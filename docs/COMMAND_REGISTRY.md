@@ -1,6 +1,6 @@
 # COMMAND REGISTRY - TOAN AAS
 
-Date: 2026-06-02
+Date: 2026-06-12
 Source: `bot.py` local audit after Step 11
 Registered Telegram commands: 224
 Registered callback groups: 9
@@ -33,6 +33,9 @@ Registered callback groups: 9
 | `/ref` | `cmd_ref` | YES | Referral link and stats. |
 | `/invite` | `cmd_invite` | YES | Alias to referral flow. |
 | `/gopy` | `cmd_gopy` | YES | User feedback. |
+| `/support` | `cmd_support` | YES | Opens the unified support/ticket category menu. |
+| `/tickets` | `cmd_tickets` | YES | Lists only the current user's support tickets. |
+| `/ticket_status` | `cmd_tickets` | YES | Alias for the current user's ticket list. |
 | `/memory` | `cmd_memory` | YES | Opens Notes/Documents storage policy and memory command guide. |
 | `/memory_plan` | `cmd_memory_plan` | YES | Shows 50MB free storage policy and +50MB/month add-on pricing. |
 | `/memory_status` | `cmd_memory_status` | YES | Shows user's text/file/total storage usage. |
@@ -152,6 +155,8 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tax_config` | `cmd_tax_config` | YES | YES | View or update manual tax assumptions; no tax law is hard-coded. |
 | `/internal_docs` | `cmd_internal_docs` | YES | YES | Open the admin-only internal business archive by department. |
 | `/search_internal_doc` | `cmd_search_internal_doc` | YES | YES | Search internal archive metadata; never exposes provider secrets. |
+| `/ticket_admin` | `cmd_ticket_admin` | YES | YES | Opens CSKH/Ticket administration with new, high-priority, refund, search and statistics views. |
+| `/ticket_overdue` | `cmd_ticket_overdue` | YES | YES | Lists new/reviewing/refund tickets older than 24h and provider waits older than 72h. |
 | `/shopaikey_status` | `cmd_shopaikey_status` | YES | YES | ShopAIKey admin status, usage and smoke-test snapshots. |
 | `/shopaikey_usage` | `cmd_shopaikey_usage` | YES | YES | ShopAIKey usage monitor, no key leakage. |
 | `/shopaikey_video_job` | `cmd_shopaikey_video_job` | YES | YES | Query ShopAIKey video job status. |
@@ -199,6 +204,7 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | Pattern | Handler | Status |
 |---|---|---|
 | `menu|` | `handle_menu_callback` | Active, unchanged. |
+| `ticket|` | `handle_ticket_callback` | Active; public ticket creation/lookup and admin-only ticket actions. |
 | `prov|` | `handle_provider_choice` | Active, unchanged. |
 | `pkg|` | `handle_package_choice` | Active, unchanged. |
 | `job|` | `handle_video_job_callback` | Active, unchanged. |

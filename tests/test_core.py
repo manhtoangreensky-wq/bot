@@ -2690,6 +2690,178 @@ def test_customer_feedback_loop_state_and_storage(monkeypatch):
             os.unlink(db_path)
 
 
+def test_support_ticket_schema_migration_is_additive_and_idempotent(monkeypatch, tmp_path):
+    db_path = tmp_path / "legacy_support.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """CREATE TABLE support_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                message TEXT
+            )"""
+        )
+        conn.execute("INSERT INTO support_tickets (user_id, message) VALUES (?, ?)", ("legacy-user", "keep this ticket"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+    bot.init_db()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(support_tickets)").fetchall()}
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(support_tickets)").fetchall()}
+        legacy = conn.execute("SELECT user_id, message FROM support_tickets WHERE user_id='legacy-user'").fetchone()
+        message_table = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='support_ticket_messages'").fetchone()
+    finally:
+        conn.close()
+
+    assert {
+        "ticket_code", "category", "priority", "status", "attachment_file_id",
+        "admin_note", "suggested_reply", "assigned_admin_id", "closed_at",
+    }.issubset(columns)
+    assert "idx_support_tickets_status" in indexes
+    assert "idx_support_tickets_user" in indexes
+    assert legacy == ("legacy-user", "keep this ticket")
+    assert message_table == ("support_ticket_messages",)
+
+
+def test_support_ticket_public_isolation_reply_and_refund_marker(monkeypatch, tmp_path):
+    db_path = tmp_path / "support.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+
+    class UserOne:
+        id = "support-user-1"
+        username = "customer_one"
+        first_name = "Customer One"
+
+    class UserTwo:
+        id = "support-user-2"
+        username = "customer_two"
+        first_name = "Customer Two"
+
+    ticket = bot.create_support_ticket(UserOne(), "payment_topup", "Tôi đã nạp nhưng chưa thấy Xu")
+    other = bot.create_support_ticket(UserTwo(), "image_error", "Ảnh chưa đúng prompt")
+    assert ticket["priority"] == "high"
+    assert bot.get_support_ticket(ticket["id"], UserOne.id)["id"] == ticket["id"]
+    assert bot.get_support_ticket(ticket["id"], UserTwo.id) is None
+    assert [row["id"] for row in bot.list_support_tickets(user_id=UserOne.id)] == [ticket["id"]]
+    assert [row["id"] for row in bot.list_support_tickets(user_id=UserTwo.id)] == [other["id"]]
+
+    bot.update_support_ticket(ticket["id"], admin_note="internal-only-note", status="refund_pending")
+    bot.add_support_ticket_message(ticket["id"], "admin", "admin-1", "TOAN AAS đang kiểm tra giao dịch.", "sent")
+    refreshed = bot.get_support_ticket(ticket["id"])
+    public_text = bot.public_support_ticket_text(refreshed)
+    assert refreshed["status"] == "refund_pending"
+    assert "internal-only-note" not in public_text
+    assert "TOAN AAS đang kiểm tra giao dịch" in public_text
+
+
+def test_support_ticket_priority_overdue_and_templates():
+    from support_v1b import overdue_reason, suggested_reply, ticket_priority
+
+    assert ticket_priority("payment_topup", "missing") == "high"
+    assert ticket_priority("refund", "please check") == "high"
+    assert ticket_priority("video_error", "Video lỗi và bị trừ Xu") == "high"
+    assert ticket_priority("feature_request", "new idea") == "low"
+    assert ticket_priority("image_error", "wrong image") == "normal"
+    assert overdue_reason("new", "2026-06-01 00:00:00", datetime(2026, 6, 2, 1, 0, 0))
+    assert overdue_reason("waiting_provider", "2026-06-01 00:00:00", datetime(2026, 6, 3, 23, 0, 0)) == ""
+    assert overdue_reason("waiting_provider", "2026-06-01 00:00:00", datetime(2026, 6, 4, 1, 0, 0))
+    assert "chưa tự động" in suggested_reply("refund", 0).lower()
+
+
+def test_support_ticket_menu_admin_registry_and_no_auto_refund():
+    source = bot_source_text()
+    admin_buttons = [
+        button.callback_data
+        for row in bot.menu_nav_keyboard("admin", True).inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    public_buttons = [
+        button.callback_data
+        for row in bot.support_ticket_menu_keyboard().inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert "ticket|admin" in admin_buttons
+    assert "ticket|cat|payment_topup" in public_buttons
+    assert "ticket|cat|lead_consulting" in public_buttons
+    assert "ticket|mine" in public_buttons
+    assert 'CommandHandler("tickets",     cmd_tickets)' in source
+    assert 'CommandHandler("ticket_admin", cmd_ticket_admin)' in source
+    assert 'CommandHandler("ticket_overdue", cmd_ticket_overdue)' in source
+    assert 'CallbackQueryHandler(handle_ticket_callback, pattern=r"^ticket\\|")' in source
+    ticket_callback_source = source_between(source, "async def handle_ticket_callback", "async def handle_menu_callback")
+    assert 'status="refund_pending"' not in ticket_callback_source
+    assert "update_support_ticket(ticket_id, status=new_status)" in ticket_callback_source
+    assert "add_credits(" not in ticket_callback_source
+    assert "refund_shopaikey_job(" not in ticket_callback_source
+
+
+def test_support_ticket_admin_reply_requires_preview_and_targets_ticket_owner(monkeypatch, tmp_path):
+    db_path = tmp_path / "support_reply.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+
+    customer = SimpleNamespace(id="ticket-customer", username="customer", first_name="Customer")
+    ticket = bot.create_support_ticket(customer, "video_error", "Video bị lỗi")
+    admin_id = str(bot.ADMIN_ID)
+    bot.set_support_ticket_pending(
+        admin_id,
+        "admin_reply_preview",
+        ticket_id=ticket["id"],
+        reply_text="TOAN AAS đang kiểm tra video của bạn.",
+    )
+
+    class FakeMessage:
+        chat_id = admin_id
+
+        async def reply_text(self, *args, **kwargs):
+            return None
+
+    class FakeQuery:
+        data = f"ticket|send|{ticket['id']}"
+        from_user = SimpleNamespace(id=admin_id)
+        message = FakeMessage()
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, *args, **kwargs):
+            return None
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, **kwargs):
+            self.sent.append(kwargs)
+            return None
+
+    fake_bot = FakeBot()
+    update = SimpleNamespace(callback_query=FakeQuery())
+    context = SimpleNamespace(bot=fake_bot)
+    asyncio.run(bot.handle_ticket_callback(update, context))
+
+    assert len(fake_bot.sent) == 1
+    assert fake_bot.sent[0]["chat_id"] == customer.id
+    refreshed = bot.get_support_ticket(ticket["id"])
+    assert refreshed["status"] == "waiting_user"
+    assert "TOAN AAS đang kiểm tra video" in bot.latest_admin_ticket_reply(ticket["id"])
+
+    asyncio.run(bot.handle_ticket_callback(update, context))
+    assert len(fake_bot.sent) == 1
+
+
 def test_public_flow_i18n_helpers_do_not_mix_vietnamese():
     vietnamese_fragments = [
         "Bạn", "Quay lại", "Hủy", "Menu chính", "Bảng giá", "Tài khoản", "Số dư",

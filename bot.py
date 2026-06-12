@@ -77,6 +77,18 @@ from operations_v1a import (
     default_retention,
     revenue_category_for_source,
 )
+from support_v1b import (
+    REPLY_TEMPLATES as SUPPORT_REPLY_TEMPLATES,
+    SUPPORT_CATEGORIES,
+    SUPPORT_PRIORITIES,
+    SUPPORT_STATUSES,
+    category_label as support_category_label,
+    overdue_reason as support_overdue_reason,
+    priority_label as support_priority_label,
+    status_label as support_status_label,
+    suggested_reply as support_suggested_reply,
+    ticket_priority as support_ticket_priority,
+)
 try:
     import edge_tts
     EDGE_TTS_IMPORT_ERROR = ""
@@ -1785,6 +1797,43 @@ def migrate_operations_v1a_schema(cursor) -> None:
         for column_name, column_sql in columns_sql:
             _add_column_if_missing(cursor, table_name, column_name, column_sql, existing)
 
+def migrate_operations_v1b_schema(cursor) -> None:
+    tables = {
+        "support_tickets": [
+            ("ticket_code", "ticket_code TEXT"),
+            ("user_id", "user_id TEXT"),
+            ("username", "username TEXT DEFAULT ''"),
+            ("category", "category TEXT DEFAULT 'other'"),
+            ("priority", "priority TEXT DEFAULT 'normal'"),
+            ("status", "status TEXT DEFAULT 'new'"),
+            ("message", "message TEXT DEFAULT ''"),
+            ("related_job_id", "related_job_id TEXT DEFAULT ''"),
+            ("related_payment_id", "related_payment_id TEXT DEFAULT ''"),
+            ("related_tool", "related_tool TEXT DEFAULT ''"),
+            ("attachment_file_id", "attachment_file_id TEXT DEFAULT ''"),
+            ("attachment_type", "attachment_type TEXT DEFAULT ''"),
+            ("attachment_name", "attachment_name TEXT DEFAULT ''"),
+            ("admin_note", "admin_note TEXT DEFAULT ''"),
+            ("suggested_reply", "suggested_reply TEXT DEFAULT ''"),
+            ("assigned_admin_id", "assigned_admin_id TEXT DEFAULT ''"),
+            ("created_at", "created_at TEXT"),
+            ("updated_at", "updated_at TEXT"),
+            ("closed_at", "closed_at TEXT DEFAULT ''"),
+        ],
+        "support_ticket_messages": [
+            ("ticket_id", "ticket_id INTEGER"),
+            ("sender_type", "sender_type TEXT"),
+            ("sender_id", "sender_id TEXT DEFAULT ''"),
+            ("message", "message TEXT DEFAULT ''"),
+            ("delivery_status", "delivery_status TEXT DEFAULT 'recorded'"),
+            ("created_at", "created_at TEXT"),
+        ],
+    }
+    for table_name, columns_sql in tables.items():
+        existing = _table_columns(cursor, table_name)
+        for column_name, column_sql in columns_sql:
+            _add_column_if_missing(cursor, table_name, column_name, column_sql, existing)
+
 def init_db():
     evaluate_data_persistence_startup_state()
     ensure_startup_sqlite_backup_once()
@@ -2224,6 +2273,43 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_internal_documents_owner ON internal_documents(owner_admin_id, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_internal_documents_department ON internal_documents(department, status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_internal_documents_created_at ON internal_documents(created_at)")
+    c.execute("""CREATE TABLE IF NOT EXISTS support_tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_code TEXT UNIQUE,
+        user_id TEXT,
+        username TEXT DEFAULT '',
+        category TEXT DEFAULT 'other',
+        priority TEXT DEFAULT 'normal',
+        status TEXT DEFAULT 'new',
+        message TEXT DEFAULT '',
+        related_job_id TEXT DEFAULT '',
+        related_payment_id TEXT DEFAULT '',
+        related_tool TEXT DEFAULT '',
+        attachment_file_id TEXT DEFAULT '',
+        attachment_type TEXT DEFAULT '',
+        attachment_name TEXT DEFAULT '',
+        admin_note TEXT DEFAULT '',
+        suggested_reply TEXT DEFAULT '',
+        assigned_admin_id TEXT DEFAULT '',
+        created_at TEXT,
+        updated_at TEXT,
+        closed_at TEXT DEFAULT ''
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS support_ticket_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id INTEGER,
+        sender_type TEXT,
+        sender_id TEXT DEFAULT '',
+        message TEXT DEFAULT '',
+        delivery_status TEXT DEFAULT 'recorded',
+        created_at TEXT
+    )""")
+    migrate_operations_v1b_schema(c)
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_support_tickets_code ON support_tickets(ticket_code)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_support_tickets_priority ON support_tickets(priority, status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket ON support_ticket_messages(ticket_id, created_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS system_flags (
         key TEXT PRIMARY KEY,
         value TEXT,
@@ -30502,6 +30588,391 @@ def support_contact_keyboard(back_to_media: bool = False, lang: str = "vi") -> I
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
+SUPPORT_TICKET_TTL_SECONDS = 15 * 60
+
+def support_ticket_pending_key(user_id) -> str:
+    return f"support_ticket:{user_id}"
+
+def set_support_ticket_pending(user_id, step: str, **fields) -> dict:
+    state = {
+        "pending_action": "support_ticket",
+        "step": str(step or "")[:60],
+        "created_at_ts": time.time(),
+    }
+    for key, value in fields.items():
+        if key in {"category", "ticket_id", "source", "reply_text", "variant"}:
+            state[key] = str(value or "")[:4000]
+    USER_PENDING[support_ticket_pending_key(user_id)] = state
+    return state
+
+def get_support_ticket_pending(user_id) -> dict | None:
+    key = support_ticket_pending_key(user_id)
+    state = USER_PENDING.get(key) or {}
+    if state.get("pending_action") != "support_ticket":
+        return None
+    if time.time() - float(state.get("created_at_ts") or 0) > SUPPORT_TICKET_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return None
+    return state
+
+def clear_support_ticket_pending(user_id) -> bool:
+    return USER_PENDING.pop(support_ticket_pending_key(user_id), None) is not None
+
+def support_ticket_menu_text() -> str:
+    return (
+        "💬 <b>Hỗ trợ TOAN AAS</b>\n\n"
+        "Bạn cần hỗ trợ vấn đề gì?\n\n"
+        "TOAN AAS sẽ tạo ticket để admin kiểm tra. Nếu liên quan đến nạp Xu, "
+        "tạo ảnh/video hoặc lỗi provider, bạn có thể gửi kèm ảnh chụp màn hình hoặc mã job nếu có."
+    )
+
+def support_ticket_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(SUPPORT_CATEGORIES["payment_topup"], callback_data="ticket|cat|payment_topup"), InlineKeyboardButton(SUPPORT_CATEGORIES["image_error"], callback_data="ticket|cat|image_error")],
+        [InlineKeyboardButton(SUPPORT_CATEGORIES["video_error"], callback_data="ticket|cat|video_error"), InlineKeyboardButton(SUPPORT_CATEGORIES["document_pdf"], callback_data="ticket|cat|document_pdf")],
+        [InlineKeyboardButton(SUPPORT_CATEGORIES["package_combo"], callback_data="ticket|cat|package_combo"), InlineKeyboardButton(SUPPORT_CATEGORIES["refund"], callback_data="ticket|cat|refund")],
+        [InlineKeyboardButton(SUPPORT_CATEGORIES["feature_request"], callback_data="ticket|cat|feature_request"), InlineKeyboardButton(SUPPORT_CATEGORIES["lead_consulting"], callback_data="ticket|cat|lead_consulting")],
+        [InlineKeyboardButton(SUPPORT_CATEGORIES["other"], callback_data="ticket|cat|other"), InlineKeyboardButton("🔍 Xem ticket của tôi", callback_data="ticket|mine")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def support_ticket_message_prompt(category: str) -> str:
+    lead_hint = (
+        "\n\nVí dụ: tạo ảnh sản phẩm, video quảng cáo, content affiliate, bot tự động hóa hoặc gói doanh nghiệp."
+        if category == "lead_consulting" else ""
+    )
+    return (
+        f"✍️ <b>{html.escape(support_category_label(category))}</b>\n\n"
+        "Bạn hãy mô tả vấn đề cần hỗ trợ.\n\n"
+        "Ví dụ:\n"
+        "• Tôi đã nạp tiền nhưng chưa thấy Xu.\n"
+        "• Video bị lỗi khi render.\n"
+        "• Ảnh tạo ra không đúng prompt.\n"
+        "• Tôi muốn hỏi gói dịch vụ phù hợp."
+        f"{lead_hint}"
+    )
+
+def support_ticket_input_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Quay lại hỗ trợ", callback_data="ticket|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def _support_ticket_row(row) -> dict | None:
+    if not row:
+        return None
+    keys = (
+        "id", "ticket_code", "user_id", "username", "category", "priority", "status", "message",
+        "related_job_id", "related_payment_id", "related_tool", "attachment_file_id", "attachment_type",
+        "attachment_name", "admin_note", "suggested_reply", "assigned_admin_id", "created_at", "updated_at", "closed_at",
+    )
+    return dict(zip(keys, row))
+
+def create_support_ticket(user, category: str, message: str, **related) -> dict:
+    category = category if category in SUPPORT_CATEGORIES else "other"
+    clean_message = str(message or "").strip()[:4000]
+    priority = support_ticket_priority(category, clean_message)
+    now = now_text()
+    uid = str(getattr(user, "id", "") or "")
+    username = str(getattr(user, "username", "") or getattr(user, "first_name", "") or "")[:160]
+    temporary_code = f"TMP-{uid}-{time.time_ns()}"
+    conn = db_connect()
+    try:
+        cursor = conn.execute(
+            """INSERT INTO support_tickets
+            (ticket_code, user_id, username, category, priority, status, message,
+             related_job_id, related_payment_id, related_tool, created_at, updated_at)
+            VALUES (?,?,?,?,?,'new',?,?,?,?,?,?)""",
+            (
+                temporary_code, uid, username, category, priority, clean_message,
+                str(related.get("related_job_id") or "")[:160],
+                str(related.get("related_payment_id") or "")[:160],
+                str(related.get("related_tool") or "")[:160],
+                now, now,
+            ),
+        )
+        ticket_id = int(cursor.lastrowid)
+        ticket_code = f"TA-{datetime.now().strftime('%Y%m%d')}-{ticket_id:06d}"
+        conn.execute("UPDATE support_tickets SET ticket_code=? WHERE id=?", (ticket_code, ticket_id))
+        conn.execute(
+            "INSERT INTO support_ticket_messages (ticket_id, sender_type, sender_id, message, delivery_status, created_at) VALUES (?,?,?,?,?,?)",
+            (ticket_id, "user", uid, clean_message, "recorded", now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_support_ticket(ticket_id) or {"id": ticket_id, "ticket_code": ticket_code}
+
+def get_support_ticket(ticket_id, user_id=None) -> dict | None:
+    conn = db_connect()
+    try:
+        sql = """SELECT id,ticket_code,user_id,username,category,priority,status,message,
+                 related_job_id,related_payment_id,related_tool,attachment_file_id,attachment_type,
+                 attachment_name,admin_note,suggested_reply,assigned_admin_id,created_at,updated_at,closed_at
+                 FROM support_tickets WHERE id=?"""
+        params = [int(ticket_id)]
+        if user_id is not None:
+            sql += " AND user_id=?"
+            params.append(str(user_id))
+        return _support_ticket_row(conn.execute(sql, params).fetchone())
+    finally:
+        conn.close()
+
+def get_support_ticket_by_code(ticket_code: str) -> dict | None:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT id,ticket_code,user_id,username,category,priority,status,message,
+               related_job_id,related_payment_id,related_tool,attachment_file_id,attachment_type,
+               attachment_name,admin_note,suggested_reply,assigned_admin_id,created_at,updated_at,closed_at
+               FROM support_tickets WHERE UPPER(ticket_code)=UPPER(?)""",
+            (str(ticket_code or "").strip(),),
+        ).fetchone()
+        return _support_ticket_row(row)
+    finally:
+        conn.close()
+
+def list_support_tickets(*, user_id=None, status=None, high_priority=False, search="", limit=10, offset=0) -> list[dict]:
+    clauses = []
+    params = []
+    if user_id is not None:
+        clauses.append("user_id=?")
+        params.append(str(user_id))
+    if status:
+        clauses.append("status=?")
+        params.append(str(status))
+    if high_priority:
+        clauses.append("priority IN ('high','urgent')")
+        clauses.append("status NOT IN ('resolved','closed')")
+    if search:
+        clauses.append("(ticket_code LIKE ? OR user_id LIKE ? OR username LIKE ? OR message LIKE ?)")
+        token = f"%{str(search)[:160]}%"
+        params.extend([token, token, token, token])
+    sql = """SELECT id,ticket_code,user_id,username,category,priority,status,message,
+             related_job_id,related_payment_id,related_tool,attachment_file_id,attachment_type,
+             attachment_name,admin_note,suggested_reply,assigned_admin_id,created_at,updated_at,closed_at
+             FROM support_tickets"""
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, id DESC LIMIT ? OFFSET ?"
+    params.extend([max(1, min(int(limit), 100)), max(0, int(offset))])
+    conn = db_connect()
+    try:
+        return [_support_ticket_row(row) for row in conn.execute(sql, params).fetchall()]
+    finally:
+        conn.close()
+
+def update_support_ticket(ticket_id, **fields) -> dict | None:
+    allowed = {"status", "priority", "attachment_file_id", "attachment_type", "attachment_name", "admin_note", "suggested_reply", "assigned_admin_id"}
+    updates = []
+    params = []
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        if key == "status" and value not in SUPPORT_STATUSES:
+            continue
+        if key == "priority" and value not in SUPPORT_PRIORITIES:
+            continue
+        updates.append(f"{key}=?")
+        params.append(str(value or "")[:4000])
+    if not updates:
+        return get_support_ticket(ticket_id)
+    updates.append("updated_at=?")
+    params.append(now_text())
+    status = fields.get("status")
+    if status in {"resolved", "closed"}:
+        updates.append("closed_at=?")
+        params.append(now_text())
+    params.append(int(ticket_id))
+    conn = db_connect()
+    try:
+        conn.execute(f"UPDATE support_tickets SET {', '.join(updates)} WHERE id=?", params)
+        conn.commit()
+    finally:
+        conn.close()
+    return get_support_ticket(ticket_id)
+
+def add_support_ticket_message(ticket_id, sender_type: str, sender_id, message: str, delivery_status: str = "recorded") -> int:
+    conn = db_connect()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO support_ticket_messages (ticket_id,sender_type,sender_id,message,delivery_status,created_at) VALUES (?,?,?,?,?,?)",
+            (int(ticket_id), str(sender_type)[:40], str(sender_id or "")[:80], str(message or "")[:4000], str(delivery_status)[:40], now_text()),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+def latest_admin_ticket_reply(ticket_id) -> str:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT message FROM support_ticket_messages WHERE ticket_id=? AND sender_type='admin' AND delivery_status='sent' ORDER BY id DESC LIMIT 1",
+            (int(ticket_id),),
+        ).fetchone()
+        return str(row[0] or "") if row else ""
+    finally:
+        conn.close()
+
+def support_ticket_created_text(ticket: dict) -> str:
+    return (
+        "✅ <b>TOAN AAS đã nhận yêu cầu hỗ trợ của bạn.</b>\n\n"
+        f"Mã ticket: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
+        f"Nhóm vấn đề: {html.escape(support_category_label(ticket.get('category')))}\n"
+        f"Trạng thái: {html.escape(support_status_label(ticket.get('status')))}\n"
+        f"Thời gian gửi: <code>{html.escape(ticket.get('created_at') or '')}</code>\n\n"
+        "Admin sẽ kiểm tra và phản hồi sớm nhất có thể."
+    )
+
+def support_ticket_created_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📎 Gửi thêm ảnh/file", callback_data=f"ticket|attach|{ticket_id}"), InlineKeyboardButton("🔍 Xem ticket của tôi", callback_data="ticket|mine")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def public_support_ticket_text(ticket: dict) -> str:
+    reply = latest_admin_ticket_reply(ticket["id"])
+    lines = [
+        f"🎫 <b>Ticket {html.escape(ticket.get('ticket_code') or '')}</b>", "",
+        f"Nhóm: {html.escape(support_category_label(ticket.get('category')))}",
+        f"Trạng thái: <b>{html.escape(support_status_label(ticket.get('status')))}</b>",
+        f"Thời gian: <code>{html.escape(ticket.get('created_at') or '')}</code>", "",
+        "<b>Nội dung:</b>", html.escape(ticket.get("message") or ""),
+    ]
+    if reply:
+        lines.extend(["", "<b>Phản hồi mới nhất:</b>", html.escape(reply)])
+    if ticket.get("attachment_file_id"):
+        lines.extend(["", "📎 Đã có file đính kèm."])
+    return "\n".join(lines)
+
+def public_support_ticket_list_keyboard(user_id) -> tuple[str, InlineKeyboardMarkup]:
+    tickets = list_support_tickets(user_id=user_id, limit=10)
+    if not tickets:
+        text = "🎫 <b>Ticket của bạn</b>\n\nBạn chưa có ticket hỗ trợ nào."
+    else:
+        lines = ["🎫 <b>Ticket của bạn</b>", ""]
+        for ticket in tickets:
+            lines.append(f"• <code>{html.escape(ticket['ticket_code'])}</code> — {html.escape(support_category_label(ticket['category']))} — {html.escape(support_status_label(ticket['status']))}")
+        text = "\n".join(lines)
+    rows = []
+    for index in range(0, len(tickets), 2):
+        rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|pv|{ticket['id']}") for ticket in tickets[index:index + 2]])
+    rows.append([InlineKeyboardButton("⬅️ Hỗ trợ", callback_data="ticket|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return text, InlineKeyboardMarkup(rows)
+
+def support_admin_menu_text() -> str:
+    return (
+        "🎧 <b>CSKH / Ticket TOAN AAS</b>\n\n"
+        "Xem yêu cầu hỗ trợ, báo lỗi, refund và lead khách hàng. "
+        "Admin phải kiểm tra ticket trước khi phản hồi hoặc đánh dấu hoàn tất."
+    )
+
+def support_admin_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🆕 Ticket mới", callback_data="ticket|al|new|0"), InlineKeyboardButton("🔥 Ưu tiên cao", callback_data="ticket|al|high|0")],
+        [InlineKeyboardButton("💰 Refund pending", callback_data="ticket|al|refund|0"), InlineKeyboardButton("👤 Theo user", callback_data="ticket|asearch|user")],
+        [InlineKeyboardButton("🔍 Tìm ticket", callback_data="ticket|asearch|all"), InlineKeyboardButton("📊 Thống kê", callback_data="ticket|stats")],
+        [InlineKeyboardButton("📚 Mẫu trả lời", callback_data="ticket|templates"), InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def support_ticket_admin_text(ticket: dict) -> str:
+    lines = [
+        f"🎫 <b>Ticket {html.escape(ticket.get('ticket_code') or '')}</b>", "",
+        f"User: <code>{html.escape(ticket.get('user_id') or '')}</code>",
+        f"Username: {html.escape(ticket.get('username') or '-')}",
+        f"Nhóm: {html.escape(support_category_label(ticket.get('category')))}",
+        f"Ưu tiên: <b>{html.escape(support_priority_label(ticket.get('priority')))}</b>",
+        f"Trạng thái: <b>{html.escape(support_status_label(ticket.get('status')))}</b>",
+        f"Thời gian: <code>{html.escape(ticket.get('created_at') or '')}</code>", "",
+        "<b>Nội dung:</b>", html.escape(ticket.get("message") or ""), "",
+        f"Job liên quan: <code>{html.escape(ticket.get('related_job_id') or '-')}</code>",
+        f"Payment liên quan: <code>{html.escape(ticket.get('related_payment_id') or '-')}</code>",
+        f"Tool liên quan: <code>{html.escape(ticket.get('related_tool') or '-')}</code>",
+        f"File đính kèm: {'có' if ticket.get('attachment_file_id') else 'không'}",
+        f"Admin phụ trách: <code>{html.escape(ticket.get('assigned_admin_id') or '-')}</code>",
+        f"Ghi chú admin: {html.escape(ticket.get('admin_note') or '-')}",
+    ]
+    return "\n".join(lines)
+
+def support_ticket_admin_keyboard(ticket: dict, source: str = "new") -> InlineKeyboardMarkup:
+    ticket_id = int(ticket["id"])
+    rows = [
+        [InlineKeyboardButton("✅ Đã xử lý", callback_data=f"ticket|st|{ticket_id}|resolved"), InlineKeyboardButton("💬 Soạn trả lời", callback_data=f"ticket|reply|{ticket_id}")],
+        [InlineKeyboardButton("🤖 Gợi ý trả lời", callback_data=f"ticket|suggest|{ticket_id}|0"), InlineKeyboardButton("💰 Đánh dấu refund", callback_data=f"ticket|st|{ticket_id}|refund_pending")],
+        [InlineKeyboardButton("⏳ Chờ provider", callback_data=f"ticket|st|{ticket_id}|waiting_provider"), InlineKeyboardButton("👤 Hỏi thêm khách", callback_data=f"ticket|ask|{ticket_id}")],
+        [InlineKeyboardButton("📌 Ghi chú admin", callback_data=f"ticket|note|{ticket_id}"), InlineKeyboardButton("🙋 Nhận xử lý", callback_data=f"ticket|assign|{ticket_id}")],
+    ]
+    if ticket.get("attachment_file_id"):
+        rows.append([InlineKeyboardButton("📎 Xem file đính kèm", callback_data=f"ticket|file|{ticket_id}")])
+    if ticket.get("category") == "lead_consulting":
+        rows.append([InlineKeyboardButton("📞 Cần liên hệ", callback_data=f"ticket|lead|{ticket_id}|contact"), InlineKeyboardButton("⭐ Lead tiềm năng", callback_data=f"ticket|lead|{ticket_id}|potential")])
+    rows.append([InlineKeyboardButton("⬅️ Danh sách", callback_data=f"ticket|al|{source}|0"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def support_admin_list_payload(list_kind: str, offset: int = 0) -> tuple[str, InlineKeyboardMarkup]:
+    kwargs = {"limit": 6, "offset": offset}
+    title = "🆕 Ticket mới"
+    if list_kind == "high":
+        kwargs["high_priority"] = True
+        title = "🔥 Ticket ưu tiên cao"
+    elif list_kind == "refund":
+        kwargs["status"] = "refund_pending"
+        title = "💰 Ticket refund pending"
+    else:
+        kwargs["status"] = "new"
+        list_kind = "new"
+    tickets = list_support_tickets(**kwargs)
+    lines = [f"<b>{title}</b>", ""]
+    if not tickets:
+        lines.append("Chưa có ticket phù hợp.")
+    else:
+        for ticket in tickets:
+            lines.append(f"• <code>{ticket['ticket_code']}</code> — {html.escape(support_category_label(ticket['category']))} — user <code>{html.escape(ticket['user_id'])}</code>")
+    rows = []
+    for index in range(0, len(tickets), 2):
+        rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|av|{ticket['id']}|{list_kind}") for ticket in tickets[index:index + 2]])
+    nav = []
+    if offset > 0:
+        nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"ticket|al|{list_kind}|{max(0, offset - 6)}"))
+    if len(tickets) == 6:
+        nav.append(InlineKeyboardButton("➡️ Trang sau", callback_data=f"ticket|al|{list_kind}|{offset + 6}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+def support_ticket_stats_text() -> str:
+    conn = db_connect()
+    try:
+        status_rows = conn.execute("SELECT status,COUNT(*) FROM support_tickets GROUP BY status ORDER BY status").fetchall()
+        category_rows = conn.execute("SELECT category,COUNT(*) FROM support_tickets GROUP BY category ORDER BY COUNT(*) DESC LIMIT 8").fetchall()
+        all_rows = conn.execute("SELECT status,created_at FROM support_tickets").fetchall()
+    finally:
+        conn.close()
+    overdue = sum(1 for status, created_at in all_rows if support_overdue_reason(status, created_at))
+    lines = ["📊 <b>Thống kê CSKH / Ticket</b>", "", "<b>Theo trạng thái:</b>"]
+    lines.extend(f"• {html.escape(support_status_label(status))}: <b>{count}</b>" for status, count in status_rows)
+    lines.extend(["", "<b>Theo nhóm:</b>"])
+    lines.extend(f"• {html.escape(support_category_label(category))}: <b>{count}</b>" for category, count in category_rows)
+    lines.extend(["", f"⚠️ Quá hạn cần kiểm tra: <b>{overdue}</b>"])
+    return "\n".join(lines)
+
+def support_reply_templates_text() -> str:
+    lines = ["📚 <b>Mẫu trả lời CSKH</b>", "", "Mẫu chỉ dùng để gợi ý. Bot không tự gửi cho khách."]
+    for category in ("video_error", "image_error", "payment_topup", "refund", "document_pdf", "lead_consulting"):
+        lines.extend(["", f"<b>{html.escape(support_category_label(category))}</b>", html.escape(support_suggested_reply(category, 0))])
+    return "\n".join(lines)
+
+def support_ticket_overdue_rows() -> list[tuple[dict, str]]:
+    tickets = list_support_tickets(limit=100)
+    result = []
+    for ticket in tickets:
+        reason = support_overdue_reason(ticket.get("status"), ticket.get("created_at"))
+        if reason:
+            result.append((ticket, reason))
+    return result
+
 FEEDBACK_CATEGORY_LABELS = {
     "hard_to_use": "Bot khó hiểu",
     "image_not_right": "Ảnh chưa đúng ý",
@@ -31976,6 +32447,7 @@ def store_customer_feedback(user, category: str, content: str, context: str = ""
         conn.close()
 
 def clear_media_creator_pending_states(user_id) -> bool:
+    support_cleared = clear_support_ticket_pending(user_id)
     quick_cleared = clear_quick_media_pending(user_id)
     quick_image_flow_cleared = clear_quick_image_flow(user_id)
     public_image_cleared = clear_public_image_prompt_pending(user_id)
@@ -31993,7 +32465,7 @@ def clear_media_creator_pending_states(user_id) -> bool:
     developing_video_cleared = clear_developing_video_pending(user_id)
     video_dubbing_cleared = clear_video_dubbing_pending(user_id)
     marketing_cleared = clear_marketing_pending(user_id)
-    return bool(quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or video_dubbing_cleared or marketing_cleared)
+    return bool(support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or video_dubbing_cleared or marketing_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -36264,6 +36736,7 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")])
         rows.append([InlineKeyboardButton("📊 Báo cáo tổng", callback_data="menu|admin_overview"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")])
         rows.append([InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider"), InlineKeyboardButton("📣 Marketing tự động", callback_data="marketing|start")])
+        rows.append([InlineKeyboardButton("🎧 CSKH / Ticket", callback_data="ticket|admin")])
         rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
         return InlineKeyboardMarkup(rows)
     elif section == "finance" and is_admin:
@@ -42588,6 +43061,304 @@ async def safe_edit_or_send(query, text: str, reply_markup=None, parse_mode: str
             logger.warning("safe_edit_or_send bot fallback failed | %s", sanitize_log_text(str(send_error))[:240])
         return None
 
+async def notify_admin_new_support_ticket(context: ContextTypes.DEFAULT_TYPE, ticket: dict) -> None:
+    text = (
+        "🆕 <b>Ticket mới TOAN AAS</b>\n\n"
+        f"Mã: <code>{html.escape(ticket.get('ticket_code') or '')}</code>\n"
+        f"User: <code>{html.escape(ticket.get('user_id') or '')}</code>\n"
+        f"Nhóm: {html.escape(support_category_label(ticket.get('category')))}\n"
+        f"Ưu tiên: <b>{html.escape(support_priority_label(ticket.get('priority')))}</b>\n\n"
+        f"Nội dung: {html.escape((ticket.get('message') or '')[:900])}"
+    )
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🎫 Xem ticket", callback_data=f"ticket|av|{ticket['id']}|new"),
+        InlineKeyboardButton("✅ Nhận xử lý", callback_data=f"ticket|assign|{ticket['id']}"),
+    ]])
+    for admin_id in owner_and_admin_ids():
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception as exc:
+            logger.warning("support ticket admin notify failed | ticket_id=%s error=%s", ticket.get("id"), type(exc).__name__)
+
+async def handle_support_ticket_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message:
+        return False
+    state = get_support_ticket_pending(update.effective_user.id)
+    if not state or state.get("step") != "awaiting_attachment":
+        return False
+    ticket_id = int(state.get("ticket_id") or 0)
+    ticket = get_support_ticket(ticket_id, update.effective_user.id)
+    if not ticket:
+        clear_support_ticket_pending(update.effective_user.id)
+        await update.message.reply_text("⚠️ Không tìm thấy ticket của bạn. Vui lòng mở lại mục Hỗ trợ.")
+        return True
+    file_id = ""
+    attachment_type = ""
+    attachment_name = ""
+    if getattr(update.message, "photo", None):
+        file_id = update.message.photo[-1].file_id
+        attachment_type = "photo"
+        attachment_name = "support_screenshot.jpg"
+    elif getattr(update.message, "document", None):
+        document = update.message.document
+        file_id = document.file_id
+        attachment_type = "document"
+        attachment_name = str(document.file_name or "support_attachment")[:240]
+    if not file_id:
+        return False
+    update_support_ticket(
+        ticket_id,
+        attachment_file_id=file_id,
+        attachment_type=attachment_type,
+        attachment_name=attachment_name,
+    )
+    clear_support_ticket_pending(update.effective_user.id)
+    await update.message.reply_text(
+        f"✅ Đã lưu file vào ticket <code>{html.escape(ticket['ticket_code'])}</code>.\n\nAdmin sẽ dùng file này để kiểm tra yêu cầu.",
+        parse_mode="HTML",
+        reply_markup=support_ticket_created_keyboard(ticket_id),
+    )
+    return True
+
+def support_admin_search_payload(search: str) -> tuple[str, InlineKeyboardMarkup]:
+    exact = get_support_ticket_by_code(search)
+    tickets = [exact] if exact else list_support_tickets(search=search, limit=10)
+    lines = ["🔍 <b>Kết quả tìm ticket</b>", ""]
+    if not tickets:
+        lines.append("Không tìm thấy ticket phù hợp.")
+    else:
+        for ticket in tickets:
+            lines.append(f"• <code>{ticket['ticket_code']}</code> — {html.escape(support_category_label(ticket['category']))} — user <code>{html.escape(ticket['user_id'])}</code>")
+    rows = []
+    for index in range(0, len(tickets), 2):
+        rows.append([InlineKeyboardButton(f"🎫 {ticket['ticket_code'][-6:]}", callback_data=f"ticket|av|{ticket['id']}|new") for ticket in tickets[index:index + 2]])
+    rows.append([InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+async def handle_support_ticket_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message or not update.message.text:
+        return False
+    uid = update.effective_user.id
+    state = get_support_ticket_pending(uid)
+    if not state:
+        return False
+    step = state.get("step")
+    text = update.message.text.strip()
+    if step == "awaiting_message":
+        if len(text) < 5:
+            await update.message.reply_text("Vui lòng mô tả rõ hơn để admin có đủ thông tin kiểm tra.", reply_markup=support_ticket_input_keyboard())
+            return True
+        ticket = create_support_ticket(update.effective_user, state.get("category") or "other", text)
+        clear_support_ticket_pending(uid)
+        await update.message.reply_text(
+            support_ticket_created_text(ticket),
+            parse_mode="HTML",
+            reply_markup=support_ticket_created_keyboard(ticket["id"]),
+        )
+        await notify_admin_new_support_ticket(context, ticket)
+        return True
+    if step == "awaiting_attachment":
+        await update.message.reply_text("📎 Vui lòng gửi một ảnh hoặc file tài liệu. Nếu không cần đính kèm, bạn có thể mở ticket khác hoặc về Menu chính.")
+        return True
+    if step == "admin_reply_input" and is_admin_user(uid):
+        ticket_id = int(state.get("ticket_id") or 0)
+        ticket = get_support_ticket(ticket_id)
+        if not ticket:
+            clear_support_ticket_pending(uid)
+            await update.message.reply_text("Không tìm thấy ticket.")
+            return True
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=text, source=state.get("source") or "new")
+        await update.message.reply_text(
+            "📨 <b>Xác nhận gửi phản hồi</b>\n\n"
+            f"Gửi tới ticket <code>{html.escape(ticket['ticket_code'])}</code>\n\n"
+            f"Nội dung:\n{html.escape(text)}\n\nBạn có muốn gửi cho khách không?",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
+                [InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+        return True
+    if step == "admin_note_input" and is_admin_user(uid):
+        ticket_id = int(state.get("ticket_id") or 0)
+        ticket = get_support_ticket(ticket_id)
+        if not ticket:
+            clear_support_ticket_pending(uid)
+            await update.message.reply_text("Không tìm thấy ticket.")
+            return True
+        existing = str(ticket.get("admin_note") or "").strip()
+        note = f"{existing}\n[{now_text()} admin {uid}] {text}".strip()[:4000]
+        ticket = update_support_ticket(ticket_id, admin_note=note)
+        clear_support_ticket_pending(uid)
+        await update.message.reply_text(support_ticket_admin_text(ticket), parse_mode="HTML", reply_markup=support_ticket_admin_keyboard(ticket))
+        return True
+    if step == "admin_search" and is_admin_user(uid):
+        clear_support_ticket_pending(uid)
+        payload, keyboard = support_admin_search_payload(text)
+        await update.message.reply_text(payload, parse_mode="HTML", reply_markup=keyboard)
+        return True
+    return False
+
+async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = str(query.data or "")
+    parts = data.split("|")
+    action = parts[1] if len(parts) > 1 else "start"
+    uid = query.from_user.id
+    admin_actions = {"admin", "al", "av", "asearch", "stats", "templates", "st", "reply", "suggest", "send", "ask", "note", "assign", "lead", "file"}
+    if action in admin_actions and not is_admin_user(uid):
+        return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    if action == "start":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, support_ticket_menu_text(), reply_markup=support_ticket_menu_keyboard())
+    if action == "cat" and len(parts) >= 3:
+        category = parts[2]
+        if category not in SUPPORT_CATEGORIES:
+            category = "other"
+        set_support_ticket_pending(uid, "awaiting_message", category=category)
+        return await safe_edit_or_send(query, support_ticket_message_prompt(category), reply_markup=support_ticket_input_keyboard())
+    if action == "mine":
+        clear_support_ticket_pending(uid)
+        text, keyboard = public_support_ticket_list_keyboard(uid)
+        return await safe_edit_or_send(query, text, reply_markup=keyboard)
+    if action == "pv" and len(parts) >= 3:
+        ticket = get_support_ticket(int(parts[2]), uid)
+        if not ticket:
+            return await query.answer("Ticket không tồn tại hoặc không thuộc tài khoản của bạn.", show_alert=True)
+        return await safe_edit_or_send(
+            query,
+            public_support_ticket_text(ticket),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📎 Gửi thêm ảnh/file", callback_data=f"ticket|attach|{ticket['id']}"), InlineKeyboardButton("⬅️ Ticket của tôi", callback_data="ticket|mine")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    if action == "attach" and len(parts) >= 3:
+        ticket = get_support_ticket(int(parts[2]), uid)
+        if not ticket:
+            return await query.answer("Ticket không tồn tại hoặc không thuộc tài khoản của bạn.", show_alert=True)
+        set_support_ticket_pending(uid, "awaiting_attachment", ticket_id=ticket["id"])
+        return await safe_edit_or_send(
+            query,
+            f"📎 Gửi một ảnh chụp màn hình hoặc file cho ticket <code>{html.escape(ticket['ticket_code'])}</code>.\n\nNên gửi từng file một để tránh lỗi.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|pv|{ticket['id']}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]),
+        )
+    if action == "admin":
+        clear_support_ticket_pending(uid)
+        return await safe_edit_or_send(query, support_admin_menu_text(), reply_markup=support_admin_menu_keyboard())
+    if action == "al" and len(parts) >= 4:
+        kind = parts[2]
+        offset = max(0, int(parts[3] or 0))
+        text, keyboard = support_admin_list_payload(kind, offset)
+        return await safe_edit_or_send(query, text, reply_markup=keyboard)
+    if action == "av" and len(parts) >= 3:
+        ticket = get_support_ticket(int(parts[2]))
+        if not ticket:
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        source = parts[3] if len(parts) >= 4 else "new"
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket, source))
+    if action == "asearch" and len(parts) >= 3:
+        set_support_ticket_pending(uid, "admin_search", source=parts[2])
+        prompt = "Nhập user ID để tìm ticket." if parts[2] == "user" else "Nhập mã ticket, user ID, username hoặc từ khóa."
+        return await safe_edit_or_send(query, f"🔍 <b>Tìm ticket</b>\n\n{prompt}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
+    if action == "stats":
+        return await safe_edit_or_send(query, support_ticket_stats_text(), reply_markup=support_admin_menu_keyboard())
+    if action == "templates":
+        return await safe_edit_or_send(query, support_reply_templates_text(), reply_markup=support_admin_menu_keyboard())
+    if action == "st" and len(parts) >= 4:
+        ticket_id = int(parts[2])
+        new_status = parts[3]
+        ticket = update_support_ticket(ticket_id, status=new_status)
+        if not ticket:
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        if new_status == "refund_pending":
+            await query.message.reply_text("💰 Ticket đã được đánh dấu cần kiểm tra hoàn Xu/refund. Thao tác này chưa cộng hoặc trừ Xu.")
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+    if action == "reply" and len(parts) >= 3:
+        ticket_id = int(parts[2])
+        if not get_support_ticket(ticket_id):
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source="new")
+        return await safe_edit_or_send(query, "💬 Nhập nội dung phản hồi cho khách. Bot chỉ gửi sau khi admin xem preview và bấm xác nhận.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")]]))
+    if action == "ask" and len(parts) >= 3:
+        ticket_id = int(parts[2])
+        set_support_ticket_pending(uid, "admin_reply_input", ticket_id=ticket_id, source="new")
+        return await safe_edit_or_send(query, "👤 Nhập câu hỏi hoặc thông tin bạn cần khách bổ sung. Bot sẽ cho xem preview trước khi gửi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
+    if action == "suggest" and len(parts) >= 4:
+        ticket_id = int(parts[2])
+        variant = int(parts[3] or 0)
+        ticket = get_support_ticket(ticket_id)
+        if not ticket:
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        reply_text = support_suggested_reply(ticket.get("category"), variant)
+        update_support_ticket(ticket_id, suggested_reply=reply_text)
+        set_support_ticket_pending(uid, "admin_reply_preview", ticket_id=ticket_id, reply_text=reply_text, variant=variant, source="new")
+        return await safe_edit_or_send(
+            query,
+            "🤖 <b>Gợi ý trả lời</b>\n\n"
+            f"{html.escape(reply_text)}\n\nBot chưa gửi nội dung này cho khách.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📨 Gửi cho khách", callback_data=f"ticket|send|{ticket_id}"), InlineKeyboardButton("✍️ Sửa lại", callback_data=f"ticket|reply|{ticket_id}")],
+                [InlineKeyboardButton("🔄 Gợi ý khác", callback_data=f"ticket|suggest|{ticket_id}|{variant + 1}"), InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")],
+            ]),
+        )
+    if action == "send" and len(parts) >= 3:
+        ticket_id = int(parts[2])
+        state = get_support_ticket_pending(uid) or {}
+        if state.get("step") != "admin_reply_preview" or int(state.get("ticket_id") or 0) != ticket_id:
+            return await query.answer("Bản xem trước đã hết hạn. Vui lòng soạn hoặc tạo gợi ý lại.", show_alert=True)
+        ticket = get_support_ticket(ticket_id)
+        reply_text = str(state.get("reply_text") or "").strip()
+        if not ticket or not reply_text:
+            return await query.answer("Không có nội dung hợp lệ để gửi.", show_alert=True)
+        try:
+            await context.bot.send_message(
+                chat_id=ticket["user_id"],
+                text=(f"💬 <b>Phản hồi từ TOAN AAS</b>\nTicket: <code>{html.escape(ticket['ticket_code'])}</code>\n\n{html.escape(reply_text)}"),
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            logger.warning("support ticket reply send failed | ticket_id=%s error=%s", ticket_id, type(exc).__name__)
+            return await query.answer("Không gửi được phản hồi. Ticket chưa được đánh dấu đã gửi.", show_alert=True)
+        add_support_ticket_message(ticket_id, "admin", uid, reply_text, "sent")
+        ticket = update_support_ticket(ticket_id, status="waiting_user", assigned_admin_id=uid)
+        clear_support_ticket_pending(uid)
+        await query.message.reply_text("✅ Đã gửi phản hồi cho đúng user của ticket.")
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+    if action == "note" and len(parts) >= 3:
+        ticket_id = int(parts[2])
+        set_support_ticket_pending(uid, "admin_note_input", ticket_id=ticket_id)
+        return await safe_edit_or_send(query, "📌 Nhập ghi chú nội bộ. Nội dung này không hiển thị cho khách.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Ticket", callback_data=f"ticket|av|{ticket_id}|new")]]))
+    if action == "assign" and len(parts) >= 3:
+        ticket = update_support_ticket(int(parts[2]), status="reviewing", assigned_admin_id=uid)
+        if not ticket:
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+    if action == "lead" and len(parts) >= 4:
+        ticket = get_support_ticket(int(parts[2]))
+        if not ticket:
+            return await query.answer("Không tìm thấy ticket.", show_alert=True)
+        marker = "Cần liên hệ" if parts[3] == "contact" else "Lead tiềm năng"
+        note = f"{ticket.get('admin_note') or ''}\n[{now_text()} admin {uid}] {marker}".strip()
+        ticket = update_support_ticket(ticket["id"], status="reviewing", assigned_admin_id=uid, admin_note=note)
+        return await safe_edit_or_send(query, support_ticket_admin_text(ticket), reply_markup=support_ticket_admin_keyboard(ticket))
+    if action == "file" and len(parts) >= 3:
+        ticket = get_support_ticket(int(parts[2]))
+        if not ticket or not ticket.get("attachment_file_id"):
+            return await query.answer("Ticket chưa có file đính kèm.", show_alert=True)
+        caption = f"📎 File của ticket <code>{html.escape(ticket['ticket_code'])}</code>"
+        try:
+            if ticket.get("attachment_type") == "photo":
+                await context.bot.send_photo(chat_id=query.message.chat_id, photo=ticket["attachment_file_id"], caption=caption, parse_mode="HTML")
+            else:
+                await context.bot.send_document(chat_id=query.message.chat_id, document=ticket["attachment_file_id"], caption=caption, parse_mode="HTML")
+        except Exception as exc:
+            logger.warning("support attachment send failed | ticket_id=%s error=%s", ticket.get("id"), type(exc).__name__)
+            return await query.answer("Không gửi lại được file đính kèm.", show_alert=True)
+        return
+    return await query.answer("Thao tác ticket chưa được hỗ trợ.", show_alert=True)
+
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -42595,6 +43366,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     user_is_admin = is_admin_user(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
     clear_media_creator_pending_states(query.from_user.id)
+    clear_support_ticket_pending(query.from_user.id)
     if action != "internal_archive":
         clear_internal_archive_pending(query.from_user.id)
     if action not in DOC_TOOL_MENU_ACTIONS:
@@ -42642,8 +43414,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "support":
         return await safe_edit_query_message(
             query,
-            support_contact_text(),
-            reply_markup=support_contact_keyboard(lang=lang),
+            support_ticket_menu_text(),
+            reply_markup=support_ticket_menu_keyboard(),
         )
     if action == "internal_archive":
         return await safe_edit_query_message(
@@ -42792,7 +43564,8 @@ async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT
     uid = query.from_user.id
     lang = user_ui_lang(uid)
     if data == "feedback|start":
-        return await safe_edit_or_send(query, feedback_start_text(lang), parse_mode="HTML", reply_markup=feedback_category_keyboard(lang))
+        clear_feedback_pending(uid)
+        return await safe_edit_or_send(query, support_ticket_menu_text(), parse_mode="HTML", reply_markup=support_ticket_menu_keyboard())
     if data == "feedback|cancel":
         clear_feedback_pending(uid)
         return await safe_edit_or_send(query, ui_text(lang, "common.cancelled_not_charged"), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
@@ -53636,10 +54409,31 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🛟 <b>HỖ TRỢ TOAN AAS</b>\n\n"
-        f"Liên hệ hỗ trợ/admin: {html.escape(SUPPORT_TELEGRAM_URL)}",
+        support_ticket_menu_text(),
         parse_mode="HTML",
+        reply_markup=support_ticket_menu_keyboard(),
     )
+
+async def cmd_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text, keyboard = public_support_ticket_list_keyboard(update.effective_user.id)
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+async def cmd_ticket_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(support_admin_menu_text(), parse_mode="HTML", reply_markup=support_admin_menu_keyboard())
+
+async def cmd_ticket_overdue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    rows = support_ticket_overdue_rows()
+    lines = ["⚠️ <b>Ticket quá hạn</b>", ""]
+    if not rows:
+        lines.append("Không có ticket quá hạn trong danh sách hiện tại.")
+    else:
+        for ticket, reason in rows:
+            lines.append(f"• <code>{ticket['ticket_code']}</code> — {html.escape(reason)} — {html.escape(support_status_label(ticket['status']))}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=support_admin_menu_keyboard())
 
 async def cmd_beta_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [
@@ -85134,6 +85928,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_internal_archive_pending_upload(update, context):
         return
 
+    if await handle_support_ticket_attachment(update, context):
+        return
+
     if await handle_doc_tool_pending_upload(update, context):
         return
 
@@ -85159,6 +85956,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_internal_archive_pending_upload(update, context):
+        return
+
+    if await handle_support_ticket_attachment(update, context):
         return
 
     if await handle_doc_tool_pending_upload(update, context):
@@ -85944,6 +86744,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     uid  = update.effective_user.id
 
+    if await handle_support_ticket_pending_text(update, context):
+        return
+
     if await handle_feedback_pending_text(update, context):
         return
 
@@ -86268,6 +87071,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ping",        cmd_ping))
     tg_app.add_handler(CommandHandler("status",      cmd_status))
     tg_app.add_handler(CommandHandler("support",     cmd_support))
+    tg_app.add_handler(CommandHandler("tickets",     cmd_tickets))
+    tg_app.add_handler(CommandHandler("ticket_status", cmd_tickets))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
@@ -86818,6 +87623,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("add",         cmd_admin_add))
     tg_app.add_handler(CommandHandler("admin_gopy",  cmd_admin_gopy))
     tg_app.add_handler(CommandHandler("feedback",    cmd_admin_gopy))
+    tg_app.add_handler(CommandHandler("ticket_admin", cmd_ticket_admin))
+    tg_app.add_handler(CommandHandler("ticket_overdue", cmd_ticket_overdue))
     tg_app.add_handler(CommandHandler("duyet",       cmd_duyet))
     tg_app.add_handler(CommandHandler("checkpayos",  cmd_checkpayos))
     tg_app.add_handler(CommandHandler("payos_status", cmd_checkpayos))
@@ -86883,6 +87690,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_video_job_callback, pattern=r"^shopai_video_job\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_ticket_callback, pattern=r"^ticket\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_tools_callback, pattern=r"^imgtool\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
