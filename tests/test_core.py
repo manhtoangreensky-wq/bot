@@ -5557,11 +5557,79 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert {"videoref|image_prompts", "videoref|frame_plan", "videoref|generate", "videoref|save"}.issubset(set(ref_result_callbacks))
 
     dub_labels = [button.text for row in bot.video_dubbing_menu_keyboard("vi").inline_keyboard for button in row]
-    assert "📝 Chỉ tạo phụ đề" in dub_labels
-    assert "🎬 Dịch + lồng tiếng + video" in dub_labels
-    dub_confirm = bot.video_dubbing_confirm_text({"process_type": "translate_voice", "target_language": "Tiếng Anh", "voice_style": "Nữ tự nhiên"}, "vi")
-    assert "chưa mở" in dub_confirm
+    assert {"📝 Tạo phụ đề", "🌐 Dịch phụ đề", "🎙 Lồng tiếng", "🎭 Dịch + lồng tiếng", "💰 Bảng giá"}.issubset(set(dub_labels))
+    assert "🎬 Dịch + lồng tiếng + video" not in dub_labels
+    assert "🎙 Lồng tiếng voice" not in dub_labels
+    dub_confirm = bot.video_dubbing_confirm_text(
+        {
+            "mode": "translate_dub",
+            "video_file_id": "video-1",
+            "video_duration": 383,
+            "target_language": "Tiếng Anh",
+            "voice_style": "Nữ tự nhiên",
+        },
+        "vi",
+    )
+    assert "Xác nhận dịch + lồng tiếng" in dub_confirm
+    assert "7 phút" in dub_confirm
+    assert "1.050 Xu" not in dub_confirm
+    assert "1050 Xu" in dub_confirm
     assert "trừ Xu" in dub_confirm
+    assert "Kiểu xử lý: <b>Dịch + lồng tiếng</b>" in dub_confirm
+
+    subtitle_confirm = bot.video_dubbing_confirm_text(
+        {"mode": "subtitle", "video_file_id": "video-2", "source_language": "auto", "video_duration": 45},
+        "vi",
+    )
+    assert "Xác nhận tạo phụ đề" in subtitle_confirm
+    assert "Kiểu giọng" not in subtitle_confirm
+    translated_subtitle_confirm = bot.video_dubbing_confirm_text(
+        {"mode": "translate_subtitle", "video_file_id": "video-3", "target_language": "Tiếng Việt", "video_duration": 61},
+        "vi",
+    )
+    assert "Xác nhận dịch phụ đề" in translated_subtitle_confirm
+    assert "Kiểu giọng" not in translated_subtitle_confirm
+
+    pricing = bot.calculate_video_translate_price("translate_subtitle", 383)
+    assert pricing == {
+        "mode": "translate_subtitle",
+        "duration_seconds": 383,
+        "billable_minutes": 7,
+        "unit_price_xu": 40,
+        "total_price_xu": 280,
+    }
+    assert bot.calculate_video_translate_price("subtitle", 0)["total_price_xu"] == 20
+    pricing_text = bot.video_dubbing_pricing_text("vi")
+    for marker in ["20 Xu/phút", "40 Xu/phút", "100 Xu/phút", "150 Xu/phút", "không gọi API và không trừ Xu"]:
+        assert marker in pricing_text
+    dub_voice_buttons = [button for row in bot.video_dubbing_voice_keyboard("vi", {"mode": "dub"}).inline_keyboard for button in row]
+    translate_dub_voice_buttons = [button for row in bot.video_dubbing_voice_keyboard("vi", {"mode": "translate_dub"}).inline_keyboard for button in row]
+    assert any(button.text == "⬅️ Quay lại gửi video" and button.callback_data == "videodub|back_voice" for button in dub_voice_buttons)
+    assert any(button.text == "⬅️ Quay lại ngôn ngữ" and button.callback_data == "videodub|back_voice" for button in translate_dub_voice_buttons)
+
+    bot.clear_video_dubbing_pending("dub-state")
+    bot.set_video_dubbing_pending("dub-state", "await_video", mode="translate_subtitle")
+    bot.set_video_dubbing_pending(
+        "dub-state",
+        "language",
+        video_file_id="file-123",
+        video_message_id="456",
+        video_duration="75",
+        video_file_size="1000",
+    )
+    bot.set_video_dubbing_pending("dub-state", "confirm", target_language="Tiếng Việt")
+    saved_state = bot.get_video_dubbing_pending("dub-state")
+    assert saved_state["mode"] == "translate_subtitle"
+    assert saved_state["video_file_id"] == "file-123"
+    assert saved_state["video_message_id"] == "456"
+    assert saved_state["target_language"] == "Tiếng Việt"
+    assert bot.clear_video_dubbing_pending("dub-state") is True
+
+    dubbing_callback_source = source_between(source, "async def handle_video_dubbing_callback", "def marketing_pending_key")
+    assert "spend_fixed_credit_info" not in dubbing_callback_source
+    assert "deduct_dynamic_credit" not in dubbing_callback_source
+    assert "shopaikey_video_create" not in dubbing_callback_source
+    assert "TOAN AAS chưa gọi API, chưa xử lý video và chưa trừ Xu" in dubbing_callback_source
 
     admin_labels = [button.text for row in bot.menu_nav_keyboard("admin", True).inline_keyboard for button in row]
     assert "📣 Marketing tự động" in admin_labels
