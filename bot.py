@@ -2251,6 +2251,21 @@ def init_db():
         created_at TEXT,
         updated_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_compliance_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        status_type TEXT,
+        title TEXT,
+        description TEXT,
+        effective_from TEXT,
+        effective_to TEXT,
+        source_note TEXT,
+        attachment_file_id TEXT,
+        confirmed_by_admin TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_compliance_type ON finance_compliance_notes(status_type)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_compliance_updated ON finance_compliance_notes(updated_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS internal_documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT,
@@ -43370,6 +43385,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     lang = get_user_language(query.from_user.id) or "vi"
     clear_media_creator_pending_states(query.from_user.id)
     clear_support_ticket_pending(query.from_user.id)
+    if action != "finance_compliance_update":
+        clear_finance_compliance_pending(query.from_user.id)
     if action != "internal_archive":
         clear_internal_archive_pending(query.from_user.id)
     if action not in DOC_TOOL_MENU_ACTIONS:
@@ -43428,6 +43445,24 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
     if action == "finance_tax":
         return await safe_edit_query_message(query, tax_accounting_menu_text(), reply_markup=tax_accounting_menu_keyboard())
+    if action == "finance_compliance":
+        return await safe_edit_query_message(query, finance_compliance_status_text(), reply_markup=finance_compliance_keyboard())
+    if action == "finance_compliance_update":
+        set_finance_compliance_pending(query.from_user.id)
+        return await safe_edit_query_message(
+            query,
+            "✍️ <b>Cập nhật trạng thái miễn/ưu đãi</b>\n\n"
+            "Gửi một dòng theo mẫu:\n"
+            "<code>status_type | tiêu đề | mô tả | từ ngày | đến ngày | căn cứ/ghi chú</code>\n\n"
+            "Ví dụ:\n"
+            "<code>license_fee_exempt | Miễn lệ phí môn bài | Đang áp dụng theo hồ sơ nội bộ | 2026-01-01 | 2026-12-31 | Chờ kế toán đối chiếu căn cứ</code>\n\n"
+            "status_type hỗ trợ: <code>license_fee_exempt</code>, <code>tax_exempt_period</code>, "
+            "<code>tax_not_required_now</code>, <code>accountant_note</code>, <code>policy_note</code>, <code>manual_review</code>.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Miễn/ưu đãi", callback_data="menu|finance_compliance"),
+                InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            ]]),
+        )
     if action == "tax_estimate":
         start_at, end_at, label, _kind = finance_period_bounds("", "month")
         payload = tax_estimate_payload(start_at, end_at, label, query.from_user.id)
@@ -43452,7 +43487,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             start_at, end_at, label, _kind = finance_period_bounds("", "month")
         await safe_edit_query_message(
             query,
-            f"📤 Đang xuất 5 file kế toán cho <b>{html.escape(label)}</b>...",
+            f"📤 Đang xuất 6 file báo cáo nội bộ cho <b>{html.escape(label)}</b>...",
             reply_markup=tax_export_keyboard(),
         )
         await send_tax_accounting_exports(context, query.message.chat_id, start_at, end_at, label, query.from_user.id)
@@ -53172,6 +53207,101 @@ def update_tax_profile(admin_id, updates: dict) -> dict:
         conn.close()
     return get_tax_profile(admin_id)
 
+FINANCE_COMPLIANCE_STATUS_LABELS = {
+    "license_fee_exempt": "Lệ phí môn bài",
+    "tax_exempt_period": "Thời kỳ miễn/ưu đãi thuế",
+    "tax_not_required_now": "Hiện chưa phát sinh nghĩa vụ",
+    "accountant_note": "Ghi chú kế toán",
+    "policy_note": "Ghi chú chính sách",
+    "manual_review": "Cần rà soát thủ công",
+}
+
+def save_finance_compliance_note(
+    status_type: str,
+    title: str,
+    description: str,
+    admin_id,
+    effective_from: str = "",
+    effective_to: str = "",
+    source_note: str = "",
+    attachment_file_id: str = "",
+) -> int:
+    status_type = str(status_type or "manual_review").strip().lower()
+    if status_type not in FINANCE_COMPLIANCE_STATUS_LABELS:
+        status_type = "manual_review"
+    created_at = now_text()
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """INSERT INTO finance_compliance_notes
+            (status_type,title,description,effective_from,effective_to,source_note,
+             attachment_file_id,confirmed_by_admin,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                status_type,
+                sanitize_log_text(str(title or ""))[:300],
+                sanitize_log_text(str(description or ""))[:2000],
+                sanitize_log_text(str(effective_from or ""))[:40],
+                sanitize_log_text(str(effective_to or ""))[:40],
+                sanitize_log_text(str(source_note or ""))[:1000],
+                str(attachment_file_id or "")[:300],
+                str(admin_id or ""),
+                created_at,
+                created_at,
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid or 0)
+    finally:
+        conn.close()
+
+def finance_compliance_notes(limit: int = 20) -> list[dict]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT id,status_type,title,description,effective_from,effective_to,
+                      source_note,attachment_file_id,confirmed_by_admin,created_at,updated_at
+               FROM finance_compliance_notes
+               ORDER BY updated_at DESC,id DESC LIMIT ?""",
+            (max(1, min(int(limit or 20), 100)),),
+        ).fetchall()
+    finally:
+        conn.close()
+    keys = [
+        "id", "status_type", "title", "description", "effective_from", "effective_to",
+        "source_note", "attachment_file_id", "confirmed_by_admin", "created_at", "updated_at",
+    ]
+    return [dict(zip(keys, row)) for row in rows]
+
+def finance_compliance_status_text() -> str:
+    notes = finance_compliance_notes(20)
+    latest_by_type = {}
+    for note in notes:
+        latest_by_type.setdefault(note.get("status_type") or "manual_review", note)
+    lines = [
+        "🟢 <b>Trạng thái miễn/ưu đãi thuế phí</b>",
+        "",
+        "Mục này giúp admin ghi chú tình trạng miễn/ưu đãi thuế, phí môn bài hoặc chính sách hỗ trợ đang áp dụng cho TOAN AAS.",
+        "",
+    ]
+    for status_type in ("license_fee_exempt", "tax_exempt_period", "tax_not_required_now", "accountant_note", "policy_note", "manual_review"):
+        note = latest_by_type.get(status_type)
+        label = FINANCE_COMPLIANCE_STATUS_LABELS[status_type]
+        if not note:
+            lines.append(f"• {label}: <i>chưa cập nhật</i>")
+            continue
+        period = " → ".join(filter(None, [str(note.get("effective_from") or ""), str(note.get("effective_to") or "")])) or "-"
+        lines.extend([
+            f"• <b>{html.escape(label)}</b>: {html.escape(str(note.get('title') or '-'))}",
+            f"  Trạng thái/ghi chú: {html.escape(str(note.get('description') or '-'))}",
+            f"  Thời gian áp dụng: <code>{html.escape(period)}</code>",
+            f"  Căn cứ: {html.escape(str(note.get('source_note') or '-'))}",
+            f"  Người xác nhận: <code>{html.escape(str(note.get('confirmed_by_admin') or '-'))}</code>",
+            f"  Ngày cập nhật: <code>{html.escape(str(note.get('updated_at') or '-'))}</code>",
+        ])
+    lines.extend(["", f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>"])
+    return "\n".join(lines)
+
 def tax_estimate_payload(start_at: str, end_at: str, label: str, admin_id) -> dict:
     finance = finance_summary_payload(start_at, end_at, label)
     config = get_tax_profile(admin_id)
@@ -53190,23 +53320,14 @@ def tax_estimate_payload(start_at: str, end_at: str, label: str, admin_id) -> di
     }
 
 def tax_estimate_text(payload: dict) -> str:
-    config = payload.get("tax_config") or {}
     has_data = int(payload.get("revenue_count") or 0) > 0 or int(payload.get("expense_count") or 0) > 0
     lines = [
-        "🧾 <b>Thuế ước tính TOAN AAS</b>",
+        "📊 <b>Thu chi / Báo cáo nội bộ TOAN AAS</b>",
         "",
         f"• Kỳ: <code>{html.escape(str(payload.get('label') or ''))}</code>",
-        f"• Doanh thu tính thuế: <b>{vnd_text(payload.get('taxable_revenue'))}</b>",
+        f"• Doanh thu: <b>{vnd_text(payload.get('taxable_revenue'))}</b>",
         f"• Chi phí nội bộ: <b>{vnd_text(payload.get('expenses_total'))}</b>",
-        f"• Lãi/lỗ quản trị trước thuế: <b>{vnd_text(payload.get('management_profit_before_tax'))}</b>",
-        "",
-        f"• VAT/GTGT ước tính ({float(payload.get('vat_rate_percent') or 0):g}%): <b>{vnd_text(payload.get('vat_estimate'))}</b>",
-        f"• TNCN ước tính ({float(payload.get('pit_rate_percent') or 0):g}%): <b>{vnd_text(payload.get('pit_estimate'))}</b>",
-        f"• Lệ phí môn bài cấu hình: <b>{vnd_text(payload.get('license_fee_estimate'))}</b>",
-        f"• Tổng nghĩa vụ ước tính: <b>{vnd_text(payload.get('total_tax_estimate'))}</b>",
-        "",
-        f"• Phương pháp: <code>{html.escape(str(config.get('tax_method') or 'manual_config'))}</code>",
-        f"• Ngưỡng doanh thu tham chiếu: <b>{vnd_text(config.get('revenue_threshold_vnd'))}</b>",
+        f"• Lãi/lỗ quản trị: <b>{vnd_text(payload.get('management_profit_before_tax'))}</b>",
     ]
     if not has_data:
         lines.extend(["", "Chưa có dữ liệu cho kỳ này."])
@@ -53216,7 +53337,7 @@ def tax_estimate_text(payload: dict) -> str:
 def tax_profile_text(admin_id) -> str:
     config = get_tax_profile(admin_id)
     return "\n".join([
-        "⚙️ <b>Cấu hình thuế nội bộ</b>",
+        "⚙️ <b>Ghi chú cấu hình kế toán nội bộ</b>",
         "",
         f"• Loại hình: <code>{html.escape(str(config.get('business_type') or 'chưa cấu hình'))}</code>",
         f"• Phương pháp: <code>{html.escape(str(config.get('tax_method') or 'manual_config'))}</code>",
@@ -53227,6 +53348,7 @@ def tax_profile_text(admin_id) -> str:
         f"• Hiệu lực: <code>{html.escape(str(config.get('effective_from') or '-'))}</code> → <code>{html.escape(str(config.get('effective_to') or '-'))}</code>",
         f"• Ghi chú: {html.escape(str(config.get('note') or '-'))}",
         "",
+        "Các trường bên dưới được giữ để tương thích dữ liệu cũ và làm tham chiếu nội bộ, không phải số phải nộp chính thức.",
         "Cập nhật từng trường bằng <code>/tax_config key=value</code>.",
         "Ví dụ: <code>/tax_config vat=3 pit=1.5 license=true license_amount=1000000</code>",
         "",
@@ -53263,11 +53385,21 @@ def tax_accounting_csv(kind: str, start_at: str, end_at: str, label: str, admin_
             headers = ["date", "user_id", "refund_xu", "event_type", "reference_id", "note"]
             rows = sql_rows(conn, """SELECT created_at,user_id,delta,event_type,ref_id,note
                                       FROM credit_events WHERE delta>0 AND lower(event_type) LIKE '%refund%' AND created_at BETWEEN ? AND ? ORDER BY created_at,id""", (start_at, end_at))
+        elif kind == "compliance_notes":
+            headers = ["id", "status_type", "title", "description", "effective_from", "effective_to", "source_note", "attachment_file_id", "confirmed_by_admin", "created_at", "updated_at"]
+            rows = sql_rows(
+                conn,
+                """SELECT id,status_type,title,description,effective_from,effective_to,source_note,
+                          attachment_file_id,confirmed_by_admin,created_at,updated_at
+                   FROM finance_compliance_notes
+                   WHERE updated_at BETWEEN ? AND ? OR created_at BETWEEN ? AND ?
+                   ORDER BY updated_at,id""",
+                (start_at, end_at, start_at, end_at),
+            )
         else:
             payload = tax_estimate_payload(start_at, end_at, label, admin_id)
-            config = payload.get("tax_config") or {}
-            headers = ["period", "taxable_revenue_vnd", "internal_expenses_vnd", "management_profit_vnd", "vat_rate_percent", "vat_estimate_vnd", "pit_rate_percent", "pit_estimate_vnd", "license_fee_vnd", "total_tax_estimate_vnd", "tax_method", "disclaimer"]
-            rows = [[label, payload.get("taxable_revenue"), payload.get("expenses_total"), payload.get("management_profit_before_tax"), payload.get("vat_rate_percent"), payload.get("vat_estimate"), payload.get("pit_rate_percent"), payload.get("pit_estimate"), payload.get("license_fee_estimate"), payload.get("total_tax_estimate"), config.get("tax_method"), TAX_PREP_DISCLAIMER]]
+            headers = ["period", "revenue_vnd", "internal_expenses_vnd", "management_profit_loss_vnd", "report_scope", "disclaimer"]
+            rows = [[label, payload.get("taxable_revenue"), payload.get("expenses_total"), payload.get("management_profit_before_tax"), "internal_finance_report", TAX_PREP_DISCLAIMER]]
         return csv_with_no_data(headers, rows)
     finally:
         conn.close()
@@ -53277,9 +53409,10 @@ def tax_accounting_export_files(start_at: str, end_at: str, label: str, admin_id
     return [
         (f"revenue_report_{token}.csv", tax_accounting_csv("revenue", start_at, end_at, label, admin_id)),
         (f"expense_report_{token}.csv", tax_accounting_csv("expenses", start_at, end_at, label, admin_id)),
+        (f"profit_loss_summary_{token}.csv", tax_accounting_csv("summary", start_at, end_at, label, admin_id)),
         (f"xu_ledger_{token}.csv", tax_accounting_csv("xu_ledger", start_at, end_at, label, admin_id)),
         (f"refund_report_{token}.csv", tax_accounting_csv("refunds", start_at, end_at, label, admin_id)),
-        (f"tax_prep_summary_{token}.csv", tax_accounting_csv("summary", start_at, end_at, label, admin_id)),
+        (f"compliance_notes_{token}.csv", tax_accounting_csv("compliance_notes", start_at, end_at, label, admin_id)),
     ]
 
 async def send_tax_accounting_exports(context: ContextTypes.DEFAULT_TYPE, chat_id, start_at: str, end_at: str, label: str, admin_id) -> None:
@@ -53289,7 +53422,7 @@ async def send_tax_accounting_exports(context: ContextTypes.DEFAULT_TYPE, chat_i
             chat_id,
             content,
             filename,
-            f"TOAN AAS tax/accounting prep — {label}",
+            f"TOAN AAS internal finance report — {label}",
         )
 
 async def send_named_text_document(context: ContextTypes.DEFAULT_TYPE, chat_id: int, content: str, filename: str, caption: str = ""):
@@ -84054,17 +84187,18 @@ def finance_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💵 Doanh thu", callback_data="menu|finance_revenue")],
         [InlineKeyboardButton("📅 Doanh thu tháng", callback_data="menu|finance_revenue_month"), InlineKeyboardButton("📉 Chi phí tháng", callback_data="menu|finance_expense_month")],
         [InlineKeyboardButton("📈 Lãi / Lỗ", callback_data="menu|finance_profit"), InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|finance_export")],
-        [InlineKeyboardButton("🧾 Thuế / Kế toán", callback_data="menu|finance_tax")],
-        [InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense"), InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|finance_help")],
+        [InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense"), InlineKeyboardButton("🟢 Miễn/ưu đãi thuế phí", callback_data="menu|finance_compliance")],
+        [InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist"), InlineKeyboardButton("🧾 Báo cáo kế toán", callback_data="menu|finance_tax")],
+        [InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|finance_help")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def finance_menu_text() -> str:
     return (
-        "💰 <b>Tài chính nội bộ TOAN AAS</b>\n\n"
+        "📊 <b>Thu chi / Báo cáo nội bộ TOAN AAS</b>\n\n"
         "Mục này giúp admin xem nhanh doanh thu, chi phí, lãi/lỗ và xuất báo cáo nội bộ. "
         "Các nút bên dưới chỉ đọc số liệu hoặc hướng dẫn lệnh hiện có, không tự cộng/trừ Xu và không chạm PayOS.\n"
-        "Số liệu phục vụ quản trị nội bộ; số liệu thuế chính thức cần đối chiếu chứng từ.\n\n"
+        f"{html.escape(TAX_PREP_DISCLAIMER)}\n\n"
         "Nếu mục nào chưa có dữ liệu, bot sẽ hiển thị <b>Chưa có dữ liệu</b>."
     )
 
@@ -84252,7 +84386,7 @@ def finance_expense_month_menu_text() -> str:
     )
 
 def finance_profit_menu_text() -> str:
-    return "📈 <b>Lãi / Lỗ</b>\n\nChọn kỳ muốn xem. Số liệu phục vụ quản trị nội bộ, chưa thay thế báo cáo thuế chính thức."
+    return "📈 <b>Lãi / Lỗ</b>\n\nChọn kỳ muốn xem. Số liệu chỉ phục vụ quản trị nội bộ và chuẩn bị dữ liệu cho kế toán."
 
 def finance_export_menu_text() -> str:
     return (
@@ -84281,9 +84415,9 @@ def finance_command_help_text() -> str:
         "• <code>/expense_report [YYYY-MM|YYYY]</code> — chi phí\n"
         "• <code>/profit_report [YYYY-MM|YYYY]</code> — lãi/lỗ\n"
         "• <code>/finance_export YYYY-MM</code> hoặc <code>/finance_export YYYY</code> — xuất CSV\n"
-        "• <code>/tax_status</code> / <code>/tax_report [YYYY-MM|YYYY]</code> — thuế ước tính nội bộ\n"
-        "• <code>/tax_export [YYYY-MM|YYYY]</code> — xuất 5 file chuẩn bị kế toán\n"
-        "• <code>/tax_config key=value</code> — cấu hình tỷ lệ theo tư vấn kế toán\n"
+        "• <code>/tax_status</code> / <code>/tax_report [YYYY-MM|YYYY]</code> — báo cáo thu chi nội bộ (tên lệnh cũ được giữ tương thích)\n"
+        "• <code>/tax_export [YYYY-MM|YYYY]</code> — xuất 6 file chuẩn bị kế toán\n"
+        "• <code>/tax_config key=value</code> — ghi chú cấu hình kế toán cũ, chỉ để tham chiếu\n"
         "• <code>/internal_docs</code> — mở kho hồ sơ nội bộ admin-only\n"
         "• <code>/expense_add ...</code> — thêm chi phí vận hành\n"
         "• <code>/expense_add_pre ...</code> — thêm chi phí trước thành lập\n\n"
@@ -84326,16 +84460,17 @@ def finance_export_instruction_text(period: str) -> str:
 
 def tax_accounting_menu_text() -> str:
     return (
-        "🧾 <b>Thuế / Kế toán TOAN AAS</b>\n\n"
-        "Tổng hợp ledger hiện có, ước tính theo tỷ lệ admin cấu hình và xuất file chuẩn bị cho kế toán.\n"
+        "📊 <b>Thu chi / Báo cáo nội bộ TOAN AAS</b>\n\n"
+        "Tổng hợp doanh thu, chi phí, lãi/lỗ, sổ Xu, hoàn Xu và ghi chú tuân thủ để chuẩn bị dữ liệu cho kế toán.\n"
         "Mở menu này không sửa doanh thu, chi phí, Xu hoặc PayOS.\n\n"
         f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>"
     )
 
 def tax_accounting_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧾 Thuế ước tính", callback_data="menu|tax_estimate"), InlineKeyboardButton("📤 Xuất file kế toán", callback_data="menu|tax_export")],
-        [InlineKeyboardButton("📚 Hồ sơ cần chuẩn bị", callback_data="menu|tax_checklist"), InlineKeyboardButton("⚙️ Cấu hình thuế", callback_data="menu|tax_config")],
+        [InlineKeyboardButton("📊 Tổng hợp nội bộ", callback_data="menu|tax_estimate"), InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|tax_export")],
+        [InlineKeyboardButton("🟢 Miễn/ưu đãi thuế phí", callback_data="menu|finance_compliance"), InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist")],
+        [InlineKeyboardButton("📝 Ghi chú kế toán cũ", callback_data="menu|tax_config")],
         [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -84344,7 +84479,7 @@ def tax_estimate_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📆 Tháng này", callback_data="menu|tax_estimate_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|tax_estimate_previous")],
         [InlineKeyboardButton("📊 Quý này", callback_data="menu|tax_estimate_quarter"), InlineKeyboardButton("📅 Tùy chọn kỳ", callback_data="menu|tax_custom_help")],
         [InlineKeyboardButton("📤 Xuất CSV", callback_data="menu|tax_export"), InlineKeyboardButton("📚 Hồ sơ cần chuẩn bị", callback_data="menu|tax_checklist")],
-        [InlineKeyboardButton("⚙️ Cấu hình thuế", callback_data="menu|tax_config"), InlineKeyboardButton("⬅️ Thuế/Kế toán", callback_data="menu|finance_tax")],
+        [InlineKeyboardButton("🟢 Miễn/ưu đãi", callback_data="menu|finance_compliance"), InlineKeyboardButton("⬅️ Báo cáo nội bộ", callback_data="menu|finance_tax")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -84352,13 +84487,13 @@ def tax_export_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📆 Tháng này", callback_data="menu|tax_export_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|tax_export_previous")],
         [InlineKeyboardButton("📊 Quý này", callback_data="menu|tax_export_quarter"), InlineKeyboardButton("📅 Tùy chọn kỳ", callback_data="menu|tax_export_custom_help")],
-        [InlineKeyboardButton("⬅️ Thuế/Kế toán", callback_data="menu|finance_tax"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("⬅️ Báo cáo nội bộ", callback_data="menu|finance_tax"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def tax_export_menu_text() -> str:
     return (
-        "📤 <b>Xuất file kế toán</b>\n\n"
-        "Chọn kỳ để nhận 5 file CSV: doanh thu, chi phí, sổ Xu, hoàn Xu và tóm tắt thuế.\n"
+        "📤 <b>Xuất báo cáo nội bộ</b>\n\n"
+        "Chọn kỳ để nhận 6 file CSV: doanh thu, chi phí, lãi/lỗ quản trị, sổ Xu, hoàn Xu và ghi chú miễn/ưu đãi.\n"
         "Nếu kỳ chưa có dữ liệu, file vẫn có header và dòng <code>No data</code>."
     )
 
@@ -84373,18 +84508,88 @@ def tax_checklist_text() -> str:
         "5. Hóa đơn/biên lai chi phí API/provider.",
         "6. Chi phí Railway/VPS/domain.",
         "7. Chi phí phần mềm/công cụ.",
-        "8. Hợp đồng/B2B nếu có.",
-        "9. File export doanh thu/chi phí từ bot.",
-        "10. Ghi chú đối soát thủ công.",
+        "8. Ghi chú miễn/ưu đãi thuế/phí và căn cứ liên quan.",
+        "9. File export báo cáo nội bộ.",
+        "10. Hợp đồng/B2B và ghi chú đối soát thủ công nếu có.",
         "",
         f"⚠️ <i>{html.escape(TAX_PREP_DISCLAIMER)}</i>",
     ])
 
 def tax_checklist_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 Xuất file kế toán", callback_data="menu|tax_export"), InlineKeyboardButton("🏢 Lưu vào hồ sơ nội bộ", callback_data="archive|dept|tax_invoice")],
-        [InlineKeyboardButton("⬅️ Thuế/Kế toán", callback_data="menu|finance_tax"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|tax_export"), InlineKeyboardButton("🏢 Lưu vào hồ sơ nội bộ", callback_data="archive|dept|tax_invoice")],
+        [InlineKeyboardButton("🟢 Miễn/ưu đãi", callback_data="menu|finance_compliance"), InlineKeyboardButton("⬅️ Báo cáo nội bộ", callback_data="menu|finance_tax")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
+
+def finance_compliance_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Cập nhật trạng thái", callback_data="menu|finance_compliance_update"), InlineKeyboardButton("📎 Lưu căn cứ/chứng từ", callback_data="archive|dept|tax_invoice")],
+        [InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|tax_export"), InlineKeyboardButton("⬅️ Báo cáo nội bộ", callback_data="menu|finance_tax")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_compliance_pending_key(user_id) -> str:
+    return f"finance_compliance:{user_id}"
+
+def set_finance_compliance_pending(user_id) -> None:
+    USER_PENDING[finance_compliance_pending_key(user_id)] = {
+        "pending_action": "finance_compliance_update",
+        "created_at_ts": time.time(),
+    }
+
+def get_finance_compliance_pending(user_id) -> dict | None:
+    key = finance_compliance_pending_key(user_id)
+    state = USER_PENDING.get(key) or {}
+    if not state:
+        return None
+    if time.time() - float(state.get("created_at_ts") or 0) > 10 * 60:
+        USER_PENDING.pop(key, None)
+        return None
+    return state
+
+def clear_finance_compliance_pending(user_id) -> bool:
+    return USER_PENDING.pop(finance_compliance_pending_key(user_id), None) is not None
+
+async def handle_finance_compliance_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    if not get_finance_compliance_pending(uid):
+        return False
+    if not is_admin_user(uid):
+        clear_finance_compliance_pending(uid)
+        return False
+    parts = [part.strip() for part in update.message.text.strip().split("|", 5)]
+    if len(parts) < 3:
+        await update.message.reply_text(
+            "⚠️ Chưa đúng mẫu. Hãy gửi ít nhất:\n"
+            "<code>status_type | tiêu đề | mô tả</code>\n\n"
+            "Có thể thêm: <code>| từ ngày | đến ngày | căn cứ/ghi chú</code>.",
+            parse_mode="HTML",
+            reply_markup=finance_compliance_keyboard(),
+        )
+        return True
+    status_type, title, description = parts[:3]
+    effective_from = parts[3] if len(parts) > 3 else ""
+    effective_to = parts[4] if len(parts) > 4 else ""
+    source_note = parts[5] if len(parts) > 5 else ""
+    note_id = save_finance_compliance_note(
+        status_type,
+        title,
+        description,
+        uid,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        source_note=source_note,
+    )
+    clear_finance_compliance_pending(uid)
+    await update.message.reply_text(
+        f"✅ Đã lưu ghi chú miễn/ưu đãi nội bộ #{note_id}.\n\n" + finance_compliance_status_text(),
+        parse_mode="HTML",
+        reply_markup=finance_compliance_keyboard(),
+    )
+    return True
 
 def tax_custom_period_help_text(command: str) -> str:
     return (
@@ -85086,7 +85291,7 @@ async def cmd_profit_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Doanh thu năm: <b>{vnd_text(payload.get('revenue_success'))}</b>",
             f"• Lãi/lỗ năm: <b>{vnd_text(payload.get('profit_management'))}</b>",
         ])
-    lines.append("\nLưu ý: đây là số quản trị nội bộ, chưa phải báo cáo thuế chính thức.")
+    lines.append("\n" + TAX_PREP_DISCLAIMER)
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_expense_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -85246,7 +85451,7 @@ async def cmd_tax_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚠️ Cú pháp: <code>/tax_export 2026-06</code> hoặc <code>/tax_export 2026</code>",
             parse_mode="HTML",
         )
-    await update.effective_message.reply_text(f"📤 Đang xuất 5 file kế toán cho <b>{html.escape(label)}</b>...", parse_mode="HTML")
+    await update.effective_message.reply_text(f"📤 Đang xuất 6 file báo cáo nội bộ cho <b>{html.escape(label)}</b>...", parse_mode="HTML")
     await send_tax_accounting_exports(context, update.effective_chat.id, start_at, end_at, label, update.effective_user.id)
 
 def parse_tax_config_args(args) -> tuple[dict, str]:
@@ -85312,7 +85517,7 @@ async def cmd_tax_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.effective_message.reply_text(f"⚠️ {html.escape(error)}", parse_mode="HTML")
     update_tax_profile(update.effective_user.id, updates)
     await update.effective_message.reply_text(
-        "✅ Đã cập nhật cấu hình thuế nội bộ.\n\n" + tax_profile_text(update.effective_user.id),
+        "✅ Đã cập nhật ghi chú cấu hình kế toán nội bộ.\n\n" + tax_profile_text(update.effective_user.id),
         parse_mode="HTML",
         reply_markup=tax_accounting_menu_keyboard(),
     )
@@ -87157,6 +87362,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     text = update.message.text.strip()
     uid  = update.effective_user.id
+
+    if await handle_finance_compliance_pending_text(update, context):
+        return
 
     if await handle_support_ticket_pending_text(update, context):
         return

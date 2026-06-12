@@ -283,8 +283,9 @@ def test_admin_menu_contains_grouped_operator_and_system():
     freeze_labels = [button.text for row in bot.freeze_queue_keyboard().inline_keyboard for button in row]
     for label in ["📊 Queue Status", "🧊 Freeze Status", "🖼 Freeze Image", "🎬 Freeze Video", "🎞 Freeze Frame", "🤖 Freeze Provider", "✅ Unfreeze Tool", "🧹 Clear Stale Jobs"]:
         assert label in freeze_labels
-    assert "Tài chính nội bộ TOAN AAS" in bot.finance_menu_text()
-    assert "số liệu thuế chính thức cần đối chiếu chứng từ" in bot.finance_menu_text()
+    assert "Thu chi / Báo cáo nội bộ TOAN AAS" in bot.finance_menu_text()
+    assert "🟢 Miễn/ưu đãi thuế phí" in finance_labels
+    assert "không tự nộp thuế" in bot.finance_menu_text()
     assert "Mục này dùng để kiểm tra hàng đợi job" in bot.freeze_queue_menu_text()
     assert "thao tác nguy hiểm luôn đi qua màn xác nhận" in bot.freeze_queue_menu_text()
     assert "Báo cáo tổng TOAN AAS" in bot.admin_overview_text()
@@ -4435,14 +4436,17 @@ def test_operations_v1a_tax_prep_and_accounting_exports(monkeypatch):
         "legal_service",
     }
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
-    assert "🧾 Thuế / Kế toán" in finance_labels
+    assert "🟢 Miễn/ưu đãi thuế phí" in finance_labels
+    assert "🧾 Báo cáo kế toán" in finance_labels
     tax_callbacks = [
         button.callback_data
         for row in bot.tax_accounting_menu_keyboard().inline_keyboard
         for button in row
     ]
-    assert {"menu|tax_estimate", "menu|tax_export", "menu|tax_checklist", "menu|tax_config"}.issubset(set(tax_callbacks))
-    assert "Không phải tờ khai thuế chính thức" in bot.tax_accounting_menu_text()
+    assert {"menu|tax_estimate", "menu|tax_export", "menu|tax_checklist", "menu|tax_config", "menu|finance_compliance"}.issubset(set(tax_callbacks))
+    assert "Thu chi / Báo cáo nội bộ" in bot.tax_accounting_menu_text()
+    assert "không tự nộp thuế" in bot.tax_accounting_menu_text()
+    assert "CREATE TABLE IF NOT EXISTS finance_compliance_notes" in source
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -4470,19 +4474,41 @@ def test_operations_v1a_tax_prep_and_accounting_exports(monkeypatch):
         assert estimate["pit_estimate"] == 150000
         assert estimate["total_tax_estimate"] == 1450000
 
+        compliance_id = bot.save_finance_compliance_note(
+            "license_fee_exempt",
+            "Miễn lệ phí môn bài",
+            "Đang áp dụng theo ghi chú quản trị nội bộ",
+            "tax-admin",
+            effective_from="2026-01-01",
+            effective_to="2026-12-31",
+            source_note="Chờ kế toán đối chiếu căn cứ",
+        )
+        assert compliance_id > 0
+        compliance = bot.finance_compliance_notes()
+        assert compliance[0]["status_type"] == "license_fee_exempt"
+        assert compliance[0]["confirmed_by_admin"] == "tax-admin"
+        compliance_text = bot.finance_compliance_status_text()
+        assert "Miễn lệ phí môn bài" in compliance_text
+        assert "Chờ kế toán đối chiếu căn cứ" in compliance_text
+        bot.init_db()
+        assert bot.finance_compliance_notes()[0]["id"] == compliance_id
+
         start_at, end_at, label, _ = bot.finance_period_bounds("2026-06", "month")
         files = dict(bot.tax_accounting_export_files(start_at, end_at, label, "tax-admin"))
         assert set(files) == {
             "revenue_report_2026_06.csv",
             "expense_report_2026_06.csv",
+            "profit_loss_summary_2026_06.csv",
             "xu_ledger_2026_06.csv",
             "refund_report_2026_06.csv",
-            "tax_prep_summary_2026_06.csv",
+            "compliance_notes_2026_06.csv",
         }
         assert "No data" in files["revenue_report_2026_06.csv"]
         assert "No data" in files["expense_report_2026_06.csv"]
         assert "date,user_id,source,category" in files["revenue_report_2026_06.csv"]
-        assert "Không phải tờ khai thuế chính thức" in files["tax_prep_summary_2026_06.csv"]
+        assert "internal_finance_report" in files["profit_loss_summary_2026_06.csv"]
+        assert "không tự nộp thuế" in files["profit_loss_summary_2026_06.csv"]
+        assert "license_fee_exempt" in files["compliance_notes_2026_06.csv"]
 
         conn = bot.db_connect()
         try:

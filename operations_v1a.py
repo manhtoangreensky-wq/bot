@@ -8,9 +8,9 @@ from typing import Iterable, Sequence
 
 
 TAX_PREP_DISCLAIMER = (
-    "Báo cáo quản trị nội bộ / dữ liệu chuẩn bị cho kế toán. "
-    "Không phải tờ khai thuế chính thức. Cần đối chiếu chứng từ và xác nhận "
-    "với kế toán trước khi nộp."
+    "Báo cáo này dùng cho quản trị nội bộ và chuẩn bị dữ liệu cho kế toán. "
+    "TOAN AAS không tự nộp thuế trong bot và không thay thế tư vấn kế toán/thuế. "
+    "Nếu có chính sách miễn/ưu đãi, admin cần lưu căn cứ và đối chiếu khi cần."
 )
 
 REVENUE_CATEGORIES = (
