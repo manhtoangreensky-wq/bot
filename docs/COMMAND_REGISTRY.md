@@ -158,6 +158,7 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/ticket_admin` | `cmd_ticket_admin` | YES | YES | Opens CSKH/Ticket administration with new, high-priority, refund, search and statistics views. |
 | `/ticket_overdue` | `cmd_ticket_overdue` | YES | YES | Lists new/reviewing/refund tickets older than 24h and provider waits older than 72h. |
 | `/support_persona_test <message>` | `cmd_support_persona_test` | YES | YES | Preview the deterministic CSKH classification, escalation decision and safe reply without creating a ticket or changing Xu. |
+| `/support_auto_test <message>` | `cmd_support_auto_test` | YES | YES | Preview Support Auto Reply V3.1 category, priority, ticket decision, admin alert and reply without creating a ticket. |
 | `/shopaikey_status` | `cmd_shopaikey_status` | YES | YES | ShopAIKey admin status, usage and smoke-test snapshots. |
 | `/shopaikey_usage` | `cmd_shopaikey_usage` | YES | YES | ShopAIKey usage monitor, no key leakage. |
 | `/shopaikey_video_job` | `cmd_shopaikey_video_job` | YES | YES | Query ShopAIKey video job status. |

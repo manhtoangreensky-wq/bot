@@ -31217,17 +31217,22 @@ SUPPORT_TICKET_TTL_SECONDS = 15 * 60
 def support_ticket_pending_key(user_id) -> str:
     return f"support_ticket:{user_id}"
 
+def support_last_ticket_key(user_id) -> str:
+    return f"support_last_ticket:{user_id}"
+
 def set_support_ticket_pending(user_id, step: str, **fields) -> dict:
+    pending_input_steps = {"awaiting_message", "lead_input", "awaiting_ticket_reply"}
     state = {
         "pending_action": "support_ticket",
         "step": str(step or "")[:60],
+        "support_pending_input": str(step or "") in pending_input_steps,
         "created_at_ts": time.time(),
     }
     for key, value in fields.items():
         if key in {
             "category", "ticket_id", "source", "reply_text", "variant", "lead_type",
             "selected_option", "service_type", "back_to", "needs_admin", "support_flow",
-            "awaiting_support_message",
+            "awaiting_support_message", "support_origin", "service_group",
         }:
             state[key] = str(value or "")[:4000]
     USER_PENDING[support_ticket_pending_key(user_id)] = state
@@ -31245,6 +31250,23 @@ def get_support_ticket_pending(user_id) -> dict | None:
 
 def clear_support_ticket_pending(user_id) -> bool:
     return USER_PENDING.pop(support_ticket_pending_key(user_id), None) is not None
+
+def remember_last_support_ticket(user_id, ticket_id) -> None:
+    USER_PENDING[support_last_ticket_key(user_id)] = {
+        "last_support_ticket_id": int(ticket_id),
+        "updated_at_ts": time.time(),
+    }
+
+def get_last_support_ticket_id(user_id) -> int | None:
+    state = USER_PENDING.get(support_last_ticket_key(user_id)) or {}
+    try:
+        return int(state.get("last_support_ticket_id"))
+    except (TypeError, ValueError):
+        return None
+
+def complete_support_pending(user_id, ticket_id) -> None:
+    clear_support_ticket_pending(user_id)
+    remember_last_support_ticket(user_id, ticket_id)
 
 def support_ticket_menu_text() -> str:
     return (
@@ -31507,6 +31529,31 @@ def support_ticket_created_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="support|start"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
+def support_auto_reply_for_ticket_category(classification: dict, ticket_category: str) -> str:
+    if ticket_category == "custom_bot_lead":
+        return (
+            "Dạ TOAN AAS đã nhận nhu cầu làm bot riêng của bạn nhé. Mình đã ghi nhận "
+            "thành yêu cầu tư vấn riêng để admin xem kỹ hơn. Bạn có thể gửi thêm sản phẩm, "
+            "câu hỏi khách thường gặp và bước muốn tự động hóa."
+        )
+    if ticket_category == "premium_lead":
+        return (
+            "Dạ TOAN AAS đã nhận yêu cầu đăng ký Premium của bạn. Bạn có thể gửi thêm nhu "
+            "cầu chính về ảnh, video, content, tài liệu, voice/TTS hoặc bot riêng để admin "
+            "tư vấn phù hợp hơn."
+        )
+    if ticket_category == "service_consulting":
+        return (
+            "Dạ mình nhận được nhu cầu tư vấn gói dịch vụ rồi nhé. TOAN AAS sẽ xem theo "
+            "số lượng đầu ra, tần suất sử dụng và ngân sách phù hợp."
+        )
+    if ticket_category == "general_support":
+        return (
+            "Dạ mình nhận được yêu cầu hỗ trợ của bạn rồi nhé. TOAN AAS đã tạo ticket để "
+            "theo dõi; bạn có thể gửi thêm ảnh chụp màn hình, mã job hoặc mô tả chi tiết."
+        )
+    return support_reply_for_classification(classification)
+
 def public_support_ticket_text(ticket: dict) -> str:
     reply = latest_admin_ticket_reply(ticket["id"])
     latest_user_message = latest_support_ticket_message(ticket["id"], "user") or ticket.get("message") or ""
@@ -31545,7 +31592,8 @@ def support_admin_menu_text() -> str:
         "🎧 <b>CSKH / Ticket TOAN AAS</b>\n\n"
         "Xem yêu cầu hỗ trợ, báo lỗi, refund và lead khách hàng. "
         "Admin phải kiểm tra ticket trước khi phản hồi hoặc đánh dấu hoàn tất.\n\n"
-        "Kiểm tra persona: <code>/support_persona_test &lt;tin nhắn khách&gt;</code>"
+        "Kiểm tra auto reply: <code>/support_auto_test &lt;tin nhắn khách&gt;</code>\n"
+        "Kiểm tra persona cũ: <code>/support_persona_test &lt;tin nhắn khách&gt;</code>"
     )
 
 def support_admin_menu_keyboard() -> InlineKeyboardMarkup:
@@ -44462,7 +44510,7 @@ def support_admin_search_payload(search: str) -> tuple[str, InlineKeyboardMarkup
     rows.append([InlineKeyboardButton("⬅️ CSKH/Ticket", callback_data="ticket|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
-async def handle_support_ticket_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+async def handle_support_pending_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.effective_user or not update.message or not update.message.text:
         return False
     uid = update.effective_user.id
@@ -44496,7 +44544,7 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
             full_message,
             classification,
         )
-        clear_support_ticket_pending(uid)
+        complete_support_pending(uid, ticket["id"])
         lead_name = {
             "premium_lead": "đăng ký Premium",
             "custom_bot_lead": "kết nối bot riêng",
@@ -44522,7 +44570,9 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
             parse_mode="HTML",
             reply_markup=support_ticket_created_keyboard(ticket["id"]),
         )
-        if classification.get("should_alert_admin"):
+        if classification.get("should_alert_admin") and (
+            is_new or str(classification.get("priority") or "") == "urgent"
+        ):
             await notify_admin_new_support_ticket(
                 context,
                 ticket,
@@ -44546,7 +44596,7 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
             text,
             classification,
         )
-        clear_support_ticket_pending(uid)
+        complete_support_pending(uid, ticket["id"])
         if selected_category == "custom_bot_lead":
             intro = (
                 "Dạ TOAN AAS đã nhận nhu cầu làm bot riêng của bạn nhé. Bạn có thể gửi thêm "
@@ -44560,10 +44610,9 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
                 "tần suất sử dụng, loại đầu ra và ngân sách phù hợp."
             )
         else:
-            intro = (
-                support_reply_for_classification(classification)
-                if classification.get("matched")
-                else "Dạ mình nhận được rồi nhé. TOAN AAS sẽ chuyển admin kiểm tra trực tiếp để chắc hơn."
+            intro = support_auto_reply_for_ticket_category(
+                classification,
+                selected_category if selected_category != "other" else "general_support",
             )
         ticket_text = (
             support_ticket_created_text(ticket)
@@ -44578,14 +44627,15 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
             parse_mode="HTML",
             reply_markup=support_ticket_created_keyboard(ticket["id"]),
         )
-        await notify_admin_new_support_ticket(
-            context,
-            ticket,
-            classification,
-            intro,
-            is_new=is_new,
-            customer_message=text,
-        )
+        if is_new or str(classification.get("priority") or "") == "urgent":
+            await notify_admin_new_support_ticket(
+                context,
+                ticket,
+                classification,
+                intro,
+                is_new=is_new,
+                customer_message=text,
+            )
         return True
     if step == "awaiting_ticket_reply":
         ticket_id = int(state.get("ticket_id") or 0)
@@ -44605,7 +44655,7 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
         if priority_rank.get(desired_priority, 1) > priority_rank.get(str(ticket.get("priority")), 1):
             update_fields["priority"] = desired_priority
         ticket = update_support_ticket(ticket_id, **update_fields) or ticket
-        clear_support_ticket_pending(uid)
+        complete_support_pending(uid, ticket_id)
         await update.message.reply_text(
             f"✅ Đã bổ sung nội dung vào ticket <code>{html.escape(ticket.get('ticket_code') or '')}</code>.\n\n"
             "TOAN AAS đã ghi nhận cập nhật và sẽ báo admin nếu cần xử lý ưu tiên.",
@@ -44664,6 +44714,10 @@ async def handle_support_ticket_pending_text(update: Update, context: ContextTyp
         return True
     return False
 
+async def handle_support_ticket_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Backward-compatible entry point for existing handlers and tests."""
+    return await handle_support_pending_input(update, context)
+
 async def handle_human_support_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -44683,6 +44737,7 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             category="general_support",
             source="human_support",
             support_flow="create_support_ticket",
+            support_origin="support_main",
             awaiting_support_message="1",
             back_to="support|start",
         )
@@ -44708,7 +44763,8 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             category="premium_lead",
             selected_option=selected,
             lead_type=f"premium_{parts[2]}",
-            support_flow=f"premium_{parts[2]}",
+            support_flow="premium_lead",
+            support_origin="premium",
             awaiting_support_message="1",
             back_to="support|premium",
         )
@@ -44737,7 +44793,8 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             category="custom_bot_lead",
             selected_option=detail["title"],
             lead_type=detail["lead_type"],
-            support_flow=f"custom_bot_{bot_type}",
+            support_flow="custom_bot_lead",
+            support_origin="custom_bot",
             awaiting_support_message="1",
             back_to=f"support|bot_type|{bot_type}",
         )
@@ -44774,7 +44831,9 @@ async def handle_human_support_callback(update: Update, context: ContextTypes.DE
             selected_option=selected,
             service_type=service_type,
             lead_type=service_type,
-            support_flow=f"service_consulting_{service_type}",
+            support_flow="service_consulting",
+            support_origin="service_consulting",
+            service_group=service_type,
             awaiting_support_message="1",
             back_to=f"support|consult_type|{service_type}",
         )
@@ -56268,6 +56327,38 @@ async def cmd_support_persona_test(update: Update, context: ContextTypes.DEFAULT
         html.escape(reply),
         "",
         "Không tạo ticket, không gọi refund và không cộng/trừ Xu.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_support_auto_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    message = " ".join(context.args or []).strip()
+    if not message:
+        return await update.message.reply_text(
+            "Cú pháp: <code>/support_auto_test &lt;tin nhắn khách&gt;</code>\n\n"
+            "Lệnh chỉ xem trước phân loại/phản hồi; không tạo ticket, không gửi alert và không đổi Xu.",
+            parse_mode="HTML",
+        )
+    classification = await classify_support_message(message, update.effective_user.id)
+    ticket_category = str(classification.get("ticket_category") or "general_support")
+    support_category = str(classification.get("support_category") or ticket_category)
+    reply = support_auto_reply_for_ticket_category(classification, ticket_category)
+    lines = [
+        "🧪 <b>Support Auto Reply Test</b>",
+        "",
+        f"Input: {html.escape(message[:500])}",
+        f"Category: <code>{html.escape(support_category)}</code>",
+        f"Ticket category: <code>{html.escape(ticket_category)}</code>",
+        f"Priority: <code>{html.escape(str(classification.get('priority') or 'normal'))}</code>",
+        f"Needs admin: <b>{'yes' if classification.get('needs_admin') else 'no'}</b>",
+        f"Would create ticket: <b>{'yes' if classification.get('should_create_ticket') else 'no'}</b>",
+        f"Admin alert: <b>{'yes' if classification.get('should_alert_admin') else 'no'}</b>",
+        "",
+        "<b>Auto reply preview:</b>",
+        html.escape(reply),
+        "",
+        "Không tạo ticket thật, không gọi refund và không cộng/trừ Xu.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -89835,9 +89926,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_finance_compliance_pending_text(update, context):
         return
 
-    if await handle_support_ticket_pending_text(update, context):
-        return
-
     if await handle_feedback_pending_text(update, context):
         return
 
@@ -89884,6 +89972,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_quick_media_pending_text(update, context):
+        return
+
+    if await handle_support_pending_input(update, context):
         return
 
     if await handle_support_persona_message(update, context):
@@ -90721,6 +90812,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("ticket_admin", cmd_ticket_admin))
     tg_app.add_handler(CommandHandler("ticket_overdue", cmd_ticket_overdue))
     tg_app.add_handler(CommandHandler("support_persona_test", cmd_support_persona_test))
+    tg_app.add_handler(CommandHandler("support_auto_test", cmd_support_auto_test))
     tg_app.add_handler(CommandHandler("duyet",       cmd_duyet))
     tg_app.add_handler(CommandHandler("checkpayos",  cmd_checkpayos))
     tg_app.add_handler(CommandHandler("payos_status", cmd_checkpayos))

@@ -3075,6 +3075,8 @@ def test_support_v3_menu_states_and_back_routing(monkeypatch):
     asyncio.run(press("support|ticket"))
     state = bot.get_support_ticket_pending(93001)
     assert state["support_flow"] == "create_support_ticket"
+    assert state["support_pending_input"] is True
+    assert state["support_origin"] == "support_main"
     assert state["awaiting_support_message"] == "1"
     ticket_prompt_callbacks = [
         button.callback_data
@@ -3094,6 +3096,8 @@ def test_support_v3_menu_states_and_back_routing(monkeypatch):
     shop_state = bot.get_support_ticket_pending(93001)
     assert shop_state["category"] == "custom_bot_lead"
     assert shop_state["lead_type"] == "shop_bot"
+    assert shop_state["support_flow"] == "custom_bot_lead"
+    assert shop_state["support_origin"] == "custom_bot"
     assert shop_state["back_to"] == "support|bot_type|shop"
 
     bot.clear_support_ticket_pending(93001)
@@ -3105,12 +3109,16 @@ def test_support_v3_menu_states_and_back_routing(monkeypatch):
     consult_state = bot.get_support_ticket_pending(93001)
     assert consult_state["category"] == "service_consulting"
     assert consult_state["service_type"] == "video"
+    assert consult_state["service_group"] == "video"
+    assert consult_state["support_origin"] == "service_consulting"
     assert consult_state["back_to"] == "support|consult_type|video"
 
     bot.clear_support_ticket_pending(93001)
     asyncio.run(press("support|premium_type|shop"))
     premium_state = bot.get_support_ticket_pending(93001)
     assert premium_state["category"] == "premium_lead"
+    assert premium_state["support_flow"] == "premium_lead"
+    assert premium_state["support_origin"] == "premium"
     assert premium_state["back_to"] == "support|premium"
 
 
@@ -3156,6 +3164,8 @@ def test_support_v3_pending_input_creates_tickets_and_auto_replies(monkeypatch, 
     assert payment_ticket["priority"] == "high"
     assert "Mã ticket" in payment_message.sent[0][0]
     assert payment_alert.sent
+    assert bot.get_support_ticket_pending("support-payment") is None
+    assert bot.get_last_support_ticket_id("support-payment") == payment_ticket["id"]
 
     handled, angry_message, angry_alert, angry_ticket = asyncio.run(submit(
         "support-angry",
@@ -3208,6 +3218,60 @@ def test_support_v3_pending_input_creates_tickets_and_auto_replies(monkeypatch, 
     assert consult_ticket["category"] == "service_consulting"
     assert "tư vấn gói video" in consult_message.sent[0][0]
     assert consult_alert.sent == []
+
+
+def test_support_auto_test_command_is_preview_only(monkeypatch):
+    class FakeMessage:
+        def __init__(self):
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((str(text), kwargs))
+
+    message = FakeMessage()
+    update = SimpleNamespace(effective_user=SimpleNamespace(id=str(bot.ADMIN_ID)), message=message)
+    context = SimpleNamespace(args=["tôi", "muốn", "đăng", "ký", "premium"])
+    monkeypatch.setattr(
+        bot,
+        "create_or_append_support_ticket",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("preview must not create ticket")),
+    )
+
+    asyncio.run(bot.cmd_support_auto_test(update, context))
+
+    payload = message.sent[0][0]
+    assert "Support Auto Reply Test" in payload
+    assert "Category: <code>premium_lead</code>" in payload
+    assert "Priority: <code>high</code>" in payload
+    assert "Needs admin: <b>yes</b>" in payload
+    assert "Không tạo ticket thật" in payload
+
+
+def test_support_classifier_handles_explicit_public_support_keywords():
+    technical = bot.classify_support_escalation("Bot đứng im và lỗi video")
+    admin = bot.classify_support_escalation("Tôi muốn gặp admin")
+    custom_bot = bot.classify_support_escalation("Tôi muốn kết nối bot riêng cho shop")
+    payment = bot.classify_support_escalation("Tôi nạp tiền rồi chưa thấy Xu")
+
+    assert technical["ticket_category"] == "video_error"
+    assert technical["support_category"] == "technical_error"
+    assert technical["needs_admin"] is True
+    assert admin["ticket_category"] == "general_support"
+    assert admin["support_category"] == "admin_contact"
+    assert admin["should_alert_admin"] is True
+    assert custom_bot["ticket_category"] == "custom_bot_lead"
+    assert custom_bot["priority"] == "high"
+    assert payment["support_category"] == "payment"
+
+
+def test_support_pending_router_runs_after_product_pending_handlers():
+    source = bot_source_text()
+    handle_message_source = source_between(source, "async def handle_message", "@asynccontextmanager")
+    support_position = handle_message_source.index("handle_support_pending_input")
+
+    assert handle_message_source.index("handle_storyboard_pending_text") < support_position
+    assert handle_message_source.index("handle_quick_image_flow_pending_text") < support_position
+    assert handle_message_source.index("handle_public_video_prompt_pending_text") < support_position
 
 
 def test_support_v3_my_tickets_reply_and_done(monkeypatch, tmp_path):

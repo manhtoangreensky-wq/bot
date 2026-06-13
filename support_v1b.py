@@ -337,10 +337,11 @@ def classify_support_escalation(user_message: str, context: dict | None = None, 
     refund = ("hoan tien", "hoan xu", "bi tru xu", "da tru xu", "mat xu", "tru xu ma", "khong ra ket qua")
     payment = ("nap tien chua", "nap xu chua", "chuyen khoan roi", "payos loi", "qr het han", "cong thieu xu", "chua thay xu")
     b2b = ("hop dong", "bao gia doanh nghiep", "du an", "trien khai cho cong ty", "so luong lon", "doi tac", "chiet khau", "hoa hong", "agency", "shop lon")
-    custom_bot = ("lam bot rieng", "bot rieng", "bot cho shop", "bot ban hang", "bot cskh", "bot noi bo", "tu dong hoa cho shop")
-    premium = ("dang ky premium", "goi premium", "premium cho shop", "premium doanh nghiep")
+    custom_bot = ("lam bot rieng", "bot rieng", "bot cho shop", "bot ban hang", "bot cskh", "bot noi bo", "ket noi bot", "tu dong hoa cho shop")
+    premium = ("dang ky premium", "goi premium", "premium cho shop", "premium doanh nghiep", "goi cao cap")
     service_consulting = ("tu van goi", "tu van dich vu", "goi video", "goi tao anh", "goi voice", "goi tai lieu")
-    technical = (" api", "api ", "webhook", "provider", "server", "vps", "bao mat", "du lieu", "tich hop he thong", "deepgram", "khong render", "render loi")
+    admin_contact = ("gap admin", "gap nguoi that", "noi chuyen voi quan ly", "lien he admin")
+    technical = (" api", "api ", "webhook", "provider", "server", "vps", "bao mat", "du lieu", "tich hop he thong", "deepgram", "khong render", "render loi", "loi video", "loi anh", "loi tai lieu", "bot dung im", "khong chay")
     pricing = ("bang gia", "gia bao nhieu", "hoi gia", "dat qua", "chi phi cao", "gia cao")
     onboarding = ("bot nay lam duoc gi", "toan aas la gi", "huong dan bat dau")
     affiliate = ("video tiktok", "lam tiktok", "affiliate")
@@ -385,6 +386,12 @@ def classify_support_escalation(user_message: str, context: dict | None = None, 
             category="admin_escalation", ticket_category="service_consulting", suggested_reply_id="b2b_contract",
             should_create_ticket=True, should_alert_admin=False,
         )
+    elif _contains_any(text, admin_contact):
+        result.update(
+            matched=True, needs_admin=True, priority="high", reason="admin_contact",
+            category="admin_escalation", ticket_category="general_support", suggested_reply_id="b2b_contract",
+            should_create_ticket=True, should_alert_admin=True,
+        )
     elif _contains_any(text, b2b):
         result.update(
             matched=True, needs_admin=True, priority="high", reason="b2b_or_large_project",
@@ -392,7 +399,14 @@ def classify_support_escalation(user_message: str, context: dict | None = None, 
             should_create_ticket=True, should_alert_admin=True,
         )
     elif _contains_any(f" {text} ", technical):
-        ticket_category = "video_error" if "video" in text or "render" in text else "other"
+        if "video" in text or "render" in text:
+            ticket_category = "video_error"
+        elif "anh" in text:
+            ticket_category = "image_error"
+        elif "tai lieu" in text:
+            ticket_category = "document_pdf"
+        else:
+            ticket_category = "other"
         result.update(
             matched=True, needs_admin=True, priority="high", reason="deep_technical_question",
             category="technical_error", ticket_category=ticket_category, suggested_reply_id="technical_deep_question",
@@ -434,6 +448,20 @@ def classify_support_escalation(user_message: str, context: dict | None = None, 
 
     template = get_support_reply_template(result["suggested_reply_id"])
     result["allowed_auto_send"] = bool(template["allowed_auto_send"])
+    ticket_category = str(result.get("ticket_category") or "other")
+    if ticket_category == "payment_topup":
+        support_category = "payment"
+    elif ticket_category == "refund":
+        support_category = "refund"
+    elif ticket_category in {"premium_lead", "custom_bot_lead", "service_consulting"}:
+        support_category = ticket_category
+    elif result.get("reason") == "admin_contact":
+        support_category = "admin_contact"
+    elif result.get("category") == "technical_error":
+        support_category = "technical_error"
+    else:
+        support_category = "general_support"
+    result["support_category"] = support_category
     return result
 
 
