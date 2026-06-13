@@ -1750,10 +1750,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "set_quick_media_pending(uid, action)" in source
     assert 'set_quick_media_pending(uid, "quick_image_prompt")' not in source  # action is centralized through start/callback helpers.
     assert "quick_image_prompt" in source and "quick_video_prompt" in source
-    assert 'set_quick_media_pending(uid, "quick_video_prompt")' in quick_source
-    assert "video.quick_admin_prompt" in quick_source
-    assert "video.admin_smoke_warning" in quick_source
-    assert "public_video_off_options_text(lang)" in quick_source
+    assert 'start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")' in quick_source
+    assert "video_addon_menu_text" in source
+    assert "video_addon_runtime_guard(pending)" in source
+    assert "Video AI chân thật đang được kiểm soát an toàn" in source
     assert "public_image_prompt" in source
     assert "set_public_image_prompt_pending(uid, tier)" in source
     assert "clear_public_image_prompt_pending(uid)" in source
@@ -2530,16 +2530,17 @@ def test_frame_video_helper_defaults_and_state():
     assert bot.frame_video_effect_payload("pan")["token"] == "pan"
     assert bot.frame_video_effect_payload("slide")["token"] == "slide"
     assert bot.frame_video_effect_payload("random")["token"] == "random"
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 50
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(7)], "duration": "fast", "effect": "fade"}) == 100
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "standard", "effect": "fade"}) == 70
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "standard", "effect": "zoom"}) == 120
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 110
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 140
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "slow", "effect": "random"}) == 190
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(20)], "duration": "fast", "effect": "pan"}) == 290
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 20
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(7)], "duration": "fast", "effect": "fade"}) == 30
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "standard", "effect": "fade"}) == 30
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "standard", "effect": "zoom"}) == 60
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 40
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 80
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "slow", "effect": "random"}) == 120
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(20)], "duration": "fast", "effect": "pan"}) == 60
     status = bot.frame_video_status_payload()
-    assert int(status["price_xu"]) == int(bot.FRAME_VIDEO_BASE_2_5_XU)
+    assert int(status["price_xu"]) == int(bot.LOCAL_FRAME_VIDEO_MIN_XU)
+    assert int(status["price_per_second_xu"]) == int(bot.LOCAL_FRAME_VIDEO_XU_PER_SECOND)
     assert status["direct_render_enabled"] == bot.FRAME_VIDEO_DIRECT_RENDER_ENABLED
     assert status["require_local_worker"] == bot.FRAME_VIDEO_REQUIRE_LOCAL_WORKER
     local_worker_lines = "\n".join(bot.local_worker_status_lines())
@@ -4377,14 +4378,14 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     warranty_buttons = [button.text for row in bot.storyboard_image_confirm_keyboard("standard").inline_keyboard for button in row]
     assert any("Thêm bảo hành" in label and "250 Xu/ảnh" in label for label in warranty_buttons)
 
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "none"}) == 50
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 50
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(7)], "duration": "fast", "effect": "fade"}) == 100
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "standard", "effect": "zoom"}) == 120
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 110
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 140
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "slow", "effect": "random"}) == 190
-    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(20)], "duration": "fast", "effect": "pan"}) == 290
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "none"}) == 20
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 20
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(7)], "duration": "fast", "effect": "fade"}) == 30
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "standard", "effect": "zoom"}) == 60
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "slow", "effect": "zoom"}) == 40
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(10)], "duration": "slow", "effect": "pan"}) == 80
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(15)], "duration": "slow", "effect": "random"}) == 120
+    assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(20)], "duration": "fast", "effect": "pan"}) == 60
     status = bot.frame_video_status_payload()
     assert status["base_2_5_xu"] == bot.FRAME_VIDEO_BASE_2_5_XU
     assert status["base_6_10_xu"] == bot.FRAME_VIDEO_BASE_6_10_XU
@@ -7798,3 +7799,94 @@ def test_payos_expiry_reminder_and_fallback_message(monkeypatch):
     assert "tạm thời không tạo được" in fallback
     assert "Nạp thủ công" in fallback
     assert "secret technical error" not in fallback
+
+
+def test_video_pricing_v2_xu_conversion_and_base_prices():
+    assert bot.XU_TO_VND == 100
+    assert 1000 * bot.XU_TO_VND == 100000
+    assert 1250 * bot.XU_TO_VND == 125000
+    assert bot.calculate_video_base_price(60, "local_frame_video", "fast")["base_video_xu"] == 120
+    assert bot.calculate_video_base_price(24, "ai_text_to_video", "fast")["base_video_xu"] == 720
+    assert bot.calculate_video_base_price(24, "ai_image_to_video", "standard")["base_video_xu"] == 1320
+    assert bot.calculate_video_base_price(24, "ai_video_to_video", "high")["base_video_xu"] == 2160
+    long_price = bot.calculate_video_base_price(180, "long_ai_video", "standard")
+    assert long_price["segments"] == 18
+    assert long_price["segment_seconds"] == 10
+    assert long_price["base_video_xu"] == 11390
+
+
+def test_video_pricing_v2_subtitle_and_dubbing_prices():
+    assert bot.calculate_video_addon_price(60, "subtitle_original", "none")["subtitle_xu"] == 20
+    assert bot.calculate_video_addon_price(180, "subtitle_original", "none")["subtitle_xu"] == 60
+    assert bot.calculate_video_addon_price(60, "none", "dub_original")["dubbing_xu"] == 100
+    assert bot.calculate_video_addon_price(180, "none", "dub_original")["dubbing_xu"] == 300
+    assert bot.calculate_video_addon_price(60, "subtitle_original", "dub_original")["addon_xu"] == 120
+    assert bot.calculate_video_addon_price(180, "subtitle_original", "dub_original")["addon_xu"] == 360
+    assert bot.calculate_video_addon_price(60, "subtitle_translated", "dub_translated", True)["addon_xu"] == 150
+    assert bot.calculate_video_addon_price(180, "subtitle_translated", "dub_translated", True)["addon_xu"] == 450
+
+
+def test_video_total_price_v2_is_itemized():
+    pricing = bot.calculate_video_total_price(
+        24,
+        "ai_image_to_video",
+        "standard",
+        "subtitle_original",
+        "dub_original",
+    )
+    assert pricing["base_video_xu"] == 1320
+    assert pricing["subtitle_xu"] == 20
+    assert pricing["dubbing_xu"] == 100
+    assert pricing["addon_xu"] == 120
+    assert pricing["total_xu"] == 1440
+    assert pricing["estimated_vnd"] == 144000
+    invoice = bot.video_price_invoice_text({
+        "current_video_duration_seconds": 24,
+        "current_video_processing_type": "ai_image_to_video",
+        "current_video_quality_tier": "standard",
+        "current_video_subtitle_option": "subtitle_original",
+        "current_video_dubbing_option": "dub_original",
+        "current_video_price_preview": pricing,
+    })
+    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề: <b>20 Xu</b>", "Lồng tiếng: <b>100 Xu</b>", "Tổng: <b>1.440 Xu</b>", "144.000đ"]:
+        assert marker in invoice
+
+
+def test_video_addon_menu_and_shared_flow_hooks():
+    callbacks = [button.callback_data for row in bot.video_addon_menu_keyboard("vi").inline_keyboard for button in row]
+    for callback in [
+        "videoaddon|none",
+        "videoaddon|subtitle",
+        "videoaddon|dub",
+        "videoaddon|combo",
+        "videoaddon|translate_sub",
+        "videoaddon|translate_combo",
+        "videoaddon|back",
+    ]:
+        assert callback in callbacks
+    source = bot_source_text()
+    frame_source = source_between(source, "async def handle_frame_video_callback", "async def handle_storyboard_callback")
+    assert 'start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")' in source
+    assert 'start_video_addon_step(query, uid, state, "low", lang, source="frame")' in frame_source
+    for flow_marker in ["trend", "selfscene", "videoref", "imagevideo", "promptvideo"]:
+        assert flow_marker in source
+
+
+def test_video_addon_provider_guard_happens_before_charge(monkeypatch):
+    monkeypatch.setattr(bot, "VIDEO_CREATION_ADDON_PIPELINE_ENABLED", False)
+    blocked = bot.video_addon_runtime_guard({
+        "subtitle_option": "subtitle_original",
+        "dubbing_option": "none",
+    })
+    assert blocked == {"ok": False, "reason": "pipeline_off"}
+    assert bot.video_addon_runtime_guard({"subtitle_option": "none", "dubbing_option": "none"})["ok"] is True
+    callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
+    assert callback_source.index("video_addon_runtime_guard(pending)") < callback_source.index("spend_fixed_credit_info(")
+
+
+def test_video_price_test_command_registered_and_preview_only():
+    source = bot_source_text()
+    command_source = source_between(source, "async def cmd_video_price_test", "def public_video_provider_fail_message")
+    assert "No job created and no Xu deducted" in command_source
+    assert 'CommandHandler("video_price_test", cmd_video_price_test)' in source
+    assert 'CallbackQueryHandler(handle_video_addon_callback, pattern=r"^videoaddon\\|")' in source

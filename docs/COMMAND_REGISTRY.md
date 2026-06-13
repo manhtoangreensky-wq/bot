@@ -166,6 +166,7 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tool_test_shopaikey_image` | `cmd_tool_test_shopaikey_image` | YES | YES | Admin image smoke test. |
 | `/tool_test_shopaikey_video` | `cmd_tool_test_shopaikey_video` | YES | YES | Admin video smoke test. |
 | `/tool_test_shopaikey_tts` | `cmd_tool_test_shopaikey_tts` | YES | YES | Admin TTS smoke test. |
+| `/video_price_test <seconds> <type> <tier> <addon>` | `cmd_video_price_test` | YES | YES | Preview itemized video, subtitle, dubbing, total Xu, and VND pricing without creating a job or charging Xu. |
 | `/maintenance_status` | `cmd_maintenance_status` | YES | YES | Maintenance/freeze status overview. |
 | `/maintenance_on` | `cmd_maintenance_on` | YES | YES | Enable maintenance mode. |
 | `/maintenance_off` | `cmd_maintenance_off` | YES | YES | Disable maintenance mode. |

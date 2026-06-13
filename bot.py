@@ -1029,15 +1029,43 @@ VIDEO_ANALYZE_PROMPT_XU = max(0, env_int("VIDEO_ANALYZE_PROMPT_XU", 0))
 VIDEO_MOTION_SUGGEST_XU = max(0, env_int("VIDEO_MOTION_SUGGEST_XU", 0))
 VIDEO_STORYBOARD_XU = max(0, env_int("VIDEO_STORYBOARD_XU", 0))
 IMAGE_TO_VIDEO_PLAN_XU = max(0, env_int("IMAGE_TO_VIDEO_PLAN_XU", 0))
-VIDEO_SUBTITLE_XU_PER_MIN = max(0, env_int("VIDEO_SUBTITLE_XU_PER_MIN", 20))
-VIDEO_TRANSLATE_SUBTITLE_XU_PER_MIN = max(0, env_int("VIDEO_TRANSLATE_SUBTITLE_XU_PER_MIN", 40))
-VIDEO_DUB_XU_PER_MIN = max(0, env_int("VIDEO_DUB_XU_PER_MIN", 100))
-VIDEO_TRANSLATE_DUB_XU_PER_MIN = max(0, env_int("VIDEO_TRANSLATE_DUB_XU_PER_MIN", 150))
+VIDEO_PRICING_ENABLED = env_flag("VIDEO_PRICING_ENABLED", "true")
+XU_TO_VND = max(1, env_int("XU_TO_VND", 100))
+LOCAL_FRAME_VIDEO_XU_PER_SECOND = max(0, env_int("LOCAL_FRAME_VIDEO_XU_PER_SECOND", 2))
+LOCAL_FRAME_VIDEO_MIN_XU = max(0, env_int("LOCAL_FRAME_VIDEO_MIN_XU", 20))
+VIDEO_AI_FAST_XU_PER_SECOND = max(0, env_int("VIDEO_AI_FAST_XU_PER_SECOND", 30))
+VIDEO_AI_STANDARD_XU_PER_SECOND = max(0, env_int("VIDEO_AI_STANDARD_XU_PER_SECOND", 55))
+VIDEO_AI_HIGH_XU_PER_SECOND = max(0, env_int("VIDEO_AI_HIGH_XU_PER_SECOND", 90))
+VIDEO_AI_DEFAULT_SEGMENT_SECONDS = max(1, env_int("VIDEO_AI_DEFAULT_SEGMENT_SECONDS", 8))
+VIDEO_AI_LONG_SEGMENT_SECONDS = max(1, env_int("VIDEO_AI_LONG_SEGMENT_SECONDS", 10))
+VIDEO_AI_MAX_PROVIDER_SEGMENT_SECONDS = max(1, env_int("VIDEO_AI_MAX_PROVIDER_SEGMENT_SECONDS", 60))
+VIDEO_LONG_EXTRA_FACTOR = max(1.0, float(_env("VIDEO_LONG_EXTRA_FACTOR", "1.15") or 1.15))
+VIDEO_RETRY_BUFFER_FACTOR = max(1.0, float(_env("VIDEO_RETRY_BUFFER_FACTOR", "1.10") or 1.10))
+VIDEO_PRICE_ROUND_TO_XU = max(1, env_int("VIDEO_PRICE_ROUND_TO_XU", 10))
+
+VIDEO_SUBTITLE_CREATE_XU_PER_MINUTE = max(0, env_int("VIDEO_SUBTITLE_CREATE_XU_PER_MINUTE", env_int("VIDEO_SUBTITLE_XU_PER_MIN", 20)))
+VIDEO_SUBTITLE_TRANSLATE_XU_PER_MINUTE = max(0, env_int("VIDEO_SUBTITLE_TRANSLATE_XU_PER_MINUTE", env_int("VIDEO_TRANSLATE_SUBTITLE_XU_PER_MIN", 40)))
+VIDEO_DUB_XU_PER_MINUTE = max(0, env_int("VIDEO_DUB_XU_PER_MINUTE", env_int("VIDEO_DUB_XU_PER_MIN", 100)))
+VIDEO_SUBTITLE_PLUS_DUB_XU_PER_MINUTE = max(0, env_int("VIDEO_SUBTITLE_PLUS_DUB_XU_PER_MINUTE", 120))
+VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE = max(0, env_int("VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE", env_int("VIDEO_TRANSLATE_DUB_XU_PER_MIN", 150)))
+VIDEO_SUBTITLE_MIN_XU = max(0, env_int("VIDEO_SUBTITLE_MIN_XU", 20))
+VIDEO_DUB_MIN_XU = max(0, env_int("VIDEO_DUB_MIN_XU", 100))
+VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU = max(1, env_int("VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU", 10))
+
+# Compatibility aliases keep the standalone translate/dub module on the same price source.
+VIDEO_SUBTITLE_XU_PER_MIN = VIDEO_SUBTITLE_CREATE_XU_PER_MINUTE
+VIDEO_TRANSLATE_SUBTITLE_XU_PER_MIN = VIDEO_SUBTITLE_TRANSLATE_XU_PER_MINUTE
+VIDEO_DUB_XU_PER_MIN = VIDEO_DUB_XU_PER_MINUTE
+VIDEO_TRANSLATE_DUB_XU_PER_MIN = VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE
 VIDEO_TRANSLATE_MIN_BILLABLE_MINUTES = max(1, env_int("VIDEO_TRANSLATE_MIN_BILLABLE_MINUTES", 1))
 VIDEO_SUBTITLE_ENABLED = env_flag("VIDEO_SUBTITLE_ENABLED", "false")
 VIDEO_TRANSLATE_SUBTITLE_ENABLED = env_flag("VIDEO_TRANSLATE_SUBTITLE_ENABLED", "false")
 VIDEO_DUB_ENABLED = env_flag("VIDEO_DUB_ENABLED", "false")
 VIDEO_SUBTITLE_PLUS_DUB_ENABLED = env_flag("VIDEO_SUBTITLE_PLUS_DUB_ENABLED", "false")
+VIDEO_CREATION_ADDON_PIPELINE_ENABLED = env_flag("VIDEO_CREATION_ADDON_PIPELINE_ENABLED", "false")
+VIDEO_UPLOAD_MAX_MB = max(1, env_int("VIDEO_UPLOAD_MAX_MB", 100))
+VIDEO_TEMP_STORAGE_MAX_MB = max(1, env_int("VIDEO_TEMP_STORAGE_MAX_MB", 150))
+VIDEO_LARGE_FILE_WARNING_MB = max(1, env_int("VIDEO_LARGE_FILE_WARNING_MB", 80))
 VIDEO_PROCESSING_MAX_INPUT_MB = max(1, env_int("VIDEO_PROCESSING_MAX_INPUT_MB", 15))
 ASR_PROVIDER = _env("ASR_PROVIDER", "deepgram").strip().lower()
 TRANSLATE_PROVIDER = _env("TRANSLATE_PROVIDER", "auto").strip().lower()
@@ -33201,8 +33229,9 @@ def clear_media_creator_pending_states(user_id) -> bool:
     storyboard_cleared = clear_storyboard_state(user_id)
     developing_video_cleared = clear_developing_video_pending(user_id)
     video_dubbing_cleared = clear_video_dubbing_pending(user_id)
+    video_addon_cleared = clear_video_addon_state(user_id)
     marketing_cleared = clear_marketing_pending(user_id)
-    return bool(support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or video_dubbing_cleared or marketing_cleared)
+    return bool(support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or video_dubbing_cleared or video_addon_cleared or marketing_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -37828,6 +37857,7 @@ def menu_text_admin() -> str:
         "• <code>/tool_test_shopaikey_tts</code> — smoke TTS admin-only\n\n"
         "<b>F. Giá / Sẵn sàng bán</b>\n"
         "• <code>/banggia</code> — bảng giá khách hàng tập trung\n"
+        "• <code>/video_price_test &lt;seconds&gt; &lt;type&gt; &lt;tier&gt; &lt;addon&gt;</code> — preview hóa đơn video, không tạo job\n"
         "• <code>/pricing_audit</code> — audit feature/price/source/guard cho admin\n"
         "• <code>/costs</code> — chi phí/provider nội bộ nếu có\n"
         "• <code>/sales_ready</code> — kiểm tra public guard, billing, refund\n"
@@ -48399,9 +48429,6 @@ async def handle_public_video_prompt_pending_text(update: Update, context: Conte
     if not payload.get("enabled"):
         await update.message.reply_text(ui_text(lang, "video.tier_disabled_message"))
         return True
-    if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
-        await update.message.reply_text(ui_text(lang, "media.public_off"))
-        return True
     active_video_job = shopaikey_active_job_for_user(uid, "video")
     if active_video_job:
         await update.message.reply_text(
@@ -48423,9 +48450,7 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
     if not prompt:
         command = "/shopaikey_video_from_image" if from_image else "/shopaikey_video"
         return await update.message.reply_text(f"⚠️ Cú pháp: {command} <mô tả video>")
-    enabled, message = shopaikey_public_generation_guard("video")
-    if not enabled:
-        return await update.message.reply_text(f"{message}\nBot chưa trừ Xu.")
+    render_enabled, render_guard_message = shopaikey_public_generation_guard("video")
     active_video_job = shopaikey_active_job_for_user(uid, "video")
     if active_video_job:
         return await update.message.reply_text(
@@ -48450,6 +48475,9 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
             "telegram_file_id": str(source_job.get("output_file_id") or ""),
             "video_prompt": prompt,
         }
+    if package:
+        package["render_enabled_at_preview"] = bool(render_enabled)
+        package["render_guard_message"] = str(render_guard_message or "")[:240]
     set_media_aspect_pending(uid, "video", tier, prompt, package)
     await update.message.reply_text(
         public_media_aspect_ratio_text("video", tier, prompt, lang),
@@ -48508,7 +48536,32 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     retry_warranty_count = max(0, int(pending.get("retry_warranty_count") or 0)) if job_type == "image" else 0
     enabled, message = shopaikey_public_generation_guard(job_type)
     if not enabled:
+        if job_type == "video":
+            return await safe_edit_or_send(
+                query,
+                "🎬 Video AI chân thật đang được kiểm soát an toàn.\n"
+                "TOAN AAS có thể giúp bạn chuẩn bị kịch bản, storyboard, prompt, nhạc, phụ đề và lồng tiếng trước.\n"
+                "Phần render AI thật sẽ mở sau khi provider ổn định.\n\nBot chưa trừ Xu.",
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng", callback_data="videoaddon|menu")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="videoaddon|main")],
+                ]),
+            )
         return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
+    if job_type == "video":
+        addon_guard = video_addon_runtime_guard(pending)
+        if not addon_guard.get("ok"):
+            return await safe_edit_or_send(
+                query,
+                video_addon_guard_text(lang),
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚫 Chọn không thêm", callback_data="videoaddon|none")],
+                    [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng", callback_data="videoaddon|menu")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="videoaddon|main")],
+                ]),
+            )
     active_public_job = shopaikey_active_job_for_user(uid, job_type)
     if active_public_job:
         if job_type == "video":
@@ -48520,6 +48573,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"))
     if job_type == "video" and source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
         return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
+    if job_type == "video":
+        clear_video_addon_state(uid)
     balance_before, _, _ = get_user(uid)
     model = (pending_model or SHOPAIKEY_IMAGE_MODEL or "nano-banana") if job_type == "image" else (SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
     if job_type == "image":
@@ -52669,6 +52724,191 @@ def frame_video_ffmpeg_path() -> str:
 def xu_number(value: int = 0) -> str:
     return f"{int(value or 0):,}".replace(",", ".")
 
+def round_video_xu(value, step: int = 0) -> int:
+    unit = max(1, int(step or VIDEO_PRICE_ROUND_TO_XU or 1))
+    amount = max(0.0, float(value or 0))
+    return int(math.ceil(amount / unit) * unit) if amount else 0
+
+def video_quality_from_tier(tier: str = "") -> str:
+    normalized = normalize_video_tier(tier)
+    if normalized in {"high", "premium"}:
+        return "high"
+    if normalized in {"standard", "common"}:
+        return "standard"
+    return "fast"
+
+def normalize_video_processing_type(value: str = "") -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "frame": "local_frame_video",
+        "local": "local_frame_video",
+        "text_to_video": "ai_text_to_video",
+        "image_to_video": "ai_image_to_video",
+        "video_to_video": "ai_video_to_video",
+        "long": "long_ai_video",
+        "long_video": "long_ai_video",
+    }
+    normalized = aliases.get(normalized, normalized)
+    allowed = {
+        "local_frame_video", "ai_text_to_video", "ai_image_to_video", "ai_video_to_video",
+        "long_ai_video", "video_sample_to_prompt", "subtitle_only", "translate_subtitle",
+        "dub_only", "subtitle_plus_dub",
+    }
+    return normalized if normalized in allowed else "ai_text_to_video"
+
+def calculate_video_base_price(
+    duration_seconds,
+    processing_type,
+    quality_tier,
+    segment_seconds=None,
+    include_retry_buffer=True,
+) -> dict:
+    duration = max(1, int(math.ceil(float(duration_seconds or 0))))
+    processing = normalize_video_processing_type(processing_type)
+    quality = str(quality_tier or "standard").strip().lower()
+    if quality not in {"fast", "standard", "high"}:
+        quality = video_quality_from_tier(quality)
+    notes = []
+    if processing in {"subtitle_only", "translate_subtitle", "dub_only", "subtitle_plus_dub", "video_sample_to_prompt"}:
+        return {
+            "duration_seconds": duration,
+            "processing_type": processing,
+            "quality_tier": quality,
+            "segments": 0,
+            "segment_seconds": 0,
+            "base_video_xu": 0,
+            "notes": ["No video rendering charge for this processing type."],
+        }
+    if processing == "local_frame_video":
+        raw = max(float(LOCAL_FRAME_VIDEO_MIN_XU), duration * float(LOCAL_FRAME_VIDEO_XU_PER_SECOND))
+        return {
+            "duration_seconds": duration,
+            "processing_type": processing,
+            "quality_tier": quality,
+            "segments": 1,
+            "segment_seconds": duration,
+            "base_video_xu": round_video_xu(raw),
+            "notes": notes,
+        }
+    rate = {
+        "fast": VIDEO_AI_FAST_XU_PER_SECOND,
+        "standard": VIDEO_AI_STANDARD_XU_PER_SECOND,
+        "high": VIDEO_AI_HIGH_XU_PER_SECOND,
+    }[quality]
+    is_long = processing == "long_ai_video" or duration > int(VIDEO_AI_MAX_PROVIDER_SEGMENT_SECONDS or 60)
+    default_segment = VIDEO_AI_LONG_SEGMENT_SECONDS if is_long else VIDEO_AI_DEFAULT_SEGMENT_SECONDS
+    segment = max(1, min(int(segment_seconds or default_segment), int(VIDEO_AI_MAX_PROVIDER_SEGMENT_SECONDS or 60)))
+    segments = max(1, int(math.ceil(duration / segment)))
+    factor = 1.0
+    if is_long:
+        factor = float(VIDEO_LONG_EXTRA_FACTOR or 1.0)
+        if include_retry_buffer:
+            # The long-video risk price uses the larger configured safety factor,
+            # not two compounded markups. This keeps the published examples stable.
+            factor = max(factor, float(VIDEO_RETRY_BUFFER_FACTOR or 1.0))
+        notes.append(f"Long video split into {segments} segments; risk factor {factor:.2f}x.")
+    raw = duration * float(rate or 0) * factor
+    return {
+        "duration_seconds": duration,
+        "processing_type": processing,
+        "quality_tier": quality,
+        "segments": segments,
+        "segment_seconds": segment,
+        "base_video_xu": round_video_xu(raw),
+        "notes": notes,
+    }
+
+def calculate_video_addon_price(
+    duration_seconds,
+    subtitle_option="none",
+    dubbing_option="none",
+    translation_enabled=False,
+) -> dict:
+    duration = max(1, int(math.ceil(float(duration_seconds or 0))))
+    subtitle = str(subtitle_option or "none").strip().lower()
+    dubbing = str(dubbing_option or "none").strip().lower()
+    translated = bool(translation_enabled or "translated" in subtitle or "translated" in dubbing)
+    has_subtitle = subtitle not in {"", "none", "off"}
+    has_dubbing = dubbing not in {"", "none", "off"}
+    minutes = duration / 60.0
+    subtitle_xu = 0
+    dubbing_xu = 0
+    if has_subtitle and has_dubbing:
+        combined_rate = VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE if translated else VIDEO_SUBTITLE_PLUS_DUB_XU_PER_MINUTE
+        combined_min = (VIDEO_SUBTITLE_MIN_XU + VIDEO_DUB_MIN_XU) if not translated else max(
+            VIDEO_SUBTITLE_MIN_XU + VIDEO_DUB_MIN_XU,
+            VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE,
+        )
+        combined = round_video_xu(max(float(combined_min), minutes * float(combined_rate)), VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU)
+        dubbing_xu = round_video_xu(max(float(VIDEO_DUB_MIN_XU), minutes * float(VIDEO_DUB_XU_PER_MINUTE)), VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU)
+        subtitle_xu = max(0, combined - dubbing_xu)
+    elif has_subtitle:
+        rate = VIDEO_SUBTITLE_TRANSLATE_XU_PER_MINUTE if translated else VIDEO_SUBTITLE_CREATE_XU_PER_MINUTE
+        minimum = max(VIDEO_SUBTITLE_MIN_XU, rate)
+        subtitle_xu = round_video_xu(max(float(minimum), minutes * float(rate)), VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU)
+    elif has_dubbing:
+        dubbing_xu = round_video_xu(max(float(VIDEO_DUB_MIN_XU), minutes * float(VIDEO_DUB_XU_PER_MINUTE)), VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU)
+    return {
+        "duration_seconds": duration,
+        "subtitle_option": subtitle,
+        "dubbing_option": dubbing,
+        "translation_enabled": translated,
+        "subtitle_xu": int(subtitle_xu),
+        "dubbing_xu": int(dubbing_xu),
+        "addon_xu": int(subtitle_xu + dubbing_xu),
+    }
+
+def calculate_video_total_price(
+    duration_seconds,
+    processing_type,
+    quality_tier,
+    subtitle_option="none",
+    dubbing_option="none",
+    translation_enabled=False,
+    segment_seconds=None,
+    include_retry_buffer=True,
+) -> dict:
+    base = calculate_video_base_price(
+        duration_seconds,
+        processing_type,
+        quality_tier,
+        segment_seconds=segment_seconds,
+        include_retry_buffer=include_retry_buffer,
+    )
+    addon = calculate_video_addon_price(
+        duration_seconds,
+        subtitle_option,
+        dubbing_option,
+        translation_enabled,
+    )
+    total = round_video_xu(int(base.get("base_video_xu") or 0) + int(addon.get("addon_xu") or 0))
+    return {
+        **base,
+        **addon,
+        "total_xu": total,
+        "estimated_vnd": total * int(XU_TO_VND or 100),
+        "notes": list(base.get("notes") or []),
+    }
+
+def video_duration_seconds_from_payload(payload: dict | None = None, default: int = 0) -> int:
+    payload = payload or {}
+    for key in ("current_video_duration_seconds", "duration_seconds", "total_duration_seconds", "seconds", "duration"):
+        value = payload.get(key)
+        if isinstance(value, (int, float)) and float(value) > 0:
+            return max(1, int(math.ceil(float(value))))
+        match = re.search(r"(\d+(?:\.\d+)?)\s*(giây|second|seconds|sec|s|phút|minute|minutes|min)\b", str(value or ""), re.I)
+        if match:
+            number = float(match.group(1))
+            unit = match.group(2).lower()
+            return max(1, int(math.ceil(number * 60 if unit in {"phút", "minute", "minutes", "min"} else number)))
+    prompt = " ".join(str(payload.get(key) or "") for key in ("prompt", "original_prompt", "video_prompt", "concept_text"))
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(giây|second|seconds|sec|s|phút|minute|minutes|min)\b", prompt, re.I)
+    if match:
+        number = float(match.group(1))
+        unit = match.group(2).lower()
+        return max(1, int(math.ceil(number * 60 if unit in {"phút", "minute", "minutes", "min"} else number)))
+    return max(1, int(default or VIDEO_AI_DEFAULT_SEGMENT_SECONDS or 8))
+
 def frame_video_effect_is_motion(effect: str = "") -> bool:
     return frame_video_effect_payload(effect).get("token") in {"zoom", "pan", "slide", "random"}
 
@@ -52712,17 +52952,28 @@ def frame_video_audio_extra_for_state(state: dict) -> int:
 
 def frame_video_price_breakdown(state: dict) -> dict:
     count = len((state or {}).get("photos") or [])
-    base = frame_video_base_price_for_count(count)
-    duration_extra = frame_video_duration_extra_for_state(state)
-    effect_extra = frame_video_effect_extra_for_state(state)
-    audio_extra = frame_video_audio_extra_for_state(state)
+    duration_seconds = frame_video_estimated_output_seconds(state)
+    pricing = calculate_video_total_price(
+        duration_seconds,
+        "local_frame_video",
+        "fast",
+        (state or {}).get("current_video_subtitle_option") or "none",
+        (state or {}).get("current_video_dubbing_option") or "none",
+        bool((state or {}).get("translation_enabled")),
+        segment_seconds=duration_seconds,
+    )
     return {
         "image_count": max(2, int(count or 0)),
-        "base": int(base or 0),
-        "duration_extra": int(duration_extra or 0),
-        "effect_extra": int(effect_extra or 0),
-        "audio_extra": int(audio_extra or 0),
-        "total": max(0, int(base or 0) + int(duration_extra or 0) + int(effect_extra or 0) + int(audio_extra or 0)),
+        "duration_seconds": int(math.ceil(duration_seconds or 0)),
+        "base": int(pricing.get("base_video_xu") or 0),
+        "duration_extra": 0,
+        "effect_extra": 0,
+        "audio_extra": 0,
+        "subtitle_xu": int(pricing.get("subtitle_xu") or 0),
+        "dubbing_xu": int(pricing.get("dubbing_xu") or 0),
+        "addon_xu": int(pricing.get("addon_xu") or 0),
+        "estimated_vnd": int(pricing.get("estimated_vnd") or 0),
+        "total": int(pricing.get("total_xu") or 0),
     }
 
 def frame_video_status_payload() -> dict:
@@ -52733,7 +52984,8 @@ def frame_video_status_payload() -> dict:
         "public_enabled": bool(FRAME_VIDEO_PUBLIC_ENABLED),
         "direct_render_enabled": bool(FRAME_VIDEO_DIRECT_RENDER_ENABLED),
         "require_local_worker": bool(FRAME_VIDEO_REQUIRE_LOCAL_WORKER),
-        "price_xu": int(FRAME_VIDEO_BASE_2_5_XU or 0),
+        "price_xu": int(LOCAL_FRAME_VIDEO_MIN_XU or 0),
+        "price_per_second_xu": int(LOCAL_FRAME_VIDEO_XU_PER_SECOND or 0),
         "basic_price_xu": int(FRAME_VIDEO_BASIC_PRICE_XU or 0),
         "effect_price_xu": int(FRAME_VIDEO_EFFECT_PRICE_XU or 0),
         "music_price_xu": int(FRAME_VIDEO_MUSIC_PRICE_XU or 0),
@@ -53004,7 +53256,9 @@ def get_frame_video_state(user_id) -> dict:
     return state
 
 def clear_frame_video_state(user_id) -> bool:
-    return USER_PENDING.pop(frame_video_pending_key(user_id), None) is not None
+    frame_cleared = USER_PENDING.pop(frame_video_pending_key(user_id), None) is not None
+    addon_cleared = USER_PENDING.pop(f"video_addon:{user_id}", None) is not None
+    return bool(frame_cleared or addon_cleared)
 
 def frame_video_collect_text(count: int = 0) -> str:
     if count:
@@ -53160,12 +53414,13 @@ def frame_video_confirm_text(state: dict, user_id=0) -> str:
         f"• Hiệu ứng: <b>{html.escape(effect['label'])}</b>\n\n"
         f"• Nhạc: <b>{html.escape(music_line)}</b>\n"
         f"• Gói render: <b>{html.escape(render_type)}</b>\n\n"
+        f"• Tổng thời lượng: <b>{int(price.get('duration_seconds') or 0)} giây</b>\n\n"
         "Chi phí:\n"
-        f"• Nền theo số ảnh: <b>{xu_number(price.get('base'))} Xu</b>\n"
-        f"• Thời lượng: <b>+{xu_number(price.get('duration_extra'))} Xu</b>\n"
-        f"• Chuyển động: <b>+{xu_number(price.get('effect_extra'))} Xu</b>\n"
-        f"• Nhạc/voice: <b>+{xu_number(price.get('audio_extra'))} Xu</b>\n\n"
-        f"Tổng: <b>{xu_number(final_cost)} Xu</b>.\n"
+        f"• Video: <b>{xu_number(price.get('base'))} Xu</b>\n"
+        f"• Phụ đề: <b>{xu_number(price.get('subtitle_xu'))} Xu</b>\n"
+        f"• Lồng tiếng: <b>{xu_number(price.get('dubbing_xu'))} Xu</b>\n"
+        f"Tổng: <b>{xu_number(final_cost)} Xu</b>\n"
+        f"Tương đương: <b>{xu_number(int(final_cost or 0) * int(XU_TO_VND or 100))}đ</b>\n\n"
         "Bot chỉ trừ Xu sau khi bạn xác nhận."
     )
 
@@ -63993,6 +64248,200 @@ def image_to_video_public_off_prompt(job_id: int = 0, user_id=0, lang: str = "vi
         text += "\n\n" + ui_text(lang, "video.admin_smoke_warning")
     return text
 
+VIDEO_ADDON_STATE_TTL_SECONDS = 15 * 60
+
+def video_addon_pending_key(user_id) -> str:
+    return f"video_addon:{user_id}"
+
+def set_video_addon_state(user_id, state: dict) -> dict:
+    now_ts = time.time()
+    clean = dict(state or {})
+    clean["pending_action"] = "video_addon_subtitle_dub_menu"
+    clean.setdefault("created_at_ts", now_ts)
+    clean["updated_at_ts"] = now_ts
+    clean["expires_at_ts"] = now_ts + VIDEO_ADDON_STATE_TTL_SECONDS
+    clean.setdefault("current_video_subtitle_option", "none")
+    clean.setdefault("current_video_dubbing_option", "none")
+    clean.setdefault("current_video_target_language", "")
+    clean.setdefault("current_video_voice_style", "")
+    clean.setdefault("current_video_music_option", "")
+    clean.setdefault("current_video_script_text", "")
+    clean.setdefault("current_video_assets", {})
+    clean.setdefault("pending_confirm_token", "")
+    USER_PENDING[video_addon_pending_key(user_id)] = clean
+    return clean
+
+def get_video_addon_state(user_id) -> dict:
+    key = video_addon_pending_key(user_id)
+    state = USER_PENDING.get(key) or {}
+    if state.get("pending_action") != "video_addon_subtitle_dub_menu":
+        if state:
+            USER_PENDING.pop(key, None)
+        return {}
+    if float(state.get("expires_at_ts") or 0) < time.time():
+        USER_PENDING.pop(key, None)
+        return {}
+    return state
+
+def clear_video_addon_state(user_id) -> bool:
+    return USER_PENDING.pop(video_addon_pending_key(user_id), None) is not None
+
+def video_addon_selection_label(subtitle_option: str = "none", dubbing_option: str = "none", translation_enabled: bool = False, lang: str = "vi") -> str:
+    subtitle = str(subtitle_option or "none")
+    dubbing = str(dubbing_option or "none")
+    translated = bool(translation_enabled or "translated" in subtitle or "translated" in dubbing)
+    if subtitle not in {"", "none"} and dubbing not in {"", "none"}:
+        return "Dịch phụ đề + lồng tiếng" if translated else "Phụ đề + lồng tiếng"
+    if subtitle not in {"", "none"}:
+        return "Dịch phụ đề" if translated else "Chỉ phụ đề"
+    if dubbing not in {"", "none"}:
+        return "Lồng tiếng đã dịch" if translated else "Chỉ lồng tiếng"
+    return "Không thêm"
+
+def video_addon_menu_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    duration = int(state.get("current_video_duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS)
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎙 <b>Subtitles & dubbing</b>\n\n"
+            f"Estimated duration: <b>{duration} seconds</b>.\n"
+            "Choose an add-on before the final itemized confirmation. Previewing does not call providers or charge Xu."
+        )
+    return (
+        "🎙 <b>Phụ đề & lồng tiếng</b>\n\n"
+        f"Thời lượng dự kiến: <b>{duration} giây</b>.\n"
+        "Bạn có muốn thêm phụ đề hoặc lồng tiếng cho video không?\n\n"
+        "Bot sẽ hiện hóa đơn tách riêng Video / Phụ đề / Lồng tiếng trước khi xử lý. "
+        "Bước này chưa gọi provider và chưa trừ Xu."
+    )
+
+def video_addon_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🚫 Không thêm" if is_vi else "🚫 None", callback_data="videoaddon|none"),
+            InlineKeyboardButton("📝 Chỉ phụ đề" if is_vi else "📝 Subtitles", callback_data="videoaddon|subtitle"),
+        ],
+        [
+            InlineKeyboardButton("🎙 Chỉ lồng tiếng" if is_vi else "🎙 Dubbing", callback_data="videoaddon|dub"),
+            InlineKeyboardButton("🎬 Phụ đề + lồng tiếng" if is_vi else "🎬 Subtitles + dub", callback_data="videoaddon|combo"),
+        ],
+        [
+            InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data="videoaddon|translate_sub"),
+            InlineKeyboardButton("🌐 Dịch + lồng tiếng" if is_vi else "🌐 Translate + dub", callback_data="videoaddon|translate_combo"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại nhạc/voice" if is_vi else "⬅️ Back", callback_data="videoaddon|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
+        ],
+    ])
+
+def video_addon_language_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="videoaddon|lang|vi"), InlineKeyboardButton("🇬🇧 English", callback_data="videoaddon|lang|en")],
+        [InlineKeyboardButton("🇯🇵 日本語", callback_data="videoaddon|lang|ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="videoaddon|lang|ko")],
+        [InlineKeyboardButton("🇨🇳 中文", callback_data="videoaddon|lang|zh"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+    ])
+
+def video_addon_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👩 Giọng nữ" if is_vi else "👩 Female", callback_data="videoaddon|voice|female"), InlineKeyboardButton("👨 Giọng nam" if is_vi else "👨 Male", callback_data="videoaddon|voice|male")],
+        [InlineKeyboardButton("✨ Tự chọn phù hợp" if is_vi else "✨ Auto select", callback_data="videoaddon|voice|auto"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+    ])
+
+def video_addon_runtime_guard(state: dict | None = None) -> dict:
+    state = state or {}
+    subtitle = str(state.get("current_video_subtitle_option") or state.get("subtitle_option") or "none")
+    dubbing = str(state.get("current_video_dubbing_option") or state.get("dubbing_option") or "none")
+    translated = bool(state.get("translation_enabled") or "translated" in subtitle or "translated" in dubbing)
+    if subtitle in {"", "none"} and dubbing in {"", "none"}:
+        return {"ok": True, "reason": "none"}
+    if not VIDEO_CREATION_ADDON_PIPELINE_ENABLED:
+        return {"ok": False, "reason": "pipeline_off"}
+    if translated and subtitle not in {"", "none"} and not VIDEO_TRANSLATE_SUBTITLE_ENABLED:
+        return {"ok": False, "reason": "translate_subtitle_off"}
+    if subtitle not in {"", "none"} and not translated and not VIDEO_SUBTITLE_ENABLED:
+        return {"ok": False, "reason": "subtitle_off"}
+    if dubbing not in {"", "none"} and not VIDEO_DUB_ENABLED:
+        return {"ok": False, "reason": "dub_off"}
+    if subtitle not in {"", "none"} and dubbing not in {"", "none"} and not VIDEO_SUBTITLE_PLUS_DUB_ENABLED:
+        return {"ok": False, "reason": "subtitle_dub_off"}
+    return {"ok": True, "reason": "ready"}
+
+def video_addon_guard_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "📝 Subtitle/dubbing providers are still being verified. No provider was called and no Xu was charged. You can return and choose no add-on."
+    return (
+        "📝 Phụ đề/lồng tiếng đang được kiểm tra nhà cung cấp.\n"
+        "TOAN AAS chưa gọi API và chưa trừ Xu.\n"
+        "Bạn có thể quay lại chọn Không thêm để tạo video trước."
+    )
+
+def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
+    pricing = state.get("current_video_price_preview") or calculate_video_total_price(
+        state.get("current_video_duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS,
+        state.get("current_video_processing_type") or "ai_text_to_video",
+        state.get("current_video_quality_tier") or "standard",
+        state.get("current_video_subtitle_option") or "none",
+        state.get("current_video_dubbing_option") or "none",
+        bool(state.get("translation_enabled")),
+        state.get("current_video_segment_seconds"),
+    )
+    duration = int(pricing.get("duration_seconds") or 0)
+    processing = str(pricing.get("processing_type") or "-").replace("_", " ")
+    quality = str(pricing.get("quality_tier") or "-")
+    segments = int(pricing.get("segments") or 0)
+    segment_seconds = int(pricing.get("segment_seconds") or 0)
+    addon_label = video_addon_selection_label(
+        state.get("current_video_subtitle_option"),
+        state.get("current_video_dubbing_option"),
+        bool(state.get("translation_enabled")),
+        lang,
+    )
+    discount_xu = int(pricing.get("discount_xu") or 0)
+    discount_line_en = f"• Member discount: <b>-{xu_number(discount_xu)} Xu</b>\n" if discount_xu > 0 else ""
+    discount_line_vi = f"• Ưu đãi thành viên: <b>-{xu_number(discount_xu)} Xu</b>\n" if discount_xu > 0 else ""
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎬 <b>Confirm video creation</b>\n\n"
+            f"Duration: <b>{duration} seconds</b>\nProcessing: <b>{html.escape(processing)}</b>\nQuality: <b>{html.escape(quality)}</b>\n"
+            f"Segments: <b>{segments} x {segment_seconds}s</b>\nAdd-on: <b>{html.escape(addon_label)}</b>\n\n"
+            f"• Video: <b>{xu_number(pricing.get('base_video_xu'))} Xu</b>\n"
+            f"• Subtitles: <b>{xu_number(pricing.get('subtitle_xu'))} Xu</b>\n"
+            f"• Dubbing: <b>{xu_number(pricing.get('dubbing_xu'))} Xu</b>\n"
+            f"{discount_line_en}"
+            f"Total: <b>{xu_number(pricing.get('total_xu'))} Xu</b>\n"
+            f"Equivalent: <b>{xu_number(pricing.get('estimated_vnd'))} VND</b>\n\n"
+            "Processing starts only after confirmation."
+        )
+    return (
+        "🎬 <b>Xác nhận tạo video</b>\n\n"
+        f"Thời lượng: <b>{duration} giây</b>\n"
+        f"Loại xử lý: <b>{html.escape(processing)}</b>\n"
+        f"Chất lượng: <b>{html.escape(quality)}</b>\n"
+        f"Số đoạn: <b>{segments} đoạn x {segment_seconds} giây</b>\n"
+        f"Phụ đề/lồng tiếng: <b>{html.escape(addon_label)}</b>\n\n"
+        "Chi phí:\n"
+        f"• Video: <b>{xu_number(pricing.get('base_video_xu'))} Xu</b>\n"
+        f"• Phụ đề: <b>{xu_number(pricing.get('subtitle_xu'))} Xu</b>\n"
+        f"• Lồng tiếng: <b>{xu_number(pricing.get('dubbing_xu'))} Xu</b>\n"
+        f"{discount_line_vi}"
+        f"Tổng: <b>{xu_number(pricing.get('total_xu'))} Xu</b>\n"
+        f"Tương đương: <b>{xu_number(pricing.get('estimated_vnd'))}đ</b>\n\n"
+        "Bot chỉ bắt đầu xử lý sau khi bạn xác nhận."
+    )
+
+def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận tạo video" if is_vi else "✅ Confirm video", callback_data=f"shopai|confirm|{token}"), InlineKeyboardButton("⚙️ Đổi chất lượng" if is_vi else "⚙️ Change quality", callback_data="create_media|quick_video")],
+        [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="videoaddon|back")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+    ])
+
 def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     pricing = video_tier_pricing_payload()
     enabled_map = video_tier_enabled_map()
@@ -64073,6 +64522,243 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         "music_label": music_label,
         "aspect_ratio": aspect,
     }
+
+def video_processing_type_for_payload(payload: dict | None = None) -> str:
+    payload = payload or {}
+    source = str(payload.get("source") or payload.get("source_flow") or "").strip().lower()
+    if "long" in source:
+        return "long_ai_video"
+    if "image" in source or payload.get("from_image") or payload.get("source_job_id"):
+        return "ai_image_to_video"
+    if "reference" in source or "sample" in source:
+        return "ai_video_to_video"
+    return "ai_text_to_video"
+
+async def start_video_addon_step(query, user_id, pending_payload: dict, tier: str, lang: str = "vi", source: str = "ai"):
+    quality = video_quality_from_tier(tier)
+    processing = "local_frame_video" if source == "frame" else video_processing_type_for_payload(pending_payload)
+    default_duration = frame_video_estimated_output_seconds(pending_payload) if source == "frame" else VIDEO_AI_DEFAULT_SEGMENT_SECONDS
+    duration = video_duration_seconds_from_payload(pending_payload, int(math.ceil(default_duration or VIDEO_AI_DEFAULT_SEGMENT_SECONDS)))
+    is_long = processing == "long_ai_video" or duration > int(VIDEO_AI_MAX_PROVIDER_SEGMENT_SECONDS or 60)
+    segment_seconds = VIDEO_AI_LONG_SEGMENT_SECONDS if is_long else (duration if source == "frame" else VIDEO_AI_DEFAULT_SEGMENT_SECONDS)
+    state = set_video_addon_state(user_id, {
+        "source": source,
+        "current_video_flow": str(pending_payload.get("source") or pending_payload.get("source_flow") or source),
+        "current_video_duration_seconds": duration,
+        "current_video_processing_type": processing,
+        "current_video_quality_tier": quality,
+        "current_video_segments": max(1, int(math.ceil(duration / max(1, segment_seconds)))),
+        "current_video_segment_seconds": int(segment_seconds),
+        "current_video_music_option": str(pending_payload.get("music_label") or pending_payload.get("music_choice") or ""),
+        "current_video_subtitle_option": "none",
+        "current_video_dubbing_option": "none",
+        "current_video_target_language": "",
+        "current_video_voice_style": "",
+        "current_video_script_text": str(pending_payload.get("original_prompt") or pending_payload.get("prompt") or "")[:2000],
+        "current_video_assets": {
+            "source_job_id": str(pending_payload.get("source_job_id") or "")[:80],
+            "image_url": str(pending_payload.get("image_url") or "")[:1000],
+            "telegram_file_id": str(pending_payload.get("telegram_file_id") or "")[:220],
+        },
+        "pending_payload": dict(pending_payload or {}),
+        "video_tier": normalize_video_tier(tier),
+    })
+    return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang))
+
+async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: str = "vi"):
+    pricing = calculate_video_total_price(
+        state.get("current_video_duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS,
+        state.get("current_video_processing_type") or "ai_text_to_video",
+        state.get("current_video_quality_tier") or "standard",
+        state.get("current_video_subtitle_option") or "none",
+        state.get("current_video_dubbing_option") or "none",
+        bool(state.get("translation_enabled")),
+        state.get("current_video_segment_seconds"),
+    )
+    raw_total = int(pricing.get("total_xu") or 0)
+    event_type = "frame_video" if state.get("source") == "frame" else "shopaikey_video"
+    final_total = shopaikey_preview_final_cost(user_id, raw_total, event_type)
+    pricing["raw_total_xu"] = raw_total
+    pricing["discount_xu"] = max(0, raw_total - final_total)
+    pricing["total_xu"] = final_total
+    pricing["estimated_vnd"] = final_total * int(XU_TO_VND or 100)
+    state["current_video_price_preview"] = pricing
+
+    old_token = str(state.get("pending_confirm_token") or "")
+    if old_token:
+        SHOPAIKEY_PENDING_CONFIRMATIONS.pop(old_token, None)
+
+    if state.get("source") == "frame":
+        frame_state = get_frame_video_state(user_id)
+        if not frame_state:
+            clear_video_addon_state(user_id)
+            return await safe_edit_or_send(query, "⏰ Yêu cầu ghép video đã hết hạn. Bot chưa trừ Xu.", parse_mode=None)
+        frame_state.update({
+            "current_video_subtitle_option": state.get("current_video_subtitle_option") or "none",
+            "current_video_dubbing_option": state.get("current_video_dubbing_option") or "none",
+            "translation_enabled": bool(state.get("translation_enabled")),
+            "current_video_target_language": state.get("current_video_target_language") or "",
+            "current_video_voice_style": state.get("current_video_voice_style") or "",
+            "current_video_price_preview": pricing,
+            "step": "confirm",
+        })
+        set_frame_video_state(user_id, frame_state)
+        set_video_addon_state(user_id, state)
+        return await safe_edit_or_send(query, frame_video_confirm_text(frame_state, user_id), parse_mode="HTML", reply_markup=frame_video_confirm_keyboard())
+
+    pending_payload = dict(state.get("pending_payload") or {})
+    pending_payload.update({
+        "base_cost": raw_total,
+        "duration_seconds": int(pricing.get("duration_seconds") or 0),
+        "processing_type": pricing.get("processing_type") or "ai_text_to_video",
+        "quality_tier": pricing.get("quality_tier") or "standard",
+        "segments": int(pricing.get("segments") or 0),
+        "segment_seconds": int(pricing.get("segment_seconds") or 0),
+        "subtitle_option": state.get("current_video_subtitle_option") or "none",
+        "dubbing_option": state.get("current_video_dubbing_option") or "none",
+        "translation_enabled": bool(state.get("translation_enabled")),
+        "target_language": state.get("current_video_target_language") or "",
+        "voice_style": state.get("current_video_voice_style") or "",
+        "video_price_preview": pricing,
+    })
+    token = set_shopaikey_pending_confirmation(user_id, pending_payload)
+    state["pending_confirm_token"] = token
+    set_video_addon_state(user_id, state)
+    tier = normalize_video_tier(state.get("video_tier") or pending_payload.get("video_tier"))
+    credits, _, _ = get_user(user_id)
+    record_shopaikey_billing_event(
+        user_id,
+        0,
+        "video_confirm_shown",
+        raw_total,
+        int(credits or 0),
+        int(credits or 0),
+        f"shopaikey_video; tier={tier}; duration={int(pricing.get('duration_seconds') or 0)}; addon={video_addon_selection_label(state.get('current_video_subtitle_option'), state.get('current_video_dubbing_option'), bool(state.get('translation_enabled')))}",
+    )
+    invoice = video_price_invoice_text(state, lang)
+    package_item = active_package_item_for_user(user_id, pending_payload.get("package_item_type") or package_item_type_for_video_tier(tier))
+    markup = video_addon_confirm_keyboard(token, tier, lang)
+    if package_item and int(pricing.get("addon_xu") or 0) <= 0:
+        invoice = package_offer_text(package_item, invoice, lang)
+        markup = package_use_choice_keyboard("video", token, tier, lang)
+    return await safe_edit_or_send(query, invoice, parse_mode="HTML", reply_markup=markup)
+
+async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "menu"
+    uid = query.from_user.id
+    lang = user_ui_lang(uid)
+    state = get_video_addon_state(uid)
+    if action == "main":
+        clear_video_addon_state(uid)
+        clear_frame_video_state(uid)
+        return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
+    if not state:
+        return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+    if action == "menu":
+        return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang))
+    if action == "back":
+        if state.get("source") == "frame":
+            frame_state = get_frame_video_state(uid)
+            if frame_state:
+                frame_state["step"] = "music"
+                set_frame_video_state(uid, frame_state)
+                return await safe_edit_or_send(query, frame_video_music_text(frame_state), parse_mode="HTML", reply_markup=frame_video_music_keyboard())
+        pending = dict(state.get("pending_payload") or {})
+        tier = normalize_video_tier(state.get("video_tier") or pending.get("video_tier"))
+        prompt = str(pending.get("original_prompt") or pending.get("prompt") or "")
+        package = dict(pending.get("package") or {})
+        clear_video_addon_state(uid)
+        set_media_aspect_pending(uid, "video", tier, prompt, package)
+        return await safe_edit_or_send(query, public_media_aspect_ratio_text("video", tier, prompt, lang), parse_mode="HTML", reply_markup=public_media_aspect_ratio_keyboard("video", lang))
+    if action == "none":
+        state.update({"current_video_subtitle_option": "none", "current_video_dubbing_option": "none", "translation_enabled": False})
+        return await finalize_video_addon_confirmation(query, uid, state, lang)
+    if action == "subtitle":
+        state.update({"current_video_subtitle_option": "subtitle_original", "current_video_dubbing_option": "none", "translation_enabled": False})
+        return await finalize_video_addon_confirmation(query, uid, state, lang)
+    if action == "dub":
+        state.update({"current_video_subtitle_option": "none", "current_video_dubbing_option": "dub_original", "translation_enabled": False})
+        set_video_addon_state(uid, state)
+        return await safe_edit_or_send(query, "🎙 Chọn giọng lồng tiếng. Bot chưa gọi API và chưa trừ Xu.", parse_mode=None, reply_markup=video_addon_voice_keyboard(lang))
+    if action == "combo":
+        state.update({"current_video_subtitle_option": "subtitle_original", "current_video_dubbing_option": "dub_original", "translation_enabled": False})
+        set_video_addon_state(uid, state)
+        return await safe_edit_or_send(query, "🎙 Chọn giọng cho phụ đề + lồng tiếng. Bot chưa gọi API và chưa trừ Xu.", parse_mode=None, reply_markup=video_addon_voice_keyboard(lang))
+    if action in {"translate_sub", "translate_combo"}:
+        state.update({
+            "current_video_subtitle_option": "subtitle_translated",
+            "current_video_dubbing_option": "dub_translated" if action == "translate_combo" else "none",
+            "translation_enabled": True,
+        })
+        set_video_addon_state(uid, state)
+        return await safe_edit_or_send(query, "🌐 Chọn ngôn ngữ đích. Bot chưa gọi API và chưa trừ Xu.", parse_mode=None, reply_markup=video_addon_language_keyboard(lang))
+    if action == "lang" and len(parts) > 2:
+        state["current_video_target_language"] = re.sub(r"[^a-z]", "", parts[2].lower())[:5]
+        set_video_addon_state(uid, state)
+        if str(state.get("current_video_dubbing_option") or "none") not in {"", "none"}:
+            return await safe_edit_or_send(query, "🎙 Chọn giọng lồng tiếng. Bot chưa gọi API và chưa trừ Xu.", parse_mode=None, reply_markup=video_addon_voice_keyboard(lang))
+        return await finalize_video_addon_confirmation(query, uid, state, lang)
+    if action == "voice" and len(parts) > 2:
+        state["current_video_voice_style"] = parts[2] if parts[2] in {"female", "male", "auto"} else "auto"
+        return await finalize_video_addon_confirmation(query, uid, state, lang)
+    return await safe_edit_or_send(query, ui_text(lang, "common.invalid_request"))
+
+async def cmd_video_price_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    if len(args) < 4:
+        return await update.message.reply_text(
+            "Cú pháp: /video_price_test <seconds> <type> <tier> <addon>\n"
+            "Ví dụ: /video_price_test 24 ai_image_to_video standard subtitle_plus_dub"
+        )
+    try:
+        duration = max(1, int(float(args[0])))
+    except Exception:
+        return await update.message.reply_text("⚠️ seconds phải là số dương.")
+    processing = normalize_video_processing_type(args[1])
+    tier = str(args[2] or "standard").strip().lower()
+    addon = str(args[3] or "none").strip().lower()
+    subtitle = "none"
+    dubbing = "none"
+    translated = False
+    if addon in {"subtitle", "subtitle_only", "subtitle_original"}:
+        subtitle = "subtitle_original"
+    elif addon in {"translate_subtitle", "subtitle_translated"}:
+        subtitle = "subtitle_translated"
+        translated = True
+    elif addon in {"dub", "dub_only", "dub_original"}:
+        dubbing = "dub_original"
+    elif addon in {"subtitle_plus_dub", "combo"}:
+        subtitle = "subtitle_original"
+        dubbing = "dub_original"
+    elif addon in {"translated_subtitle_plus_dub", "translate_plus_dub", "translated_combo"}:
+        subtitle = "subtitle_translated"
+        dubbing = "dub_translated"
+        translated = True
+    elif addon not in {"none", "off"}:
+        return await update.message.reply_text("⚠️ Add-on không hợp lệ: none/subtitle/dub/subtitle_plus_dub/translated_subtitle_plus_dub")
+    pricing = calculate_video_total_price(duration, processing, tier, subtitle, dubbing, translated)
+    await update.message.reply_text(
+        "🎬 <b>Video Price Test</b>\n\n"
+        f"• Duration: <code>{pricing['duration_seconds']}s</code>\n"
+        f"• Type: <code>{html.escape(pricing['processing_type'])}</code>\n"
+        f"• Tier: <code>{html.escape(pricing['quality_tier'])}</code>\n"
+        f"• Segments: <code>{pricing['segments']} x {pricing['segment_seconds']}s</code>\n"
+        f"• Add-on: <code>{html.escape(addon)}</code>\n"
+        f"• Video Xu: <code>{pricing['base_video_xu']}</code>\n"
+        f"• Subtitle Xu: <code>{pricing['subtitle_xu']}</code>\n"
+        f"• Dubbing Xu: <code>{pricing['dubbing_xu']}</code>\n"
+        f"• Add-on Xu: <code>{pricing['addon_xu']}</code>\n"
+        f"• Total Xu: <code>{pricing['total_xu']}</code>\n"
+        f"• Estimated VND: <code>{pricing['estimated_vnd']}</code>\n\n"
+        "Preview only. No job created and no Xu deducted.",
+        parse_mode="HTML",
+    )
 
 def public_video_provider_fail_message(amount_xu: int = 0, refund_done: bool = False, lang: str = "vi") -> str:
     amount = int(amount_xu or 0)
@@ -64316,32 +65002,22 @@ async def handle_public_video_retry_callback(query, user_id, job_id_text: str, l
     if source_job_id and not shopaikey_paid_image_source_available(user_id, source_job_id):
         return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
     credits, _, _ = get_user(user_id, getattr(query.from_user, "first_name", "") or getattr(query.from_user, "username", "") or "Video user")
-    base_cost = int(payload.get("cost") or 0)
     package_item_type = normalize_package_item_type(job.get("package_item_type") or package_item_type_for_video_tier(tier))
-    package_item = active_package_item_for_user(user_id, package_item_type)
-    final_preview_cost = shopaikey_preview_final_cost(user_id, base_cost, "shopaikey_video")
-    if int(credits or 0) < final_preview_cost and not is_admin_user(user_id) and not package_item:
-        return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, user_id)
     pending_payload = {
         "job_type": "video",
         "prompt": video_tier_prompt_for_generation(prompt, tier),
         "original_prompt": prompt,
-        "base_cost": base_cost,
+        "base_cost": int(payload.get("cost") or 0),
         "from_image": bool(source_job_id),
         "source_job_id": source_job_id,
         "video_tier": tier,
         "tier_label": payload.get("label") or tier,
         "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
         "package_item_type": package_item_type,
+        "source": "retry_video_job",
     }
-    token = set_shopaikey_pending_confirmation(user_id, pending_payload)
-    record_shopaikey_billing_event(user_id, 0, "video_retry_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"retry_from_job={job_id}; tier={tier}")
-    confirm_text = public_video_confirm_text(tier, prompt, int(credits or 0), lang)
-    confirm_markup = shopaikey_confirm_keyboard("video", token, tier, lang)
-    if package_item:
-        confirm_text = package_offer_text(package_item, confirm_text, lang)
-        confirm_markup = package_use_choice_keyboard("video", token, tier, lang)
-    return await safe_edit_or_send(query, confirm_text, parse_mode="HTML", reply_markup=confirm_markup)
+    record_shopaikey_billing_event(user_id, 0, "video_retry_addon_shown", 0, int(credits or 0), int(credits or 0), f"retry_from_job={job_id}; tier={tier}")
+    return await start_video_addon_step(query, user_id, pending_payload, tier, lang, source="ai")
 
 def public_video_success_keyboard(tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     tier_norm = normalize_video_tier(tier)
@@ -67443,13 +68119,25 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             state["music_merge_enabled"] = False
             state["voice_choice"] = "skip"
             state["voice_merge_enabled"] = False
-        state["step"] = "confirm"
+        state["step"] = "video_addon"
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, frame_video_confirm_text(state, uid), parse_mode="HTML", reply_markup=frame_video_confirm_keyboard())
+        return await start_video_addon_step(query, uid, state, "low", lang, source="frame")
 
     if action == "confirm":
         if len(state.get("photos") or []) < 2:
             return await safe_edit_or_send(query, "⚠️ Cần ít nhất 2 ảnh để ghép thành video. Bot chưa trừ Xu.", reply_markup=frame_video_collect_keyboard(), parse_mode=None)
+        addon_guard = video_addon_runtime_guard(state)
+        if not addon_guard.get("ok"):
+            return await safe_edit_or_send(
+                query,
+                video_addon_guard_text(lang),
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚫 Chọn không thêm", callback_data="videoaddon|none")],
+                    [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng", callback_data="videoaddon|menu")],
+                    [InlineKeyboardButton("🏠 Menu chính", callback_data="videoaddon|main")],
+                ]),
+            )
         guard = frame_video_runtime_guard(state, uid)
         if guard.get("action") == "worker_queue":
             credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Frame video user")
@@ -67925,17 +68613,6 @@ async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAU
         )
     if action == "mode_ai" and len(parts) > 2:
         project_id = int(parts[2] or 0)
-        enabled, message = shopaikey_public_generation_guard("video")
-        if not enabled:
-            return await safe_edit_or_send(
-                query,
-                storyboard_ai_video_busy_text(),
-                parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{project_id}")],
-                    [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-                ]),
-            )
         return await safe_edit_or_send(
             query,
             "✨ Chọn ảnh/cảnh muốn animate bằng video AI.\n\nBot chưa trừ Xu. Sau bước này bạn sẽ chọn tier video theo bảng giá hiện tại.",
@@ -67945,17 +68622,6 @@ async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAU
     if action == "ai_scene" and len(parts) > 3:
         project_id = int(parts[2] or 0)
         scene_index = int(parts[3] or 1)
-        enabled, message = shopaikey_public_generation_guard("video")
-        if not enabled:
-            return await safe_edit_or_send(
-                query,
-                storyboard_ai_video_busy_text(),
-                parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{project_id}")],
-                    [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-                ]),
-            )
         return await safe_edit_or_send(
             query,
             f"✨ Chọn chuyển động AI cho ảnh {scene_index}:\n\n"
@@ -67969,17 +68635,6 @@ async def handle_storyboard_callback(update: Update, context: ContextTypes.DEFAU
         project_id = int(parts[2] or 0)
         scene_index = int(parts[3] or 1)
         motion_index = int(parts[4] or 1)
-        enabled, message = shopaikey_public_generation_guard("video")
-        if not enabled:
-            return await safe_edit_or_send(
-                query,
-                storyboard_ai_video_busy_text(),
-                parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎞 Ghép ảnh thành video", callback_data=f"storyboard|mode_frame|{project_id}")],
-                    [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-                ]),
-            )
         package = storyboard_video_package_from_scene(uid, project_id, scene_index, motion_index, get_user_language(uid) or "vi")
         if not package.get("source_job_id"):
             return await safe_edit_or_send(
@@ -68612,8 +69267,6 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, ui_text(lang, "video.premium_message"))
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "video.tier_disabled_message"))
-        if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
-            return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
         active_video_job = shopaikey_active_job_for_user(uid, "video")
         if active_video_job:
             return await safe_edit_or_send(
@@ -68625,6 +69278,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         credits, _, _ = get_user(uid, query.from_user.first_name or query.from_user.username or "Video user")
         if package:
             pending_payload = public_video_pending_payload_from_package(tier, package, aspect)
+            pending_payload["package"] = dict(package)
             raw_prompt = str(pending_payload.get("original_prompt") or prompt)
         else:
             pending_payload = {
@@ -68642,27 +69296,10 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         source_job_id = str(pending_payload.get("source_job_id") or "").strip()
         if source_job_id and not shopaikey_paid_image_source_available(uid, source_job_id):
             return await safe_edit_or_send(query, video_missing_source_text(lang), parse_mode="HTML", reply_markup=video_missing_source_keyboard(lang))
-        base_cost = int(pending_payload.get("base_cost") or 0)
-        final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
         package_item_type = package_item_type_for_video_tier(tier)
-        package_item = active_package_item_for_user(uid, package_item_type)
         pending_payload["package_item_type"] = package_item_type
-        if int(credits or 0) < final_preview_cost and not is_admin_user(uid) and not package_item:
-            return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
-        token = set_shopaikey_pending_confirmation(uid, pending_payload)
         record_shopaikey_billing_event(uid, 0, "video_prompt_received", 0, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
-        record_shopaikey_billing_event(uid, 0, "video_confirm_shown", base_cost, int(credits or 0), int(credits or 0), f"shopaikey_video; tier={tier}; aspect={aspect}")
-        confirm_text = public_video_confirm_text(tier, pending_payload.get("prompt") or raw_prompt, int(credits or 0), lang, pending_payload.get("music_label") or "", aspect)
-        confirm_markup = shopaikey_confirm_keyboard("video", token, tier, lang)
-        if package_item:
-            confirm_text = package_offer_text(package_item, confirm_text, lang)
-            confirm_markup = package_use_choice_keyboard("video", token, tier, lang)
-        return await safe_edit_or_send(
-            query,
-            confirm_text,
-            parse_mode="HTML",
-            reply_markup=confirm_markup,
-        )
+        return await start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")
     if action.startswith("image_tier_"):
         clear_trend_video_flow_pending(uid)
         clear_quick_media_pending(uid)
@@ -68696,15 +69333,6 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
                 public_video_active_job_text(lang),
                 reply_markup=public_video_active_job_keyboard(active_video_job, lang),
             )
-        if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
-            if is_admin_user(uid):
-                set_quick_media_pending(uid, "quick_video_prompt")
-                return await safe_edit_or_send(
-                    query,
-                    ui_text(lang, "video.quick_admin_prompt", warning=ui_text(lang, "video.admin_smoke_warning")),
-                    parse_mode="HTML",
-                )
-            return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
         return await safe_edit_or_send(
             query,
             public_video_tier_selection_text(lang),
@@ -68723,8 +69351,6 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, ui_text(lang, "video.premium_message"))
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "video.tier_disabled_message"))
-        if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
-            return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
         active_video_job = shopaikey_active_job_for_user(uid, "video")
         if active_video_job:
             return await safe_edit_or_send(
@@ -88628,18 +89254,21 @@ def video_translate_mode_rate(mode: str) -> int:
         VIDEO_SUBTITLE_MODE_CREATE: VIDEO_SUBTITLE_XU_PER_MIN,
         VIDEO_SUBTITLE_MODE_TRANSLATE: VIDEO_TRANSLATE_SUBTITLE_XU_PER_MIN,
         VIDEO_SUBTITLE_MODE_DUB: VIDEO_DUB_XU_PER_MIN,
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_TRANSLATE_DUB_XU_PER_MIN,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_SUBTITLE_PLUS_DUB_XU_PER_MINUTE,
     }.get(normalize_video_translate_mode(mode), 0)
 
-def calculate_video_translate_price(mode: str, duration_seconds) -> dict:
+def calculate_video_translate_price(mode: str, duration_seconds, translation_enabled: bool = False) -> dict:
     duration = max(0, _safe_int(duration_seconds, 0))
     minutes = max(
         VIDEO_TRANSLATE_MIN_BILLABLE_MINUTES,
         int(math.ceil(duration / 60.0)) if duration else VIDEO_TRANSLATE_MIN_BILLABLE_MINUTES,
     )
-    unit_price = int(video_translate_mode_rate(mode) or 0)
+    normalized_mode = normalize_video_translate_mode(mode)
+    unit_price = int(video_translate_mode_rate(normalized_mode) or 0)
+    if normalized_mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and translation_enabled:
+        unit_price = int(VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE or 0)
     return {
-        "mode": normalize_video_translate_mode(mode),
+        "mode": normalized_mode,
         "duration_seconds": duration,
         "billable_minutes": minutes,
         "unit_price_xu": unit_price,
@@ -88660,7 +89289,8 @@ def video_dubbing_pricing_text(lang: str = "vi") -> str:
             f"• Create subtitles: {VIDEO_SUBTITLE_XU_PER_MIN} Xu/min\n"
             f"• Translate subtitles: {VIDEO_TRANSLATE_SUBTITLE_XU_PER_MIN} Xu/min\n"
             f"• Dubbing: {VIDEO_DUB_XU_PER_MIN} Xu/min\n"
-            f"• Subtitles + dubbing: {VIDEO_TRANSLATE_DUB_XU_PER_MIN} Xu/min\n\n"
+            f"• Subtitles + dubbing: {VIDEO_SUBTITLE_PLUS_DUB_XU_PER_MINUTE} Xu/min\n"
+            f"• Translated subtitles + dubbing: {VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE} Xu/min\n\n"
             "Billing rounds up by minute, with a one-minute minimum. These are expected public prices; unavailable tools do not call providers or charge Xu."
         )
     return (
@@ -88669,7 +89299,8 @@ def video_dubbing_pricing_text(lang: str = "vi") -> str:
         f"• Tạo phụ đề: <b>{VIDEO_SUBTITLE_XU_PER_MIN} Xu/phút</b>\n"
         f"• Dịch phụ đề: <b>{VIDEO_TRANSLATE_SUBTITLE_XU_PER_MIN} Xu/phút</b>\n"
         f"• Lồng tiếng: <b>{VIDEO_DUB_XU_PER_MIN} Xu/phút</b>\n"
-        f"• Phụ đề + lồng tiếng: <b>{VIDEO_TRANSLATE_DUB_XU_PER_MIN} Xu/phút</b>\n\n"
+        f"• Phụ đề + lồng tiếng: <b>{VIDEO_SUBTITLE_PLUS_DUB_XU_PER_MINUTE} Xu/phút</b>\n"
+        f"• Dịch phụ đề + lồng tiếng: <b>{VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE} Xu/phút</b>\n\n"
         "Làm tròn theo phút, video dưới 1 phút tính tối thiểu 1 phút. Bot luôn hiển thị phí dự kiến và hỏi xác nhận trước khi trừ Xu.\n"
         "Nếu công cụ đang bảo trì/chưa mở, TOAN AAS không gọi API và không trừ Xu."
     )
@@ -88807,7 +89438,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
     source_language = _short_pending_text(state.get("source_language"), 80)
     target = _short_pending_text(state.get("target_language"), 80)
     voice = _short_pending_text(state.get("voice_style"), 100)
-    pricing = calculate_video_translate_price(mode, duration)
+    pricing = calculate_video_translate_price(mode, duration, bool(target and mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB))
     expected_vi = {
         VIDEO_SUBTITLE_MODE_CREATE: "phụ đề/text và file .srt",
         VIDEO_SUBTITLE_MODE_TRANSLATE: "phụ đề dịch/text dịch và file .srt",
@@ -89048,7 +89679,11 @@ async def execute_video_dubbing_pipeline(query, context: ContextTypes.DEFAULT_TY
     capability = video_dubbing_capability(mode, state)
     if not capability.get("ok"):
         return {"ok": False, "guard": True, "text": video_dubbing_guard_text(mode, state, lang)}
-    pricing = calculate_video_translate_price(mode, state.get("video_duration") or state.get("source_duration"))
+    pricing = calculate_video_translate_price(
+        mode,
+        state.get("video_duration") or state.get("source_duration"),
+        bool(state.get("target_language") and mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB),
+    )
     charge_preview = apply_member_service_discount(uid, int(pricing.get("total_price_xu") or 0), f"video_{mode}")
     credits, _, _ = get_user(uid)
     if not is_admin_user(uid) and int(credits or 0) < int(charge_preview.get("final_cost") or 0):
@@ -90331,6 +90966,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("orchestrator_status", cmd_orchestrator_status))
     tg_app.add_handler(CommandHandler("provider_matrix", cmd_provider_matrix))
     tg_app.add_handler(CommandHandler("shopaikey_status", cmd_shopaikey_status))
+    tg_app.add_handler(CommandHandler("video_price_test", cmd_video_price_test))
     tg_app.add_handler(CommandHandler("image_provider_status", cmd_image_provider_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
     tg_app.add_handler(CommandHandler("maintenance_status", cmd_maintenance_status))
@@ -90873,6 +91509,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_upload_callback, pattern=r"^video_upload\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard_callback, pattern=r"^storyboard\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_addon_callback, pattern=r"^videoaddon\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_frame_video_callback, pattern=r"^framevideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
