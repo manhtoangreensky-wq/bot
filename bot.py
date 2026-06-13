@@ -459,6 +459,11 @@ SHOPAIKEY_VIDEO_WAITING_MESSAGE_ENABLED = env_flag("SHOPAIKEY_VIDEO_WAITING_MESS
 SHOPAIKEY_VIDEO_STATUS_STALE_SECONDS = env_int("SHOPAIKEY_VIDEO_STATUS_STALE_SECONDS", 30 * 60)
 SHOPAIKEY_VIDEO_STALE_TIMEOUT_LOW_MINUTES = env_int("SHOPAIKEY_VIDEO_STALE_TIMEOUT_LOW_MINUTES", 15)
 SHOPAIKEY_VIDEO_STALE_TIMEOUT_DEFAULT_MINUTES = env_int("SHOPAIKEY_VIDEO_STALE_TIMEOUT_DEFAULT_MINUTES", 30)
+SHOPAIKEY_VIDEO_SMOKE_SUBMIT_TIMEOUT_SECONDS = max(5, env_int("SHOPAIKEY_VIDEO_SMOKE_SUBMIT_TIMEOUT_SECONDS", 30))
+SHOPAIKEY_VIDEO_SMOKE_POLL_SECONDS = max(1, env_int("SHOPAIKEY_VIDEO_SMOKE_POLL_SECONDS", 10))
+SHOPAIKEY_VIDEO_SMOKE_MAX_WAIT_SECONDS = max(10, env_int("SHOPAIKEY_VIDEO_SMOKE_MAX_WAIT_SECONDS", 180))
+SHOPAIKEY_VIDEO_JOB_MAX_AGE_MINUTES = max(5, env_int("SHOPAIKEY_VIDEO_JOB_MAX_AGE_MINUTES", 60))
+SHOPAIKEY_WF_I2V_SMOKE_ENABLED = env_flag("SHOPAIKEY_WF_I2V_SMOKE_ENABLED", "false")
 SHOPAIKEY_VIDEO_PROVIDER_MODE = _env("SHOPAIKEY_VIDEO_PROVIDER_MODE", "admin_only")
 SHOPAIKEY_IMAGE_PROVIDER_MODE = _env("SHOPAIKEY_IMAGE_PROVIDER_MODE", "admin_only")
 SHOPAIKEY_MAINTENANCE_ON_PROVIDER_ERROR = env_flag("SHOPAIKEY_MAINTENANCE_ON_PROVIDER_ERROR", "true")
@@ -1062,6 +1067,12 @@ VIDEO_SUBTITLE_ENABLED = env_flag("VIDEO_SUBTITLE_ENABLED", "false")
 VIDEO_TRANSLATE_SUBTITLE_ENABLED = env_flag("VIDEO_TRANSLATE_SUBTITLE_ENABLED", "false")
 VIDEO_DUB_ENABLED = env_flag("VIDEO_DUB_ENABLED", "false")
 VIDEO_SUBTITLE_PLUS_DUB_ENABLED = env_flag("VIDEO_SUBTITLE_PLUS_DUB_ENABLED", "false")
+VIDEO_SUBTITLE_PUBLIC_ENABLED = env_flag("VIDEO_SUBTITLE_PUBLIC_ENABLED", "false")
+VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED = env_flag("VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED", "false")
+VIDEO_DUB_PUBLIC_ENABLED = env_flag("VIDEO_DUB_PUBLIC_ENABLED", "false")
+VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED = env_flag("VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED", "false")
+VIDEO_SUBTITLE_BURN_IN_ENABLED = env_flag("VIDEO_SUBTITLE_BURN_IN_ENABLED", "false")
+VIDEO_DUB_MUX_ENABLED = env_flag("VIDEO_DUB_MUX_ENABLED", "false")
 VIDEO_CREATION_ADDON_PIPELINE_ENABLED = env_flag("VIDEO_CREATION_ADDON_PIPELINE_ENABLED", "false")
 VIDEO_UPLOAD_MAX_MB = max(1, env_int("VIDEO_UPLOAD_MAX_MB", 100))
 VIDEO_TEMP_STORAGE_MAX_MB = max(1, env_int("VIDEO_TEMP_STORAGE_MAX_MB", 150))
@@ -33540,12 +33551,13 @@ def normalize_shopaikey_video_snapshot(snapshot: dict) -> dict:
             snap["model"] = snap.get("model") or detail_map.get("model", "")
             status = event_status
             tested_at = str(snap.get("tested_at") or "")
-    if status in {"PASS_SUBMITTED", "IN_PROGRESS", "PROCESSING", "RUNNING", "QUEUED", "PENDING"}:
+    if status in {"PASS_SUBMITTED", "SUBMITTED", "IN_PROGRESS", "PROCESSING", "RUNNING", "QUEUED", "PENDING"}:
         last_dt = parse_now_text(tested_at)
-        if last_dt and (datetime.now() - last_dt).total_seconds() > max(60, int(SHOPAIKEY_VIDEO_STATUS_STALE_SECONDS or 1800)):
-            snap["status"] = "STALE_TIMEOUT"
+        max_age_seconds = max(300, int(SHOPAIKEY_VIDEO_JOB_MAX_AGE_MINUTES or 60) * 60)
+        if last_dt and (datetime.now() - last_dt).total_seconds() > max_age_seconds:
+            snap["status"] = "TIMEOUT_STALE"
             detail = str(snap.get("detail") or "")
-            snap["detail"] = (detail + "; " if detail else "") + "stale video smoke status; latest job exceeded timeout threshold"
+            snap["detail"] = (detail + "; " if detail else "") + "video smoke exceeded configured maximum job age"
     return snap
 
 def shopaikey_chat_status_snapshot() -> dict:
@@ -33605,6 +33617,8 @@ def shopaikey_video_reason_text(snapshot: dict | None = None) -> str:
     detail = str(snap.get("detail") or "")
     if status == "FAIL_NO_AVAILABLE_CHANNEL" or "no available channel" in detail.lower():
         return "provider/group has no available channel for selected model."
+    if status == "TIMEOUT_STALE":
+        return "job exceeded the configured maximum age; query the provider job before retrying."
     return ""
 
 async def get_shopaikey_usage() -> dict:
@@ -33899,6 +33913,32 @@ async def shopaikey_tts_smoke_test() -> tuple[str, bytes, str, int]:
         return shopaikey_classify_error(res.status_code, detail), b"", detail, int(res.status_code)
     except Exception as e:
         return "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(e)), 0
+
+async def shopaikey_tts_bytes(text: str) -> tuple[str, bytes, str, int]:
+    if not SHOPAIKEY_API_KEY or not SHOPAIKEY_ENABLED:
+        return "MISSING", b"", "ShopAIKey TTS disabled or key missing", 0
+    endpoint = (SHOPAIKEY_BASE_URL or "").rstrip("/") + "/audio/speech"
+    try:
+        async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60)) as client:
+            res = await client.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": SHOPAIKEY_TTS_MODEL or "tts-1",
+                    "voice": SHOPAIKEY_TTS_VOICE or "alloy",
+                    "input": str(text or "")[:3500],
+                    "response_format": "mp3",
+                    "speed": 1.0,
+                },
+            )
+        content_type = str(res.headers.get("content-type") or "")
+        if res.status_code < 400 and res.content and (len(res.content) > 1024 or "audio" in content_type):
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; model={SHOPAIKEY_TTS_MODEL}", int(res.status_code)
+        detail = shopaikey_sanitize_error(res.text[:300] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return shopaikey_classify_error(res.status_code, detail), b"", detail, int(res.status_code)
+    except Exception as exc:
+        status = "FAIL_TIMEOUT" if "timeout" in type(exc).__name__.lower() else "FAIL_PROVIDER_ERROR"
+        return status, b"", shopaikey_sanitize_error(str(exc)), 0
 
 def shopaikey_provider_error_from_payload(payload: dict) -> tuple[str, str]:
     if not isinstance(payload, dict):
@@ -35302,7 +35342,7 @@ async def shopaikey_video_create_for_model(model: str, prompt: str = "") -> dict
     started = time.perf_counter()
     payload = shopaikey_video_request_payload(model, prompt)
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=float(SHOPAIKEY_VIDEO_SMOKE_SUBMIT_TIMEOUT_SECONDS or 30)) as client:
             res = await client.post(
                 SHOPAIKEY_VIDEO_URL,
                 headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
@@ -35488,6 +35528,25 @@ async def shopaikey_video_job_status(task_id: str) -> dict:
         error_class = "FAIL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "FAIL_PROVIDER_ERROR"
         return {"status": error_class, "http_status": 0, "latency_ms": latency_ms, "task_id": task_id, "provider_status": "", "progress": "", "result_url": "", "fail_reason": shopaikey_sanitize_error(str(e)), "error_class": error_class, "detail": shopaikey_sanitize_error(str(e))}
 
+async def poll_shopaikey_video_smoke_job(task_id: str) -> dict:
+    """Briefly poll a smoke job without turning normal provider latency into a failure."""
+    deadline = time.monotonic() + min(
+        int(SHOPAIKEY_VIDEO_SMOKE_MAX_WAIT_SECONDS or 180),
+        int(SHOPAIKEY_VIDEO_SMOKE_POLL_SECONDS or 10),
+    )
+    last = {"status": "SUBMITTED", "task_id": task_id, "provider_status": "", "result_url": ""}
+    while True:
+        last = await shopaikey_video_job_status(task_id)
+        normalized = normalize_shopaikey_video_status(last.get("status") or last.get("provider_status") or "")
+        if normalized == "SUCCESS":
+            return {**last, "lifecycle_status": "succeeded"}
+        if normalized == "FAILED" or str(last.get("error_class") or "").upper().startswith("FAIL_"):
+            return {**last, "lifecycle_status": "failed"}
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {**last, "lifecycle_status": "processing"}
+        await asyncio.sleep(min(float(SHOPAIKEY_VIDEO_SMOKE_POLL_SECONDS or 10), remaining))
+
 async def send_shopaikey_video_result(bot_client, chat_id, task_id: str, result_url: str) -> tuple[bool, str]:
     if not bot_client or not chat_id or not result_url:
         return False, ""
@@ -35521,6 +35580,12 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
     lang = user_ui_lang(user_id)
     max_attempts = max(1, int(SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS or 24))
     interval = max(5, int(SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS or 25))
+    initial_job = shopaikey_job_by_id(job_id) or {}
+    if bool(int(initial_job.get("admin_only") or 0)):
+        max_attempts = max(
+            max_attempts,
+            math.ceil((int(SHOPAIKEY_VIDEO_JOB_MAX_AGE_MINUTES or 60) * 60) / interval),
+        )
     for attempt in range(1, max_attempts + 1):
         await asyncio.sleep(interval)
         result = await shopaikey_video_job_status(task_id)
@@ -35600,7 +35665,7 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
                 finished_at=now_text(),
             )
             return
-    record_provider_error("shopaikey", "video", "TIMEOUT", "video_poll_timeout")
+    record_provider_error("shopaikey", "video", "TIMEOUT_STALE", "video_poll_timeout")
     job_snapshot = shopaikey_job_by_id(job_id) or {}
     deducted_amount = int(job_snapshot.get("xu_deducted") or 0)
     package_used = bool(int(job_snapshot.get("package_item_id") or 0) and int(job_snapshot.get("package_units_used") or 0))
@@ -36812,7 +36877,8 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_elevenlabs_status", "tool_test_deepgram_status",
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_chat", "tool_test_shopaikey_tts",
     "tool_test_shopaikey_image", "tool_test_wf_i2v",
-    "tool_test_shopaikey_video", "shopaikey_video_job", "trial_bonus_status",
+    "tool_test_shopaikey_video", "shopaikey_video_job", "tool_test_asr",
+    "tool_test_video_subtitle", "tool_test_video_dub", "tool_test_subtitle_plus_dub", "trial_bonus_status",
     "local_status", "local_worker_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
     "local_jobs", "local_job", "render_center",
     "voiceover", "tts", "upscale_image", "audio_enhance", "real_video", "avatar_video",
@@ -37854,7 +37920,12 @@ def menu_text_admin() -> str:
         "• <code>/tool_test_shopaikey_chat [model]</code> — smoke chat từng model fallback\n"
         "• <code>/tool_test_shopaikey_image</code> — smoke image admin-only\n"
         "• <code>/tool_test_shopaikey_video [model]</code> — submit video smoke, có fallback model\n"
-        "• <code>/tool_test_shopaikey_tts</code> — smoke TTS admin-only\n\n"
+        "• <code>/tool_test_shopaikey_tts</code> — smoke TTS admin-only\n"
+        "• <code>/tool_test_asr</code> — reply audio/video để smoke ASR Deepgram\n"
+        "• <code>/tool_test_translate [text] [lang]</code> — smoke translation fallback\n"
+        "• <code>/tool_test_video_subtitle</code> — reply video để test ASR → SRT\n"
+        "• <code>/tool_test_video_dub [text]</code> — test TTS/audio dub, 0 Xu\n"
+        "• <code>/tool_test_subtitle_plus_dub</code> — reply video để test ASR → SRT → TTS\n\n"
         "<b>F. Giá / Sẵn sàng bán</b>\n"
         "• <code>/banggia</code> — bảng giá khách hàng tập trung\n"
         "• <code>/video_price_test &lt;seconds&gt; &lt;type&gt; &lt;tier&gt; &lt;addon&gt;</code> — preview hóa đơn video, không tạo job\n"
@@ -45438,6 +45509,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     maintenance_on, _maintenance_message = is_system_maintenance()
     provider_freeze_on = provider_freeze_runtime_on("shopaikey")
     package_wallet = package_wallet_status_payload()
+    video_pipeline = video_pipeline_status_payload()
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
         cobalt_note = "OK to smoke test"
@@ -45539,7 +45611,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/tool_test_asr</code> | <code>/tool_test_translate</code> | <code>/tool_test_video_subtitle</code> | <code>/tool_test_video_dub</code> | <code>/tool_test_subtitle_plus_dub</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -45549,6 +45621,14 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Auphonic enhance: <code>{provider_status_text(providers['audio']['auphonic'])}</code> | stage <code>{html.escape(providers['media_factory'].get('auphonic_audio_enhance_stage') or 'DISABLED')}</code>",
         f"• TTS tested: <code>{html.escape(tool_test_status_text('tts'))}</code>",
         f"• STT tested: <code>{html.escape(tool_test_status_text('stt'))}</code>",
+        "",
+        "<b>Subtitle / Dubbing Pipeline</b>",
+        f"• ASR: <code>{html.escape(str(video_pipeline.get('asr_provider') or 'missing'))}</code> | tested <code>{html.escape(str(video_pipeline.get('asr_test') or 'NOT_TESTED'))}</code>",
+        f"• Translation: <code>{html.escape(str(video_pipeline.get('translation_provider') or 'missing'))}</code> | tested <code>{html.escape(str(video_pipeline.get('translation_test') or 'NOT_TESTED'))}</code>",
+        f"• TTS: <code>{html.escape(str(video_pipeline.get('tts_provider') or 'missing'))}</code> | tested <code>{html.escape(str(video_pipeline.get('tts_test') or 'NOT_TESTED'))}</code>",
+        f"• FFmpeg mux: <code>{html.escape(str(video_pipeline.get('ffmpeg_mux') or 'disabled'))}</code> | burn-in <code>{html.escape(str(video_pipeline.get('subtitle_burn_in') or 'disabled'))}</code> | worker <code>{'connected' if video_pipeline.get('local_worker_connected') else 'not_connected'}</code>",
+        f"• Last tests: subtitle <code>{html.escape(str(video_pipeline.get('subtitle_test') or 'NOT_TESTED'))}</code> | dub <code>{html.escape(str(video_pipeline.get('dub_test') or 'NOT_TESTED'))}</code> | subtitle+dub <code>{html.escape(str(video_pipeline.get('subtitle_dub_test') or 'NOT_TESTED'))}</code>",
+        f"• Public flags: subtitle <code>{'ON' if VIDEO_SUBTITLE_PUBLIC_ENABLED else 'OFF'}</code> | translated subtitle <code>{'ON' if VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED else 'OFF'}</code> | dub <code>{'ON' if VIDEO_DUB_PUBLIC_ENABLED else 'OFF'}</code> | subtitle+dub <code>{'ON' if VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED else 'OFF'}</code>",
         "",
         "<b>Music / Audio / Media Library</b>",
         f"• Jamendo music library: <code>{provider_runtime_status_text(providers['music']['jamendo'], 'music_library')}</code> | tested <code>{html.escape(tool_test_status_text('music_library'))}</code> | stage <code>{html.escape(providers['media_factory'].get('music_library_stage') or 'DISABLED')}</code>",
@@ -46230,7 +46310,7 @@ async def cmd_tool_test_deepgram_status(update: Update, context: ContextTypes.DE
         parse_mode="HTML",
     )
 
-async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def _cmd_shopaikey_status_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     result = shopaikey_chat_status_snapshot()
@@ -46244,8 +46324,10 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
     maintenance_on, _maintenance_message = is_system_maintenance()
     pricing = media_workflow_pricing_payload()
     package_wallet = package_wallet_status_payload()
+    video_queue = shopaikey_video_queue_counts_readonly()
+    video_pipeline = video_pipeline_status_payload()
     lines = [
-        "🧪 <b>ShopAIKey Experimental Provider</b>",
+        "🔐 <b>ShopAIKey Status</b>",
         "",
         f"• Enabled: <code>{'yes' if SHOPAIKEY_ENABLED else 'no'}</code>",
         f"• Admin only: <code>{'yes' if SHOPAIKEY_ADMIN_ONLY else 'no'}</code>",
@@ -46312,6 +46394,15 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         f"• TTS detail: <code>{html.escape(str(tts_result.get('detail') or '-')[:220])}</code>",
         f"• Image detail: <code>{html.escape(str(image_result.get('detail') or '-')[:220])}</code>",
         f"• Video detail: <code>{html.escape(str(video_result.get('detail') or '-')[:220])}</code>",
+        f"• Video queue: <code>queued {int(video_queue.get('queued') or 0)} / processing {int(video_queue.get('running') or 0)} / done {int(video_queue.get('success') or 0)} / failed {int(video_queue.get('failed') or 0)}</code>",
+        "",
+        "<b>Subtitle / Dubbing</b>",
+        f"• ASR: <code>{html.escape(str(video_pipeline.get('asr_provider') or 'missing'))}</code> | tested <code>{html.escape(str(video_pipeline.get('asr_test') or 'NOT_TESTED'))}</code>",
+        f"• Translation: <code>{html.escape(str(video_pipeline.get('translation_provider') or 'missing'))}</code> | tested <code>{html.escape(str(video_pipeline.get('translation_test') or 'NOT_TESTED'))}</code>",
+        f"• TTS: <code>{html.escape(str(video_pipeline.get('tts_provider') or 'missing'))}</code> | tested <code>{html.escape(str(video_pipeline.get('tts_test') or 'NOT_TESTED'))}</code>",
+        f"• FFmpeg mux: <code>{html.escape(str(video_pipeline.get('ffmpeg_mux') or 'disabled'))}</code> | subtitle burn-in <code>{html.escape(str(video_pipeline.get('subtitle_burn_in') or 'disabled'))}</code>",
+        f"• Tests: subtitle <code>{html.escape(str(video_pipeline.get('subtitle_test') or 'NOT_TESTED'))}</code> | dub <code>{html.escape(str(video_pipeline.get('dub_test') or 'NOT_TESTED'))}</code> | subtitle+dub <code>{html.escape(str(video_pipeline.get('subtitle_dub_test') or 'NOT_TESTED'))}</code>",
+        f"• Public flags: subtitle <code>{'ON' if VIDEO_SUBTITLE_PUBLIC_ENABLED else 'OFF'}</code> | translated subtitle <code>{'ON' if VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED else 'OFF'}</code> | dub <code>{'ON' if VIDEO_DUB_PUBLIC_ENABLED else 'OFF'}</code> | subtitle+dub <code>{'ON' if VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED else 'OFF'}</code>",
         "",
         "<b>Usage last known</b>",
         f"• Summary: <code>{html.escape(shopaikey_usage_summary_text(usage))}</code>",
@@ -46327,7 +46418,53 @@ async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYP
         "",
         "ShopAIKey không thay OpenRouter/OpenAI/Gemini; raw provider public vẫn đóng, customer flow đi qua guard ENV/billing.",
     ]
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await reply_html_lines(update, lines)
+
+async def cmd_shopaikey_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    try:
+        return await _cmd_shopaikey_status_impl(update, context)
+    except Exception as exc:
+        error_code = type(exc).__name__
+        logger.warning("shopaikey status command failed | error_class=%s", error_code)
+        usage = {}
+        try:
+            usage = shopaikey_last_usage_snapshot() or {}
+        except Exception:
+            usage = {}
+        lines = [
+            "⚠️ <b>Lệnh admin /shopaikey_status gặp lỗi khi đọc trạng thái.</b>",
+            "Bot chưa ảnh hưởng ví/Xu của user.",
+            "",
+            f"• Enabled: <code>{'yes' if SHOPAIKEY_ENABLED else 'no'}</code>",
+            f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
+            f"• Usage: <code>{html.escape(shopaikey_usage_summary_text(usage) if usage else 'usage unavailable')}</code>",
+            f"• Mã lỗi nội bộ: <code>{html.escape(error_code)}</code>",
+            "• Gợi ý: kiểm tra log Railway và handler status.",
+        ]
+        return await reply_html_lines(update, lines)
+
+async def cmd_shopaikey_status_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    snapshots = {
+        "chat": shopaikey_chat_status_snapshot(),
+        "tts": shopaikey_tts_status_snapshot(),
+        "image": shopaikey_image_status_snapshot(),
+        "video": shopaikey_video_status_snapshot(),
+    }
+    lines = ["🧪 <b>ShopAIKey Status Debug</b>", ""]
+    for name, snapshot in snapshots.items():
+        lines.append(
+            f"• {html.escape(name)}: <code>{html.escape(str(snapshot.get('status') or 'NOT_TESTED'))}</code>"
+            f" | at <code>{html.escape(str(snapshot.get('tested_at') or '-'))}</code>"
+        )
+    lines.extend([
+        f"• Usage: <code>{html.escape(shopaikey_usage_summary_text(shopaikey_last_usage_snapshot()))}</code>",
+        "• Secrets/raw provider responses: <code>hidden</code>",
+    ])
+    await reply_html_lines(update, lines)
 
 async def cmd_image_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -47246,9 +47383,31 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         xu_cost_planned=0,
     )
     waiting_message = await send_waiting_message(update, context, "video_submit") if SHOPAIKEY_VIDEO_WAITING_MESSAGE_ENABLED else None
-    result = await shopaikey_video_create_smoke_test(model_override)
+    submit_result = await shopaikey_video_create_smoke_test(model_override)
+    result = dict(submit_result or {})
+    attempts = submit_result.get("attempts") or []
+    task_id = str(submit_result.get("task_id") or "")
+    if task_id:
+        poll_result = await poll_shopaikey_video_smoke_job(task_id)
+        lifecycle_status = str(poll_result.get("lifecycle_status") or "processing")
+        if lifecycle_status == "succeeded":
+            result.update(poll_result)
+            result["status"] = "SUCCEEDED"
+        elif lifecycle_status == "failed":
+            result.update(poll_result)
+            result["status"] = "FAILED"
+        else:
+            result.update({
+                "status": "PROCESSING",
+                "provider_status": poll_result.get("provider_status") or submit_result.get("provider_status") or "processing",
+                "progress": poll_result.get("progress") or "",
+                "lifecycle_status": "processing",
+            })
+            result["task_id"] = task_id
+            result["model"] = submit_result.get("model") or result.get("model")
+            result["selected_model"] = submit_result.get("selected_model") or result.get("model")
+            result["attempts"] = attempts
     status = str(result.get("status") or "FAIL")
-    attempts = result.get("attempts") or []
     attempt_text = shopaikey_video_attempts_summary(attempts)
     detail = (
         f"model={result.get('model') or SHOPAIKEY_VIDEO_MODEL}; http={result.get('http_status')}; "
@@ -47260,16 +47419,15 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
     save_tool_test_result("shopaikey_video", status, detail, uid)
     save_shopaikey_component_snapshot("video", result, detail, uid)
     record_api_debug("shopaikey", "tool_test_shopaikey_video", status, int(result.get("http_status") or 0), detail)
-    if status != "PASS_SUBMITTED":
+    if status not in {"PASS_SUBMITTED", "SUBMITTED", "PROCESSING", "SUCCEEDED"}:
         record_provider_error(
             "shopaikey",
             "video",
             classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, result.get("message") or result.get("detail") or detail),
             result.get("message") or result.get("detail") or detail,
         )
-    task_id = str(result.get("task_id") or "")
     selected_model = str(result.get("selected_model") or "") if task_id else ""
-    db_status = "IN_PROGRESS" if status == "PASS_SUBMITTED" and task_id else "FAILED"
+    db_status = "SUCCESS" if status == "SUCCEEDED" else ("IN_PROGRESS" if status in {"PASS_SUBMITTED", "SUBMITTED", "PROCESSING"} and task_id else "FAILED")
     update_shopaikey_job(
         job_id=job_id,
         task_id=task_id,
@@ -47279,11 +47437,19 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         provider_error_code=result.get("provider_error_code") or "",
         provider_message=result.get("message") or result.get("detail") or "",
         attempts=len(attempts),
+        result_url=result.get("result_url") or "",
         finished_at="" if db_status == "IN_PROGRESS" else now_text(),
     )
     update_generation_pending_job(uid, tool_type, normalized_prompt, task_id=task_id, status=status)
     await update_waiting_message(waiting_message, "✅ ShopAIKey video submit đã xử lý xong. Không trừ Xu.")
-    if task_id and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
+    output_sent = False
+    if db_status == "SUCCESS" and result.get("result_url"):
+        output_sent, output_file_id = await send_shopaikey_video_result(
+            context.bot, update.effective_chat.id, task_id, str(result.get("result_url") or "")
+        )
+        if output_sent:
+            update_shopaikey_job(job_id=job_id, task_id=task_id, result_sent=1, output_file_id=output_file_id)
+    if task_id and db_status == "IN_PROGRESS" and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
         asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, update.effective_chat.id, uid, task_id))
     await safe_reply_text(
         update.message,
@@ -47294,11 +47460,13 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         f"• Selected model: <code>{html.escape(selected_model or '-')}</code>\n"
         f"• Task ID: <code>{html.escape(task_id or '-')}</code>\n"
         f"• Provider status: <code>{html.escape(str(result.get('provider_status') or '-'))}</code>\n"
+        f"• Lifecycle: <code>{html.escape(str(result.get('lifecycle_status') or ('succeeded' if status == 'SUCCEEDED' else 'submitted')))}</code>\n"
+        f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n"
         f"• Attempts: <code>{html.escape(attempt_text)}</code>\n"
         f"• Message: <code>{html.escape(str(result.get('message') or result.get('detail') or '-')[:220])}</code>\n"
         f"• Friendly message: <code>{html.escape(shopaikey_generation_unavailable_message(status, result.get('message') or result.get('detail') or '') if status != 'PASS_SUBMITTED' else '-')}</code>\n"
         f"• No Xu deducted: <code>yes</code>\n\n"
-        + (f"Auto poll: <code>{'ON' if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else 'OFF'}</code>\n" if task_id else "")
+        + (f"Auto poll: <code>{'ON' if (db_status == 'IN_PROGRESS' and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED) else 'OFF'}</code>\n" if task_id else "")
         + (f"Kiểm tra tiếp: <code>/shopaikey_video_job {html.escape(task_id)}</code>\n\n" if task_id else "")
         + "Endpoint admin-only. Smoke test có thể tốn credit thật của provider. Không log prompt/response/key. Public video do ENV/billing guard kiểm soát.",
         parse_mode="HTML",
@@ -49023,6 +49191,37 @@ async def translate_to_vietnamese(text: str) -> dict:
 async def cmd_tool_test_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if context.args:
+        args = [str(item or "").strip() for item in context.args if str(item or "").strip()]
+        target = "vi"
+        if args and args[-1].lower() in {"vi", "en", "ja", "ko", "zh", "fr", "de", "es", "th", "id"}:
+            target = args.pop().lower()
+        source_text = " ".join(args).strip().strip('"') or "Hello from TOAN AAS"
+        try:
+            result = await translate_to_language(source_text[:500], target)
+            provider = str(result.get("provider") or "-")
+            translated = str(result.get("text") or "").strip()
+            if not translated:
+                raise RuntimeError("translation_empty")
+            save_tool_test_result("translation", "PASS", f"provider={provider}; target={target}; chars={len(translated)}", update.effective_user.id)
+            return await update.message.reply_text(
+                "🌐 <b>Translation Smoke Test</b>\n\n"
+                "• Status: <code>PASS</code>\n"
+                f"• Provider: <code>{html.escape(provider)}</code>\n"
+                f"• Target: <code>{html.escape(target)}</code>\n"
+                f"• Preview: <code>{html.escape(translated[:300])}</code>\n"
+                "• No Xu deducted: <code>yes</code>",
+                parse_mode="HTML",
+            )
+        except Exception as exc:
+            save_tool_test_result("translation", "FAIL", f"error_class={type(exc).__name__}; target={target}", update.effective_user.id)
+            return await update.message.reply_text(
+                "🌐 <b>Translation Smoke Test</b>\n\n"
+                "• Status: <code>FAIL</code>\n"
+                f"• Error class: <code>{html.escape(type(exc).__name__)}</code>\n"
+                "• No Xu deducted: <code>yes</code>",
+                parse_mode="HTML",
+            )
     source_text = "こんにちは、今日は新しい動画を紹介します。"
     deepl_status = "MISSING"
     gemini_status = "MISSING"
@@ -49777,6 +49976,7 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     if not DEEPGRAM_API_KEY:
         save_tool_test_result("stt", "MISSING", "DEEPGRAM_API_KEY missing", update.effective_user.id)
+        save_tool_test_result("asr", "MISSING", "DEEPGRAM_API_KEY missing", update.effective_user.id)
         return await update.message.reply_text("🎤 <b>STT Smoke Test</b>\n\n• Deepgram: <code>MISSING</code>", parse_mode="HTML")
     media_info = await resolve_stt_test_media(update, context)
     if not media_info:
@@ -49797,6 +49997,7 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = "PASS" if passed else "FAIL"
         detail = transcript if transcript else "empty_transcript"
         save_tool_test_result("stt", status, f"source={media_info.get('source')}; type={media_info.get('file_type')}; mime={content_type}; provider=deepgram; cost_level=low; {detail[:450]}", update.effective_user.id)
+        save_tool_test_result("asr", status, f"provider=deepgram; source={media_info.get('source')}; chars={len(transcript)}", update.effective_user.id)
         if passed:
             await update.message.reply_text(
                 "🎙 <b>STT PASS</b>\n\n"
@@ -49819,12 +50020,137 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(text, parse_mode="HTML")
     except Exception as e:
         save_tool_test_result("stt", "FAIL", str(e)[:500], update.effective_user.id)
+        save_tool_test_result("asr", "FAIL", f"error_class={type(e).__name__}", update.effective_user.id)
         await update.message.reply_text(
             "🎤 <b>STT Smoke Test</b>\n\n"
             "• Deepgram: <code>FAIL</code>\n"
             f"• Error: <code>{html.escape(str(e)[:240])}</code>",
             parse_mode="HTML",
         )
+
+async def cmd_tool_test_asr(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_tool_test_stt(update, context)
+
+async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    mode = normalize_video_translate_mode(mode)
+    media_info = await resolve_stt_test_media(update, context)
+    text_input = " ".join(context.args or []).strip()
+    if mode != VIDEO_SUBTITLE_MODE_DUB and not media_info:
+        return await update.message.reply_text(
+            "⚠️ Reply một video/audio ngắn rồi chạy lại lệnh. Smoke test chưa gọi API và không trừ Xu."
+        )
+    if mode == VIDEO_SUBTITLE_MODE_DUB and not media_info and not text_input:
+        return await update.message.reply_text(
+            "⚠️ Reply video/audio ngắn hoặc thêm đoạn text sau lệnh để test lồng tiếng. Không trừ Xu."
+        )
+    await update.message.reply_text("⏳ TOAN AAS đang kiểm tra pipeline admin. Vui lòng chờ và không gửi lại lệnh.")
+    transcript = text_input
+    asr_status = "NOT_USED" if transcript else "NOT_TESTED"
+    try:
+        if not transcript:
+            if not DEEPGRAM_API_KEY:
+                save_tool_test_result("asr", "MISSING", "DEEPGRAM_API_KEY missing", uid)
+                return await update.message.reply_text("⚙️ ASR Deepgram chưa cấu hình. Không gọi API và không trừ Xu.")
+            file_size = int(media_info.get("file_size") or 0)
+            if file_size > VIDEO_PROCESSING_MAX_INPUT_MB * 1024 * 1024:
+                return await update.message.reply_text(
+                    f"⚠️ File vượt giới hạn smoke {VIDEO_PROCESSING_MAX_INPUT_MB}MB. Không gọi API và không trừ Xu."
+                )
+            transcript = (await AgentDeepgram.transcribe(
+                media_info.get("bytes") or b"",
+                context,
+                content_type=media_info.get("content_type") or "application/octet-stream",
+            ) or "").strip()
+            if not transcript or transcript.startswith("❌"):
+                raise RuntimeError("asr_empty_or_failed")
+            asr_status = "PASS"
+            save_tool_test_result("asr", "PASS", f"provider=deepgram; chars={len(transcript)}", uid)
+
+        output_text = transcript
+        translation_status = "NOT_USED"
+        if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
+            translated = await translate_to_language(transcript[:3500], "vi")
+            output_text = str(translated.get("text") or "").strip()
+            if not output_text:
+                raise RuntimeError("translation_empty")
+            translation_status = "PASS"
+            save_tool_test_result("translation", "PASS", f"provider={translated.get('provider') or '-'}; target=vi", uid)
+
+        srt_bytes = b""
+        if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+            srt_text = video_dubbing_srt_from_text(output_text, 0)
+            if not srt_text:
+                raise RuntimeError("subtitle_empty")
+            srt_bytes = srt_text.encode("utf-8")
+            await update.message.reply_document(
+                document=video_dubbing_output_file(srt_bytes, f"toan_aas_{mode}_smoke.srt"),
+                filename=f"toan_aas_{mode}_smoke.srt",
+                caption="✅ Subtitle smoke output — admin-only / 0 Xu",
+            )
+
+        tts_provider = ""
+        audio_bytes = b""
+        if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+            tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(output_text, "")
+            await update.message.reply_audio(
+                audio=video_dubbing_output_file(audio_bytes, f"toan_aas_{mode}_smoke.mp3"),
+                filename=f"toan_aas_{mode}_smoke.mp3",
+                caption=f"✅ Dub smoke output — {tts_provider} / admin-only / 0 Xu",
+            )
+
+        tool_name = {
+            VIDEO_SUBTITLE_MODE_CREATE: "video_subtitle",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "video_subtitle",
+            VIDEO_SUBTITLE_MODE_DUB: "video_dub",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
+        }.get(mode, "video_pipeline")
+        mux_requested = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+        mux_status = video_pipeline_status_payload().get("ffmpeg_mux") if mux_requested else video_pipeline_status_payload().get("subtitle_burn_in")
+        detail = (
+            f"mode={mode}; asr={asr_status}; translation={translation_status}; "
+            f"subtitle={'PASS' if srt_bytes else 'NOT_USED'}; tts={'PASS' if audio_bytes else 'NOT_USED'}; mux={mux_status}"
+        )
+        save_tool_test_result(tool_name, "PASS", detail, uid)
+        return await update.message.reply_text(
+            "✅ <b>Video Pipeline Smoke Test</b>\n\n"
+            f"• Mode: <code>{html.escape(mode)}</code>\n"
+            f"• ASR: <code>{html.escape(asr_status)}</code>\n"
+            f"• Translation: <code>{html.escape(translation_status)}</code>\n"
+            f"• Subtitle: <code>{'PASS' if srt_bytes else 'NOT_USED'}</code>\n"
+            f"• TTS: <code>{html.escape(tts_provider or 'NOT_USED')}</code>\n"
+            f"• Mux/burn-in: <code>{html.escape(str(mux_status or 'disabled'))}</code>\n"
+            "• No Xu deducted: <code>yes</code>\n\n"
+            "Nếu mux/burn-in chưa ready, bot gửi SRT/audio riêng thay vì giả báo video đã ghép.",
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        error_class = type(exc).__name__
+        tool_name = {
+            VIDEO_SUBTITLE_MODE_CREATE: "video_subtitle",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "video_subtitle",
+            VIDEO_SUBTITLE_MODE_DUB: "video_dub",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
+        }.get(mode, "video_pipeline")
+        save_tool_test_result(tool_name, "FAIL", f"error_class={error_class}", uid)
+        logger.warning("admin video pipeline smoke failed | mode=%s | error_class=%s", mode, error_class)
+        return await update.message.reply_text(
+            "⚙️ Pipeline admin smoke chưa hoàn tất.\n"
+            f"Mã lỗi: <code>{html.escape(error_class)}</code>\n"
+            "Không trừ Xu và không hiển thị raw provider response.",
+            parse_mode="HTML",
+        )
+
+async def cmd_tool_test_video_subtitle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_CREATE)
+
+async def cmd_tool_test_video_dub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_DUB)
+
+async def cmd_tool_test_subtitle_plus_dub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
 
 async def cmd_tool_test_stt_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -53048,6 +53374,11 @@ def get_frame_video_last_error() -> str:
     except Exception:
         pass
     return str(FRAME_VIDEO_LAST_ERROR or "")[:300]
+
+def clear_frame_video_last_error(updated_by="") -> None:
+    global FRAME_VIDEO_LAST_ERROR
+    FRAME_VIDEO_LAST_ERROR = ""
+    set_system_setting("frame_video_last_error", "", note="Frame video last error cleared", updated_by=updated_by)
 
 def frame_video_active_jobs_count() -> int:
     active_statuses = {"queued", "waiting_worker", "rendering"}
@@ -67843,6 +68174,19 @@ async def cmd_frame_video_status(update: Update, context: ContextTypes.DEFAULT_T
     ]
     await reply_html_lines(update, lines)
 
+async def cmd_clear_frame_video_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    previous = get_frame_video_last_error()
+    clear_frame_video_last_error(uid)
+    await update.message.reply_text(
+        "✅ Đã xóa lỗi frame video gần nhất khỏi màn trạng thái.\n"
+        f"Lỗi cũ: <code>{html.escape(previous or '-')}</code>\n"
+        "Không thay đổi job, Xu hoặc Local Worker.",
+        parse_mode="HTML",
+    )
+
 async def cmd_tool_test_frame_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
@@ -69465,6 +69809,17 @@ async def cmd_tool_test_workflow_image_to_video(update: Update, context: Context
             "• Status: <code>DISABLED</code>\n"
             "• Reason: <code>SHOPAIKEY_ADMIN_ONLY and SHOPAIKEY_VIDEO_ADMIN_ONLY must remain true</code>\n"
             "• No Xu deducted: <code>yes</code>",
+            parse_mode="HTML",
+        )
+    if not VIDEO_IMAGE_TO_VIDEO_ENABLED and not SHOPAIKEY_WF_I2V_SMOKE_ENABLED:
+        save_tool_test_result("workflow_image_to_video", "GUARDED", "VIDEO_IMAGE_TO_VIDEO_ENABLED=false and SHOPAIKEY_WF_I2V_SMOKE_ENABLED=false; no call", uid)
+        return await update.message.reply_text(
+            "🎞 <b>Workflow Image-to-Video Smoke Test</b>\n\n"
+            "• Status: <code>GUARDED</code>\n"
+            "• Workflow image-to-video đang OFF.\n"
+            "• Bật <code>VIDEO_IMAGE_TO_VIDEO_ENABLED=true</code> hoặc <code>SHOPAIKEY_WF_I2V_SMOKE_ENABLED=true</code> để admin smoke.\n"
+            "• No Xu deducted: <code>yes</code>\n"
+            "• Public video: <code>OFF</code>",
             parse_mode="HTML",
         )
     asset = latest_workflow_image_for_user(uid)
@@ -89531,26 +89886,38 @@ def video_dubbing_mode_flag(mode: str) -> bool:
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_SUBTITLE_PLUS_DUB_ENABLED,
     }.get(normalize_video_translate_mode(mode), False)
 
+def video_dubbing_public_flag(mode: str) -> bool:
+    return {
+        VIDEO_SUBTITLE_MODE_CREATE: VIDEO_SUBTITLE_PUBLIC_ENABLED,
+        VIDEO_SUBTITLE_MODE_TRANSLATE: VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED,
+        VIDEO_SUBTITLE_MODE_DUB: VIDEO_DUB_PUBLIC_ENABLED,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED,
+    }.get(normalize_video_translate_mode(mode), False)
+
 def video_translation_provider_available() -> bool:
     return bool(DEEPL_API_KEY or gemini_client or openai_client)
 
 def video_tts_provider_available() -> bool:
     provider = str(TTS_PROVIDER or "auto").lower()
+    if provider in {"shopaikey", "shopai"}:
+        return bool(SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY)
     if provider == "elevenlabs":
         return bool(ELEVENLABS_API_KEY)
     if provider in {"fish", "fish_audio"}:
         return bool(FISH_AUDIO_KEY)
     if provider in {"edge", "edge_tts"}:
         return bool(edge_tts)
-    return bool(ELEVENLABS_API_KEY or FISH_AUDIO_KEY or edge_tts)
+    return bool((SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY) or ELEVENLABS_API_KEY or FISH_AUDIO_KEY or edge_tts)
 
-def video_dubbing_capability(mode: str, state: dict | None = None) -> dict:
+def video_dubbing_capability(mode: str, state: dict | None = None, public: bool = True) -> dict:
     mode = normalize_video_translate_mode(mode)
     state = state or {}
     if not mode:
         return {"ok": False, "reason": "invalid_mode", "missing": ["mode"]}
     if not video_dubbing_mode_flag(mode):
         return {"ok": False, "reason": "mode_disabled", "missing": ["feature_flag"]}
+    if public and not video_dubbing_public_flag(mode):
+        return {"ok": False, "reason": "public_disabled", "missing": ["public_flag"]}
     missing = []
     if ASR_PROVIDER not in {"deepgram", "auto"} or not DEEPGRAM_API_KEY:
         missing.append("asr")
@@ -89569,7 +89936,25 @@ def video_dubbing_capability(mode: str, state: dict | None = None) -> dict:
         "asr": "deepgram" if DEEPGRAM_API_KEY else "",
         "translation": TRANSLATE_PROVIDER if video_translation_provider_available() else "",
         "tts": TTS_PROVIDER if video_tts_provider_available() else "",
-        "mux": "not_enabled_audio_output_only",
+        "mux": "enabled" if VIDEO_DUB_MUX_ENABLED else "not_enabled_audio_output_only",
+    }
+
+def video_pipeline_status_payload() -> dict:
+    worker = local_worker_status_payload()
+    mux_worker_ready = bool(worker.get("connected") and worker.get("ffmpeg_path"))
+    return {
+        "asr_provider": "deepgram" if DEEPGRAM_API_KEY else "missing",
+        "asr_test": preferred_tool_test_status_text("asr", "stt"),
+        "translation_provider": TRANSLATE_PROVIDER if video_translation_provider_available() else "missing",
+        "translation_test": preferred_tool_test_status_text("translation"),
+        "tts_provider": ("shopaikey" if SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY else TTS_PROVIDER) if video_tts_provider_available() else "missing",
+        "tts_test": preferred_tool_test_status_text("video_dub", "shopaikey_tts", "tts"),
+        "ffmpeg_mux": "ready" if VIDEO_DUB_MUX_ENABLED and mux_worker_ready else ("configured/waiting_worker" if VIDEO_DUB_MUX_ENABLED else "disabled"),
+        "subtitle_burn_in": "ready" if VIDEO_SUBTITLE_BURN_IN_ENABLED and mux_worker_ready else ("configured/waiting_worker" if VIDEO_SUBTITLE_BURN_IN_ENABLED else "disabled"),
+        "local_worker_connected": bool(worker.get("connected")),
+        "subtitle_test": preferred_tool_test_status_text("video_subtitle"),
+        "dub_test": preferred_tool_test_status_text("video_dub"),
+        "subtitle_dub_test": preferred_tool_test_status_text("subtitle_plus_dub"),
     }
 
 def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "vi") -> str:
@@ -89580,6 +89965,7 @@ def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "
     if normalize_user_language(lang) != "vi":
         detail = {
             "mode_disabled": "This processing mode is not enabled.",
+            "public_disabled": "This processing mode is still in admin validation.",
             "missing_asr": "Speech recognition is not ready.",
             "missing_translation": "The translation provider is not ready.",
             "missing_tts": "The dubbing voice provider is not ready.",
@@ -89590,6 +89976,7 @@ def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "
         )
     detail = {
         "mode_disabled": f"{label} đang được kiểm tra nhà cung cấp.",
+        "public_disabled": f"{label} đang được kiểm tra nội bộ, chưa mở công khai.",
         "missing_asr": "Công cụ lấy lời thoại/tạo phụ đề từ video chưa sẵn sàng.",
         "missing_translation": "Trình dịch phụ đề chưa sẵn sàng.",
         "missing_tts": "Công cụ tạo giọng lồng tiếng đang được kiểm tra nhà cung cấp.",
@@ -89651,6 +90038,8 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
 async def video_dubbing_tts_bytes(text: str, voice_style: str = "") -> tuple[str, bytes, str]:
     provider = str(TTS_PROVIDER or "auto").lower()
     candidates = []
+    if provider in {"auto", "shopaikey", "shopai"}:
+        candidates.append(("ShopAIKey", shopaikey_tts_bytes))
     if provider in {"auto", "elevenlabs"}:
         candidates.append(("ElevenLabs", tts_elevenlabs_bytes))
     if provider in {"auto", "fish", "fish_audio"}:
@@ -90966,6 +91355,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("orchestrator_status", cmd_orchestrator_status))
     tg_app.add_handler(CommandHandler("provider_matrix", cmd_provider_matrix))
     tg_app.add_handler(CommandHandler("shopaikey_status", cmd_shopaikey_status))
+    tg_app.add_handler(CommandHandler("shopaikey_status_debug", cmd_shopaikey_status_debug))
     tg_app.add_handler(CommandHandler("video_price_test", cmd_video_price_test))
     tg_app.add_handler(CommandHandler("image_provider_status", cmd_image_provider_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
@@ -90998,6 +91388,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("shopaikey_video", cmd_shopaikey_video_public))
     tg_app.add_handler(CommandHandler("shopaikey_video_from_image", cmd_shopaikey_video_from_image_public))
     tg_app.add_handler(CommandHandler("tool_test_translate", cmd_tool_test_translate))
+    tg_app.add_handler(CommandHandler("tool_test_asr", cmd_tool_test_asr))
+    tg_app.add_handler(CommandHandler("tool_test_video_subtitle", cmd_tool_test_video_subtitle))
+    tg_app.add_handler(CommandHandler("tool_test_video_dub", cmd_tool_test_video_dub))
+    tg_app.add_handler(CommandHandler("tool_test_subtitle_plus_dub", cmd_tool_test_subtitle_plus_dub))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
     tg_app.add_handler(CommandHandler("tool_test_image_debug", cmd_tool_test_image_debug))
     tg_app.add_handler(CommandHandler("tool_test_ai_image", cmd_tool_test_ai_image))
@@ -91333,6 +91727,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("quick_video_test", cmd_quick_video_test))
     tg_app.add_handler(CommandHandler("storyboard_video", cmd_storyboard_video))
     tg_app.add_handler(CommandHandler("frame_video_status", cmd_frame_video_status))
+    tg_app.add_handler(CommandHandler("clear_frame_video_error", cmd_clear_frame_video_error))
     tg_app.add_handler(CommandHandler("tool_test_frame_video", cmd_tool_test_frame_video))
     tg_app.add_handler(CommandHandler("image_tools", cmd_image_tools))
     tg_app.add_handler(CommandHandler("image_studio", cmd_image_studio))

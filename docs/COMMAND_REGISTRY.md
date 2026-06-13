@@ -160,12 +160,19 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/support_persona_test <message>` | `cmd_support_persona_test` | YES | YES | Preview the deterministic CSKH classification, escalation decision and safe reply without creating a ticket or changing Xu. |
 | `/support_auto_test <message>` | `cmd_support_auto_test` | YES | YES | Preview Support Auto Reply V3.1 category, priority, ticket decision, admin alert and reply without creating a ticket. |
 | `/shopaikey_status` | `cmd_shopaikey_status` | YES | YES | ShopAIKey admin status, usage and smoke-test snapshots. |
+| `/shopaikey_status_debug` | `cmd_shopaikey_status_debug` | YES | YES | Sanitized component snapshots for diagnosing status rendering; never shows secrets. |
 | `/shopaikey_usage` | `cmd_shopaikey_usage` | YES | YES | ShopAIKey usage monitor, no key leakage. |
 | `/shopaikey_video_job` | `cmd_shopaikey_video_job` | YES | YES | Query ShopAIKey video job status. |
 | `/tool_test_shopaikey` | `cmd_tool_test_shopaikey` | YES | YES | Admin chat smoke test. |
 | `/tool_test_shopaikey_image` | `cmd_tool_test_shopaikey_image` | YES | YES | Admin image smoke test. |
 | `/tool_test_shopaikey_video` | `cmd_tool_test_shopaikey_video` | YES | YES | Admin video smoke test. |
 | `/tool_test_shopaikey_tts` | `cmd_tool_test_shopaikey_tts` | YES | YES | Admin TTS smoke test. |
+| `/tool_test_asr` | `cmd_tool_test_asr` | YES | YES | Reply a short audio/video file to smoke test Deepgram ASR with no Xu charge. |
+| `/tool_test_translate [text] [lang]` | `cmd_tool_test_translate` | YES | YES | Smoke test translation routing/fallback with a short text. |
+| `/tool_test_video_subtitle` | `cmd_tool_test_video_subtitle` | YES | YES | Reply a short video to test ASR to SRT; admin-only and no Xu charge. |
+| `/tool_test_video_dub [text]` | `cmd_tool_test_video_dub` | YES | YES | Test dubbing TTS output from replied media or short text; mux remains capability-guarded. |
+| `/tool_test_subtitle_plus_dub` | `cmd_tool_test_subtitle_plus_dub` | YES | YES | Reply a short video to test ASR, subtitle, and TTS outputs without charging Xu. |
+| `/clear_frame_video_error` | `cmd_clear_frame_video_error` | YES | YES | Clear only the stored frame-video last-error display; does not alter jobs or Xu. |
 | `/video_price_test <seconds> <type> <tier> <addon>` | `cmd_video_price_test` | YES | YES | Preview itemized video, subtitle, dubbing, total Xu, and VND pricing without creating a job or charging Xu. |
 | `/maintenance_status` | `cmd_maintenance_status` | YES | YES | Maintenance/freeze status overview. |
 | `/maintenance_on` | `cmd_maintenance_on` | YES | YES | Enable maintenance mode. |

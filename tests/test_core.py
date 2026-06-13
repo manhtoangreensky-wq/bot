@@ -1338,8 +1338,8 @@ def test_shopaikey_video_status_stale_timeout_and_success_event(monkeypatch):
         bot.set_system_setting("shopaikey_video_last_at", "2000-01-01 00:00:00", "test stale timestamp", "test")
         monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_STATUS_STALE_SECONDS", 60)
         stale = bot.shopaikey_video_status_snapshot()
-        assert stale["status"] == "STALE_TIMEOUT"
-        assert "stale video smoke status" in stale["detail"]
+        assert stale["status"] == "TIMEOUT_STALE"
+        assert "maximum job age" in stale["detail"]
 
         bot.record_api_debug("shopaikey", "shopaikey_video_job", "SUCCESS", 200, "model=veo3.1-fast; task_id=new_task; result_url=sent")
         latest = bot.shopaikey_video_status_snapshot()
@@ -7890,3 +7890,70 @@ def test_video_price_test_command_registered_and_preview_only():
     assert "No job created and no Xu deducted" in command_source
     assert 'CommandHandler("video_price_test", cmd_video_price_test)' in source
     assert 'CallbackQueryHandler(handle_video_addon_callback, pattern=r"^videoaddon\\|")' in source
+
+
+def test_provider_pipeline_v32_status_handler_is_chunked_and_safe():
+    source = bot_source_text()
+    impl = source_between(source, "async def _cmd_shopaikey_status_impl", "async def cmd_shopaikey_status")
+    wrapper = source_between(source, "async def cmd_shopaikey_status", "async def cmd_shopaikey_status_debug")
+    assert "reply_html_lines(update, lines)" in impl
+    assert "except Exception as exc" in wrapper
+    assert "Bot chưa ảnh hưởng ví/Xu của user" in wrapper
+    assert "API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}" in wrapper
+
+
+def test_provider_pipeline_v32_video_processing_is_not_immediate_stale(monkeypatch):
+    monkeypatch.setattr(bot, "latest_api_debug_event", lambda *_args, **_kwargs: {})
+    snapshot = {
+        "status": "PASS_SUBMITTED",
+        "tested_at": bot.now_text(),
+        "detail": "task_id=active_job",
+    }
+    normalized = bot.normalize_shopaikey_video_snapshot(snapshot)
+    assert normalized["status"] == "PASS_SUBMITTED"
+
+
+def test_provider_pipeline_v32_brief_video_poll_returns_processing(monkeypatch):
+    async def fake_status(_task_id):
+        return {"status": "PROCESSING", "provider_status": "processing", "task_id": "job_1"}
+
+    monkeypatch.setattr(bot, "shopaikey_video_job_status", fake_status)
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_SMOKE_MAX_WAIT_SECONDS", -1)
+    result = asyncio.run(bot.poll_shopaikey_video_smoke_job("job_1"))
+    assert result["lifecycle_status"] == "processing"
+    assert result["task_id"] == "job_1"
+
+
+def test_provider_pipeline_v32_public_subtitle_guards_are_separate(monkeypatch):
+    monkeypatch.setattr(bot, "VIDEO_SUBTITLE_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PUBLIC_ENABLED", False)
+    capability = bot.video_dubbing_capability(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, public=True)
+    assert capability["ok"] is False
+    assert capability["reason"] == "public_disabled"
+    assert "chưa mở công khai" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
+
+
+def test_provider_pipeline_v32_admin_smoke_commands_registered_and_no_charge():
+    source = bot_source_text()
+    for command, handler in {
+        "shopaikey_status_debug": "cmd_shopaikey_status_debug",
+        "tool_test_asr": "cmd_tool_test_asr",
+        "tool_test_video_subtitle": "cmd_tool_test_video_subtitle",
+        "tool_test_video_dub": "cmd_tool_test_video_dub",
+        "tool_test_subtitle_plus_dub": "cmd_tool_test_subtitle_plus_dub",
+        "clear_frame_video_error": "cmd_clear_frame_video_error",
+    }.items():
+        assert f'CommandHandler("{command}", {handler})' in source
+        assert len(command) <= 32
+    smoke_source = source_between(source, "async def run_admin_video_pipeline_smoke", "async def cmd_tool_test_video_subtitle")
+    assert "spend_fixed_credit_info" not in smoke_source
+    assert "No Xu deducted" in smoke_source
+
+
+def test_provider_pipeline_v32_wf_i2v_and_frame_error_guards_present():
+    source = bot_source_text()
+    wf_source = source_between(source, "async def cmd_tool_test_workflow_image_to_video", "async def cmd_image_tools")
+    assert "SHOPAIKEY_WF_I2V_SMOKE_ENABLED" in wf_source
+    assert "Workflow image-to-video đang OFF" in wf_source
+    frame_source = source_between(source, "async def cmd_frame_video_status", "async def cmd_clear_frame_video_error")
+    assert "Last error" in frame_source
