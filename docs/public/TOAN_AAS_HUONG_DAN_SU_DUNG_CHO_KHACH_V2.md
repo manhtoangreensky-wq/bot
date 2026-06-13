@@ -62,8 +62,8 @@ Người dùng phải kiểm tra đúng địa chỉ ví và đúng mạng TRC20
 
 ## 6. Chính sách ưu đãi
 
-- Ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50k/100k/200k/500k và các ưu đãi cộng thêm Xu chỉ áp dụng cho khách nội địa Việt Nam hoặc giao dịch VND qua PayOS, QR ngân hàng Việt Nam, ZaloPay hoặc MoMo.
-- Nạp quốc tế USD/CNY/USDT không áp dụng bonus cộng Xu.
+- Ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50k/100k/200k/500k và các ưu đãi cộng thêm Xu chỉ áp dụng cho khách nội địa Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.
+- ZaloPay, MoMo và nạp quốc tế USD/CNY/USDT không áp dụng bonus cộng Xu.
 - Khách quốc tế vẫn có thể hưởng chiết khấu phần trăm theo hạng thành viên khi đủ điều kiện.
 - Nếu admin tặng thêm Xu cho khách quốc tế, khoản tặng phải được thực hiện bằng admin grant riêng và có lý do.
 

@@ -50,8 +50,8 @@ Module đang thử nghiệm hoặc chưa mở công khai phải hiển thị gua
 
 ## 6. Chính sách ưu đãi
 
-- Ưu đãi nạp lần đầu 30%, Launch Bonus mệnh giá 50k/100k/200k/500k, bonus cộng Xu và quà nạp khi lên hạng chỉ áp dụng cho khách nội địa Việt Nam hoặc giao dịch VND qua PayOS, QR ngân hàng Việt Nam, ZaloPay hoặc MoMo.
-- Giao dịch USD/CNY/USDT không áp dụng bonus cộng Xu.
+- Ưu đãi nạp lần đầu 30%, Launch Bonus mệnh giá 50k/100k/200k/500k, bonus cộng Xu và quà nạp khi lên hạng chỉ áp dụng cho khách nội địa Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.
+- ZaloPay, MoMo và giao dịch USD/CNY/USDT không áp dụng bonus cộng Xu.
 - Khách quốc tế vẫn giữ chiết khấu phần trăm theo hạng thành viên khi đủ điều kiện.
 - Nếu admin tặng thêm cho khách quốc tế, khoản tặng phải dùng admin grant riêng và ghi rõ lý do.
 

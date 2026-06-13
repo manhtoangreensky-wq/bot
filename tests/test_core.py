@@ -7704,6 +7704,7 @@ def test_manual_topup_menu_methods(monkeypatch):
     monkeypatch.setattr(bot, "MANUAL_BANK_ENABLED", True)
     monkeypatch.setattr(bot, "MANUAL_ZALOPAY_PERSONAL_ENABLED", True)
     monkeypatch.setattr(bot, "MANUAL_ZALOPAY_MERCHANT_ENABLED", True)
+    monkeypatch.setattr(bot, "MANUAL_MOMO_TUITHANTAI_ENABLED", True)
     monkeypatch.setattr(bot, "MANUAL_USDT_TRC20_ENABLED", False)
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
     currency_labels = [button.text for row in bot.manual_payment_menu_keyboard(123).inline_keyboard for button in row]
@@ -7714,6 +7715,7 @@ def test_manual_topup_menu_methods(monkeypatch):
     assert "🏦 Ngân hàng ACB/VietQR" in labels
     assert "💚 ZaloPay cá nhân" in labels
     assert "🛍 ZaloPay cửa hàng" in labels
+    assert "💗 MoMo/Túi Thần Tài" in labels
     assert "🪙 USDT TRC20" not in labels
 
 
@@ -7744,6 +7746,103 @@ def test_manual_bank_qr_asset_send_and_missing_no_crash(monkeypatch, tmp_path):
     assert alerts and "missing manual payment QR asset" in alerts[0][1]
 
 
+def test_manual_menu_bonus_text_no_zalopay_momo():
+    text = bot.manual_payment_menu_text()
+    assert "PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR" in text
+    assert "ZaloPay/MoMo: dùng cho thanh toán CNY nếu chuyển được" in text
+    assert "USD/CNY/USDT không áp dụng ưu đãi cộng Xu" in text
+    assert "QR ngân hàng Việt Nam, ZaloPay hoặc MoMo" not in text
+
+
+def test_bonus_only_payos_bank_vnd():
+    allowed = (
+        {"currency": "VND", "method": "payos", "foreign_manual": False},
+        {"currency": "VND", "method": "bank_acb", "foreign_manual": False},
+        {"currency": "VND", "method": "manual_vietqr_vnd", "foreign_manual": False},
+    )
+    blocked = (
+        {"currency": "VND", "method": "zalopay_personal", "foreign_manual": False},
+        {"currency": "VND", "method": "zalopay_merchant", "foreign_manual": False},
+        {"currency": "VND", "method": "momo_tuithantai", "foreign_manual": False},
+        {"currency": "USD", "method": "usdt_trc20", "foreign_manual": True},
+        {"currency": "CNY", "method": "zalopay_personal", "foreign_manual": True},
+    )
+    assert all(bot.is_topup_bonus_allowed(item) for item in allowed)
+    assert all(bot.is_topup_bonus_blocked(item) for item in blocked)
+    assert all(not bot.is_topup_bonus_allowed(item) for item in blocked)
+
+
+def test_qr_paths_exist_or_alert():
+    for method in ("bank_acb", "usdt_trc20", "zalopay_personal", "zalopay_merchant", "momo_tuithantai"):
+        assert os.path.isfile(bot.manual_method_asset_path(method)), method
+
+
+def test_all_manual_qr_methods_send_photo_not_text(monkeypatch, tmp_path):
+    class FakeBot:
+        def __init__(self):
+            self.photos = []
+            self.messages = []
+
+        async def send_photo(self, **kwargs):
+            self.photos.append(kwargs)
+
+        async def send_message(self, **kwargs):
+            self.messages.append(kwargs)
+
+    method_paths = {
+        "bank_acb": "MANUAL_BANK_QR_PATH",
+        "usdt_trc20": "MANUAL_USDT_TRC20_QR_PATH",
+        "zalopay_personal": "MANUAL_ZALOPAY_PERSONAL_QR_PATH",
+        "zalopay_merchant": "MANUAL_ZALOPAY_MERCHANT_QR_PATH",
+        "momo_tuithantai": "MANUAL_MOMO_TUITHANTAI_QR_PATH",
+    }
+    for method, attribute in method_paths.items():
+        qr_path = tmp_path / f"{method}.jpg"
+        qr_path.write_bytes(b"qr")
+        monkeypatch.setattr(bot, attribute, str(qr_path))
+        fake_bot = FakeBot()
+        context = SimpleNamespace(bot=fake_bot)
+        bot.set_manual_bill_state(
+            123,
+            order_code="MANUAL",
+            currency="VND" if method != "usdt_trc20" else "USD",
+            amount=50000,
+            amount_vnd=50000,
+            base_xu=500,
+            expected_xu=500,
+            xu=500,
+            method=method,
+            pkg_key="50k",
+            foreign_manual=method == "usdt_trc20",
+        )
+        assert asyncio.run(bot.send_manual_method_qr(context, 1, 123, method)) is True
+        assert len(fake_bot.photos) == 1
+        assert fake_bot.messages == []
+        assert fake_bot.photos[0]["caption"]
+        assert fake_bot.photos[0]["reply_markup"] is not None
+
+
+def test_momo_asset_is_public_manual_method(monkeypatch):
+    monkeypatch.setattr(bot, "MANUAL_MOMO_TUITHANTAI_ENABLED", True)
+    labels = [button.text for row in bot.manual_domestic_method_keyboard(123).inline_keyboard for button in row]
+    assert "💗 MoMo/Túi Thần Tài" in labels
+    assert os.path.isfile(bot.manual_method_asset_path("momo_tuithantai"))
+
+
+def test_manual_vnd_amount_then_method_and_blocked_bonus(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "calculate_package_credit_for_user",
+        lambda _uid, amount: {"base_xu": amount // 100, "launch_bonus_xu": 100},
+    )
+    amount_labels = [button.text for row in bot.manual_domestic_amount_keyboard(123).inline_keyboard for button in row]
+    assert amount_labels[:6] == ["💳 10k", "💳 20k", "💳 50k", "💳 100k", "💳 200k", "💳 500k"]
+    bank = bot.manual_vnd_topup_preview(123, "50k", "bank_acb")
+    zalo = bot.manual_vnd_topup_preview(123, "50k", "zalopay_personal")
+    assert bank["bonus_allowed"] is True and bank["expected_xu"] == 600
+    assert zalo["bonus_allowed"] is False and zalo["bonus_xu"] == 0 and zalo["expected_xu"] == 500
+
+
 def _create_manual_deposit_test_db(path):
     conn = sqlite3.connect(path)
     conn.execute(
@@ -7767,6 +7866,37 @@ def _create_manual_deposit_test_db(path):
     )
     conn.commit()
     conn.close()
+
+
+def test_admin_approve_no_bonus_for_blocked_methods(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-blocked-bonus.db"
+    _create_manual_deposit_test_db(db_path)
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    result = bot.create_manual_pending_deposit(
+        SimpleNamespace(id=123, first_name="Customer"),
+        {
+            "currency": "VND",
+            "method": "zalopay_personal",
+            "foreign_manual": False,
+            "amount": 50000,
+            "amount_vnd": 50000,
+            "base_xu": 500,
+            "bonus_xu": 100,
+            "expected_xu": 600,
+            "xu": 600,
+        },
+        tx_hash="blocked-bonus-test",
+    )
+    assert result["ok"] is True
+    assert result["bonus_allowed"] is False
+    assert result["bonus_xu"] == 0
+    assert result["expected_xu"] == 500
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT base_xu,bonus_xu,expected_xu FROM pending_deposits WHERE id=?", (result["id"],)).fetchone()
+    finally:
+        conn.close()
+    assert row == (500, 0, 500)
 
 
 def test_manual_bill_upload_creates_pending_review_without_credit(monkeypatch, tmp_path):
@@ -7869,7 +7999,7 @@ def test_manual_international_topup_fixed_rates_and_bonus_guards(monkeypatch):
         assert preview["rank_discount_percent_preserved"] is True
 
 
-def test_cny_zalopay_is_foreign_and_vnd_methods_keep_bonus_eligibility():
+def test_cny_zalopay_is_foreign_and_vnd_zalopay_blocks_bonus():
     cny_zalopay = {"currency": "CNY", "method": "zalopay_personal", "foreign_manual": True}
     vnd_bank = {"currency": "VND", "method": "bank_acb", "foreign_manual": False}
     vnd_zalopay = {"currency": "VND", "method": "zalopay_personal", "foreign_manual": False}
@@ -7878,7 +8008,9 @@ def test_cny_zalopay_is_foreign_and_vnd_methods_keep_bonus_eligibility():
     assert bot.is_topup_bonus_allowed(cny_zalopay) is False
     assert bot.is_domestic_vnd_topup(vnd_bank) is True
     assert bot.is_launch_bonus_allowed(vnd_bank) is True
-    assert bot.is_first_topup_bonus_allowed(vnd_zalopay) is True
+    assert bot.is_first_topup_bonus_allowed(vnd_zalopay) is False
+    assert bot.is_launch_bonus_allowed(vnd_zalopay) is False
+    assert bot.is_rank_topup_reward_allowed(vnd_zalopay) is False
     assert bot.is_rank_discount_percent_allowed(None, cny_zalopay) is True
 
 
@@ -7892,8 +8024,9 @@ def test_foreign_topup_i18n_hides_bonus_promises_and_vi_has_domestic_notice():
     assert "不包含首次充值奖励" in zh
     assert "首充 30%" not in zh
     assert "chỉ áp dụng cho khách nội địa Việt Nam" in vi
-    for method in ("PayOS", "QR ngân hàng Việt Nam", "ZaloPay", "MoMo"):
-        assert method in vi
+    assert "PayOS" in vi
+    assert "QR ngân hàng Việt Nam/ACB/VietQR" in vi
+    assert "ZaloPay, MoMo, USD, CNY và USDT TRC20 không áp dụng" in vi
 
 
 def test_manual_foreign_session_saves_bonus_flags_and_duplicate_tx(monkeypatch, tmp_path):

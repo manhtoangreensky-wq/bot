@@ -810,13 +810,15 @@ MANUAL_BANK_OWNER     = _env("MANUAL_BANK_OWNER", "NGUYEN MANH TOAN")
 PAYMENT_ASSET_DIR = _env("PAYMENT_ASSET_DIR", "assets/payments")
 MANUAL_BANK_ENABLED = env_flag("MANUAL_BANK_ENABLED", "true")
 MANUAL_ZALOPAY_PERSONAL_ENABLED = env_flag("MANUAL_ZALOPAY_PERSONAL_ENABLED", "true")
-MANUAL_ZALOPAY_MERCHANT_ENABLED = env_flag("MANUAL_ZALOPAY_MERCHANT_ENABLED", "false")
+MANUAL_ZALOPAY_MERCHANT_ENABLED = env_flag("MANUAL_ZALOPAY_MERCHANT_ENABLED", "true")
+MANUAL_MOMO_TUITHANTAI_ENABLED = env_flag("MANUAL_MOMO_TUITHANTAI_ENABLED", "true")
 MANUAL_USDT_TRC20_ENABLED = env_flag("MANUAL_USDT_TRC20_ENABLED", "true")
 MANUAL_USDT_TRC20_ADMIN_ONLY = env_flag("MANUAL_USDT_TRC20_ADMIN_ONLY", "false")
 MANUAL_BANK_QR_PATH = _env("MANUAL_BANK_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "acb_vietqr_manual.jpg"))
 MANUAL_ZALOPAY_PERSONAL_QR_PATH = _env("MANUAL_ZALOPAY_PERSONAL_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "zalopay_personal_qr.jpg"))
 MANUAL_ZALOPAY_MERCHANT_QR_PATH = _env("MANUAL_ZALOPAY_MERCHANT_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "zalopay_merchant_qr.jpg"))
-MANUAL_USDT_TRC20_QR_PATH = _env("MANUAL_USDT_TRC20_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "binance_usdt_trc20_qr.jpg"))
+MANUAL_MOMO_TUITHANTAI_QR_PATH = _env("MANUAL_MOMO_TUITHANTAI_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "momo_tuithantai_qr.jpg"))
+MANUAL_USDT_TRC20_QR_PATH = _env("MANUAL_USDT_TRC20_QR_PATH", os.path.join(PAYMENT_ASSET_DIR, "usdt_trc20_qr.jpg"))
 MANUAL_USDT_TRC20_ADDRESS = _env("MANUAL_USDT_TRC20_ADDRESS", "TUqyVeoRhBtFVJmQzaKkqrTVRa1ULNj6o5")
 MANUAL_FOREIGN_TOPUP_ENABLED = env_flag("MANUAL_FOREIGN_TOPUP_ENABLED", "true")
 USD_FIXED_RATE_VND = max(1, env_int("USD_FIXED_RATE_VND", 25000))
@@ -849,19 +851,19 @@ PROMO_RANK_TOPUP_REWARD_ELIGIBLE_CURRENCIES = {
 PROMO_FIRST_TOPUP_ELIGIBLE_METHODS = {
     value.strip().lower() for value in _env(
         "PROMO_FIRST_TOPUP_ELIGIBLE_METHODS",
-        "payos,manual_bank_acb_vnd,manual_zalopay_personal_vnd,manual_zalopay_merchant_vnd,manual_momo_tuithantai_vnd",
+        "payos,manual_bank_acb_vnd,manual_vietqr_vnd,bank_acb_vietqr",
     ).split(",") if value.strip()
 }
 PROMO_LAUNCH_BONUS_ELIGIBLE_METHODS = {
     value.strip().lower() for value in _env(
         "PROMO_LAUNCH_BONUS_ELIGIBLE_METHODS",
-        "payos,manual_bank_acb_vnd,manual_zalopay_personal_vnd,manual_zalopay_merchant_vnd,manual_momo_tuithantai_vnd",
+        "payos,manual_bank_acb_vnd,manual_vietqr_vnd,bank_acb_vietqr",
     ).split(",") if value.strip()
 }
 PROMO_RANK_TOPUP_REWARD_ELIGIBLE_METHODS = {
     value.strip().lower() for value in _env(
         "PROMO_RANK_TOPUP_REWARD_ELIGIBLE_METHODS",
-        "payos,manual_bank_acb_vnd,manual_zalopay_personal_vnd,manual_zalopay_merchant_vnd,manual_momo_tuithantai_vnd",
+        "payos,manual_bank_acb_vnd,manual_vietqr_vnd,bank_acb_vietqr",
     ).split(",") if value.strip()
 }
 RANK_DISCOUNT_PERCENT_ELIGIBLE_CURRENCIES = {
@@ -5763,14 +5765,28 @@ def manual_custom_payment_text(uid: int, reason: str = "") -> str:
 
 DOMESTIC_VND_METHOD_ALIASES = {
     "payos": "payos",
-    "bank_acb": "manual_bank_acb_vnd",
-    "manual_bank_acb_vnd": "manual_bank_acb_vnd",
+    "bank_acb": "bank_acb_vietqr",
+    "bank_acb_vietqr": "bank_acb_vietqr",
+    "manual_bank_acb_vnd": "bank_acb_vietqr",
+    "manual_vietqr_vnd": "bank_acb_vietqr",
     "zalopay_personal": "manual_zalopay_personal_vnd",
     "manual_zalopay_personal_vnd": "manual_zalopay_personal_vnd",
     "zalopay_merchant": "manual_zalopay_merchant_vnd",
     "manual_zalopay_merchant_vnd": "manual_zalopay_merchant_vnd",
     "momo_tuithantai": "manual_momo_tuithantai_vnd",
     "manual_momo_tuithantai_vnd": "manual_momo_tuithantai_vnd",
+}
+
+DOMESTIC_BONUS_METHODS = {
+    "payos",
+    "bank_acb_vietqr",
+}
+
+BONUS_BLOCKED_METHODS = {
+    "manual_zalopay_personal_vnd",
+    "manual_zalopay_merchant_vnd",
+    "manual_momo_tuithantai_vnd",
+    "usdt_trc20",
 }
 
 def payment_context_value(payment, key: str, default=None):
@@ -5788,6 +5804,10 @@ def canonical_topup_method(method: str) -> str:
     normalized = str(method or "").strip().lower()
     return DOMESTIC_VND_METHOD_ALIASES.get(normalized, normalized)
 
+def configured_topup_method_allowed(method: str, configured_methods) -> bool:
+    canonical = canonical_topup_method(method)
+    return canonical in {canonical_topup_method(item) for item in configured_methods}
+
 def is_domestic_vnd_topup(payment) -> bool:
     currency = str(payment_context_value(payment, "currency", "VND") or "VND").strip().upper()
     method = canonical_topup_method(payment_context_value(payment, "method", ""))
@@ -5795,7 +5815,8 @@ def is_domestic_vnd_topup(payment) -> bool:
         DOMESTIC_TOPUP_BONUS_ENABLED
         and currency == "VND"
         and not payment_context_bool(payment, "foreign_manual", False)
-        and method in PROMO_FIRST_TOPUP_ELIGIBLE_METHODS
+        and method in DOMESTIC_BONUS_METHODS
+        and method not in BONUS_BLOCKED_METHODS
     )
 
 def is_foreign_topup(payment) -> bool:
@@ -5806,20 +5827,30 @@ def is_foreign_topup(payment) -> bool:
 def is_topup_bonus_allowed(payment) -> bool:
     return bool(is_domestic_vnd_topup(payment) and not is_foreign_topup(payment))
 
+def is_topup_bonus_blocked(payment) -> bool:
+    currency = str(payment_context_value(payment, "currency", "VND") or "VND").strip().upper()
+    method = canonical_topup_method(payment_context_value(payment, "method", ""))
+    return bool(
+        currency in {"USD", "CNY"}
+        or payment_context_bool(payment, "foreign_manual", False)
+        or method in BONUS_BLOCKED_METHODS
+        or method not in DOMESTIC_BONUS_METHODS
+    )
+
 def is_first_topup_bonus_allowed(payment) -> bool:
     method = canonical_topup_method(payment_context_value(payment, "method", ""))
     currency = str(payment_context_value(payment, "currency", "VND") or "VND").strip().upper()
-    return bool(is_topup_bonus_allowed(payment) and currency in PROMO_FIRST_TOPUP_ELIGIBLE_CURRENCIES and method in PROMO_FIRST_TOPUP_ELIGIBLE_METHODS)
+    return bool(is_topup_bonus_allowed(payment) and currency in PROMO_FIRST_TOPUP_ELIGIBLE_CURRENCIES and configured_topup_method_allowed(method, PROMO_FIRST_TOPUP_ELIGIBLE_METHODS))
 
 def is_launch_bonus_allowed(payment) -> bool:
     method = canonical_topup_method(payment_context_value(payment, "method", ""))
     currency = str(payment_context_value(payment, "currency", "VND") or "VND").strip().upper()
-    return bool(is_topup_bonus_allowed(payment) and currency in PROMO_LAUNCH_BONUS_ELIGIBLE_CURRENCIES and method in PROMO_LAUNCH_BONUS_ELIGIBLE_METHODS)
+    return bool(is_topup_bonus_allowed(payment) and currency in PROMO_LAUNCH_BONUS_ELIGIBLE_CURRENCIES and configured_topup_method_allowed(method, PROMO_LAUNCH_BONUS_ELIGIBLE_METHODS))
 
 def is_rank_topup_reward_allowed(payment) -> bool:
     method = canonical_topup_method(payment_context_value(payment, "method", ""))
     currency = str(payment_context_value(payment, "currency", "VND") or "VND").strip().upper()
-    return bool(is_topup_bonus_allowed(payment) and currency in PROMO_RANK_TOPUP_REWARD_ELIGIBLE_CURRENCIES and method in PROMO_RANK_TOPUP_REWARD_ELIGIBLE_METHODS)
+    return bool(is_topup_bonus_allowed(payment) and currency in PROMO_RANK_TOPUP_REWARD_ELIGIBLE_CURRENCIES and configured_topup_method_allowed(method, PROMO_RANK_TOPUP_REWARD_ELIGIBLE_METHODS))
 
 def is_rank_discount_percent_allowed(user, payment_or_purchase=None) -> bool:
     payment = payment_or_purchase or {}
@@ -5873,10 +5904,11 @@ def foreign_topup_preview(currency: str, original_amount, method: str = "usdt_tr
 
 def domestic_topup_bonus_notice() -> str:
     return (
-        "Lưu ý: ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50k/100k/200k/500k và các ưu đãi cộng Xu khi lên hạng "
-        "chỉ áp dụng cho khách nội địa Việt Nam hoặc giao dịch VND qua PayOS, QR ngân hàng Việt Nam, ZaloPay hoặc MoMo.\n"
-        "Nạp quốc tế bằng USD/CNY/USDT chỉ quy đổi theo tỉ giá nội bộ và không áp dụng ưu đãi cộng Xu. "
-        "Chiết khấu % theo hạng thành viên vẫn có thể áp dụng khi đủ điều kiện."
+        "Lưu ý:\n"
+        "Ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50k/100k/200k/500k và các ưu đãi cộng Xu khi lên hạng "
+        "chỉ áp dụng cho khách nội địa Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.\n\n"
+        "ZaloPay, MoMo, USD, CNY và USDT TRC20 không áp dụng ưu đãi cộng Xu. "
+        "Khách vẫn có thể hưởng chiết khấu % theo hạng thành viên nếu đủ điều kiện."
     )
 
 def foreign_topup_policy_note(lang: str = "vi") -> str:
@@ -5889,8 +5921,10 @@ def foreign_topup_policy_note(lang: str = "vi") -> str:
 
 MANUAL_PAYMENT_METHODS = {
     "bank_acb": "🏦 Ngân hàng ACB/VietQR",
+    "bank_acb_vietqr": "🏦 Ngân hàng ACB/VietQR",
     "zalopay_personal": "💚 ZaloPay cá nhân",
     "zalopay_merchant": "🛍 ZaloPay cửa hàng",
+    "momo_tuithantai": "💗 MoMo/Túi Thần Tài",
     "usdt_trc20": "🪙 USDT TRC20",
 }
 
@@ -5899,7 +5933,11 @@ def manual_payment_menu_text() -> str:
         "💵 <b>Nạp thủ công TOAN AAS</b>\n\n"
         "Bạn muốn nạp bằng loại tiền nào?\n\n"
         "TOAN AAS chỉ cộng Xu sau khi admin đối soát tiền thật. Ảnh bill hoặc TXID không tự động xác nhận giao dịch.\n\n"
-        + domestic_topup_bonus_notice()
+        "Lưu ý:\n"
+        "Ưu đãi nạp lần đầu, Launch Bonus 50k/100k/200k/500k và các ưu đãi cộng Xu chỉ áp dụng cho khách nội địa Việt Nam "
+        "nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.\n\n"
+        "ZaloPay/MoMo: dùng cho thanh toán CNY nếu chuyển được. Nếu không thanh toán được, vui lòng dùng USDT TRC20.\n\n"
+        "USD/CNY/USDT không áp dụng ưu đãi cộng Xu. Chiết khấu hạng thành viên vẫn áp dụng nếu đủ điều kiện."
     )
 
 def manual_payment_menu_keyboard(uid) -> InlineKeyboardMarkup:
@@ -5915,6 +5953,25 @@ def manual_payment_menu_keyboard(uid) -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(rows)
 
+def manual_domestic_amount_text() -> str:
+    return (
+        "🇻🇳 <b>Nạp Xu bằng VND</b>\n\n"
+        "Chọn mệnh giá bạn muốn nạp. Sau đó bot sẽ hỏi phương thức thanh toán.\n\n"
+        "Ưu đãi cộng Xu chỉ áp dụng khi đủ điều kiện và thanh toán qua PayOS hoặc ACB/VietQR."
+    )
+
+def manual_domestic_amount_keyboard(uid) -> InlineKeyboardMarkup:
+    rows = []
+    for first, second in (("10k", "20k"), ("50k", "100k"), ("200k", "500k")):
+        rows.append([
+            InlineKeyboardButton(f"💳 {PAYMENT_PACKAGES[first]['amount'] // 1000}k", callback_data=f"manual|vndamount|{first}|{uid}"),
+            InlineKeyboardButton(f"💳 {PAYMENT_PACKAGES[second]['amount'] // 1000}k", callback_data=f"manual|vndamount|{second}|{uid}"),
+        ])
+    rows.extend([
+        [InlineKeyboardButton("⬅️ Nạp thủ công", callback_data=f"manual|menu|{uid}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
 def manual_domestic_method_keyboard(uid) -> InlineKeyboardMarkup:
     methods = []
     if MANUAL_BANK_ENABLED:
@@ -5923,8 +5980,8 @@ def manual_domestic_method_keyboard(uid) -> InlineKeyboardMarkup:
         methods.append("zalopay_personal")
     if MANUAL_ZALOPAY_MERCHANT_ENABLED:
         methods.append("zalopay_merchant")
-    if MANUAL_USDT_TRC20_ENABLED and (not MANUAL_USDT_TRC20_ADMIN_ONLY or is_admin_user(uid)):
-        methods.append("usdt_trc20")
+    if MANUAL_MOMO_TUITHANTAI_ENABLED:
+        methods.append("momo_tuithantai")
     rows = []
     for index in range(0, len(methods), 2):
         rows.append([
@@ -5994,6 +6051,10 @@ def manual_foreign_preview_keyboard(preview: dict, uid) -> InlineKeyboardMarkup:
     if currency == "CNY":
         rows.append([
             InlineKeyboardButton("💚 ZaloPay/manual", callback_data=f"manual|fxmethod|CNY|{amount}|zalopay_personal|{uid}"),
+            InlineKeyboardButton("💗 MoMo/Túi Thần Tài", callback_data=f"manual|fxmethod|CNY|{amount}|momo_tuithantai|{uid}"),
+        ])
+        rows.append([
+            InlineKeyboardButton("🛍 ZaloPay cửa hàng", callback_data=f"manual|fxmethod|CNY|{amount}|zalopay_merchant|{uid}"),
             InlineKeyboardButton("🪙 USDT TRC20", callback_data=f"manual|fxmethod|CNY|{amount}|usdt_trc20|{uid}"),
         ])
     else:
@@ -6005,21 +6066,57 @@ def manual_foreign_preview_keyboard(preview: dict, uid) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 def manual_method_enabled(method: str, uid) -> bool:
-    if method == "bank_acb":
+    if method in {"bank_acb", "bank_acb_vietqr"}:
         return bool(MANUAL_BANK_ENABLED)
     if method == "zalopay_personal":
         return bool(MANUAL_ZALOPAY_PERSONAL_ENABLED)
     if method == "zalopay_merchant":
         return bool(MANUAL_ZALOPAY_MERCHANT_ENABLED)
+    if method == "momo_tuithantai":
+        return bool(MANUAL_MOMO_TUITHANTAI_ENABLED)
     if method == "usdt_trc20":
         return bool(MANUAL_USDT_TRC20_ENABLED and (not MANUAL_USDT_TRC20_ADMIN_ONLY or is_admin_user(uid)))
     return False
 
+def manual_vnd_topup_preview(user_id, pkg_key: str, method: str) -> dict:
+    pkg = PAYMENT_PACKAGES.get(str(pkg_key or ""))
+    if not pkg:
+        raise ValueError("invalid_vnd_amount")
+    amount = int(pkg["amount"])
+    payment = {"currency": "VND", "method": method, "foreign_manual": False}
+    bonus_allowed = is_topup_bonus_allowed(payment)
+    credit = calculate_package_credit_for_user(user_id, amount)
+    base_xu = int(credit.get("base_xu") or pkg["xu"])
+    launch_bonus_xu = int(credit.get("launch_bonus_xu") or 0) if bonus_allowed else 0
+    return {
+        "currency": "VND",
+        "original_amount": amount,
+        "fixed_rate_vnd": 1,
+        "amount": amount,
+        "amount_vnd": amount,
+        "base_xu": base_xu,
+        "bonus_xu": launch_bonus_xu,
+        "expected_xu": base_xu + launch_bonus_xu,
+        "xu": base_xu + launch_bonus_xu,
+        "foreign_manual": False,
+        "bonus_allowed": bonus_allowed,
+        "first_bonus_applied": False,
+        "launch_bonus_applied": False,
+        "rank_topup_reward_applied": False,
+        "extra_xu_percent_bonus_applied": False,
+        "rank_discount_percent_preserved": is_rank_discount_percent_allowed(None, payment),
+        "member_points_eligible": True,
+        "method": method,
+        "pkg_key": str(pkg_key),
+    }
+
 def manual_method_asset_path(method: str) -> str:
     configured = {
         "bank_acb": MANUAL_BANK_QR_PATH,
+        "bank_acb_vietqr": MANUAL_BANK_QR_PATH,
         "zalopay_personal": MANUAL_ZALOPAY_PERSONAL_QR_PATH,
         "zalopay_merchant": MANUAL_ZALOPAY_MERCHANT_QR_PATH,
+        "momo_tuithantai": MANUAL_MOMO_TUITHANTAI_QR_PATH,
         "usdt_trc20": MANUAL_USDT_TRC20_QR_PATH,
     }.get(method, "")
     if not configured:
@@ -6036,6 +6133,7 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None) -> s
     pkg_key = str(state.get("pkg_key") or "").strip()
     currency = str(state.get("currency") or "VND").upper()
     foreign_manual = bool(state.get("foreign_manual"))
+    bonus_allowed = is_topup_bonus_allowed({"currency": currency, "method": method, "foreign_manual": foreign_manual})
     transfer_content = str(state.get("transfer_content") or f"AAS {uid} MANUAL")
     selected = (
         f"{format_foreign_amount(state.get('original_amount'))} {currency} — quy đổi {amount:,}đ"
@@ -6043,9 +6141,14 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None) -> s
         (f"{pkg_key} — {amount:,}đ" if amount else "chưa chọn")
     )
     expected_xu = f"{xu} Xu" if xu else "chờ admin xác nhận theo số tiền thật"
-    foreign_note = (
-        "\n• Ưu đãi cộng Xu: <b>không áp dụng cho nạp quốc tế</b>\n"
-        "• Chiết khấu hạng: vẫn giữ khi mua/dùng dịch vụ đủ điều kiện\n"
+    bonus_note = (
+        "• Ưu đãi cộng Xu: <b>chỉ áp dụng nếu tài khoản đủ điều kiện nội địa VND</b>\n"
+        if bonus_allowed else
+        "• Ưu đãi cộng Xu: <b>không áp dụng cho phương thức này</b>\n"
+    )
+    foreign_rate_note = (
+        f"• Tỉ giá tạm tính: <b>{int(state.get('fixed_rate_vnd') or 0):,}đ/{currency}</b>\n"
+        f"• Quy đổi tạm tính: <b>{amount:,}đ</b>\n"
         if foreign_manual else ""
     )
     common = (
@@ -6053,26 +6156,34 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None) -> s
         f"📦 Mệnh giá đã chọn: <b>{html.escape(selected)}</b>\n"
         f"💰 Xu dự kiến: <b>{html.escape(expected_xu)}</b>\n"
         f"🧾 Nội dung: <code>{transfer_content}</code>\n\n"
-        f"{foreign_note}"
+        f"{foreign_rate_note}"
+        f"{bonus_note}"
+        "• Chiết khấu hạng: vẫn áp dụng khi mua/dùng dịch vụ nếu đủ điều kiện\n\n"
         "Các bước:\n1. Chuyển đúng nội dung.\n2. Chụp bill giao dịch.\n"
         "3. Bấm gửi bill rồi gửi ảnh hoặc TXID vào bot.\n4. Chờ admin kiểm tra giao dịch thật và duyệt.\n\n"
         "⚠️ <b>Lưu ý chống fake bill:</b> TOAN AAS chỉ cộng Xu sau khi admin xác minh tiền thật đã vào tài khoản. "
         "Ảnh bill không đồng nghĩa giao dịch đã thành công."
     )
-    if method == "bank_acb":
+    if method in {"bank_acb", "bank_acb_vietqr"}:
         return (
-            "🏦 <b>Nạp thủ công qua ngân hàng</b>\n\n"
+            "🏦 <b>Nạp thủ công qua ACB/VietQR</b>\n\n"
             f"• Ngân hàng: <b>{html.escape(MANUAL_BANK_NAME)}</b>\n"
             f"• Số tài khoản: <code>{html.escape(MANUAL_BANK_ACCOUNT)}</code>\n"
             f"• Chủ tài khoản: <b>{html.escape(PAYMENT_ACCOUNT_OWNER_LABEL)}</b>"
             + common
         )
     if method == "zalopay_personal":
-        return "💚 <b>Nạp thủ công qua ZaloPay</b>\n\nQuét QR ZaloPay cá nhân và chuyển đúng nội dung." + common
+        return "💚 <b>Nạp thủ công qua ZaloPay cá nhân</b>\n\nQuét QR ZaloPay cá nhân và chuyển đúng nội dung." + common
     if method == "zalopay_merchant":
         return (
             "🛍 <b>Nạp qua ZaloPay cửa hàng</b>\n\n"
             "Phương thức này dùng để test/đối soát thủ công và chỉ mở khi admin xác nhận đã test ổn."
+            + common
+        )
+    if method == "momo_tuithantai":
+        return (
+            "💗 <b>Nạp thủ công qua MoMo/Túi Thần Tài</b>\n\n"
+            "Quét QR MoMo/Túi Thần Tài và gửi bill để admin đối soát."
             + common
         )
     return (
@@ -6091,8 +6202,8 @@ def manual_method_keyboard(uid) -> InlineKeyboardMarkup:
         back_callback = f"manual|fxamount|{currency}|{amount}|{uid}"
         back_label = "⬅️ Xác nhận mệnh giá"
     else:
-        back_callback = f"manual|currency|VND|{uid}"
-        back_label = "⬅️ Phương thức nạp"
+        back_callback = f"manual|vndamount|{state.get('pkg_key') or '10k'}|{uid}"
+        back_label = "⬅️ Chọn lại phương thức"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📷 Tôi đã chuyển khoản / gửi bill", callback_data=f"manual|await_bill|{uid}"), InlineKeyboardButton("📂 Lịch sử nạp thủ công", callback_data=f"manual|history|{uid}")],
         [InlineKeyboardButton(back_label, callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
@@ -6120,7 +6231,11 @@ def manual_topup_history_payload(uid) -> tuple[str, InlineKeyboardMarkup]:
                 bonus_text = "không bonus cộng Xu"
             else:
                 amount_text = f"{int(amount or 0):,}đ"
-                bonus_text = "bonus theo chính sách VND nếu có"
+                bonus_text = (
+                    "bonus theo chính sách VND nếu có"
+                    if is_topup_bonus_allowed({"currency": currency, "method": method, "foreign_manual": False})
+                    else "không bonus cộng Xu"
+                )
             adjustment = f", điều chỉnh: {html.escape(str(admin_note or '')[:80])}" if approved_xu and int(approved_xu) != int(xu or 0) and admin_note else ""
             lines.append(
                 f"• #{int(deposit_id)} — {amount_text} — {html.escape(MANUAL_PAYMENT_METHODS.get(method or 'bank_acb', method or 'bank_acb'))} — "
@@ -6138,10 +6253,12 @@ def create_manual_pending_deposit(user, state: dict, file_id: str = "", file_uni
     currency = str(payment.get("currency") or "VND").upper()
     method = str(payment.get("method") or "bank_acb")
     foreign_manual = bool(is_foreign_topup(payment))
+    bonus_allowed = bool(is_topup_bonus_allowed(payment))
     amount_vnd = int(payment.get("amount_vnd") or payment.get("amount") or 0)
-    expected_xu = int(payment.get("expected_xu") or payment.get("xu") or 0)
-    base_xu = int(payment.get("base_xu") or (package_base_xu(amount_vnd) if amount_vnd else expected_xu))
-    bonus_xu = 0 if foreign_manual else int(payment.get("bonus_xu") or max(0, expected_xu - base_xu))
+    requested_xu = int(payment.get("expected_xu") or payment.get("xu") or 0)
+    base_xu = int(payment.get("base_xu") or (package_base_xu(amount_vnd) if amount_vnd else requested_xu))
+    bonus_xu = int(payment.get("bonus_xu") or max(0, requested_xu - base_xu)) if bonus_allowed else 0
+    expected_xu = base_xu + bonus_xu
     original_amount = payment.get("original_amount", amount_vnd)
     fixed_rate_vnd = int(payment.get("fixed_rate_vnd") or (foreign_topup_rate_vnd(currency) if foreign_manual else 1))
     transfer_content = str(payment.get("transfer_content") or f"AAS {uid} MANUAL")
@@ -6191,6 +6308,7 @@ def create_manual_pending_deposit(user, state: dict, file_id: str = "", file_uni
         "amount_vnd": amount_vnd,
         "base_xu": base_xu,
         "bonus_xu": bonus_xu,
+        "bonus_allowed": bonus_allowed,
         "expected_xu": expected_xu,
         "foreign_manual": foreign_manual,
         "rank_discount_percent_preserved": is_rank_discount_percent_allowed(user, payment),
@@ -6201,11 +6319,16 @@ def create_manual_pending_deposit(user, state: dict, file_id: str = "", file_uni
 def manual_pending_admin_text(deposit: dict) -> str:
     foreign = bool(deposit.get("foreign_manual"))
     currency = str(deposit.get("currency") or "VND").upper()
+    bonus_allowed = is_topup_bonus_allowed({
+        "currency": currency,
+        "method": deposit.get("method"),
+        "foreign_manual": foreign,
+    })
     original = format_foreign_amount(deposit.get("original_amount")) if foreign else f"{int(deposit.get('amount_vnd') or 0):,}đ"
     bonus_policy_lines = (
         "First bonus: <b>no</b> | Launch bonus: <b>no</b> | Rank top-up reward: <b>no</b>\n"
         "Extra Xu percent bonus: <b>no</b>\n"
-        if foreign else
+        if not bonus_allowed else
         "First/Launch/Rank bonus: <b>theo chính sách VND nếu đủ điều kiện</b>\n"
     )
     return (
@@ -6217,6 +6340,7 @@ def manual_pending_admin_text(deposit: dict) -> str:
         f"Fixed rate: <b>{int(deposit.get('fixed_rate_vnd') or 0):,}đ</b>\n"
         f"Amount VND: <b>{int(deposit.get('amount_vnd') or 0):,}đ</b>\n"
         f"Base Xu: <b>{int(deposit.get('base_xu') or 0):,}</b>\n"
+        f"Bonus allowed: <b>{'true' if bonus_allowed else 'false'}</b>\n"
         f"Bonus Xu: <b>{int(deposit.get('bonus_xu') or 0):,}</b>\n"
         f"Expected Xu: <b>{int(deposit.get('expected_xu') or 0):,}</b>\n"
         f"Foreign manual: <b>{'yes' if foreign else 'no'}</b>\n"
@@ -6244,10 +6368,15 @@ def manual_pending_user_text(deposit: dict) -> str:
         f"{format_foreign_amount(deposit.get('original_amount'))} {currency}"
         if foreign else f"{int(deposit.get('amount_vnd') or 0):,}đ"
     )
+    bonus_allowed = is_topup_bonus_allowed({
+        "currency": currency,
+        "method": deposit.get("method"),
+        "foreign_manual": foreign,
+    })
     foreign_lines = (
-        "Ưu đãi cộng Xu: <b>không áp dụng cho nạp quốc tế</b>\n"
+        "Ưu đãi cộng Xu: <b>không áp dụng cho phương thức này</b>\n"
         "Chiết khấu hạng: vẫn áp dụng khi mua/dùng dịch vụ nếu đủ điều kiện\n"
-        if foreign else ""
+        if not bonus_allowed else ""
     )
     return (
         "✅ <b>Đã gửi bill/TXID cho Admin. TOAN AAS đã nhận thông tin thanh toán của bạn.</b>\n\n"
@@ -6272,18 +6401,61 @@ async def notify_manual_pending_deposit(context, deposit: dict) -> None:
         except Exception as exc:
             logger.warning("Manual bill admin alert skipped: %s", type(exc).__name__)
 
-async def send_manual_method_qr(context, chat_id, uid, method: str) -> bool:
+async def _send_manual_payment_qr_to_chat(context, chat_id, method: str, caption: str, keyboard=None) -> bool:
     asset_path = manual_method_asset_path(method)
     if asset_path and os.path.isfile(asset_path):
-        with open(asset_path, "rb") as qr_file:
-            await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=qr_file,
-                caption=f"{MANUAL_PAYMENT_METHODS.get(method, method)} — QR nạp thủ công.",
+        try:
+            with open(asset_path, "rb") as qr_file:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=qr_file,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            return True
+        except Exception as exc:
+            await alert_admin(
+                context,
+                "Manual payment asset",
+                f"manual payment QR send failed: method={method}; path={asset_path}; error={type(exc).__name__}",
             )
-        return True
-    await alert_admin(context, "Manual payment asset", f"missing manual payment QR asset: method={method}; path={asset_path or '-'}")
+    else:
+        await alert_admin(context, "Manual payment asset", f"missing manual payment QR asset: method={method}; expected_path={asset_path or '-'}")
+    send_message = getattr(context.bot, "send_message", None)
+    if callable(send_message):
+        try:
+            await send_message(
+                chat_id=chat_id,
+                text=(
+                    "QR phương thức này chưa được cấu hình. TOAN AAS chưa tạo yêu cầu nạp. "
+                    "Vui lòng chọn phương thức khác hoặc liên hệ admin."
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Manual payment QR fallback message skipped: %s", type(exc).__name__)
     return False
+
+async def send_manual_payment_qr(update, context, method: str, caption: str, keyboard=None) -> bool:
+    chat = getattr(update, "effective_chat", None)
+    chat_id = getattr(chat, "id", None)
+    if chat_id is None:
+        query = getattr(update, "callback_query", None)
+        message = getattr(query, "message", None)
+        chat_id = getattr(message, "chat_id", None)
+    if chat_id is None:
+        raise ValueError("manual_payment_chat_missing")
+    return await _send_manual_payment_qr_to_chat(context, chat_id, method, caption, keyboard)
+
+async def send_manual_method_qr(context, chat_id, uid, method: str) -> bool:
+    state = get_active_manual_bill_state(uid) or {}
+    return await _send_manual_payment_qr_to_chat(
+        context,
+        chat_id,
+        method,
+        manual_payment_method_text(uid, method, state),
+        manual_method_keyboard(uid),
+    )
 
 def manual_qr_url(uid: int, amount: int, order_code: int) -> str:
     params = {
@@ -28700,11 +28872,30 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         if query.from_user.id != uid:
             return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
         if currency == "VND":
-            set_manual_bill_state(uid, order_code="MANUAL", currency="VND", method="bank_acb")
+            existing_state = get_active_manual_bill_state(uid) or {}
+            selected_pkg_key = str(existing_state.get("pkg_key") or "")
+            if selected_pkg_key in PAYMENT_PACKAGES:
+                preview = manual_vnd_topup_preview(uid, selected_pkg_key, "bank_acb")
+                set_manual_bill_state(
+                    uid,
+                    order_code=existing_state.get("order_code") or "MANUAL",
+                    step="select_method",
+                    **preview,
+                )
+                return await query.edit_message_text(
+                    "🇻🇳 <b>Chọn phương thức nạp VND</b>\n\n"
+                    f"Mệnh giá: <b>{int(preview['amount_vnd']):,}đ</b>\n"
+                    f"Xu gốc dự kiến: <b>{int(preview['base_xu']):,} Xu</b>\n\n"
+                    "ACB/VietQR có thể nhận ưu đãi cộng Xu nếu tài khoản đủ điều kiện. "
+                    "ZaloPay không áp dụng ưu đãi cộng Xu.".replace(",", "."),
+                    parse_mode="HTML",
+                    reply_markup=manual_domestic_method_keyboard(uid),
+                )
+            set_manual_bill_state(uid, order_code="MANUAL", currency="VND", foreign_manual=False, step="select_amount")
             return await query.edit_message_text(
-                "🇻🇳 <b>Nạp thủ công bằng VND</b>\n\nChọn phương thức nội địa. Các ưu đãi cộng Xu chỉ áp dụng khi giao dịch đủ điều kiện theo chính sách VND.",
+                manual_domestic_amount_text(),
                 parse_mode="HTML",
-                reply_markup=manual_domestic_method_keyboard(uid),
+                reply_markup=manual_domestic_amount_keyboard(uid),
             )
         if not MANUAL_FOREIGN_TOPUP_ENABLED or currency not in SUPPORTED_MANUAL_CURRENCIES or currency not in {"USD", "CNY"}:
             return await query.edit_message_text("⚠️ Loại tiền này chưa được mở cho nạp thủ công.", reply_markup=manual_payment_menu_keyboard(uid))
@@ -28713,6 +28904,24 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             manual_foreign_amount_text(currency),
             parse_mode="HTML",
             reply_markup=manual_foreign_amount_keyboard(currency, uid),
+        )
+    if action == "vndamount" and len(parts) == 4:
+        pkg_key = str(parts[2] or "")
+        uid = int(parts[3]) if str(parts[3]).isdigit() else int(query.from_user.id)
+        if query.from_user.id != uid:
+            return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
+        if pkg_key not in PAYMENT_PACKAGES:
+            return await query.edit_message_text(manual_domestic_amount_text(), parse_mode="HTML", reply_markup=manual_domestic_amount_keyboard(uid))
+        preview = manual_vnd_topup_preview(uid, pkg_key, "bank_acb")
+        set_manual_bill_state(uid, order_code="MANUAL", step="select_method", **preview)
+        return await query.edit_message_text(
+            "🇻🇳 <b>Chọn phương thức nạp VND</b>\n\n"
+            f"Mệnh giá: <b>{int(preview['amount_vnd']):,}đ</b>\n"
+            f"Xu gốc dự kiến: <b>{int(preview['base_xu']):,} Xu</b>\n\n"
+            "ACB/VietQR có thể nhận ưu đãi cộng Xu nếu tài khoản đủ điều kiện. "
+            "ZaloPay không áp dụng ưu đãi cộng Xu.".replace(",", "."),
+            parse_mode="HTML",
+            reply_markup=manual_domestic_method_keyboard(uid),
         )
     if action == "fxamount" and len(parts) == 5:
         currency = str(parts[2] or "").upper()
@@ -28748,7 +28957,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
         uid = int(parts[5]) if str(parts[5]).isdigit() else int(query.from_user.id)
         if query.from_user.id != uid:
             return await query.answer("⚠️ Không phải yêu cầu của bạn!", show_alert=True)
-        if method not in {"zalopay_personal", "usdt_trc20"} or not manual_method_enabled(method, uid):
+        if method not in {"zalopay_personal", "zalopay_merchant", "momo_tuithantai", "usdt_trc20"} or not manual_method_enabled(method, uid):
             return await query.edit_message_text("⚠️ Phương thức này chưa được bật hoặc đang chờ admin kiểm tra.", reply_markup=manual_foreign_amount_keyboard(currency, uid))
         try:
             preview = foreign_topup_preview(currency, parts[3], method=method)
@@ -28764,12 +28973,14 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             step="await_payment",
             **preview,
         )
-        await query.edit_message_text(
+        sent = await send_manual_payment_qr(
+            update,
+            context,
+            method,
             manual_payment_method_text(uid, method, get_active_manual_bill_state(uid)),
-            parse_mode="HTML",
-            reply_markup=manual_method_keyboard(uid),
+            manual_method_keyboard(uid),
         )
-        await send_manual_method_qr(context, query.message.chat_id, uid, method)
+        update_manual_bill_state(uid, step="await_payment" if sent else "select_method")
         return
     uid_token = parts[-1] if len(parts) >= 3 else str(query.from_user.id)
     uid = int(uid_token) if str(uid_token).isdigit() else int(query.from_user.id)
@@ -28792,9 +29003,23 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
                 reply_markup=manual_payment_menu_keyboard(uid),
             )
         state = get_active_manual_bill_state(uid) or {}
-        update_manual_bill_state(uid, method=method, step="await_payment")
-        await query.edit_message_text(manual_payment_method_text(uid, method, get_active_manual_bill_state(uid)), parse_mode="HTML", reply_markup=manual_method_keyboard(uid))
-        await send_manual_method_qr(context, query.message.chat_id, uid, method)
+        pkg_key = str(state.get("pkg_key") or "")
+        if pkg_key not in PAYMENT_PACKAGES:
+            return await query.edit_message_text(
+                manual_domestic_amount_text(),
+                parse_mode="HTML",
+                reply_markup=manual_domestic_amount_keyboard(uid),
+            )
+        preview = manual_vnd_topup_preview(uid, pkg_key, method)
+        update_manual_bill_state(uid, step="select_method", **preview)
+        sent = await send_manual_payment_qr(
+            update,
+            context,
+            method,
+            manual_payment_method_text(uid, method, get_active_manual_bill_state(uid)),
+            manual_method_keyboard(uid),
+        )
+        update_manual_bill_state(uid, step="await_payment" if sent else "select_method")
         return
     if action == "await_bill":
         state = get_active_manual_bill_state(uid)
@@ -87496,6 +87721,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "method": str(pending_order[7] or "bank_acb"),
             "foreign_manual": foreign_manual,
         }
+        topup_bonus_allowed = is_topup_bonus_allowed(payment_context)
         expected_order_xu = int(pending_order[11] or pending_order[4] or 0)
         member_points_eligible = bool(int(pending_order[12] if pending_order[12] is not None else 1))
         first_deposit_before_credit = not user_has_successful_deposit_conn(lookup_conn, target_id)
@@ -87538,18 +87764,28 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     order_launch_xu,
                     pending_order_code,
                 )
+            else:
+                manual_launch_xu = int(pending_order[10] or 0)
+                launch_recorded = record_launch_bonus_redemption(
+                    conn,
+                    target_id,
+                    order_amount,
+                    order_base_xu,
+                    manual_launch_xu,
+                    pending_order_code,
+                )
         c.execute(
             """UPDATE pending_deposits SET status='approved',approved_xu=?,admin_note=?,approved_by=?,approved_at=?,updated_at=?,
                first_bonus_applied=0,launch_bonus_applied=?,rank_topup_reward_applied=0,extra_xu_percent_bonus_applied=0
                WHERE id=? AND status IN ('pending','pending_admin_review')""",
             (int(amount), admin_adjustment_reason, str(update.effective_user.id), now_text(), now_text(), int(launch_recorded > 0), pending_deposit_id)
         )
-        if pending_order_code:
+        if pending_order_code and topup_bonus_allowed:
             c.execute(
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), pending_order_code)
             )
-            if order_amount and order_base_xu and not foreign_manual:
+            if order_amount and order_base_xu and topup_bonus_allowed:
                 promo_result = redeem_promo_for_order(conn, target_id, pending_order_code, order_amount, order_base_xu)
         if order_amount and (not foreign_manual or member_points_eligible):
             c.execute(
@@ -87568,7 +87804,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             c.execute("UPDATE users SET has_deposited=1 WHERE user_id=?", (str(target_id),))
-        if not foreign_manual:
+        if topup_bonus_allowed:
             referral_result = award_referral_bonus_if_needed(
                 conn,
                 target_id,
@@ -87579,9 +87815,9 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         promo_bonus = int(promo_result.get("bonus_xu") or 0)
         promo_code = promo_result.get("code") or ""
-        first_bonus_applied = int(not foreign_manual and normalize_promo_code(promo_code) == normalize_promo_code(PROMO_FIRST_TOPUP_CODE) and promo_bonus > 0)
-        rank_reward_applied = int(not foreign_manual and any(item.get("promo_code") for item in (tier_up_result.get("promos") or [])))
-        extra_percent_applied = int(not foreign_manual and promo_bonus > 0 and not first_bonus_applied)
+        first_bonus_applied = int(topup_bonus_allowed and normalize_promo_code(promo_code) == normalize_promo_code(PROMO_FIRST_TOPUP_CODE) and promo_bonus > 0)
+        rank_reward_applied = int(topup_bonus_allowed and any(item.get("promo_code") for item in (tier_up_result.get("promos") or [])))
+        extra_percent_applied = int(topup_bonus_allowed and promo_bonus > 0 and not first_bonus_applied)
         c.execute(
             """UPDATE pending_deposits SET first_bonus_applied=?,launch_bonus_applied=?,
                rank_topup_reward_applied=?,extra_xu_percent_bonus_applied=? WHERE id=?""",
