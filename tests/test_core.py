@@ -223,7 +223,7 @@ def test_customer_guide_download_routes_are_word_only():
     md = client.get("/download/huong-dan-toan-aas.md")
     assert docx.status_code == 200
     assert md.status_code == 404
-    assert "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx" in docx.headers["content-disposition"]
+    assert "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V2.docx" in docx.headers["content-disposition"]
 
 
 def test_public_branding_and_scope_static_guard():
@@ -236,6 +236,9 @@ def test_public_branding_and_scope_static_guard():
     assert bot.make_payos_description("50k") == "AAS50K"
     assert bot.manual_qr_url(123, 50000, 999).find("AAS+123+999") >= 0
     assert "https://t.me/toanaasbot" in index_html
+    assert "Hướng dẫn sử dụng V2" in index_html
+    assert "Điều khoản &amp; Chính sách V2" in index_html or "Điều khoản & Chính sách V2" in index_html
+    assert "1.000 Xu tương đương 100.000đ" in index_html
     assert "https://t.me/Httdhtoan" not in public_surface
     assert "@Httdhtoan" not in public_surface
     assert "TOAN DAAS" not in public_surface

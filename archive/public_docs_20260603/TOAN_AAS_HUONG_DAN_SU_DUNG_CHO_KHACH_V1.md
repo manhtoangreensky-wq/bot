@@ -1,3 +1,9 @@
+# BẢN CŨ - KHÔNG DÙNG ĐỂ GHIM CHO KHÁCH
+
+Tài liệu này đã được thay bằng `TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V2` cập nhật theo chính sách mới.
+
+---
+
 # TOAN AAS - HƯỚNG DẪN SỬ DỤNG CHO KHÁCH HÀNG
 
 **Phiên bản:** V1 - Stable Revenue Tool Bot  

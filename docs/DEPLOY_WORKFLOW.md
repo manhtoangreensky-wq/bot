@@ -29,7 +29,7 @@ git diff --stat
 4. Add only required files:
 
 ```powershell
-git add bot.py index.html LOGO.png banner.png TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx TOAN_AAS_DIEU_KHOAN_SU_DUNG_DICH_VU_V1.pdf docs/DEPLOY_WORKFLOW.md
+git add bot.py index.html LOGO.png banner.png TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V2.docx TOAN_AAS_DIEU_KHOAN_CHINH_SACH_DICH_VU_V2.pdf docs/public archive/public_docs_20260603 docs/DEPLOY_WORKFLOW.md
 ```
 
 5. Commit:

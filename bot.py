@@ -912,8 +912,8 @@ TRIAL_BONUS_IP_HEADER_MODE = _env("TRIAL_BONUS_IP_HEADER_MODE", "auto")
 TRIAL_BONUS_ALLOW_TELEGRAM_ONLY_FALLBACK = env_flag("TRIAL_BONUS_ALLOW_TELEGRAM_ONLY_FALLBACK", "true")
 ORDER_TTL_MINUTES  = 30
 REFERRAL_BONUS_XU  = 20
-GUIDE_DOCX_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx"
-TERMS_PDF_FILE = "TOAN_AAS_DIEU_KHOAN_SU_DUNG_DICH_VU_V1.pdf"
+GUIDE_DOCX_FILE = "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V2.docx"
+TERMS_PDF_FILE = "TOAN_AAS_DIEU_KHOAN_CHINH_SACH_DICH_VU_V2.pdf"
 LAUNCH_BONUS_BY_AMOUNT = {
     50000: 30,
     100000: 50,
@@ -44450,8 +44450,8 @@ ADMIN_DOCS = {
 }
 
 PUBLIC_DOCS = {
-    "guide_docx": "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V1.docx",
-    "terms_pdf": "TOAN_AAS_DIEU_KHOAN_SU_DUNG_DICH_VU_V1.pdf",
+    "guide_docx": "TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V2.docx",
+    "terms_pdf": "TOAN_AAS_DIEU_KHOAN_CHINH_SACH_DICH_VU_V2.pdf",
 }
 
 def find_risk_package_file(filename: str) -> str:
@@ -55352,7 +55352,7 @@ async def cmd_tool_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "",
         "<b>Khách hàng đang dùng</b>",
         "• AI chat/script/caption/prompt: <code>public</code>",
-        "• Video Factory Lite: <code>/film</code>, <code>/image_prompt</code>, <code>/image_to_video_pack</code>",
+        "• Video / Content Factory: <code>/film</code>, <code>/image_prompt</code>, <code>/image_to_video_pack</code>",
         "• Music/Media: <code>/music_tools</code>, <code>/music_prompt</code>, <code>/music_library</code>, <code>/sfx_library</code>, <code>/media_library</code>",
         "• Voice/audio/image utility: chỉ mở khi công cụ đã test PASS.",
         f"• TOAN AAS Memory: <code>{memory_public_stage()}</code> — <code>/memory</code>, <code>/memory_plan</code>",
@@ -61244,7 +61244,7 @@ def media_factory_overview_text() -> str:
         "• Tạo voice tiếng Việt.\n"
         "• Tạo caption/hashtag/CTA.\n"
         "• Hiện hỗ trợ content/video pack để khách tự dựng/tự đăng.\n"
-        "• Tạo video AI thật: planned/admin-only, chưa mở cho khách.\n\n"
+        "• Tạo Video AI chân thật: planned/admin-only, chưa mở cho khách.\n\n"
         "<b>5. Duyệt nội dung</b>\n"
         "• Bot tạo bản nháp.\n"
         "• Khách/admin duyệt hoặc từ chối.\n"
@@ -61261,7 +61261,7 @@ def media_factory_overview_text() -> str:
         "• <code>/media_factory &lt;chủ đề&gt;</code> — tạo pack trend/script/ảnh/video/caption\n"
         "• <code>/video_factory_flow</code> — xem quy trình đầy đủ\n"
         "• <code>/image_tools</code> — công cụ ảnh\n"
-        "• <code>/video_provider_status</code> — trạng thái tạo video AI thật\n"
+        "• <code>/video_provider_status</code> — trạng thái tạo Video AI chân thật\n"
         "• <code>/image_prompt &lt;chủ đề&gt;</code> — prompt ảnh chân thật\n"
         "• <code>/image_to_video_pack &lt;chủ đề&gt;</code> — prompt video từ ảnh\n"
         "• <code>/content_policy</code> — quy định nội dung/bản quyền\n\n"
@@ -61314,7 +61314,7 @@ def video_factory_flow_text() -> str:
         "<b>Bước 5: Tạo video pack</b>\n"
         "→ <code>/media_factory &lt;chủ đề&gt;</code>\n"
         "→ Kết quả gồm script, storyboard, prompt ảnh/video, voice-over, caption, hashtag, CTA.\n\n"
-        "→ Tạo video AI thật: planned/admin-only, chưa mở cho khách.\n\n"
+        "→ Tạo Video AI chân thật: planned/admin-only, chưa mở cho khách.\n\n"
         "<b>Bước 6: Duyệt</b>\n"
         "→ Khách kiểm tra bản nháp.\n"
         "→ Nếu chưa ổn: có thể yêu cầu tạo lại 1 lần theo chính sách gói.\n"
@@ -61440,7 +61440,7 @@ def fallback_media_factory_pack(topic: str) -> str:
         "• Approval workflow tự động cho khách là roadmap; hiện khách tự duyệt bản nháp trước khi dùng.\n\n"
         "=== 7. TẠO VIDEO THẬT ===\n"
         "• Real video generation: admin-only/not public; khách hiện dùng prompt/video plan.\n"
-        "• Chưa gọi công cụ video AI thật trong bot khách.\n\n"
+        "• Chưa gọi công cụ Video AI chân thật trong bot khách.\n\n"
         "=== 8. ĐĂNG BÀI ===\n"
         "• Customer publish: OFF.\n"
         "• Admin publish: internal test only, cần approval gate.\n"
@@ -71316,7 +71316,7 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• Tạo nhạc AI thật, làm rõ audio",
         "• Ghép nhạc vào video, ghép voice vào video",
         "• Tạo video từ ảnh + nhạc, làm rõ video",
-        "• Tạo video AI thật khi được mở",
+        "• Tạo Video AI chân thật khi được mở",
         "",
         "📦 <b>GÓI THÁNG ĐỊNH HƯỚNG</b>",
         "",
@@ -71366,7 +71366,7 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• Phù hợp chiến dịch nội dung, shop, team affiliate, agency nhỏ",
         "• Ưu tiên xử lý nhiều nội dung hơn theo chính sách đang bật",
         "",
-        "Ghi chú: số lượt VIP chỉ là ước tính vì mỗi công cụ có mức tốn API/server khác nhau. Tác vụ nặng như tạo video AI thật, làm rõ video dài, dịch video dài, tạo nhạc AI/vocal có thể tính Xu riêng cao hơn. Vượt hạn mức gói có thể nạp thêm Xu để dùng tiếp.",
+        "Ghi chú: số lượt VIP chỉ là ước tính vì mỗi công cụ có mức tốn API/server khác nhau. Tác vụ nặng như tạo Video AI chân thật, làm rõ video dài, dịch video dài, tạo nhạc AI/vocal có thể tính Xu riêng cao hơn. Vượt hạn mức gói có thể nạp thêm Xu để dùng tiếp.",
         "",
         "🤖 <b>Chat AI &amp; Dịch thuật theo gói</b>",
         "",
@@ -71546,7 +71546,7 @@ def pricing_frame_video_lines() -> list[str]:
     rows = [
         "🎞 <b>GHÉP ẢNH THÀNH VIDEO</b>",
         "",
-        "Dùng Local Worker/FFmpeg, không gọi VEO/video AI provider. Đây là luồng rẻ hơn video AI thật.",
+        "Dùng Local Worker/FFmpeg, không gọi VEO/video AI provider. Đây là luồng rẻ hơn Video AI chân thật.",
         "",
     ]
     for label, state in examples:
@@ -72210,7 +72210,7 @@ def vip_services_lines() -> list[str]:
         "• Ghép voice vào video",
         "• Tạo video từ ảnh + nhạc",
         "• Làm rõ video",
-        "• Tạo video AI thật khi được mở",
+        "• Tạo Video AI chân thật khi được mở",
         "",
         "<b>Cách tính:</b>",
         "• Gói tháng có một lượng hạn mức VIP tương ứng.",

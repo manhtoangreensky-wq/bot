@@ -1,6 +1,6 @@
 # TOAN AAS Bot
 
-Bot Telegram + FastAPI cho dịch vụ AI tính phí bằng Xu: chat AI, bóc băng audio, đọc voice, tách nền ảnh, tải video sạch, PayOS QR động, referral và dashboard admin.
+Bot Telegram + FastAPI cho TOAN AAS AI Automation System: chat/nội dung, ảnh, video, voice/phụ đề, tài liệu, hỗ trợ ticket, thanh toán Xu và dashboard admin.
 
 ## Chạy cục bộ
 
@@ -36,14 +36,14 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 
 ## Domain web
 
-- Nếu mua được domain `toanaas.com`, `toanaas.vn` hoặc biến thể gần nhất, trỏ DNS về Railway Custom Domain theo hướng dẫn Railway.
-- Sau khi domain hoạt động HTTPS, set `PUBLIC_BASE_URL=https://<domain>` trên Railway để landing page, tracking affiliate `/r/...`, PayOS return/cancel URL và n8n worker dùng đúng domain mới.
+- Website chính thức: `https://www.toanaas.vn/`.
+- Set `PUBLIC_BASE_URL=https://www.toanaas.vn` trên Railway để landing page, tracking affiliate `/r/...`, PayOS return/cancel URL và worker dùng đúng domain public.
 - Không cần đổi code khi đổi domain; chỉ cần cập nhật DNS và biến môi trường.
 
 ## Lệnh người dùng
 
 - `/start`: menu chính.
-- `/huongdan`, `/guide`, `/hdsd`: xem hướng dẫn sử dụng từng bước và tải tài liệu Word/Markdown.
+- `/huongdan`, `/guide`, `/hdsd`: xem hướng dẫn sử dụng từng bước và tải tài liệu Word V2.
 - `/profile`: xem số dư, hạng, tổng chi.
 - `/trial_status`: kiểm tra trạng thái 200 Xu trải nghiệm theo ID Telegram.
 - `/naptien`: tạo hóa đơn PayOS QR động.
@@ -58,7 +58,12 @@ Không lưu token/API key thật trong source code. Cấu hình trên Railway/Re
 Download:
 
 - `/download/huong-dan-toan-aas.docx`
-- `/download/huong-dan-toan-aas.md`
+- `/download/dieu-khoan-su-dung-toan-aas.pdf`
+
+Public sources:
+
+- `docs/public/TOAN_AAS_HUONG_DAN_SU_DUNG_CHO_KHACH_V2.md`
+- `docs/public/TOAN_AAS_DIEU_KHOAN_CHINH_SACH_DICH_VU_V2.md`
 
 Telegram command:
 
