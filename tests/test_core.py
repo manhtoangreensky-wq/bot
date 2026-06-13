@@ -539,6 +539,7 @@ def test_provider_maintenance_error_classify_sanitize_and_freeze(monkeypatch):
     monkeypatch.setattr(bot, "TOOL_FREEZE_VIDEO", False)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     try:
@@ -628,6 +629,7 @@ def test_video_provider_freeze_does_not_block_public_image(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_ERROR_FREEZE_WINDOW_MINUTES", 15)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     monkeypatch.setattr(bot, "SYSTEM_MAINTENANCE_MODE", False)
@@ -850,6 +852,7 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert bot.shopaikey_public_generation_guard("video") == (False, public_off_message)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     assert bot.shopaikey_public_generation_guard("image")[0] is True
@@ -1411,6 +1414,7 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
     assert bot.shopaikey_public_generation_guard("video")[0] is False
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     assert bot.shopaikey_public_generation_guard("image")[0] is True
@@ -2263,13 +2267,13 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "💰 Xem giá" not in image_labels
     assert "📞 Liên hệ admin" not in image_labels
     video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
-    assert any(button.text == "🎬 Video AI thật" and button.callback_data == "menu|video_ai_true" for button in video_buttons)
+    assert any(button.text == "🎬 Video AI chân thật" and button.callback_data == "menu|video_ai_true" for button in video_buttons)
     assert not any(button.text == "✨ Làm theo từng bước" for button in video_buttons)
     assert any(button.text == "🔥 Video theo trend" and button.callback_data == "trendg|start" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
     assert video_labels == [
         "🔥 Video theo trend",
-        "🎬 Video AI thật",
+        "🎬 Video AI chân thật",
         "🧩 Kịch bản → Ảnh → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
@@ -2295,7 +2299,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "create_media|quick_video" not in video_ai_callbacks
     assert "menu|hint_image_to_video_pack" not in video_ai_callbacks
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
-    assert "Video AI thật hiện đang được bảo trì" in bot.video_ai_true_text("vi")
+    assert "Video AI chân thật hiện đang được bảo trì" in bot.video_ai_true_text("vi")
     frame_intro_labels = [button.text for row in bot.video_frame_intro_keyboard("vi").inline_keyboard for button in row]
     assert "📷 Bắt đầu ghép ảnh" in frame_intro_labels
     assert "Local Worker + ffmpeg" in bot.video_frame_intro_text("vi")
@@ -4255,7 +4259,7 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     video_keyboard_source = source_between(source, "def main_video_keyboard", "def main_ai_keyboard")
     assert "🧩 Kịch bản → Ảnh → Video" in video_keyboard_source
     assert "🎞 Ghép ảnh thành video" in video_keyboard_source
-    assert "🎬 Video AI thật" in video_keyboard_source
+    assert "🎬 Video AI chân thật" in video_keyboard_source
     assert "🎥 Tự quay & đổi cảnh AI" in video_keyboard_source
     assert "📺 Kịch bản video dài" in video_keyboard_source
     assert "🔥 Video theo trend" in video_keyboard_source
@@ -5672,7 +5676,7 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
         "chưa trừ Xu",
     ]:
         assert expected in selfscene_plan
-    assert "Video AI thật hiện đang được bảo trì hoặc chưa mở công khai" in bot.self_scene_guard_text("video_guard", "vi")
+    assert "Video AI chân thật hiện đang được bảo trì hoặc chưa mở công khai" in bot.self_scene_guard_text("video_guard", "vi")
 
     video_menu_buttons = [
         button.text
@@ -7427,6 +7431,135 @@ def test_video_system_v9_preview_and_stable_flow_linkage():
     assert 'structured_video_plan(plan, "videoref")' in reference_handler
     assert "video_request_is_vague(prompt)" in vague_handler
     assert "TOAN AAS chưa gọi API video và chưa trừ Xu" in vague_handler
+
+
+def test_video_module_v10_feature_flags_callbacks_and_detailed_prompts(monkeypatch):
+    assert bot.VIDEO_SAMPLE_MAX_SECONDS >= 60
+    assert bot.VIDEO_SAMPLE_MAX_MB >= 1
+    assert bot.VIDEO_PROVIDER_RENDER_MAX_SECONDS >= 1
+    assert isinstance(bot.VIDEO_TEMP_STORAGE_ENABLED, bool)
+
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", False)
+    assert bot.video_render_feature_enabled("promptvideo") is False
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_LONG_RENDER_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_VIDEO_TO_VIDEO_ENABLED", True)
+    assert bot.video_render_feature_enabled("longvideo") is True
+    assert bot.video_render_feature_enabled("selfscene") is True
+
+    idea_callbacks = [
+        button.callback_data
+        for row in bot.video_idea_result_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "videoidea|frame_video" in idea_callbacks
+    assert "videoidea|render_ai" in idea_callbacks
+    long_callbacks = [
+        button.callback_data
+        for row in bot.long_video_result_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "longvideo|frame_video" in long_callbacks
+    assert "longvideo|render_segments" in long_callbacks
+    reference_callbacks = [
+        button.callback_data
+        for row in bot.video_reference_result_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "videoref|sample_segments" in reference_callbacks
+    assert "videoref|video_prompts" in reference_callbacks
+
+    detailed = bot.detailed_video_scene_prompts_text(
+        {
+            "selected_topic": "nước hoa nam",
+            "selected_context": "studio luxury",
+            "selected_motion": "slow push-in",
+            "selected_style": "cinematic",
+            "aspect_ratio": "9:16",
+        },
+        "videoidea",
+        "vi",
+        scene_count=3,
+    )
+    for expected in ("Cảnh 1", "Thời lượng", "Chủ thể/bối cảnh", "Hành động", "Camera", "Ánh sáng/phong cách", "Chuyển cảnh/âm thanh", "Negative"):
+        assert expected in detailed
+
+    source = bot_source_text()
+    idea_handler = source_between(source, "async def handle_video_idea_callback", "def menu_text_main_ai")
+    long_handler = source_between(source, "async def handle_long_video_callback", "async def handle_video_idea_callback")
+    reference_handler = source_between(source, "async def handle_video_reference_callback", "async def handle_video_dubbing_callback")
+    for action in ("frame_video", "render_ai"):
+        assert f'action == "{action}"' in idea_handler
+    for action in ("frame_video", "render_segments"):
+        assert f'action == "{action}"' in long_handler
+    for action in ("sample_segments", "video_prompts"):
+        assert f'action == "{action}"' in reference_handler
+
+
+def test_video_module_v10_reference_sample_accepts_long_planning_without_provider(monkeypatch):
+    uid = 991001
+    replies = []
+
+    class FakeMessage:
+        def __init__(self):
+            self.video = SimpleNamespace(
+                file_id="video-file-id",
+                file_unique_id="video-unique-id",
+                file_name="reference.mp4",
+                mime_type="video/mp4",
+                duration=120,
+                file_size=5 * 1024 * 1024,
+                width=1080,
+                height=1920,
+            )
+            self.document = None
+
+        async def reply_text(self, text, **kwargs):
+            replies.append((text, kwargs))
+
+    bot.clear_developing_video_pending(uid)
+    bot.set_developing_video_pending(uid, "videoref", "await_video")
+    monkeypatch.setattr(bot, "VIDEO_ANALYZE_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_SAMPLE_MAX_SECONDS", 600)
+    monkeypatch.setattr(bot, "VIDEO_SAMPLE_MAX_MB", 100)
+    update = SimpleNamespace(message=FakeMessage(), effective_user=SimpleNamespace(id=uid))
+    assert asyncio.run(bot.handle_video_reference_pending_upload(update, SimpleNamespace())) is True
+    state = bot.get_developing_video_pending(uid)
+    assert state and state["step"] == "direction"
+    assert state["source_file_id"] == "video-file-id"
+    assert int(state["source_duration"]) == 120
+    assert replies and "Đã nhận video mẫu" in replies[-1][0]
+    assert "chia từng đoạn" in replies[-1][0]
+    bot.clear_developing_video_pending(uid)
+    bot.LAST_USER_VIDEO.pop(uid, None)
+
+
+def test_video_module_v10_self_scene_source_status_and_safe_guard():
+    without_source = bot.self_scene_plan_text(
+        {
+            "selected_topic": "người mẫu",
+            "selected_context": "studio",
+            "direction": "cinema",
+            "selected_motion": "orbit",
+            "selected_music": "cinematic",
+        },
+        "vi",
+    )
+    assert "Video đã nhận: <b>chưa — mới lập kế hoạch</b>" in without_source
+    with_source = bot.self_scene_plan_text(
+        {
+            "source_file_id": "telegram-video-id",
+            "selected_topic": "người mẫu",
+            "selected_context": "studio",
+            "direction": "cinema",
+            "selected_motion": "orbit",
+            "selected_music": "cinematic",
+        },
+        "vi",
+    )
+    assert "Video đã nhận: <b>có</b>" in with_source
+    assert "chưa gọi API video" in bot.developing_video_render_guard_text("selfscene", "vi")
+    assert "chưa trừ Xu" in bot.developing_video_render_guard_text("selfscene", "vi")
 
 
 def test_manual_topup_menu_methods(monkeypatch):

@@ -1011,6 +1011,16 @@ FRAME_VIDEO_MAX_CONCURRENT_JOBS = max(1, env_int("FRAME_VIDEO_MAX_CONCURRENT_JOB
 VIDEO_ANALYZE_ENABLED = env_flag("VIDEO_ANALYZE_ENABLED", "true")
 VIDEO_ANALYZE_MAX_SECONDS = max(5, env_int("VIDEO_ANALYZE_MAX_SECONDS", 60))
 VIDEO_ANALYZE_MAX_FRAMES = max(3, env_int("VIDEO_ANALYZE_MAX_FRAMES", 12))
+VIDEO_AI_PUBLIC_ENABLED = env_flag("VIDEO_AI_PUBLIC_ENABLED", "false")
+VIDEO_IMAGE_TO_VIDEO_ENABLED = env_flag("VIDEO_IMAGE_TO_VIDEO_ENABLED", "false")
+VIDEO_VIDEO_TO_VIDEO_ENABLED = env_flag("VIDEO_VIDEO_TO_VIDEO_ENABLED", "false")
+VIDEO_LONG_RENDER_ENABLED = env_flag("VIDEO_LONG_RENDER_ENABLED", "false")
+VIDEO_TREND_RENDER_ENABLED = env_flag("VIDEO_TREND_RENDER_ENABLED", "false")
+VIDEO_SAMPLE_MAX_SECONDS = max(60, env_int("VIDEO_SAMPLE_MAX_SECONDS", 600))
+VIDEO_SAMPLE_MAX_MB = max(1, env_int("VIDEO_SAMPLE_MAX_MB", 100))
+VIDEO_PROVIDER_RENDER_MAX_SECONDS = max(1, env_int("VIDEO_PROVIDER_RENDER_MAX_SECONDS", 60))
+VIDEO_TEMP_CLEANUP_MINUTES = max(1, env_int("VIDEO_TEMP_CLEANUP_MINUTES", 60))
+VIDEO_TEMP_STORAGE_ENABLED = env_flag("VIDEO_TEMP_STORAGE_ENABLED", "true")
 VIDEO_PLAN_FREE_ENABLED = env_flag("VIDEO_PLAN_FREE_ENABLED", "true")
 IMAGE_TO_VIDEO_PLAN_FREE = env_flag("IMAGE_TO_VIDEO_PLAN_FREE", "true")
 VIDEO_SUGGESTION_LIBRARY_ENABLED = env_flag("VIDEO_SUGGESTION_LIBRARY_ENABLED", "true")
@@ -34780,7 +34790,7 @@ def public_video_runtime_status_text() -> str:
     video_freeze = provider_freeze_display("shopaikey_video")
     if video_freeze.get("frozen"):
         return "FROZEN"
-    return "ON" if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else "OFF"
+    return "ON" if (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED) else "OFF"
 
 def public_voice_runtime_status_text() -> str:
     return "admin-only"
@@ -34798,7 +34808,7 @@ def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
         return False, freeze.get("message") or USER_PROVIDER_BUSY_MESSAGE
     if job == "image" and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
         return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
-    if job == "video" and not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+    if job == "video" and not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
         return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
     if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
         return False, "Hệ thống tạo ảnh/video đang bảo trì ngắn hoặc chưa sẵn sàng."
@@ -36157,7 +36167,7 @@ CUSTOMER_GUIDE_SECTIONS = [
         "Hướng dẫn tạo video AI",
         (
             "🎬 <b>Hướng dẫn tạo video AI</b>\n\n"
-            "1. Mở <b>Tạo nội dung / Video</b> rồi chọn <b>🎬 Video AI thật</b>.\n"
+            "1. Mở <b>Tạo nội dung / Video</b> rồi chọn <b>🎬 Video AI chân thật</b>.\n"
             "2. Gửi mô tả video: sản phẩm, cảnh quay, chuyển động, tỉ lệ, thời lượng, phong cách.\n"
             "3. Nếu cần, tạo ảnh khung chính trước rồi dùng ảnh đó để làm video.\n"
             "4. Chọn chất lượng video và xác nhận giá.\n"
@@ -37124,7 +37134,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         return video_v6_keyboard(
             [
                 ("🔥 Video theo trend", "trendg|start"),
-                ("🎬 Video AI thật", "menu|video_ai_true"),
+                ("🎬 Video AI chân thật", "menu|video_ai_true"),
                 ("🧩 Kịch bản → Ảnh → Video", "storyboard|start"),
                 ("🎞 Ghép ảnh thành video", "menu|video_frame_intro"),
                 ("🎥 Tự quay & đổi cảnh AI", "selfscene|start"),
@@ -37850,13 +37860,14 @@ def menu_text_main_video() -> str:
         "🎬 <b>Video TOAN AAS</b>\n\n"
         "Bạn muốn tạo hoặc xử lý video theo hướng nào?\n\n"
         "• Planning như ý tưởng, prompt, storyboard, chuyển động, nhạc/voice là miễn phí.\n"
-        "• Video AI thật chỉ gọi provider và tính Xu sau màn xác nhận.\n"
+        "• Video AI chân thật chỉ gọi provider và tính Xu sau màn xác nhận.\n"
         "• Ghép ảnh thành video dùng Local Worker + ffmpeg và giữ nguyên giá render hiện tại.\n"
         "• Dịch/lồng tiếng sẽ hỏi từng bước; nếu provider chưa sẵn sàng bot chỉ lưu kế hoạch và không trừ Xu."
     )
 
 def video_ai_true_text(lang: str = "vi") -> str:
     enabled, _message = shopaikey_public_generation_guard("video")
+    enabled = bool(enabled and VIDEO_AI_PUBLIC_ENABLED)
     if normalize_user_language(lang) == "zh":
         warning = "" if enabled else "\n\n🎬 真实 AI 视频目前维护中或尚未公开。TOAN AAS 未扣除 Xu。你可以先用 Trend 视频生成 prompt/计划。"
         return (
@@ -37873,9 +37884,9 @@ def video_ai_true_text(lang: str = "vi") -> str:
             "Start from a prompt, image or reference video. TOAN AAS creates the plan first; it only calls a provider and charges Xu after you confirm real rendering."
             f"{warning}"
         )
-    warning = "" if enabled else "\n\n🎬 Video AI thật hiện đang được bảo trì hoặc chưa mở public. TOAN AAS chưa trừ Xu. Bạn có thể dùng Video theo trend để tạo prompt/kế hoạch trước."
+    warning = "" if enabled else "\n\n🎬 Video AI chân thật hiện đang được bảo trì hoặc chưa mở public. TOAN AAS chưa trừ Xu. Bạn có thể dùng Video theo trend để tạo prompt/kế hoạch trước."
     return (
-        "🎬 <b>Video AI thật</b>\n\n"
+        "🎬 <b>Video AI chân thật</b>\n\n"
         "Tạo video bằng provider AI như ShopAIKey VEO, sau này có thể dùng Kling/Runway/WokuShop/Key4U.\n\n"
         "Bạn có thể bắt đầu từ prompt, ảnh hoặc video mẫu tham khảo.\n"
         "TOAN AAS luôn tạo prompt/kế hoạch trước; chỉ khi xác nhận render thật mới gọi provider và tính Xu.\n\n"
@@ -38503,7 +38514,7 @@ def prompt_video_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("1️⃣ Quảng cáo sản phẩm", callback_data="promptvideo|kind|ad"), InlineKeyboardButton("2️⃣ Điện ảnh/kể chuyện", callback_data="promptvideo|kind|cinema")],
         [InlineKeyboardButton("3️⃣ TikTok/Reels", callback_data="promptvideo|kind|viral"), InlineKeyboardButton("✍️ Nhập prompt riêng", callback_data="promptvideo|kind|custom")],
-        [InlineKeyboardButton("🔙 Quay lại Video AI thật", callback_data="menu|video_ai_true"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🔙 Quay lại Video AI chân thật", callback_data="menu|video_ai_true"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def prompt_video_kind_label(kind: str, lang: str = "vi") -> str:
@@ -38808,6 +38819,120 @@ def structured_video_plan(state: dict | None = None, flow: str = "promptvideo") 
     result["validation"] = validate_video_prompt_against_user_request(user_request, result.get("prompt") or "", intent)
     return result
 
+def video_render_feature_enabled(flow: str) -> bool:
+    flow = str(flow or "").strip().lower()
+    if not VIDEO_AI_PUBLIC_ENABLED:
+        return False
+    if flow == "imagevideo":
+        return VIDEO_IMAGE_TO_VIDEO_ENABLED
+    if flow in {"videoref", "selfscene"}:
+        return VIDEO_VIDEO_TO_VIDEO_ENABLED
+    if flow == "longvideo":
+        return VIDEO_LONG_RENDER_ENABLED
+    if flow == "trend":
+        return VIDEO_TREND_RENDER_ENABLED
+    return True
+
+def developing_video_render_guard_text(flow: str, lang: str = "vi", source_ready: bool = True) -> str:
+    flow = str(flow or "").strip().lower()
+    if not source_ready:
+        return (
+            "⚠️ Hãy gửi video/ảnh nguồn trước khi tạo video AI. TOAN AAS chưa gọi provider và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "⚠️ Send the source video/image before generating AI video. No provider call and no Xu charged."
+        )
+    labels_vi = {
+        "imagevideo": "Ảnh → Video AI",
+        "videoref": "Video mẫu → Video AI",
+        "selfscene": "Tự quay & đổi cảnh AI",
+        "longvideo": "Render video dài theo phân đoạn",
+        "trend": "Render Video theo trend",
+        "videoidea": "Render video từ ý tưởng",
+        "promptvideo": "Prompt → Video AI",
+    }
+    labels_en = {
+        "imagevideo": "Image → AI Video",
+        "videoref": "Reference video → AI Video",
+        "selfscene": "Self-shot scene AI",
+        "longvideo": "Long-form segment rendering",
+        "trend": "Trend video rendering",
+        "videoidea": "Idea-to-video rendering",
+        "promptvideo": "Prompt → AI Video",
+    }
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"🎬 <b>{html.escape(labels_en.get(flow, 'AI video rendering'))}</b> is currently guarded or not public.\n\n"
+            "You can keep the plan and scene prompts. TOAN AAS has not called a video provider and has not charged Xu."
+        )
+    return (
+        f"🎬 <b>{html.escape(labels_vi.get(flow, 'Tạo video AI chân thật'))}</b> đang được guard hoặc chưa mở công khai.\n\n"
+        "Bạn vẫn có thể lưu kế hoạch và prompt từng cảnh. TOAN AAS chưa gọi API video/provider và chưa trừ Xu."
+    )
+
+def developing_video_public_package(plan: dict | None, flow: str, lang: str = "vi") -> dict:
+    plan = dict(plan or {})
+    render_plan = structured_video_plan(plan, flow)
+    return {
+        "source": f"{str(flow or 'video')}_plan",
+        "concept_text": plan.get("selected_topic") or plan.get("product") or plan.get("selected_context") or "",
+        "video_prompt": render_plan.get("prompt") or plan.get("selected_prompt") or "",
+        "music_choice": {"label": self_scene_music_label(plan.get("selected_music"), lang)},
+    }
+
+def detailed_video_scene_prompts_text(plan: dict | None, flow: str, lang: str = "vi", scene_count: int = 3) -> str:
+    plan = dict(plan or {})
+    scene_count = max(1, min(12, int(scene_count or 3)))
+    package = structured_video_plan(plan, flow)
+    intent = package.get("intent") or {}
+    topic = _short_pending_text(
+        plan.get("selected_topic") or plan.get("product") or intent.get("user_goal"),
+        220,
+    ) or ("selected subject" if normalize_user_language(lang) != "vi" else "chủ thể đã chọn")
+    setting = _short_pending_text(
+        plan.get("selected_context") or plan.get("context") or intent.get("setting"),
+        180,
+    ) or ("a coherent practical setting" if normalize_user_language(lang) != "vi" else "bối cảnh thực tế, nhất quán")
+    camera = str(intent.get("camera_motion") or plan.get("selected_motion") or "slow push-in")
+    subject_motion = str(intent.get("subject_motion") or "natural controlled movement")
+    ratio = str(intent.get("ratio") or plan.get("aspect_ratio") or "9:16")
+    style = str(intent.get("visual_style") or plan.get("selected_style") or plan.get("idea_kind") or "cinematic commercial")
+    negative = str(package.get("negative_prompt") or "distortion, unstable identity, random text, watermark, abrupt motion")
+    transitions = ["clean cut", "match cut", "soft dissolve", "motivated whip transition"]
+    cameras = [camera, "stable medium tracking shot", "gentle orbit with controlled parallax", "slow pull-out reveal"]
+    if normalize_user_language(lang) != "vi":
+        lines = ["🎬 <b>Detailed scene video prompts</b>", ""]
+        for idx in range(1, scene_count + 1):
+            phase = "hook" if idx == 1 else ("result and soft CTA" if idx == scene_count else ("before/after proof" if idx == scene_count - 1 else f"development beat {idx}"))
+            lines.extend([
+                f"<b>Scene {idx}</b>",
+                f"• Duration: {3 if idx < scene_count else 4}s",
+                f"• Subject/setting: {html.escape(topic)} in {html.escape(setting)}",
+                f"• Action: {html.escape(subject_motion)}; visual goal: {phase}",
+                f"• Camera: {html.escape(cameras[(idx - 1) % len(cameras)])}",
+                f"• Lighting/style: coherent lighting, {html.escape(style)}, aspect ratio {html.escape(ratio)}",
+                f"• Transition/audio: {transitions[(idx - 1) % len(transitions)]}; music/voice follows the saved plan",
+                f"• Negative: {html.escape(negative)}",
+                "",
+            ])
+        lines.append("Planning only. No video provider call and no Xu charged.")
+        return "\n".join(lines)
+    lines = ["🎬 <b>Prompt video từng cảnh — bản chi tiết</b>", ""]
+    for idx in range(1, scene_count + 1):
+        phase = "hook thu hút" if idx == 1 else ("kết quả và CTA nhẹ" if idx == scene_count else ("before/after làm bằng chứng" if idx == scene_count - 1 else f"phát triển ý {idx}"))
+        lines.extend([
+            f"<b>Cảnh {idx}</b>",
+            f"• Thời lượng gợi ý: {3 if idx < scene_count else 4} giây",
+            f"• Chủ thể/bối cảnh: {html.escape(topic)} trong {html.escape(setting)}",
+            f"• Hành động: {html.escape(subject_motion)}; mục tiêu cảnh: {phase}",
+            f"• Camera: {html.escape(cameras[(idx - 1) % len(cameras)])}",
+            f"• Ánh sáng/phong cách: ánh sáng nhất quán, {html.escape(style)}, tỉ lệ {html.escape(ratio)}",
+            f"• Chuyển cảnh/âm thanh: {transitions[(idx - 1) % len(transitions)]}; nhạc/voice theo kế hoạch đã chọn",
+            f"• Negative: {html.escape(negative)}",
+            "",
+        ])
+    lines.append("Đây là bước lập kế hoạch. Bot chưa gọi provider video và chưa trừ Xu.")
+    return "\n".join(lines)
+
 def structured_video_preview_text(state: dict | None = None, lang: str = "vi", flow: str = "promptvideo") -> str:
     package = structured_video_plan(state, flow)
     intent = package.get("intent") or {}
@@ -38891,7 +39016,7 @@ def image_video_start_text(lang: str = "vi") -> str:
 def image_video_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📷 Gửi ảnh" if normalize_user_language(lang) == "vi" else "📷 Send image", callback_data="imagevideo|await_image")],
-        [InlineKeyboardButton("🔙 Quay lại Video AI thật" if normalize_user_language(lang) == "vi" else "🔙 Back to Real AI Video", callback_data="menu|video_ai_true"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("🔙 Quay lại Video AI chân thật" if normalize_user_language(lang) == "vi" else "🔙 Back to Real AI Video", callback_data="menu|video_ai_true"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def image_video_style_suggestions(offset: int = 0, lang: str = "vi") -> list[str]:
@@ -38957,7 +39082,7 @@ def guided_video_public_guard_text(lang: str = "vi", from_image: bool = False) -
         return f"🎬 Real AI Video is under maintenance or not public yet.{extra}\nTOAN AAS has not called the provider API, processed a real video, or charged Xu. You can save this plan first."
     extra = "\nCầu nối gửi ảnh Telegram sang provider video chưa mở an toàn." if from_image else ""
     return (
-        "🎬 Video AI thật hiện đang được bảo trì hoặc chưa mở công khai."
+        "🎬 Video AI chân thật hiện đang được bảo trì hoặc chưa mở công khai."
         f"{extra}\nTOAN AAS chưa gọi API, chưa xử lý video thật và chưa trừ Xu.\nBạn có thể lưu prompt/kế hoạch trước."
     )
 
@@ -38974,13 +39099,13 @@ def video_reference_start_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🎞 <b>Reference video → AI Video</b>\n\n"
-            "Send or reply to a short reference video. TOAN AAS will turn its structure, pacing, camera motion and visual style into a new planning pack.\n\n"
+            f"Send or reply to a reference video up to {VIDEO_SAMPLE_MAX_SECONDS} seconds / {VIDEO_SAMPLE_MAX_MB} MB. TOAN AAS will turn its structure, pacing, camera motion and visual style into a new planning pack.\n\n"
             "TOAN AAS only studies structure and style. Do not copy protected faces, voices, logos, brands or copyrighted content without permission.\n\n"
             "Planning is free. No video provider call and no Xu charge."
         )
     return (
         "🎞 <b>Video mẫu → Video AI</b>\n\n"
-        "Bạn hãy gửi hoặc reply video mẫu. TOAN AAS sẽ phân tích cấu trúc cảnh, phong cách hình ảnh, nhịp dựng, chuyển động camera, prompt ảnh/video và nhạc/voice.\n\n"
+        f"Bạn hãy gửi hoặc reply video mẫu tối đa {VIDEO_SAMPLE_MAX_SECONDS} giây / {VIDEO_SAMPLE_MAX_MB} MB. TOAN AAS sẽ phân tích cấu trúc cảnh, phong cách hình ảnh, nhịp dựng, chuyển động camera, prompt ảnh/video và nhạc/voice.\n\n"
         "TOAN AAS chỉ dùng video mẫu để phân tích cấu trúc, phong cách, nhịp cảnh và chuyển động. "
         "Vui lòng không sao chép y nguyên video, logo, khuôn mặt, giọng nói, thương hiệu hoặc nội dung có bản quyền nếu chưa có quyền sử dụng.\n\n"
         "Bước phân tích/kế hoạch chưa gọi provider video và chưa trừ Xu."
@@ -38991,7 +39116,7 @@ def video_reference_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📎 Tôi sẽ gửi video" if is_vi else "📎 I will send a video", callback_data="videoref|await_video"),
-            InlineKeyboardButton("⬅️ Video AI thật" if is_vi else "⬅️ Real AI Video", callback_data="menu|video_ai_true"),
+            InlineKeyboardButton("⬅️ Video AI chân thật" if is_vi else "⬅️ Real AI Video", callback_data="menu|video_ai_true"),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
@@ -38999,16 +39124,21 @@ def video_reference_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def video_reference_direction_text(state: dict | None = None, lang: str = "vi") -> str:
     duration = _safe_int((state or {}).get("source_duration"), 0)
     duration_line = f"\nVideo: <b>{duration}s</b>" if duration else ""
+    long_note_en = ""
+    long_note_vi = ""
+    if duration > VIDEO_PROVIDER_RENDER_MAX_SECONDS:
+        long_note_en = f"\n\nThis is a long reference sample. TOAN AAS will analyze it as a plan; provider rendering remains limited to segments of at most {VIDEO_PROVIDER_RENDER_MAX_SECONDS} seconds."
+        long_note_vi = f"\n\nĐây là video mẫu dài. TOAN AAS chỉ phân tích thành kế hoạch; nếu render provider thì phải chia từng đoạn tối đa {VIDEO_PROVIDER_RENDER_MAX_SECONDS} giây."
     if normalize_user_language(lang) != "vi":
         return (
             "🎞 <b>Reference video received</b>\n\n"
             "How should TOAN AAS analyze and adapt its structure?"
-            f"{duration_line}\n\nPlanning is free; no provider call and no Xu charged."
+            f"{duration_line}{long_note_en}\n\nPlanning is free; no provider call and no Xu charged."
         )
     return (
         "🎞 <b>Đã nhận video mẫu</b>\n\n"
         "Bạn muốn phân tích và chuyển cấu trúc video này theo hướng nào?"
-        f"{duration_line}\n\nBước này chỉ tạo kế hoạch, chưa gọi provider video và chưa trừ Xu."
+        f"{duration_line}{long_note_vi}\n\nBước này chỉ tạo kế hoạch, chưa gọi provider video và chưa trừ Xu."
     )
 
 def video_reference_direction_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -39201,8 +39331,10 @@ def video_reference_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_v6_keyboard(
         [
             ("🖼 Tạo ảnh từng cảnh" if is_vi else "🖼 Create scene images", "videoref|image_prompts"),
+            ("✂️ Chia video mẫu thành đoạn" if is_vi else "✂️ Split reference into segments", "videoref|sample_segments"),
+            ("🎬 Prompt video từng đoạn" if is_vi else "🎬 Segment video prompts", "videoref|video_prompts"),
             ("🎞 Ghép ảnh thành video" if is_vi else "🎞 Image slideshow video", "videoref|frame_plan"),
-            ("🎬 Tạo video AI thật" if is_vi else "🎬 Generate real AI video", "videoref|generate"),
+            ("🎬 Tạo video AI chân thật" if is_vi else "🎬 Generate real AI video", "videoref|generate"),
             ("🔄 Tạo phiên bản khác" if is_vi else "🔄 Create another version", "videoref|version_refresh"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "videoref|save"),
         ],
@@ -39226,6 +39358,31 @@ def video_reference_image_prompts_text(state: dict | None = None, lang: str = "v
         f"2. <code>{html.escape(topic)}, bối cảnh và demo thực tế, medium shot, sản phẩm chính xác</code>\n"
         f"3. <code>{html.escape(topic)}, hero result, chừa vùng CTA, bố cục premium</code>\n\n"
         "Lập prompt miễn phí. Nếu tạo ảnh thật, bot vẫn dùng bảng giá và màn xác nhận ảnh hiện tại."
+    )
+
+def video_reference_segment_plan_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    duration = max(1, _safe_int(state.get("source_duration"), 0))
+    segment_limit = max(1, int(VIDEO_PROVIDER_RENDER_MAX_SECONDS or 60))
+    segment_count = max(1, math.ceil(duration / segment_limit)) if duration else 1
+    if normalize_user_language(lang) != "vi":
+        return (
+            "✂️ <b>Reference-video segment plan</b>\n\n"
+            f"Reference duration: <b>{duration}s</b>\n"
+            f"Provider render limit per segment: <b>{segment_limit}s</b>\n"
+            f"Suggested segments: <b>{segment_count}</b>\n\n"
+            "Each segment keeps one hook/idea, one camera goal and a clean transition into the next segment. "
+            "TOAN AAS only stores Telegram media metadata in this planning session; it does not load the full video into Railway memory.\n\n"
+            "Planning only. No provider call and no Xu charged."
+        )
+    return (
+        "✂️ <b>Kế hoạch chia video mẫu</b>\n\n"
+        f"Thời lượng video mẫu: <b>{duration} giây</b>\n"
+        f"Giới hạn render provider mỗi đoạn: <b>{segment_limit} giây</b>\n"
+        f"Số đoạn đề xuất: <b>{segment_count}</b>\n\n"
+        "Mỗi đoạn giữ một hook/ý chính, một mục tiêu camera và một điểm chuyển rõ sang đoạn tiếp theo. "
+        "Trong bước planning, TOAN AAS chỉ giữ metadata/file ID Telegram, không nạp toàn bộ video vào RAM Railway.\n\n"
+        "Bot chưa gọi provider video và chưa trừ Xu."
     )
 
 def video_reference_media_info(message) -> dict:
@@ -39268,11 +39425,20 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
             reply_markup=video_reference_start_keyboard(lang),
         )
         return True
-    if info.get("duration") and int(info["duration"]) > int(VIDEO_ANALYZE_MAX_SECONDS or 60):
+    if info.get("duration") and int(info["duration"]) > int(VIDEO_SAMPLE_MAX_SECONDS or 600):
         await update.message.reply_text(
-            f"⚠️ Video mẫu vượt giới hạn {int(VIDEO_ANALYZE_MAX_SECONDS or 60)} giây. Vui lòng gửi video ngắn hơn. Bot chưa trừ Xu."
+            f"⚠️ Video mẫu vượt giới hạn {int(VIDEO_SAMPLE_MAX_SECONDS or 600)} giây. Vui lòng gửi video ngắn hơn. Bot chưa trừ Xu."
             if normalize_user_language(lang) == "vi"
-            else f"⚠️ The reference video exceeds {int(VIDEO_ANALYZE_MAX_SECONDS or 60)} seconds. Send a shorter video. No Xu charged.",
+            else f"⚠️ The reference video exceeds {int(VIDEO_SAMPLE_MAX_SECONDS or 600)} seconds. Send a shorter video. No Xu charged.",
+            reply_markup=video_reference_start_keyboard(lang),
+        )
+        return True
+    max_bytes = int(VIDEO_SAMPLE_MAX_MB or 100) * 1024 * 1024
+    if info.get("file_size") and int(info["file_size"]) > max_bytes:
+        await update.message.reply_text(
+            f"⚠️ Video mẫu vượt giới hạn {int(VIDEO_SAMPLE_MAX_MB or 100)} MB. Vui lòng gửi file nhỏ hơn. Bot chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else f"⚠️ The reference video exceeds {int(VIDEO_SAMPLE_MAX_MB or 100)} MB. Send a smaller file. No Xu charged.",
             reply_markup=video_reference_start_keyboard(lang),
         )
         return True
@@ -39295,6 +39461,54 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
         video_reference_direction_text(state, lang),
         parse_mode="HTML",
         reply_markup=video_reference_direction_keyboard(lang),
+    )
+    return True
+
+async def handle_self_scene_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_developing_video_pending(uid)
+    if not pending or pending.get("flow") != "selfscene" or pending.get("step") != "await_video":
+        return False
+    info = video_reference_media_info(update.message)
+    if not info:
+        return False
+    lang = get_user_language(uid) or "vi"
+    max_bytes = int(VIDEO_SAMPLE_MAX_MB or 100) * 1024 * 1024
+    if info.get("duration") and int(info["duration"]) > int(VIDEO_SAMPLE_MAX_SECONDS or 600):
+        await update.message.reply_text(
+            f"⚠️ Video tự quay vượt giới hạn {VIDEO_SAMPLE_MAX_SECONDS} giây. Vui lòng gửi video ngắn hơn. Bot chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else f"⚠️ The self-shot video exceeds {VIDEO_SAMPLE_MAX_SECONDS} seconds. Send a shorter video. No Xu charged."
+        )
+        return True
+    if info.get("file_size") and int(info["file_size"]) > max_bytes:
+        await update.message.reply_text(
+            f"⚠️ Video tự quay vượt giới hạn {VIDEO_SAMPLE_MAX_MB} MB. Vui lòng gửi file nhỏ hơn. Bot chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else f"⚠️ The self-shot video exceeds {VIDEO_SAMPLE_MAX_MB} MB. Send a smaller file. No Xu charged."
+        )
+        return True
+    remember_last_media(update)
+    cache_recent_media_state(update)
+    set_developing_video_pending(
+        uid,
+        "selfscene",
+        "context",
+        input_type="video",
+        selected_topic=self_scene_input_label("video", lang),
+        source_file_id=info.get("file_id"),
+        source_file_name=info.get("file_name"),
+        source_mime_type=info.get("mime_type"),
+        source_duration=info.get("duration"),
+        source_file_size=info.get("file_size"),
+    )
+    state = get_developing_video_pending(uid) or {}
+    await update.message.reply_text(
+        self_scene_context_text(state, lang),
+        parse_mode="HTML",
+        reply_markup=self_scene_context_keyboard(lang),
     )
     return True
 
@@ -39718,6 +39932,7 @@ def self_scene_plan_text(state: dict, lang: str = "vi") -> str:
     motion = state.get("selected_motion") or state.get("selected_style") or "pushin"
     motion_label = self_scene_style_label(motion, lang)
     music_label = self_scene_music_label(state.get("selected_music") or "cinematic", lang)
+    source_received = bool(state.get("source_file_id"))
     render_state = {
         **(state or {}),
         "selected_prompt": f"{topic}. Change scene to {context_text}. Direction: {direction_label}. Motion: {motion_label}.",
@@ -39733,7 +39948,7 @@ def self_scene_plan_text(state: dict, lang: str = "vi") -> str:
         )
         return (
             "🎥 <b>Self-shot scene AI plan</b>\n\n"
-            "Video received: <b>yes</b>\n"
+            f"Video received: <b>{'yes' if source_received else 'no — planning only'}</b>\n"
             f"Direction: <b>{html.escape(direction_label)}</b>\n"
             f"Subject to preserve: <code>{html.escape(topic)}</code>\n"
             f"New scene: <code>{html.escape(context_text)}</code>\n"
@@ -39757,7 +39972,7 @@ def self_scene_plan_text(state: dict, lang: str = "vi") -> str:
     )
     return (
         "🎥 <b>Kế hoạch đổi cảnh video</b>\n\n"
-        "Video đã nhận: <b>có</b>\n"
+        f"Video đã nhận: <b>{'có' if source_received else 'chưa — mới lập kế hoạch'}</b>\n"
         f"Hướng đổi video: <b>{html.escape(direction_label)}</b>\n"
         f"Đối tượng cần giữ: <code>{html.escape(topic)}</code>\n"
         f"Bối cảnh mới: <code>{html.escape(context_text)}</code>\n"
@@ -39783,7 +39998,7 @@ def self_scene_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return video_v6_keyboard(
         [
             ("🖼 Tạo ảnh khung chính nếu công cụ ảnh mở" if is_vi else "🖼 Keyframe image prompt", "selfscene|image_guard"),
-            ("🎬 Tạo video AI nếu video công khai mở" if is_vi else "🎬 AI video prompt", "selfscene|video_guard"),
+            ("🎬 Tạo video AI chân thật" if is_vi else "🎬 Generate AI video", "selfscene|video_guard"),
             ("🎞 Ghép ảnh thành video nếu có ảnh" if is_vi else "🎞 Use image slideshow video", "selfscene|frame_hint"),
             ("🎵 Gợi ý nhạc" if is_vi else "🎵 Music suggestions", "selfscene|music_guard"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "selfscene|save"),
@@ -39835,7 +40050,7 @@ def self_scene_guard_text(action: str, lang: str = "vi", plan: dict | None = Non
     if action == "save":
         return "💾 TOAN AAS đã lưu kế hoạch trong phiên hiện tại. Bot chưa gọi provider và chưa trừ Xu."
     if action == "video_guard":
-        return "🎬 Video AI thật hiện đang được bảo trì hoặc chưa mở công khai.\nTOAN AAS chưa trừ Xu.\nBạn có thể lưu kế hoạch hoặc dùng ghép ảnh thành video trước."
+        return "🎬 Video AI chân thật hiện đang được bảo trì hoặc chưa mở công khai.\nTOAN AAS chưa trừ Xu.\nBạn có thể lưu kế hoạch hoặc dùng ghép ảnh thành video trước."
     return "⚙️ Tạo ảnh/video thật đang được kiểm soát an toàn ở bước kế hoạch này. TOAN AAS chưa gọi nhà cung cấp AI và chưa trừ Xu."
 
 def long_video_topic_label(topic_key: str, lang: str = "vi") -> str:
@@ -40104,6 +40319,8 @@ def long_video_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧩 Tạo storyboard" if is_vi else "🧩 Create storyboard", "longvideo|storyboard"),
             ("🖼 Tạo prompt ảnh từng cảnh" if is_vi else "🖼 Image prompts by scene", "longvideo|image_prompts"),
             ("🎬 Tạo prompt video từng cảnh" if is_vi else "🎬 Video prompts by scene", "longvideo|video_prompts"),
+            ("🎞 Ghép ảnh từng đoạn" if is_vi else "🎞 Assemble segment images", "longvideo|frame_video"),
+            ("✨ Render AI từng đoạn" if is_vi else "✨ Render AI segments", "longvideo|render_segments"),
             ("🎵 Gợi ý nhạc/voice" if is_vi else "🎵 Music/voice suggestions", "longvideo|music"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save roadmap", "longvideo|save"),
         ],
@@ -40125,6 +40342,8 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
             if normalize_user_language(lang) != "vi"
             else "💾 TOAN AAS đã lưu lộ trình trong phiên hiện tại. Bot chưa gọi provider và chưa trừ Xu."
         )
+    if action == "video_prompts":
+        return detailed_video_scene_prompts_text(plan, "longvideo", lang, scene_count=scene_count)
     if normalize_user_language(lang) != "vi":
         if action == "music":
             return (
@@ -40781,6 +41000,8 @@ def video_idea_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧩 Tạo storyboard" if is_vi else "🧩 Storyboard", "videoidea|storyboard"),
             ("🖼 Prompt ảnh từng cảnh" if is_vi else "🖼 Image prompts", "videoidea|image_prompts"),
             ("🎬 Prompt video từng cảnh" if is_vi else "🎬 Video prompts", "videoidea|video_prompts"),
+            ("🎞 Ghép ảnh thành video" if is_vi else "🎞 Assemble scene images", "videoidea|frame_video"),
+            ("✨ Tạo video AI chân thật" if is_vi else "✨ Generate AI video", "videoidea|render_ai"),
             ("🎵 Gợi ý nhạc/voice" if is_vi else "🎵 Music/voice", "videoidea|music"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "videoidea|save"),
         ],
@@ -40792,6 +41013,8 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
     plan = plan or {}
     topic = _short_pending_text(plan.get("selected_topic") or plan.get("product"), 200) or ("product" if normalize_user_language(lang) != "vi" else "sản phẩm")
     context_text = _short_pending_text(plan.get("context"), 160) or ("selected context" if normalize_user_language(lang) != "vi" else "bối cảnh đã chọn")
+    if action == "video_prompts":
+        return detailed_video_scene_prompts_text(plan, "videoidea", lang, scene_count=6)
     if str(plan.get("idea_kind") or "") == "cinema":
         if normalize_user_language(lang) != "vi":
             if action == "storyboard":
@@ -41310,8 +41533,8 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
     if action == "generate":
         if shopaikey_active_job_for_user(uid, "video"):
             return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(shopaikey_active_job_for_user(uid, "video"), lang))
-        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
-            return await safe_edit_or_send(query, guided_video_public_guard_text(lang), reply_markup=guided_video_result_keyboard("promptvideo", lang))
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED or not video_render_feature_enabled("promptvideo"):
+            return await safe_edit_or_send(query, developing_video_render_guard_text("promptvideo", lang), parse_mode="HTML", reply_markup=guided_video_result_keyboard("promptvideo", lang))
         render_plan = structured_video_plan(state, "promptvideo")
         package = {
             "source": "prompt_to_video",
@@ -41465,7 +41688,12 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         active = shopaikey_active_job_for_user(uid, "video")
         if active:
             return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(active, lang))
-        return await safe_edit_or_send(query, guided_video_public_guard_text(lang, from_image=True), reply_markup=guided_video_result_keyboard("imagevideo", lang))
+        return await safe_edit_or_send(
+            query,
+            developing_video_render_guard_text("imagevideo", lang, source_ready=bool(state.get("source_file_id"))),
+            parse_mode="HTML",
+            reply_markup=guided_video_result_keyboard("imagevideo", lang),
+        )
     return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
 
 async def handle_video_reference_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41573,6 +41801,25 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
             parse_mode="HTML",
             reply_markup=video_reference_result_keyboard(lang),
         )
+    if action == "sample_segments":
+        if not plan:
+            return await safe_edit_or_send(query, video_reference_start_text(lang), parse_mode="HTML", reply_markup=video_reference_start_keyboard(lang))
+        return await safe_edit_or_send(
+            query,
+            video_reference_segment_plan_text(plan, lang),
+            parse_mode="HTML",
+            reply_markup=video_reference_result_keyboard(lang),
+        )
+    if action == "video_prompts":
+        if not plan:
+            return await safe_edit_or_send(query, video_reference_start_text(lang), parse_mode="HTML", reply_markup=video_reference_start_keyboard(lang))
+        duration = max(1, _safe_int(plan.get("source_duration"), 0))
+        scene_count = max(3, min(12, math.ceil(duration / max(1, VIDEO_PROVIDER_RENDER_MAX_SECONDS))))
+        return await safe_edit_or_send_long_html(
+            query,
+            detailed_video_scene_prompts_text(plan, "videoref", lang, scene_count=scene_count),
+            reply_markup=video_reference_result_keyboard(lang),
+        )
     if action == "frame_plan":
         if not plan:
             return await safe_edit_or_send(query, video_reference_start_text(lang), parse_mode="HTML", reply_markup=video_reference_start_keyboard(lang))
@@ -41603,8 +41850,8 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
         active = shopaikey_active_job_for_user(uid, "video")
         if active:
             return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(active, lang))
-        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
-            return await safe_edit_or_send(query, guided_video_public_guard_text(lang), reply_markup=video_reference_result_keyboard(lang))
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED or not video_render_feature_enabled("videoref"):
+            return await safe_edit_or_send(query, developing_video_render_guard_text("videoref", lang), parse_mode="HTML", reply_markup=video_reference_result_keyboard(lang))
         render_plan = structured_video_plan(plan, "videoref")
         package = {
             "source": "reference_video_plan",
@@ -41674,6 +41921,31 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
         )
     if action in {"object", "input"}:
         input_type = parts[2] if len(parts) > 2 else "custom"
+        if input_type == "video":
+            recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
+            if not recent.get("file_id"):
+                set_developing_video_pending(uid, "selfscene", "await_video", input_type="video")
+                return await safe_edit_query_message(
+                    query,
+                    "📎 Hãy gửi video tự quay cần đổi cảnh. TOAN AAS chỉ lưu Telegram file ID trong phiên, chưa gọi provider và chưa trừ Xu."
+                    if normalize_user_language(lang) == "vi"
+                    else "📎 Send the self-shot video to transform. TOAN AAS only keeps its Telegram file ID in this session; no provider call and no Xu charged.",
+                    reply_markup=video_v6_keyboard([], lang, back=("⬅️ Quay lại đối tượng" if normalize_user_language(lang) == "vi" else "⬅️ Back to subject", "selfscene|back_object")),
+                )
+            set_developing_video_pending(
+                uid,
+                "selfscene",
+                "context",
+                input_type="video",
+                selected_topic=self_scene_input_label("video", lang),
+                source_file_id=recent.get("file_id"),
+                source_file_name=recent.get("file_name") or "self_scene_video.mp4",
+                source_mime_type=recent.get("mime_type") or "video/mp4",
+                source_duration=recent.get("duration") or 0,
+                source_file_size=recent.get("file_size") or 0,
+            )
+            state = get_developing_video_pending(uid) or {}
+            return await safe_edit_query_message(query, self_scene_context_text(state, lang), reply_markup=self_scene_context_keyboard(lang))
         if input_type != "custom":
             subject = self_scene_input_label(input_type, lang)
             set_developing_video_pending(uid, "selfscene", "context", input_type=input_type, selected_topic=subject)
@@ -41810,7 +42082,30 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "selfscene", state)
         return await safe_edit_query_message(query, self_scene_plan_text(plan, lang), reply_markup=self_scene_result_keyboard(lang))
-    if action in {"image_guard", "video_guard", "frame_hint", "music_guard", "save"}:
+    if action == "video_guard":
+        plan = get_latest_developing_video_plan(uid, "selfscene")
+        if not plan:
+            return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        if not plan.get("source_file_id"):
+            return await safe_edit_query_message(
+                query,
+                developing_video_render_guard_text("selfscene", lang, source_ready=False),
+                parse_mode="HTML",
+                reply_markup=self_scene_result_keyboard(lang),
+            )
+        active = shopaikey_active_job_for_user(uid, "video")
+        if active:
+            return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(active, lang))
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED or not video_render_feature_enabled("selfscene"):
+            return await safe_edit_query_message(
+                query,
+                developing_video_render_guard_text("selfscene", lang),
+                parse_mode="HTML",
+                reply_markup=self_scene_result_keyboard(lang),
+            )
+        set_public_video_package_context(uid, developing_video_public_package(plan, "selfscene", lang))
+        return await safe_edit_or_send(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
+    if action in {"image_guard", "frame_hint", "music_guard", "save"}:
         plan = get_latest_developing_video_plan(uid, "selfscene")
         if not plan:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
@@ -41951,6 +42246,37 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "longvideo", state)
         return await safe_edit_or_send_long_html(query, long_video_plan_text(plan, lang), reply_markup=long_video_result_keyboard(lang))
+    if action == "frame_video":
+        plan = saved_plan
+        if not plan:
+            return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        photos = developing_video_frame_photos(plan)
+        if len(photos) >= 2:
+            return await open_existing_images_in_frame_video(query, uid, photos, "longvideo_plan", lang=lang)
+        text = (
+            "⚠️ Lộ trình video dài chưa có bộ ảnh phân đoạn. Hãy tạo/lưu ít nhất 2 ảnh rồi dùng Ghép ảnh thành video. Bot chưa render và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "⚠️ This long-form roadmap has no segment image set yet. Create/save at least two images before using image slideshow video. No render and no Xu charged."
+        )
+        return await safe_edit_or_send(query, text, reply_markup=long_video_result_keyboard(lang))
+    if action == "render_segments":
+        plan = saved_plan
+        if not plan:
+            return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        active = shopaikey_active_job_for_user(uid, "video")
+        if active:
+            return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(active, lang))
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED or not video_render_feature_enabled("longvideo"):
+            return await safe_edit_or_send(query, developing_video_render_guard_text("longvideo", lang), parse_mode="HTML", reply_markup=long_video_result_keyboard(lang))
+        package = developing_video_public_package(plan, "longvideo", lang)
+        package["concept_text"] = f"Segment 1/{plan.get('structure') or 'long-form plan'}: {package.get('concept_text') or ''}"
+        set_public_video_package_context(uid, package)
+        notice = (
+            f"🎬 Video dài phải render từng phân đoạn tối đa {VIDEO_PROVIDER_RENDER_MAX_SECONDS} giây. Hãy chọn tier cho phân đoạn đầu tiên."
+            if normalize_user_language(lang) == "vi"
+            else f"🎬 Long-form video must be rendered in segments up to {VIDEO_PROVIDER_RENDER_MAX_SECONDS} seconds. Choose a tier for the first segment."
+        )
+        return await safe_edit_or_send(query, notice + "\n\n" + public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
     if action in {"storyboard", "image_prompts", "video_prompts", "music", "save"}:
         plan = saved_plan
         if not plan:
@@ -42156,6 +42482,28 @@ async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAU
             "✍️ Hãy nhập ý tưởng quảng cáo riêng của bạn." if normalize_user_language(lang) == "vi" else "✍️ Enter your custom advertising idea.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Quay lại 3 ý tưởng" if normalize_user_language(lang) == "vi" else "🔙 Back to ideas", callback_data="videoidea|back_choices"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
+    if action == "frame_video":
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        photos = developing_video_frame_photos(plan)
+        if len(photos) >= 2:
+            return await open_existing_images_in_frame_video(query, uid, photos, "videoidea_plan", lang=lang)
+        text = (
+            "⚠️ Ý tưởng này chưa có bộ ảnh từng cảnh. Hãy tạo/lưu ít nhất 2 ảnh trước khi ghép video. Bot chưa render và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "⚠️ This idea has no scene image set yet. Create/save at least two images before assembling video. No render and no Xu charged."
+        )
+        return await safe_edit_or_send(query, text, reply_markup=video_idea_result_keyboard(lang))
+    if action == "render_ai":
+        if not plan:
+            return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
+        active = shopaikey_active_job_for_user(uid, "video")
+        if active:
+            return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(active, lang))
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED or not video_render_feature_enabled("videoidea"):
+            return await safe_edit_or_send(query, developing_video_render_guard_text("videoidea", lang), parse_mode="HTML", reply_markup=video_idea_result_keyboard(lang))
+        set_public_video_package_context(uid, developing_video_public_package(plan, "videoidea", lang))
+        return await safe_edit_or_send(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
     if action in {"storyboard", "image_prompts", "video_prompts", "music"}:
         if not plan:
             return await safe_edit_or_send(query, video_idea_menu_text(lang), reply_markup=video_idea_menu_keyboard(lang))
@@ -42441,7 +42789,7 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_doc_save_document": ("main_memory", "📄 <b>Lưu tài liệu</b>\n\nBạn hãy gửi file muốn lưu vào kho tài liệu cá nhân. TOAN AAS sẽ kiểm tra dung lượng trước khi lưu. Nên gửi từng file một để tránh lỗi."),
         "hint_pricing": ("main_topup", "💰 <b>Bảng giá</b>\n\nĐang mở bảng giá TOAN AAS."),
         "hint_image_tools": ("main_image", "🖼 <b>Hình ảnh TOAN AAS</b>\n\nChọn đúng tác vụ bằng nút trong menu ảnh. Bot chưa gọi API và chưa trừ Xu khi chỉ mở menu."),
-        "hint_image_to_video_pack": ("main_video", "🎬 <b>Ảnh → Video AI</b>\n\nVui lòng mở <b>🎬 Video AI thật</b> rồi chọn <b>🖼 Ảnh → Video AI</b>. Bot sẽ hướng dẫn gửi ảnh, chọn phong cách, chuyển động và nhạc trước khi tạo video thật.\n\nTOAN AAS chưa gọi API và chưa trừ Xu."),
+        "hint_image_to_video_pack": ("main_video", "🎬 <b>Ảnh → Video AI</b>\n\nVui lòng mở <b>🎬 Video AI chân thật</b> rồi chọn <b>🖼 Ảnh → Video AI</b>. Bot sẽ hướng dẫn gửi ảnh, chọn phong cách, chuyển động và nhạc trước khi tạo video thật.\n\nTOAN AAS chưa gọi API và chưa trừ Xu."),
         "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy công cụ đã bật."),
         "hint_video_status": ("main_guide", "🔄 <b>Kiểm tra trạng thái video</b>\n\nKhi video được gửi vào queue, bot sẽ gửi kèm nút <b>Kiểm tra trạng thái video</b> trong chính tin nhắn job.\n\nNếu bạn không còn tin nhắn đó, hãy gửi admin ID Telegram và job/task gần nhất để TOAN AAS kiểm tra. Không cần bấm tạo lại nhiều lần khi job đang xử lý."),
         "hint_film_blueprint": ("video_workflow", "🚀 <b>Film Blueprint</b>\n\nCopy lệnh:\n<code>/film_blueprint</code>"),
@@ -45059,6 +45407,10 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Package refund guard: <code>{'ON' if package_wallet.get('refund_guard') else 'OFF'}</code> | rank/top-up points excluded <code>{'ON' if package_wallet.get('rank_points_excluded') else 'OFF'}</code>",
         f"• Public video generation: <code>{html.escape(public_video_runtime_status_text())}</code>",
         f"• Public user can generate real video: <code>{'YES' if public_video_runtime_status_text() == 'ON' else 'NO'}</code>",
+        f"• Video AI master flag: <code>{'ON' if VIDEO_AI_PUBLIC_ENABLED else 'OFF'}</code>",
+        f"• Image→video: <code>{'ON' if VIDEO_IMAGE_TO_VIDEO_ENABLED else 'OFF'}</code> | video→video/self-scene: <code>{'ON' if VIDEO_VIDEO_TO_VIDEO_ENABLED else 'OFF'}</code>",
+        f"• Long render: <code>{'ON' if VIDEO_LONG_RENDER_ENABLED else 'OFF'}</code> | trend render: <code>{'ON' if VIDEO_TREND_RENDER_ENABLED else 'OFF'}</code>",
+        f"• Reference sample limits: <code>{VIDEO_SAMPLE_MAX_SECONDS}s / {VIDEO_SAMPLE_MAX_MB}MB</code> | provider segment <code>{VIDEO_PROVIDER_RENDER_MAX_SECONDS}s</code>",
         f"• Admin video smoke tests: <code>{'available/admin-only' if SHOPAIKEY_VIDEO_ADMIN_ONLY else 'disabled'}</code>",
         f"• Video premium: <code>{'admin-only' if VIDEO_PREMIUM_ADMIN_ONLY else ('ON' if VIDEO_TIER_PREMIUM_ENABLED else 'OFF')}</code>",
         "• Video pricing source: <code>tiered_media_pricing</code>",
@@ -47988,7 +48340,7 @@ async def handle_public_video_prompt_pending_text(update: Update, context: Conte
     if not payload.get("enabled"):
         await update.message.reply_text(ui_text(lang, "video.tier_disabled_message"))
         return True
-    if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+    if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
         await update.message.reply_text(ui_text(lang, "media.public_off"))
         return True
     active_video_job = shopaikey_active_job_for_user(uid, "video")
@@ -62353,7 +62705,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
             idx = max(1, min(3, safe_int(value or concept.get("video_prompt_choice") or 1, 1)))
             concept["video_prompt_choice"] = idx
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
-            if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+            if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
                 package = save_latest_video_package(uid, build_cinematic_ad_video_package(uid, concept, lang, source="cinematic_ad_prompt"))
                 return await safe_edit_query_message(
                     query,
@@ -62404,7 +62756,7 @@ async def handle_cinematic_ad_callback(update: Update, context: ContextTypes.DEF
                 concept.setdefault("music_choice", concept.get("music_choice") or "not_selected")
             concept["video_prompt_choice"] = safe_int(value or concept.get("video_prompt_choice") or 1, 1)
             LAST_CINEMATIC_AD_CONCEPTS[cinematic_ad_latest_key(uid)] = concept
-            if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+            if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
                 package = save_latest_video_package(uid, build_cinematic_ad_video_package(uid, concept, lang, no_music=no_music, source="cinematic_ad_music"))
                 return await safe_edit_query_message(
                     query,
@@ -66244,11 +66596,11 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         idx = int(state.get("video_prompt_choice") or 1)
         return await safe_edit_or_send(query, prefix + trend_guided_selected_video_prompt_text(state, idx, lang), parse_mode="HTML", reply_markup=trend_guided_selected_video_prompt_keyboard(lang, is_admin_user(uid)))
     if action == "video_real":
-        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED or not video_render_feature_enabled("trend"):
             package = save_latest_video_package(uid, build_trend_guided_video_package(uid, state, lang))
             return await safe_edit_or_send(
                 query,
-                trend_guided_video_package_saved_text(package, lang),
+                trend_guided_video_package_saved_text(package, lang) + "\n\n" + developing_video_render_guard_text("trend", lang),
                 parse_mode="HTML",
                 reply_markup=trend_guided_video_public_off_keyboard(lang, is_admin_user(uid)),
             )
@@ -66488,7 +66840,7 @@ async def handle_trend_video_flow_callback(update: Update, context: ContextTypes
         match = re.match(r"^image_video_real_(\d+)_(\d+)$", action)
         job_id = safe_int(match.group(1), 0) if match else 0
         idx = max(1, min(3, safe_int(match.group(2), 1) if match else 1))
-        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+        if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED and VIDEO_IMAGE_TO_VIDEO_ENABLED):
             return await safe_edit_or_send(
                 query,
                 image_to_video_public_off_from_prompt_text(job_id, uid, idx, lang),
@@ -68169,7 +68521,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, ui_text(lang, "video.premium_message"))
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "video.tier_disabled_message"))
-        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+        if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
             return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
         active_video_job = shopaikey_active_job_for_user(uid, "video")
         if active_video_job:
@@ -68253,7 +68605,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
                 public_video_active_job_text(lang),
                 reply_markup=public_video_active_job_keyboard(active_video_job, lang),
             )
-        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+        if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
             if is_admin_user(uid):
                 set_quick_media_pending(uid, "quick_video_prompt")
                 return await safe_edit_or_send(
@@ -68280,7 +68632,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             return await safe_edit_or_send(query, ui_text(lang, "video.premium_message"))
         if not payload.get("enabled"):
             return await safe_edit_or_send(query, ui_text(lang, "video.tier_disabled_message"))
-        if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+        if not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
             return await safe_edit_or_send(query, public_video_off_options_text(lang), parse_mode="HTML")
         active_video_job = shopaikey_active_job_for_user(uid, "video")
         if active_video_job:
@@ -69929,7 +70281,7 @@ def pricing_main_lines() -> list[str]:
         "<b>3. 🎬 Video AI</b>",
         *video_items,
         "• Prompt/kế hoạch video: <b>0 Xu</b> nếu chưa tạo video thật.",
-        "• Ảnh → Video AI dùng cùng tier Video AI thật.",
+        "• Ảnh → Video AI dùng cùng tier Video AI chân thật.",
         f"• Trạng thái public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
         "<b>4. 🎞 Ghép ảnh thành video</b>",
@@ -89316,7 +89668,23 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
         set_developing_video_pending(uid, "videoref", "await_video")
         return await safe_edit_or_send(query, video_reference_start_text(lang), parse_mode="HTML", reply_markup=video_reference_start_keyboard(lang))
     if action == "selfscene":
+        recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
         clear_developing_video_pending(uid)
+        if recent.get("file_id"):
+            set_developing_video_pending(
+                uid,
+                "selfscene",
+                "direction",
+                input_type="video",
+                selected_topic=self_scene_input_label("video", lang),
+                source_file_id=recent.get("file_id"),
+                source_file_name=recent.get("file_name") or "self_scene_video.mp4",
+                source_mime_type=recent.get("mime_type") or "video/mp4",
+                source_duration=recent.get("duration") or 0,
+                source_file_size=recent.get("file_size") or 0,
+            )
+            state = get_developing_video_pending(uid) or {}
+            return await safe_edit_or_send(query, self_scene_start_text(lang, state), reply_markup=self_scene_input_keyboard(lang, state))
         return await safe_edit_or_send(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
     if action == "music":
         return await safe_edit_or_send(query, video_upload_music_text(lang), reply_markup=music_library_quick_keyboard(lang))
@@ -89359,6 +89727,8 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_video_reference_pending_upload(update, context):
+        return
+    if await handle_self_scene_pending_upload(update, context):
         return
     if await handle_video_dubbing_pending_upload(update, context):
         return
