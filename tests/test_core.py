@@ -8439,3 +8439,27 @@ def test_no_charge_before_confirm():
         assert charge_call not in editor_source
         assert charge_call not in video_source
     assert "xu_cost=0" in video_source
+
+
+def test_video_prompt_engine_v10_strength_controls_are_prompt_only():
+    callbacks = [
+        button.callback_data
+        for row in bot.guided_video_result_keyboard("promptvideo", "vi").inline_keyboard
+        for button in row
+    ]
+    for strength in ("quick", "director", "viral", "provider_safe", "premium"):
+        assert f"promptvideo|strength|{strength}" in callbacks
+
+    plan = bot.structured_video_plan(
+        {
+            "selected_prompt": "TOAN AAS AI automation business promo, 15 seconds",
+            "prompt_strength": "premium",
+            "selected_motion": "slow push-in",
+            "selected_music": "modern electronic",
+        },
+        "promptvideo",
+    )
+    assert plan["intent"]["prompt_strength"] == "premium"
+    assert "[Global Vision & Tone]" in plan["prompt"]
+    assert "[Shot Breakdown]" in plan["prompt"]
+    assert "[Audio / SFX]" in plan["prompt"]

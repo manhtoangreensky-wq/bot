@@ -58,11 +58,18 @@ from image_prompt_quality import (
     enhance_image_prompt_for_generation,
 )
 from video_prompt_quality import (
+    ACTION_PACKS,
+    AUDIO_MODES,
+    PROMPT_STRENGTH_LEVELS,
+    STYLE_PACKS,
+    VideoPromptSpec,
+    build_video_prompt_example,
     build_video_prompt,
     enhance_video_prompt_for_generation,
     normalize_video_motion,
     parse_video_user_intent,
     validate_video_prompt_against_user_request,
+    video_prompt_library_summary,
     video_request_is_vague,
 )
 from operations_v1a import (
@@ -40379,11 +40386,21 @@ def structured_video_preview_text(state: dict | None = None, lang: str = "vi", f
     keep = "; ".join(intent.get("must_keep") or []) or ("requested subject and identity" if normalize_user_language(lang) != "vi" else "chủ thể và nhận diện đã yêu cầu")
     avoid = package.get("negative_prompt") or "distortion, random text, watermark"
     caution = str(package.get("caution") or "").strip()
+    strength = str(intent.get("prompt_strength") or "director")
+    strength_label = str((PROMPT_STRENGTH_LEVELS.get(strength) or PROMPT_STRENGTH_LEVELS["director"]).get("label") or strength)
+    style_name = str((STYLE_PACKS.get(str(intent.get("style_pack") or "")) or {}).get("name") or intent.get("style_pack") or "custom")
+    action_name = str((ACTION_PACKS.get(str(intent.get("action_pack") or "")) or {}).get("name") or intent.get("action_pack") or "custom")
+    shot_count = len(intent.get("shot_breakdown") or []) or int(intent.get("shot_count") or 0)
+    duration_seconds = int(intent.get("duration_seconds") or 15)
     if normalize_user_language(lang) != "vi":
         return (
             "🎬 <b>Optimized video plan</b>\n\n"
             f"Goal: <b>{html.escape(str(intent.get('user_goal') or 'short-form video'))}</b>\n"
             f"Task: <b>{html.escape(str(intent.get('task_type') or flow))}</b>\n"
+            f"Prompt strength: <b>{html.escape(strength_label)}</b>\n"
+            f"Genre / style: <b>{html.escape(str(intent.get('genre') or 'video'))} / {html.escape(style_name)}</b>\n"
+            f"Primary action: <b>{html.escape(action_name)}</b>\n"
+            f"Duration / shots: <b>{duration_seconds}s / {shot_count}</b>\n"
             f"Camera motion: <b>{html.escape(str(intent.get('camera_motion') or 'stable camera'))}</b>\n"
             f"Subject motion: <b>{html.escape(str(intent.get('subject_motion') or 'natural motion'))}</b>\n"
             f"Ratio/platform: <b>{html.escape(str(intent.get('ratio') or '9:16'))} / {html.escape(str(intent.get('platform') or 'custom'))}</b>\n"
@@ -40407,6 +40424,10 @@ def structured_video_preview_text(state: dict | None = None, lang: str = "vi", f
         "🎬 <b>Kế hoạch video đã tối ưu</b>\n\n"
         f"Mục tiêu: <b>{html.escape(str(intent.get('user_goal') or 'video ngắn'))}</b>\n"
         f"Tác vụ: <b>{html.escape(str(intent.get('task_type') or flow))}</b>\n"
+        f"Mức prompt: <b>{html.escape(strength_label)}</b>\n"
+        f"Thể loại / phong cách: <b>{html.escape(str(intent.get('genre') or 'video'))} / {html.escape(style_name)}</b>\n"
+        f"Hành động chính: <b>{html.escape(action_name)}</b>\n"
+        f"Thời lượng / số shot: <b>{duration_seconds} giây / {shot_count}</b>\n"
         f"Chuyển động camera: <b>{html.escape(str(intent.get('camera_motion') or 'camera ổn định'))}</b>\n"
         f"Chuyển động chủ thể: <b>{html.escape(str(intent.get('subject_motion') or 'chuyển động tự nhiên'))}</b>\n"
         f"Tỉ lệ / nền tảng: <b>{html.escape(str(intent.get('ratio') or '9:16'))} / {html.escape(str(intent.get('platform') or 'custom'))}</b>\n"
@@ -40429,8 +40450,15 @@ def guided_video_plan_text(state: dict | None = None, lang: str = "vi", from_ima
 
 def guided_video_result_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    strength_buttons = [
+        ("⚡ Nhanh gọn" if is_vi else "⚡ Quick", f"{prefix}|strength|quick"),
+        ("🎬 Đạo diễn phim" if is_vi else "🎬 Director", f"{prefix}|strength|director"),
+        ("🔥 Viral nâng cao" if is_vi else "🔥 Advanced viral", f"{prefix}|strength|viral"),
+        ("🧪 Provider-safe", f"{prefix}|strength|provider_safe"),
+        ("👑 Cao cấp" if is_vi else "👑 Premium", f"{prefix}|strength|premium"),
+    ]
     return video_v6_keyboard(
-        [
+        strength_buttons + [
             ("🎬 Tạo video AI nếu công cụ mở" if is_vi else "🎬 Generate AI video if available", f"{prefix}|generate"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", f"{prefix}|save"),
             ("✍️ Sửa prompt" if is_vi else "✍️ Edit prompt", f"{prefix}|edit_prompt"),
@@ -42612,7 +42640,7 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             state["selected_music"] = text
             clear_developing_video_pending(uid)
             plan = save_developing_video_plan(uid, "promptvideo", state)
-            await update.message.reply_text(guided_video_plan_text(plan, lang), parse_mode="HTML", reply_markup=guided_video_result_keyboard("promptvideo", lang))
+            await safe_reply_long_html(update.message, guided_video_plan_text(plan, lang), reply_markup=guided_video_result_keyboard("promptvideo", lang))
             return True
         return True
     if flow == "imagevideo":
@@ -42634,14 +42662,14 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             state["selected_prompt"] = image_video_prompt_from_state(state, lang)
             clear_developing_video_pending(uid)
             plan = save_developing_video_plan(uid, "imagevideo", state)
-            await update.message.reply_text(guided_video_plan_text(plan, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_result_keyboard("imagevideo", lang))
+            await safe_reply_long_html(update.message, guided_video_plan_text(plan, lang, from_image=True), reply_markup=guided_video_result_keyboard("imagevideo", lang))
             return True
         if step == "edit_prompt":
             state = dict(pending)
             state["selected_prompt"] = text
             clear_developing_video_pending(uid)
             plan = save_developing_video_plan(uid, "imagevideo", state)
-            await update.message.reply_text(guided_video_plan_text(plan, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_result_keyboard("imagevideo", lang))
+            await safe_reply_long_html(update.message, guided_video_plan_text(plan, lang, from_image=True), reply_markup=guided_video_result_keyboard("imagevideo", lang))
             return True
         return True
     if flow == "videoref":
@@ -42959,10 +42987,17 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         state["selected_music"] = selected_music
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "promptvideo", state)
-        return await safe_edit_or_send(query, guided_video_plan_text(plan, lang), parse_mode="HTML", reply_markup=guided_video_result_keyboard("promptvideo", lang))
+        return await safe_edit_or_send_long_html(query, guided_video_plan_text(plan, lang), reply_markup=guided_video_result_keyboard("promptvideo", lang))
     if action == "back_music":
         restore_developing_video_pending(uid, "promptvideo", state, "music")
         return await safe_edit_or_send(query, guided_video_music_text(state, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
+    if action == "strength":
+        prompt_strength = value if value in PROMPT_STRENGTH_LEVELS else "director"
+        updated = dict(state)
+        updated["prompt_strength"] = prompt_strength
+        clear_developing_video_pending(uid)
+        plan = save_developing_video_plan(uid, "promptvideo", updated)
+        return await safe_edit_or_send_long_html(query, guided_video_plan_text(plan, lang), reply_markup=guided_video_result_keyboard("promptvideo", lang))
     if action == "edit_prompt":
         restore_developing_video_pending(uid, "promptvideo", state, "edit_prompt")
         text = "✍️ Hãy gửi mô tả mới để TOAN AAS tạo lại 3 prompt." if normalize_user_language(lang) == "vi" else "✍️ Send a new description to rebuild the three prompts."
@@ -43111,10 +43146,17 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         state["selected_prompt"] = image_video_prompt_from_state(state, lang)
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "imagevideo", state)
-        return await safe_edit_or_send(query, guided_video_plan_text(plan, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_result_keyboard("imagevideo", lang))
+        return await safe_edit_or_send_long_html(query, guided_video_plan_text(plan, lang, from_image=True), reply_markup=guided_video_result_keyboard("imagevideo", lang))
     if action == "back_music":
         restore_developing_video_pending(uid, "imagevideo", state, "music")
         return await safe_edit_or_send(query, guided_video_music_text(state, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
+    if action == "strength":
+        prompt_strength = value if value in PROMPT_STRENGTH_LEVELS else "director"
+        updated = dict(state)
+        updated["prompt_strength"] = prompt_strength
+        clear_developing_video_pending(uid)
+        plan = save_developing_video_plan(uid, "imagevideo", updated)
+        return await safe_edit_or_send_long_html(query, guided_video_plan_text(plan, lang, from_image=True), reply_markup=guided_video_result_keyboard("imagevideo", lang))
     if action == "edit_prompt":
         restore_developing_video_pending(uid, "imagevideo", state, "edit_prompt")
         text = "✍️ Hãy gửi prompt video mới cho ảnh này." if normalize_user_language(lang) == "vi" else "✍️ Send a new video prompt for this image."
