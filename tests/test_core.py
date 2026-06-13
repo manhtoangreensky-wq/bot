@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import bot
+import local_worker
 
 
 def bot_source_text() -> str:
@@ -2284,6 +2285,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🧠 Ý tưởng video",
         "🎥 Prompt / Chuyển động",
         "🌐 Dịch/Lồng tiếng video",
+        "🛠 Chỉnh sửa video local",
         "🔙 Quay lại",
         "🏠 Menu chính",
     ]
@@ -8168,3 +8170,139 @@ def test_provider_pipeline_v32_wf_i2v_and_frame_error_guards_present():
     assert "Workflow image-to-video đang OFF" in wf_source
     frame_source = source_between(source, "async def cmd_frame_video_status", "async def cmd_clear_frame_video_error")
     assert "Last error" in frame_source
+
+
+def _editor_test_image_bytes(size=(640, 480), color=(80, 150, 190)):
+    image = bot.Image.new("RGB", size, color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_image_enhance_menu():
+    labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
+    assert "🪄 Chỉnh ảnh tự động" in labels
+    assert "🎨 Công thức màu" in labels
+    assert "✂️ Cắt / Đổi tỉ lệ ảnh" in labels
+    assert "🔠 Thêm chữ / logo" in labels
+    assert "🖼 Làm nét / nâng chất lượng ảnh" in labels
+
+
+def test_image_enhance_preview():
+    ok, output, size_text, preset = bot.process_image_local_editor_bytes(_editor_test_image_bytes(), "photo_clear_detail")
+    assert ok is True
+    assert output.startswith(b"\x89PNG")
+    assert size_text == "640x480"
+    assert preset == "photo_clear_detail"
+
+
+def test_image_preset_clear_detail():
+    preset = bot.IMAGE_EDITOR_PRESETS["photo_clear_detail"]
+    assert preset["contrast"] > 1
+    assert preset["sharpness"] > 1
+    assert bot.image_editor_preset_label("photo_clear_detail") == "Ảnh rõ và chi tiết"
+
+
+def test_image_crop_ratios():
+    source = _editor_test_image_bytes((800, 600))
+    for ratio, expected in {"1:1": "1024x1024", "4:5": "1080x1350", "9:16": "1080x1920", "16:9": "1920x1080"}.items():
+        ok, output, size_text, method = bot.process_image_local_resize_bytes(source, ratio, "crop")
+        assert ok is True
+        assert output.startswith(b"\x89PNG")
+        assert size_text == expected
+        assert method == "crop"
+
+
+def test_video_enhance_menu():
+    labels = [button.text for row in bot.video_editor_menu_keyboard("vi").inline_keyboard for button in row]
+    assert "🪄 Chỉnh màu video" in labels
+    assert "✂️ Cắt / Đổi tỉ lệ video" in labels
+    assert "📱 Làm video dọc 9:16" in labels
+    assert "🔠 Thêm chữ / watermark" in labels
+    assert "🎞 Tăng nét video cơ bản" in labels
+
+
+def test_video_preset_clear():
+    payload = {"preset": "video_clear"}
+    filter_value, is_complex = local_worker.video_editor_filter(payload)
+    assert "eq=" in filter_value
+    assert "unsharp=" in filter_value
+    assert is_complex is False
+
+
+def test_video_crop_9_16():
+    filter_value, is_complex = local_worker.video_editor_filter({"ratio": "9:16", "method": "crop", "preset": "video_clear"})
+    assert "scale=720:1280" in filter_value
+    assert "crop=720:1280" in filter_value
+    assert is_complex is False
+
+
+def test_video_blur_background():
+    filter_value, is_complex = local_worker.video_editor_filter({"ratio": "9:16", "method": "blur", "preset": "video_clear"})
+    assert "gblur=sigma=28" in filter_value
+    assert "overlay=(W-w)/2:(H-h)/2" in filter_value
+    assert is_complex is True
+
+
+def test_add_text_to_image():
+    ok, output, size_text, _preset = bot.process_image_local_editor_bytes(
+        _editor_test_image_bytes(), "photo_clear_detail", overlay_text="TOAN AAS local editor"
+    )
+    assert ok is True
+    assert output.startswith(b"\x89PNG")
+    assert size_text == "640x480"
+
+
+def test_add_watermark_to_image():
+    logo = _editor_test_image_bytes((120, 60), (20, 220, 180))
+    ok, output, size_text, _preset = bot.process_image_local_editor_bytes(
+        _editor_test_image_bytes(), "product_clean", logo_bytes=logo
+    )
+    assert ok is True
+    assert output.startswith(b"\x89PNG")
+    assert size_text == "640x480"
+
+
+def test_add_text_to_video_guard_or_render():
+    filter_value, _is_complex = local_worker.video_editor_filter({"preset": "video_clear", "overlay_text": "TOAN AAS"})
+    assert "drawtext=" in filter_value
+    assert "TOAN AAS" in filter_value
+    source = bot_source_text()
+    assert 'job_type="video_local_edit"' in source
+
+
+def test_local_worker_offline_guard(monkeypatch):
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {
+        "enabled": True,
+        "poll_enabled": True,
+        "token_configured": True,
+        "connected": False,
+    })
+    assert bot.video_editor_worker_ready() is False
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {
+        "enabled": True,
+        "poll_enabled": True,
+        "token_configured": True,
+        "connected": True,
+    })
+    assert bot.video_editor_worker_ready() is True
+
+
+def test_no_provider_called_in_v1():
+    source = bot_source_text()
+    editor_source = source_between(source, "IMAGE_EDITOR_WEB_ROUTE_TEMPLATE", "def image_resize_method_label")
+    video_source = source_between(source, "async def submit_local_video_editor_job", "async def handle_video_upload_callback")
+    for forbidden in ["shopaikey_image", "shopaikey_video", "REPLICATE_API_TOKEN", "OPENAI_API_KEY"]:
+        assert forbidden not in editor_source
+        assert forbidden not in video_source
+    assert "create_local_worker_job" in video_source
+
+
+def test_no_charge_before_confirm():
+    source = bot_source_text()
+    editor_source = source_between(source, "IMAGE_EDITOR_WEB_ROUTE_TEMPLATE", "def image_resize_method_label")
+    video_source = source_between(source, "async def submit_local_video_editor_job", "async def handle_video_upload_callback")
+    for charge_call in ["spend_fixed_credit_info", "deduct", "charge_user", "refund_charged_credit"]:
+        assert charge_call not in editor_source
+        assert charge_call not in video_source
+    assert "xu_cost=0" in video_source

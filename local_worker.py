@@ -2,8 +2,9 @@
 TOAN AAS Local Worker Phase 1.
 
 Runs on the local Windows machine and polls Railway bot internal worker endpoints.
-Phase 1 only supports worker ping and local ffmpeg health checks. ComfyUI is kept
-as planned/not_ready and is not called unless later phases explicitly enable it.
+Supports worker health checks plus guarded local FFmpeg jobs used by TOAN AAS.
+ComfyUI is kept as planned/not_ready and is not called unless later phases
+explicitly enable it.
 """
 
 from __future__ import annotations
@@ -75,6 +76,7 @@ LOCAL_WORKER_MAX_JOB_SECONDS = max(30, env_int("LOCAL_WORKER_MAX_JOB_SECONDS", 6
 LOCAL_FFMPEG_PATH = str(
     os.environ.get("LOCAL_FFMPEG_PATH", r"D:\TOANAAS\ffmpeg-8.1.1\bin\ffmpeg.exe")
 ).strip()
+LOCAL_FFMPEG_FONT_PATH = str(os.environ.get("LOCAL_FFMPEG_FONT_PATH", r"C:\Windows\Fonts\arial.ttf")).strip()
 LOCAL_COMFY_ENABLED = env_flag("LOCAL_COMFY_ENABLED", "false")
 
 
@@ -291,6 +293,108 @@ def telegram_send_video(chat_id: str, video_path: str, caption: str = "") -> str
     return str(videos.get("file_id") or "")
 
 
+VIDEO_EDITOR_PRESET_FILTERS = {
+    "video_clear": "eq=brightness=0.01:contrast=1.06:saturation=1.06,unsharp=5:5:0.55:5:5:0.0",
+    "video_tiktok_pop": "eq=brightness=0.015:contrast=1.10:saturation=1.18,unsharp=5:5:0.65:5:5:0.0",
+    "video_cinematic": "eq=brightness=-0.01:contrast=1.13:saturation=0.94:gamma=0.97,unsharp=5:5:0.40:5:5:0.0",
+    "video_soft_clean": "eq=brightness=0.02:contrast=0.99:saturation=0.96,unsharp=5:5:0.25:5:5:0.0",
+}
+VIDEO_EDITOR_RATIO_SIZES = {"9:16": (720, 1280), "16:9": (1280, 720), "1:1": (1080, 1080), "4:5": (864, 1080)}
+
+
+def ffmpeg_drawtext_escape(value: str) -> str:
+    return (
+        str(value or "")[:260]
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace(":", "\\:")
+        .replace("%", "\\%")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+    )
+
+
+def video_editor_text_filter(text: str) -> str:
+    clean = ffmpeg_drawtext_escape(text)
+    if not clean:
+        return ""
+    font_part = ""
+    if LOCAL_FFMPEG_FONT_PATH and os.path.exists(LOCAL_FFMPEG_FONT_PATH):
+        font_path = LOCAL_FFMPEG_FONT_PATH.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+        font_part = f"fontfile='{font_path}':"
+    return (
+        f"drawtext={font_part}text='{clean}':fontcolor=white:fontsize=h/22:"
+        "borderw=2:bordercolor=black@0.75:box=1:boxcolor=black@0.35:boxborderw=18:"
+        "x=(w-text_w)/2:y=h-text_h-h*0.06"
+    )
+
+
+def video_editor_filter(payload: dict) -> tuple[str, bool]:
+    preset = str(payload.get("preset") or "video_clear")
+    color_filter = VIDEO_EDITOR_PRESET_FILTERS.get(preset, VIDEO_EDITOR_PRESET_FILTERS["video_clear"])
+    if payload.get("sharpen") and "unsharp" not in color_filter:
+        color_filter += ",unsharp=5:5:0.65:5:5:0.0"
+    ratio = str(payload.get("ratio") or "")
+    method = str(payload.get("method") or "crop")
+    width, height = VIDEO_EDITOR_RATIO_SIZES.get(ratio, (0, 0))
+    text_filter = video_editor_text_filter(str(payload.get("overlay_text") or ""))
+    tail = ",".join(part for part in [color_filter, text_filter, "format=yuv420p"] if part)
+    if width and height and method == "blur":
+        complex_filter = (
+            f"[0:v]split=2[bg][fg];"
+            f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},gblur=sigma=28[bg2];"
+            f"[fg]scale={width}:{height}:force_original_aspect_ratio=decrease[fg2];"
+            f"[bg2][fg2]overlay=(W-w)/2:(H-h)/2,setsar=1,{tail}[v]"
+        )
+        return complex_filter, True
+    filters = []
+    if width and height:
+        filters.append(f"scale={width}:{height}:force_original_aspect_ratio=increase")
+        filters.append(f"crop={width}:{height}")
+        filters.append("setsar=1")
+    filters.append(tail)
+    return ",".join(part for part in filters if part), False
+
+
+def run_video_local_edit(job: dict) -> None:
+    job_id = job.get("id")
+    try:
+        payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+        source_file_id = str(payload.get("source_file_id") or "")
+        chat_id = str(payload.get("chat_id") or "")
+        if not source_file_id or not chat_id:
+            update_job(job_id, "failed", "video_local_edit_missing_input")
+            return
+        if not LOCAL_FFMPEG_PATH or not os.path.exists(LOCAL_FFMPEG_PATH):
+            update_job(job_id, "failed", "LOCAL_FFMPEG_PATH missing")
+            return
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "video_editor_input.mp4")
+            output_path = os.path.join(tmpdir, "toan_aas_video_editor.mp4")
+            telegram_download_file(source_file_id, input_path, max_bytes=50 * 1024 * 1024)
+            filter_value, is_complex = video_editor_filter(payload)
+            command = [LOCAL_FFMPEG_PATH, "-y", "-i", input_path]
+            if is_complex:
+                command.extend(["-filter_complex", filter_value, "-map", "[v]", "-map", "0:a?"])
+            else:
+                command.extend(["-vf", filter_value, "-map", "0:v:0", "-map", "0:a?"])
+            command.extend([
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+                "-max_muxing_queue_size", "2048", output_path,
+            ])
+            timeout = min(LOCAL_WORKER_MAX_JOB_SECONDS, max(60, int(payload.get("max_render_seconds") or 300)))
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+            if result.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+                raise RuntimeError(first_line(result.stderr or result.stdout) or "video_local_edit_ffmpeg_failed")
+            output_file_id = telegram_send_video(chat_id, output_path, str(payload.get("caption") or ""))
+        update_job(job_id, "succeeded", "local video edit sent", output_file_id=output_file_id)
+    except subprocess.TimeoutExpired:
+        update_job(job_id, "failed", "video_local_edit_timeout")
+    except Exception as exc:
+        update_job(job_id, "failed", f"video_local_edit:{type(exc).__name__}:{first_line(str(exc))}")
+
+
 def run_frame_video_render(job: dict) -> None:
     job_id = job.get("id")
     try:
@@ -339,6 +443,9 @@ def process_job(job: dict) -> None:
         return
     if job_type == "frame_video_render":
         run_frame_video_render(job)
+        return
+    if job_type == "video_local_edit":
+        run_video_local_edit(job)
         return
     if job_type.startswith("comfy_"):
         update_job(job_id, "failed", "ComfyUI Phase 1 planned/not_ready.")

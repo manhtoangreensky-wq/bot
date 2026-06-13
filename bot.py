@@ -105,12 +105,14 @@ except Exception as e:
     EDGE_TTS_IMPORT_ERROR = str(e)[:240]
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageOps
 except Exception:
     Image = None
     ImageDraw = None
     ImageFont = None
     ImageFilter = None
+    ImageEnhance = None
+    ImageOps = None
 
 try:
     from pypdf import PdfReader, PdfWriter
@@ -29818,6 +29820,7 @@ LOCAL_WORKER_JOB_TYPES = {
     "ffmpeg_health",
     "ffmpeg_probe",
     "frame_video_render",
+    "video_local_edit",
     "add_music_to_video_planned",
     "add_voice_to_video_planned",
     "image_to_music_video_planned",
@@ -32459,6 +32462,11 @@ IMAGE_MENU_PENDING_ACTIONS = {
     "image_resize_ratio_method",
     "image_resize_pixels_custom",
     "image_resize_ratio_custom",
+    "image_editor_wait_image",
+    "image_editor_menu",
+    "image_editor_custom_settings",
+    "image_editor_text_input",
+    "image_editor_wait_logo",
 }
 
 def image_menu_pending_key(user_id) -> str:
@@ -32482,7 +32490,8 @@ def set_image_menu_pending(user_id, action: str, **fields) -> None:
                 "manual_action",
                 "pixel_size", "source_name", "prompt", "current_prompt", "short_prompt",
                 "detail_prompt", "negative_prompt", "selected_variant", "ratio_change",
-                "prompt_source", "back_to", "last_step",
+                "prompt_source", "back_to", "last_step", "editor_mode", "editor_preset",
+                "editor_text", "editor_source",
                 "image_prompt_current_prompt", "image_prompt_short_prompt",
                 "image_prompt_detail_prompt", "image_prompt_negative_prompt",
                 "image_prompt_selected_ratio", "image_prompt_selected_purpose",
@@ -32625,7 +32634,8 @@ def image_menu_v5_text(lang: str = "vi") -> str:
             "Choose a task below.\n\n"
             "• Quick image: choose from suggestions or enter a prompt, then select ratio and tier.\n"
             "• Prompt from image: send an image so the bot writes a matching prompt.\n"
-            "• Edit image: resize, crop/pad/blur, or guarded AI edit when available.\n\n"
+            "• Local editor: auto enhance, color presets, crop/resize, text/logo and basic sharpen.\n"
+            "• Advanced AI edit remains guarded until a provider is ready.\n\n"
             "Any real image generation step will ask for confirmation before charging Xu."
         )
     return (
@@ -32633,7 +32643,8 @@ def image_menu_v5_text(lang: str = "vi") -> str:
         "Chọn tác vụ bên dưới:\n\n"
         "• 🖼 <b>Tạo ảnh nhanh</b>: chọn gợi ý hoặc nhập prompt, sau đó chọn tỉ lệ và tier.\n"
         "• ✍️ <b>Tạo prompt từ ảnh</b>: gửi ảnh để bot viết prompt giống/phù hợp ảnh đó.\n"
-        "• 🧩 <b>Chỉnh sửa ảnh</b>: resize, đổi tỉ lệ, crop/thêm nền, chỉnh sửa AI nếu công cụ mở.\n\n"
+        "• 🪄 <b>Chỉnh sửa ảnh / Editor local</b>: chỉnh tự động, preset màu, crop/resize, thêm chữ/logo và làm nét cơ bản.\n"
+        "• ✨ <b>Chỉnh sửa AI nâng cao</b>: vẫn được guard ở Phase 2, chưa mở giả.\n\n"
         "Các bước tạo ảnh thật đều có xác nhận trước khi trừ Xu và hoàn Xu nếu provider lỗi theo policy."
     )
 
@@ -33621,6 +33632,303 @@ def process_image_local_resize_bytes(img_bytes: bytes, ratio: str = "", method: 
             return True, out.getvalue(), f"{width}x{height}", method
     except Exception as e:
         return False, b"", f"local_resize_failed: {sanitize_log_text(str(e))[:160]}", method
+
+
+IMAGE_EDITOR_WEB_ROUTE_TEMPLATE = "/editor/image/{session_id}"  # Phase 2 web editor handoff.
+IMAGE_EDITOR_PRESETS = {
+    "photo_clear_detail": {"brightness": 1.03, "contrast": 1.10, "saturation": 1.05, "sharpness": 1.30, "tone": "neutral"},
+    "product_clean": {"brightness": 1.08, "contrast": 1.08, "saturation": 1.02, "sharpness": 1.22, "tone": "clean"},
+    "cinematic_warm": {"brightness": 0.99, "contrast": 1.14, "saturation": 1.08, "sharpness": 1.12, "tone": "warm"},
+    "fresh_blue": {"brightness": 1.03, "contrast": 1.08, "saturation": 1.12, "sharpness": 1.16, "tone": "cool"},
+    "food_vivid": {"brightness": 1.04, "contrast": 1.12, "saturation": 1.24, "sharpness": 1.25, "tone": "warm"},
+}
+
+
+def image_editor_preset_label(preset: str = "", lang: str = "vi") -> str:
+    labels_vi = {
+        "photo_clear_detail": "Ảnh rõ và chi tiết",
+        "product_clean": "Sản phẩm sạch sáng",
+        "cinematic_warm": "Cinematic ấm",
+        "fresh_blue": "Tươi xanh",
+        "food_vivid": "Ẩm thực nổi bật",
+        "custom": "Thông số tùy chỉnh",
+        "upscale_basic": "Làm nét / nâng chất lượng cơ bản",
+        "text_overlay": "Thêm chữ / watermark",
+        "logo_overlay": "Thêm logo",
+    }
+    labels_en = {
+        "photo_clear_detail": "Clear detail",
+        "product_clean": "Clean product",
+        "cinematic_warm": "Warm cinematic",
+        "fresh_blue": "Fresh blue",
+        "food_vivid": "Vivid food",
+        "custom": "Custom settings",
+        "upscale_basic": "Basic sharpen / upscale",
+        "text_overlay": "Text / watermark",
+        "logo_overlay": "Logo overlay",
+    }
+    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(preset or ""), str(preset or "local"))
+
+
+def parse_image_editor_settings(value: str = "") -> dict:
+    text = str(value or "").lower().replace(",", " ")
+    aliases = {
+        "brightness": ("brightness", "sang", "độ_sáng"),
+        "contrast": ("contrast", "tuongphan", "tương_phản"),
+        "saturation": ("saturation", "color", "mau", "độ_màu"),
+        "sharpness": ("sharpness", "sharp", "net", "độ_nét"),
+    }
+    result = {}
+    for key, names in aliases.items():
+        for name in names:
+            match = re.search(rf"(?:^|\s){re.escape(name)}\s*[=:]\s*(0\.\d+|1(?:\.\d+)?|2(?:\.0+)?)", text)
+            if match:
+                result[key] = max(0.5, min(2.0, float(match.group(1))))
+                break
+    return result
+
+
+def _image_editor_overlay_tone(image, tone: str):
+    tone = str(tone or "neutral")
+    if tone not in {"warm", "cool", "clean"}:
+        return image
+    colors = {"warm": (255, 190, 120), "cool": (120, 205, 255), "clean": (255, 255, 255)}
+    opacity = 0.055 if tone != "clean" else 0.035
+    overlay = Image.new("RGB", image.size, colors[tone])
+    return Image.blend(image, overlay, opacity)
+
+
+def _image_editor_wrapped_lines(draw, text: str, font, max_width: int, max_lines: int = 4) -> list[str]:
+    words = re.sub(r"\s+", " ", str(text or "").strip()).split(" ")
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        width = draw.textbbox((0, 0), candidate, font=font)[2]
+        if current and width > max_width:
+            lines.append(current)
+            current = word
+            if len(lines) >= max_lines - 1:
+                break
+        else:
+            current = candidate
+    if current and len(lines) < max_lines:
+        lines.append(current)
+    return lines
+
+
+def process_image_local_editor_bytes(
+    img_bytes: bytes,
+    preset: str = "photo_clear_detail",
+    settings: dict | None = None,
+    overlay_text: str = "",
+    logo_bytes: bytes = b"",
+    upscale: bool = False,
+) -> tuple[bool, bytes, str, str]:
+    if Image is None or ImageEnhance is None:
+        return False, b"", "pillow_missing", ""
+    if not img_bytes:
+        return False, b"", "empty_image", ""
+    if len(img_bytes) > 25 * 1024 * 1024:
+        return False, b"", "input_too_large", ""
+    preset_code = str(preset or "photo_clear_detail").strip().lower()
+    config = dict(IMAGE_EDITOR_PRESETS.get(preset_code) or IMAGE_EDITOR_PRESETS["photo_clear_detail"])
+    for key, value in dict(settings or {}).items():
+        if key in {"brightness", "contrast", "saturation", "sharpness"}:
+            config[key] = max(0.5, min(2.0, float(value)))
+    try:
+        with Image.open(io.BytesIO(img_bytes)) as source:
+            source.load()
+            image = ImageOps.exif_transpose(source) if ImageOps is not None else source.copy()
+            image = image.convert("RGB")
+            if image.width * image.height > 36_000_000:
+                image.thumbnail((6000, 6000), Image.Resampling.LANCZOS)
+            if ImageOps is not None:
+                image = ImageOps.autocontrast(image, cutoff=1)
+            image = ImageEnhance.Brightness(image).enhance(float(config.get("brightness", 1.0)))
+            image = ImageEnhance.Contrast(image).enhance(float(config.get("contrast", 1.0)))
+            image = ImageEnhance.Color(image).enhance(float(config.get("saturation", 1.0)))
+            image = ImageEnhance.Sharpness(image).enhance(float(config.get("sharpness", 1.0)))
+            image = _image_editor_overlay_tone(image, config.get("tone"))
+            if upscale:
+                scale = min(2.0, 4096 / max(1, image.width), 4096 / max(1, image.height))
+                if scale > 1.02:
+                    image = image.resize((max(1, int(image.width * scale)), max(1, int(image.height * scale))), Image.Resampling.LANCZOS)
+                if ImageFilter is not None:
+                    image = image.filter(ImageFilter.UnsharpMask(radius=1.6, percent=125, threshold=3))
+            if overlay_text and ImageDraw is not None and ImageFont is not None:
+                draw = ImageDraw.Draw(image, "RGBA")
+                font = load_operator_font(max(20, min(72, image.width // 18)), bold=True)
+                lines = _image_editor_wrapped_lines(draw, overlay_text[:260], font, int(image.width * 0.82))
+                line_height = max(28, int(font.size * 1.25) if hasattr(font, "size") else 34)
+                block_height = line_height * max(1, len(lines)) + 30
+                top = max(10, image.height - block_height - int(image.height * 0.04))
+                draw.rounded_rectangle((int(image.width * 0.06), top, int(image.width * 0.94), top + block_height), radius=18, fill=(0, 0, 0, 145))
+                y = top + 15
+                for line in lines:
+                    box = draw.textbbox((0, 0), line, font=font)
+                    x = max(12, (image.width - (box[2] - box[0])) // 2)
+                    draw.text((x, y), line, font=font, fill=(255, 255, 255, 245), stroke_width=1, stroke_fill=(0, 0, 0, 180))
+                    y += line_height
+            if logo_bytes:
+                with Image.open(io.BytesIO(logo_bytes)) as logo_source:
+                    logo_source.load()
+                    logo = logo_source.convert("RGBA")
+                    logo.thumbnail((max(64, int(image.width * 0.22)), max(64, int(image.height * 0.18))), Image.Resampling.LANCZOS)
+                    if logo.getchannel("A"):
+                        alpha = logo.getchannel("A").point(lambda value: int(value * 0.78))
+                        logo.putalpha(alpha)
+                    base = image.convert("RGBA")
+                    margin = max(16, int(min(image.size) * 0.025))
+                    base.alpha_composite(logo, (image.width - logo.width - margin, image.height - logo.height - margin))
+                    image = base.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="PNG", optimize=True)
+            return True, output.getvalue(), f"{image.width}x{image.height}", preset_code
+    except Exception as exc:
+        return False, b"", f"local_image_editor_failed:{type(exc).__name__}:{sanitize_log_text(str(exc))[:120]}", preset_code
+
+
+def image_editor_start_text(mode: str = "auto", lang: str = "vi") -> str:
+    mode_label = {
+        "auto": "chỉnh ảnh tự động",
+        "preset": "công thức màu",
+        "overlay": "thêm chữ/logo",
+        "upscale": "làm nét/nâng chất lượng cơ bản",
+    }.get(str(mode or "auto"), "chỉnh ảnh local")
+    if normalize_user_language(lang) != "vi":
+        return "🪄 <b>Local image editor</b>\n\nSend or reply to an image. V1 uses local Pillow processing only; no AI provider and no Xu charge."
+    return (
+        f"🪄 <b>{html.escape(mode_label.title())}</b>\n\n"
+        "Bạn hãy gửi hoặc reply ảnh cần xử lý.\n"
+        "V1 xử lý local bằng Pillow, không gọi provider AI và chưa trừ Xu."
+    )
+
+
+def image_editor_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard([], nav_back=("⬅️ Về menu ảnh" if is_vi else "⬅️ Image menu", "menu|main_image"), lang=lang)
+
+
+def image_editor_action_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("🪄 Chỉnh tự động" if is_vi else "🪄 Auto enhance", "imgtool|editor_preset|photo_clear_detail"),
+        ("🎨 Công thức màu" if is_vi else "🎨 Color presets", "imgtool|editor_presets"),
+        ("✂️ Cắt / Đổi tỉ lệ" if is_vi else "✂️ Crop / resize", "imgtool|editor_resize"),
+        ("🔠 Thêm chữ / logo" if is_vi else "🔠 Text / logo", "imgtool|editor_overlays"),
+        ("🖼 Làm nét cơ bản" if is_vi else "🖼 Basic sharpen", "imgtool|editor_upscale"),
+        ("✨ Chỉnh sửa AI (Phase 2)" if is_vi else "✨ AI edit (Phase 2)", "imgtool|editor_phase2"),
+    ]
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Về menu ảnh" if is_vi else "⬅️ Image menu", "menu|main_image"), lang=lang)
+
+
+def image_editor_preset_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("✨ Rõ và chi tiết" if is_vi else "✨ Clear detail", "imgtool|editor_preset|photo_clear_detail"),
+        ("📦 Sản phẩm sạch sáng" if is_vi else "📦 Clean product", "imgtool|editor_preset|product_clean"),
+        ("🎬 Cinematic ấm" if is_vi else "🎬 Warm cinematic", "imgtool|editor_preset|cinematic_warm"),
+        ("💎 Tươi xanh" if is_vi else "💎 Fresh blue", "imgtool|editor_preset|fresh_blue"),
+        ("🍜 Ẩm thực nổi bật" if is_vi else "🍜 Vivid food", "imgtool|editor_preset|food_vivid"),
+        ("🎚 Tùy chỉnh thông số" if is_vi else "🎚 Custom settings", "imgtool|editor_custom"),
+    ]
+    return build_2col_keyboard(buttons, nav_back=(ui_text(lang, "common.back"), "menu|main_image"), lang=lang)
+
+
+def image_editor_overlay_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("🔠 Thêm chữ / watermark" if is_vi else "🔠 Add text / watermark", "imgtool|editor_text"),
+            ("🖼 Thêm logo" if is_vi else "🖼 Add logo", "imgtool|editor_logo"),
+        ],
+        nav_back=(ui_text(lang, "common.back"), "menu|main_image"),
+        lang=lang,
+    )
+
+
+def image_editor_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎨 Thử preset khác" if is_vi else "🎨 Try another preset", callback_data="imgtool|editor_continue"), InlineKeyboardButton("🎚 Tùy chỉnh" if is_vi else "🎚 Custom", callback_data="imgtool|editor_custom")],
+        [InlineKeyboardButton("💾 Lưu ảnh" if is_vi else "💾 Save image", callback_data="imgtool|editor_save"), InlineKeyboardButton("🧩 Xử lý tiếp" if is_vi else "🧩 Continue editing", callback_data="imgtool|editor_continue")],
+        [InlineKeyboardButton("⬅️ Về menu ảnh" if is_vi else "⬅️ Image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+async def send_local_edited_image(
+    update_or_query,
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    preset: str = "photo_clear_detail",
+    settings: dict | None = None,
+    overlay_text: str = "",
+    logo_file_id: str = "",
+    upscale: bool = False,
+) -> bool:
+    message = getattr(update_or_query, "message", None) or getattr(getattr(update_or_query, "callback_query", None), "message", None)
+    query = getattr(update_or_query, "callback_query", None)
+    user = getattr(update_or_query, "effective_user", None) or getattr(query, "from_user", None)
+    uid = getattr(user, "id", 0)
+    lang = get_user_language(uid) or "vi"
+    file_id = str((state or {}).get("file_id") or "")
+    chat_id = message.chat_id if message else query.message.chat_id
+    if not file_id:
+        await context.bot.send_message(chat_id=chat_id, text="⚠️ Chưa có ảnh để xử lý. TOAN AAS chưa trừ Xu.", reply_markup=image_editor_start_keyboard(lang))
+        return True
+    source_id = f"{file_id}:{preset}:{overlay_text[:80]}:{logo_file_id}:{int(bool(upscale))}"
+    if not acquire_image_action_lock(uid, "local_image_editor", source_id, 180):
+        await context.bot.send_message(chat_id=chat_id, text=image_action_locked_text(lang))
+        return True
+    try:
+        if query:
+            await safe_edit_query_message(query, image_action_waiting_text(lang), parse_mode=None)
+        else:
+            await message.reply_text(image_action_waiting_text(lang))
+        image_bytes = await telegram_photo_file_bytes(context, file_id)
+        logo_bytes = await telegram_photo_file_bytes(context, logo_file_id) if logo_file_id else b""
+        ok, output_bytes, size_text, preset_used = await asyncio.to_thread(
+            process_image_local_editor_bytes,
+            image_bytes,
+            preset,
+            settings,
+            overlay_text,
+            logo_bytes,
+            upscale,
+        )
+        if not ok:
+            raise RuntimeError(size_text)
+        photo = io.BytesIO(output_bytes)
+        photo.name = f"toan_aas_editor_{uid}_{int(time.time())}.png"
+        caption = (
+            "✅ <b>Ảnh preview đã xử lý xong.</b>\n\n"
+            f"Công thức: <b>{html.escape(image_editor_preset_label('upscale_basic' if upscale else ('logo_overlay' if logo_file_id else ('text_overlay' if overlay_text else preset_used)), lang))}</b>\n"
+            f"Kích thước: <code>{html.escape(size_text)}</code>\n"
+            "Phí V1: <b>0 Xu</b>\n\n"
+            "Đây là xử lý local, không gọi provider AI."
+        )
+        sent = await context.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, parse_mode="HTML", reply_markup=image_editor_result_keyboard(lang))
+        output_file_id = sent.photo[-1].file_id if getattr(sent, "photo", None) else file_id
+        save_image_tool_result(uid, "editor", {
+            "file_id": output_file_id,
+            "source_file_id": file_id,
+            "preset": preset_used,
+            "size": size_text,
+            "overlay_text": overlay_text[:260],
+        })
+        set_image_menu_pending(uid, "image_editor_menu", file_id=output_file_id, source_name="edited_image.png", editor_mode="preset", editor_preset=preset_used)
+        return True
+    except Exception as exc:
+        logger.warning("local image editor failed | %s", sanitize_log_text(str(exc))[:220])
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ TOAN AAS chưa xử lý được ảnh này bằng editor local. Bot chưa trừ Xu. Vui lòng thử ảnh JPG/PNG/WebP nhỏ hơn.",
+            reply_markup=image_editor_start_keyboard(lang),
+        )
+        return True
+    finally:
+        release_image_action_lock(uid, "local_image_editor", source_id, cooldown_seconds=5)
 
 def image_resize_method_label(method: str = "", lang: str = "vi") -> str:
     code = str(method or "").strip().lower()
@@ -37889,6 +38197,137 @@ def menu_parent_action(section: str = "main") -> str:
     }
     return parent_map.get(str(section or "main"), "main")
 
+VIDEO_EDITOR_PRESETS = {
+    "video_clear": "Video rõ, cân bằng",
+    "video_tiktok_pop": "TikTok nổi bật",
+    "video_cinematic": "Cinematic",
+    "video_soft_clean": "Mềm và sạch",
+}
+VIDEO_EDITOR_TTL_SECONDS = 10 * 60
+
+
+def video_editor_pending_key(user_id) -> str:
+    return f"video_editor:{user_id}"
+
+
+def set_video_editor_pending(user_id, step: str, **fields) -> dict:
+    payload = {"step": str(step or "menu"), "created_at_ts": time.time()}
+    for key, value in fields.items():
+        if key in {"source_file_id", "source_file_name", "source_mime_type", "requested_action", "preset", "ratio", "method", "overlay_text"}:
+            payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:500]
+        elif key in {"source_file_size", "source_duration", "job_id"}:
+            payload[key] = safe_int(value, 0)
+        elif key == "sharpen":
+            payload[key] = bool(value)
+    USER_PENDING[video_editor_pending_key(user_id)] = payload
+    return payload
+
+
+def get_video_editor_pending(user_id) -> dict:
+    key = video_editor_pending_key(user_id)
+    state = USER_PENDING.get(key) or {}
+    if not state:
+        return {}
+    if time.time() - float(state.get("created_at_ts") or 0) > VIDEO_EDITOR_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return {}
+    return state
+
+
+def clear_video_editor_pending(user_id) -> bool:
+    return USER_PENDING.pop(video_editor_pending_key(user_id), None) is not None
+
+
+def recent_video_editor_source(user_id) -> dict:
+    source = get_recent_media_state(LAST_USER_VIDEO, safe_int(user_id, 0)) or {}
+    if not source.get("file_id"):
+        return {}
+    return {
+        "source_file_id": str(source.get("file_id") or "")[:240],
+        "source_file_name": str(source.get("file_name") or "video.mp4")[:180],
+        "source_mime_type": str(source.get("mime_type") or "video/mp4")[:120],
+        "source_file_size": safe_int(source.get("file_size"), 0),
+        "source_duration": safe_int(source.get("duration"), 0),
+    }
+
+
+def video_editor_menu_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🛠 <b>Local Video Editor</b>\n\n"
+            "Color, crop/ratio, vertical 9:16, text watermark and basic sharpen run through Windows Local Worker/FFmpeg. "
+            "No AI provider and no Xu charge in V1."
+        )
+    return (
+        "🛠 <b>Chỉnh sửa video local</b>\n\n"
+        "Màu, crop/tỉ lệ, video dọc 9:16, chữ/watermark và tăng nét cơ bản được gửi sang Windows Local Worker/FFmpeg.\n\n"
+        "V1 không gọi provider AI và chưa trừ Xu. Nếu worker offline, bot dừng trước khi tạo job."
+    )
+
+
+def video_editor_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("🪄 Chỉnh màu video" if is_vi else "🪄 Video color", "videoedit|color"),
+        ("✂️ Cắt / Đổi tỉ lệ video" if is_vi else "✂️ Crop / ratio", "videoedit|crop"),
+        ("📱 Làm video dọc 9:16" if is_vi else "📱 Make vertical 9:16", "videoedit|vertical"),
+        ("🔠 Thêm chữ / watermark" if is_vi else "🔠 Text / watermark", "videoedit|text"),
+        ("🎞 Tăng nét video cơ bản" if is_vi else "🎞 Basic sharpen", "videoedit|sharpen"),
+    ]
+    return video_v6_keyboard(buttons, lang, back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"))
+
+
+def video_editor_preset_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("✨ Video rõ" if is_vi else "✨ Clear", "videoedit|preset|video_clear"),
+        ("📱 TikTok nổi bật" if is_vi else "📱 TikTok pop", "videoedit|preset|video_tiktok_pop"),
+        ("🎬 Cinematic", "videoedit|preset|video_cinematic"),
+        ("🫧 Mềm và sạch" if is_vi else "🫧 Soft clean", "videoedit|preset|video_soft_clean"),
+    ]
+    return video_v6_keyboard(buttons, lang, back=(ui_text(lang, "common.back"), "videoedit|menu"))
+
+
+def video_editor_ratio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    buttons = [("📱 9:16", "videoedit|ratio|9x16"), ("🖥 16:9", "videoedit|ratio|16x9"), ("⬜ 1:1", "videoedit|ratio|1x1"), ("📰 4:5", "videoedit|ratio|4x5")]
+    return video_v6_keyboard(buttons, lang, back=(ui_text(lang, "common.back"), "videoedit|menu"))
+
+
+def video_editor_ratio_method_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [("✂️ Crop vừa khung" if is_vi else "✂️ Crop to frame", "videoedit|method|crop"), ("🌫 Nền mờ, giữ chủ thể" if is_vi else "🌫 Blur background", "videoedit|method|blur")],
+        lang,
+        back=(ui_text(lang, "common.back"), "videoedit|crop"),
+    )
+
+
+def video_editor_status_keyboard(job_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔄 Kiểm tra trạng thái" if is_vi else "🔄 Check status", callback_data=f"videoedit|status|{int(job_id)}"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+
+def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
+    status = str((job or {}).get("status") or "unknown").lower()
+    labels = {"queued": "đang chờ worker", "running": "đang xử lý", "succeeded": "hoàn tất", "failed": "thất bại", "cancelled": "đã hủy"}
+    lines = ["🎞 <b>Trạng thái chỉnh video local</b>", "", f"• Job: <code>#{html.escape(str((job or {}).get('id') or '-'))}</code>", f"• Trạng thái: <b>{html.escape(labels.get(status, status))}</b>", "• Phí V1: <b>0 Xu</b>"]
+    if status == "succeeded":
+        lines.append("• Kết quả: worker đã gửi video tự động vào chat.")
+    elif status == "failed":
+        lines.append("• Kết quả: xử lý chưa thành công. TOAN AAS chưa trừ Xu.")
+    else:
+        lines.append("• Kết quả sẽ được gửi tự động khi hoàn tất. Không cần gửi lại lệnh.")
+    return "\n".join(lines)
+
+
+def video_editor_worker_ready() -> bool:
+    status = local_worker_status_payload()
+    return bool(status.get("enabled") and status.get("poll_enabled") and status.get("token_configured") and status.get("connected"))
+
+
 def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
@@ -37903,6 +38342,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
                 ("🧠 Ý tưởng video", "videoidea|start"),
                 ("🎥 Prompt / Chuyển động", "motion|start"),
                 ("🌐 Dịch/Lồng tiếng video", "videodub|start"),
+                ("🛠 Chỉnh sửa video local", "videoedit|menu"),
             ],
             lang,
             back=("🔙 Quay lại", "menu|main"),
@@ -37918,6 +38358,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧠 视频创意", "videoidea|start"),
             ("🎥 Prompt / 镜头运动", "motion|start"),
             ("🌐 视频翻译/配音", "videodub|start"),
+            ("🛠 本地视频编辑", "videoedit|menu"),
         ]
     else:
         items = [
@@ -37930,6 +38371,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧠 Video ideas", "videoidea|start"),
             ("🎥 Prompt / Motion", "motion|start"),
             ("🌐 Translate / Dub video", "videodub|start"),
+            ("🛠 Local video editor", "videoedit|menu"),
         ]
     return video_v6_keyboard(items, lang, back=(ui_text(lang, "common.back"), "menu|main"))
 
@@ -38068,6 +38510,11 @@ def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("🖼 Tạo ảnh nhanh" if is_vi else "🖼 Quick image", "create_media|quick_image"),
         ("✍️ Tạo prompt từ ảnh" if is_vi else "✍️ Prompt from image", "menu|image_prompt_start"),
         ("🧩 Chỉnh sửa ảnh" if is_vi else "🧩 Edit image", "menu|image_edit_start"),
+        ("🪄 Chỉnh ảnh tự động" if is_vi else "🪄 Auto enhance", "imgtool|editor_start|auto"),
+        ("🎨 Công thức màu" if is_vi else "🎨 Color presets", "imgtool|editor_start|preset"),
+        ("✂️ Cắt / Đổi tỉ lệ ảnh" if is_vi else "✂️ Crop / resize", "menu|image_edit_start"),
+        ("🔠 Thêm chữ / logo" if is_vi else "🔠 Text / logo", "imgtool|editor_start|overlay"),
+        ("🖼 Làm nét / nâng chất lượng ảnh" if is_vi else "🖼 Basic sharpen / upscale", "imgtool|editor_start|upscale"),
     ]
     back = ("🔙 Quay lại", "menu|main") if is_vi else ("🔙 Back", "menu|main")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
@@ -48501,6 +48948,87 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
     action = parts[1] if len(parts) > 1 else ""
     pending = get_image_menu_pending(uid) or {}
 
+    if action == "editor_start":
+        mode = parts[2] if len(parts) > 2 else "auto"
+        source = recent_image_file_state(uid)
+        if not source.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode=mode)
+            return await safe_edit_query_message(query, image_editor_start_text(mode, lang), reply_markup=image_editor_start_keyboard(lang))
+        state = {**source, "editor_mode": mode}
+        set_image_menu_pending(uid, "image_editor_menu", **state)
+        if mode == "auto":
+            return await send_local_edited_image(update, context, state, preset="photo_clear_detail")
+        if mode == "upscale":
+            return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+        if mode == "overlay":
+            return await safe_edit_query_message(query, "🔠 Chọn cách thêm chữ/logo. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_overlay_keyboard(lang))
+        return await safe_edit_query_message(query, "🎨 Chọn công thức màu local để xem preview.", parse_mode=None, reply_markup=image_editor_preset_keyboard(lang))
+    if action == "editor_presets":
+        return await safe_edit_query_message(query, "🎨 Chọn công thức màu local để xem preview.", parse_mode=None, reply_markup=image_editor_preset_keyboard(lang))
+    if action == "editor_overlays":
+        return await safe_edit_query_message(query, "🔠 Chọn cách thêm chữ/logo. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_overlay_keyboard(lang))
+    if action == "editor_resize":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="resize")
+            return await safe_edit_query_message(query, image_editor_start_text("resize", lang), reply_markup=image_editor_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_resize_choice", **state)
+        return await safe_edit_query_message(query, image_resize_ratio_text(lang), reply_markup=image_resize_ratio_keyboard(False, lang))
+    if action == "editor_upscale":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="upscale")
+            return await safe_edit_query_message(query, image_editor_start_text("upscale", lang), reply_markup=image_editor_start_keyboard(lang))
+        return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+    if action == "editor_preset":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="preset")
+            return await safe_edit_query_message(query, image_editor_start_text("preset", lang), reply_markup=image_editor_start_keyboard(lang))
+        preset = parts[2] if len(parts) > 2 else "photo_clear_detail"
+        return await send_local_edited_image(update, context, state, preset=preset)
+    if action == "editor_custom":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="preset")
+            return await safe_edit_query_message(query, image_editor_start_text("preset", lang), reply_markup=image_editor_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_editor_custom_settings", **state)
+        return await safe_edit_query_message(
+            query,
+            "🎚 Nhập thông số theo mẫu:\nbrightness=1.05 contrast=1.10 saturation=1.08 sharpness=1.20\n\nMỗi giá trị từ 0.5 đến 2.0. Bot chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=image_editor_start_keyboard(lang),
+        )
+    if action == "editor_text":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="overlay")
+            return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_editor_text_input", **state)
+        return await safe_edit_query_message(query, "🔠 Gửi nội dung chữ/watermark muốn đặt ở cuối ảnh. Tối đa 260 ký tự. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_start_keyboard(lang))
+    if action == "editor_logo":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="overlay")
+            return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_editor_wait_logo", **state)
+        return await safe_edit_query_message(query, "🖼 Gửi file logo PNG/JPG/WebP. Logo sẽ được đặt góc dưới bên phải với độ trong nhẹ. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_start_keyboard(lang))
+    if action == "editor_continue":
+        result = get_image_tool_result(uid, "editor") or {}
+        if not result.get("file_id"):
+            return await safe_edit_query_message(query, image_editor_start_text("auto", lang), reply_markup=image_editor_start_keyboard(lang))
+        set_image_menu_pending(uid, "image_editor_menu", **result)
+        return await safe_edit_query_message(query, "🪄 Chọn thao tác tiếp theo cho ảnh preview hiện tại.", parse_mode=None, reply_markup=image_editor_action_keyboard(lang))
+    if action == "editor_save":
+        return await safe_edit_query_message(query, "💾 Ảnh đã được gửi trong chat. Bạn có thể tải/lưu trực tiếp từ tin nhắn ảnh. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_result_keyboard(lang))
+    if action == "editor_phase2":
+        return await safe_edit_query_message(
+            query,
+            "✨ Chỉnh sửa AI nâng cao thuộc Phase 2 và chưa mở public. TOAN AAS chưa gọi provider, chưa tạo job và chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=image_editor_action_keyboard(lang),
+        )
+
     if action == "prompt_need_image":
         set_image_menu_pending(uid, "image_prompt_wait_image")
         return await safe_edit_query_message(query, image_prompt_send_image_hint_text(lang), parse_mode=None, reply_markup=image_prompt_start_keyboard(lang))
@@ -48955,6 +49483,17 @@ async def handle_image_menu_pending_text(update: Update, context: ContextTypes.D
         return False
     lang = get_user_language(uid) or "vi"
     action = str(pending.get("pending_action") or "")
+    if action == "image_editor_custom_settings":
+        settings = parse_image_editor_settings(text)
+        if not settings:
+            await update.message.reply_text(
+                "⚠️ Chưa đọc được thông số. Ví dụ: brightness=1.05 contrast=1.10 saturation=1.08 sharpness=1.20. Bot chưa trừ Xu.",
+                reply_markup=image_editor_start_keyboard(lang),
+            )
+            return True
+        return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", settings=settings)
+    if action == "image_editor_text_input":
+        return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", overlay_text=text[:260])
     if action in {"image_prompt_only", "image_prompt_wait_image"}:
         set_image_menu_pending(uid, "image_prompt_subject", goal_code="custom", goal="mô tả thủ công")
         await update.message.reply_text(image_prompt_subject_text("mô tả thủ công", lang), parse_mode="HTML", reply_markup=image_menu_child_keyboard(lang))
@@ -49064,6 +49603,26 @@ async def handle_image_menu_pending_photo(update: Update, context: ContextTypes.
         return False
     lang = get_user_language(uid) or "vi"
     action = str(pending.get("pending_action") or "")
+    if action == "image_editor_wait_logo":
+        logo_file_id = update.message.photo[-1].file_id if update.message.photo else ""
+        return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", logo_file_id=logo_file_id)
+    if action == "image_editor_wait_image":
+        remember_last_user_file(update)
+        cache_recent_media_state(update)
+        file_id = update.message.photo[-1].file_id if update.message.photo else ""
+        file_unique_id = update.message.photo[-1].file_unique_id if update.message.photo else ""
+        mode = str(pending.get("editor_mode") or "auto")
+        state = {"file_id": file_id, "file_unique_id": file_unique_id, "source_name": "telegram_photo.jpg", "editor_mode": mode}
+        set_image_menu_pending(uid, "image_editor_menu", **state)
+        if mode == "auto":
+            return await send_local_edited_image(update, context, state, preset="photo_clear_detail")
+        if mode == "upscale":
+            return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+        if mode == "overlay":
+            await update.message.reply_text("🔠 Chọn cách thêm chữ/logo. Bot chưa trừ Xu.", reply_markup=image_editor_overlay_keyboard(lang))
+            return True
+        await update.message.reply_text("🎨 Chọn công thức màu local để xem preview.", reply_markup=image_editor_preset_keyboard(lang))
+        return True
     if action in {"image_prompt_only", "image_prompt_wait_image"}:
         remember_last_user_file(update)
         cache_recent_media_state(update)
@@ -49123,12 +49682,27 @@ async def handle_image_menu_pending_document(update: Update, context: ContextTyp
     if not pending:
         return False
     action = str(pending.get("pending_action") or "")
-    if action not in {"image_prompt_wait_image", "image_prompt_only", "image_edit_wait_image", "image_upscale_wait_image"}:
+    if action not in {"image_prompt_wait_image", "image_prompt_only", "image_edit_wait_image", "image_upscale_wait_image", "image_editor_wait_image", "image_editor_wait_logo"}:
         return False
     remember_last_user_file(update)
     file_id = str(getattr(document, "file_id", "") or "")
     file_unique_id = str(getattr(document, "file_unique_id", "") or "")
     lang = get_user_language(uid) or "vi"
+    if action == "image_editor_wait_logo":
+        return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", logo_file_id=file_id)
+    if action == "image_editor_wait_image":
+        mode = str(pending.get("editor_mode") or "auto")
+        state = {"file_id": file_id, "file_unique_id": file_unique_id, "source_name": file_name, "editor_mode": mode}
+        set_image_menu_pending(uid, "image_editor_menu", **state)
+        if mode == "auto":
+            return await send_local_edited_image(update, context, state, preset="photo_clear_detail")
+        if mode == "upscale":
+            return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+        if mode == "overlay":
+            await update.message.reply_text("🔠 Chọn cách thêm chữ/logo. Bot chưa trừ Xu.", reply_markup=image_editor_overlay_keyboard(lang))
+            return True
+        await update.message.reply_text("🎨 Chọn công thức màu local để xem preview.", reply_markup=image_editor_preset_keyboard(lang))
+        return True
     if action in {"image_prompt_wait_image", "image_prompt_only"}:
         set_image_menu_pending(
             uid,
@@ -55212,18 +55786,21 @@ async def cmd_video_upscale(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_video_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("⚠️ Video enhance đang admin test/chưa mở public. Bot chưa trừ Xu.")
-    await update.message.reply_text(
-        "🎞 <b>Video Enhance — ADMIN TEST</b>\n\n"
-        f"• Replicate: <code>{provider_status_text(bool(REPLICATE_API_TOKEN))}</code>\n"
-        "• Status: <code>ADMIN_ONLY / NOT_IMPLEMENTED</code>\n"
-        "Không gọi API, không fake PASS, không trừ Xu.",
-        parse_mode="HTML",
-    )
+    uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
+    source = recent_video_editor_source(uid)
+    set_video_editor_pending(uid, "menu", **source)
+    await update.message.reply_text(video_editor_menu_text(lang), parse_mode="HTML", reply_markup=video_editor_menu_keyboard(lang))
 
 async def cmd_image_enhance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await cmd_public_admin_first_placeholder(update, context, "Image Enhance", "/image_prompt <chủ đề>")
+    uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
+    source = recent_image_file_state(uid)
+    if source.get("file_id"):
+        set_image_menu_pending(uid, "image_editor_menu", **source, editor_mode="auto")
+        return await update.message.reply_text("🪄 Chọn cách xử lý ảnh local hiện tại.", reply_markup=image_editor_action_keyboard(lang))
+    set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="auto")
+    return await update.message.reply_text(image_editor_start_text("auto", lang), parse_mode="HTML", reply_markup=image_editor_start_keyboard(lang))
 
 async def cmd_tool_test_music_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -91463,6 +92040,7 @@ def video_upload_received_keyboard(user_id, lang: str = "vi") -> InlineKeyboardM
         ("🧠 Tạo ý tưởng video" if vi else "🧠 Create video ideas", "video_upload|ideas"),
         ("🎥 Prompt / chuyển động" if vi else "🎥 Prompt / motion", "video_upload|motion"),
         ("✨ Nâng cấp video" if vi else "✨ Enhance video", "video_upload|enhance"),
+        ("🛠 Chỉnh sửa video local" if vi else "🛠 Local video editor", "videoedit|menu"),
         ("💾 Lưu video tham khảo" if vi else "💾 Save reference video", "video_upload|save"),
     ]
     if is_admin_user(user_id):
@@ -91481,6 +92059,187 @@ def video_upload_music_text(lang: str = "vi") -> str:
         "Chọn phong cách nhạc bên dưới để tìm/gợi ý. Bạn cũng có thể gửi voice/audio riêng để chuẩn bị ghép sau.\n\n"
         "Nếu kho nhạc chưa sẵn sàng, TOAN AAS vẫn gợi ý phong cách nhạc bằng text. Bot chưa trừ Xu."
     )
+
+def video_editor_source_from_update(update: Update) -> dict:
+    message = update.message
+    if not message:
+        return {}
+    media = getattr(message, "video", None) or getattr(message, "document", None)
+    if not media:
+        return {}
+    mime_type = str(getattr(media, "mime_type", "") or "video/mp4")
+    file_name = str(getattr(media, "file_name", "") or "video.mp4")
+    if getattr(message, "document", None) and not (mime_type.startswith("video/") or file_name.lower().endswith((".mp4", ".mov", ".mkv", ".webm"))):
+        return {}
+    return {
+        "source_file_id": str(getattr(media, "file_id", "") or "")[:240],
+        "source_file_name": file_name[:180],
+        "source_mime_type": mime_type[:120],
+        "source_file_size": safe_int(getattr(media, "file_size", 0), 0),
+        "source_duration": safe_int(getattr(media, "duration", 0), 0),
+    }
+
+
+async def submit_local_video_editor_job(update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict) -> bool:
+    query = update.callback_query
+    message = update.message or (query.message if query else None)
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
+    source_file_id = str((state or {}).get("source_file_id") or "")
+    if not source_file_id:
+        set_video_editor_pending(uid, "await_video", requested_action=str((state or {}).get("requested_action") or "color"))
+        text = "🎞 Gửi video cần xử lý. Nên gửi file MP4/MOV ngắn dưới 50MB. Bot chưa trừ Xu."
+        if query:
+            await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
+        else:
+            await message.reply_text(text, reply_markup=video_editor_menu_keyboard(lang))
+        return True
+    if safe_int(state.get("source_file_size"), 0) > 50 * 1024 * 1024:
+        text = "⚠️ Video vượt 50MB, chưa phù hợp editor local V1. TOAN AAS chưa tạo job và chưa trừ Xu."
+        if query:
+            await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
+        else:
+            await message.reply_text(text, reply_markup=video_editor_menu_keyboard(lang))
+        return True
+    if not video_editor_worker_ready():
+        text = "🎞 Công cụ chỉnh video local đang bảo trì hoặc cần worker xử lý. TOAN AAS chưa trừ Xu. Vui lòng thử lại sau."
+        if query:
+            await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
+        else:
+            await message.reply_text(text, reply_markup=video_editor_menu_keyboard(lang))
+        return True
+    payload = {
+        "user_id": str(uid),
+        "chat_id": str(message.chat_id),
+        "source_file_id": source_file_id,
+        "source_file_name": str(state.get("source_file_name") or "video.mp4")[:180],
+        "preset": str(state.get("preset") or "video_clear")[:80],
+        "ratio": str(state.get("ratio") or "")[:20],
+        "method": str(state.get("method") or "crop")[:20],
+        "overlay_text": str(state.get("overlay_text") or "")[:260],
+        "sharpen": bool(state.get("sharpen")),
+        "max_render_seconds": min(600, LOCAL_WORKER_MAX_JOB_SECONDS),
+        "caption": "✅ Video local đã xử lý xong. Phí V1: 0 Xu.",
+    }
+    job_id = create_local_worker_job(
+        user_id=uid,
+        command="video_editor_v1",
+        job_type="video_local_edit",
+        provider="local_worker_ffmpeg",
+        input_file_id=json.dumps(payload, ensure_ascii=False),
+        xu_cost=0,
+        admin_only=False,
+    )
+    clear_video_editor_pending(uid)
+    text = (
+        "✅ Video đã được gửi sang Local Worker.\n\n"
+        "TOAN AAS đang xử lý và sẽ gửi video tự động khi hoàn tất.\n"
+        "Vui lòng không bấm lại nhiều lần.\n\n"
+        f"Job: #{job_id}\n"
+        "Phí V1: 0 Xu"
+    )
+    if query:
+        await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_editor_status_keyboard(job_id, lang))
+    else:
+        await message.reply_text(text, reply_markup=video_editor_status_keyboard(job_id, lang))
+    return True
+
+
+async def handle_video_editor_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message:
+        return False
+    uid = update.effective_user.id
+    state = get_video_editor_pending(uid)
+    if str(state.get("step") or "") != "await_video":
+        return False
+    source = video_editor_source_from_update(update)
+    if not source.get("source_file_id"):
+        return False
+    cache_recent_media_state(update)
+    action = str(state.get("requested_action") or "color")
+    current = set_video_editor_pending(uid, "menu", **source, requested_action=action)
+    lang = get_user_language(uid) or "vi"
+    if action == "color":
+        await update.message.reply_text("🎨 Chọn công thức màu video.", reply_markup=video_editor_preset_keyboard(lang))
+        return True
+    if action == "crop":
+        await update.message.reply_text("📐 Chọn tỉ lệ video đầu ra.", reply_markup=video_editor_ratio_keyboard(lang))
+        return True
+    if action == "text":
+        set_video_editor_pending(uid, "await_text", **current)
+        await update.message.reply_text("🔠 Nhập chữ/watermark muốn đặt ở cuối video. Tối đa 260 ký tự. Bot chưa trừ Xu.", reply_markup=video_editor_menu_keyboard(lang))
+        return True
+    if action == "vertical":
+        current.update({"ratio": "9:16", "method": "blur"})
+        return await submit_local_video_editor_job(update, context, current)
+    current.update({"preset": "video_clear", "sharpen": True})
+    return await submit_local_video_editor_job(update, context, current)
+
+
+async def handle_video_editor_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message or not update.message.text:
+        return False
+    uid = update.effective_user.id
+    state = get_video_editor_pending(uid)
+    if str(state.get("step") or "") != "await_text":
+        return False
+    text = re.sub(r"\s+", " ", update.message.text.strip())[:260]
+    if not text or text.startswith("/"):
+        return False
+    state["overlay_text"] = text
+    return await submit_local_video_editor_job(update, context, state)
+
+
+async def handle_video_editor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "menu"
+    if action == "menu":
+        source = recent_video_editor_source(uid)
+        set_video_editor_pending(uid, "menu", **source)
+        return await safe_edit_or_send(query, video_editor_menu_text(lang), parse_mode="HTML", reply_markup=video_editor_menu_keyboard(lang))
+    if action == "status":
+        job_id = safe_int(parts[2] if len(parts) > 2 else 0, 0)
+        job = get_local_worker_job(job_id)
+        if not job or (str(job.get("user_id") or "") != str(uid) and not is_admin_user(uid)):
+            return await query.answer("Không tìm thấy job video này.", show_alert=True)
+        return await safe_edit_or_send(query, video_editor_job_status_text(job, lang), parse_mode="HTML", reply_markup=video_editor_status_keyboard(job_id, lang))
+    state = dict(get_video_editor_pending(uid) or {})
+    source = {key: value for key, value in state.items() if key.startswith("source_")}
+    if not source.get("source_file_id"):
+        source = recent_video_editor_source(uid)
+    if action in {"color", "crop", "vertical", "text", "sharpen"} and not source.get("source_file_id"):
+        set_video_editor_pending(uid, "await_video", requested_action=action)
+        return await safe_edit_or_send(query, "🎞 Gửi video cần xử lý. Nên gửi MP4/MOV ngắn dưới 50MB. Bot chưa trừ Xu.", parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
+    if action == "color":
+        set_video_editor_pending(uid, "menu", **source, requested_action="color")
+        return await safe_edit_or_send(query, "🎨 Chọn công thức màu video.", parse_mode=None, reply_markup=video_editor_preset_keyboard(lang))
+    if action == "preset":
+        preset = parts[2] if len(parts) > 2 else "video_clear"
+        return await submit_local_video_editor_job(update, context, {**source, "preset": preset})
+    if action == "crop":
+        set_video_editor_pending(uid, "menu", **source, requested_action="crop")
+        return await safe_edit_or_send(query, "📐 Chọn tỉ lệ video đầu ra.", parse_mode=None, reply_markup=video_editor_ratio_keyboard(lang))
+    if action == "ratio":
+        ratio = str(parts[2] if len(parts) > 2 else "9x16").replace("x", ":")
+        set_video_editor_pending(uid, "menu", **source, requested_action="crop", ratio=ratio)
+        return await safe_edit_or_send(query, "✂️ Chọn cách đưa video vào khung mới.", parse_mode=None, reply_markup=video_editor_ratio_method_keyboard(lang))
+    if action == "method":
+        current = get_video_editor_pending(uid) or source
+        current["method"] = parts[2] if len(parts) > 2 else "crop"
+        return await submit_local_video_editor_job(update, context, current)
+    if action == "vertical":
+        return await submit_local_video_editor_job(update, context, {**source, "ratio": "9:16", "method": "blur"})
+    if action == "text":
+        set_video_editor_pending(uid, "await_text", **source, requested_action="text")
+        return await safe_edit_or_send(query, "🔠 Nhập chữ/watermark muốn đặt ở cuối video. Tối đa 260 ký tự. Bot chưa trừ Xu.", parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
+    if action == "sharpen":
+        return await submit_local_video_editor_job(update, context, {**source, "preset": "video_clear", "sharpen": True})
+    return await safe_edit_or_send(query, video_editor_menu_text(lang), parse_mode="HTML", reply_markup=video_editor_menu_keyboard(lang))
+
 
 async def handle_video_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -91567,6 +92326,8 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
     return await safe_edit_or_send(query, video_upload_received_text(lang), reply_markup=video_upload_received_keyboard(uid, lang))
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_video_editor_pending_upload(update, context):
+        return
     if await handle_video_reference_pending_upload(update, context):
         return
     if await handle_self_scene_pending_upload(update, context):
@@ -91704,6 +92465,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_public_video_prompt_pending_text(update, context):
+        return
+
+    if await handle_video_editor_pending_text(update, context):
         return
 
     if await handle_image_menu_pending_text(update, context):
@@ -92633,6 +93397,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_long_video_callback, pattern=r"^longvideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_upload_callback, pattern=r"^video_upload\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_editor_callback, pattern=r"^videoedit\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard_callback, pattern=r"^storyboard\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_addon_callback, pattern=r"^videoaddon\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\|"))
