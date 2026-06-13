@@ -4,14 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TOAN AAS - AI Automation System</title>
-  <meta name="description" content="TOAN AAS là AI Automation System cho nội dung, ảnh, video, voice, tài liệu, hỗ trợ ticket và workflow AI cho cá nhân, shop, affiliate và doanh nghiệp.">
+  <meta name="description" content="Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.">
   <meta name="theme-color" content="#063b2b">
   <meta property="og:title" content="TOAN AAS - AI Automation System">
-  <meta property="og:description" content="Tạo nội dung, media, tài liệu và triển khai bot hỗ trợ công việc trong một hệ thống AI Automation dễ dùng.">
-  <meta property="og:image" content="/banner.png?v=20260613">
+  <meta property="og:description" content="Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.">
+  <meta property="og:image" content="https://www.toanaas.vn/assets/brand/toan-aas-banner-official.png">
   <meta property="og:type" content="website">
-  <link rel="icon" type="image/png" href="/LOGO.png?v=20260613">
-  <link rel="apple-touch-icon" href="/LOGO.png?v=20260613">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="TOAN AAS - AI Automation System">
+  <meta name="twitter:description" content="Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.">
+  <meta name="twitter:image" content="https://www.toanaas.vn/assets/brand/toan-aas-banner-official.png">
+  <link rel="icon" type="image/png" href="/assets/brand/toan-aas-logo-official.png">
+  <link rel="apple-touch-icon" href="/assets/brand/toan-aas-logo-official.png">
   <style>
     :root {
       --ink: #14221c;
@@ -73,7 +77,7 @@
     .brand img {
       width: 42px;
       height: 42px;
-      object-fit: cover;
+      object-fit: contain;
       border-radius: 6px;
       background: var(--white);
     }
@@ -113,21 +117,26 @@
       align-items: flex-end;
       color: var(--white);
       background-color: #043526;
-      background-image: url('/banner.png?v=20260613');
-      background-position: center;
-      background-size: cover;
-      background-blend-mode: multiply;
       overflow: hidden;
+    }
+    .hero-banner {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
     }
     .hero::before {
       content: "";
       position: absolute;
       inset: 0;
-      background: rgba(1, 25, 18, 0.56);
+      z-index: 1;
+      background: rgba(1, 25, 18, 0.38);
     }
     .hero-content {
       position: relative;
-      z-index: 1;
+      z-index: 2;
       max-width: 820px;
       padding: 68px 0 62px;
     }
@@ -354,6 +363,14 @@
     }
     .footer-links { display: flex; flex-wrap: wrap; gap: 18px; }
     .footer-links a:hover { color: var(--green-500); }
+    .footer-brand { display: flex; align-items: center; gap: 12px; }
+    .footer-brand img {
+      width: 50px;
+      height: 50px;
+      object-fit: contain;
+      border-radius: 6px;
+      background: var(--white);
+    }
 
     @media (max-width: 920px) {
       .nav-links a:not(.nav-button) { display: none; }
@@ -370,12 +387,22 @@
       .brand small { display: none; }
       .nav-button { display: none; }
       .hero {
-        min-height: 560px;
-        height: calc(87svh - 62px);
-        max-height: 680px;
-        background-position: 62% center;
+        min-height: 0;
+        height: auto;
+        max-height: none;
+        display: block;
+        background: var(--green-950);
       }
-      .hero-content { width: calc(100% - 28px); max-width: none; padding: 46px 0 40px; }
+      .hero-banner {
+        position: relative;
+        width: 100%;
+        height: auto;
+        min-height: 150px;
+        aspect-ratio: 4 / 1;
+        object-fit: contain;
+      }
+      .hero::before { display: none; }
+      .hero-content { width: calc(100% - 28px); max-width: none; padding: 34px 0 40px; }
       h1 { font-size: 40px; }
       .hero-lead { font-size: 18px; }
       .hero-copy { font-size: 14px; overflow-wrap: anywhere; }
@@ -393,7 +420,7 @@
   <header class="topbar">
     <div class="container nav">
       <a class="brand" href="#top" aria-label="TOAN AAS">
-        <img src="/LOGO.png?v=20260613" alt="Logo TOAN AAS">
+        <img src="/assets/brand/toan-aas-logo-official.png" alt="TOAN AAS - AI Automation System">
         <span>TOAN AAS<small>AI Automation System</small></span>
       </a>
       <nav class="nav-links" aria-label="Điều hướng chính">
@@ -409,11 +436,12 @@
 
   <main id="top">
     <section class="hero" aria-label="TOAN AAS AI Automation System">
+      <img class="hero-banner" src="/assets/brand/toan-aas-banner-official.png" alt="TOAN AAS - Hệ thống tự động hóa AI" loading="eager" fetchpriority="high">
       <div class="container hero-content">
         <div class="eyebrow">AI Automation System</div>
         <h1>TOAN AAS</h1>
-        <p class="hero-lead">AI Automation System cho nội dung, media, tài liệu và bot hỗ trợ công việc.</p>
-        <p class="hero-copy">Tạo ý tưởng, viết nội dung, tạo ảnh, video, voice, phụ đề, xử lý tài liệu, quản lý ticket và triển khai workflow AI cho cá nhân, shop, affiliate và doanh nghiệp.</p>
+        <p class="hero-lead">Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.</p>
+        <p class="hero-copy">TOAN AAS kết nối các công cụ AI thành quy trình rõ ràng cho cá nhân, creator, shop và doanh nghiệp.</p>
         <div class="hero-actions">
           <a class="button primary" href="https://t.me/toanaasbot" target="_blank" rel="noopener">Mở bot Telegram</a>
           <a class="button" href="/download/huong-dan-toan-aas.docx">Hướng dẫn V2</a>
@@ -467,8 +495,8 @@
           </div>
           <div class="policy-note">
             <h3>Chính sách ưu đãi</h3>
-            <p>Ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50/100/200/500 và các ưu đãi cộng Xu chỉ áp dụng cho khách nội địa Việt Nam hoặc giao dịch VND qua PayOS, QR ngân hàng Việt Nam, ZaloPay hoặc MoMo.</p>
-            <p>Nạp quốc tế USD/CNY/USDT không áp dụng bonus cộng Xu. Chiết khấu phần trăm theo hạng thành viên vẫn được giữ khi đủ điều kiện.</p>
+            <p>Ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50/100/200/500 và các ưu đãi cộng Xu chỉ áp dụng cho khách nội địa Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.</p>
+            <p>ZaloPay, MoMo và nạp quốc tế USD/CNY/USDT không áp dụng bonus cộng Xu. Chiết khấu phần trăm theo hạng thành viên vẫn được giữ khi đủ điều kiện.</p>
           </div>
         </div>
       </div>
@@ -536,7 +564,10 @@
 
   <footer>
     <div class="container footer-row">
-      <div><strong>TOAN AAS</strong><br><small>Cập nhật chính sách theo từng giai đoạn vận hành.</small></div>
+      <div class="footer-brand">
+        <img src="/assets/brand/toan-aas-logo-official.png" alt="TOAN AAS - AI Automation System" loading="lazy">
+        <div><strong>TOAN AAS</strong><br><small>Cập nhật chính sách theo từng giai đoạn vận hành.</small></div>
+      </div>
       <div class="footer-links">
         <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">Bot Telegram</a>
         <a href="https://t.me/toanaas" target="_blank" rel="noopener">Admin</a>
