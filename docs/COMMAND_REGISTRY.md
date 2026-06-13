@@ -101,6 +101,7 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/stats` | `cmd_stats` | YES | YES | Admin stats. |
 | `/pending` | `cmd_pending` | YES | YES | Pending manual bills. |
 | `/duyet` | `cmd_duyet` | YES | YES | Approve manual bill. |
+| `/fx_price_test` | `cmd_fx_price_test` | YES | YES | Preview USD/CNY fixed-rate conversion; creates no payment and credits no Xu. |
 | `/tuchoi` | `cmd_tuchoi` | YES | YES | Reject manual bill. |
 | `/add` | `cmd_admin_add` | YES | YES | Add credit. |
 | `/setvip` | `cmd_setvip` | YES | YES | Set member tier: silver/gold/platinum/diamond/vip only. |

@@ -7701,7 +7701,11 @@ def test_manual_topup_menu_methods(monkeypatch):
     monkeypatch.setattr(bot, "MANUAL_ZALOPAY_MERCHANT_ENABLED", True)
     monkeypatch.setattr(bot, "MANUAL_USDT_TRC20_ENABLED", False)
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
-    labels = [button.text for row in bot.manual_payment_menu_keyboard(123).inline_keyboard for button in row]
+    currency_labels = [button.text for row in bot.manual_payment_menu_keyboard(123).inline_keyboard for button in row]
+    assert "🇻🇳 VND" in currency_labels
+    assert "🇺🇸 USD" in currency_labels
+    assert "🇨🇳 CNY" in currency_labels
+    labels = [button.text for row in bot.manual_domestic_method_keyboard(123).inline_keyboard for button in row]
     assert "🏦 Ngân hàng ACB/VietQR" in labels
     assert "💚 ZaloPay cá nhân" in labels
     assert "🛍 ZaloPay cửa hàng" in labels
@@ -7743,7 +7747,17 @@ def _create_manual_deposit_test_db(path):
             user_id TEXT, username TEXT, file_id TEXT, file_unique_id TEXT,
             submitted_at TEXT, status TEXT, order_code TEXT, amount INTEGER, xu INTEGER,
             method TEXT, tx_hash TEXT, admin_note TEXT, approved_by TEXT,
-            approved_at TEXT, updated_at TEXT
+            approved_at TEXT, updated_at TEXT,
+            currency TEXT DEFAULT 'VND', original_amount REAL DEFAULT 0,
+            fixed_rate_vnd INTEGER DEFAULT 1, amount_vnd INTEGER DEFAULT 0,
+            base_xu INTEGER DEFAULT 0, bonus_xu INTEGER DEFAULT 0,
+            expected_xu INTEGER DEFAULT 0, approved_xu INTEGER DEFAULT 0,
+            foreign_manual INTEGER DEFAULT 0, first_bonus_applied INTEGER DEFAULT 0,
+            launch_bonus_applied INTEGER DEFAULT 0, rank_topup_reward_applied INTEGER DEFAULT 0,
+            extra_xu_percent_bonus_applied INTEGER DEFAULT 0,
+            rank_discount_percent_preserved INTEGER DEFAULT 1,
+            member_points_eligible INTEGER DEFAULT 1, transfer_content TEXT DEFAULT '',
+            bill_file_id TEXT DEFAULT ''
         )"""
     )
     conn.commit()
@@ -7820,6 +7834,132 @@ def test_manual_approve_requires_second_confirmation(monkeypatch, tmp_path):
     state = bot.get_manual_approval_state(999)
     assert state and state["deposit_id"] == 1 and state["step"] == "await_amount"
     assert any("chưa cộng Xu" in item for item in replies)
+
+
+def test_manual_international_topup_fixed_rates_and_bonus_guards(monkeypatch):
+    monkeypatch.setattr(bot, "XU_TO_VND", 100)
+    monkeypatch.setattr(bot, "USD_FIXED_RATE_VND", 25000)
+    monkeypatch.setattr(bot, "CNY_FIXED_RATE_VND", 3800)
+    monkeypatch.setattr(bot, "FOREIGN_XU_ROUND_TO", 10)
+    monkeypatch.setattr(bot, "FOREIGN_XU_ROUNDING_MODE", "floor")
+
+    usd = bot.foreign_topup_preview("USD", 10, "usdt_trc20")
+    cny = bot.foreign_topup_preview("CNY", 10, "zalopay_personal")
+    assert usd["amount_vnd"] == 250000
+    assert usd["base_xu"] == 2500
+    assert usd["bonus_xu"] == 0
+    assert usd["expected_xu"] == 2500
+    assert cny["amount_vnd"] == 38000
+    assert cny["base_xu"] == 380
+    assert cny["bonus_xu"] == 0
+    assert cny["expected_xu"] == 380
+
+    for preview in (usd, cny):
+        assert bot.is_foreign_topup(preview) is True
+        assert bot.is_topup_bonus_allowed(preview) is False
+        assert bot.is_first_topup_bonus_allowed(preview) is False
+        assert bot.is_launch_bonus_allowed(preview) is False
+        assert bot.is_rank_topup_reward_allowed(preview) is False
+        assert preview["extra_xu_percent_bonus_applied"] is False
+        assert preview["rank_discount_percent_preserved"] is True
+
+
+def test_cny_zalopay_is_foreign_and_vnd_methods_keep_bonus_eligibility():
+    cny_zalopay = {"currency": "CNY", "method": "zalopay_personal", "foreign_manual": True}
+    vnd_bank = {"currency": "VND", "method": "bank_acb", "foreign_manual": False}
+    vnd_zalopay = {"currency": "VND", "method": "zalopay_personal", "foreign_manual": False}
+
+    assert bot.is_foreign_topup(cny_zalopay) is True
+    assert bot.is_topup_bonus_allowed(cny_zalopay) is False
+    assert bot.is_domestic_vnd_topup(vnd_bank) is True
+    assert bot.is_launch_bonus_allowed(vnd_bank) is True
+    assert bot.is_first_topup_bonus_allowed(vnd_zalopay) is True
+    assert bot.is_rank_discount_percent_allowed(None, cny_zalopay) is True
+
+
+def test_foreign_topup_i18n_hides_bonus_promises_and_vi_has_domestic_notice():
+    en = bot.menu_text_main_topup_i18n("en")
+    zh = bot.menu_text_main_topup_i18n("zh")
+    vi = bot.domestic_topup_bonus_notice()
+
+    assert "does not include first top-up bonus" in en
+    assert "30%" not in en
+    assert "不包含首次充值奖励" in zh
+    assert "首充 30%" not in zh
+    assert "chỉ áp dụng cho khách nội địa Việt Nam" in vi
+    for method in ("PayOS", "QR ngân hàng Việt Nam", "ZaloPay", "MoMo"):
+        assert method in vi
+
+
+def test_manual_foreign_session_saves_bonus_flags_and_duplicate_tx(monkeypatch, tmp_path):
+    db_path = tmp_path / "manual-foreign.db"
+    _create_manual_deposit_test_db(db_path)
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    preview = bot.foreign_topup_preview("USD", 10, "usdt_trc20")
+    state = {**preview, "order_code": "MANUAL", "transfer_content": "AAS 123 USD MANUAL"}
+    user = SimpleNamespace(id=123, first_name="Foreign customer", username="foreign")
+
+    first = bot.create_manual_pending_deposit(user, state, tx_hash="txid-unique-001")
+    second = bot.create_manual_pending_deposit(user, state, tx_hash="txid-unique-001")
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert second["reason"] == "duplicate_tx_hash"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            """SELECT currency,original_amount,fixed_rate_vnd,amount_vnd,base_xu,bonus_xu,expected_xu,
+                      foreign_manual,first_bonus_applied,launch_bonus_applied,rank_topup_reward_applied,
+                      extra_xu_percent_bonus_applied,rank_discount_percent_preserved
+               FROM pending_deposits WHERE id=?""",
+            (first["id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == ("USD", 10.0, 25000, 250000, 2500, 0, 2500, 1, 0, 0, 0, 0, 1)
+
+
+def test_manual_custom_xu_requires_reason_before_confirm(monkeypatch):
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: uid == 999)
+    bot.MANUAL_APPROVAL_STATE.clear()
+    bot.set_manual_approval_state(999, 7, "123", step="await_amount", amount=2500, expected_xu=2500)
+    replies = []
+
+    async def reply_text(text, **kwargs):
+        replies.append((str(text), kwargs))
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=999),
+        effective_message=SimpleNamespace(text="2450", reply_text=reply_text),
+    )
+    assert asyncio.run(bot.handle_manual_approval_pending_text(update, SimpleNamespace())) is True
+    state = bot.get_manual_approval_state(999)
+    assert state["step"] == "await_reason"
+    assert state["amount"] == 2450
+    assert "lý do" in replies[-1][0].lower()
+
+    update.effective_message.text = "phí chuyển USDT"
+    assert asyncio.run(bot.handle_manual_approval_pending_text(update, SimpleNamespace())) is True
+    state = bot.get_manual_approval_state(999)
+    assert state["step"] == "confirm"
+    assert state["reason"] == "phí chuyển USDT"
+    assert "Xác nhận duyệt Xu điều chỉnh" in replies[-1][0]
+
+
+def test_fx_price_test_command_is_admin_preview_only(monkeypatch):
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: uid == 999)
+    replies = []
+
+    async def reply_text(text, **kwargs):
+        replies.append(str(text))
+
+    update = SimpleNamespace(effective_user=SimpleNamespace(id=999), message=SimpleNamespace(reply_text=reply_text))
+    asyncio.run(bot.cmd_fx_price_test(update, SimpleNamespace(args=["USD", "10"])))
+    payload = replies[-1]
+    assert "250.000đ" in payload
+    assert "2.500 Xu" in payload
+    assert "Bonus Xu: <b>0</b>" in payload
+    assert "không tạo payment" in payload
 
 
 def test_payos_failure_alert_cooldown(monkeypatch):
