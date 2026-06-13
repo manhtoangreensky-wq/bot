@@ -136,6 +136,19 @@ SUPPORT_REPLY_TEMPLATES = {
     ],
     "payment": [
         _reply_template(
+            "payment_how_to_topup",
+            "payment",
+            "hỏi cách nạp tiền / nạp Xu",
+            "💳 Cách nạp Xu TOAN AAS:\n\n"
+            "1. Bấm 💰 Nạp Xu ở menu chính hoặc gửi /naptien.\n"
+            "2. Chọn mệnh giá 10k, 20k, 50k, 100k, 200k hoặc 500k.\n"
+            "3. Với PayOS, Xu được cộng khi giao dịch hợp lệ được xác nhận. "
+            "Với nạp thủ công, bạn gửi bill/mã giao dịch để admin đối soát rồi mới cộng Xu.\n\n"
+            "Nếu bạn đã thanh toán nhưng chưa nhận Xu, hãy gửi ảnh giao dịch, số tiền "
+            "và thời gian chuyển khoản để TOAN AAS kiểm tra.",
+            priority="low",
+        ),
+        _reply_template(
             "payment_insufficient_xu",
             "payment",
             "hết Xu / cần nạp",
@@ -335,6 +348,10 @@ def classify_support_escalation(user_message: str, context: dict | None = None, 
         "qua te", "doi tien", "chui", "tru xu ma khong ra video",
     )
     refund = ("hoan tien", "hoan xu", "bi tru xu", "da tru xu", "mat xu", "tru xu ma", "khong ra ket qua")
+    payment_help = (
+        "lam sao nap", "lam sao de nap", "cach nap", "cach de nap", "huong dan nap", "nap xu nhu the nao",
+        "nap tien nhu the nao", "muon nap xu", "muon nap tien",
+    )
     payment = ("nap tien chua", "nap xu chua", "chuyen khoan roi", "payos loi", "qr het han", "cong thieu xu", "chua thay xu")
     b2b = ("hop dong", "bao gia doanh nghiep", "du an", "trien khai cho cong ty", "so luong lon", "doi tac", "chiet khau", "hoa hong", "agency", "shop lon")
     custom_bot = ("lam bot rieng", "bot rieng", "bot cho shop", "bot ban hang", "bot cskh", "bot noi bo", "ket noi bot", "tu dong hoa cho shop")
@@ -361,6 +378,12 @@ def classify_support_escalation(user_message: str, context: dict | None = None, 
             matched=True, needs_admin=True, priority="high", reason="refund_or_xu_loss",
             category="refund_complaint", ticket_category="refund", suggested_reply_id="refund_review",
             should_create_ticket=True, should_alert_admin=True,
+        )
+    elif _contains_any(text, payment_help):
+        result.update(
+            matched=True, priority="low", reason="payment_how_to_topup",
+            category="payment", ticket_category="payment_topup",
+            suggested_reply_id="payment_how_to_topup",
         )
     elif _contains_any(text, payment):
         result.update(

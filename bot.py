@@ -31587,10 +31587,7 @@ def support_auto_reply_for_ticket_category(classification: dict, ticket_category
             "số lượng đầu ra, tần suất sử dụng và ngân sách phù hợp."
         )
     if ticket_category == "general_support":
-        return (
-            "Dạ mình nhận được yêu cầu hỗ trợ của bạn rồi nhé. TOAN AAS đã tạo ticket để "
-            "theo dõi; bạn có thể gửi thêm ảnh chụp màn hình, mã job hoặc mô tả chi tiết."
-        )
+        return support_reply_for_classification(classification)
     return support_reply_for_classification(classification)
 
 def public_support_ticket_text(ticket: dict) -> str:

@@ -3248,6 +3248,74 @@ def test_support_auto_test_command_is_preview_only(monkeypatch):
     assert "Không tạo ticket thật" in payload
 
 
+def test_support_answers_topup_question_before_ticket_details(monkeypatch, tmp_path):
+    db_path = tmp_path / "support_topup_answer.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_STARTUP_BACKUP_PATHS", set())
+    bot.init_db()
+
+    classification = bot.classify_support_escalation("Làm sao để nạp tiền vào bot?")
+    assert classification["matched"] is True
+    assert classification["reason"] == "payment_how_to_topup"
+    assert classification["should_create_ticket"] is False
+    direct_reply = bot.support_reply_for_classification(classification)
+    assert "/naptien" in direct_reply
+    assert "10k, 20k, 50k, 100k, 200k hoặc 500k" in direct_reply
+
+    class FakeMessage:
+        def __init__(self):
+            self.text = "Làm sao để nạp tiền vào bot?"
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((str(text), kwargs))
+
+    class FakeBot:
+        async def send_message(self, **kwargs):
+            raise AssertionError("simple top-up guidance must not alert admin")
+
+    user = SimpleNamespace(id="support-topup-guide", username="topup_user", first_name="Topup")
+    message = FakeMessage()
+    bot.set_support_ticket_pending(user.id, "awaiting_message", category="general_support")
+    handled = asyncio.run(bot.handle_support_ticket_pending_text(
+        SimpleNamespace(effective_user=user, message=message),
+        SimpleNamespace(bot=FakeBot()),
+    ))
+
+    assert handled is True
+    payload = message.sent[0][0]
+    assert payload.index("Cách nạp Xu TOAN AAS") < payload.index("Mã ticket")
+    assert "/naptien" in payload
+    assert bot.list_support_tickets(user_id=user.id)
+
+
+def test_support_persona_topup_faq_does_not_create_ticket(monkeypatch):
+    class FakeMessage:
+        def __init__(self):
+            self.text = "Tôi muốn nạp Xu, làm sao nạp?"
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((str(text), kwargs))
+
+    message = FakeMessage()
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id="support-faq", username="faq_user", first_name="FAQ"),
+        message=message,
+    )
+    context = SimpleNamespace(bot=SimpleNamespace())
+    monkeypatch.setattr(
+        bot,
+        "create_or_append_support_ticket",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("FAQ must not create a ticket")),
+    )
+
+    handled = asyncio.run(bot.handle_support_persona_message(update, context))
+
+    assert handled is True
+    assert "/naptien" in message.sent[0][0]
+
+
 def test_support_classifier_handles_explicit_public_support_keywords():
     technical = bot.classify_support_escalation("Bot đứng im và lỗi video")
     admin = bot.classify_support_escalation("Tôi muốn gặp admin")
