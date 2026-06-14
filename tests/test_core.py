@@ -313,6 +313,17 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "🧬 Runtime" in system_labels
     assert "🗄 Data Status" in system_labels
     admin_menu = bot.menu_text_admin()
+    assert len(admin_menu) < 4096
+    admin_content, admin_markup = bot.localized_menu_content("admin", True, "vi", user_id=bot.ADMIN_ID)
+    assert admin_content == admin_menu
+    assert len(admin_content) < 4096
+    assert admin_markup.inline_keyboard
+    assert all(
+        len(button.callback_data or "") <= 64
+        for row in admin_markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    )
     for command in [
         "/add",
         "/setvip",
