@@ -218,7 +218,10 @@ def test_free_hub_callbacks_have_handlers():
 def test_free_hub_reuses_existing_handlers():
     docs_callbacks = _callbacks(bot.free_hub_docs_keyboard("vi"))
     notes_callbacks = _callbacks(bot.free_hub_notes_keyboard("vi"))
-    assert "menu|main_docs" in docs_callbacks
+    assert "menu|hint_doc_image_to_pdf" in docs_callbacks
+    assert "menu|hint_doc_compress_pdf" in docs_callbacks
+    assert "freehub|docs_split_merge" in docs_callbacks
+    assert "freehub|docs_summary_guard" in docs_callbacks
     assert "menu|main_memory" in notes_callbacks
     assert "menu|memory_storage_status" in notes_callbacks
 
@@ -419,6 +422,7 @@ def test_free_tool_types_cover_requested_routes():
         "hook_script",
         "image_prompt",
         "video_prompt",
+        "image_video_prompt",
         "document_pdf",
         "notes_storage",
         "prompt_library",

@@ -6283,6 +6283,158 @@ def test_trend_guided_video_prompt_callbacks_open_finalization(monkeypatch):
     assert "Hoàn thiện video" in real_video["text"]
 
 
+def test_free_tools_guided_outputs_and_followups(monkeypatch):
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "free_hub_quota_payload", lambda _uid: {"allowed": True})
+    monkeypatch.setattr(bot, "free_hub_record_success", lambda *_args, **_kwargs: 1)
+
+    async def no_promo(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(bot, "maybe_send_free_hub_promo", no_promo)
+
+    class FakeMessage:
+        def __init__(self, text):
+            self.text = text
+            self.replies = []
+
+        async def reply_text(self, text, parse_mode=None, reply_markup=None):
+            self.replies.append({"text": str(text), "parse_mode": parse_mode, "reply_markup": reply_markup})
+            return SimpleNamespace(text=text, reply_markup=reply_markup)
+
+    async def run_tool(task_type, user_text):
+        uid = 871001
+        bot.clear_free_hub_pending(uid)
+        bot.set_free_hub_pending(uid, "input", task_type=task_type)
+        message = FakeMessage(user_text)
+        update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=uid, first_name="Free Tool", username="free_tool"),
+        )
+        handled = await bot.handle_free_hub_pending_text(update, SimpleNamespace())
+        assert handled is True
+        assert message.replies
+        return message.replies[-1]
+
+    meta = asyncio.run(run_tool("meta_ai_prompt", "Nước hoa nam dùng khi đi hẹn hò"))
+    assert "Prompt ngắn" in meta["text"]
+    assert "Prompt chi tiết" in meta["text"]
+    assert "Prompt quảng cáo" in meta["text"]
+    meta_buttons = [button.text for row in meta["reply_markup"].inline_keyboard for button in row]
+    assert "🔁 Đổi gợi ý khác" in meta_buttons
+    assert "🖼 Tạo prompt ảnh/video từ ý này" in meta_buttons
+    assert "✍️ Viết caption/hashtag" in meta_buttons
+
+    caption = asyncio.run(run_tool("caption_hashtag", "Máy xay sinh tố mini cho dân văn phòng, đăng TikTok"))
+    assert "Caption ngắn" in caption["text"]
+    assert "Caption bán hàng" in caption["text"]
+    assert "Hashtag" in caption["text"]
+    caption_buttons = [button.text for row in caption["reply_markup"].inline_keyboard for button in row]
+    assert "🧠 Tạo thêm ý tưởng content" in caption_buttons
+    assert "🖼 Tạo prompt ảnh/video" in caption_buttons
+
+    ideas = asyncio.run(run_tool("content_idea", "Dịch vụ tạo video AI cho shop mỹ phẩm"))
+    assert "3 ý tưởng video ngắn" in ideas["text"]
+    assert "3 ý tưởng bài đăng" in ideas["text"]
+    assert "Hướng nên làm trước" in ideas["text"]
+    idea_buttons = [button.text for row in ideas["reply_markup"].inline_keyboard for button in row]
+    assert "🎬 Tạo concept quảng cáo cinematic" in idea_buttons
+    assert "✍️ Viết caption từ ý này" in idea_buttons
+
+    prompts = asyncio.run(run_tool("image_video_prompt", "Nước hoa nam cao cấp"))
+    assert "Prompt ảnh 9:16" in prompts["text"]
+    assert "Prompt ảnh 1:1" in prompts["text"]
+    assert "Prompt video AI" in prompts["text"]
+    assert "Prompt ghép ảnh/video" in prompts["text"]
+    prompt_buttons = [button.text for row in prompts["reply_markup"].inline_keyboard for button in row]
+    assert "🖼 Dùng prompt này tạo ảnh" in prompt_buttons
+    assert "🎬 Dùng prompt này tạo video AI" in prompt_buttons
+
+
+def test_free_tools_menu_byok_and_docs_are_guarded():
+    main_text = bot.free_hub_main_text("vi")
+    assert "chuẩn bị nội dung" in main_text
+    main_buttons = [button.text for row in bot.free_hub_main_keyboard("vi").inline_keyboard for button in row]
+    assert "🤖 Prompt Meta AI" in main_buttons
+    assert "🔐 Kết nối API riêng" in main_buttons
+    assert "🔑 API riêng của tôi" not in main_buttons
+
+    byok_text = bot.free_hub_byok_text("vi")
+    byok_buttons = [button.text for row in bot.free_hub_byok_keyboard("vi").inline_keyboard for button in row]
+    assert "không nên gửi api key" in byok_text.lower()
+    assert "👨‍💼 Liên hệ admin" in byok_buttons
+    assert not any("API key" in button for button in byok_buttons)
+
+    docs_callbacks = [button.callback_data for row in bot.free_hub_docs_keyboard("vi").inline_keyboard for button in row]
+    assert "menu|hint_doc_image_to_pdf" in docs_callbacks
+    assert "freehub|docs_split_merge" in docs_callbacks
+    assert "freehub|docs_summary_guard" in docs_callbacks
+
+
+def test_free_tools_followup_buttons_have_handlers(monkeypatch):
+    replies = []
+
+    async def fake_edit(query, text, reply_markup=None, parse_mode="HTML"):
+        replies.append({"text": str(text), "reply_markup": reply_markup, "parse_mode": parse_mode})
+        return SimpleNamespace(text=text, reply_markup=reply_markup)
+
+    async def no_promo(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(bot, "safe_edit_or_send", fake_edit)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "free_hub_record_success", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(bot, "maybe_send_free_hub_promo", no_promo)
+
+    class FakeQuery:
+        def __init__(self, data, user_id=871002):
+            self.data = data
+            self.from_user = SimpleNamespace(id=user_id, first_name="Free Tool", username="free_tool")
+            self.message = SimpleNamespace(chat_id=871003)
+            self.answers = []
+
+        async def answer(self, text=None, show_alert=False):
+            self.answers.append({"text": text, "show_alert": show_alert})
+            return None
+
+    async def press(data, uid=871002):
+        await bot.handle_free_hub_callback(
+            SimpleNamespace(callback_query=FakeQuery(data, uid)),
+            SimpleNamespace(),
+        )
+        return replies[-1]
+
+    uid = 871002
+    bot.clear_free_hub_pending(uid)
+    result = bot.free_hub_meta_prompt_pack("Nước hoa nam dùng khi đi hẹn hò")
+    bot.set_free_hub_pending(
+        uid,
+        "result",
+        task_type="meta_ai_prompt",
+        user_input="Nước hoa nam dùng khi đi hẹn hò",
+        result=result,
+        provider="local_prompt_library",
+    )
+
+    variant = asyncio.run(press("freehub|variant", uid))
+    assert "Prompt ngắn" in variant["text"]
+    assert "Xu deducted" in variant["text"]
+
+    prompts = asyncio.run(press("freehub|to_prompts", uid))
+    assert "Prompt ảnh 9:16" in prompts["text"]
+    assert "Prompt video AI" in prompts["text"]
+
+    use_video = asyncio.run(press("freehub|use_video", uid))
+    assert "Dùng prompt này để tạo video AI" in use_video["text"]
+    assert "xác nhận cuối" in use_video["text"]
+    use_video_buttons = [button.text for row in use_video["reply_markup"].inline_keyboard for button in row]
+    assert "🎬 Mở Video AI" in use_video_buttons
+
+    byok = asyncio.run(press("freehub|byok", uid))
+    assert "Kết nối API riêng" in byok["text"]
+    assert "không nên gửi API key" in byok["text"]
+
+
 def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch):
     replies = []
 
