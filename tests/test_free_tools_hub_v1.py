@@ -1,4 +1,6 @@
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import bot
 from free_tools_hub import (
@@ -35,12 +37,151 @@ def _source_between(start_marker: str, end_marker: str) -> str:
     return source[start:end]
 
 
+class _FakeFreeHubQuery:
+    def __init__(self, data="freehub|main", user_id=12345):
+        self.data = data
+        self.from_user = SimpleNamespace(id=user_id, username="tester", first_name="Tester")
+        self.message = SimpleNamespace(chat_id=user_id)
+        self.answered = False
+        self.edited = None
+
+    async def answer(self, *args, **kwargs):
+        self.answered = True
+        self.answer_args = args
+        self.answer_kwargs = kwargs
+
+    async def edit_message_text(self, text, parse_mode=None, reply_markup=None):
+        self.edited = {
+            "text": text,
+            "parse_mode": parse_mode,
+            "reply_markup": reply_markup,
+        }
+        return self.edited
+
+
+def _labels(markup):
+    return [[button.text for button in row] for row in markup.inline_keyboard]
+
+
+def _callback_set(markup):
+    return {
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    }
+
+
 def test_free_hub_menu_visible():
     assert "freehub|main" in _callbacks(bot.main_menu_keyboard(False))
     assert "freehub|main" in _callbacks(bot.localized_main_menu_keyboard(False, "vi"))
     assert "freehub|main" in _callbacks(bot.localized_main_menu_keyboard(False, "en"))
     assert "freehub|main" in _callbacks(bot.localized_main_menu_keyboard(False, "zh"))
     assert "miễn phí không giới hạn" not in bot.free_hub_main_text("vi").lower()
+
+
+def test_main_menu_layout_regular_user():
+    markup = bot.localized_main_menu_keyboard(False, "vi")
+    labels = _labels(markup)
+
+    assert labels[0] == ["🆓 Công cụ miễn phí", "👤 Tài khoản"]
+    assert labels[1] == ["🖼 Tạo ảnh AI", "🎬 Tạo video AI"]
+    assert all(len(row) == 2 for row in markup.inline_keyboard)
+    assert all("🔐 Admin" not in label for row in labels for label in row)
+    assert "menu|main_video" in _callback_set(markup)
+
+
+def test_main_menu_layout_admin():
+    markup = bot.localized_main_menu_keyboard(True, "vi")
+    labels = _labels(markup)
+
+    assert labels[0] == ["🆓 Công cụ miễn phí", "👤 Tài khoản"]
+    assert labels[-1] == ["🔐 Admin"]
+    assert len(markup.inline_keyboard[-1]) == 1
+    assert all(len(row) == 2 for row in markup.inline_keyboard[:-1])
+
+
+def test_main_menu_callbacks_have_handlers():
+    source = _source()
+    markup = bot.localized_main_menu_keyboard(True, "vi")
+    callbacks = _callback_set(markup)
+
+    assert callbacks == {
+        "freehub|main",
+        "menu|main_profile",
+        "menu|main_image",
+        "menu|main_video",
+        "menu|main_memory",
+        "menu|main_music",
+        "pricing|main",
+        "menu|main_guide",
+        "menu|support",
+        "feedback|start",
+        "back_lang",
+        "menu|admin",
+    }
+    assert 'CallbackQueryHandler(handle_free_hub_callback, pattern=r"^freehub\\|")' in source
+    assert 'CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\\|")' in source
+    assert 'CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\\|")' in source
+    assert 'CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\\|")' in source
+    assert 'CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\\|[a-z]{2}|lang_more|back_lang)$")' in source
+
+
+def test_video_main_button_opens_video_menu():
+    text, markup = bot.localized_menu_content("main_video", False, "vi", user_id=12345)
+    callbacks = _callback_set(markup)
+
+    assert "VIDEO TOAN AAS" in text.upper()
+    assert "menu|video_ai_true" in callbacks
+    assert "trendg|start" in callbacks
+    assert "menu|main" in callbacks
+
+
+def test_free_tools_main_keyboard_is_compact_placeholder():
+    callbacks = _callback_set(bot.free_hub_main_keyboard("vi"))
+
+    assert {
+        "freehub|meta",
+        "freehub|caption",
+        "freehub|ideas",
+        "freehub|prompts",
+        "freehub|docs",
+        "freehub|notes",
+        "freehub|byok",
+        "freehub|upload",
+        "menu|main",
+    }.issubset(callbacks)
+    assert "freehub|chat" not in callbacks
+    assert "freehub|hook" not in callbacks
+    assert "freehub|library" not in callbacks
+
+
+def test_free_tools_button_opens_menu(monkeypatch):
+    monkeypatch.setattr(bot, "FREE_HUB_ENABLED", True)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    query = _FakeFreeHubQuery("freehub|main")
+    update = SimpleNamespace(callback_query=query)
+
+    asyncio.run(bot.handle_free_hub_callback(update, SimpleNamespace()))
+
+    assert query.answered is True
+    assert "Công cụ miễn phí TOAN AAS" in query.edited["text"]
+    assert "freehub|meta" in _callback_set(query.edited["reply_markup"])
+    assert "menu|main" in _callback_set(query.edited["reply_markup"])
+
+
+def test_free_tools_child_buttons_guard_if_not_ready(monkeypatch):
+    monkeypatch.setattr(bot, "FREE_HUB_ENABLED", True)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    query = _FakeFreeHubQuery("freehub|unknown_button")
+    update = SimpleNamespace(callback_query=query)
+
+    asyncio.run(bot.handle_free_hub_callback(update, SimpleNamespace()))
+
+    assert query.answered is True
+    assert "đang hoàn thiện nút này" in query.edited["text"]
+    assert "chưa gọi API" in query.edited["text"]
+    assert "chưa trừ Xu" in query.edited["text"]
 
 
 def test_free_hub_callbacks_have_handlers():

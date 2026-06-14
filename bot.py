@@ -38511,15 +38511,12 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return build_2col_keyboard(
         [
-            ("💬 Hỏi AI miễn phí" if is_vi else "💬 Free AI", "freehub|chat"),
             ("🎬 Prompt Meta AI" if is_vi else "🎬 Meta AI prompt", "freehub|meta"),
-            ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
             ("✍️ Caption/Hashtag" if is_vi else "✍️ Caption/hashtags", "freehub|caption"),
-            ("🧩 Kịch bản & Hook" if is_vi else "🧩 Script & hooks", "freehub|hook"),
+            ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
             ("🖼 Prompt ảnh/video" if is_vi else "🖼 Image/video prompts", "freehub|prompts"),
             ("📄 Tài liệu/PDF miễn phí" if is_vi else "📄 Documents/PDF", "freehub|docs"),
             ("🗒 Ghi chú/Lưu trữ" if is_vi else "🗒 Notes/storage", "freehub|notes"),
-            ("📚 Thư viện prompt" if is_vi else "📚 Prompt library", "freehub|library"),
             ("🔑 API riêng của tôi" if is_vi else "🔑 My API key", "freehub|byok"),
             ("📤 Upload để hậu kỳ" if is_vi else "📤 Upload for postprocess", "freehub|upload"),
         ],
@@ -39038,17 +39035,15 @@ async def maybe_send_free_hub_promo(target, user_id, lang: str, success_count: i
 
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
+        [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
         [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
-        [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")],
         [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
-        [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
+        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
-    else:
-        rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
+        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
     return InlineKeyboardMarkup(rows)
 
 def language_choice_text() -> str:
@@ -39085,44 +39080,38 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         rows = [
+            [InlineKeyboardButton("🆓 免费工具", callback_data="freehub|main"), InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 AI 图片", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
             [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 语音 / 音乐", callback_data="menu|main_music")],
-            [InlineKeyboardButton("🆓 免费工具", callback_data="freehub|main")],
             [InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
-            [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support"), InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start")],
+            [InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")],
         ]
         if is_admin:
-            rows.append([InlineKeyboardButton("🌍 切换语言", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
-        else:
-            rows.append([InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")])
+            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
         return InlineKeyboardMarkup(rows)
     if lang == "vi":
         rows = [
+            [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
             [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
-            [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")],
             [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
-            [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
+            [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
         ]
         if is_admin:
-            rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
-        else:
-            rows.append([InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")])
+            rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
         return InlineKeyboardMarkup(rows)
     rows = [
+        [InlineKeyboardButton("🆓 Free tools", callback_data="freehub|main"), InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 AI Image", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
         [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Music", callback_data="menu|main_music")],
-        [InlineKeyboardButton("🆓 Free tools", callback_data="freehub|main")],
         [InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
-        [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support"), InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start")],
+        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("🌍 Change language", callback_data="back_lang"), InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
-    else:
-        rows.append([InlineKeyboardButton("🌍 Change language", callback_data="back_lang")])
+        rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
     return InlineKeyboardMarkup(rows)
 
 def localized_start_menu_text(user_id, lang: str) -> str:
@@ -47830,7 +47819,17 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
             },
         )
         return await query.answer(f"Đã lưu vào ghi chú #{note_id}.", show_alert=True)
-    return await query.answer("Thao tác Free Hub chưa hỗ trợ.", show_alert=True)
+    logger.info(
+        "free hub unknown callback guarded | user=%s | action=%s",
+        uid,
+        sanitize_log_text(action)[:80],
+    )
+    guard_text = (
+        "TOAN AAS đang hoàn thiện nút này trong khu Công cụ miễn phí. Bot chưa gọi API và chưa trừ Xu."
+        if normalize_user_language(lang) == "vi"
+        else "TOAN AAS is still preparing this free-tool button. No API was called and no Xu was charged."
+    )
+    return await safe_edit_or_send(query, guard_text, reply_markup=free_hub_main_keyboard(lang))
 
 async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
