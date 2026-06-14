@@ -8,14 +8,14 @@
   <meta name="theme-color" content="#063b2b">
   <meta property="og:title" content="TOAN AAS - AI Automation System">
   <meta property="og:description" content="Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.">
-  <meta property="og:image" content="https://www.toanaas.vn/assets/brand/toan-aas-banner-official.png">
+  <meta property="og:image" content="https://www.toanaas.vn/assets/banner.png">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="TOAN AAS - AI Automation System">
   <meta name="twitter:description" content="Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.">
-  <meta name="twitter:image" content="https://www.toanaas.vn/assets/brand/toan-aas-banner-official.png">
-  <link rel="icon" type="image/png" href="/assets/brand/toan-aas-logo-official.png">
-  <link rel="apple-touch-icon" href="/assets/brand/toan-aas-logo-official.png">
+  <meta name="twitter:image" content="https://www.toanaas.vn/assets/banner.png">
+  <link rel="icon" type="image/png" href="./assets/logo.png">
+  <link rel="apple-touch-icon" href="./assets/logo.png">
   <style>
     :root {
       --ink: #14221c;
@@ -74,10 +74,16 @@
       color: var(--white);
       font-weight: 850;
     }
-    .brand img {
+    .logo-img {
+      width: 52px;
+      height: 52px;
+      object-fit: contain;
+      display: block;
+      border-radius: 10px;
+    }
+    .brand .logo-img {
       width: 42px;
       height: 42px;
-      object-fit: contain;
       border-radius: 6px;
       background: var(--white);
     }
@@ -119,10 +125,18 @@
       background-color: #043526;
       overflow: hidden;
     }
-    .hero-banner {
+    .hero-banner-img {
+      width: 100%;
+      max-width: 1100px;
+      height: auto;
+      display: block;
+      object-fit: contain;
+    }
+    .hero > .hero-banner-img {
       position: absolute;
       inset: 0;
       width: 100%;
+      max-width: none;
       height: 100%;
       object-fit: cover;
       object-position: center;
@@ -393,9 +407,10 @@
         display: block;
         background: var(--green-950);
       }
-      .hero-banner {
+      .hero > .hero-banner-img {
         position: relative;
         width: 100%;
+        max-width: 100%;
         height: auto;
         min-height: 150px;
         aspect-ratio: 4 / 1;
@@ -420,7 +435,7 @@
   <header class="topbar">
     <div class="container nav">
       <a class="brand" href="#top" aria-label="TOAN AAS">
-        <img src="/assets/brand/toan-aas-logo-official.png" alt="TOAN AAS - AI Automation System">
+        <img src="./assets/logo.png" alt="TOAN AAS logo" class="logo-img">
         <span>TOAN AAS<small>AI Automation System</small></span>
       </a>
       <nav class="nav-links" aria-label="Điều hướng chính">
@@ -436,7 +451,7 @@
 
   <main id="top">
     <section class="hero" aria-label="TOAN AAS AI Automation System">
-      <img class="hero-banner" src="/assets/brand/toan-aas-banner-official.png" alt="TOAN AAS - Hệ thống tự động hóa AI" loading="eager" fetchpriority="high">
+      <img src="./assets/banner.png" alt="TOAN AAS - Hệ thống tự động hóa AI" class="hero-banner-img" loading="eager" fetchpriority="high">
       <div class="container hero-content">
         <div class="eyebrow">AI Automation System</div>
         <h1>TOAN AAS</h1>
@@ -565,7 +580,7 @@
   <footer>
     <div class="container footer-row">
       <div class="footer-brand">
-        <img src="/assets/brand/toan-aas-logo-official.png" alt="TOAN AAS - AI Automation System" loading="lazy">
+        <img src="./assets/logo.png" alt="TOAN AAS logo" class="logo-img" loading="lazy">
         <div><strong>TOAN AAS</strong><br><small>Cập nhật chính sách theo từng giai đoạn vận hành.</small></div>
       </div>
       <div class="footer-links">
