@@ -667,6 +667,7 @@ TELEGRAM_WEBHOOK_PATH = _env(
 if not TELEGRAM_WEBHOOK_PATH.startswith("/"):
     TELEGRAM_WEBHOOK_PATH = "/" + TELEGRAM_WEBHOOK_PATH
 LEAD_WEBHOOK_SECRET = _env("LEAD_WEBHOOK_SECRET")
+OPERATOR_API_ENABLED = env_flag("OPERATOR_API_ENABLED", "false")
 OPERATOR_API_TOKEN  = _env("OPERATOR_API_TOKEN")
 AFFILIATE_POSTBACK_TOKEN = _env("AFFILIATE_POSTBACK_TOKEN")
 OPERATOR_UPLOAD_DIR = _env("OPERATOR_UPLOAD_DIR", "operator_uploads")
@@ -10075,6 +10076,83 @@ def find_affiliate_link_by_url(owner_id, url):
 def public_tracking_base_url():
     return (PUBLIC_BASE_URL or "").rstrip("/")
 
+def check_operator_bridge_config(public_base_url=None, operator_api_token=None, enabled=None) -> dict:
+    bridge_enabled = OPERATOR_API_ENABLED if enabled is None else bool(enabled)
+    base_url = (PUBLIC_BASE_URL if public_base_url is None else str(public_base_url or "")).strip().rstrip("/")
+    token = OPERATOR_API_TOKEN if operator_api_token is None else str(operator_api_token or "")
+    if not bridge_enabled:
+        return {
+            "status": "disabled",
+            "severity": "disabled",
+            "enabled": False,
+            "ok": True,
+            "missing": [],
+            "reason": "operator_api_disabled",
+            "safe_message": "Operator API bridge đang tắt bằng OPERATOR_API_ENABLED=false; đây là tính năng nội bộ tùy chọn.",
+            "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+        }
+    missing = []
+    if not base_url:
+        missing.append("PUBLIC_BASE_URL")
+    if not token:
+        missing.append("OPERATOR_API_TOKEN")
+    parsed = urlparse(base_url) if base_url else None
+    host = (parsed.hostname or "").lower() if parsed else ""
+    if base_url and (host in {"localhost", "127.0.0.1", "::1"} or base_url.startswith(("http://localhost", "https://localhost"))):
+        return {
+            "status": "fail",
+            "severity": "fail",
+            "enabled": True,
+            "ok": False,
+            "missing": [],
+            "reason": "public_base_url_localhost",
+            "safe_message": "PUBLIC_BASE_URL không được là localhost/127.0.0.1 khi bật Operator API.",
+            "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+        }
+    if missing:
+        return {
+            "status": "fail",
+            "severity": "fail",
+            "enabled": True,
+            "ok": False,
+            "missing": missing,
+            "reason": "missing_required_env",
+            "safe_message": "Thiếu cấu hình bắt buộc cho Operator API bridge: " + ", ".join(missing),
+            "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+        }
+    if len(token) < 24:
+        return {
+            "status": "fail",
+            "severity": "fail",
+            "enabled": True,
+            "ok": False,
+            "missing": [],
+            "reason": "operator_token_too_short",
+            "safe_message": "OPERATOR_API_TOKEN quá ngắn; hãy dùng secret mạnh, ví dụ secrets.token_urlsafe(32).",
+            "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+        }
+    if parsed and parsed.scheme not in {"http", "https"}:
+        return {
+            "status": "fail",
+            "severity": "fail",
+            "enabled": True,
+            "ok": False,
+            "missing": [],
+            "reason": "public_base_url_invalid_scheme",
+            "safe_message": "PUBLIC_BASE_URL phải là URL http/https public của backend Railway.",
+            "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+        }
+    return {
+        "status": "pass",
+        "severity": "pass",
+        "enabled": True,
+        "ok": True,
+        "missing": [],
+        "reason": "configured",
+        "safe_message": "PUBLIC_BASE_URL và OPERATOR_API_TOKEN đã sẵn sàng cho bridge nội bộ.",
+        "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
+    }
+
 def affiliate_tracking_url(affiliate_id, job_id=0, source=""):
     base_url = public_tracking_base_url()
     if not base_url or not affiliate_id:
@@ -10214,6 +10292,54 @@ def import_affiliate_links_from_text(owner_id, raw_text, default_niche="", defau
         except Exception as exc:
             errors.append({"url": item["url"], "error": str(exc)})
     return created, skipped, errors
+
+def ensure_growth_content_defaults_after_affiliate_import(owner_id) -> dict:
+    conn = db_connect()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM affiliate_links WHERE owner_id=? AND status='active'", (str(owner_id),))
+        active_affiliates = int(c.fetchone()[0] or 0)
+        c.execute("SELECT COUNT(*) FROM social_channels WHERE owner_id=? AND status='active'", (str(owner_id),))
+        active_channels = int(c.fetchone()[0] or 0)
+        c.execute("SELECT COUNT(*) FROM campaigns WHERE owner_id=? AND status='active'", (str(owner_id),))
+        active_campaigns = int(c.fetchone()[0] or 0)
+    finally:
+        conn.close()
+    result = {
+        "active_affiliates": active_affiliates,
+        "created_channel": None,
+        "created_campaign": None,
+        "skipped": [],
+    }
+    if active_affiliates <= 0:
+        result["skipped"].append("no_real_affiliate_data")
+        return result
+    if active_channels <= 0:
+        channel_id = create_social_channel(
+            owner_id,
+            "telegram",
+            "TOAN AAS Affiliate Content",
+            "planned",
+            "affiliate content seed",
+            "khách quan tâm sản phẩm affiliate và nội dung AI",
+            "manual",
+            "Default planned/manual channel created after real affiliate import. No publisher API is enabled.",
+            "manual",
+            "",
+            "",
+        )
+        result["created_channel"] = {"id": channel_id, "name": "TOAN AAS Affiliate Content", "status": "active"}
+    if active_campaigns <= 0:
+        campaign_id = create_campaign(
+            owner_id,
+            "Affiliate Content Seed Campaign",
+            "affiliate content test",
+            "telegram",
+            "",
+            "",
+        )
+        result["created_campaign"] = {"id": campaign_id, "name": "Affiliate Content Seed Campaign", "status": "active"}
+    return result
 
 def affiliate_match_score(affiliate, niche="", trend_text="", platform=""):
     (
@@ -11275,11 +11401,12 @@ def operator_status_data(owner_id):
     for row in channel_rows:
         readiness, reason = channel_publish_readiness(row)
         channel_readiness.append((row, readiness, reason))
+    bridge = check_operator_bridge_config()
     checks = [
         ("channels", active_channels > 0, f"{active_channels} kênh active", "/operator_bootstrap hoặc /channel_add platform=tiktok name=..."),
         ("affiliates", active_affiliates > 0, f"{active_affiliates} affiliate active", "/operator_bootstrap hoặc /affiliate_seed"),
         ("campaigns", active_campaigns > 0, f"{active_campaigns} campaign active", "/operator_bootstrap hoặc /campaign_new name=... niche=..."),
-        ("operator_api", bool(OPERATOR_API_TOKEN), "OPERATOR_API_TOKEN đã bật" if OPERATOR_API_TOKEN else "OPERATOR_API_TOKEN chưa set", "/operator_api"),
+        ("operator_api", bool(bridge.get("ok")), bridge.get("safe_message") or "Operator API bridge chưa sẵn sàng.", "/operator_api"),
         ("publish_ready", any(r in {"manual_ready", "api_ready"} for _, r, _ in channel_readiness), "Có kênh sẵn sàng đăng" if channel_readiness else "Chưa có kênh", "/publish_readiness"),
     ]
     ready_to_scale = all(ok for key, ok, _, _ in checks[:3])
@@ -11442,7 +11569,8 @@ def operator_audit_data(owner_id):
         elif readiness != "manual_required":
             channel_issues.append({"channel_id": row[0], "platform": row[1], "readiness": readiness, "reason": reason})
 
-    api_ok = bool(OPERATOR_API_TOKEN and PUBLIC_BASE_URL)
+    bridge = check_operator_bridge_config()
+    api_ok = bool(bridge.get("ok"))
     ai_ok = bool(gemini_client or openai_client)
     payos_ok = bool(PAYOS_CLIENT_ID and PAYOS_API_KEY and PAYOS_CHECKSUM_KEY)
     content_ok = active_affiliates > 0 and active_channels > 0 and active_campaigns > 0
@@ -11452,7 +11580,7 @@ def operator_audit_data(owner_id):
 
     checks = [
         ("telegram_brain", True, "Telegram bot có /brain, /operator_director, /operator_execute.", "/brain đầu não nên làm gì tiếp theo"),
-        ("operator_api", api_ok, "OPERATOR_API_TOKEN và PUBLIC_BASE_URL đã sẵn sàng." if api_ok else "Thiếu OPERATOR_API_TOKEN hoặc PUBLIC_BASE_URL cho n8n/Claude.", "/operator_api"),
+        ("operator_api", api_ok, bridge.get("safe_message") or "Operator API bridge chưa sẵn sàng.", "/operator_api"),
         ("ai_provider", ai_ok, "Có Gemini/OpenAI để tạo brief/prompt." if ai_ok else "Thiếu GEMINI_API_KEY hoặc OPENAI_API_KEY; bot dùng fallback template.", "Set GEMINI_API_KEY hoặc OPENAI_API_KEY trên Railway"),
         ("payos", payos_ok, "PayOS env đủ 3 khóa." if payos_ok else "Thiếu PAYOS_CLIENT_ID/PAYOS_API_KEY/PAYOS_CHECKSUM_KEY.", "Kiểm tra biến PayOS trên Railway"),
         ("affiliate_catalog", active_affiliates > 0, f"{active_affiliates} affiliate active.", "/operator_bootstrap hoặc /affiliate_seed"),
@@ -15423,7 +15551,8 @@ def operator_goal_audit_data(owner_id, days=30, platform="tiktok", limit=8):
         "performance_add": "cmd_performance_add",
     }
     command_surface_ok = all(name in globals() for name in command_names.values())
-    api_surface_ok = bool(OPERATOR_API_TOKEN and PUBLIC_BASE_URL)
+    bridge = check_operator_bridge_config()
+    api_surface_ok = bool(bridge.get("ok"))
     ai_ok = bool(gemini_client or openai_client)
     content_ok = bool(audit_checks.get("affiliate_catalog") and audit_checks.get("channels") and audit_checks.get("campaigns"))
     production_started = bool(job_rows or (task_total or 0) > 0)
@@ -15453,8 +15582,11 @@ def operator_goal_audit_data(owner_id, days=30, platform="tiktok", limit=8):
             "key": "api_commander_bridge",
             "ok": api_surface_ok,
             "phase": "control",
-            "detail": "PUBLIC_BASE_URL + OPERATOR_API_TOKEN sẵn sàng cho Claude/n8n." if api_surface_ok else "Thiếu PUBLIC_BASE_URL hoặc OPERATOR_API_TOKEN trên Railway.",
+            "status": bridge.get("status"),
+            "severity": bridge.get("severity"),
+            "detail": bridge.get("safe_message") or "Operator API bridge chưa sẵn sàng.",
             "next": "Set PUBLIC_BASE_URL và OPERATOR_API_TOKEN trên Railway rồi chạy /runtime",
+            "soft": bridge.get("status") == "disabled",
         },
         {
             "key": "ai_planning_provider",
@@ -81078,12 +81210,22 @@ async def cmd_affiliate_import(update: Update, context: ContextTypes.DEFAULT_TYP
         default_niche=data.get("niche") or data.get("ngach") or "",
         default_network=data.get("network") or data.get("net") or "",
     )
+    defaults = ensure_growth_content_defaults_after_affiliate_import(update.effective_user.id)
     lines = [
         "📥 <b>BULK AFFILIATE IMPORT</b>",
         f"• Tạo mới: <b>{len(created)}</b>",
         f"• Trùng URL bỏ qua: <b>{len(skipped)}</b>",
         f"• Lỗi: <b>{len(errors)}</b>",
+        f"• Affiliate active: <b>{defaults.get('active_affiliates', 0)}</b>",
     ]
+    if defaults.get("created_channel") or defaults.get("created_campaign"):
+        lines.append("\n<b>Thiết lập tối thiểu sau import:</b>")
+        if defaults.get("created_channel"):
+            item = defaults["created_channel"]
+            lines.append(f"• Channel: #{item['id']} | {html.escape(item['name'])} | {html.escape(item['status'])}")
+        if defaults.get("created_campaign"):
+            item = defaults["created_campaign"]
+            lines.append(f"• Campaign: #{item['id']} | {html.escape(item['name'])} | {html.escape(item['status'])}")
     if created:
         lines.append("\n<b>Link vừa tạo:</b>")
         for affiliate_id, network, product, _url, niche in created[:20]:
@@ -81100,6 +81242,20 @@ async def cmd_affiliate_import(update: Update, context: ContextTypes.DEFAULT_TYP
             lines.append(f"• <code>{html.escape(item.get('url') or '-')}</code>: {html.escape(item.get('error') or '-')}")
     lines.append("\nDùng tiếp: <code>/affiliate_match niche=...</code> hoặc <code>/affiliate_related brand=...</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_admin_import_affiliate_inventory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    raw = " ".join(context.args).strip()
+    if not raw:
+        return await update.message.reply_text(
+            "📥 <b>IMPORT AFFILIATE INVENTORY</b>\n\n"
+            "Dán link affiliate vào lệnh này, mỗi dòng một link hoặc kèm tên sản phẩm.\n\n"
+            "<code>/admin_import_affiliate_inventory https://shorten.asia/abc (Tên sản phẩm)</code>\n\n"
+            "Nếu link đang nằm trong file local Windows, hãy mở file và dán nội dung vào bot; Railway không tự đọc được ổ D local.",
+            parse_mode="HTML",
+        )
+    return await cmd_affiliate_import(update, context)
 
 async def cmd_affiliates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
@@ -83758,7 +83914,7 @@ async def cmd_goal_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Checklist mục tiêu:</b>",
     ]
     for item in (audit.get("requirements") or [])[:12]:
-        marker = "✅" if item.get("ok") else ("⚠️" if item.get("soft") else "❌")
+        marker = "⚪" if item.get("severity") == "disabled" else ("✅" if item.get("ok") else ("⚠️" if item.get("soft") else "❌"))
         lines.append(
             f"{marker} <code>{html.escape(item.get('phase') or '-')}</code> — "
             f"{html.escape(item.get('key') or '-')}: {html.escape(item.get('detail') or '-')}"
@@ -84132,10 +84288,14 @@ async def cmd_operator_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
     base_url = (PUBLIC_BASE_URL or "").rstrip("/") or "https://<RAILWAY_DOMAIN>"
+    bridge = check_operator_bridge_config()
     token_status = "đã bật" if OPERATOR_API_TOKEN else "chưa bật"
     lines = [
         "🔌 <b>OPERATOR API BRIDGE</b>",
         "",
+        f"• Enabled: <code>{'YES' if OPERATOR_API_ENABLED else 'NO'}</code>",
+        f"• Status: <code>{html.escape(bridge.get('status') or '-')}</code>",
+        f"• Message: {html.escape(bridge.get('safe_message') or '-')}",
         f"• Base URL: <code>{html.escape(base_url)}</code>",
         f"• OPERATOR_API_TOKEN: <b>{token_status}</b>",
         "• Header bắt buộc: <code>Authorization: Bearer &lt;OPERATOR_API_TOKEN&gt;</code>",
@@ -95856,6 +96016,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("affiliate_add", admin_internal_command(cmd_affiliate_add)))
     tg_app.add_handler(CommandHandler("affiliate_seed", admin_internal_command(cmd_affiliate_seed)))
     tg_app.add_handler(CommandHandler("affiliate_import", admin_internal_command(cmd_affiliate_import)))
+    tg_app.add_handler(CommandHandler("admin_import_affiliate_inventory", admin_internal_command(cmd_admin_import_affiliate_inventory)))
     tg_app.add_handler(CommandHandler("affiliates",  admin_internal_command(cmd_affiliates)))
     tg_app.add_handler(CommandHandler("affiliate_profile", admin_internal_command(cmd_affiliate_profile)))
     tg_app.add_handler(CommandHandler("affiliate_match", admin_internal_command(cmd_affiliate_match)))
@@ -99173,6 +99334,7 @@ async def api_operator_affiliate_import(payload: OperatorAffiliateImportRequest,
         default_niche=payload.default_niche,
         default_network=payload.default_network,
     )
+    defaults = ensure_growth_content_defaults_after_affiliate_import(ADMIN_ID)
     if payload.notify_admin and tg_app and ADMIN_ID:
         try:
             await tg_app.bot.send_message(
@@ -99182,6 +99344,8 @@ async def api_operator_affiliate_import(payload: OperatorAffiliateImportRequest,
                     f"• Created: <b>{len(created)}</b>\n"
                     f"• Skipped duplicate: <b>{len(skipped)}</b>\n"
                     f"• Errors: <b>{len(errors)}</b>\n"
+                    f"• Defaults: channel=<b>{'YES' if defaults.get('created_channel') else 'NO'}</b>, "
+                    f"campaign=<b>{'YES' if defaults.get('created_campaign') else 'NO'}</b>\n"
                     "Xem catalog: <code>/affiliates</code>"
                 ),
                 parse_mode="HTML",
@@ -99193,6 +99357,9 @@ async def api_operator_affiliate_import(payload: OperatorAffiliateImportRequest,
         "created_count": len(created),
         "skipped_count": len(skipped),
         "error_count": len(errors),
+        "default_channel_created": defaults.get("created_channel"),
+        "default_campaign_created": defaults.get("created_campaign"),
+        "active_affiliates": defaults.get("active_affiliates", 0),
         "created": [
             {"id": aid, "network": network, "product": product, "url": url, "niche": niche}
             for aid, network, product, url, niche in created

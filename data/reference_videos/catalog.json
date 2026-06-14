@@ -1,0 +1,5 @@
+{
+  "version": "1.0",
+  "description": "Seed catalog for admin-managed reference videos. Empty references warn in readiness checks but do not fail production startup.",
+  "references": []
+}
