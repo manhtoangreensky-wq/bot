@@ -6181,6 +6181,108 @@ def test_video_ux_v7_trend_back_and_suggestion_flow():
     assert "longvideo|back_structure" in long_result_callbacks
 
 
+def test_trend_guided_video_prompt_callbacks_are_telegram_safe():
+    state = {
+        "topic": "Nước hoa nam giúp tự tin trước buổi gặp khách hàng quan trọng",
+        "trend_choice": 1,
+        "selected_trend_title": "Before / After",
+        "motion_choice": 1,
+        "selected_motion_title": "Push-in sản phẩm chậm",
+        "selected_motion_summary": "0-3s camera tiến vào sản phẩm; 3-8s orbit nhẹ; 8-15s giữ khung CTA sạch.",
+        "image_prompt_choice": 1,
+        "video_prompt_choice": 1,
+    }
+
+    full_prompt = bot.trend_guided_video_prompt_for_index(state, 1, "vi")
+    assert len(full_prompt) > len(bot.trend_guided_video_prompt_preview(full_prompt, 1700))
+
+    text_screens = [
+        bot.trend_guided_video_prompts_text(state, "vi"),
+        bot.trend_guided_selected_video_prompt_text(state, 1, "vi"),
+        bot.trend_guided_video_public_off_text(state, "vi"),
+    ]
+    for text in text_screens:
+        assert len(text) < 4096
+        assert "Prompt đầy đủ vẫn được giữ" in text
+        assert "chưa trừ Xu" in text
+
+    keyboards = [
+        bot.trend_guided_selected_motion_keyboard("vi"),
+        bot.trend_guided_image_prompt_choices_keyboard("vi"),
+        bot.trend_guided_selected_image_prompt_keyboard("vi"),
+        bot.trend_guided_video_prompt_choices_keyboard("vi"),
+        bot.trend_guided_selected_video_prompt_keyboard("vi", is_admin=True),
+        bot.trend_guided_video_public_off_keyboard("vi", is_admin=True),
+    ]
+    for keyboard in keyboards:
+        assert max(len(row) for row in keyboard.inline_keyboard) <= 2
+        callbacks = [
+            button.callback_data
+            for row in keyboard.inline_keyboard
+            for button in row
+            if getattr(button, "callback_data", None)
+        ]
+        assert max(len(callback) for callback in callbacks) <= 64
+        assert "trendg|cancel" not in callbacks
+
+
+def test_trend_guided_video_prompt_callbacks_open_finalization(monkeypatch):
+    replies = []
+
+    async def fake_edit(query, text, reply_markup=None, parse_mode="HTML"):
+        replies.append({"text": str(text), "reply_markup": reply_markup, "parse_mode": parse_mode})
+        assert len(str(text)) < 4096
+        return SimpleNamespace(text=text, reply_markup=reply_markup)
+
+    monkeypatch.setattr(bot, "safe_edit_or_send", fake_edit)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "user_ui_lang", lambda _uid: "vi")
+
+    class FakeQuery:
+        def __init__(self, data, user_id=97701):
+            self.data = data
+            self.from_user = SimpleNamespace(id=user_id, first_name="Video UX", username="video_ux")
+            self.message = SimpleNamespace(chat_id=97702)
+
+        async def answer(self):
+            return None
+
+    async def press(data):
+        await bot.handle_trend_guided_callback(
+            SimpleNamespace(callback_query=FakeQuery(data)),
+            SimpleNamespace(),
+        )
+        return replies[-1]
+
+    uid = 97701
+    bot.clear_trend_video_flow_pending(uid)
+    bot.set_trend_video_flow_pending(
+        uid,
+        "image_prompt_selected",
+        topic="Nước hoa nam giúp tự tin trước buổi gặp khách hàng quan trọng",
+        trend_choice=1,
+        selected_trend_title="Before / After",
+        motion_choice=1,
+        selected_motion_title="Push-in sản phẩm chậm",
+        selected_motion_summary="0-3s camera tiến vào sản phẩm; 3-8s orbit nhẹ; 8-15s giữ khung CTA sạch.",
+        image_prompt_choice=1,
+    )
+
+    prompt_choices = asyncio.run(press("trendg|video_prompt_step"))
+    assert "Chọn 1 prompt video" in prompt_choices["text"]
+    assert "Prompt đầy đủ vẫn được giữ" in prompt_choices["text"]
+
+    selected_prompt = asyncio.run(press("trendg|video_prompt_select_1"))
+    assert "Đã chọn prompt video" in selected_prompt["text"]
+
+    finalization = asyncio.run(press("trendg|finalization"))
+    assert "Hoàn thiện video" in finalization["text"]
+    assert "chưa gọi API/provider" in finalization["text"]
+
+    real_video = asyncio.run(press("trendg|video_real"))
+    assert "Hoàn thiện video" in real_video["text"]
+
+
 def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch):
     replies = []
 

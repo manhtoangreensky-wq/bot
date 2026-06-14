@@ -70030,13 +70030,17 @@ def trend_guided_selected_motion_text(state: dict, index: int = 1, lang: str = "
     return f"✅ <b>Đã chọn hướng chuyển động.</b>\n\n<b>{html.escape(title)}</b>\n{html.escape(summary)}\n\nBot chưa gọi API video và chưa trừ Xu."
 
 def trend_guided_selected_motion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Chốt chuyển động này" if normalize_user_language(lang) == "vi" else "✅ Lock this motion", callback_data="trendg|motion_lock")],
-        [InlineKeyboardButton("✍️ Sửa chuyển động" if normalize_user_language(lang) == "vi" else "✍️ Edit motion", callback_data="trendg|motion_custom")],
-        [InlineKeyboardButton("➡️ Sang bước ảnh" if normalize_user_language(lang) == "vi" else "➡️ Next: image", callback_data="trendg|image_step")],
-        [InlineKeyboardButton("🎞 Tạo prompt video từ chuyển động này" if normalize_user_language(lang) == "vi" else "🎞 Create video prompt from motion", callback_data="trendg|video_prompt_step")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("✅ Chốt chuyển động này" if is_vi else "✅ Lock motion", "trendg|motion_lock"),
+            ("✍️ Sửa chuyển động" if is_vi else "✍️ Edit motion", "trendg|motion_custom"),
+            ("➡️ Sang bước ảnh" if is_vi else "➡️ Next: image", "trendg|image_step"),
+            ("🎞 Tạo prompt video" if is_vi else "🎞 Create video prompt", "trendg|video_prompt_step"),
+        ],
+        lang,
+        back=("🔙 Quay lại gợi ý" if is_vi else "🔙 Back to motions", "trendg|motion_step"),
+    )
 
 def trend_guided_image_prompt_for_index(state: dict, index: int = 1, lang: str = "vi") -> str:
     custom = str((state or {}).get("custom_image_prompt") or "").strip()
@@ -70086,14 +70090,17 @@ def trend_guided_image_prompts_text(state: dict, lang: str = "vi") -> str:
     )
 
 def trend_guided_image_prompt_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn prompt ảnh 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose image prompt 1", callback_data="trendg|image_prompt_select_1")],
-        [InlineKeyboardButton("2️⃣ Chọn prompt ảnh 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose image prompt 2", callback_data="trendg|image_prompt_select_2")],
-        [InlineKeyboardButton("3️⃣ Chọn prompt ảnh 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose image prompt 3", callback_data="trendg|image_prompt_select_3")],
-        [InlineKeyboardButton("🔁 Tạo lại 3 prompt ảnh" if normalize_user_language(lang) == "vi" else "🔁 Regenerate image prompts", callback_data="trendg|image_step")],
-        [InlineKeyboardButton("🔙 Quay lại chuyển động" if normalize_user_language(lang) == "vi" else "🔙 Back to motion", callback_data="trendg|motion_review")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn prompt ảnh 1" if is_vi else "1️⃣ Choose image 1", "trendg|image_prompt_select_1"),
+            ("2️⃣ Chọn prompt ảnh 2" if is_vi else "2️⃣ Choose image 2", "trendg|image_prompt_select_2"),
+            ("3️⃣ Chọn prompt ảnh 3" if is_vi else "3️⃣ Choose image 3", "trendg|image_prompt_select_3"),
+            ("🔁 Tạo lại 3 prompt ảnh" if is_vi else "🔁 Regenerate", "trendg|image_step"),
+        ],
+        lang,
+        back=("🔙 Quay lại chuyển động" if is_vi else "🔙 Back to motion", "trendg|motion_review"),
+    )
 
 def trend_guided_selected_image_prompt_text(state: dict, index: int = 1, lang: str = "vi") -> str:
     raw_idx = safe_int(index, 1)
@@ -70104,16 +70111,17 @@ def trend_guided_selected_image_prompt_text(state: dict, index: int = 1, lang: s
     return f"🖼 <b>{html.escape(title)}</b>\n\n<code>{html.escape(prompt)}</code>\n\n{html.escape(question)}\n\nBot chưa gọi API ảnh/video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else f"🖼 <b>{html.escape(title)}</b>\n\n<code>{html.escape(prompt)}</code>\n\n{html.escape(question)}\n\nThe bot has not called image/video APIs and has not charged Xu."
 
 def trend_guided_selected_image_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton("✅ Lưu prompt ảnh" if normalize_user_language(lang) == "vi" else "✅ Save image prompt", callback_data="trendg|image_prompt_save")],
-    ]
-    rows.extend(image_tier_choice_rows(lambda tier: f"trendg|image_ai_tier|{tier}", lang))
-    rows.extend([
-        [InlineKeyboardButton("✍️ Sửa prompt ảnh" if normalize_user_language(lang) == "vi" else "✍️ Edit image prompt", callback_data="trendg|image_prompt_custom")],
-        [InlineKeyboardButton("➡️ Sang bước prompt video" if normalize_user_language(lang) == "vi" else "➡️ Next: video prompt", callback_data="trendg|video_prompt_step")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
+    is_vi = normalize_user_language(lang) == "vi"
+    items = [("✅ Lưu prompt ảnh" if is_vi else "✅ Save image prompt", "trendg|image_prompt_save")]
+    for tier in IMAGE_TIER_ORDER:
+        payload = image_tier_payload(tier)
+        if payload.get("enabled"):
+            items.append((image_tier_button_text(tier, lang), f"trendg|image_ai_tier|{tier}"))
+    items.extend([
+        ("✍️ Sửa prompt ảnh" if is_vi else "✍️ Edit image prompt", "trendg|image_prompt_custom"),
+        ("➡️ Sang prompt video" if is_vi else "➡️ Next video prompt", "trendg|video_prompt_step"),
     ])
-    return InlineKeyboardMarkup(rows)
+    return video_v6_keyboard(items, lang, back=("🔙 Quay lại 3 prompt ảnh" if is_vi else "🔙 Back to image prompts", "trendg|image_step"))
 
 def trend_guided_video_prompt_for_index(state: dict, index: int = 1, lang: str = "vi") -> str:
     custom = str((state or {}).get("custom_video_prompt") or "").strip()
@@ -70149,9 +70157,15 @@ def trend_guided_video_prompt_for_index(state: dict, index: int = 1, lang: str =
     )
     return enhance_video_prompt_for_generation(raw_prompt, "standard", "9:16", "trend", state)
 
+def trend_guided_video_prompt_preview(prompt: str, limit: int = 900) -> str:
+    text = re.sub(r"\s+", " ", str(prompt or "").strip())
+    if len(text) <= limit:
+        return text
+    return text[: max(80, int(limit or 900))].rstrip() + "..."
+
 def trend_guided_video_prompts_text(state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
-    prompts = [trend_guided_video_prompt_for_index(state, i, lang) for i in range(1, 4)]
+    prompts = [trend_guided_video_prompt_preview(trend_guided_video_prompt_for_index(state, i, lang), 620) for i in range(1, 4)]
     if normalize_user_language(lang) != "vi":
         return (
             "🎞 <b>Choose 1 video prompt</b>\n\n"
@@ -70162,6 +70176,7 @@ def trend_guided_video_prompts_text(state: dict, lang: str = "vi") -> str:
             f"<code>{html.escape(prompts[1])}</code>\n\n"
             "<b>3. 15-second video</b>\n"
             f"<code>{html.escape(prompts[2])}</code>\n\n"
+            "This is a safe preview. The full prompt is kept for finalization/render.\n"
             "The bot has not called the video API and has not charged Xu."
         )
     return (
@@ -70173,70 +70188,88 @@ def trend_guided_video_prompts_text(state: dict, lang: str = "vi") -> str:
         f"<code>{html.escape(prompts[1])}</code>\n\n"
         "<b>3️⃣ Gợi ý video 15 giây</b>\n"
         f"<code>{html.escape(prompts[2])}</code>\n\n"
+        "Đây là bản xem nhanh an toàn. Prompt đầy đủ vẫn được giữ để dùng ở bước hoàn thiện/render.\n"
         "Bot chưa gọi API video và chưa trừ Xu."
     )
 
 def trend_guided_video_prompt_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn prompt video 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose video prompt 1", callback_data="trendg|video_prompt_select_1")],
-        [InlineKeyboardButton("2️⃣ Chọn prompt video 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose video prompt 2", callback_data="trendg|video_prompt_select_2")],
-        [InlineKeyboardButton("3️⃣ Chọn prompt video 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose video prompt 3", callback_data="trendg|video_prompt_select_3")],
-        [InlineKeyboardButton("🔁 Tạo lại 3 prompt video" if normalize_user_language(lang) == "vi" else "🔁 Regenerate video prompts", callback_data="trendg|video_prompt_step")],
-        [InlineKeyboardButton("🔙 Quay lại bước ảnh" if normalize_user_language(lang) == "vi" else "🔙 Back to image", callback_data="trendg|image_review")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("1️⃣ Chọn prompt video 1" if is_vi else "1️⃣ Choose prompt 1", "trendg|video_prompt_select_1"),
+            ("2️⃣ Chọn prompt video 2" if is_vi else "2️⃣ Choose prompt 2", "trendg|video_prompt_select_2"),
+            ("3️⃣ Chọn prompt video 3" if is_vi else "3️⃣ Choose prompt 3", "trendg|video_prompt_select_3"),
+            ("🔁 Tạo lại 3 prompt video" if is_vi else "🔁 Regenerate", "trendg|video_prompt_step"),
+        ],
+        lang,
+        back=("🔙 Quay lại bước ảnh" if is_vi else "🔙 Back to image", "trendg|image_review"),
+    )
 
 def trend_guided_selected_video_prompt_text(state: dict, index: int = 1, lang: str = "vi") -> str:
     raw_idx = safe_int(index, 1)
     idx = 0 if raw_idx == 0 else max(1, min(3, raw_idx))
     prompt = trend_guided_video_prompt_for_index(state, idx, lang)
+    preview = trend_guided_video_prompt_preview(prompt, 1700)
     if normalize_user_language(lang) != "vi":
-        return f"🎞 <b>Video prompt selected</b>\n\n<code>{html.escape(prompt)}</code>\n\nThe bot has not called the video API and has not charged Xu."
-    return f"🎞 <b>Đã chọn prompt video</b>\n\n<code>{html.escape(prompt)}</code>\n\nBot chưa gọi API video và chưa trừ Xu."
+        return (
+            "🎞 <b>Video prompt selected</b>\n\n"
+            f"<code>{html.escape(preview)}</code>\n\n"
+            "This is a safe preview. The full prompt is kept for finalization/render.\n"
+            "The bot has not called the video API and has not charged Xu."
+        )
+    return (
+        "🎞 <b>Đã chọn prompt video</b>\n\n"
+        f"<code>{html.escape(preview)}</code>\n\n"
+        "Đây là bản xem nhanh an toàn. Prompt đầy đủ vẫn được giữ để dùng ở bước hoàn thiện/render.\n"
+        "Bot chưa gọi API video và chưa trừ Xu."
+    )
 
 def trend_guided_selected_video_prompt_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton("✅ Lưu prompt video" if normalize_user_language(lang) == "vi" else "✅ Save video prompt", callback_data="trendg|video_prompt_save")],
-        [InlineKeyboardButton("🎛 Hoàn thiện video" if normalize_user_language(lang) == "vi" else "🎛 Finalize video", callback_data="trendg|finalization")],
-        [InlineKeyboardButton("🎬 Tạo video thật từ prompt này" if normalize_user_language(lang) == "vi" else "🎬 Create real video from this prompt", callback_data="trendg|video_real")],
-        [InlineKeyboardButton("🖼 Tạo ảnh khung chính" if normalize_user_language(lang) == "vi" else "🖼 Create keyframe image", callback_data="trendg|image_step")],
-        [InlineKeyboardButton("🎵 Sang bước nhạc" if normalize_user_language(lang) == "vi" else "🎵 Next: music", callback_data="trendg|music_step")],
-        [InlineKeyboardButton("✍️ Sửa prompt video" if normalize_user_language(lang) == "vi" else "✍️ Edit video prompt", callback_data="trendg|video_prompt_custom")],
+    is_vi = normalize_user_language(lang) == "vi"
+    items = [
+        ("✅ Lưu prompt video" if is_vi else "✅ Save prompt", "trendg|video_prompt_save"),
+        ("🎛 Hoàn thiện video" if is_vi else "🎛 Finalize video", "trendg|finalization"),
+        ("🎬 Tạo video thật" if is_vi else "🎬 Create video", "trendg|video_real"),
+        ("🖼 Tạo ảnh khung chính" if is_vi else "🖼 Keyframe image", "trendg|image_step"),
+        ("🎵 Sang bước nhạc" if is_vi else "🎵 Next: music", "trendg|music_step"),
+        ("✍️ Sửa prompt video" if is_vi else "✍️ Edit prompt", "trendg|video_prompt_custom"),
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("🔐 Admin test video từ prompt này" if normalize_user_language(lang) == "vi" else "🔐 Admin test video from this prompt", callback_data="trendg|admin_video_smoke")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")])
-    return InlineKeyboardMarkup(rows)
+        items.append(("🔐 Admin test video" if is_vi else "🔐 Admin video test", "trendg|admin_video_smoke"))
+    return video_v6_keyboard(items, lang, back=("🔙 Quay lại 3 prompt" if is_vi else "🔙 Back to prompts", "trendg|video_prompt_step"))
 
 def trend_guided_video_public_off_text(state: dict, lang: str = "vi") -> str:
     prompt = trend_guided_video_prompt_for_index(state, (state or {}).get("video_prompt_choice") or 1, lang)
+    preview = trend_guided_video_prompt_preview(prompt, 1300)
     if normalize_user_language(lang) != "vi":
         return (
             "🎬 <b>Real video generation is not public yet</b>\n\n"
             "TOAN AAS saved this video prompt. When video generation opens, you will choose quality and confirm price before creating.\n\n"
-            f"<code>{html.escape(prompt)}</code>\n\n"
+            f"<code>{html.escape(preview)}</code>\n\n"
+            "This is a safe preview. The full prompt is kept for finalization/render.\n"
             "You can continue with music, create a keyframe image, edit the prompt, finish here or return to the main menu.\n"
             "The bot has not called the video API and has not charged Xu."
         )
     return (
         "🎬 <b>Tạo video thật chưa mở công khai</b>\n\n"
         "TOAN AAS đã lưu prompt video này. Khi tính năng video được mở, bạn sẽ chọn chất lượng video và xác nhận giá trước khi tạo.\n\n"
-        f"<code>{html.escape(prompt)}</code>\n\n"
+        f"<code>{html.escape(preview)}</code>\n\n"
+        "Đây là bản xem nhanh an toàn. Prompt đầy đủ vẫn được giữ để dùng ở bước hoàn thiện/render.\n"
         "Bạn có thể làm tiếp: chọn nhạc, tạo ảnh khung chính, sửa prompt video, hoàn tất tại prompt video hoặc về menu chính.\n"
         "Bot chưa gọi API video và chưa trừ Xu."
     )
 
 def trend_guided_video_public_off_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton("🎵 Sang bước nhạc" if normalize_user_language(lang) == "vi" else "🎵 Next: music", callback_data="trendg|music_step")],
-        [InlineKeyboardButton("🖼 Tạo ảnh khung chính" if normalize_user_language(lang) == "vi" else "🖼 Create keyframe image", callback_data="trendg|image_step")],
-        [InlineKeyboardButton("✍️ Sửa prompt video" if normalize_user_language(lang) == "vi" else "✍️ Edit video prompt", callback_data="trendg|video_prompt_custom")],
-        [InlineKeyboardButton("✅ Hoàn tất tại prompt video" if normalize_user_language(lang) == "vi" else "✅ Finish at video prompt", callback_data="trendg|finalize")],
+    is_vi = normalize_user_language(lang) == "vi"
+    items = [
+        ("🎵 Sang bước nhạc" if is_vi else "🎵 Next: music", "trendg|music_step"),
+        ("🖼 Tạo ảnh khung chính" if is_vi else "🖼 Keyframe image", "trendg|image_step"),
+        ("✍️ Sửa prompt video" if is_vi else "✍️ Edit video prompt", "trendg|video_prompt_custom"),
+        ("✅ Hoàn tất tại prompt" if is_vi else "✅ Finish at prompt", "trendg|finalize"),
     ]
     if is_admin:
-        rows.append([InlineKeyboardButton("🔐 Admin test video từ prompt này" if normalize_user_language(lang) == "vi" else "🔐 Admin test video from this prompt", callback_data="trendg|admin_video_smoke")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")])
-    return InlineKeyboardMarkup(rows)
+        items.append(("🔐 Admin test video" if is_vi else "🔐 Admin video test", "trendg|admin_video_smoke"))
+    return video_v6_keyboard(items, lang, back=("🎞 Quay lại prompt video" if is_vi else "🎞 Back to video prompt", "trendg|video_review"))
 
 def trend_guided_music_menu_text(state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
