@@ -1,0 +1,112 @@
+{
+  "version": "1.0",
+  "description": "Expandable prompt seeds for TOAN AAS Free Tools Hub. 20 industries x 7 categories = 140 initial prompt combinations.",
+  "industries": [
+    {"id": "shop_online", "title": "Shop online", "product": "sản phẩm bán online", "audience": "khách mua hàng 18-35", "benefit": "mua nhanh và hiểu rõ lợi ích"},
+    {"id": "affiliate", "title": "Affiliate", "product": "sản phẩm affiliate", "audience": "người mới cần review chân thật", "benefit": "chọn đúng sản phẩm phù hợp"},
+    {"id": "cosmetics", "title": "Mỹ phẩm", "product": "sản phẩm chăm sóc da", "audience": "người quan tâm làm đẹp", "benefit": "quy trình chăm sóc dễ áp dụng"},
+    {"id": "fragrance", "title": "Nước hoa", "product": "nước hoa phong cách cá nhân", "audience": "nam nữ 18-35", "benefit": "tạo dấu ấn và sự tự tin"},
+    {"id": "spa", "title": "Spa / thẩm mỹ", "product": "dịch vụ spa", "audience": "khách địa phương quan tâm ngoại hình", "benefit": "trải nghiệm thư giãn và chỉn chu"},
+    {"id": "fashion", "title": "Thời trang", "product": "sản phẩm thời trang", "audience": "người mua online quan tâm phong cách", "benefit": "phối đồ dễ và tự tin hơn"},
+    {"id": "food_cafe", "title": "Đồ ăn / quán cafe", "product": "món ăn hoặc đồ uống nổi bật", "audience": "người trẻ thích trải nghiệm địa điểm mới", "benefit": "trải nghiệm ngon và đáng nhớ"},
+    {"id": "real_estate", "title": "Bất động sản", "product": "căn hộ hoặc không gian sống", "audience": "người đang tìm nơi ở hoặc đầu tư", "benefit": "không gian phù hợp nhu cầu"},
+    {"id": "interior", "title": "Nội thất", "product": "sản phẩm nội thất", "audience": "gia đình muốn tối ưu không gian", "benefit": "không gian đẹp và tiện dụng"},
+    {"id": "travel", "title": "Du lịch", "product": "trải nghiệm du lịch", "audience": "người thích khám phá", "benefit": "hành trình dễ lên kế hoạch"},
+    {"id": "course", "title": "Khóa học", "product": "khóa học kỹ năng", "audience": "người mới muốn học thực tế", "benefit": "học nhanh và áp dụng được"},
+    {"id": "saas", "title": "Phần mềm / SaaS", "product": "phần mềm hỗ trợ công việc", "audience": "creator và shop nhỏ", "benefit": "tiết kiệm thời gian vận hành"},
+    {"id": "local_service", "title": "Dịch vụ local", "product": "dịch vụ tại địa phương", "audience": "khách hàng quanh khu vực", "benefit": "được hỗ trợ nhanh và thuận tiện"},
+    {"id": "recruitment", "title": "Tuyển dụng", "product": "cơ hội việc làm", "audience": "ứng viên phù hợp", "benefit": "hiểu rõ công việc và môi trường"},
+    {"id": "event", "title": "Sự kiện", "product": "sự kiện cộng đồng hoặc thương hiệu", "audience": "người quan tâm chủ đề sự kiện", "benefit": "tham gia đúng trải nghiệm cần thiết"},
+    {"id": "mother_baby", "title": "Mẹ và bé", "product": "sản phẩm cho mẹ và bé", "audience": "gia đình trẻ", "benefit": "chăm sóc thuận tiện và an tâm hơn"},
+    {"id": "pets", "title": "Thú cưng", "product": "sản phẩm cho thú cưng", "audience": "người nuôi chó mèo", "benefit": "chăm sóc thú cưng dễ dàng"},
+    {"id": "fitness", "title": "Fitness", "product": "sản phẩm hoặc dịch vụ fitness", "audience": "người muốn cải thiện sức khỏe", "benefit": "duy trì thói quen tốt"},
+    {"id": "personal_finance_content", "title": "Tài chính cá nhân - content", "product": "nội dung giáo dục tài chính cơ bản", "audience": "người muốn quản lý chi tiêu", "benefit": "hiểu nguyên tắc chung, không phải tư vấn đầu tư"},
+    {"id": "education", "title": "Giáo dục / kỹ năng", "product": "nội dung giáo dục kỹ năng", "audience": "người học muốn tiến bộ", "benefit": "kiến thức rõ ràng và dễ thực hành"}
+  ],
+  "categories": [
+    {
+      "id": "meta_ai_video",
+      "title": "Prompt Meta AI Video",
+      "templates": [
+        {
+          "title": "Meta AI video - {industry}",
+          "goal": ["sell", "lead", "engagement"],
+          "platform": ["tiktok", "reels", "facebook"],
+          "prompt_template": "Tạo video 9:16 dài 8-15 giây cho {product}, hướng tới {audience}. Mở bằng tình huống thực tế, cho thấy hành động sử dụng rõ ràng, camera close-up chuyển medium shot rồi product reveal, ánh sáng chân thật, chuyển động ổn định, không chữ sai, không watermark. Nhấn mạnh lợi ích: {benefit}. Kết thúc bằng khung sạch để ghép CTA."
+        }
+      ]
+    },
+    {
+      "id": "image_prompt",
+      "title": "Prompt ảnh",
+      "templates": [
+        {
+          "title": "Ảnh quảng cáo - {industry}",
+          "goal": ["branding", "sell"],
+          "platform": ["social", "poster"],
+          "prompt_template": "Ảnh quảng cáo chân thật cho {product}, chủ thể rõ, bố cục có khoảng thở, ánh sáng studio mềm, vật liệu tự nhiên, màu thương hiệu tinh tế, phù hợp {audience}, nhấn mạnh {benefit}, không chữ méo, không logo giả, không watermark."
+        }
+      ]
+    },
+    {
+      "id": "video_prompt",
+      "title": "Prompt video",
+      "templates": [
+        {
+          "title": "Video motion - {industry}",
+          "goal": ["engagement", "sell"],
+          "platform": ["tiktok", "reels"],
+          "prompt_template": "Video 9:16 cho {product}: 0-2s close-up hook; 2-7s hành động sử dụng tự nhiên; 7-12s hero shot kết quả. Camera slow push-in, pan nhẹ, ánh sáng có chiều sâu, chuyển cảnh match cut, chủ thể nhất quán, không flicker, không vật thể méo. Lợi ích chính: {benefit}."
+        }
+      ]
+    },
+    {
+      "id": "caption_cta",
+      "title": "Caption / Hashtag / CTA",
+      "templates": [
+        {
+          "title": "Caption bán hàng - {industry}",
+          "goal": ["sell", "engagement"],
+          "platform": ["facebook", "instagram", "tiktok"],
+          "prompt_template": "Viết caption ngắn cho {product}, mở bằng vấn đề quen thuộc của {audience}, nêu lợi ích {benefit}, giọng tự nhiên không phóng đại, kết thúc CTA mềm và 5 hashtag liên quan."
+        }
+      ]
+    },
+    {
+      "id": "hook_script",
+      "title": "Hook / Kịch bản",
+      "templates": [
+        {
+          "title": "Kịch bản 15-30 giây - {industry}",
+          "goal": ["sell", "educate"],
+          "platform": ["short_video"],
+          "prompt_template": "Tạo 3 hook 3 giây và kịch bản 15/30 giây cho {product}. Cấu trúc problem -> demo -> benefit -> proof -> CTA; đối tượng {audience}; lợi ích {benefit}; tránh claim tuyệt đối và lời hứa không kiểm chứng."
+        }
+      ]
+    },
+    {
+      "id": "document_checklist",
+      "title": "Ghi chú / Tài liệu",
+      "templates": [
+        {
+          "title": "Checklist nội dung - {industry}",
+          "goal": ["organize"],
+          "platform": ["notes"],
+          "prompt_template": "Tạo checklist chuẩn bị nội dung tuần cho {product}: mục tiêu, chân dung {audience}, 3 chủ đề, asset cần có, lịch đăng, CTA, bước đo hiệu quả và mục ghi chú cải thiện."
+        }
+      ]
+    },
+    {
+      "id": "music_sfx",
+      "title": "Gợi ý nhạc / SFX",
+      "templates": [
+        {
+          "title": "Mood nhạc - {industry}",
+          "goal": ["mood"],
+          "platform": ["video"],
+          "prompt_template": "Gợi ý mood nhạc và SFX cho video {product}: nhịp phù hợp {audience}, intro gọn, whoosh nhẹ khi chuyển cảnh, soft impact lúc product reveal, không lấn voice, mô tả style để tìm trong thư viện nhạc có bản quyền phù hợp."
+        }
+      ]
+    }
+  ]
+}

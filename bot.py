@@ -104,6 +104,22 @@ from support_v1b import (
     suggested_reply as support_suggested_reply,
     ticket_priority as support_ticket_priority,
 )
+from free_tools_hub import (
+    ALLOWED_FREE_PROVIDER_TASKS,
+    FREE_TOOL_TYPES,
+    caption_hashtag_pack,
+    content_idea_pack,
+    free_provider_candidates,
+    generate_contextual_prompt,
+    hook_script_pack,
+    load_prompt_library,
+    prompt_library_counts,
+    prompt_library_item,
+    prompt_library_suggestions,
+    quota_limit_for_user,
+    sensitive_free_task_reason,
+    should_show_soft_promo,
+)
 try:
     import edge_tts
     EDGE_TTS_IMPORT_ERROR = ""
@@ -405,6 +421,40 @@ SHOPAIKEY_CHAT_MODEL = _env("SHOPAIKEY_CHAT_MODEL") or SHOPAIKEY_DEFAULT_MODEL
 SHOPAIKEY_CHAT_FALLBACK_MODELS = _env("SHOPAIKEY_CHAT_FALLBACK_MODELS", "gpt-4.1-mini,qwen-plus")
 SHOPAIKEY_CHAT_MAX_TOKENS = env_int("SHOPAIKEY_CHAT_MAX_TOKENS", 120)
 SHOPAIKEY_CHAT_TIMEOUT_SECONDS = env_int("SHOPAIKEY_CHAT_TIMEOUT_SECONDS", 30)
+FREE_HUB_ENABLED = env_flag("FREE_HUB_ENABLED", "true")
+FREE_PROVIDER_ROUTER_ENABLED = env_flag("FREE_PROVIDER_ROUTER_ENABLED", "true")
+FREE_PROVIDER_ORDER = [
+    item.strip().lower()
+    for item in _env("FREE_PROVIDER_ORDER", "gemini,groq,openrouter,shopaikey").split(",")
+    if item.strip()
+]
+GEMINI_ENABLED = env_flag("GEMINI_ENABLED", "true" if GEMINI_API_KEY else "false")
+GEMINI_MODEL_FREE = _env("GEMINI_MODEL_FREE", "gemini-2.0-flash")
+GEMINI_MAX_DAILY_REQUESTS = max(0, env_int("GEMINI_MAX_DAILY_REQUESTS", 500))
+GROQ_ENABLED = env_flag("GROQ_ENABLED", "false")
+GROQ_API_KEY = _env("GROQ_API_KEY")
+GROQ_BASE_URL = _env("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+GROQ_MODEL_FREE = _env("GROQ_MODEL_FREE")
+GROQ_MAX_DAILY_REQUESTS = max(0, env_int("GROQ_MAX_DAILY_REQUESTS", 500))
+OPENROUTER_ENABLED = env_flag("OPENROUTER_ENABLED", "false")
+OPENROUTER_MODEL_FREE = _env("OPENROUTER_MODEL_FREE", "openrouter/free")
+OPENROUTER_MAX_DAILY_REQUESTS = max(0, env_int("OPENROUTER_MAX_DAILY_REQUESTS", 300))
+FREE_USER_DAILY_FREE_AI_REQUESTS = max(0, env_int("FREE_USER_DAILY_FREE_AI_REQUESTS", 30))
+REGISTERED_USER_DAILY_FREE_AI_REQUESTS = max(0, env_int("REGISTERED_USER_DAILY_FREE_AI_REQUESTS", 100))
+PREMIUM_USER_DAILY_FREE_AI_REQUESTS = max(0, env_int("PREMIUM_USER_DAILY_FREE_AI_REQUESTS", 300))
+ADMIN_DAILY_FREE_AI_REQUESTS = max(0, env_int("ADMIN_DAILY_FREE_AI_REQUESTS", 1000))
+FREE_HUB_SHOW_SOFT_PROMO = env_flag("FREE_HUB_SHOW_SOFT_PROMO", "true")
+FREE_HUB_PROMO_AFTER_REQUESTS = max(1, env_int("FREE_HUB_PROMO_AFTER_REQUESTS", 5))
+FREE_HUB_PROMO_COOLDOWN_HOURS = max(1, env_int("FREE_HUB_PROMO_COOLDOWN_HOURS", 24))
+FREE_HUB_BYOK_ENABLED = env_flag("FREE_HUB_BYOK_ENABLED", "false")
+FREE_HUB_PENDING_TTL_SECONDS = max(60, env_int("FREE_HUB_PENDING_TTL_SECONDS", 600))
+try:
+    FREE_PROMPT_LIBRARY = load_prompt_library()
+    FREE_PROMPT_LIBRARY_ERROR = ""
+except Exception as e:
+    FREE_PROMPT_LIBRARY = {"version": "unavailable", "categories": [], "_expanded_items": []}
+    FREE_PROMPT_LIBRARY_ERROR = type(e).__name__
+    logger.warning("Free prompt library unavailable | error=%s", FREE_PROMPT_LIBRARY_ERROR)
 SHOPAIKEY_TTS_ENABLED = env_flag("SHOPAIKEY_TTS_ENABLED", "false")
 SHOPAIKEY_TTS_ENDPOINT = _env("SHOPAIKEY_TTS_ENDPOINT", "/audio/speech")
 SHOPAIKEY_TTS_MODEL = _env("SHOPAIKEY_TTS_MODEL", "tts-1")
@@ -27389,6 +27439,43 @@ SHOPAIKEY_PENDING_CONFIRMATIONS: dict[str, dict] = {}
 LAST_TREND_VIDEO_WORKFLOWS: dict[str, dict] = {}
 LAST_WORKFLOW_IMAGES: dict[str, dict] = {}
 LAST_DEVELOPING_VIDEO_PLANS: dict[str, dict] = {}
+
+def free_hub_pending_key(user_id) -> str:
+    return f"free_hub:{user_id}"
+
+def free_hub_promo_key(user_id) -> str:
+    return f"free_hub_promo:{user_id}"
+
+def set_free_hub_pending(user_id, step: str, **fields) -> dict:
+    current = USER_PENDING.get(free_hub_pending_key(user_id)) or {}
+    payload = {
+        "pending_action": "free_hub",
+        "step": str(step or ""),
+        "created_at_ts": time.time(),
+    }
+    if current.get("pending_action") == "free_hub":
+        payload.update({
+            key: value
+            for key, value in current.items()
+            if key not in {"pending_action", "step", "created_at_ts"}
+        })
+    payload.update(fields)
+    USER_PENDING[free_hub_pending_key(user_id)] = payload
+    return payload
+
+def get_free_hub_pending(user_id) -> dict:
+    key = free_hub_pending_key(user_id)
+    state = USER_PENDING.get(key) or {}
+    if state.get("pending_action") != "free_hub":
+        return {}
+    created_at = float(state.get("created_at_ts") or 0.0)
+    if created_at and time.time() - created_at > FREE_HUB_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return {}
+    return dict(state)
+
+def clear_free_hub_pending(user_id) -> bool:
+    return USER_PENDING.pop(free_hub_pending_key(user_id), None) is not None
 LAST_IMAGE_TOOL_RESULTS: dict[str, dict] = {}
 IMAGE_ACTION_LOCKS: dict[str, float] = {}
 FRAME_VIDEO_JOBS: dict[str, dict] = {}
@@ -34443,6 +34530,7 @@ def store_customer_feedback(user, category: str, content: str, context: str = ""
         conn.close()
 
 def clear_media_creator_pending_states(user_id) -> bool:
+    free_hub_cleared = clear_free_hub_pending(user_id)
     support_cleared = clear_support_ticket_pending(user_id)
     quick_cleared = clear_quick_media_pending(user_id)
     quick_image_flow_cleared = clear_quick_image_flow(user_id)
@@ -34462,7 +34550,7 @@ def clear_media_creator_pending_states(user_id) -> bool:
     video_dubbing_cleared = clear_video_dubbing_pending(user_id)
     video_addon_cleared = clear_video_addon_state(user_id)
     marketing_cleared = clear_marketing_pending(user_id)
-    return bool(support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or video_dubbing_cleared or video_addon_cleared or marketing_cleared)
+    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or video_dubbing_cleared or video_addon_cleared or marketing_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -38261,10 +38349,566 @@ def build_2col_keyboard(
         rows.append(nav)
     return InlineKeyboardMarkup(rows)
 
+FREE_HUB_LIBRARY_CATEGORIES = {
+    "meta": ("meta_ai_video", "🎬 Meta AI Video"),
+    "image": ("image_prompt", "🖼 Prompt ảnh"),
+    "video": ("video_prompt", "🎞 Prompt video"),
+    "caption": ("caption_cta", "✍️ Caption / CTA"),
+    "hook": ("hook_script", "🧩 Hook / Kịch bản"),
+    "docs": ("document_checklist", "📄 Checklist / Tài liệu"),
+    "music": ("music_sfx", "🎵 Nhạc / SFX"),
+}
+
+def free_hub_main_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🆓 <b>TOAN AAS FREE TOOLS</b>\n\n"
+            "Daily low-cost tools for prompts, captions, content ideas, documents and notes.\n\n"
+            "Heavy image/video rendering, long dubbing or paid provider work always shows its Xu price before processing. "
+            "This area never charges Xu automatically and does not promise unlimited use."
+        )
+    return (
+        "🆓 <b>Công cụ miễn phí TOAN AAS</b>\n\n"
+        "Khu này gom các công cụ miễn phí/tiết kiệm để bạn dùng hằng ngày: "
+        "viết caption, tạo prompt, lên ý tưởng, tài liệu/PDF, ghi chú, prompt Meta AI, hashtag và lưu mẫu.\n\n"
+        "Các tác vụ nặng như Video AI chân thật, ảnh chất lượng cao, lồng tiếng dài hoặc render provider "
+        "sẽ luôn báo Xu trước khi xử lý. Khu này không tự trừ Xu và không quảng cáo miễn phí vô hạn."
+    )
+
+def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("💬 Hỏi AI miễn phí" if is_vi else "💬 Free AI", "freehub|chat"),
+            ("🎬 Prompt Meta AI" if is_vi else "🎬 Meta AI prompt", "freehub|meta"),
+            ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
+            ("✍️ Caption/Hashtag" if is_vi else "✍️ Caption/hashtags", "freehub|caption"),
+            ("🧩 Kịch bản & Hook" if is_vi else "🧩 Script & hooks", "freehub|hook"),
+            ("🖼 Prompt ảnh/video" if is_vi else "🖼 Image/video prompts", "freehub|prompts"),
+            ("📄 Tài liệu/PDF miễn phí" if is_vi else "📄 Documents/PDF", "freehub|docs"),
+            ("🗒 Ghi chú/Lưu trữ" if is_vi else "🗒 Notes/storage", "freehub|notes"),
+            ("📚 Thư viện prompt" if is_vi else "📚 Prompt library", "freehub|library"),
+            ("🔑 API riêng của tôi" if is_vi else "🔑 My API key", "freehub|byok"),
+            ("📤 Upload để hậu kỳ" if is_vi else "📤 Upload for postprocess", "freehub|upload"),
+        ],
+        nav_back=None,
+        nav_main=True,
+        lang=lang,
+    )
+
+def free_hub_input_text(task_type: str, lang: str = "vi") -> str:
+    labels = {
+        "free_chat": "câu hỏi",
+        "meta_ai_prompt": "sản phẩm/chủ đề",
+        "content_idea": "sản phẩm/chủ đề",
+        "caption_hashtag": "sản phẩm hoặc nội dung",
+        "hook_script": "sản phẩm/chủ đề",
+        "image_prompt": "ảnh bạn muốn",
+        "video_prompt": "video bạn muốn",
+    }
+    label = labels.get(task_type, "nội dung")
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"✍️ <b>Send your {html.escape(label)}</b>\n\n"
+            "Do not send passwords, API keys, payment receipts or sensitive personal data.\n"
+            "This free step does not charge Xu."
+        )
+    example = {
+        "free_chat": "Gợi ý kế hoạch content 7 ngày cho shop nhỏ.",
+        "meta_ai_prompt": "Tôi bán nước hoa nam cao cấp.",
+        "content_idea": "App AI tạo nội dung cho người mới.",
+        "caption_hashtag": "Nước hoa nam dùng khi đi hẹn hò.",
+        "hook_script": "Máy xay sinh tố mini cho dân văn phòng.",
+        "image_prompt": "Banner công nghệ TOAN AAS màu xanh ngọc.",
+        "video_prompt": "Video quảng cáo quán cafe mới mở.",
+    }.get(task_type, "Sản phẩm hoặc chủ đề của bạn.")
+    return (
+        f"✍️ <b>Hãy gửi {html.escape(label)} của bạn</b>\n\n"
+        f"Ví dụ: <i>{html.escape(example)}</i>\n\n"
+        "Không gửi mật khẩu, API key, bill thanh toán hoặc dữ liệu cá nhân nhạy cảm.\n"
+        "Bước miễn phí này không trừ Xu."
+    )
+
+def free_hub_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Công cụ miễn phí" if normalize_user_language(lang) == "vi" else "⬅️ Free tools", callback_data="freehub|main"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+def free_hub_prompt_result_text(result: dict, task_type: str, provider: str = "local_prompt_library") -> str:
+    title = html.escape(str(result.get("title") or "Kết quả miễn phí"))
+    lines = [f"✅ <b>{title}</b>", ""]
+    if result.get("prompt"):
+        lines.extend(["<b>Prompt:</b>", f"<code>{html.escape(str(result['prompt']))}</code>", ""])
+    variants = list(result.get("variants") or [])
+    if variants:
+        lines.append("<b>3 biến thể:</b>")
+        for index, item in enumerate(variants[:3], 1):
+            lines.append(f"{index}. {html.escape(str(item))}")
+        lines.append("")
+    ideas = list(result.get("ideas") or [])
+    if ideas:
+        lines.append("<b>3 ý tưởng:</b>")
+        lines.extend(f"{index}. {html.escape(str(item))}" for index, item in enumerate(ideas[:3], 1))
+        lines.append("")
+    hooks = list(result.get("hooks") or [])
+    if hooks:
+        lines.append("<b>Hook:</b>")
+        lines.extend(f"• {html.escape(str(item))}" for item in hooks[:5])
+        lines.append("")
+    if result.get("script_15s"):
+        lines.extend(["<b>Kịch bản 15s:</b>", html.escape(str(result["script_15s"])), ""])
+    if result.get("script_30s"):
+        lines.extend(["<b>Kịch bản 30s:</b>", html.escape(str(result["script_30s"])), ""])
+    if result.get("caption"):
+        lines.extend(["<b>Caption:</b>", html.escape(str(result["caption"])), ""])
+    hashtags = result.get("hashtags") or []
+    if hashtags:
+        lines.extend(["<b>Hashtag:</b>", html.escape(" ".join(str(item) for item in hashtags)), ""])
+    if result.get("cta"):
+        lines.extend(["<b>CTA:</b>", html.escape(str(result["cta"])), ""])
+    if result.get("music_sfx"):
+        lines.extend(["<b>Nhạc/SFX:</b>", html.escape(str(result["music_sfx"])), ""])
+    if result.get("negative_prompt"):
+        lines.extend(["<b>Negative:</b>", f"<code>{html.escape(str(result['negative_prompt']))}</code>", ""])
+    if result.get("copy_instruction"):
+        lines.extend([html.escape(str(result["copy_instruction"])), ""])
+    lines.extend([
+        f"Provider: <code>{html.escape(provider or 'local_prompt_library')}</code>",
+        "Xu deducted: <code>0</code>",
+    ])
+    return "\n".join(lines)
+
+def free_hub_result_keyboard(lang: str = "vi", meta: bool = False) -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("📋 Xem prompt để copy" if is_vi else "📋 View prompt", "freehub|copy"),
+        ("🔁 Tạo biến thể khác" if is_vi else "🔁 Another variant", "freehub|variant"),
+        ("📚 Lưu vào ghi chú" if is_vi else "📚 Save to notes", "freehub|save"),
+        ("📤 Upload để hậu kỳ" if is_vi else "📤 Upload result", "freehub|upload"),
+    ]
+    if meta:
+        buttons.insert(2, ("✍️ Caption khác" if is_vi else "✍️ Another caption", "freehub|caption_more"))
+    return build_2col_keyboard(
+        buttons,
+        nav_back=("⬅️ Công cụ miễn phí" if is_vi else "⬅️ Free tools", "freehub|main"),
+        lang=lang,
+    )
+
+def free_hub_prompts_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "🖼 <b>FREE IMAGE / VIDEO PROMPTS</b>\n\nChoose which prompt you want to prepare. This does not render media or charge Xu."
+    return (
+        "🖼 <b>Prompt ảnh/video miễn phí</b>\n\n"
+        "TOAN AAS sẽ chuẩn bị prompt có chủ thể, bối cảnh, hành động, camera, ánh sáng và giới hạn lỗi.\n"
+        "Bước này chỉ tạo text, không gọi provider render và không trừ Xu."
+    )
+
+def free_hub_prompts_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("🖼 Tạo prompt ảnh" if is_vi else "🖼 Image prompt", "freehub|image_prompt"),
+            ("🎞 Tạo prompt video" if is_vi else "🎞 Video prompt", "freehub|video_prompt"),
+        ],
+        nav_back=("⬅️ Công cụ miễn phí" if is_vi else "⬅️ Free tools", "freehub|main"),
+        lang=lang,
+    )
+
+def free_hub_library_text(lang: str = "vi") -> str:
+    count = len(FREE_PROMPT_LIBRARY.get("_expanded_items") or [])
+    if normalize_user_language(lang) != "vi":
+        return f"📚 <b>PROMPT LIBRARY</b>\n\n{count} expandable prompt seeds are available. Choose a category."
+    return (
+        "📚 <b>Thư viện prompt TOAN AAS</b>\n\n"
+        f"Đã tải <b>{count}</b> mẫu gợi ý theo ngành và mục tiêu. "
+        "Chọn nhóm để xem 3 mẫu; nút Gợi ý khác sẽ đổi bộ mẫu."
+    )
+
+def free_hub_library_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    buttons = [(label, f"freehub|lib_{key}") for key, (_category, label) in FREE_HUB_LIBRARY_CATEGORIES.items()]
+    return build_2col_keyboard(
+        buttons,
+        nav_back=("⬅️ Công cụ miễn phí" if normalize_user_language(lang) == "vi" else "⬅️ Free tools", "freehub|main"),
+        lang=lang,
+    )
+
+def free_hub_library_suggestions_text(items: list[dict], category_label: str) -> str:
+    lines = [f"📚 <b>{html.escape(category_label)}</b>", "", "Chọn một mẫu bên dưới:"]
+    for index, item in enumerate(items[:3], 1):
+        lines.append(f"\n<b>{index}. {html.escape(str(item.get('title') or 'Prompt'))}</b>")
+        lines.append(html.escape(str(item.get("prompt") or "")[:420]))
+    return "\n".join(lines)
+
+def free_hub_library_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("1️⃣ Chọn mẫu 1" if is_vi else "1️⃣ Choose 1", "freehub|lib_pick1"),
+            ("2️⃣ Chọn mẫu 2" if is_vi else "2️⃣ Choose 2", "freehub|lib_pick2"),
+            ("3️⃣ Chọn mẫu 3" if is_vi else "3️⃣ Choose 3", "freehub|lib_pick3"),
+            ("🔁 Gợi ý khác" if is_vi else "🔁 More", "freehub|lib_more"),
+        ],
+        nav_back=("⬅️ Thư viện prompt" if is_vi else "⬅️ Prompt library", "freehub|library"),
+        lang=lang,
+    )
+
+def free_hub_library_item_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("📌 Lưu mẫu này" if is_vi else "📌 Save template", "freehub|save"),
+            ("🧩 Tạo theo sản phẩm của tôi" if is_vi else "🧩 Use my product", "freehub|meta"),
+            ("📤 Dùng cho Meta AI" if is_vi else "📤 Use with Meta AI", "freehub|copy"),
+            ("✍️ Tạo caption từ mẫu" if is_vi else "✍️ Caption from prompt", "freehub|caption_more"),
+        ],
+        nav_back=("⬅️ Danh sách mẫu" if is_vi else "⬅️ Suggestions", "freehub|lib_back"),
+        lang=lang,
+    )
+
+def free_hub_docs_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📄 <b>FREE DOCUMENT / PDF TOOLS</b>\n\n"
+            "This entry reuses the existing guided document tools. Local tools remain free; OCR/provider work stays guarded."
+        )
+    return (
+        "📄 <b>Tài liệu/PDF miễn phí</b>\n\n"
+        "Khu này dùng lại flow Tài liệu/PDF hiện có: gửi file → xác nhận → xử lý.\n"
+        "Công cụ local đang mở giữ nguyên miễn phí; OCR/provider chưa sẵn sàng sẽ được guard, không tự trừ Xu."
+    )
+
+def free_hub_docs_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [("🧰 Mở Công cụ PDF / Word" if is_vi else "🧰 Open PDF / Word tools", "menu|main_docs")],
+        nav_back=("⬅️ Công cụ miễn phí" if is_vi else "⬅️ Free tools", "freehub|main"),
+        lang=lang,
+    )
+
+def free_hub_notes_text(user_id, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🗒 <b>NOTES / STORAGE</b>\n\n"
+            f"Free storage: {TOTAL_FREE_STORAGE_MB}MB total "
+            f"({NOTES_TEXT_FREE_MB}MB text + {FILES_AUDIO_FREE_MB}MB files). "
+            "Temporary files do not count as long-term quota when auto-cleaned."
+        )
+    return (
+        "🗒 <b>Ghi chú / Lưu trữ</b>\n\n"
+        f"Gói miễn phí có <b>{TOTAL_FREE_STORAGE_MB}MB</b> lưu trữ cơ bản: "
+        f"{NOTES_TEXT_FREE_MB}MB text/ghi chú và {FILES_AUDIO_FREE_MB}MB file nhỏ.\n"
+        "Ghi chú text tính dung lượng thật; file đính kèm tính đúng size; file tạm không tính lâu dài nếu tự xóa.\n\n"
+        + memory_status_text(user_id)
+    )
+
+def free_hub_notes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("📝 Mở Ghi chú / Tài liệu" if is_vi else "📝 Open notes/docs", "menu|main_memory"),
+            ("💾 Xem dung lượng" if is_vi else "💾 Storage status", "menu|memory_storage_status"),
+        ],
+        nav_back=("⬅️ Công cụ miễn phí" if is_vi else "⬅️ Free tools", "freehub|main"),
+        lang=lang,
+    )
+
+def free_hub_byok_text(lang: str = "vi") -> str:
+    enabled = FREE_HUB_BYOK_ENABLED
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🔑 <b>MY API KEY</b>\n\n"
+            f"Encrypted per-user key storage: <b>{'ON' if enabled else 'OFF'}</b>.\n\n"
+            "Key input is blocked until encrypted secret storage is available. Do not paste an API key into chat."
+        )
+    return (
+        "🔑 <b>API riêng của tôi</b>\n\n"
+        f"Lưu key mã hóa theo từng user: <b>{'ON' if enabled else 'OFF'}</b>.\n\n"
+        "Codebase hiện chưa có helper lưu secret mã hóa theo user, nên TOAN AAS không nhận hoặc lưu API key ở màn này. "
+        "Không dán key vào chat. Khi kho secret an toàn được bật, key sẽ chỉ hiển thị dạng <code>...abcd</code> và chỉ dùng cho chính bạn."
+    )
+
+def free_hub_byok_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("➕ Gemini API key" if is_vi else "➕ Gemini API key", "freehub|byok_gemini"),
+            ("➕ Groq API key" if is_vi else "➕ Groq API key", "freehub|byok_groq"),
+            ("➕ OpenRouter API key" if is_vi else "➕ OpenRouter API key", "freehub|byok_openrouter"),
+            ("📊 Trạng thái key" if is_vi else "📊 Key status", "freehub|byok_status"),
+            ("🗑 Xóa key" if is_vi else "🗑 Delete key", "freehub|byok_delete"),
+        ],
+        nav_back=("⬅️ Công cụ miễn phí" if is_vi else "⬅️ Free tools", "freehub|main"),
+        lang=lang,
+    )
+
+def free_hub_upload_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📤 <b>UPLOAD FOR POSTPROCESSING</b>\n\n"
+            "Send one image or video. TOAN AAS will store it temporarily and offer existing image/video tools. "
+            "Paid postprocessing always shows its price before confirmation."
+        )
+    return (
+        "📤 <b>Upload kết quả để hậu kỳ</b>\n\n"
+        "Hãy gửi một ảnh hoặc video bạn đã tạo bằng Meta AI/công cụ bên ngoài.\n"
+        "TOAN AAS sẽ lưu tạm rồi nối sang công cụ ảnh/video hiện có. Caption/hashtag có thể dùng miễn phí; "
+        "phụ đề, lồng tiếng hoặc render tốn Xu phải báo giá trước và không tự trừ Xu."
+    )
+
+def free_hub_upload_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return free_hub_input_keyboard(lang)
+
+def free_hub_meta_choice_text(step: str, state: dict, lang: str = "vi") -> str:
+    product = html.escape(str(state.get("user_input") or "sản phẩm/chủ đề"))
+    labels = {
+        "meta_goal": "Mục tiêu chính của video là gì?",
+        "meta_platform": "Bạn muốn dùng video trên nền tảng nào?",
+        "meta_ratio": "Bạn muốn tỉ lệ khung hình nào?",
+        "meta_style": "Bạn muốn phong cách nào?",
+    }
+    if normalize_user_language(lang) != "vi":
+        return f"🎬 <b>Meta AI prompt</b>\n\nTopic: {product}\n\nChoose the next option."
+    return (
+        "🎬 <b>Prompt Meta AI miễn phí</b>\n\n"
+        f"Sản phẩm/chủ đề: <b>{product}</b>\n\n"
+        f"{labels.get(step, 'Chọn thông tin tiếp theo:')}\n\n"
+        "TOAN AAS chỉ tạo prompt để bạn copy sang Meta AI; bot chưa gọi API Meta và chưa tạo video."
+    )
+
+def free_hub_meta_choice_keyboard(step: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    options = {
+        "meta_goal": [
+            ("🛒 Bán hàng" if is_vi else "🛒 Sales", "freehub|meta_goal_sell"),
+            ("💬 Tăng tương tác" if is_vi else "💬 Engagement", "freehub|meta_goal_engage"),
+            ("🏷 Giới thiệu thương hiệu" if is_vi else "🏷 Brand", "freehub|meta_goal_brand"),
+            ("📖 Kể chuyện" if is_vi else "📖 Story", "freehub|meta_goal_story"),
+        ],
+        "meta_platform": [
+            ("Facebook", "freehub|meta_platform_facebook"),
+            ("Instagram/Reels", "freehub|meta_platform_reels"),
+            ("TikTok", "freehub|meta_platform_tiktok"),
+            ("YouTube Shorts", "freehub|meta_platform_shorts"),
+        ],
+        "meta_ratio": [
+            ("📱 9:16", "freehub|meta_ratio_9x16"),
+            ("🖥 16:9", "freehub|meta_ratio_16x9"),
+            ("⬜ 1:1", "freehub|meta_ratio_1x1"),
+            ("📰 4:5", "freehub|meta_ratio_4x5"),
+        ],
+        "meta_style": [
+            ("📷 Chân thật" if is_vi else "📷 Realistic", "freehub|meta_style_real"),
+            ("🎬 Cinematic", "freehub|meta_style_cinematic"),
+            ("😄 Vui nhộn" if is_vi else "😄 Fun", "freehub|meta_style_fun"),
+            ("✨ Sang trọng" if is_vi else "✨ Luxury", "freehub|meta_style_luxury"),
+            ("👤 UGC", "freehub|meta_style_ugc"),
+        ],
+    }
+    back_action = {
+        "meta_goal": "freehub|meta",
+        "meta_platform": "freehub|meta_back_goal",
+        "meta_ratio": "freehub|meta_back_platform",
+        "meta_style": "freehub|meta_back_ratio",
+    }.get(step, "freehub|meta")
+    return build_2col_keyboard(
+        options.get(step, []),
+        nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", back_action),
+        lang=lang,
+    )
+
+def free_hub_provider_status_payload() -> dict:
+    enabled = {
+        "gemini": bool(FREE_PROVIDER_ROUTER_ENABLED and GEMINI_ENABLED and GEMINI_API_KEY),
+        "groq": bool(FREE_PROVIDER_ROUTER_ENABLED and GROQ_ENABLED and GROQ_API_KEY and GROQ_MODEL_FREE),
+        "openrouter": bool(FREE_PROVIDER_ROUTER_ENABLED and OPENROUTER_ENABLED and OPENROUTER_API_KEY and OPENROUTER_MODEL_FREE),
+        "shopaikey": bool(FREE_PROVIDER_ROUTER_ENABLED and shopaikey_public_chat_fallback_enabled()),
+        "byok_gemini": False,
+        "byok_groq": False,
+        "byok_openrouter": False,
+    }
+    return {
+        "router_enabled": FREE_PROVIDER_ROUTER_ENABLED,
+        "order": list(FREE_PROVIDER_ORDER),
+        "enabled": enabled,
+        "candidates": free_provider_candidates(FREE_PROVIDER_ORDER, enabled),
+        "byok_enabled": FREE_HUB_BYOK_ENABLED,
+        "allowed_tasks": sorted(ALLOWED_FREE_PROVIDER_TASKS),
+    }
+
+def free_hub_daily_usage_count(user_id) -> int:
+    conn = None
+    try:
+        conn = db_connect()
+        row = conn.execute(
+            """SELECT COUNT(*) FROM usage_events
+               WHERE user_id=? AND tool_name='free_hub'
+                 AND event_type='tool_success'
+                 AND substr(created_at,1,10)=?""",
+            (str(user_id), now_text()[:10]),
+        ).fetchone()
+        return int((row or [0])[0] or 0)
+    except Exception:
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+def free_hub_quota_payload(user_id) -> dict:
+    _credits, total_spent, is_vip = get_user(user_id)
+    is_registered = user_exists(user_id)
+    limit = quota_limit_for_user(
+        is_admin_user(user_id),
+        bool(is_vip or int(total_spent or 0) > 0),
+        is_registered,
+        {
+            "free": FREE_USER_DAILY_FREE_AI_REQUESTS,
+            "registered": REGISTERED_USER_DAILY_FREE_AI_REQUESTS,
+            "premium": PREMIUM_USER_DAILY_FREE_AI_REQUESTS,
+            "admin": ADMIN_DAILY_FREE_AI_REQUESTS,
+        },
+    )
+    used = free_hub_daily_usage_count(user_id)
+    return {"limit": limit, "used": used, "remaining": max(0, limit - used), "allowed": used < limit}
+
+def free_hub_quota_exhausted_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "You have used today's free AI allowance. Come back tomorrow, use your own API key when secure BYOK is enabled, "
+            "or choose a paid service. No Xu was deducted."
+        )
+    return (
+        "Bạn đã dùng hết lượt AI miễn phí hôm nay. Bạn có thể quay lại ngày mai, dùng API riêng khi kho BYOK an toàn được bật "
+        "hoặc chọn dịch vụ trả phí. Bot không trừ Xu."
+    )
+
+def free_hub_sensitive_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "This content is not suitable for a free provider. Please use Support for payment/account issues or a safer confirmed mode. "
+            "No data was sent to a provider and no Xu was deducted."
+        )
+    return (
+        "Nội dung này không phù hợp để xử lý bằng provider miễn phí. "
+        "Nếu liên quan thanh toán/tài khoản, hãy dùng mục Hỗ trợ; nội dung nhạy cảm cần chế độ an toàn hơn hoặc xác nhận riêng.\n\n"
+        "TOAN AAS chưa gửi dữ liệu sang provider và chưa trừ Xu."
+    )
+
+async def free_provider_router_call(task_type: str, user_input: str, user_id, max_tokens: int = 900) -> dict:
+    reason = sensitive_free_task_reason(user_input, task_type)
+    if reason:
+        return {"ok": False, "blocked": True, "reason": reason, "provider": "safety_guard"}
+    if not FREE_PROVIDER_ROUTER_ENABLED:
+        return {"ok": False, "blocked": False, "reason": "router_disabled", "provider": ""}
+    status = free_hub_provider_status_payload()
+    system_prompt = (
+        "Bạn là TOAN AAS Free Tools. Trả lời tiếng Việt, thực dụng, ngắn gọn, có cấu trúc. "
+        "Chỉ xử lý content/prompt nhẹ. Không tư vấn chính thức về pháp lý, thuế, đầu tư; "
+        "không yêu cầu hoặc nhắc lại API key, token, OTP, bill thanh toán hay dữ liệu nhạy cảm."
+    )
+    errors = []
+    for provider in status["candidates"]:
+        try:
+            if provider == "gemini" and gemini_client:
+                def run_gemini_free():
+                    return gemini_client.models.generate_content(
+                        model=GEMINI_MODEL_FREE or "gemini-2.0-flash",
+                        config=types.GenerateContentConfig(system_instruction=system_prompt),
+                        contents=user_input,
+                    )
+                response = await asyncio.to_thread(run_gemini_free)
+                text = str(getattr(response, "text", "") or "").strip()
+            elif provider in {"groq", "openrouter"}:
+                base_url = GROQ_BASE_URL if provider == "groq" else OPENROUTER_BASE_URL
+                api_key = GROQ_API_KEY if provider == "groq" else OPENROUTER_API_KEY
+                model = GROQ_MODEL_FREE if provider == "groq" else OPENROUTER_MODEL_FREE
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{base_url.rstrip('/')}/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_input},
+                            ],
+                            "max_tokens": min(1000, max(80, int(max_tokens))),
+                            "temperature": 0.5,
+                        },
+                    )
+                payload = response.json() if response.content else {}
+                text = str((((payload.get("choices") or [{}])[0].get("message") or {}).get("content")) or "").strip()
+                if response.status_code >= 400:
+                    raise RuntimeError(f"http_{response.status_code}")
+            elif provider == "shopaikey":
+                result = await shopaikey_chat_completion(system_prompt, user_input, user_id, max_tokens=max_tokens)
+                text = str(result.get("text") or "").strip() if result.get("ok") else ""
+                if not text:
+                    raise RuntimeError(str(result.get("status") or "provider_fail"))
+            else:
+                continue
+            if text:
+                return {"ok": True, "blocked": False, "provider": provider, "text": text}
+            raise RuntimeError("empty_content")
+        except Exception as e:
+            errors.append(f"{provider}:{type(e).__name__}")
+    return {"ok": False, "blocked": False, "provider": "", "reason": "providers_unavailable", "errors": errors}
+
+def free_hub_record_success(user, task_type: str, provider: str = "local_prompt_library") -> int:
+    record_usage_event(
+        getattr(user, "id", user),
+        username=getattr(user, "username", "") or getattr(user, "first_name", "") or "",
+        event_type="tool_success",
+        tool_name="free_hub",
+        command=task_type,
+        status="free_no_charge",
+        provider=provider,
+        xu_delta=0,
+        detail=f"task={task_type}; no_xu_charge=true",
+    )
+    return free_hub_daily_usage_count(getattr(user, "id", user))
+
+def free_hub_soft_promo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("⭐ Xem gói Premium" if is_vi else "⭐ Premium plans", "pricing|main"),
+            ("🤖 Làm bot riêng" if is_vi else "🤖 Custom bot", "menu|support"),
+            ("📦 Tư vấn dịch vụ" if is_vi else "📦 Service advice", "menu|support"),
+            ("Tiếp tục dùng miễn phí" if is_vi else "Continue free", "freehub|main"),
+        ],
+        nav_back=None,
+        nav_main=False,
+        lang=lang,
+    )
+
+async def maybe_send_free_hub_promo(target, user_id, lang: str, success_count: int) -> None:
+    if not FREE_HUB_SHOW_SOFT_PROMO:
+        return
+    state = USER_PENDING.get(free_hub_promo_key(user_id)) or {}
+    last_shown = float(state.get("last_shown_ts") or 0.0)
+    if not should_show_soft_promo(
+        success_count,
+        FREE_HUB_PROMO_AFTER_REQUESTS,
+        last_shown,
+        time.time(),
+        FREE_HUB_PROMO_COOLDOWN_HOURS,
+    ):
+        return
+    USER_PENDING[free_hub_promo_key(user_id)] = {"last_shown_ts": time.time()}
+    text = (
+        "Bạn đang dùng công cụ miễn phí. Nếu muốn TOAN AAS làm trọn gói video/caption/phụ đề/lồng tiếng "
+        "hoặc bot riêng cho shop, bạn có thể xem dịch vụ. Đây chỉ là gợi ý, bạn vẫn có thể tiếp tục dùng miễn phí."
+        if normalize_user_language(lang) == "vi"
+        else "You can keep using free tools. Premium workflows and custom bots are available when you need them."
+    )
+    await target.reply_text(text, reply_markup=free_hub_soft_promo_keyboard(lang))
+
 def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
         [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
+        [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")],
         [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
         [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
@@ -38311,6 +38955,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         rows = [
             [InlineKeyboardButton("🖼 AI 图片", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
             [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 语音 / 音乐", callback_data="menu|main_music")],
+            [InlineKeyboardButton("🆓 免费工具", callback_data="freehub|main")],
             [InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
             [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
@@ -38324,6 +38969,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         rows = [
             [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
             [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
+            [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main")],
             [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
             [InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
             [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
@@ -38336,6 +38982,7 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     rows = [
         [InlineKeyboardButton("🖼 AI Image", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
         [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Music", callback_data="menu|main_music")],
+        [InlineKeyboardButton("🆓 Free tools", callback_data="freehub|main")],
         [InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
         [InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
         [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
@@ -46818,6 +47465,241 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     text, keyboard = localized_menu_content(action, user_is_admin, lang, query.from_user.id)
     await safe_edit_query_message(query, text, reply_markup=keyboard)
 
+async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else "main"
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    if not FREE_HUB_ENABLED:
+        return await safe_edit_or_send(
+            query,
+            "🛠 Công cụ miễn phí đang bảo trì. TOAN AAS chưa gọi API và chưa trừ Xu.",
+            reply_markup=localized_public_back_keyboard(lang),
+        )
+    if action == "main":
+        clear_free_hub_pending(uid)
+        return await safe_edit_or_send(query, free_hub_main_text(lang), reply_markup=free_hub_main_keyboard(lang))
+    if action in {"chat", "meta", "ideas", "caption", "hook", "image_prompt", "video_prompt"}:
+        task_map = {
+            "chat": "free_chat",
+            "meta": "meta_ai_prompt",
+            "ideas": "content_idea",
+            "caption": "caption_hashtag",
+            "hook": "hook_script",
+            "image_prompt": "image_prompt",
+            "video_prompt": "video_prompt",
+        }
+        task_type = task_map[action]
+        quota = free_hub_quota_payload(uid)
+        if not quota["allowed"]:
+            return await safe_edit_or_send(query, free_hub_quota_exhausted_text(lang), reply_markup=free_hub_main_keyboard(lang))
+        set_free_hub_pending(uid, "input", task_type=task_type)
+        return await safe_edit_or_send(query, free_hub_input_text(task_type, lang), reply_markup=free_hub_input_keyboard(lang))
+    if action == "prompts":
+        clear_free_hub_pending(uid)
+        return await safe_edit_or_send(query, free_hub_prompts_text(lang), reply_markup=free_hub_prompts_keyboard(lang))
+    if action == "docs":
+        clear_free_hub_pending(uid)
+        return await safe_edit_or_send(query, free_hub_docs_text(lang), reply_markup=free_hub_docs_keyboard(lang))
+    if action == "notes":
+        clear_free_hub_pending(uid)
+        return await safe_edit_or_send(query, free_hub_notes_text(uid, lang), reply_markup=free_hub_notes_keyboard(lang))
+    if action == "byok":
+        clear_free_hub_pending(uid)
+        return await safe_edit_or_send(query, free_hub_byok_text(lang), reply_markup=free_hub_byok_keyboard(lang))
+    if action.startswith("byok_"):
+        return await query.answer(
+            "Kho secret mã hóa theo user chưa được bật. Không dán API key vào chat.",
+            show_alert=True,
+        )
+    if action == "upload":
+        set_free_hub_pending(uid, "upload", task_type="upload_for_postprocess")
+        return await safe_edit_or_send(query, free_hub_upload_text(lang), reply_markup=free_hub_upload_keyboard(lang))
+    if action == "library":
+        clear_free_hub_pending(uid)
+        return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
+    if action.startswith("lib_") and action not in {"lib_more", "lib_back"} and not action.startswith("lib_pick"):
+        token = action.replace("lib_", "", 1)
+        category_id, label = FREE_HUB_LIBRARY_CATEGORIES.get(token, ("", "Prompt Library"))
+        if not category_id:
+            return await query.answer("Nhóm prompt chưa hỗ trợ.", show_alert=True)
+        items = prompt_library_suggestions(FREE_PROMPT_LIBRARY, category_id, count=3, seed=int(time.time()))
+        state = set_free_hub_pending(
+            uid,
+            "library_suggestions",
+            task_type="prompt_library",
+            library_category=category_id,
+            library_label=label,
+            library_ids=[item.get("id") for item in items],
+        )
+        return await safe_edit_or_send(
+            query,
+            free_hub_library_suggestions_text(items, label),
+            reply_markup=free_hub_library_suggestions_keyboard(lang),
+        )
+    if action in {"lib_more", "lib_back"}:
+        state = get_free_hub_pending(uid)
+        category_id = str(state.get("library_category") or "")
+        label = str(state.get("library_label") or "Prompt Library")
+        if not category_id:
+            return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
+        exclude = list(state.get("library_ids") or []) if action == "lib_more" else []
+        items = prompt_library_suggestions(FREE_PROMPT_LIBRARY, category_id, count=3, exclude_ids=exclude, seed=int(time.time()))
+        set_free_hub_pending(uid, "library_suggestions", library_ids=[item.get("id") for item in items])
+        return await safe_edit_or_send(
+            query,
+            free_hub_library_suggestions_text(items, label),
+            reply_markup=free_hub_library_suggestions_keyboard(lang),
+        )
+    if action.startswith("lib_pick"):
+        state = get_free_hub_pending(uid)
+        ids = list(state.get("library_ids") or [])
+        try:
+            selected_index = max(0, min(2, int(action[-1]) - 1))
+        except Exception:
+            selected_index = 0
+        selected = prompt_library_item(FREE_PROMPT_LIBRARY, ids[selected_index] if selected_index < len(ids) else "")
+        if not selected:
+            return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
+        result = {
+            "title": selected.get("title"),
+            "prompt": selected.get("prompt"),
+            "copy_instruction": "Mẫu này chỉ tạo text; TOAN AAS chưa gọi provider render và chưa trừ Xu.",
+        }
+        set_free_hub_pending(uid, "result", task_type="prompt_library", result=result, selected_prompt_id=selected.get("id"))
+        return await safe_edit_or_send(
+            query,
+            free_hub_prompt_result_text(result, "prompt_library"),
+            reply_markup=free_hub_library_item_keyboard(lang),
+        )
+    state = get_free_hub_pending(uid)
+    if action in {"meta_back_goal", "meta_back_platform", "meta_back_ratio"}:
+        step = {
+            "meta_back_goal": "meta_goal",
+            "meta_back_platform": "meta_platform",
+            "meta_back_ratio": "meta_ratio",
+        }[action]
+        set_free_hub_pending(uid, step)
+        return await safe_edit_or_send(
+            query,
+            free_hub_meta_choice_text(step, state, lang),
+            reply_markup=free_hub_meta_choice_keyboard(step, lang),
+        )
+    if action.startswith("meta_goal_"):
+        goal = {
+            "sell": "bán hàng",
+            "engage": "tăng tương tác",
+            "brand": "giới thiệu thương hiệu",
+            "story": "kể chuyện",
+        }.get(action.replace("meta_goal_", "", 1), "bán hàng")
+        state = set_free_hub_pending(uid, "meta_platform", goal=goal)
+        return await safe_edit_or_send(query, free_hub_meta_choice_text("meta_platform", state, lang), reply_markup=free_hub_meta_choice_keyboard("meta_platform", lang))
+    if action.startswith("meta_platform_"):
+        platform = {
+            "facebook": "Facebook",
+            "reels": "Instagram/Reels",
+            "tiktok": "TikTok",
+            "shorts": "YouTube Shorts",
+        }.get(action.replace("meta_platform_", "", 1), "TikTok/Reels")
+        state = set_free_hub_pending(uid, "meta_ratio", platform=platform)
+        return await safe_edit_or_send(query, free_hub_meta_choice_text("meta_ratio", state, lang), reply_markup=free_hub_meta_choice_keyboard("meta_ratio", lang))
+    if action.startswith("meta_ratio_"):
+        ratio = action.replace("meta_ratio_", "", 1).replace("x", ":")
+        state = set_free_hub_pending(uid, "meta_style", aspect_ratio=ratio)
+        return await safe_edit_or_send(query, free_hub_meta_choice_text("meta_style", state, lang), reply_markup=free_hub_meta_choice_keyboard("meta_style", lang))
+    if action.startswith("meta_style_"):
+        styles = {
+            "real": "chân thật",
+            "cinematic": "cinematic",
+            "fun": "vui nhộn",
+            "luxury": "sang trọng",
+            "ugc": "UGC đời thường",
+        }
+        style = styles.get(action.replace("meta_style_", "", 1), "chân thật")
+        context_data = {
+            "goal": state.get("goal") or "bán hàng",
+            "platform": state.get("platform") or "TikTok/Reels",
+            "aspect_ratio": state.get("aspect_ratio") or "9:16",
+            "style": style,
+        }
+        result = generate_contextual_prompt(str(state.get("user_input") or ""), context_data)
+        set_free_hub_pending(uid, "result", result=result, task_type="meta_ai_prompt", context=context_data)
+        count = free_hub_record_success(query.from_user, "meta_ai_prompt", "local_contextual_prompt")
+        await safe_edit_or_send(
+            query,
+            free_hub_prompt_result_text(result, "meta_ai_prompt", "local_contextual_prompt"),
+            reply_markup=free_hub_result_keyboard(lang, meta=True),
+        )
+        return await maybe_send_free_hub_promo(query.message, uid, lang, count)
+    if action in {"copy", "variant", "caption_more", "save"}:
+        result = dict(state.get("result") or {})
+        if not result:
+            return await safe_edit_or_send(query, free_hub_main_text(lang), reply_markup=free_hub_main_keyboard(lang))
+        if action == "copy":
+            return await safe_edit_or_send(
+                query,
+                free_hub_prompt_result_text(result, str(state.get("task_type") or ""), str(state.get("provider") or "local_prompt_library")),
+                reply_markup=free_hub_result_keyboard(lang, meta=state.get("task_type") == "meta_ai_prompt"),
+            )
+        if action == "variant":
+            source = str(state.get("user_input") or ((result.get("context") or {}).get("product_name")) or result.get("title") or "")
+            context_data = dict(state.get("context") or {})
+            style_options = ["chân thật", "cinematic", "UGC đời thường", "sang trọng", "vui nhộn"]
+            current_style = str(context_data.get("style") or "")
+            try:
+                next_style = style_options[(style_options.index(current_style) + 1) % len(style_options)]
+            except ValueError:
+                next_style = style_options[1]
+            context_data["style"] = next_style
+            result = generate_contextual_prompt(source, context_data)
+            set_free_hub_pending(uid, "result", result=result, context=context_data)
+            count = free_hub_record_success(query.from_user, str(state.get("task_type") or "meta_ai_prompt"), "local_contextual_prompt")
+            await safe_edit_or_send(
+                query,
+                free_hub_prompt_result_text(result, str(state.get("task_type") or ""), "local_contextual_prompt"),
+                reply_markup=free_hub_result_keyboard(lang, meta=state.get("task_type") == "meta_ai_prompt"),
+            )
+            return await maybe_send_free_hub_promo(query.message, uid, lang, count)
+        if action == "caption_more":
+            source = str(state.get("user_input") or result.get("title") or result.get("prompt") or "")
+            pack = caption_hashtag_pack(source)
+            result["caption"] = pack["caption"]
+            result["hashtags"] = pack["hashtags"]
+            result["cta"] = pack["cta"]
+            set_free_hub_pending(uid, "result", result=result)
+            count = free_hub_record_success(query.from_user, "caption_hashtag", "local_prompt_library")
+            await safe_edit_or_send(
+                query,
+                free_hub_prompt_result_text(result, str(state.get("task_type") or ""), "local_prompt_library"),
+                reply_markup=free_hub_result_keyboard(lang, meta=state.get("task_type") == "meta_ai_prompt"),
+            )
+            return await maybe_send_free_hub_promo(query.message, uid, lang, count)
+        content = "\n\n".join(
+            value for value in [
+                str(result.get("title") or ""),
+                str(result.get("prompt") or ""),
+                str(result.get("caption") or ""),
+                " ".join(str(item) for item in (result.get("hashtags") or [])),
+            ] if value
+        )
+        quota_error = memory_quota_error(uid, len(content.encode("utf-8")))
+        if quota_error:
+            return await query.answer("Không đủ dung lượng ghi chú để lưu mẫu này.", show_alert=True)
+        note_id = memory_create_note(
+            uid,
+            content,
+            ai_data={
+                "title": result.get("title") or "Free Hub prompt",
+                "summary": str(result.get("caption") or result.get("prompt") or "")[:500],
+                "tags": "free-hub, prompt",
+                "category": "Ý tưởng content",
+                "priority": "normal",
+            },
+        )
+        return await query.answer(f"Đã lưu vào ghi chú #{note_id}.", show_alert=True)
+    return await query.answer("Thao tác Free Hub chưa hỗ trợ.", show_alert=True)
+
 async def handle_feedback_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -46947,6 +47829,70 @@ async def cmd_customer_surface(update: Update, context: ContextTypes.DEFAULT_TYP
         "Nếu Telegram vẫn hiện A-TOOLS khi audit OK, vấn đề nằm ở webhook/process cũ cùng TELEGRAM_TOKEN; chạy <code>/telegram_status</code> và <code>/telegram_takeover</code>.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_free_hub_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    status = free_hub_provider_status_payload()
+    counts = prompt_library_counts(FREE_PROMPT_LIBRARY)
+    lines = [
+        "🆓 <b>FREE TOOLS HUB STATUS</b>",
+        "",
+        f"• Free Hub: <code>{'ON' if FREE_HUB_ENABLED else 'OFF'}</code>",
+        f"• Prompt library: <code>{len(FREE_PROMPT_LIBRARY.get('_expanded_items') or [])}</code>",
+        f"• Prompt library error: <code>{html.escape(FREE_PROMPT_LIBRARY_ERROR or '-')}</code>",
+        f"• Free router: <code>{'ON' if status['router_enabled'] else 'OFF'}</code>",
+        f"• Provider order: <code>{html.escape(', '.join(status['order']) or '-')}</code>",
+        f"• Available candidates: <code>{html.escape(', '.join(status['candidates']) or '-')}</code>",
+        f"• Gemini: <code>{'enabled' if status['enabled']['gemini'] else 'disabled/missing'}</code>",
+        f"• Groq: <code>{'enabled' if status['enabled']['groq'] else 'disabled/missing'}</code>",
+        f"• OpenRouter: <code>{'enabled' if status['enabled']['openrouter'] else 'disabled/missing'}</code>",
+        f"• ShopAIKey fallback: <code>{'enabled' if status['enabled']['shopaikey'] else 'disabled/missing'}</code>",
+        f"• BYOK encrypted storage: <code>{'ON' if status['byok_enabled'] else 'OFF/GUARDED'}</code>",
+        f"• Daily quota free/registered/premium/admin: <code>{FREE_USER_DAILY_FREE_AI_REQUESTS}/{REGISTERED_USER_DAILY_FREE_AI_REQUESTS}/{PREMIUM_USER_DAILY_FREE_AI_REQUESTS}/{ADMIN_DAILY_FREE_AI_REQUESTS}</code>",
+        f"• Storage free: <code>{TOTAL_FREE_STORAGE_MB}MB ({NOTES_TEXT_FREE_MB}MB text + {FILES_AUDIO_FREE_MB}MB files)</code>",
+        "• Xu deduction in Free Hub: <code>NO</code>",
+        "• Meta AI API integration: <code>NO - prompt workflow only</code>",
+        "",
+        "<b>Prompt categories:</b>",
+    ]
+    lines.extend(f"• {html.escape(key)}: <code>{value}</code>" for key, value in sorted(counts.items()))
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_free_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    status = free_hub_provider_status_payload()
+    lines = [
+        "🧭 <b>FREE PROVIDER ROUTER</b>",
+        "",
+        f"• Enabled: <code>{'YES' if status['router_enabled'] else 'NO'}</code>",
+        f"• Order: <code>{html.escape(', '.join(status['order']) or '-')}</code>",
+        f"• Candidates now: <code>{html.escape(', '.join(status['candidates']) or '-')}</code>",
+        f"• BYOK: <code>{'enabled' if status['byok_enabled'] else 'guarded; no encrypted storage'}</code>",
+        f"• Allowed tasks: <code>{html.escape(', '.join(status['allowed_tasks']))}</code>",
+        "• Sensitive/payment/admin tasks: <code>BLOCKED</code>",
+        "• API keys shown/logged: <code>NO</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_free_hub_prompt_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    topic = " ".join(context.args or []).strip()
+    if not topic:
+        return await update.message.reply_text("Cú pháp: <code>/free_hub_prompt_test nước hoa nam</code>", parse_mode="HTML")
+    reason = sensitive_free_task_reason(topic, "meta_ai_prompt")
+    if reason:
+        return await update.message.reply_text(
+            "⛔ Prompt test bị safety guard chặn. Không gửi dữ liệu sang provider và không trừ Xu."
+        )
+    result = generate_contextual_prompt(topic)
+    await update.message.reply_text(
+        free_hub_prompt_result_text(result, "meta_ai_prompt", "local_contextual_prompt"),
+        parse_mode="HTML",
+        reply_markup=free_hub_result_keyboard(get_user_language(update.effective_user.id) or "vi", meta=True),
+    )
 
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -92286,6 +93232,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if await handle_free_hub_pending_upload(update, context):
+        return
+
     if await handle_internal_archive_pending_upload(update, context):
         return
 
@@ -92316,6 +93265,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_free_hub_pending_upload(update, context):
+        return
+
     if await handle_internal_archive_pending_upload(update, context):
         return
 
@@ -92358,6 +93310,8 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
     )
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_free_hub_pending_upload(update, context):
+        return
     media_kind = cache_recent_media_state(update)
     remember_last_media(update)
     if await handle_video_finalization_pending_media(update, context):
@@ -93926,6 +94880,8 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
     return await safe_edit_or_send(query, video_upload_received_text(lang), reply_markup=video_upload_received_keyboard(uid, lang))
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_free_hub_pending_upload(update, context):
+        return
     if await handle_video_finalization_pending_media(update, context):
         return
     if await handle_video_editor_pending_upload(update, context):
@@ -94027,6 +94983,154 @@ async def handle_feedback_pending_text(update: Update, context: ContextTypes.DEF
     )
     return True
 
+async def handle_free_hub_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    state = get_free_hub_pending(uid)
+    if not state or state.get("step") != "input":
+        return False
+    text = re.sub(r"\s+", " ", update.message.text.strip())[:2000]
+    if not text:
+        return True
+    lang = get_user_language(uid) or "vi"
+    task_type = str(state.get("task_type") or "")
+    reason = sensitive_free_task_reason(text, task_type)
+    if reason:
+        clear_free_hub_pending(uid)
+        await update.message.reply_text(
+            free_hub_sensitive_text(lang),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
+                [InlineKeyboardButton("⬅️ Công cụ miễn phí", callback_data="freehub|main")],
+            ]),
+        )
+        return True
+    quota = free_hub_quota_payload(uid)
+    if not quota["allowed"]:
+        clear_free_hub_pending(uid)
+        await update.message.reply_text(free_hub_quota_exhausted_text(lang), reply_markup=free_hub_main_keyboard(lang))
+        return True
+    if task_type == "meta_ai_prompt":
+        state = set_free_hub_pending(uid, "meta_goal", task_type=task_type, user_input=text)
+        await update.message.reply_text(
+            free_hub_meta_choice_text("meta_goal", state, lang),
+            parse_mode="HTML",
+            reply_markup=free_hub_meta_choice_keyboard("meta_goal", lang),
+        )
+        return True
+    if task_type == "free_chat":
+        result = await free_provider_router_call(task_type, text, uid)
+        if result.get("blocked"):
+            clear_free_hub_pending(uid)
+            await update.message.reply_text(free_hub_sensitive_text(lang), reply_markup=free_hub_main_keyboard(lang))
+            return True
+        if not result.get("ok"):
+            clear_free_hub_pending(uid)
+            await update.message.reply_text(
+                "⚠️ Provider AI miễn phí đang bận hoặc chưa cấu hình. TOAN AAS chưa trừ Xu. "
+                "Bạn vẫn có thể dùng thư viện prompt và các công cụ content local.",
+                reply_markup=free_hub_main_keyboard(lang),
+            )
+            return True
+        payload = {
+            "title": "Hỏi AI miễn phí",
+            "prompt": str(result.get("text") or ""),
+            "copy_instruction": "Kết quả AI miễn phí; hãy kiểm tra lại thông tin quan trọng trước khi sử dụng.",
+        }
+        provider = str(result.get("provider") or "free_router")
+    elif task_type == "content_idea":
+        payload = content_idea_pack(text)
+        provider = "local_prompt_library"
+    elif task_type == "caption_hashtag":
+        payload = {"title": "Caption / Hashtag miễn phí", **caption_hashtag_pack(text)}
+        provider = "local_prompt_library"
+    elif task_type == "hook_script":
+        payload = {"title": "Hook / Kịch bản miễn phí", **hook_script_pack(text)}
+        provider = "local_prompt_library"
+    elif task_type in {"image_prompt", "video_prompt"}:
+        payload = generate_contextual_prompt(
+            text,
+            {
+                "duration_seconds": 12,
+                "style": "chân thật / hiện đại",
+            },
+        )
+        payload["title"] = "Prompt ảnh miễn phí" if task_type == "image_prompt" else "Prompt video miễn phí"
+        if task_type == "image_prompt":
+            payload["prompt"] = (
+                f"Ảnh quảng cáo chân thật cho {text}, chủ thể rõ, bối cảnh phù hợp sản phẩm, "
+                "ánh sáng mềm có chiều sâu, bố cục chuyên nghiệp, vật liệu tự nhiên, màu sắc hài hòa, "
+                "không chữ méo, không logo giả, không watermark. "
+                f"Negative: {payload.get('negative_prompt') or ''}"
+            )
+        provider = "local_contextual_prompt"
+    else:
+        clear_free_hub_pending(uid)
+        return False
+    set_free_hub_pending(
+        uid,
+        "result",
+        task_type=task_type,
+        user_input=text,
+        result=payload,
+        provider=provider,
+        context=dict(payload.get("context") or {}),
+    )
+    count = free_hub_record_success(update.effective_user, task_type, provider)
+    await update.message.reply_text(
+        free_hub_prompt_result_text(payload, task_type, provider),
+        parse_mode="HTML",
+        reply_markup=free_hub_result_keyboard(lang, meta=False),
+    )
+    await maybe_send_free_hub_promo(update.message, uid, lang, count)
+    return True
+
+async def handle_free_hub_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message:
+        return False
+    uid = update.effective_user.id
+    state = get_free_hub_pending(uid)
+    if not state or state.get("step") != "upload":
+        return False
+    lang = get_user_language(uid) or "vi"
+    photo = bool(getattr(update.message, "photo", None))
+    video = bool(getattr(update.message, "video", None))
+    document = getattr(update.message, "document", None)
+    if document:
+        mime_type = str(getattr(document, "mime_type", "") or "").lower()
+        file_name = str(getattr(document, "file_name", "") or "").lower()
+        photo = photo or mime_type.startswith("image/") or file_name.endswith((".jpg", ".jpeg", ".png", ".webp"))
+        video = video or mime_type.startswith("video/") or file_name.endswith((".mp4", ".mov", ".mkv", ".webm"))
+    if not (photo or video or document):
+        await update.message.reply_text("⚠️ Hãy gửi một ảnh, video hoặc tài liệu nhỏ. Bot chưa trừ Xu.")
+        return True
+    remember_last_user_file(update)
+    if photo:
+        clear_free_hub_pending(uid)
+        await update.message.reply_text(
+            "✅ Đã nhận ảnh và lưu tạm.\n\nBạn có thể tạo prompt/caption miễn phí hoặc mở công cụ ảnh hiện có. "
+            "Tác vụ render/chỉnh sửa tốn Xu phải báo giá trước.",
+            reply_markup=image_upload_outside_flow_keyboard(lang, admin=is_admin_user(uid)),
+        )
+        return True
+    if video:
+        cache_recent_media_state(update)
+        remember_last_media(update)
+        clear_free_hub_pending(uid)
+        await update.message.reply_text(
+            "✅ Đã nhận video và lưu tạm.\n\nBạn có thể lấy ý tưởng/caption miễn phí hoặc mở công cụ hậu kỳ video hiện có. "
+            "Phụ đề/lồng tiếng/render tốn Xu phải báo giá và xác nhận trước.",
+            reply_markup=video_upload_received_keyboard(uid, lang),
+        )
+        return True
+    clear_free_hub_pending(uid)
+    await update.message.reply_text(
+        "✅ Đã nhận tài liệu và lưu tạm.\n\nHãy chọn công cụ PDF/Word hiện có để xử lý. Bot chưa trừ Xu.",
+        reply_markup=free_hub_docs_keyboard(lang),
+    )
+    return True
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -94037,6 +95141,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_manual_topup_pending_text(update, context):
+        return
+
+    if await handle_free_hub_pending_text(update, context):
         return
 
     if await handle_finance_compliance_pending_text(update, context):
@@ -94446,6 +95553,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("unfreeze_tools", cmd_unfreeze_tools))
     tg_app.add_handler(CommandHandler("ops_plan", cmd_ops_plan))
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
+    tg_app.add_handler(CommandHandler("free_hub_status", cmd_free_hub_status))
+    tg_app.add_handler(CommandHandler("free_hub_prompt_test", cmd_free_hub_prompt_test))
+    tg_app.add_handler(CommandHandler("free_provider_status", cmd_free_provider_status))
     tg_app.add_handler(CommandHandler("ai_status",   cmd_ai_status))
     tg_app.add_handler(CommandHandler("api_recommend", cmd_api_recommend))
     tg_app.add_handler(CommandHandler("feature_status", cmd_feature_status))
@@ -95025,6 +96135,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_buy_plan_callback, pattern=r"^buy_plan\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_doc_tool_callback, pattern=r"^docflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback, pattern=r"^freehub\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_payos_alert_callback, pattern=r"^payosalert\|"))
