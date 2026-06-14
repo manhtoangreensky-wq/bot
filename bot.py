@@ -36381,6 +36381,7 @@ def shopaikey_active_job_for_user(user_id, job_type: str = "") -> dict | None:
     if kind == "video":
         try:
             mark_stale_public_video_jobs(uid)
+            mark_stale_admin_video_jobs(uid)
         except Exception:
             pass
     statuses = tuple(sorted(SHOPAIKEY_ACTIVE_JOB_STATUSES))
@@ -36737,8 +36738,89 @@ def mark_stale_public_video_jobs(user_id: str = "", limit: int = 50) -> list[dic
         stale_jobs.append({**job, "refunded": refunded, "timeout_minutes": timeout_minutes})
     return stale_jobs
 
+def mark_stale_admin_video_jobs(user_id: str = "", limit: int = 50) -> list[dict]:
+    statuses = tuple(sorted(SHOPAIKEY_ACTIVE_JOB_STATUSES))
+    placeholders = ",".join("?" for _ in statuses)
+    uid = str(user_id or "").strip()
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT * FROM shopaikey_jobs
+            WHERE job_type='video'
+              AND admin_only=1
+              AND (?='' OR user_id=?)
+              AND UPPER(status) IN ({placeholders})
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (uid, uid, *statuses, max(1, min(200, int(limit or 50)))),
+        ).fetchall()
+    finally:
+        conn.close()
+    stale_jobs: list[dict] = []
+    now_dt = datetime.now()
+    for row in rows:
+        job = dict(row)
+        created_dt = parse_now_text(job.get("created_at") or job.get("updated_at") or "")
+        if not created_dt:
+            continue
+        timeout_minutes = shopaikey_video_job_timeout_minutes(job)
+        if now_dt - created_dt < timedelta(minutes=timeout_minutes):
+            continue
+        job_id = int(job.get("id") or 0)
+        deducted_amount = int(job.get("xu_deducted") or 0)
+        refunded = refund_shopaikey_job_if_needed(job.get("user_id") or "", job_id, job.get("task_id") or "", "admin_smoke_stale_timeout") if deducted_amount > 0 else False
+        update_shopaikey_job(
+            job_id=job_id,
+            status="FAILED_TIMEOUT",
+            error_class="ADMIN_STALE_TIMEOUT",
+            fail_reason="admin_smoke_stale_timeout",
+            refund_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "not_charged"),
+            refund_amount=deducted_amount if refunded else 0,
+            refund_reason="admin_smoke_stale_timeout",
+            billing_status="refunded" if refunded else ("refund_failed" if deducted_amount > 0 else "admin_timeout_not_charged"),
+            finished_at=now_text(),
+        )
+        record_system_event(
+            "shopaikey_video_admin_stale_timeout",
+            provider="shopaikey_video",
+            tool="video",
+            severity="warning",
+            code="ADMIN_STALE_TIMEOUT",
+            message=f"job_id={job_id}; user_id={job.get('user_id') or ''}; timeout_minutes={timeout_minutes}",
+        )
+        stale_jobs.append({**job, "refunded": refunded, "timeout_minutes": timeout_minutes})
+    return stale_jobs
+
+def shopaikey_active_video_admin_block_text(job: dict | None, user_id) -> str:
+    job = job or {}
+    job_id = int(job.get("id") or 0)
+    task_id = str(job.get("task_id") or "").strip()
+    status = str(job.get("status") or "-")
+    created_at = str(job.get("created_at") or "-")
+    lines = [
+        "⏳ <b>Bạn đang có một tác vụ video đang chạy.</b>",
+        "",
+        f"• Job ID: <code>{job_id or '-'}</code>",
+        f"• Status: <code>{html.escape(status)}</code>",
+        f"• Task ID: <code>{html.escape(task_id or '-')}</code>",
+        f"• Created: <code>{html.escape(created_at)}</code>",
+        "",
+    ]
+    if task_id:
+        lines.append(f"Kiểm tra provider: <code>/shopaikey_video_job {html.escape(task_id)}</code>")
+    if job_id:
+        lines.append(f"Kiểm tra DB: <code>/job_status {job_id}</code>")
+    lines.append(f"Nếu đã xác nhận job kẹt: <code>/clear_job_lock {html.escape(str(user_id or ''))}</code>")
+    lines.append("")
+    lines.append("Bot chưa gửi thêm job mới để tránh submit trùng và tốn credit provider thật.")
+    return "\n".join(lines)
+
 def shopaikey_video_queue_counts() -> dict:
     mark_stale_public_video_jobs()
+    mark_stale_admin_video_jobs()
     conn = db_connect()
     try:
         rows = conn.execute(
@@ -49185,6 +49267,7 @@ async def cmd_queue_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     stale = mark_stale_public_video_jobs()
+    stale_admin = mark_stale_admin_video_jobs()
     queue = shopaikey_video_queue_counts()
     raw = queue.get("raw") or {}
     raw_text = ", ".join(f"{key}={value}" for key, value in sorted(raw.items())) or "-"
@@ -49195,7 +49278,8 @@ async def cmd_queue_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Success: <code>{int(queue.get('success') or 0)}</code>\n"
         f"• Failed/timeout: <code>{int(queue.get('failed') or 0)}</code>\n"
         f"• Total: <code>{int(queue.get('total') or 0)}</code>\n"
-        f"• Stale fixed now: <code>{len(stale)}</code>\n"
+        f"• Stale fixed now: <code>{len(stale) + len(stale_admin)}</code> "
+        f"(public <code>{len(stale)}</code> / admin <code>{len(stale_admin)}</code>)\n"
         f"• Raw statuses: <code>{html.escape(raw_text)}</code>\n\n"
         "Không gọi provider. Không trừ Xu.",
         parse_mode="HTML",
@@ -49881,7 +49965,8 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
     active_job = shopaikey_active_job_for_user(uid, "video")
     if active_job:
         return await update.message.reply_text(
-            "⏳ Bạn đang có một tác vụ đang chạy. Vui lòng chờ kết quả hoặc kiểm tra trạng thái."
+            shopaikey_active_video_admin_block_text(active_job, uid),
+            parse_mode="HTML",
         )
     tool_type = "shopaikey_video"
     normalized_prompt = normalize_generation_prompt("shopaikey video smoke test " + ",".join(test_models))

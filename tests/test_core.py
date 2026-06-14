@@ -1454,6 +1454,39 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
         saved = bot.shopaikey_job_by_task_id("task_abc")
         assert saved["status"] == "SUCCESS"
         assert saved["result_sent"] == 1
+
+        admin_job_id = bot.create_shopaikey_job(
+            "admin1",
+            "c1",
+            "video",
+            model="veo3.1-fast",
+            prompt="admin smoke prompt that must not be shown in lock text",
+            status="IN_PROGRESS",
+            admin_only=True,
+        )
+        conn = bot.db_connect()
+        try:
+            conn.execute(
+                "UPDATE shopaikey_jobs SET created_at=?, updated_at=? WHERE id=?",
+                ("2000-01-01 00:00:00", "2000-01-01 00:00:00", admin_job_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        stale_admin = bot.mark_stale_admin_video_jobs("admin1")
+        assert len(stale_admin) == 1
+        admin_job = bot.shopaikey_job_by_id(admin_job_id)
+        assert admin_job["status"] == "FAILED_TIMEOUT"
+        assert admin_job["error_class"] == "ADMIN_STALE_TIMEOUT"
+        assert bot.shopaikey_active_job_for_user("admin1", "video") is None
+        block_text = bot.shopaikey_active_video_admin_block_text(
+            {"id": 99, "task_id": "task_live", "status": "IN_PROGRESS", "created_at": "2026-06-14 19:11:00"},
+            "admin1",
+        )
+        assert "/shopaikey_video_job task_live" in block_text
+        assert "/job_status 99" in block_text
+        assert "/clear_job_lock admin1" in block_text
+        assert "admin smoke prompt" not in block_text
     finally:
         if os.path.exists(db_path):
             os.unlink(db_path)
