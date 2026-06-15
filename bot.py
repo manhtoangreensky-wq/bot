@@ -615,6 +615,16 @@ STABILITY_API_KEY   = _env("STABILITY_API_KEY")
 PAYOS_CLIENT_ID     = _env("PAYOS_CLIENT_ID")
 PAYOS_API_KEY       = _env("PAYOS_API_KEY")
 PAYOS_CHECKSUM_KEY  = _env("PAYOS_CHECKSUM_KEY")
+PAYOS_WEBHOOK_URL = _env("PAYOS_WEBHOOK_URL", "https://app.toanaas.vn/api/v1/billing/webhook/payos")
+PAYOS_RETURN_URL = _env("PAYOS_RETURN_URL", "")
+PAYOS_CANCEL_URL = _env("PAYOS_CANCEL_URL", "")
+WEB_BILLING_ENABLED = env_flag("WEB_BILLING_ENABLED", "false")
+WEB_BILLING_API_BASE_URL = _env("WEB_BILLING_API_BASE_URL", "https://app.toanaas.vn/api/v1").rstrip("/")
+WEB_BILLING_API_TOKEN = _env("WEB_BILLING_API_TOKEN")
+WEB_BILLING_APPLY_CONFIRMED = env_flag("WEB_BILLING_APPLY_CONFIRMED", "false")
+BOT_PAYOS_FALLBACK_ENABLED = env_flag("BOT_PAYOS_FALLBACK_ENABLED", "true")
+INTERNAL_BILLING_ENABLED = env_flag("INTERNAL_BILLING_ENABLED", "false")
+INTERNAL_BILLING_TOKEN = _env("INTERNAL_BILLING_TOKEN")
 
 # Misc
 SERPAPI_API_KEY     = _env("SERPAPI_API_KEY")
@@ -2199,6 +2209,10 @@ def init_db():
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS payos_processed (
         order_code TEXT PRIMARY KEY,
+        payment_link_id TEXT DEFAULT '',
+        payment_type TEXT DEFAULT 'topup_xu',
+        apply_status TEXT DEFAULT 'success',
+        apply_error TEXT DEFAULT '',
         processed_at DATETIME
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS payos_orders (
@@ -2222,6 +2236,22 @@ def init_db():
         checkout_url TEXT,
         payment_link_id TEXT
     )""")
+    payos_processed_columns = _table_columns(c, "payos_processed")
+    for column_name, column_sql in [
+        ("payment_link_id", "payment_link_id TEXT DEFAULT ''"),
+        ("payment_type", "payment_type TEXT DEFAULT 'topup_xu'"),
+        ("apply_status", "apply_status TEXT DEFAULT 'success'"),
+        ("apply_error", "apply_error TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(c, "payos_processed", column_name, column_sql, payos_processed_columns)
+    payos_order_columns = _table_columns(c, "payos_orders")
+    for column_name, column_sql in [
+        ("payment_type", "payment_type TEXT DEFAULT 'topup_xu'"),
+        ("package_id", "package_id TEXT DEFAULT ''"),
+        ("apply_status", "apply_status TEXT DEFAULT ''"),
+        ("apply_error", "apply_error TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(c, "payos_orders", column_name, column_sql, payos_order_columns)
     c.execute("""CREATE TABLE IF NOT EXISTS user_plans (
         user_id TEXT PRIMARY KEY,
         current_plan TEXT DEFAULT '',
@@ -3129,6 +3159,35 @@ def init_db():
         created_at TEXT,
         updated_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS storage_entitlements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        source TEXT DEFAULT '',
+        payment_order_code TEXT DEFAULT '',
+        package_id TEXT DEFAULT '',
+        quota_mb INTEGER DEFAULT 0,
+        starts_at TEXT,
+        expires_at TEXT,
+        status TEXT DEFAULT 'active',
+        created_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS storage_usage (
+        user_id TEXT PRIMARY KEY,
+        used_bytes INTEGER DEFAULT 0,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS storage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        event_type TEXT,
+        delta_mb INTEGER DEFAULT 0,
+        used_bytes_after INTEGER DEFAULT 0,
+        ref_id TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        created_at TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_storage_entitlements_user_status ON storage_entitlements(user_id,status,expires_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_storage_events_user_created ON storage_events(user_id,created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_memory_storage_addons_user_status ON memory_storage_addons(user_id,status,expires_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS tool_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5287,6 +5346,65 @@ def mark_payos_order_processed(order_code: str):
     conn.commit()
     conn.close()
 
+PAYMENT_TYPES = {
+    "topup_xu",
+    "storage_addon",
+    "combo_purchase",
+    "monthly_package",
+    "manual_topup",
+}
+
+def normalize_payment_type(value: str = "", order_type: str = "", metadata: dict | None = None) -> str:
+    candidate = str(value or "").strip().lower()
+    if candidate in PAYMENT_TYPES:
+        return candidate
+    order = str(order_type or "topup").strip().lower()
+    meta = metadata if isinstance(metadata, dict) else {}
+    if order in {"topup", "topup_xu", ""}:
+        return "topup_xu"
+    if order == "storage_addon":
+        return "storage_addon"
+    if order == "plan_purchase":
+        return "monthly_package"
+    if order == "package_purchase":
+        return "monthly_package" if str(meta.get("package_type") or "").lower() == "monthly" else "combo_purchase"
+    if order == "manual_topup":
+        return "manual_topup"
+    return candidate or order
+
+def payment_package_id(order_type: str = "", plan_id: str = "", metadata: dict | None = None) -> str:
+    meta = metadata if isinstance(metadata, dict) else {}
+    return str(
+        meta.get("package_id")
+        or meta.get("package_code")
+        or meta.get("item_id")
+        or plan_id
+        or order_type
+        or ""
+    ).strip()
+
+def record_payos_processed_conn(
+    conn,
+    order_code: str,
+    payment_type: str,
+    apply_status: str = "success",
+    payment_link_id: str = "",
+    apply_error: str = "",
+) -> None:
+    conn.execute(
+        """INSERT OR IGNORE INTO payos_processed
+        (order_code, payment_link_id, payment_type, apply_status, apply_error, processed_at)
+        VALUES (?,?,?,?,?,?)""",
+        (
+            str(order_code),
+            str(payment_link_id or ""),
+            normalize_payment_type(payment_type),
+            str(apply_status or "success"),
+            str(apply_error or "")[:300],
+            now_text(),
+        ),
+    )
+
 def create_order(
     order_code,
     user_id,
@@ -5302,6 +5420,14 @@ def create_order(
     plan_xu=0,
     metadata_json="",
 ):
+    try:
+        metadata = json.loads(metadata_json or "{}") if metadata_json else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+    except Exception:
+        metadata = {}
+    payment_type = normalize_payment_type(metadata.get("payment_type"), order_type, metadata)
+    package_id = payment_package_id(order_type, plan_id, metadata)
     conn = db_connect()
     c = conn.cursor()
     created_at = datetime.now()
@@ -5311,11 +5437,11 @@ def create_order(
         """INSERT INTO payos_orders
         (order_code, user_id, amount, xu, package_amount_vnd, base_xu, launch_bonus_xu,
          order_type, plan_id, plan_name, duration_days, plan_xu, metadata_json,
-         status, created_at, expires_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         payment_type, package_id, status, created_at, expires_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (str(order_code), str(user_id), amount, xu, package_vnd, int(base_xu or 0), int(launch_bonus_xu or 0),
          str(order_type or "topup"), str(plan_id or ""), str(plan_name or ""), int(duration_days or 0), int(plan_xu or 0), str(metadata_json or ""),
-         PAYOS_STATUS_PENDING,
+         payment_type, package_id, PAYOS_STATUS_PENDING,
          created_at.strftime("%Y-%m-%d %H:%M:%S"), expires_at.strftime("%Y-%m-%d %H:%M:%S"))
     )
     conn.commit()
@@ -5446,10 +5572,15 @@ def generate_order_code() -> int:
     return base
 
 def make_payos_return_url(context: ContextTypes.DEFAULT_TYPE) -> str:
+    if PAYOS_RETURN_URL:
+        return PAYOS_RETURN_URL
     if PUBLIC_BASE_URL:
         return PUBLIC_BASE_URL.rstrip("/") + "/landing"
     bot_name = context.bot.username or BOT_USERNAME
     return f"https://t.me/{bot_name}" if bot_name else "https://t.me"
+
+def make_payos_cancel_url(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return PAYOS_CANCEL_URL or make_payos_return_url(context)
 
 def make_payos_description(pkg_key: str) -> str:
     # payOS giới hạn 9 ký tự mô tả với một số kênh ngân hàng chưa liên kết.
@@ -6001,6 +6132,109 @@ async def create_payos_payment_request(payos_body: dict, signature_variant: str 
         )
     res_data, raw_preview = parse_payos_response_safe(res)
     return res, res_data, raw_preview, raw_str
+
+def web_billing_api_url(path: str = "/billing/create-payment-link") -> str:
+    base = (WEB_BILLING_API_BASE_URL or "").strip().rstrip("/")
+    return base + "/" + str(path or "").strip().lstrip("/") if base else ""
+
+def web_billing_checkout_enabled(payment_type: str = "") -> bool:
+    return bool(
+        WEB_BILLING_ENABLED
+        and WEB_BILLING_APPLY_CONFIRMED
+        and WEB_BILLING_API_BASE_URL
+        and WEB_BILLING_API_TOKEN
+        and normalize_payment_type(payment_type) in {"topup_xu", "storage_addon", "combo_purchase", "monthly_package"}
+    )
+
+def web_billing_bridge_status_payload() -> dict:
+    endpoint = web_billing_api_url("/billing/create-payment-link")
+    safe_base = (WEB_BILLING_API_BASE_URL or "").strip().rstrip("/")
+    return {
+        "web_billing_enabled": bool(WEB_BILLING_ENABLED),
+        "apply_confirmed": bool(WEB_BILLING_APPLY_CONFIRMED),
+        "api_base": safe_base,
+        "api_token_configured": bool(WEB_BILLING_API_TOKEN),
+        "create_payment_endpoint": endpoint,
+        "payos_webhook_target": PAYOS_WEBHOOK_URL,
+        "return_url": PAYOS_RETURN_URL or "auto",
+        "cancel_url": PAYOS_CANCEL_URL or "auto",
+        "bot_fallback_enabled": bool(BOT_PAYOS_FALLBACK_ENABLED),
+        "storage_addon_enabled": True,
+        "risk_double_webhook": bool(WEB_BILLING_APPLY_CONFIRMED and BOT_PAYOS_FALLBACK_ENABLED),
+        "safe_to_route_customer_payments": bool(web_billing_checkout_enabled("topup_xu") and not BOT_PAYOS_FALLBACK_ENABLED),
+    }
+
+def build_web_billing_payment_payload(
+    user_id,
+    payment_type: str,
+    package_id: str,
+    amount: int,
+    metadata: dict | None = None,
+) -> dict:
+    payment_type = normalize_payment_type(payment_type)
+    safe_metadata = dict(metadata or {})
+    safe_metadata.update({
+        "bot": "toanaas",
+        "telegram_user_id": str(user_id),
+        "return_url": PAYOS_RETURN_URL or "",
+        "cancel_url": PAYOS_CANCEL_URL or "",
+    })
+    return {
+        "source": "telegram",
+        "user_id": str(user_id),
+        "payment_type": payment_type,
+        "package_id": str(package_id or payment_type),
+        "amount": int(amount or 0),
+        "metadata": safe_metadata,
+    }
+
+def normalize_billing_checkout_response(data: dict) -> dict:
+    payload = data if isinstance(data, dict) else {}
+    nested = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    checkout_url = (
+        payload.get("checkoutUrl")
+        or payload.get("checkout_url")
+        or nested.get("checkoutUrl")
+        or nested.get("checkout_url")
+        or ""
+    )
+    order_code = payload.get("orderCode") or payload.get("order_code") or nested.get("orderCode") or nested.get("order_code") or ""
+    payment_link_id = payload.get("paymentLinkId") or payload.get("payment_link_id") or nested.get("paymentLinkId") or nested.get("payment_link_id") or ""
+    ok = bool(checkout_url and (payload.get("success") is True or payload.get("code") == "00" or nested or payload.get("ok") is True))
+    return {
+        "ok": ok,
+        "checkout_url": str(checkout_url or ""),
+        "order_code": str(order_code or ""),
+        "payment_link_id": str(payment_link_id or ""),
+        "message": str(payload.get("message") or payload.get("desc") or nested.get("message") or nested.get("desc") or "")[:240],
+    }
+
+async def create_web_billing_payment_link(payload: dict) -> dict:
+    if not WEB_BILLING_ENABLED:
+        return {"ok": False, "reason": "web_billing_disabled"}
+    if not WEB_BILLING_API_TOKEN:
+        return {"ok": False, "reason": "missing_web_billing_token"}
+    endpoint = web_billing_api_url("/billing/create-payment-link")
+    if not endpoint:
+        return {"ok": False, "reason": "missing_web_billing_base_url"}
+    headers = {
+        "Authorization": f"Bearer {WEB_BILLING_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(endpoint, headers=headers, json=payload, timeout=20.0)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        normalized = normalize_billing_checkout_response(data)
+        normalized.update({"http_status": int(getattr(res, "status_code", 0) or 0), "endpoint": endpoint})
+        if getattr(res, "status_code", 0) >= 400 and not normalized.get("ok"):
+            normalized["reason"] = "web_billing_http_error"
+        return normalized
+    except Exception as exc:
+        return {"ok": False, "reason": type(exc).__name__, "message": "web billing request failed"}
 
 def manual_payment_text(uid: int, amount: int, xu: int, order_code: int, reason: str = "") -> str:
     reason_line = f"⚠️ {reason}\n\n" if reason else ""
@@ -26537,7 +26771,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
         c.execute(
             """SELECT user_id, amount, xu, status, expires_at,
                       COALESCE(order_type,'topup'), COALESCE(plan_id,''), COALESCE(plan_name,''),
-                      COALESCE(duration_days,0), COALESCE(plan_xu,0), COALESCE(metadata_json,'')
+                      COALESCE(duration_days,0), COALESCE(plan_xu,0), COALESCE(metadata_json,''),
+                      COALESCE(payment_type,''), COALESCE(package_id,''), COALESCE(payment_link_id,'')
                FROM payos_orders WHERE order_code=?""",
             (str(order_code),)
         )
@@ -26546,7 +26781,7 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             conn.rollback()
             return False, "order_not_found", {}
 
-        target_id, expected_amount, xu, status, expires_at, order_type, plan_id, plan_name, duration_days, plan_xu, metadata_json = order
+        target_id, expected_amount, xu, status, expires_at, order_type, plan_id, plan_name, duration_days, plan_xu, metadata_json, payment_type, package_id, payment_link_id = order
         order_type = str(order_type or "topup")
         try:
             metadata = json.loads(metadata_json or "{}") if metadata_json else {}
@@ -26554,6 +26789,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 metadata = {}
         except Exception:
             metadata = {}
+        payment_type = normalize_payment_type(payment_type, order_type, metadata)
+        package_id = str(package_id or payment_package_id(order_type, plan_id, metadata))
         stored_xu = int(xu or 0)
         calculated_base_xu = package_base_xu(expected_amount)
         base_xu = calculated_base_xu if calculated_base_xu > 0 else stored_xu
@@ -26567,6 +26804,9 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             "plan_name": plan_name or "",
             "plan_xu": int(plan_xu or 0),
             "metadata": metadata,
+            "payment_type": payment_type,
+            "package_id": package_id,
+            "payment_link_id": payment_link_id or "",
         }
 
         if status == PAYOS_STATUS_PAID:
@@ -26618,10 +26858,7 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
-            c.execute(
-                "INSERT INTO payos_processed (order_code, processed_at) VALUES (?,?)",
-                (str(order_code), now_text()),
-            )
+            record_payos_processed_conn(conn, order_code, payment_type, "success", payment_link_id)
             item_summary = package_items_summary(entry.get("items") or {})
             record_usage_event_conn(
                 conn,
@@ -26698,10 +26935,7 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
-            c.execute(
-                "INSERT INTO payos_processed (order_code, processed_at) VALUES (?,?)",
-                (str(order_code), now_text()),
-            )
+            record_payos_processed_conn(conn, order_code, payment_type, "success", payment_link_id)
             record_usage_event_conn(
                 conn,
                 target_id,
@@ -26778,10 +27012,7 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
-            c.execute(
-                "INSERT INTO payos_processed (order_code, processed_at) VALUES (?,?)",
-                (str(order_code), now_text()),
-            )
+            record_payos_processed_conn(conn, order_code, payment_type, "success", payment_link_id)
             record_usage_event_conn(
                 conn,
                 target_id,
@@ -26862,10 +27093,7 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
             (PAYOS_STATUS_PAID, now_text(), str(order_code))
         )
-        c.execute(
-            "INSERT INTO payos_processed (order_code, processed_at) VALUES (?,?)",
-            (str(order_code), now_text())
-        )
+        record_payos_processed_conn(conn, order_code, payment_type, "success", payment_link_id)
         record_credit_event(conn, target_id, base_xu, "payos_deposit", order_code, f"Nạp PayOS {amount_vnd}đ")
         if launch_bonus > 0:
             record_credit_event(conn, target_id, launch_bonus, "launch_bonus", order_code, f"Launch Bonus gói {amount_vnd}đ")
@@ -29422,6 +29650,35 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     base_xu = int(package_credit.get("base_xu") or pkg["xu"])
     launch_preview = int(package_credit.get("launch_bonus_xu") or 0)
     xu = int(package_credit.get("total_xu") or base_xu)
+    if web_billing_checkout_enabled("topup_xu"):
+        web_payload = build_web_billing_payment_payload(
+            uid,
+            "topup_xu",
+            pkg_key,
+            amount,
+            {
+                "base_xu": int(base_xu),
+                "launch_bonus_preview_xu": int(launch_preview),
+                "expected_total_xu": int(xu),
+            },
+        )
+        web_result = await create_web_billing_payment_link(web_payload)
+        if web_result.get("ok") and web_result.get("checkout_url"):
+            web_order = web_result.get("order_code") or "web_app"
+            return await query.edit_message_text(
+                "⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN PAYOS QUA WEB APP</b>\n\n"
+                f"📋 Mệnh giá: <b>{html.escape(pkg['text'])}</b>\n"
+                f"💰 Số tiền: <b>{amount:,}đ</b>\n"
+                f"🪙 Xu dự kiến: <b>+{xu} Xu</b>\n"
+                f"🆔 Mã đơn Web App: <code>{html.escape(str(web_order))}</code>\n\n"
+                "Xu chỉ được cộng khi webhook PayOS đã xác thực thành công. Không cộng Xu ở bước tạo link.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Thanh toán PayOS", url=web_result["checkout_url"])]])
+            )
+        if not BOT_PAYOS_FALLBACK_ENABLED:
+            return await query.edit_message_text(
+                "❌ Web Billing chưa tạo được link thanh toán. Bot chưa tạo đơn và chưa cộng/trừ Xu."
+            )
     order_code = generate_order_code()
     create_order(
         order_code,
@@ -29466,7 +29723,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         "orderCode": order_code,
         "amount": amount,
         "description": make_payos_description(pkg_key),
-        "cancelUrl": return_url,
+        "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url
     }
 
@@ -41091,6 +41348,7 @@ def menu_text_admin() -> str:
         "<b>B. Bill / Nạp tiền</b>\n"
         "• <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code> — chỉ xử lý sau khi đối soát tiền thật\n"
         "• <code>/payos_test_plan</code>, <code>/mark_payos_test</code>, <code>/fx_price_test</code>\n\n"
+        "• <code>/billing_bridge_status</code>, <code>/billing_bridge_test topup 10000 dry_run=1</code>, <code>/payos_confirm_webhook</code>\n\n"
         "<b>C. Gói / Combo</b>\n"
         "• <code>/package_catalog</code>, <code>/grant_combo</code>, <code>/grant_monthly</code>, <code>/grant_storage</code>\n"
         "• <code>/user_packages</code>, <code>/adjust_package</code>, <code>/revoke_package</code>\n\n"
@@ -64640,6 +64898,37 @@ def ensure_memory_storage_addons_table(conn=None) -> None:
         if own_conn:
             conn.close()
 
+def ensure_storage_billing_tables_conn(conn) -> None:
+    conn.execute("""CREATE TABLE IF NOT EXISTS storage_entitlements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        source TEXT DEFAULT '',
+        payment_order_code TEXT DEFAULT '',
+        package_id TEXT DEFAULT '',
+        quota_mb INTEGER DEFAULT 0,
+        starts_at TEXT,
+        expires_at TEXT,
+        status TEXT DEFAULT 'active',
+        created_at TEXT
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS storage_usage (
+        user_id TEXT PRIMARY KEY,
+        used_bytes INTEGER DEFAULT 0,
+        updated_at TEXT
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS storage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        event_type TEXT,
+        delta_mb INTEGER DEFAULT 0,
+        used_bytes_after INTEGER DEFAULT 0,
+        ref_id TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        created_at TEXT
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_storage_entitlements_user_status ON storage_entitlements(user_id,status,expires_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_storage_events_user_created ON storage_events(user_id,created_at)")
+
 def memory_active_storage_addon_mb_conn(conn, user_id) -> int:
     ensure_memory_storage_addons_table(conn)
     row = conn.execute(
@@ -64669,6 +64958,7 @@ def grant_memory_storage_addon_conn(
     note: str = "",
 ) -> dict:
     ensure_memory_storage_addons_table(conn)
+    ensure_storage_billing_tables_conn(conn)
     uid = str(user_id)
     addon_mb = max(0, int(addon_mb or 0))
     months = max(1, int(months or 1))
@@ -64702,6 +64992,56 @@ def grant_memory_storage_addon_conn(
             now_text(),
             now_text(),
         ),
+    )
+    conn.execute(
+        """INSERT INTO storage_entitlements
+        (user_id, source, payment_order_code, package_id, quota_mb, starts_at, expires_at, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            uid,
+            str(source or ""),
+            str(order_code or ""),
+            f"storage_{int(addon_mb)}mb",
+            int(addon_mb),
+            datetime_text(starts),
+            datetime_text(expires),
+            "active",
+            now_text(),
+        ),
+    )
+    used_row = conn.execute(
+        """SELECT
+               COALESCE(SUM(LENGTH(CAST(COALESCE(content,'') AS BLOB)) + LENGTH(CAST(COALESCE(summary,'') AS BLOB))),0),
+               COALESCE(SUM(COALESCE(file_size,0)),0)
+           FROM memory_notes WHERE user_id=? AND is_archived=0""",
+        (uid,),
+    ).fetchone()
+    archive_bytes = int(sql_scalar(
+        conn,
+        "SELECT COALESCE(SUM(COALESCE(size_bytes,0)),0) FROM internal_documents WHERE owner_admin_id=? AND status='active'",
+        (uid,),
+        0,
+    ) or 0)
+    used_bytes_after = int((used_row[0] or 0) + (used_row[1] or 0) + archive_bytes) if used_row else archive_bytes
+    conn.execute(
+        """INSERT INTO storage_events
+        (user_id, event_type, delta_mb, used_bytes_after, ref_id, note, created_at)
+        VALUES (?,?,?,?,?,?,?)""",
+        (
+            uid,
+            "storage_addon_granted",
+            int(addon_mb),
+            int(used_bytes_after),
+            str(order_code or ""),
+            str(note or source or "")[:500],
+            now_text(),
+        ),
+    )
+    conn.execute(
+        """INSERT INTO storage_usage (user_id, used_bytes, updated_at)
+        VALUES (?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET used_bytes=excluded.used_bytes, updated_at=excluded.updated_at""",
+        (uid, int(used_bytes_after), now_text()),
     )
     active_mb = memory_active_storage_addon_mb_conn(conn, uid)
     plan_row = conn.execute("SELECT storage_limit_mb FROM memory_plans WHERE user_id=?", (uid,)).fetchone()
@@ -65435,6 +65775,30 @@ async def start_storage_addon_purchase(update: Update, context: ContextTypes.DEF
     get_user(uid, update.effective_user.first_name or update.effective_user.username or "")
     if flag_on("emergency_lock") or flag_on("payment_freeze"):
         return await message.reply_text("⚠️ Thanh toán đang tạm khóa an toàn. Bot chưa tạo đơn dung lượng.")
+    if web_billing_checkout_enabled("storage_addon"):
+        package_id = f"storage_{addon_mb}mb"
+        web_payload = build_web_billing_payment_payload(
+            uid,
+            "storage_addon",
+            package_id,
+            amount,
+            {"quota_mb": int(addon_mb), "days": 30 * int(spec.get("months") or 1)},
+        )
+        web_result = await create_web_billing_payment_link(web_payload)
+        if web_result.get("ok") and web_result.get("checkout_url"):
+            web_order = web_result.get("order_code") or "web_app"
+            return await message.reply_text(
+                "📦 <b>Thanh toán dung lượng lưu trữ qua Web App</b>\n\n"
+                f"• Gói: <b>+{addon_mb}MB/tháng</b>\n"
+                f"• Giá: <b>{amount:,}đ</b>\n"
+                "• Đây là gói dung lượng lưu trữ, không cộng Xu dịch vụ.\n"
+                "• Dung lượng chỉ được cộng khi webhook PayOS đã xác thực thành công.\n"
+                f"• Mã đơn Web App: <code>{html.escape(str(web_order))}</code>",
+                parse_mode="HTML",
+                reply_markup=storage_addon_checkout_keyboard(web_result["checkout_url"]),
+            )
+        if not BOT_PAYOS_FALLBACK_ENABLED:
+            return await message.reply_text("❌ Web Billing chưa tạo được link dung lượng. Bot chưa tạo đơn và chưa cộng/trừ Xu.")
     if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
         return await message.reply_text("❌ Chưa cấu hình đủ PayOS để mua thêm dung lượng. Bot chưa tạo đơn.")
 
@@ -65476,7 +65840,7 @@ async def start_storage_addon_purchase(update: Update, context: ContextTypes.DEF
         "orderCode": int(order_code),
         "amount": int(amount),
         "description": make_payos_storage_description(spec),
-        "cancelUrl": return_url,
+        "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
     }
     try:
@@ -79142,7 +79506,7 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
         "orderCode": int(order_code),
         "amount": int(amount),
         "description": package_purchase_description(package_type, code),
-        "cancelUrl": return_url,
+        "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
     }
     try:
@@ -79273,7 +79637,7 @@ async def start_plan_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE
         "orderCode": int(order_code),
         "amount": int(amount),
         "description": make_payos_plan_description(plan_id),
-        "cancelUrl": return_url,
+        "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
     }
     try:
@@ -93740,6 +94104,110 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, ValueError):
         await update.message.reply_text("⚠️ Cú pháp: <code>/duyet &lt;deposit_id|user_id&gt; &lt;Số_Xu&gt;</code>", parse_mode="HTML")
 
+def billing_bridge_status_lines() -> list[str]:
+    status = web_billing_bridge_status_payload()
+    return [
+        "🌉 <b>BILLING BRIDGE STATUS</b>",
+        "",
+        f"• Web billing enabled: <code>{'YES' if status['web_billing_enabled'] else 'NO'}</code>",
+        f"• Apply confirmed/shared DB: <code>{'YES' if status['apply_confirmed'] else 'NO'}</code>",
+        f"• API base: <code>{html.escape(status['api_base'] or '-')}</code>",
+        f"• API token: <code>{'configured' if status['api_token_configured'] else 'missing'}</code>",
+        f"• Create-payment endpoint: <code>{html.escape(status['create_payment_endpoint'] or '-')}</code>",
+        f"• PayOS webhook target: <code>{html.escape(status['payos_webhook_target'] or '-')}</code>",
+        f"• Return URL: <code>{html.escape(status['return_url'] or '-')}</code>",
+        f"• Cancel URL: <code>{html.escape(status['cancel_url'] or '-')}</code>",
+        f"• Bot PayOS fallback: <code>{'ON' if status['bot_fallback_enabled'] else 'OFF'}</code>",
+        f"• Storage add-on: <code>{'ON' if status['storage_addon_enabled'] else 'OFF'}</code>",
+        f"• Risk double webhook: <code>{'YES' if status['risk_double_webhook'] else 'NO'}</code>",
+        "",
+        "Safety: Bot chỉ route checkout sang Web App khi <code>WEB_BILLING_APPLY_CONFIRMED=true</code>. Nếu chưa xác nhận DB/apply chung, bot giữ PayOS cũ để tránh mất Xu/dung lượng.",
+    ]
+
+async def cmd_billing_bridge_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text("\n".join(billing_bridge_status_lines()), parse_mode="HTML")
+
+async def cmd_billing_bridge_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(context.args or [])
+    kind = (args[0] if args else "topup").strip().lower()
+    dry_run = any(str(arg).lower() in {"dry_run=1", "dry=1", "--dry-run"} for arg in args)
+    if kind == "storage":
+        package_id = args[1] if len(args) > 1 else "storage_50mb"
+        spec = storage_addon_spec_by_code(package_id.replace("storage_", "")) or storage_addon_spec_by_code("50mb")
+        payment_type = "storage_addon"
+        amount = int(spec.get("amount_vnd") or STORAGE_ADDON_BLOCK_PRICE_VND)
+        metadata = {"quota_mb": int(spec.get("addon_mb") or STORAGE_ADDON_BLOCK_MB), "days": 30}
+        package_id = f"storage_{int(metadata['quota_mb'])}mb"
+    else:
+        amount = safe_int(args[1] if len(args) > 1 else 10000, 10000)
+        payment_type = "topup_xu"
+        package_id = f"{amount // 1000}k" if amount % 1000 == 0 else str(amount)
+        metadata = {"expected_xu": package_base_xu(amount)}
+    payload = build_web_billing_payment_payload(update.effective_user.id, payment_type, package_id, amount, metadata)
+    if dry_run:
+        return await update.message.reply_text(
+            "🧪 <b>BILLING BRIDGE DRY RUN</b>\n\n"
+            f"<code>{html.escape(json.dumps(payload, ensure_ascii=False, indent=2))}</code>\n\n"
+            "Không tạo thanh toán thật, không cộng Xu/dung lượng.",
+            parse_mode="HTML",
+        )
+    if not web_billing_checkout_enabled(payment_type):
+        return await update.message.reply_text(
+            "⚠️ Web Billing chưa được bật đủ an toàn cho checkout thật. Dùng <code>/billing_bridge_status</code> để kiểm tra.",
+            parse_mode="HTML",
+        )
+    result = await create_web_billing_payment_link(payload)
+    await update.message.reply_text(
+        "🧪 <b>BILLING BRIDGE TEST</b>\n\n"
+        f"• Status: <code>{'PASS' if result.get('ok') else 'FAIL'}</code>\n"
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or '-'))}</code>\n"
+        f"• Checkout URL: <code>{'yes' if result.get('checkout_url') else 'no'}</code>\n"
+        f"• Reason: <code>{html.escape(str(result.get('reason') or result.get('message') or '-'))}</code>\n\n"
+        "Không log token/secret.",
+        parse_mode="HTML",
+    )
+
+async def cmd_billing_retry_apply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    if len(context.args or []) < 2 or str(context.args[1]).lower() != "confirm_paid=1":
+        return await update.message.reply_text(
+            "Cú pháp an toàn: <code>/billing_retry_apply &lt;order_code&gt; confirm_paid=1</code>\n"
+            "Chỉ dùng khi admin đã đối soát PayOS/bank thật. Lệnh này không gọi provider và không sửa webhook.",
+            parse_mode="HTML",
+        )
+    order_code = str(context.args[0]).strip()
+    conn = db_connect()
+    try:
+        row = conn.execute("SELECT amount FROM payos_orders WHERE order_code=?", (order_code,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return await update.message.reply_text("⚠️ Không tìm thấy order_code.")
+    processed, desc, info = process_payos_paid_order(order_code, int(row[0] or 0))
+    await update.message.reply_text(
+        "🔁 <b>BILLING RETRY APPLY</b>\n\n"
+        f"• Order: <code>{html.escape(order_code)}</code>\n"
+        f"• Result: <code>{'processed' if processed else 'not_processed'}</code>\n"
+        f"• Desc: <code>{html.escape(str(desc))}</code>\n"
+        f"• Type: <code>{html.escape(str(info.get('payment_type') or info.get('order_type') or '-'))}</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_payos_confirm_webhook(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(
+        "🔗 <b>PayOS webhook target</b>\n\n"
+        f"Set trong PayOS dashboard:\n<code>{html.escape(PAYOS_WEBHOOK_URL)}</code>\n\n"
+        "Bot không tự gọi API xác nhận webhook để tránh ghi nhầm kênh PayOS. Không log Client ID/API key/checksum.",
+        parse_mode="HTML",
+    )
+
 async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return
@@ -93897,7 +94365,7 @@ async def cmd_payos_debug_create(update: Update, context: ContextTypes.DEFAULT_T
         "orderCode": int(order_code),
         "amount": int(amount),
         "description": description,
-        "cancelUrl": return_url,
+        "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
     }
     try:
@@ -94056,7 +94524,7 @@ async def cmd_payos_env_check(update: Update, context: ContextTypes.DEFAULT_TYPE
         "",
         f"public_base_url: <code>{html.escape(effective_public_base_url() or '-')}</code>",
         f"returnUrl: <code>{html.escape(return_url)}</code>",
-        f"cancelUrl: <code>{html.escape(return_url)}</code>",
+        f"cancelUrl: <code>{html.escape(make_payos_cancel_url(context))}</code>",
         f"using endpoint: <code>{html.escape(PAYOS_CREATE_PAYMENT_ENDPOINT)}</code>",
         f"Active signature variant: <code>{html.escape(get_payos_create_signature_variant())}</code>",
         "",
@@ -94108,7 +94576,7 @@ async def cmd_payos_signature_debug(update: Update, context: ContextTypes.DEFAUL
         "orderCode": int(order_code),
         "amount": int(amount),
         "description": make_payos_description("50k"),
-        "cancelUrl": return_url,
+        "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
     }
     if PAYOS_CHECKSUM_KEY:
@@ -94150,7 +94618,7 @@ async def cmd_payos_official_debug(update: Update, context: ContextTypes.DEFAULT
         "orderCode": int(order_code),
         "amount": int(amount),
         "description": make_payos_description("50k"),
-        "cancelUrl": return_url,
+        "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
     }
     signature, signature_data = sign_payos_payment_request(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT) if PAYOS_CHECKSUM_KEY else ("", build_payos_signature_data(payload, PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT))
@@ -99603,6 +100071,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("payos_status", cmd_checkpayos))
     tg_app.add_handler(CommandHandler("payos_verify", cmd_checkpayos))
     tg_app.add_handler(CommandHandler("payos_debug_create", cmd_payos_debug_create))
+    tg_app.add_handler(CommandHandler("billing_bridge_status", cmd_billing_bridge_status))
+    tg_app.add_handler(CommandHandler("billing_bridge_test", cmd_billing_bridge_test))
+    tg_app.add_handler(CommandHandler("billing_retry_apply", cmd_billing_retry_apply))
+    tg_app.add_handler(CommandHandler("payos_confirm_webhook", cmd_payos_confirm_webhook))
     tg_app.add_handler(CommandHandler("payos_env_check", cmd_payos_env_check))
     tg_app.add_handler(CommandHandler("payos_key_fingerprint", cmd_payos_key_fingerprint))
     tg_app.add_handler(CommandHandler("tuchoi",      cmd_tuchoi))
@@ -103335,6 +103807,7 @@ def verify_payos_signature(data: dict, received_sig: str) -> bool:
     ).hexdigest()
     return hmac.compare_digest(computed, received_sig)
 
+@fastapi_app.post("/api/v1/billing/webhook/payos")
 @fastapi_app.post("/webhook/payos")
 async def webhook_payos(request: Request):
     """
