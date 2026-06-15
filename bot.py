@@ -44795,105 +44795,144 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
     lines.append("Bot chưa gọi API ảnh/video và chưa trừ Xu.")
     return "\n".join(lines)
 
+STORYBOARD_PACK_TEMPLATE_LABELS = {
+    "product_ad": "Quảng cáo sản phẩm",
+    "cinematic_story": "Điện ảnh / kể chuyện",
+    "tiktok_reels": "TikTok/Reels ngắn",
+    "tutorial": "Hướng dẫn / tutorial",
+    "shop_affiliate": "Shop/Affiliate",
+    "custom": "Nhập tự do",
+}
+
+def storyboard_pack_template_label(value: str, lang: str = "vi") -> str:
+    clean = str(value or "product_ad").strip() or "product_ad"
+    if normalize_user_language(lang) != "vi":
+        labels = {
+            "product_ad": "Product ad",
+            "cinematic_story": "Cinematic storytelling",
+            "tiktok_reels": "Short TikTok/Reels",
+            "tutorial": "Tutorial",
+            "shop_affiliate": "Shop/Affiliate",
+            "custom": "Custom",
+        }
+        return labels.get(clean, clean)
+    return STORYBOARD_PACK_TEMPLATE_LABELS.get(clean, clean)
+
 def storyboard_pack_start_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🎞 <b>Cinematic storyboard prompt pack</b>\n\n"
-            "Send a product, story idea or scene. TOAN AAS will build a shot-by-shot prompt pack with camera angle, motion, lighting, image prompt, video prompt and negative prompt.\n\n"
+            "TOAN AAS will build a video plan scene by scene:\n"
+            "• opening hook\n• shot list\n• camera angle and motion\n• lighting\n"
+            "• image prompt\n• video prompt\n• negative prompt\n• caption/voice/music suggestions\n\n"
             "Planning only. No provider call and no Xu charged."
         )
     return (
         "🎞 <b>Storyboard + Prompt điện ảnh</b>\n\n"
-        "Bạn hãy gửi chủ đề/sản phẩm/cảnh muốn dựng. TOAN AAS sẽ tạo shot pack theo từng cảnh: góc máy, chuyển động, ánh sáng, prompt ảnh, prompt video và negative prompt.\n\n"
+        "TOAN AAS sẽ dựng kế hoạch video theo từng cảnh:\n"
+        "• hook mở đầu\n• shot list\n• góc máy\n• chuyển động\n• ánh sáng\n"
+        "• prompt ảnh\n• prompt video\n• negative prompt\n• caption/voice gợi ý\n• nhạc/SFX gợi ý\n\n"
         "Bước này chỉ lập kế hoạch. Bot chưa gọi provider và chưa trừ Xu."
     )
 
 def storyboard_pack_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
-        [],
+        [
+            ("🧴 Quảng cáo sản phẩm" if is_vi else "🧴 Product ad", "storypack|template|product_ad"),
+            ("🎬 Điện ảnh / kể chuyện" if is_vi else "🎬 Cinematic story", "storypack|template|cinematic_story"),
+            ("📱 TikTok/Reels ngắn" if is_vi else "📱 Short TikTok/Reels", "storypack|template|tiktok_reels"),
+            ("🧑‍🏫 Hướng dẫn / tutorial" if is_vi else "🧑‍🏫 Tutorial", "storypack|template|tutorial"),
+            ("🏪 Shop/Affiliate", "storypack|template|shop_affiliate"),
+            ("✍️ Nhập tự do" if is_vi else "✍️ Custom", "storypack|template|custom"),
+        ],
         lang,
-        back=("🔙 Quay lại Video" if normalize_user_language(lang) == "vi" else "🔙 Back to Video", "menu|main_video"),
+        back=("⬅️ Video" if is_vi else "⬅️ Video", "menu|main_video"),
+    )
+
+def storyboard_pack_topic_text(state: dict, lang: str = "vi") -> str:
+    template = storyboard_pack_template_label((state or {}).get("reference_template") or "product_ad", lang)
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"🎞 <b>{html.escape(template)}</b>\n\n"
+            "What product, topic or scene do you want to build?\n\n"
+            "Example: premium men's perfume, AI automation bot for online shops."
+        )
+    return (
+        f"🎞 <b>{html.escape(template)}</b>\n\n"
+        "Bạn muốn dựng video về sản phẩm/chủ đề gì?\n\n"
+        "Ví dụ: <i>nước hoa nam cao cấp</i> hoặc <i>bot AI tự động hóa cho shop online</i>."
+    )
+
+def storyboard_pack_topic_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_v6_keyboard([], lang, back=("⬅️ Chọn mẫu" if normalize_user_language(lang) == "vi" else "⬅️ Templates", "storypack|start"))
+
+def storyboard_pack_brief_defaults(state: dict) -> dict:
+    template = str((state or {}).get("reference_template") or "product_ad")
+    defaults = {
+        "product_ad": ("TikTok/Reels", "9:16", "30s", "chân thật + cinematic", "bán hàng"),
+        "cinematic_story": ("YouTube/Facebook", "16:9", "60s", "cinematic", "giới thiệu"),
+        "tiktok_reels": ("TikTok/Reels", "9:16", "15s", "vui nhộn / bắt trend", "tăng tương tác"),
+        "tutorial": ("TikTok/Reels", "9:16", "30s", "rõ ràng / hướng dẫn", "giáo dục"),
+        "shop_affiliate": ("TikTok/Reels", "9:16", "30s", "UGC review", "bán hàng"),
+        "custom": ("TikTok/Reels", "9:16", "30s", "chân thật", "giới thiệu"),
+    }
+    platform, ratio, duration, style, goal = defaults.get(template, defaults["product_ad"])
+    return {
+        "platform": (state or {}).get("platform") or platform,
+        "ratio": (state or {}).get("preferred_aspect_ratio") or ratio,
+        "duration": (state or {}).get("duration") or duration,
+        "style": (state or {}).get("selected_style") or style,
+        "goal": (state or {}).get("goal") or goal,
+    }
+
+def storyboard_pack_brief_text(state: dict, lang: str = "vi") -> str:
+    topic = _short_pending_text((state or {}).get("selected_topic"), 220)
+    defaults = storyboard_pack_brief_defaults(state)
+    if normalize_user_language(lang) != "vi":
+        return (
+            "⚙️ <b>Quick setup</b>\n\n"
+            f"Topic: <code>{html.escape(topic)}</code>\n"
+            f"Default: {defaults['platform']} · {defaults['ratio']} · {defaults['duration']} · {defaults['style']} · {defaults['goal']}\n\n"
+            "Use defaults or add a short note."
+        )
+    return (
+        "⚙️ <b>Thiết lập nhanh</b>\n\n"
+        f"Chủ đề: <code>{html.escape(topic)}</code>\n"
+        f"Mặc định: {html.escape(defaults['platform'])} · {html.escape(defaults['ratio'])} · {html.escape(defaults['duration'])} · {html.escape(defaults['style'])} · {html.escape(defaults['goal'])}\n\n"
+        "Bạn có thể dùng mặc định để tạo nhanh 3 hướng storyboard, hoặc nhập thêm yêu cầu ngắn."
+    )
+
+def storyboard_pack_brief_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("✅ Dùng mặc định" if is_vi else "✅ Use defaults", "storypack|generate_concepts"),
+            ("✍️ Nhập thêm yêu cầu" if is_vi else "✍️ Add note", "storypack|brief_custom"),
+        ],
+        lang,
+        back=("⬅️ Sửa chủ đề" if is_vi else "⬅️ Topic", "storypack|back_topic"),
     )
 
 def storyboard_pack_shot_count(value: str) -> int:
     clean = str(value or "").strip().lower()
+    if "15" in clean:
+        return 5
+    if "60" in clean:
+        return 10
     if clean in {"ad", "commercial"}:
         return 6
     if clean in {"motion", "cinematic"}:
         return 8
     match = re.search(r"\d+", clean)
     if match:
-        return max(3, min(12, int(match.group(0))))
-    return 5
-
-def storyboard_pack_shot_type_label(value: str, lang: str = "vi") -> str:
-    labels_vi = {
-        "5": "Storyboard 5 shot",
-        "8": "Storyboard 8 shot",
-        "12": "Storyboard 12 shot",
-        "ad": "Shot pack quảng cáo",
-        "motion": "Shot pack cinematic chuyển động",
-        "custom": "Số shot riêng",
-    }
-    labels_en = {
-        "5": "5-shot storyboard",
-        "8": "8-shot storyboard",
-        "12": "12-shot storyboard",
-        "ad": "Ad shot pack",
-        "motion": "Cinematic motion shot pack",
-        "custom": "Custom shot count",
-    }
-    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(value or ""), str(value or "5"))
-
-def storyboard_pack_type_text(state: dict, lang: str = "vi") -> str:
-    topic = _short_pending_text(state.get("selected_topic"), 220)
-    if normalize_user_language(lang) != "vi":
-        return f"🧱 <b>Choose output type</b>\n\nTopic: <code>{html.escape(topic)}</code>"
-    return f"🧱 <b>Chọn loại shot pack</b>\n\nChủ đề: <code>{html.escape(topic)}</code>"
-
-def storyboard_pack_type_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
-    return video_v6_keyboard(
-        [
-            ("Storyboard 5 shot", "storypack|type|5"),
-            ("Storyboard 8 shot", "storypack|type|8"),
-            ("Storyboard 12 shot", "storypack|type|12"),
-            ("Shot pack quảng cáo" if is_vi else "Ad shot pack", "storypack|type|ad"),
-            ("Shot pack cinematic" if is_vi else "Cinematic shot pack", "storypack|type|motion"),
-            ("✍️ Nhập số shot riêng" if is_vi else "✍️ Custom shot count", "storypack|type_custom"),
-        ],
-        lang,
-        back=("🔙 Quay lại nhập chủ đề" if is_vi else "🔙 Back to topic", "storypack|start"),
-    )
-
-def storyboard_pack_type_custom_text(lang: str = "vi") -> str:
-    return "✍️ Nhập số shot bạn muốn, ví dụ: 7 shot." if normalize_user_language(lang) == "vi" else "✍️ Send the shot count, for example: 7 shots."
-
-def storyboard_pack_style_text(state: dict, lang: str = "vi") -> str:
-    shot_type = storyboard_pack_shot_type_label(state.get("shot_type") or "5", lang)
-    if normalize_user_language(lang) != "vi":
-        return f"🎨 <b>Choose cinematic style</b>\n\nOutput: <b>{html.escape(shot_type)}</b>"
-    return f"🎨 <b>Chọn phong cách điện ảnh</b>\n\nLoại output: <b>{html.escape(shot_type)}</b>"
-
-def storyboard_pack_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
-    return video_v6_keyboard(
-        [
-            ("🎬 Cinematic đen trắng" if is_vi else "🎬 Black-white cinematic", "storypack|style|bw"),
-            ("🧼 Sạch hiện đại" if is_vi else "🧼 Clean modern", "storypack|style|clean"),
-            ("🤖 Công nghệ" if is_vi else "🤖 Tech", "storypack|style|tech"),
-            ("💎 Luxury", "storypack|style|luxury"),
-            ("🌿 Lifestyle", "storypack|style|lifestyle"),
-            ("🎭 Drama đời thường" if is_vi else "🎭 Everyday drama", "storypack|style|drama"),
-            ("📦 Product commercial", "storypack|style|product"),
-            ("📱 TikTok ads", "storypack|style|tiktok"),
-            ("✍️ Nhập phong cách riêng" if is_vi else "✍️ Custom style", "storypack|style_custom"),
-        ],
-        lang,
-        back=("🔙 Quay lại loại shot" if is_vi else "🔙 Back to shot type", "storypack|back_type"),
-    )
+        number = int(match.group(0))
+        if number <= 20:
+            return max(4, min(12, number))
+    return 6
 
 def storyboard_pack_style_label(style: str, lang: str = "vi") -> str:
+    clean = str(style or "cinematic").strip()
     labels_vi = {
         "bw": "cinematic đen trắng",
         "clean": "sạch hiện đại",
@@ -44914,97 +44953,182 @@ def storyboard_pack_style_label(style: str, lang: str = "vi") -> str:
         "product": "product commercial",
         "tiktok": "TikTok ads",
     }
-    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(style or ""), str(style or "cinematic"))
+    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(clean, clean)
+
+def storyboard_pack_concepts(state: dict, lang: str = "vi") -> list[dict]:
+    state = state or {}
+    topic = _short_pending_text(state.get("selected_topic"), 220) or "sản phẩm/chủ đề"
+    template = storyboard_pack_template_label(state.get("reference_template") or "product_ad", lang)
+    defaults = storyboard_pack_brief_defaults(state)
+    note = _short_pending_text(state.get("note"), 180)
+    raw = [
+        ("Bản an toàn, dễ dùng", f"Mở bằng vấn đề quen thuộc của người xem, đưa {topic} vào như giải pháp rõ ràng.", "4-6 cảnh", "sạch, thật, dễ render", "Lưu lại ý tưởng và thử bản đầu tiên.", defaults["platform"]),
+        ("Bản quảng cáo/bán hàng", f"Tập trung proof, lợi ích chính và lý do hành động ngay với {topic}.", "5-7 cảnh", "commercial, CTA rõ", "Nhắn ngay để nhận bản phù hợp.", defaults["platform"]),
+        ("Bản cinematic/sáng tạo", f"Biến {topic} thành một câu chuyện cảm xúc với nhịp mở - chuyển - kết.", "6-8 cảnh", "cinematic, giàu cảm xúc", "Khám phá cách kể chuyện mới.", "YouTube/Facebook/Reels"),
+        ("Bản UGC đời thường", f"Người dùng kể trải nghiệm thật, demo nhanh và kết bằng before/after của {topic}.", "4-6 cảnh", "UGC, gần gũi", "Thử cách làm gọn hơn hôm nay.", "TikTok/Reels"),
+        ("Bản tutorial nhanh", f"Chia {topic} thành 3 bước đơn giản, mỗi bước có cutaway và text ngắn.", "5-7 cảnh", "hướng dẫn, rõ nhịp", "Lưu lại để làm theo.", defaults["platform"]),
+        ("Bản luxury reveal", f"Reveal {topic} bằng ánh sáng, close-up và chuyển động chậm tạo cảm giác cao cấp.", "6-8 cảnh", "luxury, tối giản", "Nâng cấp trải nghiệm của bạn.", "Reels/YouTube Shorts"),
+    ]
+    offset = safe_int(state.get("suggest_offset"), 0)
+    rotated = raw[offset % len(raw):] + raw[:offset % len(raw)]
+    concepts = []
+    for idx, item in enumerate(rotated[:3], start=1):
+        name, hook, scenes, mood, cta, platform = item
+        if note:
+            hook = f"{hook} Ghi chú thêm: {note}."
+        concepts.append({
+            "index": idx,
+            "name": name,
+            "hook": hook,
+            "scene_count": scenes,
+            "mood": f"{mood}; mẫu {template}; tỉ lệ {defaults['ratio']}; thời lượng {defaults['duration']}",
+            "cta": cta,
+            "platform": platform,
+        })
+    return concepts
+
+def storyboard_pack_concepts_text(state: dict, lang: str = "vi") -> str:
+    topic = _short_pending_text((state or {}).get("selected_topic"), 220)
+    concepts = storyboard_pack_concepts(state, lang)
+    lines = [
+        "🎞 <b>3 hướng storyboard</b>",
+        "",
+        f"Chủ đề: <code>{html.escape(topic)}</code>",
+        "Bot chưa gọi API ảnh/video và chưa trừ Xu.",
+        "",
+    ]
+    for concept in concepts:
+        lines.extend([
+            f"<b>{concept['index']}. {html.escape(concept['name'])}</b>",
+            f"• Hook: {html.escape(concept['hook'])}",
+            f"• Số cảnh đề xuất: {html.escape(concept['scene_count'])}",
+            f"• Mood/style: {html.escape(concept['mood'])}",
+            f"• CTA: {html.escape(concept['cta'])}",
+            f"• Dùng tốt cho: {html.escape(concept['platform'])}",
+            "",
+        ])
+    return "\n".join(lines)
+
+def storyboard_pack_concepts_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("✅ Dùng bản 1" if is_vi else "✅ Use 1", "storypack|concept|1"),
+            ("✅ Dùng bản 2" if is_vi else "✅ Use 2", "storypack|concept|2"),
+            ("✅ Dùng bản 3" if is_vi else "✅ Use 3", "storypack|concept|3"),
+            ("🔁 Đổi 3 bản khác" if is_vi else "🔁 More concepts", "storypack|regenerate_concepts"),
+            ("✍️ Sửa yêu cầu" if is_vi else "✍️ Edit brief", "storypack|edit_requirement"),
+        ],
+        lang,
+        back=("⬅️ Sửa chủ đề" if is_vi else "⬅️ Topic", "storypack|back_topic"),
+    )
+
+def storyboard_pack_selected_concept(state: dict, lang: str = "vi") -> dict:
+    concepts = storyboard_pack_concepts(state, lang)
+    index = max(1, min(3, safe_int((state or {}).get("selected_suggestion_index"), 1)))
+    return concepts[index - 1] if concepts else {}
 
 def storyboard_pack_build_payload(state: dict, lang: str = "vi") -> dict:
     state = state or {}
     topic = _short_pending_text(state.get("selected_topic"), 260) or ("sản phẩm/chủ đề" if normalize_user_language(lang) == "vi" else "product/topic")
-    shot_type = str(state.get("shot_type") or "5")
-    shot_count = storyboard_pack_shot_count(state.get("shot_count") or shot_type)
-    style = storyboard_pack_style_label(state.get("selected_style") or "clean", lang)
+    defaults = storyboard_pack_brief_defaults(state)
+    concept = storyboard_pack_selected_concept(state, lang)
+    shot_count = storyboard_pack_shot_count(defaults["duration"])
+    style = storyboard_pack_style_label(defaults["style"], lang)
     phases = [
-        "hook mở cảnh" if normalize_user_language(lang) == "vi" else "opening hook",
-        "thiết lập bối cảnh" if normalize_user_language(lang) == "vi" else "context setup",
-        "cận cảnh chủ thể/sản phẩm" if normalize_user_language(lang) == "vi" else "subject/product close-up",
-        "demo/chuyển động chính" if normalize_user_language(lang) == "vi" else "main demo/motion",
-        "before/after hoặc bằng chứng" if normalize_user_language(lang) == "vi" else "before/after or proof",
-        "hero ending + CTA" if normalize_user_language(lang) == "vi" else "hero ending + CTA",
+        ("Hook / mở đầu", "kéo người xem vào vấn đề trong 2 giây đầu", "close-up", "slow push-in"),
+        ("Thiết lập bối cảnh", "cho thấy tình huống trước khi có giải pháp", "wide shot", "gentle pan"),
+        ("Reveal chủ thể/sản phẩm", "đưa chủ thể vào khung hình sạch và dễ nhớ", "medium shot", "smooth dolly-in"),
+        ("Demo / hành động chính", "chứng minh lợi ích bằng hành động cụ thể", "over-the-shoulder", "locked camera with cutaway"),
+        ("Proof / before-after", "cho thấy kết quả hoặc cảm xúc sau thay đổi", "split composition", "match cut"),
+        ("CTA sạch", "kết bằng hành động tiếp theo rõ nhưng không gắt", "hero frame", "soft pull-out"),
     ]
     shots = []
     for idx in range(1, shot_count + 1):
-        phase = phases[(idx - 1) % len(phases)]
-        motion = ["slow push-in", "gentle pan", "orbit nhẹ", "match cut", "reveal tilt", "locked-off hero"][idx % 6]
+        title, goal, camera, motion = phases[(idx - 1) % len(phases)]
+        duration = "2-3s" if idx == 1 else ("3-5s" if idx < shot_count else "4-6s")
+        setting = f"bối cảnh phù hợp với {topic}, tỉ lệ {defaults['ratio']}, nền sạch, không rối"
+        visual = f"{topic} trong cảnh {title.lower()}, chủ thể rõ, bố cục có điểm nhìn chính"
+        action = f"thể hiện {goal} theo hướng {concept.get('name') or 'storyboard'}"
+        image_prompt = (
+            f"{topic}, {title.lower()}, {style}, {setting}, {visual}, realistic lighting, "
+            f"clean composition, aspect ratio {defaults['ratio']}, no watermark, no extra text"
+        )
+        video_prompt = (
+            f"{topic}, {title.lower()}, action: {action}, camera motion: {motion}, scene duration {duration}, "
+            f"lighting: {style} soft practical light, transition: clean {('cut on motion' if idx < shot_count else 'final CTA hold')}, "
+            "stable subject, no watermark, no subtitles, no fake text"
+        )
         shots.append({
             "shot": idx,
-            "phase": phase,
-            "duration": "3-5s",
-            "scene": f"{topic} - {phase}",
-            "camera": "close-up" if idx % 3 == 1 else ("wide shot" if idx % 3 == 2 else "medium shot"),
+            "scene_index": idx,
+            "title": title,
+            "duration": duration,
+            "scene_goal": goal,
+            "visual_content": visual,
+            "main_action": action,
+            "camera": camera,
+            "camera_angle": camera,
             "motion": motion,
-            "lighting": f"{style}, realistic soft key light",
-            "action": f"Chủ thể/sản phẩm thể hiện {phase}",
-            "image_prompt": f"{topic}, {phase}, {style}, cinematic composition, clear subject, realistic lighting, high detail, no watermark",
-            "video_prompt": f"{topic}, {phase}, {style}, {motion}, stable subject, natural motion, clean transition, no random text",
-            "negative_prompt": "watermark, random text, distorted face, bad hands, duplicated body, broken logo, blurry subject",
-            "music": "cinematic ambient / subtle whoosh transition",
-            "transition": "cut on motion" if idx < shot_count else "soft resolve",
+            "camera_motion": motion,
+            "lighting": f"{style}, ánh sáng thật, soft key light, giữ da/sản phẩm tự nhiên",
+            "setting": setting,
+            "text_overlay": "1 dòng ngắn, dễ đọc, không che chủ thể",
+            "voiceover": f"Voice/script gợi ý cho {title.lower()}: nói ngắn, tự nhiên, đúng lợi ích chính.",
+            "music": "piano cinematic / ambient luxury / subtle whoosh transition",
+            "image_prompt": image_prompt,
+            "video_prompt": video_prompt,
+            "negative_prompt": "blurry, distorted hands, distorted face, watermark, extra text, low quality, wrong product, logo distortion",
+            "transition": "cut on motion" if idx < shot_count else "soft resolve to CTA",
         })
-    return {"topic": topic, "shot_type": shot_type, "shot_count": shot_count, "style": style, "shots": shots}
+    return {
+        "topic": topic,
+        "template": storyboard_pack_template_label(state.get("reference_template") or "product_ad", lang),
+        "shot_type": str(state.get("shot_type") or shot_count),
+        "shot_count": shot_count,
+        "style": style,
+        "platform": defaults["platform"],
+        "ratio": defaults["ratio"],
+        "duration": defaults["duration"],
+        "goal": defaults["goal"],
+        "concept": concept,
+        "shots": shots,
+    }
 
 def storyboard_pack_result_text(state: dict, lang: str = "vi") -> str:
     payload = storyboard_pack_build_payload(state, lang)
-    if normalize_user_language(lang) != "vi":
-        lines = [
-            "🎞 <b>Cinematic storyboard prompt pack</b>",
-            "",
-            f"Topic: <code>{html.escape(payload['topic'])}</code>",
-            f"Style: <b>{html.escape(payload['style'])}</b>",
-            f"Shots: <b>{payload['shot_count']}</b>",
-            "",
-            "<b>Three usable directions</b>",
-            "1. Safe/easy render: clean subject, simple camera motion, stable scene.",
-            "2. Cinematic: stronger lighting, richer camera moves, emotional pacing.",
-            "3. Advertising: product proof, benefit framing and soft CTA.",
-            "",
-        ]
-        for shot in payload["shots"]:
-            lines.extend([
-                f"<b>Shot {shot['shot']}</b> - {html.escape(shot['duration'])}",
-                f"• Scene: {html.escape(shot['scene'])}",
-                f"• Camera: {html.escape(shot['camera'])} | Motion: {html.escape(shot['motion'])}",
-                f"• Lighting/action: {html.escape(shot['lighting'])}; {html.escape(shot['action'])}",
-                f"• Image prompt: <code>{html.escape(shot['image_prompt'])}</code>",
-                f"• Video prompt: <code>{html.escape(shot['video_prompt'])}</code>",
-                f"• Negative: <code>{html.escape(shot['negative_prompt'])}</code>",
-                f"• Music/SFX: {html.escape(shot['music'])}",
-                f"• Transition: {html.escape(shot['transition'])}",
-                "",
-            ])
-        lines.append("Planning only. No image/video API call and no Xu charged.")
-        return "\n".join(lines)
+    concept = payload.get("concept") or {}
     lines = [
         "🎞 <b>Storyboard + Prompt điện ảnh</b>",
         "",
         f"Chủ đề: <code>{html.escape(payload['topic'])}</code>",
-        f"Phong cách: <b>{html.escape(payload['style'])}</b>",
-        f"Số shot: <b>{payload['shot_count']}</b>",
+        f"Mẫu: <b>{html.escape(payload['template'])}</b>",
+        f"Hướng đã chọn: <b>{html.escape(concept.get('name') or 'Bản an toàn, dễ dùng')}</b>",
+        f"Nền tảng/tỉ lệ/thời lượng: <b>{html.escape(payload['platform'])}</b> · <b>{html.escape(payload['ratio'])}</b> · <b>{html.escape(payload['duration'])}</b>",
+        f"Phong cách/mục tiêu: <b>{html.escape(payload['style'])}</b> · <b>{html.escape(payload['goal'])}</b>",
+        f"Số cảnh: <b>{payload['shot_count']}</b>",
         "",
         "<b>3 hướng prompt có thể dùng</b>",
-        "1. Hướng an toàn/dễ render: chủ thể rõ, chuyển động đơn giản, cảnh ổn định.",
-        "2. Hướng cinematic đẹp: ánh sáng mạnh hơn, camera giàu cảm xúc, nhịp dựng mượt.",
-        "3. Hướng quảng cáo mạnh: proof sản phẩm, lợi ích rõ và CTA nhẹ.",
+        "1. An toàn/dễ render · 2. Quảng cáo/bán hàng · 3. Cinematic/sáng tạo",
         "",
     ]
     for shot in payload["shots"]:
         lines.extend([
-            f"<b>Shot {shot['shot']}</b> - {html.escape(shot['duration'])}",
-            f"• Cảnh: {html.escape(shot['scene'])}",
-            f"• Góc máy: {html.escape(shot['camera'])} | Chuyển động: {html.escape(shot['motion'])}",
-            f"• Ánh sáng/hành động: {html.escape(shot['lighting'])}; {html.escape(shot['action'])}",
+            f"<b>Cảnh {shot['scene_index']} / Shot {shot['scene_index']} — {html.escape(shot['title'])}</b>",
+            f"• Thời lượng: {html.escape(shot['duration'])}",
+            f"• Mục tiêu cảnh: {html.escape(shot['scene_goal'])}",
+            f"• Nội dung hình ảnh: {html.escape(shot['visual_content'])}",
+            f"• Hành động chính: {html.escape(shot['main_action'])}",
+            f"• Góc máy: {html.escape(shot['camera_angle'])}",
+            f"• Chuyển động camera: {html.escape(shot['camera_motion'])}",
+            f"• Ánh sáng: {html.escape(shot['lighting'])}",
+            f"• Bối cảnh: {html.escape(shot['setting'])}",
+            f"• Text overlay/caption: {html.escape(shot['text_overlay'])}",
+            f"• Voice/script gợi ý: {html.escape(shot['voiceover'])}",
+            f"• Nhạc/SFX gợi ý: {html.escape(shot['music'])}",
             f"• Prompt ảnh: <code>{html.escape(shot['image_prompt'])}</code>",
             f"• Prompt video: <code>{html.escape(shot['video_prompt'])}</code>",
             f"• Negative prompt: <code>{html.escape(shot['negative_prompt'])}</code>",
-            f"• Nhạc/SFX: {html.escape(shot['music'])}",
             f"• Chuyển cảnh: {html.escape(shot['transition'])}",
             "",
         ])
@@ -45015,16 +45139,17 @@ def storyboard_pack_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
-            ("🔁 Đổi gợi ý khác" if is_vi else "🔁 More variations", "storypack|refresh"),
-            ("✏️ Sửa chủ đề" if is_vi else "✏️ Edit topic", "storypack|start"),
-            ("✅ Chốt shot pack" if is_vi else "✅ Lock shot pack", "storypack|lock"),
-            ("🖼 Tạo ảnh keyframe" if is_vi else "🖼 Create keyframes", "storypack|image_keyframes"),
-            ("✨ Tạo video AI từng shot" if is_vi else "✨ AI video by shot", "storypack|ai_video"),
-            ("🎞 Render preview storyboard" if is_vi else "🎞 Render storyboard preview", "storypack|preview"),
+            ("🔁 Đổi storyboard khác" if is_vi else "🔁 More storyboard", "storypack|regenerate_concepts"),
+            ("✍️ Sửa yêu cầu" if is_vi else "✍️ Edit brief", "storypack|edit_requirement"),
+            ("🖼 Tạo prompt ảnh từng cảnh" if is_vi else "🖼 Image prompts", "storypack|image_prompts"),
+            ("🎬 Tạo prompt video từng cảnh" if is_vi else "🎬 Video prompts", "storypack|video_prompts"),
+            ("🤖 Prompt Meta AI", "storypack|meta_ai_prompt"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "storypack|save"),
+            ("🎬 Tạo video AI từ prompt" if is_vi else "🎬 AI video from prompt", "storypack|create_video_ai"),
+            ("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", "storypack|create_or_upload_images"),
         ],
         lang,
-        back=("🔙 Quay lại phong cách" if is_vi else "🔙 Back to style", "storypack|back_style"),
+        back=("⬅️ Quay lại chọn concept" if is_vi else "⬅️ Concepts", "storypack|back_concepts"),
     )
 
 def save_storyboard_prompt_pack(user_id, state: dict, status: str = "draft") -> int:
@@ -45058,16 +45183,101 @@ def save_storyboard_prompt_pack(user_id, state: dict, status: str = "draft") -> 
         if conn:
             conn.close()
 
+def storyboard_pack_scene_prompts_text(state: dict, prompt_type: str = "image", lang: str = "vi") -> str:
+    payload = storyboard_pack_build_payload(state, lang)
+    is_video = str(prompt_type or "") == "video"
+    title = "🎬 <b>Prompt video từng cảnh</b>" if is_video else "🖼 <b>Prompt ảnh từng cảnh</b>"
+    lines = [
+        title,
+        "",
+        f"Chủ đề: <code>{html.escape(payload['topic'])}</code>",
+        "Bot chỉ hiển thị prompt để copy/lưu. Chưa gọi API và chưa trừ Xu.",
+        "",
+    ]
+    for shot in payload["shots"]:
+        prompt = shot["video_prompt"] if is_video else shot["image_prompt"]
+        extra = (
+            f"Camera/motion: {html.escape(shot['camera_motion'])} · Duration: {html.escape(shot['duration'])} · Transition: {html.escape(shot['transition'])}"
+            if is_video
+            else f"Subject/setting: {html.escape(shot['visual_content'])} · Lighting: {html.escape(shot['lighting'])}"
+        )
+        lines.extend([
+            f"<b>Cảnh {shot['scene_index']} — {html.escape(shot['title'])}</b>",
+            f"• {extra}",
+            f"• Prompt: <code>{html.escape(prompt)}</code>",
+            f"• Negative: <code>{html.escape(shot['negative_prompt'])}</code>",
+            "",
+        ])
+    return "\n".join(lines)
+
+def storyboard_pack_scene_prompts_keyboard(prompt_type: str = "image", lang: str = "vi") -> InlineKeyboardMarkup:
+    is_video = str(prompt_type or "") == "video"
+    return video_v6_keyboard(
+        [
+            ("📋 Copy tất cả", f"storypack|copy_{'video' if is_video else 'image'}_prompts"),
+            ("🔁 Đổi prompt video" if is_video else "🔁 Đổi prompt ảnh", "storypack|regenerate_concepts"),
+            ("💾 Lưu prompt", "storypack|save"),
+        ],
+        lang,
+        back=("⬅️ Storyboard", "storypack|back_detail"),
+    )
+
+def storyboard_pack_meta_ai_text(state: dict, lang: str = "vi") -> str:
+    payload = storyboard_pack_build_payload(state, lang)
+    topic = payload["topic"]
+    concept = (payload.get("concept") or {}).get("name") or "storyboard cinematic"
+    variants = [
+        f"Tạo storyboard quảng cáo 30s cho {topic}, phong cách {concept}, gồm hook, shot list, prompt ảnh/video từng cảnh, CTA mềm.",
+        f"Viết concept video ngắn cho {topic}: mở bằng vấn đề thật, reveal giải pháp, demo lợi ích, before/after và CTA. Có prompt ảnh/video 9:16.",
+        f"Đóng vai đạo diễn quảng cáo, dựng shot pack cinematic cho {topic}, kiểm soát chủ thể, ánh sáng, camera motion và negative prompt.",
+    ]
+    lines = [
+        "🤖 <b>3 prompt Meta AI</b>",
+        "",
+        "Bot chưa gọi Meta API. Bạn có thể copy một biến thể để dùng ở Meta AI hoặc lưu kế hoạch.",
+        "",
+    ]
+    for idx, item in enumerate(variants, start=1):
+        lines.append(f"{idx}. <code>{html.escape(item)}</code>")
+    return "\n".join(lines)
+
+def storyboard_pack_meta_ai_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_v6_keyboard(
+        [
+            ("📋 Copy prompt", "storypack|copy_meta_ai_prompt"),
+            ("💾 Lưu kế hoạch", "storypack|save"),
+        ],
+        lang,
+        back=("⬅️ Storyboard", "storypack|back_detail"),
+    )
+
+def storyboard_pack_video_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_v6_keyboard(
+        [
+            ("📋 Copy prompt", "storypack|video_prompts"),
+            ("🤖 Prompt Meta AI", "storypack|meta_ai_prompt"),
+            ("💾 Lưu kế hoạch", "storypack|save"),
+            ("🖼 Tạo/gửi ảnh trước", "storypack|create_or_upload_images"),
+        ],
+        lang,
+        back=("⬅️ Storyboard", "storypack|back_detail"),
+    )
+
 def storyboard_pack_guard_text(action: str, lang: str = "vi") -> str:
-    if action == "image_keyframes":
+    if action in {"image_keyframes", "create_or_upload_images"}:
         return (
-            "🖼 Bước tạo ảnh keyframe phải đi qua flow ảnh hiện có và xác nhận giá trước khi trừ Xu. Hãy copy prompt từng shot hoặc dùng nút tạo ảnh trong flow ảnh."
+            "🖼 <b>Tạo/gửi ảnh trước</b>\n\n"
+            "Bước tạo ảnh thật phải đi qua flow ảnh hiện có và xác nhận giá trước khi trừ Xu.\n"
+            "V1 của Storyboard chỉ chuẩn bị prompt từng cảnh. Bạn có thể copy prompt ảnh, lưu kế hoạch hoặc dùng flow tạo ảnh riêng.\n\n"
+            "Bot chưa gọi API ảnh/video và chưa trừ Xu."
             if normalize_user_language(lang) == "vi"
             else "🖼 Keyframe generation must go through the existing image flow with final price confirmation first."
         )
-    if action == "ai_video":
+    if action in {"ai_video", "create_video_ai"}:
         return (
-            "✨ Tạo video AI từng shot sẽ dùng pipeline video chung: phụ đề/lồng tiếng → hóa đơn → xác nhận → job. Nếu provider chưa sẵn sàng, bot sẽ báo trước và không trừ Xu."
+            "🎬 <b>Video AI chân thật đang được kiểm soát an toàn.</b>\n\n"
+            "TOAN AAS chưa mở render Video AI công khai vì provider/video job chưa ổn định. Bot chưa gọi API và chưa trừ Xu.\n\n"
+            "Bạn có thể copy prompt, dùng Meta AI, lưu kế hoạch hoặc tạo/gửi ảnh trước."
             if normalize_user_language(lang) == "vi"
             else "✨ AI video by shot uses the shared video pipeline with invoice and confirmation. If the provider is unavailable, no Xu is charged."
         )
@@ -46015,24 +46225,17 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
         return True
     if flow == "storypack":
         if step == "topic":
-            set_developing_video_pending(uid, "storypack", "type", selected_topic=text)
+            set_developing_video_pending(uid, "storypack", "brief", selected_topic=text)
             state = get_developing_video_pending(uid) or {}
-            await update.message.reply_text(storyboard_pack_type_text(state, lang), parse_mode="HTML", reply_markup=storyboard_pack_type_keyboard(lang))
+            await update.message.reply_text(storyboard_pack_brief_text(state, lang), parse_mode="HTML", reply_markup=storyboard_pack_brief_keyboard(lang))
             return True
-        if step == "type_custom":
+        if step in {"brief_custom", "edit_requirement"}:
             state = dict(pending)
-            state["shot_type"] = "custom"
-            state["shot_count"] = storyboard_pack_shot_count(text)
-            set_developing_video_pending(uid, "storypack", "style", **{k: v for k, v in state.items() if k not in {"pending_action", "flow", "step", "created_at_ts"}})
-            current = get_developing_video_pending(uid) or {}
-            await update.message.reply_text(storyboard_pack_style_text(current, lang), parse_mode="HTML", reply_markup=storyboard_pack_style_keyboard(lang))
-            return True
-        if step == "style_custom":
-            state = dict(pending)
-            state["selected_style"] = text
-            clear_developing_video_pending(uid)
+            state["note"] = text
+            state["suggest_offset"] = 0
+            restore_developing_video_pending(uid, "storypack", state, "concepts")
             plan = save_developing_video_plan(uid, "storypack", state)
-            await safe_reply_long_html(update.message, storyboard_pack_result_text(plan, lang), reply_markup=storyboard_pack_result_keyboard(lang))
+            await update.message.reply_text(storyboard_pack_concepts_text(plan, lang), parse_mode="HTML", reply_markup=storyboard_pack_concepts_keyboard(lang))
             return True
         return True
     if flow == "videoidea":
@@ -47218,72 +47421,93 @@ async def handle_storyboard_pack_callback(update: Update, context: ContextTypes.
     action = parts[1] if len(parts) > 1 else "start"
     pending = get_developing_video_pending(uid)
     plan = get_latest_developing_video_plan(uid, "storypack")
+
+    def _state_for_storypack() -> dict:
+        return dict(pending or plan or {})
+
     if action == "start":
         clear_developing_video_pending(uid)
-        set_developing_video_pending(uid, "storypack", "topic")
         return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-    if action == "back_type":
-        state = pending or plan
-        if not state:
-            set_developing_video_pending(uid, "storypack", "topic")
-            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-        restore_developing_video_pending(uid, "storypack", state, "type")
-        return await safe_edit_or_send(query, storyboard_pack_type_text(state, lang), reply_markup=storyboard_pack_type_keyboard(lang), parse_mode="HTML")
-    if action == "back_style":
-        state = pending or plan
-        if not state:
-            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-        restore_developing_video_pending(uid, "storypack", state, "style")
-        return await safe_edit_or_send(query, storyboard_pack_style_text(state, lang), reply_markup=storyboard_pack_style_keyboard(lang), parse_mode="HTML")
-    if action == "type_custom":
-        if not pending:
-            set_developing_video_pending(uid, "storypack", "topic")
-            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-        set_developing_video_pending(uid, "storypack", "type_custom")
-        return await safe_edit_or_send(
-            query,
-            storyboard_pack_type_custom_text(lang),
-            reply_markup=video_v6_keyboard([], lang, back=("🔙 Quay lại loại shot" if normalize_user_language(lang) == "vi" else "🔙 Back", "storypack|back_type")),
-            parse_mode="HTML",
-        )
-    if action == "type":
-        if not pending:
-            set_developing_video_pending(uid, "storypack", "topic")
-            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-        value = parts[2] if len(parts) > 2 else "5"
-        set_developing_video_pending(uid, "storypack", "style", shot_type=value, shot_count=storyboard_pack_shot_count(value))
+    if action == "template":
+        template = parts[2] if len(parts) > 2 else "product_ad"
+        set_developing_video_pending(uid, "storypack", "topic", reference_template=template)
         state = get_developing_video_pending(uid) or {}
-        return await safe_edit_or_send(query, storyboard_pack_style_text(state, lang), reply_markup=storyboard_pack_style_keyboard(lang), parse_mode="HTML")
-    if action == "style_custom":
-        if not pending:
+        return await safe_edit_or_send(query, storyboard_pack_topic_text(state, lang), reply_markup=storyboard_pack_topic_keyboard(lang), parse_mode="HTML")
+    if action == "back_topic":
+        state = _state_for_storypack()
+        if not state:
             return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-        set_developing_video_pending(uid, "storypack", "style_custom")
+        restore_developing_video_pending(uid, "storypack", state, "topic")
+        return await safe_edit_or_send(query, storyboard_pack_topic_text(state, lang), reply_markup=storyboard_pack_topic_keyboard(lang), parse_mode="HTML")
+    if action == "brief_custom":
+        state = _state_for_storypack()
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        restore_developing_video_pending(uid, "storypack", state, "brief_custom")
         return await safe_edit_or_send(
             query,
-            long_video_style_custom_text(lang),
-            reply_markup=video_v6_keyboard([], lang, back=("🔙 Quay lại phong cách" if normalize_user_language(lang) == "vi" else "🔙 Back to style", "storypack|back_style")),
+            "✍️ Hãy nhập thêm yêu cầu ngắn, ví dụ: sang trọng hơn, ít chữ hơn, thêm CTA cuối.",
+            reply_markup=video_v6_keyboard([], lang, back=("⬅️ Thiết lập nhanh", "storypack|back_brief")),
             parse_mode="HTML",
         )
-    if action == "style":
-        state = dict(pending or {})
+    if action == "back_brief":
+        state = _state_for_storypack()
         if not state:
             return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-        state["selected_style"] = parts[2] if len(parts) > 2 else "clean"
+        restore_developing_video_pending(uid, "storypack", state, "brief")
+        return await safe_edit_or_send(query, storyboard_pack_brief_text(state, lang), reply_markup=storyboard_pack_brief_keyboard(lang), parse_mode="HTML")
+    if action in {"generate_concepts", "regenerate_concepts", "refresh"}:
+        state = _state_for_storypack()
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        if action in {"regenerate_concepts", "refresh"}:
+            state["suggest_offset"] = safe_int(state.get("suggest_offset"), 0) + 3
+        else:
+            state.setdefault("suggest_offset", 0)
+        restore_developing_video_pending(uid, "storypack", state, "concepts")
+        plan = save_developing_video_plan(uid, "storypack", state)
+        return await safe_edit_or_send(query, storyboard_pack_concepts_text(plan, lang), reply_markup=storyboard_pack_concepts_keyboard(lang), parse_mode="HTML")
+    if action == "back_concepts":
+        state = _state_for_storypack()
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        restore_developing_video_pending(uid, "storypack", state, "concepts")
+        return await safe_edit_or_send(query, storyboard_pack_concepts_text(state, lang), reply_markup=storyboard_pack_concepts_keyboard(lang), parse_mode="HTML")
+    if action == "concept":
+        state = _state_for_storypack()
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        state["selected_suggestion_index"] = max(1, min(3, safe_int(parts[2] if len(parts) > 2 else 1, 1)))
+        plan = save_developing_video_plan(uid, "storypack", state)
         clear_developing_video_pending(uid)
-        plan = save_developing_video_plan(uid, "storypack", state)
         return await safe_edit_or_send_long_html(query, storyboard_pack_result_text(plan, lang), reply_markup=storyboard_pack_result_keyboard(lang))
-    if action == "refresh":
-        state = dict(plan or pending or {})
+    if action in {"back_detail", "detail"}:
+        state = _state_for_storypack()
         if not state:
             return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-        styles = ["clean", "tech", "luxury", "lifestyle", "drama", "product", "tiktok", "bw"]
-        current = str(state.get("selected_style") or "clean")
-        idx = (styles.index(current) + 1) if current in styles else 1
-        state["selected_style"] = styles[idx % len(styles)]
-        plan = save_developing_video_plan(uid, "storypack", state)
-        return await safe_edit_or_send_long_html(query, storyboard_pack_result_text(plan, lang), reply_markup=storyboard_pack_result_keyboard(lang))
+        return await safe_edit_or_send_long_html(query, storyboard_pack_result_text(state, lang), reply_markup=storyboard_pack_result_keyboard(lang))
+    if action == "edit_requirement":
+        state = _state_for_storypack()
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        restore_developing_video_pending(uid, "storypack", state, "edit_requirement")
+        return await safe_edit_or_send(
+            query,
+            "✍️ Hãy gửi yêu cầu chỉnh storyboard, ví dụ: ít chữ hơn, thêm cảnh CTA, sang trọng hơn.\n\nBot chưa gọi API và chưa trừ Xu.",
+            reply_markup=video_v6_keyboard([], lang, back=("⬅️ Quay lại chọn concept", "storypack|back_concepts")),
+            parse_mode="HTML",
+        )
+    if action in {"image_prompts", "copy_image_prompts"}:
+        state = _state_for_storypack()
+        return await safe_edit_or_send_long_html(query, storyboard_pack_scene_prompts_text(state, "image", lang), reply_markup=storyboard_pack_scene_prompts_keyboard("image", lang))
+    if action in {"video_prompts", "copy_video_prompts"}:
+        state = _state_for_storypack()
+        return await safe_edit_or_send_long_html(query, storyboard_pack_scene_prompts_text(state, "video", lang), reply_markup=storyboard_pack_scene_prompts_keyboard("video", lang))
+    if action in {"meta_ai_prompt", "copy_meta_ai_prompt"}:
+        state = _state_for_storypack()
+        return await safe_edit_or_send(query, storyboard_pack_meta_ai_text(state, lang), reply_markup=storyboard_pack_meta_ai_keyboard(lang), parse_mode="HTML")
     if action in {"lock", "save"}:
-        state = dict(plan or pending or {})
+        state = _state_for_storypack()
         if not state:
             return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
         pack_id = save_storyboard_prompt_pack(uid, state, "locked" if action == "lock" else "draft")
@@ -47292,18 +47516,12 @@ async def handle_storyboard_pack_callback(update: Update, context: ContextTypes.
             prefix = "✅ Shot pack locked." if action == "lock" else "💾 Plan saved."
         suffix = f"\nPack ID: <code>{pack_id}</code>\n\n" if pack_id else "\n\n"
         return await safe_edit_or_send_long_html(query, prefix + suffix + storyboard_pack_result_text(state, lang), reply_markup=storyboard_pack_result_keyboard(lang))
-    if action in {"image_keyframes", "preview"}:
-        state = dict(plan or pending or {})
+    if action in {"image_keyframes", "preview", "create_or_upload_images"}:
         text = storyboard_pack_guard_text(action, lang)
-        return await safe_edit_or_send(query, text, reply_markup=storyboard_pack_result_keyboard(lang), parse_mode="HTML")
-    if action == "ai_video":
-        state = dict(plan or pending or {})
-        if not state:
-            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
-        package = developing_video_public_package(state, "storypack", lang)
-        package["concept_text"] = state.get("selected_topic") or package.get("concept_text") or ""
-        package["video_prompt"] = storyboard_pack_build_payload(state, lang)["shots"][0]["video_prompt"]
-        return await open_video_finalization(query, uid, "storypack", state, lang, "storypack|back_style", package)
+        return await safe_edit_or_send(query, text, reply_markup=storyboard_pack_video_guard_keyboard(lang) if action == "create_or_upload_images" else storyboard_pack_result_keyboard(lang), parse_mode="HTML")
+    if action in {"ai_video", "create_video_ai"}:
+        text = storyboard_pack_guard_text("create_video_ai", lang)
+        return await safe_edit_or_send(query, text, reply_markup=storyboard_pack_video_guard_keyboard(lang), parse_mode="HTML")
     return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
 
 async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

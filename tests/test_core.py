@@ -6724,8 +6724,15 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
     ]:
         assert expected in story_text
     story_callbacks = [button.callback_data for row in bot.storyboard_pack_result_keyboard("vi").inline_keyboard for button in row]
-    assert {"storypack|lock", "storypack|image_keyframes", "storypack|ai_video", "storypack|preview", "storypack|save"}.issubset(set(story_callbacks))
-    assert "pipeline video chung" in bot.storyboard_pack_guard_text("ai_video", "vi")
+    assert {
+        "storypack|image_prompts",
+        "storypack|video_prompts",
+        "storypack|meta_ai_prompt",
+        "storypack|create_video_ai",
+        "storypack|create_or_upload_images",
+        "storypack|save",
+    }.issubset(set(story_callbacks))
+    assert "chưa mở render Video AI công khai" in bot.storyboard_pack_guard_text("ai_video", "vi")
 
     db_path = tmp_path / "long-story.db"
     monkeypatch.setattr(bot, "DB_FILE", str(db_path))
