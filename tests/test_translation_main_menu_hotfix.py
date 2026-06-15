@@ -35,15 +35,18 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
     assert "Dịch thuật TOAN AAS" in text
-    assert callbacks == {
+    assert {
         "menu|translation_text",
+        "menu|translation_voice",
+        "menu|translation_two_way",
+        "menu|translation_live_conversation",
         "menu|translation_document",
-        "videodub|type|subtitle_translate",
-        "videodub|type|subtitle_plus_dub",
         "menu|translation_transcript",
+        "menu|translation_video_dub_menu",
         "menu|translation_language",
         "menu|main",
-    }
+        "menu|translation_stop_session",
+    }.issubset(callbacks)
 
 
 def test_translation_child_callbacks_have_handlers_or_existing_routes():
@@ -51,8 +54,13 @@ def test_translation_child_callbacks_have_handlers_or_existing_routes():
     assert 'CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\\|")' in source
     assert 'CallbackQueryHandler(handle_video_dubbing_callback, pattern=r"^videodub\\|")' in source
     assert 'if action in {"translation_text", "translation_transcript"}' in source
+    assert 'if action == "translation_voice"' in source
+    assert 'if action == "translation_two_way"' in source
+    assert 'if action == "translation_live_conversation"' in source
     assert 'if action == "translation_document"' in source
     assert 'if action == "translation_language"' in source
+    assert 'if action == "translation_video_dub_menu"' in source
+    assert 'if action in {"translation_stop_session", "translation_cancel"}' in source
     assert 'VIDEO_SUBTITLE_MODE_TRANSLATE = "subtitle_translate"' in source
     assert 'VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB = "subtitle_plus_dub"' in source
 
@@ -94,3 +102,57 @@ def test_language_menu_remains_accessible_from_translation_and_account():
     assert "menu|translation_auto_target" in translation_callbacks
     assert "back_lang" in translation_callbacks
     assert "back_lang" in _callbacks(bot.main_profile_keyboard("vi"))
+
+
+def test_full_translation_hub_has_voice_two_way_live_and_video_branch():
+    text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
+    callbacks = _callbacks(markup)
+    assert "Dịch / Lồng tiếng video" in text
+    assert "menu|translation_voice" in callbacks
+    assert "menu|translation_two_way" in callbacks
+    assert "menu|translation_live_conversation" in callbacks
+    assert "menu|translation_video_dub_menu" in callbacks
+    assert "videodub|type|subtitle_translate" not in callbacks
+
+
+def test_language_alias_map_extended():
+    assert bot.normalize_translate_target("Trung giản thể") == "zh_cn"
+    assert bot.normalize_translate_target("Chinese Traditional") == "zh_tw"
+    assert bot.normalize_translate_target("Tiếng Đức") == "de"
+    assert bot.normalize_translate_target("Filipino") == "fil"
+    assert bot.normalize_translate_target("tự nhận diện") == "auto"
+
+
+def test_two_way_translation_session_text_uses_translation_provider(monkeypatch):
+    user_id = 812346
+    bot.clear_translation_session(user_id)
+    bot.set_translation_session(user_id, "two_way", "vi", "en")
+    sent = {}
+
+    async def fake_translate(text, target):
+        sent["source"] = text
+        sent["target"] = target
+        return {"provider": "pytest", "text": "Hello customer", "target": target}
+
+    async def fake_reply(text, **kwargs):
+        sent["reply"] = text
+        sent["reply_markup"] = kwargs.get("reply_markup")
+
+    monkeypatch.setattr(bot, "translate_to_language", fake_translate)
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=user_id),
+        message=SimpleNamespace(text="Xin chào khách hàng", reply_text=fake_reply),
+    )
+
+    assert asyncio.run(bot.handle_translation_session_text(update, SimpleNamespace())) is True
+    assert sent["target"] == "en"
+    assert "Hello customer" in sent["reply"]
+    assert "Bot chưa trừ Xu" in sent["reply"]
+
+
+def test_stop_translation_session_clears_runtime_state():
+    user_id = 812347
+    bot.set_translation_session(user_id, "live_conversation", "vi", "en")
+    assert bot.translation_session_is_active(user_id)
+    assert bot.clear_translation_session(user_id) is True
+    assert not bot.translation_session_is_active(user_id)
