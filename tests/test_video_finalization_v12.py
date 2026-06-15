@@ -128,6 +128,37 @@ def test_video_finalization_summary_and_guard_are_explicit(monkeypatch):
     assert "chưa trừ Xu" in guard
 
 
+def test_video_finalization_summary_routes_prompt_without_images_to_ai_or_keyframe():
+    state = {
+        "source": "trend",
+        "source_label": "Video theo trend",
+        "photos": [],
+        "has_script": True,
+        "has_video_prompt": True,
+    }
+    callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
+    assert "vfinal|export_local" not in callbacks
+    assert "vfinal|export_ai" in callbacks
+    assert "trendg|image_step" in callbacks
+
+    text = bot.video_finalization_local_needs_images_text(state, "vi")
+    assert "Ghép ảnh thành video cần có ảnh trước" in text
+    assert "Tạo video AI chân thật" in text
+    assert "chưa trừ Xu" in text
+
+
+def test_video_finalization_summary_keeps_local_export_when_images_exist():
+    state = {
+        "source": "storyboard",
+        "photos": [{"file_id": "photo-1"}, {"file_id": "photo-2"}],
+        "has_script": True,
+        "has_video_prompt": True,
+    }
+    callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
+    assert "vfinal|export_local" in callbacks
+    assert "vfinal|export_ai" in callbacks
+
+
 def test_video_finalization_readiness_requires_explicit_flags(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_LOCAL_FRAME_RENDER_ENABLED", True)
     monkeypatch.setattr(bot, "FRAME_VIDEO_ENABLED", True)
@@ -169,6 +200,8 @@ def test_video_result_keyboards_link_to_common_finalization():
 def test_finalization_callback_is_registered_and_has_no_direct_billing():
     source = Path(bot.__file__).resolve().read_text(encoding="utf-8")
     assert 'CallbackQueryHandler(handle_video_finalization_callback, pattern=r"^vfinal\\|")' in source
+    assert "Chọn bước muốn quay lại" not in source
+    assert "Bạn chưa có bộ ảnh để ghép video" not in source
     handler_source = _source_between(
         "async def handle_video_finalization_callback",
         "async def handle_video_finalization_pending_text",
