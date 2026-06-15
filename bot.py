@@ -3155,6 +3155,112 @@ def init_db():
         status TEXT DEFAULT 'active',
         created_at DATETIME
     )""")
+    reference_columns = _table_columns(c, "reference_videos")
+    for column_name, column_sql in [
+        ("user_id", "user_id TEXT"),
+        ("source_type", "source_type TEXT DEFAULT 'manual'"),
+        ("source_url", "source_url TEXT DEFAULT ''"),
+        ("telegram_file_id", "telegram_file_id TEXT DEFAULT ''"),
+        ("niche", "niche TEXT DEFAULT ''"),
+        ("format_type", "format_type TEXT DEFAULT ''"),
+        ("duration_seconds", "duration_seconds INTEGER DEFAULT 0"),
+        ("aspect_ratio", "aspect_ratio TEXT DEFAULT ''"),
+        ("language", "language TEXT DEFAULT ''"),
+        ("hook_pattern", "hook_pattern TEXT DEFAULT ''"),
+        ("scene_count", "scene_count INTEGER DEFAULT 0"),
+        ("scene_notes_json", "scene_notes_json TEXT DEFAULT '[]'"),
+        ("caption_style", "caption_style TEXT DEFAULT ''"),
+        ("cta_style", "cta_style TEXT DEFAULT ''"),
+        ("music_style", "music_style TEXT DEFAULT ''"),
+        ("visual_style", "visual_style TEXT DEFAULT ''"),
+        ("safety_notes", "safety_notes TEXT DEFAULT ''"),
+        ("updated_at", "updated_at TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(c, "reference_videos", column_name, column_sql, reference_columns)
+    c.execute("""CREATE TABLE IF NOT EXISTS channel_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        channel_name TEXT DEFAULT '',
+        platform TEXT DEFAULT 'other',
+        channel_url TEXT DEFAULT '',
+        niche TEXT DEFAULT '',
+        target_audience TEXT DEFAULT '',
+        content_style TEXT DEFAULT '',
+        tone TEXT DEFAULT '',
+        language TEXT DEFAULT 'vi',
+        allowed_topics_json TEXT DEFAULT '[]',
+        blocked_topics_json TEXT DEFAULT '[]',
+        brand_keywords_json TEXT DEFAULT '[]',
+        cta_default TEXT DEFAULT '',
+        affiliate_allowed INTEGER DEFAULT 0,
+        product_categories_json TEXT DEFAULT '[]',
+        posting_frequency TEXT DEFAULT '',
+        preferred_aspect_ratio TEXT DEFAULT '9:16',
+        preferred_duration_seconds INTEGER DEFAULT 15,
+        primary_goal TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS publish_packages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        reference_video_id INTEGER DEFAULT 0,
+        channel_profile_id INTEGER DEFAULT 0,
+        platform TEXT DEFAULT '',
+        title TEXT DEFAULT '',
+        caption TEXT DEFAULT '',
+        hashtags TEXT DEFAULT '',
+        cta TEXT DEFAULT '',
+        pinned_comment TEXT DEFAULT '',
+        thumbnail_idea TEXT DEFAULT '',
+        posting_time_note TEXT DEFAULT '',
+        affiliate_link TEXT DEFAULT '',
+        checklist_json TEXT DEFAULT '[]',
+        content_json TEXT DEFAULT '{}',
+        status TEXT DEFAULT 'draft',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS publisher_channels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        platform TEXT DEFAULT '',
+        channel_profile_id INTEGER DEFAULT 0,
+        access_status TEXT DEFAULT 'not_connected',
+        token_ref TEXT DEFAULT '',
+        channel_id TEXT DEFAULT '',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS publish_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        channel_id INTEGER DEFAULT 0,
+        content_id INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'draft',
+        scheduled_at TEXT DEFAULT '',
+        published_url TEXT DEFAULT '',
+        error_message TEXT DEFAULT '',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS content_performance_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        channel_profile_id INTEGER DEFAULT 0,
+        publish_package_id INTEGER DEFAULT 0,
+        post_url TEXT DEFAULT '',
+        event_type TEXT DEFAULT 'manual_note',
+        value_number REAL DEFAULT 0,
+        amount_vnd REAL DEFAULT 0,
+        note TEXT DEFAULT '',
+        created_at TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_reference_videos_user_status ON reference_videos(user_id,status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_channel_profiles_user_status ON channel_profiles(user_id,status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_publish_packages_user_status ON publish_packages(user_id,status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_content_performance_user ON content_performance_events(user_id,created_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS long_video_projects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -17591,6 +17697,191 @@ def video_pattern_bank_data():
         for key, value in VIDEO_PATTERN_BANK.items()
     }
 
+REFERENCE_SAFETY_NOTE = (
+    "Chỉ học format, hook, nhịp dựng, caption và CTA; không copy/reup video, "
+    "khuôn mặt, giọng nói, logo, thương hiệu hoặc nội dung có bản quyền."
+)
+
+def update_reference_video_metadata(ref_id, owner_id, **fields):
+    allowed = {
+        "user_id", "source_type", "source_url", "telegram_file_id", "niche", "format_type",
+        "duration_seconds", "aspect_ratio", "language", "hook_pattern", "scene_count",
+        "scene_notes_json", "caption_style", "cta_style", "music_style", "visual_style",
+        "safety_notes", "status", "updated_at",
+    }
+    updates = []
+    params = []
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        updates.append(f"{key}=?")
+        params.append(value)
+    if not updates or not ref_id:
+        return False
+    if "updated_at" not in fields:
+        updates.append("updated_at=?")
+        params.append(now_text())
+    params.extend([int(ref_id), str(owner_id)])
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(f"UPDATE reference_videos SET {', '.join(updates)} WHERE id=? AND owner_id=?", params)
+        changed = c.rowcount > 0
+        conn.commit()
+    except sqlite3.OperationalError:
+        changed = False
+    finally:
+        conn.close()
+    return changed
+
+def create_channel_profile(user_id, state: dict) -> int:
+    now = now_text()
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(
+            """INSERT INTO channel_profiles
+            (user_id,channel_name,platform,channel_url,niche,target_audience,content_style,tone,
+             language,blocked_topics_json,cta_default,affiliate_allowed,preferred_aspect_ratio,
+             preferred_duration_seconds,primary_goal,status,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id), _short_pending_text(state.get("channel_name"), 120),
+                _short_pending_text(state.get("platform"), 30) or "other",
+                _short_pending_text(state.get("channel_url"), 300),
+                _short_pending_text(state.get("niche"), 220),
+                _short_pending_text(state.get("target_audience"), 300),
+                _short_pending_text(state.get("content_style"), 220),
+                _short_pending_text(state.get("tone"), 160), normalize_user_language(state.get("language")) or "vi",
+                json.dumps([_short_pending_text(state.get("blocked_topics"), 300)], ensure_ascii=False),
+                _short_pending_text(state.get("cta_default"), 220), 1 if truthy_value(state.get("affiliate_allowed"), False) else 0,
+                _short_pending_text(state.get("preferred_aspect_ratio"), 12) or "9:16",
+                max(5, min(_safe_int(state.get("preferred_duration_seconds"), 15), 600)),
+                _short_pending_text(state.get("primary_goal"), 120), "active", now, now,
+            ),
+        )
+        profile_id = int(c.lastrowid or 0)
+        conn.commit()
+    except sqlite3.OperationalError:
+        profile_id = 0
+    finally:
+        conn.close()
+    return profile_id
+
+def get_latest_channel_profile(user_id) -> dict:
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(
+            """SELECT id,channel_name,platform,channel_url,niche,target_audience,content_style,tone,
+            language,blocked_topics_json,cta_default,affiliate_allowed,preferred_aspect_ratio,
+            preferred_duration_seconds,primary_goal,status,created_at,updated_at
+            FROM channel_profiles WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 1""",
+            (str(user_id),),
+        )
+        row = c.fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    finally:
+        conn.close()
+    if not row:
+        return {}
+    keys = [
+        "id", "channel_name", "platform", "channel_url", "niche", "target_audience",
+        "content_style", "tone", "language", "blocked_topics_json", "cta_default",
+        "affiliate_allowed", "preferred_aspect_ratio", "preferred_duration_seconds",
+        "primary_goal", "status", "created_at", "updated_at",
+    ]
+    return dict(zip(keys, row))
+
+def create_publish_package(user_id, state: dict, profile: dict | None = None) -> dict:
+    profile = profile or get_latest_channel_profile(user_id)
+    topic = _short_pending_text(state.get("selected_topic") or state.get("niche"), 180) or "nội dung mới"
+    platform = _short_pending_text(profile.get("platform"), 30) or "TikTok/Reels/Facebook"
+    goal = _short_pending_text(profile.get("primary_goal"), 100) or "tăng tương tác và chuyển đổi"
+    title = f"{topic}: phiên bản ngắn dễ xem"
+    caption = f"{topic} được trình bày theo format rõ hook, lợi ích và CTA. Lưu lại nếu bạn cần dùng sau."
+    hashtags = "#toanaas #aiautomation #contentcreator"
+    cta = _short_pending_text(profile.get("cta_default"), 220) or "Bình luận hoặc nhắn tin để nhận thông tin phù hợp."
+    pinned = "Bạn muốn xem bản hướng dẫn hay bản bán hàng?"
+    checklist = ["Video đúng tỷ lệ", "Có phụ đề nếu cần", "Có CTA", "Không vi phạm bản quyền", "Đã kiểm tra link/keyword"]
+    content = {
+        "topic": topic, "platform": platform, "goal": goal,
+        "reference_rule": REFERENCE_SAFETY_NOTE,
+    }
+    now = now_text()
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(
+            """INSERT INTO publish_packages
+            (user_id,reference_video_id,channel_profile_id,platform,title,caption,hashtags,cta,
+             pinned_comment,thumbnail_idea,posting_time_note,checklist_json,content_json,status,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id), _safe_int(state.get("reference_id"), 0), _safe_int(profile.get("id"), 0),
+                platform, title, caption, hashtags, cta, pinned,
+                f"Ảnh chủ thể chính của {topic}, chữ ngắn, tương phản rõ",
+                "Ưu tiên khung giờ kênh có tương tác tốt; thử 11:30 hoặc 20:00 nếu chưa có dữ liệu.",
+                json.dumps(checklist, ensure_ascii=False), json.dumps(content, ensure_ascii=False),
+                "draft", now, now,
+            ),
+        )
+        package_id = int(c.lastrowid or 0)
+        conn.commit()
+    except sqlite3.OperationalError:
+        package_id = 0
+    finally:
+        conn.close()
+    return {
+        "id": package_id, "platform": platform, "topic": topic, "goal": goal, "title": title,
+        "caption": caption, "hashtags": hashtags, "cta": cta, "pinned_comment": pinned,
+        "thumbnail_idea": f"Ảnh chủ thể chính của {topic}, chữ ngắn, tương phản rõ",
+        "posting_time_note": "Thử 11:30 hoặc 20:00 nếu kênh chưa có dữ liệu.", "checklist": checklist,
+    }
+
+def add_content_performance_event(user_id, state: dict) -> int:
+    conn = db_connect()
+    c = conn.cursor()
+    try:
+        c.execute(
+            """INSERT INTO content_performance_events
+            (user_id,channel_profile_id,publish_package_id,post_url,event_type,value_number,amount_vnd,note,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id), _safe_int(state.get("channel_profile_id"), 0),
+                _safe_int(state.get("publish_package_id"), 0), _short_pending_text(state.get("post_url"), 500),
+                _short_pending_text(state.get("event_type"), 40) or "manual_note",
+                float(state.get("value_number") or 0), float(state.get("amount_vnd") or 0),
+                _short_pending_text(state.get("note"), 500), now_text(),
+            ),
+        )
+        event_id = int(c.lastrowid or 0)
+        conn.commit()
+    except (sqlite3.OperationalError, TypeError, ValueError):
+        event_id = 0
+    finally:
+        conn.close()
+    return event_id
+
+def reference_catalog_status_data() -> dict:
+    conn = db_connect()
+    c = conn.cursor()
+    result = {}
+    for key, table in [
+        ("reference_videos", "reference_videos"),
+        ("channel_profiles", "channel_profiles"),
+        ("publish_packages", "publish_packages"),
+        ("performance_events", "content_performance_events"),
+    ]:
+        try:
+            c.execute(f"SELECT COUNT(*) FROM {table}")
+            result[key] = int(c.fetchone()[0] or 0)
+        except sqlite3.OperationalError:
+            result[key] = 0
+    conn.close()
+    return result
+
 def add_reference_video(owner_id, title, path_or_url, platform="", pattern_hint="", tags="", note=""):
     if not path_or_url:
         return 0
@@ -17614,6 +17905,15 @@ def add_reference_video(owner_id, title, path_or_url, platform="", pattern_hint=
             ),
         )
         ref_id = c.lastrowid
+        c.execute(
+            """UPDATE reference_videos SET user_id=?,source_type=?,source_url=?,safety_notes=?,updated_at=?
+            WHERE id=?""",
+            (
+                str(owner_id), "url" if re.match(r"^https?://", path_or_url or "", re.IGNORECASE) else "manual",
+                path_or_url if re.match(r"^https?://", path_or_url or "", re.IGNORECASE) else "",
+                REFERENCE_SAFETY_NOTE, now_text(), ref_id,
+            ),
+        )
         conn.commit()
     except sqlite3.OperationalError:
         ref_id = 0
@@ -38911,6 +39211,10 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("✍️ Caption/Hashtag" if is_vi else "✍️ Caption/hashtags", "freehub|caption"),
             ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
             ("🖼 Prompt ảnh/video" if is_vi else "🖼 Image/video prompts", "freehub|prompts"),
+            ("🎬 Prompt theo video mẫu" if is_vi else "🎬 Prompt from reference", "videoref|hub"),
+            ("📺 Hồ sơ kênh" if is_vi else "📺 Channel profile", "videoref|profile"),
+            ("📦 Gói đăng bài" if is_vi else "📦 Publish package", "videoref|publish_package"),
+            ("📚 Kho format mẫu" if is_vi else "📚 Format catalog", "videoref|catalog"),
             ("📝 Ghi chú / Tài liệu" if is_vi else "📝 Notes / Documents", "menu|main_memory"),
             ("📥 Lưu media tạm để dùng tiếp" if is_vi else "📥 Save media temporarily", "freehub|upload"),
         ],
@@ -40104,6 +40408,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
                 ("🎥 Tự quay & đổi cảnh AI", "selfscene|start"),
                 ("🎬 Phim AI nhiều cảnh", "longvideo|start"),
                 ("🎞 Storyboard + Prompt điện ảnh", "storypack|start"),
+                ("📤 Video mẫu / Kênh mẫu", "videoref|hub"),
                 ("🧠 Ý tưởng video", "videoidea|start"),
                 ("🎥 Prompt / Chuyển động", "motion|start"),
                 ("🌐 Dịch/Lồng tiếng video", "videodub|start"),
@@ -40121,6 +40426,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🎥 自拍换场景 AI", "selfscene|start"),
             ("🎬 多场景 AI 故事片", "longvideo|start"),
             ("🎞 电影分镜 Prompt 包", "storypack|start"),
+            ("📤 参考视频 / 频道资料", "videoref|hub"),
             ("🧠 视频创意", "videoidea|start"),
             ("🎥 Prompt / 镜头运动", "motion|start"),
             ("🌐 视频翻译/配音", "videodub|start"),
@@ -40135,6 +40441,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🎥 Self-shot scene AI", "selfscene|start"),
             ("🎬 Multi-scene AI story film", "longvideo|start"),
             ("🎞 Cinematic storyboard prompt pack", "storypack|start"),
+            ("📤 Reference video / Channel", "videoref|hub"),
             ("🧠 Video ideas", "videoidea|start"),
             ("🎥 Prompt / Motion", "motion|start"),
             ("🌐 Translate / Dub video", "videodub|start"),
@@ -41363,6 +41670,11 @@ def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> Non
             "style_offset", "selected_suggestion_index", "source_duration",
             "source_file_size", "source_width", "source_height", "analysis_kind",
             "processing", "reference_template", "shot_type", "shot_count",
+            "reference_id", "source_url", "source_description", "channel_name", "channel_url",
+            "niche", "target_audience", "content_style", "tone", "blocked_topics",
+            "affiliate_allowed", "primary_goal", "preferred_aspect_ratio",
+            "preferred_duration_seconds", "language", "post_url", "event_type",
+            "value_number", "amount_vnd", "note", "channel_profile_id", "publish_package_id",
         }:
             payload[key] = _short_pending_text(value)
     USER_PENDING[developing_video_pending_key(user_id)] = payload
@@ -42043,6 +42355,145 @@ def guided_video_public_guard_text(lang: str = "vi", from_image: bool = False) -
         f"{extra}\nTOAN AAS chưa gọi API, chưa xử lý video thật và chưa trừ Xu.\nBạn có thể lưu prompt/kế hoạch trước."
     )
 
+def video_reference_hub_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📤 <b>Reference Video / Channel Profile</b>\n\n"
+            "Analyze a reference video or channel to learn format, hook, pacing, caption and CTA, then create original content for your own channel.\n\n"
+            "TOAN AAS does not copy or re-upload protected content. Planning is free and does not charge Xu."
+        )
+    return (
+        "📤 <b>Video mẫu / Kênh mẫu</b>\n\n"
+        "TOAN AAS giúp bạn phân tích video/kênh tham khảo để học format, hook, nhịp cảnh, caption, CTA và tạo nội dung mới phù hợp kênh của bạn.\n\n"
+        "Bot không khuyến khích copy/reup video người khác. Video mẫu chỉ dùng để học cấu trúc và phong cách. Bước lập kế hoạch không trừ Xu."
+    )
+
+def video_reference_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("🔗 Phân tích link video" if is_vi else "🔗 Analyze video link", "videoref|link"),
+            ("📤 Upload video mẫu" if is_vi else "📤 Upload reference video", "videoref|start"),
+            ("📺 Hồ sơ kênh của tôi" if is_vi else "📺 My channel profile", "videoref|profile"),
+            ("📚 Kho format mẫu" if is_vi else "📚 Format catalog", "videoref|catalog"),
+            ("🎬 Tạo video theo format" if is_vi else "🎬 Create from format", "videoref|format"),
+            ("📦 Gói đăng bài" if is_vi else "📦 Publish package", "videoref|publish_package"),
+        ],
+        lang,
+        back=("⬅️ Video" if is_vi else "⬅️ Video", "menu|main_video"),
+    )
+
+def channel_profile_text(profile: dict | None = None, lang: str = "vi") -> str:
+    profile = profile or {}
+    if not profile:
+        return (
+            "📺 <b>Hồ sơ kênh của tôi</b>\n\n"
+            "Chưa có hồ sơ kênh. TOAN AAS sẽ hỏi nền tảng, ngành, giọng văn, khách hàng mục tiêu, nội dung cần tránh, affiliate và mục tiêu chính.\n\n"
+            "Thông tin này giúp prompt/caption phù hợp đúng kênh hơn."
+            if normalize_user_language(lang) == "vi" else
+            "📺 <b>My channel profile</b>\n\nNo profile yet. Create one so prompts and captions match your platform and audience."
+        )
+    return (
+        "📺 <b>Hồ sơ kênh hiện tại</b>\n\n"
+        f"• Nền tảng: <b>{html.escape(str(profile.get('platform') or '-'))}</b>\n"
+        f"• Ngành: {html.escape(str(profile.get('niche') or '-'))}\n"
+        f"• Khách hàng: {html.escape(str(profile.get('target_audience') or '-'))}\n"
+        f"• Phong cách: {html.escape(str(profile.get('content_style') or profile.get('tone') or '-'))}\n"
+        f"• Mục tiêu: {html.escape(str(profile.get('primary_goal') or '-'))}\n"
+        f"• Affiliate: <b>{'Có' if profile.get('affiliate_allowed') else 'Không'}</b>"
+        if normalize_user_language(lang) == "vi" else
+        "📺 <b>Current channel profile</b>\n\n"
+        f"Platform: {html.escape(str(profile.get('platform') or '-'))}\nNiche: {html.escape(str(profile.get('niche') or '-'))}\nGoal: {html.escape(str(profile.get('primary_goal') or '-'))}"
+    )
+
+def channel_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [("✍️ Tạo/cập nhật hồ sơ" if is_vi else "✍️ Create/update profile", "videoref|profile_create")],
+        lang,
+        back=("⬅️ Video mẫu / Kênh mẫu" if is_vi else "⬅️ Reference hub", "videoref|hub"),
+    )
+
+def channel_profile_platform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_v6_keyboard(
+        [("TikTok", "videoref|profile_platform|tiktok"), ("Facebook/Reels", "videoref|profile_platform|facebook"),
+         ("Instagram", "videoref|profile_platform|instagram"), ("YouTube", "videoref|profile_platform|youtube"),
+         ("Telegram/Website", "videoref|profile_platform|other")],
+        lang,
+        back=("⬅️ Hồ sơ kênh" if normalize_user_language(lang) == "vi" else "⬅️ Channel profile", "videoref|profile"),
+    )
+
+def channel_profile_affiliate_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [("✅ Có dùng affiliate" if is_vi else "✅ Affiliate enabled", "videoref|profile_affiliate|yes"),
+         ("🚫 Không dùng affiliate" if is_vi else "🚫 No affiliate", "videoref|profile_affiliate|no")],
+        lang,
+        back=("⬅️ Hồ sơ kênh" if is_vi else "⬅️ Channel profile", "videoref|profile"),
+    )
+
+def channel_profile_goal_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [("📈 Tăng follow" if is_vi else "📈 Grow followers", "videoref|profile_goal|follow"),
+         ("🛒 Bán hàng" if is_vi else "🛒 Sales", "videoref|profile_goal|sales"),
+         ("📥 Lấy lead/inbox" if is_vi else "📥 Leads/inbox", "videoref|profile_goal|lead"),
+         ("🌐 Kéo website" if is_vi else "🌐 Website traffic", "videoref|profile_goal|website")],
+        lang,
+        back=("⬅️ Hồ sơ kênh" if is_vi else "⬅️ Channel profile", "videoref|profile"),
+    )
+
+def reference_catalog_text(user_id, lang: str = "vi") -> str:
+    rows = list_reference_videos(user_id, limit=10)
+    if normalize_user_language(lang) != "vi":
+        lines = ["📚 <b>Reference format catalog</b>", "", "Saved metadata is used to learn structure, never to copy protected content."]
+    else:
+        lines = ["📚 <b>Kho format mẫu</b>", "", "Kho chỉ lưu metadata/format để học cấu trúc, không lưu video lớn miễn phí lâu dài và không dùng để reup."]
+    if not rows:
+        lines.append("\n📭 Chưa có format mẫu. Hãy upload video hoặc nhập link/mô tả trước.")
+    for row in rows:
+        item = serialize_reference_video(row) or {}
+        lines.append(f"\n• <b>#{item.get('id')}</b> {html.escape(str(item.get('title') or 'Reference'))} | {html.escape(str(item.get('platform') or 'other'))}")
+    lines.extend(["", html.escape(REFERENCE_SAFETY_NOTE)])
+    return "\n".join(lines)
+
+def publish_package_text(package: dict, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📦 <b>TOAN AAS publish package</b>\n\n"
+            f"Platform: {html.escape(package.get('platform') or '-')}\nTitle: {html.escape(package.get('title') or '-')}\n\n"
+            f"Caption:\n{html.escape(package.get('caption') or '-')}\n\nHashtags: {html.escape(package.get('hashtags') or '-')}\n"
+            f"CTA: {html.escape(package.get('cta') or '-')}\nPinned comment: {html.escape(package.get('pinned_comment') or '-')}\n\n"
+            "Manual publish only. Auto-publish stays disabled until a valid channel is connected and confirmed."
+        )
+    checklist = "\n".join(f"□ {html.escape(item)}" for item in package.get("checklist") or [])
+    return (
+        "📦 <b>Gói đăng bài TOAN AAS</b>\n\n"
+        f"Nền tảng: <b>{html.escape(package.get('platform') or '-')}</b>\n"
+        f"Mục tiêu: {html.escape(package.get('goal') or '-')}\n"
+        f"Chủ đề: {html.escape(package.get('topic') or '-')}\n\n"
+        f"<b>Tiêu đề:</b>\n{html.escape(package.get('title') or '-')}\n\n"
+        f"<b>Caption:</b>\n{html.escape(package.get('caption') or '-')}\n\n"
+        f"<b>Hashtag:</b> {html.escape(package.get('hashtags') or '-')}\n"
+        f"<b>CTA:</b> {html.escape(package.get('cta') or '-')}\n"
+        f"<b>Comment ghim:</b> {html.escape(package.get('pinned_comment') or '-')}\n"
+        f"<b>Thumbnail:</b> {html.escape(package.get('thumbnail_idea') or '-')}\n"
+        f"<b>Khung giờ:</b> {html.escape(package.get('posting_time_note') or '-')}\n\n"
+        f"<b>Checklist:</b>\n{checklist}\n\n"
+        "Giai đoạn này chỉ tạo gói để bạn tự đăng. Tự động đăng chưa bật và bot chưa trừ Xu."
+    )
+
+def publish_package_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [("🎬 Tạo/sửa video" if is_vi else "🎬 Create/edit video", "videoref|format"),
+         ("📝 Phụ đề/lồng tiếng" if is_vi else "📝 Subtitle/dubbing", "videodub|start"),
+         ("📊 Cập nhật hiệu quả" if is_vi else "📊 Update performance", "videoref|performance"),
+         ("🚫 Tự đăng (chưa kết nối)" if is_vi else "🚫 Auto-publish unavailable", "videoref|auto_publish")],
+        lang,
+        back=("⬅️ Video mẫu / Kênh mẫu" if is_vi else "⬅️ Reference hub", "videoref|hub"),
+    )
+
 def video_reference_start_text(lang: str = "vi") -> str:
     if not VIDEO_ANALYZE_ENABLED:
         return (
@@ -42289,11 +42740,15 @@ def video_reference_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [
             ("🎛 Hoàn thiện video" if is_vi else "🎛 Finalize video", "videoref|finalization"),
             ("🖼 Tạo ảnh từng cảnh" if is_vi else "🖼 Create scene images", "videoref|image_prompts"),
+            ("🧩 Tạo format mới" if is_vi else "🧩 Create new format", "videoref|version_refresh"),
+            ("📦 Gói đăng bài" if is_vi else "📦 Publish package", "videoref|publish_package"),
             ("✂️ Chia video mẫu thành đoạn" if is_vi else "✂️ Split reference into segments", "videoref|sample_segments"),
             ("🎬 Prompt video từng đoạn" if is_vi else "🎬 Segment video prompts", "videoref|video_prompts"),
             ("🎞 Ghép ảnh thành video" if is_vi else "🎞 Image slideshow video", "videoref|frame_plan"),
             ("🎬 Tạo video AI chân thật" if is_vi else "🎬 Generate real AI video", "videoref|generate"),
             ("🔄 Tạo phiên bản khác" if is_vi else "🔄 Create another version", "videoref|version_refresh"),
+            ("📌 Lưu vào kho format" if is_vi else "📌 Save to catalog", "videoref|save_catalog"),
+            ("📺 Gắn với kênh của tôi" if is_vi else "📺 Attach channel profile", "videoref|profile"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "videoref|save"),
         ],
         lang,
@@ -42402,6 +42857,30 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
         return True
     remember_last_media(update)
     cache_recent_media_state(update)
+    ref_id = add_reference_video(
+        uid,
+        title=info.get("file_name") or "reference video",
+        path_or_url=f"telegram_file:{info.get('file_id')}",
+        platform="",
+        pattern_hint="pending_analysis",
+        tags="reference,telegram-upload",
+        note="Metadata only; uploaded file is not retained as a permanent free asset.",
+    )
+    if ref_id:
+        width = _safe_int(info.get("width"), 0)
+        height = _safe_int(info.get("height"), 0)
+        aspect_ratio = "9:16" if height > width else ("16:9" if width > height else "1:1")
+        update_reference_video_metadata(
+            ref_id,
+            uid,
+            user_id=str(uid),
+            source_type="upload",
+            telegram_file_id=info.get("file_id") or "",
+            duration_seconds=_safe_int(info.get("duration"), 0),
+            aspect_ratio=aspect_ratio,
+            safety_notes=REFERENCE_SAFETY_NOTE,
+            status="draft",
+        )
     set_developing_video_pending(
         uid,
         "videoref",
@@ -42413,6 +42892,7 @@ async def handle_video_reference_pending_upload(update: Update, context: Context
         source_file_size=info.get("file_size"),
         source_width=info.get("width"),
         source_height=info.get("height"),
+        reference_id=ref_id,
     )
     state = get_developing_video_pending(uid) or {}
     await update.message.reply_text(
@@ -44631,6 +45111,105 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             return True
         return True
     if flow == "videoref":
+        if step == "link_input":
+            if not re.match(r"^https?://", text, re.IGNORECASE):
+                await update.message.reply_text(
+                    "⚠️ Link chưa hợp lệ. Hãy gửi link bắt đầu bằng http:// hoặc https://. Bot chưa trừ Xu.",
+                    reply_markup=video_v6_keyboard([], lang, back=("⬅️ Video mẫu / Kênh mẫu", "videoref|hub")),
+                )
+                return True
+            ref_id = add_reference_video(
+                uid,
+                title="Reference link",
+                path_or_url=text,
+                platform="",
+                pattern_hint="link_pending_manual_analysis",
+                tags="reference,link",
+                note="Link metadata only; platform download is disabled.",
+            )
+            if ref_id:
+                update_reference_video_metadata(
+                    ref_id, uid, user_id=str(uid), source_type="youtube_url" if "youtu" in text.lower() else "url",
+                    source_url=text, status="draft", safety_notes=REFERENCE_SAFETY_NOTE,
+                )
+            clear_developing_video_pending(uid)
+            await update.message.reply_text(
+                "🔗 Đã lưu link tham khảo. TOAN AAS chưa tải video từ nền tảng. Hãy upload file hoặc mô tả thủ công để phân tích format. Bot chưa gọi provider và chưa trừ Xu.",
+                reply_markup=video_v6_keyboard(
+                    [("📤 Upload video mẫu", "videoref|start"), ("✍️ Mô tả thủ công", "videoref|manual")],
+                    lang,
+                    back=("⬅️ Video mẫu / Kênh mẫu", "videoref|hub"),
+                ),
+            )
+            return True
+        if step == "manual_description":
+            ref_id = add_reference_video(
+                uid,
+                title=_short_pending_text(text, 80) or "Manual reference",
+                path_or_url=f"manual:{int(time.time())}",
+                platform="",
+                pattern_hint="manual_description",
+                tags="reference,manual",
+                note=_short_pending_text(text, 500),
+            )
+            if ref_id:
+                update_reference_video_metadata(
+                    ref_id, uid, user_id=str(uid), source_type="manual", scene_notes_json=json.dumps([text], ensure_ascii=False),
+                    status="draft", safety_notes=REFERENCE_SAFETY_NOTE,
+                )
+            set_developing_video_pending(
+                uid, "videoref", "direction", source_file_id="manual", source_description=text,
+                source_file_name="manual_reference", reference_id=ref_id,
+            )
+            state = get_developing_video_pending(uid) or {}
+            await update.message.reply_text(video_reference_direction_text(state, lang), parse_mode="HTML", reply_markup=video_reference_direction_keyboard(lang))
+            return True
+        if step == "profile_niche":
+            set_developing_video_pending(uid, "videoref", "profile_tone", niche=text)
+            await update.message.reply_text("2/6. Bạn muốn phong cách và giọng văn như thế nào?", reply_markup=video_v6_keyboard([], lang, back=("⬅️ Hồ sơ kênh", "videoref|profile")))
+            return True
+        if step == "profile_tone":
+            set_developing_video_pending(uid, "videoref", "profile_audience", content_style=text, tone=text)
+            await update.message.reply_text("3/6. Khách hàng/khán giả mục tiêu là ai?", reply_markup=video_v6_keyboard([], lang, back=("⬅️ Hồ sơ kênh", "videoref|profile")))
+            return True
+        if step == "profile_audience":
+            set_developing_video_pending(uid, "videoref", "profile_blocked", target_audience=text)
+            await update.message.reply_text("4/6. Nội dung/chủ đề nào bạn không muốn đăng? Nếu không có, nhập: không.", reply_markup=video_v6_keyboard([], lang, back=("⬅️ Hồ sơ kênh", "videoref|profile")))
+            return True
+        if step == "profile_blocked":
+            set_developing_video_pending(uid, "videoref", "profile_affiliate", blocked_topics=text)
+            await update.message.reply_text("5/6. Kênh có dùng affiliate không?", reply_markup=channel_profile_affiliate_keyboard(lang))
+            return True
+        if step == "performance_input":
+            data = parse_key_value_args(text)
+            event_ids = []
+            common = {
+                "post_url": data.get("url") or data.get("link") or "",
+                "note": data.get("note") or "manual performance update",
+            }
+            for event_type in ["view", "like", "comment", "share", "click", "order"]:
+                aliases = {"view": "views", "like": "likes", "comment": "comments", "share": "shares", "click": "clicks", "order": "orders"}
+                raw_value = data.get(event_type) or data.get(aliases[event_type])
+                if raw_value is None:
+                    continue
+                event_id = add_content_performance_event(uid, {**common, "event_type": event_type, "value_number": raw_value})
+                if event_id:
+                    event_ids.append(event_id)
+            revenue = data.get("revenue") or data.get("amount")
+            if revenue is not None:
+                event_id = add_content_performance_event(uid, {**common, "event_type": "revenue", "amount_vnd": revenue})
+                if event_id:
+                    event_ids.append(event_id)
+            if not event_ids:
+                event_id = add_content_performance_event(uid, {**common, "event_type": "manual_note", "note": text})
+                if event_id:
+                    event_ids.append(event_id)
+            clear_developing_video_pending(uid)
+            await update.message.reply_text(
+                f"✅ Đã lưu {len(event_ids)} chỉ số hiệu quả thủ công. TOAN AAS sẽ dùng dữ liệu này để đánh giá hook/CTA/format. Bot chưa trừ Xu.",
+                reply_markup=video_reference_hub_keyboard(lang),
+            )
+            return True
         if step == "direction_custom":
             set_developing_video_pending(uid, "videoref", "topic_suggestions", analysis_kind=text, suggest_offset=0)
             state = get_developing_video_pending(uid) or {}
@@ -45202,6 +45781,112 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
+
+    if action == "hub":
+        clear_developing_video_pending(uid)
+        return await safe_edit_or_send(query, video_reference_hub_text(lang), parse_mode="HTML", reply_markup=video_reference_hub_keyboard(lang))
+    if action == "profile":
+        clear_developing_video_pending(uid)
+        profile = get_latest_channel_profile(uid)
+        return await safe_edit_or_send(query, channel_profile_text(profile, lang), parse_mode="HTML", reply_markup=channel_profile_keyboard(lang))
+    if action == "profile_create":
+        clear_developing_video_pending(uid)
+        set_developing_video_pending(uid, "videoref", "profile_platform", language=lang)
+        text = "📺 Kênh của bạn đăng ở đâu?" if normalize_user_language(lang) == "vi" else "📺 Which platform is your channel on?"
+        return await safe_edit_or_send(query, text, reply_markup=channel_profile_platform_keyboard(lang))
+    if action == "profile_platform":
+        set_developing_video_pending(uid, "videoref", "profile_niche", platform=value or "other", language=lang)
+        text = "1/6. Hãy nhập ngành/chủ đề chính của kênh." if normalize_user_language(lang) == "vi" else "1/6. Enter the channel niche."
+        return await safe_edit_or_send(query, text, reply_markup=video_v6_keyboard([], lang, back=("⬅️ Hồ sơ kênh", "videoref|profile")))
+    if action == "profile_affiliate":
+        state = get_developing_video_pending(uid) or {}
+        restore_developing_video_pending(uid, "videoref", state, "profile_goal")
+        set_developing_video_pending(uid, "videoref", "profile_goal", affiliate_allowed=(value == "yes"))
+        text = "6/6. Mục tiêu chính của kênh là gì?" if normalize_user_language(lang) == "vi" else "6/6. What is the main channel goal?"
+        return await safe_edit_or_send(query, text, reply_markup=channel_profile_goal_keyboard(lang))
+    if action == "profile_goal":
+        state = get_developing_video_pending(uid) or {}
+        state["primary_goal"] = value or "content"
+        profile_id = create_channel_profile(uid, state)
+        clear_developing_video_pending(uid)
+        profile = get_latest_channel_profile(uid)
+        prefix = "✅ Đã lưu hồ sơ kênh.\n\n" if profile_id and normalize_user_language(lang) == "vi" else ("✅ Channel profile saved.\n\n" if profile_id else "⚠️ Không lưu được hồ sơ kênh.\n\n")
+        return await safe_edit_or_send(query, prefix + channel_profile_text(profile, lang), parse_mode="HTML", reply_markup=channel_profile_keyboard(lang))
+    if action == "catalog":
+        clear_developing_video_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            reference_catalog_text(uid, lang),
+            parse_mode="HTML",
+            reply_markup=video_v6_keyboard(
+                [("📤 Thêm video mẫu" if normalize_user_language(lang) == "vi" else "📤 Add reference", "videoref|start")],
+                lang,
+                back=("⬅️ Video mẫu / Kênh mẫu", "videoref|hub"),
+            ),
+        )
+    if action == "link":
+        clear_developing_video_pending(uid)
+        set_developing_video_pending(uid, "videoref", "link_input")
+        text = (
+            "🔗 Hãy gửi link video tham khảo.\n\nGiai đoạn này TOAN AAS không tải video từ nền tảng. Bot sẽ lưu link/metadata an toàn và yêu cầu upload file hoặc mô tả thủ công để phân tích. Không trừ Xu."
+            if normalize_user_language(lang) == "vi" else
+            "🔗 Send the reference link. TOAN AAS does not download platform videos in this phase; upload the file or provide a manual description. No Xu charged."
+        )
+        return await safe_edit_or_send(query, text, reply_markup=video_v6_keyboard([], lang, back=("⬅️ Video mẫu / Kênh mẫu", "videoref|hub")))
+    if action == "manual":
+        clear_developing_video_pending(uid)
+        set_developing_video_pending(uid, "videoref", "manual_description")
+        text = "✍️ Hãy mô tả hook, số cảnh, nhịp dựng, visual, caption và CTA của video mẫu." if normalize_user_language(lang) == "vi" else "✍️ Describe the hook, scenes, pacing, visual style, caption and CTA."
+        return await safe_edit_or_send(query, text, reply_markup=video_v6_keyboard([], lang, back=("⬅️ Video mẫu / Kênh mẫu", "videoref|hub")))
+    if action == "format":
+        plan = get_latest_developing_video_plan(uid, "videoref")
+        if plan:
+            return await safe_edit_or_send_long_html(query, video_reference_plan_text(plan, lang), reply_markup=video_reference_result_keyboard(lang))
+        return await safe_edit_or_send(
+            query,
+            "🎬 Hãy upload video mẫu, nhập link/mô tả hoặc chọn format trong kho trước. Bước lập kế hoạch không trừ Xu."
+            if normalize_user_language(lang) == "vi" else "🎬 Add a reference or choose a saved format first. Planning does not charge Xu.",
+            reply_markup=video_reference_hub_keyboard(lang),
+        )
+    if action == "publish_package":
+        plan = get_latest_developing_video_plan(uid, "videoref") or {"selected_topic": "nội dung theo format kênh"}
+        package = create_publish_package(uid, plan, get_latest_channel_profile(uid))
+        return await safe_edit_or_send(query, publish_package_text(package, lang), parse_mode="HTML", reply_markup=publish_package_keyboard(lang))
+    if action == "save_catalog":
+        plan = get_latest_developing_video_plan(uid, "videoref") or {}
+        ref_id = _safe_int(plan.get("reference_id"), 0)
+        if ref_id:
+            update_reference_video_metadata(
+                ref_id,
+                uid,
+                niche=_short_pending_text(plan.get("selected_topic"), 180),
+                format_type=_short_pending_text(plan.get("analysis_kind"), 60),
+                hook_pattern="hook_0_3s_then_proof_then_cta",
+                scene_count=3,
+                caption_style="short_channel_aware",
+                cta_style="soft_action_cta",
+                visual_style="original_adaptation",
+                safety_notes=REFERENCE_SAFETY_NOTE,
+                status="active",
+            )
+        text = "📌 Đã lưu metadata/format vào kho mẫu. Không lưu bản video lớn lâu dài và không trừ Xu." if normalize_user_language(lang) == "vi" else "📌 Format metadata saved. No long-term large video storage and no Xu charge."
+        return await safe_edit_or_send(query, text, reply_markup=video_reference_result_keyboard(lang))
+    if action == "performance":
+        clear_developing_video_pending(uid)
+        set_developing_video_pending(uid, "videoref", "performance_input")
+        text = (
+            "📊 Nhập hiệu quả bài đăng theo mẫu:\nurl=https://... views=1000 likes=50 comments=5 clicks=10 orders=2 revenue=500000 note=..."
+            if normalize_user_language(lang) == "vi" else
+            "📊 Enter performance: url=https://... views=1000 likes=50 comments=5 clicks=10 orders=2 revenue=500000 note=..."
+        )
+        return await safe_edit_or_send(query, text, reply_markup=video_v6_keyboard([], lang, back=("⬅️ Gói đăng bài", "videoref|publish_package")))
+    if action == "auto_publish":
+        text = (
+            "🚫 TOAN AAS hiện chỉ xuất gói đăng bài để bạn tự đăng. Tự động đăng sẽ mở sau khi kết nối kênh hợp lệ và bạn xác nhận rõ. Bot chưa lưu token và chưa đăng nội dung."
+            if normalize_user_language(lang) == "vi" else
+            "🚫 Manual publish package only. Auto-publish stays disabled until a valid channel is connected and explicitly confirmed."
+        )
+        return await safe_edit_or_send(query, text, reply_markup=publish_package_keyboard(lang))
 
     if not VIDEO_ANALYZE_ENABLED:
         clear_developing_video_pending(uid)
@@ -87884,6 +88569,37 @@ async def cmd_film_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_storyboard_upload_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_storyboard_crop(update, context)
 
+async def cmd_admin_import_reference_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    if context.args:
+        return await cmd_reference_add(update, context)
+    uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
+    clear_developing_video_pending(uid)
+    set_developing_video_pending(uid, "videoref", "await_video")
+    await update.message.reply_text(
+        "📤 Gửi video mẫu ngay sau lệnh này. Bot chỉ lưu metadata/format, không giữ video lớn miễn phí lâu dài và không trừ Xu.\n\n"
+        "Hoặc dùng: /admin_import_reference_video url=https://... title=... platform=tiktok",
+        reply_markup=video_reference_start_keyboard(lang),
+    )
+
+async def cmd_reference_catalog_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_ID:
+        return
+    counts = reference_catalog_status_data()
+    await update.message.reply_text(
+        "📚 <b>REFERENCE CATALOG STATUS</b>\n"
+        f"• Reference videos: <b>{counts.get('reference_videos', 0)}</b>\n"
+        f"• Channel profiles: <b>{counts.get('channel_profiles', 0)}</b>\n"
+        f"• Publish packages: <b>{counts.get('publish_packages', 0)}</b>\n"
+        f"• Performance events: <b>{counts.get('performance_events', 0)}</b>\n"
+        "• Auto publish: <b>OFF / manual package only</b>\n"
+        "• Safety: học format, không copy/reup\n"
+        "• Planning charge: <b>0 Xu</b>",
+        parse_mode="HTML",
+    )
+
 async def cmd_reference_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != ADMIN_ID:
         return
@@ -98672,6 +99388,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("reference_pack", admin_internal_command(cmd_reference_pack)))
     tg_app.add_handler(CommandHandler("reference_videos", admin_internal_command(cmd_reference_videos)))
     tg_app.add_handler(CommandHandler("reference_add", admin_internal_command(cmd_reference_add)))
+    tg_app.add_handler(CommandHandler("admin_import_reference_video", admin_internal_command(cmd_admin_import_reference_video)))
+    tg_app.add_handler(CommandHandler("reference_catalog_status", admin_internal_command(cmd_reference_catalog_status)))
     tg_app.add_handler(CommandHandler("viral_remix", admin_internal_command(cmd_viral_remix)))
     tg_app.add_handler(CommandHandler("reference_analyze", admin_internal_command(cmd_reference_analyze)))
     tg_app.add_handler(CommandHandler("reference_build", admin_internal_command(cmd_reference_build)))
