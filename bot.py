@@ -38780,6 +38780,69 @@ FREE_HUB_LIBRARY_CATEGORIES = {
     "music": ("music_sfx", "🎵 Nhạc / SFX"),
 }
 
+FREE_HUB_SUGGESTION_BANK = {
+    "meta_ai_prompt": [
+        "Nước hoa nam dùng khi đi hẹn hò, phong cách sang trọng, đăng TikTok/Reels",
+        "Máy xay sinh tố mini cho dân văn phòng, muốn video bán hàng ngắn",
+        "Dịch vụ thiết kế logo cho shop nhỏ, cần prompt quảng cáo Meta AI",
+        "Khóa học affiliate cho người mới, giọng gần gũi, CTA mềm",
+        "App AI tạo nội dung cho chủ shop, muốn video demo nhanh",
+        "Quán cà phê mới mở, cần video khai trương cảm xúc",
+        "Sản phẩm chăm sóc da cho nữ văn phòng, phong cách UGC chân thật",
+        "Dịch vụ làm video AI cho shop mỹ phẩm, muốn concept cao cấp",
+        "Phụ kiện điện thoại giá tốt, phong cách nhanh, rõ lợi ích",
+    ],
+    "caption_hashtag": [
+        "Máy xay sinh tố mini cho dân văn phòng, đăng TikTok",
+        "Nước hoa nam dùng khi đi hẹn hò, caption bán hàng nhẹ",
+        "Dịch vụ tạo video AI cho shop online, đăng Facebook",
+        "Quán cà phê mới mở, caption khai trương có CTA",
+        "App AI tạo nội dung cho người mới, đăng Reels",
+        "Khóa học affiliate cho người mới bắt đầu, giọng truyền cảm hứng",
+        "Sản phẩm chăm sóc da, caption before/after",
+        "Dịch vụ thiết kế logo, caption giới thiệu portfolio",
+        "Combo video AI cho chủ shop, caption ưu đãi nội địa",
+    ],
+    "content_idea": [
+        "Dịch vụ tạo video AI cho shop mỹ phẩm",
+        "App AI tạo nội dung cho người mới kinh doanh online",
+        "Máy xay sinh tố mini màu xanh ngọc",
+        "Khóa học affiliate cho người mới",
+        "Nước hoa nam cao cấp cho buổi gặp quan trọng",
+        "Quán cà phê mới mở cần nội dung 7 ngày",
+        "Dịch vụ thiết kế logo và nhận diện thương hiệu nhỏ",
+        "Sản phẩm chăm sóc da cho nữ văn phòng",
+        "Phụ kiện điện thoại bán qua TikTok Shop",
+    ],
+    "image_video_prompt": [
+        "Logo TOAN AAS màu xanh ngọc, công nghệ tối giản, nền trắng sạch",
+        "Banner quảng cáo dịch vụ video AI cho shop online",
+        "Ảnh sản phẩm nước hoa nam cao cấp phong cách studio luxury",
+        "Video AI 9:16 giới thiệu máy xay sinh tố mini màu xanh ngọc",
+        "Prompt ghép 5 ảnh thành video affiliate sản phẩm công nghệ",
+        "Ảnh lifestyle quán cà phê mới mở, ánh sáng sáng sớm",
+        "Video AI before/after cho sản phẩm chăm sóc da",
+        "Ảnh quảng cáo app AI tạo nội dung, bố cục rõ CTA",
+        "Video cinematic ngắn cho khóa học affiliate người mới",
+    ],
+    "image_prompt": [
+        "Ảnh sản phẩm studio sạch, chủ thể rõ, ánh sáng mềm",
+        "Banner social 1:1 cho chiến dịch bán hàng nhẹ",
+        "Ảnh dọc 9:16 cho TikTok/Reels, mobile-first",
+        "Logo công nghệ tối giản màu xanh ngọc",
+        "Ảnh lifestyle có người dùng sản phẩm tự nhiên",
+        "Ảnh quảng cáo luxury nền tối nhẹ, không rối chữ",
+    ],
+    "video_prompt": [
+        "Video sản phẩm 5 giây mở bằng close-up rồi hero shot",
+        "Video UGC đời thường nêu vấn đề rồi đưa giải pháp",
+        "Video cinematic 10 giây có camera push-in và CTA sạch",
+        "Video before/after 9:16 cho sản phẩm làm đẹp",
+        "Video quick tips 3 bước cho app/dịch vụ AI",
+        "Video affiliate hook mạnh nhưng không phóng đại quá mức",
+    ],
+}
+
 def free_hub_main_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
@@ -38801,10 +38864,8 @@ def free_hub_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("✍️ Caption/Hashtag" if is_vi else "✍️ Caption/hashtags", "freehub|caption"),
             ("🧠 Ý tưởng content" if is_vi else "🧠 Content ideas", "freehub|ideas"),
             ("🖼 Prompt ảnh/video" if is_vi else "🖼 Image/video prompts", "freehub|prompts"),
-            ("📄 Tài liệu/PDF miễn phí" if is_vi else "📄 Documents/PDF", "freehub|docs"),
-            ("📝 Ghi chú/Lưu trữ" if is_vi else "📝 Notes/storage", "freehub|notes"),
-            ("🔐 Kết nối API riêng" if is_vi else "🔐 Connect own API", "freehub|byok"),
-            ("📤 Upload để hậu kỳ" if is_vi else "📤 Upload for postprocess", "freehub|upload"),
+            ("📝 Ghi chú / Tài liệu" if is_vi else "📝 Notes / Documents", "menu|main_memory"),
+            ("📥 Lưu media tạm để dùng tiếp" if is_vi else "📥 Save media temporarily", "freehub|upload"),
         ],
         nav_back=None,
         nav_main=True,
@@ -38882,6 +38943,87 @@ def free_hub_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         InlineKeyboardButton("⬅️ Công cụ miễn phí" if normalize_user_language(lang) == "vi" else "⬅️ Free tools", callback_data="freehub|main"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ]])
+
+def normalize_free_hub_task_type(task_type: str) -> str:
+    task_type = str(task_type or "").strip()
+    if task_type in {"image_prompt", "video_prompt"}:
+        return "image_video_prompt"
+    return task_type
+
+def free_hub_suggestion_items(task_type: str, offset: int = 0) -> list[str]:
+    task_type = normalize_free_hub_task_type(task_type)
+    bank = list(FREE_HUB_SUGGESTION_BANK.get(task_type) or FREE_HUB_SUGGESTION_BANK["meta_ai_prompt"])
+    if not bank:
+        return []
+    start = _safe_int(offset, 0) % len(bank)
+    return [bank[(start + index) % len(bank)] for index in range(min(3, len(bank)))]
+
+def free_hub_suggestion_title(task_type: str, lang: str = "vi") -> str:
+    task_type = normalize_free_hub_task_type(task_type)
+    is_vi = normalize_user_language(lang) == "vi"
+    labels_vi = {
+        "meta_ai_prompt": "Prompt Meta AI",
+        "caption_hashtag": "Caption/Hashtag",
+        "content_idea": "Ý tưởng content",
+        "image_video_prompt": "Prompt ảnh/video",
+        "hook_script": "Hook/kịch bản",
+    }
+    labels_en = {
+        "meta_ai_prompt": "Meta AI prompt",
+        "caption_hashtag": "Caption/Hashtag",
+        "content_idea": "Content ideas",
+        "image_video_prompt": "Image/video prompts",
+        "hook_script": "Hook/script",
+    }
+    return (labels_vi if is_vi else labels_en).get(task_type, "Công cụ miễn phí")
+
+def free_hub_suggestions_text(task_type: str, suggestions: list[str], lang: str = "vi") -> str:
+    title = free_hub_suggestion_title(task_type, lang)
+    lines = [
+        f"✨ <b>3 gợi ý {html.escape(title)}</b>",
+        "",
+        "Chọn một gợi ý bên dưới để TOAN AAS tạo nội dung mẫu, hoặc bấm <b>Tự nhập riêng</b> nếu bạn đã có chủ đề.",
+        "",
+    ]
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            f"✨ <b>3 {html.escape(title)} suggestions</b>",
+            "",
+            "Choose one suggestion below, or tap <b>Custom input</b> if you already have your own topic.",
+            "",
+        ]
+    for index, item in enumerate(suggestions[:3], 1):
+        lines.append(f"{index}. {html.escape(str(item))}")
+    lines.extend(["", "Bước này chỉ tạo text, không gọi API render và không trừ Xu." if normalize_user_language(lang) == "vi" else "This step only creates text. No render API call and no Xu charge."])
+    return "\n".join(lines)
+
+def free_hub_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("1️⃣ Dùng gợi ý 1" if is_vi else "1️⃣ Use suggestion 1", "freehub|suggest_pick1"),
+            ("2️⃣ Dùng gợi ý 2" if is_vi else "2️⃣ Use suggestion 2", "freehub|suggest_pick2"),
+            ("3️⃣ Dùng gợi ý 3" if is_vi else "3️⃣ Use suggestion 3", "freehub|suggest_pick3"),
+            ("🔄 Gợi ý khác" if is_vi else "🔄 More suggestions", "freehub|suggest_more"),
+            ("✍️ Tự nhập riêng" if is_vi else "✍️ Custom input", "freehub|suggest_custom"),
+        ],
+        nav_back=("⬅️ Công cụ miễn phí" if is_vi else "⬅️ Free tools", "freehub|main"),
+        lang=lang,
+    )
+
+def free_hub_generate_task_payload(task_type: str, text: str, variant_seed: int = 0) -> tuple[dict, str, str]:
+    task_type = normalize_free_hub_task_type(task_type)
+    if task_type == "meta_ai_prompt":
+        return free_hub_meta_prompt_pack(text, variant_seed), task_type, "local_prompt_library"
+    if task_type == "content_idea":
+        return free_hub_content_ideas_pack(text, variant_seed), task_type, "local_prompt_library"
+    if task_type == "caption_hashtag":
+        return free_hub_caption_pack(text, variant_seed), task_type, "local_prompt_library"
+    if task_type == "image_video_prompt":
+        return free_hub_image_video_prompt_pack(text, variant_seed), task_type, "local_prompt_library"
+    if task_type == "hook_script":
+        return {"title": "Hook / Kịch bản miễn phí", **hook_script_pack(text)}, task_type, "local_prompt_library"
+    return free_hub_meta_prompt_pack(text, variant_seed), "meta_ai_prompt", "local_prompt_library"
 
 def free_hub_topic(value: str, limit: int = 180) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
@@ -39286,14 +39428,15 @@ def free_hub_byok_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def free_hub_upload_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "📤 <b>UPLOAD FOR POSTPROCESSING</b>\n\n"
-            "Send one image or video. TOAN AAS will store it temporarily and offer existing image/video tools. "
+            "📥 <b>SAVE MEDIA TEMPORARILY</b>\n\n"
+            "Send one image or video. TOAN AAS will store it temporarily so you can continue with existing image/video tools. "
             "Paid postprocessing always shows its price before confirmation."
         )
     return (
-        "📤 <b>Upload kết quả để hậu kỳ</b>\n\n"
+        "📥 <b>Lưu ảnh/video tạm để dùng tiếp</b>\n\n"
         "Hãy gửi một ảnh hoặc video bạn đã tạo bằng Meta AI/công cụ bên ngoài.\n"
-        "TOAN AAS sẽ lưu tạm rồi nối sang công cụ ảnh/video hiện có. Caption/hashtag có thể dùng miễn phí; "
+        "TOAN AAS sẽ lưu tạm rồi nối sang công cụ ảnh/video hiện có. Ảnh/video tạm chỉ dùng cho phiên hiện tại và có TTL tự dọn.\n"
+        "Caption/hashtag có thể dùng miễn phí; "
         "phụ đề, lồng tiếng hoặc render tốn Xu phải báo giá trước và không tự trừ Xu."
     )
 
@@ -48083,17 +48226,39 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
         quota = free_hub_quota_payload(uid)
         if not quota["allowed"]:
             return await safe_edit_or_send(query, free_hub_quota_exhausted_text(lang), reply_markup=free_hub_main_keyboard(lang))
+        if task_type in {"meta_ai_prompt", "caption_hashtag", "content_idea", "image_prompt", "video_prompt", "hook_script"}:
+            task_type = normalize_free_hub_task_type(task_type)
+            suggestions = free_hub_suggestion_items(task_type, 0)
+            set_free_hub_pending(uid, "suggestions", task_type=task_type, suggestion_offset=0, suggestion_items=suggestions)
+            return await safe_edit_or_send(
+                query,
+                free_hub_suggestions_text(task_type, suggestions, lang),
+                parse_mode="HTML",
+                reply_markup=free_hub_suggestions_keyboard(lang),
+            )
         set_free_hub_pending(uid, "input", task_type=task_type)
         return await safe_edit_or_send(query, free_hub_input_text(task_type, lang), reply_markup=free_hub_input_keyboard(lang))
     if action == "prompts":
         quota = free_hub_quota_payload(uid)
         if not quota["allowed"]:
             return await safe_edit_or_send(query, free_hub_quota_exhausted_text(lang), reply_markup=free_hub_main_keyboard(lang))
-        set_free_hub_pending(uid, "input", task_type="image_video_prompt")
-        return await safe_edit_or_send(query, free_hub_input_text("image_video_prompt", lang), parse_mode="HTML", reply_markup=free_hub_input_keyboard(lang))
-    if action == "docs":
+        task_type = "image_video_prompt"
+        suggestions = free_hub_suggestion_items(task_type, 0)
+        set_free_hub_pending(uid, "suggestions", task_type=task_type, suggestion_offset=0, suggestion_items=suggestions)
+        return await safe_edit_or_send(
+            query,
+            free_hub_suggestions_text(task_type, suggestions, lang),
+            parse_mode="HTML",
+            reply_markup=free_hub_suggestions_keyboard(lang),
+        )
+    if action in {"docs", "notes"}:
         clear_free_hub_pending(uid)
-        return await safe_edit_or_send(query, free_hub_docs_text(lang), reply_markup=free_hub_docs_keyboard(lang))
+        return await safe_edit_or_send(
+            query,
+            menu_text_main_memory_i18n(lang),
+            parse_mode="HTML",
+            reply_markup=main_memory_keyboard(lang, uid),
+        )
     if action == "docs_split_merge":
         return await safe_edit_or_send(
             query,
@@ -48119,18 +48284,57 @@ async def handle_free_hub_callback(update: Update, context: ContextTypes.DEFAULT
                 lang=lang,
             ),
         )
-    if action == "notes":
-        clear_free_hub_pending(uid)
-        return await safe_edit_or_send(query, free_hub_notes_text(uid, lang), reply_markup=free_hub_notes_keyboard(lang))
     if action == "byok":
         clear_free_hub_pending(uid)
-        return await safe_edit_or_send(query, free_hub_byok_text(lang), reply_markup=free_hub_byok_keyboard(lang))
+        return await safe_edit_or_send(
+            query,
+            "🔐 Kết nối API riêng chưa mở trong khu công cụ miễn phí. Vui lòng liên hệ admin nếu cần cấu hình provider riêng. Bot chưa nhận API key và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "🔐 BYOK is not open in Free Tools yet. Contact admin if you need a private provider setup. No API key was accepted and no Xu was charged.",
+            reply_markup=free_hub_main_keyboard(lang),
+        )
     if action == "upload":
         set_free_hub_pending(uid, "upload", task_type="upload_for_postprocess")
         return await safe_edit_or_send(query, free_hub_upload_text(lang), reply_markup=free_hub_upload_keyboard(lang))
     if action == "library":
         clear_free_hub_pending(uid)
         return await safe_edit_or_send(query, free_hub_library_text(lang), reply_markup=free_hub_library_keyboard(lang))
+    if action in {"suggest_more", "suggest_custom"} or action.startswith("suggest_pick"):
+        state = get_free_hub_pending(uid)
+        task_type = normalize_free_hub_task_type(str(state.get("task_type") or "meta_ai_prompt"))
+        if action == "suggest_custom":
+            set_free_hub_pending(uid, "input", task_type=task_type)
+            return await safe_edit_or_send(query, free_hub_input_text(task_type, lang), parse_mode="HTML", reply_markup=free_hub_input_keyboard(lang))
+        if action == "suggest_more":
+            offset = _safe_int(state.get("suggestion_offset"), 0) + 3
+            suggestions = free_hub_suggestion_items(task_type, offset)
+            set_free_hub_pending(uid, "suggestions", task_type=task_type, suggestion_offset=offset, suggestion_items=suggestions)
+            return await safe_edit_or_send(
+                query,
+                free_hub_suggestions_text(task_type, suggestions, lang),
+                parse_mode="HTML",
+                reply_markup=free_hub_suggestions_keyboard(lang),
+            )
+        try:
+            selected_index = max(0, min(2, int(action.replace("suggest_pick", "", 1)) - 1))
+        except Exception:
+            selected_index = 0
+        suggestions = list(state.get("suggestion_items") or free_hub_suggestion_items(task_type, _safe_int(state.get("suggestion_offset"), 0)))
+        topic = str(suggestions[selected_index] if selected_index < len(suggestions) else (suggestions[0] if suggestions else "sản phẩm/chủ đề của bạn"))
+        reason = sensitive_free_task_reason(topic, task_type)
+        if reason:
+            clear_free_hub_pending(uid)
+            return await safe_edit_or_send(query, free_hub_sensitive_text(lang), reply_markup=free_hub_main_keyboard(lang))
+        payload, task_type, provider = free_hub_generate_task_payload(task_type, topic)
+        set_free_hub_pending(uid, "result", task_type=task_type, user_input=topic, result=payload, provider=provider, variant_seed=0)
+        count = free_hub_record_success(query.from_user, task_type, provider)
+        await safe_edit_or_send(
+            query,
+            free_hub_prompt_result_text(payload, task_type, provider),
+            parse_mode="HTML",
+            reply_markup=free_hub_result_keyboard(lang, task_type, meta=task_type == "meta_ai_prompt"),
+        )
+        return await maybe_send_free_hub_promo(query.message, uid, lang, count)
     if action.startswith("lib_") and action not in {"lib_more", "lib_back"} and not action.startswith("lib_pick"):
         token = action.replace("lib_", "", 1)
         category_id, label = FREE_HUB_LIBRARY_CATEGORIES.get(token, ("", "Prompt Library"))
@@ -96858,25 +97062,17 @@ async def handle_free_hub_pending_text(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(free_hub_quota_exhausted_text(lang), reply_markup=free_hub_main_keyboard(lang))
         return True
     if task_type == "meta_ai_prompt":
-        payload = free_hub_meta_prompt_pack(text)
-        provider = "local_prompt_library"
+        payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
     elif task_type == "content_idea":
-        payload = free_hub_content_ideas_pack(text)
-        provider = "local_prompt_library"
+        payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
     elif task_type == "caption_hashtag":
-        payload = free_hub_caption_pack(text)
-        provider = "local_prompt_library"
+        payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
     elif task_type == "image_video_prompt":
-        payload = free_hub_image_video_prompt_pack(text)
-        provider = "local_prompt_library"
-        task_type = "image_video_prompt"
+        payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
     elif task_type in {"image_prompt", "video_prompt"}:
-        payload = free_hub_image_video_prompt_pack(text)
-        provider = "local_prompt_library"
-        task_type = "image_video_prompt"
+        payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
     elif task_type == "hook_script":
-        payload = {"title": "Hook / Kịch bản miễn phí", **hook_script_pack(text)}
-        provider = "local_prompt_library"
+        payload, task_type, provider = free_hub_generate_task_payload(task_type, text)
     elif task_type == "free_chat":
         result = await free_provider_router_call(task_type, text, uid)
         if result.get("blocked"):

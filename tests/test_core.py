@@ -6479,7 +6479,8 @@ def test_free_tools_menu_byok_and_docs_are_guarded():
     assert "chuẩn bị nội dung" in main_text
     main_buttons = [button.text for row in bot.free_hub_main_keyboard("vi").inline_keyboard for button in row]
     assert "🤖 Prompt Meta AI" in main_buttons
-    assert "🔐 Kết nối API riêng" in main_buttons
+    assert "📝 Ghi chú / Tài liệu" in main_buttons
+    assert "🔐 Kết nối API riêng" not in main_buttons
     assert "🔑 API riêng của tôi" not in main_buttons
 
     byok_text = bot.free_hub_byok_text("vi")
@@ -6554,8 +6555,8 @@ def test_free_tools_followup_buttons_have_handlers(monkeypatch):
     assert "🎬 Mở Video AI" in use_video_buttons
 
     byok = asyncio.run(press("freehub|byok", uid))
-    assert "Kết nối API riêng" in byok["text"]
-    assert "không nên gửi API key" in byok["text"]
+    assert "Kết nối API riêng chưa mở" in byok["text"]
+    assert "chưa nhận API key" in byok["text"]
 
 
 def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch):

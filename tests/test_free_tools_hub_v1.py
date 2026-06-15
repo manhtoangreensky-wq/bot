@@ -145,15 +145,14 @@ def test_free_tools_main_keyboard_is_compact_placeholder():
         "freehub|caption",
         "freehub|ideas",
         "freehub|prompts",
-        "freehub|docs",
-        "freehub|notes",
-        "freehub|byok",
+        "menu|main_memory",
         "freehub|upload",
         "menu|main",
     }.issubset(callbacks)
     assert "freehub|chat" not in callbacks
     assert "freehub|hook" not in callbacks
     assert "freehub|library" not in callbacks
+    assert "freehub|byok" not in callbacks
 
 
 def test_free_tools_button_opens_menu(monkeypatch):
@@ -210,6 +209,8 @@ def test_free_hub_callbacks_have_handlers():
         "variant",
         "caption_more",
         "save",
+        "suggest_more",
+        "suggest_custom",
     }
     for action in required_actions:
         assert f'"{action}"' in handler
@@ -224,6 +225,37 @@ def test_free_hub_reuses_existing_handlers():
     assert "freehub|docs_summary_guard" in docs_callbacks
     assert "menu|main_memory" in notes_callbacks
     assert "menu|memory_storage_status" in notes_callbacks
+
+
+def test_free_hub_main_links_notes_documents_directly_and_hides_byok():
+    callbacks = _callbacks(bot.free_hub_main_keyboard("vi"))
+    assert "menu|main_memory" in callbacks
+    assert "freehub|docs" not in callbacks
+    assert "freehub|notes" not in callbacks
+    assert "freehub|byok" not in callbacks
+    labels = [button.text for row in bot.free_hub_main_keyboard("vi").inline_keyboard for button in row]
+    assert "📝 Ghi chú / Tài liệu" in labels
+    assert not any("API" in label for label in labels)
+
+
+def test_free_hub_suggestion_flow_before_input():
+    suggestions = bot.free_hub_suggestion_items("meta_ai_prompt", 0)
+    more = bot.free_hub_suggestion_items("meta_ai_prompt", 3)
+    assert len(suggestions) == 3
+    assert len(more) == 3
+    assert suggestions != more
+    text = bot.free_hub_suggestions_text("meta_ai_prompt", suggestions, "vi")
+    assert "3 gợi ý" in text
+    assert "không trừ Xu" in text
+    callbacks = _callbacks(bot.free_hub_suggestions_keyboard("vi"))
+    assert {
+        "freehub|suggest_pick1",
+        "freehub|suggest_pick2",
+        "freehub|suggest_pick3",
+        "freehub|suggest_more",
+        "freehub|suggest_custom",
+        "freehub|main",
+    }.issubset(callbacks)
 
 
 def test_free_hub_back_routing():
