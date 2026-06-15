@@ -29027,6 +29027,40 @@ def translation_session_is_active(user_id) -> bool:
 def translation_pair_label(lang_a: str, lang_b: str) -> str:
     return f"{translate_target_label(lang_a)} ↔ {translate_target_label(lang_b)}"
 
+def translation_pair_draft_key(user_id, mode: str = "two_way") -> str:
+    return f"translation_pair_draft:{user_id}:{mode}"
+
+def get_translation_pair_draft(user_id, mode: str = "two_way") -> dict:
+    key = translation_pair_draft_key(user_id, mode)
+    draft = USER_PENDING.get(key) or {}
+    if not draft:
+        draft = {"source": "auto", "target": "en", "mode": str(mode or "two_way")}
+        USER_PENDING[key] = draft
+    return dict(draft)
+
+def set_translation_pair_draft(user_id, mode: str = "two_way", source: str | None = None, target: str | None = None) -> dict:
+    draft = get_translation_pair_draft(user_id, mode)
+    if source is not None:
+        draft["source"] = normalize_translate_target(source) or "auto"
+    if target is not None:
+        normalized_target = normalize_translate_target(target)
+        draft["target"] = normalized_target if normalized_target and normalized_target != "auto" else "en"
+    draft["mode"] = str(mode or draft.get("mode") or "two_way")
+    USER_PENDING[translation_pair_draft_key(user_id, mode)] = draft
+    return dict(draft)
+
+def clear_translation_pair_drafts(user_id) -> None:
+    prefix = f"translation_pair_draft:{user_id}:"
+    for key in list(USER_PENDING.keys()):
+        if str(key).startswith(prefix):
+            USER_PENDING.pop(key, None)
+
+def translation_source_label_for_button(source: str) -> str:
+    normalized = normalize_translate_target(source)
+    if normalized == "auto" or not normalized:
+        return "Tự nhận diện"
+    return translate_target_label(normalized)
+
 def translation_detect_direction_target(text: str, session: dict) -> str:
     lang_a = normalize_translate_target(session.get("lang_a")) or "vi"
     lang_b = normalize_translate_target(session.get("lang_b")) or "en"
@@ -29044,7 +29078,7 @@ def translation_session_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🎙 Bật voice" if is_vi else "🎙 Enable voice", "menu|translation_output_voice"),
             ("⏹ Tắt chế độ dịch" if is_vi else "⏹ Stop translation", "menu|translation_stop_session"),
         ],
-        nav_back=("⬅️ Dịch thuật" if is_vi else "⬅️ Translation", "menu|translate"),
+        nav_back=("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
         nav_main=True,
         lang=lang,
     )
@@ -29069,19 +29103,50 @@ def translation_session_started_text(session: dict, lang: str = "vi") -> str:
         "Voice-to-voice requires STT + TTS and needs a separate confirmation/budget. No Xu charged."
     )
 
-def translation_pair_keyboard(mode: str = "two_way", lang: str = "vi") -> InlineKeyboardMarkup:
+def translation_pair_keyboard(mode: str = "two_way", lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    prefix = "translation_live_pair" if mode == "live_conversation" else "translation_two_way_pair"
+    draft = get_translation_pair_draft(user_id or "__customer__", mode)
+    source = draft.get("source") or "auto"
+    target = draft.get("target") or "en"
     return build_2col_keyboard(
         [
-            ("🇻🇳 Việt ↔ English", f"menu|{prefix}_vi_en"),
-            ("🇨🇳 中文 ↔ Tiếng Việt", f"menu|{prefix}_zh_vi"),
-            ("🇯🇵 日本語 ↔ Tiếng Việt", f"menu|{prefix}_ja_vi"),
-            ("🇰🇷 한국어 ↔ Tiếng Việt", f"menu|{prefix}_ko_vi"),
-            ("🌍 Tự nhận diện" if is_vi else "🌍 Auto detect", "menu|translation_auto_detect"),
-            ("✍️ Nhập cặp khác" if is_vi else "✍️ Custom pair", "menu|translation_set_source_lang"),
+            (f"🌐 Nguồn: {translation_source_label_for_button(source)}" if is_vi else f"🌐 From: {translation_source_label_for_button(source)}", f"menu|translation_pair_source_{mode}"),
+            (f"➡️ Dịch sang: {translate_target_label(target)}" if is_vi else f"➡️ To: {translate_target_label(target)}", f"menu|translation_pair_target_{mode}"),
+            ("🔁 Đổi chiều" if is_vi else "🔁 Swap", f"menu|translation_pair_swap_{mode}"),
+            ("✅ Bắt đầu" if is_vi else "✅ Start", f"menu|translation_pair_start_{mode}"),
         ],
-        nav_back=("⬅️ Dịch thuật" if is_vi else "⬅️ Translation", "menu|translate"),
+        nav_back=("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
+        nav_main=True,
+        lang=lang,
+    )
+
+def translation_pair_language_picker_text(kind: str, mode: str, lang: str = "vi") -> str:
+    is_source = kind == "source"
+    if normalize_user_language(lang) == "vi":
+        label = "ngôn ngữ cần dịch" if is_source else "ngôn ngữ dịch ra"
+        return f"🌐 <b>Chọn {label}</b>\n\nChọn nhanh bên dưới hoặc nhập cặp riêng trong bước sau. Bot chưa trừ Xu."
+    label = "source language" if is_source else "target language"
+    return f"🌐 <b>Choose {label}</b>\n\nPick a language. No Xu charged."
+
+def translation_pair_language_picker_keyboard(kind: str, mode: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    prefix = f"translation_pair_set_{kind}_{mode}"
+    items = []
+    if kind == "source":
+        items.append(("🌍 Tự nhận diện" if is_vi else "🌍 Auto detect", f"menu|{prefix}_auto"))
+    items.extend([
+        ("🇻🇳 Tiếng Việt", f"menu|{prefix}_vi"),
+        ("🇺🇸 English", f"menu|{prefix}_en"),
+        ("🇨🇳 中文", f"menu|{prefix}_zh"),
+        ("🇯🇵 日本語", f"menu|{prefix}_ja"),
+        ("🇰🇷 한국어", f"menu|{prefix}_ko"),
+        ("🇹🇭 ไทย", f"menu|{prefix}_th"),
+        ("🇫🇷 Français", f"menu|{prefix}_fr"),
+        ("🇩🇪 Deutsch", f"menu|{prefix}_de"),
+    ])
+    return build_2col_keyboard(
+        items,
+        nav_back=("⬅️ Chọn ngôn ngữ" if is_vi else "⬅️ Language pair", f"menu|translation_pair_back_{mode}"),
         nav_main=True,
         lang=lang,
     )
@@ -29107,7 +29172,7 @@ def translation_voice_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📝 Chỉ text dịch" if is_vi else "📝 Text only", "tr_pick|voice"),
             ("🔊 Text + audio đọc" if is_vi else "🔊 Text + spoken audio", "menu|translation_output_voice"),
         ],
-        nav_back=("⬅️ Dịch thuật" if is_vi else "⬅️ Translation", "menu|translate"),
+        nav_back=("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
         nav_main=True,
         lang=lang,
     )
@@ -41081,40 +41146,61 @@ def translation_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "vi":
         return (
             "🌐 <b>Dịch thuật TOAN AAS</b>\n\n"
-            "Bạn muốn dịch theo kiểu nào?\n\n"
-            "TOAN AAS hỗ trợ dịch văn bản, voice/audio, transcript, tài liệu, phụ đề và chế độ hội thoại 2 chiều. "
-            "Tác vụ nhẹ có thể dùng miễn phí/tiết kiệm; tác vụ dài, STT/TTS/lồng tiếng sẽ báo Xu trước khi xử lý.\n\n"
-            "Lưu ý: <b>Dịch / Lồng tiếng video</b> là một nhánh riêng trong hub này, không thay thế toàn bộ Dịch thuật."
+            "Chọn nhóm dịch bạn muốn dùng:\n\n"
+            "• <b>Dịch ngôn ngữ:</b> văn bản, voice/audio, 2 chiều, hội thoại, tài liệu và transcript.\n"
+            "• <b>Dịch / Lồng tiếng video:</b> phụ đề, dịch phụ đề và lồng tiếng video.\n\n"
+            "Mở menu không gọi provider và không trừ Xu."
         )
     return (
         "🌐 <b>TOAN AAS Translation</b>\n\n"
-        "Choose how you want to translate: text, voice/audio, transcript, documents, subtitles or two-way conversation. "
-        "Long/STT/TTS/dubbing tasks are guarded and confirm pricing before processing."
+        "Choose a translation group: language translation or video translate/dubbing. Opening this menu does not call providers or charge Xu."
     )
 
 def translation_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return build_2col_keyboard(
         [
-            ("📝 Dịch văn bản" if is_vi else "📝 Translate text", "menu|translation_text"),
-            ("🎙 Dịch voice/audio" if is_vi else "🎙 Translate voice/audio", "menu|translation_voice"),
-            ("🔁 Dịch 2 chiều" if is_vi else "🔁 Two-way", "menu|translation_two_way"),
-            ("🗣 Nói chuyện dịch qua lại" if is_vi else "🗣 Interpreter mode", "menu|translation_live_conversation"),
-            ("📄 Dịch tài liệu" if is_vi else "📄 Translate document", "menu|translation_document"),
-            ("🧾 Dịch transcript" if is_vi else "🧾 Translate transcript", "menu|translation_transcript"),
+            ("🌐 Dịch ngôn ngữ" if is_vi else "🌐 Language translation", "menu|translation_language_hub"),
             ("🎬 Dịch / Lồng tiếng video" if is_vi else "🎬 Video translate/dub", "menu|translation_video_dub_menu"),
-            ("🌍 Chọn ngôn ngữ" if is_vi else "🌍 Language options", "menu|translation_language"),
-            ("⏹ Tắt chế độ dịch" if is_vi else "⏹ Stop translation", "menu|translation_stop_session"),
         ],
         nav_back=("⬅️ Menu chính" if is_vi else "⬅️ Main menu", "menu|main"),
         nav_main=False,
         lang=lang,
     )
 
+def translation_language_hub_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "vi":
+        return (
+            "🌐 <b>Dịch ngôn ngữ</b>\n\n"
+            "Chọn kiểu dịch. Các bước dịch văn bản ngắn không trừ Xu; voice/audio, tài liệu dài hoặc TTS sẽ được guard và báo rõ trước khi xử lý."
+        )
+    return (
+        "🌐 <b>Language translation</b>\n\n"
+        "Choose a translation mode. Short text translation does not charge Xu; voice/audio, long documents or TTS are guarded before processing."
+    )
+
+def translation_language_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("📝 Dịch văn bản" if is_vi else "📝 Translate text", "menu|translation_text"),
+            ("🎙 Dịch voice/audio" if is_vi else "🎙 Translate voice/audio", "menu|translation_voice"),
+            ("🔁 Dịch 2 chiều" if is_vi else "🔁 Two-way", "menu|translation_two_way"),
+            ("💬 Dịch hội thoại" if is_vi else "💬 Conversation", "menu|translation_live_conversation"),
+            ("📄 Dịch tài liệu" if is_vi else "📄 Translate document", "menu|translation_document"),
+            ("🧾 Dịch transcript" if is_vi else "🧾 Translate transcript", "menu|translation_transcript"),
+            ("▶️ Bật dịch tự động" if is_vi else "▶️ Auto translate", "menu|translation_language"),
+            ("⏹ Tắt dịch tự động" if is_vi else "⏹ Stop auto translate", "menu|translation_stop_session"),
+        ],
+        nav_back=("⬅️ Dịch thuật" if is_vi else "⬅️ Translation", "menu|translate"),
+        nav_main=True,
+        lang=lang,
+    )
+
 def translation_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return build_2col_keyboard(
         [],
-        nav_back=("⬅️ Dịch thuật" if normalize_user_language(lang) == "vi" else "⬅️ Translation", "menu|translate"),
+        nav_back=("⬅️ Dịch ngôn ngữ" if normalize_user_language(lang) == "vi" else "⬅️ Language translation", "menu|translation_language_hub"),
         nav_main=True,
         lang=lang,
     )
@@ -47892,6 +47978,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return menu_text_main_audio_i18n(lang), main_audio_keyboard(lang)
     if action == "translate":
         return translation_menu_text(lang), translation_menu_keyboard(lang)
+    if action == "translation_language_hub":
+        return translation_language_hub_text(lang), translation_language_hub_keyboard(lang)
     if action == "translation_auto_target":
         return menu_text_translate_i18n(False, lang), translate_language_keyboard(False, lang)
     if action == "translate_more":
@@ -47951,6 +48039,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_main_audio(), main_audio_keyboard()
     if action == "translate":
         return translation_menu_text("vi"), translation_menu_keyboard("vi")
+    if action == "translation_language_hub":
+        return translation_language_hub_text("vi"), translation_language_hub_keyboard("vi")
     if action == "translation_auto_target":
         return menu_text_translate(False), translate_language_keyboard(False)
     if action == "translate_more":
@@ -50058,19 +50148,80 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=translation_voice_menu_keyboard(lang),
         )
     if action == "translation_two_way":
+        set_translation_pair_draft(query.from_user.id, "two_way")
         text = (
-            "🔁 <b>Dịch 2 chiều</b>\n\nChọn cặp ngôn ngữ. Sau khi bật, bạn gửi văn bản và TOAN AAS sẽ dịch sang ngôn ngữ còn lại. Bot chưa trừ Xu."
+            "🔁 <b>Dịch 2 chiều</b>\n\nChọn ngôn ngữ nguồn và ngôn ngữ dịch ra như Google Dịch. Sau khi bật, bạn gửi văn bản và TOAN AAS sẽ dịch theo cặp đã chọn. Bot chưa trừ Xu."
             if normalize_user_language(lang) == "vi" else
-            "🔁 <b>Two-way translation</b>\n\nChoose a language pair. Send text and TOAN AAS translates to the other side. No Xu charged."
+            "🔁 <b>Two-way translation</b>\n\nChoose source and target languages. Send text and TOAN AAS translates using that pair. No Xu charged."
         )
-        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_pair_keyboard("two_way", lang))
+        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_pair_keyboard("two_way", lang, query.from_user.id))
     if action == "translation_live_conversation":
+        set_translation_pair_draft(query.from_user.id, "live_conversation")
         text = (
-            "🗣 <b>Nói chuyện dịch qua lại</b>\n\nChế độ phiên dịch liên tục cho text. Voice-to-voice cần STT + TTS nên sẽ được guard/confirm riêng. Bot chưa trừ Xu."
+            "💬 <b>Dịch hội thoại</b>\n\nChọn ngôn ngữ cần dịch và ngôn ngữ dịch ra. Sau đó bạn cứ nhắn từng câu, TOAN AAS dịch liên tục đến khi bạn tắt. Bot chưa trừ Xu."
             if normalize_user_language(lang) == "vi" else
-            "🗣 <b>Interpreter mode</b>\n\nContinuous text interpreter mode. Voice-to-voice requires STT + TTS and is guarded separately. No Xu charged."
+            "💬 <b>Conversation translation</b>\n\nChoose source and target languages, then send messages. TOAN AAS translates until you stop the session. No Xu charged."
         )
-        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_pair_keyboard("live_conversation", lang))
+        return await safe_edit_query_message(query, text, parse_mode="HTML", reply_markup=translation_pair_keyboard("live_conversation", lang, query.from_user.id))
+    if action.startswith("translation_pair_source_") or action.startswith("translation_pair_target_"):
+        kind = "source" if action.startswith("translation_pair_source_") else "target"
+        mode = action.replace("translation_pair_source_", "", 1).replace("translation_pair_target_", "", 1)
+        return await safe_edit_query_message(
+            query,
+            translation_pair_language_picker_text(kind, mode, lang),
+            parse_mode="HTML",
+            reply_markup=translation_pair_language_picker_keyboard(kind, mode, lang),
+        )
+    if action.startswith("translation_pair_set_source_") or action.startswith("translation_pair_set_target_"):
+        kind = "source" if action.startswith("translation_pair_set_source_") else "target"
+        rest = action.replace("translation_pair_set_source_", "", 1).replace("translation_pair_set_target_", "", 1)
+        mode, code = rest.rsplit("_", 1) if "_" in rest else ("two_way", rest)
+        if kind == "source":
+            set_translation_pair_draft(query.from_user.id, mode, source=code)
+        else:
+            set_translation_pair_draft(query.from_user.id, mode, target=code)
+        title = "💬 <b>Dịch hội thoại</b>" if mode == "live_conversation" else "🔁 <b>Dịch 2 chiều</b>"
+        return await safe_edit_query_message(
+            query,
+            f"{title}\n\nChọn nguồn và đích. Bot chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=translation_pair_keyboard(mode, lang, query.from_user.id),
+        )
+    if action.startswith("translation_pair_back_"):
+        mode = action.replace("translation_pair_back_", "", 1) or "two_way"
+        title = "💬 <b>Dịch hội thoại</b>" if mode == "live_conversation" else "🔁 <b>Dịch 2 chiều</b>"
+        return await safe_edit_query_message(
+            query,
+            f"{title}\n\nChọn nguồn và đích. Bot chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=translation_pair_keyboard(mode, lang, query.from_user.id),
+        )
+    if action.startswith("translation_pair_swap_"):
+        mode = action.replace("translation_pair_swap_", "", 1) or "two_way"
+        draft = get_translation_pair_draft(query.from_user.id, mode)
+        source = draft.get("source") or "auto"
+        target = draft.get("target") or "en"
+        if normalize_translate_target(source) == "auto":
+            return await query.answer("Nguồn tự nhận diện không thể đổi chiều. Hãy chọn ngôn ngữ nguồn cụ thể.", show_alert=True)
+        set_translation_pair_draft(query.from_user.id, mode, source=target, target=source)
+        return await safe_edit_query_message(
+            query,
+            "🔁 <b>Đã đổi chiều</b>\n\nBot chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=translation_pair_keyboard(mode, lang, query.from_user.id),
+        )
+    if action.startswith("translation_pair_start_"):
+        mode = action.replace("translation_pair_start_", "", 1) or "two_way"
+        draft = get_translation_pair_draft(query.from_user.id, mode)
+        source = draft.get("source") or "auto"
+        target = draft.get("target") or "en"
+        session = set_translation_session(query.from_user.id, mode, source, target, input_mode="text", output_mode="text")
+        return await safe_edit_query_message(
+            query,
+            translation_session_started_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=translation_session_keyboard(lang),
+        )
     if action.startswith("translation_two_way_pair_") or action.startswith("translation_live_pair_"):
         pair = action.replace("translation_two_way_pair_", "", 1).replace("translation_live_pair_", "", 1)
         parts = pair.split("_", 1)
@@ -50131,14 +50282,15 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await safe_edit_query_message(
             query,
             translation_stop_text(lang, changed_session or changed_mode),
-            reply_markup=translation_menu_keyboard(lang),
+            reply_markup=translation_language_hub_keyboard(lang),
         )
     if action == "translation_video_dub_menu":
+        set_video_dubbing_pending(query.from_user.id, "menu", origin="translation")
         return await safe_edit_query_message(
             query,
             video_dubbing_menu_text(lang),
             parse_mode="HTML",
-            reply_markup=video_dubbing_menu_keyboard(lang),
+            reply_markup=video_dubbing_menu_keyboard(lang, "translation"),
         )
     if action == "translation_document":
         return await safe_edit_query_message(
@@ -97685,7 +97837,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "video_message_id", "video_duration", "source_duration",
             "video_file_size", "source_file_size", "source_language", "target_language",
             "voice_style", "processing", "pending_video_action", "pending_confirm_token",
-            "last_video_flow", "translate_requested",
+            "last_video_flow", "translate_requested", "origin",
         }:
             state[key] = _short_pending_text(value)
     mode = normalize_video_translate_mode(
@@ -97738,8 +97890,16 @@ def video_dubbing_menu_text(lang: str = "vi") -> str:
         "TOAN AAS sẽ hỏi từng bước. Chỉ khi bạn xác nhận xử lý thật thì hệ thống mới gọi provider và tính Xu nếu công cụ đã mở."
     )
 
-def video_dubbing_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_dubbing_back_target(origin: str = "video") -> tuple[str, str]:
+    if str(origin or "").strip().lower() == "translation":
+        return "⬅️ Quay lại Dịch thuật", "menu|translate"
+    return "⬅️ Quay lại Video", "menu|main_video"
+
+def video_dubbing_menu_keyboard(lang: str = "vi", origin: str = "video") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    back_label, back_callback = video_dubbing_back_target(origin)
+    if not is_vi:
+        back_label = "⬅️ Back to Translation" if str(origin or "").strip().lower() == "translation" else "⬅️ Back to Video"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📝 Tạo phụ đề" if is_vi else "📝 Create subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_CREATE}"),
@@ -97751,7 +97911,7 @@ def video_dubbing_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("💰 Bảng giá" if is_vi else "💰 Pricing", callback_data="videodub|pricing"),
-            InlineKeyboardButton("⬅️ Quay lại Video" if is_vi else "⬅️ Back to Video", callback_data="menu|main_video"),
+            InlineKeyboardButton(back_label, callback_data=back_callback),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
@@ -97829,10 +97989,11 @@ def video_dubbing_pricing_text(lang: str = "vi") -> str:
         "Nếu công cụ đang bảo trì/chưa mở, TOAN AAS không gọi API và không trừ Xu."
     )
 
-def video_dubbing_pricing_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_dubbing_pricing_keyboard(lang: str = "vi", origin: str = "video") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    start_callback = "videodub|start|translation" if str(origin or "").strip().lower() == "translation" else "videodub|start"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌐 Dịch/Lồng tiếng" if is_vi else "🌐 Translate/Dub", callback_data="videodub|start")],
+        [InlineKeyboardButton("🌐 Dịch/Lồng tiếng" if is_vi else "🌐 Translate/Dub", callback_data=start_callback)],
         [InlineKeyboardButton("⬅️ Quay lại bảng giá" if is_vi else "⬅️ Back to pricing", callback_data="pricing|video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -98419,15 +98580,23 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
     state = get_video_dubbing_pending(uid) or {}
+    origin = (
+        "translation"
+        if action == "start" and str(value or "").strip().lower() == "translation"
+        else str(state.get("origin") or "video").strip().lower()
+    )
+    if origin not in {"translation", "video"}:
+        origin = "video"
     if action in {"start", "back_type"}:
         clear_video_dubbing_pending(uid)
-        return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang))
+        set_video_dubbing_pending(uid, "menu", origin=origin)
+        return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
     if action == "pricing":
-        return await safe_edit_or_send(query, video_dubbing_pricing_text(lang), parse_mode="HTML", reply_markup=video_dubbing_pricing_keyboard(lang))
+        return await safe_edit_or_send(query, video_dubbing_pricing_text(lang), parse_mode="HTML", reply_markup=video_dubbing_pricing_keyboard(lang, origin))
     if action == "type":
         mode = normalize_video_translate_mode(value)
         if not mode:
-            return await safe_edit_or_send(query, "⚠️ Loại xử lý không hợp lệ. Vui lòng chọn lại.", reply_markup=video_dubbing_menu_keyboard(lang))
+            return await safe_edit_or_send(query, "⚠️ Loại xử lý không hợp lệ. Vui lòng chọn lại.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         base_fields = {
             "mode": mode,
             "process_type": mode,
@@ -98438,6 +98607,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             "processing": "0",
             "translate_requested": "0",
             "last_video_flow": "video_dubbing",
+            "origin": origin,
         }
         if mode == VIDEO_SUBTITLE_MODE_CREATE:
             state = set_video_dubbing_pending(uid, "await_video", **base_fields)
@@ -98455,7 +98625,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
     )
     if action == "language_strategy":
         if mode != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang))
+            return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         if value == "original":
             state = set_video_dubbing_pending(
                 uid,
@@ -98469,7 +98639,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, video_dubbing_language_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_language_keyboard(lang, state))
     if action == "await_video":
         if not mode:
-            return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang))
+            return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         state = set_video_dubbing_pending(uid, "await_video")
         return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
     if action == "back_upload":
@@ -98482,10 +98652,10 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             state = set_video_dubbing_pending(uid, "voice")
             return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
-        return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang))
+        return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
     if action == "language_custom":
         if mode not in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-            return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang))
+            return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         set_video_dubbing_pending(uid, "language_custom")
         return await safe_edit_or_send(
             query,
@@ -98496,7 +98666,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             state = set_video_dubbing_pending(uid, "language_strategy", target_language="")
             return await safe_edit_or_send(query, video_dubbing_language_strategy_text(lang), parse_mode="HTML", reply_markup=video_dubbing_language_strategy_keyboard(lang))
-        return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang))
+        return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
     if action == "language":
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
             state = set_video_dubbing_pending(uid, "await_video", target_language=value, translate_requested="1")
@@ -98504,10 +98674,10 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             state = set_video_dubbing_pending(uid, "voice", target_language=value, translate_requested="1")
             return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
-        return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước chọn ngôn ngữ dịch.", reply_markup=video_dubbing_menu_keyboard(lang))
+        return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước chọn ngôn ngữ dịch.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
     if action == "voice_custom":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-            return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang))
+            return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         set_video_dubbing_pending(uid, "voice_custom")
         return await safe_edit_or_send(
             query,
@@ -98516,7 +98686,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         )
     if action == "voice":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-            return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang))
+            return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         state = set_video_dubbing_pending(uid, "await_video", voice_style=value)
         return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
     if action == "back_voice":
@@ -98526,7 +98696,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 return await safe_edit_or_send(query, video_dubbing_language_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_language_keyboard(lang, state))
             state = set_video_dubbing_pending(uid, "language_strategy")
             return await safe_edit_or_send(query, video_dubbing_language_strategy_text(lang), parse_mode="HTML", reply_markup=video_dubbing_language_strategy_keyboard(lang))
-        return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang))
+        return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
     if action == "back_confirm":
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
             state = set_video_dubbing_pending(uid, "language")
@@ -98554,7 +98724,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(
                 query,
                 "⚠️ Trạng thái video đã hết hạn hoặc không khớp loại xử lý. Vui lòng chọn lại và gửi video.",
-                reply_markup=video_dubbing_menu_keyboard(lang),
+                reply_markup=video_dubbing_menu_keyboard(lang, origin),
             )
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE and not state.get("target_language"):
             state = set_video_dubbing_pending(uid, "language")
@@ -98607,7 +98777,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             + ("\n• Audio lồng tiếng được gửi riêng; ghép audio vào video chưa bật trong pipeline public." if result.get("has_audio") else ""),
             reply_markup=video_dubbing_guard_keyboard(lang),
         )
-    return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang))
+    return await safe_edit_or_send(query, video_dubbing_menu_text(lang), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
 
 def marketing_pending_key(user_id) -> str:
     return f"marketing_auto:{user_id}"

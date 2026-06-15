@@ -35,6 +35,17 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
     assert "Dịch thuật TOAN AAS" in text
+    assert callbacks == {
+        "menu|translation_language_hub",
+        "menu|translation_video_dub_menu",
+        "menu|main",
+    }
+
+    language_text, language_markup = bot.localized_menu_content(
+        "translation_language_hub", False, "vi", user_id=123
+    )
+    language_callbacks = _callbacks(language_markup)
+    assert "Dịch ngôn ngữ" in language_text
     assert {
         "menu|translation_text",
         "menu|translation_voice",
@@ -42,11 +53,11 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
         "menu|translation_live_conversation",
         "menu|translation_document",
         "menu|translation_transcript",
-        "menu|translation_video_dub_menu",
         "menu|translation_language",
         "menu|main",
+        "menu|translate",
         "menu|translation_stop_session",
-    }.issubset(callbacks)
+    }.issubset(language_callbacks)
 
 
 def test_translation_child_callbacks_have_handlers_or_existing_routes():
@@ -60,6 +71,8 @@ def test_translation_child_callbacks_have_handlers_or_existing_routes():
     assert 'if action == "translation_document"' in source
     assert 'if action == "translation_language"' in source
     assert 'if action == "translation_video_dub_menu"' in source
+    assert 'if action.startswith("translation_pair_source_") or action.startswith("translation_pair_target_")' in source
+    assert 'if action.startswith("translation_pair_start_")' in source
     assert 'if action in {"translation_stop_session", "translation_cancel"}' in source
     assert 'VIDEO_SUBTITLE_MODE_TRANSLATE = "subtitle_translate"' in source
     assert 'VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB = "subtitle_plus_dub"' in source
@@ -108,11 +121,47 @@ def test_full_translation_hub_has_voice_two_way_live_and_video_branch():
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
     assert "Dịch / Lồng tiếng video" in text
-    assert "menu|translation_voice" in callbacks
-    assert "menu|translation_two_way" in callbacks
-    assert "menu|translation_live_conversation" in callbacks
+    assert "menu|translation_language_hub" in callbacks
     assert "menu|translation_video_dub_menu" in callbacks
+    assert "menu|translation_voice" not in callbacks
     assert "videodub|type|subtitle_translate" not in callbacks
+
+    _, language_markup = bot.localized_menu_content("translation_language_hub", False, "vi", user_id=123)
+    language_callbacks = _callbacks(language_markup)
+    assert "menu|translation_voice" in language_callbacks
+    assert "menu|translation_two_way" in language_callbacks
+    assert "menu|translation_live_conversation" in language_callbacks
+
+
+def test_translation_pair_uses_separate_source_target_controls():
+    user_id = 812348
+    bot.clear_translation_pair_drafts(user_id)
+    bot.set_translation_pair_draft(user_id, "two_way", source="vi", target="en")
+    markup = bot.translation_pair_keyboard("two_way", "vi", user_id)
+    callbacks = _callbacks(markup)
+    labels = [button.text for button in _buttons(markup)]
+
+    assert "menu|translation_pair_source_two_way" in callbacks
+    assert "menu|translation_pair_target_two_way" in callbacks
+    assert "menu|translation_pair_swap_two_way" in callbacks
+    assert "menu|translation_pair_start_two_way" in callbacks
+    assert "menu|translation_language_hub" in callbacks
+    assert any("Nguồn:" in label and "Tiếng Việt" in label for label in labels)
+    assert any("Dịch sang:" in label and "English" in label for label in labels)
+
+
+def test_video_dubbing_back_route_tracks_entry_origin():
+    translation_markup = bot.video_dubbing_menu_keyboard("vi", "translation")
+    video_markup = bot.video_dubbing_menu_keyboard("vi", "video")
+
+    assert "menu|translate" in _callbacks(translation_markup)
+    assert "menu|main_video" not in _callbacks(translation_markup)
+    assert "menu|main_video" in _callbacks(video_markup)
+
+    bot.clear_video_dubbing_pending(812349)
+    state = bot.set_video_dubbing_pending(812349, "menu", origin="translation")
+    state = bot.set_video_dubbing_pending(812349, "language", mode="subtitle_translate")
+    assert state["origin"] == "translation"
 
 
 def test_language_alias_map_extended():
