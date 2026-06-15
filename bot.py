@@ -1123,9 +1123,9 @@ VIDEO_HIGH_PROVIDER_COST_XU = env_int("VIDEO_HIGH_PROVIDER_COST_XU", 600)
 VIDEO_PREMIUM_PROVIDER_COST_XU = env_int("VIDEO_PREMIUM_PROVIDER_COST_XU", 1000)
 IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU", IMAGE_LOW_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 IMAGE_STANDARD_COST_XU = env_int("IMAGE_STANDARD_COST_XU", 200)
-IMAGE_STANDARD_WARRANTY_COST_XU = env_int("IMAGE_STANDARD_WARRANTY_COST_XU", 250)
+IMAGE_STANDARD_WARRANTY_COST_XU = env_int("IMAGE_STANDARD_WARRANTY_COST_XU", 300)
 IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", 400)
-IMAGE_HIGH_WARRANTY_COST_XU = env_int("IMAGE_HIGH_WARRANTY_COST_XU", 500)
+IMAGE_HIGH_WARRANTY_COST_XU = env_int("IMAGE_HIGH_WARRANTY_COST_XU", 600)
 VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", 200)
 VIDEO_BASIC_COST_XU = env_int("VIDEO_BASIC_COST_XU", 300)
 VIDEO_COMMON_COST_XU = env_int("VIDEO_COMMON_COST_XU", 400)
@@ -30872,7 +30872,7 @@ def image_tier_pricing_payload() -> dict:
         },
         "standard_warranty": {
             "label": "Ảnh tiêu chuẩn + bảo hành",
-            "cost": max(0, int(IMAGE_STANDARD_WARRANTY_COST_XU or 250)),
+            "cost": max(0, int(IMAGE_STANDARD_WARRANTY_COST_XU or 300)),
             "provider_cost": int(IMAGE_STANDARD_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
             "note": "Gói này kèm 1 lần tạo lại trong cùng yêu cầu.",
@@ -30888,7 +30888,7 @@ def image_tier_pricing_payload() -> dict:
         },
         "high_warranty": {
             "label": "Ảnh chất lượng cao + bảo hành",
-            "cost": max(0, int(IMAGE_HIGH_WARRANTY_COST_XU or 500)),
+            "cost": max(0, int(IMAGE_HIGH_WARRANTY_COST_XU or 600)),
             "provider_cost": int(IMAGE_HIGH_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
             "note": "Gói này kèm 1 lần tạo lại trong cùng yêu cầu.",
@@ -39841,19 +39841,22 @@ def main_ai_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
-def main_memory_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def main_memory_keyboard(lang: str = "vi", user_id=0) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     buttons = [
-        ("📝 Tạo ghi chú" if is_vi else "📝 Create note", "menu|hint_note"),
+        ("📝 Tạo ghi chú" if is_vi else "📝 Create note", "memory|create"),
+        ("📋 Ghi chú đã lưu" if is_vi else "📋 Saved notes", "memory|list"),
         ("⏰ Nhắc hẹn" if is_vi else "⏰ Reminder", "menu|hint_remind"),
         ("📄 Lưu tài liệu" if is_vi else "📄 Save document", "menu|hint_doc_save_document"),
-        ("🔍 Tìm ghi chú" if is_vi else "🔍 Search notes", "menu|hint_search_note"),
+        ("🔍 Tìm ghi chú" if is_vi else "🔍 Search notes", "memory|search"),
+        ("🗑 Xóa ghi chú" if is_vi else "🗑 Delete note", "memory|delete_start"),
         ("💾 Dung lượng của tôi" if is_vi else "💾 My storage", "menu|memory_storage_status"),
         ("📦 Mua thêm dung lượng" if is_vi else "📦 Add storage", "menu|memory_storage_addon"),
         ("🧹 Dọn file cũ" if is_vi else "🧹 Clean old files", "menu|memory_storage_cleanup"),
         ("🧰 Công cụ PDF / Word" if is_vi else "🧰 PDF / Word tools", "menu|main_docs"),
-        ("🏢 Hồ sơ nội bộ" if is_vi else "🏢 Internal archive", "menu|internal_archive"),
     ]
+    if is_admin_user(user_id):
+        buttons.append(("🏢 Hồ sơ nội bộ" if is_vi else "🏢 Internal archive", "menu|internal_archive"))
     back = ("⬅️ Quay lại", "menu|main") if is_vi else ("⬅️ Back", "menu|main")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
@@ -45397,8 +45400,8 @@ def menu_hint_text(action: str) -> tuple[str, str]:
     hints = {
         "hint_film": ("main_video", "🎬 <b>Tạo nội dung / Video</b>\n\nCopy lệnh:\n<code>/film chủ đề của bạn</code>\n\nVí dụ:\n<code>/film review máy xay sinh tố mini, đăng TikTok, giọng gần gũi</code>"),
         "hint_ai_prompt": ("main_ai", "✍️ <b>Cách hỏi AI hay</b>\n\nNói rõ mục tiêu, đối tượng, nền tảng, giọng văn và kết quả bạn muốn.\n\nVí dụ:\n<code>Viết caption bán hàng cho sản phẩm X, giọng gần gũi, có CTA, dành cho mẹ bỉm.</code>"),
-        "hint_note": ("main_memory", "📝 <b>Lưu ghi chú</b>\n\nCopy lệnh:\n<code>/note nội dung cần lưu</code>"),
-        "hint_search_note": ("main_memory", "🔎 <b>Tìm ghi chú</b>\n\nCopy lệnh:\n<code>/search_note từ khóa</code>"),
+        "hint_note": ("main_memory", "📝 <b>Lưu ghi chú</b>\n\nBấm nút <b>Tạo ghi chú</b>, gửi nội dung ở tin nhắn tiếp theo. Bot sẽ lưu kèm thời gian đầy đủ và chưa trừ Xu."),
+        "hint_search_note": ("main_memory", "🔎 <b>Tìm ghi chú</b>\n\nBấm nút <b>Tìm ghi chú</b>, gửi từ khóa ở tin nhắn tiếp theo. Bot sẽ trả danh sách kết quả có mã #id và thời gian tạo."),
         "hint_remind": ("main_memory", "⏰ <b>Đặt nhắc việc</b>\n\nCopy lệnh:\n<code>/remind 30m nội dung cần nhắc</code>"),
         "hint_doc_tools": ("main_docs", "📄 <b>Công cụ tài liệu</b>\n\nChọn công cụ bằng nút bên dưới. Bot sẽ hướng dẫn gửi file, xác nhận rồi mới xử lý. Không cần gõ lệnh kỹ thuật."),
         "hint_doc_pdf_to_word": ("main_docs", "📄 <b>PDF sang Word</b>\n\nBạn hãy gửi hoặc reply file PDF muốn chuyển sang Word. Bot sẽ hỏi xác nhận trước khi xử lý. Công cụ dùng local engine và chưa trừ Xu ở flow hướng dẫn."),
@@ -45429,8 +45432,8 @@ def menu_hint_text_i18n(action: str, lang: str) -> tuple[str, str]:
     hints = {
         "hint_film": ("main_video", "🎬 <b>Create content</b>\n\nCopy:\n<code>/film your topic</code>\n\nExample:\n<code>/film product review for TikTok, friendly tone, clear CTA</code>"),
         "hint_ai_prompt": ("main_ai", "✍️ <b>Better AI prompts</b>\n\nTell the bot your goal, audience, platform, tone and desired output."),
-        "hint_note": ("main_memory", "📝 <b>Save a note</b>\n\nCopy:\n<code>/note what you want to save</code>"),
-        "hint_search_note": ("main_memory", "🔎 <b>Search notes</b>\n\nCopy:\n<code>/search_note keyword</code>"),
+        "hint_note": ("main_memory", "📝 <b>Save a note</b>\n\nTap <b>Create note</b>, then send the note content in the next message. The bot saves it with a full timestamp and does not charge Xu."),
+        "hint_search_note": ("main_memory", "🔎 <b>Search notes</b>\n\nTap <b>Search notes</b>, then send a keyword. The bot returns notes with #id and creation time."),
         "hint_remind": ("main_memory", "⏰ <b>Create a reminder</b>\n\nCopy:\n<code>/remind 30m reminder text</code>"),
         "hint_doc_tools": ("main_docs", "📄 <b>Document tools</b>\n\nChoose a tool with the buttons below. The bot will guide upload → confirm → process. No technical command needed."),
         "hint_doc_pdf_to_word": ("main_docs", "📄 <b>PDF to Word</b>\n\nSend or reply to the PDF you want to convert. The bot will ask for confirmation before processing."),
@@ -45539,26 +45542,16 @@ def menu_text_main_music_i18n(lang: str) -> str:
     if lang == "zh":
         return (
             "🎵 <b>TOAN AAS 音乐 / 音效中心</b>\n\n"
-            "查找背景音乐、音效、公开视频素材，并为视频生成安全的音乐提示词。\n\n"
-            "<b>命令:</b>\n"
-            "• <code>/music</code> 或 <code>/music_tools</code> — 打开音乐中心\n"
-            "• <code>/music_prompt &lt;描述&gt;</code> — 生成音乐提示词\n"
-            "• <code>/music_library &lt;关键词&gt;</code> — 查找背景音乐\n"
-            "• <code>/sfx_library &lt;关键词&gt;</code> — 查找音效\n"
-            "• <code>/media_library &lt;关键词&gt;</code> — 查找公共图片/视频\n\n"
+            "可制作配音文本、生成音乐提示词、查找背景音乐、音效和公开视频素材。\n\n"
+            "请使用下方按钮开始。需要输入内容时，Bot 会提示你发送文字，并给出 3 个建议、重新建议和返回按钮。\n\n"
             "公共音乐/媒体来源有各自的授权条款。发布广告或商业内容前，请检查商业使用权。"
         )
     if lang == "vi":
         return menu_text_main_music()
     return (
         "🎵 <b>TOAN AAS MUSIC / SFX CENTER</b>\n\n"
-        "Find background music, sound effects, public media, and safe music prompts for video.\n\n"
-        "<b>Commands:</b>\n"
-        "• <code>/music</code> or <code>/music_tools</code> — open the music center\n"
-        "• <code>/music_prompt &lt;description&gt;</code> — create a music prompt\n"
-        "• <code>/music_library &lt;keyword&gt;</code> — find background music\n"
-        "• <code>/sfx_library &lt;keyword&gt;</code> — find sound effects\n"
-        "• <code>/media_library &lt;keyword&gt;</code> — find public images/video\n\n"
+        "Create voice-over drafts, generate music prompts, find background music, SFX, and public media.\n\n"
+        "Use the buttons below. When input is needed, the bot will ask for text and return 3 suggestions, more suggestions, and a back button.\n\n"
         "Public music/media sources have their own licenses. Check commercial rights before posting ads or monetized content."
     )
 
@@ -45665,7 +45658,7 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_ai":
         return menu_text_main_ai_i18n(lang), main_ai_keyboard(lang)
     if action == "main_memory":
-        return menu_text_main_memory_i18n(lang), main_memory_keyboard(lang)
+        return menu_text_main_memory_i18n(lang), main_memory_keyboard(lang, user_id)
     if action == "memory_storage_status":
         return memory_status_text(user_id or "__customer__"), memory_storage_nav_keyboard(lang)
     if action == "memory_storage_addon":
@@ -47635,6 +47628,9 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         clear_internal_archive_pending(query.from_user.id)
     if action not in DOC_TOOL_MENU_ACTIONS:
         clear_doc_tool_pending(query.from_user.id)
+    if action not in {"hint_note", "hint_search_note"}:
+        clear_memory_guided_pending(query.from_user.id)
+    clear_music_guided_pending(query.from_user.id)
     admin_only = {"affiliate", "operator", "admin", "system", "finance", "billing", "admin_packages", "admin_provider", "internal_archive"}
     admin_only_prefixes = (
         "finance_",
@@ -47659,6 +47655,16 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
+    if action == "hint_note":
+        if not memory_can_use_full(query.from_user.id):
+            return await safe_edit_query_message(query, memory_access_message(), reply_markup=main_memory_keyboard(lang, query.from_user.id))
+        set_memory_guided_pending(query.from_user.id, "create")
+        return await safe_edit_query_message(query, memory_create_prompt_text(lang), reply_markup=memory_main_keyboard(lang))
+    if action == "hint_search_note":
+        if not memory_can_use_full(query.from_user.id):
+            return await safe_edit_query_message(query, memory_access_message(), reply_markup=main_memory_keyboard(lang, query.from_user.id))
+        set_memory_guided_pending(query.from_user.id, "search")
+        return await safe_edit_query_message(query, memory_search_prompt_text(lang), reply_markup=memory_main_keyboard(lang))
     if action == "hint_pricing":
         return await send_pricing_lines(query.message, pricing_hub_lines(lang), pricing_main_keyboard(lang))
     if action in DOC_TOOL_MENU_ACTIONS:
@@ -53590,6 +53596,253 @@ def music_no_xu_text(lang: str) -> str:
         return "The bot has not charged Xu."
     return "Bot chưa trừ Xu."
 
+def music_guided_pending_key(user_id) -> str:
+    return f"music_guided:{user_id}"
+
+def music_guided_result_key(user_id) -> str:
+    return f"music_guided_result:{user_id}"
+
+def set_music_guided_pending(user_id, action: str, **fields) -> dict:
+    payload = {
+        "pending_action": str(action or "").strip(),
+        "created_at_ts": time.time(),
+    }
+    for key, value in fields.items():
+        payload[str(key)] = _short_pending_text(value, 900)
+    USER_PENDING[music_guided_pending_key(user_id)] = payload
+    return payload
+
+def get_music_guided_pending(user_id) -> dict | None:
+    payload = USER_PENDING.get(music_guided_pending_key(user_id)) or {}
+    if not payload.get("pending_action"):
+        return None
+    if time.time() - float(payload.get("created_at_ts") or 0) > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(music_guided_pending_key(user_id), None)
+        return None
+    return payload
+
+def clear_music_guided_pending(user_id) -> bool:
+    return USER_PENDING.pop(music_guided_pending_key(user_id), None) is not None
+
+def save_music_guided_result(user_id, payload: dict) -> dict:
+    data = dict(payload or {})
+    data["created_at_ts"] = time.time()
+    USER_PENDING[music_guided_result_key(user_id)] = data
+    return data
+
+def get_music_guided_result(user_id) -> dict | None:
+    data = USER_PENDING.get(music_guided_result_key(user_id)) or {}
+    if not data:
+        return None
+    if time.time() - float(data.get("created_at_ts") or 0) > TREND_WORKFLOW_TTL_SECONDS:
+        USER_PENDING.pop(music_guided_result_key(user_id), None)
+        return None
+    return data
+
+def music_guided_back_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    return build_2col_keyboard(
+        [],
+        nav_back=("🔙 Voice / Nhạc" if is_vi else "🔙 Voice / Music", "menu|main_music"),
+        lang=lang,
+    )
+
+def music_prompt_input_text(lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "en":
+        return "🎼 <b>Music prompt</b>\n\nDescribe the video/product. The bot will create 3 music directions first. No API call and no Xu charge."
+    if lang == "zh":
+        return "🎼 <b>音乐提示词</b>\n\n请描述视频/产品。机器人会先生成 3 个音乐方向。本次不调用 API、不扣 Xu。"
+    return (
+        "🎼 <b>Tạo prompt nhạc</b>\n\n"
+        "Bạn muốn nhạc nền cho video/sản phẩm gì? Hãy gửi mô tả ở tin nhắn tiếp theo.\n\n"
+        "TOAN AAS sẽ tạo 3 hướng nhạc để bạn chọn/đổi/sửa trước. Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def music_library_keyword_text(kind: str = "music", lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    labels = {
+        "music": ("nhạc nền", "music", "背景音乐"),
+        "sfx": ("hiệu ứng âm thanh", "sound effect", "音效"),
+        "media": ("media public", "public media", "公开视频/图片素材"),
+    }
+    vi_label, en_label, zh_label = labels.get(kind, labels["music"])
+    if lang == "en":
+        return f"✍️ Send a keyword for {en_label}. The bot will search and show preview/select buttons. No Xu charge."
+    if lang == "zh":
+        return f"✍️ 请发送要查找的{zh_label}关键词。Bot 会返回预览/选择按钮，未扣 Xu。"
+    return f"✍️ Bạn hãy gửi từ khóa tìm {vi_label}. Bot sẽ trả kết quả có nút xem thử/chọn, chưa trừ Xu."
+
+def voice_text_input_text(lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "zh":
+        return "🎙 <b>生成语音</b>\n\n请发送要朗读的文字。Bot 会先给出 3 种声音风格建议。本步骤不调用 TTS provider、不扣 Xu。"
+    if lang == "en":
+        return "🎙 <b>Create voice</b>\n\nSend the text you want to read aloud. The bot will show 3 voice style suggestions and a guarded confirmation. No TTS provider call and no Xu charge at this step."
+    return (
+        "🎙 <b>Tạo giọng đọc</b>\n\n"
+        "Bạn hãy gửi nội dung cần đọc ở tin nhắn tiếp theo.\n\n"
+        "Bot sẽ gợi ý 3 kiểu giọng để chọn trước. Chỉ khi public TTS được mở và có xác nhận phí thì mới gọi provider. Hiện bước này chưa trừ Xu."
+    )
+
+def music_prompt_suggestions(description: str, offset: int = 0, lang: str = "vi") -> list[dict]:
+    desc = _short_pending_text(description, 220) or ("video sản phẩm" if music_ui_lang(lang=lang) == "vi" else "product video")
+    base = [
+        {
+            "name": "Vui tươi / bán hàng",
+            "mood": "sáng, tích cực, tạo cảm giác dễ mua",
+            "tempo": "110-125 BPM",
+            "instrument": "light drums, soft synth, pluck, clap nhẹ",
+            "duration": "15-30s",
+            "vocal": "no vocal",
+            "use_case": "TikTok/Reels/Shorts, review sản phẩm, CTA rõ",
+        },
+        {
+            "name": "Cinematic / cao cấp",
+            "mood": "sang, cảm xúc vừa phải, thương hiệu",
+            "tempo": "80-95 BPM",
+            "instrument": "piano, soft strings, ambient pad, sub bass nhẹ",
+            "duration": "30-60s",
+            "vocal": "no vocal",
+            "use_case": "quảng cáo premium, key visual, reveal sản phẩm",
+        },
+        {
+            "name": "Nhẹ nhàng / cảm xúc",
+            "mood": "ấm, tin cậy, kể chuyện",
+            "tempo": "70-90 BPM",
+            "instrument": "acoustic guitar, piano nhẹ, pad mềm",
+            "duration": "30-45s",
+            "vocal": "no vocal",
+            "use_case": "voice-over, review chân thật, before/after",
+        },
+        {
+            "name": "Công nghệ / tương lai",
+            "mood": "sạch, hiện đại, tự động hóa",
+            "tempo": "100-118 BPM",
+            "instrument": "minimal synth, digital pulse, clean percussion",
+            "duration": "15-30s",
+            "vocal": "no vocal",
+            "use_case": "AI tool, SaaS, dashboard, automation",
+        },
+        {
+            "name": "Viral short / bắt tai",
+            "mood": "nhanh, bắt nhịp, trẻ trung",
+            "tempo": "125-140 BPM",
+            "instrument": "snappy drums, bass ngắn, hook synth",
+            "duration": "10-20s",
+            "vocal": "no vocal",
+            "use_case": "hook đầu video, trend, UGC ngắn",
+        },
+        {
+            "name": "Luxury tối giản",
+            "mood": "tĩnh, đắt tiền, ít chi tiết",
+            "tempo": "65-85 BPM",
+            "instrument": "felt piano, deep pad, soft ticks",
+            "duration": "20-40s",
+            "vocal": "no vocal",
+            "use_case": "nước hoa, mỹ phẩm, thời trang, brand ad",
+        },
+    ]
+    start = _safe_int(offset, 0) % len(base)
+    rotated = [base[(start + idx) % len(base)] for idx in range(min(3, len(base)))]
+    return [dict(item, description=desc) for item in rotated]
+
+def music_prompt_suggestions_text(description: str, offset: int = 0, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    suggestions = music_prompt_suggestions(description, offset, lang)
+    if lang == "en":
+        lines = ["🎼 <b>3 suggested music prompts</b>", "", f"<b>Brief:</b> {html.escape(_short_pending_text(description, 220) or 'video/product')}", ""]
+        labels = ("Mood", "Tempo", "Instruments", "Duration", "Vocal", "Use case", "Prompt")
+        footer = "The bot has not called a music API and has not charged Xu."
+    elif lang == "zh":
+        lines = ["🎼 <b>3 个音乐提示词建议</b>", "", f"<b>内容:</b> {html.escape(_short_pending_text(description, 220) or '视频/产品')}", ""]
+        labels = ("情绪", "速度", "乐器", "时长", "人声", "适合", "Prompt")
+        footer = "本次未调用音乐 API，未扣除 Xu。"
+    else:
+        lines = ["🎼 <b>3 prompt nhạc gợi ý</b>", "", f"<b>Nội dung:</b> {html.escape(_short_pending_text(description, 220) or 'video/sản phẩm')}", ""]
+        labels = ("Mood", "Tempo", "Nhạc cụ", "Thời lượng", "Vocal", "Dùng cho", "Prompt")
+        footer = "Bot chưa gọi API nhạc và chưa trừ Xu."
+    for idx, item in enumerate(suggestions, start=1):
+        prompt = (
+            f"{item['name']} background music for {item['description']}, "
+            f"mood {item['mood']}, tempo {item['tempo']}, instruments {item['instrument']}, "
+            f"duration {item['duration']}, {item['vocal']}, copyright-safe, no famous melody."
+        )
+        lines.extend([
+            f"<b>{idx}. {html.escape(item['name'])}</b>",
+            f"• {labels[0]}: {html.escape(item['mood'])}",
+            f"• {labels[1]}: {html.escape(item['tempo'])}",
+            f"• {labels[2]}: {html.escape(item['instrument'])}",
+            f"• {labels[3]}: {html.escape(item['duration'])}",
+            f"• {labels[4]}: {html.escape(item['vocal'])}",
+            f"• {labels[5]}: {html.escape(item['use_case'])}",
+            f"• {labels[6]}: <code>{html.escape(prompt)}</code>",
+            "",
+        ])
+    lines.append(footer)
+    return "\n".join(lines)
+
+def music_prompt_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = [
+        ("1️⃣ Chọn gợi ý 1" if is_vi else "1️⃣ Choose 1", "music_quick|prompt_choose_1"),
+        ("2️⃣ Chọn gợi ý 2" if is_vi else "2️⃣ Choose 2", "music_quick|prompt_choose_2"),
+        ("3️⃣ Chọn gợi ý 3" if is_vi else "3️⃣ Choose 3", "music_quick|prompt_choose_3"),
+        ("🔁 Đổi prompt khác" if is_vi else "🔁 More prompts", "music_quick|prompt_more"),
+        ("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", "music_quick|prompt"),
+        ("🎵 Tìm nhạc theo prompt" if is_vi else "🎵 Search music", "music_quick|find_from_prompt"),
+        ("💾 Lưu prompt" if is_vi else "💾 Save prompt", "music_quick|save_prompt"),
+        ("🤖 Tạo nhạc AI (đang hoàn thiện)" if is_vi else "🤖 AI music (in progress)", "music_quick|music_ai_guard"),
+    ]
+    back = ("🔙 Voice / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def voice_style_suggestions_text(text: str, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    content = html.escape(_short_pending_text(text, 260))
+    if lang == "en":
+        return (
+            "🎙 <b>Received voice-over text</b>\n\n"
+            f"<b>Text:</b>\n{content}\n\n"
+            "<b>3 suggested voice styles:</b>\n"
+            "1. Soft female — clear and friendly, good for tutorials/explainers.\n"
+            "2. Deep male — steady and trustworthy, good for premium product/service ads.\n"
+            "3. Youthful sales — medium-fast and energetic, good for TikTok/Reels/Shorts.\n\n"
+            "Real TTS still depends on provider/quota. This step has not called a provider and has not charged Xu."
+        )
+    if lang == "zh":
+        return (
+            "🎙 <b>已收到配音文本</b>\n\n"
+            f"<b>文本:</b>\n{content}\n\n"
+            "<b>3 种声音风格建议:</b>\n"
+            "1. 温柔女声 — 清晰友好，适合教程/解释类视频。\n"
+            "2. 低沉男声 — 稳重可信，适合高端产品/服务广告。\n"
+            "3. 年轻销售感 — 速度适中、有能量，适合 TikTok/Reels/Shorts。\n\n"
+            "真实 TTS 仍取决于 provider/quota。本步骤未调用 provider，未扣 Xu。"
+        )
+    return (
+        "🎙 <b>Đã nhận nội dung giọng đọc</b>\n\n"
+        f"<b>Nội dung:</b>\n{content}\n\n"
+        "<b>3 kiểu giọng gợi ý:</b>\n"
+        "1. Nữ nhẹ nhàng — rõ chữ, thân thiện, hợp video hướng dẫn/giải thích.\n"
+        "2. Nam trầm — chắc, tin cậy, hợp quảng cáo dịch vụ/sản phẩm cao cấp.\n"
+        "3. Trẻ trung bán hàng — nhanh vừa, năng lượng, hợp TikTok/Reels/Shorts.\n\n"
+        "TTS thật vẫn phụ thuộc provider/quota. Bước này chưa gọi provider và chưa trừ Xu."
+    )
+
+def voice_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = [
+        ("1️⃣ Nữ nhẹ nhàng" if is_vi else "1️⃣ Soft female", "music_quick|voice_style_1"),
+        ("2️⃣ Nam trầm" if is_vi else "2️⃣ Deep male", "music_quick|voice_style_2"),
+        ("3️⃣ Trẻ trung bán hàng" if is_vi else "3️⃣ Youthful sales", "music_quick|voice_style_3"),
+        ("🔁 Đổi giọng" if is_vi else "🔁 Change voice", "music_quick|voice"),
+        ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", "music_quick|voice"),
+        ("🎧 Ghép vào video (đang hoàn thiện)" if is_vi else "🎧 Add to video (in progress)", "music_quick|voice_video"),
+    ]
+    back = ("🔙 Voice / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
 def music_provider_error_text(lang: str) -> str:
     lang = music_ui_lang(lang=lang)
     if lang == "zh":
@@ -53611,7 +53864,6 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if lang == "zh":
         labels = {
             "voice": "🎙 生成语音",
-            "voice_pick": "🗣 选择声音",
             "stt": "🎧 转文字/STT",
             "voice_video": "🎬 添加语音",
             "prompt": "🎼 音乐提示词",
@@ -53626,7 +53878,6 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     elif lang == "en":
         labels = {
             "voice": "🎙 Create voice",
-            "voice_pick": "🗣 Choose voice",
             "stt": "🎧 STT / Transcribe",
             "voice_video": "🎬 Add voice",
             "prompt": "🎼 Music prompt",
@@ -53640,8 +53891,7 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         }
     else:
         labels = {
-            "voice": "🎙 Tạo voice",
-            "voice_pick": "🗣 Chọn giọng",
+            "voice": "🎙 Tạo giọng đọc",
             "stt": "🎧 STT / Bóc băng",
             "voice_video": "🎬 Ghép voice",
             "prompt": "🎼 Tạo prompt nhạc",
@@ -53656,22 +53906,21 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(labels["voice"], callback_data="music_quick|voice"),
-            InlineKeyboardButton(labels["voice_pick"], callback_data="music_quick|voice_pick"),
-        ],
-        [
             InlineKeyboardButton(labels["stt"], callback_data="music_quick|stt"),
+        ],
+        [
             InlineKeyboardButton(labels["voice_video"], callback_data="music_quick|voice_video"),
-        ],
-        [
             InlineKeyboardButton(labels["prompt"], callback_data="music_quick|prompt"),
+        ],
+        [
             InlineKeyboardButton(labels["music"], callback_data="music_quick|music"),
-        ],
-        [
             InlineKeyboardButton(labels["sfx"], callback_data="music_quick|sfx"),
-            InlineKeyboardButton(labels["media"], callback_data="music_quick|media"),
         ],
         [
+            InlineKeyboardButton(labels["media"], callback_data="music_quick|media"),
             InlineKeyboardButton(labels["add_music"], callback_data="music_quick|add_music"),
+        ],
+        [
             InlineKeyboardButton(labels["policy"], callback_data="music_quick|policy"),
         ],
         [
@@ -53685,30 +53934,18 @@ def music_prompt_guide_text(lang: str = "vi") -> str:
     if lang == "zh":
         return (
             "🎼 <b>生成背景音乐提示词</b>\n\n"
-            "请描述你的视频，机器人会生成更安全的音乐提示词。\n\n"
-            "示例:\n"
-            "• <code>/music_prompt 产品测评视频，轻快，30秒</code>\n"
-            "• <code>/music_prompt 现代AI科技视频，干净，快节奏</code>\n"
-            "• <code>/music_prompt 情感故事视频，轻柔，无人声</code>\n\n"
+            "请发送视频/产品说明。机器人会先生成 3 个音乐方向，然后你可以选择、重新生成、修改、保存或搜索音乐库。\n\n"
             f"{music_no_xu_text(lang)}"
         )
     if lang == "en":
         return (
             "🎼 <b>CREATE A BACKGROUND MUSIC PROMPT</b>\n\n"
-            "Describe your video and the bot will create a copyright-safe music prompt.\n\n"
-            "Examples:\n"
-            "• <code>/music_prompt product review video, cheerful, 30 seconds</code>\n"
-            "• <code>/music_prompt modern AI technology video, clean, fast rhythm</code>\n"
-            "• <code>/music_prompt emotional storytelling video, calm, no vocal</code>\n\n"
+            "Send the video/product brief. The bot will create 3 music directions first, then you can choose, regenerate, edit, save, or search music from the library.\n\n"
             f"{music_no_xu_text(lang)}"
         )
     return (
         "🎼 <b>TẠO PROMPT NHẠC NỀN</b>\n\n"
-        "Gõ mô tả video để bot tạo prompt nhạc an toàn bản quyền.\n\n"
-        "Ví dụ:\n"
-        "• <code>/music_prompt video review máy xay sinh tố mini vui tươi 30 giây</code>\n"
-        "• <code>/music_prompt video công nghệ AI hiện đại, sạch, nhịp nhanh</code>\n"
-        "• <code>/music_prompt video kể chuyện cảm xúc, nhẹ nhàng, không vocal</code>\n\n"
+        "Bạn gửi mô tả video/sản phẩm. Bot sẽ tạo 3 hướng prompt nhạc trước, sau đó bạn có thể chọn, đổi gợi ý, sửa mô tả, lưu prompt hoặc tìm nhạc trong kho.\n\n"
         "Bot chưa trừ Xu."
     )
 
@@ -53717,32 +53954,20 @@ def music_library_guide_text(lang: str = "vi") -> str:
     if lang == "zh":
         return (
             "🎧 <b>音乐库</b>\n\n"
-            "请选择快速主题，或输入自己的关键词。\n\n"
-            "示例:\n"
-            "• <code>/music_library upbeat product review</code>\n"
-            "• <code>/music_library futuristic technology background</code>\n"
-            "• <code>/music_library energetic tiktok short video</code>\n\n"
+            "请选择下方快速主题，或点击自定义关键词后发送文字。\n\n"
             "找到结果后，点击 ▶️ 试听或 ✅ 选择音乐。\n"
             f"{music_no_xu_text(lang)}"
         )
     if lang == "en":
         return (
             "🎧 <b>MUSIC LIBRARY</b>\n\n"
-            "Choose a quick topic or type your own keyword.\n\n"
-            "Examples:\n"
-            "• <code>/music_library upbeat product review</code>\n"
-            "• <code>/music_library futuristic technology background</code>\n"
-            "• <code>/music_library energetic tiktok short video</code>\n\n"
+            "Choose a quick topic below, or tap custom keyword and send your own text.\n\n"
             "After results appear, tap ▶️ to preview or ✅ to select music.\n"
             f"{music_no_xu_text(lang)}"
         )
     return (
         "🎧 <b>KHO NHẠC NỀN</b>\n\n"
-        "Chọn nhanh một chủ đề hoặc gõ lệnh với từ khóa riêng.\n\n"
-        "Ví dụ:\n"
-        "• <code>/music_library upbeat product review</code>\n"
-        "• <code>/music_library futuristic technology background</code>\n"
-        "• <code>/music_library energetic tiktok short video</code>\n\n"
+        "Chọn nhanh một chủ đề bên dưới, hoặc bấm <b>Tự nhập từ khóa</b> rồi gửi chữ bạn muốn tìm.\n\n"
         "Sau khi có kết quả, bấm ▶️ để nghe thử hoặc ✅ để chọn nhạc.\n"
         "Bot chưa trừ Xu."
     )
@@ -53752,32 +53977,20 @@ def sfx_library_guide_text(lang: str = "vi") -> str:
     if lang == "zh":
         return (
             "🔊 <b>音效库</b>\n\n"
-            "请选择快速音效类型，或输入自己的关键词。\n\n"
-            "示例:\n"
-            "• <code>/sfx_library whoosh transition</code>\n"
-            "• <code>/sfx_library click</code>\n"
-            "• <code>/sfx_library cinematic hit</code>\n\n"
+            "请选择下方快速音效类型，或点击自定义关键词后发送文字。\n\n"
             "找到结果后，点击 ▶️ 试听或 ✅ 选择音效。\n"
             f"{music_no_xu_text(lang)}"
         )
     if lang == "en":
         return (
             "🔊 <b>SOUND EFFECTS LIBRARY</b>\n\n"
-            "Choose a quick SFX type or type your own keyword.\n\n"
-            "Examples:\n"
-            "• <code>/sfx_library whoosh transition</code>\n"
-            "• <code>/sfx_library click</code>\n"
-            "• <code>/sfx_library cinematic hit</code>\n\n"
+            "Choose a quick SFX type below, or tap custom keyword and send your own text.\n\n"
             "After results appear, tap ▶️ to preview or ✅ to select SFX.\n"
             f"{music_no_xu_text(lang)}"
         )
     return (
         "🔊 <b>KHO HIỆU ỨNG ÂM THANH</b>\n\n"
-        "Chọn nhanh một loại SFX hoặc gõ lệnh với từ khóa riêng.\n\n"
-        "Ví dụ:\n"
-        "• <code>/sfx_library whoosh transition</code>\n"
-        "• <code>/sfx_library click</code>\n"
-        "• <code>/sfx_library cinematic hit</code>\n\n"
+        "Chọn nhanh một loại SFX bên dưới, hoặc bấm <b>Tự nhập từ khóa</b> rồi gửi chữ bạn muốn tìm.\n\n"
         "Sau khi có kết quả, bấm ▶️ để nghe thử hoặc ✅ để chọn SFX.\n"
         "Bot chưa trừ Xu."
     )
@@ -53787,32 +54000,20 @@ def media_library_guide_text(lang: str = "vi") -> str:
     if lang == "zh":
         return (
             "🖼 <b>公开视频/图片素材库</b>\n\n"
-            "请选择快速主题，或输入自己的关键词。\n\n"
-            "示例:\n"
-            "• <code>/media_library modern kitchen blender</code>\n"
-            "• <code>/media_library ai technology dashboard</code>\n"
-            "• <code>/media_library product showcase</code>\n\n"
+            "请选择下方快速主题，或点击自定义关键词后发送文字。\n\n"
             "找到结果后，点击 🖼/🎬 查看或 ✅ 选择素材。\n"
             f"{music_no_xu_text(lang)}"
         )
     if lang == "en":
         return (
             "🖼 <b>PUBLIC MEDIA LIBRARY</b>\n\n"
-            "Choose a quick topic or type your own keyword.\n\n"
-            "Examples:\n"
-            "• <code>/media_library modern kitchen blender</code>\n"
-            "• <code>/media_library ai technology dashboard</code>\n"
-            "• <code>/media_library product showcase</code>\n\n"
+            "Choose a quick topic below, or tap custom keyword and send your own text.\n\n"
             "After results appear, tap 🖼/🎬 to preview or ✅ to select media.\n"
             f"{music_no_xu_text(lang)}"
         )
     return (
         "🖼 <b>KHO MEDIA PUBLIC</b>\n\n"
-        "Chọn nhanh một chủ đề hoặc gõ lệnh với từ khóa riêng.\n\n"
-        "Ví dụ:\n"
-        "• <code>/media_library modern kitchen blender</code>\n"
-        "• <code>/media_library ai technology dashboard</code>\n"
-        "• <code>/media_library product showcase</code>\n\n"
+        "Chọn nhanh một chủ đề bên dưới, hoặc bấm <b>Tự nhập từ khóa</b> rồi gửi chữ bạn muốn tìm.\n\n"
         "Sau khi có kết quả, bấm 🖼/🎬 để xem hoặc ✅ để chọn media.\n"
         "Bot chưa trừ Xu."
     )
@@ -53828,6 +54029,8 @@ def music_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     else:
         custom_label = "✍️ Tự nhập từ khóa"
         labels = ("⚡ Sales/product", "💼 Tech", "🎬 Cinematic", "🌿 Calm/review", "🔥 Trend")
+    back_label = "🔙 Voice / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
+    main_label = "🏠 Menu chính" if lang == "vi" else ("🏠 Main menu" if lang == "en" else "🏠 主菜单")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(labels[0], callback_data="music_quick|sales"),
@@ -53841,11 +54044,14 @@ def music_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(labels[4], callback_data="music_quick|trend"),
             InlineKeyboardButton(custom_label, callback_data="music_quick|custom_music"),
         ],
+        [InlineKeyboardButton(back_label, callback_data="menu|main_music"), InlineKeyboardButton(main_label, callback_data="menu|main")],
     ])
 
 def sfx_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
     custom_label = "✍️ 自定义关键词" if lang == "zh" else ("✍️ Custom keyword" if lang == "en" else "✍️ Tự nhập từ khóa")
+    back_label = "🔙 Voice / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
+    main_label = "🏠 Menu chính" if lang == "vi" else ("🏠 Main menu" if lang == "en" else "🏠 主菜单")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("💨 Whoosh", callback_data="sfx_quick|whoosh"),
@@ -53859,11 +54065,14 @@ def sfx_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("💥 Pop impact", callback_data="sfx_quick|pop"),
             InlineKeyboardButton(custom_label, callback_data="music_quick|custom_sfx"),
         ],
+        [InlineKeyboardButton(back_label, callback_data="menu|main_music"), InlineKeyboardButton(main_label, callback_data="menu|main")],
     ])
 
 def media_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
     custom_label = "✍️ 自定义关键词" if lang == "zh" else ("✍️ Custom keyword" if lang == "en" else "✍️ Tự nhập từ khóa")
+    back_label = "🔙 Voice / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
+    main_label = "🏠 Menu chính" if lang == "vi" else ("🏠 Main menu" if lang == "en" else "🏠 主菜单")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🍳 Kitchen blender", callback_data="media_quick|kitchen"),
@@ -53876,6 +54085,7 @@ def media_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(custom_label, callback_data="music_quick|custom_media"),
         ],
+        [InlineKeyboardButton(back_label, callback_data="menu|main_music"), InlineKeyboardButton(main_label, callback_data="menu|main")],
     ])
 
 MUSIC_QUICK_QUERIES = {
@@ -53910,26 +54120,12 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     lang = music_ui_lang(user_id)
     if action == "prompt":
         await query.answer()
-        return await query.message.reply_text(music_prompt_guide_text(lang), parse_mode="HTML")
-    if action == "voice":
+        set_music_guided_pending(user_id, "music_prompt_input")
+        return await query.message.reply_text(music_prompt_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+    if action in {"voice", "voice_pick"}:
         await query.answer()
-        text = (
-            "🎙 <b>Tạo voice từ văn bản</b>\n\n"
-            "Tính năng voice/TTS đang được kiểm soát theo provider và quota. Nếu chưa mở public, bot sẽ báo admin test và không trừ Xu.\n\n"
-            "Bạn có thể nhập nội dung cần đọc vào chat; nếu bot phân loại là voice, hệ thống sẽ hiển thị lựa chọn provider."
-            if lang == "vi" else
-            "🎙 <b>Create voice from text</b>\n\nTTS is guarded by provider/quota status. If it is not public, the bot reports admin-test and does not charge Xu."
-        )
-        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
-    if action == "voice_pick":
-        await query.answer()
-        text = (
-            "🗣 <b>Chọn giọng đọc</b>\n\n"
-            "Giọng đọc khả dụng phụ thuộc provider đang bật. Admin có thể kiểm tra TTS trong /providers hoặc ShopAIKey status. Khách sẽ thấy trạng thái thử nghiệm nếu chưa public."
-            if lang == "vi" else
-            "🗣 <b>Choose voice</b>\n\nAvailable voices depend on enabled providers. Public users see a guarded/admin-test state when it is not open."
-        )
-        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
+        set_music_guided_pending(user_id, "voice_text")
+        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
     if action == "stt":
         await query.answer()
         text = (
@@ -53975,31 +54171,75 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         )
     if action == "custom_music":
         await query.answer()
-        if lang == "zh":
-            text = "✍️ 输入: <code>/music_library &lt;关键词&gt;</code>\n示例: <code>/music_library upbeat product review</code>"
-        elif lang == "en":
-            text = "✍️ Type: <code>/music_library &lt;keyword&gt;</code>\nExample: <code>/music_library upbeat product review</code>"
-        else:
-            text = "✍️ Gõ: <code>/music_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/music_library upbeat product review</code>"
-        return await query.message.reply_text(text, parse_mode="HTML")
+        set_music_guided_pending(user_id, "music_library_keyword")
+        return await query.message.reply_text(music_library_keyword_text("music", lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
     if action == "custom_sfx":
         await query.answer()
-        if lang == "zh":
-            text = "✍️ 输入: <code>/sfx_library &lt;关键词&gt;</code>\n示例: <code>/sfx_library whoosh transition</code>"
-        elif lang == "en":
-            text = "✍️ Type: <code>/sfx_library &lt;keyword&gt;</code>\nExample: <code>/sfx_library whoosh transition</code>"
-        else:
-            text = "✍️ Gõ: <code>/sfx_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/sfx_library whoosh transition</code>"
-        return await query.message.reply_text(text, parse_mode="HTML")
+        set_music_guided_pending(user_id, "sfx_library_keyword")
+        return await query.message.reply_text(music_library_keyword_text("sfx", lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
     if action == "custom_media":
         await query.answer()
-        if lang == "zh":
-            text = "✍️ 输入: <code>/media_library &lt;关键词&gt;</code>\n示例: <code>/media_library modern kitchen blender</code>"
-        elif lang == "en":
-            text = "✍️ Type: <code>/media_library &lt;keyword&gt;</code>\nExample: <code>/media_library modern kitchen blender</code>"
-        else:
-            text = "✍️ Gõ: <code>/media_library &lt;từ khóa&gt;</code>\nVí dụ: <code>/media_library modern kitchen blender</code>"
-        return await query.message.reply_text(text, parse_mode="HTML")
+        set_music_guided_pending(user_id, "media_library_keyword")
+        return await query.message.reply_text(music_library_keyword_text("media", lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+    if action == "prompt_more":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        desc = result.get("description") or "video sản phẩm"
+        offset = _safe_int(result.get("offset"), 0) + 3
+        suggestions = music_prompt_suggestions(desc, offset, lang)
+        save_music_guided_result(user_id, {"description": desc, "offset": offset, "suggestions": suggestions, "selected_prompt": ""})
+        return await query.message.reply_text(music_prompt_suggestions_text(desc, offset, lang), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
+    if action.startswith("prompt_choose_"):
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        suggestions = list(result.get("suggestions") or [])
+        idx = max(1, min(3, _safe_int(action.rsplit("_", 1)[-1], 1)))
+        if not suggestions:
+            suggestions = music_prompt_suggestions(result.get("description") or "video sản phẩm", _safe_int(result.get("offset"), 0), lang)
+        chosen = suggestions[idx - 1]
+        prompt_text = (
+            f"{chosen['name']} background music for {chosen['description']}, mood {chosen['mood']}, tempo {chosen['tempo']}, "
+            f"instruments {chosen['instrument']}, duration {chosen['duration']}, {chosen['vocal']}, copyright-safe, no famous melody."
+        )
+        result.update({"suggestions": suggestions, "selected_prompt": prompt_text, "selected_index": idx})
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text(
+            f"✅ Đã chọn gợi ý {idx}.\n\n<code>{html.escape(prompt_text)}</code>\n\nBot chưa gọi API nhạc và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=music_prompt_result_keyboard(lang),
+        )
+    if action == "find_from_prompt":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        query_text = result.get("selected_prompt") or result.get("description") or "upbeat product review"
+        return await send_music_library_results(query.message, user_id, _short_pending_text(query_text, 80))
+    if action == "save_prompt":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        prompt_text = result.get("selected_prompt")
+        if not prompt_text:
+            suggestions = result.get("suggestions") or music_prompt_suggestions(result.get("description") or "video sản phẩm", _safe_int(result.get("offset"), 0), lang)
+            prompt_text = "\n\n".join(
+                f"{item['name']}: {item['mood']} | {item['tempo']} | {item['instrument']} | {item['duration']}"
+                for item in suggestions[:3]
+            )
+        if not memory_can_use_full(user_id):
+            return await query.message.reply_text("💾 Ghi chú/Memory chưa mở cho tài khoản này. Prompt vẫn nằm trong tin nhắn hiện tại. Bot chưa trừ Xu.", reply_markup=music_prompt_result_keyboard(lang))
+        note_id = memory_create_note(user_id, prompt_text, source_type="music_prompt")
+        memory_record_event(user_id, "note_created", note_id=note_id, detail="music_prompt")
+        return await query.message.reply_text(f"💾 Đã lưu prompt nhạc vào ghi chú <code>#{note_id}</code>. Bot chưa trừ Xu.", parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
+    if action == "music_ai_guard":
+        await query.answer()
+        return await query.message.reply_text(
+            "🤖 Tạo nhạc AI đang được hoàn thiện/kiểm tra provider. TOAN AAS chưa gọi API nhạc, chưa xử lý file và chưa trừ Xu.",
+            reply_markup=music_prompt_result_keyboard(lang),
+        )
+    if action.startswith("voice_style_"):
+        await query.answer()
+        return await query.message.reply_text(
+            "✅ Đã chọn kiểu giọng.\n\nTTS public thật sẽ có bước báo giá và xác nhận riêng khi được mở. Hiện TOAN AAS chưa gọi provider và chưa trừ Xu.",
+            reply_markup=voice_style_keyboard(lang),
+        )
     if namespace == "music_quick" and action in MUSIC_QUICK_QUERIES:
         await query.answer("Searching music..." if lang == "en" else ("正在查找音乐..." if lang == "zh" else "Đang tìm nhạc..."))
         return await send_music_library_results(query.message, user_id, MUSIC_QUICK_QUERIES[action])
@@ -55478,7 +55718,12 @@ async def cmd_music_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = music_ui_lang(update.effective_user.id if update.effective_user else 0)
     desc = " ".join(context.args or []).strip()
     if not desc:
-        return await update.message.reply_text(music_prompt_guide_text(lang), parse_mode="HTML")
+        set_music_guided_pending(update.effective_user.id, "music_prompt_input")
+        return await update.message.reply_text(
+            music_prompt_guide_text(lang),
+            parse_mode="HTML",
+            reply_markup=music_guided_back_keyboard(lang),
+        )
     blocked = music_copyright_block_reason(desc)
     if blocked:
         if lang == "zh":
@@ -55506,7 +55751,17 @@ async def cmd_music_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text,
             parse_mode="HTML",
         )
-    await update.message.reply_text(build_music_prompt_pack(desc, lang), parse_mode="HTML", disable_web_page_preview=True)
+    suggestions = music_prompt_suggestions(desc, 0, lang)
+    save_music_guided_result(
+        update.effective_user.id if update.effective_user else 0,
+        {"description": desc, "offset": 0, "suggestions": suggestions, "selected_prompt": ""},
+    )
+    await update.message.reply_text(
+        music_prompt_suggestions_text(desc, 0, lang),
+        parse_mode="HTML",
+        reply_markup=music_prompt_result_keyboard(lang),
+        disable_web_page_preview=True,
+    )
 
 async def send_music_library_results(message, user_id, query: str):
     lang = music_ui_lang(user_id)
@@ -55708,6 +55963,59 @@ async def dispatch_music_inline_command(update: Update, context: ContextTypes.DE
     finally:
         context.args = old_args
     return True
+
+async def handle_music_guided_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    state = get_music_guided_pending(uid)
+    if not state:
+        return False
+    text = _short_pending_text(update.message.text, 900)
+    if not text or text.startswith("/"):
+        return False
+    lang = music_ui_lang(uid)
+    action = str(state.get("pending_action") or "")
+    clear_music_guided_pending(uid)
+    if action == "music_prompt_input":
+        blocked = music_copyright_block_reason(text)
+        if blocked:
+            await update.message.reply_text(
+                "⛔ Prompt nhạc này có rủi ro bản quyền/clone.\n\n"
+                f"• Dấu hiệu: <code>{html.escape(blocked)}</code>\n"
+                "Hãy mô tả mood, tempo, nhạc cụ, bối cảnh video và cảm xúc thay vì nhắc nghệ sĩ/bài hát cụ thể.\n"
+                "Bot chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=music_guided_back_keyboard(lang),
+            )
+            return True
+        suggestions = music_prompt_suggestions(text, 0, lang)
+        save_music_guided_result(uid, {"description": text, "offset": 0, "suggestions": suggestions, "selected_prompt": ""})
+        await update.message.reply_text(
+            music_prompt_suggestions_text(text, 0, lang),
+            parse_mode="HTML",
+            reply_markup=music_prompt_result_keyboard(lang),
+            disable_web_page_preview=True,
+        )
+        return True
+    if action == "music_library_keyword":
+        await send_music_library_results(update.message, uid, text)
+        return True
+    if action == "sfx_library_keyword":
+        await send_sfx_library_results(update.message, uid, text)
+        return True
+    if action == "media_library_keyword":
+        await send_media_library_results(update.message, uid, text)
+        return True
+    if action == "voice_text":
+        save_music_guided_result(uid, {"voice_text": text})
+        await update.message.reply_text(
+            voice_style_suggestions_text(text, lang),
+            parse_mode="HTML",
+            reply_markup=voice_style_keyboard(lang),
+        )
+        return True
+    return False
 
 def music_ai_provider_summary() -> str:
     providers = []
@@ -62037,7 +62345,7 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
         parent_action = doc_tool_parent_action(state)
         clear_doc_tool_pending(uid)
         if parent_action == "main_memory":
-            return await safe_edit_or_send(query, menu_text_main_memory_i18n(lang), parse_mode="HTML", reply_markup=main_memory_keyboard(lang))
+            return await safe_edit_or_send(query, menu_text_main_memory_i18n(lang), parse_mode="HTML", reply_markup=main_memory_keyboard(lang, uid))
         return await safe_edit_or_send(query, menu_text_main_docs_i18n(lang), parse_mode="HTML", reply_markup=main_docs_keyboard(lang))
     if not state:
         return await safe_edit_or_send(query, "⏰ Yêu cầu tài liệu đã hết hạn. TOAN AAS chưa xử lý file và chưa trừ Xu.", reply_markup=doc_tools_keyboard(lang))
@@ -62764,6 +63072,145 @@ def memory_format_note_item(note: dict) -> str:
         f"  {html.escape((note.get('summary') or '')[:180])}"
     )
 
+def memory_format_note_item_with_time(note: dict) -> str:
+    created_at = html.escape(str(note.get("created_at") or "-"))
+    source = html.escape(str(note.get("source_type") or "manual"))
+    return (
+        f"#{note.get('id')} — <b>{html.escape(note.get('title') or 'Ghi chú')}</b>\n"
+        f"  Tạo lúc: <code>{created_at}</code> | Nguồn: <code>{source}</code>\n"
+        f"  {html.escape((note.get('summary') or note.get('content') or '')[:180])}"
+    )
+
+def memory_guided_pending_key(user_id) -> str:
+    return f"memory_guided:{user_id}"
+
+def set_memory_guided_pending(user_id, action: str, **fields) -> dict:
+    payload = {
+        "pending_action": str(action or "").strip(),
+        "created_at_ts": time.time(),
+    }
+    for key, value in fields.items():
+        payload[str(key)] = _short_pending_text(value, 900)
+    USER_PENDING[memory_guided_pending_key(user_id)] = payload
+    return payload
+
+def get_memory_guided_pending(user_id) -> dict | None:
+    payload = USER_PENDING.get(memory_guided_pending_key(user_id)) or {}
+    if not payload.get("pending_action"):
+        return None
+    if time.time() - float(payload.get("created_at_ts") or 0) > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(memory_guided_pending_key(user_id), None)
+        return None
+    return payload
+
+def clear_memory_guided_pending(user_id) -> bool:
+    return USER_PENDING.pop(memory_guided_pending_key(user_id), None) is not None
+
+def memory_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("📝 Tạo ghi chú" if is_vi else "📝 Create note", "memory|create"),
+        ("📋 Ghi chú đã lưu" if is_vi else "📋 Saved notes", "memory|list"),
+        ("🔍 Tìm ghi chú" if is_vi else "🔍 Search notes", "memory|search"),
+        ("🗑 Xóa ghi chú" if is_vi else "🗑 Delete note", "memory|delete_start"),
+        ("💾 Dung lượng của tôi" if is_vi else "💾 My storage", "menu|memory_storage_status"),
+        ("🧰 Công cụ PDF / Word" if is_vi else "🧰 PDF / Word tools", "menu|main_docs"),
+    ]
+    back = ("⬅️ Ghi chú / Tài liệu", "menu|main_memory") if is_vi else ("⬅️ Notes / Docs", "menu|main_memory")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def memory_create_prompt_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📝 <b>Create note</b>\n\n"
+            "Send the note content in your next message. You can save prompts, captions, ideas, checklists or document notes.\n\n"
+            "TOAN AAS will save it with full timestamp. No API call and no Xu charge."
+        )
+    return (
+        "📝 <b>Tạo ghi chú</b>\n\n"
+        "Bạn hãy gửi nội dung ghi chú ở tin nhắn tiếp theo. Có thể lưu prompt, caption, ý tưởng, checklist hoặc ghi chú tài liệu.\n\n"
+        "TOAN AAS sẽ lưu kèm thời gian đầy đủ. Bot chưa gọi API và chưa trừ Xu."
+    )
+
+def memory_search_prompt_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "🔍 <b>Search notes</b>\n\nSend the keyword you want to search. No Xu charge."
+    return "🔍 <b>Tìm ghi chú</b>\n\nBạn hãy gửi từ khóa cần tìm. Bot sẽ trả danh sách note có mã #id và thời gian tạo. Bot chưa trừ Xu."
+
+def memory_delete_prompt_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "🗑 <b>Delete note</b>\n\nSend the note ID you want to delete, for example: <code>12</code>. The bot will ask for confirmation first."
+    return "🗑 <b>Xóa ghi chú</b>\n\nBạn hãy gửi mã ghi chú muốn xóa, ví dụ: <code>12</code>. Bot sẽ hỏi xác nhận trước khi xóa."
+
+def memory_notes_list_text(notes: list[dict], title: str = "📋 Ghi chú đã lưu") -> str:
+    if not notes:
+        return f"{title}\n\nBạn chưa có ghi chú phù hợp. Bấm <b>Tạo ghi chú</b> để lưu nội dung mới."
+    lines = [f"{title}", ""]
+    lines.extend(memory_format_note_item_with_time(note) for note in notes)
+    return "\n\n".join(lines)
+
+def memory_notes_list_keyboard(notes: list[dict], lang: str = "vi", delete_mode: bool = False) -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons: list[tuple[str, str]] = []
+    for note in notes[:6]:
+        note_id = int(note.get("id") or 0)
+        if not note_id:
+            continue
+        if delete_mode:
+            buttons.append((f"🗑 Xóa #{note_id}" if is_vi else f"🗑 Delete #{note_id}", f"memory|delete|{note_id}"))
+        else:
+            buttons.append((f"👁 Xem #{note_id}" if is_vi else f"👁 View #{note_id}", f"memory|view|{note_id}"))
+    buttons.extend([
+        ("🔍 Tìm ghi chú" if is_vi else "🔍 Search notes", "memory|search"),
+        ("📝 Tạo ghi chú" if is_vi else "📝 Create note", "memory|create"),
+    ])
+    back = ("⬅️ Ghi chú / Tài liệu", "menu|main_memory") if is_vi else ("⬅️ Notes / Docs", "menu|main_memory")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def memory_note_detail_text(note: dict) -> str:
+    return (
+        f"🧠 <b>Ghi chú #{note['id']}</b>\n\n"
+        f"• Tiêu đề: <b>{html.escape(note.get('title') or '')}</b>\n"
+        f"• Mục: <code>{html.escape(note.get('category') or 'Khác')}</code>\n"
+        f"• Mức độ: <code>{html.escape(note.get('priority') or 'normal')}</code>\n"
+        f"• Tags: <code>{html.escape(note.get('tags') or '-')}</code>\n"
+        f"• Nguồn: <code>{html.escape(note.get('source_type') or 'manual')}</code>\n"
+        f"• Tạo lúc: <code>{html.escape(note.get('created_at') or '-')}</code>\n"
+        f"• Cập nhật: <code>{html.escape(note.get('updated_at') or '-')}</code>\n\n"
+        f"<b>Nội dung:</b>\n{html.escape(note.get('content') or '')}"
+    )
+
+def memory_note_detail_keyboard(note_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("🗑 Xóa ghi chú" if is_vi else "🗑 Delete note", f"memory|delete|{int(note_id)}"),
+        ("🔍 Tìm ghi chú khác" if is_vi else "🔍 Search another", "memory|search"),
+        ("📋 Danh sách ghi chú" if is_vi else "📋 Notes list", "memory|list"),
+    ]
+    back = ("⬅️ Ghi chú / Tài liệu", "menu|main_memory") if is_vi else ("⬅️ Notes / Docs", "menu|main_memory")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def memory_delete_confirm_text(note: dict) -> str:
+    return (
+        f"🗑 <b>Xác nhận xóa ghi chú #{note['id']}</b>\n\n"
+        f"Tiêu đề: <b>{html.escape(note.get('title') or '')}</b>\n"
+        f"Tạo lúc: <code>{html.escape(note.get('created_at') or '-')}</code>\n\n"
+        "Ghi chú sẽ được archive mềm để tránh mất dữ liệu nhầm."
+    )
+
+def memory_delete_confirm_keyboard(note_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Xóa" if is_vi else "✅ Delete", callback_data=f"memory|delete_yes|{int(note_id)}"),
+            InlineKeyboardButton("❌ Hủy" if is_vi else "❌ Cancel", callback_data=f"memory|view|{int(note_id)}"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Danh sách" if is_vi else "⬅️ List", callback_data="memory|list"),
+            InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="menu|main"),
+        ],
+    ])
+
 def memory_list_notes(user_id, where_sql: str = "", params: tuple = (), limit: int = 10) -> list[dict]:
     conn = db_connect()
     try:
@@ -62896,8 +63343,154 @@ def memory_storage_nav_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
+async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    action_parts = str(query.data or "memory|main").split("|")
+    action = action_parts[1] if len(action_parts) > 1 else "main"
+    if not memory_can_use_full(uid):
+        clear_memory_guided_pending(uid)
+        return await safe_edit_or_send(query, memory_access_message(), parse_mode="HTML", reply_markup=main_memory_keyboard(lang, uid))
+    if action == "main":
+        clear_memory_guided_pending(uid)
+        return await safe_edit_or_send(query, menu_text_main_memory_i18n(lang), parse_mode="HTML", reply_markup=main_memory_keyboard(lang, uid))
+    if action == "create":
+        set_memory_guided_pending(uid, "create")
+        return await safe_edit_or_send(query, memory_create_prompt_text(lang), parse_mode="HTML", reply_markup=memory_main_keyboard(lang))
+    if action == "search":
+        set_memory_guided_pending(uid, "search")
+        return await safe_edit_or_send(query, memory_search_prompt_text(lang), parse_mode="HTML", reply_markup=memory_main_keyboard(lang))
+    if action == "delete_start":
+        notes = memory_list_notes(uid, limit=8)
+        if not notes:
+            return await safe_edit_or_send(query, memory_notes_list_text([], "🗑 Xóa ghi chú"), parse_mode="HTML", reply_markup=memory_main_keyboard(lang))
+        set_memory_guided_pending(uid, "delete_id")
+        return await safe_edit_or_send(
+            query,
+            "🗑 <b>Chọn ghi chú muốn xóa</b>\n\n" + "\n\n".join(memory_format_note_item_with_time(note) for note in notes),
+            parse_mode="HTML",
+            reply_markup=memory_notes_list_keyboard(notes, lang, delete_mode=True),
+        )
+    if action == "list":
+        clear_memory_guided_pending(uid)
+        notes = memory_list_notes(uid, limit=10)
+        return await safe_edit_or_send(
+            query,
+            memory_notes_list_text(notes, "📋 <b>Ghi chú đã lưu</b>"),
+            parse_mode="HTML",
+            reply_markup=memory_notes_list_keyboard(notes, lang),
+        )
+    if action == "view" and len(action_parts) > 2:
+        clear_memory_guided_pending(uid)
+        note_id = safe_int(action_parts[2], 0)
+        note = memory_fetch_note(uid, note_id)
+        if not note:
+            return await safe_edit_or_send(query, "⚠️ Không tìm thấy ghi chú của bạn hoặc ghi chú đã archive.", reply_markup=memory_main_keyboard(lang))
+        return await safe_edit_or_send(query, memory_note_detail_text(note), parse_mode="HTML", reply_markup=memory_note_detail_keyboard(note_id, lang))
+    if action == "delete" and len(action_parts) > 2:
+        clear_memory_guided_pending(uid)
+        note_id = safe_int(action_parts[2], 0)
+        note = memory_fetch_note(uid, note_id)
+        if not note:
+            return await safe_edit_or_send(query, "⚠️ Không tìm thấy ghi chú active của bạn.", reply_markup=memory_main_keyboard(lang))
+        return await safe_edit_or_send(query, memory_delete_confirm_text(note), parse_mode="HTML", reply_markup=memory_delete_confirm_keyboard(note_id, lang))
+    if action == "delete_yes" and len(action_parts) > 2:
+        clear_memory_guided_pending(uid)
+        note_id = safe_int(action_parts[2], 0)
+        note = memory_fetch_note(uid, note_id)
+        if not note:
+            return await safe_edit_or_send(query, "⚠️ Không tìm thấy ghi chú active của bạn.", reply_markup=memory_main_keyboard(lang))
+        conn = db_connect()
+        try:
+            conn.execute(
+                "UPDATE memory_notes SET is_archived=1, status='archived', updated_at=? WHERE id=? AND user_id=?",
+                (now_text(), note_id, str(uid)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        memory_record_event(uid, "note_archived", note_id=note_id, detail="guided_delete")
+        return await safe_edit_or_send(
+            query,
+            f"✅ Đã xóa/ẩn ghi chú <code>#{note_id}</code>.\n\nTOAN AAS chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=memory_main_keyboard(lang),
+        )
+    return await safe_edit_or_send(query, menu_text_main_memory_i18n(lang), parse_mode="HTML", reply_markup=main_memory_keyboard(lang, uid))
+
+async def handle_memory_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    state = get_memory_guided_pending(uid)
+    if not state:
+        return False
+    if not await memory_require_access(update):
+        clear_memory_guided_pending(uid)
+        return True
+    lang = get_user_language(uid) or "vi"
+    text = update.message.text.strip()
+    if not text or text.startswith("/"):
+        return False
+    action = str(state.get("pending_action") or "")
+    if action == "create":
+        quota_error = memory_quota_error(uid, len(text.encode("utf-8")))
+        if quota_error:
+            clear_memory_guided_pending(uid)
+            await update.message.reply_text(quota_error, parse_mode="HTML", reply_markup=memory_main_keyboard(lang))
+            return True
+        note_id = memory_create_note(uid, text, source_type="manual")
+        memory_record_event(uid, "note_created", note_id=note_id, detail="guided")
+        save_tool_test_result("memory_notes", "PASS", "guided note saved", uid)
+        clear_memory_guided_pending(uid)
+        note = memory_fetch_note(uid, note_id)
+        await update.message.reply_text(
+            "✅ Đã lưu ghi chú.\n\n" + memory_note_detail_text(note),
+            parse_mode="HTML",
+            reply_markup=memory_note_detail_keyboard(note_id, lang),
+        )
+        return True
+    if action == "search":
+        like = f"%{text}%"
+        notes = memory_list_notes(uid, "(title LIKE ? OR content LIKE ? OR summary LIKE ? OR tags LIKE ? OR category LIKE ?)", (like, like, like, like, like), limit=10)
+        clear_memory_guided_pending(uid)
+        title = f"🔎 <b>Kết quả tìm: {html.escape(text[:80])}</b>"
+        await update.message.reply_text(
+            memory_notes_list_text(notes, title),
+            parse_mode="HTML",
+            reply_markup=memory_notes_list_keyboard(notes, lang),
+        )
+        return True
+    if action == "delete_id":
+        note_id = safe_int(text.lstrip("#"), 0)
+        note = memory_fetch_note(uid, note_id)
+        if not note:
+            await update.message.reply_text(
+                "⚠️ Không tìm thấy ghi chú active với mã này. Bạn có thể bấm danh sách ghi chú để chọn lại.",
+                reply_markup=memory_main_keyboard(lang),
+            )
+            return True
+        clear_memory_guided_pending(uid)
+        await update.message.reply_text(
+            memory_delete_confirm_text(note),
+            parse_mode="HTML",
+            reply_markup=memory_delete_confirm_keyboard(note_id, lang),
+        )
+        return True
+    return False
+
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(memory_menu_text(), parse_mode="HTML")
+    uid = update.effective_user.id if update.effective_user else 0
+    lang = get_user_language(uid) or "vi"
+    await update.message.reply_text(
+        menu_text_main_memory_i18n(lang),
+        parse_mode="HTML",
+        reply_markup=main_memory_keyboard(lang, uid),
+    )
 
 async def cmd_memory_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(memory_plan_text(), parse_mode="HTML")
@@ -63065,10 +63658,12 @@ async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     notes = memory_list_notes(uid, limit=10)
     if not notes:
-        return await update.message.reply_text("🧠 Bạn chưa có ghi chú active nào.\n\nDùng /note <nội dung> để lưu.")
-    lines = ["🧠 <b>10 ghi chú gần nhất</b>", ""]
-    lines.extend(memory_format_note_item(note) for note in notes)
-    await reply_html_lines(update, lines)
+        return await update.message.reply_text("🧠 Bạn chưa có ghi chú active nào.\n\nBấm <b>Tạo ghi chú</b> để lưu nội dung mới.", parse_mode="HTML", reply_markup=memory_main_keyboard(user_ui_lang(uid)))
+    await update.message.reply_text(
+        memory_notes_list_text(notes, "🧠 <b>10 ghi chú gần nhất</b>"),
+        parse_mode="HTML",
+        reply_markup=memory_notes_list_keyboard(notes, user_ui_lang(uid)),
+    )
 
 async def cmd_note_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -63079,17 +63674,11 @@ async def cmd_note_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     note = memory_fetch_note(uid, int(context.args[0]))
     if not note:
         return await update.message.reply_text("⚠️ Không tìm thấy ghi chú của bạn hoặc ghi chú đã archive.")
-    text = (
-        f"🧠 <b>Ghi chú #{note['id']}</b>\n\n"
-        f"• Tiêu đề: <b>{html.escape(note.get('title') or '')}</b>\n"
-        f"• Mục: <code>{html.escape(note.get('category') or 'Khác')}</code>\n"
-        f"• Mức độ: <code>{html.escape(note.get('priority') or 'normal')}</code>\n"
-        f"• Tags: <code>{html.escape(note.get('tags') or '-')}</code>\n"
-        f"• Tạo lúc: <code>{html.escape(note.get('created_at') or '-')}</code>\n\n"
-        f"<b>Tóm tắt:</b>\n{html.escape(note.get('summary') or '')}\n\n"
-        f"<b>Nội dung:</b>\n{html.escape(note.get('content') or '')}"
+    await update.message.reply_text(
+        memory_note_detail_text(note),
+        parse_mode="HTML",
+        reply_markup=memory_note_detail_keyboard(int(note["id"]), user_ui_lang(uid)),
     )
-    await reply_html_lines(update, text.splitlines())
 
 async def cmd_search_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -63102,9 +63691,11 @@ async def cmd_search_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     notes = memory_list_notes(uid, "(title LIKE ? OR content LIKE ? OR summary LIKE ? OR tags LIKE ? OR category LIKE ?)", (like, like, like, like, like), limit=15)
     if not notes:
         return await update.message.reply_text(f"🔎 Không tìm thấy ghi chú với từ khóa: {html.escape(keyword)}", parse_mode="HTML")
-    lines = [f"🔎 <b>Kết quả tìm: {html.escape(keyword)}</b>", ""]
-    lines.extend(memory_format_note_item(note) for note in notes)
-    await reply_html_lines(update, lines)
+    await update.message.reply_text(
+        memory_notes_list_text(notes, f"🔎 <b>Kết quả tìm: {html.escape(keyword)}</b>"),
+        parse_mode="HTML",
+        reply_markup=memory_notes_list_keyboard(notes, user_ui_lang(uid)),
+    )
 
 async def cmd_note_tags(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -95674,6 +96265,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_text(update, context):
         return
 
+    if await handle_memory_pending_text(update, context):
+        return
+
+    if await handle_music_guided_pending_text(update, context):
+        return
+
     if await handle_storyboard_pending_text(update, context):
         return
 
@@ -96645,6 +97242,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_ticket_callback, pattern=r"^ticket\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_tools_callback, pattern=r"^imgtool\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_memory_callback, pattern=r"^memory\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_purchase_callback, pattern=r"^pkgbuy\|"))

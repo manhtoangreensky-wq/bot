@@ -468,9 +468,9 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "MEDIA_PRICE_MULTIPLIER=2" in env_example
     assert "IMAGE_LOW_COST_XU=50" in env_example
     assert "IMAGE_STANDARD_COST_XU=200" in env_example
-    assert "IMAGE_STANDARD_WARRANTY_COST_XU=250" in env_example
+    assert "IMAGE_STANDARD_WARRANTY_COST_XU=300" in env_example
     assert "IMAGE_HIGH_COST_XU=400" in env_example
-    assert "IMAGE_HIGH_WARRANTY_COST_XU=500" in env_example
+    assert "IMAGE_HIGH_WARRANTY_COST_XU=600" in env_example
     assert "VIDEO_LOW_COST_XU=200" in env_example
     assert "VIDEO_BASIC_COST_XU=300" in env_example
     assert "VIDEO_COMMON_COST_XU=400" in env_example
@@ -3927,8 +3927,8 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     selected_image_buttons = [button.text for row in bot.cinematic_ad_image_prompt_selected_keyboard(1).inline_keyboard for button in row]
     assert "✅ Lưu prompt ảnh" in selected_image_buttons
     assert any("Tiết kiệm" in label for label in selected_image_buttons)
-    assert any("Chuẩn + BH" in label and "250 Xu" in label for label in selected_image_buttons)
-    assert any("Cao + BH" in label and "500 Xu" in label for label in selected_image_buttons)
+    assert any("Chuẩn + BH" in label and "300 Xu" in label for label in selected_image_buttons)
+    assert any("Cao + BH" in label and "600 Xu" in label for label in selected_image_buttons)
     video_choice_buttons = [button.text for row in bot.cinematic_ad_video_prompt_choices_keyboard().inline_keyboard for button in row]
     assert "1️⃣ Chọn gợi ý 1" in video_choice_buttons
     assert "2️⃣ Chọn gợi ý 2" in video_choice_buttons
@@ -4493,7 +4493,7 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert "975 Xu" in confirm_text
     assert "Giá storyboard bulk" in confirm_text
     warranty_buttons = [button.text for row in bot.storyboard_image_confirm_keyboard("standard").inline_keyboard for button in row]
-    assert any("Thêm bảo hành" in label and "250 Xu/ảnh" in label for label in warranty_buttons)
+    assert any("Thêm bảo hành" in label and "300 Xu/ảnh" in label for label in warranty_buttons)
 
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "none"}) == 20
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 20
@@ -5187,7 +5187,10 @@ def test_operations_v1a_internal_archive_schema_flow_and_routing(monkeypatch):
     assert 'CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\\|")' in source
 
     memory_labels = [button.text for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]
-    assert "🏢 Hồ sơ nội bộ" in memory_labels
+    assert "🏢 Hồ sơ nội bộ" not in memory_labels
+    monkeypatch.setattr(bot, "ADMIN_IDS", {"archive-admin"})
+    admin_memory_labels = [button.text for row in bot.main_memory_keyboard("vi", "archive-admin").inline_keyboard for button in row]
+    assert "🏢 Hồ sơ nội bộ" in admin_memory_labels
     archive_callbacks = [
         button.callback_data
         for row in bot.internal_archive_menu_keyboard().inline_keyboard
@@ -7378,9 +7381,10 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
     assert "🔙 Quay lại" in image_edit_result_labels
 
     memory_rows = rows(bot.main_memory_keyboard("vi"))
-    assert memory_rows[:4] == [
-        ["📝 Tạo ghi chú", "⏰ Nhắc hẹn"],
-        ["📄 Lưu tài liệu", "🔍 Tìm ghi chú"],
+    assert memory_rows[:5] == [
+        ["📝 Tạo ghi chú", "📋 Ghi chú đã lưu"],
+        ["⏰ Nhắc hẹn", "📄 Lưu tài liệu"],
+        ["🔍 Tìm ghi chú", "🗑 Xóa ghi chú"],
         ["💾 Dung lượng của tôi", "📦 Mua thêm dung lượng"],
         ["🧹 Dọn file cũ", "🧰 Công cụ PDF / Word"],
     ]
@@ -7391,6 +7395,56 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
     assert "+250MB" not in storage_text
     assert "+500MB" not in storage_text
     assert bot.TOTAL_FREE_STORAGE_MB == 50
+
+
+def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
+    source = bot_source_text()
+    message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
+    menu_source = source_between(source, "async def handle_menu_callback", "async def handle_free_hub_callback")
+
+    assert bot.IMAGE_STANDARD_WARRANTY_COST_XU == 300
+    assert bot.IMAGE_HIGH_WARRANTY_COST_XU == 600
+    assert bot.image_tier_cost_xu("standard_warranty") == 300
+    assert bot.image_tier_cost_xu("high_warranty") == 600
+
+    memory_callbacks = [button.callback_data for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]
+    assert {"memory|create", "memory|list", "memory|search", "memory|delete_start"}.issubset(set(memory_callbacks))
+    assert "menu|internal_archive" not in memory_callbacks
+    monkeypatch.setattr(bot, "ADMIN_ID", "123456")
+    monkeypatch.setattr(bot, "ADMIN_IDS", {"123456"})
+    admin_memory_callbacks = [button.callback_data for row in bot.main_memory_keyboard("vi", 123456).inline_keyboard for button in row]
+    assert "menu|internal_archive" in admin_memory_callbacks
+    assert "Copy lệnh" not in bot.menu_hint_text("hint_note")[1]
+    assert "Copy lệnh" not in bot.menu_hint_text("hint_search_note")[1]
+    assert 'CallbackQueryHandler(handle_memory_callback, pattern=r"^memory\\|")' in source
+    assert "handle_memory_pending_text(update, context)" in message_source
+    assert "set_memory_guided_pending(query.from_user.id, \"create\")" in menu_source
+    assert "set_memory_guided_pending(query.from_user.id, \"search\")" in menu_source
+    assert "memory_format_note_item_with_time" in source
+
+    music_labels = [button.text for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
+    assert "🎙 Tạo giọng đọc" in music_labels
+    assert "🗣 Chọn giọng" not in music_labels
+    music_callbacks = [button.callback_data for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
+    assert "music_quick|prompt" in music_callbacks
+    assert "music_quick|voice" in music_callbacks
+    assert "music_quick|voice_pick" not in music_callbacks
+
+    suggestions = bot.music_prompt_suggestions("video review máy xay sinh tố mini", 0, "vi")
+    next_suggestions = bot.music_prompt_suggestions("video review máy xay sinh tố mini", 3, "vi")
+    assert len(suggestions) == 3
+    assert suggestions != next_suggestions
+    suggestions_text = bot.music_prompt_suggestions_text("video review máy xay sinh tố mini", 0, "vi")
+    assert "3 prompt nhạc gợi ý" in suggestions_text
+    assert "Prompt:" in suggestions_text
+    prompt_callbacks = [button.callback_data for row in bot.music_prompt_result_keyboard("vi").inline_keyboard for button in row]
+    assert {"music_quick|prompt_choose_1", "music_quick|prompt_more", "music_quick|save_prompt", "music_quick|find_from_prompt"}.issubset(set(prompt_callbacks))
+
+    for keyboard in [bot.music_library_quick_keyboard("vi"), bot.sfx_library_quick_keyboard("vi"), bot.media_library_quick_keyboard("vi")]:
+        callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+        assert "menu|main_music" in callbacks
+        assert "menu|main" in callbacks
+    assert "handle_music_guided_pending_text(update, context)" in message_source
 
 
 def test_document_pdf_tools_v6_guided_upload_confirm_flow():
