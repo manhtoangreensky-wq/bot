@@ -1,5 +1,7 @@
 import time
 from pathlib import Path
+import asyncio
+from types import SimpleNamespace
 
 import bot
 
@@ -136,6 +138,9 @@ def test_video_finalization_summary_routes_prompt_without_images_to_ai_or_keyfra
         "has_script": True,
         "has_video_prompt": True,
     }
+    summary_text = bot.video_finalization_summary_text(state, "vi")
+    assert "không bắt buộc nếu xuất từ prompt" in summary_text
+
     callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "vfinal|export_local" not in callbacks
     assert "vfinal|export_ai" in callbacks
@@ -148,6 +153,9 @@ def test_video_finalization_summary_routes_prompt_without_images_to_ai_or_keyfra
 
     guard_callbacks = _callbacks(bot.video_finalization_guard_keyboard(state, "vi"))
     assert "vfinal|export_local" not in guard_callbacks
+    assert "vfinal|review" in guard_callbacks
+    assert "vfinal|back" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
+    assert "vfinal|review" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
 
 
 def test_video_finalization_summary_keeps_local_export_when_images_exist():
@@ -161,6 +169,79 @@ def test_video_finalization_summary_keeps_local_export_when_images_exist():
     assert "vfinal|export_local" in callbacks
     assert "vfinal|export_ai" in callbacks
     assert "vfinal|export_local" in _callbacks(bot.video_finalization_guard_keyboard(state, "vi"))
+
+
+def test_stale_local_export_without_images_uses_prompt_video_path(monkeypatch):
+    user_id = 991209
+    bot.clear_video_finalization_state(user_id)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "is_ai_video_ready", lambda: False)
+    bot.set_video_finalization_state(user_id, {
+        "source": "trend",
+        "source_label": "Video theo trend",
+        "photos": [],
+        "has_script": True,
+        "has_video_prompt": True,
+    })
+
+    class FakeQuery:
+        data = "vfinal|export_local"
+        from_user = SimpleNamespace(id=user_id)
+        message = SimpleNamespace(chat_id=user_id)
+        edited = None
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
+            self.edited = {"text": str(text), "parse_mode": parse_mode, "reply_markup": reply_markup}
+            return self.edited
+
+    query = FakeQuery()
+    asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert query.edited is not None
+    assert "Video AI chân thật đang được kiểm soát an toàn" in query.edited["text"]
+    assert "Prompt/kế hoạch của bạn vẫn được giữ" in query.edited["text"]
+    callbacks = _callbacks(query.edited["reply_markup"])
+    assert "vfinal|review" in callbacks
+    assert "vfinal|export_local" not in callbacks
+    assert "vfinal|back" not in callbacks
+
+
+def test_local_export_without_prompt_or_images_keeps_image_slideshow_guard(monkeypatch):
+    user_id = 991210
+    bot.clear_video_finalization_state(user_id)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    bot.set_video_finalization_state(user_id, {
+        "source": "videoidea",
+        "source_label": "Ý tưởng video",
+        "photos": [],
+        "has_script": False,
+        "has_video_prompt": False,
+    })
+
+    class FakeQuery:
+        data = "vfinal|export_local"
+        from_user = SimpleNamespace(id=user_id)
+        message = SimpleNamespace(chat_id=user_id)
+        edited = None
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
+            self.edited = {"text": str(text), "parse_mode": parse_mode, "reply_markup": reply_markup}
+            return self.edited
+
+    query = FakeQuery()
+    asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert query.edited is not None
+    assert "Ghép ảnh thành video cần có ảnh trước" in query.edited["text"]
+    callbacks = _callbacks(query.edited["reply_markup"])
+    assert "vfinal|review" in callbacks
+    assert "vfinal|back" not in callbacks
 
 
 def test_video_finalization_readiness_requires_explicit_flags(monkeypatch):

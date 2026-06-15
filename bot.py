@@ -72230,10 +72230,14 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
     readiness = video_finalization_readiness()
     photos = developing_video_frame_photos(state)
     source = state.get("source_label") or video_finalization_source_label(state.get("source"), lang)
+    has_prompt = video_finalization_has_prompt(state)
     yes = "Có" if normalize_user_language(lang) == "vi" else "Yes"
     no = "Không" if normalize_user_language(lang) == "vi" else "No"
     status = lambda value: "ready" if value else "not ready"
     if normalize_user_language(lang) != "vi":
+        local_frame_status = status(readiness["local_frame"]) if len(photos) >= 2 else (
+            "not required for prompt export" if has_prompt else "missing images"
+        )
         return (
             "🎬 <b>Confirm video export</b>\n\n"
             f"Source: <b>{html.escape(str(source))}</b>\n"
@@ -72245,12 +72249,15 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
             f"• Subtitles: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n"
             f"• Subtitles + dubbing: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n\n"
             "<b>Readiness</b>\n"
-            f"• Local frame video: <code>{status(readiness['local_frame']) if photos else 'missing images'}</code>\n"
+            f"• Local frame video: <code>{local_frame_status}</code>\n"
             f"• AI video: <code>{status(readiness['ai_video'])}</code>\n"
             f"• ASR / TTS: <code>{status(readiness['asr'])} / {status(readiness['dub'])}</code>\n"
             f"• Audio/subtitle mux: <code>{status(readiness['voice_mux'])} / {status(readiness['subtitle_burn'])}</code>\n\n"
             "No Xu has been charged. Existing pricing and confirmation remain the final billing gate."
         )
+    local_frame_status = status(readiness["local_frame"]) if len(photos) >= 2 else (
+        "không bắt buộc nếu xuất từ prompt" if has_prompt else "chưa có đủ ảnh"
+    )
     return (
         "🎬 <b>Xác nhận xuất video</b>\n\n"
         f"Nguồn video: <b>{html.escape(str(source))}</b>\n"
@@ -72262,7 +72269,7 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
         f"• Phụ đề: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n"
         f"• Phụ đề + lồng tiếng: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n\n"
         "<b>Trạng thái xử lý</b>\n"
-        f"• Ghép ảnh local: <code>{status(readiness['local_frame']) if photos else 'chưa có đủ ảnh'}</code>\n"
+        f"• Ghép ảnh local: <code>{local_frame_status}</code>\n"
         f"• Video AI chân thật: <code>{status(readiness['ai_video'])}</code>\n"
         f"• Phụ đề tự động / TTS: <code>{status(readiness['asr'])} / {status(readiness['dub'])}</code>\n"
         f"• Ghép audio / burn subtitle: <code>{status(readiness['voice_mux'])} / {status(readiness['subtitle_burn'])}</code>\n\n"
@@ -72278,6 +72285,29 @@ def video_finalization_source_keyframe_callback(state: dict | None = None) -> st
     if source == "storyboard":
         return str((state or {}).get("back_callback") or "menu|main_video")[:64]
     return str((state or {}).get("back_callback") or "menu|main_video")[:64]
+
+def video_finalization_has_prompt(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    source_payload = dict(state.get("source_payload") or {})
+    session_context = dict(state.get("session_context") or {})
+    video_project = dict(state.get("video_project") or {})
+    prompt_values = [
+        state.get("has_video_prompt"),
+        state.get("has_script"),
+        state.get("video_prompt"),
+        state.get("selected_prompt"),
+        state.get("custom_video_prompt"),
+        source_payload.get("video_prompt"),
+        source_payload.get("prompt"),
+        source_payload.get("original_prompt"),
+        source_payload.get("script_text"),
+        source_payload.get("concept_text"),
+        session_context.get("video_prompt"),
+        session_context.get("script"),
+        video_project.get("script_text"),
+    ]
+    prompt_values.extend(list(source_payload.get("video_prompts") or [])[:3])
+    return any(bool(str(value or "").strip()) for value in prompt_values)
 
 def video_finalization_local_needs_images_text(state: dict | None = None, lang: str = "vi") -> str:
     source = (state or {}).get("source_label") or video_finalization_source_label((state or {}).get("source"), lang)
@@ -72307,7 +72337,7 @@ def video_finalization_local_needs_images_keyboard(state: dict | None = None, la
         ],
         [
             InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|review"),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")],
     ])
@@ -72319,23 +72349,37 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
     state = dict(state or {})
     is_vi = normalize_user_language(lang) == "vi"
     photos = developing_video_frame_photos(state)
-    first_row = (
-        [
+    has_prompt = video_finalization_has_prompt(state)
+    if len(photos) >= 2:
+        first_row = [
             InlineKeyboardButton("✅ Xuất video local" if is_vi else "✅ Export local video", callback_data="vfinal|export_local"),
             InlineKeyboardButton("✨ Tạo video AI chân thật" if is_vi else "✨ Generate AI video", callback_data="vfinal|export_ai"),
         ]
-        if len(photos) >= 2 else
-        [
-            InlineKeyboardButton("✨ Tạo video AI từ prompt" if is_vi else "✨ Generate AI video from prompt", callback_data="vfinal|export_ai"),
-            InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=video_finalization_source_keyframe_callback(state)),
-        ]
-    )
-    return InlineKeyboardMarkup([
-        first_row,
-        [
+        second_row = [
             InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
             InlineKeyboardButton("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", callback_data="vfinal|save"),
-        ],
+        ]
+    elif has_prompt:
+        first_row = [
+            InlineKeyboardButton("✅ Xuất video từ prompt" if is_vi else "✅ Export video from prompt", callback_data="vfinal|export_ai"),
+            InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=video_finalization_source_keyframe_callback(state)),
+        ]
+        second_row = [
+            InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
+            InlineKeyboardButton("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", callback_data="vfinal|save"),
+        ]
+    else:
+        first_row = [
+            InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=video_finalization_source_keyframe_callback(state)),
+            InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
+        ]
+        second_row = [
+            InlineKeyboardButton("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", callback_data="vfinal|save"),
+            InlineKeyboardButton("✨ Tạo video AI từ prompt" if is_vi else "✨ Generate AI video from prompt", callback_data="vfinal|export_ai"),
+        ]
+    return InlineKeyboardMarkup([
+        first_row,
+        second_row,
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
@@ -72348,8 +72392,15 @@ def video_finalization_ai_guard_text(state: dict | str | None = None, lang: str 
         state = {}
     state = dict(state or {})
     has_local_images = len(developing_video_frame_photos(state)) >= 2
+    has_prompt = video_finalization_has_prompt(state)
     if normalize_user_language(lang) != "vi":
-        next_step = "You can export the existing images locally or save the plan first." if has_local_images else "Save the prompt/plan or create/upload scene images first."
+        next_step = (
+            "You can export the existing images locally or save the plan first."
+            if has_local_images else
+            "Your prompt/plan is saved. Prompt-to-video is guarded until public AI video is ready; create/upload scene images only if you want the local slideshow path."
+            if has_prompt else
+            "Save the plan or create/upload scene images first."
+        )
         return (
             "✨ <b>Real AI video is under safety control.</b>\n\n"
             "Public AI video rendering is not enabled while provider jobs are being stabilized. "
@@ -72358,7 +72409,9 @@ def video_finalization_ai_guard_text(state: dict | str | None = None, lang: str 
     next_step = (
         "Bạn có thể ghép bộ ảnh hiện có thành video local hoặc lưu kế hoạch trước."
         if has_local_images else
-        "Bạn có thể lưu prompt/kế hoạch hoặc tạo/gửi ảnh từng cảnh trước. TOAN AAS không hiện nút xuất video local khi chưa đủ ảnh."
+        "Prompt/kế hoạch của bạn vẫn được giữ. Nhánh xuất video từ prompt đang chờ provider Video AI sẵn sàng; chỉ cần tạo/gửi ảnh nếu bạn muốn đi nhánh ghép ảnh local."
+        if has_prompt else
+        "Bạn có thể lưu kế hoạch hoặc tạo/gửi ảnh từng cảnh trước."
     )
     return (
         "✨ <b>Video AI chân thật đang được kiểm soát an toàn.</b>\n\n"
@@ -72372,14 +72425,21 @@ def video_finalization_guard_keyboard(state: dict | str | None = None, lang: str
         state = {}
     state = dict(state or {})
     is_vi = normalize_user_language(lang) == "vi"
-    first_row = [InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu")]
     if len(developing_video_frame_photos(state)) >= 2:
-        first_row.insert(0, InlineKeyboardButton("🎞 Xuất video local" if is_vi else "🎞 Export local video", callback_data="vfinal|export_local"))
+        first_row = [
+            InlineKeyboardButton("🎞 Xuất video local" if is_vi else "🎞 Export local video", callback_data="vfinal|export_local"),
+            InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
+        ]
+    else:
+        first_row = [
+            InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=video_finalization_source_keyframe_callback(state)),
+            InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
+        ]
     return InlineKeyboardMarkup([
         first_row,
         [
             InlineKeyboardButton("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", callback_data="vfinal|save"),
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|review"),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")],
     ])
@@ -72726,31 +72786,35 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         state["video_finalization"]["finalization_confirmed"] = True
         set_video_finalization_state(uid, state)
         if action == "export_local":
-            result = await handle_legacy_frame_video_export(query, uid, state.get("source") or "video_finalization", lang, state)
-            state = get_video_finalization_state(uid)
-            if state:
+            if len(developing_video_frame_photos(state)) < 2 and video_finalization_has_prompt(state):
+                action = "export_ai"
+            else:
+                result = await handle_legacy_frame_video_export(query, uid, state.get("source") or "video_finalization", lang, state)
+                state = get_video_finalization_state(uid)
+                if state:
+                    state["export_lock_until"] = 0
+                    set_video_finalization_state(uid, state)
+                return result
+        if action == "export_ai":
+            payload = video_finalization_payload(state)
+            if not payload:
                 state["export_lock_until"] = 0
                 set_video_finalization_state(uid, state)
-            return result
-        payload = video_finalization_payload(state)
-        if not payload:
+                return await safe_edit_or_send(query, "⚠️ Chưa có prompt/keyframe đủ điều kiện cho Video AI. Bot chưa gọi provider và chưa trừ Xu.", reply_markup=video_finalization_guard_keyboard(state, lang))
+            if payload.get("resume_video_addon"):
+                tier = normalize_video_tier(payload.get("video_tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
+                source = str(payload.get("resume_source") or "ai")
+                state["export_lock_until"] = 0
+                set_video_finalization_state(uid, state)
+                return await start_video_addon_step(query, uid, payload, tier, lang, source=source)
+            if not is_ai_video_ready():
+                state["export_lock_until"] = 0
+                set_video_finalization_state(uid, state)
+                return await safe_edit_or_send(query, video_finalization_ai_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
+            set_public_video_package_context(uid, payload)
             state["export_lock_until"] = 0
             set_video_finalization_state(uid, state)
-            return await safe_edit_or_send(query, "⚠️ Chưa có prompt/keyframe đủ điều kiện cho Video AI. Bot chưa gọi provider và chưa trừ Xu.", reply_markup=video_finalization_guard_keyboard(state, lang))
-        if payload.get("resume_video_addon"):
-            tier = normalize_video_tier(payload.get("video_tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
-            source = str(payload.get("resume_source") or "ai")
-            state["export_lock_until"] = 0
-            set_video_finalization_state(uid, state)
-            return await start_video_addon_step(query, uid, payload, tier, lang, source=source)
-        if not is_ai_video_ready():
-            state["export_lock_until"] = 0
-            set_video_finalization_state(uid, state)
-            return await safe_edit_or_send(query, video_finalization_ai_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
-        set_public_video_package_context(uid, payload)
-        state["export_lock_until"] = 0
-        set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
+            return await safe_edit_or_send(query, public_video_tier_selection_text(lang), parse_mode="HTML", reply_markup=public_video_tier_keyboard(lang))
     if action == "save":
         state["step"] = "saved"
         set_video_finalization_state(uid, state)
