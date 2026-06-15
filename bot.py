@@ -3113,6 +3113,23 @@ def init_db():
         detail TEXT,
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS memory_storage_addons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        order_code TEXT DEFAULT '',
+        addon_mb INTEGER DEFAULT 0,
+        amount_vnd INTEGER DEFAULT 0,
+        months INTEGER DEFAULT 1,
+        status TEXT DEFAULT 'active',
+        source TEXT DEFAULT '',
+        granted_by TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        starts_at TEXT,
+        expires_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_storage_addons_user_status ON memory_storage_addons(user_id,status,expires_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS tool_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -26384,6 +26401,92 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             conn.commit()
             return True, "plan_success", info
 
+        if order_type == "storage_addon":
+            addon_mb = int(metadata.get("addon_mb") or 0)
+            months = max(1, int(metadata.get("months") or max(1, int(duration_days or 30) // 30) or 1))
+            if addon_mb <= 0:
+                conn.rollback()
+                return False, "invalid_storage_addon_order", info
+            user_row = c.execute("SELECT 1 FROM users WHERE user_id=?", (str(target_id),)).fetchone()
+            if not user_row:
+                c.execute(
+                    "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent, has_deposited) VALUES (?,?,?,?,?,?,?)",
+                    (str(target_id), "PayOS storage user", 0, 0, now_text(), 0, 0),
+                )
+            grant_result = grant_memory_storage_addon_conn(
+                conn,
+                target_id,
+                addon_mb,
+                amount_vnd=int(amount_vnd or 0),
+                months=months,
+                order_code=str(order_code),
+                source="payos",
+                granted_by="payos",
+                note="PayOS storage add-on",
+            )
+            if not grant_result.get("ok"):
+                conn.rollback()
+                return False, grant_result.get("reason") or "storage_addon_grant_failed", info
+            c.execute(
+                "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
+                (PAYOS_STATUS_PAID, now_text(), str(order_code)),
+            )
+            c.execute(
+                "INSERT INTO payos_processed (order_code, processed_at) VALUES (?,?)",
+                (str(order_code), now_text()),
+            )
+            record_usage_event_conn(
+                conn,
+                target_id,
+                event_type="payment_payos_storage_addon_success",
+                tool_name="memory_storage",
+                command="/webhook/payos",
+                status="paid",
+                xu_delta=0,
+                amount_vnd=int(amount_vnd or 0),
+                provider="payos",
+                detail=f"order={order_code}; addon_mb={addon_mb}; months={months}; counts_for_member_tier=false; no_xu=true",
+            )
+            record_finance_revenue_event_conn(
+                conn,
+                target_id,
+                "storage_addon",
+                str(order_code),
+                int(amount_vnd or 0),
+                0,
+                "payos",
+                "success",
+                f"PayOS storage add-on +{addon_mb}MB/{months} month(s)",
+            )
+            record_audit(
+                conn,
+                "payos",
+                "system",
+                "storage_addon.paid",
+                "payos_order",
+                str(order_code),
+                before={"status": status, "amount": expected_amount, "order_type": order_type},
+                after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "addon_mb": addon_mb, "months": months, "amount": amount_vnd},
+                note="PayOS storage add-on paid; extends notes/docs quota; not counted as top-up",
+            )
+            emit_event(
+                conn,
+                "storage_addon.paid",
+                "payos",
+                {"order_code": str(order_code), "user_id": str(target_id), "amount": int(amount_vnd), "addon_mb": addon_mb, "months": months},
+                status="processed",
+            )
+            info.update({
+                "xu": 0,
+                "addon_mb": addon_mb,
+                "months": months,
+                "active_addon_mb": int(grant_result.get("active_addon_mb") or 0),
+                "total_limit_mb": int(grant_result.get("total_limit_mb") or 0),
+                "expires_at": grant_result.get("expires_at") or "",
+            })
+            conn.commit()
+            return True, "storage_addon_success", info
+
         c.execute("SELECT COALESCE(has_deposited,0) FROM users WHERE user_id=?", (str(target_id),))
         user_deposit_row = c.fetchone()
         is_first_deposit = not (user_deposit_row and int(user_deposit_row[0] or 0) > 0)
@@ -29547,6 +29650,7 @@ def admin_center_text(section: str = "main") -> str:
         "• <code>/package_catalog</code> — xem catalog combo/gói tháng\n"
         "• <code>/grant_combo &lt;ID&gt; &lt;combo_code&gt; [note]</code> — cấp combo admin, không cộng Xu\n"
         "• <code>/grant_monthly &lt;ID&gt; &lt;plan_code&gt; &lt;days&gt; [note]</code> — cấp gói tháng admin, không cộng Xu\n"
+        "• <code>/grant_storage &lt;ID&gt; &lt;50MB|100MB|30k&gt; [months] [note]</code> — tặng dung lượng ghi chú/tài liệu, không cộng Xu\n"
         "• <code>/user_packages &lt;ID&gt;</code> — xem lượt còn lại\n"
         "• <code>/adjust_package &lt;ID&gt; &lt;package_id_or_code&gt; &lt;item_type&gt; &lt;delta&gt; [note]</code> — chỉnh lượt thủ công\n"
         "• <code>/revoke_package &lt;ID&gt; &lt;package_id_or_code&gt; [note]</code> — thu hồi gói/combo\n"
@@ -29669,6 +29773,109 @@ async def cmd_grant_monthly(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Gói tháng là lượt dịch vụ, không cộng Xu và không tính điểm rank/top-up.",
         parse_mode="HTML",
     )
+
+async def cmd_grant_storage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = context.args or []
+    if len(args) < 2:
+        return await update.message.reply_text(
+            "Cú pháp: /grant_storage <ID> <50MB|100MB|250MB|500MB|30k> [months] [note]\n"
+            "Ví dụ: /grant_storage 7817576663 100MB 1 test"
+        )
+    user_id = str(args[0]).strip()
+    spec = storage_addon_spec_from_custom(args[1])
+    if not spec:
+        return await update.message.reply_text("⚠️ Dung lượng phải là bội số 50MB hoặc số tiền theo block 10k, ví dụ 150MB hoặc 30k.")
+    months = 1
+    note_start = 2
+    if len(args) >= 3:
+        try:
+            months = max(1, int(args[2]))
+            note_start = 3
+        except Exception:
+            months = 1
+            note_start = 2
+    note = " ".join(args[note_start:]).strip()
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if not conn.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,)).fetchone():
+            conn.execute(
+                "INSERT INTO users (user_id, username, credits, is_vip, join_date, total_spent, has_deposited) VALUES (?,?,?,?,?,?,?)",
+                (user_id, "Admin storage grant user", 0, 0, now_text(), 0, 0),
+            )
+        grant = grant_memory_storage_addon_conn(
+            conn,
+            user_id,
+            int(spec["addon_mb"]),
+            amount_vnd=0,
+            months=months,
+            order_code="",
+            source="admin_grant",
+            granted_by=str(update.effective_user.id),
+            note=note,
+        )
+        if not grant.get("ok"):
+            conn.rollback()
+            return await update.message.reply_text(f"⚠️ Không cấp được dung lượng: {html.escape(str(grant.get('reason') or 'unknown'))}")
+        record_usage_event_conn(
+            conn,
+            user_id,
+            event_type="admin_storage_addon_grant",
+            tool_name="memory_storage",
+            command="/grant_storage",
+            status="active",
+            xu_delta=0,
+            amount_vnd=0,
+            provider="admin",
+            detail=f"addon_mb={int(spec['addon_mb'])}; months={months}; granted_by={update.effective_user.id}; no_xu=true",
+        )
+        record_audit(
+            conn,
+            "admin",
+            str(update.effective_user.id),
+            "storage_addon.granted",
+            "user",
+            user_id,
+            before={},
+            after={"addon_mb": int(spec["addon_mb"]), "months": months, "expires_at": grant.get("expires_at") or ""},
+            note=note or "Admin granted storage add-on",
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    await update.message.reply_text(
+        "✅ Đã tặng thêm dung lượng.\n\n"
+        f"• User: <code>{html.escape(user_id)}</code>\n"
+        f"• Dung lượng: <b>+{int(spec['addon_mb'])}MB</b>\n"
+        f"• Thời hạn: <b>{months} tháng</b>\n"
+        f"• Tổng hạn mức hiện tại: <b>{int(grant.get('total_limit_mb') or 0)}MB</b>\n"
+        f"• Hạn: <code>{html.escape(str(grant.get('expires_at') or '-')[:16])}</code>\n\n"
+        "Admin grant không cộng Xu, không chạy bonus nạp và không tính điểm nâng hạng.",
+        parse_mode="HTML",
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=(
+                "📦 <b>TOAN AAS đã tặng thêm dung lượng lưu trữ</b>\n\n"
+                f"• Dung lượng: <b>+{int(spec['addon_mb'])}MB</b>\n"
+                f"• Thời hạn: <b>{months} tháng</b>\n"
+                f"• Tổng hạn mức hiện tại: <b>{int(grant.get('total_limit_mb') or 0)}MB</b>\n\n"
+                "Gói tặng này không trừ Xu."
+            ),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status")],
+                [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    except Exception:
+        pass
 
 async def cmd_user_packages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -40317,7 +40524,7 @@ def menu_text_admin() -> str:
         "• <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code> — chỉ xử lý sau khi đối soát tiền thật\n"
         "• <code>/payos_test_plan</code>, <code>/mark_payos_test</code>, <code>/fx_price_test</code>\n\n"
         "<b>C. Gói / Combo</b>\n"
-        "• <code>/package_catalog</code>, <code>/grant_combo</code>, <code>/grant_monthly</code>\n"
+        "• <code>/package_catalog</code>, <code>/grant_combo</code>, <code>/grant_monthly</code>, <code>/grant_storage</code>\n"
         "• <code>/user_packages</code>, <code>/adjust_package</code>, <code>/revoke_package</code>\n\n"
         "<b>D. Trạng thái hệ thống</b>\n"
         "• <code>/runtime</code>, <code>/data_status</code>, <code>/storage_status</code>, <code>/storage_user</code>\n"
@@ -45662,7 +45869,7 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "memory_storage_status":
         return memory_status_text(user_id or "__customer__"), memory_storage_nav_keyboard(lang)
     if action == "memory_storage_addon":
-        return memory_storage_addon_text(), memory_storage_nav_keyboard(lang)
+        return memory_storage_addon_text(), memory_storage_addon_keyboard(lang)
     if action == "memory_storage_cleanup":
         return memory_storage_cleanup_text(), memory_storage_nav_keyboard(lang)
     if action == "main_docs":
@@ -45719,7 +45926,7 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
     if action == "memory_storage_status":
         return memory_status_text("__customer__"), memory_storage_nav_keyboard()
     if action == "memory_storage_addon":
-        return memory_storage_addon_text(), memory_storage_nav_keyboard()
+        return memory_storage_addon_text(), memory_storage_addon_keyboard()
     if action == "memory_storage_cleanup":
         return memory_storage_cleanup_text(), memory_storage_nav_keyboard()
     if action == "main_docs":
@@ -47628,6 +47835,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         clear_internal_archive_pending(query.from_user.id)
     if action not in DOC_TOOL_MENU_ACTIONS:
         clear_doc_tool_pending(query.from_user.id)
+    if action != "memory_storage_addon":
+        clear_storage_addon_pending(query.from_user.id)
     if action not in {"hint_note", "hint_search_note"}:
         clear_memory_guided_pending(query.from_user.id)
     clear_music_guided_pending(query.from_user.id)
@@ -62705,8 +62914,169 @@ def storage_bytes_to_mb_text(value: int | float) -> str:
 def storage_addon_lines() -> list[str]:
     return [
         f"• +50MB/tháng: {STORAGE_ADDON_BLOCK_PRICE_VND:,}đ".replace(",", "."),
-        "• Cần nhiều hơn: mua thêm theo từng block +50MB, không đổi thành gói dung lượng khác.",
+        f"• +100MB/tháng: {STORAGE_ADDON_BLOCK_PRICE_VND * 2:,}đ".replace(",", "."),
+        f"• +250MB/tháng: {STORAGE_ADDON_BLOCK_PRICE_VND * 5:,}đ".replace(",", "."),
+        f"• +500MB/tháng: {STORAGE_ADDON_BLOCK_PRICE_VND * 10:,}đ".replace(",", "."),
+        "• Cần số khác: nhập bội số 50MB hoặc số tiền tương ứng.",
     ]
+
+def storage_addon_tiers() -> list[dict]:
+    return [
+        {"code": "50mb", "addon_mb": 50, "amount_vnd": STORAGE_ADDON_BLOCK_PRICE_VND, "months": 1},
+        {"code": "100mb", "addon_mb": 100, "amount_vnd": STORAGE_ADDON_BLOCK_PRICE_VND * 2, "months": 1},
+        {"code": "250mb", "addon_mb": 250, "amount_vnd": STORAGE_ADDON_BLOCK_PRICE_VND * 5, "months": 1},
+        {"code": "500mb", "addon_mb": 500, "amount_vnd": STORAGE_ADDON_BLOCK_PRICE_VND * 10, "months": 1},
+    ]
+
+def storage_addon_spec_by_code(code: str) -> dict:
+    safe_code = str(code or "").strip().lower()
+    for item in storage_addon_tiers():
+        if item["code"] == safe_code:
+            return dict(item)
+    if safe_code.startswith("custom_") and safe_code.endswith("mb"):
+        return storage_addon_spec_from_custom(safe_code.replace("custom_", ""))
+    return {}
+
+def storage_addon_spec_from_custom(value: str) -> dict:
+    raw = str(value or "").strip().lower().replace(" ", "")
+    if not raw:
+        return {}
+    digits = re.sub(r"[^0-9]", "", raw)
+    if not digits:
+        return {}
+    number = int(digits or 0)
+    if number <= 0:
+        return {}
+    if "k" in raw or "đ" in raw or "vnd" in raw:
+        amount_vnd = number * 1000 if "k" in raw and number < 1000 else number
+        if amount_vnd < STORAGE_ADDON_BLOCK_PRICE_VND or amount_vnd % STORAGE_ADDON_BLOCK_PRICE_VND != 0:
+            return {}
+        blocks = amount_vnd // STORAGE_ADDON_BLOCK_PRICE_VND
+        addon_mb = blocks * STORAGE_ADDON_BLOCK_MB
+    else:
+        addon_mb = number
+        if addon_mb < STORAGE_ADDON_BLOCK_MB or addon_mb % STORAGE_ADDON_BLOCK_MB != 0:
+            return {}
+        blocks = addon_mb // STORAGE_ADDON_BLOCK_MB
+        amount_vnd = blocks * STORAGE_ADDON_BLOCK_PRICE_VND
+    return {
+        "code": f"custom_{int(addon_mb)}mb",
+        "addon_mb": int(addon_mb),
+        "amount_vnd": int(amount_vnd),
+        "months": 1,
+    }
+
+def storage_addon_label(spec: dict) -> str:
+    addon_mb = int((spec or {}).get("addon_mb") or 0)
+    amount_vnd = int((spec or {}).get("amount_vnd") or 0)
+    if amount_vnd % 1000 == 0:
+        price = f"{amount_vnd // 1000}k"
+    else:
+        price = f"{amount_vnd:,}đ".replace(",", ".")
+    return f"{price} — +{addon_mb}MB/tháng"
+
+def ensure_memory_storage_addons_table(conn=None) -> None:
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS memory_storage_addons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            order_code TEXT DEFAULT '',
+            addon_mb INTEGER DEFAULT 0,
+            amount_vnd INTEGER DEFAULT 0,
+            months INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'active',
+            source TEXT DEFAULT '',
+            granted_by TEXT DEFAULT '',
+            note TEXT DEFAULT '',
+            starts_at TEXT,
+            expires_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )""")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_storage_addons_user_status ON memory_storage_addons(user_id,status,expires_at)")
+        if own_conn:
+            conn.commit()
+    finally:
+        if own_conn:
+            conn.close()
+
+def memory_active_storage_addon_mb_conn(conn, user_id) -> int:
+    ensure_memory_storage_addons_table(conn)
+    row = conn.execute(
+        """SELECT COALESCE(SUM(COALESCE(addon_mb,0)),0)
+           FROM memory_storage_addons
+           WHERE user_id=? AND status='active' AND (expires_at IS NULL OR expires_at='' OR expires_at>=?)""",
+        (str(user_id), now_text()),
+    ).fetchone()
+    return int(row[0] or 0) if row else 0
+
+def memory_active_storage_addon_mb(user_id) -> int:
+    conn = db_connect()
+    try:
+        return memory_active_storage_addon_mb_conn(conn, user_id)
+    finally:
+        conn.close()
+
+def grant_memory_storage_addon_conn(
+    conn,
+    user_id,
+    addon_mb: int,
+    amount_vnd: int = 0,
+    months: int = 1,
+    order_code: str = "",
+    source: str = "admin",
+    granted_by: str = "",
+    note: str = "",
+) -> dict:
+    ensure_memory_storage_addons_table(conn)
+    uid = str(user_id)
+    addon_mb = max(0, int(addon_mb or 0))
+    months = max(1, int(months or 1))
+    if addon_mb <= 0:
+        return {"ok": False, "reason": "invalid_addon_mb"}
+    cfg = memory_plan_config("free")
+    conn.execute(
+        """INSERT OR IGNORE INTO memory_plans
+        (user_id, plan, note_limit, storage_limit_mb, ai_classify_monthly_limit, ai_classify_used, renew_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?)""",
+        (uid, "free", cfg["note_limit"], cfg["storage_limit_mb"], cfg["ai_classify_monthly_limit"], 0, memory_current_period_key(), now_text()),
+    )
+    starts = datetime.now()
+    expires = starts + timedelta(days=30 * months)
+    conn.execute(
+        """INSERT INTO memory_storage_addons
+        (user_id, order_code, addon_mb, amount_vnd, months, status, source, granted_by, note, starts_at, expires_at, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            uid,
+            str(order_code or ""),
+            int(addon_mb),
+            int(amount_vnd or 0),
+            int(months),
+            "active",
+            str(source or ""),
+            str(granted_by or ""),
+            str(note or "")[:500],
+            datetime_text(starts),
+            datetime_text(expires),
+            now_text(),
+            now_text(),
+        ),
+    )
+    active_mb = memory_active_storage_addon_mb_conn(conn, uid)
+    plan_row = conn.execute("SELECT storage_limit_mb FROM memory_plans WHERE user_id=?", (uid,)).fetchone()
+    base_mb = max(TOTAL_FREE_STORAGE_MB, int(plan_row[0] or TOTAL_FREE_STORAGE_MB) if plan_row else TOTAL_FREE_STORAGE_MB)
+    return {
+        "ok": True,
+        "user_id": uid,
+        "addon_mb": int(addon_mb),
+        "active_addon_mb": int(active_mb),
+        "total_limit_mb": int(base_mb + active_mb),
+        "expires_at": datetime_text(expires),
+    }
 
 def storage_policy_short_lines() -> list[str]:
     return [
@@ -62880,7 +63250,9 @@ def memory_status_payload(user_id) -> dict:
     storage_bytes = int(storage["total_bytes"])
     ai_limit = int(plan["ai_classify_monthly_limit"])
     ai_used = int(plan["ai_classify_used"])
-    total_limit_mb = max(TOTAL_FREE_STORAGE_MB, int(plan["storage_limit_mb"]))
+    active_storage_addon_mb = memory_active_storage_addon_mb(user_id)
+    base_limit_mb = max(TOTAL_FREE_STORAGE_MB, int(plan["storage_limit_mb"]))
+    total_limit_mb = base_limit_mb + active_storage_addon_mb
     total_limit_bytes = total_limit_mb * 1024 * 1024
     used_percent = (storage_bytes / total_limit_bytes * 100) if total_limit_bytes > 0 else 0
     addon_mb = max(0, total_limit_mb - TOTAL_FREE_STORAGE_MB)
@@ -62897,6 +63269,8 @@ def memory_status_payload(user_id) -> dict:
         "total_limit_bytes": total_limit_bytes,
         "used_percent": used_percent,
         "addon_mb": addon_mb,
+        "active_storage_addon_mb": active_storage_addon_mb,
+        "base_limit_mb": base_limit_mb,
         "near_quota": used_percent >= STORAGE_NEAR_QUOTA_PERCENT,
         "ai_remaining": max(0, ai_limit - ai_used),
         "active_reminders": memory_active_reminder_count(user_id),
@@ -63316,11 +63690,80 @@ def memory_status_text(user_id) -> str:
 def memory_storage_addon_text() -> str:
     return (
         "📦 <b>Mua thêm dung lượng</b>\n\n"
-        "Mở rộng theo block:\n"
+        "Chọn dung lượng mở rộng theo tháng:\n"
         + "\n".join(storage_addon_lines()) + "\n\n"
-        "Thanh toán sẽ dùng hệ thống nạp tiền/thanh toán hiện có của TOAN AAS khi được bật cho add-on lưu trữ.\n"
-        "Hiện tại nếu cần mở dung lượng ngay, vui lòng liên hệ admin. TOAN AAS chưa gọi PayOS và chưa trừ Xu ở màn này."
+        "Bấm gói bên dưới để tạo link PayOS riêng cho dung lượng lưu trữ.\n"
+        "Thanh toán thành công thì dung lượng tự cộng vào tài khoản trong 30 ngày.\n\n"
+        "Màn này không nạp Xu, không cộng bonus nạp và không đổi logic thanh toán khác."
     )
+
+def memory_storage_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = []
+    tiers = storage_addon_tiers()
+    for idx in range(0, len(tiers), 2):
+        row = []
+        for spec in tiers[idx:idx + 2]:
+            label = storage_addon_label(spec)
+            row.append(InlineKeyboardButton(f"💳 {label}", callback_data=f"storage|select|{spec['code']}"))
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton("✍️ Nhập số khác" if is_vi else "✍️ Custom amount", callback_data="storage|custom"),
+        InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="menu|main_memory"),
+    ])
+    rows.append([InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def memory_storage_addon_confirm_text(spec: dict) -> str:
+    return (
+        "📦 <b>Xác nhận mua thêm dung lượng</b>\n\n"
+        f"• Dung lượng: <b>+{int(spec.get('addon_mb') or 0)}MB</b>\n"
+        "• Thời hạn: <b>30 ngày</b>\n"
+        f"• Thanh toán: <b>{int(spec.get('amount_vnd') or 0):,}đ</b>\n"
+        "• Kênh: <b>PayOS QR động</b>\n\n"
+        "Sau khi PayOS xác nhận, TOAN AAS tự cộng dung lượng vào tài khoản.\n"
+        "Đây là dung lượng lưu trữ, không phải nạp Xu và không chạy bonus nạp."
+    ).replace(",", ".")
+
+def memory_storage_addon_confirm_keyboard(spec: dict) -> InlineKeyboardMarkup:
+    code = str(spec.get("code") or "")
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận thanh toán", callback_data=f"storage|confirm|{code}")],
+        [InlineKeyboardButton("⬅️ Chọn gói khác", callback_data="storage|menu"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def storage_addon_checkout_keyboard(checkout_url: str = "") -> InlineKeyboardMarkup:
+    rows = []
+    if checkout_url:
+        rows.append([InlineKeyboardButton("💳 Thanh toán PayOS", url=checkout_url)])
+    rows.append([InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status")])
+    rows.append([InlineKeyboardButton("⬅️ Mua thêm dung lượng", callback_data="storage|menu"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def storage_addon_pending_key(user_id) -> str:
+    return f"storage_addon:{user_id}"
+
+def set_storage_addon_pending(user_id, action: str) -> None:
+    USER_PENDING[storage_addon_pending_key(user_id)] = {
+        "pending_action": str(action or ""),
+        "created_at_ts": time.time(),
+    }
+
+def get_storage_addon_pending(user_id) -> dict | None:
+    payload = USER_PENDING.get(storage_addon_pending_key(user_id)) or {}
+    if not payload.get("pending_action"):
+        return None
+    if time.time() - float(payload.get("created_at_ts") or 0) > QUICK_MEDIA_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(storage_addon_pending_key(user_id), None)
+        return None
+    return payload
+
+def clear_storage_addon_pending(user_id) -> bool:
+    return USER_PENDING.pop(storage_addon_pending_key(user_id), None) is not None
+
+def make_payos_storage_description(spec: dict) -> str:
+    addon_mb = max(0, int((spec or {}).get("addon_mb") or 0))
+    return f"AASSTOR{addon_mb}MB"[:25] or "AASSTORAGE"
 
 def memory_storage_cleanup_text() -> str:
     return (
@@ -63342,6 +63785,171 @@ def memory_storage_nav_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status"), InlineKeyboardButton("⬅️ Ghi chú / Tài liệu", callback_data="menu|main_memory")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
+
+async def start_storage_addon_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, spec: dict, message=None):
+    message = message or (update.callback_query.message if update.callback_query else update.message)
+    uid = update.effective_user.id if update.effective_user else 0
+    if not message or not uid:
+        return None
+    addon_mb = int((spec or {}).get("addon_mb") or 0)
+    amount = int((spec or {}).get("amount_vnd") or 0)
+    if addon_mb <= 0 or amount <= 0:
+        return await message.reply_text("⚠️ Gói dung lượng không hợp lệ. Bot chưa tạo đơn và chưa trừ Xu.", reply_markup=memory_storage_addon_keyboard(user_ui_lang(uid)))
+    get_user(uid, update.effective_user.first_name or update.effective_user.username or "")
+    if flag_on("emergency_lock") or flag_on("payment_freeze"):
+        return await message.reply_text("⚠️ Thanh toán đang tạm khóa an toàn. Bot chưa tạo đơn dung lượng.")
+    if not PAYOS_CLIENT_ID or not PAYOS_API_KEY or not PAYOS_CHECKSUM_KEY:
+        return await message.reply_text("❌ Chưa cấu hình đủ PayOS để mua thêm dung lượng. Bot chưa tạo đơn.")
+
+    order_code = generate_order_code()
+    created_at = now_text()
+    expires_at = datetime_text(datetime.now() + timedelta(minutes=ORDER_TTL_MINUTES))
+    label = f"+{addon_mb}MB/tháng"
+    metadata = {
+        "type": "storage_addon",
+        "payment_type": "storage_addon",
+        "item_id": str(spec.get("code") or f"{addon_mb}mb"),
+        "user_id": str(uid),
+        "amount_vnd": int(amount),
+        "status": "pending",
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "note": f"storage_addon:{addon_mb}mb",
+        "addon_mb": int(addon_mb),
+        "months": int(spec.get("months") or 1),
+        "telegram_user_id": str(uid),
+    }
+    create_order(
+        order_code,
+        uid,
+        amount,
+        0,
+        base_xu=0,
+        launch_bonus_xu=0,
+        package_amount_vnd=0,
+        order_type="storage_addon",
+        plan_id=str(spec.get("code") or f"{addon_mb}mb"),
+        plan_name=label,
+        duration_days=30,
+        plan_xu=0,
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+    return_url = make_payos_return_url(context)
+    payos_body = {
+        "orderCode": int(order_code),
+        "amount": int(amount),
+        "description": make_payos_storage_description(spec),
+        "cancelUrl": return_url,
+        "returnUrl": return_url,
+    }
+    try:
+        res, res_data, raw_preview, _raw_str = await create_payos_payment_request(payos_body)
+        data = res_data if isinstance(res_data, dict) else {}
+        checkout_data = data.get("data") if isinstance(data.get("data"), dict) else {}
+        checkout_url = checkout_data.get("checkoutUrl", "")
+        payment_link_id = checkout_data.get("paymentLinkId", "")
+        if getattr(res, "status_code", "") == 200 and data.get("code") == "00" and checkout_url:
+            update_order_checkout_info(order_code, checkout_url, payment_link_id)
+            record_usage_event(
+                uid,
+                username=update.effective_user.username or update.effective_user.first_name or "",
+                event_type="storage_addon_created",
+                tool_name="memory_storage",
+                command="/memory_storage_addon",
+                status="pending",
+                amount_vnd=amount,
+                provider="payos",
+                detail=f"order={order_code}; addon_mb={addon_mb}; counts_for_member_tier=false; no_xu=true",
+            )
+            return await message.reply_text(
+                "📦 <b>Thanh toán dung lượng lưu trữ</b>\n\n"
+                f"• Gói: <b>{html.escape(label)}</b>\n"
+                f"• Giá: <b>{amount:,}đ</b>\n"
+                "• Hiệu lực: <b>30 ngày</b>\n"
+                "• Sau khi PayOS xác nhận, bot tự cộng dung lượng vào tài khoản.\n"
+                "• Không cộng Xu, không chạy bonus nạp, không tính điểm nâng hạng.\n\n"
+                f"• Mã đơn: <code>{order_code}</code>",
+                parse_mode="HTML",
+                reply_markup=storage_addon_checkout_keyboard(checkout_url),
+            )
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        return await message.reply_text(
+            "❌ PayOS chưa tạo được link thanh toán dung lượng.\n"
+            "Bot chưa kích hoạt dung lượng và chưa cộng/trừ Xu.\n\n"
+            f"Chi tiết ngắn: <code>{html.escape(str(data.get('desc') or data.get('message') or raw_preview or '-')[:220])}</code>",
+            parse_mode="HTML",
+            reply_markup=memory_storage_addon_keyboard(user_ui_lang(uid)),
+        )
+    except Exception as e:
+        update_order_status(order_code, PAYOS_STATUS_CANCELLED)
+        logger.warning("Storage add-on PayOS create failed: %s", sanitize_log_text(str(e))[:220])
+        return await message.reply_text(
+            "❌ PayOS chưa tạo được link thanh toán dung lượng.\n"
+            "Bot chưa kích hoạt dung lượng và chưa cộng/trừ Xu.",
+            reply_markup=memory_storage_addon_keyboard(user_ui_lang(uid)),
+        )
+
+async def handle_storage_addon_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "storage|menu").split("|")
+    action = parts[1] if len(parts) > 1 else "menu"
+    clear_storage_addon_pending(uid)
+    if action == "menu":
+        return await safe_edit_or_send(query, memory_storage_addon_text(), parse_mode="HTML", reply_markup=memory_storage_addon_keyboard(lang))
+    if action == "custom":
+        set_storage_addon_pending(uid, "custom")
+        return await safe_edit_or_send(
+            query,
+            "✍️ <b>Nhập số dung lượng muốn mua</b>\n\n"
+            "Nhập bội số 50MB, ví dụ: <code>150MB</code>, <code>300MB</code>.\n"
+            "Hoặc nhập số tiền tương ứng, ví dụ: <code>30k</code>.\n\n"
+            "Quy đổi: 10k = +50MB/tháng. Bot chưa tạo đơn và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Mua thêm dung lượng", callback_data="storage|menu"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+            ]),
+        )
+    if action in {"select", "confirm"} and len(parts) > 2:
+        spec = storage_addon_spec_by_code(parts[2])
+        if not spec:
+            return await safe_edit_or_send(query, "⚠️ Gói dung lượng không hợp lệ. Bot chưa tạo đơn.", reply_markup=memory_storage_addon_keyboard(lang))
+        if action == "select":
+            return await safe_edit_or_send(query, memory_storage_addon_confirm_text(spec), parse_mode="HTML", reply_markup=memory_storage_addon_confirm_keyboard(spec))
+        return await start_storage_addon_purchase(update, context, spec, message=query.message)
+    return await safe_edit_or_send(query, memory_storage_addon_text(), parse_mode="HTML", reply_markup=memory_storage_addon_keyboard(lang))
+
+async def handle_storage_addon_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_storage_addon_pending(uid)
+    if not pending:
+        return False
+    text = update.message.text.strip()
+    if text.startswith("/"):
+        return False
+    clear_storage_addon_pending(uid)
+    spec = storage_addon_spec_from_custom(text)
+    if not spec:
+        await update.message.reply_text(
+            "⚠️ Dung lượng chưa hợp lệ.\n\n"
+            "Vui lòng nhập bội số 50MB, ví dụ: 150MB, 300MB.\n"
+            "Hoặc nhập số tiền theo block 10k, ví dụ: 30k = +150MB/tháng.\n\n"
+            "Bot chưa tạo đơn PayOS và chưa trừ/cộng Xu.",
+            reply_markup=memory_storage_addon_keyboard(user_ui_lang(uid)),
+        )
+        return True
+    await update.message.reply_text(
+        memory_storage_addon_confirm_text(spec),
+        parse_mode="HTML",
+        reply_markup=memory_storage_addon_confirm_keyboard(spec),
+    )
+    return True
 
 async def handle_memory_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -91399,6 +92007,25 @@ async def cmd_checkpayos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"✅ Check PayOS: đã kích hoạt gói <b>{html.escape(info.get('plan_name') or '')}</b> cho user <code>{html.escape(str(target_id))}</code>.",
                         parse_mode="HTML",
                     )
+                if info.get("order_type") == "storage_addon":
+                    target_id = info["target_id"]
+                    addon_mb = int(info.get("addon_mb") or 0)
+                    total_limit_mb = int(info.get("total_limit_mb") or 0)
+                    await context.bot.send_message(
+                        chat_id=target_id,
+                        text=(
+                            "📦 <b>MUA THÊM DUNG LƯỢNG THÀNH CÔNG</b>\n\n"
+                            f"PayOS đã xác nhận đơn <code>{html.escape(str(order_code))}</code>.\n"
+                            f"• Dung lượng cộng thêm: <b>+{addon_mb}MB/tháng</b>\n"
+                            f"• Tổng hạn mức hiện tại: <b>{total_limit_mb}MB</b>\n\n"
+                            "Đơn này không cộng Xu, không chạy bonus nạp và không tính điểm nâng hạng."
+                        ),
+                        parse_mode="HTML",
+                    )
+                    return await update.message.reply_text(
+                        f"✅ Check PayOS: đã cộng +{addon_mb}MB dung lượng cho user <code>{html.escape(str(target_id))}</code>.",
+                        parse_mode="HTML",
+                    )
                 target_id = info["target_id"]
                 base_xu = int(info.get("base_xu") or info.get("xu") or 0)
                 launch_bonus = int(info.get("launch_bonus", 0) or 0)
@@ -96265,6 +96892,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_text(update, context):
         return
 
+    if await handle_storage_addon_pending_text(update, context):
+        return
+
     if await handle_memory_pending_text(update, context):
         return
 
@@ -97192,6 +97822,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("package_catalog", cmd_package_catalog))
     tg_app.add_handler(CommandHandler("grant_combo", cmd_grant_combo))
     tg_app.add_handler(CommandHandler("grant_monthly", cmd_grant_monthly))
+    tg_app.add_handler(CommandHandler("grant_storage", cmd_grant_storage))
     tg_app.add_handler(CommandHandler("user_packages", cmd_user_packages))
     tg_app.add_handler(CommandHandler("adjust_package", cmd_adjust_package))
     tg_app.add_handler(CommandHandler("revoke_package", cmd_revoke_package))
@@ -97242,6 +97873,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_ticket_callback, pattern=r"^ticket\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_tools_callback, pattern=r"^imgtool\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_storage_addon_callback, pattern=r"^storage\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_memory_callback, pattern=r"^memory\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
@@ -101012,6 +101644,46 @@ async def webhook_payos(request: Request):
             except Exception as e:
                 logger.error(f"Plan notify error: {e}")
         return JSONResponse({"code": "00", "desc": "plan_success"})
+
+    if info.get("order_type") == "storage_addon":
+        target_id = info["target_id"]
+        addon_mb = int(info.get("addon_mb") or 0)
+        total_limit_mb = int(info.get("total_limit_mb") or 0)
+        expires_at = str(info.get("expires_at") or "")
+        logger.info(f"✅ PayOS storage add-on success addon_mb={addon_mb} user={target_id} | Đơn: {order_code}")
+        if tg_app:
+            try:
+                await tg_app.bot.send_message(
+                    chat_id=target_id,
+                    text=(
+                        "📦 <b>MUA THÊM DUNG LƯỢNG THÀNH CÔNG</b>\n\n"
+                        f"PayOS đã xác nhận đơn <code>{html.escape(str(order_code))}</code>.\n"
+                        f"• Dung lượng cộng thêm: <b>+{addon_mb}MB/tháng</b>\n"
+                        f"• Tổng hạn mức hiện tại: <b>{total_limit_mb}MB</b>\n"
+                        f"• Hạn gói: <code>{html.escape(expires_at[:16] or '-')}</code>\n\n"
+                        "Đơn này không cộng Xu, không chạy bonus nạp và không tính điểm nâng hạng."
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💾 Dung lượng của tôi", callback_data="menu|memory_storage_status")],
+                        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+                    ]),
+                )
+                await tg_app.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        "📦 <b>AUTO STORAGE PAYOS SUCCESS</b>\n\n"
+                        f"🆔 User: <code>{html.escape(str(target_id))}</code>\n"
+                        f"📦 Add-on: <b>+{addon_mb}MB/tháng</b>\n"
+                        f"💰 Số tiền: <b>{amount_vnd:,}đ</b>\n"
+                        f"📋 Order Code: <code>{html.escape(str(order_code))}</code>\n"
+                        "Không cộng Xu, không tính tổng nạp nâng hạng, không chạy launch bonus."
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Storage add-on notify error: {e}")
+        return JSONResponse({"code": "00", "desc": "storage_addon_success"})
 
     target_id = info["target_id"]
     xu = info["xu"]

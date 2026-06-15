@@ -1260,6 +1260,123 @@ def test_package_purchase_checkout_metadata_is_classified(monkeypatch):
         if os.path.exists(db_path):
             os.unlink(db_path)
 
+def test_storage_addon_menu_and_payos_paid_grants_storage_without_xu(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "ADMIN_ID", "admin-only")
+    try:
+        bot.init_db()
+        labels = [button.text for row in bot.memory_storage_addon_keyboard("vi").inline_keyboard for button in row]
+        callbacks = [button.callback_data for row in bot.memory_storage_addon_keyboard("vi").inline_keyboard for button in row]
+        assert "💳 10k — +50MB/tháng" in labels
+        assert "💳 20k — +100MB/tháng" in labels
+        assert "💳 50k — +250MB/tháng" in labels
+        assert "💳 100k — +500MB/tháng" in labels
+        assert "storage|custom" in callbacks
+        assert "storage|select|50mb" in callbacks
+
+        user_id = "storage-payos-user"
+        bot.get_user(user_id, "Storage Buyer")
+        before_credits, before_spent, _ = bot.get_user(user_id)
+        metadata = {
+            "type": "storage_addon",
+            "payment_type": "storage_addon",
+            "item_id": "50mb",
+            "user_id": user_id,
+            "amount_vnd": 10000,
+            "status": "pending",
+            "addon_mb": 50,
+            "months": 1,
+        }
+        bot.create_order(
+            "920001",
+            user_id,
+            10000,
+            0,
+            base_xu=0,
+            launch_bonus_xu=0,
+            package_amount_vnd=0,
+            order_type="storage_addon",
+            plan_id="50mb",
+            plan_name="+50MB/tháng",
+            duration_days=30,
+            plan_xu=0,
+            metadata_json=json.dumps(metadata, ensure_ascii=False),
+        )
+        processed, desc, info = bot.process_payos_paid_order("920001", 10000)
+        assert processed is True
+        assert desc == "storage_addon_success"
+        assert info["order_type"] == "storage_addon"
+        assert int(info["addon_mb"]) == 50
+        status = bot.memory_status_payload(user_id)
+        assert int(status["active_storage_addon_mb"]) == 50
+        assert int(status["total_limit_mb"]) >= bot.TOTAL_FREE_STORAGE_MB + 50
+        after_credits, after_spent, _ = bot.get_user(user_id)
+        assert int(after_credits) == int(before_credits)
+        assert int(after_spent) == int(before_spent)
+        assert bot.member_total_paid_vnd(user_id) == 0
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
+
+def test_storage_addon_checkout_metadata_and_admin_grant(monkeypatch):
+    fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    monkeypatch.setattr(bot, "DB_FILE", db_path)
+    monkeypatch.setattr(bot, "PAYOS_CLIENT_ID", "client")
+    monkeypatch.setattr(bot, "PAYOS_API_KEY", "api")
+    monkeypatch.setattr(bot, "PAYOS_CHECKSUM_KEY", "checksum")
+    monkeypatch.setattr(bot, "generate_order_code", lambda: "920002")
+    monkeypatch.setattr(bot, "make_payos_return_url", lambda _context: "https://www.toanaas.vn/")
+    monkeypatch.setattr(bot, "record_usage_event", lambda *args, **kwargs: None)
+
+    async def fake_payos(body):
+        assert body["amount"] == 10000
+        assert body["description"] == "AASSTOR50MB"
+        return SimpleNamespace(status_code=200), {"code": "00", "data": {"checkoutUrl": "https://pay.example/920002", "paymentLinkId": "link-920002"}}, "", ""
+
+    class FakeMessage:
+        def __init__(self):
+            self.sent = []
+
+        async def reply_text(self, text, **kwargs):
+            self.sent.append((text, kwargs))
+
+    monkeypatch.setattr(bot, "create_payos_payment_request", fake_payos)
+    try:
+        bot.init_db()
+        message = FakeMessage()
+        user = SimpleNamespace(id=789, first_name="Storage Buyer", username="storage_buyer")
+        update = SimpleNamespace(effective_user=user, message=message, callback_query=None)
+        asyncio.run(bot.start_storage_addon_purchase(update, SimpleNamespace(), bot.storage_addon_spec_by_code("50mb"), message=message))
+        conn = bot.db_connect()
+        try:
+            order = conn.execute(
+                "SELECT order_type, xu, base_xu, launch_bonus_xu, package_amount_vnd, metadata_json FROM payos_orders WHERE order_code=?",
+                ("920002",),
+            ).fetchone()
+            grant = bot.grant_memory_storage_addon_conn(conn, "admin-granted-user", 100, amount_vnd=0, months=2, source="admin_grant", granted_by="pytest")
+            conn.commit()
+        finally:
+            conn.close()
+        metadata = json.loads(order[5])
+        assert order[0] == "storage_addon"
+        assert int(order[1]) == 0
+        assert int(order[2]) == 0
+        assert int(order[3]) == 0
+        assert int(order[4]) == 0
+        assert metadata["payment_type"] == "storage_addon"
+        assert metadata["item_id"] == "50mb"
+        assert int(metadata["addon_mb"]) == 50
+        assert "Không cộng Xu" in message.sent[-1][0]
+        assert grant["ok"] is True
+        assert int(bot.memory_status_payload("admin-granted-user")["active_storage_addon_mb"]) == 100
+    finally:
+        if os.path.exists(db_path):
+            os.unlink(db_path)
+
 
 def test_shopaikey_status_persists_usage_and_chat_snapshots(monkeypatch):
     fd, db_path = tempfile.mkstemp(suffix=".db")
@@ -2180,6 +2297,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "40MB cho tệp" in storage_price_text
     assert "Tổng miễn phí: 50MB/tài khoản" in storage_price_text
     assert "+50MB/tháng: 10.000đ" in storage_price_text
+    assert "+100MB/tháng: 20.000đ" in storage_price_text
+    assert "+250MB/tháng: 50.000đ" in storage_price_text
+    assert "+500MB/tháng: 100.000đ" in storage_price_text
     assert "500MB/tháng: 29.000đ" not in storage_price_text
     assert "TOAN AAS Pricing Audit V6" in audit_price_text
     assert "Feature | Price | Source | Guard" in audit_price_text
@@ -2476,9 +2596,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     memory_plan_text = bot.memory_plan_text()
     assert "Tổng 50MB miễn phí" in memory_plan_text
     assert "+50MB/tháng: 10.000đ" in memory_plan_text
-    assert "+100MB/tháng" not in memory_plan_text
-    assert "+250MB/tháng" not in memory_plan_text
-    assert "+500MB/tháng" not in memory_plan_text
+    assert "+100MB/tháng: 20.000đ" in memory_plan_text
+    assert "+250MB/tháng: 50.000đ" in memory_plan_text
+    assert "+500MB/tháng: 100.000đ" in memory_plan_text
     assert "Lite — 19.000" not in memory_plan_text
     assert "5MB storage" not in memory_plan_text
     assert bot.TOTAL_FREE_STORAGE_MB == 50
@@ -7391,9 +7511,9 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
     assert memory_rows[-1] == ["⬅️ Quay lại", "🏠 Menu chính"]
     storage_text = "\n".join(bot.storage_addon_lines())
     assert "+50MB/tháng: 10.000đ" in storage_text
-    assert "+100MB" not in storage_text
-    assert "+250MB" not in storage_text
-    assert "+500MB" not in storage_text
+    assert "+100MB/tháng: 20.000đ" in storage_text
+    assert "+250MB/tháng: 50.000đ" in storage_text
+    assert "+500MB/tháng: 100.000đ" in storage_text
     assert bot.TOTAL_FREE_STORAGE_MB == 50
 
 
