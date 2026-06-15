@@ -3155,6 +3155,53 @@ def init_db():
         status TEXT DEFAULT 'active',
         created_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS long_video_projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        title TEXT,
+        concept TEXT,
+        video_type TEXT,
+        target_duration TEXT,
+        status TEXT DEFAULT 'planning',
+        total_scenes INTEGER DEFAULT 0,
+        xu_estimated INTEGER DEFAULT 0,
+        xu_deducted INTEGER DEFAULT 0,
+        final_output_url TEXT DEFAULT '',
+        final_sent INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS long_video_scenes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER,
+        scene_index INTEGER DEFAULT 0,
+        description TEXT,
+        image_prompt TEXT,
+        video_prompt TEXT,
+        voice_text TEXT,
+        duration TEXT,
+        image_file_id TEXT DEFAULT '',
+        video_job_id TEXT DEFAULT '',
+        video_url TEXT DEFAULT '',
+        status TEXT DEFAULT 'pending',
+        error TEXT DEFAULT '',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS storyboard_prompt_packs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        title TEXT,
+        style TEXT,
+        shot_count INTEGER DEFAULT 0,
+        content_json TEXT,
+        status TEXT DEFAULT 'draft',
+        created_at TEXT,
+        updated_at TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_long_video_projects_user_status ON long_video_projects(user_id,status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_long_video_scenes_project ON long_video_scenes(project_id,scene_index)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_storyboard_prompt_packs_user ON storyboard_prompt_packs(user_id,created_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS trend_candidates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         owner_id TEXT,
@@ -40055,7 +40102,8 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
                 ("🧩 Kịch bản → Ảnh → Video", "storyboard|start"),
                 ("🎞 Ghép ảnh thành video", "menu|video_frame_intro"),
                 ("🎥 Tự quay & đổi cảnh AI", "selfscene|start"),
-                ("📺 Kịch bản video dài", "longvideo|start"),
+                ("🎬 Phim AI nhiều cảnh", "longvideo|start"),
+                ("🎞 Storyboard + Prompt điện ảnh", "storypack|start"),
                 ("🧠 Ý tưởng video", "videoidea|start"),
                 ("🎥 Prompt / Chuyển động", "motion|start"),
                 ("🌐 Dịch/Lồng tiếng video", "videodub|start"),
@@ -40071,7 +40119,8 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧩 脚本 → 图片 → 视频", "storyboard|start"),
             ("🎞 图片合成视频", "menu|video_frame_intro"),
             ("🎥 自拍换场景 AI", "selfscene|start"),
-            ("📺 长视频脚本", "longvideo|start"),
+            ("🎬 多场景 AI 故事片", "longvideo|start"),
+            ("🎞 电影分镜 Prompt 包", "storypack|start"),
             ("🧠 视频创意", "videoidea|start"),
             ("🎥 Prompt / 镜头运动", "motion|start"),
             ("🌐 视频翻译/配音", "videodub|start"),
@@ -40084,7 +40133,8 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧩 Script → Images → Video", "storyboard|start"),
             ("🎞 Image slideshow video", "menu|video_frame_intro"),
             ("🎥 Self-shot scene AI", "selfscene|start"),
-            ("📺 Long-form video script", "longvideo|start"),
+            ("🎬 Multi-scene AI story film", "longvideo|start"),
+            ("🎞 Cinematic storyboard prompt pack", "storypack|start"),
             ("🧠 Video ideas", "videoidea|start"),
             ("🎥 Prompt / Motion", "motion|start"),
             ("🌐 Translate / Dub video", "videodub|start"),
@@ -40886,7 +40936,7 @@ def video_long_script_text(lang: str = "vi", selected: str = "") -> str:
         f"{selected_line}"
     )
 
-DEVELOPING_VIDEO_FLOWS = {"selfscene", "longvideo", "videoidea", "promptvideo", "imagevideo", "videoref"}
+DEVELOPING_VIDEO_FLOWS = {"selfscene", "longvideo", "storypack", "videoidea", "promptvideo", "imagevideo", "videoref"}
 
 def developing_video_pending_key(user_id) -> str:
     return f"developing_video:{user_id}"
@@ -41312,7 +41362,7 @@ def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> Non
             "suggest_offset", "prompt_variant_offset", "motion_offset", "music_offset",
             "style_offset", "selected_suggestion_index", "source_duration",
             "source_file_size", "source_width", "source_height", "analysis_kind",
-            "processing", "reference_template",
+            "processing", "reference_template", "shot_type", "shot_count",
         }:
             payload[key] = _short_pending_text(value)
     USER_PENDING[developing_video_pending_key(user_id)] = payload
@@ -41729,6 +41779,7 @@ def developing_video_render_guard_text(flow: str, lang: str = "vi", source_ready
         "videoref": "Video mẫu → Video AI",
         "selfscene": "Tự quay & đổi cảnh AI",
         "longvideo": "Render video dài theo phân đoạn",
+        "storypack": "Render storyboard điện ảnh theo shot",
         "trend": "Render Video theo trend",
         "videoidea": "Render video từ ý tưởng",
         "promptvideo": "Prompt → Video AI",
@@ -41738,6 +41789,7 @@ def developing_video_render_guard_text(flow: str, lang: str = "vi", source_ready
         "videoref": "Reference video → AI Video",
         "selfscene": "Self-shot scene AI",
         "longvideo": "Long-form segment rendering",
+        "storypack": "Cinematic storyboard shot rendering",
         "trend": "Trend video rendering",
         "videoidea": "Idea-to-video rendering",
         "promptvideo": "Prompt → AI Video",
@@ -43125,6 +43177,181 @@ def long_video_structure_suggestions(duration: str, lang: str = "vi") -> list[st
         return ["3 đoạn x 60 giây", "6 đoạn x 30 giây", "hook - demo - CTA"]
     return ["3 chương rõ ràng", "nhiều clip ngắn dễ cắt", "chapters theo từng ý chính"]
 
+def long_video_scene_count_from_structure(structure: str, duration: str = "") -> int:
+    text = f"{structure or ''} {duration or ''}".lower()
+    match = re.search(r"\d+", text)
+    if match:
+        return max(3, min(30, int(match.group(0))))
+    if "60" in text:
+        return 12
+    if "30" in text:
+        return 10
+    if "10" in text:
+        return 8
+    return 6
+
+def long_video_character_bible_lines(topic: str, style_label: str, lang: str = "vi") -> list[str]:
+    if normalize_user_language(lang) != "vi":
+        return [
+            "<b>Character Bible</b>",
+            f"• Main subject: consistent host/hero tied to <code>{html.escape(topic)}</code>.",
+            "• Look: stable face, outfit, color palette and silhouette across scenes.",
+            f"• Acting style: {html.escape(style_label)}, clear emotion, controlled gestures.",
+            "• Voice: same tone, pace and pronunciation across chapters.",
+            "• Guard: avoid celebrity/brand imitation unless the user has rights.",
+            "",
+        ]
+    return [
+        "<b>Character Bible</b>",
+        f"• Nhân vật/chủ thể chính: host/hero nhất quán gắn với <code>{html.escape(topic)}</code>.",
+        "• Nhận diện: giữ ổn định gương mặt, trang phục, bảng màu và dáng người giữa các cảnh.",
+        f"• Diễn xuất: phong cách {html.escape(style_label)}, cảm xúc rõ, cử động có kiểm soát.",
+        "• Giọng đọc: giữ cùng tone, tốc độ và phát âm xuyên suốt các chương.",
+        "• Guard: không bắt chước người nổi tiếng/thương hiệu nếu chưa có quyền.",
+        "",
+    ]
+
+def create_long_video_project_from_plan(user_id, plan: dict, project_type: str = "ai_story_film") -> int:
+    plan = plan or {}
+    topic = _short_pending_text(plan.get("selected_topic"), 240) or "Long AI story video"
+    duration = _short_pending_text(plan.get("duration"), 80)
+    structure = _short_pending_text(plan.get("structure"), 120) or long_video_structure_suggestions(duration or "10 phút")[0]
+    scene_count = long_video_scene_count_from_structure(structure, duration)
+    now = now_text()
+    conn = None
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute(
+            """INSERT INTO long_video_projects
+            (user_id,title,concept,video_type,target_duration,status,total_scenes,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (str(user_id), topic[:180], topic, project_type, duration, "planning", scene_count, now, now),
+        )
+        project_id = int(c.lastrowid)
+        style = long_video_style_label(plan.get("selected_style") or "professional", "vi")
+        for idx in range(1, scene_count + 1):
+            phase = "hook mở đầu" if idx == 1 else ("recap và CTA" if idx == scene_count else f"ý chính cảnh {idx}")
+            c.execute(
+                """INSERT INTO long_video_scenes
+                (project_id,scene_index,description,image_prompt,video_prompt,voice_text,duration,status,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    project_id,
+                    idx,
+                    f"{phase}: {topic}",
+                    f"{topic}, {phase}, {style}, consistent subject, clean cinematic composition, no watermark",
+                    f"{topic}, {phase}, stable subject, natural motion, clear transition to next shot",
+                    f"Lời đọc cảnh {idx}: {phase} cho {topic}.",
+                    "5-8s",
+                    "pending",
+                    now,
+                    now,
+                ),
+            )
+        conn.commit()
+        return project_id
+    except Exception as e:
+        logger.warning("Long video project create skipped: %s", type(e).__name__)
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+def latest_long_video_project_for_user(user_id) -> dict | None:
+    conn = None
+    try:
+        conn = db_connect()
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM long_video_projects WHERE user_id=? ORDER BY id DESC LIMIT 1",
+            (str(user_id),),
+        ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def long_video_project_status(project_id: int) -> dict | None:
+    conn = None
+    try:
+        conn = db_connect()
+        conn.row_factory = sqlite3.Row
+        project = conn.execute("SELECT * FROM long_video_projects WHERE id=?", (int(project_id),)).fetchone()
+        if not project:
+            return None
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS count FROM long_video_scenes WHERE project_id=? GROUP BY status",
+            (int(project_id),),
+        ).fetchall()
+        counts = {str(row["status"] or "unknown"): int(row["count"] or 0) for row in rows}
+        return {"project": dict(project), "scene_counts": counts}
+    except Exception:
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def long_video_project_status_text(project_id: int, requester_id=None, lang: str = "vi") -> str:
+    payload = long_video_project_status(project_id)
+    if not payload:
+        return "⚠️ Không tìm thấy project video dài này." if normalize_user_language(lang) == "vi" else "⚠️ Long video project not found."
+    project = payload["project"]
+    if requester_id and str(project.get("user_id") or "") != str(requester_id) and not is_admin_user(requester_id):
+        return "⛔ Bạn không có quyền xem project này." if normalize_user_language(lang) == "vi" else "⛔ You cannot view this project."
+    counts = payload.get("scene_counts") or {}
+    done = int(counts.get("video_done", 0) or 0) + int(counts.get("approved", 0) or 0)
+    failed = int(counts.get("failed", 0) or 0)
+    total = int(project.get("total_scenes") or 0)
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📺 <b>Long video project status</b>\n\n"
+            f"• Project: <code>{int(project.get('id') or project_id)}</code>\n"
+            f"• User: <code>{html.escape(str(project.get('user_id') or '-'))}</code>\n"
+            f"• Type: <b>{html.escape(str(project.get('video_type') or '-'))}</b>\n"
+            f"• Status: <b>{html.escape(str(project.get('status') or '-'))}</b>\n"
+            f"• Scenes: <b>{done}/{total}</b> done, <b>{failed}</b> failed\n"
+            f"• Stage: <b>{html.escape(str(project.get('status') or 'planning'))}</b>\n"
+            f"• Xu estimated/deducted: <b>{int(project.get('xu_estimated') or 0)}</b> / <b>{int(project.get('xu_deducted') or 0)}</b>\n"
+            f"• Final sent: <b>{'yes' if int(project.get('final_sent') or 0) else 'no'}</b>\n\n"
+            "Planning status only. Provider render still requires the final invoice and confirmation step."
+        )
+    return (
+        "📺 <b>Trạng thái project video dài</b>\n\n"
+        f"• Project: <code>{int(project.get('id') or project_id)}</code>\n"
+        f"• User: <code>{html.escape(str(project.get('user_id') or '-'))}</code>\n"
+        f"• Loại: <b>{html.escape(str(project.get('video_type') or '-'))}</b>\n"
+        f"• Trạng thái: <b>{html.escape(str(project.get('status') or '-'))}</b>\n"
+        f"• Cảnh: <b>{done}/{total}</b> đã xong, <b>{failed}</b> lỗi\n"
+        f"• Stage hiện tại: <b>{html.escape(str(project.get('status') or 'planning'))}</b>\n"
+        f"• Xu dự kiến/đã trừ: <b>{int(project.get('xu_estimated') or 0)}</b> / <b>{int(project.get('xu_deducted') or 0)}</b>\n"
+        f"• Final đã gửi: <b>{'yes' if int(project.get('final_sent') or 0) else 'no'}</b>\n\n"
+        "Đây là trạng thái kế hoạch. Render provider vẫn phải đi qua hóa đơn và xác nhận cuối."
+    )
+
+async def cmd_long_video_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else ""
+    lang = get_user_language(uid) or "vi"
+    project_id = 0
+    try:
+        if context.args:
+            project_id = int(str(context.args[0]).strip())
+    except Exception:
+        project_id = 0
+    if not project_id:
+        latest = latest_long_video_project_for_user(uid)
+        project_id = int((latest or {}).get("id") or 0)
+    if not project_id:
+        text = (
+            "ℹ️ Chưa có project video dài nào trong hệ thống. Hãy tạo kế hoạch bằng 🎬 Phim AI nhiều cảnh trước."
+            if normalize_user_language(lang) == "vi"
+            else "ℹ️ No long video project found yet. Create one from Multi-scene AI story film first."
+        )
+        return await update.message.reply_text(text, parse_mode="HTML")
+    return await update.message.reply_text(long_video_project_status_text(project_id, uid, lang), parse_mode="HTML")
+
 def long_video_structure_text(state: dict, lang: str = "vi") -> str:
     topic = _short_pending_text(state.get("selected_topic"), 160) or ("topic" if normalize_user_language(lang) != "vi" else "chủ đề")
     duration = _short_pending_text(state.get("duration"), 80) or ("10 minutes" if normalize_user_language(lang) != "vi" else "10 phút")
@@ -43161,6 +43388,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
     style_label = long_video_style_label(style, lang)
     structures = long_video_structure_suggestions(duration, lang)
     chosen_structure = _short_pending_text(state.get("structure"), 120) or structures[0]
+    project_line = f"Project ID: <code>{int(state.get('project_id') or 0)}</code>\n" if state.get("project_id") else ""
     if normalize_user_language(lang) != "vi":
         return (
             "📺 <b>Long-form AI video roadmap</b>\n\n"
@@ -43168,6 +43396,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
             f"Length: <b>{html.escape(duration)}</b>\n"
             f"Style: <b>{html.escape(style_label)}</b>\n"
             f"Structure: <b>{html.escape(chosen_structure)}</b>\n\n"
+            f"{project_line}"
             "<b>1. Overall outline</b>\n"
             "Hook and promise → problem/context → main teaching/demo/story chapters → proof → recap and CTA.\n\n"
             "<b>2. Chapters/segments</b>\n"
@@ -43178,6 +43407,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
             "Hook → explanation/demo → proof/example → transition sentence. Keep narration clear and editable.\n\n"
             "<b>5. Required scenes</b>\n"
             "Host/subject close-up, wide context shot, screen/product demo, proof/before-after, recap and CTA scene.\n\n"
+            + "\n".join(long_video_character_bible_lines(topic, style_label, lang)) +
             "<b>6. Image prompt template</b>\n"
             f"<code>Key visual for {html.escape(topic)}, chapter objective clearly visible, {html.escape(style_label)}, clean composition, consistent subject, high quality.</code>\n\n"
             "<b>7. Video prompt template</b>\n"
@@ -43196,6 +43426,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
         f"Thời lượng: <b>{html.escape(duration)}</b>\n"
         f"Phong cách: <b>{html.escape(style_label)}</b>\n"
         f"Cấu trúc: <b>{html.escape(chosen_structure)}</b>\n\n"
+        f"{project_line}"
         "<b>1. Outline tổng thể</b>\n"
         "Hook + lời hứa giá trị → vấn đề/ngữ cảnh → các chương demo/hướng dẫn/câu chuyện → bằng chứng → recap và CTA.\n\n"
         "<b>2. Danh sách chương/phân đoạn</b>\n"
@@ -43206,6 +43437,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
         "Hook → giải thích/demo → ví dụ/bằng chứng → câu chuyển. Lời đọc rõ, câu ngắn, dễ sửa và dễ chia voice.\n\n"
         "<b>5. Cảnh cần có</b>\n"
         "Cận cảnh chủ thể, toàn cảnh bối cảnh, demo màn hình/sản phẩm, before/after hoặc bằng chứng, recap và cảnh CTA.\n\n"
+        + "\n".join(long_video_character_bible_lines(topic, style_label, lang)) +
         "<b>6. Prompt ảnh từng cảnh</b>\n"
         f"<code>Key visual cho {html.escape(topic)}, thể hiện rõ mục tiêu chương, phong cách {html.escape(style_label)}, bố cục sạch, chủ thể nhất quán, chất lượng cao.</code>\n\n"
         "<b>7. Prompt video từng cảnh</b>\n"
@@ -43245,10 +43477,11 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
     match = re.search(r"\d+", structure)
     scene_count = max(3, min(12, int(match.group(0)) if match else 6))
     if action == "save":
+        project_note = f"\nProject ID: <code>{int(plan.get('project_id') or 0)}</code>" if plan.get("project_id") else ""
         return (
-            "💾 Roadmap saved in this session. No provider call and no Xu charged."
+            f"💾 Roadmap saved in this session.{project_note}\nNo provider call and no Xu charged."
             if normalize_user_language(lang) != "vi"
-            else "💾 TOAN AAS đã lưu lộ trình trong phiên hiện tại. Bot chưa gọi provider và chưa trừ Xu."
+            else f"💾 TOAN AAS đã lưu lộ trình trong phiên hiện tại.{project_note}\nBot chưa gọi provider và chưa trừ Xu."
         )
     if action == "video_prompts":
         return detailed_video_scene_prompts_text(plan, "longvideo", lang, scene_count=scene_count)
@@ -43353,6 +43586,290 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
             ])
     lines.append("Bot chưa gọi API ảnh/video và chưa trừ Xu.")
     return "\n".join(lines)
+
+def storyboard_pack_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎞 <b>Cinematic storyboard prompt pack</b>\n\n"
+            "Send a product, story idea or scene. TOAN AAS will build a shot-by-shot prompt pack with camera angle, motion, lighting, image prompt, video prompt and negative prompt.\n\n"
+            "Planning only. No provider call and no Xu charged."
+        )
+    return (
+        "🎞 <b>Storyboard + Prompt điện ảnh</b>\n\n"
+        "Bạn hãy gửi chủ đề/sản phẩm/cảnh muốn dựng. TOAN AAS sẽ tạo shot pack theo từng cảnh: góc máy, chuyển động, ánh sáng, prompt ảnh, prompt video và negative prompt.\n\n"
+        "Bước này chỉ lập kế hoạch. Bot chưa gọi provider và chưa trừ Xu."
+    )
+
+def storyboard_pack_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return video_v6_keyboard(
+        [],
+        lang,
+        back=("🔙 Quay lại Video" if normalize_user_language(lang) == "vi" else "🔙 Back to Video", "menu|main_video"),
+    )
+
+def storyboard_pack_shot_count(value: str) -> int:
+    clean = str(value or "").strip().lower()
+    if clean in {"ad", "commercial"}:
+        return 6
+    if clean in {"motion", "cinematic"}:
+        return 8
+    match = re.search(r"\d+", clean)
+    if match:
+        return max(3, min(12, int(match.group(0))))
+    return 5
+
+def storyboard_pack_shot_type_label(value: str, lang: str = "vi") -> str:
+    labels_vi = {
+        "5": "Storyboard 5 shot",
+        "8": "Storyboard 8 shot",
+        "12": "Storyboard 12 shot",
+        "ad": "Shot pack quảng cáo",
+        "motion": "Shot pack cinematic chuyển động",
+        "custom": "Số shot riêng",
+    }
+    labels_en = {
+        "5": "5-shot storyboard",
+        "8": "8-shot storyboard",
+        "12": "12-shot storyboard",
+        "ad": "Ad shot pack",
+        "motion": "Cinematic motion shot pack",
+        "custom": "Custom shot count",
+    }
+    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(value or ""), str(value or "5"))
+
+def storyboard_pack_type_text(state: dict, lang: str = "vi") -> str:
+    topic = _short_pending_text(state.get("selected_topic"), 220)
+    if normalize_user_language(lang) != "vi":
+        return f"🧱 <b>Choose output type</b>\n\nTopic: <code>{html.escape(topic)}</code>"
+    return f"🧱 <b>Chọn loại shot pack</b>\n\nChủ đề: <code>{html.escape(topic)}</code>"
+
+def storyboard_pack_type_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("Storyboard 5 shot", "storypack|type|5"),
+            ("Storyboard 8 shot", "storypack|type|8"),
+            ("Storyboard 12 shot", "storypack|type|12"),
+            ("Shot pack quảng cáo" if is_vi else "Ad shot pack", "storypack|type|ad"),
+            ("Shot pack cinematic" if is_vi else "Cinematic shot pack", "storypack|type|motion"),
+            ("✍️ Nhập số shot riêng" if is_vi else "✍️ Custom shot count", "storypack|type_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại nhập chủ đề" if is_vi else "🔙 Back to topic", "storypack|start"),
+    )
+
+def storyboard_pack_type_custom_text(lang: str = "vi") -> str:
+    return "✍️ Nhập số shot bạn muốn, ví dụ: 7 shot." if normalize_user_language(lang) == "vi" else "✍️ Send the shot count, for example: 7 shots."
+
+def storyboard_pack_style_text(state: dict, lang: str = "vi") -> str:
+    shot_type = storyboard_pack_shot_type_label(state.get("shot_type") or "5", lang)
+    if normalize_user_language(lang) != "vi":
+        return f"🎨 <b>Choose cinematic style</b>\n\nOutput: <b>{html.escape(shot_type)}</b>"
+    return f"🎨 <b>Chọn phong cách điện ảnh</b>\n\nLoại output: <b>{html.escape(shot_type)}</b>"
+
+def storyboard_pack_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("🎬 Cinematic đen trắng" if is_vi else "🎬 Black-white cinematic", "storypack|style|bw"),
+            ("🧼 Sạch hiện đại" if is_vi else "🧼 Clean modern", "storypack|style|clean"),
+            ("🤖 Công nghệ" if is_vi else "🤖 Tech", "storypack|style|tech"),
+            ("💎 Luxury", "storypack|style|luxury"),
+            ("🌿 Lifestyle", "storypack|style|lifestyle"),
+            ("🎭 Drama đời thường" if is_vi else "🎭 Everyday drama", "storypack|style|drama"),
+            ("📦 Product commercial", "storypack|style|product"),
+            ("📱 TikTok ads", "storypack|style|tiktok"),
+            ("✍️ Nhập phong cách riêng" if is_vi else "✍️ Custom style", "storypack|style_custom"),
+        ],
+        lang,
+        back=("🔙 Quay lại loại shot" if is_vi else "🔙 Back to shot type", "storypack|back_type"),
+    )
+
+def storyboard_pack_style_label(style: str, lang: str = "vi") -> str:
+    labels_vi = {
+        "bw": "cinematic đen trắng",
+        "clean": "sạch hiện đại",
+        "tech": "công nghệ",
+        "luxury": "luxury",
+        "lifestyle": "lifestyle",
+        "drama": "drama đời thường",
+        "product": "product commercial",
+        "tiktok": "TikTok ads",
+    }
+    labels_en = {
+        "bw": "black-white cinematic",
+        "clean": "clean modern",
+        "tech": "tech",
+        "luxury": "luxury",
+        "lifestyle": "lifestyle",
+        "drama": "everyday drama",
+        "product": "product commercial",
+        "tiktok": "TikTok ads",
+    }
+    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(style or ""), str(style or "cinematic"))
+
+def storyboard_pack_build_payload(state: dict, lang: str = "vi") -> dict:
+    state = state or {}
+    topic = _short_pending_text(state.get("selected_topic"), 260) or ("sản phẩm/chủ đề" if normalize_user_language(lang) == "vi" else "product/topic")
+    shot_type = str(state.get("shot_type") or "5")
+    shot_count = storyboard_pack_shot_count(state.get("shot_count") or shot_type)
+    style = storyboard_pack_style_label(state.get("selected_style") or "clean", lang)
+    phases = [
+        "hook mở cảnh" if normalize_user_language(lang) == "vi" else "opening hook",
+        "thiết lập bối cảnh" if normalize_user_language(lang) == "vi" else "context setup",
+        "cận cảnh chủ thể/sản phẩm" if normalize_user_language(lang) == "vi" else "subject/product close-up",
+        "demo/chuyển động chính" if normalize_user_language(lang) == "vi" else "main demo/motion",
+        "before/after hoặc bằng chứng" if normalize_user_language(lang) == "vi" else "before/after or proof",
+        "hero ending + CTA" if normalize_user_language(lang) == "vi" else "hero ending + CTA",
+    ]
+    shots = []
+    for idx in range(1, shot_count + 1):
+        phase = phases[(idx - 1) % len(phases)]
+        motion = ["slow push-in", "gentle pan", "orbit nhẹ", "match cut", "reveal tilt", "locked-off hero"][idx % 6]
+        shots.append({
+            "shot": idx,
+            "phase": phase,
+            "duration": "3-5s",
+            "scene": f"{topic} - {phase}",
+            "camera": "close-up" if idx % 3 == 1 else ("wide shot" if idx % 3 == 2 else "medium shot"),
+            "motion": motion,
+            "lighting": f"{style}, realistic soft key light",
+            "action": f"Chủ thể/sản phẩm thể hiện {phase}",
+            "image_prompt": f"{topic}, {phase}, {style}, cinematic composition, clear subject, realistic lighting, high detail, no watermark",
+            "video_prompt": f"{topic}, {phase}, {style}, {motion}, stable subject, natural motion, clean transition, no random text",
+            "negative_prompt": "watermark, random text, distorted face, bad hands, duplicated body, broken logo, blurry subject",
+            "music": "cinematic ambient / subtle whoosh transition",
+            "transition": "cut on motion" if idx < shot_count else "soft resolve",
+        })
+    return {"topic": topic, "shot_type": shot_type, "shot_count": shot_count, "style": style, "shots": shots}
+
+def storyboard_pack_result_text(state: dict, lang: str = "vi") -> str:
+    payload = storyboard_pack_build_payload(state, lang)
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            "🎞 <b>Cinematic storyboard prompt pack</b>",
+            "",
+            f"Topic: <code>{html.escape(payload['topic'])}</code>",
+            f"Style: <b>{html.escape(payload['style'])}</b>",
+            f"Shots: <b>{payload['shot_count']}</b>",
+            "",
+            "<b>Three usable directions</b>",
+            "1. Safe/easy render: clean subject, simple camera motion, stable scene.",
+            "2. Cinematic: stronger lighting, richer camera moves, emotional pacing.",
+            "3. Advertising: product proof, benefit framing and soft CTA.",
+            "",
+        ]
+        for shot in payload["shots"]:
+            lines.extend([
+                f"<b>Shot {shot['shot']}</b> - {html.escape(shot['duration'])}",
+                f"• Scene: {html.escape(shot['scene'])}",
+                f"• Camera: {html.escape(shot['camera'])} | Motion: {html.escape(shot['motion'])}",
+                f"• Lighting/action: {html.escape(shot['lighting'])}; {html.escape(shot['action'])}",
+                f"• Image prompt: <code>{html.escape(shot['image_prompt'])}</code>",
+                f"• Video prompt: <code>{html.escape(shot['video_prompt'])}</code>",
+                f"• Negative: <code>{html.escape(shot['negative_prompt'])}</code>",
+                f"• Music/SFX: {html.escape(shot['music'])}",
+                f"• Transition: {html.escape(shot['transition'])}",
+                "",
+            ])
+        lines.append("Planning only. No image/video API call and no Xu charged.")
+        return "\n".join(lines)
+    lines = [
+        "🎞 <b>Storyboard + Prompt điện ảnh</b>",
+        "",
+        f"Chủ đề: <code>{html.escape(payload['topic'])}</code>",
+        f"Phong cách: <b>{html.escape(payload['style'])}</b>",
+        f"Số shot: <b>{payload['shot_count']}</b>",
+        "",
+        "<b>3 hướng prompt có thể dùng</b>",
+        "1. Hướng an toàn/dễ render: chủ thể rõ, chuyển động đơn giản, cảnh ổn định.",
+        "2. Hướng cinematic đẹp: ánh sáng mạnh hơn, camera giàu cảm xúc, nhịp dựng mượt.",
+        "3. Hướng quảng cáo mạnh: proof sản phẩm, lợi ích rõ và CTA nhẹ.",
+        "",
+    ]
+    for shot in payload["shots"]:
+        lines.extend([
+            f"<b>Shot {shot['shot']}</b> - {html.escape(shot['duration'])}",
+            f"• Cảnh: {html.escape(shot['scene'])}",
+            f"• Góc máy: {html.escape(shot['camera'])} | Chuyển động: {html.escape(shot['motion'])}",
+            f"• Ánh sáng/hành động: {html.escape(shot['lighting'])}; {html.escape(shot['action'])}",
+            f"• Prompt ảnh: <code>{html.escape(shot['image_prompt'])}</code>",
+            f"• Prompt video: <code>{html.escape(shot['video_prompt'])}</code>",
+            f"• Negative prompt: <code>{html.escape(shot['negative_prompt'])}</code>",
+            f"• Nhạc/SFX: {html.escape(shot['music'])}",
+            f"• Chuyển cảnh: {html.escape(shot['transition'])}",
+            "",
+        ])
+    lines.append("Bot chưa gọi API ảnh/video và chưa trừ Xu.")
+    return "\n".join(lines)
+
+def storyboard_pack_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("🔁 Đổi gợi ý khác" if is_vi else "🔁 More variations", "storypack|refresh"),
+            ("✏️ Sửa chủ đề" if is_vi else "✏️ Edit topic", "storypack|start"),
+            ("✅ Chốt shot pack" if is_vi else "✅ Lock shot pack", "storypack|lock"),
+            ("🖼 Tạo ảnh keyframe" if is_vi else "🖼 Create keyframes", "storypack|image_keyframes"),
+            ("✨ Tạo video AI từng shot" if is_vi else "✨ AI video by shot", "storypack|ai_video"),
+            ("🎞 Render preview storyboard" if is_vi else "🎞 Render storyboard preview", "storypack|preview"),
+            ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "storypack|save"),
+        ],
+        lang,
+        back=("🔙 Quay lại phong cách" if is_vi else "🔙 Back to style", "storypack|back_style"),
+    )
+
+def save_storyboard_prompt_pack(user_id, state: dict, status: str = "draft") -> int:
+    payload = storyboard_pack_build_payload(state, "vi")
+    now = now_text()
+    conn = None
+    try:
+        conn = db_connect()
+        c = conn.cursor()
+        c.execute(
+            """INSERT INTO storyboard_prompt_packs
+            (user_id,title,style,shot_count,content_json,status,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id),
+                str(payload.get("topic") or "Storyboard prompt pack")[:180],
+                str(payload.get("style") or ""),
+                int(payload.get("shot_count") or 0),
+                json.dumps(payload, ensure_ascii=False),
+                str(status or "draft"),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        return int(c.lastrowid)
+    except Exception as e:
+        logger.warning("Storyboard prompt pack save skipped: %s", type(e).__name__)
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+def storyboard_pack_guard_text(action: str, lang: str = "vi") -> str:
+    if action == "image_keyframes":
+        return (
+            "🖼 Bước tạo ảnh keyframe phải đi qua flow ảnh hiện có và xác nhận giá trước khi trừ Xu. Hãy copy prompt từng shot hoặc dùng nút tạo ảnh trong flow ảnh."
+            if normalize_user_language(lang) == "vi"
+            else "🖼 Keyframe generation must go through the existing image flow with final price confirmation first."
+        )
+    if action == "ai_video":
+        return (
+            "✨ Tạo video AI từng shot sẽ dùng pipeline video chung: phụ đề/lồng tiếng → hóa đơn → xác nhận → job. Nếu provider chưa sẵn sàng, bot sẽ báo trước và không trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "✨ AI video by shot uses the shared video pipeline with invoice and confirmation. If the provider is unavailable, no Xu is charged."
+        )
+    if action == "preview":
+        return (
+            "🎞 Render preview storyboard cần Local Worker/ffmpeg an toàn. Nếu worker chưa sẵn sàng, bot không render trực tiếp trên Railway và không trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "🎞 Storyboard preview rendering requires a safe Local Worker/ffmpeg path. No direct Railway render and no Xu charged."
+        )
+    return "Bot chưa gọi provider và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "No provider call and no Xu charged."
 
 def video_idea_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -44183,7 +44700,32 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
             state["structure"] = text
             clear_developing_video_pending(uid)
             plan = save_developing_video_plan(uid, "longvideo", state)
+            project_id = create_long_video_project_from_plan(uid, plan, "ai_story_film")
+            if project_id:
+                plan["project_id"] = project_id
             await safe_reply_long_html(update.message, long_video_plan_text(plan, lang), reply_markup=long_video_result_keyboard(lang))
+            return True
+        return True
+    if flow == "storypack":
+        if step == "topic":
+            set_developing_video_pending(uid, "storypack", "type", selected_topic=text)
+            state = get_developing_video_pending(uid) or {}
+            await update.message.reply_text(storyboard_pack_type_text(state, lang), parse_mode="HTML", reply_markup=storyboard_pack_type_keyboard(lang))
+            return True
+        if step == "type_custom":
+            state = dict(pending)
+            state["shot_type"] = "custom"
+            state["shot_count"] = storyboard_pack_shot_count(text)
+            set_developing_video_pending(uid, "storypack", "style", **{k: v for k, v in state.items() if k not in {"pending_action", "flow", "step", "created_at_ts"}})
+            current = get_developing_video_pending(uid) or {}
+            await update.message.reply_text(storyboard_pack_style_text(current, lang), parse_mode="HTML", reply_markup=storyboard_pack_style_keyboard(lang))
+            return True
+        if step == "style_custom":
+            state = dict(pending)
+            state["selected_style"] = text
+            clear_developing_video_pending(uid)
+            plan = save_developing_video_plan(uid, "storypack", state)
+            await safe_reply_long_html(update.message, storyboard_pack_result_text(plan, lang), reply_markup=storyboard_pack_result_keyboard(lang))
             return True
         return True
     if flow == "videoidea":
@@ -45209,6 +45751,9 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
         state["structure"] = options[idx - 1] if idx <= len(options) else options[0]
         clear_developing_video_pending(uid)
         plan = save_developing_video_plan(uid, "longvideo", state)
+        project_id = create_long_video_project_from_plan(uid, plan, "ai_story_film")
+        if project_id:
+            plan["project_id"] = project_id
         return await safe_edit_or_send_long_html(query, long_video_plan_text(plan, lang), reply_markup=long_video_result_keyboard(lang))
     if action == "finalization":
         plan = saved_plan
@@ -45244,8 +45789,109 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
         plan = saved_plan
         if not plan:
             return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+        if action == "save" and not plan.get("project_id"):
+            project_id = create_long_video_project_from_plan(uid, plan, "ai_story_film")
+            if project_id:
+                plan["project_id"] = project_id
         return await safe_edit_or_send_long_html(query, long_video_followup_text(action, plan, lang), reply_markup=long_video_result_keyboard(lang))
     return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
+
+async def handle_storyboard_pack_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "start"
+    pending = get_developing_video_pending(uid)
+    plan = get_latest_developing_video_plan(uid, "storypack")
+    if action == "start":
+        clear_developing_video_pending(uid)
+        set_developing_video_pending(uid, "storypack", "topic")
+        return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+    if action == "back_type":
+        state = pending or plan
+        if not state:
+            set_developing_video_pending(uid, "storypack", "topic")
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        restore_developing_video_pending(uid, "storypack", state, "type")
+        return await safe_edit_or_send(query, storyboard_pack_type_text(state, lang), reply_markup=storyboard_pack_type_keyboard(lang), parse_mode="HTML")
+    if action == "back_style":
+        state = pending or plan
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        restore_developing_video_pending(uid, "storypack", state, "style")
+        return await safe_edit_or_send(query, storyboard_pack_style_text(state, lang), reply_markup=storyboard_pack_style_keyboard(lang), parse_mode="HTML")
+    if action == "type_custom":
+        if not pending:
+            set_developing_video_pending(uid, "storypack", "topic")
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        set_developing_video_pending(uid, "storypack", "type_custom")
+        return await safe_edit_or_send(
+            query,
+            storyboard_pack_type_custom_text(lang),
+            reply_markup=video_v6_keyboard([], lang, back=("🔙 Quay lại loại shot" if normalize_user_language(lang) == "vi" else "🔙 Back", "storypack|back_type")),
+            parse_mode="HTML",
+        )
+    if action == "type":
+        if not pending:
+            set_developing_video_pending(uid, "storypack", "topic")
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        value = parts[2] if len(parts) > 2 else "5"
+        set_developing_video_pending(uid, "storypack", "style", shot_type=value, shot_count=storyboard_pack_shot_count(value))
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_or_send(query, storyboard_pack_style_text(state, lang), reply_markup=storyboard_pack_style_keyboard(lang), parse_mode="HTML")
+    if action == "style_custom":
+        if not pending:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        set_developing_video_pending(uid, "storypack", "style_custom")
+        return await safe_edit_or_send(
+            query,
+            long_video_style_custom_text(lang),
+            reply_markup=video_v6_keyboard([], lang, back=("🔙 Quay lại phong cách" if normalize_user_language(lang) == "vi" else "🔙 Back to style", "storypack|back_style")),
+            parse_mode="HTML",
+        )
+    if action == "style":
+        state = dict(pending or {})
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        state["selected_style"] = parts[2] if len(parts) > 2 else "clean"
+        clear_developing_video_pending(uid)
+        plan = save_developing_video_plan(uid, "storypack", state)
+        return await safe_edit_or_send_long_html(query, storyboard_pack_result_text(plan, lang), reply_markup=storyboard_pack_result_keyboard(lang))
+    if action == "refresh":
+        state = dict(plan or pending or {})
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        styles = ["clean", "tech", "luxury", "lifestyle", "drama", "product", "tiktok", "bw"]
+        current = str(state.get("selected_style") or "clean")
+        idx = (styles.index(current) + 1) if current in styles else 1
+        state["selected_style"] = styles[idx % len(styles)]
+        plan = save_developing_video_plan(uid, "storypack", state)
+        return await safe_edit_or_send_long_html(query, storyboard_pack_result_text(plan, lang), reply_markup=storyboard_pack_result_keyboard(lang))
+    if action in {"lock", "save"}:
+        state = dict(plan or pending or {})
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        pack_id = save_storyboard_prompt_pack(uid, state, "locked" if action == "lock" else "draft")
+        prefix = "✅ Đã chốt shot pack." if action == "lock" else "💾 Đã lưu kế hoạch."
+        if normalize_user_language(lang) != "vi":
+            prefix = "✅ Shot pack locked." if action == "lock" else "💾 Plan saved."
+        suffix = f"\nPack ID: <code>{pack_id}</code>\n\n" if pack_id else "\n\n"
+        return await safe_edit_or_send_long_html(query, prefix + suffix + storyboard_pack_result_text(state, lang), reply_markup=storyboard_pack_result_keyboard(lang))
+    if action in {"image_keyframes", "preview"}:
+        state = dict(plan or pending or {})
+        text = storyboard_pack_guard_text(action, lang)
+        return await safe_edit_or_send(query, text, reply_markup=storyboard_pack_result_keyboard(lang), parse_mode="HTML")
+    if action == "ai_video":
+        state = dict(plan or pending or {})
+        if not state:
+            return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
+        package = developing_video_public_package(state, "storypack", lang)
+        package["concept_text"] = state.get("selected_topic") or package.get("concept_text") or ""
+        package["video_prompt"] = storyboard_pack_build_payload(state, lang)["shots"][0]["video_prompt"]
+        return await open_video_finalization(query, uid, "storypack", state, lang, "storypack|back_style", package)
+    return await safe_edit_or_send(query, storyboard_pack_start_text(lang), reply_markup=storyboard_pack_start_keyboard(lang), parse_mode="HTML")
 
 async def handle_video_idea_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -69301,6 +69947,7 @@ def video_finalization_source_label(source: str, lang: str = "vi") -> str:
     labels_vi = {
         "videoidea": "Ý tưởng quảng cáo / điện ảnh",
         "longvideo": "Kịch bản video dài",
+        "storypack": "Storyboard + Prompt điện ảnh",
         "trend": "Video theo trend",
         "storyboard": "Kịch bản → Ảnh → Video",
         "promptvideo": "Prompt → Video AI",
@@ -69313,6 +69960,7 @@ def video_finalization_source_label(source: str, lang: str = "vi") -> str:
     labels_en = {
         "videoidea": "Advertising / cinematic idea",
         "longvideo": "Long-form video plan",
+        "storypack": "Cinematic storyboard prompt pack",
         "trend": "Trend video",
         "storyboard": "Storyboard → Images → Video",
         "promptvideo": "Prompt → AI Video",
@@ -69808,6 +70456,14 @@ async def video_finalization_back_to_source(query, user_id, state: dict, lang: s
                 parse_mode="HTML",
                 reply_markup=trend_guided_selected_video_prompt_keyboard(lang, is_admin_user(user_id)),
             )
+    if source == "longvideo":
+        plan = get_developing_video_pending(user_id) or get_latest_developing_video_plan(user_id, "longvideo") or {}
+        if plan:
+            return await safe_edit_or_send_long_html(query, long_video_plan_text(plan, lang), reply_markup=long_video_result_keyboard(lang))
+    if source == "storypack":
+        plan = get_developing_video_pending(user_id) or get_latest_developing_video_plan(user_id, "storypack") or {}
+        if plan:
+            return await safe_edit_or_send_long_html(query, storyboard_pack_result_text(plan, lang), reply_markup=storyboard_pack_result_keyboard(lang))
     if source in {"promptvideo", "imagevideo", "videoref", "videoidea"}:
         flow = "videoref" if source == "videoref" else source
         plan = get_developing_video_pending(user_id) or get_latest_developing_video_plan(user_id, flow) or {}
@@ -97975,6 +98631,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("quick_image_test", cmd_quick_image_test))
     tg_app.add_handler(CommandHandler("quick_video_test", cmd_quick_video_test))
     tg_app.add_handler(CommandHandler("storyboard_video", cmd_storyboard_video))
+    tg_app.add_handler(CommandHandler("long_video_status", cmd_long_video_status))
     tg_app.add_handler(CommandHandler("frame_video_status", cmd_frame_video_status))
     tg_app.add_handler(CommandHandler("clear_frame_video_error", cmd_clear_frame_video_error))
     tg_app.add_handler(CommandHandler("tool_test_frame_video", cmd_tool_test_frame_video))
@@ -98152,6 +98809,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_marketing_callback, pattern=r"^marketing\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_self_scene_ai_callback, pattern=r"^selfscene\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_long_video_callback, pattern=r"^longvideo\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_storyboard_pack_callback, pattern=r"^storypack\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_idea_callback, pattern=r"^videoidea\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_upload_callback, pattern=r"^video_upload\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_editor_callback, pattern=r"^videoedit\|"))

@@ -2445,7 +2445,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🧩 Kịch bản → Ảnh → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
-        "📺 Kịch bản video dài",
+        "🎬 Phim AI nhiều cảnh",
+        "🎞 Storyboard + Prompt điện ảnh",
         "🧠 Ý tưởng video",
         "🎥 Prompt / Chuyển động",
         "🌐 Dịch/Lồng tiếng video",
@@ -4563,7 +4564,8 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert "🎞 Ghép ảnh thành video" in video_keyboard_source
     assert "🎬 Video AI chân thật" in video_keyboard_source
     assert "🎥 Tự quay & đổi cảnh AI" in video_keyboard_source
-    assert "📺 Kịch bản video dài" in video_keyboard_source
+    assert "🎬 Phim AI nhiều cảnh" in video_keyboard_source
+    assert "🎞 Storyboard + Prompt điện ảnh" in video_keyboard_source
     assert "🔥 Video theo trend" in video_keyboard_source
     assert "🧠 Ý tưởng video" in video_keyboard_source
     assert "📢 Concept quảng cáo" not in video_keyboard_source
@@ -6668,6 +6670,71 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
 
     bot.clear_developing_video_pending(uid)
     bot.clear_trend_video_flow_pending(uid)
+
+
+def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_path):
+    source = bot_source_text()
+    labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
+    callbacks = [button.callback_data for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
+    assert "🎬 Phim AI nhiều cảnh" in labels
+    assert "🎞 Storyboard + Prompt điện ảnh" in labels
+    assert "longvideo|start" in callbacks
+    assert "storypack|start" in callbacks
+    assert 'CallbackQueryHandler(handle_storyboard_pack_callback, pattern=r"^storypack\\|")' in source
+    assert 'CommandHandler("long_video_status", cmd_long_video_status)' in source
+
+    long_plan = bot.long_video_plan_text(
+        {
+            "selected_topic": "nước hoa nam dùng khi đi hẹn hò",
+            "duration": "60 giây",
+            "selected_style": "cinematic",
+            "structure": "10 shot x 6 giây",
+            "project_id": 12,
+        },
+        "vi",
+    )
+    assert "Character Bible" in long_plan
+    assert "Project ID" in long_plan
+    assert "không bắt chước người nổi tiếng" in long_plan
+    assert "Bot chưa gọi nhà cung cấp AI và chưa trừ Xu" in long_plan
+
+    story_state = {
+        "selected_topic": "máy xay sinh tố mini cho dân văn phòng",
+        "shot_type": "8",
+        "shot_count": 8,
+        "selected_style": "clean",
+    }
+    story_text = bot.storyboard_pack_result_text(story_state, "vi")
+    for expected in [
+        "Storyboard + Prompt điện ảnh",
+        "3 hướng prompt có thể dùng",
+        "Shot 1",
+        "Prompt ảnh",
+        "Prompt video",
+        "Negative prompt",
+        "Bot chưa gọi API ảnh/video và chưa trừ Xu",
+    ]:
+        assert expected in story_text
+    story_callbacks = [button.callback_data for row in bot.storyboard_pack_result_keyboard("vi").inline_keyboard for button in row]
+    assert {"storypack|lock", "storypack|image_keyframes", "storypack|ai_video", "storypack|preview", "storypack|save"}.issubset(set(story_callbacks))
+    assert "pipeline video chung" in bot.storyboard_pack_guard_text("ai_video", "vi")
+
+    db_path = tmp_path / "long-story.db"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    monkeypatch.setattr(bot, "DB_BACKUP_DIR", str(tmp_path / "backups"))
+    bot.init_db()
+    project_id = bot.create_long_video_project_from_plan("story-user", {
+        "selected_topic": "nước hoa nam cinematic",
+        "duration": "60 giây",
+        "selected_style": "cinematic",
+        "structure": "10 shot x 6 giây",
+    })
+    assert project_id > 0
+    status_text = bot.long_video_project_status_text(project_id, "story-user", "vi")
+    assert "Trạng thái project video dài" in status_text
+    assert "10" in status_text
+    pack_id = bot.save_storyboard_prompt_pack("story-user", story_state, "locked")
+    assert pack_id > 0
 
 
 def test_video_regression_v91_storyboard_restores_project_and_reuses_frame_flow(monkeypatch):
