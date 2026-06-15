@@ -112,12 +112,12 @@ def test_main_menu_callbacks_have_handlers():
         "menu|main_image",
         "menu|main_video",
         "menu|main_memory",
+        "menu|translate",
         "menu|main_music",
         "pricing|main",
         "menu|main_guide",
         "menu|support",
         "feedback|start",
-        "back_lang",
         "menu|admin",
     }
     assert 'CallbackQueryHandler(handle_free_hub_callback, pattern=r"^freehub\\|")' in source

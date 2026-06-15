@@ -28683,6 +28683,25 @@ TRANSLATION_PRIMARY_LANGS = ("vi", "en", "zh")
 TRANSLATION_MORE_LANGS = ("ja", "ko", "th", "fr", "de", "es", "id", "ar")
 TRANSLATION_REQUEST_TTL_SECONDS = 10 * 60
 LAST_TRANSLATION_REQUEST: dict = {}
+TRANSLATION_MENU_PENDING: dict = {}
+
+def set_translation_menu_pending(user_id, source_type: str) -> None:
+    TRANSLATION_MENU_PENDING[str(user_id)] = {
+        "source_type": str(source_type or "text"),
+        "created_at_ts": time.time(),
+    }
+
+def get_translation_menu_pending(user_id) -> dict:
+    pending = TRANSLATION_MENU_PENDING.get(str(user_id)) or {}
+    if not pending:
+        return {}
+    if float(pending.get("created_at_ts") or 0) + TRANSLATION_REQUEST_TTL_SECONDS < time.time():
+        TRANSLATION_MENU_PENDING.pop(str(user_id), None)
+        return {}
+    return dict(pending)
+
+def clear_translation_menu_pending(user_id) -> bool:
+    return TRANSLATION_MENU_PENDING.pop(str(user_id), None) is not None
 
 def translation_source_label(source_type: str) -> str:
     return {
@@ -40043,10 +40062,10 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-        [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
-        [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
-        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
+        [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
+        [InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
+        [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
+        [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -40088,10 +40107,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         rows = [
             [InlineKeyboardButton("🆓 免费工具", callback_data="freehub|main"), InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 AI 图片", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
-            [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 语音 / 音乐", callback_data="menu|main_music")],
-            [InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support"), InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start")],
-            [InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 切换语言", callback_data="back_lang")],
+            [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("🌐 翻译", callback_data="menu|translate")],
+            [InlineKeyboardButton("🎙 语音 / 音乐", callback_data="menu|main_music"), InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main")],
+            [InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
+            [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
             rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -40100,10 +40119,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         rows = [
             [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-            [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music")],
-            [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
-            [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
-            [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Đổi ngôn ngữ", callback_data="back_lang")],
+            [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
+            [InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
+            [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
+            [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
             rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -40111,10 +40130,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     rows = [
         [InlineKeyboardButton("🆓 Free tools", callback_data="freehub|main"), InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 AI Image", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("🎙 Voice / Music", callback_data="menu|main_music")],
-        [InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
-        [InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support"), InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start")],
-        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL), InlineKeyboardButton("🌍 Change language", callback_data="back_lang")],
+        [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("🌐 Translation", callback_data="menu|translate")],
+        [InlineKeyboardButton("🎙 Voice / Music", callback_data="menu|main_music"), InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main")],
+        [InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
+        [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -40611,6 +40630,55 @@ def main_audio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
     ])
 
+def translation_menu_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) == "vi":
+        return (
+            "🌐 <b>Dịch thuật TOAN AAS</b>\n\n"
+            "Bạn muốn dịch nội dung nào?\n\n"
+            "TOAN AAS hỗ trợ dịch văn bản, tài liệu, transcript, phụ đề và nội dung video. "
+            "Tác vụ nhẹ không trừ Xu; tác vụ dài hoặc cần lồng tiếng sẽ báo giá và xác nhận trong flow hiện có trước khi xử lý."
+        )
+    return (
+        "🌐 <b>TOAN AAS Translation</b>\n\n"
+        "Choose the content type. Text translation is free/lightweight. Long documents, subtitles or dubbing use the existing guarded flow and confirm pricing before processing."
+    )
+
+def translation_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("📝 Dịch văn bản" if is_vi else "📝 Translate text", "menu|translation_text"),
+            ("📄 Dịch tài liệu" if is_vi else "📄 Translate document", "menu|translation_document"),
+            ("🎬 Dịch phụ đề video" if is_vi else "🎬 Translate video subtitles", "videodub|type|subtitle_translate"),
+            ("🎙 Dịch + lồng tiếng" if is_vi else "🎙 Translate + dub", "videodub|type|subtitle_plus_dub"),
+            ("🧾 Dịch transcript" if is_vi else "🧾 Translate transcript", "menu|translation_transcript"),
+            ("🌍 Chọn ngôn ngữ" if is_vi else "🌍 Language options", "menu|translation_language"),
+        ],
+        nav_back=("⬅️ Menu chính" if is_vi else "⬅️ Main menu", "menu|main"),
+        nav_main=False,
+        lang=lang,
+    )
+
+def translation_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return build_2col_keyboard(
+        [],
+        nav_back=("⬅️ Dịch thuật" if normalize_user_language(lang) == "vi" else "⬅️ Translation", "menu|translate"),
+        nav_main=True,
+        lang=lang,
+    )
+
+def translation_language_options_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return build_2col_keyboard(
+        [
+            ("🌐 Ngôn ngữ đích tự động" if is_vi else "🌐 Auto-translate target", "menu|translation_auto_target"),
+            ("🌍 Ngôn ngữ giao diện bot" if is_vi else "🌍 Bot interface language", "back_lang"),
+        ],
+        nav_back=("⬅️ Dịch thuật" if is_vi else "⬅️ Translation", "menu|translate"),
+        nav_main=True,
+        lang=lang,
+    )
+
 def translate_language_keyboard(other: bool = False, lang: str = "vi") -> InlineKeyboardMarkup:
     english_ui = normalize_user_language(lang) != "vi"
     if other:
@@ -40620,13 +40688,13 @@ def translate_language_keyboard(other: bool = False, lang: str = "vi") -> Inline
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🇯🇵 日本語", callback_data="menu|translate_set_ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="menu|translate_set_ko")],
             [InlineKeyboardButton("🇹🇭 ไทย", callback_data="menu|translate_set_th"), InlineKeyboardButton("🇸🇦 العربية", callback_data="menu|translate_set_ar")],
-            [InlineKeyboardButton(back_label, callback_data="menu|translate")],
+            [InlineKeyboardButton(back_label, callback_data="menu|translation_auto_target")],
             [InlineKeyboardButton(off_label, callback_data="menu|translate_off")],
             [InlineKeyboardButton(main_label, callback_data="menu|main")],
         ])
     more_label = "🌍 More languages" if english_ui else "🌍 Ngôn ngữ khác / More languages"
     off_label = "🌐 Disable auto-translate" if english_ui else "🌐 Tắt dịch tự động"
-    back_audio = "⬅️ Voice" if english_ui else "⬅️ Về âm thanh"
+    back_audio = "⬅️ Translation" if english_ui else "⬅️ Dịch thuật"
     main_label = "🏠 Main menu" if english_ui else "🏠 Menu chính"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="menu|translate_set_vi")],
@@ -40634,7 +40702,7 @@ def translate_language_keyboard(other: bool = False, lang: str = "vi") -> Inline
         [InlineKeyboardButton("🇨🇳 中文", callback_data="menu|translate_set_zh")],
         [InlineKeyboardButton(more_label, callback_data="menu|translate_more")],
         [InlineKeyboardButton(off_label, callback_data="menu|translate_off")],
-        [InlineKeyboardButton(back_audio, callback_data="menu|main_audio"), InlineKeyboardButton(main_label, callback_data="menu|main")],
+        [InlineKeyboardButton(back_audio, callback_data="menu|translate"), InlineKeyboardButton(main_label, callback_data="menu|main")],
     ])
 
 def main_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -47015,7 +47083,8 @@ def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎁 Combo của tôi" if is_vi else "🎁 My packages", callback_data="menu|profile_packages"), InlineKeyboardButton("👑 Thành viên" if is_vi else "👑 Membership", callback_data="pricing|member")],
         [InlineKeyboardButton("📚 Hướng dẫn Xu" if is_vi else "📚 Xu guide", callback_data="menu|guide_credits"), InlineKeyboardButton("👨‍💼 Hỗ trợ" if is_vi else "👨‍💼 Support", callback_data="menu|support")],
         [InlineKeyboardButton("🎁 Link giới thiệu" if is_vi else ui_text(lang, "account.ref_link_button"), callback_data="menu|profile_ref_link"), InlineKeyboardButton("👥 Người đã giới thiệu" if is_vi else ui_text(lang, "account.ref_stats_button"), callback_data="menu|profile_ref_stats")],
-        [InlineKeyboardButton("📋 Cách nhận thưởng" if is_vi else ui_text(lang, "account.ref_policy_button"), callback_data="menu|profile_ref_policy"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("📋 Cách nhận thưởng" if is_vi else ui_text(lang, "account.ref_policy_button"), callback_data="menu|profile_ref_policy"), InlineKeyboardButton("🌍 Đổi ngôn ngữ" if is_vi else "🌍 Change language", callback_data="back_lang")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def profile_child_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -47355,6 +47424,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action == "main_audio":
         return menu_text_main_audio_i18n(lang), main_audio_keyboard(lang)
     if action == "translate":
+        return translation_menu_text(lang), translation_menu_keyboard(lang)
+    if action == "translation_auto_target":
         return menu_text_translate_i18n(False, lang), translate_language_keyboard(False, lang)
     if action == "translate_more":
         return menu_text_translate_i18n(True, lang), translate_language_keyboard(True, lang)
@@ -47412,6 +47483,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
     if action == "main_audio":
         return menu_text_main_audio(), main_audio_keyboard()
     if action == "translate":
+        return translation_menu_text("vi"), translation_menu_keyboard("vi")
+    if action == "translation_auto_target":
         return menu_text_translate(False), translate_language_keyboard(False)
     if action == "translate_more":
         return menu_text_translate(True), translate_language_keyboard(True)
@@ -49301,6 +49374,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     user_is_admin = is_admin_user(query.from_user.id)
     lang = get_user_language(query.from_user.id) or "vi"
+    if action not in {"translation_text", "translation_transcript"}:
+        clear_translation_menu_pending(query.from_user.id)
     clear_media_creator_pending_states(query.from_user.id)
     clear_support_ticket_pending(query.from_user.id)
     if action != "finance_compliance_update":
@@ -49488,6 +49563,33 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             query,
             image_edit_menu_start_text(lang),
             reply_markup=image_edit_start_keyboard(lang),
+        )
+    if action in {"translation_text", "translation_transcript"}:
+        source_type = "transcript" if action == "translation_transcript" else "text"
+        set_translation_menu_pending(query.from_user.id, source_type)
+        text = (
+            "🧾 Hãy gửi transcript cần dịch. Sau đó bot sẽ hỏi ngôn ngữ đích. Bot chưa trừ Xu."
+            if source_type == "transcript" and normalize_user_language(lang) == "vi"
+            else "📝 Hãy gửi văn bản cần dịch. Sau đó bot sẽ hỏi ngôn ngữ đích. Bot chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "📝 Send the text/transcript to translate. The bot will ask for the target language. No Xu charged."
+        )
+        return await safe_edit_query_message(query, text, reply_markup=translation_input_keyboard(lang))
+    if action == "translation_document":
+        return await safe_edit_query_message(
+            query,
+            "📄 <b>Dịch tài liệu</b>\n\nHãy gửi file TXT, DOCX, PDF, SRT hoặc VTT. Sau khi nhận file, bot sẽ hiện nút chọn ngôn ngữ dịch. File dài/OCR chưa sẵn sàng sẽ được guard rõ và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi" else
+            "📄 <b>Translate document</b>\n\nSend a TXT, DOCX, PDF, SRT or VTT file. The bot will then show target-language options. Unsupported long/OCR files are guarded without charging Xu.",
+            reply_markup=translation_input_keyboard(lang),
+        )
+    if action == "translation_language":
+        return await safe_edit_query_message(
+            query,
+            "🌍 <b>Chọn loại ngôn ngữ</b>\n\n• Ngôn ngữ đích tự động: tin nhắn text thường sẽ được dịch khi bạn bật.\n• Ngôn ngữ giao diện bot: chỉ đổi menu/hướng dẫn, không bật chế độ dịch."
+            if normalize_user_language(lang) == "vi" else
+            "🌍 <b>Language options</b>\n\nAuto-translate target changes normal text routing. Bot interface language only changes menus and guidance.",
+            reply_markup=translation_language_options_keyboard(lang),
         )
     if action.startswith("translate_set_"):
         target = normalize_translate_target(action.replace("translate_set_", "", 1))
@@ -98531,6 +98633,30 @@ async def handle_free_hub_pending_upload(update: Update, context: ContextTypes.D
     )
     return True
 
+async def handle_translation_menu_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_translation_menu_pending(uid)
+    if not pending:
+        return False
+    text = update.message.text.strip()
+    if not text:
+        return True
+    lang = get_user_language(uid) or "vi"
+    if len(text) > 3000:
+        await update.message.reply_text(
+            "⚠️ Nội dung dài hơn 3.000 ký tự. Vui lòng chia thành từng đoạn ngắn để dịch ổn định. Bot chưa trừ Xu."
+            if normalize_user_language(lang) == "vi" else
+            "⚠️ Text is longer than 3,000 characters. Split it into shorter sections. No Xu charged.",
+            reply_markup=translation_input_keyboard(lang),
+        )
+        return True
+    clear_translation_menu_pending(uid)
+    save_translation_request(uid, "text", source_text=text)
+    await show_translation_picker(update, "text")
+    return True
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -98544,6 +98670,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_free_hub_pending_text(update, context):
+        return
+
+    if await handle_translation_menu_pending_text(update, context):
         return
 
     if await handle_finance_compliance_pending_text(update, context):
