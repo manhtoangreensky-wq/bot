@@ -162,15 +162,28 @@ def prompt_library_suggestions(
     count: int = 3,
     exclude_ids: list[str] | None = None,
     seed: int | None = None,
+    industry_id: str = "",
 ) -> list[dict[str, Any]]:
     excluded = set(exclude_ids or [])
+    industry_ids = {item.strip() for item in str(industry_id or "").split(",") if item.strip()}
     candidates = [
         item
-        for item in prompt_library_items(library, category_id=category_id)
+        for item in prompt_library_items(
+            library,
+            category_id="" if category_id == "__all__" else category_id,
+        )
         if item.get("id") not in excluded
+        and (not industry_ids or item.get("industry_id") in industry_ids)
     ]
     if len(candidates) < count:
-        candidates = prompt_library_items(library, category_id=category_id)
+        candidates = [
+            item
+            for item in prompt_library_items(
+                library,
+                category_id="" if category_id == "__all__" else category_id,
+            )
+            if not industry_ids or item.get("industry_id") in industry_ids
+        ]
     rng = random.Random(seed)
     rng.shuffle(candidates)
     return candidates[: max(1, int(count or 3))]

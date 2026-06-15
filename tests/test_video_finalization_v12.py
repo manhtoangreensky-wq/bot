@@ -146,6 +146,9 @@ def test_video_finalization_summary_routes_prompt_without_images_to_ai_or_keyfra
     assert "Tạo video AI chân thật" in text
     assert "chưa trừ Xu" in text
 
+    guard_callbacks = _callbacks(bot.video_finalization_guard_keyboard(state, "vi"))
+    assert "vfinal|export_local" not in guard_callbacks
+
 
 def test_video_finalization_summary_keeps_local_export_when_images_exist():
     state = {
@@ -157,6 +160,7 @@ def test_video_finalization_summary_keeps_local_export_when_images_exist():
     callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "vfinal|export_local" in callbacks
     assert "vfinal|export_ai" in callbacks
+    assert "vfinal|export_local" in _callbacks(bot.video_finalization_guard_keyboard(state, "vi"))
 
 
 def test_video_finalization_readiness_requires_explicit_flags(monkeypatch):

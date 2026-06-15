@@ -47,9 +47,27 @@ def test_reference_video_menu_opens_and_all_hub_callbacks_are_routed():
     }.issubset(callbacks)
 
 
-def test_free_hub_has_reference_entries():
+def test_reference_entries_are_isolated_from_free_hub():
     callbacks = _callbacks(bot.free_hub_main_keyboard("vi"))
-    assert {"videoref|hub", "videoref|profile", "videoref|publish_package", "videoref|catalog"}.issubset(callbacks)
+    assert not {"videoref|hub", "videoref|profile", "videoref|publish_package", "videoref|catalog"}.intersection(callbacks)
+    assert "freehub|library" in callbacks
+
+
+def test_reference_back_routes_stay_inside_video_reference_flow():
+    hub_callbacks = _callbacks(bot.video_reference_hub_keyboard("vi"))
+    profile_callbacks = _callbacks(bot.channel_profile_keyboard("vi"))
+    catalog_callbacks = _callbacks(
+        bot.video_v6_keyboard(
+            [("📤 Thêm video mẫu", "videoref|start")],
+            "vi",
+            back=("⬅️ Video mẫu / Kênh mẫu", "videoref|hub"),
+        )
+    )
+
+    assert "menu|main_video" in hub_callbacks
+    assert "videoref|hub" in profile_callbacks
+    assert "videoref|hub" in catalog_callbacks
+    assert "freehub|main" not in profile_callbacks | catalog_callbacks
 
 
 def test_channel_profile_and_publish_package_are_channel_aware(monkeypatch, tmp_path):

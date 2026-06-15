@@ -145,14 +145,16 @@ def test_free_tools_main_keyboard_is_compact_placeholder():
         "freehub|caption",
         "freehub|ideas",
         "freehub|prompts",
+        "freehub|publish_package",
+        "freehub|library",
         "menu|main_memory",
         "freehub|upload",
         "menu|main",
     }.issubset(callbacks)
     assert "freehub|chat" not in callbacks
     assert "freehub|hook" not in callbacks
-    assert "freehub|library" not in callbacks
     assert "freehub|byok" not in callbacks
+    assert not any(callback.startswith("videoref|") for callback in callbacks)
 
 
 def test_free_tools_button_opens_menu(monkeypatch):
@@ -205,6 +207,8 @@ def test_free_hub_callbacks_have_handlers():
         "byok",
         "upload",
         "library",
+        "publish_package",
+        "prompt_back",
         "copy",
         "variant",
         "caption_more",
@@ -214,6 +218,7 @@ def test_free_hub_callbacks_have_handlers():
     }
     for action in required_actions:
         assert f'"{action}"' in handler
+    assert 'action.startswith("use_prompt")' in handler
 
 
 def test_free_hub_reuses_existing_handlers():
@@ -238,6 +243,30 @@ def test_free_hub_main_links_notes_documents_directly_and_hides_byok():
     assert not any("API" in label for label in labels)
 
 
+def test_free_hub_removes_reference_shortcuts_and_renames_prompt_library():
+    markup = bot.free_hub_main_keyboard("vi")
+    callbacks = _callbacks(markup)
+    labels = [button.text for row in markup.inline_keyboard for button in row]
+
+    assert "videoref|hub" not in callbacks
+    assert "videoref|profile" not in callbacks
+    assert "🎬 Prompt theo video mẫu" not in labels
+    assert "📺 Hồ sơ kênh" not in labels
+    assert "📚 Kho prompt mẫu" in labels
+    assert "freehub|library" in callbacks
+
+
+def test_free_prompt_library_back_to_free_hub():
+    markup = bot.free_hub_library_keyboard("vi")
+    callbacks = _callbacks(markup)
+    labels = [button.text for row in markup.inline_keyboard for button in row]
+
+    assert "freehub|main" in callbacks
+    assert "🎬 Prompt video" in labels
+    assert "🖼 Prompt ảnh" in labels
+    assert "🔁 Gợi ý ngẫu nhiên" in labels
+
+
 def test_free_hub_suggestion_flow_before_input():
     suggestions = bot.free_hub_suggestion_items("meta_ai_prompt", 0)
     more = bot.free_hub_suggestion_items("meta_ai_prompt", 3)
@@ -256,6 +285,35 @@ def test_free_hub_suggestion_flow_before_input():
         "freehub|suggest_custom",
         "freehub|main",
     }.issubset(callbacks)
+
+
+def test_prompt_flow_generates_three_prompts_and_has_required_actions():
+    result = bot.free_hub_meta_prompt_pack("nước hoa nam", 0)
+    choices = bot.free_hub_prompt_choices(result)
+    callbacks = _callbacks(bot.free_hub_result_keyboard("vi", "meta_ai_prompt", meta=True))
+
+    assert len(choices) == 3
+    assert {
+        "freehub|use_prompt1",
+        "freehub|use_prompt2",
+        "freehub|use_prompt3",
+        "freehub|variant",
+        "freehub|edit",
+        "freehub|save",
+        "freehub|use_video",
+        "freehub|copy",
+    }.issubset(callbacks)
+
+
+def test_prompt_create_video_ai_guard_has_no_local_export():
+    callbacks = _callbacks(bot.free_hub_video_ai_guard_keyboard("vi"))
+    text = bot.free_hub_video_ai_guard_text({"selected_prompt": "prompt test"}, "vi")
+
+    assert "chưa gọi API" in text
+    assert "chưa trừ Xu" in text
+    assert "freehub|prompt_back" in callbacks
+    assert "vfinal|export_local" not in callbacks
+    assert "menu|main_video" not in callbacks
 
 
 def test_free_hub_back_routing():

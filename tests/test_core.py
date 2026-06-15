@@ -6447,7 +6447,10 @@ def test_free_tools_guided_outputs_and_followups(monkeypatch):
     assert "Prompt chi tiết" in meta["text"]
     assert "Prompt quảng cáo" in meta["text"]
     meta_buttons = [button.text for row in meta["reply_markup"].inline_keyboard for button in row]
-    assert "🔁 Đổi gợi ý khác" in meta_buttons
+    assert "🔁 Đổi 3 prompt khác" in meta_buttons
+    assert "✅ Dùng prompt 1" in meta_buttons
+    assert "✅ Dùng prompt 2" in meta_buttons
+    assert "✅ Dùng prompt 3" in meta_buttons
     assert "🖼 Tạo prompt ảnh/video từ ý này" in meta_buttons
     assert "✍️ Viết caption/hashtag" in meta_buttons
 
@@ -6473,8 +6476,11 @@ def test_free_tools_guided_outputs_and_followups(monkeypatch):
     assert "Prompt video AI" in prompts["text"]
     assert "Prompt ghép ảnh/video" in prompts["text"]
     prompt_buttons = [button.text for row in prompts["reply_markup"].inline_keyboard for button in row]
-    assert "🖼 Dùng prompt này tạo ảnh" in prompt_buttons
-    assert "🎬 Dùng prompt này tạo video AI" in prompt_buttons
+    assert "✅ Dùng prompt 1" in prompt_buttons
+    assert "✅ Dùng prompt 2" in prompt_buttons
+    assert "✅ Dùng prompt 3" in prompt_buttons
+    assert "🔁 Đổi 3 prompt khác" in prompt_buttons
+    assert "🎬 Tạo video AI từ prompt" in prompt_buttons
 
 
 def test_free_tools_menu_byok_and_docs_are_guarded():
@@ -6552,10 +6558,11 @@ def test_free_tools_followup_buttons_have_handlers(monkeypatch):
     assert "Prompt video AI" in prompts["text"]
 
     use_video = asyncio.run(press("freehub|use_video", uid))
-    assert "Dùng prompt này để tạo video AI" in use_video["text"]
-    assert "xác nhận cuối" in use_video["text"]
+    assert "Video AI chân thật đang được kiểm soát an toàn" in use_video["text"]
+    assert "chưa gọi API" in use_video["text"]
     use_video_buttons = [button.text for row in use_video["reply_markup"].inline_keyboard for button in row]
-    assert "🎬 Mở Video AI" in use_video_buttons
+    assert "⬅️ Quay lại prompt" in use_video_buttons
+    assert "🎞 Xuất video local" not in use_video_buttons
 
     byok = asyncio.run(press("freehub|byok", uid))
     assert "Kết nối API riêng chưa mở" in byok["text"]
