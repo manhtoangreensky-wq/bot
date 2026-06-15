@@ -40682,9 +40682,9 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
         [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
-        [InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
+        [InlineKeyboardButton("🎙 Giọng nói / Nhạc", callback_data="menu|main_music"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
         [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
-        [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -40739,9 +40739,9 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
             [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
             [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
-            [InlineKeyboardButton("🎙 Voice / Nhạc", callback_data="menu|main_music"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
+            [InlineKeyboardButton("🎙 Giọng nói / Nhạc", callback_data="menu|main_music"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
             [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
-            [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
             rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -45279,7 +45279,7 @@ def storyboard_pack_guard_text(action: str, lang: str = "vi") -> str:
             "TOAN AAS chưa mở render Video AI công khai vì provider/video job chưa ổn định. Bot chưa gọi API và chưa trừ Xu.\n\n"
             "Bạn có thể copy prompt, dùng Meta AI, lưu kế hoạch hoặc tạo/gửi ảnh trước."
             if normalize_user_language(lang) == "vi"
-            else "✨ AI video by shot uses the shared video pipeline with invoice and confirmation. If the provider is unavailable, no Xu is charged."
+            else "🎬 Realistic AI video is currently under TOAN AAS safety control. The bot has not called any provider and has not charged Xu. You can copy prompts, use Meta AI, save the plan, or create/upload images first."
         )
     if action == "preview":
         return (
@@ -56598,7 +56598,7 @@ def music_guided_back_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
     return build_2col_keyboard(
         [],
-        nav_back=("🔙 Voice / Nhạc" if is_vi else "🔙 Voice / Music", "menu|main_music"),
+        nav_back=("🔙 Giọng nói / Nhạc" if is_vi else "🔙 Voice / Music", "menu|main_music"),
         lang=lang,
     )
 
@@ -56749,7 +56749,7 @@ def music_prompt_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("💾 Lưu prompt" if is_vi else "💾 Save prompt", "music_quick|save_prompt"),
         ("🤖 Tạo nhạc AI (đang hoàn thiện)" if is_vi else "🤖 AI music (in progress)", "music_quick|music_ai_guard"),
     ]
-    back = ("🔙 Voice / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def voice_style_suggestions_text(text: str, lang: str = "vi") -> str:
@@ -56795,7 +56795,7 @@ def voice_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", "music_quick|voice"),
         ("🎧 Ghép vào video (đang hoàn thiện)" if is_vi else "🎧 Add to video (in progress)", "music_quick|voice_video"),
     ]
-    back = ("🔙 Voice / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def music_provider_error_text(lang: str) -> str:
@@ -56984,7 +56984,7 @@ def music_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     else:
         custom_label = "✍️ Tự nhập từ khóa"
         labels = ("⚡ Sales/product", "💼 Tech", "🎬 Cinematic", "🌿 Calm/review", "🔥 Trend")
-    back_label = "🔙 Voice / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
+    back_label = "🔙 Giọng nói / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
     main_label = "🏠 Menu chính" if lang == "vi" else ("🏠 Main menu" if lang == "en" else "🏠 主菜单")
     return InlineKeyboardMarkup([
         [
@@ -57005,7 +57005,7 @@ def music_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def sfx_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
     custom_label = "✍️ 自定义关键词" if lang == "zh" else ("✍️ Custom keyword" if lang == "en" else "✍️ Tự nhập từ khóa")
-    back_label = "🔙 Voice / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
+    back_label = "🔙 Giọng nói / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
     main_label = "🏠 Menu chính" if lang == "vi" else ("🏠 Main menu" if lang == "en" else "🏠 主菜单")
     return InlineKeyboardMarkup([
         [
@@ -57026,7 +57026,7 @@ def sfx_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def media_library_quick_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
     custom_label = "✍️ 自定义关键词" if lang == "zh" else ("✍️ Custom keyword" if lang == "en" else "✍️ Tự nhập từ khóa")
-    back_label = "🔙 Voice / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
+    back_label = "🔙 Giọng nói / Nhạc" if lang == "vi" else ("🔙 Voice / Music" if lang == "en" else "🔙 返回")
     main_label = "🏠 Menu chính" if lang == "vi" else ("🏠 Main menu" if lang == "en" else "🏠 主菜单")
     return InlineKeyboardMarkup([
         [

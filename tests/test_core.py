@@ -2334,7 +2334,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🎬 Tạo video AI" in start_labels
     assert "🔥 Video theo trend" not in start_labels
     assert "📝 Ghi chú / Tài liệu" in start_labels
-    assert "🎙 Voice / Nhạc" in start_labels
+    assert "🎙 Giọng nói / Nhạc" in start_labels
     assert "🎞 Video" not in start_labels
     assert "👨‍💼 Hỗ trợ" in start_labels
     assert "💰 Nạp Xu / Bảng giá" in start_labels
