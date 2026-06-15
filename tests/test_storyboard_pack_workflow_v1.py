@@ -97,11 +97,22 @@ def test_storyboard_topic_state_and_three_concepts(monkeypatch):
     brief = asyncio.run(_send_text("nước hoa nam cao cấp", uid))
     assert "Thiết lập nhanh" in brief["text"]
     assert bot.get_developing_video_pending(uid)["step"] == "brief"
+    brief_callbacks = _callbacks(brief["reply_markup"])
+    assert {
+        "storypack|set_platform|TikTok/Reels",
+        "storypack|set_ratio|9:16",
+        "storypack|set_duration|30s",
+        "storypack|set_style|cinematic",
+        "storypack|set_goal|bán hàng",
+        "storypack|generate_concepts",
+    }.issubset(brief_callbacks)
 
     concepts = asyncio.run(_press("storypack|generate_concepts", uid))
     assert "3 hướng storyboard" in concepts["text"]
+    assert "Concept 1" in concepts["text"]
     callbacks = _callbacks(concepts["reply_markup"])
     assert {"storypack|concept|1", "storypack|concept|2", "storypack|concept|3", "storypack|regenerate_concepts"}.issubset(callbacks)
+    assert "storypack|back_brief" in callbacks
     assert "Bot chưa gọi API ảnh/video và chưa trừ Xu" in concepts["text"]
 
 
@@ -121,6 +132,8 @@ def test_storyboard_concept_generates_required_scene_pack(monkeypatch):
     text = bot.storyboard_pack_result_text(plan, "vi")
 
     for expected in [
+        "Storyboard chi tiết",
+        "Storyboard + Prompt điện ảnh",
         "Cảnh 1",
         "Mục tiêu cảnh",
         "Nội dung hình ảnh",
@@ -136,13 +149,16 @@ def test_storyboard_concept_generates_required_scene_pack(monkeypatch):
         "Prompt video",
         "Negative prompt",
         "Chuyển cảnh",
+        "Kết thúc",
+        "Caption ngắn",
+        "Hashtag gợi ý",
         "Bot chưa gọi API ảnh/video và chưa trừ Xu",
     ]:
         assert expected in text
 
     callbacks = _callbacks(bot.storyboard_pack_result_keyboard("vi"))
     assert "vfinal|export_local" not in callbacks
-    assert {"storypack|image_prompts", "storypack|video_prompts", "storypack|meta_ai_prompt", "storypack|create_video_ai"}.issubset(callbacks)
+    assert {"storypack|image_prompts", "storypack|video_prompts", "storypack|meta_ai_prompt", "storypack|copy_plan", "storypack|create_video_ai"}.issubset(callbacks)
 
 
 def test_storyboard_prompt_views_and_video_guard(monkeypatch):
@@ -158,16 +174,24 @@ def test_storyboard_prompt_views_and_video_guard(monkeypatch):
     image_prompts = asyncio.run(_press("storypack|image_prompts", uid))
     assert "Prompt ảnh từng cảnh" in image_prompts["text"]
     assert "Subject/setting" in image_prompts["text"]
-    assert "storypack|back_detail" in _callbacks(image_prompts["reply_markup"])
+    image_callbacks = _callbacks(image_prompts["reply_markup"])
+    assert "storypack|back_detail" in image_callbacks
+    assert "storypack|regenerate_image_prompts" in image_callbacks
+    assert "storypack|video_prompts" in image_callbacks
 
     video_prompts = asyncio.run(_press("storypack|video_prompts", uid))
     assert "Prompt video từng cảnh" in video_prompts["text"]
     assert "Camera/motion" in video_prompts["text"]
-    assert "storypack|back_detail" in _callbacks(video_prompts["reply_markup"])
+    video_callbacks = _callbacks(video_prompts["reply_markup"])
+    assert "storypack|back_detail" in video_callbacks
+    assert "storypack|regenerate_video_prompts" in video_callbacks
+    assert "storypack|image_prompts" in video_callbacks
 
     meta = asyncio.run(_press("storypack|meta_ai_prompt", uid))
     assert "3 prompt Meta AI" in meta["text"]
     assert "Bot chưa gọi Meta API" in meta["text"]
+    assert "Caption gợi ý" in meta["text"]
+    assert {"storypack|copy_meta_1", "storypack|copy_meta_2", "storypack|copy_meta_3", "storypack|regenerate_meta_ai_prompts"}.issubset(_callbacks(meta["reply_markup"]))
 
     guard = asyncio.run(_press("storypack|create_video_ai", uid))
     assert "chưa mở render Video AI công khai" in guard["text"]
@@ -175,3 +199,57 @@ def test_storyboard_prompt_views_and_video_guard(monkeypatch):
     guard_callbacks = _callbacks(guard["reply_markup"])
     assert "storypack|back_detail" in guard_callbacks
     assert "vfinal|export_local" not in guard_callbacks
+
+
+def test_storyboard_product_ad_manual_path_v2(monkeypatch):
+    uid = 990405
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    bot.clear_developing_video_pending(uid)
+
+    entry = asyncio.run(_press("storypack|start", uid))
+    assert "Storyboard + Prompt điện ảnh" in entry["text"]
+    assert "menu|main_video" in _callbacks(entry["reply_markup"])
+
+    template = asyncio.run(_press("storypack|template|product_ad", uid))
+    assert "Quảng cáo sản phẩm" in template["text"]
+    assert bot.get_developing_video_pending(uid)["step"] == "topic"
+
+    brief = asyncio.run(_send_text("nước hoa nam cao cấp", uid))
+    assert "Thiết lập nhanh" in brief["text"]
+
+    concepts = asyncio.run(_press("storypack|generate_concepts", uid))
+    assert "Concept 1" in concepts["text"]
+    assert "Concept 2" in concepts["text"]
+    assert "Concept 3" in concepts["text"]
+
+    detail = asyncio.run(_press("storypack|concept|1", uid))
+    assert "Storyboard chi tiết" in detail["text"]
+    for expected in ["Cảnh 1", "Prompt ảnh", "Prompt video", "Negative prompt", "Góc máy", "Chuyển động camera", "Ánh sáng"]:
+        assert expected in detail["text"]
+    detail_callbacks = _callbacks(detail["reply_markup"])
+    assert "storypack|video_prompts" in detail_callbacks
+    assert "storypack|image_prompts" in detail_callbacks
+    assert "storypack|meta_ai_prompt" in detail_callbacks
+    assert "storypack|back_concepts" in detail_callbacks
+    assert "vfinal|export_local" not in detail_callbacks
+
+    video_prompts = asyncio.run(_press("storypack|video_prompts", uid))
+    assert "Prompt video từng cảnh" in video_prompts["text"]
+    assert "storypack|back_detail" in _callbacks(video_prompts["reply_markup"])
+
+    back_detail = asyncio.run(_press("storypack|back_detail", uid))
+    assert "Storyboard chi tiết" in back_detail["text"]
+
+    meta = asyncio.run(_press("storypack|meta_ai_prompt", uid))
+    assert "3 prompt Meta AI" in meta["text"]
+    assert "Bot chưa gọi Meta API" in meta["text"]
+
+    video_guard = asyncio.run(_press("storypack|create_video_ai", uid))
+    assert "Video AI chân thật đang được kiểm soát an toàn" in video_guard["text"]
+    assert "storypack|back_detail" in _callbacks(video_guard["reply_markup"])
+    assert "vfinal|export_local" not in _callbacks(video_guard["reply_markup"])
+
+    image_guard = asyncio.run(_press("storypack|create_or_upload_images", uid))
+    assert "Tạo/gửi ảnh trước" in image_guard["text"]
+    assert "storypack|image_prompts" in _callbacks(image_guard["reply_markup"])
+    assert "storypack|upload_images_guard" in _callbacks(image_guard["reply_markup"])
