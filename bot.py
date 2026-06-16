@@ -472,7 +472,7 @@ SHOPAIKEY_VIDEO_ENDPOINT = _env("SHOPAIKEY_VIDEO_ENDPOINT", "/video/generations"
 SHOPAIKEY_VIDEO_URL = _env("SHOPAIKEY_VIDEO_URL") or join_shopaikey_url(SHOPAIKEY_BASE_URL, SHOPAIKEY_VIDEO_ENDPOINT)
 SHOPAIKEY_VIDEO_STATUS_ENDPOINT = _env("SHOPAIKEY_VIDEO_STATUS_ENDPOINT")
 SHOPAIKEY_VIDEO_CONTENT_ENDPOINT = _env("SHOPAIKEY_VIDEO_CONTENT_ENDPOINT")
-SHOPAIKEY_VIDEO_ENABLED = env_flag("SHOPAIKEY_VIDEO_ENABLED", "false")
+SHOPAIKEY_VIDEO_ENABLED = env_flag("SHOPAIKEY_VIDEO_ENABLED", _env("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true")))
 SHOPAIKEY_VIDEO_ADMIN_ONLY = env_flag("SHOPAIKEY_VIDEO_ADMIN_ONLY", "true")
 SHOPAIKEY_VIDEO_MODEL_PRIMARY = _env("SHOPAIKEY_VIDEO_MODEL_PRIMARY", _env("SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast"))
 SHOPAIKEY_VIDEO_MODEL = SHOPAIKEY_VIDEO_MODEL_PRIMARY
@@ -1192,6 +1192,11 @@ VIDEO_PUBLIC_MAX_CONCURRENT_JOBS = max(1, env_int("VIDEO_PUBLIC_MAX_CONCURRENT_J
 VIDEO_PUBLIC_REQUIRE_CONFIRM = env_flag("VIDEO_PUBLIC_REQUIRE_CONFIRM", "true")
 VIDEO_PUBLIC_REQUIRE_JOB_LOCK = env_flag("VIDEO_PUBLIC_REQUIRE_JOB_LOCK", "true")
 VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR = env_flag("VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR", "true")
+VIDEO_BETA_200_MARKETING_LOSS_ENABLED = env_flag("VIDEO_BETA_200_MARKETING_LOSS_ENABLED", "false")
+VIDEO_BETA_200_MAX_USER_DAY = max(1, env_int("VIDEO_BETA_200_MAX_USER_DAY", 1))
+VIDEO_BETA_200_MAX_TOTAL_DAY = max(1, env_int("VIDEO_BETA_200_MAX_TOTAL_DAY", 10))
+VIDEO_BETA_200_LABEL = _env("VIDEO_BETA_200_LABEL", "Gói mồi 200 Xu")
+VIDEO_BETA_200_WARNING = env_flag("VIDEO_BETA_200_WARNING", "true")
 VIDEO_PREMIUM_PUBLIC_ENABLED = env_flag("VIDEO_PREMIUM_PUBLIC_ENABLED", "false")
 VIDEO_SAMPLE_MAX_SECONDS = max(60, env_int("VIDEO_SAMPLE_MAX_SECONDS", 600))
 VIDEO_SAMPLE_MAX_MB = max(1, env_int("VIDEO_SAMPLE_MAX_MB", 100))
@@ -36583,10 +36588,26 @@ def normalize_shopaikey_video_snapshot(snapshot: dict) -> dict:
     snap = dict(snapshot or {})
     status = str(snap.get("status") or "NOT_TESTED").upper()
     tested_at = str(snap.get("tested_at") or "")
+    output_confirmed = bool_from_runtime_value(get_system_setting("shopaikey_video_last_output_sent", ""), False)
+    last_output = str(get_system_setting("shopaikey_video_last_output", "") or "").strip().lower()
+    if output_confirmed or last_output == "confirmed" or video_gate_detail_has_output(snap.get("detail") or ""):
+        if status in {"PASS_SUBMITTED", "SUBMITTED", "IN_PROGRESS", "PROCESSING", "RUNNING", "QUEUED", "PENDING", "NOT_TESTED", ""}:
+            snap["status"] = "SUCCESS"
+            detail = str(snap.get("detail") or "")
+            confirmed_detail = "last_video_output=confirmed; output_sent=yes"
+            snap["detail"] = detail if video_gate_detail_has_output(detail) else ((detail + "; " if detail else "") + confirmed_detail)
+            snap["tested_at"] = get_system_setting("shopaikey_video_last_completed_at", "") or tested_at
+            status = "SUCCESS"
+            tested_at = str(snap.get("tested_at") or "")
     event = latest_api_debug_event("shopaikey", ["shopaikey_video_job", "tool_test_shopaikey_video", "quick_video_test", "tool_test_workflow_image_to_video"])
     event_status = str((event or {}).get("status") or "").upper()
     if event and event_status and event_status not in {"", "NOT_TESTED"}:
-        if status in {"PASS_SUBMITTED", "IN_PROGRESS", "PROCESSING", "RUNNING", "QUEUED", "PENDING"} or shopaikey_status_event_is_newer(event.get("created_at") or "", tested_at):
+        event_success = event_status in {"PASS", "SUCCESS", "COMPLETED", "DONE", "SUCCEEDED", "LIVE_PASS"}
+        preserve_confirmed_success = status == "SUCCESS" and (output_confirmed or last_output == "confirmed") and not event_success
+        if not preserve_confirmed_success and (
+            status in {"PASS_SUBMITTED", "IN_PROGRESS", "PROCESSING", "RUNNING", "QUEUED", "PENDING"}
+            or shopaikey_status_event_is_newer(event.get("created_at") or "", tested_at)
+        ):
             snap["status"] = event_status
             snap["detail"] = event.get("detail") or snap.get("detail") or ""
             snap["tested_at"] = event.get("created_at") or tested_at
@@ -38701,6 +38722,24 @@ async def send_shopaikey_video_result(bot_client, chat_id, task_id: str, result_
         except Exception:
             return False, ""
 
+def mark_shopaikey_video_output_confirmed(task_id: str = "", model: str = "", updated_by="", source: str = "video_output") -> None:
+    safe_task_id = str(task_id or "").strip()[:180]
+    safe_model = str(model or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")[:120]
+    detail = (
+        f"task_id={safe_task_id or '-'}; provider_status=SUCCESS; "
+        "output_sent=yes; output_sent=true; last_video_output=confirmed; "
+        f"source={str(source or 'video_output')[:80]}"
+    )
+    payload = {"status": "SUCCESS", "model": safe_model, "http_status": 200, "latency_ms": 0}
+    save_tool_test_result("shopaikey_video", "SUCCESS", detail, updated_by)
+    save_tool_test_result("shopaikey_video_job", "SUCCESS", detail, updated_by)
+    save_shopaikey_component_snapshot("video", payload, detail, updated_by)
+    set_system_setting("shopaikey_video_last_task_id", safe_task_id, detail, updated_by)
+    set_system_setting("shopaikey_video_last_output", "confirmed", detail, updated_by)
+    set_system_setting("shopaikey_video_last_output_sent", "true", detail, updated_by)
+    set_system_setting("shopaikey_video_last_completed_at", now_text(), detail, updated_by)
+    record_api_debug("shopaikey", str(source or "video_output")[:80], "SUCCESS", 200, detail)
+
 async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_id, task_id: str) -> None:
     lang = user_ui_lang(user_id)
     max_attempts = max(1, int(SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS or 24))
@@ -38739,6 +38778,8 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
                 output_file_id=file_id,
                 finished_at=now_text(),
             )
+            if output_sent:
+                mark_shopaikey_video_output_confirmed(task_id, (initial_job or {}).get("model") or SHOPAIKEY_VIDEO_MODEL, user_id, "auto_poll_shopaikey_video_job")
             credits_now, _, _ = get_user(user_id)
             record_shopaikey_billing_event(user_id, job_id, "video_success", 0, int(credits_now or 0), int(credits_now or 0), f"task_id={task_id}; result_url={'yes' if result_url else 'no'}")
             try:
@@ -51959,9 +52000,47 @@ async def cmd_free_hub_prompt_test(update: Update, context: ContextTypes.DEFAULT
 def video_public_bool_label(value) -> str:
     return "ON" if bool(value) else "OFF"
 
+def bool_from_runtime_value(value, default: bool = False) -> bool:
+    text = str(value if value is not None else "").strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled", "open"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled", "closed"}:
+        return False
+    return bool(default)
+
+def video_runtime_bool(key: str, default: bool = False) -> bool:
+    value = get_system_setting(str(key), "")
+    if str(value or "").strip() == "":
+        return bool(default)
+    return bool_from_runtime_value(value, default)
+
+def set_video_runtime_bool(key: str, value: bool, updated_by="", note: str = "") -> None:
+    set_system_setting(str(key), "true" if value else "false", note or "video public runtime flag", updated_by)
+
+def video_public_beta_enabled_runtime() -> bool:
+    return video_runtime_bool("video_public_beta_enabled", VIDEO_PUBLIC_BETA_ENABLED)
+
+def video_ai_public_enabled_runtime() -> bool:
+    return video_runtime_bool("video_ai_public_enabled", VIDEO_AI_PUBLIC_ENABLED)
+
+def video_ai_master_enabled_runtime() -> bool:
+    return video_runtime_bool("video_ai_master_enabled", VIDEO_AI_MASTER_ENABLED)
+
+def video_text_to_video_public_enabled_runtime() -> bool:
+    return video_runtime_bool("video_text_to_video_public_enabled", VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED)
+
+def shopaikey_public_video_enabled_runtime() -> bool:
+    return video_runtime_bool("shopaikey_public_video_enabled", SHOPAIKEY_PUBLIC_VIDEO_ENABLED)
+
+def video_beta_200_marketing_loss_enabled_runtime() -> bool:
+    return video_runtime_bool("video_beta_200_marketing_loss_enabled", VIDEO_BETA_200_MARKETING_LOSS_ENABLED)
+
+def video_public_allowed_tiers_runtime() -> str:
+    return get_system_setting("video_public_allowed_tiers", "") or str(VIDEO_PUBLIC_ALLOWED_TIERS or "low,basic,common")
+
 def video_public_allowed_tiers() -> list[str]:
     allowed = []
-    for tier in str(VIDEO_PUBLIC_ALLOWED_TIERS or "low,basic,common").split(","):
+    for tier in str(video_public_allowed_tiers_runtime() or "low,basic,common").split(","):
         tier = normalize_video_tier(tier.strip())
         if tier and tier not in allowed:
             allowed.append(tier)
@@ -51994,6 +52073,12 @@ def video_public_tier_token_to_name(token: str = "") -> str:
     }
     return mapping.get(raw, normalize_video_tier(raw))
 
+def video_beta_open_parse_args(args: list[str] | tuple[str, ...] | None = None) -> dict:
+    raw = " ".join(str(item) for item in (args or [])).strip()
+    allow_loss_200 = bool(re.search(r"\ballow_loss_200\s*=\s*(1|true|yes|on)\b", raw, re.I))
+    clean = re.sub(r"\ballow_loss_200\s*=\s*(1|true|yes|on|0|false|no|off)\b", "", raw, flags=re.I)
+    return {"raw": raw, "tier_text": clean.strip(), "allow_loss_200": allow_loss_200}
+
 def video_public_tier_enabled(tier: str = "") -> bool:
     tier_norm = normalize_video_tier(tier)
     if tier_norm not in video_public_beta_tiers():
@@ -52007,7 +52092,7 @@ def video_public_tier_enabled(tier: str = "") -> bool:
         "basic": bool(VIDEO_TIER_BASIC_ENABLED),
         "common": bool(VIDEO_TIER_COMMON_ENABLED),
     }.get(tier_norm, False)
-    return bool(base_enabled and VIDEO_PUBLIC_BETA_ENABLED)
+    return bool(base_enabled and video_public_beta_enabled_runtime())
 
 def video_public_tier_revenue_vnd(tier: str = "") -> int:
     return int(video_tier_cost_xu(tier) * XU_TO_VND)
@@ -52028,10 +52113,14 @@ def check_video_margin(tier: str = "") -> dict:
         blocked.append("price_xu missing")
     if provider_cost_xu <= 0:
         blocked.append("provider_cost_unknown")
-    if ratio is not None and ratio > float(VIDEO_PUBLIC_WARN_COST_RATIO):
+    marketing_loss = bool(tier_norm == "low" and video_beta_200_marketing_loss_enabled_runtime())
+    if ratio is not None and ratio > float(VIDEO_PUBLIC_WARN_COST_RATIO) and not marketing_loss:
         blocked.append(f"provider_cost_ratio {ratio:.2f} exceeds hard limit {VIDEO_PUBLIC_WARN_COST_RATIO:.2f}")
     status = "PASS"
-    if blocked:
+    if marketing_loss:
+        status = "MARKETING_LOSS"
+        blocked = [item for item in blocked if "provider_cost_ratio" not in str(item)]
+    elif blocked:
         status = "BLOCKED"
     elif ratio is not None and ratio > float(VIDEO_PUBLIC_MAX_COST_RATIO):
         status = "WARN_MARGIN"
@@ -52042,10 +52131,11 @@ def check_video_margin(tier: str = "") -> dict:
         "revenue_vnd": revenue_vnd,
         "cost_ratio": ratio,
         "status": status,
-        "can_open": status in {"PASS", "WARN_MARGIN"},
+        "can_open": status in {"PASS", "WARN_MARGIN", "MARKETING_LOSS"},
         "blockers": blocked,
         "safe_ratio": float(VIDEO_PUBLIC_MAX_COST_RATIO),
         "hard_ratio": float(VIDEO_PUBLIC_WARN_COST_RATIO),
+        "marketing_loss": marketing_loss,
     }
 
 def video_public_beta_cost_rows() -> list[dict]:
@@ -52071,9 +52161,12 @@ def video_ai_provider_smoke_gate() -> dict:
     snap = shopaikey_video_status_snapshot()
     status = str(snap.get("status") or "NOT_TESTED").upper()
     detail = str(snap.get("detail") or "")
+    has_output = bool(video_gate_detail_has_output(detail))
+    if has_output and status in {"PASS_SUBMITTED", "SUBMITTED", "IN_PROGRESS", "PROCESSING", "RUNNING", "QUEUED", "PENDING", "NOT_TESTED", ""}:
+        status = "SUCCESS"
+        snap["status"] = "SUCCESS"
     success_status = status in {"PASS", "SUCCESS", "COMPLETED", "DONE", "SUCCEEDED", "LIVE_PASS"}
     submitted_only = status in {"PASS_SUBMITTED", "SUBMITTED", "IN_PROGRESS", "PROCESSING", "RUNNING", "QUEUED", "PENDING"}
-    has_output = bool(video_gate_detail_has_output(detail))
     blockers = []
     if not success_status:
         if submitted_only:
@@ -52090,10 +52183,10 @@ def video_ai_provider_smoke_gate() -> dict:
         blockers.append("SHOPAIKEY_ENABLED=false")
     if not SHOPAIKEY_API_KEY:
         blockers.append("SHOPAIKEY_API_KEY missing")
-    if not SHOPAIKEY_VIDEO_ENABLED:
-        blockers.append("SHOPAIKEY_VIDEO_ENABLED=false")
     if not SHOPAIKEY_VIDEO_URL:
         blockers.append("SHOPAIKEY_VIDEO_URL missing")
+    if not SHOPAIKEY_VIDEO_MODEL:
+        blockers.append("SHOPAIKEY_VIDEO_MODEL missing")
     return {
         "ready": not blockers,
         "status": status,
@@ -52188,7 +52281,14 @@ def video_public_status_payload() -> dict:
     worker = local_worker_status_payload()
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
     frame_public = bool(FRAME_VIDEO_PUBLIC_ENABLED and frame_gate["ready"])
-    ai_public = bool(VIDEO_PUBLIC_BETA_ENABLED and VIDEO_AI_PUBLIC_ENABLED and VIDEO_AI_MASTER_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED and ai_gate["ready"] and billing_gate["ready"])
+    ai_public = bool(
+        video_public_beta_enabled_runtime()
+        and video_ai_public_enabled_runtime()
+        and video_ai_master_enabled_runtime()
+        and shopaikey_public_video_enabled_runtime()
+        and ai_gate["ready"]
+        and billing_gate["ready"]
+    )
     return {
         "ops": ops,
         "frame_gate": frame_gate,
@@ -52200,11 +52300,12 @@ def video_public_status_payload() -> dict:
             "VIDEO_PLANNING_PUBLIC_ENABLED": bool(VIDEO_PLANNING_PUBLIC_ENABLED),
             "VIDEO_TREND_CONTENT_PUBLIC_ENABLED": bool(VIDEO_TREND_CONTENT_PUBLIC_ENABLED),
             "VIDEO_STORYBOARD_PUBLIC_ENABLED": bool(VIDEO_STORYBOARD_PUBLIC_ENABLED),
-            "SHOPAIKEY_PUBLIC_VIDEO_ENABLED": bool(SHOPAIKEY_PUBLIC_VIDEO_ENABLED),
-            "VIDEO_AI_PUBLIC_ENABLED": bool(VIDEO_AI_PUBLIC_ENABLED),
-            "VIDEO_AI_MASTER_ENABLED": bool(VIDEO_AI_MASTER_ENABLED),
-            "VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED": bool(VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED),
-            "VIDEO_PUBLIC_BETA_ENABLED": bool(VIDEO_PUBLIC_BETA_ENABLED),
+            "SHOPAIKEY_PUBLIC_VIDEO_ENABLED": bool(shopaikey_public_video_enabled_runtime()),
+            "VIDEO_AI_PUBLIC_ENABLED": bool(video_ai_public_enabled_runtime()),
+            "VIDEO_AI_MASTER_ENABLED": bool(video_ai_master_enabled_runtime()),
+            "VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED": bool(video_text_to_video_public_enabled_runtime()),
+            "VIDEO_PUBLIC_BETA_ENABLED": bool(video_public_beta_enabled_runtime()),
+            "VIDEO_BETA_200_MARKETING_LOSS_ENABLED": bool(video_beta_200_marketing_loss_enabled_runtime()),
             "VIDEO_PUBLIC_MAX_DURATION_SECONDS": int(VIDEO_PUBLIC_MAX_DURATION_SECONDS or 0),
             "VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY": int(VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY or 0),
             "VIDEO_PUBLIC_MAX_CONCURRENT_JOBS": int(VIDEO_PUBLIC_MAX_CONCURRENT_JOBS or 0),
@@ -52355,10 +52456,15 @@ def video_gate_matrix_rows() -> list[dict]:
             output = "mp4_local" if frame_ready else "blocked"
             billing = "CONFIRM_REFUND" if payload["billing_gate"]["ready"] else "GUARDED"
         elif tier == "tier_c":
-            final = "READY_PUBLIC" if (ai_ready and VIDEO_PUBLIC_BETA_ENABLED and VIDEO_AI_PUBLIC_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED) else ("READY_ADMIN_ONLY" if payload["ai_gate"].get("status") == "PASS_SUBMITTED" else "KEEP_OFF")
+            final = "READY_PUBLIC" if (
+                ai_ready
+                and video_public_beta_enabled_runtime()
+                and video_ai_public_enabled_runtime()
+                and shopaikey_public_video_enabled_runtime()
+            ) else ("READY_ADMIN_ONLY" if payload["ai_gate"].get("status") in {"PASS_SUBMITTED", "SUCCESS", "PASS", "COMPLETED"} else "KEEP_OFF")
             provider = "PASS" if ai_ready else "GUARDED"
             worker = "N/A"
-            output = "provider_video" if ai_ready else "not_confirmed"
+            output = "confirmed_smoke" if payload["ai_gate"].get("has_output") else ("provider_video" if ai_ready else "not_confirmed")
             billing = "CONFIRM_REFUND" if payload["billing_gate"]["ready"] else "GUARDED"
         else:
             final = "KEEP_OFF"
@@ -52451,6 +52557,20 @@ def video_public_open_safe_result(admin_id) -> dict:
         VIDEO_TREND_RENDER_ENABLED = False
         opened.extend([f"video_beta_{video_tier_cost_xu(tier)}xu" for tier in allowed if tier in video_public_beta_tiers()])
         opened.extend(["video_ai_from_prompt_beta", "video_ai_realistic_beta"])
+        set_system_setting("video_public_allowed_tiers", VIDEO_PUBLIC_ALLOWED_TIERS, "safe public video tiers", admin_id)
+        set_video_runtime_bool("video_public_beta_enabled", True, admin_id, "safe public video open")
+        set_video_runtime_bool("shopaikey_public_video_enabled", True, admin_id, "safe public video open")
+        set_video_runtime_bool("video_ai_public_enabled", True, admin_id, "safe public video open")
+        set_video_runtime_bool("video_ai_master_enabled", True, admin_id, "safe public video open")
+        set_video_runtime_bool("video_text_to_video_public_enabled", True, admin_id, "safe public video open")
+        set_video_runtime_bool("video_beta_tier_200_enabled", "low" in allowed, admin_id, "safe public video open")
+        set_video_runtime_bool("video_beta_tier_300_enabled", "basic" in allowed, admin_id, "safe public video open")
+        set_video_runtime_bool("video_beta_tier_400_enabled", "common" in allowed, admin_id, "safe public video open")
+        set_video_runtime_bool("video_public_600_plus_enabled", False, admin_id, "keep 600+ off")
+        set_video_runtime_bool("video_premium_public_enabled", False, admin_id, "keep premium off")
+        set_video_runtime_bool("video_image_to_video_enabled", False, admin_id, "keep image-to-video off")
+        set_video_runtime_bool("video_video_to_video_enabled", False, admin_id, "keep video-to-video off")
+        set_video_runtime_bool("video_long_render_enabled", False, admin_id, "keep long render off")
     else:
         kept_off.extend(["video_ai_from_prompt", "video_ai_realistic"])
         blockers.extend(ai_gate.get("blockers") or [])
@@ -52538,8 +52658,9 @@ def video_beta_limits_text() -> str:
     return "\n".join([
         "🎬 <b>VIDEO BETA LIMITS</b>",
         "",
-        f"• Beta enabled: <code>{video_public_bool_label(VIDEO_PUBLIC_BETA_ENABLED)}</code>",
+        f"• Beta enabled: <code>{video_public_bool_label(video_public_beta_enabled_runtime())}</code>",
         f"• Allowed tiers: <code>{html.escape(', '.join(video_public_allowed_tiers()))}</code>",
+        f"• 200 marketing loss override: <code>{video_public_bool_label(video_beta_200_marketing_loss_enabled_runtime())}</code>",
         f"• Max duration: <code>{int(VIDEO_PUBLIC_MAX_DURATION_SECONDS or 0)}s</code>",
         f"• Max jobs/user/day: <code>{int(VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY or 0)}</code>",
         f"• Max concurrent jobs: <code>{int(VIDEO_PUBLIC_MAX_CONCURRENT_JOBS or 0)}</code>",
@@ -52562,7 +52683,7 @@ def system_public_status_text() -> str:
         f"• Video planning: <code>{video['conclusion'].get('planning_video')}</code>",
         f"• Storyboard: <code>{video['conclusion'].get('storyboard')}</code>",
         f"• Frame video local: <code>{video['conclusion'].get('frame_video_local')}</code>",
-        f"• Video AI beta 200/300/400: <code>{'ON' if VIDEO_PUBLIC_BETA_ENABLED else 'OFF'}</code>",
+        f"• Video AI beta 200/300/400: <code>{'ON' if video_public_beta_enabled_runtime() else 'OFF'}</code>",
         f"• Video 600+: <code>OFF</code>",
         f"• Long video: <code>OFF</code>",
         f"• Voice/Music: <code>ON/GUARDED</code>",
@@ -52574,7 +52695,8 @@ def system_public_status_text() -> str:
     ])
 
 def video_beta_requested_tiers(args: list[str] | tuple[str, ...] | None = None) -> list[str]:
-    raw = " ".join(str(item) for item in (args or [])).strip()
+    parsed = video_beta_open_parse_args(args)
+    raw = str(parsed.get("tier_text") or "").strip()
     if not raw:
         return list(video_public_beta_tiers())
     raw = raw.replace("tiers=", "").replace("tier=", "").replace(" ", ",")
@@ -52590,9 +52712,9 @@ def video_beta_open_result(admin_id, args: list[str] | tuple[str, ...] | None = 
     global VIDEO_AI_PUBLIC_ENABLED, VIDEO_AI_MASTER_ENABLED, SHOPAIKEY_PUBLIC_VIDEO_ENABLED, VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED
     global VIDEO_PREMIUM_PUBLIC_ENABLED, VIDEO_IMAGE_TO_VIDEO_ENABLED, VIDEO_VIDEO_TO_VIDEO_ENABLED, VIDEO_LONG_RENDER_ENABLED, VIDEO_TREND_RENDER_ENABLED
 
+    parsed = video_beta_open_parse_args(args)
     requested = video_beta_requested_tiers(args)
     ai_gate = video_ai_provider_smoke_gate()
-    billing_gate = video_billing_public_gate()
     ops = current_system_mode()
     core_blockers = []
     tier_blockers = []
@@ -52600,6 +52722,11 @@ def video_beta_open_result(admin_id, args: list[str] | tuple[str, ...] | None = 
         core_blockers.append("System maintenance/tool/provider freeze is active")
     if not ai_gate.get("ready"):
         core_blockers.extend(ai_gate.get("blockers") or ["Video AI provider smoke gate is not ready"])
+    if parsed.get("allow_loss_200") and "low" in requested and not core_blockers:
+        set_video_runtime_bool("video_beta_200_marketing_loss_enabled", True, admin_id, "admin allowed 200 Xu marketing-loss beta")
+    elif "low" in requested and not parsed.get("allow_loss_200"):
+        set_video_runtime_bool("video_beta_200_marketing_loss_enabled", False, admin_id, "200 Xu marketing-loss override not requested")
+    billing_gate = video_billing_public_gate()
     if not billing_gate.get("ready"):
         core_blockers.extend(billing_gate.get("blockers") or [])
     cost_by_tier = {row["tier"]: row for row in video_public_beta_cost_rows()}
@@ -52630,13 +52757,28 @@ def video_beta_open_result(admin_id, args: list[str] | tuple[str, ...] | None = 
     VIDEO_VIDEO_TO_VIDEO_ENABLED = False
     VIDEO_LONG_RENDER_ENABLED = False
     VIDEO_TREND_RENDER_ENABLED = False
-    note = f"opened={','.join(opened_tiers)}; requested={','.join(requested)}"
+    set_system_setting("video_public_allowed_tiers", VIDEO_PUBLIC_ALLOWED_TIERS, "video beta open tiers", admin_id)
+    set_video_runtime_bool("video_public_beta_enabled", True, admin_id, "video beta open")
+    set_video_runtime_bool("shopaikey_public_video_enabled", True, admin_id, "video beta open")
+    set_video_runtime_bool("video_ai_public_enabled", True, admin_id, "video beta open")
+    set_video_runtime_bool("video_ai_master_enabled", True, admin_id, "video beta open")
+    set_video_runtime_bool("video_text_to_video_public_enabled", True, admin_id, "video beta open")
+    set_video_runtime_bool("video_beta_tier_200_enabled", "low" in opened_tiers, admin_id, "video beta open")
+    set_video_runtime_bool("video_beta_tier_300_enabled", "basic" in opened_tiers, admin_id, "video beta open")
+    set_video_runtime_bool("video_beta_tier_400_enabled", "common" in opened_tiers, admin_id, "video beta open")
+    set_video_runtime_bool("video_public_600_plus_enabled", False, admin_id, "keep 600+ off")
+    set_video_runtime_bool("video_premium_public_enabled", False, admin_id, "keep premium off")
+    set_video_runtime_bool("video_image_to_video_enabled", False, admin_id, "keep image-to-video off")
+    set_video_runtime_bool("video_video_to_video_enabled", False, admin_id, "keep video-to-video off")
+    set_video_runtime_bool("video_long_render_enabled", False, admin_id, "keep long render off")
+    note = f"opened={','.join(opened_tiers)}; requested={','.join(requested)}; allow_loss_200={bool(parsed.get('allow_loss_200'))}"
     set_system_setting("video_beta_open_last_result", "OPENED", note, admin_id)
     record_audit_event(admin_id, "admin", "video.beta_open", "video_public_gate", "beta_open", before={"requested": requested}, after={"opened": opened_tiers}, note=note)
     return {
         "status": "OPENED",
         "opened_tiers": opened_tiers,
         "requested_tiers": requested,
+        "allow_loss_200": bool(parsed.get("allow_loss_200")),
         "blockers": list(dict.fromkeys(str(item) for item in tier_blockers if item)),
     }
 
@@ -52644,24 +52786,44 @@ def video_beta_open_text(result: dict) -> str:
     opened = result.get("opened_tiers") or []
     blockers = result.get("blockers") or []
     lines = ["🎬 <b>VIDEO BETA OPEN</b>", ""]
+    opened_prices = {int(video_tier_cost_xu(tier)): tier for tier in opened}
     if opened:
-        lines.append("Đã mở public beta cho:")
-        for tier in opened:
-            lines.append(f"• <code>{html.escape(tier)}</code> — <code>{int(video_tier_cost_xu(tier))} Xu</code>")
+        lines.append("Đã mở public beta:")
+        for price in (200, 300, 400):
+            tier = opened_prices.get(price)
+            if tier:
+                suffix = " — MARKETING_LOSS" if tier == "low" and video_beta_200_marketing_loss_enabled_runtime() else ""
+                lines.append(f"• <code>{price} Xu</code>: <code>ON{html.escape(suffix)}</code>")
+            else:
+                reason = "OFF nếu chưa override allow_loss_200=true" if price == 200 else "OFF"
+                lines.append(f"• <code>{price} Xu</code>: <code>{html.escape(reason)}</code>")
     else:
         lines.append("Chưa mở public beta.")
     if blockers:
         lines.extend(["", "<b>Blockers</b>"])
         lines.extend(f"• <code>{html.escape(str(item))}</code>" for item in blockers[:12])
-    lines.extend(["", "600+, premium, long render, image-to-video và video-to-video vẫn OFF. Không gọi provider trong lệnh này."])
+    lines.extend([
+        "",
+        "Giữ OFF: 600+, premium, long render, image-to-video và video-to-video.",
+        "Không gọi provider trong lệnh này. Không trừ Xu.",
+    ])
     return "\n".join(lines)
 
 def video_beta_close_result(admin_id) -> dict:
-    global VIDEO_PUBLIC_BETA_ENABLED, VIDEO_AI_PUBLIC_ENABLED, VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED, SHOPAIKEY_PUBLIC_VIDEO_ENABLED
+    global VIDEO_PUBLIC_BETA_ENABLED, VIDEO_AI_PUBLIC_ENABLED, VIDEO_AI_MASTER_ENABLED, VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED, SHOPAIKEY_PUBLIC_VIDEO_ENABLED
     VIDEO_PUBLIC_BETA_ENABLED = False
     VIDEO_AI_PUBLIC_ENABLED = False
+    VIDEO_AI_MASTER_ENABLED = False
     VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED = False
     SHOPAIKEY_PUBLIC_VIDEO_ENABLED = False
+    set_video_runtime_bool("video_public_beta_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("video_ai_public_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("video_ai_master_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("video_text_to_video_public_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("shopaikey_public_video_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("video_beta_tier_200_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("video_beta_tier_300_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("video_beta_tier_400_enabled", False, admin_id, "video beta close")
     set_system_setting("video_beta_open_last_result", "CLOSED", "Video AI public beta closed by admin", admin_id)
     record_audit_event(admin_id, "admin", "video.beta_close", "video_public_gate", "beta_close", before={}, after={"VIDEO_PUBLIC_BETA_ENABLED": False}, note="closed")
     return {"status": "CLOSED"}
@@ -54713,6 +54875,7 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         )
         if output_sent:
             update_shopaikey_job(job_id=job_id, task_id=task_id, result_sent=1, output_file_id=output_file_id)
+            mark_shopaikey_video_output_confirmed(task_id, result.get("model") or selected_model or SHOPAIKEY_VIDEO_MODEL, uid, "tool_test_shopaikey_video")
     if task_id and db_status == "IN_PROGRESS" and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
         asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, update.effective_chat.id, uid, task_id))
     await safe_reply_text(
@@ -54783,6 +54946,8 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
             output_sent, output_file_id = await send_shopaikey_video_result(context.bot, update.effective_chat.id, task_id, result_url)
             if output_sent:
                 update_shopaikey_job(job_id=job_id, task_id=task_id, output_file_id=output_file_id, result_sent=1)
+    if result_url and (output_sent or already_sent):
+        mark_shopaikey_video_output_confirmed(task_id, (db_job or {}).get("model") or SHOPAIKEY_VIDEO_MODEL, uid, "shopaikey_video_job")
     normalized_db_status = shopaikey_db_video_status(status)
     detail = (
         f"http={result.get('http_status')}; task_id={task_id}; provider_status={result.get('provider_status') or '-'}; "
@@ -73633,27 +73798,25 @@ def is_dub_ready() -> bool:
 
 def is_ai_video_ready() -> bool:
     return bool(
-        SHOPAIKEY_PUBLIC_VIDEO_ENABLED
-        and VIDEO_AI_PUBLIC_ENABLED
+        shopaikey_public_video_enabled_runtime()
+        and video_ai_public_enabled_runtime()
+        and video_ai_master_enabled_runtime()
         and SHOPAIKEY_ENABLED
         and SHOPAIKEY_API_KEY
-        and SHOPAIKEY_VIDEO_ENABLED
         and SHOPAIKEY_VIDEO_URL
         and SHOPAIKEY_VIDEO_MODEL
     )
 
 def get_video_prompt_export_readiness(user_is_admin: bool = False) -> dict:
     missing_public: list[str] = []
-    if not VIDEO_AI_PUBLIC_ENABLED:
+    if not video_ai_public_enabled_runtime():
         missing_public.append("VIDEO_AI_PUBLIC_ENABLED=false")
-    if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+    if not shopaikey_public_video_enabled_runtime():
         missing_public.append("SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false")
     if not SHOPAIKEY_ENABLED:
         missing_public.append("SHOPAIKEY_ENABLED=false")
     if not SHOPAIKEY_API_KEY:
         missing_public.append("SHOPAIKEY_API_KEY missing")
-    if not SHOPAIKEY_VIDEO_ENABLED:
-        missing_public.append("SHOPAIKEY_VIDEO_ENABLED=false")
     if not SHOPAIKEY_VIDEO_URL:
         missing_public.append("SHOPAIKEY_VIDEO_URL missing")
     if not SHOPAIKEY_VIDEO_MODEL:
@@ -73666,8 +73829,6 @@ def get_video_prompt_export_readiness(user_is_admin: bool = False) -> dict:
         missing_admin.append("SHOPAIKEY_ENABLED=false")
     if not SHOPAIKEY_API_KEY:
         missing_admin.append("SHOPAIKEY_API_KEY missing")
-    if not SHOPAIKEY_VIDEO_ENABLED:
-        missing_admin.append("SHOPAIKEY_VIDEO_ENABLED=false")
     if not SHOPAIKEY_VIDEO_URL:
         missing_admin.append("SHOPAIKEY_VIDEO_URL missing")
     if not SHOPAIKEY_VIDEO_MODEL:

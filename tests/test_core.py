@@ -4866,6 +4866,99 @@ def test_video_public_status_and_gate_text_do_not_expose_secrets(monkeypatch):
     assert "xoxb-" not in status_text
 
 
+def test_video_output_confirmed_marks_smoke_success(monkeypatch):
+    settings = {}
+    tool_results = []
+    snapshots = []
+    debug_events = []
+
+    monkeypatch.setattr(bot, "set_system_setting", lambda key, value, note="", updated_by="": settings.__setitem__(key, value))
+    monkeypatch.setattr(bot, "save_tool_test_result", lambda tool, status, detail="", updated_by="": tool_results.append((tool, status, detail)))
+    monkeypatch.setattr(bot, "save_shopaikey_component_snapshot", lambda component, result, detail, updated_by="": snapshots.append((component, result, detail)))
+    monkeypatch.setattr(bot, "record_api_debug", lambda provider, action, status, http_status, detail="": debug_events.append((provider, action, status, http_status, detail)))
+
+    bot.mark_shopaikey_video_output_confirmed("task_123", "veo3.1-fast", "admin", "pytest")
+
+    assert ("shopaikey_video", "SUCCESS") in [(tool, status) for tool, status, _ in tool_results]
+    assert ("shopaikey_video_job", "SUCCESS") in [(tool, status) for tool, status, _ in tool_results]
+    assert settings["shopaikey_video_last_output"] == "confirmed"
+    assert settings["shopaikey_video_last_output_sent"] == "true"
+    assert snapshots and snapshots[0][1]["status"] == "SUCCESS"
+    assert debug_events and debug_events[0][2] == "SUCCESS"
+
+
+def test_video_ai_provider_gate_treats_confirmed_output_as_success(monkeypatch):
+    monkeypatch.setattr(bot, "shopaikey_video_status_snapshot", lambda: {
+        "status": "IN_PROGRESS",
+        "detail": "task_id=abc; output_sent=yes; provider_status=SUCCESS",
+        "model": "veo3.1-fast",
+        "tested_at": "2026-06-16 00:00:00",
+    })
+    monkeypatch.setattr(bot, "provider_freeze_runtime_on", lambda name: False)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "configured")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_URL", "https://api.shopaikey.com/v1/video/generations")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
+
+    gate = bot.video_ai_provider_smoke_gate()
+
+    assert gate["ready"] is True
+    assert gate["status"] == "SUCCESS"
+    assert gate["has_output"] is True
+    assert gate["blockers"] == []
+
+
+def test_video_beta_open_300_400_does_not_enable_200_without_override(monkeypatch):
+    settings = {}
+    monkeypatch.setattr(bot, "set_system_setting", lambda key, value, note="", updated_by="": settings.__setitem__(key, value))
+    monkeypatch.setattr(bot, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "current_system_mode", lambda: {"maintenance_mode": False, "tool_freeze": False, "provider_freeze": False})
+    monkeypatch.setattr(bot, "video_ai_provider_smoke_gate", lambda: {"ready": True, "status": "SUCCESS", "has_output": True, "blockers": []})
+    monkeypatch.setattr(bot, "get_system_setting", lambda key, default="": settings.get(key, default))
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BETA_ENABLED", False)
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common")
+    monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 200)
+    monkeypatch.setattr(bot, "VIDEO_BASIC_COST_XU", 300)
+    monkeypatch.setattr(bot, "VIDEO_COMMON_COST_XU", 400)
+    monkeypatch.setattr(bot, "VIDEO_LOW_PROVIDER_COST_XU", 600)
+    monkeypatch.setattr(bot, "VIDEO_BASIC_PROVIDER_COST_XU", 150)
+    monkeypatch.setattr(bot, "VIDEO_COMMON_PROVIDER_COST_XU", 220)
+
+    result = bot.video_beta_open_result("admin", ["tiers=300,400"])
+
+    assert result["status"] == "OPENED"
+    assert result["opened_tiers"] == ["basic", "common"]
+    assert "low" not in result["opened_tiers"]
+    assert settings["video_public_allowed_tiers"] == "basic,common"
+    assert settings["video_beta_tier_200_enabled"] == "false"
+
+
+def test_video_beta_open_200_requires_explicit_loss_override(monkeypatch):
+    settings = {}
+    monkeypatch.setattr(bot, "set_system_setting", lambda key, value, note="", updated_by="": settings.__setitem__(key, value))
+    monkeypatch.setattr(bot, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "current_system_mode", lambda: {"maintenance_mode": False, "tool_freeze": False, "provider_freeze": False})
+    monkeypatch.setattr(bot, "video_ai_provider_smoke_gate", lambda: {"ready": True, "status": "SUCCESS", "has_output": True, "blockers": []})
+    monkeypatch.setattr(bot, "get_system_setting", lambda key, default="": settings.get(key, default))
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common")
+    monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 200)
+    monkeypatch.setattr(bot, "VIDEO_BASIC_COST_XU", 300)
+    monkeypatch.setattr(bot, "VIDEO_COMMON_COST_XU", 400)
+    monkeypatch.setattr(bot, "VIDEO_LOW_PROVIDER_COST_XU", 600)
+    monkeypatch.setattr(bot, "VIDEO_BASIC_PROVIDER_COST_XU", 150)
+    monkeypatch.setattr(bot, "VIDEO_COMMON_PROVIDER_COST_XU", 220)
+
+    blocked = bot.video_beta_open_result("admin", ["tiers=200"])
+    assert blocked["status"] == "BLOCKED"
+    assert "low" not in blocked["opened_tiers"]
+
+    opened = bot.video_beta_open_result("admin", ["tiers=200,300,400", "allow_loss_200=true"])
+    assert opened["status"] == "OPENED"
+    assert opened["opened_tiers"] == ["low", "basic", "common"]
+    assert settings["video_beta_200_marketing_loss_enabled"] == "true"
+    assert settings["video_beta_tier_200_enabled"] == "true"
+
+
 def test_naptien_does_not_enable_manual_bill_state_by_default():
     source = bot_source_text()
     cmd_naptien_source = source_between(source, "async def cmd_naptien", "async def cmd_thanhtoan_thucong")
