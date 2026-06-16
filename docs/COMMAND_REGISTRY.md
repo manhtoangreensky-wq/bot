@@ -115,6 +115,14 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/providers` | `cmd_providers` | YES | YES | Provider key status, configured/missing only. |
 | `/costs` | `cmd_costs` | YES | YES | Cost control and paid-provider risk summary. |
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
+| `/system_public_status` | `cmd_system_public_status` | YES | YES | Public tool surface summary; no secrets and no provider calls. |
+| `/tool_public_status` | `cmd_tool_public_status` | YES | YES | Alias-style public tool surface summary for launch checks. |
+| `/video_public_status` | `cmd_video_public_status` | YES | YES | Video public flags, provider smoke, worker readiness, tier status and blocked tiers. |
+| `/video_gate_status` | `cmd_video_gate_status` | YES | YES | Video gate matrix for planning, frame video, Video AI, image/video-to-video and long render. |
+| `/video_cost_status` | `cmd_video_cost_status` | YES | YES | Video beta 200/300/400 cost ratio and margin status; no payment changes. |
+| `/video_beta_limits` | `cmd_video_beta_limits` | YES | YES | Current public video beta limits, confirm/job-lock policy and duration caps. |
+| `/video_beta_open` | `cmd_video_beta_open` | YES | YES | Opens only eligible 200/300/400 Video AI beta tiers after smoke and cost gates pass. |
+| `/video_beta_close` | `cmd_video_beta_close` | YES | YES | Closes Video AI public beta without touching planning/storyboard or payment logic. |
 | `/runtime` | `cmd_runtime` | YES | YES | Runtime/webhook diagnostics. |
 | `/data_status` | `cmd_data_status` | YES | YES | Persistent DB/backup/volume status. |
 | `/storage_status` | `cmd_storage_status` | YES | YES | Admin read-only storage policy and aggregate usage; no secrets. |

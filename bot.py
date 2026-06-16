@@ -1182,6 +1182,15 @@ VIDEO_LONG_RENDER_ENABLED = env_flag("VIDEO_LONG_RENDER_ENABLED", "false")
 VIDEO_TREND_RENDER_ENABLED = env_flag("VIDEO_TREND_RENDER_ENABLED", "false")
 VIDEO_PUBLIC_MAX_DURATION_SECONDS = max(1, env_int("VIDEO_PUBLIC_MAX_DURATION_SECONDS", 8))
 VIDEO_PUBLIC_ALLOWED_TIERS = _env("VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common")
+VIDEO_PUBLIC_BLOCK_TIERS = _env("VIDEO_PUBLIC_BLOCK_TIERS", "standard,high,premium,long,video_600_plus")
+VIDEO_PUBLIC_BETA_ENABLED = env_flag("VIDEO_PUBLIC_BETA_ENABLED", "false")
+VIDEO_PUBLIC_MAX_COST_RATIO = max(0.0, env_float("VIDEO_PUBLIC_MAX_COST_RATIO", 0.5))
+VIDEO_PUBLIC_WARN_COST_RATIO = max(VIDEO_PUBLIC_MAX_COST_RATIO, env_float("VIDEO_PUBLIC_WARN_COST_RATIO", 0.6))
+VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY = max(1, env_int("VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY", 1))
+VIDEO_PUBLIC_MAX_CONCURRENT_JOBS = max(1, env_int("VIDEO_PUBLIC_MAX_CONCURRENT_JOBS", 1))
+VIDEO_PUBLIC_REQUIRE_CONFIRM = env_flag("VIDEO_PUBLIC_REQUIRE_CONFIRM", "true")
+VIDEO_PUBLIC_REQUIRE_JOB_LOCK = env_flag("VIDEO_PUBLIC_REQUIRE_JOB_LOCK", "true")
+VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR = env_flag("VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR", "true")
 VIDEO_PREMIUM_PUBLIC_ENABLED = env_flag("VIDEO_PREMIUM_PUBLIC_ENABLED", "false")
 VIDEO_SAMPLE_MAX_SECONDS = max(60, env_int("VIDEO_SAMPLE_MAX_SECONDS", 600))
 VIDEO_SAMPLE_MAX_MB = max(1, env_int("VIDEO_SAMPLE_MAX_MB", 100))
@@ -32392,12 +32401,12 @@ def video_tier_pricing_payload() -> dict:
 
 def video_tier_enabled_map() -> dict:
     return {
-        "low": bool(VIDEO_TIER_LOW_ENABLED),
-        "basic": bool(VIDEO_TIER_BASIC_ENABLED),
-        "common": bool(VIDEO_TIER_COMMON_ENABLED),
-        "standard": bool(VIDEO_TIER_STANDARD_ENABLED),
-        "high": bool(VIDEO_TIER_HIGH_ENABLED),
-        "premium": bool(VIDEO_TIER_PREMIUM_ENABLED) and not bool(VIDEO_PREMIUM_ADMIN_ONLY),
+        "low": video_public_tier_enabled("low"),
+        "basic": video_public_tier_enabled("basic"),
+        "common": video_public_tier_enabled("common"),
+        "standard": False,
+        "high": False,
+        "premium": False,
     }
 
 def normalize_video_tier(value: str = "") -> str:
@@ -37722,7 +37731,7 @@ def public_video_runtime_status_text() -> str:
     video_freeze = provider_freeze_display("shopaikey_video")
     if video_freeze.get("frozen"):
         return "FROZEN"
-    return "ON" if (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED) else "OFF"
+    return "ON" if (VIDEO_PUBLIC_BETA_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED) else "OFF"
 
 def public_voice_runtime_status_text() -> str:
     return "admin-only"
@@ -37740,7 +37749,7 @@ def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
         return False, freeze.get("message") or USER_PROVIDER_BUSY_MESSAGE
     if job == "image" and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
         return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
-    if job == "video" and not (SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
+    if job == "video" and not (VIDEO_PUBLIC_BETA_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
         return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
     if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
         return False, "Hệ thống tạo ảnh/video đang bảo trì ngắn hoặc chưa sẵn sàng."
@@ -51741,7 +51750,91 @@ def video_public_allowed_tiers() -> list[str]:
         tier = normalize_video_tier(tier.strip())
         if tier and tier not in allowed:
             allowed.append(tier)
-    return allowed or ["low", "basic", "common"]
+    allowed = allowed or ["low", "basic", "common"]
+    return [tier for tier in allowed if tier in {"low", "basic", "common"}] or ["low", "basic", "common"]
+
+def video_public_blocked_tiers() -> set[str]:
+    blocked = {"standard", "high", "premium"}
+    for tier in str(VIDEO_PUBLIC_BLOCK_TIERS or "").split(","):
+        tier_norm = normalize_video_tier(tier.strip())
+        if tier_norm:
+            blocked.add(tier_norm)
+    return blocked
+
+def video_public_beta_tiers() -> tuple[str, ...]:
+    return ("low", "basic", "common")
+
+def video_public_tier_token_to_name(token: str = "") -> str:
+    raw = str(token or "").strip().lower()
+    mapping = {
+        "200": "low",
+        "200xu": "low",
+        "video_beta_200": "low",
+        "300": "basic",
+        "300xu": "basic",
+        "video_beta_300": "basic",
+        "400": "common",
+        "400xu": "common",
+        "video_beta_400": "common",
+    }
+    return mapping.get(raw, normalize_video_tier(raw))
+
+def video_public_tier_enabled(tier: str = "") -> bool:
+    tier_norm = normalize_video_tier(tier)
+    if tier_norm not in video_public_beta_tiers():
+        return False
+    if tier_norm in video_public_blocked_tiers():
+        return False
+    if tier_norm not in video_public_allowed_tiers():
+        return False
+    base_enabled = {
+        "low": bool(VIDEO_TIER_LOW_ENABLED),
+        "basic": bool(VIDEO_TIER_BASIC_ENABLED),
+        "common": bool(VIDEO_TIER_COMMON_ENABLED),
+    }.get(tier_norm, False)
+    return bool(base_enabled and VIDEO_PUBLIC_BETA_ENABLED)
+
+def video_public_tier_revenue_vnd(tier: str = "") -> int:
+    return int(video_tier_cost_xu(tier) * XU_TO_VND)
+
+def check_video_margin(tier: str = "") -> dict:
+    tier_norm = normalize_video_tier(tier)
+    payload = video_tier_pricing_payload().get(tier_norm) or {}
+    price_xu = int(payload.get("cost") or 0)
+    provider_cost_xu = int(payload.get("provider_cost") or 0)
+    revenue_vnd = int(price_xu * XU_TO_VND)
+    ratio = (provider_cost_xu / price_xu) if price_xu > 0 and provider_cost_xu > 0 else None
+    blocked = []
+    if tier_norm not in video_public_beta_tiers():
+        blocked.append("tier is not in public beta 200/300/400")
+    if tier_norm in video_public_blocked_tiers():
+        blocked.append("tier is blocked for public beta")
+    if price_xu <= 0:
+        blocked.append("price_xu missing")
+    if provider_cost_xu <= 0:
+        blocked.append("provider_cost_unknown")
+    if ratio is not None and ratio > float(VIDEO_PUBLIC_WARN_COST_RATIO):
+        blocked.append(f"provider_cost_ratio {ratio:.2f} exceeds hard limit {VIDEO_PUBLIC_WARN_COST_RATIO:.2f}")
+    status = "PASS"
+    if blocked:
+        status = "BLOCKED"
+    elif ratio is not None and ratio > float(VIDEO_PUBLIC_MAX_COST_RATIO):
+        status = "WARN_MARGIN"
+    return {
+        "tier": tier_norm,
+        "price_xu": price_xu,
+        "provider_cost_xu": provider_cost_xu,
+        "revenue_vnd": revenue_vnd,
+        "cost_ratio": ratio,
+        "status": status,
+        "can_open": status in {"PASS", "WARN_MARGIN"},
+        "blockers": blocked,
+        "safe_ratio": float(VIDEO_PUBLIC_MAX_COST_RATIO),
+        "hard_ratio": float(VIDEO_PUBLIC_WARN_COST_RATIO),
+    }
+
+def video_public_beta_cost_rows() -> list[dict]:
+    return [check_video_margin(tier) for tier in video_public_beta_tiers()]
 
 def video_gate_tool_status(tool_name: str) -> str:
     return str((preferred_tool_test_result(tool_name) or {}).get("status") or "NOT_TESTED").upper()
@@ -51827,22 +51920,47 @@ def video_billing_public_gate() -> dict:
     blockers = []
     if not VIDEO_PRICING_ENABLED:
         blockers.append("VIDEO_PRICING_ENABLED=false")
-    if not SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT:
+    if not SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT or not VIDEO_PUBLIC_REQUIRE_CONFIRM:
         blockers.append("SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT=false")
     if not SHOPAIKEY_REFUND_ON_PROVIDER_FAIL:
         blockers.append("SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=false")
-    if not SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED:
+    if not SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED or not VIDEO_PUBLIC_REQUIRE_JOB_LOCK:
         blockers.append("SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED=false")
     if not SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED:
         blockers.append("SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED=false")
-    enabled_allowed = [tier for tier in video_public_allowed_tiers() if video_tier_payload(tier).get("enabled")]
+    if int(VIDEO_PUBLIC_MAX_CONCURRENT_JOBS or 1) > 1:
+        blockers.append("VIDEO_PUBLIC_MAX_CONCURRENT_JOBS must be 1 for beta")
+    if int(VIDEO_PUBLIC_MAX_DURATION_SECONDS or 0) > 8:
+        blockers.append("VIDEO_PUBLIC_MAX_DURATION_SECONDS must stay <= 8 for beta")
+    cost_rows = video_public_beta_cost_rows()
+    cost_safe = {
+        row["tier"]: bool(row.get("can_open"))
+        for row in cost_rows
+    }
+    base_enabled = {
+        "low": bool(VIDEO_TIER_LOW_ENABLED),
+        "basic": bool(VIDEO_TIER_BASIC_ENABLED),
+        "common": bool(VIDEO_TIER_COMMON_ENABLED),
+    }
+    enabled_allowed = [
+        tier for tier in video_public_allowed_tiers()
+        if base_enabled.get(tier) and cost_safe.get(tier)
+    ]
+    tier_blockers = []
     if not enabled_allowed:
-        blockers.append("No low/basic/common public video tier enabled")
+        blockers.append("No 200/300/400 public video tier enabled with safe cost gate")
+    for row in cost_rows:
+        if row.get("tier") in video_public_allowed_tiers() and not row.get("can_open"):
+            tier_blockers.extend(row.get("blockers") or [f"{row.get('tier')} cost gate blocked"])
+    if not enabled_allowed:
+        blockers.extend(tier_blockers)
     if VIDEO_PREMIUM_PUBLIC_ENABLED or (VIDEO_TIER_PREMIUM_ENABLED and not VIDEO_PREMIUM_ADMIN_ONLY):
         blockers.append("Premium video public must stay OFF")
     return {
         "ready": not blockers,
         "allowed_tiers": enabled_allowed,
+        "cost_rows": cost_rows,
+        "tier_blockers": tier_blockers,
         "blockers": blockers,
     }
 
@@ -51855,7 +51973,7 @@ def video_public_status_payload() -> dict:
     worker = local_worker_status_payload()
     planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
     frame_public = bool(FRAME_VIDEO_PUBLIC_ENABLED and frame_gate["ready"])
-    ai_public = bool(VIDEO_AI_PUBLIC_ENABLED and VIDEO_AI_MASTER_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED and ai_gate["ready"] and billing_gate["ready"])
+    ai_public = bool(VIDEO_PUBLIC_BETA_ENABLED and VIDEO_AI_PUBLIC_ENABLED and VIDEO_AI_MASTER_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED and ai_gate["ready"] and billing_gate["ready"])
     return {
         "ops": ops,
         "frame_gate": frame_gate,
@@ -51871,6 +51989,10 @@ def video_public_status_payload() -> dict:
             "VIDEO_AI_PUBLIC_ENABLED": bool(VIDEO_AI_PUBLIC_ENABLED),
             "VIDEO_AI_MASTER_ENABLED": bool(VIDEO_AI_MASTER_ENABLED),
             "VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED": bool(VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED),
+            "VIDEO_PUBLIC_BETA_ENABLED": bool(VIDEO_PUBLIC_BETA_ENABLED),
+            "VIDEO_PUBLIC_MAX_DURATION_SECONDS": int(VIDEO_PUBLIC_MAX_DURATION_SECONDS or 0),
+            "VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY": int(VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY or 0),
+            "VIDEO_PUBLIC_MAX_CONCURRENT_JOBS": int(VIDEO_PUBLIC_MAX_CONCURRENT_JOBS or 0),
             "VIDEO_IMAGE_TO_VIDEO_ENABLED": bool(VIDEO_IMAGE_TO_VIDEO_ENABLED),
             "VIDEO_VIDEO_TO_VIDEO_ENABLED": bool(VIDEO_VIDEO_TO_VIDEO_ENABLED),
             "VIDEO_LONG_RENDER_ENABLED": bool(VIDEO_LONG_RENDER_ENABLED),
@@ -51885,6 +52007,11 @@ def video_public_status_payload() -> dict:
             "frame_video_local": "PUBLIC" if frame_public else ("GUARDED" if FRAME_VIDEO_PUBLIC_ENABLED else "OFF"),
             "video_ai_from_prompt": "PUBLIC" if ai_public else ("ADMIN_ONLY" if ai_gate.get("status") in {"PASS_SUBMITTED", "SUCCESS", "PASS", "COMPLETED"} else "OFF"),
             "video_ai_realistic": "PUBLIC" if ai_public else "ADMIN_ONLY",
+            "video_beta_200": "PUBLIC" if ai_public and "low" in billing_gate.get("allowed_tiers", []) else "OFF",
+            "video_beta_300": "PUBLIC" if ai_public and "basic" in billing_gate.get("allowed_tiers", []) else "OFF",
+            "video_beta_400": "PUBLIC" if ai_public and "common" in billing_gate.get("allowed_tiers", []) else "OFF",
+            "video_600_plus": "OFF",
+            "premium_video": "OFF",
             "image_to_video": "OFF",
             "video_to_video": "OFF",
             "long_render": "OFF",
@@ -51911,6 +52038,7 @@ def video_public_status_text() -> str:
         f"• video_freeze: <code>{video_public_bool_label(freeze.get('frozen'))}</code>",
     ]
     for key in (
+        "VIDEO_PUBLIC_BETA_ENABLED",
         "VIDEO_AI_PUBLIC_ENABLED",
         "VIDEO_AI_MASTER_ENABLED",
         "SHOPAIKEY_PUBLIC_VIDEO_ENABLED",
@@ -51947,6 +52075,28 @@ def video_public_status_text() -> str:
         f"• job lock: <code>{video_public_bool_label(SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED and SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED)}</code>",
         f"• pricing source: <code>tiered_media_pricing</code>",
         f"• allowed public tiers: <code>{html.escape(', '.join(billing.get('allowed_tiers') or video_public_allowed_tiers()))}</code>",
+        f"• max duration: <code>{int(flags.get('VIDEO_PUBLIC_MAX_DURATION_SECONDS') or 0)}s</code>",
+        f"• max jobs/user/day: <code>{int(flags.get('VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY') or 0)}</code>",
+        f"• max concurrent jobs: <code>{int(flags.get('VIDEO_PUBLIC_MAX_CONCURRENT_JOBS') or 0)}</code>",
+        "",
+        "<b>Beta cost gate</b>",
+    ])
+    for row in billing.get("cost_rows") or video_public_beta_cost_rows():
+        ratio = row.get("cost_ratio")
+        ratio_text = "-" if ratio is None else f"{float(ratio):.2f}"
+        lines.append(
+            f"• {html.escape(str(row.get('tier')))}: <code>{int(row.get('price_xu') or 0)} Xu</code> | "
+            f"provider <code>{int(row.get('provider_cost_xu') or 0)} Xu</code> | "
+            f"ratio <code>{html.escape(ratio_text)}</code> | "
+            f"<code>{html.escape(str(row.get('status') or '-'))}</code>"
+        )
+    lines.extend([
+        "",
+        "<b>Blocked public tiers</b>",
+        "• 600+ / standard / high: <code>OFF</code>",
+        "• premium: <code>OFF</code>",
+        "• long render: <code>OFF</code>",
+        "• image-to-video / video-to-video: <code>OFF until smoke pass</code>",
         "",
         "<b>Conclusion</b>",
     ])
@@ -51990,7 +52140,7 @@ def video_gate_matrix_rows() -> list[dict]:
             output = "mp4_local" if frame_ready else "blocked"
             billing = "CONFIRM_REFUND" if payload["billing_gate"]["ready"] else "GUARDED"
         elif tier == "tier_c":
-            final = "READY_PUBLIC" if (ai_ready and VIDEO_AI_PUBLIC_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED) else ("READY_ADMIN_ONLY" if payload["ai_gate"].get("status") == "PASS_SUBMITTED" else "KEEP_OFF")
+            final = "READY_PUBLIC" if (ai_ready and VIDEO_PUBLIC_BETA_ENABLED and VIDEO_AI_PUBLIC_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED) else ("READY_ADMIN_ONLY" if payload["ai_gate"].get("status") == "PASS_SUBMITTED" else "KEEP_OFF")
             provider = "PASS" if ai_ready else "GUARDED"
             worker = "N/A"
             output = "provider_video" if ai_ready else "not_confirmed"
@@ -52041,7 +52191,8 @@ def video_gate_status_text() -> str:
 def video_public_open_safe_result(admin_id) -> dict:
     global VIDEO_PLANNING_PUBLIC_ENABLED, VIDEO_TREND_CONTENT_PUBLIC_ENABLED, VIDEO_STORYBOARD_PUBLIC_ENABLED
     global FRAME_VIDEO_PUBLIC_ENABLED, SHOPAIKEY_PUBLIC_VIDEO_ENABLED, VIDEO_AI_PUBLIC_ENABLED, VIDEO_AI_MASTER_ENABLED
-    global VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED, VIDEO_PREMIUM_PUBLIC_ENABLED
+    global VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED, VIDEO_PUBLIC_BETA_ENABLED, VIDEO_PUBLIC_ALLOWED_TIERS
+    global VIDEO_PREMIUM_PUBLIC_ENABLED, VIDEO_IMAGE_TO_VIDEO_ENABLED, VIDEO_VIDEO_TO_VIDEO_ENABLED, VIDEO_LONG_RENDER_ENABLED, VIDEO_TREND_RENDER_ENABLED
 
     before = video_public_status_payload()
     opened = []
@@ -52071,18 +52222,26 @@ def video_public_open_safe_result(admin_id) -> dict:
     ai_gate = before["ai_gate"]
     billing_gate = before["billing_gate"]
     if not system_blockers and ai_gate.get("ready") and billing_gate.get("ready"):
+        allowed = billing_gate.get("allowed_tiers") or ["low", "basic", "common"]
+        VIDEO_PUBLIC_ALLOWED_TIERS = ",".join(tier for tier in allowed if tier in video_public_beta_tiers())
+        VIDEO_PUBLIC_BETA_ENABLED = True
         SHOPAIKEY_PUBLIC_VIDEO_ENABLED = True
         VIDEO_AI_PUBLIC_ENABLED = True
         VIDEO_AI_MASTER_ENABLED = True
         VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED = True
         VIDEO_PREMIUM_PUBLIC_ENABLED = False
-        opened.extend(["video_ai_from_prompt_low_tiers", "video_ai_realistic_low_tiers"])
+        VIDEO_IMAGE_TO_VIDEO_ENABLED = False
+        VIDEO_VIDEO_TO_VIDEO_ENABLED = False
+        VIDEO_LONG_RENDER_ENABLED = False
+        VIDEO_TREND_RENDER_ENABLED = False
+        opened.extend([f"video_beta_{video_tier_cost_xu(tier)}xu" for tier in allowed if tier in video_public_beta_tiers()])
+        opened.extend(["video_ai_from_prompt_beta", "video_ai_realistic_beta"])
     else:
         kept_off.extend(["video_ai_from_prompt", "video_ai_realistic"])
         blockers.extend(ai_gate.get("blockers") or [])
         blockers.extend(billing_gate.get("blockers") or [])
 
-    kept_off.extend(["premium_video", "image_to_video", "video_to_video", "long_render", "auto_publish", "ads_assistant"])
+    kept_off.extend(["video_600_plus", "premium_video", "image_to_video", "video_to_video", "long_render", "auto_publish", "ads_assistant"])
     after = video_public_status_payload()
     note = "; ".join(dict.fromkeys(str(item) for item in blockers if item))[:1000]
     set_system_setting("video_public_open_safe_last_at", now_text(), "Safe public video open command", admin_id)
@@ -52125,6 +52284,176 @@ def video_public_open_safe_text(result: dict) -> str:
     ])
     return "\n".join(lines)
 
+def video_cost_status_text() -> str:
+    rows = video_public_beta_cost_rows()
+    usage = shopaikey_last_usage_snapshot()
+    lines = [
+        "💰 <b>VIDEO COST STATUS</b>",
+        "",
+        f"• Pricing mode: <code>tiered_media_pricing</code>",
+        f"• 1 Xu: <code>{int(XU_TO_VND)}đ</code>",
+        f"• Safe ratio: <code>{VIDEO_PUBLIC_MAX_COST_RATIO:.2f}</code>",
+        f"• Hard block ratio: <code>{VIDEO_PUBLIC_WARN_COST_RATIO:.2f}</code>",
+        f"• ShopAIKey remaining: <code>{html.escape(str(usage.get('remaining') or usage.get('balance') or '-'))}</code>",
+        f"• ShopAIKey remaining percent: <code>{html.escape(str(usage.get('remaining_percent') or '-'))}</code>",
+        "",
+        "<b>Beta tiers</b>",
+    ]
+    for row in rows:
+        ratio = row.get("cost_ratio")
+        ratio_text = "-" if ratio is None else f"{float(ratio):.2f}"
+        blockers = "; ".join(str(item) for item in row.get("blockers") or [])
+        lines.append(
+            f"• {html.escape(str(row['tier']))}: <code>{int(row['price_xu'])} Xu</code> "
+            f"(<code>{int(row['revenue_vnd'])}đ</code>) | provider <code>{int(row['provider_cost_xu'])} Xu</code> | "
+            f"ratio <code>{html.escape(ratio_text)}</code> | <code>{html.escape(str(row['status']))}</code>"
+            + (f" — <code>{html.escape(blockers[:180])}</code>" if blockers else "")
+        )
+    lines.extend([
+        "",
+        "<b>Blocked by policy</b>",
+        "• 600+ / standard / high: <code>OFF</code>",
+        "• premium: <code>OFF</code>",
+        "• long render: <code>OFF</code>",
+        "• image-to-video / video-to-video: <code>OFF until separate smoke pass</code>",
+    ])
+    return "\n".join(lines)
+
+def video_beta_limits_text() -> str:
+    return "\n".join([
+        "🎬 <b>VIDEO BETA LIMITS</b>",
+        "",
+        f"• Beta enabled: <code>{video_public_bool_label(VIDEO_PUBLIC_BETA_ENABLED)}</code>",
+        f"• Allowed tiers: <code>{html.escape(', '.join(video_public_allowed_tiers()))}</code>",
+        f"• Max duration: <code>{int(VIDEO_PUBLIC_MAX_DURATION_SECONDS or 0)}s</code>",
+        f"• Max jobs/user/day: <code>{int(VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY or 0)}</code>",
+        f"• Max concurrent jobs: <code>{int(VIDEO_PUBLIC_MAX_CONCURRENT_JOBS or 0)}</code>",
+        f"• Confirm required: <code>{video_public_bool_label(VIDEO_PUBLIC_REQUIRE_CONFIRM)}</code>",
+        f"• Job lock required: <code>{video_public_bool_label(VIDEO_PUBLIC_REQUIRE_JOB_LOCK)}</code>",
+        f"• Auto freeze on error: <code>{video_public_bool_label(VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR)}</code>",
+        "",
+        "Public beta only covers 200/300/400 Xu. 600+, premium and long render stay OFF.",
+    ])
+
+def system_public_status_text() -> str:
+    video = video_public_status_payload()
+    return "\n".join([
+        "🌐 <b>TOAN AAS PUBLIC STATUS</b>",
+        "",
+        f"• Free tools: <code>ON</code>",
+        f"• Translation: <code>STABLE_LOCKED / ON</code>",
+        f"• Image generation: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'GUARDED'}</code>",
+        f"• Image AI edit: <code>{'ON' if get_image_ai_edit_readiness().get('ready') else 'GUARDED'}</code>",
+        f"• Video planning: <code>{video['conclusion'].get('planning_video')}</code>",
+        f"• Storyboard: <code>{video['conclusion'].get('storyboard')}</code>",
+        f"• Frame video local: <code>{video['conclusion'].get('frame_video_local')}</code>",
+        f"• Video AI beta 200/300/400: <code>{'ON' if VIDEO_PUBLIC_BETA_ENABLED else 'OFF'}</code>",
+        f"• Video 600+: <code>OFF</code>",
+        f"• Long video: <code>OFF</code>",
+        f"• Voice/Music: <code>ON/GUARDED</code>",
+        f"• Document/PDF: <code>ON</code>",
+        f"• Storage addon: <code>ON</code>",
+        f"• Billing: <code>ON</code>",
+        f"• Support: <code>ON</code>",
+        f"• Admin: <code>admin-only</code>",
+    ])
+
+def video_beta_requested_tiers(args: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    raw = " ".join(str(item) for item in (args or [])).strip()
+    if not raw:
+        return list(video_public_beta_tiers())
+    raw = raw.replace("tiers=", "").replace("tier=", "").replace(" ", ",")
+    requested = []
+    for part in re.split(r"[,/;]+", raw):
+        tier = video_public_tier_token_to_name(part)
+        if tier in video_public_beta_tiers() and tier not in requested:
+            requested.append(tier)
+    return requested or list(video_public_beta_tiers())
+
+def video_beta_open_result(admin_id, args: list[str] | tuple[str, ...] | None = None) -> dict:
+    global VIDEO_PUBLIC_BETA_ENABLED, VIDEO_PUBLIC_ALLOWED_TIERS
+    global VIDEO_AI_PUBLIC_ENABLED, VIDEO_AI_MASTER_ENABLED, SHOPAIKEY_PUBLIC_VIDEO_ENABLED, VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED
+    global VIDEO_PREMIUM_PUBLIC_ENABLED, VIDEO_IMAGE_TO_VIDEO_ENABLED, VIDEO_VIDEO_TO_VIDEO_ENABLED, VIDEO_LONG_RENDER_ENABLED, VIDEO_TREND_RENDER_ENABLED
+
+    requested = video_beta_requested_tiers(args)
+    ai_gate = video_ai_provider_smoke_gate()
+    billing_gate = video_billing_public_gate()
+    ops = current_system_mode()
+    core_blockers = []
+    tier_blockers = []
+    if ops.get("maintenance_mode") or ops.get("tool_freeze") or ops.get("provider_freeze"):
+        core_blockers.append("System maintenance/tool/provider freeze is active")
+    if not ai_gate.get("ready"):
+        core_blockers.extend(ai_gate.get("blockers") or ["Video AI provider smoke gate is not ready"])
+    if not billing_gate.get("ready"):
+        core_blockers.extend(billing_gate.get("blockers") or [])
+    cost_by_tier = {row["tier"]: row for row in video_public_beta_cost_rows()}
+    opened_tiers = []
+    for tier in requested:
+        row = cost_by_tier.get(tier) or check_video_margin(tier)
+        if row.get("can_open") and tier in (billing_gate.get("allowed_tiers") or []):
+            opened_tiers.append(tier)
+        else:
+            tier_blockers.extend(row.get("blockers") or [f"{tier} cost gate blocked"])
+    if core_blockers or not opened_tiers:
+        blockers = list(dict.fromkeys(str(item) for item in [*core_blockers, *tier_blockers] if item))
+        set_system_setting("video_beta_open_last_result", "BLOCKED", "; ".join(blockers)[:1000], admin_id)
+        return {
+            "status": "BLOCKED",
+            "opened_tiers": [],
+            "requested_tiers": requested,
+            "blockers": blockers,
+        }
+    VIDEO_PUBLIC_ALLOWED_TIERS = ",".join(opened_tiers)
+    VIDEO_PUBLIC_BETA_ENABLED = True
+    SHOPAIKEY_PUBLIC_VIDEO_ENABLED = True
+    VIDEO_AI_PUBLIC_ENABLED = True
+    VIDEO_AI_MASTER_ENABLED = True
+    VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED = True
+    VIDEO_PREMIUM_PUBLIC_ENABLED = False
+    VIDEO_IMAGE_TO_VIDEO_ENABLED = False
+    VIDEO_VIDEO_TO_VIDEO_ENABLED = False
+    VIDEO_LONG_RENDER_ENABLED = False
+    VIDEO_TREND_RENDER_ENABLED = False
+    note = f"opened={','.join(opened_tiers)}; requested={','.join(requested)}"
+    set_system_setting("video_beta_open_last_result", "OPENED", note, admin_id)
+    record_audit_event(admin_id, "admin", "video.beta_open", "video_public_gate", "beta_open", before={"requested": requested}, after={"opened": opened_tiers}, note=note)
+    return {
+        "status": "OPENED",
+        "opened_tiers": opened_tiers,
+        "requested_tiers": requested,
+        "blockers": list(dict.fromkeys(str(item) for item in tier_blockers if item)),
+    }
+
+def video_beta_open_text(result: dict) -> str:
+    opened = result.get("opened_tiers") or []
+    blockers = result.get("blockers") or []
+    lines = ["🎬 <b>VIDEO BETA OPEN</b>", ""]
+    if opened:
+        lines.append("Đã mở public beta cho:")
+        for tier in opened:
+            lines.append(f"• <code>{html.escape(tier)}</code> — <code>{int(video_tier_cost_xu(tier))} Xu</code>")
+    else:
+        lines.append("Chưa mở public beta.")
+    if blockers:
+        lines.extend(["", "<b>Blockers</b>"])
+        lines.extend(f"• <code>{html.escape(str(item))}</code>" for item in blockers[:12])
+    lines.extend(["", "600+, premium, long render, image-to-video và video-to-video vẫn OFF. Không gọi provider trong lệnh này."])
+    return "\n".join(lines)
+
+def video_beta_close_result(admin_id) -> dict:
+    global VIDEO_PUBLIC_BETA_ENABLED, VIDEO_AI_PUBLIC_ENABLED, VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED, SHOPAIKEY_PUBLIC_VIDEO_ENABLED
+    VIDEO_PUBLIC_BETA_ENABLED = False
+    VIDEO_AI_PUBLIC_ENABLED = False
+    VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED = False
+    SHOPAIKEY_PUBLIC_VIDEO_ENABLED = False
+    set_system_setting("video_beta_open_last_result", "CLOSED", "Video AI public beta closed by admin", admin_id)
+    record_audit_event(admin_id, "admin", "video.beta_close", "video_public_gate", "beta_close", before={}, after={"VIDEO_PUBLIC_BETA_ENABLED": False}, note="closed")
+    return {"status": "CLOSED"}
+
+def video_beta_close_text(result: dict) -> str:
+    return "🧊 <b>VIDEO BETA CLOSE</b>\n\nĐã đóng Video AI public beta trong runtime hiện tại. Planning/storyboard vẫn có thể mở nếu flag riêng đang ON.\n\nKhông gọi provider và không trừ Xu."
+
 async def cmd_video_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
@@ -52140,6 +52469,38 @@ async def cmd_video_public_open_safe(update: Update, context: ContextTypes.DEFAU
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     result = video_public_open_safe_result(update.effective_user.id)
     await update.message.reply_text(video_public_open_safe_text(result), parse_mode="HTML")
+
+async def cmd_video_beta_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    result = video_beta_open_result(update.effective_user.id, getattr(context, "args", []) or [])
+    await update.message.reply_text(video_beta_open_text(result), parse_mode="HTML")
+
+async def cmd_video_beta_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    result = video_beta_close_result(update.effective_user.id)
+    await update.message.reply_text(video_beta_close_text(result), parse_mode="HTML")
+
+async def cmd_video_beta_limits(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(video_beta_limits_text(), parse_mode="HTML")
+
+async def cmd_video_cost_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(video_cost_status_text(), parse_mode="HTML")
+
+async def cmd_system_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(system_public_status_text(), parse_mode="HTML")
+
+async def cmd_tool_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(system_public_status_text(), parse_mode="HTML")
 
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -52263,7 +52624,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/video_public_status</code> | <code>/video_gate_status</code> | <code>/video_public_open_safe</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/tool_test_asr</code> | <code>/tool_test_translate</code> | <code>/tool_test_video_subtitle</code> | <code>/tool_test_video_dub</code> | <code>/tool_test_subtitle_plus_dub</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/system_public_status</code> | <code>/tool_public_status</code> | <code>/video_public_status</code> | <code>/video_gate_status</code> | <code>/video_cost_status</code> | <code>/video_beta_limits</code> | <code>/video_beta_open</code> | <code>/video_beta_close</code> | <code>/video_public_open_safe</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/tool_test_asr</code> | <code>/tool_test_translate</code> | <code>/tool_test_video_subtitle</code> | <code>/tool_test_video_dub</code> | <code>/tool_test_subtitle_plus_dub</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -55579,6 +55940,7 @@ async def handle_public_video_prompt_pending_text(update: Update, context: Conte
 
 async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAULT_TYPE, from_image: bool = False):
     uid = update.effective_user.id
+    lang = user_ui_lang(uid)
     prompt = shopaikey_public_prompt_from_args(context)
     if not prompt:
         command = "/shopaikey_video_from_image" if from_image else "/shopaikey_video"
@@ -55594,11 +55956,14 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
     source_job = shopaikey_paid_image_source_job(uid) if from_image else None
     tier = normalize_video_tier(SHOPAIKEY_VIDEO_DEFAULT_TIER)
     tier_payload = video_tier_payload(tier)
+    if tier == "premium" or tier_payload.get("admin_only"):
+        return await update.message.reply_text(ui_text(lang, "video.premium_message"))
+    if not tier_payload.get("enabled"):
+        return await update.message.reply_text(ui_text(lang, "video.tier_disabled_message"))
     base_cost = int(tier_payload.get("cost") or shopaikey_video_cost_for_flow(from_image, uid))
     final_preview_cost = shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video")
     if int(credits or 0) < final_preview_cost and not is_admin_user(uid):
         return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
-    lang = user_ui_lang(uid)
     package = {}
     if from_image and source_job:
         package = {
@@ -72827,7 +73192,33 @@ def clear_public_video_prompt_pending(user_id) -> bool:
     return USER_PENDING.pop(public_video_pending_key(user_id), None) is not None
 
 def public_video_tier_selection_text(lang: str = "vi") -> str:
-    return ui_text(lang, "video.choose_tier.title")
+    if normalize_user_language(lang) == "zh":
+        return (
+            "🎬 <b>真实 AI 视频 Beta</b>\n\n"
+            "当前仅开放短视频 Beta 档位：\n"
+            "• 200 Xu — 基础短视频\n"
+            "• 300 Xu — 标准短视频\n"
+            "• 400 Xu — 更稳定的短视频\n\n"
+            "600 Xu 以上、Premium 和长视频仍保持关闭。Bot 会先报价并等待确认。"
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎬 <b>Real AI Video Beta</b>\n\n"
+            "Public beta currently supports short-video tiers only:\n"
+            "• 200 Xu — basic short video\n"
+            "• 300 Xu — standard short video\n"
+            "• 400 Xu — stronger short video\n\n"
+            "600+ Xu, premium and long render remain OFF. The bot will show the invoice and ask for confirmation first."
+        )
+    return (
+        "🎬 <b>Video AI chân thật Beta</b>\n\n"
+        "TOAN AAS đang mở thử nghiệm Video AI thật ở gói ngắn để kiểm soát chất lượng.\n\n"
+        "Gói public hiện có:\n"
+        "• 200 Xu — video ngắn cơ bản\n"
+        "• 300 Xu — video ngắn tiêu chuẩn\n"
+        "• 400 Xu — video ngắn tốt hơn\n\n"
+        "Các gói 600 Xu trở lên, premium và video dài đang giữ OFF. Bot sẽ báo giá và hỏi xác nhận trước khi xử lý."
+    )
 
 def public_video_off_options_text(lang: str = "vi") -> str:
     return ui_text(lang, "video.public_off_options")
@@ -74274,18 +74665,24 @@ def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     pricing = video_tier_pricing_payload()
     enabled_map = video_tier_enabled_map()
     rows = []
-    for tier in [name for name in VIDEO_TIER_ORDER if name != "premium"]:
+    tier_buttons = []
+    for tier in video_public_beta_tiers():
         icon = VIDEO_TIER_ICONS.get(tier, "🎞")
         payload = pricing[tier]
         state = "" if enabled_map.get(tier) else ui_text(lang, "image.tier_disabled")
-        rows.append([InlineKeyboardButton(
+        tier_buttons.append(InlineKeyboardButton(
             f"{icon} {localized_video_tier_label(tier, lang)} — {int(payload['cost'])} Xu{state}",
             callback_data=f"create_media|video_tier_{tier}",
-        )])
-    rows.append([InlineKeyboardButton(ui_text(lang, "video.premium_admin"), callback_data="create_media|video_tier_premium")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_video")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel")])
+        ))
+    rows.extend([tier_buttons[i:i + 2] for i in range(0, len(tier_buttons), 2)])
+    if normalize_user_language(lang) == "zh":
+        plan_label = "🧠 先做方案"
+    elif normalize_user_language(lang) == "vi":
+        plan_label = "🧠 Tạo kế hoạch trước"
+    else:
+        plan_label = "🧠 Plan first"
+    rows.append([InlineKeyboardButton(plan_label, callback_data="menu|main_video")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def public_video_prompt_request_text(tier: str, lang: str = "vi") -> str:
@@ -102212,6 +102609,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_public_status", cmd_video_public_status))
     tg_app.add_handler(CommandHandler("video_gate_status", cmd_video_gate_status))
     tg_app.add_handler(CommandHandler("video_public_open_safe", cmd_video_public_open_safe))
+    tg_app.add_handler(CommandHandler("video_beta_open", cmd_video_beta_open))
+    tg_app.add_handler(CommandHandler("video_beta_close", cmd_video_beta_close))
+    tg_app.add_handler(CommandHandler("video_beta_limits", cmd_video_beta_limits))
+    tg_app.add_handler(CommandHandler("video_cost_status", cmd_video_cost_status))
+    tg_app.add_handler(CommandHandler("system_public_status", cmd_system_public_status))
+    tg_app.add_handler(CommandHandler("tool_public_status", cmd_tool_public_status))
     tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
     tg_app.add_handler(CommandHandler("dubbing_help", cmd_dubbing_help))
     tg_app.add_handler(CommandHandler("story_video_factory", cmd_story_video_factory))

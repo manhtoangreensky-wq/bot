@@ -1992,6 +1992,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_TIER_STANDARD_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_HIGH_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_PREMIUM_ENABLED", False)
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BETA_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common")
     monkeypatch.setattr(bot, "VIDEO_PREMIUM_ADMIN_ONLY", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_DEFAULT_TIER", "low")
     monkeypatch.setattr(bot, "VIDEO_BASIC_COST_XU", 765)
@@ -2038,7 +2040,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.video_tier_payload("vip")["tier"] == "premium"
     assert bot.video_tier_payload("premium")["admin_only"] is True
     assert bot.video_tier_payload("premium")["enabled"] is False
-    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / standard:ON / high:ON / premium:OFF"
+    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / standard:OFF / high:OFF / premium:OFF"
     callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
     assert "shopaikey_recent_image_job_for_callback" in callback_source
     assert callback_source.index("shopaikey_recent_image_job_for_callback") < callback_source.index("common.expired_not_charged")
@@ -2191,22 +2193,21 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
             os.unlink(db_path)
 
     video_tier_text = bot.public_video_tier_selection_text()
-    assert "Bạn muốn tạo video chất lượng nào" in video_tier_text
+    assert "Video AI chân thật Beta" in video_tier_text
     video_tier_buttons = [button for row in bot.public_video_tier_keyboard().inline_keyboard for button in row]
     assert any(button.callback_data == "create_media|video_tier_low" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_basic" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_common" for button in video_tier_buttons)
-    assert any(button.callback_data == "create_media|video_tier_standard" for button in video_tier_buttons)
-    assert any(button.callback_data == "create_media|video_tier_high" for button in video_tier_buttons)
-    assert any(button.callback_data == "create_media|video_tier_premium" for button in video_tier_buttons)
+    assert not any(button.callback_data == "create_media|video_tier_standard" for button in video_tier_buttons)
+    assert not any(button.callback_data == "create_media|video_tier_high" for button in video_tier_buttons)
+    assert not any(button.callback_data == "create_media|video_tier_premium" for button in video_tier_buttons)
     assert any("Video Trải Nghiệm" in button.text and "654 Xu" in button.text for button in video_tier_buttons)
     assert any("Video Cơ Bản" in button.text and "765 Xu" in button.text for button in video_tier_buttons)
     assert any("Video Phổ Thông" in button.text and "876 Xu" in button.text for button in video_tier_buttons)
-    assert any("Video premium" in button.text and "liên hệ admin" in button.text for button in video_tier_buttons)
-    assert "Gửi mô tả video bạn muốn tạo" in bot.public_video_prompt_request_text("standard")
-    assert "999 Xu" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500, aspect_ratio="9:16")
-    assert "Tỉ lệ khung hình: <b>9:16</b>" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500, aspect_ratio="9:16")
-    assert "Public video" in bot.public_video_confirm_text("standard", "video sản phẩm", 1500, music_label="piano cinematic", aspect_ratio="4:5")
+    assert "Gửi mô tả video bạn muốn tạo" in bot.public_video_prompt_request_text("common")
+    assert "876 Xu" in bot.public_video_confirm_text("common", "video sản phẩm", 1500, aspect_ratio="9:16")
+    assert "Tỉ lệ khung hình: <b>9:16</b>" in bot.public_video_confirm_text("common", "video sản phẩm", 1500, aspect_ratio="9:16")
+    assert "Public video" in bot.public_video_confirm_text("common", "video sản phẩm", 1500, music_label="piano cinematic", aspect_ratio="4:5")
     assert bot.media_aspect_ratio_options("video") == ("9:16", "16:9", "1:1", "4:5", "3:4")
     assert "3:2" in bot.media_aspect_ratio_options("image")
     aspect_buttons = [button.callback_data for row in bot.public_media_aspect_ratio_keyboard("video").inline_keyboard for button in row]
@@ -4739,9 +4740,17 @@ def test_safe_public_video_activation_commands_registered_and_admin_only():
     assert 'CommandHandler("video_public_status", cmd_video_public_status)' in source
     assert 'CommandHandler("video_gate_status", cmd_video_gate_status)' in source
     assert 'CommandHandler("video_public_open_safe", cmd_video_public_open_safe)' in source
+    assert 'CommandHandler("video_beta_open", cmd_video_beta_open)' in source
+    assert 'CommandHandler("video_beta_close", cmd_video_beta_close)' in source
+    assert 'CommandHandler("video_beta_limits", cmd_video_beta_limits)' in source
+    assert 'CommandHandler("video_cost_status", cmd_video_cost_status)' in source
+    assert 'CommandHandler("system_public_status", cmd_system_public_status)' in source
+    assert 'CommandHandler("tool_public_status", cmd_tool_public_status)' in source
     assert "async def cmd_video_public_status" in source
     assert "async def cmd_video_gate_status" in source
     assert "async def cmd_video_public_open_safe" in source
+    assert "async def cmd_video_beta_open" in source
+    assert "async def cmd_video_cost_status" in source
     assert source_between(source, "async def cmd_video_public_status", "async def cmd_video_gate_status").count("is_admin_user") >= 1
     assert source_between(source, "async def cmd_video_gate_status", "async def cmd_video_public_open_safe").count("is_admin_user") >= 1
 
@@ -4789,6 +4798,37 @@ def test_video_public_open_safe_blocks_when_veo_timeout_stale(monkeypatch):
     assert any("TIMEOUT_STALE" in item for item in result["blockers"])
     assert bot.VIDEO_AI_PUBLIC_ENABLED is False
     assert bot.SHOPAIKEY_PUBLIC_VIDEO_ENABLED is False
+
+
+def test_video_beta_cost_status_and_public_tiers(monkeypatch):
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BETA_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common")
+    monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 200)
+    monkeypatch.setattr(bot, "VIDEO_BASIC_COST_XU", 300)
+    monkeypatch.setattr(bot, "VIDEO_COMMON_COST_XU", 400)
+    monkeypatch.setattr(bot, "VIDEO_LOW_PROVIDER_COST_XU", 100)
+    monkeypatch.setattr(bot, "VIDEO_BASIC_PROVIDER_COST_XU", 150)
+    monkeypatch.setattr(bot, "VIDEO_COMMON_PROVIDER_COST_XU", 220)
+    monkeypatch.setattr(bot, "VIDEO_TIER_LOW_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_BASIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_COMMON_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_STANDARD_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_HIGH_ENABLED", True)
+    assert bot.video_tier_enabled_map()["low"] is True
+    assert bot.video_tier_enabled_map()["basic"] is True
+    assert bot.video_tier_enabled_map()["common"] is True
+    assert bot.video_tier_enabled_map()["standard"] is False
+    assert bot.video_tier_enabled_map()["high"] is False
+    assert bot.video_tier_enabled_map()["premium"] is False
+    assert bot.check_video_margin("low")["status"] == "PASS"
+    assert bot.check_video_margin("common")["status"] == "WARN_MARGIN"
+    cost_text = bot.video_cost_status_text()
+    assert "VIDEO COST STATUS" in cost_text
+    assert "600+ / standard / high" in cost_text
+    system_text = bot.system_public_status_text()
+    assert "TOAN AAS PUBLIC STATUS" in system_text
+    assert "Video 600+" in system_text
+    assert "Long video" in system_text
 
 
 def test_video_public_status_and_gate_text_do_not_expose_secrets(monkeypatch):
