@@ -5001,6 +5001,35 @@ def test_video_beta_open_response_and_status_show_200_marketing_loss(monkeypatch
     assert "giới hạn" in response
 
 
+def test_video_beta_200_starter_stays_allowed_with_legacy_300_400_setting(monkeypatch):
+    settings = {
+        "video_public_beta_enabled": "true",
+        "video_ai_public_enabled": "true",
+        "video_ai_master_enabled": "true",
+        "shopaikey_public_video_enabled": "true",
+        "video_public_allowed_tiers": "basic,common",
+    }
+    monkeypatch.setattr(bot, "get_system_setting", lambda key, default="": settings.get(key, default))
+    monkeypatch.setattr(bot, "current_system_mode", lambda: {"maintenance_mode": False, "payment_freeze": False, "tool_freeze": False, "provider_freeze": False})
+    monkeypatch.setattr(bot, "provider_freeze_runtime_on", lambda provider="": False)
+    monkeypatch.setattr(bot, "shopaikey_video_status_snapshot", lambda: {"status": "SUCCESS", "detail": "output_sent=yes", "model": "veo3.1-fast", "tested_at": "now"})
+    monkeypatch.setattr(bot, "video_gate_tool_status", lambda _tool: "PASS")
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": True})
+    monkeypatch.setattr(bot, "frame_video_status_payload", lambda: {"local_worker_connected": True, "ffmpeg_configured": True, "last_error": ""})
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_URL", "https://provider.test/video")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
+    monkeypatch.setattr(bot, "VIDEO_LOW_PROVIDER_COST_XU", 9999)
+    monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 200)
+
+    assert bot.video_public_allowed_tiers()[0] == "low"
+    assert bot.video_public_tier_enabled("low") is True
+    status = bot.get_public_video_tier_ui_status("low")
+    assert status["enabled"] is True
+    assert status["public_status"] == "PUBLIC_MARKETING_LOSS"
+
+
 def test_video_beta_open_allow_loss_aliases_parse():
     for args in (
         ["tiers=200,300,400", "allow_loss_200=true"],

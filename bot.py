@@ -52136,7 +52136,10 @@ def video_public_allowed_tiers() -> list[str]:
         if tier and tier not in allowed:
             allowed.append(tier)
     allowed = allowed or ["low", "basic", "common"]
-    return [tier for tier in allowed if tier in {"low", "basic", "common"}] or ["low", "basic", "common"]
+    allowed = [tier for tier in allowed if tier in {"low", "basic", "common"}] or ["low", "basic", "common"]
+    if video_public_beta_enabled_runtime() and "low" not in allowed:
+        allowed.insert(0, "low")
+    return allowed
 
 def video_public_blocked_tiers() -> set[str]:
     blocked = {"standard", "high", "premium"}
