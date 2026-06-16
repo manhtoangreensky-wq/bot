@@ -2198,12 +2198,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.callback_data == "create_media|video_tier_low" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_basic" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_common" for button in video_tier_buttons)
-    assert not any(button.callback_data == "create_media|video_tier_standard" for button in video_tier_buttons)
-    assert not any(button.callback_data == "create_media|video_tier_high" for button in video_tier_buttons)
+    assert any(button.callback_data == "create_media|video_tier_standard" for button in video_tier_buttons)
+    assert any(button.callback_data == "create_media|video_tier_high" for button in video_tier_buttons)
     assert not any(button.callback_data == "create_media|video_tier_premium" for button in video_tier_buttons)
-    assert any("Video Trải Nghiệm" in button.text and "654 Xu" in button.text for button in video_tier_buttons)
-    assert any("Video Cơ Bản" in button.text and "765 Xu" in button.text for button in video_tier_buttons)
-    assert any("Video Phổ Thông" in button.text and "876 Xu" in button.text for button in video_tier_buttons)
+    assert any("Trải nghiệm" in button.text and "654 Xu" in button.text for button in video_tier_buttons)
+    assert any("Cơ bản" in button.text and "765 Xu" in button.text for button in video_tier_buttons)
+    assert any("Phổ thông" in button.text and "876 Xu" in button.text for button in video_tier_buttons)
     assert "Gửi mô tả video bạn muốn tạo" in bot.public_video_prompt_request_text("common")
     assert "876 Xu" in bot.public_video_confirm_text("common", "video sản phẩm", 1500, aspect_ratio="9:16")
     assert "Tỉ lệ khung hình: <b>9:16</b>" in bot.public_video_confirm_text("common", "video sản phẩm", 1500, aspect_ratio="9:16")
@@ -4933,7 +4933,7 @@ def test_video_beta_open_300_400_does_not_enable_200_without_override(monkeypatc
     assert settings["video_beta_tier_200_enabled"] == "false"
 
 
-def test_video_beta_open_200_requires_explicit_loss_override(monkeypatch):
+def test_video_beta_open_200_is_public_starter_when_requested(monkeypatch):
     settings = {}
     monkeypatch.setattr(bot, "set_system_setting", lambda key, value, note="", updated_by="": settings.__setitem__(key, value))
     monkeypatch.setattr(bot, "record_audit_event", lambda *args, **kwargs: None)
@@ -4948,14 +4948,14 @@ def test_video_beta_open_200_requires_explicit_loss_override(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_BASIC_PROVIDER_COST_XU", 150)
     monkeypatch.setattr(bot, "VIDEO_COMMON_PROVIDER_COST_XU", 220)
 
-    blocked = bot.video_beta_open_result("admin", ["tiers=200"])
-    assert blocked["status"] == "BLOCKED"
-    assert "low" not in blocked["opened_tiers"]
+    starter = bot.video_beta_open_result("admin", ["tiers=200"])
+    assert starter["status"] == "OPENED"
+    assert starter["opened_tiers"] == ["low"]
+    assert settings["video_beta_tier_200_enabled"] == "true"
 
-    opened = bot.video_beta_open_result("admin", ["tiers=200,300,400", "allow_loss_200=true"])
+    opened = bot.video_beta_open_result("admin", ["tiers=200,300,400"])
     assert opened["status"] == "OPENED"
     assert opened["opened_tiers"] == ["low", "basic", "common"]
-    assert settings["video_beta_200_marketing_loss_enabled"] == "true"
     assert settings["video_beta_tier_200_enabled"] == "true"
 
 
@@ -8518,7 +8518,9 @@ def test_public_video_tier_keyboard_uses_five_beta_gate_buttons():
     buttons = _button_texts(bot.public_video_tier_keyboard("vi"))
     callbacks = _button_callbacks(bot.public_video_tier_keyboard("vi"))
     for label in ("200 Xu", "300 Xu", "400 Xu", "600 Xu", "1200 Xu"):
-        assert label in buttons
+        assert any(label in button for button in buttons)
+    for label in ("Trải nghiệm", "Cơ bản", "Phổ thông", "Tiêu chuẩn", "Cao cấp"):
+        assert any(label in button for button in buttons)
     for tier in ("low", "basic", "common", "standard", "high"):
         assert f"create_media|video_tier_{tier}" in callbacks
 

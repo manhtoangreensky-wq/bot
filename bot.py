@@ -1192,7 +1192,7 @@ VIDEO_PUBLIC_MAX_CONCURRENT_JOBS = max(1, env_int("VIDEO_PUBLIC_MAX_CONCURRENT_J
 VIDEO_PUBLIC_REQUIRE_CONFIRM = env_flag("VIDEO_PUBLIC_REQUIRE_CONFIRM", "true")
 VIDEO_PUBLIC_REQUIRE_JOB_LOCK = env_flag("VIDEO_PUBLIC_REQUIRE_JOB_LOCK", "true")
 VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR = env_flag("VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR", "true")
-VIDEO_BETA_200_MARKETING_LOSS_ENABLED = env_flag("VIDEO_BETA_200_MARKETING_LOSS_ENABLED", "false")
+VIDEO_BETA_200_MARKETING_LOSS_ENABLED = env_flag("VIDEO_BETA_200_MARKETING_LOSS_ENABLED", "true")
 VIDEO_BETA_200_MAX_USER_DAY = max(1, env_int("VIDEO_BETA_200_MAX_USER_DAY", 1))
 VIDEO_BETA_200_MAX_TOTAL_DAY = max(1, env_int("VIDEO_BETA_200_MAX_TOTAL_DAY", 10))
 VIDEO_BETA_200_LABEL = _env("VIDEO_BETA_200_LABEL", "Gói mồi 200 Xu")
@@ -32628,6 +32628,57 @@ def video_tier_payload(tier: str = "") -> dict:
 def localized_video_tier_label(tier: str = "", lang: str = "vi") -> str:
     return ui_text(lang, f"video.tier.{normalize_video_tier(tier)}")
 
+def video_tier_short_label(tier: str = "", lang: str = "vi") -> str:
+    tier_norm = normalize_video_tier(tier)
+    is_vi = normalize_user_language(lang) == "vi"
+    if is_vi:
+        labels = {
+            "low": "Trải nghiệm",
+            "basic": "Cơ bản",
+            "common": "Phổ thông",
+            "standard": "Tiêu chuẩn",
+            "high": "Cao cấp",
+            "premium": "Premium",
+        }
+    else:
+        labels = {
+            "low": "Starter",
+            "basic": "Basic",
+            "common": "Standard",
+            "standard": "Quality",
+            "high": "High",
+            "premium": "Premium",
+        }
+    return labels.get(tier_norm) or localized_video_tier_label(tier_norm, lang)
+
+def video_tier_button_text(tier: str = "", lang: str = "vi") -> str:
+    tier_norm = normalize_video_tier(tier)
+    status = get_public_video_tier_ui_status(tier_norm)
+    return f"{VIDEO_TIER_ICONS.get(tier_norm, '🎬')} {video_tier_short_label(tier_norm, lang)} — {int(status['price_xu'])} Xu"
+
+def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
+    tier_norm = normalize_video_tier(tier)
+    payload = video_tier_pricing_payload().get(tier_norm) or video_tier_pricing_payload()["low"]
+    cost = int(payload.get("cost") or video_tier_cost_xu(tier_norm))
+    label = payload.get("label") or localized_video_tier_label(tier_norm, lang)
+    if normalize_user_language(lang) != "vi":
+        notes = {
+            "low": "starter/trial tier, controlled public beta",
+            "basic": "short AI video, public beta",
+            "common": "stronger short AI video, public beta",
+            "standard": "held OFF for quality control",
+            "high": "premium/high tier, not public yet",
+        }
+    else:
+        notes = {
+            "low": "gói trải nghiệm, có giới hạn/ngày",
+            "basic": "video ngắn cơ bản, public beta",
+            "common": "video ngắn tốt hơn, public beta",
+            "standard": "giữ OFF để kiểm soát chất lượng",
+            "high": "cao cấp/premium, chưa mở public",
+        }
+    return f"• {VIDEO_TIER_ICONS.get(tier_norm, '🎬')} <b>{html.escape(str(label))}</b> — <b>{cost} Xu</b>: {html.escape(notes.get(tier_norm, ''))}"
+
 def video_tier_cost_xu(tier: str = "") -> int:
     return int(video_tier_payload(tier).get("cost") or 0)
 
@@ -32654,14 +32705,14 @@ def get_video_tier_status(tier: str = "", user_is_admin: bool = False) -> dict:
         configured_enabled = False
     reason = "ready"
     if tier_norm == "low" and not video_beta_200_marketing_loss_enabled_runtime():
-        reason = "Gói 200 Xu đang tạm khóa vì là gói mồi có thể lỗ. Admin chỉ mở khi dùng allow_loss_200=true."
+        reason = "Gói trải nghiệm 200 Xu chưa nằm trong danh sách public beta đang mở."
     elif tier_norm in video_public_beta_tiers() and tier_norm not in billing_allowed:
         blockers = billing_gate.get("blockers") or []
         reason = str(blockers[0]) if blockers else "Gói video này chưa vượt qua billing/cost gate."
     elif tier_norm == "standard" and not VIDEO_PUBLIC_600_PLUS_ENABLED:
         reason = "Gói 600 Xu đang được TOAN AAS giữ lại để kiểm soát chất lượng. Bạn có thể chọn 200/300/400 Xu trước."
     elif tier_norm in {"high", "premium"}:
-        reason = "Gói 1200 Xu/premium chưa mở public. Hiện chỉ mở beta 300/400 Xu và 200 Xu nếu admin bật gói mồi."
+        reason = "Gói 1200 Xu/premium chưa mở public. Hiện chỉ mở beta 200/300/400 Xu."
     elif not configured_enabled:
         reason = "Gói video này chưa mở public."
     elif not provider_ready:
@@ -38028,7 +38079,7 @@ def shopaikey_public_generation_guard(job_type: str) -> tuple[bool, str]:
         return False, freeze.get("message") or USER_PROVIDER_BUSY_MESSAGE
     if job == "image" and not SHOPAIKEY_PUBLIC_IMAGE_ENABLED:
         return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
-    if job == "video" and not (VIDEO_PUBLIC_BETA_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED):
+    if job == "video" and not (video_public_beta_enabled_runtime() and shopaikey_public_video_enabled_runtime() and video_ai_public_enabled_runtime()):
         return False, "🧪 Tính năng này đang thử nghiệm nội bộ, chưa mở công khai. TOAN AAS sẽ mở sau khi kiểm tra ổn định."
     if not SHOPAIKEY_ENABLED or not SHOPAIKEY_API_KEY:
         return False, "Hệ thống tạo ảnh/video đang bảo trì ngắn hoặc chưa sẵn sàng."
@@ -52072,7 +52123,8 @@ def shopaikey_public_video_enabled_runtime() -> bool:
     return video_runtime_bool("shopaikey_public_video_enabled", SHOPAIKEY_PUBLIC_VIDEO_ENABLED)
 
 def video_beta_200_marketing_loss_enabled_runtime() -> bool:
-    return video_runtime_bool("video_beta_200_marketing_loss_enabled", VIDEO_BETA_200_MARKETING_LOSS_ENABLED)
+    explicit = video_runtime_bool("video_beta_200_marketing_loss_enabled", VIDEO_BETA_200_MARKETING_LOSS_ENABLED)
+    return bool(explicit or (video_public_beta_enabled_runtime() and "low" in video_public_allowed_tiers()))
 
 def video_public_allowed_tiers_runtime() -> str:
     return get_system_setting("video_public_allowed_tiers", "") or str(VIDEO_PUBLIC_ALLOWED_TIERS or "low,basic,common")
@@ -52797,7 +52849,7 @@ def video_beta_limits_text() -> str:
         "",
         f"• Beta enabled: <code>{video_public_bool_label(video_public_beta_enabled_runtime())}</code>",
         f"• Allowed tiers: <code>{html.escape(', '.join(video_public_allowed_tiers()))}</code>",
-        f"• 200 marketing loss override: <code>{video_public_bool_label(video_beta_200_marketing_loss_enabled_runtime())}</code>",
+        f"• 200 starter tier: <code>{video_public_bool_label(video_beta_200_marketing_loss_enabled_runtime())}</code>",
         f"• Max duration: <code>{int(VIDEO_PUBLIC_MAX_DURATION_SECONDS or 0)}s</code>",
         f"• Max jobs/user/day: <code>{int(VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY or 0)}</code>",
         f"• Max concurrent jobs: <code>{int(VIDEO_PUBLIC_MAX_CONCURRENT_JOBS or 0)}</code>",
@@ -52859,10 +52911,8 @@ def video_beta_open_result(admin_id, args: list[str] | tuple[str, ...] | None = 
         core_blockers.append("System maintenance/tool/provider freeze is active")
     if not ai_gate.get("ready"):
         core_blockers.extend(ai_gate.get("blockers") or ["Video AI provider smoke gate is not ready"])
-    if parsed.get("allow_loss_200") and "low" in requested and not core_blockers:
-        set_video_runtime_bool("video_beta_200_marketing_loss_enabled", True, admin_id, "admin allowed 200 Xu marketing-loss beta")
-    elif "low" in requested and not parsed.get("allow_loss_200"):
-        set_video_runtime_bool("video_beta_200_marketing_loss_enabled", False, admin_id, "200 Xu marketing-loss override not requested")
+    if "low" in requested and not core_blockers:
+        set_video_runtime_bool("video_beta_200_marketing_loss_enabled", True, admin_id, "200 Xu starter video beta enabled")
     billing_gate = video_billing_public_gate()
     if not billing_gate.get("ready"):
         core_blockers.extend(billing_gate.get("blockers") or [])
@@ -52936,7 +52986,7 @@ def video_beta_open_text(result: dict) -> str:
                 )
                 lines.append(f"• <code>{price} Xu</code>: <code>ON{html.escape(suffix)}</code>")
             else:
-                reason = "OFF nếu chưa override allow_loss_200=true" if price == 200 else "OFF"
+                reason = "OFF nếu chưa bật tier 200" if price == 200 else "OFF"
                 lines.append(f"• <code>{price} Xu</code>: <code>{html.escape(reason)}</code>")
     else:
         lines.append("Chưa mở public beta.")
@@ -56571,10 +56621,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 "TOAN AAS có thể giúp bạn chuẩn bị kịch bản, storyboard, prompt, nhạc, phụ đề và lồng tiếng trước.\n"
                 "Phần render AI thật sẽ mở sau khi provider ổn định.\n\nBot chưa trừ Xu.",
                 parse_mode=None,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng", callback_data="videoaddon|menu")],
-                    [InlineKeyboardButton("🏠 Menu chính", callback_data="videoaddon|main")],
-                ]),
+                reply_markup=(video_finalization_tier_keyboard(lang) if get_video_finalization_state(uid) else public_video_tier_keyboard(lang)),
             )
         return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))
     if job_type == "video":
@@ -73774,20 +73821,20 @@ def public_video_tier_selection_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "zh":
         return (
             "🎬 <b>真实 AI 视频 Beta</b>\n\n"
-            "当前开放短视频 Beta 档位：300/400 Xu。200 Xu 仅在管理员开启营销亏损档时开放。\n"
+            "当前开放短视频 Beta 档位：200/300/400 Xu。200 Xu 是体验档，按每日限制控制。\n"
             "600 Xu、1200 Xu、Premium 和长视频仍保持关闭。Bot 会先报价并等待确认。"
         )
     if normalize_user_language(lang) != "vi":
         return (
             "🎬 <b>Real AI Video Beta</b>\n\n"
-            "Public beta currently supports 300/400 Xu short-video tiers. 200 Xu opens only when the admin enables the marketing-loss override.\n"
+            "Public beta currently supports 200/300/400 Xu short-video tiers. 200 Xu is a controlled starter tier with daily limits.\n"
             "600 Xu, 1200 Xu, premium and long render remain OFF. The bot will show the invoice and ask for confirmation first."
         )
     return (
         "🎬 <b>Video AI chân thật Beta</b>\n\n"
         "TOAN AAS đang mở thử nghiệm Video AI thật ở gói ngắn để kiểm soát chất lượng.\n\n"
-        "Gói public hiện có: <b>300 Xu</b> và <b>400 Xu</b>.\n"
-        "Gói <b>200 Xu</b> chỉ mở khi admin bật allow_loss_200=true.\n"
+        "Gói public hiện có: <b>200 Xu</b>, <b>300 Xu</b> và <b>400 Xu</b>.\n"
+        "Gói <b>200 Xu</b> là gói trải nghiệm, có giới hạn/ngày để kiểm soát chi phí.\n"
         "Gói <b>600 Xu</b>, <b>1200 Xu</b>, premium và video dài đang giữ OFF.\n\n"
         "Bot sẽ báo giá và hỏi xác nhận trước khi xử lý."
     )
@@ -74145,11 +74192,11 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
             f"Voice/dubbing: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
             f"Subtitles: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
             "Choose the right package:\n"
-            f"• {video_tier_cost_xu('low')} Xu — marketing-loss entry tier, only when admin override is enabled\n"
-            f"• {video_tier_cost_xu('basic')} Xu — public beta short video\n"
-            f"• {video_tier_cost_xu('common')} Xu — stronger public beta short video\n"
-            f"• {video_tier_cost_xu('standard')} Xu — held OFF for quality control\n"
-            f"• {video_tier_cost_xu('high')} Xu — premium/high tier, not public yet\n\n"
+            f"{video_tier_price_line('low', lang)}\n"
+            f"{video_tier_price_line('basic', lang)}\n"
+            f"{video_tier_price_line('common', lang)}\n"
+            f"{video_tier_price_line('standard', lang)}\n"
+            f"{video_tier_price_line('high', lang)}\n\n"
             "TOAN AAS will show the final invoice before any provider call or Xu charge."
         )
     return (
@@ -74162,19 +74209,18 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         f"Voice/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
         f"Phụ đề: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
         "Chọn gói phù hợp:\n"
-        f"• {video_tier_cost_xu('low')} Xu — gói mồi, chỉ mở khi admin bật allow_loss_200\n"
-        f"• {video_tier_cost_xu('basic')} Xu — video ngắn tiêu chuẩn, public beta\n"
-        f"• {video_tier_cost_xu('common')} Xu — video ngắn tốt hơn, public beta\n"
-        f"• {video_tier_cost_xu('standard')} Xu — giữ OFF để kiểm soát chất lượng\n"
-        f"• {video_tier_cost_xu('high')} Xu — cao cấp/premium, chưa mở public\n\n"
+        f"{video_tier_price_line('low', lang)}\n"
+        f"{video_tier_price_line('basic', lang)}\n"
+        f"{video_tier_price_line('common', lang)}\n"
+        f"{video_tier_price_line('standard', lang)}\n"
+        f"{video_tier_price_line('high', lang)}\n\n"
         "Bot sẽ báo lại lần cuối trước khi tạo job."
     )
 
 def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     def label(tier: str) -> str:
-        status = get_public_video_tier_ui_status(tier)
-        return f"{int(status['price_xu'])} Xu"
+        return video_tier_button_text(tier, lang)
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(label("low"), callback_data="vfinal|tier|low"),
@@ -75449,9 +75495,8 @@ def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> Inl
 def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     tier_buttons = []
     for tier in VIDEO_PUBLIC_TIER_UI_ORDER:
-        ui_status = get_public_video_tier_ui_status(tier)
         tier_buttons.append(InlineKeyboardButton(
-            f"{int(ui_status['price_xu'])} Xu",
+            video_tier_button_text(tier, lang),
             callback_data=f"create_media|video_tier_{tier}",
         ))
     if normalize_user_language(lang) == "zh":
