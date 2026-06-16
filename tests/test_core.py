@@ -2248,10 +2248,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "654 Xu" not in bot.create_media_pricing_text()
     pricing_hub_text = "\n".join(bot.pricing_hub_lines("vi"))
     assert "Nạp Xu / Bảng giá TOAN AAS" in pricing_hub_text
-    assert "xem bảng giá, nạp Xu hay mua gói/combo" in pricing_hub_text
+    assert "xem bảng giá, nạp Xu, xem ưu đãi hay mua gói/combo" in pricing_hub_text
+    assert "Launch Bonus cho thanh toán nội địa Việt Nam" in pricing_hub_text
     price_keyboard_labels = [button.text for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
     assert price_keyboard_labels == [
         "📋 Bảng giá",
+        "🎁 Xem ưu đãi",
         "💳 Nạp Xu",
         "🎁 Gói / Combo",
         "🏠 Menu chính",
@@ -2259,10 +2261,29 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     pricing_callbacks = [button.callback_data for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
     assert pricing_callbacks == [
         "pricing|catalog",
+        "pricing|promotions",
         "menu|main_topup",
         "pricing|packages",
         "menu|main",
     ]
+    en_pricing_labels = [button.text for row in bot.pricing_main_keyboard("en").inline_keyboard for button in row]
+    assert "🎁 Xem ưu đãi" not in en_pricing_labels
+    assert en_pricing_labels == ["📋 Pricing", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"]
+    assert "Vietnam local top-up promotions are not available for international payments" in "\n".join(bot.pricing_hub_lines("en"))
+    promo_text = "\n".join(bot.billing_promotions_lines("vi"))
+    assert "🎁 ƯU ĐÃI TOAN AAS" in promo_text
+    assert "FIRST30" in promo_text
+    assert "SECOND15" in promo_text
+    assert "MONTHLY20" in promo_text
+    assert "WEEKLY10" in promo_text
+    assert "DAILY5" in promo_text
+    assert "Launch Bonus theo mệnh giá" in promo_text
+    assert "PayOS, QR ngân hàng/VietQR" in promo_text
+    assert "ZaloPay/MoMo, USDT và thanh toán quốc tế không áp dụng" in promo_text
+    promo_callbacks = [button.callback_data for row in bot.billing_promotions_keyboard("vi").inline_keyboard for button in row]
+    assert promo_callbacks == ["pricing|promo_apply", "pricing|gift_code", "menu|main_topup", "pricing|catalog", "pricing|main", "menu|main"]
+    assert bot.hidden_active_features_audit("vi") == []
+    assert bot.hidden_active_features_audit("vi", ["📋 Bảng giá", "💳 Nạp Xu"])[0]["code"] == "HIDDEN_ACTIVE_FEATURE"
     catalog_labels = [button.text for row in bot.pricing_catalog_keyboard("vi").inline_keyboard for button in row]
     catalog_callbacks = [button.callback_data for row in bot.pricing_catalog_keyboard("vi").inline_keyboard for button in row]
     assert "🆓 Miễn phí" not in catalog_labels
@@ -8455,6 +8476,33 @@ def test_bonus_only_payos_bank_vnd():
     assert all(bot.is_topup_bonus_allowed(item) for item in allowed)
     assert all(bot.is_topup_bonus_blocked(item) for item in blocked)
     assert all(not bot.is_topup_bonus_allowed(item) for item in blocked)
+
+
+def test_topup_promo_payment_eligibility_keeps_zalopay_momo_blocked():
+    assert bot.is_vietnam_local_payment_method("payos") is True
+    assert bot.is_vietnam_local_payment_method("bank_qr") is True
+    assert bot.is_vietnam_local_payment_method("manual_bank") is True
+    assert bot.is_vietnam_local_payment_method("vietqr") is True
+    assert bot.is_vietnam_local_payment_method("zalopay_personal") is False
+    assert bot.is_vietnam_local_payment_method("zalopay_merchant") is False
+    assert bot.is_vietnam_local_payment_method("momo") is False
+    assert bot.is_vietnam_local_payment_method("usdt_trc20") is False
+
+    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 50000, "50k", 50000) is True
+    assert bot.should_apply_topup_promo("topup_xu", "manual_vietqr_vnd", "VND", 50000, "50k", 50000) is True
+    assert bot.should_apply_topup_promo("topup_xu", "zalopay_personal", "VND", 50000, "50k", 50000) is False
+    assert bot.should_apply_topup_promo("topup_xu", "momo_tuithantai", "VND", 50000, "50k", 50000) is False
+    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 10000, "10k", 50000) is False
+    assert bot.should_apply_topup_promo("topup_xu", "payos", "VND", 20000, "20k", 50000) is False
+    assert bot.should_apply_topup_promo("storage_addon", "payos", "VND", 50000, "50mb", 50000) is False
+    assert bot.should_apply_topup_promo("combo_purchase", "payos", "VND", 99000, "tiktok_99k", 50000) is False
+    assert bot.should_apply_topup_promo("monthly_package", "payos", "VND", 99000, "creator_monthly", 50000) is False
+    assert bot.should_apply_topup_promo("topup_xu", "usdt_trc20", "USD", 250000, "", 50000, foreign_manual=True) is False
+    assert bot.launch_bonus_eligible_for_payment("topup_xu", "payos", "VND", 50000, "50k") is True
+    assert bot.launch_bonus_eligible_for_payment("topup_xu", "usdt_trc20", "USD", 250000, "", True) is False
+    assert bot.launch_bonus_eligible_for_payment("topup_xu", "zalopay_personal", "VND", 50000, "50k") is False
+    assert bot.membership_rank_volume_eligible("topup_xu", "usdt_trc20", "USD") is True
+    assert bot.membership_rank_volume_eligible("storage_addon", "payos", "VND") is False
 
 
 def test_qr_paths_exist_or_alert():
