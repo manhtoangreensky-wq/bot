@@ -3949,14 +3949,14 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "trendg|music_select_3" in music_callbacks
     trend_music_selected_buttons = [button.text for row in bot.trend_guided_music_selected_keyboard().inline_keyboard for button in row]
     assert "✅ Chốt nhạc này" in trend_music_selected_buttons
-    assert "🎬 Tạo video / chốt video với nhạc này" in trend_music_selected_buttons
-    assert "🚫 Bỏ nhạc và tạo video không nhạc" in trend_music_selected_buttons
+    assert "🎬 Chốt video với nhạc" in trend_music_selected_buttons
+    assert "🚫 Tạo video không nhạc" in trend_music_selected_buttons
     assert "🎞 Quay lại prompt video" in trend_music_selected_buttons
     trend_library_followup_buttons = [button.text for row in bot.selected_music_video_followup_keyboard("trend_guided").inline_keyboard for button in row]
-    assert "🎬 Tạo video / chốt video với nhạc này" in trend_library_followup_buttons
-    assert "🚫 Bỏ nhạc và tạo video không nhạc" in trend_library_followup_buttons
+    assert "🎬 Chốt video với nhạc" in trend_library_followup_buttons
+    assert "🚫 Tạo video không nhạc" in trend_library_followup_buttons
     trend_ai_music_buttons = [button.text for row in bot.trend_guided_music_ai_selected_keyboard().inline_keyboard for button in row]
-    assert "🎬 Tạo video / chốt video với prompt nhạc này" in trend_ai_music_buttons
+    assert "🎬 Chốt video với nhạc" in trend_ai_music_buttons
     video_off_text = bot.trend_guided_video_public_off_text(bot.get_trend_video_flow_pending("u_trend") or {})
     assert "Tạo video thật chưa mở công khai" in video_off_text
     assert "chưa trừ Xu" in video_off_text
@@ -4064,8 +4064,8 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "3️⃣ Chọn gợi ý 3" in music_choice_buttons
     music_selected_buttons = [button.text for row in bot.cinematic_ad_music_selected_keyboard().inline_keyboard for button in row]
     assert "✅ Chốt nhạc này" in music_selected_buttons
-    assert "🎬 Tạo video / chốt video với nhạc này" in music_selected_buttons
-    assert "🚫 Bỏ nhạc và tạo video không nhạc" in music_selected_buttons
+    assert "🎬 Chốt video với nhạc" in music_selected_buttons
+    assert "🚫 Tạo video không nhạc" in music_selected_buttons
     assert "🎞 Quay lại prompt video" in music_selected_buttons
     assert "🎵 Chọn nhạc khác" in music_selected_buttons
     no_music_buttons = [button.text for row in bot.cinematic_ad_no_music_keyboard().inline_keyboard for button in row]

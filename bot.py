@@ -58078,19 +58078,25 @@ def selected_music_video_followup_keyboard(source: str = "cinematic_ad", index_t
     else:
         labels = {
             "save": "✅ Chốt nhạc này",
-            "create": "🎬 Tạo video / chốt video với nhạc này",
-            "none": "🚫 Bỏ nhạc và tạo video không nhạc",
+            "create": "🎬 Chốt video với nhạc",
+            "none": "🚫 Tạo video không nhạc",
             "choose": "🎵 Chọn bài khác",
             "license": "📜 Xem license",
         }
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels["save"], callback_data=save_cb)],
-        [InlineKeyboardButton(labels["create"], callback_data=create_cb)],
-        [InlineKeyboardButton(labels["none"], callback_data=no_music_cb)],
-        [InlineKeyboardButton(labels["choose"], callback_data=choose_cb)],
-        [InlineKeyboardButton(labels["license"], callback_data=f"license_music|{index_text}")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data=main_cb)],
-    ])
+    rows = build_2col_keyboard(
+        [
+            (labels["save"], save_cb),
+            (labels["create"], create_cb),
+            (labels["none"], no_music_cb),
+            (labels["choose"], choose_cb),
+            (labels["license"], f"license_music|{index_text}"),
+        ],
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data=main_cb)])
+    return InlineKeyboardMarkup(rows)
 
 async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str, index_text: str):
     user_id = update.effective_user.id if update.effective_user else 0
@@ -69242,16 +69248,24 @@ def cinematic_ad_video_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
     ])
 
 def cinematic_ad_video_prompt_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "concept.choose_1"), callback_data="adconcept|video_prompt_choice|1")],
-        [InlineKeyboardButton(ui_text(lang, "concept.choose_2"), callback_data="adconcept|video_prompt_choice|2")],
-        [InlineKeyboardButton(ui_text(lang, "concept.choose_3"), callback_data="adconcept|video_prompt_choice|3")],
-        [InlineKeyboardButton("🎬 Tạo video / chốt video" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video" if normalize_user_language(lang) != "zh" else "🎬 确认视频"), callback_data="adconcept|finalize_video_music")],
-        [InlineKeyboardButton(ui_text(lang, "concept.regenerate_3"), callback_data="adconcept|video_prompt_current")],
-        [InlineKeyboardButton(ui_text(lang, "concept.edit_video_prompt"), callback_data="adconcept|edit_current")],
-        [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    is_zh = normalize_user_language(lang) == "zh"
+    rows = build_2col_keyboard(
+        [
+            (ui_text(lang, "concept.choose_1"), "adconcept|video_prompt_choice|1"),
+            (ui_text(lang, "concept.choose_2"), "adconcept|video_prompt_choice|2"),
+            (ui_text(lang, "concept.choose_3"), "adconcept|video_prompt_choice|3"),
+            ("✅ Xác nhận xuất video" if is_vi else ("✅ Confirm video export" if not is_zh else "✅ 确认导出视频"), "adconcept|finalize_video_music"),
+            (ui_text(lang, "concept.regenerate_3"), "adconcept|video_prompt_current"),
+            (ui_text(lang, "concept.edit_video_prompt"), "adconcept|edit_current"),
+        ],
+        nav_back=(ui_text(lang, "concept.back_locked"), "adconcept|back_locked"),
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main"))
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_video_prompt_selected_keyboard(prompt_index: int = 1, lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
     idx = max(1, min(3, int(prompt_index or 1)))
@@ -69291,52 +69305,88 @@ def cinematic_ad_video_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def cinematic_ad_music_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "concept.music_suggest_only"), callback_data="adconcept|music_suggest")],
-        [InlineKeyboardButton(ui_text(lang, "concept.music_library"), callback_data="adconcept|music_library")],
-        [InlineKeyboardButton(ui_text(lang, "concept.music_ai"), callback_data="adconcept|music_ai")],
-        [InlineKeyboardButton(ui_text(lang, "concept.music_none"), callback_data="adconcept|music_none")],
-        [InlineKeyboardButton(ui_text(lang, "concept.back_locked"), callback_data="adconcept|back_locked")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
-    ])
+    rows = build_2col_keyboard(
+        [
+            (ui_text(lang, "concept.music_suggest_only"), "adconcept|music_suggest"),
+            (ui_text(lang, "concept.music_library"), "adconcept|music_library"),
+            (ui_text(lang, "concept.music_ai"), "adconcept|music_ai"),
+            (ui_text(lang, "concept.music_none"), "adconcept|music_none"),
+        ],
+        nav_back=(ui_text(lang, "concept.back_locked"), "adconcept|back_locked"),
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main"))
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_music_suggestion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(ui_text(lang, "concept.choose_1"), callback_data="adconcept|music_choice|1")],
-        [InlineKeyboardButton(ui_text(lang, "concept.choose_2"), callback_data="adconcept|music_choice|2")],
-        [InlineKeyboardButton(ui_text(lang, "concept.choose_3"), callback_data="adconcept|music_choice|3")],
-        [InlineKeyboardButton(ui_text(lang, "concept.regenerate_3"), callback_data="adconcept|music_suggest")],
-        [InlineKeyboardButton(ui_text(lang, "concept.music_none"), callback_data="adconcept|music_none")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
-    ])
+    rows = build_2col_keyboard(
+        [
+            (ui_text(lang, "concept.choose_1"), "adconcept|music_choice|1"),
+            (ui_text(lang, "concept.choose_2"), "adconcept|music_choice|2"),
+            (ui_text(lang, "concept.choose_3"), "adconcept|music_choice|3"),
+            (ui_text(lang, "concept.regenerate_3"), "adconcept|music_suggest"),
+            (ui_text(lang, "concept.music_none"), "adconcept|music_none"),
+        ],
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")])
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_music_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Chốt nhạc này" if normalize_user_language(lang) == "vi" else ("✅ Lock this music" if normalize_user_language(lang) != "zh" else "✅ 确认这段音乐"), callback_data="adconcept|music_save")],
-        [InlineKeyboardButton("🎬 Tạo video / chốt video với nhạc này" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video with this music" if normalize_user_language(lang) != "zh" else "🎬 用此音乐确认视频"), callback_data="adconcept|finalize_video_music")],
-        [InlineKeyboardButton("🚫 Bỏ nhạc và tạo video không nhạc" if normalize_user_language(lang) == "vi" else ("🚫 Finalize video without music" if normalize_user_language(lang) != "zh" else "🚫 不加音乐确认视频"), callback_data="adconcept|finalize_video_no_music")],
-        [InlineKeyboardButton("🎞 Quay lại prompt video" if normalize_user_language(lang) == "vi" else ("🎞 Back to video prompt" if normalize_user_language(lang) != "zh" else "🎞 返回视频 prompt"), callback_data="adconcept|video_prompt_current")],
-        [InlineKeyboardButton("🎵 Chọn nhạc khác" if normalize_user_language(lang) == "vi" else ("🎵 Choose another music" if normalize_user_language(lang) != "zh" else "🎵 选择其他音乐"), callback_data="adconcept|music_menu")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    is_zh = normalize_user_language(lang) == "zh"
+    rows = build_2col_keyboard(
+        [
+            ("✅ Chốt nhạc này" if is_vi else ("✅ Lock this music" if not is_zh else "✅ 确认这段音乐"), "adconcept|music_save"),
+            ("🎬 Chốt video với nhạc" if is_vi else ("🎬 Finalize with music" if not is_zh else "🎬 用此音乐确认视频"), "adconcept|finalize_video_music"),
+            ("🚫 Tạo video không nhạc" if is_vi else ("🚫 Finalize without music" if not is_zh else "🚫 不加音乐确认视频"), "adconcept|finalize_video_no_music"),
+            ("🎵 Chọn nhạc khác" if is_vi else ("🎵 Choose another music" if not is_zh else "🎵 选择其他音乐"), "adconcept|music_menu"),
+        ],
+        nav_back=("🎞 Quay lại prompt video" if is_vi else ("🎞 Back to video prompt" if not is_zh else "🎞 返回视频 prompt"), "adconcept|video_prompt_current"),
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main"))
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_music_ai_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Lưu prompt nhạc" if normalize_user_language(lang) == "vi" else ("✅ Save music prompt" if normalize_user_language(lang) != "zh" else "✅ 保存音乐 prompt"), callback_data="adconcept|music_ai_save")],
-        [InlineKeyboardButton("🎬 Tạo video / chốt video với prompt nhạc này" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video with this music prompt" if normalize_user_language(lang) != "zh" else "🎬 用此音乐 prompt 确认视频"), callback_data="adconcept|finalize_video_music")],
-        [InlineKeyboardButton("🚫 Bỏ nhạc và tạo video không nhạc" if normalize_user_language(lang) == "vi" else ("🚫 Finalize video without music" if normalize_user_language(lang) != "zh" else "🚫 不加音乐确认视频"), callback_data="adconcept|finalize_video_no_music")],
-        [InlineKeyboardButton("🎞 Quay lại prompt video" if normalize_user_language(lang) == "vi" else ("🎞 Back to video prompt" if normalize_user_language(lang) != "zh" else "🎞 返回视频 prompt"), callback_data="adconcept|video_prompt_current")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    is_zh = normalize_user_language(lang) == "zh"
+    rows = build_2col_keyboard(
+        [
+            ("✅ Lưu prompt nhạc" if is_vi else ("✅ Save music prompt" if not is_zh else "✅ 保存音乐 prompt"), "adconcept|music_ai_save"),
+            ("🎬 Chốt video với nhạc" if is_vi else ("🎬 Finalize with music" if not is_zh else "🎬 用此音乐 prompt 确认视频"), "adconcept|finalize_video_music"),
+            ("🚫 Tạo video không nhạc" if is_vi else ("🚫 Finalize without music" if not is_zh else "🚫 不加音乐确认视频"), "adconcept|finalize_video_no_music"),
+        ],
+        nav_back=("🎞 Quay lại prompt video" if is_vi else ("🎞 Back to video prompt" if not is_zh else "🎞 返回视频 prompt"), "adconcept|video_prompt_current"),
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main"))
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_no_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Chốt video không nhạc" if normalize_user_language(lang) == "vi" else ("🎬 Finalize video without music" if normalize_user_language(lang) != "zh" else "🎬 确认无音乐视频"), callback_data="adconcept|finalize_video_no_music")],
-        [InlineKeyboardButton(ui_text(lang, "concept.save_video_prompt"), callback_data="adconcept|save_video_prompt_current")],
-        [InlineKeyboardButton("🎵 Chọn nhạc lại" if normalize_user_language(lang) == "vi" else ("🎵 Choose music again" if normalize_user_language(lang) != "zh" else "🎵 重新选择音乐"), callback_data="adconcept|music_menu")],
-        [InlineKeyboardButton("🎞 Xem prompt video" if normalize_user_language(lang) == "vi" else ("🎞 View video prompt" if normalize_user_language(lang) != "zh" else "🎞 查看视频 prompt"), callback_data="adconcept|video_prompt_current")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    is_zh = normalize_user_language(lang) == "zh"
+    rows = build_2col_keyboard(
+        [
+            ("🎬 Chốt video không nhạc" if is_vi else ("🎬 Finalize without music" if not is_zh else "🎬 确认无音乐视频"), "adconcept|finalize_video_no_music"),
+            (ui_text(lang, "concept.save_video_prompt"), "adconcept|save_video_prompt_current"),
+            ("🎵 Chọn nhạc lại" if is_vi else ("🎵 Choose music again" if not is_zh else "🎵 重新选择音乐"), "adconcept|music_menu"),
+            ("🎞 Xem prompt video" if is_vi else ("🎞 View video prompt" if not is_zh else "🎞 查看视频 prompt"), "adconcept|video_prompt_current"),
+        ],
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="adconcept|main")])
+    return InlineKeyboardMarkup(rows)
 
 def cinematic_ad_music_library_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -72546,15 +72596,11 @@ def video_finalization_local_needs_images_text(state: dict | None = None, lang: 
 def video_finalization_local_needs_images_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     keyframe_callback = video_finalization_source_keyframe_callback(state)
-    ai_ready = bool(get_video_prompt_export_readiness(False).get("public_ready"))
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "✅ Xuất video AI từ prompt" if (is_vi and ai_ready) else
-                "✅ Export AI video from prompt" if ai_ready else
-                "🛡 Video AI chưa mở" if is_vi else
-                "🛡 AI video not ready",
-                callback_data="vfinal|export_ai" if ai_ready else "vfinal|ai_guard",
+                "✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export",
+                callback_data="vfinal|export_ai",
             ),
             InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=keyframe_callback),
         ],
@@ -72574,7 +72620,6 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
     photos = developing_video_frame_photos(state)
     has_prompt = video_finalization_has_prompt(state)
     readiness = video_finalization_readiness()
-    ai_ready = bool(get_video_prompt_export_readiness(False).get("public_ready"))
     local_ready = bool(readiness.get("local_frame"))
     if len(photos) >= 2:
         first_row = [
@@ -72586,11 +72631,11 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
                 callback_data="vfinal|export_local" if local_ready else "vfinal|local_guard",
             ),
             InlineKeyboardButton(
-                "✅ Xuất video AI từ prompt" if (is_vi and ai_ready and has_prompt) else
-                "✅ Export AI video from prompt" if (ai_ready and has_prompt) else
-                "🛡 Video AI chưa mở" if is_vi else
-                "🛡 AI video not ready",
-                callback_data="vfinal|export_ai" if (ai_ready and has_prompt) else "vfinal|ai_guard",
+                "✅ Xác nhận xuất video" if (is_vi and has_prompt) else
+                "✅ Confirm video export" if has_prompt else
+                "📋 Xem prompt trước" if is_vi else
+                "📋 Prepare prompt first",
+                callback_data="vfinal|export_ai" if has_prompt else "vfinal|ai_guard",
             ),
         ]
         second_row = [
@@ -72600,17 +72645,14 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
     elif has_prompt:
         first_row = [
             InlineKeyboardButton(
-                "✅ Xuất video AI từ prompt" if (is_vi and ai_ready) else
-                "✅ Export AI video from prompt" if ai_ready else
-                "🛡 Video AI chưa mở" if is_vi else
-                "🛡 AI video not ready",
-                callback_data="vfinal|export_ai" if ai_ready else "vfinal|ai_guard",
+                "✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export",
+                callback_data="vfinal|export_ai",
             ),
             InlineKeyboardButton("📋 Copy prompt" if is_vi else "📋 Copy prompt", callback_data="vfinal|copy_prompt"),
         ]
         second_row = [
-            InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=video_finalization_source_keyframe_callback(state)),
             InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
+            InlineKeyboardButton("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", callback_data="vfinal|save"),
         ]
     else:
         first_row = [
@@ -72635,32 +72677,18 @@ def video_finalization_ai_guard_text(state: dict | str | None = None, lang: str 
         lang = state
         state = {}
     state = dict(state or {})
-    has_local_images = len(developing_video_frame_photos(state)) >= 2
-    has_prompt = video_finalization_has_prompt(state)
     if normalize_user_language(lang) != "vi":
-        next_step = (
-            "You can export the existing images locally or save the plan first."
-            if has_local_images else
-            "Your prompt/plan is saved. Prompt-to-video is guarded until public AI video is ready; create/upload scene images only if you want the local slideshow path."
-            if has_prompt else
-            "Save the plan or create/upload scene images first."
-        )
         return (
-            "✨ <b>Real AI video is under safety control.</b>\n\n"
-            "Public AI video rendering is not enabled while provider jobs are being stabilized. "
-            f"TOAN AAS has not called a provider or charged Xu.\n\n{next_step}"
+            "🛠 <b>Video generation is under maintenance / upgrade.</b>\n\n"
+            "TOAN AAS has saved your video prompt and finalization choices. "
+            "Public AI video rendering is not open yet, so the bot has not called a provider and has not charged Xu.\n\n"
+            "You can save the plan, copy the prompt, adjust finalization, or return to the previous step."
         )
-    next_step = (
-        "Bạn có thể ghép bộ ảnh hiện có thành video local hoặc lưu kế hoạch trước."
-        if has_local_images else
-        "Prompt/kế hoạch của bạn vẫn được giữ. Nhánh xuất video từ prompt đang chờ provider Video AI sẵn sàng; chỉ cần tạo/gửi ảnh nếu bạn muốn đi nhánh ghép ảnh local."
-        if has_prompt else
-        "Bạn có thể lưu kế hoạch hoặc tạo/gửi ảnh từng cảnh trước."
-    )
     return (
-        "✨ <b>Video AI chân thật đang được kiểm soát an toàn.</b>\n\n"
-        "TOAN AAS chưa mở render Video AI công khai vì provider/video job chưa ổn định. "
-        f"Bot chưa gọi API và chưa trừ Xu.\n\n{next_step}"
+        "🛠 <b>Tính năng tạo video đang bảo trì / nâng cấp.</b>\n\n"
+        "TOAN AAS đã lưu prompt video và các lựa chọn hoàn thiện của bạn. "
+        "Hiện video AI công khai chưa mở, nên bot chưa gọi provider và chưa trừ Xu.\n\n"
+        "Bạn có thể lưu kế hoạch, copy prompt, sửa hoàn thiện hoặc quay lại bước trước."
     )
 
 def video_finalization_local_guard_text(state: dict | str | None = None, lang: str = "vi") -> str:
@@ -72709,23 +72737,10 @@ def video_finalization_guard_keyboard(state: dict | str | None = None, lang: str
         state = {}
     state = dict(state or {})
     is_vi = normalize_user_language(lang) == "vi"
-    local_ready = bool(video_finalization_readiness().get("local_frame"))
-    if len(developing_video_frame_photos(state)) >= 2:
-        first_row = [
-            InlineKeyboardButton(
-                "🎞 Xuất video local" if (is_vi and local_ready) else
-                "🎞 Export local video" if local_ready else
-                "🛡 Ghép local chưa sẵn" if is_vi else
-                "🛡 Local render not ready",
-                callback_data="vfinal|export_local" if local_ready else "vfinal|local_guard",
-            ),
-            InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
-        ]
-    else:
-        first_row = [
-            InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=video_finalization_source_keyframe_callback(state)),
-            InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
-        ]
+    first_row = [
+        InlineKeyboardButton("📋 Copy prompt" if is_vi else "📋 Copy prompt", callback_data="vfinal|copy_prompt"),
+        InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
+    ]
     return InlineKeyboardMarkup([
         first_row,
         [
@@ -75117,14 +75132,21 @@ def trend_guided_music_menu_text(state: dict, lang: str = "vi") -> str:
     return f"🎵 <b>Bạn có muốn thêm nhạc không?</b>\n\nChủ đề: <b>{html.escape(topic)}</b>\n\nNhạc là tùy chọn. Bot chưa gọi API nhạc/video và chưa trừ Xu."
 
 def trend_guided_music_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚫 Không cần nhạc, hoàn tất" if normalize_user_language(lang) == "vi" else "🚫 No music, finish", callback_data="trendg|music_none")],
-        [InlineKeyboardButton("💡 Gợi ý 3 kiểu nhạc" if normalize_user_language(lang) == "vi" else "💡 Suggest 3 music styles", callback_data="trendg|music_suggest")],
-        [InlineKeyboardButton("🎵 Tìm nhạc trong kho" if normalize_user_language(lang) == "vi" else "🎵 Search music library", callback_data="trendg|music_library")],
-        [InlineKeyboardButton("🤖 Tạo prompt nhạc AI" if normalize_user_language(lang) == "vi" else "🤖 Create AI music prompt", callback_data="trendg|music_ai")],
-        [InlineKeyboardButton("🔙 Quay lại prompt video" if normalize_user_language(lang) == "vi" else "🔙 Back to video prompt", callback_data="trendg|video_review")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = build_2col_keyboard(
+        [
+            ("🚫 Không cần nhạc" if is_vi else "🚫 No music", "trendg|music_none"),
+            ("💡 Gợi ý 3 kiểu nhạc" if is_vi else "💡 Suggest 3 music styles", "trendg|music_suggest"),
+            ("🎵 Tìm nhạc trong kho" if is_vi else "🎵 Search music library", "trendg|music_library"),
+            ("🤖 Prompt nhạc AI" if is_vi else "🤖 AI music prompt", "trendg|music_ai"),
+        ],
+        nav_back=("🔙 Quay lại prompt video" if is_vi else "🔙 Back to video prompt", "trendg|video_review"),
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main"))
+    return InlineKeyboardMarkup(rows)
 
 def trend_guided_music_suggestions_text(state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
@@ -75145,14 +75167,21 @@ def trend_guided_music_suggestions_text(state: dict, lang: str = "vi") -> str:
     )
 
 def trend_guided_music_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("1️⃣ Chọn nhạc 1" if normalize_user_language(lang) == "vi" else "1️⃣ Choose music 1", callback_data="trendg|music_select_1")],
-        [InlineKeyboardButton("2️⃣ Chọn nhạc 2" if normalize_user_language(lang) == "vi" else "2️⃣ Choose music 2", callback_data="trendg|music_select_2")],
-        [InlineKeyboardButton("3️⃣ Chọn nhạc 3" if normalize_user_language(lang) == "vi" else "3️⃣ Choose music 3", callback_data="trendg|music_select_3")],
-        [InlineKeyboardButton("🔁 Tạo lại 3 gợi ý nhạc" if normalize_user_language(lang) == "vi" else "🔁 Regenerate music suggestions", callback_data="trendg|music_suggest")],
-        [InlineKeyboardButton("🚫 Không cần nhạc" if normalize_user_language(lang) == "vi" else "🚫 No music", callback_data="trendg|music_none")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = build_2col_keyboard(
+        [
+            ("1️⃣ Chọn nhạc 1" if is_vi else "1️⃣ Choose music 1", "trendg|music_select_1"),
+            ("2️⃣ Chọn nhạc 2" if is_vi else "2️⃣ Choose music 2", "trendg|music_select_2"),
+            ("3️⃣ Chọn nhạc 3" if is_vi else "3️⃣ Choose music 3", "trendg|music_select_3"),
+            ("🔁 Đổi 3 gợi ý" if is_vi else "🔁 Regenerate", "trendg|music_suggest"),
+            ("🚫 Không cần nhạc" if is_vi else "🚫 No music", "trendg|music_none"),
+        ],
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")])
+    return InlineKeyboardMarkup(rows)
 
 def trend_guided_music_choice_text(state: dict, index: int = 1, lang: str = "vi") -> str:
     idx = max(1, min(3, int(index or 1)))
@@ -75164,14 +75193,21 @@ def trend_guided_music_choice_text(state: dict, index: int = 1, lang: str = "vi"
 
 def trend_guided_music_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     # Locked UX from music flow: every music branch must return to video finalize/tier selection.
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Chốt nhạc này" if normalize_user_language(lang) == "vi" else "✅ Lock this music", callback_data="trendg|music_save")],
-        [InlineKeyboardButton("🎬 Tạo video / chốt video với nhạc này" if normalize_user_language(lang) == "vi" else "🎬 Finalize video with this music", callback_data="trendg|video_real")],
-        [InlineKeyboardButton("🚫 Bỏ nhạc và tạo video không nhạc" if normalize_user_language(lang) == "vi" else "🚫 Finalize video without music", callback_data="trendg|music_none")],
-        [InlineKeyboardButton("🎞 Quay lại prompt video" if normalize_user_language(lang) == "vi" else "🎞 Back to video prompt", callback_data="trendg|video_review")],
-        [InlineKeyboardButton("🎵 Chọn nhạc khác" if normalize_user_language(lang) == "vi" else "🎵 Choose another music", callback_data="trendg|music_step")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = build_2col_keyboard(
+        [
+            ("✅ Chốt nhạc này" if is_vi else "✅ Lock this music", "trendg|music_save"),
+            ("🎬 Chốt video với nhạc" if is_vi else "🎬 Finalize with music", "trendg|video_real"),
+            ("🚫 Tạo video không nhạc" if is_vi else "🚫 Finalize without music", "trendg|music_none"),
+            ("🎵 Chọn nhạc khác" if is_vi else "🎵 Choose another music", "trendg|music_step"),
+        ],
+        nav_back=("🎞 Quay lại prompt video" if is_vi else "🎞 Back to video prompt", "trendg|video_review"),
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main"))
+    return InlineKeyboardMarkup(rows)
 
 def trend_guided_no_music_text(state: dict, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -75179,13 +75215,20 @@ def trend_guided_no_music_text(state: dict, lang: str = "vi") -> str:
     return "✅ <b>Đã chọn không thêm nhạc.</b>\n\nBạn có thể tạo video không nhạc hoặc lưu prompt để dùng sau. Bot chưa gọi API nhạc/video và chưa trừ Xu."
 
 def trend_guided_no_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Chốt video không nhạc" if normalize_user_language(lang) == "vi" else "🎬 Finalize video without music", callback_data="trendg|video_real")],
-        [InlineKeyboardButton("✅ Lưu prompt video" if normalize_user_language(lang) == "vi" else "✅ Save video prompt", callback_data="trendg|video_prompt_save")],
-        [InlineKeyboardButton("🎵 Chọn nhạc lại" if normalize_user_language(lang) == "vi" else "🎵 Choose music again", callback_data="trendg|music_step")],
-        [InlineKeyboardButton("🎞 Xem prompt video" if normalize_user_language(lang) == "vi" else "🎞 View video prompt", callback_data="trendg|video_review")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = build_2col_keyboard(
+        [
+            ("🎬 Chốt video không nhạc" if is_vi else "🎬 Finalize without music", "trendg|video_real"),
+            ("✅ Lưu prompt video" if is_vi else "✅ Save video prompt", "trendg|video_prompt_save"),
+            ("🎵 Chọn nhạc lại" if is_vi else "🎵 Choose music again", "trendg|music_step"),
+            ("🎞 Xem prompt video" if is_vi else "🎞 View video prompt", "trendg|video_review"),
+        ],
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")])
+    return InlineKeyboardMarkup(rows)
 
 def trend_guided_finalize_text(state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
@@ -75208,12 +75251,19 @@ def trend_guided_finalize_text(state: dict, lang: str = "vi") -> str:
     )
 
 def trend_guided_review_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎛 Hoàn thiện video" if normalize_user_language(lang) == "vi" else "🎛 Finalize video", callback_data="trendg|finalization")],
-        [InlineKeyboardButton("🎞 Xem lại prompt video" if normalize_user_language(lang) == "vi" else "🎞 Review video prompt", callback_data="trendg|video_review")],
-        [InlineKeyboardButton("🖼 Xem lại prompt ảnh" if normalize_user_language(lang) == "vi" else "🖼 Review image prompt", callback_data="trendg|image_review")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = build_2col_keyboard(
+        [
+            ("🎛 Hoàn thiện video" if is_vi else "🎛 Finalize video", "trendg|finalization"),
+            ("🎞 Xem prompt video" if is_vi else "🎞 Review video prompt", "trendg|video_review"),
+            ("🖼 Xem prompt ảnh" if is_vi else "🖼 Review image prompt", "trendg|image_review"),
+        ],
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")])
+    return InlineKeyboardMarkup(rows)
 
 def trend_guided_music_library_text(state: dict, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -75221,13 +75271,20 @@ def trend_guided_music_library_text(state: dict, lang: str = "vi") -> str:
     return "🎵 <b>Tìm nhạc trong kho</b>\n\nChọn mood nhạc. Bot sẽ tìm nhạc nghe thử, không trừ Xu."
 
 def trend_guided_music_library_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Cinematic" if normalize_user_language(lang) != "vi" else "🎬 Điện ảnh cảm xúc", callback_data="trendg|music_genre|cinematic")],
-        [InlineKeyboardButton("💻 Technology" if normalize_user_language(lang) != "vi" else "💻 Công nghệ / hiện đại", callback_data="trendg|music_genre|tech")],
-        [InlineKeyboardButton("📱 Upbeat short-form" if normalize_user_language(lang) != "vi" else "📱 TikTok/Reels vui tươi", callback_data="trendg|music_genre|viral")],
-        [InlineKeyboardButton("🔙 Back" if normalize_user_language(lang) != "vi" else "🔙 Quay lại bước nhạc", callback_data="trendg|music_step")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = build_2col_keyboard(
+        [
+            ("🎬 Điện ảnh cảm xúc" if is_vi else "🎬 Cinematic", "trendg|music_genre|cinematic"),
+            ("💻 Công nghệ / hiện đại" if is_vi else "💻 Technology", "trendg|music_genre|tech"),
+            ("📱 TikTok/Reels vui tươi" if is_vi else "📱 Upbeat short-form", "trendg|music_genre|viral"),
+        ],
+        nav_back=("🔙 Quay lại bước nhạc" if is_vi else "🔙 Back", "trendg|music_step"),
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main"))
+    return InlineKeyboardMarkup(rows)
 
 def trend_guided_music_genre_query(genre: str, state: dict, lang: str = "vi") -> str:
     topic = trend_guided_topic(state)
@@ -75246,13 +75303,20 @@ def trend_guided_music_ai_text(state: dict, lang: str = "vi") -> str:
     return f"🤖 <b>Prompt tạo nhạc AI</b>\n\n<code>{html.escape(prompt)}</code>\n\nBot chỉ chuẩn bị prompt, chưa gọi API tạo nhạc và chưa trừ Xu."
 
 def trend_guided_music_ai_selected_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Lưu prompt nhạc" if normalize_user_language(lang) == "vi" else "✅ Save music prompt", callback_data="trendg|music_save")],
-        [InlineKeyboardButton("🎬 Tạo video / chốt video với prompt nhạc này" if normalize_user_language(lang) == "vi" else "🎬 Finalize video with this music prompt", callback_data="trendg|video_real")],
-        [InlineKeyboardButton("🚫 Bỏ nhạc và tạo video không nhạc" if normalize_user_language(lang) == "vi" else "🚫 Finalize video without music", callback_data="trendg|music_none")],
-        [InlineKeyboardButton("🎞 Quay lại prompt video" if normalize_user_language(lang) == "vi" else "🎞 Back to video prompt", callback_data="trendg|video_review")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = build_2col_keyboard(
+        [
+            ("✅ Lưu prompt nhạc" if is_vi else "✅ Save music prompt", "trendg|music_save"),
+            ("🎬 Chốt video với nhạc" if is_vi else "🎬 Finalize with music", "trendg|video_real"),
+            ("🚫 Tạo video không nhạc" if is_vi else "🚫 Finalize without music", "trendg|music_none"),
+        ],
+        nav_back=("🎞 Quay lại prompt video" if is_vi else "🎞 Back to video prompt", "trendg|video_review"),
+        nav_main=False,
+        lang=lang,
+    ).inline_keyboard
+    rows = [list(row) for row in rows]
+    rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="trendg|main"))
+    return InlineKeyboardMarkup(rows)
 
 def build_trend_guided_video_package(user_id, state: dict, lang: str = "vi") -> dict:
     idx = int((state or {}).get("video_prompt_choice") or 1)

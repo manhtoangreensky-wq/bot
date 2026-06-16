@@ -125,12 +125,12 @@ def test_video_finalization_summary_and_guard_are_explicit(monkeypatch):
     assert "chưa trừ Xu" in text
 
     guard = bot.video_finalization_ai_guard_text("vi")
-    assert "chưa mở render Video AI công khai" in guard
-    assert "chưa gọi API" in guard
+    assert "bảo trì / nâng cấp" in guard
+    assert "chưa gọi provider" in guard
     assert "chưa trừ Xu" in guard
 
 
-def test_video_finalization_summary_hides_prompt_export_when_ai_not_ready(monkeypatch):
+def test_video_finalization_summary_keeps_confirm_export_when_ai_not_ready(monkeypatch):
     monkeypatch.setattr(
         bot,
         "get_video_prompt_export_readiness",
@@ -155,10 +155,10 @@ def test_video_finalization_summary_hides_prompt_export_when_ai_not_ready(monkey
 
     callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "vfinal|export_local" not in callbacks
-    assert "vfinal|export_ai" not in callbacks
-    assert "vfinal|ai_guard" in callbacks
+    assert "vfinal|export_ai" in callbacks
+    assert "vfinal|ai_guard" not in callbacks
     assert "vfinal|copy_prompt" in callbacks
-    assert "trendg|image_step" in callbacks
+    assert "trendg|image_step" not in callbacks
 
     text = bot.video_finalization_local_needs_images_text(state, "vi")
     assert "Ghép ảnh thành video cần có ảnh trước" in text
@@ -170,7 +170,7 @@ def test_video_finalization_summary_hides_prompt_export_when_ai_not_ready(monkey
     assert "vfinal|review" in guard_callbacks
     assert "vfinal|back" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
     assert "vfinal|review" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
-    assert "vfinal|export_ai" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
+    assert "vfinal|export_ai" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
 
 
 def test_video_finalization_summary_shows_prompt_export_only_when_ai_ready(monkeypatch):
@@ -236,7 +236,9 @@ def test_video_finalization_summary_keeps_local_export_when_images_exist(monkeyp
     callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "vfinal|export_local" in callbacks
     assert "vfinal|export_ai" in callbacks
-    assert "vfinal|export_local" in _callbacks(bot.video_finalization_guard_keyboard(state, "vi"))
+    guard_callbacks = _callbacks(bot.video_finalization_guard_keyboard(state, "vi"))
+    assert "vfinal|copy_prompt" in guard_callbacks
+    assert "vfinal|export_local" not in guard_callbacks
 
 
 def test_stale_local_export_without_images_uses_prompt_video_path(monkeypatch):
@@ -280,8 +282,8 @@ def test_stale_local_export_without_images_uses_prompt_video_path(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert "Video AI chân thật đang được kiểm soát an toàn" in query.edited["text"]
-    assert "Prompt/kế hoạch của bạn vẫn được giữ" in query.edited["text"]
+    assert "Tính năng tạo video đang bảo trì / nâng cấp" in query.edited["text"]
+    assert "TOAN AAS đã lưu prompt video" in query.edited["text"]
     callbacks = _callbacks(query.edited["reply_markup"])
     assert "vfinal|review" in callbacks
     assert "vfinal|export_local" not in callbacks
