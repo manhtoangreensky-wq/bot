@@ -72126,7 +72126,57 @@ def is_dub_ready() -> bool:
     return bool(VIDEO_DUB_TTS_ENABLED and video_tts_provider_available())
 
 def is_ai_video_ready() -> bool:
-    return bool(SHOPAIKEY_PUBLIC_VIDEO_ENABLED and VIDEO_AI_PUBLIC_ENABLED)
+    return bool(
+        SHOPAIKEY_PUBLIC_VIDEO_ENABLED
+        and VIDEO_AI_PUBLIC_ENABLED
+        and SHOPAIKEY_ENABLED
+        and SHOPAIKEY_API_KEY
+        and SHOPAIKEY_VIDEO_ENABLED
+        and SHOPAIKEY_VIDEO_URL
+        and SHOPAIKEY_VIDEO_MODEL
+    )
+
+def get_video_prompt_export_readiness(user_is_admin: bool = False) -> dict:
+    missing_public: list[str] = []
+    if not VIDEO_AI_PUBLIC_ENABLED:
+        missing_public.append("VIDEO_AI_PUBLIC_ENABLED=false")
+    if not SHOPAIKEY_PUBLIC_VIDEO_ENABLED:
+        missing_public.append("SHOPAIKEY_PUBLIC_VIDEO_ENABLED=false")
+    if not SHOPAIKEY_ENABLED:
+        missing_public.append("SHOPAIKEY_ENABLED=false")
+    if not SHOPAIKEY_API_KEY:
+        missing_public.append("SHOPAIKEY_API_KEY missing")
+    if not SHOPAIKEY_VIDEO_ENABLED:
+        missing_public.append("SHOPAIKEY_VIDEO_ENABLED=false")
+    if not SHOPAIKEY_VIDEO_URL:
+        missing_public.append("SHOPAIKEY_VIDEO_URL missing")
+    if not SHOPAIKEY_VIDEO_MODEL:
+        missing_public.append("SHOPAIKEY_VIDEO_MODEL missing")
+
+    missing_admin: list[str] = []
+    if not user_is_admin:
+        missing_admin.append("admin required")
+    if not SHOPAIKEY_ENABLED:
+        missing_admin.append("SHOPAIKEY_ENABLED=false")
+    if not SHOPAIKEY_API_KEY:
+        missing_admin.append("SHOPAIKEY_API_KEY missing")
+    if not SHOPAIKEY_VIDEO_ENABLED:
+        missing_admin.append("SHOPAIKEY_VIDEO_ENABLED=false")
+    if not SHOPAIKEY_VIDEO_URL:
+        missing_admin.append("SHOPAIKEY_VIDEO_URL missing")
+    if not SHOPAIKEY_VIDEO_MODEL:
+        missing_admin.append("SHOPAIKEY_VIDEO_MODEL missing")
+
+    public_ready = not missing_public
+    admin_ready = user_is_admin and not missing_admin
+    return {
+        "public_ready": public_ready,
+        "admin_ready": admin_ready,
+        "ready": public_ready or admin_ready,
+        "missing_public": missing_public,
+        "missing_admin": missing_admin,
+        "reason": "; ".join(missing_public) if missing_public else "ready",
+    }
 
 def video_finalization_readiness() -> dict:
     return {
@@ -72442,6 +72492,39 @@ def video_finalization_has_prompt(state: dict | None = None) -> bool:
     prompt_values.extend(list(source_payload.get("video_prompts") or [])[:3])
     return any(bool(str(value or "").strip()) for value in prompt_values)
 
+def video_finalization_prompt_text(state: dict | None = None) -> str:
+    state = dict(state or {})
+    source_payload = dict(state.get("source_payload") or {})
+    session_context = dict(state.get("session_context") or {})
+    video_project = dict(state.get("video_project") or {})
+    for value in (
+        state.get("video_prompt"),
+        state.get("selected_prompt"),
+        state.get("custom_video_prompt"),
+        source_payload.get("video_prompt"),
+        source_payload.get("prompt"),
+        source_payload.get("original_prompt"),
+        session_context.get("video_prompt"),
+        video_project.get("video_prompt"),
+        video_project.get("prompt"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text[:3000]
+    prompts = list(source_payload.get("video_prompts") or [])
+    if prompts:
+        return str(prompts[0] or "").strip()[:3000]
+    for value in (
+        source_payload.get("script_text"),
+        source_payload.get("concept_text"),
+        session_context.get("script"),
+        video_project.get("script_text"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text[:3000]
+    return ""
+
 def video_finalization_local_needs_images_text(state: dict | None = None, lang: str = "vi") -> str:
     source = (state or {}).get("source_label") or video_finalization_source_label((state or {}).get("source"), lang)
     if normalize_user_language(lang) != "vi":
@@ -72463,9 +72546,16 @@ def video_finalization_local_needs_images_text(state: dict | None = None, lang: 
 def video_finalization_local_needs_images_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     keyframe_callback = video_finalization_source_keyframe_callback(state)
+    ai_ready = bool(get_video_prompt_export_readiness(False).get("public_ready"))
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✨ Tạo video AI từ prompt" if is_vi else "✨ Generate AI video from prompt", callback_data="vfinal|export_ai"),
+            InlineKeyboardButton(
+                "✅ Xuất video AI từ prompt" if (is_vi and ai_ready) else
+                "✅ Export AI video from prompt" if ai_ready else
+                "🛡 Video AI chưa mở" if is_vi else
+                "🛡 AI video not ready",
+                callback_data="vfinal|export_ai" if ai_ready else "vfinal|ai_guard",
+            ),
             InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=keyframe_callback),
         ],
         [
@@ -72483,10 +72573,25 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
     is_vi = normalize_user_language(lang) == "vi"
     photos = developing_video_frame_photos(state)
     has_prompt = video_finalization_has_prompt(state)
+    readiness = video_finalization_readiness()
+    ai_ready = bool(get_video_prompt_export_readiness(False).get("public_ready"))
+    local_ready = bool(readiness.get("local_frame"))
     if len(photos) >= 2:
         first_row = [
-            InlineKeyboardButton("✅ Xuất video local" if is_vi else "✅ Export local video", callback_data="vfinal|export_local"),
-            InlineKeyboardButton("✨ Tạo video AI chân thật" if is_vi else "✨ Generate AI video", callback_data="vfinal|export_ai"),
+            InlineKeyboardButton(
+                "✅ Xuất video local" if (is_vi and local_ready) else
+                "✅ Export local video" if local_ready else
+                "🛡 Ghép local chưa sẵn" if is_vi else
+                "🛡 Local render not ready",
+                callback_data="vfinal|export_local" if local_ready else "vfinal|local_guard",
+            ),
+            InlineKeyboardButton(
+                "✅ Xuất video AI từ prompt" if (is_vi and ai_ready and has_prompt) else
+                "✅ Export AI video from prompt" if (ai_ready and has_prompt) else
+                "🛡 Video AI chưa mở" if is_vi else
+                "🛡 AI video not ready",
+                callback_data="vfinal|export_ai" if (ai_ready and has_prompt) else "vfinal|ai_guard",
+            ),
         ]
         second_row = [
             InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
@@ -72494,12 +72599,18 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
         ]
     elif has_prompt:
         first_row = [
-            InlineKeyboardButton("✅ Xuất video từ prompt" if is_vi else "✅ Export video from prompt", callback_data="vfinal|export_ai"),
-            InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=video_finalization_source_keyframe_callback(state)),
+            InlineKeyboardButton(
+                "✅ Xuất video AI từ prompt" if (is_vi and ai_ready) else
+                "✅ Export AI video from prompt" if ai_ready else
+                "🛡 Video AI chưa mở" if is_vi else
+                "🛡 AI video not ready",
+                callback_data="vfinal|export_ai" if ai_ready else "vfinal|ai_guard",
+            ),
+            InlineKeyboardButton("📋 Copy prompt" if is_vi else "📋 Copy prompt", callback_data="vfinal|copy_prompt"),
         ]
         second_row = [
+            InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=video_finalization_source_keyframe_callback(state)),
             InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
-            InlineKeyboardButton("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", callback_data="vfinal|save"),
         ]
     else:
         first_row = [
@@ -72508,7 +72619,7 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
         ]
         second_row = [
             InlineKeyboardButton("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", callback_data="vfinal|save"),
-            InlineKeyboardButton("✨ Tạo video AI từ prompt" if is_vi else "✨ Generate AI video from prompt", callback_data="vfinal|export_ai"),
+            InlineKeyboardButton("📋 Xem prompt trước" if is_vi else "📋 Prepare prompt first", callback_data="vfinal|ai_guard"),
         ]
     return InlineKeyboardMarkup([
         first_row,
@@ -72552,15 +72663,62 @@ def video_finalization_ai_guard_text(state: dict | str | None = None, lang: str 
         f"Bot chưa gọi API và chưa trừ Xu.\n\n{next_step}"
     )
 
+def video_finalization_local_guard_text(state: dict | str | None = None, lang: str = "vi") -> str:
+    if isinstance(state, str):
+        lang = state
+        state = {}
+    state = dict(state or {})
+    photo_count = len(developing_video_frame_photos(state))
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎞 <b>Local image-video rendering is not ready.</b>\n\n"
+            f"Current image count: <b>{photo_count}</b>.\n"
+            "The local slideshow path requires at least 2 images and a ready Local Worker/ffmpeg guard. "
+            "TOAN AAS has not rendered anything and has not charged Xu."
+        )
+    return (
+        "🎞 <b>Ghép ảnh thành video local chưa sẵn.</b>\n\n"
+        f"Số ảnh hiện có: <b>{photo_count}</b>.\n"
+        "Nhánh ghép ảnh local cần ít nhất 2 ảnh và Local Worker/ffmpeg sẵn sàng. "
+        "TOAN AAS chưa render, chưa gọi provider và chưa trừ Xu."
+    )
+
+def video_finalization_copy_prompt_text(state: dict | None = None, lang: str = "vi") -> str:
+    prompt = video_finalization_prompt_text(state)
+    if not prompt:
+        return (
+            "📋 Chưa có prompt video để copy. Hãy tạo hoặc sửa prompt trước. Bot chưa gọi API và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "📋 No video prompt is available yet. Create or edit the prompt first. No API call and no Xu charge."
+        )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📋 <b>Video prompt</b>\n\n"
+            f"<code>{html.escape(prompt)}</code>\n\n"
+            "You can copy this prompt manually. No provider was called and no Xu was charged."
+        )
+    return (
+        "📋 <b>Prompt video</b>\n\n"
+        f"<code>{html.escape(prompt)}</code>\n\n"
+        "Bạn có thể copy prompt này thủ công. Bot chưa gọi provider và chưa trừ Xu."
+    )
+
 def video_finalization_guard_keyboard(state: dict | str | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
     if isinstance(state, str):
         lang = state
         state = {}
     state = dict(state or {})
     is_vi = normalize_user_language(lang) == "vi"
+    local_ready = bool(video_finalization_readiness().get("local_frame"))
     if len(developing_video_frame_photos(state)) >= 2:
         first_row = [
-            InlineKeyboardButton("🎞 Xuất video local" if is_vi else "🎞 Export local video", callback_data="vfinal|export_local"),
+            InlineKeyboardButton(
+                "🎞 Xuất video local" if (is_vi and local_ready) else
+                "🎞 Export local video" if local_ready else
+                "🛡 Ghép local chưa sẵn" if is_vi else
+                "🛡 Local render not ready",
+                callback_data="vfinal|export_local" if local_ready else "vfinal|local_guard",
+            ),
             InlineKeyboardButton("🎛 Sửa hoàn thiện" if is_vi else "🎛 Edit finalization", callback_data="vfinal|menu"),
         ]
     else:
@@ -72907,43 +73065,50 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         return await safe_edit_or_send(query, video_finalization_summary_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
     if action == "review":
         return await safe_edit_or_send(query, video_finalization_summary_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
+    if action == "ai_guard":
+        return await safe_edit_or_send(query, video_finalization_ai_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
+    if action == "local_guard":
+        return await safe_edit_or_send(query, video_finalization_local_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
+    if action == "copy_prompt":
+        return await safe_edit_or_send(query, video_finalization_copy_prompt_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
     if action == "strip_addons":
         state["video_finalization"] = video_finalization_defaults()
         state["video_finalization"]["finalization_confirmed"] = True
         set_video_finalization_state(uid, state)
         return await handle_legacy_frame_video_export(query, uid, state.get("source") or "video_finalization", lang, state)
     if action in {"export_local", "export_ai"}:
+        if action == "export_local" and len(developing_video_frame_photos(state)) < 2 and video_finalization_has_prompt(state):
+            action = "export_ai"
+        if action == "export_ai":
+            payload = video_finalization_payload(state)
+            if not payload or (not payload.get("resume_video_addon") and not video_finalization_has_prompt(state)):
+                return await safe_edit_or_send(query, "⚠️ Chưa có prompt/keyframe đủ điều kiện cho Video AI. Bot chưa gọi provider và chưa trừ Xu.", reply_markup=video_finalization_guard_keyboard(state, lang))
+            if not payload.get("resume_video_addon") and not get_video_prompt_export_readiness(is_admin_user(uid)).get("public_ready"):
+                return await safe_edit_or_send(query, video_finalization_ai_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
+        if action == "export_local":
+            local_ready = bool(video_finalization_readiness().get("local_frame"))
+            if not local_ready or len(developing_video_frame_photos(state)) < 2:
+                return await safe_edit_or_send(query, video_finalization_local_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
         if video_finalization_export_lock_active(state):
             return await safe_edit_or_send(query, "TOAN AAS đang xử lý yêu cầu trước đó. Vui lòng chờ, đừng bấm lại nhiều lần nhé.")
         state["export_lock_until"] = time.time() + VIDEO_FINALIZATION_LOCK_SECONDS
         state["video_finalization"]["finalization_confirmed"] = True
         set_video_finalization_state(uid, state)
         if action == "export_local":
-            if len(developing_video_frame_photos(state)) < 2 and video_finalization_has_prompt(state):
-                action = "export_ai"
-            else:
-                result = await handle_legacy_frame_video_export(query, uid, state.get("source") or "video_finalization", lang, state)
-                state = get_video_finalization_state(uid)
-                if state:
-                    state["export_lock_until"] = 0
-                    set_video_finalization_state(uid, state)
-                return result
-        if action == "export_ai":
-            payload = video_finalization_payload(state)
-            if not payload:
+            result = await handle_legacy_frame_video_export(query, uid, state.get("source") or "video_finalization", lang, state)
+            state = get_video_finalization_state(uid)
+            if state:
                 state["export_lock_until"] = 0
                 set_video_finalization_state(uid, state)
-                return await safe_edit_or_send(query, "⚠️ Chưa có prompt/keyframe đủ điều kiện cho Video AI. Bot chưa gọi provider và chưa trừ Xu.", reply_markup=video_finalization_guard_keyboard(state, lang))
+            return result
+        if action == "export_ai":
+            payload = video_finalization_payload(state)
             if payload.get("resume_video_addon"):
                 tier = normalize_video_tier(payload.get("video_tier") or SHOPAIKEY_VIDEO_DEFAULT_TIER)
                 source = str(payload.get("resume_source") or "ai")
                 state["export_lock_until"] = 0
                 set_video_finalization_state(uid, state)
                 return await start_video_addon_step(query, uid, payload, tier, lang, source=source)
-            if not is_ai_video_ready():
-                state["export_lock_until"] = 0
-                set_video_finalization_state(uid, state)
-                return await safe_edit_or_send(query, video_finalization_ai_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
             set_public_video_package_context(uid, payload)
             state["export_lock_until"] = 0
             set_video_finalization_state(uid, state)

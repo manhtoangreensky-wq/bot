@@ -130,7 +130,19 @@ def test_video_finalization_summary_and_guard_are_explicit(monkeypatch):
     assert "chưa trừ Xu" in guard
 
 
-def test_video_finalization_summary_routes_prompt_without_images_to_ai_or_keyframe():
+def test_video_finalization_summary_hides_prompt_export_when_ai_not_ready(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "get_video_prompt_export_readiness",
+        lambda user_is_admin=False: {
+            "public_ready": False,
+            "admin_ready": False,
+            "ready": False,
+            "missing_public": ["VIDEO_AI_PUBLIC_ENABLED=false"],
+            "missing_admin": ["admin required"],
+            "reason": "VIDEO_AI_PUBLIC_ENABLED=false",
+        },
+    )
     state = {
         "source": "trend",
         "source_label": "Video theo trend",
@@ -143,7 +155,9 @@ def test_video_finalization_summary_routes_prompt_without_images_to_ai_or_keyfra
 
     callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "vfinal|export_local" not in callbacks
-    assert "vfinal|export_ai" in callbacks
+    assert "vfinal|export_ai" not in callbacks
+    assert "vfinal|ai_guard" in callbacks
+    assert "vfinal|copy_prompt" in callbacks
     assert "trendg|image_step" in callbacks
 
     text = bot.video_finalization_local_needs_images_text(state, "vi")
@@ -156,9 +170,63 @@ def test_video_finalization_summary_routes_prompt_without_images_to_ai_or_keyfra
     assert "vfinal|review" in guard_callbacks
     assert "vfinal|back" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
     assert "vfinal|review" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
+    assert "vfinal|export_ai" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
 
 
-def test_video_finalization_summary_keeps_local_export_when_images_exist():
+def test_video_finalization_summary_shows_prompt_export_only_when_ai_ready(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "get_video_prompt_export_readiness",
+        lambda user_is_admin=False: {
+            "public_ready": True,
+            "admin_ready": False,
+            "ready": True,
+            "missing_public": [],
+            "missing_admin": ["admin required"],
+            "reason": "ready",
+        },
+    )
+    state = {
+        "source": "trend",
+        "source_label": "Video theo trend",
+        "photos": [],
+        "has_script": True,
+        "has_video_prompt": True,
+    }
+    callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
+    assert "vfinal|export_local" not in callbacks
+    assert "vfinal|export_ai" in callbacks
+    assert "vfinal|ai_guard" not in callbacks
+    assert "vfinal|copy_prompt" in callbacks
+
+
+def test_video_finalization_summary_keeps_local_export_when_images_exist(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "video_finalization_readiness",
+        lambda: {
+            "local_frame": True,
+            "music_mux": False,
+            "voice_mux": False,
+            "subtitle_burn": False,
+            "asr": False,
+            "translate": False,
+            "dub": False,
+            "ai_video": True,
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "get_video_prompt_export_readiness",
+        lambda user_is_admin=False: {
+            "public_ready": True,
+            "admin_ready": False,
+            "ready": True,
+            "missing_public": [],
+            "missing_admin": ["admin required"],
+            "reason": "ready",
+        },
+    )
     state = {
         "source": "storyboard",
         "photos": [{"file_id": "photo-1"}, {"file_id": "photo-2"}],
@@ -175,7 +243,18 @@ def test_stale_local_export_without_images_uses_prompt_video_path(monkeypatch):
     user_id = 991209
     bot.clear_video_finalization_state(user_id)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    monkeypatch.setattr(bot, "is_ai_video_ready", lambda: False)
+    monkeypatch.setattr(
+        bot,
+        "get_video_prompt_export_readiness",
+        lambda user_is_admin=False: {
+            "public_ready": False,
+            "admin_ready": False,
+            "ready": False,
+            "missing_public": ["VIDEO_AI_PUBLIC_ENABLED=false"],
+            "missing_admin": ["admin required"],
+            "reason": "VIDEO_AI_PUBLIC_ENABLED=false",
+        },
+    )
     bot.set_video_finalization_state(user_id, {
         "source": "trend",
         "source_label": "Video theo trend",
@@ -209,6 +288,55 @@ def test_stale_local_export_without_images_uses_prompt_video_path(monkeypatch):
     assert "vfinal|back" not in callbacks
 
 
+def test_ready_prompt_export_opens_public_video_tiers(monkeypatch):
+    user_id = 991211
+    bot.clear_video_finalization_state(user_id)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
+    monkeypatch.setattr(
+        bot,
+        "get_video_prompt_export_readiness",
+        lambda user_is_admin=False: {
+            "public_ready": True,
+            "admin_ready": False,
+            "ready": True,
+            "missing_public": [],
+            "missing_admin": ["admin required"],
+            "reason": "ready",
+        },
+    )
+    monkeypatch.setattr(bot, "public_video_tier_selection_text", lambda lang="vi": "CHOOSE_VIDEO_TIER")
+    bot.set_video_finalization_state(user_id, {
+        "source": "trend",
+        "source_label": "Video theo trend",
+        "photos": [],
+        "source_payload": {"video_prompt": "Prompt video ready"},
+        "has_script": True,
+        "has_video_prompt": True,
+    })
+
+    class FakeQuery:
+        data = "vfinal|export_ai"
+        from_user = SimpleNamespace(id=user_id)
+        message = SimpleNamespace(chat_id=user_id)
+        edited = None
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
+            self.edited = {"text": str(text), "parse_mode": parse_mode, "reply_markup": reply_markup}
+            return self.edited
+
+    query = FakeQuery()
+    asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert query.edited is not None
+    assert query.edited["text"] == "CHOOSE_VIDEO_TIER"
+    pending = bot.get_public_video_package_context(user_id)
+    assert pending.get("video_prompt") or pending.get("source_payload", {}).get("video_prompt")
+
+
 def test_local_export_without_prompt_or_images_keeps_image_slideshow_guard(monkeypatch):
     user_id = 991210
     bot.clear_video_finalization_state(user_id)
@@ -238,7 +366,7 @@ def test_local_export_without_prompt_or_images_keeps_image_slideshow_guard(monke
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert "Ghép ảnh thành video cần có ảnh trước" in query.edited["text"]
+    assert "Ghép ảnh thành video local chưa sẵn" in query.edited["text"]
     callbacks = _callbacks(query.edited["reply_markup"])
     assert "vfinal|review" in callbacks
     assert "vfinal|back" not in callbacks
