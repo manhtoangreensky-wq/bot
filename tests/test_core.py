@@ -4959,6 +4959,62 @@ def test_video_beta_open_200_requires_explicit_loss_override(monkeypatch):
     assert settings["video_beta_tier_200_enabled"] == "true"
 
 
+def test_video_beta_open_response_and_status_show_200_marketing_loss(monkeypatch):
+    settings = {
+        "video_public_beta_enabled": "true",
+        "video_ai_public_enabled": "true",
+        "video_ai_master_enabled": "true",
+        "shopaikey_public_video_enabled": "true",
+        "video_public_allowed_tiers": "low,basic,common",
+        "video_beta_200_marketing_loss_enabled": "true",
+    }
+    monkeypatch.setattr(bot, "get_system_setting", lambda key, default="": settings.get(key, default))
+    monkeypatch.setattr(bot, "current_system_mode", lambda: {"maintenance_mode": False, "payment_freeze": False, "tool_freeze": False, "provider_freeze": False})
+    monkeypatch.setattr(bot, "provider_freeze_runtime_on", lambda provider="": False)
+    monkeypatch.setattr(bot, "shopaikey_video_status_snapshot", lambda: {"status": "SUCCESS", "detail": "output_sent=yes", "model": "veo3.1-fast", "tested_at": "now"})
+    monkeypatch.setattr(bot, "video_gate_tool_status", lambda _tool: "PASS")
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": True})
+    monkeypatch.setattr(bot, "frame_video_status_payload", lambda: {"local_worker_connected": True, "ffmpeg_configured": True, "last_error": ""})
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_URL", "https://provider.test/video")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
+    monkeypatch.setattr(bot, "VIDEO_LOW_PROVIDER_COST_XU", 600)
+    monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 200)
+    monkeypatch.setattr(bot, "VIDEO_BASIC_PROVIDER_COST_XU", 150)
+    monkeypatch.setattr(bot, "VIDEO_COMMON_PROVIDER_COST_XU", 200)
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BLOCK_TIERS", "low,standard,high,premium")
+
+    row = bot.check_video_margin("low")
+    assert row["status"] == "MARKETING_LOSS_ON"
+    assert row["can_open"] is True
+    assert bot.video_public_tier_enabled("low") is True
+
+    text = bot.video_public_status_text()
+    assert "Video Beta 200" in text
+    assert "PUBLIC_MARKETING_LOSS" in text
+    assert "MARKETING_LOSS_ON" in text
+
+    response = bot.video_beta_open_text({"status": "OPENED", "opened_tiers": ["low", "basic", "common"], "blockers": []})
+    assert "200 Xu" in response
+    assert "MARKETING_LOSS" in response
+    assert "giới hạn" in response
+
+
+def test_video_beta_open_allow_loss_aliases_parse():
+    for args in (
+        ["tiers=200,300,400", "allow_loss_200=true"],
+        ["tiers=200,300,400", "allow_loss_200=1"],
+        ["tiers=200,300,400", "allow_loss=true"],
+        ["tiers=200,300,400", "allow_loss"],
+        ["tiers=200,300,400", "marketing_loss_200=true"],
+        ["tiers=200,300,400", "loss_200=true"],
+    ):
+        parsed = bot.video_beta_open_parse_args(args)
+        assert parsed["allow_loss_200"] is True
+    assert bot.video_beta_open_parse_args(["tiers=200", "allow_loss=false"])["allow_loss_200"] is False
+
+
 def test_naptien_does_not_enable_manual_bill_state_by_default():
     source = bot_source_text()
     cmd_naptien_source = source_between(source, "async def cmd_naptien", "async def cmd_thanhtoan_thucong")
@@ -8381,10 +8437,12 @@ def test_video_export_vfinal_addons_and_tier_gate_labels(monkeypatch):
     assert "300 Xu" in tier_text
     assert "400 Xu" in tier_text
     assert "600 Xu" in tier_text
+    assert "1200 Xu" in tier_text
     assert "vfinal|tier|low" in tier_callbacks
     assert "vfinal|tier|basic" in tier_callbacks
     assert "vfinal|tier|common" in tier_callbacks
     assert "vfinal|tier|standard" in tier_callbacks
+    assert "vfinal|tier|high" in tier_callbacks
 
 
 def test_video_export_vfinal_not_ready_hides_fake_maintenance_action(monkeypatch):
@@ -8412,13 +8470,20 @@ def test_video_export_vfinal_not_ready_hides_fake_maintenance_action(monkeypatch
 
 
 def test_video_export_vfinal_ready_uses_confirm_path(monkeypatch):
-    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
-    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
-    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
-    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
-    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_ENABLED", True)
-    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_URL", "https://provider.test/video")
-    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
+    monkeypatch.setattr(bot, "video_tier_enabled_map", lambda: {"low": False, "basic": True, "common": True, "standard": False, "high": False, "premium": False})
+    monkeypatch.setattr(bot, "video_billing_public_gate", lambda: {"ready": True, "allowed_tiers": ["basic", "common"], "blockers": []})
+    monkeypatch.setattr(
+        bot,
+        "get_video_prompt_export_readiness",
+        lambda user_is_admin=False: {
+            "public_ready": True,
+            "admin_ready": False,
+            "ready": True,
+            "missing_public": [],
+            "missing_admin": ["admin required"],
+            "reason": "ready",
+        },
+    )
     state = {
         "source": "trend",
         "source_label": "Video theo trend",
@@ -8428,8 +8493,9 @@ def test_video_export_vfinal_ready_uses_confirm_path(monkeypatch):
         "source_payload": {"video_prompt": "video quảng cáo nước hoa nam"},
         "video_finalization": bot.video_finalization_defaults(),
     }
-    status = bot.get_video_tier_status("low", False)
-    assert status["ready"] is True
+    status = bot.get_public_video_tier_ui_status("basic", False)
+    assert status["enabled"] is True
+    assert bot.get_public_video_tier_ui_status("low", False)["enabled"] is False
     buttons = _button_texts(bot.video_finalization_summary_keyboard(state, "vi"))
     callbacks = _button_callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "✅ Xác nhận xuất video" in buttons
@@ -8441,10 +8507,20 @@ def test_video_export_vfinal_ready_uses_confirm_path(monkeypatch):
 
 def test_video_export_vfinal_600_guard_default_off(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_PUBLIC_600_PLUS_ENABLED", False)
-    status = bot.get_video_tier_status("standard", False)
-    assert status["ready"] is False
+    status = bot.get_public_video_tier_ui_status("standard", False)
+    assert status["enabled"] is False
     assert "600 Xu" in bot.video_finalization_tier_text({}, "vi")
+    assert "1200 Xu" in bot.video_finalization_tier_text({}, "vi")
     assert "giữ lại để kiểm soát chất lượng" in bot.video_finalization_tier_guard_text("standard", "vi")
+
+
+def test_public_video_tier_keyboard_uses_five_beta_gate_buttons():
+    buttons = _button_texts(bot.public_video_tier_keyboard("vi"))
+    callbacks = _button_callbacks(bot.public_video_tier_keyboard("vi"))
+    for label in ("200 Xu", "300 Xu", "400 Xu", "600 Xu", "1200 Xu"):
+        assert label in buttons
+    for tier in ("low", "basic", "common", "standard", "high"):
+        assert f"create_media|video_tier_{tier}" in callbacks
 
 
 def test_video_prompt_result_uses_create_now_and_addons_labels():

@@ -308,7 +308,6 @@ def test_ready_prompt_export_opens_public_video_tiers(monkeypatch):
             "reason": "ready",
         },
     )
-    monkeypatch.setattr(bot, "public_video_tier_selection_text", lambda lang="vi": "CHOOSE_VIDEO_TIER")
     bot.set_video_finalization_state(user_id, {
         "source": "trend",
         "source_label": "Video theo trend",
@@ -335,9 +334,12 @@ def test_ready_prompt_export_opens_public_video_tiers(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert query.edited["text"] == "CHOOSE_VIDEO_TIER"
-    pending = bot.get_public_video_package_context(user_id)
-    assert pending.get("video_prompt") or pending.get("source_payload", {}).get("video_prompt")
+    assert "Chọn gói xuất video AI" in query.edited["text"]
+    callbacks = _callbacks(query.edited["reply_markup"])
+    assert "vfinal|tier|basic" in callbacks
+    assert "vfinal|tier|common" in callbacks
+    pending = bot.get_video_finalization_state(user_id)
+    assert pending.get("source_payload", {}).get("video_prompt") or pending.get("source_payload", {}).get("prompt")
 
 
 def test_local_export_without_prompt_or_images_keeps_image_slideshow_guard(monkeypatch):
