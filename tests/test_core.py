@@ -8249,6 +8249,113 @@ def test_video_system_v9_preview_and_stable_flow_linkage():
     assert "thành phố tương lai" in self_scene
     assert "orbit shot" in self_scene
 
+
+def _button_texts(markup):
+    return [button.text for row in markup.inline_keyboard for button in row]
+
+
+def _button_callbacks(markup):
+    return [button.callback_data for row in markup.inline_keyboard for button in row]
+
+
+def test_video_export_vfinal_addons_and_tier_gate_labels(monkeypatch):
+    state = {
+        "source": "trend",
+        "source_label": "Video theo trend",
+        "has_script": True,
+        "has_video_prompt": True,
+        "session_context": {"video_prompt": "video quảng cáo nước hoa nam, camera push-in, ánh sáng luxury"},
+        "source_payload": {"video_prompt": "video quảng cáo nước hoa nam, camera push-in, ánh sáng luxury"},
+        "video_finalization": bot.video_finalization_defaults(),
+    }
+    menu_text = bot.video_finalization_menu_text(state, "vi")
+    menu_buttons = _button_texts(bot.video_finalization_menu_keyboard("vi"))
+    assert "Thêm tính năng khác" in menu_text
+    assert "Bỏ qua & chọn gói" in menu_buttons
+    assert "Bỏ qua & xuất video" not in menu_buttons
+    assert "Hoàn thiện video" not in menu_text
+
+    tier_text = bot.video_finalization_tier_text(state, "vi")
+    tier_markup = bot.video_finalization_tier_keyboard("vi")
+    tier_callbacks = _button_callbacks(tier_markup)
+    assert "Chọn gói xuất video AI" in tier_text
+    assert "200 Xu" in tier_text
+    assert "300 Xu" in tier_text
+    assert "400 Xu" in tier_text
+    assert "600 Xu" in tier_text
+    assert "vfinal|tier|low" in tier_callbacks
+    assert "vfinal|tier|basic" in tier_callbacks
+    assert "vfinal|tier|common" in tier_callbacks
+    assert "vfinal|tier|standard" in tier_callbacks
+
+
+def test_video_export_vfinal_not_ready_hides_fake_maintenance_action(monkeypatch):
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", False)
+    state = {
+        "source": "trend",
+        "source_label": "Video theo trend",
+        "has_script": True,
+        "has_video_prompt": True,
+        "selected_video_tier": "low",
+        "session_context": {"video_prompt": "video quảng cáo nước hoa nam"},
+        "source_payload": {"video_prompt": "video quảng cáo nước hoa nam"},
+        "video_finalization": bot.video_finalization_defaults(),
+    }
+    text = bot.video_finalization_confirm_not_ready_text(state, "vi")
+    buttons = _button_texts(bot.video_finalization_confirm_not_ready_keyboard(state, "vi"))
+    callbacks = _button_callbacks(bot.video_finalization_confirm_not_ready_keyboard(state, "vi"))
+    assert "Video AI đang bảo trì/nâng cấp" in text
+    assert "✅ Xác nhận xuất video" not in buttons
+    assert "Video AI bảo trì/nâng cấp" not in buttons
+    assert "📋 Copy prompt" in buttons
+    assert "💾 Lưu kế hoạch" in buttons
+    assert "🎛 Thêm tính năng khác" in buttons
+    assert "vfinal|tier" in callbacks
+
+
+def test_video_export_vfinal_ready_uses_confirm_path(monkeypatch):
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_URL", "https://provider.test/video")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "veo3.1-fast")
+    state = {
+        "source": "trend",
+        "source_label": "Video theo trend",
+        "has_script": True,
+        "has_video_prompt": True,
+        "session_context": {"video_prompt": "video quảng cáo nước hoa nam"},
+        "source_payload": {"video_prompt": "video quảng cáo nước hoa nam"},
+        "video_finalization": bot.video_finalization_defaults(),
+    }
+    status = bot.get_video_tier_status("low", False)
+    assert status["ready"] is True
+    buttons = _button_texts(bot.video_finalization_summary_keyboard(state, "vi"))
+    callbacks = _button_callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
+    assert "✅ Xác nhận xuất video" in buttons
+    assert "📋 Copy prompt" in buttons
+    assert "Video AI bảo trì/nâng cấp" not in buttons
+    assert "vfinal|export_ai" in callbacks
+    assert "vfinal|copy_prompt" in callbacks
+
+
+def test_video_export_vfinal_600_guard_default_off(monkeypatch):
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_600_PLUS_ENABLED", False)
+    status = bot.get_video_tier_status("standard", False)
+    assert status["ready"] is False
+    assert "600 Xu" in bot.video_finalization_tier_text({}, "vi")
+    assert "giữ lại để kiểm soát chất lượng" in bot.video_finalization_tier_guard_text("standard", "vi")
+
+
+def test_video_prompt_result_uses_create_now_and_addons_labels():
+    buttons = _button_texts(bot.trend_guided_selected_video_prompt_keyboard("vi", is_admin=False))
+    assert "🎛 Thêm tính năng khác" in buttons
+    assert "🎬 Tạo video ngay" in buttons
+    assert "🎛 Hoàn thiện video" not in buttons
+    assert "🎬 Tạo video thật" not in buttons
+
     trend_prompt = bot.trend_guided_video_prompt_for_index(
         {
             "topic": "máy xay sinh tố mini",
