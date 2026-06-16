@@ -34406,14 +34406,14 @@ def image_edit_menu_start_text(lang: str = "vi") -> str:
         return (
             "🧩 <b>Edit image</b>\n\n"
             "Send or reply to the image you want to edit.\n\n"
-            "Local crop/resize, text/logo and color presets are available. AI edit has its own guarded flow and will ask for confirmation before any provider call or Xu charge."
+            "Local crop/resize, text/logo, color presets and AI upscale are grouped here. AI image edit is a separate button in the main Image menu.\n\n"
+            "No provider call and no Xu charged on this screen."
         )
     return (
         "🧩 <b>Chỉnh sửa ảnh</b>\n\n"
         "Bạn hãy gửi hoặc reply vào ảnh cần sửa.\n\n"
-        "Sau đó TOAN AAS sẽ cho bạn chọn cách xử lý:\n\n"
-        "• Local/cơ bản: cắt hoặc đổi tỉ lệ, resize pixel, thêm chữ/logo, công thức màu.\n"
-        "• Chỉnh sửa AI: đi qua flow riêng, có gợi ý, xác nhận và guard provider.\n\n"
+        "Sau khi nhận ảnh, TOAN AAS sẽ mở các công cụ: cắt/resize, thêm chữ/logo, công thức màu và nâng chất lượng.\n"
+        "Chỉnh sửa AI là flow riêng ở menu Hình ảnh chính.\n\n"
         "Bot chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu ở màn này."
     )
 
@@ -34421,19 +34421,21 @@ def image_edit_instruction_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "✅ Image received.\n\n"
-            "Choose how you want to process it.\n\n"
-            "• Crop/ratio and pixel resize use local processing.\n"
-            "• Text/logo and color presets reuse the stable local editor.\n"
-            "• AI edit asks for details and confirmation before any provider call.\n\n"
-            "No provider call and no Xu charged."
+            "How do you want to edit it?\n\n"
+            "1. Crop/ratio and pixel resize: local processing.\n"
+            "2. Text/logo and color presets: stable local editor.\n"
+            "3. AI upscale: sharpen/upscale if the provider is available.\n"
+            "4. Custom request: describe what you need and TOAN AAS will guide or move to AI flow if needed.\n\n"
+            "No provider call and no Xu charged until you confirm."
         )
     return (
         "✅ Đã nhận ảnh.\n\n"
         "Bạn muốn chỉnh ảnh theo cách nào?\n\n"
-        "1. Cắt/đổi tỉ lệ và resize pixel: xử lý local.\n"
+        "1. Cắt / đổi tỉ lệ và resize pixel: xử lý local.\n"
         "2. Thêm chữ/logo và công thức màu: dùng editor local đang chạy.\n"
-        "3. Chỉnh sửa AI: hỏi yêu cầu, tạo 3 phương án, xác nhận rồi mới gọi provider nếu sẵn sàng.\n\n"
-        "Bot chưa gọi provider và chưa trừ Xu."
+        "3. Nâng chất lượng AI: làm nét/nâng cấp ảnh nếu provider sẵn sàng.\n"
+        "4. Nhập yêu cầu riêng: mô tả yêu cầu để TOAN AAS hướng dẫn hoặc chuyển sang flow AI nếu cần.\n\n"
+        "Bot chưa gọi provider và chưa trừ Xu nếu bạn chưa xác nhận."
     )
 
 def image_upscale_menu_start_text(lang: str = "vi") -> str:
@@ -34461,21 +34463,21 @@ def image_menu_v5_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🖼 <b>TOAN AAS Image Tools</b>\n\n"
-            "Choose a task below.\n\n"
+            "Choose a task group:\n\n"
             "• Quick image: choose from suggestions or enter a prompt, then select ratio and tier.\n"
             "• Prompt from image: send an image so the bot writes a matching prompt.\n"
-            "• AI edit: edit a real image through a guarded provider flow.\n"
-            "• Local editor: crop/resize, text/logo and color presets.\n\n"
-            "Any real image generation step will ask for confirmation before charging Xu."
+            "• AI edit: edit an image with AI request/confirmation guard.\n"
+            "• Edit image: crop/resize, text/logo, color presets and upscale.\n\n"
+            "All real image create/edit steps ask for confirmation before charging Xu."
         )
     return (
         "🖼 <b>Hình ảnh TOAN AAS</b>\n\n"
-        "Chọn tác vụ bên dưới:\n\n"
-        "• 🖼 <b>Tạo ảnh nhanh</b>: chọn gợi ý hoặc nhập prompt, sau đó chọn tỉ lệ và tier.\n"
-        "• ✍️ <b>Tạo prompt từ ảnh</b>: gửi ảnh để bot viết prompt giống/phù hợp ảnh đó.\n"
-        "• ✨ <b>Chỉnh sửa AI</b>: sửa ảnh thật qua flow có gợi ý, xác nhận và guard provider.\n"
-        "• 🧩 <b>Chỉnh sửa ảnh</b>: crop/resize, công thức màu, thêm chữ/logo bằng local editor.\n\n"
-        "Các bước tạo ảnh thật đều có xác nhận trước khi trừ Xu và hoàn Xu nếu provider lỗi theo policy."
+        "Chọn nhóm tác vụ:\n\n"
+        "• Tạo ảnh nhanh: nhập prompt hoặc chọn gợi ý để tạo ảnh.\n"
+        "• Tạo prompt từ ảnh: gửi ảnh để bot viết prompt phù hợp.\n"
+        "• Chỉnh sửa AI: sửa ảnh bằng AI theo yêu cầu, có xác nhận trước khi xử lý.\n"
+        "• Chỉnh sửa ảnh: crop/resize, thêm chữ/logo, công thức màu và nâng chất lượng.\n\n"
+        "Các bước tạo/chỉnh ảnh thật đều có xác nhận trước khi trừ Xu."
     )
 
 def image_tool_latest_key(user_id, tool: str = "") -> str:
@@ -34956,13 +34958,13 @@ def image_edit_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("✂️ Crop / ratio", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixels", callback_data="imgtool|resize_task|pixels")],
             [InlineKeyboardButton("🔤 Text / logo", callback_data="imgtool|editor_overlays"), InlineKeyboardButton("🎨 Color presets", callback_data="imgtool|editor_presets")],
-            [InlineKeyboardButton("✨ AI edit", callback_data="imgtool|edit_ai_menu"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("✨ AI upscale", callback_data="imgtool|ai_upscale_start"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
             [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✂️ Cắt / đổi tỉ lệ", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixel", callback_data="imgtool|resize_task|pixels")],
         [InlineKeyboardButton("🔤 Thêm chữ / logo", callback_data="imgtool|editor_overlays"), InlineKeyboardButton("🎨 Công thức màu", callback_data="imgtool|editor_presets")],
-        [InlineKeyboardButton("✨ Chỉnh sửa AI", callback_data="imgtool|edit_ai_menu"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
+        [InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|ai_upscale_start"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
         [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -35577,13 +35579,14 @@ def image_resize_choice_text(lang: str = "vi") -> str:
             "✅ <b>Image received.</b>\n\nHow do you want to process it?\n\n"
             "• Crop/ratio and pixel resize use local processing.\n"
             "• Text/logo and color presets reuse the stable local editor.\n"
-            "• AI edit has a separate guarded flow with confirmation before provider calls."
+            "• AI upscale is guarded and asks for confirmation before provider calls."
         )
     return (
         "✅ <b>Đã nhận ảnh.</b>\n\nBạn muốn chỉnh ảnh theo cách nào?\n\n"
         "1. ✂️ Cắt/đổi tỉ lệ hoặc resize pixel — xử lý local.\n"
         "2. 🔤 Thêm chữ/logo hoặc công thức màu — dùng editor local đang chạy.\n"
-        "3. ✨ Chỉnh sửa AI — có gợi ý, xác nhận và guard provider trước khi trừ Xu."
+        "3. ✨ Nâng chất lượng AI — làm nét/nâng cấp ảnh nếu provider sẵn sàng.\n"
+        "4. ✍️ Nhập yêu cầu riêng — TOAN AAS hướng dẫn hoặc chuyển sang flow AI nếu cần."
     )
 
 def image_resize_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -35591,13 +35594,13 @@ def image_resize_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("✂️ Crop / ratio", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixels", callback_data="imgtool|resize_task|pixels")],
             [InlineKeyboardButton("🔤 Text / logo", callback_data="imgtool|editor_overlays"), InlineKeyboardButton("🎨 Color presets", callback_data="imgtool|editor_presets")],
-            [InlineKeyboardButton("✨ AI edit", callback_data="imgtool|edit_ai_menu"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("✨ AI upscale", callback_data="imgtool|ai_upscale_start"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
             [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✂️ Cắt / đổi tỉ lệ", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixel", callback_data="imgtool|resize_task|pixels")],
         [InlineKeyboardButton("🔤 Thêm chữ / logo", callback_data="imgtool|editor_overlays"), InlineKeyboardButton("🎨 Công thức màu", callback_data="imgtool|editor_presets")],
-        [InlineKeyboardButton("✨ Chỉnh sửa AI", callback_data="imgtool|edit_ai_menu"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
+        [InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|ai_upscale_start"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
         [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -35931,9 +35934,9 @@ def image_editor_action_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("✂️ Cắt / Đổi tỉ lệ" if is_vi else "✂️ Crop / resize", "imgtool|editor_resize"),
         ("🔠 Thêm chữ / logo" if is_vi else "🔠 Text / logo", "imgtool|editor_overlays"),
         ("🖼 Làm nét cơ bản" if is_vi else "🖼 Basic sharpen", "imgtool|editor_upscale"),
-        ("✨ Chỉnh sửa AI" if is_vi else "✨ AI edit", "imgtool|edit_ai_menu"),
+        ("✍️ Nhập yêu cầu riêng" if is_vi else "✍️ Custom request", "imgtool|edit_type_custom"),
     ]
-    return build_2col_keyboard(buttons, nav_back=("⬅️ Về menu ảnh" if is_vi else "⬅️ Image menu", "menu|main_image"), lang=lang)
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Chỉnh sửa ảnh" if is_vi else "⬅️ Edit tools", "imgtool|edit_back_choice"), lang=lang)
 
 
 def image_editor_preset_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -35946,7 +35949,7 @@ def image_editor_preset_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("🍜 Ẩm thực nổi bật" if is_vi else "🍜 Vivid food", "imgtool|editor_preset|food_vivid"),
         ("🎚 Tùy chỉnh thông số" if is_vi else "🎚 Custom settings", "imgtool|editor_custom"),
     ]
-    return build_2col_keyboard(buttons, nav_back=(ui_text(lang, "common.back"), "menu|main_image"), lang=lang)
+    return build_2col_keyboard(buttons, nav_back=(ui_text(lang, "common.back"), "imgtool|edit_back_choice"), lang=lang)
 
 
 def image_editor_overlay_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -35956,7 +35959,7 @@ def image_editor_overlay_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🔠 Thêm chữ / watermark" if is_vi else "🔠 Add text / watermark", "imgtool|editor_text"),
             ("🖼 Thêm logo" if is_vi else "🖼 Add logo", "imgtool|editor_logo"),
         ],
-        nav_back=(ui_text(lang, "common.back"), "menu|main_image"),
+        nav_back=(ui_text(lang, "common.back"), "imgtool|edit_back_choice"),
         lang=lang,
     )
 
@@ -41741,12 +41744,8 @@ def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("✍️ Tạo prompt từ ảnh" if is_vi else "✍️ Prompt from image", "menu|image_prompt_start"),
         ("✨ Chỉnh sửa AI" if is_vi else "✨ AI edit", "imgtool|edit_ai_start"),
         ("🧩 Chỉnh sửa ảnh" if is_vi else "🧩 Edit image", "menu|image_edit_start"),
-        ("🎨 Công thức màu" if is_vi else "🎨 Color presets", "imgtool|editor_start|preset"),
-        ("✂️ Cắt / Đổi tỉ lệ ảnh" if is_vi else "✂️ Crop / resize", "menu|image_edit_start"),
-        ("🔠 Thêm chữ / logo" if is_vi else "🔠 Text / logo", "imgtool|editor_start|overlay"),
-        ("✨ Nâng chất lượng AI" if is_vi else "✨ AI enhance", "imgtool|ai_upscale_start"),
     ]
-    back = ("🔙 Quay lại", "menu|main") if is_vi else ("🔙 Back", "menu|main")
+    back = ("⬅️ Quay lại", "menu|main") if is_vi else ("⬅️ Back", "menu|main")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def main_audio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:

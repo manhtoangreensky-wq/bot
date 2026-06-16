@@ -2374,8 +2374,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "✍️ Tạo prompt từ ảnh" in image_labels
     assert "✨ Chỉnh sửa AI" in image_labels
     assert "🧩 Chỉnh sửa ảnh" in image_labels
-    assert "🔠 Thêm chữ / logo" in image_labels
-    assert "✨ Nâng chất lượng AI" in image_labels
+    assert "🎨 Công thức màu" not in image_labels
+    assert "✂️ Cắt / Đổi tỉ lệ ảnh" not in image_labels
+    assert "🔠 Thêm chữ / logo" not in image_labels
+    assert "✨ Nâng chất lượng AI" not in image_labels
     assert "🖼 Làm nét / nâng chất lượng ảnh" not in image_labels
     assert "📐 Nâng cấp / đổi kích thước" not in image_labels
     assert "🧩 Sửa ảnh / edit ảnh" not in image_labels
@@ -2426,8 +2428,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "📐 Resize pixel" in edit_choice_labels
     assert "🔤 Thêm chữ / logo" in edit_choice_labels
     assert "🎨 Công thức màu" in edit_choice_labels
-    assert "✨ Chỉnh sửa AI" in edit_choice_labels
-    assert "✨ Nâng chất lượng AI" not in edit_choice_labels
+    assert "✨ Chỉnh sửa AI" not in edit_choice_labels
+    assert "✨ Nâng chất lượng AI" in edit_choice_labels
+    assert "✍️ Nhập yêu cầu riêng" in edit_choice_labels
     assert "🎬 Chuẩn bị ảnh cho video" not in edit_choice_labels
     assert bot.image_edit_suggestions("background_color") == ["Nền trắng studio sạch đẹp", "Luxury showroom", "Đổi tông màu nhưng giữ sản phẩm"]
     edit_prompt = bot.image_edit_prompt_text({"edit_type": "background_color", "edit_request": "Luxury showroom"})
@@ -2441,8 +2444,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "📐 Resize pixel" in resize_choice_labels
     assert "🔤 Thêm chữ / logo" in resize_choice_labels
     assert "🎨 Công thức màu" in resize_choice_labels
-    assert "✨ Chỉnh sửa AI" in resize_choice_labels
-    assert "✨ Nâng chất lượng AI" not in resize_choice_labels
+    assert "✨ Chỉnh sửa AI" not in resize_choice_labels
+    assert "✨ Nâng chất lượng AI" in resize_choice_labels
+    assert "✍️ Nhập yêu cầu riêng" in resize_choice_labels
     assert "🎬 Chuẩn bị ảnh cho video" not in resize_choice_labels
     resize_method_labels = [button.text for row in bot.image_resize_method_keyboard("vi").inline_keyboard for button in row]
     assert resize_method_labels[0] == "🌫 Nền mờ, không cắt chủ thể"
@@ -8007,8 +8011,9 @@ def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
     assert "📐 Resize pixel" in resize_labels
     assert "🔤 Thêm chữ / logo" in resize_labels
     assert "🎨 Công thức màu" in resize_labels
-    assert "✨ Chỉnh sửa AI" in resize_labels
-    assert "✨ Nâng chất lượng AI" not in resize_labels
+    assert "✨ Chỉnh sửa AI" not in resize_labels
+    assert "✨ Nâng chất lượng AI" in resize_labels
+    assert "✍️ Nhập yêu cầu riêng" in resize_labels
     assert "🎬 Chuẩn bị ảnh cho video" not in resize_labels
     assert "✨ Biến đổi tỉ lệ bằng AI" not in resize_labels
     method_labels = [
@@ -9156,12 +9161,38 @@ def test_image_enhance_menu():
     labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
     assert "✨ Chỉnh sửa AI" in labels
     assert "🧩 Chỉnh sửa ảnh" in labels
-    assert "🎨 Công thức màu" in labels
-    assert "✂️ Cắt / Đổi tỉ lệ ảnh" in labels
-    assert "🔠 Thêm chữ / logo" in labels
-    assert "✨ Nâng chất lượng AI" in labels
+    assert "🎨 Công thức màu" not in labels
+    assert "✂️ Cắt / Đổi tỉ lệ ảnh" not in labels
+    assert "🔠 Thêm chữ / logo" not in labels
+    assert "✨ Nâng chất lượng AI" not in labels
     assert "🪄 Chỉnh ảnh tự động" not in labels
     assert "🖼 Làm nét / nâng chất lượng ảnh" not in labels
+
+
+def test_image_menu_structure_v2_exact_groups():
+    main_rows = [[button.text for button in row] for row in bot.main_image_keyboard("vi").inline_keyboard]
+    assert main_rows == [
+        ["🖼 Tạo ảnh nhanh", "✍️ Tạo prompt từ ảnh"],
+        ["✨ Chỉnh sửa AI", "🧩 Chỉnh sửa ảnh"],
+        ["⬅️ Quay lại", "🏠 Menu chính"],
+    ]
+
+    edit_rows = [[button.text for button in row] for row in bot.image_edit_choice_keyboard("vi").inline_keyboard]
+    assert edit_rows == [
+        ["✂️ Cắt / đổi tỉ lệ", "📐 Resize pixel"],
+        ["🔤 Thêm chữ / logo", "🎨 Công thức màu"],
+        ["✨ Nâng chất lượng AI", "✍️ Nhập yêu cầu riêng"],
+        ["⬅️ Về menu ảnh", "🏠 Menu chính"],
+    ]
+    assert "✨ Chỉnh sửa AI" not in [label for row in edit_rows for label in row]
+
+    action_callbacks = [button.callback_data for row in bot.image_editor_action_keyboard("vi").inline_keyboard for button in row]
+    preset_callbacks = [button.callback_data for row in bot.image_editor_preset_keyboard("vi").inline_keyboard for button in row]
+    overlay_callbacks = [button.callback_data for row in bot.image_editor_overlay_keyboard("vi").inline_keyboard for button in row]
+    assert "imgtool|edit_ai_menu" not in action_callbacks
+    assert "imgtool|edit_back_choice" in action_callbacks
+    assert "imgtool|edit_back_choice" in preset_callbacks
+    assert "imgtool|edit_back_choice" in overlay_callbacks
 
 
 def test_image_enhance_preview():
