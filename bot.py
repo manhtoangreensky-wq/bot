@@ -1171,10 +1171,18 @@ VIDEO_ANALYZE_ENABLED = env_flag("VIDEO_ANALYZE_ENABLED", "true")
 VIDEO_ANALYZE_MAX_SECONDS = max(5, env_int("VIDEO_ANALYZE_MAX_SECONDS", 60))
 VIDEO_ANALYZE_MAX_FRAMES = max(3, env_int("VIDEO_ANALYZE_MAX_FRAMES", 12))
 VIDEO_AI_PUBLIC_ENABLED = env_flag("VIDEO_AI_PUBLIC_ENABLED", "false")
+VIDEO_AI_MASTER_ENABLED = env_flag("VIDEO_AI_MASTER_ENABLED", "true" if VIDEO_AI_PUBLIC_ENABLED else "false")
+VIDEO_PLANNING_PUBLIC_ENABLED = env_flag("VIDEO_PLANNING_PUBLIC_ENABLED", "true")
+VIDEO_TREND_CONTENT_PUBLIC_ENABLED = env_flag("VIDEO_TREND_CONTENT_PUBLIC_ENABLED", "true")
+VIDEO_STORYBOARD_PUBLIC_ENABLED = env_flag("VIDEO_STORYBOARD_PUBLIC_ENABLED", "true")
+VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED = env_flag("VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED", "true" if VIDEO_AI_PUBLIC_ENABLED else "false")
 VIDEO_IMAGE_TO_VIDEO_ENABLED = env_flag("VIDEO_IMAGE_TO_VIDEO_ENABLED", "false")
 VIDEO_VIDEO_TO_VIDEO_ENABLED = env_flag("VIDEO_VIDEO_TO_VIDEO_ENABLED", "false")
 VIDEO_LONG_RENDER_ENABLED = env_flag("VIDEO_LONG_RENDER_ENABLED", "false")
 VIDEO_TREND_RENDER_ENABLED = env_flag("VIDEO_TREND_RENDER_ENABLED", "false")
+VIDEO_PUBLIC_MAX_DURATION_SECONDS = max(1, env_int("VIDEO_PUBLIC_MAX_DURATION_SECONDS", 8))
+VIDEO_PUBLIC_ALLOWED_TIERS = _env("VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common")
+VIDEO_PREMIUM_PUBLIC_ENABLED = env_flag("VIDEO_PREMIUM_PUBLIC_ENABLED", "false")
 VIDEO_SAMPLE_MAX_SECONDS = max(60, env_int("VIDEO_SAMPLE_MAX_SECONDS", 600))
 VIDEO_SAMPLE_MAX_MB = max(1, env_int("VIDEO_SAMPLE_MAX_MB", 100))
 VIDEO_PROVIDER_RENDER_MAX_SECONDS = max(1, env_int("VIDEO_PROVIDER_RENDER_MAX_SECONDS", 60))
@@ -51441,6 +51449,415 @@ async def cmd_free_hub_prompt_test(update: Update, context: ContextTypes.DEFAULT
         reply_markup=free_hub_result_keyboard(get_user_language(update.effective_user.id) or "vi", "meta_ai_prompt", meta=True),
     )
 
+def video_public_bool_label(value) -> str:
+    return "ON" if bool(value) else "OFF"
+
+def video_public_allowed_tiers() -> list[str]:
+    allowed = []
+    for tier in str(VIDEO_PUBLIC_ALLOWED_TIERS or "low,basic,common").split(","):
+        tier = normalize_video_tier(tier.strip())
+        if tier and tier not in allowed:
+            allowed.append(tier)
+    return allowed or ["low", "basic", "common"]
+
+def video_gate_tool_status(tool_name: str) -> str:
+    return str((preferred_tool_test_result(tool_name) or {}).get("status") or "NOT_TESTED").upper()
+
+def video_gate_detail_has_output(detail: str = "") -> bool:
+    text = str(detail or "").lower()
+    return any(marker in text for marker in (
+        "output_sent=yes",
+        "output sent yes",
+        "output_sent=true",
+        "result_url",
+        "video_url",
+        "output_url",
+        "sent_video=yes",
+        "send_video=ok",
+    ))
+
+def video_ai_provider_smoke_gate() -> dict:
+    snap = shopaikey_video_status_snapshot()
+    status = str(snap.get("status") or "NOT_TESTED").upper()
+    detail = str(snap.get("detail") or "")
+    success_status = status in {"PASS", "SUCCESS", "COMPLETED", "DONE", "SUCCEEDED", "LIVE_PASS"}
+    submitted_only = status in {"PASS_SUBMITTED", "SUBMITTED", "IN_PROGRESS", "PROCESSING", "RUNNING", "QUEUED", "PENDING"}
+    has_output = bool(video_gate_detail_has_output(detail))
+    blockers = []
+    if not success_status:
+        if submitted_only:
+            blockers.append(f"Last video smoke still not completed: {status}")
+        elif status == "TIMEOUT_STALE":
+            blockers.append("Last video smoke: TIMEOUT_STALE")
+        else:
+            blockers.append(f"Last video smoke: {status}")
+    if success_status and not has_output:
+        blockers.append("Provider output/result_url and Telegram output_sent not confirmed")
+    if provider_freeze_runtime_on("shopaikey_video"):
+        blockers.append("Provider/video freeze is active")
+    if not SHOPAIKEY_ENABLED:
+        blockers.append("SHOPAIKEY_ENABLED=false")
+    if not SHOPAIKEY_API_KEY:
+        blockers.append("SHOPAIKEY_API_KEY missing")
+    if not SHOPAIKEY_VIDEO_ENABLED:
+        blockers.append("SHOPAIKEY_VIDEO_ENABLED=false")
+    if not SHOPAIKEY_VIDEO_URL:
+        blockers.append("SHOPAIKEY_VIDEO_URL missing")
+    return {
+        "ready": not blockers,
+        "status": status,
+        "detail": detail,
+        "model": snap.get("model") or SHOPAIKEY_VIDEO_MODEL,
+        "tested_at": snap.get("tested_at") or "",
+        "has_output": has_output,
+        "blockers": blockers,
+    }
+
+def frame_video_public_gate() -> dict:
+    frame = frame_video_status_payload()
+    status = video_gate_tool_status("frame_video")
+    blockers = []
+    if not FRAME_VIDEO_ENABLED:
+        blockers.append("FRAME_VIDEO_ENABLED=false")
+    if not frame.get("local_worker_connected"):
+        blockers.append("Local Worker not connected")
+    if not frame.get("ffmpeg_configured"):
+        blockers.append("ffmpeg missing")
+    if FRAME_VIDEO_DIRECT_RENDER_ENABLED:
+        blockers.append("FRAME_VIDEO_DIRECT_RENDER_ENABLED=true; Railway direct render is not safe")
+    if not FRAME_VIDEO_REQUIRE_LOCAL_WORKER:
+        blockers.append("FRAME_VIDEO_REQUIRE_LOCAL_WORKER=false")
+    if int(FRAME_VIDEO_MAX_CONCURRENT_JOBS or 1) > 1:
+        blockers.append("FRAME_VIDEO_MAX_CONCURRENT_JOBS must be 1")
+    if status != "PASS":
+        blockers.append(f"/tool_test_frame_video status is {status}")
+    if str(frame.get("last_error") or "").strip():
+        blockers.append(f"last frame video error: {str(frame.get('last_error'))[:120]}")
+    return {
+        "ready": not blockers,
+        "status": status,
+        "frame": frame,
+        "blockers": blockers,
+    }
+
+def video_billing_public_gate() -> dict:
+    blockers = []
+    if not VIDEO_PRICING_ENABLED:
+        blockers.append("VIDEO_PRICING_ENABLED=false")
+    if not SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT:
+        blockers.append("SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT=false")
+    if not SHOPAIKEY_REFUND_ON_PROVIDER_FAIL:
+        blockers.append("SHOPAIKEY_REFUND_ON_PROVIDER_FAIL=false")
+    if not SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED:
+        blockers.append("SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED=false")
+    if not SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED:
+        blockers.append("SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED=false")
+    enabled_allowed = [tier for tier in video_public_allowed_tiers() if video_tier_payload(tier).get("enabled")]
+    if not enabled_allowed:
+        blockers.append("No low/basic/common public video tier enabled")
+    if VIDEO_PREMIUM_PUBLIC_ENABLED or (VIDEO_TIER_PREMIUM_ENABLED and not VIDEO_PREMIUM_ADMIN_ONLY):
+        blockers.append("Premium video public must stay OFF")
+    return {
+        "ready": not blockers,
+        "allowed_tiers": enabled_allowed,
+        "blockers": blockers,
+    }
+
+def video_public_status_payload() -> dict:
+    ops = current_system_mode()
+    frame_gate = frame_video_public_gate()
+    ai_gate = video_ai_provider_smoke_gate()
+    billing_gate = video_billing_public_gate()
+    freeze = provider_freeze_display("shopaikey_video")
+    worker = local_worker_status_payload()
+    planning_public = bool(VIDEO_PLANNING_PUBLIC_ENABLED and VIDEO_TREND_CONTENT_PUBLIC_ENABLED and VIDEO_STORYBOARD_PUBLIC_ENABLED)
+    frame_public = bool(FRAME_VIDEO_PUBLIC_ENABLED and frame_gate["ready"])
+    ai_public = bool(VIDEO_AI_PUBLIC_ENABLED and VIDEO_AI_MASTER_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED and ai_gate["ready"] and billing_gate["ready"])
+    return {
+        "ops": ops,
+        "frame_gate": frame_gate,
+        "ai_gate": ai_gate,
+        "billing_gate": billing_gate,
+        "worker": worker,
+        "freeze": freeze,
+        "public_flags": {
+            "VIDEO_PLANNING_PUBLIC_ENABLED": bool(VIDEO_PLANNING_PUBLIC_ENABLED),
+            "VIDEO_TREND_CONTENT_PUBLIC_ENABLED": bool(VIDEO_TREND_CONTENT_PUBLIC_ENABLED),
+            "VIDEO_STORYBOARD_PUBLIC_ENABLED": bool(VIDEO_STORYBOARD_PUBLIC_ENABLED),
+            "SHOPAIKEY_PUBLIC_VIDEO_ENABLED": bool(SHOPAIKEY_PUBLIC_VIDEO_ENABLED),
+            "VIDEO_AI_PUBLIC_ENABLED": bool(VIDEO_AI_PUBLIC_ENABLED),
+            "VIDEO_AI_MASTER_ENABLED": bool(VIDEO_AI_MASTER_ENABLED),
+            "VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED": bool(VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED),
+            "VIDEO_IMAGE_TO_VIDEO_ENABLED": bool(VIDEO_IMAGE_TO_VIDEO_ENABLED),
+            "VIDEO_VIDEO_TO_VIDEO_ENABLED": bool(VIDEO_VIDEO_TO_VIDEO_ENABLED),
+            "VIDEO_LONG_RENDER_ENABLED": bool(VIDEO_LONG_RENDER_ENABLED),
+            "VIDEO_TREND_RENDER_ENABLED": bool(VIDEO_TREND_RENDER_ENABLED),
+            "FRAME_VIDEO_PUBLIC_ENABLED": bool(FRAME_VIDEO_PUBLIC_ENABLED),
+            "LOCAL_WORKER_ENABLED": bool(LOCAL_WORKER_ENABLED),
+        },
+        "conclusion": {
+            "planning_video": "PUBLIC" if planning_public else "OFF",
+            "trend_content": "PUBLIC" if VIDEO_TREND_CONTENT_PUBLIC_ENABLED else "OFF",
+            "storyboard": "PUBLIC" if VIDEO_STORYBOARD_PUBLIC_ENABLED else "OFF",
+            "frame_video_local": "PUBLIC" if frame_public else ("GUARDED" if FRAME_VIDEO_PUBLIC_ENABLED else "OFF"),
+            "video_ai_from_prompt": "PUBLIC" if ai_public else ("ADMIN_ONLY" if ai_gate.get("status") in {"PASS_SUBMITTED", "SUCCESS", "PASS", "COMPLETED"} else "OFF"),
+            "video_ai_realistic": "PUBLIC" if ai_public else "ADMIN_ONLY",
+            "image_to_video": "OFF",
+            "video_to_video": "OFF",
+            "long_render": "OFF",
+        },
+    }
+
+def video_public_status_text() -> str:
+    payload = video_public_status_payload()
+    flags = payload["public_flags"]
+    frame = payload["frame_gate"]["frame"]
+    ai_gate = payload["ai_gate"]
+    billing = payload["billing_gate"]
+    ops = payload["ops"]
+    freeze = payload["freeze"]
+    conclusion = payload["conclusion"]
+    lines = [
+        "🎬 <b>VIDEO PUBLIC STATUS</b>",
+        "",
+        "<b>Public flags</b>",
+        f"• Maintenance: <code>{video_public_bool_label(ops.get('maintenance_mode'))}</code>",
+        f"• payment_freeze: <code>{video_public_bool_label(ops.get('payment_freeze'))}</code>",
+        f"• tool_freeze: <code>{video_public_bool_label(ops.get('tool_freeze'))}</code>",
+        f"• provider_freeze: <code>{video_public_bool_label(ops.get('provider_freeze'))}</code>",
+        f"• video_freeze: <code>{video_public_bool_label(freeze.get('frozen'))}</code>",
+    ]
+    for key in (
+        "VIDEO_AI_PUBLIC_ENABLED",
+        "VIDEO_AI_MASTER_ENABLED",
+        "SHOPAIKEY_PUBLIC_VIDEO_ENABLED",
+        "VIDEO_IMAGE_TO_VIDEO_ENABLED",
+        "VIDEO_VIDEO_TO_VIDEO_ENABLED",
+        "VIDEO_LONG_RENDER_ENABLED",
+        "VIDEO_TREND_RENDER_ENABLED",
+        "FRAME_VIDEO_PUBLIC_ENABLED",
+        "LOCAL_WORKER_ENABLED",
+    ):
+        lines.append(f"• {key}: <code>{video_public_bool_label(flags.get(key))}</code>")
+    lines.extend([
+        "",
+        "<b>Provider</b>",
+        f"• ShopAIKey enabled: <code>{video_public_bool_label(SHOPAIKEY_ENABLED)}</code>",
+        f"• ShopAIKey base URL: <code>{'configured' if SHOPAIKEY_BASE_URL else 'missing'}</code>",
+        f"• Video model: <code>{html.escape(str(SHOPAIKEY_VIDEO_MODEL or '-'))}</code>",
+        f"• Video endpoint: <code>{'configured' if SHOPAIKEY_VIDEO_URL else 'missing'}</code>",
+        f"• Status endpoint: <code>{'configured' if SHOPAIKEY_VIDEO_STATUS_ENDPOINT else 'default/by task_id'}</code>",
+        f"• Last video smoke: <code>{html.escape(str(ai_gate.get('status') or '-'))}</code>",
+        f"• Last video task status: <code>{html.escape(shopaikey_video_status_text())}</code>",
+        f"• Last video output: <code>{'confirmed' if ai_gate.get('has_output') else 'not_confirmed'}</code>",
+        f"• Last error: <code>{html.escape('; '.join(ai_gate.get('blockers') or []) or '-')}</code>",
+        "",
+        "<b>Local Worker</b>",
+        f"• connected: <code>{video_public_bool_label(frame.get('local_worker_connected'))}</code>",
+        f"• ffmpeg configured: <code>{video_public_bool_label(frame.get('ffmpeg_configured'))}</code>",
+        f"• frame video tested: <code>{html.escape(str(payload['frame_gate'].get('status') or '-'))}</code>",
+        f"• last frame video error: <code>{html.escape(str(frame.get('last_error') or '-'))}</code>",
+        "",
+        "<b>Billing safety</b>",
+        f"• confirm before deduct: <code>{video_public_bool_label(SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT)}</code>",
+        f"• refund on provider fail: <code>{video_public_bool_label(SHOPAIKEY_REFUND_ON_PROVIDER_FAIL)}</code>",
+        f"• job lock: <code>{video_public_bool_label(SHOPAIKEY_PUBLIC_JOB_LOCK_ENABLED and SHOPAIKEY_VIDEO_JOB_LOCK_ENABLED)}</code>",
+        f"• pricing source: <code>tiered_media_pricing</code>",
+        f"• allowed public tiers: <code>{html.escape(', '.join(billing.get('allowed_tiers') or video_public_allowed_tiers()))}</code>",
+        "",
+        "<b>Conclusion</b>",
+    ])
+    for key, value in conclusion.items():
+        lines.append(f"• {html.escape(key.replace('_', ' ').title())}: <code>{html.escape(str(value))}</code>")
+    return "\n".join(lines)
+
+VIDEO_GATE_FEATURES = [
+    ("Video menu", "tier_a", "video_menu"),
+    ("Video trend content", "tier_a", "trend_content"),
+    ("Storyboard + Prompt điện ảnh", "tier_a", "storyboard"),
+    ("Prompt / Chuyển động", "tier_a", "prompt_motion"),
+    ("Video mẫu / Kênh mẫu", "tier_a", "reference_video"),
+    ("Ghép ảnh thành video local", "tier_b", "frame_video"),
+    ("Video AI từ prompt", "tier_c", "text_to_video"),
+    ("Video AI chân thật", "tier_c", "real_ai_video"),
+    ("Image-to-video", "tier_d", "image_to_video"),
+    ("Video-to-video/self-scene", "tier_d", "video_to_video"),
+    ("Video dài", "tier_d", "long_render"),
+    ("Dịch/Lồng tiếng video", "tier_d", "subtitle_dub"),
+]
+
+def video_gate_matrix_rows() -> list[dict]:
+    payload = video_public_status_payload()
+    ops = payload["ops"]
+    frame_ready = bool(payload["frame_gate"]["ready"])
+    ai_ready = bool(payload["ai_gate"]["ready"] and payload["billing_gate"]["ready"])
+    system_guarded = bool(ops.get("maintenance_mode") or ops.get("tool_freeze") or ops.get("provider_freeze"))
+    rows = []
+    for feature, tier, key in VIDEO_GATE_FEATURES:
+        if tier == "tier_a":
+            final = "GUARDED" if system_guarded else ("READY_PUBLIC" if VIDEO_PLANNING_PUBLIC_ENABLED else "KEEP_OFF")
+            provider = "N/A"
+            worker = "N/A"
+            output = "prompt/plan"
+            billing = "NO_CHARGE"
+        elif tier == "tier_b":
+            final = "READY_PUBLIC" if frame_ready else "GUARDED"
+            provider = "N/A"
+            worker = "PASS" if frame_ready else "GUARDED"
+            output = "mp4_local" if frame_ready else "blocked"
+            billing = "CONFIRM_REFUND" if payload["billing_gate"]["ready"] else "GUARDED"
+        elif tier == "tier_c":
+            final = "READY_PUBLIC" if (ai_ready and VIDEO_AI_PUBLIC_ENABLED and SHOPAIKEY_PUBLIC_VIDEO_ENABLED) else ("READY_ADMIN_ONLY" if payload["ai_gate"].get("status") == "PASS_SUBMITTED" else "KEEP_OFF")
+            provider = "PASS" if ai_ready else "GUARDED"
+            worker = "N/A"
+            output = "provider_video" if ai_ready else "not_confirmed"
+            billing = "CONFIRM_REFUND" if payload["billing_gate"]["ready"] else "GUARDED"
+        else:
+            final = "KEEP_OFF"
+            provider = "OFF"
+            worker = "N/A"
+            output = "OFF"
+            billing = "NO_CHARGE"
+        rows.append({
+            "feature": feature,
+            "visibility": "ON" if final in {"READY_PUBLIC", "PLANNING_ONLY"} else "GUARDED",
+            "callback": "PASS",
+            "state": "PASS",
+            "provider": provider,
+            "worker": worker,
+            "billing": billing,
+            "output": output,
+            "final": final,
+        })
+    return rows
+
+def video_gate_status_text() -> str:
+    rows = video_gate_matrix_rows()
+    lines = [
+        "🧪 <b>VIDEO GATE STATUS</b>",
+        "",
+        "<code>| Feature | Visibility | Callback | State | Provider | Worker | Billing | Output | Final |</code>",
+        "<code>| --- | --- | --- | --- | --- | --- | --- | --- | --- |</code>",
+    ]
+    for row in rows:
+        lines.append(
+            "<code>| "
+            + " | ".join(html.escape(str(row.get(key) or "-")) for key in ("feature", "visibility", "callback", "state", "provider", "worker", "billing", "output", "final"))
+            + " |</code>"
+        )
+    payload = video_public_status_payload()
+    blockers = []
+    blockers.extend(payload["frame_gate"].get("blockers") or [])
+    blockers.extend(payload["ai_gate"].get("blockers") or [])
+    blockers.extend(payload["billing_gate"].get("blockers") or [])
+    if blockers:
+        lines.extend(["", "<b>Blockers</b>"])
+        lines.extend(f"• <code>{html.escape(str(item))}</code>" for item in blockers[:12])
+    return "\n".join(lines)
+
+def video_public_open_safe_result(admin_id) -> dict:
+    global VIDEO_PLANNING_PUBLIC_ENABLED, VIDEO_TREND_CONTENT_PUBLIC_ENABLED, VIDEO_STORYBOARD_PUBLIC_ENABLED
+    global FRAME_VIDEO_PUBLIC_ENABLED, SHOPAIKEY_PUBLIC_VIDEO_ENABLED, VIDEO_AI_PUBLIC_ENABLED, VIDEO_AI_MASTER_ENABLED
+    global VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED, VIDEO_PREMIUM_PUBLIC_ENABLED
+
+    before = video_public_status_payload()
+    opened = []
+    kept_off = []
+    blockers = []
+    system_blockers = []
+
+    if before["ops"].get("maintenance_mode") or before["ops"].get("tool_freeze") or before["ops"].get("provider_freeze"):
+        system_blockers.append("System maintenance/tool/provider freeze is active")
+        blockers.extend(system_blockers)
+
+    # Tier A is content/planning only: no provider call, no Xu.
+    if not system_blockers:
+        VIDEO_PLANNING_PUBLIC_ENABLED = True
+        VIDEO_TREND_CONTENT_PUBLIC_ENABLED = True
+        VIDEO_STORYBOARD_PUBLIC_ENABLED = True
+        opened.extend(["planning_video", "trend_content", "storyboard_prompt"])
+
+    frame_gate = before["frame_gate"]
+    if not system_blockers and frame_gate.get("ready"):
+        FRAME_VIDEO_PUBLIC_ENABLED = True
+        opened.append("frame_video_local")
+    else:
+        kept_off.append("frame_video_local")
+        blockers.extend(frame_gate.get("blockers") or [])
+
+    ai_gate = before["ai_gate"]
+    billing_gate = before["billing_gate"]
+    if not system_blockers and ai_gate.get("ready") and billing_gate.get("ready"):
+        SHOPAIKEY_PUBLIC_VIDEO_ENABLED = True
+        VIDEO_AI_PUBLIC_ENABLED = True
+        VIDEO_AI_MASTER_ENABLED = True
+        VIDEO_TEXT_TO_VIDEO_PUBLIC_ENABLED = True
+        VIDEO_PREMIUM_PUBLIC_ENABLED = False
+        opened.extend(["video_ai_from_prompt_low_tiers", "video_ai_realistic_low_tiers"])
+    else:
+        kept_off.extend(["video_ai_from_prompt", "video_ai_realistic"])
+        blockers.extend(ai_gate.get("blockers") or [])
+        blockers.extend(billing_gate.get("blockers") or [])
+
+    kept_off.extend(["premium_video", "image_to_video", "video_to_video", "long_render", "auto_publish", "ads_assistant"])
+    after = video_public_status_payload()
+    note = "; ".join(dict.fromkeys(str(item) for item in blockers if item))[:1000]
+    set_system_setting("video_public_open_safe_last_at", now_text(), "Safe public video open command", admin_id)
+    set_system_setting("video_public_open_safe_last_result", "OPENED_PARTIAL" if opened and blockers else ("OPENED" if opened else "BLOCKED"), note, admin_id)
+    set_system_setting("video_public_open_safe_last_blockers", note, "Safe public video blockers", admin_id)
+    record_audit_event(admin_id, "admin", "video.public_open_safe", "video_public_gate", "safe_open", before=before.get("conclusion"), after=after.get("conclusion"), note=note or "safe open gate checked")
+    return {
+        "opened": list(dict.fromkeys(opened)),
+        "kept_off": list(dict.fromkeys(kept_off)),
+        "blockers": list(dict.fromkeys(str(item) for item in blockers if item)),
+        "before": before,
+        "after": after,
+    }
+
+def video_public_open_safe_text(result: dict) -> str:
+    blockers = result.get("blockers") or []
+    opened = result.get("opened") or []
+    kept_off = result.get("kept_off") or []
+    lines = ["🛡 <b>VIDEO PUBLIC OPEN SAFE</b>", ""]
+    if blockers:
+        lines.extend([
+            "Không thể mở public Video AI chân thật vì:",
+            *[f"• <code>{html.escape(str(item))}</code>" for item in blockers[:12]],
+            "",
+            "Cần chạy smoke theo thứ tự:",
+            "• <code>/tool_test_frame_video</code> nếu muốn mở ghép ảnh local.",
+            "• <code>/tool_test_shopaikey_video</code> rồi <code>/shopaikey_video_job &lt;task_id&gt;</code> tới khi có output thành công nếu muốn mở Video AI.",
+        ])
+    else:
+        lines.append("Gate pass. Đã bật các tầng đủ điều kiện trong runtime hiện tại.")
+    lines.extend([
+        "",
+        "<b>Opened / confirmed</b>",
+        *(f"• <code>{html.escape(item)}</code>" for item in (opened or ["-"])),
+        "",
+        "<b>Kept OFF</b>",
+        *(f"• <code>{html.escape(item)}</code>" for item in (kept_off or ["-"])),
+        "",
+        "Không gọi provider trong lệnh này. Không trừ Xu.",
+    ])
+    return "\n".join(lines)
+
+async def cmd_video_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(video_public_status_text(), parse_mode="HTML")
+
+async def cmd_video_gate_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(video_gate_status_text(), parse_mode="HTML")
+
+async def cmd_video_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    result = video_public_open_safe_result(update.effective_user.id)
+    await update.message.reply_text(video_public_open_safe_text(result), parse_mode="HTML")
+
 async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -51563,7 +51980,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/tool_test_asr</code> | <code>/tool_test_translate</code> | <code>/tool_test_video_subtitle</code> | <code>/tool_test_video_dub</code> | <code>/tool_test_subtitle_plus_dub</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/video_public_status</code> | <code>/video_gate_status</code> | <code>/video_public_open_safe</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/tool_test_asr</code> | <code>/tool_test_translate</code> | <code>/tool_test_video_subtitle</code> | <code>/tool_test_video_dub</code> | <code>/tool_test_subtitle_plus_dub</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -72596,11 +73013,13 @@ def video_finalization_local_needs_images_text(state: dict | None = None, lang: 
 def video_finalization_local_needs_images_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     keyframe_callback = video_finalization_source_keyframe_callback(state)
+    ai_ready = bool(get_video_prompt_export_readiness(False).get("public_ready"))
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export",
-                callback_data="vfinal|export_ai",
+                ("✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export") if ai_ready
+                else ("🛠 Video AI bảo trì/nâng cấp" if is_vi else "🛠 AI video under maintenance"),
+                callback_data="vfinal|export_ai" if ai_ready else "vfinal|ai_guard",
             ),
             InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=keyframe_callback),
         ],
@@ -72620,6 +73039,7 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
     photos = developing_video_frame_photos(state)
     has_prompt = video_finalization_has_prompt(state)
     readiness = video_finalization_readiness()
+    ai_ready = bool(get_video_prompt_export_readiness(False).get("public_ready"))
     local_ready = bool(readiness.get("local_frame"))
     if len(photos) >= 2:
         first_row = [
@@ -72631,11 +73051,13 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
                 callback_data="vfinal|export_local" if local_ready else "vfinal|local_guard",
             ),
             InlineKeyboardButton(
-                "✅ Xác nhận xuất video" if (is_vi and has_prompt) else
-                "✅ Confirm video export" if has_prompt else
+                "✅ Xác nhận xuất video" if (is_vi and has_prompt and ai_ready) else
+                "✅ Confirm video export" if (has_prompt and ai_ready) else
+                "🛠 Video AI bảo trì/nâng cấp" if (is_vi and has_prompt) else
+                "🛠 AI video under maintenance" if has_prompt else
                 "📋 Xem prompt trước" if is_vi else
                 "📋 Prepare prompt first",
-                callback_data="vfinal|export_ai" if has_prompt else "vfinal|ai_guard",
+                callback_data="vfinal|export_ai" if (has_prompt and ai_ready) else "vfinal|ai_guard",
             ),
         ]
         second_row = [
@@ -72645,8 +73067,9 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
     elif has_prompt:
         first_row = [
             InlineKeyboardButton(
-                "✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export",
-                callback_data="vfinal|export_ai",
+                ("✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export") if ai_ready
+                else ("🛠 Video AI bảo trì/nâng cấp" if is_vi else "🛠 AI video under maintenance"),
+                callback_data="vfinal|export_ai" if ai_ready else "vfinal|ai_guard",
             ),
             InlineKeyboardButton("📋 Copy prompt" if is_vi else "📋 Copy prompt", callback_data="vfinal|copy_prompt"),
         ]
@@ -101353,6 +101776,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
     tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
     tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
+    tg_app.add_handler(CommandHandler("video_public_status", cmd_video_public_status))
+    tg_app.add_handler(CommandHandler("video_gate_status", cmd_video_gate_status))
+    tg_app.add_handler(CommandHandler("video_public_open_safe", cmd_video_public_open_safe))
     tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
     tg_app.add_handler(CommandHandler("dubbing_help", cmd_dubbing_help))
     tg_app.add_handler(CommandHandler("story_video_factory", cmd_story_video_factory))

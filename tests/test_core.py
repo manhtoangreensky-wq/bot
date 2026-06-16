@@ -4725,6 +4725,73 @@ def test_critical_sales_ready_commands_remain_registered():
         assert any(f'CommandHandler("{command}"' in line and handler in line for line in handler_lines), command
 
 
+def test_safe_public_video_activation_commands_registered_and_admin_only():
+    source = bot_source_text()
+    assert 'CommandHandler("video_public_status", cmd_video_public_status)' in source
+    assert 'CommandHandler("video_gate_status", cmd_video_gate_status)' in source
+    assert 'CommandHandler("video_public_open_safe", cmd_video_public_open_safe)' in source
+    assert "async def cmd_video_public_status" in source
+    assert "async def cmd_video_gate_status" in source
+    assert "async def cmd_video_public_open_safe" in source
+    assert source_between(source, "async def cmd_video_public_status", "async def cmd_video_gate_status").count("is_admin_user") >= 1
+    assert source_between(source, "async def cmd_video_gate_status", "async def cmd_video_public_open_safe").count("is_admin_user") >= 1
+
+
+def test_video_public_open_safe_blocks_when_veo_timeout_stale(monkeypatch):
+    monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", False)
+    monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
+    monkeypatch.setattr(bot, "set_system_setting", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        bot,
+        "video_ai_provider_smoke_gate",
+        lambda: {
+            "ready": False,
+            "status": "TIMEOUT_STALE",
+            "detail": "video smoke exceeded configured maximum job age",
+            "model": "veo3.1-fast",
+            "tested_at": "2026-06-16 00:00:00",
+            "has_output": False,
+            "blockers": ["Last video smoke: TIMEOUT_STALE", "Provider output/result_url and Telegram output_sent not confirmed"],
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "frame_video_public_gate",
+        lambda: {
+            "ready": False,
+            "status": "FAIL",
+            "frame": {
+                "local_worker_connected": False,
+                "ffmpeg_configured": False,
+                "last_error": "worker_failed frame_video_render",
+            },
+            "blockers": ["Local Worker not connected", "/tool_test_frame_video status is FAIL"],
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_billing_public_gate",
+        lambda: {"ready": True, "allowed_tiers": ["low", "basic", "common"], "blockers": []},
+    )
+    result = bot.video_public_open_safe_result("admin-test")
+    assert "video_ai_from_prompt" in result["kept_off"]
+    assert "video_ai_realistic" in result["kept_off"]
+    assert any("TIMEOUT_STALE" in item for item in result["blockers"])
+    assert bot.VIDEO_AI_PUBLIC_ENABLED is False
+    assert bot.SHOPAIKEY_PUBLIC_VIDEO_ENABLED is False
+
+
+def test_video_public_status_and_gate_text_do_not_expose_secrets(monkeypatch):
+    status_text = bot.video_public_status_text()
+    gate_text = bot.video_gate_status_text()
+    assert "VIDEO PUBLIC STATUS" in status_text
+    assert "VIDEO GATE STATUS" in gate_text
+    assert "Bearer " not in status_text
+    assert "sk-" not in status_text
+    assert "xoxb-" not in status_text
+
+
 def test_naptien_does_not_enable_manual_bill_state_by_default():
     source = bot_source_text()
     cmd_naptien_source = source_between(source, "async def cmd_naptien", "async def cmd_thanhtoan_thucong")

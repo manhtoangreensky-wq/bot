@@ -130,7 +130,7 @@ def test_video_finalization_summary_and_guard_are_explicit(monkeypatch):
     assert "chưa trừ Xu" in guard
 
 
-def test_video_finalization_summary_keeps_confirm_export_when_ai_not_ready(monkeypatch):
+def test_video_finalization_summary_hides_prompt_export_when_ai_not_ready(monkeypatch):
     monkeypatch.setattr(
         bot,
         "get_video_prompt_export_readiness",
@@ -155,8 +155,8 @@ def test_video_finalization_summary_keeps_confirm_export_when_ai_not_ready(monke
 
     callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "vfinal|export_local" not in callbacks
-    assert "vfinal|export_ai" in callbacks
-    assert "vfinal|ai_guard" not in callbacks
+    assert "vfinal|export_ai" not in callbacks
+    assert "vfinal|ai_guard" in callbacks
     assert "vfinal|copy_prompt" in callbacks
     assert "trendg|image_step" not in callbacks
 
@@ -170,7 +170,8 @@ def test_video_finalization_summary_keeps_confirm_export_when_ai_not_ready(monke
     assert "vfinal|review" in guard_callbacks
     assert "vfinal|back" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
     assert "vfinal|review" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
-    assert "vfinal|export_ai" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
+    assert "vfinal|export_ai" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
+    assert "vfinal|ai_guard" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
 
 
 def test_video_finalization_summary_shows_prompt_export_only_when_ai_ready(monkeypatch):
