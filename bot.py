@@ -421,6 +421,34 @@ SHOPAIKEY_CHAT_MODEL = _env("SHOPAIKEY_CHAT_MODEL") or SHOPAIKEY_DEFAULT_MODEL
 SHOPAIKEY_CHAT_FALLBACK_MODELS = _env("SHOPAIKEY_CHAT_FALLBACK_MODELS", "gpt-4.1-mini,qwen-plus")
 SHOPAIKEY_CHAT_MAX_TOKENS = env_int("SHOPAIKEY_CHAT_MAX_TOKENS", 120)
 SHOPAIKEY_CHAT_TIMEOUT_SECONDS = env_int("SHOPAIKEY_CHAT_TIMEOUT_SECONDS", 30)
+
+# Key4U backup provider candidate. It is admin-smoke only by default and must
+# not replace ShopAIKey/OpenRouter/OpenAI/Gemini unless a later public gate does
+# that explicitly.
+KEY4U_ENABLED = env_flag("KEY4U_ENABLED", "false")
+KEY4U_API_KEY = _env("KEY4U_API_KEY", "")
+KEY4U_BASE_URL = _env("KEY4U_BASE_URL", "https://api.key4u.shop")
+KEY4U_OPENAI_BASE_URL = _env("KEY4U_OPENAI_BASE_URL", "https://api.key4u.shop/v1")
+KEY4U_CHAT_ENDPOINT = _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions")
+KEY4U_IMAGE_EDIT_ENDPOINT = _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits")
+KEY4U_NANO_BANANA_EDIT_ENDPOINT = _env("KEY4U_NANO_BANANA_EDIT_ENDPOINT", "/fal-ai/nano-banana/edit")
+KEY4U_VIDEO_CREATE_ENDPOINT = _env("KEY4U_VIDEO_CREATE_ENDPOINT", "/v1/video/create")
+KEY4U_VIDEO_QUERY_ENDPOINT = _env("KEY4U_VIDEO_QUERY_ENDPOINT", "/v1/video/query")
+KEY4U_CHAT_MODEL = _env("KEY4U_CHAT_MODEL", "")
+KEY4U_VISION_MODEL = _env("KEY4U_VISION_MODEL", "")
+KEY4U_IMAGE_EDIT_MODEL = _env("KEY4U_IMAGE_EDIT_MODEL", "grok-imagine-image-pro")
+KEY4U_NANO_BANANA_EDIT_MODEL = _env("KEY4U_NANO_BANANA_EDIT_MODEL", "nano-banana")
+KEY4U_VIDEO_MODEL = _env("KEY4U_VIDEO_MODEL", "veo3.1-fast")
+KEY4U_PUBLIC_ENABLED = env_flag("KEY4U_PUBLIC_ENABLED", "false")
+KEY4U_ADMIN_SMOKE_ENABLED = env_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true")
+WOKU_ENABLED = env_flag("WOKU_ENABLED", _env("WOKUSHOP_ENABLED", "false"))
+WOKU_PUBLIC_ENABLED = env_flag("WOKU_PUBLIC_ENABLED", _env("WOKUSHOP_PUBLIC_ENABLED", "false"))
+WOKU_ADMIN_SMOKE_ENABLED = env_flag("WOKU_ADMIN_SMOKE_ENABLED", _env("WOKUSHOP_ADMIN_SMOKE_ENABLED", "false"))
+WOKU_REASON = _env("WOKU_REASON", _env("WOKUSHOP_REASON", "cost_high_parked"))
+PROVIDER_ROUTER_ENABLED = env_flag("PROVIDER_ROUTER_ENABLED", "true")
+PROVIDER_FALLBACK_ENABLED = env_flag("PROVIDER_FALLBACK_ENABLED", "false")
+PROVIDER_FALLBACK_ORDER = _env("PROVIDER_FALLBACK_ORDER", "shopaikey,key4u")
+
 FREE_HUB_ENABLED = env_flag("FREE_HUB_ENABLED", "true")
 FREE_PROVIDER_ROUTER_ENABLED = env_flag("FREE_PROVIDER_ROUTER_ENABLED", "true")
 FREE_PROVIDER_ORDER = [
@@ -31889,10 +31917,67 @@ def orchestrator_config_stage(configured: bool, tool_name: str = "", default_sta
         return "live_pass"
     return default_stage
 
+def key4u_provider_instance():
+    from providers.key4u_provider import Key4UConfig, Key4UProvider
+
+    return Key4UProvider(Key4UConfig(
+        enabled=bool(KEY4U_ENABLED),
+        api_key=KEY4U_API_KEY,
+        base_url=KEY4U_BASE_URL,
+        openai_base_url=KEY4U_OPENAI_BASE_URL,
+        public_enabled=bool(KEY4U_PUBLIC_ENABLED),
+        admin_smoke_enabled=bool(KEY4U_ADMIN_SMOKE_ENABLED),
+        chat_endpoint=KEY4U_CHAT_ENDPOINT,
+        image_edit_endpoint=KEY4U_IMAGE_EDIT_ENDPOINT,
+        nano_banana_edit_endpoint=KEY4U_NANO_BANANA_EDIT_ENDPOINT,
+        video_create_endpoint=KEY4U_VIDEO_CREATE_ENDPOINT,
+        video_query_endpoint=KEY4U_VIDEO_QUERY_ENDPOINT,
+        chat_model=KEY4U_CHAT_MODEL,
+        vision_model=KEY4U_VISION_MODEL,
+        image_edit_model=KEY4U_IMAGE_EDIT_MODEL,
+        nano_banana_edit_model=KEY4U_NANO_BANANA_EDIT_MODEL,
+        video_model=KEY4U_VIDEO_MODEL,
+    ))
+
+def key4u_status_payload() -> dict:
+    provider = key4u_provider_instance()
+    status = provider.get_status()
+    status["capabilities"] = provider.list_capabilities()
+    status["stage"] = "disabled" if not KEY4U_ENABLED else orchestrator_config_stage(
+        provider.is_configured(), "key4u_chat", "admin_only"
+    )
+    return status
+
+def woku_provider_status_payload() -> dict:
+    return {
+        "provider": "wokushop",
+        "label": "WokuShop",
+        "enabled": bool(WOKU_ENABLED),
+        "public_enabled": bool(WOKU_PUBLIC_ENABLED),
+        "admin_smoke_enabled": bool(WOKU_ADMIN_SMOKE_ENABLED),
+        "configured": False,
+        "stage": "disabled",
+        "reason": WOKU_REASON or "cost_high_parked",
+    }
+
+def provider_router_fallback_order() -> list[str]:
+    try:
+        from provider_router import provider_fallback_order
+        return provider_fallback_order()
+    except Exception:
+        raw = PROVIDER_FALLBACK_ORDER or "shopaikey,key4u"
+        order = []
+        for item in raw.split(","):
+            key = item.strip().lower()
+            if key and key not in {"woku", "wokushop"} and key not in order:
+                order.append(key)
+        return order or ["shopaikey", "key4u"]
+
 def provider_registry() -> dict:
     local_status = local_worker_status_payload()
     ffmpeg_configured = bool(local_status.get("ffmpeg_path_configured") or local_status.get("connected"))
     shopaikey_configured = bool(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED and SHOPAIKEY_ADMIN_ONLY)
+    key4u_status = key4u_status_payload()
     return {
         "openrouter": {
             "label": "OpenRouter",
@@ -31977,6 +32062,30 @@ def provider_registry() -> dict:
             "timeout_seconds": 30,
             "fallback": [],
             "health": get_tool_test_result("shopaikey"),
+        },
+        "key4u": {
+            "label": "Key4U",
+            "configured": bool(key4u_status.get("configured")),
+            "capabilities": ["text_brain", "vision_analysis", "image_edit", "video_generate"],
+            "stage": key4u_status.get("stage") or "disabled",
+            "admin_only": True,
+            "test_name": "key4u_chat",
+            "cost_guard": "admin_smoke_tests_only; no_public_routing; no_xu_deduction",
+            "timeout_seconds": 30,
+            "fallback": [],
+            "health": preferred_tool_test_result("key4u_chat", "key4u_video", "key4u_image_edit"),
+        },
+        "wokushop": {
+            "label": "WokuShop",
+            "configured": False,
+            "capabilities": [],
+            "stage": "disabled",
+            "admin_only": True,
+            "test_name": "wokushop",
+            "cost_guard": f"parked; reason={WOKU_REASON or 'cost_high'}; no_calls",
+            "timeout_seconds": 0,
+            "fallback": [],
+            "health": {"status": "PARKED", "tested_at": "", "detail": WOKU_REASON or "cost_high_parked"},
         },
     }
 
@@ -39079,10 +39188,13 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
 
 def provider_matrix_lines() -> list[str]:
     registry = provider_registry()
+    fallback_order = provider_router_fallback_order()
     lines = [
         "🧭 <b>TOAN AAS Provider Matrix</b>",
         "",
         "Admin-first only. Không mở public render, không trừ Xu, không hiển thị secret.",
+        f"Router: <code>{'ON' if PROVIDER_ROUTER_ENABLED else 'OFF'}</code> | fallback: <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code> | order <code>{html.escape(', '.join(fallback_order))}</code>",
+        "Primary: <code>ShopAIKey</code> | Backup: <code>Key4U</code> | WokuShop: <code>parked/cost_high</code>",
         "",
     ]
     for name, payload in registry.items():
@@ -40258,6 +40370,8 @@ TOOL_FREEZE_COMMANDS = {
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_chat", "tool_test_shopaikey_tts",
     "tool_test_shopaikey_image", "tool_test_wf_i2v",
     "tool_test_shopaikey_video", "shopaikey_video_job", "tool_test_asr",
+    "key4u_status", "tool_test_key4u_chat", "tool_test_key4u_vision",
+    "tool_test_key4u_image", "tool_test_key4u_image_edit", "tool_test_key4u_video", "key4u_video_job",
     "tool_test_video_subtitle", "tool_test_video_dub", "tool_test_subtitle_plus_dub",
     "subtitle_status", "tool_test_tts_for_dub", "video_dub_public_open", "video_dub_public_close",
     "trial_bonus_status",
@@ -53626,6 +53740,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     provider_freeze_on = provider_freeze_runtime_on("shopaikey")
     package_wallet = package_wallet_status_payload()
     video_pipeline = video_pipeline_status_payload()
+    key4u_payload = key4u_status_payload()
+    woku_payload = woku_provider_status_payload()
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
         cobalt_note = "OK to smoke test"
@@ -53662,6 +53778,14 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Router normal/pro/deep: <code>{'configured' if (providers['ai']['ready'] or shopaikey_public_chat_fallback_enabled()) else 'missing'}</code>",
         f"• AI tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
         "• AI quota guide: <code>Gemini/OpenAI quota/rate limit → fallback ShopAIKey; nếu tất cả fail thì không trừ Xu.</code>",
+        "",
+        "<b>Key4U Backup Provider</b>",
+        f"• Enabled: <code>{'yes' if key4u_payload.get('enabled') else 'no'}</code> | configured <code>{'yes' if key4u_payload.get('configured') else 'no'}</code> | public <code>{'ON' if key4u_payload.get('public_enabled') else 'OFF'}</code> | admin smoke <code>{'ON' if key4u_payload.get('admin_smoke_enabled') else 'OFF'}</code>",
+        f"• Models: chat <code>{html.escape(str(key4u_payload.get('chat_model') or '-'))}</code> | vision <code>{html.escape(str(key4u_payload.get('vision_model') or '-'))}</code> | image edit <code>{html.escape(str(key4u_payload.get('image_edit_model') or '-'))}</code> | nano-banana edit <code>{html.escape(str(key4u_payload.get('nano_banana_edit_model') or '-'))}</code> | video <code>{html.escape(str(key4u_payload.get('video_model') or '-'))}</code>",
+        f"• Provider router: <code>{'ON' if PROVIDER_ROUTER_ENABLED else 'OFF'}</code> | fallback <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code> | order <code>{html.escape(', '.join(provider_router_fallback_order()))}</code>",
+        f"• WokuShop: <code>parked</code> | reason <code>{html.escape(str(woku_payload.get('reason') or 'cost_high_parked'))}</code> | calls <code>disabled</code>",
+        "• Commands: <code>/key4u_status</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/key4u_video_job</code>",
+        "• Rule: <code>admin-only / no Xu / no raw key, prompt, response log</code>",
         "",
         "<b>ShopAIKey / Unified AI Proxy</b>",
         f"• API key: <code>{'configured' if SHOPAIKEY_API_KEY else 'missing'}</code>",
@@ -54298,6 +54422,7 @@ async def cmd_orchestrator_status(update: Update, context: ContextTypes.DEFAULT_
         "• <code>/tool_test_elevenlabs_status</code>",
         "• <code>/tool_test_deepgram_status</code>",
         "• <code>/shopaikey_status</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code>",
+        "• <code>/key4u_status</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/key4u_video_job</code>",
     ])
     await reply_html_lines(update, lines)
 
@@ -54305,6 +54430,179 @@ async def cmd_provider_matrix(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     await reply_html_lines(update, provider_matrix_lines())
+
+def key4u_smoke_detail(result: dict) -> str:
+    return (
+        f"capability={result.get('capability') or '-'}; model={result.get('model') or '-'}; "
+        f"http={result.get('http_status') or 0}; latency_ms={result.get('latency_ms') or 0}; "
+        f"task_id={result.get('task_id') or '-'}; output_url={'yes' if result.get('output_url') else 'no'}; "
+        f"bytes={len(result.get('output_bytes') or b'')}; error_class={result.get('error_class') or '-'}; "
+        f"message={sanitize_log_text(str(result.get('error_message_safe') or '-'))[:220]}"
+    )
+
+def key4u_result_lines(title: str, result: dict) -> list[str]:
+    return [
+        f"🧪 <b>{html.escape(title)}</b>",
+        "",
+        f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>",
+        f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>",
+        f"• Capability: <code>{html.escape(str(result.get('capability') or '-'))}</code>",
+        f"• Model: <code>{html.escape(str(result.get('model') or '-'))}</code>",
+        f"• Task ID: <code>{html.escape(str(result.get('task_id') or '-'))}</code>",
+        f"• Output URL: <code>{'yes' if result.get('output_url') else 'no'}</code>",
+        f"• Output bytes: <code>{len(result.get('output_bytes') or b'')}</code>",
+        f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>",
+        f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>",
+        f"• Message: <code>{html.escape(str(result.get('error_message_safe') or '-')[:220])}</code>",
+        "",
+        "Admin-only. Không trừ Xu. Không log prompt/response/key. Public Key4U vẫn OFF.",
+    ]
+
+async def key4u_reply_image_bytes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bytes:
+    message = update.message.reply_to_message if update and update.message else None
+    if not message:
+        return b""
+    file_id = ""
+    if getattr(message, "photo", None):
+        file_id = message.photo[-1].file_id
+    elif getattr(message, "document", None) and str(message.document.mime_type or "").startswith("image/"):
+        file_id = message.document.file_id
+    if not file_id:
+        return b""
+    tg_file = await context.bot.get_file(file_id)
+    data = await tg_file.download_as_bytearray()
+    return bytes(data or b"")
+
+async def key4u_send_image_output_if_any(update: Update, context: ContextTypes.DEFAULT_TYPE, result: dict) -> bool:
+    output_bytes = result.get("output_bytes") or b""
+    output_url = str(result.get("output_url") or "")
+    if output_bytes:
+        photo = io.BytesIO(output_bytes)
+        photo.name = "key4u_image_edit_test.png"
+        await context.bot.send_photo(
+            chat_id=update.effective_chat.id,
+            photo=photo,
+            caption="🖼 Key4U image output\nAdmin smoke test. Không trừ Xu.",
+        )
+        return True
+    if output_url:
+        await context.bot.send_photo(
+            chat_id=update.effective_chat.id,
+            photo=output_url,
+            caption="🖼 Key4U image output\nAdmin smoke test. Không trừ Xu.",
+        )
+        return True
+    return False
+
+async def cmd_key4u_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    payload = key4u_status_payload()
+    capabilities = payload.get("capabilities") or {}
+    lines = [
+        "🔑 <b>Key4U Provider Status</b>",
+        "",
+        f"• Enabled: <code>{'yes' if payload.get('enabled') else 'no'}</code>",
+        f"• Public enabled: <code>{'yes' if payload.get('public_enabled') else 'no'}</code>",
+        f"• Admin smoke: <code>{'yes' if payload.get('admin_smoke_enabled') else 'no'}</code>",
+        f"• API key: <code>{html.escape(str(payload.get('api_key') or 'missing'))}</code>",
+        f"• Configured: <code>{'yes' if payload.get('configured') else 'no'}</code>",
+        f"• Stage: <code>{html.escape(str(payload.get('stage') or 'disabled'))}</code>",
+        f"• Base URL: <code>{'configured' if payload.get('base_url') else 'missing'}</code>",
+        f"• OpenAI base URL: <code>{'configured' if payload.get('openai_base_url') else 'missing'}</code>",
+        f"• Chat model: <code>{html.escape(str(payload.get('chat_model') or '-'))}</code>",
+        f"• Vision model: <code>{html.escape(str(payload.get('vision_model') or '-'))}</code>",
+        f"• Image edit model: <code>{html.escape(str(payload.get('image_edit_model') or '-'))}</code>",
+        f"• Nano Banana edit model: <code>{html.escape(str(payload.get('nano_banana_edit_model') or '-'))}</code>",
+        f"• Video model: <code>{html.escape(str(payload.get('video_model') or '-'))}</code>",
+        f"• Fallback order: <code>{html.escape(', '.join(provider_router_fallback_order()))}</code>",
+        "",
+        "<b>Capabilities</b>",
+    ]
+    for capability, stage in capabilities.items():
+        lines.append(f"• {html.escape(str(capability))}: <code>{html.escape(str(stage))}</code>")
+    lines.extend([
+        "",
+        "Key4U là provider dự phòng/admin smoke. Không thay ShopAIKey/OpenRouter/OpenAI/Gemini và không mở public trong task này.",
+        "WokuShop: <code>parked/cost_high_parked</code>.",
+    ])
+    await reply_html_lines(update, lines)
+
+async def cmd_tool_test_key4u_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    model = " ".join(context.args or []).strip() or KEY4U_CHAT_MODEL
+    result = await provider.chat_completion(model=model)
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_chat", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_chat", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    await reply_html_lines(update, key4u_result_lines("Key4U Chat Smoke", result))
+
+async def cmd_tool_test_key4u_vision(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    image_bytes = await key4u_reply_image_bytes(update, context)
+    result = await provider.vision_analysis(image_bytes=image_bytes)
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_vision", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_vision", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    await reply_html_lines(update, key4u_result_lines("Key4U Vision Smoke", result))
+
+async def cmd_tool_test_key4u_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    result = await provider.image_generation()
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_image", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_image", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    await reply_html_lines(update, key4u_result_lines("Key4U Image Smoke", result))
+
+async def cmd_tool_test_key4u_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    image_bytes = await key4u_reply_image_bytes(update, context)
+    use_nano = any(str(arg).strip().lower() in {"nano", "banana", "nano-banana"} for arg in (context.args or []))
+    result = await provider.image_edit(image_bytes=image_bytes, use_nano_banana=use_nano)
+    output_sent = False
+    if result.get("ok"):
+        output_sent = await key4u_send_image_output_if_any(update, context, result)
+    detail = key4u_smoke_detail(result) + f"; output_sent={'yes' if output_sent else 'no'}"
+    save_tool_test_result("key4u_image_edit", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_image_edit", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    lines = key4u_result_lines("Key4U Image Edit Smoke", result)
+    lines.insert(-2, f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>")
+    await reply_html_lines(update, lines)
+
+async def cmd_tool_test_key4u_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    model = " ".join(context.args or []).strip() or KEY4U_VIDEO_MODEL
+    result = await provider.video_generation(model=model)
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_video", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_video", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    lines = key4u_result_lines("Key4U Video Smoke", result)
+    if result.get("task_id"):
+        lines.append(f"Kiểm tra tiếp: <code>/key4u_video_job {html.escape(str(result.get('task_id')))}</code>")
+    await reply_html_lines(update, lines)
+
+async def cmd_key4u_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /key4u_video_job <task_id>")
+    provider = key4u_provider_instance()
+    task_id = str(context.args[0] or "").strip()
+    result = await provider.poll_video_task(task_id)
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_video_job", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "key4u_video_job", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    await reply_html_lines(update, key4u_result_lines("Key4U Video Job", result))
 
 async def cmd_tool_test_openrouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -103859,6 +104157,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("provider_matrix", cmd_provider_matrix))
     tg_app.add_handler(CommandHandler("shopaikey_status", cmd_shopaikey_status))
     tg_app.add_handler(CommandHandler("shopaikey_status_debug", cmd_shopaikey_status_debug))
+    tg_app.add_handler(CommandHandler("key4u_status", cmd_key4u_status))
     tg_app.add_handler(CommandHandler("video_price_test", cmd_video_price_test))
     tg_app.add_handler(CommandHandler("image_provider_status", cmd_image_provider_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
@@ -103890,6 +104189,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_wf_i2v", cmd_tool_test_workflow_image_to_video))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_video", cmd_tool_test_shopaikey_video))
     tg_app.add_handler(CommandHandler("shopaikey_video_job", cmd_shopaikey_video_job))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_chat", cmd_tool_test_key4u_chat))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_vision", cmd_tool_test_key4u_vision))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_image", cmd_tool_test_key4u_image))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_image_edit", cmd_tool_test_key4u_image_edit))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_video", cmd_tool_test_key4u_video))
+    tg_app.add_handler(CommandHandler("key4u_video_job", cmd_key4u_video_job))
     tg_app.add_handler(CommandHandler("shopaikey_image", cmd_shopaikey_image_public))
     tg_app.add_handler(CommandHandler("shopaikey_video", cmd_shopaikey_video_public))
     tg_app.add_handler(CommandHandler("shopaikey_video_from_image", cmd_shopaikey_video_from_image_public))

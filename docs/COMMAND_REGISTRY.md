@@ -185,6 +185,13 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tool_test_shopaikey_image` | `cmd_tool_test_shopaikey_image` | YES | YES | Admin image smoke test. |
 | `/tool_test_shopaikey_video` | `cmd_tool_test_shopaikey_video` | YES | YES | Admin video smoke test. |
 | `/tool_test_shopaikey_tts` | `cmd_tool_test_shopaikey_tts` | YES | YES | Admin TTS smoke test. |
+| `/key4u_status` | `cmd_key4u_status` | YES | YES | Key4U backup provider status; admin-only, public OFF, no secrets. |
+| `/tool_test_key4u_chat` | `cmd_tool_test_key4u_chat` | YES | YES | Key4U chat smoke test; no Xu charge and no prompt/response logging. |
+| `/tool_test_key4u_vision` | `cmd_tool_test_key4u_vision` | YES | YES | Reply to an image to test Key4U vision model; no Xu charge. |
+| `/tool_test_key4u_image` | `cmd_tool_test_key4u_image` | YES | YES | Guarded Key4U image generation placeholder until endpoint docs are verified. |
+| `/tool_test_key4u_image_edit` | `cmd_tool_test_key4u_image_edit` | YES | YES | Reply to an image to smoke test Key4U image edit/nano-banana edit. |
+| `/tool_test_key4u_video` | `cmd_tool_test_key4u_video` | YES | YES | Key4U video create smoke test; submits admin-only job if provider accepts. |
+| `/key4u_video_job` | `cmd_key4u_video_job` | YES | YES | Query Key4U video job status by provider task id. |
 | `/tool_test_asr` | `cmd_tool_test_asr` | YES | YES | Reply a short audio/video file to smoke test Deepgram ASR with no Xu charge. |
 | `/tool_test_translate [text] [lang]` | `cmd_tool_test_translate` | YES | YES | Smoke test translation routing/fallback with a short text. |
 | `/tool_test_tts_for_dub` | `cmd_tool_test_tts` | YES | YES | Alias for TTS smoke when verifying dubbing readiness. |
