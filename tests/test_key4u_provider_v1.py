@@ -3,7 +3,14 @@ from pathlib import Path
 
 import bot
 import provider_router
-from providers.key4u_provider import Key4UConfig, Key4UProvider, is_placeholder_task_id, mask_key, safe_join_url
+from providers.key4u_provider import (
+    Key4UConfig,
+    Key4UProvider,
+    is_placeholder_task_id,
+    mask_key,
+    safe_join_url,
+    should_try_model_fallback,
+)
 
 
 def repo_file(name: str) -> str:
@@ -120,7 +127,9 @@ def test_key4u_admin_smoke_commands_have_model_fallbacks():
     assert "max_fallbacks=2" in chat_block
     assert "max_fallbacks=2" in vision_block
     assert "max_fallbacks=1" in video_block
-    assert "models_tried" in source_between(source, "def key4u_result_lines", "def key4u_manual_balance_usd")
+    result_lines_block = source_between(source, "def key4u_result_lines", "def key4u_manual_balance_usd")
+    assert "models_tried" in result_lines_block
+    assert "KEY4U_VIDEO_NO_TASK_NOTE" in result_lines_block
 
 
 def test_key4u_video_query_uses_get_with_id_and_rejects_placeholders():
@@ -131,11 +140,31 @@ def test_key4u_video_query_uses_get_with_id_and_rejects_placeholders():
     assert "client.get(endpoint" in poll_block
     assert "client.post(endpoint" not in poll_block
     assert is_placeholder_task_id("<task_id>") is True
+    assert is_placeholder_task_id("<task_id_thật>") is True
+    assert is_placeholder_task_id("TASK_ID") is True
+    assert is_placeholder_task_id("your_task_id") is True
+    assert is_placeholder_task_id("abc") is True
+    assert is_placeholder_task_id("abc123") is True
+    assert is_placeholder_task_id("*") is True
+    assert is_placeholder_task_id("abc12345") is False
     provider = Key4UProvider(Key4UConfig(enabled=True, admin_smoke_enabled=True, api_key="sk-test"))
     result = asyncio.run(provider.poll_video_task("<task_id>"))
     assert result["ok"] is False
     assert result["status"] == "NEED_TASK_ID"
     assert result["http_status"] == 0
+    assert "task_id thật" in result["error_message_safe"]
+    bot_block = source_between(source_between(repo_file("bot.py"), "async def cmd_key4u_video_job", "async def cmd_tool_test_key4u_tts"), "async def cmd_key4u_video_job", "result = await provider.poll_video_task")
+    assert "is_placeholder_task_id(task_id)" in bot_block
+    assert bot_block.index("is_placeholder_task_id(task_id)") < bot_block.index("key4u_provider_instance()")
+
+
+def test_key4u_video_group_unavailable_can_fallback():
+    result = {
+        "status": "FAIL",
+        "error_class": "FAIL_PROVIDER_GROUP_UNAVAILABLE",
+        "error_message_safe": "No available channel for model veo3.1-fast under group cheap",
+    }
+    assert should_try_model_fallback(result) is True
 
 
 def test_key4u_video_submit_payload_and_timeout_are_safe():
@@ -160,6 +189,8 @@ def test_key4u_commands_registered_and_documented():
         "tool_test_key4u_image",
         "tool_test_key4u_image_edit",
         "tool_test_key4u_video",
+        "tool_test_key4u_video_model",
+        "tool_test_key4u_video_all",
         "key4u_video_job",
         "tool_test_key4u_tts",
         "tool_test_key4u_stt",
@@ -209,7 +240,7 @@ def test_env_example_key4u_public_off_and_woku_parked():
     assert "KEY4U_CHAT_MODEL_FALLBACKS=qwen-plus,qwen-turbo,deepseek-chat,gemini-2.5-flash" in env_text
     assert "KEY4U_DEFAULT_VISION_MODEL=gemini-2.5-flash" in env_text
     assert "KEY4U_VISION_MODEL_FALLBACKS=gemini-2.5-flash,gemini-2.5-flash-all,gpt-4o-mini,qwen-vl-max" in env_text
-    assert "KEY4U_VIDEO_FALLBACK_MODELS=" in env_text
+    assert "KEY4U_VIDEO_FALLBACK_MODELS=veo3.1-fast,pixverse-video,viduq3,kling-video,minimax-video,doubao-seedance" in env_text
     assert "KEY4U_PUBLIC_ENABLED=false" in env_text
     assert "KEY4U_ADMIN_SMOKE_ENABLED=true" in env_text
     assert "PROVIDER_PRIMARY=shopaikey" in env_text

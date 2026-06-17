@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -58,10 +59,30 @@ def _safe_message(value: Any, limit: int = 220) -> str:
     return text[:limit]
 
 
+GROUP_UNAVAILABLE_MARKERS = (
+    "no available channel",
+    "channel unavailable",
+    "no channel",
+    "group unavailable",
+    "under group",
+    "provider unavailable",
+    "distributor",
+)
+
+
+def _is_group_or_channel_unavailable(status_code: int, message: Any) -> bool:
+    if int(status_code or 0) != 503:
+        return False
+    msg = str(message or "").lower()
+    return any(marker in msg for marker in GROUP_UNAVAILABLE_MARKERS)
+
+
 def _classify_http(status_code: int, message: str = "") -> str:
     msg = str(message or "").lower()
     if any(marker in msg for marker in ("model not found", "invalid model", "model_not_found", "invalid_model")):
         return "FAIL_MODEL_NOT_FOUND"
+    if _is_group_or_channel_unavailable(status_code, message):
+        return "FAIL_PROVIDER_GROUP_UNAVAILABLE"
     if status_code in {401, 403}:
         return "FAIL_AUTH"
     if status_code == 429:
@@ -77,19 +98,68 @@ def _classify_http(status_code: int, message: str = "") -> str:
     return "FAIL_PROVIDER_ERROR"
 
 
-PLACEHOLDER_TASK_IDS = {"", "<task_id>", "task_id", "task-id", "taskid", "none", "null", "----", "-"}
+PLACEHOLDER_TASK_IDS = {
+    "",
+    "*",
+    "-",
+    "----",
+    "<task_id>",
+    "<task_id_thật>",
+    "task_id",
+    "task-id",
+    "taskid",
+    "task id",
+    "your_task_id",
+    "your-task-id",
+    "none",
+    "null",
+    "abc",
+    "abc123",
+}
 
 
 def is_placeholder_task_id(value: str | None) -> bool:
-    return str(value or "").strip().lower() in PLACEHOLDER_TASK_IDS
+    raw = str(value or "").strip()
+    lowered = raw.lower()
+    if lowered in PLACEHOLDER_TASK_IDS:
+        return True
+    if lowered.startswith("<") and lowered.endswith(">"):
+        return True
+    if "task_id" in lowered or "taskid" in lowered or "your_task" in lowered:
+        return True
+    compact = re.sub(r"[^a-zA-Z0-9_-]", "", raw)
+    if compact and len(compact) < 8:
+        return True
+    return False
 
 
 def should_try_model_fallback(result: dict[str, Any]) -> bool:
     haystack = " ".join(
         str(result.get(key) or "")
-        for key in ("status", "error_class", "error_message_safe")
+        for key in ("status", "error_class", "error_message_safe", "message_user_safe", "recommendation")
     ).lower()
-    return any(marker in haystack for marker in ("model_not_found", "invalid_model", "model not found", "invalid model", "need_model"))
+    return any(
+        marker in haystack
+        for marker in (
+            "model_not_found",
+            "invalid_model",
+            "model not found",
+            "invalid model",
+            "need_model",
+            "fail_provider_group_unavailable",
+            "no available channel",
+            "channel unavailable",
+            "group unavailable",
+            "under group",
+        )
+    )
+
+
+def _add_video_unavailable_guidance(result: dict[str, Any]) -> dict[str, Any]:
+    if str(result.get("error_class") or "") == "FAIL_PROVIDER_GROUP_UNAVAILABLE":
+        result["message_user_safe"] = "Nhà cung cấp video Key4U hiện chưa có kênh khả dụng cho model này."
+        result["recommendation"] = "Thử model khác hoặc kiểm tra group/model trong Key4U dashboard."
+    return result
 
 
 def _timeout_result(capability: str, model: str, exc: Exception, *, task_id: str = "", stage: str = "timeout") -> dict[str, Any]:
@@ -594,7 +664,8 @@ class Key4UProvider:
             provider_status = str((body or {}).get("status") or data.get("status") or "")
             if 200 <= response.status_code < 300 and task_id:
                 return _result(ok=True, capability="video_generate", model=selected_model, status="PASS_SUBMITTED", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, raw_debug_admin_only={"provider_status": provider_status})
-            return _result(ok=False, capability="video_generate", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+            result = _result(ok=False, capability="video_generate", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+            return _add_video_unavailable_guidance(result)
         except httpx.TimeoutException as exc:
             return _timeout_result("video_generate", selected_model, exc, stage="submit_timeout")
         except Exception as exc:
@@ -611,7 +682,7 @@ class Key4UProvider:
                 model=self.config.video_model,
                 status="NEED_TASK_ID",
                 error_class="NEED_TASK_ID",
-                error_message_safe="Vui lòng nhập task_id thật. Ví dụ: /key4u_video_job abc123",
+                error_message_safe="Vui lòng dùng task_id thật do /tool_test_key4u_video trả về. Hiện chưa có task_id vì lệnh tạo video chưa submit thành công.",
             )
         endpoint = safe_join_url(self.config.base_url, self.config.video_query_endpoint)
         started = time.perf_counter()
@@ -638,7 +709,8 @@ class Key4UProvider:
                     output_url=output_url,
                     raw_debug_admin_only={"provider_status": status, "progress": (body or {}).get("progress") or data.get("progress") or ""},
                 )
-            return _result(ok=False, capability="video_query", model=self.config.video_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+            result = _result(ok=False, capability="video_query", model=self.config.video_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+            return _add_video_unavailable_guidance(result)
         except httpx.TimeoutException as exc:
             return _timeout_result("video_query", self.config.video_model, exc, task_id=safe_task_id)
         except Exception as exc:

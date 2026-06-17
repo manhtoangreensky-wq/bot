@@ -198,6 +198,8 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tool_test_key4u_image` | `cmd_tool_test_key4u_image` | YES | YES | Guarded Key4U image generation placeholder until endpoint docs are verified. |
 | `/tool_test_key4u_image_edit` | `cmd_tool_test_key4u_image_edit` | YES | YES | Reply to an image to smoke test Key4U image edit/nano-banana edit. |
 | `/tool_test_key4u_video` | `cmd_tool_test_key4u_video` | YES | YES | Key4U video create smoke test; submits admin-only job if provider accepts. |
+| `/tool_test_key4u_video_model` | `cmd_tool_test_key4u_video_model` | YES | YES | Key4U video create smoke test for one explicit model; no Xu charge and no public routing. |
+| `/tool_test_key4u_video_all` | `cmd_tool_test_key4u_video_all` | YES | YES | Lists configured Key4U video model candidates without submitting expensive batch jobs. |
 | `/key4u_video_job` | `cmd_key4u_video_job` | YES | YES | Query Key4U video job status by provider task id. |
 | `/tool_test_key4u_tts` | `cmd_tool_test_key4u_tts` | YES | YES | Key4U TTS smoke test; returns NEED_DOCS unless endpoint/model are configured; no Xu charge. |
 | `/tool_test_key4u_stt` | `cmd_tool_test_key4u_stt` | YES | YES | Reply to audio to test Key4U STT if endpoint/model are configured; no Xu charge. |

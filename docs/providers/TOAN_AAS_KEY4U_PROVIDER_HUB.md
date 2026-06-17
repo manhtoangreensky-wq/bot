@@ -38,6 +38,8 @@ Key4U is a parallel provider hub for TOAN AAS. It is not the default production 
 - `/tool_test_key4u_image`
 - `/tool_test_key4u_image_edit [nano]`
 - `/tool_test_key4u_video [model]`
+- `/tool_test_key4u_video_model <model>`
+- `/tool_test_key4u_video_all` (lists candidates only; no batch submit)
 - `/key4u_video_job <task_id>`
 - `/tool_test_key4u_tts`
 - `/tool_test_key4u_stt`

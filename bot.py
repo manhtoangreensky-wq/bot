@@ -450,7 +450,7 @@ KEY4U_VISION_MODEL_FALLBACKS = _env("KEY4U_VISION_MODEL_FALLBACKS", "gemini-2.5-
 KEY4U_IMAGE_EDIT_MODEL = _env("KEY4U_DEFAULT_IMAGE_EDIT_MODEL", _env("KEY4U_IMAGE_EDIT_MODEL", "grok-imagine-image-pro"))
 KEY4U_NANO_BANANA_EDIT_MODEL = _env("KEY4U_NANO_BANANA_EDIT_MODEL", "nano-banana")
 KEY4U_VIDEO_MODEL = _env("KEY4U_DEFAULT_VIDEO_MODEL", _env("KEY4U_VIDEO_MODEL", "veo3.1-fast"))
-KEY4U_VIDEO_FALLBACK_MODELS = _env("KEY4U_VIDEO_FALLBACK_MODELS", "")
+KEY4U_VIDEO_FALLBACK_MODELS = _env("KEY4U_VIDEO_FALLBACK_MODELS", "veo3.1-fast,pixverse-video,viduq3,kling-video,minimax-video,doubao-seedance")
 KEY4U_TTS_MODEL = _env("KEY4U_DEFAULT_TTS_MODEL", _env("KEY4U_TTS_MODEL", ""))
 KEY4U_STT_MODEL = _env("KEY4U_STT_MODEL", "")
 KEY4U_SUNO_MODEL = _env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", ""))
@@ -40670,7 +40670,8 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_shopaikey_image", "tool_test_wf_i2v",
     "tool_test_shopaikey_video", "shopaikey_video_job", "tool_test_asr",
     "key4u_status", "key4u_usage", "key4u_set_manual_balance", "tool_test_key4u_chat", "tool_test_key4u_vision",
-    "tool_test_key4u_image", "tool_test_key4u_image_edit", "tool_test_key4u_video", "key4u_video_job",
+    "tool_test_key4u_image", "tool_test_key4u_image_edit", "tool_test_key4u_video", "tool_test_key4u_video_model",
+    "tool_test_key4u_video_all", "key4u_video_job",
     "tool_test_key4u_tts", "tool_test_key4u_stt", "tool_test_key4u_suno", "key4u_suno_job", "tool_test_key4u_rerank",
     "tool_test_video_subtitle", "tool_test_video_dub", "tool_test_subtitle_plus_dub",
     "subtitle_status", "dub_status", "tool_test_tts_for_dub", "video_dub_public_open", "video_dub_public_close",
@@ -42948,7 +42949,7 @@ def menu_text_admin() -> str:
         "• <code>/shopaikey_status</code>, <code>/shopaikey_usage</code>, <code>/shopaikey_video_job</code> — kiểm tra job video\n"
         "• <code>/tool_test_shopaikey</code>, <code>/tool_test_shopaikey_image</code>, <code>/tool_test_shopaikey_video</code>, <code>/tool_test_shopaikey_tts</code>\n"
         "• <code>/key4u_status</code>, <code>/key4u_usage</code>, <code>/key4u_set_manual_balance</code> — Key4U parallel hub/admin smoke\n"
-        "• <code>/tool_test_key4u_chat</code>, <code>/tool_test_key4u_vision</code>, <code>/tool_test_key4u_image_edit</code>, <code>/tool_test_key4u_video</code>, <code>/key4u_video_job</code>\n"
+        "• <code>/tool_test_key4u_chat</code>, <code>/tool_test_key4u_vision</code>, <code>/tool_test_key4u_image_edit</code>, <code>/tool_test_key4u_video</code>, <code>/tool_test_key4u_video_model</code>, <code>/key4u_video_job</code>\n"
         "• <code>/tool_test_key4u_tts</code>, <code>/tool_test_key4u_stt</code>, <code>/tool_test_key4u_suno</code>, <code>/key4u_suno_job</code>, <code>/tool_test_key4u_rerank</code>\n"
         "• <code>/tool_test_asr</code>, <code>/tool_test_translate</code>, <code>/tool_test_video_subtitle</code>, <code>/tool_test_video_dub</code>, <code>/tool_test_subtitle_plus_dub</code>\n\n"
         "<b>F. Giá / Sẵn sàng bán</b>\n"
@@ -54396,7 +54397,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Usage: manual balance <code>{html.escape(f'{key4u_manual_balance:.2f} USD' if key4u_manual_balance is not None else 'not_set')}</code> | local calls 24h <code>{int(key4u_local_usage.get('total_calls') or 0)}</code> | failures <code>{int(key4u_local_usage.get('fail_count') or 0)}</code>",
         f"• Provider router: <code>{'ON' if PROVIDER_ROUTER_ENABLED else 'OFF'}</code> | parallel <code>{'ON' if PROVIDER_PARALLEL_ENABLED else 'OFF'}</code> | fallback <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code> | order <code>{html.escape(', '.join(provider_router_fallback_order()))}</code>",
         f"• WokuShop: <code>parked</code> | reason <code>{html.escape(str(woku_payload.get('reason') or 'cost_high_parked'))}</code> | calls <code>disabled</code>",
-        "• Commands: <code>/key4u_status</code> | <code>/key4u_usage</code> | <code>/key4u_set_manual_balance</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/key4u_video_job</code>",
+        "• Commands: <code>/key4u_status</code> | <code>/key4u_usage</code> | <code>/key4u_set_manual_balance</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/tool_test_key4u_video_model</code> | <code>/key4u_video_job</code>",
         "• Rule: <code>admin-only / no Xu / no raw key, prompt, response log</code>",
         "",
         "<b>ShopAIKey / Unified AI Proxy</b>",
@@ -55034,7 +55035,7 @@ async def cmd_orchestrator_status(update: Update, context: ContextTypes.DEFAULT_
         "• <code>/tool_test_elevenlabs_status</code>",
         "• <code>/tool_test_deepgram_status</code>",
         "• <code>/shopaikey_status</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code>",
-        "• <code>/key4u_status</code> | <code>/key4u_usage</code> | <code>/key4u_set_manual_balance</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/key4u_video_job</code>",
+        "• <code>/key4u_status</code> | <code>/key4u_usage</code> | <code>/key4u_set_manual_balance</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/tool_test_key4u_video_model</code> | <code>/key4u_video_job</code>",
     ])
     await reply_html_lines(update, lines)
 
@@ -55050,8 +55051,41 @@ def key4u_smoke_detail(result: dict) -> str:
         f"http={result.get('http_status') or 0}; latency_ms={result.get('latency_ms') or 0}; "
         f"task_id={result.get('task_id') or '-'}; output_url={'yes' if result.get('output_url') else 'no'}; "
         f"bytes={len(result.get('output_bytes') or b'')}; error_class={result.get('error_class') or '-'}; "
-        f"message={sanitize_log_text(str(result.get('error_message_safe') or '-'))[:220]}"
+        f"message={sanitize_log_text(str(result.get('error_message_safe') or '-'))[:220]}; "
+        f"recommendation={sanitize_log_text(str(result.get('recommendation') or '-'))[:220]}"
     )
+
+KEY4U_VIDEO_NO_TASK_NOTE = "Không có task_id vì provider chưa nhận job. Không chạy /key4u_video_job cho lần test này."
+KEY4U_VIDEO_TASK_PLACEHOLDER_MESSAGE = "Vui lòng dùng task_id thật do /tool_test_key4u_video trả về. Hiện chưa có task_id vì lệnh tạo video chưa submit thành công."
+
+def key4u_detail_field(detail: str, field: str) -> str:
+    prefix = f"{field}="
+    for part in str(detail or "").split(";"):
+        item = part.strip()
+        if item.startswith(prefix):
+            return item[len(prefix):].strip()
+    return ""
+
+def key4u_last_video_failure_lines() -> list[str]:
+    result = preferred_tool_test_result("key4u_video", "key4u_video_model")
+    status = str(result.get("status") or "NOT_TESTED").upper()
+    detail = str(result.get("detail") or "")
+    if status in {"", "NOT_TESTED", "PASS", "PASS_SUBMITTED", "SUCCESS", "OK"} or not detail:
+        return []
+    error_class = key4u_detail_field(detail, "error_class") or "-"
+    recommendation = key4u_detail_field(detail, "recommendation")
+    if not recommendation or recommendation == "-":
+        if error_class == "FAIL_PROVIDER_GROUP_UNAVAILABLE":
+            recommendation = "Thử model khác hoặc kiểm tra group/model trong Key4U dashboard."
+        else:
+            recommendation = "-"
+    return [
+        "<b>Last video fail</b>",
+        f"• Model: <code>{html.escape(key4u_detail_field(detail, 'model') or '-')}</code>",
+        f"• HTTP: <code>{html.escape(key4u_detail_field(detail, 'http') or '0')}</code>",
+        f"• Error class: <code>{html.escape(error_class)}</code>",
+        f"• Recommendation: <code>{html.escape(recommendation)}</code>",
+    ]
 
 def key4u_model_candidates(primary: str, fallbacks_csv: str = "", max_fallbacks: int = 2) -> list[str]:
     items: list[str] = []
@@ -55082,7 +55116,7 @@ async def key4u_run_with_model_fallback(candidates: list[str], runner):
     return {"ok": False, "status": "NEED_MODEL", "error_class": "NEED_MODEL", "error_message_safe": "No Key4U model candidates configured", "models_tried": []}
 
 def key4u_result_lines(title: str, result: dict) -> list[str]:
-    return [
+    lines = [
         f"🧪 <b>{html.escape(title)}</b>",
         "",
         f"• Status: <code>{html.escape(str(result.get('status') or 'FAIL'))}</code>",
@@ -55097,9 +55131,18 @@ def key4u_result_lines(title: str, result: dict) -> list[str]:
         f"• Latency: <code>{html.escape(str(result.get('latency_ms') or 0))}ms</code>",
         f"• Error class: <code>{html.escape(str(result.get('error_class') or '-'))}</code>",
         f"• Message: <code>{html.escape(str(result.get('error_message_safe') or '-')[:220])}</code>",
+    ]
+    if result.get("message_user_safe"):
+        lines.append(f"• Safe message: <code>{html.escape(str(result.get('message_user_safe') or '')[:220])}</code>")
+    if result.get("recommendation"):
+        lines.append(f"• Recommendation: <code>{html.escape(str(result.get('recommendation') or '')[:220])}</code>")
+    if str(result.get("capability") or "") == "video_generate" and not result.get("task_id"):
+        lines.append(f"• Task note: <code>{html.escape(KEY4U_VIDEO_NO_TASK_NOTE)}</code>")
+    lines.extend([
         "",
         "Admin-only. Không trừ Xu. Không log prompt/response/key. Public Key4U vẫn OFF.",
-    ]
+    ])
+    return lines
 
 def key4u_manual_balance_usd() -> float | None:
     raw = get_system_setting("key4u_manual_balance_usd", KEY4U_DASHBOARD_BALANCE_USD)
@@ -55361,6 +55404,10 @@ async def cmd_key4u_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("<b>Smoke</b>")
     for label, status in smoke.items():
         lines.append(f"• {html.escape(label)}: <code>{html.escape(status)}</code>")
+    video_failure = key4u_last_video_failure_lines()
+    if video_failure:
+        lines.append("")
+        lines.extend(video_failure)
     lines.extend([
         "",
         "Key4U là parallel provider hub/admin smoke. Không thay ShopAIKey/OpenRouter/OpenAI/Gemini và không mở public trong task này.",
@@ -55472,13 +55519,67 @@ async def cmd_tool_test_key4u_video(update: Update, context: ContextTypes.DEFAUL
         lines.append(f"Kiểm tra tiếp: <code>/key4u_video_job {html.escape(str(result.get('task_id')))}</code>")
     await reply_html_lines(update, lines)
 
+async def cmd_tool_test_key4u_video_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text(
+            "Cú pháp: /tool_test_key4u_video_model <model>\n"
+            "Ví dụ: /tool_test_key4u_video_model pixverse-video"
+        )
+    model = str(context.args[0] or "").strip()
+    if not model or model.lower() in {"model", "<model>", "your_model"}:
+        return await update.message.reply_text("Model không hợp lệ. Ví dụ: /tool_test_key4u_video_model veo3.1-fast")
+    provider = key4u_provider_instance()
+    result = await provider.video_generation(model=model, timeout_seconds=60.0)
+    result["models_tried"] = [model]
+    result["fallback_used"] = False
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_video_model", result.get("status") or "FAIL", detail, update.effective_user.id)
+    save_tool_test_result("key4u_video", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_video_model", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_video_model_submit")
+    lines = key4u_result_lines("Key4U Video Model Smoke", result)
+    if result.get("task_id"):
+        lines.append(f"Kiểm tra tiếp: <code>/key4u_video_job {html.escape(str(result.get('task_id')))}</code>")
+    await reply_html_lines(update, lines)
+
+async def cmd_tool_test_key4u_video_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    candidates = key4u_model_candidates(KEY4U_VIDEO_MODEL, KEY4U_VIDEO_FALLBACK_MODELS, max_fallbacks=20)
+    detail = f"models={','.join(candidates) or '-'}; submit_batch=no; reason=avoid_expensive_video_batch"
+    save_tool_test_result("key4u_video_all", "INFO_ONLY", detail, update.effective_user.id)
+    lines = [
+        "🧪 <b>Key4U Video Model List</b>",
+        "",
+        "Lệnh này không submit hàng loạt vì tạo video có thể tốn credit thật.",
+        f"• Primary: <code>{html.escape(str(KEY4U_VIDEO_MODEL or '-'))}</code>",
+        f"• Candidates: <code>{html.escape(', '.join(candidates) or '-')}</code>",
+        "",
+        "Muốn test model nào, dùng:",
+        "<code>/tool_test_key4u_video_model veo3.1-fast</code>",
+        "<code>/tool_test_key4u_video_model pixverse-video</code>",
+        "<code>/tool_test_key4u_video_model kling-video</code>",
+        "<code>/tool_test_key4u_video_model viduq3</code>",
+        "<code>/tool_test_key4u_video_model doubao-seedance</code>",
+        "<code>/tool_test_key4u_video_model minimax-video</code>",
+        "",
+        "Admin-only. Không trừ Xu. Public Key4U vẫn OFF.",
+    ]
+    await reply_html_lines(update, lines)
+
 async def cmd_key4u_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     if not context.args:
         return await update.message.reply_text("Cú pháp: /key4u_video_job <task_id>")
-    provider = key4u_provider_instance()
     task_id = str(context.args[0] or "").strip()
+    from providers.key4u_provider import is_placeholder_task_id
+
+    if is_placeholder_task_id(task_id):
+        return await update.message.reply_text(KEY4U_VIDEO_TASK_PLACEHOLDER_MESSAGE)
+    provider = key4u_provider_instance()
     result = await provider.poll_video_task(task_id)
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_video_job", result.get("status") or "FAIL", detail, update.effective_user.id)
@@ -105256,6 +105357,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_key4u_image", cmd_tool_test_key4u_image))
     tg_app.add_handler(CommandHandler("tool_test_key4u_image_edit", cmd_tool_test_key4u_image_edit))
     tg_app.add_handler(CommandHandler("tool_test_key4u_video", cmd_tool_test_key4u_video))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_video_model", cmd_tool_test_key4u_video_model))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_video_all", cmd_tool_test_key4u_video_all))
     tg_app.add_handler(CommandHandler("key4u_video_job", cmd_key4u_video_job))
     tg_app.add_handler(CommandHandler("tool_test_key4u_tts", cmd_tool_test_key4u_tts))
     tg_app.add_handler(CommandHandler("tool_test_key4u_stt", cmd_tool_test_key4u_stt))

@@ -31,6 +31,7 @@ KEY4U_VISION_MODEL=
 KEY4U_IMAGE_EDIT_MODEL=grok-imagine-image-pro
 KEY4U_NANO_BANANA_EDIT_MODEL=nano-banana
 KEY4U_VIDEO_MODEL=veo3.1-fast
+KEY4U_VIDEO_FALLBACK_MODELS=veo3.1-fast,pixverse-video,viduq3,kling-video,minimax-video,doubao-seedance
 KEY4U_PUBLIC_ENABLED=false
 KEY4U_ADMIN_SMOKE_ENABLED=true
 PROVIDER_ROUTER_ENABLED=true
@@ -50,6 +51,8 @@ WOKU_REASON=cost_high_parked
 - `/tool_test_key4u_image`
 - `/tool_test_key4u_image_edit [nano]`
 - `/tool_test_key4u_video [model]`
+- `/tool_test_key4u_video_model <model>`
+- `/tool_test_key4u_video_all` (lists candidates only; no batch submit)
 - `/key4u_video_job <task_id>`
 - `/provider_matrix`
 
