@@ -555,6 +555,11 @@ def test_provider_maintenance_error_classify_sanitize_and_freeze(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BETA_ENABLED", True)
+    monkeypatch.setattr(bot, "video_public_beta_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "shopaikey_public_video_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "video_ai_public_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "is_tool_frozen", lambda *_args, **_kwargs: {"frozen": False})
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     try:
@@ -645,6 +650,11 @@ def test_video_provider_freeze_does_not_block_public_image(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BETA_ENABLED", True)
+    monkeypatch.setattr(bot, "video_public_beta_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "shopaikey_public_video_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "video_ai_public_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "is_tool_frozen", lambda *_args, **_kwargs: {"frozen": False})
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     monkeypatch.setattr(bot, "SYSTEM_MAINTENANCE_MODE", False)
@@ -868,6 +878,9 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "video_public_beta_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "shopaikey_public_video_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "video_ai_public_enabled_runtime", lambda: True)
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     assert bot.shopaikey_public_generation_guard("image")[0] is True
@@ -1547,6 +1560,9 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "video_public_beta_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "shopaikey_public_video_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "video_ai_public_enabled_runtime", lambda: True)
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "test-key")
     assert bot.shopaikey_public_generation_guard("image")[0] is True
@@ -1998,8 +2014,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_DEFAULT_TIER", "low")
     monkeypatch.setattr(bot, "VIDEO_BASIC_COST_XU", 765)
     monkeypatch.setattr(bot, "VIDEO_COMMON_COST_XU", 876)
+    monkeypatch.setattr(bot, "VIDEO_ADVANCED_COST_XU", 950)
     monkeypatch.setattr(bot, "VIDEO_STANDARD_COST_XU", 999)
     monkeypatch.setattr(bot, "VIDEO_HIGH_COST_XU", 1111)
+    monkeypatch.setattr(bot, "VIDEO_FUTURE_1000_COST_XU", 1000)
+    monkeypatch.setattr(bot, "VIDEO_FUTURE_1500_COST_XU", 1500)
     monkeypatch.setattr(bot, "VIDEO_PREMIUM_COST_XU", 2222)
     monkeypatch.setattr(bot, "WORKFLOW_TREND_ANALYSIS_COST_XU", 7)
     monkeypatch.setattr(bot, "WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 8)
@@ -2016,9 +2035,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pricing["video_tiers"]["low"]["cost"] == 654
     assert pricing["video_tiers"]["basic"]["cost"] == 765
     assert pricing["video_tiers"]["common"]["cost"] == 876
+    assert pricing["video_tiers"]["advanced"]["cost"] == 950
     assert pricing["video_tiers"]["standard"]["cost"] == 999
     assert pricing["video_tiers"]["high"]["cost"] == 1111
-    assert pricing["video_tiers"]["premium"]["cost"] == 2222
+    assert pricing["video_tiers"]["future_1000"]["cost"] == 1000
+    assert pricing["video_tiers"]["future_1500"]["cost"] == 1500
     assert pricing["quick_image_cost"] == 321
     assert pricing["quick_video_cost"] == 654
     assert bot.image_tier_cost_xu("low") == 321
@@ -2033,14 +2054,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.video_tier_cost_xu("low") == 654
     assert bot.video_tier_cost_xu("basic") == 765
     assert bot.video_tier_cost_xu("common") == 876
+    assert bot.video_tier_cost_xu("advanced") == 950
     assert bot.video_tier_cost_xu("standard") == 999
     assert bot.video_tier_cost_xu("high") == 1111
     assert bot.video_tier_payload("starter")["tier"] == "basic"
     assert bot.video_tier_payload("regular")["tier"] == "common"
-    assert bot.video_tier_payload("vip")["tier"] == "premium"
-    assert bot.video_tier_payload("premium")["admin_only"] is True
-    assert bot.video_tier_payload("premium")["enabled"] is False
-    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / standard:OFF / high:OFF / premium:OFF"
+    assert bot.video_tier_payload("vip")["tier"] == "future_1500"
+    assert bot.video_tier_payload("future_1500")["admin_only"] is True
+    assert bot.video_tier_payload("future_1500")["enabled"] is False
+    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / advanced:OFF / standard:OFF / high:OFF / future_1000:OFF / future_1500:OFF"
     callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
     assert "shopaikey_recent_image_job_for_callback" in callback_source
     assert callback_source.index("shopaikey_recent_image_job_for_callback") < callback_source.index("common.expired_not_charged")
@@ -2271,7 +2293,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert en_pricing_labels == ["📋 Pricing", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"]
     assert "Vietnam local top-up promotions are not available for international payments" in "\n".join(bot.pricing_hub_lines("en"))
     promo_text = "\n".join(bot.billing_promotions_lines("vi"))
-    assert "🎁 ƯU ĐÃI TOAN AAS" in promo_text
+    assert "ƯU ĐÃI TOAN AAS" in promo_text
     assert "FIRST30" in promo_text
     assert "SECOND15" in promo_text
     assert "MONTHLY20" in promo_text
@@ -2304,7 +2326,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video Trải Nghiệm: <b>654 Xu</b>" in video_price_text
     assert "Video Cơ Bản: <b>765 Xu</b>" in video_price_text
     assert "Video Phổ Thông: <b>876 Xu</b>" in video_price_text
-    assert "Video premium/admin-only: <b>admin-only / liên hệ admin</b>" in video_price_text
+    assert "Video Nâng Cao: <b>950 Xu</b>" in video_price_text
+    assert "Video Bán Hàng: <b>999 Xu</b>" in video_price_text
+    assert "Video Cao Cấp: <b>1111 Xu</b>" in video_price_text
+    assert "Video Kling/Seedance: <b>1000 Xu</b>" in video_price_text
+    assert "Video Premium Future: <b>1500 Xu</b>" in video_price_text
     assert "Combo Ưu Đãi TikTok" in combo_price_text
     assert "khuyến nghị 9:16" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
@@ -4842,17 +4868,20 @@ def test_video_beta_cost_status_and_public_tiers(monkeypatch):
     assert bot.video_tier_enabled_map()["low"] is True
     assert bot.video_tier_enabled_map()["basic"] is True
     assert bot.video_tier_enabled_map()["common"] is True
+    assert bot.video_tier_enabled_map()["advanced"] is False
     assert bot.video_tier_enabled_map()["standard"] is False
     assert bot.video_tier_enabled_map()["high"] is False
-    assert bot.video_tier_enabled_map()["premium"] is False
-    assert bot.check_video_margin("low")["status"] == "PASS"
+    assert bot.video_tier_enabled_map()["future_1000"] is False
+    assert bot.video_tier_enabled_map()["future_1500"] is False
+    assert bot.check_video_margin("low")["status"] == "MARKETING_LOSS_ON"
     assert bot.check_video_margin("common")["status"] == "WARN_MARGIN"
     cost_text = bot.video_cost_status_text()
     assert "VIDEO COST STATUS" in cost_text
-    assert "600+ / standard / high" in cost_text
+    assert "500/600/800" in cost_text
     system_text = bot.system_public_status_text()
     assert "TOAN AAS PUBLIC STATUS" in system_text
-    assert "Video 600+" in system_text
+    assert "Video 500" in system_text
+    assert "Video 800" in system_text
     assert "Long video" in system_text
 
 
@@ -6721,11 +6750,11 @@ def test_trend_guided_video_prompt_callbacks_open_finalization(monkeypatch):
     assert "Đã chọn prompt video" in selected_prompt["text"]
 
     finalization = asyncio.run(press("trendg|finalization"))
-    assert "Hoàn thiện video" in finalization["text"]
+    assert "Thêm tính năng khác" in finalization["text"]
     assert "chưa gọi API/provider" in finalization["text"]
 
     real_video = asyncio.run(press("trendg|video_real"))
-    assert "Hoàn thiện video" in real_video["text"]
+    assert "Chọn gói xuất video AI" in real_video["text"]
 
 
 def test_free_tools_guided_outputs_and_followups(monkeypatch):
@@ -7817,7 +7846,7 @@ def test_image_ux_v8_manual_and_ai_edit_confirmation_guards():
     ]
     assert {"imgtool|edit_back_result", "imgtool|edit_ai_menu", "menu|main"}.issubset(set(ai_guard_callbacks))
     assert 'if action == "edit_back_suggestions":' in callback_source
-    assert "image_edit_ai_guard_keyboard(lang)" in callback_source
+    assert "image_edit_ai_guard_keyboard(lang)" in bot_source_text()
     assert "chưa gọi API và chưa trừ Xu" in bot.image_edit_ai_guard_text("vi")
 
 
@@ -8454,7 +8483,7 @@ def test_video_export_vfinal_addons_and_tier_gate_labels(monkeypatch):
     menu_text = bot.video_finalization_menu_text(state, "vi")
     menu_buttons = _button_texts(bot.video_finalization_menu_keyboard("vi"))
     assert "Thêm tính năng khác" in menu_text
-    assert "Bỏ qua & chọn gói" in menu_buttons
+    assert any("Bỏ qua & chọn gói" in text for text in menu_buttons)
     assert "Bỏ qua & xuất video" not in menu_buttons
     assert "Hoàn thiện video" not in menu_text
 
@@ -8465,11 +8494,13 @@ def test_video_export_vfinal_addons_and_tier_gate_labels(monkeypatch):
     assert "200 Xu" in tier_text
     assert "300 Xu" in tier_text
     assert "400 Xu" in tier_text
+    assert "500 Xu" in tier_text
     assert "600 Xu" in tier_text
-    assert "1200 Xu" in tier_text
+    assert "800 Xu" in tier_text
     assert "vfinal|tier|low" in tier_callbacks
     assert "vfinal|tier|basic" in tier_callbacks
     assert "vfinal|tier|common" in tier_callbacks
+    assert "vfinal|tier|advanced" in tier_callbacks
     assert "vfinal|tier|standard" in tier_callbacks
     assert "vfinal|tier|high" in tier_callbacks
 
@@ -8538,19 +8569,20 @@ def test_video_export_vfinal_600_guard_default_off(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_PUBLIC_600_PLUS_ENABLED", False)
     status = bot.get_public_video_tier_ui_status("standard", False)
     assert status["enabled"] is False
+    assert "500 Xu" in bot.video_finalization_tier_text({}, "vi")
     assert "600 Xu" in bot.video_finalization_tier_text({}, "vi")
-    assert "1200 Xu" in bot.video_finalization_tier_text({}, "vi")
-    assert "giữ lại để kiểm soát chất lượng" in bot.video_finalization_tier_guard_text("standard", "vi")
+    assert "800 Xu" in bot.video_finalization_tier_text({}, "vi")
+    assert "chưa vượt qua billing/cost gate" in bot.video_finalization_tier_guard_text("standard", "vi")
 
 
 def test_public_video_tier_keyboard_uses_five_beta_gate_buttons():
     buttons = _button_texts(bot.public_video_tier_keyboard("vi"))
     callbacks = _button_callbacks(bot.public_video_tier_keyboard("vi"))
-    for label in ("200 Xu", "300 Xu", "400 Xu", "600 Xu", "1200 Xu"):
+    for label in ("200 Xu", "300 Xu", "400 Xu", "500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1500 Xu"):
         assert any(label in button for button in buttons)
-    for label in ("Trải nghiệm", "Cơ bản", "Phổ thông", "Tiêu chuẩn", "Cao cấp"):
+    for label in ("Trải nghiệm", "Cơ bản", "Phổ thông", "Nâng cao", "Bán hàng", "Cao cấp", "Đang phát triển"):
         assert any(label in button for button in buttons)
-    for tier in ("low", "basic", "common", "standard", "high"):
+    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1500"):
         assert f"create_media|video_tier_{tier}" in callbacks
 
 

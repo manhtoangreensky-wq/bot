@@ -117,11 +117,20 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/sales_ready` | `cmd_sales_ready` | YES | YES | NOT READY/BETA READY readiness check; no auto SALES READY. |
 | `/system_public_status` | `cmd_system_public_status` | YES | YES | Public tool surface summary; no secrets and no provider calls. |
 | `/tool_public_status` | `cmd_tool_public_status` | YES | YES | Alias-style public tool surface summary for launch checks. |
+| `/image_edit_status` | `cmd_image_edit_status` | YES | YES | Image edit provider readiness matrix; never shows keys and does not fake output. |
+| `/tool_test_image_edit` | `cmd_tool_test_ai_image_edit` | YES | YES | Alias for the real OpenAI image edit smoke test; requires replying to an image. |
+| `/tool_test_gemini_image_edit` | `cmd_tool_test_gemini_image_edit` | YES | YES | Guarded Gemini image-edit readiness check; no fake image and no Xu charge. |
+| `/tool_test_shopaikey_image_edit` | `cmd_tool_test_shopaikey_image_edit` | YES | YES | Guarded ShopAIKey image-edit readiness check; no fake image and no Xu charge. |
+| `/image_edit_public_open` | `cmd_image_edit_public_open` | YES | YES | Owner-only gate; opens image edit public only after real provider readiness and smoke PASS. |
+| `/image_edit_public_close` | `cmd_image_edit_public_close` | YES | YES | Owner-only gate; returns image edit to admin-only. |
+| `/chat_ai_status` | `cmd_chat_ai_status` | YES | YES | Text/vision Chat AI readiness and image-analysis provider status. |
+| `/toanaas_ai_status` | `cmd_toanaas_ai_status` | YES | YES | TOAN AAS assistant knowledge-base and AI provider readiness. |
 | `/video_public_status` | `cmd_video_public_status` | YES | YES | Video public flags, provider smoke, worker readiness, tier status and blocked tiers. |
 | `/video_gate_status` | `cmd_video_gate_status` | YES | YES | Video gate matrix for planning, frame video, Video AI, image/video-to-video and long render. |
+| `/video_tier_status` | `cmd_video_tier_status` | YES | YES | Video 200/300/400/500/600/800 tier status plus 1000/1500 coming-soon guard. |
 | `/video_cost_status` | `cmd_video_cost_status` | YES | YES | Video beta 200/300/400 cost ratio and margin status; no payment changes. |
 | `/video_beta_limits` | `cmd_video_beta_limits` | YES | YES | Current public video beta limits, confirm/job-lock policy and duration caps. |
-| `/video_beta_open` | `cmd_video_beta_open` | YES | YES | Opens only eligible 200/300/400 Video AI beta tiers after smoke and cost gates pass. |
+| `/video_beta_open` | `cmd_video_beta_open` | YES | YES | Opens only eligible 200/300/400/500/600/800 Video AI tiers after smoke and cost gates pass. |
 | `/video_beta_close` | `cmd_video_beta_close` | YES | YES | Closes Video AI public beta without touching planning/storyboard or payment logic. |
 | `/runtime` | `cmd_runtime` | YES | YES | Runtime/webhook diagnostics. |
 | `/data_status` | `cmd_data_status` | YES | YES | Persistent DB/backup/volume status. |
@@ -178,9 +187,14 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tool_test_shopaikey_tts` | `cmd_tool_test_shopaikey_tts` | YES | YES | Admin TTS smoke test. |
 | `/tool_test_asr` | `cmd_tool_test_asr` | YES | YES | Reply a short audio/video file to smoke test Deepgram ASR with no Xu charge. |
 | `/tool_test_translate [text] [lang]` | `cmd_tool_test_translate` | YES | YES | Smoke test translation routing/fallback with a short text. |
+| `/tool_test_tts_for_dub` | `cmd_tool_test_tts` | YES | YES | Alias for TTS smoke when verifying dubbing readiness. |
+| `/subtitle_dub_status` | `cmd_subtitle_dub_status` | YES | YES | Subtitle/dub pipeline readiness: ASR, translation, TTS, mux and public mode gates. |
+| `/subtitle_status` | `cmd_subtitle_dub_status` | YES | YES | Alias for subtitle/dub readiness status. |
 | `/tool_test_video_subtitle` | `cmd_tool_test_video_subtitle` | YES | YES | Reply a short video to test ASR to SRT; admin-only and no Xu charge. |
 | `/tool_test_video_dub [text]` | `cmd_tool_test_video_dub` | YES | YES | Test dubbing TTS output from replied media or short text; mux remains capability-guarded. |
 | `/tool_test_subtitle_plus_dub` | `cmd_tool_test_subtitle_plus_dub` | YES | YES | Reply a short video to test ASR, subtitle, and TTS outputs without charging Xu. |
+| `/video_dub_public_open` | `cmd_video_dub_public_open` | YES | YES | Owner-only gate; opens subtitle/dub modes only after provider readiness and smoke PASS. |
+| `/video_dub_public_close` | `cmd_video_dub_public_close` | YES | YES | Owner-only gate; closes selected subtitle/dub public modes. |
 | `/clear_frame_video_error` | `cmd_clear_frame_video_error` | YES | YES | Clear only the stored frame-video last-error display; does not alter jobs or Xu. |
 | `/video_price_test <seconds> <type> <tier> <addon>` | `cmd_video_price_test` | YES | YES | Preview itemized video, subtitle, dubbing, total Xu, and VND pricing without creating a job or charging Xu. |
 | `/maintenance_status` | `cmd_maintenance_status` | YES | YES | Maintenance/freeze status overview. |

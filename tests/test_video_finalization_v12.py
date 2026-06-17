@@ -432,7 +432,7 @@ def test_finalization_callback_is_registered_and_has_no_direct_billing():
     ):
         assert forbidden not in handler_source
     assert "set_public_video_package_context" in handler_source
-    assert "public_video_tier_selection_text" in handler_source
+    assert "video_finalization_tier_text" in handler_source
 
 
 def test_video_finalization_flags_are_documented():
