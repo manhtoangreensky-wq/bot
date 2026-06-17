@@ -3,7 +3,7 @@ from pathlib import Path
 
 import bot
 import provider_router
-from providers.key4u_provider import Key4UConfig, Key4UProvider, mask_key, safe_join_url
+from providers.key4u_provider import Key4UConfig, Key4UProvider, is_placeholder_task_id, mask_key, safe_join_url
 
 
 def repo_file(name: str) -> str:
@@ -38,6 +38,15 @@ def test_key4u_status_masks_api_key():
 def test_key4u_url_join_keeps_v1_clean():
     assert safe_join_url("https://api.key4u.shop/v1", "/v1/chat/completions") == "https://api.key4u.shop/v1/chat/completions"
     assert safe_join_url("https://api.key4u.shop", "/v1/video/create") == "https://api.key4u.shop/v1/video/create"
+
+
+def test_key4u_default_models_are_not_empty():
+    provider = Key4UProvider(Key4UConfig(enabled=True, admin_smoke_enabled=True, api_key="sk-test"))
+    status = provider.get_status()
+    assert status["chat_model"] == "qwen-plus"
+    assert status["vision_model"] == "gemini-2.5-flash"
+    assert bot.KEY4U_CHAT_MODEL == "qwen-plus"
+    assert bot.KEY4U_VISION_MODEL == "gemini-2.5-flash"
 
 
 def test_key4u_missing_config_no_network_no_crash():
@@ -100,6 +109,45 @@ def test_key4u_admin_smoke_commands_do_not_deduct_xu():
             assert token not in block
 
 
+def test_key4u_admin_smoke_commands_have_model_fallbacks():
+    source = repo_file("bot.py")
+    chat_block = source_between(source, "async def cmd_tool_test_key4u_chat", "async def cmd_tool_test_key4u_vision")
+    vision_block = source_between(source, "async def cmd_tool_test_key4u_vision", "async def cmd_tool_test_key4u_image")
+    video_block = source_between(source, "async def cmd_tool_test_key4u_video", "async def cmd_key4u_video_job")
+    assert "KEY4U_CHAT_MODEL_FALLBACKS" in chat_block
+    assert "KEY4U_VISION_MODEL_FALLBACKS" in vision_block
+    assert "KEY4U_VIDEO_FALLBACK_MODELS" in video_block
+    assert "max_fallbacks=2" in chat_block
+    assert "max_fallbacks=2" in vision_block
+    assert "max_fallbacks=1" in video_block
+    assert "models_tried" in source_between(source, "def key4u_result_lines", "def key4u_manual_balance_usd")
+
+
+def test_key4u_video_query_uses_get_with_id_and_rejects_placeholders():
+    source = repo_file("providers/key4u_provider.py")
+    poll_block = source_between(source, "async def poll_video_task", "async def tts")
+    assert "is_placeholder_task_id(safe_task_id)" in poll_block
+    assert 'params={"id": safe_task_id}' in poll_block
+    assert "client.get(endpoint" in poll_block
+    assert "client.post(endpoint" not in poll_block
+    assert is_placeholder_task_id("<task_id>") is True
+    provider = Key4UProvider(Key4UConfig(enabled=True, admin_smoke_enabled=True, api_key="sk-test"))
+    result = asyncio.run(provider.poll_video_task("<task_id>"))
+    assert result["ok"] is False
+    assert result["status"] == "NEED_TASK_ID"
+    assert result["http_status"] == 0
+
+
+def test_key4u_video_submit_payload_and_timeout_are_safe():
+    source = repo_file("providers/key4u_provider.py")
+    video_block = source_between(source, "async def video_generation", "async def poll_video_task")
+    assert "timeout_seconds: float = 60.0" in video_block
+    assert '"aspect_ratio": "16:9"' in video_block
+    assert '"enhance_prompt": True' in video_block
+    assert '"enable_upsample": False' in video_block
+    assert '_timeout_result("video_generate"' in video_block
+
+
 def test_key4u_commands_registered_and_documented():
     source = repo_file("bot.py")
     registry = repo_file("docs/COMMAND_REGISTRY.md")
@@ -157,6 +205,11 @@ def test_env_example_key4u_public_off_and_woku_parked():
     assert "KEY4U_USAGE_ENDPOINT=" in env_text
     assert "KEY4U_BALANCE_ENDPOINT=" in env_text
     assert "KEY4U_DASHBOARD_BALANCE_USD=" in env_text
+    assert "KEY4U_DEFAULT_CHAT_MODEL=qwen-plus" in env_text
+    assert "KEY4U_CHAT_MODEL_FALLBACKS=qwen-plus,qwen-turbo,deepseek-chat,gemini-2.5-flash" in env_text
+    assert "KEY4U_DEFAULT_VISION_MODEL=gemini-2.5-flash" in env_text
+    assert "KEY4U_VISION_MODEL_FALLBACKS=gemini-2.5-flash,gemini-2.5-flash-all,gpt-4o-mini,qwen-vl-max" in env_text
+    assert "KEY4U_VIDEO_FALLBACK_MODELS=" in env_text
     assert "KEY4U_PUBLIC_ENABLED=false" in env_text
     assert "KEY4U_ADMIN_SMOKE_ENABLED=true" in env_text
     assert "PROVIDER_PRIMARY=shopaikey" in env_text

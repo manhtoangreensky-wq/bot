@@ -8208,6 +8208,16 @@ def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
     assert "chưa gọi API và chưa trừ Xu" in bot.image_edit_ai_guard_text("vi")
     readiness = bot.get_image_ai_edit_readiness()
     assert {"ready", "provider", "model", "endpoint", "reason"}.issubset(set(readiness))
+    run_edit_source = source_between(source, "async def run_image_ai_edit_from_state", "def image_edit_create_new_text")
+    assert "if is_admin_user(uid):" in run_edit_source
+    assert "Lý do kỹ thuật:" in run_edit_source
+    public_guard_branch = run_edit_source[
+        run_edit_source.index("else:"):
+        run_edit_source.index("await safe_edit_query_message")
+    ]
+    assert "KEY4U_" not in public_guard_branch
+    assert "ENABLE_OPENAI_IMAGE_EDIT" not in public_guard_branch
+    assert "Lý do:" not in public_guard_branch
     assert "không phải sửa trực tiếp ảnh gốc" in bot.image_edit_create_new_text({}, "vi")
     assert "image_edit_prompt_ready" in bot.IMAGE_MENU_PENDING_ACTIONS
     assert "image_edit_option_ready" in bot.IMAGE_MENU_PENDING_ACTIONS

@@ -443,11 +443,14 @@ KEY4U_STT_ENDPOINT = _env("KEY4U_STT_ENDPOINT", "")
 KEY4U_SUNO_CREATE_ENDPOINT = _env("KEY4U_SUNO_CREATE_ENDPOINT", "")
 KEY4U_SUNO_QUERY_ENDPOINT = _env("KEY4U_SUNO_QUERY_ENDPOINT", "")
 KEY4U_RERANK_ENDPOINT = _env("KEY4U_RERANK_ENDPOINT", "")
-KEY4U_CHAT_MODEL = _env("KEY4U_DEFAULT_CHAT_MODEL", _env("KEY4U_CHAT_MODEL", ""))
-KEY4U_VISION_MODEL = _env("KEY4U_DEFAULT_VISION_MODEL", _env("KEY4U_VISION_MODEL", ""))
+KEY4U_CHAT_MODEL = _env("KEY4U_DEFAULT_CHAT_MODEL", _env("KEY4U_CHAT_MODEL", "qwen-plus"))
+KEY4U_CHAT_MODEL_FALLBACKS = _env("KEY4U_CHAT_MODEL_FALLBACKS", "qwen-plus,qwen-turbo,deepseek-chat,gemini-2.5-flash")
+KEY4U_VISION_MODEL = _env("KEY4U_DEFAULT_VISION_MODEL", _env("KEY4U_VISION_MODEL", "gemini-2.5-flash"))
+KEY4U_VISION_MODEL_FALLBACKS = _env("KEY4U_VISION_MODEL_FALLBACKS", "gemini-2.5-flash,gemini-2.5-flash-all,gpt-4o-mini,qwen-vl-max")
 KEY4U_IMAGE_EDIT_MODEL = _env("KEY4U_DEFAULT_IMAGE_EDIT_MODEL", _env("KEY4U_IMAGE_EDIT_MODEL", "grok-imagine-image-pro"))
 KEY4U_NANO_BANANA_EDIT_MODEL = _env("KEY4U_NANO_BANANA_EDIT_MODEL", "nano-banana")
 KEY4U_VIDEO_MODEL = _env("KEY4U_DEFAULT_VIDEO_MODEL", _env("KEY4U_VIDEO_MODEL", "veo3.1-fast"))
+KEY4U_VIDEO_FALLBACK_MODELS = _env("KEY4U_VIDEO_FALLBACK_MODELS", "")
 KEY4U_TTS_MODEL = _env("KEY4U_DEFAULT_TTS_MODEL", _env("KEY4U_TTS_MODEL", ""))
 KEY4U_STT_MODEL = _env("KEY4U_STT_MODEL", "")
 KEY4U_SUNO_MODEL = _env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", ""))
@@ -36032,11 +36035,20 @@ async def run_image_ai_edit_from_state(update: Update, context: ContextTypes.DEF
         return True
     readiness = get_image_ai_edit_readiness(uid)
     if not readiness.get("ready"):
+        if is_admin_user(uid):
+            guard_text = (
+                "✨ <b>Chỉnh sửa ảnh AI đang được kiểm soát an toàn.</b>\n\n"
+                f"Lý do kỹ thuật: <code>{html.escape(str(readiness.get('reason') or 'not ready'))}</code>\n\n"
+                "TOAN AAS chưa gọi provider và chưa trừ Xu. Bạn có thể dùng Cắt/Đổi tỉ lệ, Thêm chữ/logo hoặc Công thức màu trước."
+            )
+        else:
+            guard_text = (
+                "✨ <b>Chỉnh sửa ảnh AI đang được bảo trì/nâng cấp để đảm bảo chất lượng.</b>\n\n"
+                "TOAN AAS chưa gọi provider và chưa trừ Xu. Bạn có thể dùng Cắt/Đổi tỉ lệ, Thêm chữ/logo hoặc Công thức màu trước."
+            )
         await safe_edit_query_message(
             query,
-            "✨ <b>Chỉnh sửa ảnh AI đang được kiểm soát an toàn.</b>\n\n"
-            f"Lý do: <code>{html.escape(str(readiness.get('reason') or 'not ready'))}</code>\n\n"
-            "TOAN AAS chưa gọi provider và chưa trừ Xu. Bạn có thể dùng Cắt/Đổi tỉ lệ, Thêm chữ/logo hoặc Công thức màu trước.",
+            guard_text,
             parse_mode="HTML",
             reply_markup=image_edit_ai_guard_keyboard(lang),
         )
@@ -55034,11 +55046,40 @@ async def cmd_provider_matrix(update: Update, context: ContextTypes.DEFAULT_TYPE
 def key4u_smoke_detail(result: dict) -> str:
     return (
         f"capability={result.get('capability') or '-'}; model={result.get('model') or '-'}; "
+        f"models_tried={','.join(result.get('models_tried') or []) or '-'}; "
         f"http={result.get('http_status') or 0}; latency_ms={result.get('latency_ms') or 0}; "
         f"task_id={result.get('task_id') or '-'}; output_url={'yes' if result.get('output_url') else 'no'}; "
         f"bytes={len(result.get('output_bytes') or b'')}; error_class={result.get('error_class') or '-'}; "
         f"message={sanitize_log_text(str(result.get('error_message_safe') or '-'))[:220]}"
     )
+
+def key4u_model_candidates(primary: str, fallbacks_csv: str = "", max_fallbacks: int = 2) -> list[str]:
+    items: list[str] = []
+    for value in [primary, *(str(fallbacks_csv or "").split(","))]:
+        model = str(value or "").strip()
+        if model and model not in items:
+            items.append(model)
+    if not items:
+        return []
+    return items[: max(1, int(max_fallbacks or 0) + 1)]
+
+async def key4u_run_with_model_fallback(candidates: list[str], runner):
+    from providers.key4u_provider import should_try_model_fallback
+
+    models_tried: list[str] = []
+    result: dict = {}
+    for model in candidates:
+        models_tried.append(model)
+        result = await runner(model)
+        result["models_tried"] = list(models_tried)
+        result["fallback_used"] = len(models_tried) > 1
+        if result.get("ok") or not should_try_model_fallback(result):
+            return result
+    if result:
+        result["models_tried"] = list(models_tried)
+        result["fallback_used"] = len(models_tried) > 1
+        return result
+    return {"ok": False, "status": "NEED_MODEL", "error_class": "NEED_MODEL", "error_message_safe": "No Key4U model candidates configured", "models_tried": []}
 
 def key4u_result_lines(title: str, result: dict) -> list[str]:
     return [
@@ -55048,6 +55089,8 @@ def key4u_result_lines(title: str, result: dict) -> list[str]:
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>",
         f"• Capability: <code>{html.escape(str(result.get('capability') or '-'))}</code>",
         f"• Model: <code>{html.escape(str(result.get('model') or '-'))}</code>",
+        f"• Models tried: <code>{html.escape(', '.join(result.get('models_tried') or []) or '-')}</code>",
+        f"• Fallback used: <code>{'yes' if result.get('fallback_used') else 'no'}</code>",
         f"• Task ID: <code>{html.escape(str(result.get('task_id') or '-'))}</code>",
         f"• Output URL: <code>{'yes' if result.get('output_url') else 'no'}</code>",
         f"• Output bytes: <code>{len(result.get('output_bytes') or b'')}</code>",
@@ -55206,13 +55249,22 @@ async def key4u_usage_lines(remote_usage: dict | None = None, remote_balance_res
 
 async def key4u_reply_image_bytes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bytes:
     message = update.message.reply_to_message if update and update.message else None
-    if not message:
-        return b""
     file_id = ""
-    if getattr(message, "photo", None):
-        file_id = message.photo[-1].file_id
-    elif getattr(message, "document", None) and str(message.document.mime_type or "").startswith("image/"):
-        file_id = message.document.file_id
+    if message:
+        if getattr(message, "photo", None):
+            file_id = message.photo[-1].file_id
+        elif getattr(message, "document", None) and str(message.document.mime_type or "").startswith("image/"):
+            file_id = message.document.file_id
+    if not file_id and update and update.effective_user:
+        cached = get_last_user_file(update.effective_user.id)
+        mime_type = str(cached.get("mime_type") or "").lower()
+        file_type = str(cached.get("file_type") or "").lower()
+        file_name = str(cached.get("file_name") or cached.get("filename") or "").lower()
+        if file_type == "image" or mime_type.startswith("image/") or file_name.endswith((".jpg", ".jpeg", ".png", ".webp")):
+            file_id = str(cached.get("file_id") or "")
+    if not file_id and update and update.effective_user:
+        cached_image = get_recent_media_state(LAST_USER_IMAGE, update.effective_user.id)
+        file_id = str(cached_image.get("file_id") or "")
     if not file_id:
         return b""
     tg_file = await context.bot.get_file(file_id)
@@ -55352,8 +55404,9 @@ async def cmd_tool_test_key4u_chat(update: Update, context: ContextTypes.DEFAULT
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     provider = key4u_provider_instance()
-    model = " ".join(context.args or []).strip() or KEY4U_CHAT_MODEL
-    result = await provider.chat_completion(model=model)
+    requested_model = " ".join(context.args or []).strip()
+    candidates = [requested_model] if requested_model else key4u_model_candidates(KEY4U_CHAT_MODEL, KEY4U_CHAT_MODEL_FALLBACKS, max_fallbacks=2)
+    result = await key4u_run_with_model_fallback(candidates, lambda model: provider.chat_completion(model=model))
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_chat", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "tool_test_key4u_chat", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
@@ -55365,7 +55418,9 @@ async def cmd_tool_test_key4u_vision(update: Update, context: ContextTypes.DEFAU
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     provider = key4u_provider_instance()
     image_bytes = await key4u_reply_image_bytes(update, context)
-    result = await provider.vision_analysis(image_bytes=image_bytes)
+    requested_model = " ".join(context.args or []).strip()
+    candidates = [requested_model] if requested_model else key4u_model_candidates(KEY4U_VISION_MODEL, KEY4U_VISION_MODEL_FALLBACKS, max_fallbacks=2)
+    result = await key4u_run_with_model_fallback(candidates, lambda model: provider.vision_analysis(image_bytes=image_bytes, model=model))
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_vision", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "tool_test_key4u_vision", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
@@ -55405,8 +55460,9 @@ async def cmd_tool_test_key4u_video(update: Update, context: ContextTypes.DEFAUL
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     provider = key4u_provider_instance()
-    model = " ".join(context.args or []).strip() or KEY4U_VIDEO_MODEL
-    result = await provider.video_generation(model=model)
+    requested_model = " ".join(context.args or []).strip()
+    candidates = [requested_model] if requested_model else key4u_model_candidates(KEY4U_VIDEO_MODEL, KEY4U_VIDEO_FALLBACK_MODELS, max_fallbacks=1)
+    result = await key4u_run_with_model_fallback(candidates, lambda model: provider.video_generation(model=model, timeout_seconds=60.0))
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_video", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "tool_test_key4u_video", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)

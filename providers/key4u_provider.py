@@ -60,6 +60,8 @@ def _safe_message(value: Any, limit: int = 220) -> str:
 
 def _classify_http(status_code: int, message: str = "") -> str:
     msg = str(message or "").lower()
+    if any(marker in msg for marker in ("model not found", "invalid model", "model_not_found", "invalid_model")):
+        return "FAIL_MODEL_NOT_FOUND"
     if status_code in {401, 403}:
         return "FAIL_AUTH"
     if status_code == 429:
@@ -73,6 +75,39 @@ def _classify_http(status_code: int, message: str = "") -> str:
     if status_code >= 500:
         return "FAIL_PROVIDER_UNAVAILABLE"
     return "FAIL_PROVIDER_ERROR"
+
+
+PLACEHOLDER_TASK_IDS = {"", "<task_id>", "task_id", "task-id", "taskid", "none", "null", "----", "-"}
+
+
+def is_placeholder_task_id(value: str | None) -> bool:
+    return str(value or "").strip().lower() in PLACEHOLDER_TASK_IDS
+
+
+def should_try_model_fallback(result: dict[str, Any]) -> bool:
+    haystack = " ".join(
+        str(result.get(key) or "")
+        for key in ("status", "error_class", "error_message_safe")
+    ).lower()
+    return any(marker in haystack for marker in ("model_not_found", "invalid_model", "model not found", "invalid model", "need_model"))
+
+
+def _timeout_result(capability: str, model: str, exc: Exception, *, task_id: str = "", stage: str = "timeout") -> dict[str, Any]:
+    if isinstance(exc, httpx.ConnectTimeout):
+        stage = "connect_timeout"
+    elif isinstance(exc, httpx.ReadTimeout):
+        stage = "read_timeout"
+    elif stage == "timeout":
+        stage = "submit_timeout"
+    return _result(
+        ok=False,
+        capability=capability,
+        model=model,
+        status="FAIL_TIMEOUT",
+        task_id=task_id,
+        error_class=stage,
+        error_message_safe=f"{stage}: provider did not respond before timeout",
+    )
 
 
 def _result(
@@ -131,8 +166,8 @@ class Key4UConfig:
     suno_create_endpoint: str = ""
     suno_query_endpoint: str = ""
     rerank_endpoint: str = ""
-    chat_model: str = ""
-    vision_model: str = ""
+    chat_model: str = "qwen-plus"
+    vision_model: str = "gemini-2.5-flash"
     image_edit_model: str = "grok-imagine-image-pro"
     nano_banana_edit_model: str = "nano-banana"
     video_model: str = "veo3.1-fast"
@@ -164,8 +199,8 @@ def config_from_env() -> Key4UConfig:
         suno_create_endpoint=_env("KEY4U_SUNO_CREATE_ENDPOINT", ""),
         suno_query_endpoint=_env("KEY4U_SUNO_QUERY_ENDPOINT", ""),
         rerank_endpoint=_env("KEY4U_RERANK_ENDPOINT", ""),
-        chat_model=_env("KEY4U_DEFAULT_CHAT_MODEL", _env("KEY4U_CHAT_MODEL", "")),
-        vision_model=_env("KEY4U_DEFAULT_VISION_MODEL", _env("KEY4U_VISION_MODEL", "")),
+        chat_model=_env("KEY4U_DEFAULT_CHAT_MODEL", _env("KEY4U_CHAT_MODEL", "qwen-plus")),
+        vision_model=_env("KEY4U_DEFAULT_VISION_MODEL", _env("KEY4U_VISION_MODEL", "gemini-2.5-flash")),
         image_edit_model=_env("KEY4U_DEFAULT_IMAGE_EDIT_MODEL", _env("KEY4U_IMAGE_EDIT_MODEL", "grok-imagine-image-pro")),
         nano_banana_edit_model=_env("KEY4U_NANO_BANANA_EDIT_MODEL", "nano-banana"),
         video_model=_env("KEY4U_DEFAULT_VIDEO_MODEL", _env("KEY4U_VIDEO_MODEL", "veo3.1-fast")),
@@ -210,12 +245,12 @@ class Key4UProvider:
 
     def list_capabilities(self) -> dict[str, str]:
         return {
-            "text_brain": "admin_smoke",
-            "vision_analysis": "admin_smoke_requires_model_and_image",
+            "text_brain": "ready_for_smoke",
+            "vision_analysis": "ready_for_smoke_requires_image",
             "image_edit": "admin_smoke_requires_image_input",
             "nano_banana_edit": "admin_smoke_requires_image_input",
-            "video_generate": "admin_smoke",
-            "video_query": "admin_smoke",
+            "video_generate": "ready_for_smoke",
+            "video_query": "ready_for_task_id",
             "image_generate": "planned_needs_docs",
             "tts": "needs_endpoint_docs" if not self.config.tts_endpoint else "admin_smoke",
             "stt": "needs_endpoint_docs" if not self.config.stt_endpoint else "admin_smoke",
@@ -414,7 +449,7 @@ class Key4UProvider:
                 error_message_safe=err,
             )
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="text_brain", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _timeout_result("text_brain", selected_model, exc)
         except Exception as exc:
             return _result(ok=False, capability="text_brain", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
@@ -432,7 +467,7 @@ class Key4UProvider:
         if not selected_model:
             return _result(ok=False, capability="vision_analysis", status="NEED_MODEL", error_class="NEED_MODEL", error_message_safe="KEY4U_VISION_MODEL is empty")
         if not image_bytes and not image_url:
-            return _result(ok=False, capability="vision_analysis", model=selected_model, status="NEED_IMAGE_INPUT", error_class="NEED_IMAGE_INPUT", error_message_safe="Reply/send an image for vision smoke test")
+            return _result(ok=False, capability="vision_analysis", model=selected_model, status="NEED_IMAGE_INPUT", error_class="NEED_IMAGE_INPUT", error_message_safe="Hãy reply một ảnh hoặc gửi ảnh trong 10 phút rồi chạy lại smoke test vision.")
         endpoint = safe_join_url(self.config.openai_base_url, self.config.chat_endpoint)
         image_content = image_url
         if image_bytes:
@@ -463,7 +498,7 @@ class Key4UProvider:
                 return _result(ok=True, capability="vision_analysis", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, text=str(text).strip())
             return _result(ok=False, capability="vision_analysis", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="vision_analysis", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _timeout_result("vision_analysis", selected_model, exc)
         except Exception as exc:
             return _result(ok=False, capability="vision_analysis", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
@@ -500,7 +535,7 @@ class Key4UProvider:
         if not self.is_configured():
             return self._missing_result(capability, selected_model)
         if not image_bytes:
-            return _result(ok=False, capability=capability, model=selected_model, status="NEED_IMAGE_INPUT", error_class="NEED_IMAGE_INPUT", error_message_safe="Reply/send an image for image edit smoke test")
+            return _result(ok=False, capability=capability, model=selected_model, status="NEED_IMAGE_INPUT", error_class="NEED_IMAGE_INPUT", error_message_safe="Hãy reply một ảnh hoặc gửi ảnh trong 10 phút rồi chạy lại smoke test image edit.")
         endpoint = safe_join_url(self.config.base_url if use_nano_banana else self.config.openai_base_url, endpoint_path)
         started = time.perf_counter()
         files = {"image": ("toan-aas-key4u-input.png", image_bytes, "image/png")}
@@ -524,21 +559,27 @@ class Key4UProvider:
                 return _result(ok=True, capability=capability, model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_url=output_url)
             return _result(ok=False, capability=capability, model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, payload), error_message_safe=payload)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability=capability, model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _timeout_result(capability, selected_model, exc)
         except Exception as exc:
             return _result(ok=False, capability=capability, model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
     async def video_generation(
         self,
-        prompt: str = "A short clean futuristic turquoise AI automation logo animation, white background, minimal, no extra text except TOAN AAS",
+        prompt: str = "6-second jade green TOAN AAS logo reveal, clean tech style, smooth camera movement, no watermark.",
         model: str = "",
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 60.0,
     ) -> dict[str, Any]:
         selected_model = model or self.config.video_model
         if not self.is_configured():
             return self._missing_result("video_generate", selected_model)
         endpoint = safe_join_url(self.config.base_url, self.config.video_create_endpoint)
-        payload = {"model": selected_model, "prompt": str(prompt or "")[:1000]}
+        payload = {
+            "model": selected_model,
+            "prompt": str(prompt or "")[:1000],
+            "aspect_ratio": "16:9",
+            "enhance_prompt": True,
+            "enable_upsample": False,
+        }
         started = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
@@ -555,7 +596,7 @@ class Key4UProvider:
                 return _result(ok=True, capability="video_generate", model=selected_model, status="PASS_SUBMITTED", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, raw_debug_admin_only={"provider_status": provider_status})
             return _result(ok=False, capability="video_generate", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="video_generate", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _timeout_result("video_generate", selected_model, exc, stage="submit_timeout")
         except Exception as exc:
             return _result(ok=False, capability="video_generate", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
@@ -563,13 +604,20 @@ class Key4UProvider:
         safe_task_id = str(task_id or "").strip()
         if not self.is_configured():
             return self._missing_result("video_query", self.config.video_model)
-        if not safe_task_id:
-            return _result(ok=False, capability="video_query", model=self.config.video_model, status="NEED_TASK_ID", error_class="NEED_TASK_ID", error_message_safe="Missing task_id")
+        if is_placeholder_task_id(safe_task_id):
+            return _result(
+                ok=False,
+                capability="video_query",
+                model=self.config.video_model,
+                status="NEED_TASK_ID",
+                error_class="NEED_TASK_ID",
+                error_message_safe="Vui lòng nhập task_id thật. Ví dụ: /key4u_video_job abc123",
+            )
         endpoint = safe_join_url(self.config.base_url, self.config.video_query_endpoint)
         started = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-                response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json={"task_id": safe_task_id})
+                response = await client.get(endpoint, headers=self._headers(), params={"id": safe_task_id})
             latency_ms = int((time.perf_counter() - started) * 1000)
             try:
                 data = response.json()
@@ -592,7 +640,7 @@ class Key4UProvider:
                 )
             return _result(ok=False, capability="video_query", model=self.config.video_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="video_query", model=self.config.video_model, status="FAIL_TIMEOUT", task_id=safe_task_id, error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _timeout_result("video_query", self.config.video_model, exc, task_id=safe_task_id)
         except Exception as exc:
             return _result(ok=False, capability="video_query", model=self.config.video_model, status="FAIL_EXCEPTION", task_id=safe_task_id, error_class=type(exc).__name__, error_message_safe=exc)
 
