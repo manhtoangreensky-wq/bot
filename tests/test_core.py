@@ -8062,10 +8062,14 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
 
     music_labels = [button.text for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
     assert "🎙 Tạo giọng đọc" in music_labels
+    assert "🎼 Tạo nhạc AI" in music_labels
+    assert "🧬 Nhân bản giọng" in music_labels
     assert "🗣 Chọn giọng" not in music_labels
     music_callbacks = [button.callback_data for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
     assert "music_quick|prompt" in music_callbacks
     assert "music_quick|voice" in music_callbacks
+    assert "music_quick|ai_music" in music_callbacks
+    assert "music_quick|voice_clone" in music_callbacks
     assert "music_quick|voice_pick" not in music_callbacks
 
     suggestions = bot.music_prompt_suggestions("video review máy xay sinh tố mini", 0, "vi")
@@ -8076,7 +8080,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "3 prompt nhạc gợi ý" in suggestions_text
     assert "Prompt:" in suggestions_text
     prompt_callbacks = [button.callback_data for row in bot.music_prompt_result_keyboard("vi").inline_keyboard for button in row]
-    assert {"music_quick|prompt_choose_1", "music_quick|prompt_more", "music_quick|save_prompt", "music_quick|find_from_prompt"}.issubset(set(prompt_callbacks))
+    assert {"music_quick|prompt_choose_1", "music_quick|prompt_more", "music_quick|save_prompt", "music_quick|find_from_prompt", "music_quick|music_ai_guard"}.issubset(set(prompt_callbacks))
 
     for keyboard in [bot.music_library_quick_keyboard("vi"), bot.sfx_library_quick_keyboard("vi"), bot.media_library_quick_keyboard("vi")]:
         callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
@@ -9464,6 +9468,11 @@ def test_media_ai_readiness_contracts_and_commands_registered():
             "admin_debug_reason",
         ]:
             assert field in payload
+
+    suno_readiness = bot.get_suno_music_readiness()
+    assert set(suno_readiness.get("providers") or {}) >= {"key4u_suno", "shopaikey_music"}
+    assert "key4u=" in suno_readiness.get("admin_smoke_status", "")
+    assert "shopaikey=" in suno_readiness.get("admin_smoke_status", "")
 
     public_status = bot.get_media_ai_public_status()
     assert public_status["video_200_paid_addons_locked"] is True

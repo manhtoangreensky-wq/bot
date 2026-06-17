@@ -70,6 +70,40 @@ def test_video_finalization_state_preserves_independent_options(monkeypatch):
     bot.clear_video_finalization_state(user_id)
 
 
+def test_video_finalization_package_maps_music_subtitle_and_dub():
+    package = bot.video_finalization_package_from_state({
+        "source": "promptvideo",
+        "video_prompt": "A clean TOAN AAS product video",
+        "has_video_prompt": True,
+        "source_payload": {"prompt": "A clean TOAN AAS product video"},
+        "video_finalization": {
+            "music_enabled": True,
+            "music_mode": "suno",
+            "music_prompt": "uplifting tech background music",
+            "subtitle_enabled": True,
+            "subtitle_mode": "manual",
+            "subtitle_text": "TOAN AAS",
+            "voice_enabled": True,
+            "voice_mode": "tts",
+            "voice_text": "TOAN AAS",
+            "dub_enabled": True,
+            "translation_enabled": True,
+            "subtitle_language": "en",
+            "voice_style": "female",
+            "finalization_confirmed": True,
+        },
+    })
+
+    assert package["music_option"] == "suno"
+    assert package["music_prompt"] == "uplifting tech background music"
+    assert package["subtitle_option"] == "subtitle_translated"
+    assert package["dubbing_option"] == "dub_translated"
+    assert package["translation_enabled"] is True
+    assert package["target_language"] == "en"
+    assert package["voice_style"] == "female"
+    assert package["video_finalization_confirmed"] is True
+
+
 def test_video_finalization_state_expires():
     user_id = 991202
     state = bot.set_video_finalization_state(user_id, {"source": "storyboard"})

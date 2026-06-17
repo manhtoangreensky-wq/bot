@@ -233,5 +233,7 @@ def test_provider_flags_and_admin_smoke_commands_are_guarded():
         source.index("async def cmd_shopaikey_music_test"):
         source.index("async def cmd_tool_test_shopaikey_image")
     ]
-    assert "client.post" not in music_guard
-    assert "payload/status/result contract" in music_guard
+    assert "client.post" in music_guard
+    assert "SHOPAIKEY_MUSIC_ENABLED" in music_guard
+    assert "Không gọi provider và không trừ Xu." in music_guard
+    assert "/suno/submit/music" in source

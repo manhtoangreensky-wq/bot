@@ -538,10 +538,11 @@ SHOPAIKEY_VIDEO_MODEL_PRIMARY = _env("SHOPAIKEY_VIDEO_MODEL_PRIMARY", _env("SHOP
 SHOPAIKEY_VIDEO_MODEL = SHOPAIKEY_VIDEO_MODEL_PRIMARY
 SHOPAIKEY_VIDEO_FALLBACK_MODELS = _env("SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,veo3.1-pro,veo3.1-4k,veo3.1-fast-components,grok-video-3,grok-video-3-10s")
 SHOPAIKEY_MUSIC_ENABLED = env_flag("SHOPAIKEY_MUSIC_ENABLED", "false")
-SHOPAIKEY_MUSIC_ENDPOINT = _env("SHOPAIKEY_MUSIC_ENDPOINT")
-SHOPAIKEY_MUSIC_STATUS_ENDPOINT = _env("SHOPAIKEY_MUSIC_STATUS_ENDPOINT")
-SHOPAIKEY_MUSIC_CONTENT_ENDPOINT = _env("SHOPAIKEY_MUSIC_CONTENT_ENDPOINT")
-SHOPAIKEY_MUSIC_MODEL = _env("SHOPAIKEY_MUSIC_MODEL")
+SHOPAIKEY_MUSIC_ENDPOINT = _env("SHOPAIKEY_MUSIC_ENDPOINT", "/suno/submit/music")
+SHOPAIKEY_MUSIC_LYRICS_ENDPOINT = _env("SHOPAIKEY_MUSIC_LYRICS_ENDPOINT", "/suno/submit/lyrics")
+SHOPAIKEY_MUSIC_STATUS_ENDPOINT = _env("SHOPAIKEY_MUSIC_STATUS_ENDPOINT", "/suno/fetch/{taskId}")
+SHOPAIKEY_MUSIC_CONTENT_ENDPOINT = _env("SHOPAIKEY_MUSIC_CONTENT_ENDPOINT", "")
+SHOPAIKEY_MUSIC_MODEL = _env("SHOPAIKEY_MUSIC_MODEL", "chirp-v4")
 SHOPAIKEY_MUSIC_GROUP = _env("SHOPAIKEY_MUSIC_GROUP")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
 SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true"))
@@ -49997,9 +49998,9 @@ def menu_text_main_music() -> str:
     return (
         "🎙 <b>VOICE / NHẠC TOAN AAS</b>\n\n"
         "<b>A. Voice / TTS / STT</b>\n"
-        "Tạo voice từ văn bản, chọn giọng, bóc băng audio và chuẩn bị voice cho video.\n\n"
+        "Tạo voice từ văn bản, chọn giọng, lưu voice profile/nhân bản giọng có consent, bóc băng audio và chuẩn bị voice cho video.\n\n"
         "<b>B. Music / SFX / Media</b>\n"
-        "Tạo prompt nhạc, tìm nhạc nền, SFX, media public và ghép nhạc vào video.\n\n"
+        "Tạo nhạc AI/Suno, tạo prompt nhạc, tìm nhạc nền, SFX, media public và ghép nhạc vào video.\n\n"
         "Chọn tác vụ bằng nút bên dưới. Tác vụ admin-test sẽ báo rõ trạng thái và không trừ Xu nếu chưa mở public."
     )
 
@@ -54692,12 +54693,17 @@ def voice_status_text() -> str:
     ])
 
 def music_status_text() -> str:
-    key4u_payload = key4u_status_payload()
+    readiness = get_suno_music_readiness()
+    providers = dict(readiness.get("providers") or {})
+    key4u = dict(providers.get("key4u_suno") or {})
+    shopaikey = dict(providers.get("shopaikey_music") or {})
     return "\n".join([
         "🎵 <b>MUSIC / SFX STATUS</b>",
         "",
-        f"• ShopAIKey music: <code>{html.escape(preferred_tool_test_status_text('shopaikey_music', 'shopaikey_music_job'))}</code>",
-        f"• Key4U Suno: <code>{'CONFIGURED' if (key4u_payload.get('configured') and KEY4U_SUNO_CREATE_ENDPOINT and KEY4U_SUNO_MODEL) else 'COMING_SOON/NEED_DOCS'}</code> | smoke <code>{html.escape(tool_test_status_text('key4u_suno'))}</code>",
+        f"• Preferred Suno provider: <code>{html.escape(str(readiness.get('provider') or '-'))}</code>",
+        f"• ShopAIKey Music/Suno: <code>{'CONFIGURED' if shopaikey.get('configured') else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(str(shopaikey.get('smoke') or '-'))}</code>",
+        f"• Key4U Suno: <code>{'CONFIGURED' if key4u.get('configured') else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(str(key4u.get('smoke') or '-'))}</code>",
+        f"• Public Suno gate: <code>{'ON' if readiness.get('public_enabled') else 'OFF'}</code> | reason <code>{html.escape(str(readiness.get('reason') or '-'))}</code>",
         "• Local SFX/library stays separate. Music AI public remains guarded until smoke + cost pass.",
     ])
 
@@ -54755,7 +54761,7 @@ def _media_readiness_payload(
     }
 
 def get_suno_music_readiness() -> dict:
-    missing = []
+    key4u_missing = []
     for name, ok in [
         ("KEY4U_ENABLED", KEY4U_ENABLED),
         ("KEY4U_API_KEY", bool(KEY4U_API_KEY)),
@@ -54764,27 +54770,68 @@ def get_suno_music_readiness() -> dict:
         ("KEY4U_DEFAULT_MUSIC_MODEL/KEY4U_SUNO_MODEL", bool(KEY4U_SUNO_MODEL)),
     ]:
         if not ok:
-            missing.append(name)
-    smoke = preferred_tool_test_status_text("key4u_suno", "key4u_suno_job")
-    configured = not missing
-    public_ready = bool(configured and SUNO_PUBLIC_ENABLED and (smoke == "PASS_SUBMITTED" or smoke == "PASS" or not SUNO_REQUIRE_SMOKE_PASS))
-    reason = "ready" if configured else "Missing " + ", ".join(missing)
-    if configured and not public_ready:
-        reason = "configured_for_admin_smoke; public gate remains closed until smoke/cost pass"
-    return _media_readiness_payload(
+            key4u_missing.append(name)
+    shopaikey_missing = []
+    for name, ok in [
+        ("MUSIC_AI_ENABLED", MUSIC_AI_ENABLED),
+        ("SHOPAIKEY_ENABLED", SHOPAIKEY_ENABLED),
+        ("SHOPAIKEY_API_KEY", bool(SHOPAIKEY_API_KEY)),
+        ("SHOPAIKEY_MUSIC_ENABLED", SHOPAIKEY_MUSIC_ENABLED),
+        ("SHOPAIKEY_MUSIC_ENDPOINT", bool(SHOPAIKEY_MUSIC_ENDPOINT)),
+    ]:
+        if not ok:
+            shopaikey_missing.append(name)
+    key4u_smoke = preferred_tool_test_status_text("key4u_suno", "key4u_suno_job")
+    shopaikey_smoke = preferred_tool_test_status_text("shopaikey_music", "shopaikey_music_job")
+    key4u_configured = not key4u_missing
+    shopaikey_configured = not shopaikey_missing
+    configured = bool(key4u_configured or shopaikey_configured)
+    smoke_ok = any(status in {"PASS_SUBMITTED", "PASS", "OK", "SUCCESS"} for status in (key4u_smoke, shopaikey_smoke))
+    preferred_provider = "key4u_suno" if key4u_configured else ("shopaikey_music" if shopaikey_configured else "none")
+    preferred_model = KEY4U_SUNO_MODEL if key4u_configured else (SHOPAIKEY_MUSIC_MODEL or "auto")
+    preferred_endpoint = KEY4U_SUNO_CREATE_ENDPOINT if key4u_configured else (SHOPAIKEY_MUSIC_ENDPOINT or "")
+    public_ready = bool(configured and SUNO_PUBLIC_ENABLED and (smoke_ok or not SUNO_REQUIRE_SMOKE_PASS))
+    if configured:
+        reason = "ready" if public_ready else "configured_for_admin_smoke; public gate remains closed until smoke/cost pass"
+        missing = []
+    else:
+        reason = "Missing Key4U Suno or ShopAIKey Music configuration"
+        missing = ["KEY4U_SUNO_* or SHOPAIKEY_MUSIC_*"]
+    payload = _media_readiness_payload(
         name="suno_music",
-        provider="key4u_suno",
-        model=KEY4U_SUNO_MODEL,
-        endpoint=KEY4U_SUNO_CREATE_ENDPOINT,
-        api_key_configured=bool(KEY4U_API_KEY),
-        endpoint_configured=bool(KEY4U_SUNO_CREATE_ENDPOINT),
-        admin_smoke_tool="key4u_suno",
+        provider=preferred_provider,
+        model=preferred_model,
+        endpoint=preferred_endpoint,
+        api_key_configured=bool((key4u_configured and KEY4U_API_KEY) or (shopaikey_configured and SHOPAIKEY_API_KEY)),
+        endpoint_configured=bool(preferred_endpoint),
+        admin_smoke_tool="key4u_suno" if key4u_configured else "shopaikey_music",
         public_enabled=public_ready,
         ready=configured,
         reason=reason,
         missing_env=missing,
         safe_user_message="⚙️ Tạo nhạc AI/Suno đang được kiểm tra. Bạn vẫn có thể dùng nhạc có sẵn; TOAN AAS chưa gọi provider và chưa trừ Xu.",
     )
+    payload.update({
+        "providers": {
+            "key4u_suno": {
+                "configured": key4u_configured,
+                "model": KEY4U_SUNO_MODEL or "",
+                "endpoint_configured": bool(KEY4U_SUNO_CREATE_ENDPOINT),
+                "smoke": key4u_smoke,
+                "missing_env": key4u_missing,
+            },
+            "shopaikey_music": {
+                "configured": shopaikey_configured,
+                "model": SHOPAIKEY_MUSIC_MODEL or "",
+                "endpoint_configured": bool(SHOPAIKEY_MUSIC_ENDPOINT),
+                "smoke": shopaikey_smoke,
+                "missing_env": shopaikey_missing,
+            },
+        },
+        "admin_smoke_status": f"key4u={key4u_smoke}; shopaikey={shopaikey_smoke}",
+        "preferred_provider": preferred_provider,
+    })
+    return payload
 
 def get_minimax_voice_readiness() -> dict:
     missing = []
@@ -58276,33 +58323,188 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
 async def cmd_shopaikey_music_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
-    enabled = bool(MUSIC_AI_ENABLED and SHOPAIKEY_MUSIC_ENABLED)
-    endpoint_ready = bool(SHOPAIKEY_MUSIC_ENDPOINT)
-    status = "DISABLED" if not enabled else ("MISSING_ENDPOINT" if not endpoint_ready else "CONTRACT_NOT_VERIFIED")
-    await update.message.reply_text(
-        "🎼 <b>ShopAIKey Music Smoke Guard</b>\n\n"
-        f"• Status: <code>{status}</code>\n"
-        f"• Music AI enabled: <code>{'yes' if enabled else 'no'}</code>\n"
-        f"• Submit endpoint: <code>{'configured' if endpoint_ready else 'missing'}</code>\n"
-        f"• Status endpoint: <code>{'configured' if SHOPAIKEY_MUSIC_STATUS_ENDPOINT else 'missing'}</code>\n"
-        f"• Content endpoint: <code>{'configured' if SHOPAIKEY_MUSIC_CONTENT_ENDPOINT else 'missing'}</code>\n\n"
-        "Bot không gửi request vì payload/status/result contract chưa được xác minh bằng cURL. "
-        "Không hard-code endpoint đoán mò. Không trừ Xu.",
-        parse_mode="HTML",
-    )
+    uid = update.effective_user.id
+    missing = []
+    for name, ok in [
+        ("MUSIC_AI_ENABLED", MUSIC_AI_ENABLED),
+        ("SHOPAIKEY_ENABLED", SHOPAIKEY_ENABLED),
+        ("SHOPAIKEY_MUSIC_ENABLED", SHOPAIKEY_MUSIC_ENABLED),
+        ("SHOPAIKEY_API_KEY", bool(SHOPAIKEY_API_KEY)),
+        ("SHOPAIKEY_MUSIC_ENDPOINT", bool(SHOPAIKEY_MUSIC_ENDPOINT)),
+    ]:
+        if not ok:
+            missing.append(name)
+    model = SHOPAIKEY_MUSIC_MODEL or "chirp-v4"
+    if missing:
+        detail = "missing=" + ",".join(missing)
+        save_tool_test_result("shopaikey_music", "DISABLED", detail, uid)
+        return await update.message.reply_text(
+            "🎼 <b>ShopAIKey Suno Music Smoke</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            f"• Model: <code>{html.escape(model)}</code>\n"
+            f"• Missing: <code>{html.escape(', '.join(missing))}</code>\n\n"
+            "Không gọi provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    prompt_text = " ".join(str(arg) for arg in (context.args or [])).strip()
+    if not prompt_text:
+        prompt_text = "Nhạc nền công nghệ xanh ngọc cho video TOAN AAS, hiện đại, sạch, tích cực, không lời"
+    prompt_text = prompt_text[:500]
+    body = {
+        "mv": model,
+        "gpt_description_prompt": prompt_text,
+        "title": "TOAN AAS Smoke Test",
+        "tags": "cinematic, tech, uplifting",
+        "make_instrumental": True,
+    }
+    url = join_shopaikey_url(SHOPAIKEY_BASE_URL, SHOPAIKEY_MUSIC_ENDPOINT)
+    http_status = 0
+    status = "FAIL_PROVIDER_ERROR"
+    task_id = ""
+    provider_message = ""
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            res = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {SHOPAIKEY_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+        http_status = int(res.status_code or 0)
+        try:
+            payload = res.json() if res.content else {}
+        except Exception:
+            payload = {}
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, str):
+            task_id = data.strip()
+        elif isinstance(data, dict):
+            task_id = str(data.get("task_id") or data.get("taskId") or data.get("id") or "").strip()
+        provider_message = sanitize_provider_error(
+            (payload.get("message") if isinstance(payload, dict) else "")
+            or (payload.get("error", {}).get("message") if isinstance(payload, dict) and isinstance(payload.get("error"), dict) else "")
+            or (res.text[:220] if not task_id else "")
+        )
+        code = str(payload.get("code") or "").lower() if isinstance(payload, dict) else ""
+        status = "PASS_SUBMITTED" if 200 <= http_status < 300 and task_id and code in {"", "success", "ok"} else classify_provider_error(http_status, "FAIL_PROVIDER_ERROR", provider_message)
+    except httpx.TimeoutException:
+        status = "FAIL_TIMEOUT"
+        provider_message = "request timeout"
+    except Exception as exc:
+        status = "FAIL_PROVIDER_ERROR"
+        provider_message = sanitize_provider_error(exc)
+    detail = f"http={http_status}; model={model}; task_id={'yes' if task_id else 'no'}; message={provider_message[:240]}"
+    save_tool_test_result("shopaikey_music", status, detail, uid)
+    record_api_debug("shopaikey", "tool_test_shopaikey_music", status, http_status, detail)
+    lines = [
+        "🎼 <b>ShopAIKey Suno Music Smoke</b>",
+        "",
+        f"• Status: <code>{html.escape(status)}</code>",
+        f"• HTTP: <code>{http_status or '-'}</code>",
+        f"• Model: <code>{html.escape(model)}</code>",
+        f"• Submit endpoint: <code>{html.escape(SHOPAIKEY_MUSIC_ENDPOINT)}</code>",
+        f"• Task ID: <code>{html.escape(task_id or '-')}</code>",
+        f"• Provider message: <code>{html.escape(provider_message or '-')}</code>",
+        "",
+        "Không trừ Xu. Lưu ý: admin smoke có thể tốn provider credit thật.",
+    ]
+    if task_id:
+        lines.append(f"Poll: <code>/shopaikey_music_job {html.escape(task_id)}</code>")
+    else:
+        lines.append("Không có task_id vì provider chưa nhận job; không chạy /shopaikey_music_job cho lần test này.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_shopaikey_music_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
     task_id = str((context.args or [""])[0] or "").strip()[:120]
     if not task_id:
         return await update.message.reply_text("Cú pháp: /shopaikey_music_job <task_id>")
+    try:
+        from providers.key4u_provider import is_placeholder_task_id
+        placeholder = is_placeholder_task_id(task_id)
+    except Exception:
+        lowered = task_id.lower()
+        placeholder = bool(
+            task_id.startswith("<")
+            or lowered in {"task_id", "your_task_id", "abc", "abc123", "none", "null", "*"}
+            or len(task_id) < 8
+        )
+    if placeholder:
+        return await update.message.reply_text(
+            "Vui lòng dùng task_id thật do /shopaikey_music_test trả về. "
+            "Nếu lệnh tạo nhạc chưa submit thành công thì hiện chưa có task_id để query."
+        )
+    if not (SHOPAIKEY_ENABLED and SHOPAIKEY_MUSIC_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_MUSIC_STATUS_ENDPOINT):
+        save_tool_test_result("shopaikey_music_job", "DISABLED", "missing status endpoint or credentials; no call", uid)
+        return await update.message.reply_text(
+            "🎼 <b>ShopAIKey Music Job</b>\n\n"
+            "• Status: <code>DISABLED</code>\n"
+            "• Reason: <code>missing status endpoint or credentials</code>\n\n"
+            "Không gọi provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    endpoint = SHOPAIKEY_MUSIC_STATUS_ENDPOINT
+    encoded_task_id = quote(task_id, safe="")
+    if "{taskId}" in endpoint:
+        endpoint = endpoint.replace("{taskId}", encoded_task_id)
+    elif "{task_id}" in endpoint:
+        endpoint = endpoint.replace("{task_id}", encoded_task_id)
+    else:
+        endpoint = endpoint.rstrip("/") + "/" + encoded_task_id
+    url = join_shopaikey_url(SHOPAIKEY_BASE_URL, endpoint)
+    http_status = 0
+    status = "FAIL_PROVIDER_ERROR"
+    progress = "-"
+    audio_present = False
+    video_present = False
+    image_present = False
+    fail_reason = ""
+    try:
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            res = await client.get(url, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}"})
+        http_status = int(res.status_code or 0)
+        try:
+            payload = res.json() if res.content else {}
+        except Exception:
+            payload = {}
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        status = str((data.get("status") if isinstance(data, dict) else "") or payload.get("status") or payload.get("code") or "").strip() or classify_provider_error(http_status, "FAIL_PROVIDER_ERROR", res.text[:180])
+        progress = str((data.get("progress") if isinstance(data, dict) else "") or payload.get("progress") or "-")
+        fail_reason = sanitize_provider_error((data.get("fail_reason") if isinstance(data, dict) else "") or payload.get("message") or payload.get("error") or "")
+        items = data.get("data") if isinstance(data, dict) else None
+        if isinstance(items, dict):
+            items = [items]
+        if isinstance(items, list):
+            for item in items[:3]:
+                if not isinstance(item, dict):
+                    continue
+                audio_present = audio_present or bool(item.get("audio_url"))
+                video_present = video_present or bool(item.get("video_url"))
+                image_present = image_present or bool(item.get("image_url"))
+    except httpx.TimeoutException:
+        status = "FAIL_TIMEOUT"
+        fail_reason = "request timeout"
+    except Exception as exc:
+        status = "FAIL_PROVIDER_ERROR"
+        fail_reason = sanitize_provider_error(exc)
+    detail = f"http={http_status}; status={status}; task_id={task_id[:24]}; audio={audio_present}; video={video_present}; message={fail_reason[:220]}"
+    save_tool_test_result("shopaikey_music_job", status, detail, uid)
+    record_api_debug("shopaikey", "shopaikey_music_job", status, http_status, detail)
     await update.message.reply_text(
-        "🎼 <b>ShopAIKey Music Job Guard</b>\n\n"
+        "🎼 <b>ShopAIKey Suno Music Job</b>\n\n"
         f"• Task ID: <code>{html.escape(task_id)}</code>\n"
-        f"• Status endpoint: <code>{'configured' if SHOPAIKEY_MUSIC_STATUS_ENDPOINT else 'missing'}</code>\n"
-        "• Status: <code>NOT_POLLED</code>\n\n"
-        "Contract polling chưa được xác minh nên bot không gọi API đoán mò. Không trừ Xu.",
+        f"• HTTP: <code>{http_status or '-'}</code>\n"
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• Progress: <code>{html.escape(progress)}</code>\n"
+        f"• Audio URL: <code>{'yes' if audio_present else 'no'}</code>\n"
+        f"• Video URL: <code>{'yes' if video_present else 'no'}</code>\n"
+        f"• Image URL: <code>{'yes' if image_present else 'no'}</code>\n"
+        f"• Fail reason: <code>{html.escape(fail_reason or '-')}</code>\n\n"
+        "Không trừ Xu. Không hiển thị API key/raw response.",
         parse_mode="HTML",
     )
 
@@ -62227,10 +62429,176 @@ def music_prompt_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", "music_quick|prompt"),
         ("🎵 Tìm nhạc theo prompt" if is_vi else "🎵 Search music", "music_quick|find_from_prompt"),
         ("💾 Lưu prompt" if is_vi else "💾 Save prompt", "music_quick|save_prompt"),
-        ("🤖 Tạo nhạc AI (đang hoàn thiện)" if is_vi else "🤖 AI music (in progress)", "music_quick|music_ai_guard"),
+        ("🎼 Tạo nhạc AI Suno" if is_vi else "🎼 Generate Suno music", "music_quick|music_ai_guard"),
     ]
     back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def suno_music_provider_summary_text(lang: str = "vi") -> str:
+    readiness = get_suno_music_readiness() if "get_suno_music_readiness" in globals() else {}
+    key4u_ready = bool(KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_SUNO_CREATE_ENDPOINT and KEY4U_SUNO_MODEL)
+    shopaikey_ready = bool(MUSIC_AI_ENABLED and SHOPAIKEY_MUSIC_ENABLED and SHOPAIKEY_MUSIC_ENDPOINT)
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"Key4U Suno: {'configured' if key4u_ready else 'needs config'}; "
+            f"ShopAIKey Music/Suno: {'configured' if shopaikey_ready else 'needs config'}; "
+            f"public gate: {'ON' if readiness.get('public_enabled') else 'OFF'}; "
+            f"smoke: {readiness.get('admin_smoke_status') or 'NOT_TESTED'}"
+        )
+    return (
+        f"Key4U Suno: {'đã cấu hình' if key4u_ready else 'chưa đủ cấu hình'}; "
+        f"ShopAIKey Music/Suno: {'đã cấu hình' if shopaikey_ready else 'chưa đủ cấu hình'}; "
+        f"public gate: {'ON' if readiness.get('public_enabled') else 'OFF'}; "
+        f"smoke: {readiness.get('admin_smoke_status') or 'NOT_TESTED'}"
+    )
+
+def music_ai_menu_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎼 <b>AI Music / Suno</b>\n\n"
+            "Choose what you want to prepare. TOAN AAS creates 3 music directions first: background music, song with lyrics, lyrics/script, or melody/mood.\n\n"
+            f"<b>Provider status:</b> {html.escape(suno_music_provider_summary_text(lang))}\n\n"
+            "Real music generation uses a separate pricing/confirmation gate. No provider call and no Xu charge on this planning screen."
+        )
+    return (
+        "🎼 <b>Tạo nhạc AI / Suno</b>\n\n"
+        "Bạn muốn chuẩn bị loại nhạc nào? TOAN AAS sẽ tạo 3 hướng trước: nhạc nền, nhạc có lời, lời/kịch bản nhạc hoặc giai điệu/mood.\n\n"
+        f"<b>Trạng thái provider:</b> {html.escape(suno_music_provider_summary_text(lang))}\n\n"
+        "Tạo nhạc thật sẽ đi qua màn báo giá/xác nhận riêng. Màn này chưa gọi provider và chưa trừ Xu."
+    )
+
+def music_ai_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = [
+        ("🎵 Nhạc nền" if is_vi else "🎵 Background", "music_quick|music_ai_background"),
+        ("🎤 Nhạc có lời" if is_vi else "🎤 Song with lyrics", "music_quick|music_ai_lyrics"),
+        ("📝 Gợi ý lời/kịch bản" if is_vi else "📝 Lyrics/script", "music_quick|music_ai_script"),
+        ("🎼 Gợi ý giai điệu" if is_vi else "🎼 Melody/mood", "music_quick|music_ai_melody"),
+        ("✍️ Tự nhập mô tả" if is_vi else "✍️ Custom brief", "music_quick|music_ai_custom"),
+        ("🔎 Trạng thái Suno" if is_vi else "🔎 Suno status", "music_quick|music_ai_guard"),
+    ]
+    back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def music_ai_input_text(kind: str = "background", lang: str = "vi") -> str:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    label_vi = {
+        "background": "nhạc nền",
+        "lyrics": "nhạc có lời",
+        "script": "lời/kịch bản bài nhạc",
+        "melody": "giai điệu/mood",
+        "custom": "nhạc AI",
+    }.get(kind, "nhạc AI")
+    label_en = {
+        "background": "background music",
+        "lyrics": "song with lyrics",
+        "script": "lyrics/music script",
+        "melody": "melody/mood",
+        "custom": "AI music",
+    }.get(kind, "AI music")
+    if not is_vi:
+        return (
+            f"🎼 <b>{html.escape(label_en.title())}</b>\n\n"
+            "Send the product/topic, mood, language, target platform, and any words you want included. The bot will return 3 options first.\n\n"
+            "No provider call and no Xu charge at this step."
+        )
+    return (
+        f"🎼 <b>Tạo {html.escape(label_vi)}</b>\n\n"
+        "Bạn gửi sản phẩm/chủ đề, mood, ngôn ngữ, nền tảng đăng và từ khóa muốn đưa vào. Bot sẽ trả 3 hướng để chọn/đổi/sửa trước.\n\n"
+        "Bước này chưa gọi provider và chưa trừ Xu."
+    )
+
+def voice_clone_intro_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🧬 <b>Voice profile / clone voice</b>\n\n"
+            "Send an audio sample that you own or have explicit consent to use. TOAN AAS will save the Telegram file ID as a private voice profile for this account.\n\n"
+            "MiniMax voice clone remains guarded until provider smoke + consent are ready. No provider call and no Xu charge on upload."
+        )
+    return (
+        "🧬 <b>Nhân bản giọng đọc/hát</b>\n\n"
+        "Hãy gửi file voice/audio mẫu mà bạn sở hữu hoặc đã có đồng ý rõ ràng. TOAN AAS sẽ lưu file ID thành voice profile riêng của tài khoản này để sau dùng cho kịch bản/lồng tiếng.\n\n"
+        "MiniMax voice clone vẫn được guard cho đến khi smoke + consent sẵn sàng. Bước gửi file chưa gọi provider và chưa trừ Xu."
+    )
+
+def voice_clone_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = [
+        ("📎 Tôi sẽ gửi file giọng" if is_vi else "📎 I will send audio", "music_quick|voice_clone_upload"),
+        ("🎙 Giọng đã lưu" if is_vi else "🎙 Saved voices", "music_quick|voice_profiles"),
+        ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", "music_quick|voice_default_female"),
+        ("👨 Giọng nam mặc định" if is_vi else "👨 Default male", "music_quick|voice_default_male"),
+        ("🔎 MiniMax status" if is_vi else "🔎 MiniMax status", "music_quick|voice_clone_guard"),
+    ]
+    back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def save_user_voice_profile(user_id, file_id: str, file_type: str = "audio", display_name: str = "") -> int:
+    clean_file_id = str(file_id or "").strip()[:220]
+    if not clean_file_id:
+        return 0
+    now = now_text()
+    metadata = {"file_type": str(file_type or "")[:40], "source": "telegram_upload"}
+    try:
+        with db_connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO voice_profiles
+                (user_id, provider, provider_voice_id, display_name, consent_status, source_file_id, status, created_at, updated_at, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(user_id),
+                    "telegram",
+                    "",
+                    display_name or f"Voice profile {now[:10]}",
+                    "user_uploaded_consent_required",
+                    clean_file_id,
+                    "saved",
+                    now,
+                    now,
+                    json.dumps(metadata, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid or 0)
+    except Exception as exc:
+        logger.warning("save_user_voice_profile failed | %s", sanitize_log_text(str(exc))[:220])
+        return 0
+
+def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5) -> str:
+    rows = []
+    try:
+        with db_connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, display_name, consent_status, status, created_at
+                FROM voice_profiles
+                WHERE user_id=?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (str(user_id), int(limit or 5)),
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        logger.warning("user_voice_profiles_summary failed | %s", sanitize_log_text(str(exc))[:220])
+    if normalize_user_language(lang) != "vi":
+        if not rows:
+            return "🎙 <b>Saved voices</b>\n\nNo saved voice profile yet. Send an audio sample first. No Xu charge."
+        lines = ["🎙 <b>Saved voices</b>", ""]
+    else:
+        if not rows:
+            return "🎙 <b>Giọng đã lưu</b>\n\nBạn chưa có voice profile nào. Hãy gửi file voice/audio mẫu trước. Bot chưa trừ Xu."
+        lines = ["🎙 <b>Giọng đã lưu</b>", ""]
+    for row in rows:
+        profile_id, name, consent, status, created = row
+        lines.append(f"• <code>#{profile_id}</code> {html.escape(str(name or 'Voice profile'))} — {html.escape(str(status or '-'))} / {html.escape(str(consent or '-'))} — {html.escape(str(created or '-')[:16])}")
+    lines.append("")
+    lines.append("MiniMax clone/use vẫn cần consent + smoke/provider gate. Bot chưa trừ Xu." if normalize_user_language(lang) == "vi" else "MiniMax clone/use still requires consent + smoke/provider gate. No Xu charge.")
+    return "\n".join(lines)
 
 def voice_style_suggestions_text(text: str, lang: str = "vi") -> str:
     lang = music_ui_lang(lang=lang)
@@ -62300,6 +62668,8 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         labels = {
             "voice": "🎙 生成语音",
             "stt": "🎧 转文字/STT",
+            "ai_music": "🎼 AI音乐",
+            "voice_clone": "🧬 声音档案",
             "voice_video": "🎬 添加语音",
             "prompt": "🎼 音乐提示词",
             "music": "🎧 音乐库",
@@ -62314,6 +62684,8 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         labels = {
             "voice": "🎙 Create voice",
             "stt": "🎧 STT / Transcribe",
+            "ai_music": "🎼 AI Music",
+            "voice_clone": "🧬 Voice profile",
             "voice_video": "🎬 Add voice",
             "prompt": "🎼 Music prompt",
             "music": "🎧 Music library",
@@ -62328,6 +62700,8 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         labels = {
             "voice": "🎙 Tạo giọng đọc",
             "stt": "🎧 STT / Bóc băng",
+            "ai_music": "🎼 Tạo nhạc AI",
+            "voice_clone": "🧬 Nhân bản giọng",
             "voice_video": "🎬 Ghép voice",
             "prompt": "🎼 Tạo prompt nhạc",
             "music": "🎧 Kho nhạc",
@@ -62342,6 +62716,10 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(labels["voice"], callback_data="music_quick|voice"),
             InlineKeyboardButton(labels["stt"], callback_data="music_quick|stt"),
+        ],
+        [
+            InlineKeyboardButton(labels["ai_music"], callback_data="music_quick|ai_music"),
+            InlineKeyboardButton(labels["voice_clone"], callback_data="music_quick|voice_clone"),
         ],
         [
             InlineKeyboardButton(labels["voice_video"], callback_data="music_quick|voice_video"),
@@ -62561,6 +62939,44 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         set_music_guided_pending(user_id, "voice_text")
         return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+    if action == "ai_music":
+        await query.answer()
+        return await query.message.reply_text(music_ai_menu_text(lang), parse_mode="HTML", reply_markup=music_ai_menu_keyboard(lang))
+    if action in {"music_ai_background", "music_ai_lyrics", "music_ai_script", "music_ai_melody", "music_ai_custom"}:
+        await query.answer()
+        kind = action.replace("music_ai_", "", 1)
+        set_music_guided_pending(user_id, f"music_ai_{kind}")
+        return await query.message.reply_text(music_ai_input_text(kind, lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+    if action == "voice_clone":
+        await query.answer()
+        return await query.message.reply_text(voice_clone_intro_text(lang), parse_mode="HTML", reply_markup=voice_clone_keyboard(lang))
+    if action == "voice_clone_upload":
+        await query.answer()
+        set_music_guided_pending(user_id, "voice_clone_upload")
+        return await query.message.reply_text(voice_clone_intro_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+    if action == "voice_profiles":
+        await query.answer()
+        return await query.message.reply_text(user_voice_profiles_summary(user_id, lang), parse_mode="HTML", reply_markup=voice_clone_keyboard(lang))
+    if action in {"voice_default_female", "voice_default_male"}:
+        await query.answer()
+        label = "giọng nữ mặc định" if action.endswith("female") else "giọng nam mặc định"
+        return await query.message.reply_text(
+            f"✅ Đã chọn {label} cho kế hoạch voice/lồng tiếng.\n\nTTS thật vẫn đi qua màn báo giá/xác nhận khi public gate sẵn sàng. Bot chưa gọi provider và chưa trừ Xu.",
+            reply_markup=voice_clone_keyboard(lang),
+        )
+    if action == "voice_clone_guard":
+        await query.answer()
+        readiness = get_minimax_voice_readiness() if "get_minimax_voice_readiness" in globals() else {}
+        return await query.message.reply_text(
+            "🧬 <b>MiniMax Voice / Clone status</b>\n\n"
+            f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
+            f"• Public: <code>{'ON' if readiness.get('public_enabled') else 'OFF'}</code>\n"
+            f"• Smoke: <code>{html.escape(str(readiness.get('admin_smoke_status') or '-'))}</code>\n"
+            f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or readiness.get('reason') or '-'))}</code>\n\n"
+            "Voice clone chỉ dùng mẫu có quyền/consent rõ ràng. Bot chưa gọi provider và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=voice_clone_keyboard(lang),
+        )
     if action == "stt":
         await query.answer()
         text = (
@@ -62665,8 +63081,15 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(f"💾 Đã lưu prompt nhạc vào ghi chú <code>#{note_id}</code>. Bot chưa trừ Xu.", parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
     if action == "music_ai_guard":
         await query.answer()
+        readiness = get_suno_music_readiness() if "get_suno_music_readiness" in globals() else {}
         return await query.message.reply_text(
-            "🤖 Tạo nhạc AI đang được hoàn thiện/kiểm tra provider. TOAN AAS chưa gọi API nhạc, chưa xử lý file và chưa trừ Xu.",
+            "🎼 <b>Suno AI Music status</b>\n\n"
+            f"• {html.escape(suno_music_provider_summary_text(lang))}\n"
+            f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
+            f"• Public: <code>{'ON' if readiness.get('public_enabled') else 'OFF'}</code>\n"
+            f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or readiness.get('reason') or '-'))}</code>\n\n"
+            "TOAN AAS đã lưu/hiện prompt nhạc để bạn dùng tiếp. Tạo nhạc thật sẽ chỉ chạy khi Suno public gate + hóa đơn xác nhận sẵn sàng. Bot chưa gọi provider và chưa trừ Xu.",
+            parse_mode="HTML",
             reply_markup=music_prompt_result_keyboard(lang),
         )
     if action.startswith("voice_style_"):
@@ -64439,6 +64862,42 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             disable_web_page_preview=True,
         )
         return True
+    if action.startswith("music_ai_"):
+        blocked = music_copyright_block_reason(text)
+        if blocked:
+            await update.message.reply_text(
+                "⛔ Yêu cầu tạo nhạc này có rủi ro bản quyền/clone.\n\n"
+                f"• Dấu hiệu: <code>{html.escape(blocked)}</code>\n"
+                "Hãy mô tả mood, tempo, nhạc cụ, lời tự viết và bối cảnh video thay vì nhắc nghệ sĩ/bài hát cụ thể.\n"
+                "Bot chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=music_ai_menu_keyboard(lang),
+            )
+            return True
+        kind = action.replace("music_ai_", "", 1)
+        prefix = {
+            "background": "Nhạc nền không lời",
+            "lyrics": "Nhạc có lời",
+            "script": "Lời/kịch bản bài nhạc",
+            "melody": "Giai điệu/mood",
+            "custom": "Nhạc AI",
+        }.get(kind, "Nhạc AI")
+        enriched = f"{prefix}: {text}"
+        suggestions = music_prompt_suggestions(enriched, 0, lang)
+        save_music_guided_result(uid, {
+            "description": enriched,
+            "offset": 0,
+            "suggestions": suggestions,
+            "selected_prompt": "",
+            "music_ai_kind": kind,
+        })
+        await update.message.reply_text(
+            music_prompt_suggestions_text(enriched, 0, lang),
+            parse_mode="HTML",
+            reply_markup=music_prompt_result_keyboard(lang),
+            disable_web_page_preview=True,
+        )
+        return True
     if action == "music_library_keyword":
         await send_music_library_results(update.message, uid, text)
         return True
@@ -64457,6 +64916,39 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         )
         return True
     return False
+
+async def handle_music_guided_pending_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    state = get_music_guided_pending(uid)
+    if not state or str(state.get("pending_action") or "") != "voice_clone_upload":
+        return False
+    media, file_type = message_media_candidate(update.message)
+    mime = media_content_type(media, file_type) if media else ""
+    if not media or not (file_type in {"voice", "audio", "document"} or str(mime).startswith("audio/")):
+        await update.message.reply_text(
+            "⚠️ Hãy gửi file voice/audio hợp lệ để lưu voice profile. Bot chưa gọi provider và chưa trừ Xu.",
+            reply_markup=voice_clone_keyboard(music_ui_lang(uid)),
+        )
+        return True
+    file_id = str(getattr(media, "file_id", "") or "")
+    profile_id = save_user_voice_profile(uid, file_id, file_type=file_type or "audio")
+    clear_music_guided_pending(uid)
+    lang = music_ui_lang(uid)
+    if profile_id:
+        await update.message.reply_text(
+            f"✅ Đã lưu voice profile <code>#{profile_id}</code> cho tài khoản này.\n\n"
+            "Bạn có thể dùng lại profile này cho kịch bản/lồng tiếng sau khi MiniMax voice gate sẵn sàng. Bot chưa gọi provider và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=voice_clone_keyboard(lang),
+        )
+    else:
+        await update.message.reply_text(
+            "⚠️ Không lưu được voice profile lúc này. Bot chưa gọi provider và chưa trừ Xu.",
+            reply_markup=voice_clone_keyboard(lang),
+        )
+    return True
 
 def music_ai_provider_summary() -> str:
     providers = []
@@ -77722,6 +78214,45 @@ def video_finalization_package_from_state(state: dict | None = None) -> dict:
     package.setdefault("video_project", dict(state.get("video_project") or {}))
     return package
 
+async def video_finalization_continue_to_invoice_or_tier(query, user_id, state: dict | None = None, lang: str = "vi"):
+    current = dict(state or get_video_finalization_state(user_id) or {})
+    if not current:
+        return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+    tier = normalize_video_tier(current.get("selected_video_tier") or "")
+    has_selected_tier = bool(current.get("selected_video_tier"))
+    if has_selected_tier and video_finalization_has_prompt(current):
+        current["selected_video_tier"] = tier
+        current["selected_video_aspect_ratio"] = video_finalization_selected_aspect(current)
+        current["step"] = "confirm"
+        set_video_finalization_state(user_id, current)
+        status = get_public_video_tier_ui_status(tier, is_admin_user(user_id))
+        if not status.get("enabled"):
+            return await safe_edit_or_send(
+                query,
+                video_finalization_tier_guard_text(tier, lang),
+                parse_mode="HTML",
+                reply_markup=video_finalization_tier_keyboard(lang),
+            )
+        package = video_finalization_package_from_state(current)
+        aspect = video_finalization_selected_aspect(current)
+        pending_payload = public_video_pending_payload_from_package(tier, package, aspect)
+        pending_payload.update({
+            "video_finalization": dict(package.get("video_finalization") or {}),
+            "video_finalization_confirmed": True,
+            "source": str(current.get("source") or package.get("source") or "promptvideo")[:80],
+            "source_flow": str(current.get("source") or package.get("source_flow") or "promptvideo")[:80],
+        })
+        set_public_video_package_context(user_id, pending_payload)
+        return await start_video_addon_step(query, user_id, pending_payload, tier, lang, source="ai")
+    current["step"] = "tier"
+    set_video_finalization_state(user_id, current)
+    return await safe_edit_or_send(
+        query,
+        video_finalization_tier_text(current, lang),
+        parse_mode="HTML",
+        reply_markup=video_finalization_tier_keyboard(lang),
+    )
+
 def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
     finalization = video_finalization_defaults()
@@ -78569,30 +79100,41 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             reply_markup=video_finalization_music_keyboard(lang),
         )
     if action == "music_ai":
+        readiness = get_suno_music_readiness()
+        if readiness.get("public_enabled"):
+            update_video_finalization(
+                uid,
+                music_enabled=True,
+                music_mode="suno",
+                music_prompt=str(video_finalization_prompt_text(state) or "background music matching this video")[:1000],
+                music_item_count=1,
+            )
+            return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
         detail = (
-            "Tạo nhạc AI chưa mở trong flow public hiện tại."
-            if not (MUSIC_AI_ENABLED and SHOPAIKEY_MUSIC_ENABLED and SHOPAIKEY_MUSIC_ENDPOINT)
-            else "Tạo nhạc AI đang được kiểm tra chất lượng trước khi mở cho khách."
+            f"Provider: {readiness.get('preferred_provider') or readiness.get('provider') or 'none'}; "
+            f"smoke: {readiness.get('admin_smoke_status') or 'NOT_TESTED'}; "
+            f"reason: {readiness.get('reason') or 'not_ready'}"
         )
         return await safe_edit_or_send(
             query,
-            "🎼 Tạo nhạc AI đang được kiểm tra trước khi mở rộng.\n"
-            f"{detail}\n"
+            "🎼 <b>Tạo nhạc AI / Suno</b>\n\n"
+            f"{html.escape(detail)}\n\n"
             "TOAN AAS chưa xử lý audio và chưa trừ Xu. Bạn vẫn có thể upload nhạc riêng hoặc chọn không dùng nhạc.",
+            parse_mode="HTML",
             reply_markup=video_finalization_music_keyboard(lang),
         )
     if action == "music_suggest":
         return await safe_edit_or_send(query, video_finalization_music_suggestion_text(lang), parse_mode="HTML", reply_markup=video_finalization_music_suggestion_keyboard(lang))
     if action == "music_use":
         update_video_finalization(uid, music_enabled=True, music_mode="suggested", music_prompt="cinematic/electronic background, subtle whoosh, low under narration")
-        return await safe_edit_or_send(query, video_finalization_addon_text(lang), parse_mode="HTML", reply_markup=video_finalization_addon_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "music_upload":
         state["step"] = "await_music_upload"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, "📎 Hãy gửi file nhạc/audio. Bot chỉ lưu file ID trong phiên, chưa ghép video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "📎 Send a music/audio file. It will only be saved in this session; no processing or Xu charge.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     if action == "music_none":
         update_video_finalization(uid, music_enabled=False, music_mode="none", music_prompt="", music_file_id="")
-        return await safe_edit_or_send(query, video_finalization_addon_text(lang), parse_mode="HTML", reply_markup=video_finalization_addon_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "addon_none":
         update_video_finalization(
             uid,
@@ -78604,10 +79146,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             subtitle_dub_enabled=False,
             translation_enabled=False,
         )
-        current = get_video_finalization_state(uid)
-        current["step"] = "tier"
-        set_video_finalization_state(uid, current)
-        return await safe_edit_or_send(query, video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "voice":
         update_video_finalization(uid, translation_enabled=False)
         state["step"] = "voice"
@@ -78632,18 +79171,11 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         return await safe_edit_or_send(query, "🎙 Đã lấy nội dung từ kịch bản. Hãy chọn ngôn ngữ/giọng. Bot chưa gọi TTS và chưa trừ Xu.", reply_markup=video_finalization_voice_language_keyboard(lang))
     if action == "voice_none":
         update_video_finalization(uid, voice_enabled=False, voice_mode="none", voice_text="", voice_file_id="", dub_enabled=False)
-        current = get_video_finalization_state(uid)
-        current["step"] = "tier"
-        set_video_finalization_state(uid, current)
-        return await safe_edit_or_send(query, video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "voice_lang":
         voice_lang = "" if value == "auto" else re.sub(r"[^a-z]", "", value.lower())[:8]
         update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_language=voice_lang, voice_style="natural", dub_enabled=True, dub_language=voice_lang)
-        note = "" if is_dub_ready() else "\n\n⚙️ Voice/TTS đang được kiểm tra. Lựa chọn đã lưu; TOAN AAS chưa xử lý voice và chưa trừ Xu."
-        current = get_video_finalization_state(uid)
-        current["step"] = "tier"
-        set_video_finalization_state(uid, current)
-        return await safe_edit_or_send(query, video_finalization_tier_text(current, lang) + note, parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "subtitle":
         update_video_finalization(uid, translation_enabled=False)
         state["step"] = "subtitle"
@@ -78658,25 +79190,15 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         if not script:
             return await safe_edit_or_send(query, "⚠️ Phiên này chưa có caption/kịch bản. Bạn có thể nhập phụ đề thủ công. TOAN AAS chưa xử lý phụ đề và chưa trừ Xu.", reply_markup=video_finalization_subtitle_keyboard(lang))
         update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="session_script", subtitle_text=script[:3000], subtitle_burn_in=True)
-        note = "" if is_subtitle_burn_ready() else "\n\n⚙️ Burn phụ đề đang chờ worker. Nội dung đã lưu; bot chưa xử lý video và chưa trừ Xu."
-        current = get_video_finalization_state(uid)
-        current["step"] = "tier"
-        set_video_finalization_state(uid, current)
-        return await safe_edit_or_send(query, video_finalization_tier_text(current, lang) + note, parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "subtitle_asr":
         if not is_asr_ready():
             return await safe_edit_or_send(query, "🎧 Tạo phụ đề tự động đang được kiểm tra. TOAN AAS chưa xử lý video và chưa trừ Xu. Bạn có thể nhập phụ đề thủ công hoặc dùng caption/kịch bản hiện có.", reply_markup=video_finalization_subtitle_keyboard(lang))
         update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="asr", subtitle_burn_in=True)
-        current = get_video_finalization_state(uid)
-        current["step"] = "tier"
-        set_video_finalization_state(uid, current)
-        return await safe_edit_or_send(query, video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "subtitle_none":
         update_video_finalization(uid, subtitle_enabled=False, subtitle_mode="none", subtitle_text="", subtitle_burn_in=False)
-        current = get_video_finalization_state(uid)
-        current["step"] = "tier"
-        set_video_finalization_state(uid, current)
-        return await safe_edit_or_send(query, video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "combo":
         update_video_finalization(uid, translation_enabled=False)
         state["step"] = "combo_language"
@@ -78730,19 +79252,12 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             dub_enabled=True,
             subtitle_dub_enabled=True,
         )
-        note = "" if (is_dub_ready() and is_subtitle_burn_ready()) else "\n\n⚙️ Phụ đề + lồng tiếng đang được kiểm tra. Nội dung đã lưu; TOAN AAS chưa xử lý video và chưa trừ Xu."
-        current = get_video_finalization_state(uid)
-        current["step"] = "tier"
-        set_video_finalization_state(uid, current)
-        return await safe_edit_or_send(query, video_finalization_tier_text(current, lang) + note, parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "combo_asr":
         if not (is_asr_ready() and is_dub_ready()):
             return await safe_edit_or_send(query, "🌐 Phụ đề + lồng tiếng tự động đang được kiểm tra. TOAN AAS chưa xử lý video và chưa trừ Xu. Bạn có thể nhập nội dung thủ công để lưu vào kế hoạch trước.", reply_markup=video_finalization_combo_source_keyboard(lang))
         update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="asr", subtitle_burn_in=True, voice_enabled=True, voice_mode="tts", dub_enabled=True, subtitle_dub_enabled=True)
-        current = get_video_finalization_state(uid)
-        current["step"] = "tier"
-        set_video_finalization_state(uid, current)
-        return await safe_edit_or_send(query, video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
     if action == "skip":
         state["video_finalization"] = video_finalization_defaults()
         state["video_finalization"]["finalization_confirmed"] = False
@@ -104999,6 +105514,8 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_free_hub_pending_upload(update, context):
         return
+    if await handle_music_guided_pending_media(update, context):
+        return
     media_kind = cache_recent_media_state(update)
     remember_last_media(update)
     if await handle_video_finalization_pending_media(update, context):
@@ -106586,6 +107103,8 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_free_hub_pending_upload(update, context):
+        return
+    if await handle_music_guided_pending_media(update, context):
         return
     if await handle_video_finalization_pending_media(update, context):
         return
