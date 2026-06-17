@@ -130,6 +130,8 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/video_gate_status` | `cmd_video_gate_status` | YES | YES | Video gate matrix for planning, frame video, Video AI, image/video-to-video and long render. |
 | `/video_tier_status` | `cmd_video_tier_status` | YES | YES | Video 200/300/400/500/600/800/1000/1200/1500 tier status and provider/billing guard summary. |
 | `/video_tier_matrix` | `cmd_video_tier_matrix` | YES | YES | Admin safe matrix for 200/300/400/500/600/800/1000/1200/1500 tiers; no provider call and no Xu charge. |
+| `/video_debug_tier_payload` | `cmd_video_debug_tier_payload` | YES | YES | Admin duration/payload debug for a video tier; shows whether submit payload contains seconds/duration without calling provider. |
+| `/video_test_tier_duration` | `cmd_video_test_tier_duration` | YES | YES | Admin safe duration smoke dry-run; confirms current payload cannot prove extra seconds before selling duration add-ons. |
 | `/video_cost_status` | `cmd_video_cost_status` | YES | YES | Video 200/300/400/500/600/800/1000 cost ratio and margin status; no payment changes. |
 | `/video_test_tier_200` | `cmd_video_test_tier_200` | YES | YES | Admin safe dry-run for 200 Xu video tier; no provider call and no Xu charge. |
 | `/video_test_tier_300` | `cmd_video_test_tier_300` | YES | YES | Admin safe dry-run for 300 Xu video tier; no provider call and no Xu charge. |

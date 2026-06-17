@@ -463,10 +463,17 @@ KEY4U_LOW_BALANCE_FREEZE_USD = env_float("KEY4U_LOW_BALANCE_FREEZE_USD", 2.0)
 SUNO_PUBLIC_ENABLED = env_flag("SUNO_PUBLIC_ENABLED", "false")
 SUNO_ADMIN_SMOKE_ENABLED = env_flag("SUNO_ADMIN_SMOKE_ENABLED", "true")
 SUNO_REQUIRE_SMOKE_PASS = env_flag("SUNO_REQUIRE_SMOKE_PASS", "true")
-MINIMAX_TTS_ENDPOINT = _env("MINIMAX_TTS_ENDPOINT", "")
-MINIMAX_TTS_MODEL = _env("MINIMAX_TTS_MODEL", "")
-MINIMAX_VOICE_CLONE_ENDPOINT = _env("MINIMAX_VOICE_CLONE_ENDPOINT", "")
-MINIMAX_VOICE_JOB_ENDPOINT = _env("MINIMAX_VOICE_JOB_ENDPOINT", "")
+MINIMAX_TTS_ENDPOINT = _env("MINIMAX_TTS_ENDPOINT", "/tts/minimax/t2a_v2")
+MINIMAX_TTS_ASYNC_ENDPOINT = _env("MINIMAX_TTS_ASYNC_ENDPOINT", "/tts/minimax/t2a_async_v2")
+MINIMAX_TTS_QUERY_ENDPOINT = _env("MINIMAX_TTS_QUERY_ENDPOINT", "/tts/minimax/query/t2a_async_query_v2")
+MINIMAX_TTS_FILE_RETRIEVE_ENDPOINT = _env("MINIMAX_TTS_FILE_RETRIEVE_ENDPOINT", "/tts/minimax/files/retrieve")
+MINIMAX_TTS_MODEL = _env("MINIMAX_TTS_MODEL", "speech-02-hd")
+MINIMAX_DEFAULT_VOICE_ID = _env("MINIMAX_DEFAULT_VOICE_ID", "male-qn-qingse")
+MINIMAX_AUDIO_FORMAT = _env("MINIMAX_AUDIO_FORMAT", "mp3")
+MINIMAX_VOICE_UPLOAD_ENDPOINT = _env("MINIMAX_VOICE_UPLOAD_ENDPOINT", "/tts/minimax/files/upload")
+MINIMAX_VOICE_CLONE_ENDPOINT = _env("MINIMAX_VOICE_CLONE_ENDPOINT", "/tts/minimax/voice_clone")
+MINIMAX_VOICE_DESIGN_ENDPOINT = _env("MINIMAX_VOICE_DESIGN_ENDPOINT", "/tts/minimax/voice_design")
+MINIMAX_VOICE_LIST_ENDPOINT = _env("MINIMAX_VOICE_LIST_ENDPOINT", "/tts/minimax/voices")
 MINIMAX_ADMIN_SMOKE_ENABLED = env_flag("MINIMAX_ADMIN_SMOKE_ENABLED", "true")
 MINIMAX_VOICE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_PUBLIC_ENABLED", "false")
 MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_CLONE_PUBLIC_ENABLED", "false")
@@ -522,6 +529,9 @@ SHOPAIKEY_TTS_VOICE = _env("SHOPAIKEY_TTS_VOICE", "alloy")
 SHOPAIKEY_TTS_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TIMEOUT_SECONDS", 60)
 SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS", 60)
 SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS", 90)
+SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT = _env("SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT", "/audio/transcriptions")
+SHOPAIKEY_AUDIO_TRANSLATION_ENDPOINT = _env("SHOPAIKEY_AUDIO_TRANSLATION_ENDPOINT", "/audio/translations")
+SHOPAIKEY_AUDIO_TRANSCRIPTION_MODEL = _env("SHOPAIKEY_AUDIO_TRANSCRIPTION_MODEL", "whisper-1")
 SHOPAIKEY_IMAGE_ENDPOINT = _env("SHOPAIKEY_IMAGE_ENDPOINT", "/images/google/generations")
 SHOPAIKEY_IMAGE_URL = _env("SHOPAIKEY_IMAGE_URL") or "https://api.shopaikey.com/images/google/generations"
 SHOPAIKEY_IMAGE_MODEL_PRIMARY = _env("SHOPAIKEY_IMAGE_MODEL_PRIMARY", _env("SHOPAIKEY_IMAGE_MODEL", "nano-banana"))
@@ -1421,7 +1431,7 @@ VIDEO_UPLOAD_MAX_MB = max(1, env_int("VIDEO_UPLOAD_MAX_MB", 100))
 VIDEO_TEMP_STORAGE_MAX_MB = max(1, env_int("VIDEO_TEMP_STORAGE_MAX_MB", 150))
 VIDEO_LARGE_FILE_WARNING_MB = max(1, env_int("VIDEO_LARGE_FILE_WARNING_MB", 80))
 VIDEO_PROCESSING_MAX_INPUT_MB = max(1, env_int("VIDEO_PROCESSING_MAX_INPUT_MB", 15))
-ASR_PROVIDER = _env("ASR_PROVIDER", "deepgram").strip().lower()
+ASR_PROVIDER = _env("ASR_PROVIDER", "auto").strip().lower()
 TRANSLATE_PROVIDER = _env("TRANSLATE_PROVIDER", "auto").strip().lower()
 TTS_PROVIDER = _env("TTS_PROVIDER", "auto").strip().lower()
 MARKETING_AUTOMATION_ADMIN_ONLY = env_flag("MARKETING_AUTOMATION_ADMIN_ONLY", "true")
@@ -38426,6 +38436,259 @@ async def shopaikey_tts_bytes(text: str) -> tuple[str, bytes, str, int]:
         status = "FAIL_TIMEOUT" if "timeout" in type(exc).__name__.lower() else "FAIL_PROVIDER_ERROR"
         return status, b"", shopaikey_sanitize_error(str(exc)), 0
 
+def minimax_tts_configured() -> bool:
+    return bool(SHOPAIKEY_API_KEY and MINIMAX_TTS_ENDPOINT and MINIMAX_TTS_MODEL)
+
+def _decode_minimax_audio_string(value: str) -> tuple[bytes, str]:
+    text = str(value or "").strip()
+    if not text:
+        return b"", "empty_audio_string"
+    if text.startswith("data:") and "," in text:
+        text = text.split(",", 1)[1].strip()
+    if re.fullmatch(r"[0-9a-fA-F]+", text or "") and len(text) % 2 == 0:
+        try:
+            data = bytes.fromhex(text)
+            if len(data) > 512:
+                return data, "hex"
+        except Exception:
+            pass
+    try:
+        data = base64.b64decode(text, validate=False)
+        if len(data) > 512:
+            return data, "base64"
+    except Exception:
+        pass
+    return b"", "unsupported_audio_string"
+
+def _minimax_audio_candidates(payload) -> list[str]:
+    values: list[str] = []
+
+    def visit(value):
+        if value is None:
+            return
+        if isinstance(value, str):
+            if value.strip():
+                values.append(value.strip())
+            return
+        if isinstance(value, list):
+            for item in value:
+                visit(item)
+            return
+        if isinstance(value, dict):
+            priority = (
+                "audio", "audio_url", "url", "download_url", "file_url",
+                "output_url", "result_url", "speech_url", "demo_audio",
+            )
+            for key in priority:
+                if key in value:
+                    visit(value.get(key))
+            for child in ("data", "file", "result", "output", "audio_file"):
+                if child in value:
+                    visit(value.get(child))
+
+    visit(payload)
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
+
+async def _download_audio_url_bytes(url: str, timeout_seconds: float = 60.0) -> tuple[bytes, str, int]:
+    target = str(url or "").strip()
+    if not target.startswith(("http://", "https://")):
+        return b"", "invalid_url", 0
+    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+        res = await client.get(target)
+    content_type = str(res.headers.get("content-type") or "")
+    if res.status_code < 400 and res.content and (content_type.startswith("audio/") or len(res.content) > 1024):
+        return bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; content_type={content_type or '-'}", int(res.status_code)
+    return b"", shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}"), int(res.status_code)
+
+async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "") -> tuple[str, bytes, str, int]:
+    if not SHOPAIKEY_API_KEY or not MINIMAX_TTS_ENDPOINT or not MINIMAX_TTS_MODEL:
+        return "MISSING", b"", "SHOPAIKEY_API_KEY/MINIMAX_TTS_ENDPOINT/MINIMAX_TTS_MODEL missing", 0
+    endpoint = join_shopaikey_url(SHOPAIKEY_BASE_URL, MINIMAX_TTS_ENDPOINT)
+    selected_voice = str(voice_id or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
+    text_value = str(text or "").strip()[:3500]
+    if not text_value:
+        return "FAIL_BAD_REQUEST", b"", "empty_text", 0
+    payload = {
+        "model": MINIMAX_TTS_MODEL or "speech-02-hd",
+        "text": text_value,
+        "voice_setting": {
+            "voice_id": selected_voice,
+            "speed": 1.0,
+            "vol": 1.0,
+            "pitch": 0,
+        },
+        "audio_setting": {
+            "sample_rate": 32000,
+            "bitrate": 128000,
+            "format": MINIMAX_AUDIO_FORMAT or "mp3",
+            "channel": 1,
+        },
+        "language_boost": "Vietnamese",
+        "stream": False,
+        "subtitle_enable": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60), follow_redirects=True) as client:
+            res = await client.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        content_type = str(res.headers.get("content-type") or "")
+        if res.status_code < 400 and res.content and content_type.startswith("audio/"):
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; model={MINIMAX_TTS_MODEL}; voice={selected_voice}", int(res.status_code)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        if res.status_code < 400 and isinstance(data, dict):
+            for candidate in _minimax_audio_candidates(data):
+                if candidate.startswith(("http://", "https://")):
+                    audio_bytes, detail, http_status = await _download_audio_url_bytes(candidate)
+                    if audio_bytes:
+                        return "PASS", audio_bytes, f"http={res.status_code}; audio_url=yes; {detail}; model={MINIMAX_TTS_MODEL}; voice={selected_voice}", int(http_status or res.status_code)
+                audio_bytes, encoding = _decode_minimax_audio_string(candidate)
+                if audio_bytes:
+                    return "PASS", audio_bytes, f"http={res.status_code}; bytes={len(audio_bytes)}; encoding={encoding}; model={MINIMAX_TTS_MODEL}; voice={selected_voice}", int(res.status_code)
+        detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}; no_audio")
+        return shopaikey_classify_error(res.status_code, detail), b"", detail, int(res.status_code)
+    except httpx.TimeoutException as exc:
+        return "FAIL_TIMEOUT", b"", shopaikey_sanitize_error(str(exc)), 0
+    except Exception as exc:
+        return "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(exc)), 0
+
+async def shopaikey_audio_transcribe_bytes(audio_bytes: bytes, content_type: str = "audio/mpeg") -> tuple[str, str, str, int]:
+    if not SHOPAIKEY_API_KEY or not SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT:
+        return "MISSING", "", "SHOPAIKEY_API_KEY/SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT missing", 0
+    if not audio_bytes:
+        return "NEED_AUDIO_INPUT", "", "missing_audio_bytes", 0
+    endpoint = join_shopaikey_url(SHOPAIKEY_BASE_URL, SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
+    media_type = str(content_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
+    ext = ".mp3"
+    if "wav" in media_type:
+        ext = ".wav"
+    elif "ogg" in media_type or "opus" in media_type:
+        ext = ".ogg"
+    files = {"file": (f"toan_aas_asr{ext}", audio_bytes, media_type)}
+    data = {
+        "model": SHOPAIKEY_AUDIO_TRANSCRIPTION_MODEL or "whisper-1",
+        "response_format": "json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(endpoint, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}"}, data=data, files=files)
+        try:
+            payload = res.json()
+        except Exception:
+            payload = {}
+        text = str((payload or {}).get("text") or (payload or {}).get("transcript") or "").strip()
+        if res.status_code < 400 and text:
+            return "PASS", text, f"http={res.status_code}; chars={len(text)}; model={SHOPAIKEY_AUDIO_TRANSCRIPTION_MODEL}", int(res.status_code)
+        detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return shopaikey_classify_error(res.status_code, detail), "", detail, int(res.status_code)
+    except httpx.TimeoutException as exc:
+        return "FAIL_TIMEOUT", "", shopaikey_sanitize_error(str(exc)), 0
+    except Exception as exc:
+        return "FAIL_PROVIDER_ERROR", "", shopaikey_sanitize_error(str(exc)), 0
+
+async def shopaikey_minimax_upload_voice_sample(audio_bytes: bytes, filename: str = "voice_sample.mp3", content_type: str = "audio/mpeg") -> tuple[str, str, str, int]:
+    if not SHOPAIKEY_API_KEY or not MINIMAX_VOICE_UPLOAD_ENDPOINT:
+        return "MISSING", "", "SHOPAIKEY_API_KEY/MINIMAX_VOICE_UPLOAD_ENDPOINT missing", 0
+    if not audio_bytes:
+        return "NEED_AUDIO_INPUT", "", "missing_audio_sample", 0
+    endpoint = join_shopaikey_url(SHOPAIKEY_BASE_URL, MINIMAX_VOICE_UPLOAD_ENDPOINT)
+    if "?" not in endpoint:
+        endpoint = f"{endpoint}?purpose=voice_clone"
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(filename or "voice_sample.mp3"))[:80] or "voice_sample.mp3"
+    media_type = str(content_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
+    files = {"file": (safe_name, audio_bytes, media_type)}
+    data = {"purpose": "voice_clone"}
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(endpoint, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}"}, data=data, files=files)
+        try:
+            payload = res.json()
+        except Exception:
+            payload = {}
+        file_obj = (payload or {}).get("file") if isinstance(payload, dict) else {}
+        file_id = str(
+            (payload or {}).get("file_id")
+            or (file_obj or {}).get("file_id")
+            or (payload or {}).get("id")
+            or ""
+        ).strip()
+        if res.status_code < 400 and file_id:
+            return "PASS", file_id, f"http={res.status_code}; file_id=yes; bytes={len(audio_bytes)}", int(res.status_code)
+        detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return shopaikey_classify_error(res.status_code, detail), "", detail, int(res.status_code)
+    except httpx.TimeoutException as exc:
+        return "FAIL_TIMEOUT", "", shopaikey_sanitize_error(str(exc)), 0
+    except Exception as exc:
+        return "FAIL_PROVIDER_ERROR", "", shopaikey_sanitize_error(str(exc)), 0
+
+async def shopaikey_minimax_voice_clone(file_id: str, voice_id: str) -> tuple[str, dict, str, int]:
+    if not SHOPAIKEY_API_KEY or not MINIMAX_VOICE_CLONE_ENDPOINT:
+        return "MISSING", {}, "SHOPAIKEY_API_KEY/MINIMAX_VOICE_CLONE_ENDPOINT missing", 0
+    file_id_text = str(file_id or "").strip()
+    voice_id_text = re.sub(r"[^A-Za-z0-9_-]+", "_", str(voice_id or "").strip())[:64].strip("_-")
+    if not file_id_text or not voice_id_text:
+        return "FAIL_BAD_REQUEST", {}, "missing_file_id_or_voice_id", 0
+    if not re.match(r"^[A-Za-z]", voice_id_text):
+        voice_id_text = f"v{voice_id_text}"
+    endpoint = join_shopaikey_url(SHOPAIKEY_BASE_URL, MINIMAX_VOICE_CLONE_ENDPOINT)
+    payload = {
+        "file_id": file_id_text,
+        "voice_id": voice_id_text,
+        "model": MINIMAX_TTS_MODEL or "speech-02-hd",
+        "need_noise_reduction": True,
+        "need_volume_normalization": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            res = await client.post(endpoint, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"}, json=payload)
+        try:
+            data = res.json()
+        except Exception:
+            data = {}
+        base_resp = data.get("base_resp") if isinstance(data, dict) else {}
+        provider_ok = str((base_resp or {}).get("status_code") or "").strip() in {"", "0", "1"}
+        if res.status_code < 400 and provider_ok:
+            return "PASS", {"voice_id": voice_id_text, "demo_audio": str((data or {}).get("demo_audio") or "")}, f"http={res.status_code}; voice_id={voice_id_text}", int(res.status_code)
+        detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return shopaikey_classify_error(res.status_code, detail), {}, detail, int(res.status_code)
+    except httpx.TimeoutException as exc:
+        return "FAIL_TIMEOUT", {}, shopaikey_sanitize_error(str(exc)), 0
+    except Exception as exc:
+        return "FAIL_PROVIDER_ERROR", {}, shopaikey_sanitize_error(str(exc)), 0
+
+def video_asr_provider_available() -> bool:
+    provider = str(ASR_PROVIDER or "auto").lower()
+    shopaikey_ready = bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
+    if provider == "deepgram":
+        return bool(DEEPGRAM_API_KEY)
+    if provider in {"shopaikey", "shopai"}:
+        return shopaikey_ready
+    return bool(DEEPGRAM_API_KEY or shopaikey_ready)
+
+async def video_dubbing_transcribe_bytes(audio_bytes: bytes, context: ContextTypes.DEFAULT_TYPE, content_type: str = "application/octet-stream") -> tuple[str, str, str]:
+    provider = str(ASR_PROVIDER or "auto").lower()
+    errors = []
+    if provider in {"auto", "deepgram"} and DEEPGRAM_API_KEY:
+        transcript = (await AgentDeepgram.transcribe(audio_bytes, context, content_type=content_type) or "").strip()
+        if transcript and not transcript.startswith("❌"):
+            return "Deepgram", transcript, f"chars={len(transcript)}"
+        errors.append("Deepgram=empty_or_failed")
+    if provider in {"auto", "shopaikey", "shopai"}:
+        status, transcript, detail, _http_status = await shopaikey_audio_transcribe_bytes(audio_bytes, content_type)
+        if status == "PASS" and transcript:
+            return "ShopAIKey ASR", transcript, detail
+        errors.append(f"ShopAIKey={status}")
+    raise RuntimeError("asr_unavailable:" + ",".join(errors or ["no_provider"]))
+
 def shopaikey_provider_error_from_payload(payload: dict) -> tuple[str, str]:
     if not isinstance(payload, dict):
         return "", ""
@@ -54835,9 +55098,10 @@ def get_suno_music_readiness() -> dict:
 
 def get_minimax_voice_readiness() -> dict:
     missing = []
+    shopaikey_voice_ready = bool(SHOPAIKEY_API_KEY and MINIMAX_TTS_ENDPOINT and MINIMAX_TTS_MODEL)
+    direct_voice_ready = bool(MINIMAX_API_KEY and MINIMAX_GROUP_ID and MINIMAX_TTS_ENDPOINT and MINIMAX_TTS_MODEL)
     for name, ok in [
-        ("MINIMAX_API_KEY", bool(MINIMAX_API_KEY)),
-        ("MINIMAX_GROUP_ID", bool(MINIMAX_GROUP_ID)),
+        ("SHOPAIKEY_API_KEY or MINIMAX_API_KEY+MINIMAX_GROUP_ID", bool(shopaikey_voice_ready or direct_voice_ready)),
         ("MINIMAX_TTS_ENDPOINT", bool(MINIMAX_TTS_ENDPOINT)),
         ("MINIMAX_TTS_MODEL", bool(MINIMAX_TTS_MODEL)),
     ]:
@@ -54851,10 +55115,10 @@ def get_minimax_voice_readiness() -> dict:
         reason = "configured_for_admin_smoke; public voice gate remains closed until smoke/cost pass"
     return _media_readiness_payload(
         name="minimax_voice",
-        provider="minimax",
+        provider="shopaikey_minimax" if shopaikey_voice_ready else "minimax",
         model=MINIMAX_TTS_MODEL,
         endpoint=MINIMAX_TTS_ENDPOINT,
-        api_key_configured=bool(MINIMAX_API_KEY and MINIMAX_GROUP_ID),
+        api_key_configured=bool(shopaikey_voice_ready or direct_voice_ready),
         endpoint_configured=bool(MINIMAX_TTS_ENDPOINT),
         admin_smoke_tool="minimax_tts",
         public_enabled=public_ready,
@@ -54868,18 +55132,19 @@ def get_asr_readiness() -> dict:
     missing = []
     if not VIDEO_ASR_ENABLED:
         missing.append("VIDEO_ASR_ENABLED")
-    if ASR_PROVIDER not in {"deepgram", "auto"}:
-        missing.append("ASR_PROVIDER=deepgram/auto")
-    if not DEEPGRAM_API_KEY:
-        missing.append("DEEPGRAM_API_KEY")
+    if ASR_PROVIDER not in {"deepgram", "auto", "shopaikey", "shopai"}:
+        missing.append("ASR_PROVIDER=deepgram/auto/shopaikey")
+    if not video_asr_provider_available():
+        missing.append("DEEPGRAM_API_KEY or SHOPAIKEY_API_KEY")
     configured = not missing
+    provider_label = "deepgram" if DEEPGRAM_API_KEY else ("shopaikey" if SHOPAIKEY_API_KEY else "missing")
     return _media_readiness_payload(
         name="asr",
-        provider="deepgram" if DEEPGRAM_API_KEY else "missing",
+        provider=provider_label,
         model=ASR_PROVIDER,
-        endpoint="Deepgram listen API",
-        api_key_configured=bool(DEEPGRAM_API_KEY),
-        endpoint_configured=bool(DEEPGRAM_API_KEY),
+        endpoint="Deepgram listen API / ShopAIKey audio transcriptions",
+        api_key_configured=bool(DEEPGRAM_API_KEY or SHOPAIKEY_API_KEY),
+        endpoint_configured=bool(DEEPGRAM_API_KEY or (SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)),
         admin_smoke_tool="asr",
         public_enabled=bool(configured and (VIDEO_SUBTITLE_PUBLIC_ENABLED or VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED or VIDEO_DUB_PUBLIC_ENABLED or VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED)),
         ready=configured,
@@ -55348,6 +55613,8 @@ VIDEO_TIER_TEST_COMMANDS = {
 
 VIDEO_COMMAND_REGISTRY_HOTFIX = {
     "video_tier_matrix": "cmd_video_tier_matrix",
+    "video_debug_tier_payload": "cmd_video_debug_tier_payload",
+    "video_test_tier_duration": "cmd_video_test_tier_duration",
     "video_test_all_tiers": "cmd_video_test_all_tiers",
     "video_recent_jobs": "cmd_video_recent_jobs",
     "video_failed_jobs": "cmd_video_failed_jobs",
@@ -55443,6 +55710,95 @@ def video_test_tier_lines(tier: str) -> list[str]:
         "",
         "Blockers/notes:",
         *[f"• {html.escape(item)}" for item in (blockers or ["Không có blocker ở tầng command/registry."])],
+    ]
+
+def _safe_payload_keys(payload: dict | None = None) -> list[str]:
+    return sorted(str(key) for key in (payload or {}).keys())
+
+def _safe_nested_keys(payload: dict | None = None, key: str = "metadata") -> list[str]:
+    nested = (payload or {}).get(key)
+    if not isinstance(nested, dict):
+        return []
+    return sorted(str(item) for item in nested.keys())
+
+def _payload_has_duration_field(payload: dict | None = None) -> bool:
+    payload = payload or {}
+    if any(key in payload for key in ("seconds", "duration", "duration_seconds")):
+        return True
+    metadata = payload.get("metadata")
+    return isinstance(metadata, dict) and any(key in metadata for key in ("seconds", "duration", "duration_seconds"))
+
+def video_duration_debug_payload(tier: str = "", seconds: int | str | None = None, provider: str = "shopaikey") -> dict:
+    tier_norm = normalize_video_tier(tier or "low")
+    requested_seconds = safe_int(seconds, VIDEO_ORDER_DEFAULT_BASE_SECONDS)
+    requested_seconds = max(1, min(int(requested_seconds or VIDEO_ORDER_DEFAULT_BASE_SECONDS), 120))
+    state = video_tier_admin_public_state(tier_norm)
+    prompt = (
+        f"TOAN AAS admin duration smoke. Create exactly {requested_seconds} seconds, one scene, "
+        "clean product-style AI video, smooth motion, no watermark."
+    )
+    model = str(state.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
+    shopaikey_payload = shopaikey_video_request_payload(model, prompt)
+    key4u_payload = {
+        "model": str(KEY4U_VIDEO_MODEL or "veo3.1-fast"),
+        "prompt": prompt[:1000],
+        "aspect_ratio": "16:9",
+        "enhance_prompt": True,
+        "enable_upsample": False,
+    }
+    duration_enforced = _payload_has_duration_field(shopaikey_payload) or _payload_has_duration_field(key4u_payload)
+    return {
+        "tier": tier_norm,
+        "label": state.get("label") or localized_video_tier_label(tier_norm),
+        "price_xu": int(state.get("price_xu") or video_tier_cost_xu(tier_norm)),
+        "requested_seconds": requested_seconds,
+        "order_base_seconds": int(VIDEO_ORDER_DEFAULT_BASE_SECONDS),
+        "provider": str(provider or "shopaikey").strip().lower(),
+        "shopaikey_model": model,
+        "shopaikey_endpoint": "/v1/video/generations",
+        "shopaikey_payload_keys": _safe_payload_keys(shopaikey_payload),
+        "shopaikey_metadata_keys": _safe_nested_keys(shopaikey_payload, "metadata"),
+        "shopaikey_has_duration_field": _payload_has_duration_field(shopaikey_payload),
+        "key4u_model": str(KEY4U_VIDEO_MODEL or "veo3.1-fast"),
+        "key4u_endpoint": str(KEY4U_VIDEO_CREATE_ENDPOINT or "/v1/video/create"),
+        "key4u_payload_keys": _safe_payload_keys(key4u_payload),
+        "key4u_has_duration_field": _payload_has_duration_field(key4u_payload),
+        "duration_enforced": duration_enforced,
+        "provider_call": "NO",
+        "xu_deducted": "NO",
+        "recommendation": (
+            "Không bán cộng giây lẻ cho 1000/1200/1500 cho tới khi admin smoke chứng minh "
+            "provider nhận duration/seconds và output thật đúng thời lượng."
+        ),
+    }
+
+def video_duration_debug_lines(tier: str = "", seconds: int | str | None = None, provider: str = "shopaikey") -> list[str]:
+    payload = video_duration_debug_payload(tier, seconds, provider)
+    return [
+        "🎬 <b>VIDEO DURATION PAYLOAD DEBUG</b>",
+        "",
+        f"Tier: <code>{html.escape(str(payload['tier']))}</code> — <b>{html.escape(str(payload['label']))}</b>",
+        f"Giá nền: <code>{int(payload['price_xu'])} Xu</code>",
+        f"Order/base seconds: <code>{int(payload['order_base_seconds'])}</code>",
+        f"Requested debug seconds: <code>{int(payload['requested_seconds'])}</code>",
+        "",
+        "<b>ShopAIKey submit payload hiện tại</b>",
+        f"• Endpoint: <code>{html.escape(str(payload['shopaikey_endpoint']))}</code>",
+        f"• Model: <code>{html.escape(str(payload['shopaikey_model']))}</code>",
+        f"• Top-level keys: <code>{html.escape(', '.join(payload['shopaikey_payload_keys']) or '-')}</code>",
+        f"• Metadata keys: <code>{html.escape(', '.join(payload['shopaikey_metadata_keys']) or '-')}</code>",
+        f"• Có trường seconds/duration: <code>{'YES' if payload['shopaikey_has_duration_field'] else 'NO'}</code>",
+        "",
+        "<b>Key4U submit payload wrapper hiện tại</b>",
+        f"• Endpoint: <code>{html.escape(str(payload['key4u_endpoint']))}</code>",
+        f"• Model: <code>{html.escape(str(payload['key4u_model']))}</code>",
+        f"• Keys: <code>{html.escape(', '.join(payload['key4u_payload_keys']) or '-')}</code>",
+        f"• Có trường seconds/duration: <code>{'YES' if payload['key4u_has_duration_field'] else 'NO'}</code>",
+        "",
+        f"Kết luận: <code>{'DURATION_ENFORCED' if payload['duration_enforced'] else 'DURATION_NOT_ENFORCED_IN_CURRENT_SUBMIT_PAYLOAD'}</code>",
+        f"Provider call: <code>{payload['provider_call']}</code> | Xu: <code>{payload['xu_deducted']}</code>",
+        "",
+        f"Khuyến nghị: {html.escape(str(payload['recommendation']))}",
     ]
 
 def video_job_admin_rows(limit: int = 8, failed_only: bool = False) -> list[dict]:
@@ -55552,6 +55908,39 @@ async def cmd_video_tier_matrix(update: Update, context: ContextTypes.DEFAULT_TY
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await reply_html_lines(update, video_tier_matrix_lines())
+
+async def cmd_video_debug_tier_payload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(getattr(context, "args", []) or [])
+    tier = args[0] if args else "low"
+    seconds = args[1] if len(args) > 1 else VIDEO_ORDER_DEFAULT_BASE_SECONDS
+    await reply_html_lines(update, video_duration_debug_lines(tier, seconds))
+
+async def cmd_video_test_tier_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(getattr(context, "args", []) or [])
+    tier = args[0] if args else "low"
+    seconds = args[1] if len(args) > 1 else VIDEO_ORDER_DEFAULT_BASE_SECONDS
+    confirmed = any(str(item or "").strip().upper() == "CONFIRM" for item in args[2:])
+    lines = video_duration_debug_lines(tier, seconds)
+    lines.extend([
+        "",
+        "<b>Duration smoke policy</b>",
+    ])
+    if confirmed:
+        lines.extend([
+            "• Admin đã nhập <code>CONFIRM</code>, nhưng lệnh này vẫn là <code>SAFE_DRY_RUN</code> vì payload submit hiện chưa có trường duration/seconds.",
+            "• Không gọi provider để tránh đốt credit bằng một test không chứng minh được thời lượng.",
+            "• Khi đã xác nhận endpoint/model nhận <code>seconds</code>, mới bật real submit duration smoke riêng.",
+        ])
+    else:
+        lines.extend([
+            "• Đây là dry-run. Không gọi provider, không trừ Xu.",
+            "• Nếu muốn rà kỹ: <code>/video_test_tier_duration 1000 8 CONFIRM</code> vẫn chỉ xác nhận payload/debug, chưa submit job thật.",
+        ])
+    await reply_html_lines(update, lines)
 
 async def _cmd_video_test_tier(update: Update, context: ContextTypes.DEFAULT_TYPE, tier: str):
     if not is_admin_user(update.effective_user.id):
@@ -55736,12 +56125,28 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
             "• Không gọi provider, không tạo audio giả, không trừ Xu.",
             parse_mode="HTML",
         )
-    save_tool_test_result("minimax_tts", "NEED_IMPLEMENTATION", "MiniMax endpoint configured but direct call adapter is not wired; no provider call", uid)
+    text = " ".join(context.args or []).strip() or "Xin chào, đây là bài kiểm tra giọng MiniMax của TOAN AAS."
+    status, audio_bytes, detail, http_status = await shopaikey_minimax_tts_bytes(text)
+    output_sent = False
+    if status == "PASS" and audio_bytes:
+        audio = io.BytesIO(audio_bytes)
+        audio.name = f"toan_aas_minimax_tts.{MINIMAX_AUDIO_FORMAT or 'mp3'}"
+        await context.bot.send_audio(
+            chat_id=update.effective_chat.id,
+            audio=audio,
+            caption="🎙 MiniMax TTS smoke output\nAdmin-only / 0 Xu. Provider có thể tốn credit thật.",
+        )
+        output_sent = True
+    save_tool_test_result("minimax_tts", status, f"{detail}; output_sent={'yes' if output_sent else 'no'}", uid)
     await update.message.reply_text(
         "🎙 <b>MiniMax TTS Smoke</b>\n\n"
-        "• Status: <code>NEED_IMPLEMENTATION</code>\n"
-        "• Endpoint/model đã cấu hình nhưng bot chưa có adapter MiniMax direct đã kiểm chứng.\n"
-        "• Không gọi endpoint đoán mò, không tạo audio giả, không trừ Xu.",
+        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• HTTP: <code>{int(http_status or 0)}</code>\n"
+        f"• Model: <code>{html.escape(MINIMAX_TTS_MODEL or '-')}</code>\n"
+        f"• Voice: <code>{html.escape(MINIMAX_DEFAULT_VOICE_ID or '-')}</code>\n"
+        f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>\n"
+        "• No Xu deducted: <code>yes</code>\n"
+        f"• Detail: <code>{html.escape(sanitize_log_text(detail)[:220])}</code>",
         parse_mode="HTML",
     )
 
@@ -55759,12 +56164,56 @@ async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextType
             "• Voice clone cần file mẫu + đồng ý rõ ràng; lệnh này chưa gọi provider và chưa trừ Xu.",
             parse_mode="HTML",
         )
-    save_tool_test_result("minimax_voice_clone", "CONSENT_REQUIRED", "clone endpoint configured; admin must reply consented sample before future adapter call", uid)
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info or not media_info.get("bytes"):
+        save_tool_test_result("minimax_voice_clone", "NEED_AUDIO_INPUT", "reply audio sample required; no provider call", uid)
+        return await update.message.reply_text(
+            "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
+            "• Status: <code>NEED_AUDIO_INPUT</code>\n"
+            "• Cách test: reply một file voice/audio mẫu đã có quyền sử dụng rồi gõ <code>/tool_test_minimax_voice_clone</code>.\n"
+            "• Bot chưa gọi provider và chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+    voice_id = "toanaas_voice_" + re.sub(r"[^0-9A-Za-z]+", "", str(uid))[-10:] + f"_{int(time.time())}"
+    upload_status, file_id, upload_detail, upload_http = await shopaikey_minimax_upload_voice_sample(
+        media_info.get("bytes") or b"",
+        media_info.get("file_name") or "voice_sample.mp3",
+        media_info.get("content_type") or "audio/mpeg",
+    )
+    if upload_status != "PASS" or not file_id:
+        save_tool_test_result("minimax_voice_clone", upload_status, f"upload_http={upload_http}; {upload_detail}", uid)
+        return await update.message.reply_text(
+            "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
+            f"• Status: <code>{html.escape(upload_status)}</code>\n"
+            f"• Step: <code>upload_sample</code>\n"
+            f"• HTTP: <code>{int(upload_http or 0)}</code>\n"
+            "• No Xu deducted: <code>yes</code>\n"
+            f"• Detail: <code>{html.escape(sanitize_log_text(upload_detail)[:220])}</code>",
+            parse_mode="HTML",
+        )
+    clone_status, clone_payload, clone_detail, clone_http = await shopaikey_minimax_voice_clone(file_id, voice_id)
+    demo_sent = False
+    demo_audio = str((clone_payload or {}).get("demo_audio") or "").strip()
+    if clone_status == "PASS" and demo_audio.startswith(("http://", "https://")):
+        try:
+            await context.bot.send_audio(
+                chat_id=update.effective_chat.id,
+                audio=demo_audio,
+                caption="🧬 MiniMax voice clone preview\nAdmin-only / 0 Xu.",
+            )
+            demo_sent = True
+        except Exception:
+            demo_sent = False
+    save_tool_test_result("minimax_voice_clone", clone_status, f"upload=PASS; clone_http={clone_http}; voice_id={voice_id}; demo_sent={'yes' if demo_sent else 'no'}; {clone_detail}", uid)
     await update.message.reply_text(
         "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
-        "• Status: <code>CONSENT_REQUIRED / ADAPTER_GUARDED</code>\n"
-        f"• Provider ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
-        "• Bot không clone giọng nếu chưa có consent/sample hợp lệ. Không trừ Xu.",
+        f"• Status: <code>{html.escape(clone_status)}</code>\n"
+        f"• Upload: <code>PASS</code>\n"
+        f"• HTTP: <code>{int(clone_http or 0)}</code>\n"
+        f"• Voice ID: <code>{html.escape(voice_id)}</code>\n"
+        f"• Demo sent: <code>{'yes' if demo_sent else 'no'}</code>\n"
+        "• No Xu deducted: <code>yes</code>\n"
+        f"• Detail: <code>{html.escape(sanitize_log_text(clone_detail)[:220])}</code>",
         parse_mode="HTML",
     )
 
@@ -55777,13 +56226,42 @@ async def cmd_minimax_voice_job(update: Update, context: ContextTypes.DEFAULT_TY
     task_id = str(context.args[0] or "").strip()
     if is_placeholder_task_id(task_id):
         return await update.message.reply_text("Vui lòng dùng task_id thật do lệnh smoke MiniMax trả về. Hiện chưa có task_id vì adapter chưa submit thành công.")
-    save_tool_test_result("minimax_voice_job", "NEED_IMPLEMENTATION", f"task_id={sanitize_log_text(task_id)[:80]}; no direct query adapter", update.effective_user.id)
-    await update.message.reply_text(
-        "🎙 <b>MiniMax Voice Job</b>\n\n"
-        "• Status: <code>NEED_IMPLEMENTATION</code>\n"
-        "• Bot chưa có adapter query MiniMax đã kiểm chứng. Không gọi endpoint đoán mò và không trừ Xu.",
-        parse_mode="HTML",
-    )
+    if not SHOPAIKEY_API_KEY or not MINIMAX_TTS_QUERY_ENDPOINT:
+        save_tool_test_result("minimax_voice_job", "MISSING", "SHOPAIKEY_API_KEY/MINIMAX_TTS_QUERY_ENDPOINT missing", update.effective_user.id)
+        return await update.message.reply_text(
+            "🎙 <b>MiniMax Voice Job</b>\n\n"
+            "• Status: <code>MISSING_CONFIG</code>\n"
+            "• Thiếu SHOPAIKEY_API_KEY hoặc MINIMAX_TTS_QUERY_ENDPOINT. Không gọi provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    endpoint = join_shopaikey_url(SHOPAIKEY_BASE_URL, MINIMAX_TTS_QUERY_ENDPOINT)
+    try:
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+            res = await client.get(endpoint, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}"}, params={"task_id": task_id})
+        try:
+            payload = res.json()
+        except Exception:
+            payload = {}
+        status_text = str((payload or {}).get("status") or (payload or {}).get("task_status") or (payload or {}).get("state") or ("HTTP_" + str(res.status_code))).strip()
+        file_id = str((payload or {}).get("file_id") or ((payload or {}).get("data") or {}).get("file_id") or "").strip()
+        detail = f"http={res.status_code}; task_id={sanitize_log_text(task_id)[:80]}; status={sanitize_log_text(status_text)[:80]}; file_id={'yes' if file_id else 'no'}"
+        final_status = "PASS" if res.status_code < 400 else shopaikey_classify_error(res.status_code, res.text[:260] if getattr(res, "text", "") else "")
+        save_tool_test_result("minimax_voice_job", final_status, detail, update.effective_user.id)
+        await update.message.reply_text(
+            "🎙 <b>MiniMax Voice Job</b>\n\n"
+            f"• Status: <code>{html.escape(status_text or final_status)}</code>\n"
+            f"• HTTP: <code>{int(res.status_code or 0)}</code>\n"
+            f"• Task ID: <code>{html.escape(sanitize_log_text(task_id)[:120])}</code>\n"
+            f"• File ID: <code>{'yes' if file_id else 'no'}</code>\n"
+            "• No Xu deducted: <code>yes</code>",
+            parse_mode="HTML",
+        )
+    except httpx.TimeoutException:
+        save_tool_test_result("minimax_voice_job", "FAIL_TIMEOUT", f"task_id={sanitize_log_text(task_id)[:80]}", update.effective_user.id)
+        await update.message.reply_text("🎙 MiniMax Voice Job: FAIL_TIMEOUT. Không trừ Xu.")
+    except Exception as exc:
+        save_tool_test_result("minimax_voice_job", "FAIL_PROVIDER_ERROR", f"error_class={type(exc).__name__}", update.effective_user.id)
+        await update.message.reply_text("🎙 MiniMax Voice Job: FAIL_PROVIDER_ERROR. Không trừ Xu.")
 
 async def cmd_suno_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global SUNO_PUBLIC_ENABLED
@@ -61705,25 +62183,26 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
     await update.message.reply_text("⏳ TOAN AAS đang kiểm tra pipeline admin. Vui lòng chờ và không gửi lại lệnh.")
     transcript = text_input
     asr_status = "NOT_USED" if transcript else "NOT_TESTED"
+    asr_provider = "TEXT_INPUT" if transcript else ""
     try:
         if not transcript:
-            if not DEEPGRAM_API_KEY:
-                save_tool_test_result("asr", "MISSING", "DEEPGRAM_API_KEY missing", uid)
-                return await update.message.reply_text("⚙️ ASR Deepgram chưa cấu hình. Không gọi API và không trừ Xu.")
+            if not video_asr_provider_available():
+                save_tool_test_result("asr", "MISSING", "DEEPGRAM_API_KEY/SHOPAIKEY_API_KEY missing", uid)
+                return await update.message.reply_text("⚙️ ASR chưa cấu hình Deepgram hoặc ShopAIKey transcription. Không gọi API và không trừ Xu.")
             file_size = int(media_info.get("file_size") or 0)
             if file_size > VIDEO_PROCESSING_MAX_INPUT_MB * 1024 * 1024:
                 return await update.message.reply_text(
                     f"⚠️ File vượt giới hạn smoke {VIDEO_PROCESSING_MAX_INPUT_MB}MB. Không gọi API và không trừ Xu."
                 )
-            transcript = (await AgentDeepgram.transcribe(
+            asr_provider, transcript, asr_detail = await video_dubbing_transcribe_bytes(
                 media_info.get("bytes") or b"",
                 context,
                 content_type=media_info.get("content_type") or "application/octet-stream",
-            ) or "").strip()
+            )
             if not transcript or transcript.startswith("❌"):
                 raise RuntimeError("asr_empty_or_failed")
             asr_status = "PASS"
-            save_tool_test_result("asr", "PASS", f"provider=deepgram; chars={len(transcript)}", uid)
+            save_tool_test_result("asr", "PASS", f"provider={asr_provider}; chars={len(transcript)}; {asr_detail}", uid)
 
         output_text = transcript
         translation_status = "NOT_USED"
@@ -61766,14 +62245,14 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
         mux_requested = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
         mux_status = video_pipeline_status_payload().get("ffmpeg_mux") if mux_requested else video_pipeline_status_payload().get("subtitle_burn_in")
         detail = (
-            f"mode={mode}; asr={asr_status}; translation={translation_status}; "
+            f"mode={mode}; asr={asr_status}; asr_provider={asr_provider or '-'}; translation={translation_status}; "
             f"subtitle={'PASS' if srt_bytes else 'NOT_USED'}; tts={'PASS' if audio_bytes else 'NOT_USED'}; mux={mux_status}"
         )
         save_tool_test_result(tool_name, "PASS", detail, uid)
         return await update.message.reply_text(
             "✅ <b>Video Pipeline Smoke Test</b>\n\n"
             f"• Mode: <code>{html.escape(mode)}</code>\n"
-            f"• ASR: <code>{html.escape(asr_status)}</code>\n"
+            f"• ASR: <code>{html.escape(asr_status)}</code> <code>{html.escape(asr_provider or '-')}</code>\n"
             f"• Translation: <code>{html.escape(translation_status)}</code>\n"
             f"• Subtitle: <code>{'PASS' if srt_bytes else 'NOT_USED'}</code>\n"
             f"• TTS: <code>{html.escape(tts_provider or 'NOT_USED')}</code>\n"
@@ -105969,6 +106448,9 @@ def video_translation_provider_available() -> bool:
 
 def video_tts_provider_available() -> bool:
     provider = str(TTS_PROVIDER or "auto").lower()
+    minimax_ready = minimax_tts_configured()
+    if provider in {"minimax", "shopaikey_minimax", "minimax_voice"}:
+        return minimax_ready
     if provider in {"shopaikey", "shopai"}:
         return bool(SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY)
     if provider == "elevenlabs":
@@ -105977,7 +106459,7 @@ def video_tts_provider_available() -> bool:
         return bool(FISH_AUDIO_KEY)
     if provider in {"edge", "edge_tts"}:
         return bool(edge_tts)
-    return bool((SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY) or ELEVENLABS_API_KEY or FISH_AUDIO_KEY or edge_tts)
+    return bool(minimax_ready or (SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY) or ELEVENLABS_API_KEY or FISH_AUDIO_KEY or edge_tts)
 
 def video_dubbing_capability(mode: str, state: dict | None = None, public: bool = True) -> dict:
     mode = normalize_video_translate_mode(mode)
@@ -105989,7 +106471,7 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
     if public and not video_dubbing_public_flag(mode):
         return {"ok": False, "reason": "public_disabled", "missing": ["public_flag"]}
     missing = []
-    if ASR_PROVIDER not in {"deepgram", "auto"} or not DEEPGRAM_API_KEY:
+    if not video_asr_provider_available():
         missing.append("asr")
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
         mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
@@ -106003,9 +106485,9 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
         "ok": not missing,
         "reason": "ready" if not missing else f"missing_{missing[0]}",
         "missing": missing,
-        "asr": "deepgram" if DEEPGRAM_API_KEY else "",
+        "asr": "deepgram" if DEEPGRAM_API_KEY else ("shopaikey" if SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT else ""),
         "translation": TRANSLATE_PROVIDER if video_translation_provider_available() else "",
-        "tts": TTS_PROVIDER if video_tts_provider_available() else "",
+        "tts": ("minimax" if minimax_tts_configured() else TTS_PROVIDER) if video_tts_provider_available() else "",
         "mux": "enabled" if VIDEO_DUB_MUX_ENABLED else "not_enabled_audio_output_only",
     }
 
@@ -106013,12 +106495,12 @@ def video_pipeline_status_payload() -> dict:
     worker = local_worker_status_payload()
     mux_worker_ready = bool(worker.get("connected") and worker.get("ffmpeg_path"))
     return {
-        "asr_provider": "deepgram" if DEEPGRAM_API_KEY else "missing",
+        "asr_provider": "deepgram" if DEEPGRAM_API_KEY else ("shopaikey" if SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT else "missing"),
         "asr_test": preferred_tool_test_status_text("asr", "stt"),
         "translation_provider": TRANSLATE_PROVIDER if video_translation_provider_available() else "missing",
         "translation_test": preferred_tool_test_status_text("translation"),
-        "tts_provider": ("shopaikey" if SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY else TTS_PROVIDER) if video_tts_provider_available() else "missing",
-        "tts_test": preferred_tool_test_status_text("video_dub", "shopaikey_tts", "tts"),
+        "tts_provider": ("minimax" if minimax_tts_configured() else ("shopaikey" if SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY else TTS_PROVIDER)) if video_tts_provider_available() else "missing",
+        "tts_test": preferred_tool_test_status_text("video_dub", "minimax_tts", "shopaikey_tts", "tts"),
         "ffmpeg_mux": "ready" if VIDEO_DUB_MUX_ENABLED and mux_worker_ready else ("configured/waiting_worker" if VIDEO_DUB_MUX_ENABLED else "disabled"),
         "subtitle_burn_in": "ready" if VIDEO_SUBTITLE_BURN_IN_ENABLED and mux_worker_ready else ("configured/waiting_worker" if VIDEO_SUBTITLE_BURN_IN_ENABLED else "disabled"),
         "local_worker_connected": bool(worker.get("connected")),
@@ -106108,6 +106590,8 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
 async def video_dubbing_tts_bytes(text: str, voice_style: str = "") -> tuple[str, bytes, str]:
     provider = str(TTS_PROVIDER or "auto").lower()
     candidates = []
+    if provider in {"auto", "minimax", "shopaikey_minimax", "minimax_voice"} and minimax_tts_configured():
+        candidates.append(("MiniMax", lambda value: shopaikey_minimax_tts_bytes(value, voice_style=voice_style)))
     if provider in {"auto", "shopaikey", "shopai"}:
         candidates.append(("ShopAIKey", shopaikey_tts_bytes))
     if provider in {"auto", "elevenlabs"}:
@@ -106157,7 +106641,7 @@ async def execute_video_dubbing_pipeline(query, context: ContextTypes.DEFAULT_TY
             ),
         }
     video_bytes, content_type = await video_dubbing_download_source(context, state)
-    transcript = (await AgentDeepgram.transcribe(video_bytes, context, content_type=content_type) or "").strip()
+    asr_provider, transcript, _asr_detail = await video_dubbing_transcribe_bytes(video_bytes, context, content_type)
     if not transcript or transcript.startswith("❌"):
         raise RuntimeError("asr_failed")
     output_text = transcript
@@ -106222,6 +106706,7 @@ async def execute_video_dubbing_pipeline(query, context: ContextTypes.DEFAULT_TY
         "ok": True,
         "mode": mode,
         "charged": charged,
+        "asr_provider": asr_provider,
         "tts_provider": tts_provider,
         "has_subtitle": bool(srt_bytes),
         "has_audio": bool(audio_bytes),
@@ -107896,6 +108381,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("pricing_validate", cmd_pricing_validate))
     tg_app.add_handler(CommandHandler("video_kling_status", cmd_video_kling_status))
     tg_app.add_handler(CommandHandler("video_tier_matrix", cmd_video_tier_matrix))
+    tg_app.add_handler(CommandHandler("video_debug_tier_payload", cmd_video_debug_tier_payload))
+    tg_app.add_handler(CommandHandler("video_test_tier_duration", cmd_video_test_tier_duration))
     tg_app.add_handler(CommandHandler("video_test_tier_200", cmd_video_test_tier_200))
     tg_app.add_handler(CommandHandler("video_test_tier_300", cmd_video_test_tier_300))
     tg_app.add_handler(CommandHandler("video_test_tier_400", cmd_video_test_tier_400))

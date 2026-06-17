@@ -4821,6 +4821,8 @@ def test_p0_video_command_registry_hotfix_commands_registered_and_documented():
     registry = (Path(bot.__file__).resolve().parent / "docs" / "COMMAND_REGISTRY.md").read_text(encoding="utf-8")
     required = {
         "video_tier_matrix": "cmd_video_tier_matrix",
+        "video_debug_tier_payload": "cmd_video_debug_tier_payload",
+        "video_test_tier_duration": "cmd_video_test_tier_duration",
         "video_test_tier_200": "cmd_video_test_tier_200",
         "video_test_tier_300": "cmd_video_test_tier_300",
         "video_test_tier_400": "cmd_video_test_tier_400",
@@ -4846,6 +4848,20 @@ def test_p0_video_command_registry_hotfix_commands_registered_and_documented():
     assert '"future_1200": video_tier_public_flag("future_1200")' in source
     assert '"future_1500": video_tier_public_flag("future_1500")' in source
     assert "PUBLIC_WITH_PROVIDER_GUARD" in source
+
+
+def test_video_duration_debug_payload_is_safe_and_detects_missing_duration_field():
+    payload = bot.video_duration_debug_payload("future_1000", 8)
+    assert payload["tier"] == "future_1000"
+    assert payload["requested_seconds"] == 8
+    assert payload["provider_call"] == "NO"
+    assert payload["xu_deducted"] == "NO"
+    assert payload["duration_enforced"] is False
+    assert payload["shopaikey_has_duration_field"] is False
+    assert payload["key4u_has_duration_field"] is False
+    lines = "\n".join(bot.video_duration_debug_lines("future_1000", 8))
+    assert "DURATION_NOT_ENFORCED_IN_CURRENT_SUBMIT_PAYLOAD" in lines
+    assert "Không bán cộng giây lẻ" in lines
 
 
 def test_video_public_open_safe_blocks_when_veo_timeout_stale(monkeypatch):
@@ -7596,7 +7612,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
 def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     source = bot_source_text()
     pipeline_source = source_between(source, "async def execute_video_dubbing_pipeline", "async def handle_video_dubbing_pending_upload")
-    assert "AgentDeepgram.transcribe" in pipeline_source
+    assert "video_dubbing_transcribe_bytes" in pipeline_source
     assert "translate_to_language" in pipeline_source
     assert "video_dubbing_tts_bytes" in pipeline_source
     assert pipeline_source.index("video_dubbing_download_source") < pipeline_source.index("spend_fixed_credit_info")
@@ -7629,7 +7645,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
 
     async def fake_transcribe(_data, _context, content_type="application/octet-stream"):
         assert content_type == "video/mp4"
-        return "Xin chào từ video"
+        return "Test ASR", "Xin chào từ video", "chars=17"
 
     async def fake_translate(text, target):
         return {"text": f"{text} translated to {target}"}
@@ -7638,7 +7654,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         return "Test TTS", b"audio-bytes", f"voice={voice_style}; chars={len(text)}"
 
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
-    monkeypatch.setattr(bot.AgentDeepgram, "transcribe", fake_transcribe)
+    monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_to_language", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
     monkeypatch.setattr(
