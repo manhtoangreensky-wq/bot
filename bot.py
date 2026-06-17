@@ -429,23 +429,41 @@ KEY4U_ENABLED = env_flag("KEY4U_ENABLED", "false")
 KEY4U_API_KEY = _env("KEY4U_API_KEY", "")
 KEY4U_BASE_URL = _env("KEY4U_BASE_URL", "https://api.key4u.shop")
 KEY4U_OPENAI_BASE_URL = _env("KEY4U_OPENAI_BASE_URL", "https://api.key4u.shop/v1")
-KEY4U_CHAT_ENDPOINT = _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions")
-KEY4U_IMAGE_EDIT_ENDPOINT = _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits")
+KEY4U_SMART_ROUTING = env_flag("KEY4U_SMART_ROUTING", "true")
+KEY4U_USAGE_ENDPOINT = _env("KEY4U_USAGE_ENDPOINT", "")
+KEY4U_BALANCE_ENDPOINT = _env("KEY4U_BALANCE_ENDPOINT", "")
+KEY4U_MODELS_ENDPOINT = _env("KEY4U_MODELS_ENDPOINT", "")
+KEY4U_CHAT_ENDPOINT = _env("KEY4U_CHAT_COMPLETIONS_ENDPOINT", _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions"))
+KEY4U_IMAGE_EDIT_ENDPOINT = _env("KEY4U_IMAGE_EDITS_ENDPOINT", _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits"))
 KEY4U_NANO_BANANA_EDIT_ENDPOINT = _env("KEY4U_NANO_BANANA_EDIT_ENDPOINT", "/fal-ai/nano-banana/edit")
 KEY4U_VIDEO_CREATE_ENDPOINT = _env("KEY4U_VIDEO_CREATE_ENDPOINT", "/v1/video/create")
 KEY4U_VIDEO_QUERY_ENDPOINT = _env("KEY4U_VIDEO_QUERY_ENDPOINT", "/v1/video/query")
-KEY4U_CHAT_MODEL = _env("KEY4U_CHAT_MODEL", "")
-KEY4U_VISION_MODEL = _env("KEY4U_VISION_MODEL", "")
-KEY4U_IMAGE_EDIT_MODEL = _env("KEY4U_IMAGE_EDIT_MODEL", "grok-imagine-image-pro")
+KEY4U_TTS_ENDPOINT = _env("KEY4U_TTS_ENDPOINT", "")
+KEY4U_STT_ENDPOINT = _env("KEY4U_STT_ENDPOINT", "")
+KEY4U_SUNO_CREATE_ENDPOINT = _env("KEY4U_SUNO_CREATE_ENDPOINT", "")
+KEY4U_SUNO_QUERY_ENDPOINT = _env("KEY4U_SUNO_QUERY_ENDPOINT", "")
+KEY4U_RERANK_ENDPOINT = _env("KEY4U_RERANK_ENDPOINT", "")
+KEY4U_CHAT_MODEL = _env("KEY4U_DEFAULT_CHAT_MODEL", _env("KEY4U_CHAT_MODEL", ""))
+KEY4U_VISION_MODEL = _env("KEY4U_DEFAULT_VISION_MODEL", _env("KEY4U_VISION_MODEL", ""))
+KEY4U_IMAGE_EDIT_MODEL = _env("KEY4U_DEFAULT_IMAGE_EDIT_MODEL", _env("KEY4U_IMAGE_EDIT_MODEL", "grok-imagine-image-pro"))
 KEY4U_NANO_BANANA_EDIT_MODEL = _env("KEY4U_NANO_BANANA_EDIT_MODEL", "nano-banana")
-KEY4U_VIDEO_MODEL = _env("KEY4U_VIDEO_MODEL", "veo3.1-fast")
+KEY4U_VIDEO_MODEL = _env("KEY4U_DEFAULT_VIDEO_MODEL", _env("KEY4U_VIDEO_MODEL", "veo3.1-fast"))
+KEY4U_TTS_MODEL = _env("KEY4U_DEFAULT_TTS_MODEL", _env("KEY4U_TTS_MODEL", ""))
+KEY4U_STT_MODEL = _env("KEY4U_STT_MODEL", "")
+KEY4U_SUNO_MODEL = _env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", ""))
+KEY4U_RERANK_MODEL = _env("KEY4U_RERANK_MODEL", "")
 KEY4U_PUBLIC_ENABLED = env_flag("KEY4U_PUBLIC_ENABLED", "false")
 KEY4U_ADMIN_SMOKE_ENABLED = env_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true")
+KEY4U_DASHBOARD_BALANCE_USD = _env("KEY4U_DASHBOARD_BALANCE_USD", "")
+KEY4U_LOW_BALANCE_WARN_USD = env_float("KEY4U_LOW_BALANCE_WARN_USD", 5.0)
+KEY4U_LOW_BALANCE_FREEZE_USD = env_float("KEY4U_LOW_BALANCE_FREEZE_USD", 2.0)
 WOKU_ENABLED = env_flag("WOKU_ENABLED", _env("WOKUSHOP_ENABLED", "false"))
 WOKU_PUBLIC_ENABLED = env_flag("WOKU_PUBLIC_ENABLED", _env("WOKUSHOP_PUBLIC_ENABLED", "false"))
 WOKU_ADMIN_SMOKE_ENABLED = env_flag("WOKU_ADMIN_SMOKE_ENABLED", _env("WOKUSHOP_ADMIN_SMOKE_ENABLED", "false"))
 WOKU_REASON = _env("WOKU_REASON", _env("WOKUSHOP_REASON", "cost_high_parked"))
 PROVIDER_ROUTER_ENABLED = env_flag("PROVIDER_ROUTER_ENABLED", "true")
+PROVIDER_PRIMARY = _env("PROVIDER_PRIMARY", "shopaikey")
+PROVIDER_PARALLEL_ENABLED = env_flag("PROVIDER_PARALLEL_ENABLED", "true")
 PROVIDER_FALLBACK_ENABLED = env_flag("PROVIDER_FALLBACK_ENABLED", "false")
 PROVIDER_FALLBACK_ORDER = _env("PROVIDER_FALLBACK_ORDER", "shopaikey,key4u")
 
@@ -2548,6 +2566,24 @@ def init_db():
         detail TEXT,
         created_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS provider_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT,
+        capability TEXT,
+        model TEXT,
+        user_id TEXT,
+        is_admin_smoke INTEGER DEFAULT 0,
+        request_id TEXT,
+        provider_task_id TEXT,
+        status TEXT,
+        estimated_cost_usd REAL DEFAULT 0,
+        estimated_cost_xu INTEGER DEFAULT 0,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        media_units INTEGER DEFAULT 0,
+        note TEXT,
+        created_at TEXT
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS usage_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -4099,6 +4135,143 @@ def record_api_debug(provider: str, action: str, status: str, http_status: int =
     finally:
         if conn:
             conn.close()
+
+def record_provider_usage_event(
+    provider: str,
+    capability: str,
+    model: str = "",
+    user_id="",
+    is_admin_smoke: bool = False,
+    request_id: str = "",
+    provider_task_id: str = "",
+    status: str = "",
+    estimated_cost_usd: float = 0.0,
+    estimated_cost_xu: int = 0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    media_units: int = 0,
+    note: str = "",
+):
+    conn = None
+    try:
+        conn = db_connect()
+        conn.execute("""CREATE TABLE IF NOT EXISTS provider_usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT,
+            capability TEXT,
+            model TEXT,
+            user_id TEXT,
+            is_admin_smoke INTEGER DEFAULT 0,
+            request_id TEXT,
+            provider_task_id TEXT,
+            status TEXT,
+            estimated_cost_usd REAL DEFAULT 0,
+            estimated_cost_xu INTEGER DEFAULT 0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            media_units INTEGER DEFAULT 0,
+            note TEXT,
+            created_at TEXT
+        )""")
+        conn.execute(
+            """INSERT INTO provider_usage_events
+            (provider, capability, model, user_id, is_admin_smoke, request_id, provider_task_id, status,
+             estimated_cost_usd, estimated_cost_xu, input_tokens, output_tokens, media_units, note, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                str(provider or "")[:60],
+                str(capability or "")[:80],
+                str(model or "")[:120],
+                str(user_id or "")[:60],
+                1 if is_admin_smoke else 0,
+                sanitize_log_text(str(request_id or ""))[:120],
+                sanitize_log_text(str(provider_task_id or ""))[:160],
+                str(status or "")[:80],
+                float(estimated_cost_usd or 0),
+                int(estimated_cost_xu or 0),
+                int(input_tokens or 0),
+                int(output_tokens or 0),
+                int(media_units or 0),
+                sanitize_log_text(str(note or ""))[:500],
+                now_text(),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Provider usage event write failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def provider_usage_summary(provider: str = "key4u", since_hours: int = 24) -> dict:
+    since = (vn_now() - timedelta(hours=max(1, int(since_hours or 24)))).strftime("%Y-%m-%d %H:%M:%S")
+    summary = {
+        "provider": str(provider or "key4u"),
+        "since_hours": int(since_hours or 24),
+        "total_calls": 0,
+        "success_count": 0,
+        "fail_count": 0,
+        "estimated_cost_usd": 0.0,
+        "estimated_cost_xu": 0,
+        "by_capability": {},
+        "last_event_at": "",
+    }
+    conn = None
+    try:
+        conn = db_connect()
+        conn.execute("""CREATE TABLE IF NOT EXISTS provider_usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT,
+            capability TEXT,
+            model TEXT,
+            user_id TEXT,
+            is_admin_smoke INTEGER DEFAULT 0,
+            request_id TEXT,
+            provider_task_id TEXT,
+            status TEXT,
+            estimated_cost_usd REAL DEFAULT 0,
+            estimated_cost_xu INTEGER DEFAULT 0,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            media_units INTEGER DEFAULT 0,
+            note TEXT,
+            created_at TEXT
+        )""")
+        rows = conn.execute(
+            """SELECT capability, status, COUNT(*), COALESCE(SUM(estimated_cost_usd),0), COALESCE(SUM(estimated_cost_xu),0)
+            FROM provider_usage_events
+            WHERE provider=? AND created_at>=?
+            GROUP BY capability, status""",
+            (str(provider or "key4u")[:60], since),
+        ).fetchall()
+        for capability, status, count, cost_usd, cost_xu in rows:
+            capability_key = capability or "unknown"
+            bucket = summary["by_capability"].setdefault(capability_key, {"calls": 0, "success": 0, "fail": 0, "estimated_cost_usd": 0.0, "estimated_cost_xu": 0})
+            count_int = int(count or 0)
+            status_upper = str(status or "").upper()
+            bucket["calls"] += count_int
+            bucket["estimated_cost_usd"] += float(cost_usd or 0)
+            bucket["estimated_cost_xu"] += int(cost_xu or 0)
+            summary["total_calls"] += count_int
+            summary["estimated_cost_usd"] += float(cost_usd or 0)
+            summary["estimated_cost_xu"] += int(cost_xu or 0)
+            if status_upper in {"PASS", "OK", "SUCCESS", "PASS_SUBMITTED"}:
+                bucket["success"] += count_int
+                summary["success_count"] += count_int
+            else:
+                bucket["fail"] += count_int
+                summary["fail_count"] += count_int
+        row = conn.execute(
+            "SELECT created_at FROM provider_usage_events WHERE provider=? ORDER BY id DESC LIMIT 1",
+            (str(provider or "key4u")[:60],),
+        ).fetchone()
+        summary["last_event_at"] = row[0] if row else ""
+    except Exception as e:
+        logger.warning(f"Provider usage summary failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+    return summary
 
 def latest_api_debug_event(provider: str, actions: list[str]) -> dict:
     action_list = [str(item or "")[:80] for item in actions if str(item or "").strip()]
@@ -31925,18 +32098,31 @@ def key4u_provider_instance():
         api_key=KEY4U_API_KEY,
         base_url=KEY4U_BASE_URL,
         openai_base_url=KEY4U_OPENAI_BASE_URL,
+        smart_routing=bool(KEY4U_SMART_ROUTING),
         public_enabled=bool(KEY4U_PUBLIC_ENABLED),
         admin_smoke_enabled=bool(KEY4U_ADMIN_SMOKE_ENABLED),
+        usage_endpoint=KEY4U_USAGE_ENDPOINT,
+        balance_endpoint=KEY4U_BALANCE_ENDPOINT,
+        models_endpoint=KEY4U_MODELS_ENDPOINT,
         chat_endpoint=KEY4U_CHAT_ENDPOINT,
         image_edit_endpoint=KEY4U_IMAGE_EDIT_ENDPOINT,
         nano_banana_edit_endpoint=KEY4U_NANO_BANANA_EDIT_ENDPOINT,
         video_create_endpoint=KEY4U_VIDEO_CREATE_ENDPOINT,
         video_query_endpoint=KEY4U_VIDEO_QUERY_ENDPOINT,
+        tts_endpoint=KEY4U_TTS_ENDPOINT,
+        stt_endpoint=KEY4U_STT_ENDPOINT,
+        suno_create_endpoint=KEY4U_SUNO_CREATE_ENDPOINT,
+        suno_query_endpoint=KEY4U_SUNO_QUERY_ENDPOINT,
+        rerank_endpoint=KEY4U_RERANK_ENDPOINT,
         chat_model=KEY4U_CHAT_MODEL,
         vision_model=KEY4U_VISION_MODEL,
         image_edit_model=KEY4U_IMAGE_EDIT_MODEL,
         nano_banana_edit_model=KEY4U_NANO_BANANA_EDIT_MODEL,
         video_model=KEY4U_VIDEO_MODEL,
+        tts_model=KEY4U_TTS_MODEL,
+        stt_model=KEY4U_STT_MODEL,
+        suno_model=KEY4U_SUNO_MODEL,
+        rerank_model=KEY4U_RERANK_MODEL,
     ))
 
 def key4u_status_payload() -> dict:
@@ -32066,7 +32252,7 @@ def provider_registry() -> dict:
         "key4u": {
             "label": "Key4U",
             "configured": bool(key4u_status.get("configured")),
-            "capabilities": ["text_brain", "vision_analysis", "image_edit", "video_generate"],
+            "capabilities": ["text_brain", "vision_analysis", "image_edit", "video_generate", "tts", "stt", "suno", "rerank"],
             "stage": key4u_status.get("stage") or "disabled",
             "admin_only": True,
             "test_name": "key4u_chat",
@@ -35536,19 +35722,12 @@ def image_edit_prompt_value(state: dict, lang: str = "vi") -> str:
 
 def get_image_edit_provider_readiness(user_id=None) -> dict:
     providers = []
+    is_admin = bool(user_id is not None and is_admin_user(user_id))
     shopaikey_edit_url = _env("SHOPAIKEY_IMAGE_EDIT_URL", "")
-    if gemini_client or GEMINI_API_KEY:
-        providers.append({
-            "provider": "gemini_image_edit",
-            "model": _env("GEMINI_IMAGE_EDIT_MODEL", "gemini-2.0-flash-preview-image-generation"),
-            "endpoint": "Gemini multimodal/image edit",
-            "ready": False,
-            "reason": "Gemini image edit path is not wired for real output in this bot build yet.",
-            "missing_env": [] if GEMINI_API_KEY else ["GEMINI_API_KEY"],
-            "public_enabled": False,
-            "admin_tested": False,
-            "last_smoke": tool_test_status_text("gemini_image_edit"),
-        })
+    public_gate = bool(is_feature_public_ready("ai_image_edit"))
+    key4u_smoke = tool_test_status_text("key4u_image_edit")
+    key4u_ready_admin = bool(KEY4U_ENABLED and KEY4U_ADMIN_SMOKE_ENABLED and KEY4U_API_KEY and (KEY4U_IMAGE_EDIT_MODEL or KEY4U_NANO_BANANA_EDIT_MODEL))
+    key4u_ready_public = bool(key4u_ready_admin and KEY4U_PUBLIC_ENABLED and public_gate and key4u_smoke == "PASS")
     providers.append({
         "provider": "shopaikey_image_edit",
         "model": _env("SHOPAIKEY_IMAGE_EDIT_MODEL", SHOPAIKEY_IMAGE_MODEL_PRIMARY or "nano-banana"),
@@ -35565,37 +35744,69 @@ def get_image_edit_provider_readiness(user_id=None) -> dict:
         "last_smoke": tool_test_status_text("shopaikey_image_edit"),
     })
     providers.append({
+        "provider": "key4u_image_edit",
+        "model": KEY4U_IMAGE_EDIT_MODEL or KEY4U_NANO_BANANA_EDIT_MODEL or "auto",
+        "endpoint": KEY4U_IMAGE_EDIT_ENDPOINT or KEY4U_NANO_BANANA_EDIT_ENDPOINT or "missing",
+        "ready": bool(key4u_ready_admin if is_admin else key4u_ready_public),
+        "reason": (
+            "ready"
+            if (key4u_ready_admin if is_admin else key4u_ready_public)
+            else (
+                "Key4U image edit configured for admin smoke; public gate/smoke is still closed."
+                if key4u_ready_admin
+                else "Key4U image edit needs KEY4U_ENABLED/API_KEY/model."
+            )
+        ),
+        "missing_env": [name for name, ok in (
+            ("KEY4U_ENABLED", KEY4U_ENABLED),
+            ("KEY4U_API_KEY", bool(KEY4U_API_KEY)),
+            ("KEY4U_ADMIN_SMOKE_ENABLED", KEY4U_ADMIN_SMOKE_ENABLED),
+            ("KEY4U_IMAGE_EDIT_MODEL", bool(KEY4U_IMAGE_EDIT_MODEL or KEY4U_NANO_BANANA_EDIT_MODEL)),
+        ) if not ok],
+        "public_enabled": bool(key4u_ready_public),
+        "admin_tested": key4u_smoke == "PASS",
+        "last_smoke": key4u_smoke,
+    })
+    if gemini_client or GEMINI_API_KEY:
+        providers.append({
+            "provider": "gemini_image_edit",
+            "model": _env("GEMINI_IMAGE_EDIT_MODEL", "gemini-2.0-flash-preview-image-generation"),
+            "endpoint": "Gemini multimodal/image edit",
+            "ready": False,
+            "reason": "Gemini image edit path is not wired for real output in this bot build yet.",
+            "missing_env": [] if GEMINI_API_KEY else ["GEMINI_API_KEY"],
+            "public_enabled": False,
+            "admin_tested": False,
+            "last_smoke": tool_test_status_text("gemini_image_edit"),
+        })
+    providers.append({
         "provider": "openai_image_edit",
         "model": OPENAI_IMAGE_MODEL,
         "endpoint": "OpenAI images.edit",
-        "ready": bool(ENABLE_OPENAI_IMAGE_EDIT and openai_client and OPENAI_API_KEY),
+        "ready": bool(ENABLE_OPENAI_IMAGE_EDIT and openai_client and OPENAI_API_KEY and (is_admin or public_gate)),
         "reason": "ready" if (ENABLE_OPENAI_IMAGE_EDIT and openai_client and OPENAI_API_KEY) else "OpenAI image edit is disabled or missing API key.",
         "missing_env": [name for name, ok in (
             ("ENABLE_OPENAI_IMAGE_EDIT", ENABLE_OPENAI_IMAGE_EDIT),
             ("OPENAI_API_KEY", bool(OPENAI_API_KEY and openai_client)),
         ) if not ok],
-        "public_enabled": bool(is_feature_public_ready("ai_image_edit")),
+        "public_enabled": bool(public_gate),
         "admin_tested": tool_test_status_text("ai_image_edit") == "PASS",
         "last_smoke": tool_test_status_text("ai_image_edit"),
     })
     selected = next((item for item in providers if item.get("ready")), None)
-    public_block = ""
-    if user_id is not None and not is_admin_user(user_id) and selected and not is_feature_enabled("image_openai_edit", user_id, default=False):
-        public_block = "Chỉnh sửa ảnh AI đang được kiểm tra public."
-    if public_block:
-        selected = None
     missing = []
     for item in providers:
         missing.extend(item.get("missing_env") or [])
+    fallback = providers[0] if providers else {}
     return {
         "ready": bool(selected),
-        "provider": (selected or providers[-1]).get("provider"),
-        "model": (selected or providers[-1]).get("model"),
-        "endpoint": (selected or providers[-1]).get("endpoint"),
+        "provider": (selected or fallback).get("provider"),
+        "model": (selected or fallback).get("model"),
+        "endpoint": (selected or fallback).get("endpoint"),
         "public_enabled": bool((selected or {}).get("public_enabled")),
         "admin_tested": bool((selected or {}).get("admin_tested")),
-        "last_smoke": (selected or providers[-1]).get("last_smoke"),
-        "reason": public_block or ((selected or {}).get("reason") if selected else "No real image edit provider is ready."),
+        "last_smoke": (selected or fallback).get("last_smoke"),
+        "reason": ((selected or {}).get("reason") if selected else "No real image edit provider is ready."),
         "missing": list(dict.fromkeys(missing)),
         "providers": providers,
     }
@@ -35605,8 +35816,8 @@ def get_image_ai_edit_readiness(user_id=None) -> dict:
     missing = []
     if not readiness.get("ready"):
         missing.extend(readiness.get("missing") or [readiness.get("reason") or "provider_not_ready"])
-    if user_id is not None and not is_admin_user(user_id) and not is_feature_enabled("image_openai_edit", user_id, default=False):
-        missing.append("image edit public flag is off")
+    if user_id is not None and not is_admin_user(user_id) and not is_feature_public_ready("ai_image_edit"):
+        missing.append("image edit public gate is off")
     return {
         "ready": not missing,
         "provider": readiness.get("provider") or "image_edit",
@@ -35751,6 +35962,47 @@ async def send_openai_image_result_to_chat(context: ContextTypes.DEFAULT_TYPE, c
         return True, ""
     return False, ""
 
+async def send_provider_image_result_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id, result: dict, caption: str, reply_markup=None) -> tuple[bool, str]:
+    output_bytes = result.get("output_bytes") or b""
+    output_url = str(result.get("output_url") or "")
+    if output_bytes:
+        photo = io.BytesIO(output_bytes)
+        photo.name = "toan_aas_provider_image_edit.png"
+        sent = await context.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption[:1000], reply_markup=reply_markup)
+        output_file_id = sent.photo[-1].file_id if getattr(sent, "photo", None) else ""
+        return True, output_file_id
+    if output_url:
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                response = await client.get(output_url)
+            if response.status_code < 400 and response.content:
+                photo = io.BytesIO(response.content)
+                photo.name = "toan_aas_provider_image_edit.png"
+                sent = await context.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption[:1000], reply_markup=reply_markup)
+                output_file_id = sent.photo[-1].file_id if getattr(sent, "photo", None) else ""
+                return True, output_file_id
+        except Exception as exc:
+            logger.warning("Provider image edit URL download failed | %s", sanitize_log_text(str(exc))[:180])
+        await context.bot.send_message(chat_id=chat_id, text=f"✅ Ảnh đã tạo: {output_url}\n\n{caption[:800]}", reply_markup=reply_markup)
+        return True, ""
+    return False, ""
+
+async def call_image_edit_provider(readiness: dict, png_bytes: bytes, prompt: str) -> dict:
+    provider_key = str(readiness.get("provider") or "")
+    if provider_key == "key4u_image_edit":
+        provider = key4u_provider_instance()
+        return await provider.image_edit(prompt=prompt, image_bytes=png_bytes, use_nano_banana=False)
+    if provider_key == "shopaikey_image_edit":
+        return {
+            "ok": False,
+            "provider": "shopaikey",
+            "capability": "image_edit",
+            "status": "NEED_DOCS",
+            "error_class": "NEED_DOCS",
+            "error_message_safe": "ShopAIKey image edit endpoint requires verified request/response docs before real calls.",
+        }
+    return {}
+
 async def run_image_ai_edit_from_state(update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict, lang: str = "vi") -> bool:
     query = update.callback_query
     uid = update.effective_user.id
@@ -35803,36 +36055,53 @@ async def run_image_ai_edit_from_state(update: Update, context: ContextTypes.DEF
         ok, png_bytes, detail = normalize_image_png_bytes(img_bytes)
         if not ok:
             raise RuntimeError(detail)
-        image_file = io.BytesIO(png_bytes)
-        image_file.name = "source.png"
         safe_prompt = (
             f"{instruction}\n\n"
             "Edit safely and keep the result realistic. Do not add watermark, fake claims, fake documents, or deceptive text."
         )
-        def run_image_edit():
-            image_file.seek(0)
-            return openai_client.images.edit(
-                model=OPENAI_IMAGE_MODEL,
-                image=image_file,
-                prompt=safe_prompt,
-                size="1024x1024",
-                n=1,
-            )
-        result = await asyncio.to_thread(run_image_edit)
+        provider_result = await call_image_edit_provider(readiness, png_bytes, safe_prompt)
+        if provider_result:
+            if not provider_result.get("ok"):
+                raise RuntimeError(provider_result.get("error_class") or provider_result.get("status") or "provider_not_ready")
+            result = provider_result
+            provider_note = f"{provider_result.get('provider') or readiness.get('provider')}_{provider_result.get('capability') or 'image_edit'}"
+        else:
+            image_file = io.BytesIO(png_bytes)
+            image_file.name = "source.png"
+            def run_image_edit():
+                image_file.seek(0)
+                return openai_client.images.edit(
+                    model=OPENAI_IMAGE_MODEL,
+                    image=image_file,
+                    prompt=safe_prompt,
+                    size="1024x1024",
+                    n=1,
+                )
+            result = await asyncio.to_thread(run_image_edit)
+            provider_note = "openai_image_edit"
         charge_result = await spend_media_factory_after_success_or_reply(update, uid, cost, "spend_ai_image_edit", f"AI image edit: {str(state.get('edit_type') or 'custom')[:80]}")
         if not charge_result.get("ok"):
             return True
         charged = not is_admin_user(uid)
-        sent, output_file_id = await send_openai_image_result_to_chat(
-            context,
-            chat_id,
-            result,
-            "✅ Ảnh AI TOAN AAS đã sửa xong.",
-            image_ai_edit_output_keyboard(lang),
-        )
+        if isinstance(result, dict):
+            sent, output_file_id = await send_provider_image_result_to_chat(
+                context,
+                chat_id,
+                result,
+                "✅ Ảnh AI TOAN AAS đã sửa xong.",
+                image_ai_edit_output_keyboard(lang),
+            )
+        else:
+            sent, output_file_id = await send_openai_image_result_to_chat(
+                context,
+                chat_id,
+                result,
+                "✅ Ảnh AI TOAN AAS đã sửa xong.",
+                image_ai_edit_output_keyboard(lang),
+            )
         if not sent:
-            raise RuntimeError("OpenAI image edit response did not contain b64_json or url")
-        create_media_factory_job(uid, media_factory_username(update), "ai_image_edit", _short_pending_text(state.get("edit_request"), 180), image_prompt_pack=safe_prompt[:1200], cost_xu=cost, note="openai_image_edit")
+            raise RuntimeError("image edit response did not contain image bytes or URL")
+        create_media_factory_job(uid, media_factory_username(update), "ai_image_edit", _short_pending_text(state.get("edit_request"), 180), image_prompt_pack=safe_prompt[:1200], cost_xu=cost, note=provider_note)
         if output_file_id:
             save_image_tool_result(uid, "edit_output", {"file_id": output_file_id, "source_file_id": file_id, "edit_type": edit_type, "edit_request": state.get("edit_request") or "", "selected_variant": state.get("selected_variant") or ""})
             set_image_menu_pending(uid, "image_edit_choice", file_id=output_file_id, source_name="ai_edited_image.png")
@@ -39193,8 +39462,8 @@ def provider_matrix_lines() -> list[str]:
         "🧭 <b>TOAN AAS Provider Matrix</b>",
         "",
         "Admin-first only. Không mở public render, không trừ Xu, không hiển thị secret.",
-        f"Router: <code>{'ON' if PROVIDER_ROUTER_ENABLED else 'OFF'}</code> | fallback: <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code> | order <code>{html.escape(', '.join(fallback_order))}</code>",
-        "Primary: <code>ShopAIKey</code> | Backup: <code>Key4U</code> | WokuShop: <code>parked/cost_high</code>",
+        f"Router: <code>{'ON' if PROVIDER_ROUTER_ENABLED else 'OFF'}</code> | parallel: <code>{'ON' if PROVIDER_PARALLEL_ENABLED else 'OFF'}</code> | fallback: <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code> | order <code>{html.escape(', '.join(fallback_order))}</code>",
+        f"Primary: <code>{html.escape(PROVIDER_PRIMARY or 'shopaikey')}</code> | Key4U: <code>parallel provider hub</code> | WokuShop: <code>parked/cost_high</code>",
         "",
     ]
     for name, payload in registry.items():
@@ -40370,10 +40639,13 @@ TOOL_FREEZE_COMMANDS = {
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_chat", "tool_test_shopaikey_tts",
     "tool_test_shopaikey_image", "tool_test_wf_i2v",
     "tool_test_shopaikey_video", "shopaikey_video_job", "tool_test_asr",
-    "key4u_status", "tool_test_key4u_chat", "tool_test_key4u_vision",
+    "key4u_status", "key4u_usage", "key4u_set_manual_balance", "tool_test_key4u_chat", "tool_test_key4u_vision",
     "tool_test_key4u_image", "tool_test_key4u_image_edit", "tool_test_key4u_video", "key4u_video_job",
+    "tool_test_key4u_tts", "tool_test_key4u_stt", "tool_test_key4u_suno", "key4u_suno_job", "tool_test_key4u_rerank",
     "tool_test_video_subtitle", "tool_test_video_dub", "tool_test_subtitle_plus_dub",
-    "subtitle_status", "tool_test_tts_for_dub", "video_dub_public_open", "video_dub_public_close",
+    "subtitle_status", "dub_status", "tool_test_tts_for_dub", "video_dub_public_open", "video_dub_public_close",
+    "subtitle_public_open", "subtitle_public_close", "dub_public_open", "dub_public_close",
+    "voice_status", "music_status", "suno_status", "support_status", "support_tickets", "support_ticket", "support_close",
     "trial_bonus_status",
     "local_status", "local_worker_status", "local_worker_ping", "tool_test_ffmpeg_local", "tool_test_comfy_local",
     "local_jobs", "local_job", "render_center",
@@ -42645,6 +42917,9 @@ def menu_text_admin() -> str:
         "<b>E. ShopAIKey / Provider</b>\n"
         "• <code>/shopaikey_status</code>, <code>/shopaikey_usage</code>, <code>/shopaikey_video_job</code> — kiểm tra job video\n"
         "• <code>/tool_test_shopaikey</code>, <code>/tool_test_shopaikey_image</code>, <code>/tool_test_shopaikey_video</code>, <code>/tool_test_shopaikey_tts</code>\n"
+        "• <code>/key4u_status</code>, <code>/key4u_usage</code>, <code>/key4u_set_manual_balance</code> — Key4U parallel hub/admin smoke\n"
+        "• <code>/tool_test_key4u_chat</code>, <code>/tool_test_key4u_vision</code>, <code>/tool_test_key4u_image_edit</code>, <code>/tool_test_key4u_video</code>, <code>/key4u_video_job</code>\n"
+        "• <code>/tool_test_key4u_tts</code>, <code>/tool_test_key4u_stt</code>, <code>/tool_test_key4u_suno</code>, <code>/key4u_suno_job</code>, <code>/tool_test_key4u_rerank</code>\n"
         "• <code>/tool_test_asr</code>, <code>/tool_test_translate</code>, <code>/tool_test_video_subtitle</code>, <code>/tool_test_video_dub</code>, <code>/tool_test_subtitle_plus_dub</code>\n\n"
         "<b>F. Giá / Sẵn sàng bán</b>\n"
         "• <code>/banggia</code>, <code>/video_price_test</code>, <code>/pricing_audit</code>, <code>/costs</code>, <code>/sales_ready</code>\n\n"
@@ -53195,23 +53470,34 @@ def video_beta_limits_text() -> str:
 
 def get_chat_ai_vision_readiness() -> dict:
     providers = []
+    key4u_configured = bool(KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_ADMIN_SMOKE_ENABLED and KEY4U_VISION_MODEL)
+    providers.append({
+        "provider": "key4u_vision",
+        "configured": key4u_configured,
+        "model": KEY4U_VISION_MODEL or "auto",
+        "reason": "ready" if key4u_configured else "KEY4U_ENABLED/API_KEY/VISION_MODEL missing or admin smoke disabled",
+        "last_smoke": tool_test_status_text("key4u_vision"),
+    })
     providers.append({
         "provider": "gemini_vision",
         "configured": bool(gemini_client and GEMINI_API_KEY),
         "model": _env("GEMINI_VISION_MODEL", "gemini-2.0-flash"),
         "reason": "ready" if (gemini_client and GEMINI_API_KEY) else "GEMINI_API_KEY missing",
+        "last_smoke": preferred_tool_test_status_text("gemini_vision", "ai_chat", "ai"),
     })
     providers.append({
         "provider": "openai_vision",
         "configured": bool(openai_client and OPENAI_API_KEY),
         "model": _env("OPENAI_VISION_MODEL", "gpt-4o-mini"),
         "reason": "ready" if (openai_client and OPENAI_API_KEY) else "OPENAI_API_KEY missing",
+        "last_smoke": preferred_tool_test_status_text("openai_vision", "ai_chat", "ai"),
     })
     providers.append({
         "provider": "shopaikey_multimodal",
         "configured": bool(SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY and shopaikey_public_chat_fallback_enabled()),
         "model": shopaikey_chat_model_sequence()[0] if shopaikey_chat_model_sequence() else SHOPAIKEY_DEFAULT_MODEL,
         "reason": "configured fallback" if (SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY and shopaikey_public_chat_fallback_enabled()) else "ShopAIKey chat fallback disabled/missing",
+        "last_smoke": tool_test_status_text("shopaikey_chat"),
     })
     selected = next((item for item in providers if item.get("configured")), None)
     return {
@@ -53229,12 +53515,14 @@ def toanaas_ai_knowledge_path() -> str:
 def toanaas_ai_status_payload() -> dict:
     path = toanaas_ai_knowledge_path()
     exists = os.path.exists(path)
+    key4u_ready = bool(KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_ADMIN_SMOKE_ENABLED and KEY4U_CHAT_MODEL)
     return {
-        "ready": bool(exists and (gemini_client or openai_client or shopaikey_public_chat_fallback_enabled())),
+        "ready": bool(exists and (key4u_ready or gemini_client or openai_client or shopaikey_public_chat_fallback_enabled())),
         "knowledge_path": path,
         "knowledge_exists": exists,
-        "ai_provider_ready": bool(gemini_client or openai_client or shopaikey_public_chat_fallback_enabled()),
-        "last_ai_smoke": preferred_tool_test_status_text("ai_chat", "ai"),
+        "ai_provider_ready": bool(key4u_ready or gemini_client or openai_client or shopaikey_public_chat_fallback_enabled()),
+        "key4u_ready": key4u_ready,
+        "last_ai_smoke": preferred_tool_test_status_text("key4u_chat", "ai_chat", "ai"),
     }
 
 def answer_toanaas_support_question(user_id, question: str) -> str:
@@ -53361,6 +53649,40 @@ def subtitle_dub_status_text() -> str:
         *rows,
         "",
         "No key/token is shown. Missing provider modes stay guarded and do not charge Xu.",
+    ])
+
+def voice_status_text() -> str:
+    key4u_payload = key4u_status_payload()
+    return "\n".join([
+        "🎙 <b>VOICE / TTS STATUS</b>",
+        "",
+        f"• ShopAIKey TTS: <code>{'READY_CONFIGURED' if (SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY) else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(preferred_tool_test_status_text('shopaikey_tts', 'tts'))}</code>",
+        f"• ElevenLabs: <code>{'CONFIGURED' if ELEVENLABS_API_KEY else 'MISSING'}</code> | smoke <code>{html.escape(tool_test_status_text('elevenlabs_status'))}</code>",
+        f"• Key4U TTS: <code>{'CONFIGURED' if (key4u_payload.get('configured') and KEY4U_TTS_ENDPOINT and KEY4U_TTS_MODEL) else 'NEED_DOCS'}</code> | smoke <code>{html.escape(tool_test_status_text('key4u_tts'))}</code>",
+        "• Public voice/TTS stays under existing product guards; no key is shown.",
+    ])
+
+def music_status_text() -> str:
+    key4u_payload = key4u_status_payload()
+    return "\n".join([
+        "🎵 <b>MUSIC / SFX STATUS</b>",
+        "",
+        f"• ShopAIKey music: <code>{html.escape(preferred_tool_test_status_text('shopaikey_music', 'shopaikey_music_job'))}</code>",
+        f"• Key4U Suno: <code>{'CONFIGURED' if (key4u_payload.get('configured') and KEY4U_SUNO_CREATE_ENDPOINT and KEY4U_SUNO_MODEL) else 'COMING_SOON/NEED_DOCS'}</code> | smoke <code>{html.escape(tool_test_status_text('key4u_suno'))}</code>",
+        "• Local SFX/library stays separate. Music AI public remains guarded until smoke + cost pass.",
+    ])
+
+def suno_status_text() -> str:
+    return "\n".join([
+        "🎼 <b>SUNO STATUS</b>",
+        "",
+        f"• Key4U enabled: <code>{'YES' if KEY4U_ENABLED else 'NO'}</code>",
+        f"• Key4U configured: <code>{'YES' if (KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_ADMIN_SMOKE_ENABLED) else 'NO'}</code>",
+        f"• Create endpoint: <code>{'configured' if KEY4U_SUNO_CREATE_ENDPOINT else 'NEED_DOCS'}</code>",
+        f"• Query endpoint: <code>{'configured' if KEY4U_SUNO_QUERY_ENDPOINT else 'NEED_DOCS'}</code>",
+        f"• Model: <code>{html.escape(KEY4U_SUNO_MODEL or 'auto/NEED_DOCS')}</code>",
+        f"• Last smoke: <code>{html.escape(preferred_tool_test_status_text('key4u_suno', 'key4u_suno_job'))}</code>",
+        "• Public: <code>COMING_SOON</code>. Không gọi API cho user thường và không trừ Xu.",
     ])
 
 def system_public_status_text() -> str:
@@ -53607,6 +53929,21 @@ async def cmd_subtitle_dub_status(update: Update, context: ContextTypes.DEFAULT_
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await update.message.reply_text(subtitle_dub_status_text(), parse_mode="HTML")
 
+async def cmd_voice_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(voice_status_text(), parse_mode="HTML")
+
+async def cmd_music_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(music_status_text(), parse_mode="HTML")
+
+async def cmd_suno_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(suno_status_text(), parse_mode="HTML")
+
 def _subtitle_dub_open_modes_from_args(args: list[str] | tuple[str, ...] | None = None) -> list[str]:
     raw = " ".join(str(item or "") for item in (args or [])).strip().lower()
     if not raw or raw in {"all", "safe"}:
@@ -53741,6 +54078,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     package_wallet = package_wallet_status_payload()
     video_pipeline = video_pipeline_status_payload()
     key4u_payload = key4u_status_payload()
+    key4u_local_usage = provider_usage_summary("key4u", 24)
+    key4u_manual_balance = key4u_manual_balance_usd()
     woku_payload = woku_provider_status_payload()
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
@@ -53779,12 +54118,14 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• AI tested: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
         "• AI quota guide: <code>Gemini/OpenAI quota/rate limit → fallback ShopAIKey; nếu tất cả fail thì không trừ Xu.</code>",
         "",
-        "<b>Key4U Backup Provider</b>",
+        "<b>Key4U Parallel Provider Hub</b>",
         f"• Enabled: <code>{'yes' if key4u_payload.get('enabled') else 'no'}</code> | configured <code>{'yes' if key4u_payload.get('configured') else 'no'}</code> | public <code>{'ON' if key4u_payload.get('public_enabled') else 'OFF'}</code> | admin smoke <code>{'ON' if key4u_payload.get('admin_smoke_enabled') else 'OFF'}</code>",
+        f"• Smart routing: <code>{'ON' if key4u_payload.get('smart_routing') else 'OFF'}</code> | role <code>parallel/admin smoke</code>",
         f"• Models: chat <code>{html.escape(str(key4u_payload.get('chat_model') or '-'))}</code> | vision <code>{html.escape(str(key4u_payload.get('vision_model') or '-'))}</code> | image edit <code>{html.escape(str(key4u_payload.get('image_edit_model') or '-'))}</code> | nano-banana edit <code>{html.escape(str(key4u_payload.get('nano_banana_edit_model') or '-'))}</code> | video <code>{html.escape(str(key4u_payload.get('video_model') or '-'))}</code>",
-        f"• Provider router: <code>{'ON' if PROVIDER_ROUTER_ENABLED else 'OFF'}</code> | fallback <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code> | order <code>{html.escape(', '.join(provider_router_fallback_order()))}</code>",
+        f"• Usage: manual balance <code>{html.escape(f'{key4u_manual_balance:.2f} USD' if key4u_manual_balance is not None else 'not_set')}</code> | local calls 24h <code>{int(key4u_local_usage.get('total_calls') or 0)}</code> | failures <code>{int(key4u_local_usage.get('fail_count') or 0)}</code>",
+        f"• Provider router: <code>{'ON' if PROVIDER_ROUTER_ENABLED else 'OFF'}</code> | parallel <code>{'ON' if PROVIDER_PARALLEL_ENABLED else 'OFF'}</code> | fallback <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code> | order <code>{html.escape(', '.join(provider_router_fallback_order()))}</code>",
         f"• WokuShop: <code>parked</code> | reason <code>{html.escape(str(woku_payload.get('reason') or 'cost_high_parked'))}</code> | calls <code>disabled</code>",
-        "• Commands: <code>/key4u_status</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/key4u_video_job</code>",
+        "• Commands: <code>/key4u_status</code> | <code>/key4u_usage</code> | <code>/key4u_set_manual_balance</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/key4u_video_job</code>",
         "• Rule: <code>admin-only / no Xu / no raw key, prompt, response log</code>",
         "",
         "<b>ShopAIKey / Unified AI Proxy</b>",
@@ -54422,7 +54763,7 @@ async def cmd_orchestrator_status(update: Update, context: ContextTypes.DEFAULT_
         "• <code>/tool_test_elevenlabs_status</code>",
         "• <code>/tool_test_deepgram_status</code>",
         "• <code>/shopaikey_status</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code>",
-        "• <code>/key4u_status</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/key4u_video_job</code>",
+        "• <code>/key4u_status</code> | <code>/key4u_usage</code> | <code>/key4u_set_manual_balance</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/key4u_video_job</code>",
     ])
     await reply_html_lines(update, lines)
 
@@ -54457,6 +54798,152 @@ def key4u_result_lines(title: str, result: dict) -> list[str]:
         "",
         "Admin-only. Không trừ Xu. Không log prompt/response/key. Public Key4U vẫn OFF.",
     ]
+
+def key4u_manual_balance_usd() -> float | None:
+    raw = get_system_setting("key4u_manual_balance_usd", KEY4U_DASHBOARD_BALANCE_USD)
+    try:
+        return float(str(raw or "").strip())
+    except Exception:
+        return None
+
+def set_key4u_manual_balance_usd(amount: float, updated_by="") -> None:
+    set_system_setting(
+        "key4u_manual_balance_usd",
+        f"{float(amount):.4f}",
+        "Key4U dashboard/manual observed balance in USD; not remote provider balance",
+        updated_by,
+    )
+
+def key4u_extract_balance_usd(result: dict) -> float | None:
+    if not result or not result.get("ok"):
+        return None
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    candidates = []
+    for key in ("balance", "remaining", "credit", "credits", "available", "amount"):
+        value = data.get(key)
+        if isinstance(value, (int, float, str)):
+            candidates.append(value)
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        for key in ("balance", "remaining", "credit", "credits", "available", "amount"):
+            value = nested.get(key)
+            if isinstance(value, (int, float, str)):
+                candidates.append(value)
+    for value in candidates:
+        try:
+            return float(str(value).replace("$", "").strip())
+        except Exception:
+            continue
+    return None
+
+def key4u_warning_text(remote_balance: float | None, manual_balance: float | None, estimated_used: float = 0.0) -> str:
+    balance = remote_balance
+    source = "remote"
+    if balance is None and manual_balance is not None:
+        balance = max(0.0, float(manual_balance) - float(estimated_used or 0))
+        source = "manual_estimated"
+    if balance is None:
+        return "BALANCE_REMOTE_UNKNOWN"
+    if balance <= float(KEY4U_LOW_BALANCE_FREEZE_USD or 2):
+        return f"CREDIT_CRITICAL_{source}"
+    if balance <= float(KEY4U_LOW_BALANCE_WARN_USD or 5):
+        return f"CREDIT_LOW_{source}"
+    return "OK"
+
+def key4u_smoke_status_map() -> dict[str, str]:
+    names = {
+        "chat": "key4u_chat",
+        "vision": "key4u_vision",
+        "image": "key4u_image",
+        "image_edit": "key4u_image_edit",
+        "video": "key4u_video",
+        "video_query": "key4u_video_job",
+        "tts": "key4u_tts",
+        "stt": "key4u_stt",
+        "suno": "key4u_suno",
+        "suno_query": "key4u_suno_job",
+        "rerank": "key4u_rerank",
+    }
+    return {label: tool_test_status_text(tool_name) for label, tool_name in names.items()}
+
+def record_key4u_smoke_usage(user_id, result: dict, note: str = "") -> None:
+    record_provider_usage_event(
+        provider="key4u",
+        capability=str(result.get("capability") or note or "unknown"),
+        model=str(result.get("model") or ""),
+        user_id=str(user_id or ""),
+        is_admin_smoke=True,
+        provider_task_id=str(result.get("task_id") or ""),
+        status=str(result.get("status") or "FAIL"),
+        estimated_cost_usd=float(result.get("estimated_cost_usd") or 0),
+        estimated_cost_xu=int(result.get("estimated_cost_xu") or 0),
+        media_units=1 if (result.get("output_url") or result.get("output_bytes") or result.get("task_id")) else 0,
+        note=note or f"key4u_{result.get('capability') or 'smoke'}",
+    )
+
+async def key4u_usage_lines(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> list[str]:
+    payload = key4u_status_payload()
+    local = provider_usage_summary("key4u", 24)
+    manual_balance = key4u_manual_balance_usd()
+    remote_balance = key4u_extract_balance_usd(remote_balance_result or {})
+    estimated_used = float(local.get("estimated_cost_usd") or 0)
+    estimated_remaining = None
+    if remote_balance is not None:
+        estimated_remaining = remote_balance
+    elif manual_balance is not None:
+        estimated_remaining = max(0.0, float(manual_balance) - estimated_used)
+    smoke = key4u_smoke_status_map()
+    warning = key4u_warning_text(remote_balance, manual_balance, estimated_used)
+    usage_status = str((remote_usage or {}).get("status") or "NEED_ENDPOINT")
+    balance_status = str((remote_balance_result or {}).get("status") or "NEED_ENDPOINT")
+    lines = [
+        "📊 <b>KEY4U USAGE</b>",
+        "",
+        "Provider: <b>Key4U</b>",
+        f"Status: <code>{'ENABLED' if payload.get('enabled') else 'DISABLED'}</code>",
+        f"API key: <code>{'configured' if payload.get('configured') else 'missing'}</code>",
+        f"Base URL: <code>{html.escape(str(payload.get('base_url') or '-'))}</code>",
+        f"Smart routing: <code>{'ON' if payload.get('smart_routing') else 'OFF'}</code>",
+        "",
+        "<b>Balance</b>",
+        f"• Remote usage: <code>{html.escape(usage_status)}</code>",
+        f"• Remote balance: <code>{html.escape(str(remote_balance if remote_balance is not None else balance_status))}</code>",
+        f"• Manual/Dashboard balance: <code>{html.escape(f'{manual_balance:.2f} USD' if manual_balance is not None else 'not_set')}</code>",
+        f"• Local estimated used: <code>{estimated_used:.4f} USD</code>",
+        f"• Estimated remaining: <code>{html.escape(f'{estimated_remaining:.4f} USD' if estimated_remaining is not None else 'unknown')}</code>",
+        "",
+        "<b>Today / last 24h</b>",
+    ]
+    by_cap = local.get("by_capability") or {}
+    if not by_cap:
+        lines.append("• No local provider usage events yet.")
+    else:
+        for cap, item in sorted(by_cap.items()):
+            lines.append(
+                f"• {html.escape(str(cap))}: calls <code>{int(item.get('calls') or 0)}</code> | "
+                f"success <code>{int(item.get('success') or 0)}</code> | fail <code>{int(item.get('fail') or 0)}</code>"
+            )
+    lines.extend([
+        f"• Total calls: <code>{int(local.get('total_calls') or 0)}</code>",
+        f"• Success count: <code>{int(local.get('success_count') or 0)}</code>",
+        f"• Fail count: <code>{int(local.get('fail_count') or 0)}</code>",
+        "",
+        "<b>Last smoke</b>",
+    ])
+    for label, status in smoke.items():
+        lines.append(f"• {html.escape(label)}: <code>{html.escape(status)}</code>")
+    lines.extend([
+        "",
+        "<b>Public</b>",
+        f"• Key4U public: <code>{'ON' if KEY4U_PUBLIC_ENABLED else 'OFF'}</code>",
+        f"• Fallback: <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code>",
+        f"• Admin smoke: <code>{'ON' if KEY4U_ADMIN_SMOKE_ENABLED else 'OFF'}</code>",
+        "",
+        "<b>Warnings</b>",
+        f"• <code>{html.escape(warning)}</code>",
+        "No API key, prompt, or raw provider response is shown.",
+    ])
+    return lines
 
 async def key4u_reply_image_bytes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bytes:
     message = update.message.reply_to_message if update and update.message else None
@@ -54494,39 +54981,113 @@ async def key4u_send_image_output_if_any(update: Update, context: ContextTypes.D
         return True
     return False
 
+async def key4u_reply_audio_bytes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bytes:
+    message = update.message.reply_to_message if update and update.message else None
+    if not message:
+        return b""
+    file_id = ""
+    if getattr(message, "voice", None):
+        file_id = message.voice.file_id
+    elif getattr(message, "audio", None):
+        file_id = message.audio.file_id
+    elif getattr(message, "document", None) and str(message.document.mime_type or "").startswith("audio/"):
+        file_id = message.document.file_id
+    if not file_id:
+        return b""
+    tg_file = await context.bot.get_file(file_id)
+    data = await tg_file.download_as_bytearray()
+    return bytes(data or b"")
+
+async def key4u_send_audio_output_if_any(update: Update, context: ContextTypes.DEFAULT_TYPE, result: dict) -> bool:
+    output_bytes = result.get("output_bytes") or b""
+    if not output_bytes:
+        return False
+    audio = io.BytesIO(output_bytes)
+    audio.name = "key4u_tts_test.mp3"
+    await context.bot.send_audio(
+        chat_id=update.effective_chat.id,
+        audio=audio,
+        caption="🎙 Key4U audio output\nAdmin smoke test. Không trừ Xu.",
+    )
+    return True
+
 async def cmd_key4u_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     payload = key4u_status_payload()
     capabilities = payload.get("capabilities") or {}
+    smoke = key4u_smoke_status_map()
+    local = provider_usage_summary("key4u", 24)
+    manual_balance = key4u_manual_balance_usd()
     lines = [
         "🔑 <b>Key4U Provider Status</b>",
         "",
         f"• Enabled: <code>{'yes' if payload.get('enabled') else 'no'}</code>",
         f"• Public enabled: <code>{'yes' if payload.get('public_enabled') else 'no'}</code>",
         f"• Admin smoke: <code>{'yes' if payload.get('admin_smoke_enabled') else 'no'}</code>",
+        f"• Smart routing: <code>{'yes' if payload.get('smart_routing') else 'no'}</code>",
         f"• API key: <code>{html.escape(str(payload.get('api_key') or 'missing'))}</code>",
         f"• Configured: <code>{'yes' if payload.get('configured') else 'no'}</code>",
         f"• Stage: <code>{html.escape(str(payload.get('stage') or 'disabled'))}</code>",
         f"• Base URL: <code>{'configured' if payload.get('base_url') else 'missing'}</code>",
         f"• OpenAI base URL: <code>{'configured' if payload.get('openai_base_url') else 'missing'}</code>",
+        f"• Usage endpoint: <code>{html.escape(str(payload.get('usage_endpoint') or 'NEED_ENDPOINT'))}</code>",
+        f"• Balance endpoint: <code>{html.escape(str(payload.get('balance_endpoint') or 'NEED_ENDPOINT'))}</code>",
         f"• Chat model: <code>{html.escape(str(payload.get('chat_model') or '-'))}</code>",
         f"• Vision model: <code>{html.escape(str(payload.get('vision_model') or '-'))}</code>",
         f"• Image edit model: <code>{html.escape(str(payload.get('image_edit_model') or '-'))}</code>",
         f"• Nano Banana edit model: <code>{html.escape(str(payload.get('nano_banana_edit_model') or '-'))}</code>",
         f"• Video model: <code>{html.escape(str(payload.get('video_model') or '-'))}</code>",
         f"• Fallback order: <code>{html.escape(', '.join(provider_router_fallback_order()))}</code>",
+        f"• Manual/Dashboard balance: <code>{html.escape(f'{manual_balance:.2f} USD' if manual_balance is not None else 'not_set')}</code>",
+        f"• Local calls 24h: <code>{int(local.get('total_calls') or 0)}</code> | success <code>{int(local.get('success_count') or 0)}</code> | fail <code>{int(local.get('fail_count') or 0)}</code>",
         "",
         "<b>Capabilities</b>",
     ]
     for capability, stage in capabilities.items():
         lines.append(f"• {html.escape(str(capability))}: <code>{html.escape(str(stage))}</code>")
+    lines.append("")
+    lines.append("<b>Smoke</b>")
+    for label, status in smoke.items():
+        lines.append(f"• {html.escape(label)}: <code>{html.escape(status)}</code>")
     lines.extend([
         "",
-        "Key4U là provider dự phòng/admin smoke. Không thay ShopAIKey/OpenRouter/OpenAI/Gemini và không mở public trong task này.",
+        "Key4U là parallel provider hub/admin smoke. Không thay ShopAIKey/OpenRouter/OpenAI/Gemini và không mở public trong task này.",
         "WokuShop: <code>parked/cost_high_parked</code>.",
     ])
     await reply_html_lines(update, lines)
+
+async def cmd_key4u_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    remote_usage = await provider.get_usage()
+    remote_balance = await provider.get_balance()
+    usage_detail = key4u_smoke_detail(remote_usage)
+    balance_detail = key4u_smoke_detail(remote_balance)
+    save_tool_test_result("key4u_usage", remote_usage.get("status") or "FAIL", usage_detail, update.effective_user.id)
+    save_tool_test_result("key4u_balance", remote_balance.get("status") or "FAIL", balance_detail, update.effective_user.id)
+    record_api_debug("key4u", "key4u_usage", remote_usage.get("status") or "FAIL", int(remote_usage.get("http_status") or 0), usage_detail)
+    record_api_debug("key4u", "key4u_balance", remote_balance.get("status") or "FAIL", int(remote_balance.get("http_status") or 0), balance_detail)
+    await reply_html_lines(update, await key4u_usage_lines(remote_usage, remote_balance))
+
+async def cmd_key4u_set_manual_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /key4u_set_manual_balance 20.2")
+    try:
+        amount = float(str(context.args[0]).replace(",", "."))
+    except Exception:
+        return await update.message.reply_text("Số dư không hợp lệ. Ví dụ: /key4u_set_manual_balance 20.2")
+    if amount < 0 or amount > 100000:
+        return await update.message.reply_text("Số dư ngoài giới hạn an toàn.")
+    set_key4u_manual_balance_usd(amount, update.effective_user.id)
+    await update.message.reply_text(
+        f"✅ Đã lưu manual/dashboard balance Key4U: <b>{amount:.2f} USD</b>\n"
+        "Đây không phải remote balance thật. Dùng /key4u_usage để xem tổng hợp.",
+        parse_mode="HTML",
+    )
 
 async def cmd_tool_test_key4u_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -54537,6 +55098,7 @@ async def cmd_tool_test_key4u_chat(update: Update, context: ContextTypes.DEFAULT
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_chat", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "tool_test_key4u_chat", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_chat_smoke")
     await reply_html_lines(update, key4u_result_lines("Key4U Chat Smoke", result))
 
 async def cmd_tool_test_key4u_vision(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54548,6 +55110,7 @@ async def cmd_tool_test_key4u_vision(update: Update, context: ContextTypes.DEFAU
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_vision", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "tool_test_key4u_vision", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_vision_smoke")
     await reply_html_lines(update, key4u_result_lines("Key4U Vision Smoke", result))
 
 async def cmd_tool_test_key4u_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54558,6 +55121,7 @@ async def cmd_tool_test_key4u_image(update: Update, context: ContextTypes.DEFAUL
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_image", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "tool_test_key4u_image", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_image_smoke")
     await reply_html_lines(update, key4u_result_lines("Key4U Image Smoke", result))
 
 async def cmd_tool_test_key4u_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54573,6 +55137,7 @@ async def cmd_tool_test_key4u_image_edit(update: Update, context: ContextTypes.D
     detail = key4u_smoke_detail(result) + f"; output_sent={'yes' if output_sent else 'no'}"
     save_tool_test_result("key4u_image_edit", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "tool_test_key4u_image_edit", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_image_edit_smoke")
     lines = key4u_result_lines("Key4U Image Edit Smoke", result)
     lines.insert(-2, f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>")
     await reply_html_lines(update, lines)
@@ -54586,6 +55151,7 @@ async def cmd_tool_test_key4u_video(update: Update, context: ContextTypes.DEFAUL
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_video", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "tool_test_key4u_video", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_video_submit")
     lines = key4u_result_lines("Key4U Video Smoke", result)
     if result.get("task_id"):
         lines.append(f"Kiểm tra tiếp: <code>/key4u_video_job {html.escape(str(result.get('task_id')))}</code>")
@@ -54602,7 +55168,82 @@ async def cmd_key4u_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_video_job", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "key4u_video_job", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_video_poll")
     await reply_html_lines(update, key4u_result_lines("Key4U Video Job", result))
+
+async def cmd_tool_test_key4u_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    text = " ".join(context.args or []).strip() or "Xin chào, đây là kiểm tra giọng nói TOAN AAS."
+    result = await provider.tts(text=text)
+    output_sent = False
+    if result.get("ok"):
+        output_sent = await key4u_send_audio_output_if_any(update, context, result)
+    detail = key4u_smoke_detail(result) + f"; output_sent={'yes' if output_sent else 'no'}"
+    save_tool_test_result("key4u_tts", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_tts", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_tts_smoke")
+    lines = key4u_result_lines("Key4U TTS Smoke", result)
+    lines.insert(-2, f"• Output sent: <code>{'yes' if output_sent else 'no'}</code>")
+    await reply_html_lines(update, lines)
+
+async def cmd_tool_test_key4u_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    audio_bytes = await key4u_reply_audio_bytes(update, context)
+    result = await provider.stt(audio_bytes=audio_bytes)
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_stt", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_stt", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_stt_smoke")
+    await reply_html_lines(update, key4u_result_lines("Key4U STT Smoke", result))
+
+async def cmd_tool_test_key4u_suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    prompt = " ".join(context.args or []).strip() or "Short upbeat TOAN AAS intro music, clean tech brand mood."
+    result = await provider.suno_create(prompt=prompt)
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_suno", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_suno", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_suno_submit")
+    lines = key4u_result_lines("Key4U Suno Smoke", result)
+    if result.get("task_id"):
+        lines.append(f"Kiểm tra tiếp: <code>/key4u_suno_job {html.escape(str(result.get('task_id')))}</code>")
+    await reply_html_lines(update, lines)
+
+async def cmd_key4u_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /key4u_suno_job <task_id>")
+    provider = key4u_provider_instance()
+    result = await provider.suno_query(str(context.args[0] or "").strip())
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_suno_job", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "key4u_suno_job", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_suno_poll")
+    await reply_html_lines(update, key4u_result_lines("Key4U Suno Job", result))
+
+async def cmd_tool_test_key4u_rerank(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    provider = key4u_provider_instance()
+    query = " ".join(context.args or []).strip() or "video quảng cáo nước hoa nam"
+    candidates = [
+        "Prompt quảng cáo sản phẩm 9:16",
+        "Storyboard cinematic thương hiệu",
+        "Caption bán hàng TikTok",
+    ]
+    result = await provider.rerank(query=query, candidates=candidates)
+    detail = key4u_smoke_detail(result)
+    save_tool_test_result("key4u_rerank", result.get("status") or "FAIL", detail, update.effective_user.id)
+    record_api_debug("key4u", "tool_test_key4u_rerank", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    record_key4u_smoke_usage(update.effective_user.id, result, "key4u_rerank_smoke")
+    await reply_html_lines(update, key4u_result_lines("Key4U Rerank Smoke", result))
 
 async def cmd_tool_test_openrouter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -66119,6 +66760,44 @@ async def cmd_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text, keyboard = public_support_ticket_list_keyboard(update.effective_user.id)
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+async def cmd_support_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(support_ticket_stats_text(), parse_mode="HTML", reply_markup=support_admin_menu_keyboard())
+
+async def cmd_support_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    text, keyboard = support_admin_list_payload("open", 0)
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+async def cmd_support_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: <code>/support_ticket &lt;ticket_id hoặc ticket_code&gt;</code>", parse_mode="HTML")
+    raw = str(context.args[0] or "").strip()
+    ticket = get_support_ticket_by_code(raw) if not raw.isdigit() else get_support_ticket(int(raw))
+    if not ticket:
+        return await update.message.reply_text("Không tìm thấy ticket.", parse_mode="HTML")
+    await update.message.reply_text(support_ticket_admin_text(ticket), parse_mode="HTML", reply_markup=support_ticket_admin_keyboard(ticket))
+
+async def cmd_support_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: <code>/support_close &lt;ticket_id hoặc ticket_code&gt;</code>", parse_mode="HTML")
+    raw = str(context.args[0] or "").strip()
+    ticket = get_support_ticket_by_code(raw) if not raw.isdigit() else get_support_ticket(int(raw))
+    if not ticket:
+        return await update.message.reply_text("Không tìm thấy ticket.", parse_mode="HTML")
+    ticket = update_support_ticket(ticket["id"], status="resolved", assigned_admin_id=update.effective_user.id) or ticket
+    await update.message.reply_text(
+        f"✅ Đã đóng ticket <code>{html.escape(ticket.get('ticket_code') or str(ticket.get('id')))}</code>.",
+        parse_mode="HTML",
+        reply_markup=support_admin_menu_keyboard(),
+    )
 
 async def cmd_ticket_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -81936,51 +82615,69 @@ async def cmd_tool_test_ai_image(update: Update, context: ContextTypes.DEFAULT_T
 async def cmd_tool_test_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
     instruction = media_factory_topic_from_args(context)
     if not instruction:
         return await update.message.reply_text("⚠️ Cú pháp: reply ảnh rồi gõ /tool_test_ai_image_edit <yêu cầu sửa ảnh>")
     reply = update.message.reply_to_message if update.message else None
     if not (reply and getattr(reply, "photo", None)):
         return await update.message.reply_text("⚠️ Hãy reply một ảnh rồi gõ /tool_test_ai_image_edit <yêu cầu sửa ảnh>.")
-    if not ENABLE_OPENAI_IMAGE_EDIT:
-        save_tool_test_result("ai_image_edit", "DISABLED", "ENABLE_OPENAI_IMAGE_EDIT=0", update.effective_user.id)
-        return await update.message.reply_text(openai_image_disabled_text("edit"))
-    if not openai_client:
-        save_tool_test_result("ai_image_edit", "MISSING", "OPENAI_API_KEY missing", update.effective_user.id)
-        return await update.message.reply_text("⚠️ OpenAI image edit provider chưa được cấu hình. Không có Xu nào bị trừ.")
+    readiness = get_image_edit_provider_readiness(uid)
+    if not readiness.get("ready"):
+        detail = readiness.get("reason") or "No image edit provider is ready"
+        save_tool_test_result("ai_image_edit", "NEED_PROVIDER", detail, uid)
+        return await update.message.reply_text(
+            "🧪 <b>Image Edit provider smoke</b>\n\n"
+            "• Status: <code>NEED_PROVIDER</code>\n"
+            f"• Selected: <code>{html.escape(str(readiness.get('provider') or '-'))}</code>\n"
+            f"• Reason: <code>{html.escape(str(detail)[:300])}</code>\n\n"
+            "Không gọi provider, không tạo ảnh giả và không trừ Xu.",
+            parse_mode="HTML",
+        )
     try:
         photo_size = reply.photo[-1]
         img_bytes = bytes(await (await photo_size.get_file()).download_as_bytearray())
         ok, png_bytes, detail = normalize_image_png_bytes(img_bytes)
         if not ok:
             raise RuntimeError(detail)
-        image_file = io.BytesIO(png_bytes)
-        image_file.name = "source.png"
         safe_prompt = (
             f"{instruction}\n\n"
             "Edit safely and keep the result realistic. Do not add watermark, fake claims, or deceptive text."
         )
-        def run_edit():
-            image_file.seek(0)
-            return openai_client.images.edit(
-                model=OPENAI_IMAGE_MODEL,
-                image=image_file,
-                prompt=safe_prompt,
-                size="1024x1024",
-                n=1,
-            )
-        result = await asyncio.to_thread(run_edit)
-        sent = await send_openai_image_result(update, result, "✅ OpenAI Image Edit admin smoke test PASS.")
+        provider_result = await call_image_edit_provider(readiness, png_bytes, safe_prompt)
+        if provider_result:
+            if not provider_result.get("ok"):
+                raise RuntimeError(provider_result.get("error_class") or provider_result.get("status") or "provider_not_ready")
+            result = provider_result
+            sent, _output_file_id = await send_provider_image_result_to_chat(context, update.effective_chat.id, result, "✅ Image Edit provider admin smoke test PASS.")
+            provider_name = str(result.get("provider") or readiness.get("provider") or "provider")
+            model_name = str(result.get("model") or readiness.get("model") or "-")
+        else:
+            image_file = io.BytesIO(png_bytes)
+            image_file.name = "source.png"
+            def run_edit():
+                image_file.seek(0)
+                return openai_client.images.edit(
+                    model=OPENAI_IMAGE_MODEL,
+                    image=image_file,
+                    prompt=safe_prompt,
+                    size="1024x1024",
+                    n=1,
+                )
+            result = await asyncio.to_thread(run_edit)
+            sent = await send_openai_image_result(update, result, "✅ OpenAI Image Edit admin smoke test PASS.")
+            provider_name = "openai_image"
+            model_name = OPENAI_IMAGE_MODEL
         if not sent:
-            raise RuntimeError("OpenAI image edit response did not contain b64_json or url")
-        save_tool_test_result("ai_image_edit", "PASS", f"model={OPENAI_IMAGE_MODEL}; admin_smoke_test", update.effective_user.id)
-        record_api_debug("openai_image", "tool_test_ai_image_edit", "PASS", 0, f"model={OPENAI_IMAGE_MODEL}; prompt_len={len(instruction)}")
+            raise RuntimeError("image edit response did not contain image bytes or URL")
+        save_tool_test_result("ai_image_edit", "PASS", f"provider={provider_name}; model={model_name}; admin_smoke_test", uid)
+        record_api_debug(provider_name, "tool_test_ai_image_edit", "PASS", int((result.get("http_status") if isinstance(result, dict) else 0) or 0), f"model={model_name}; prompt_len={len(instruction)}")
     except Exception as e:
         detail = provider_error_summary(e)
-        save_tool_test_result("ai_image_edit", "FAIL", detail, update.effective_user.id)
+        save_tool_test_result("ai_image_edit", "FAIL", detail, uid)
         record_api_debug("openai_image", "tool_test_ai_image_edit", "FAIL", 0, detail)
         await update.message.reply_text(
-            "❌ OpenAI Image Edit admin smoke test FAIL.\n"
+            "❌ Image Edit admin smoke test FAIL.\n"
             f"• Error: <code>{html.escape(detail[:300])}</code>\n"
             "Không có Xu nào bị trừ.",
             parse_mode="HTML",
@@ -82124,49 +82821,61 @@ async def cmd_ai_image_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             source_name = info.get("file_name") or info.get("filename") or "source.png"
     if not source_file_id:
         return await update.message.reply_text("⚠️ Hãy reply ảnh hoặc gửi ảnh/file ảnh rồi gõ /ai_image_edit <yêu cầu sửa ảnh> trong vòng 10 phút.")
-    if not ENABLE_OPENAI_IMAGE_EDIT or not is_feature_enabled("image_openai_edit", uid, default=False):
-        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc công cụ chưa sẵn sàng. Bot chưa trừ Xu.")
-    if not openai_client:
-        return await update.message.reply_text("Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc công cụ chưa sẵn sàng. Bot chưa trừ Xu.")
+    readiness = get_image_ai_edit_readiness(uid)
+    if not readiness.get("ready"):
+        return await update.message.reply_text("Chỉnh sửa ảnh AI đang được bảo trì/nâng cấp để đảm bảo chất lượng. TOAN AAS chưa trừ Xu của quý khách.")
     ok_credit, _charge_preview = await preview_media_factory_credit_or_reply(update, uid, AI_IMAGE_EDIT_COST, "spend_ai_image_edit")
     if not ok_credit:
         return
     charged = False
     try:
         tg_file = await context.bot.get_file(source_file_id)
-        image_file = io.BytesIO()
-        await tg_file.download_to_memory(out=image_file)
-        image_file.seek(0)
-        image_file.name = source_name or "source.png"
+        raw_image = bytes(await tg_file.download_as_bytearray())
+        ok, png_bytes, detail = normalize_image_png_bytes(raw_image)
+        if not ok:
+            raise RuntimeError(detail)
         safe_prompt = (
             f"{instruction}\n\n"
             "Edit safely and keep the result realistic. Do not add watermark, fake claims, or deceptive text."
         )
-        def run_image_edit():
-            image_file.seek(0)
-            return openai_client.images.edit(
-                model=OPENAI_IMAGE_MODEL,
-                image=image_file,
-                prompt=safe_prompt,
-                size="1024x1024",
-                n=1,
-            )
-        result = await asyncio.to_thread(run_image_edit)
+        provider_result = await call_image_edit_provider(readiness, png_bytes, safe_prompt)
+        if provider_result:
+            if not provider_result.get("ok"):
+                raise RuntimeError(provider_result.get("error_class") or provider_result.get("status") or "provider_not_ready")
+            result = provider_result
+            provider_note = f"{provider_result.get('provider') or readiness.get('provider')}_{provider_result.get('capability') or 'image_edit'}"
+        else:
+            image_file = io.BytesIO(png_bytes)
+            image_file.name = source_name or "source.png"
+            def run_image_edit():
+                image_file.seek(0)
+                return openai_client.images.edit(
+                    model=OPENAI_IMAGE_MODEL,
+                    image=image_file,
+                    prompt=safe_prompt,
+                    size="1024x1024",
+                    n=1,
+                )
+            result = await asyncio.to_thread(run_image_edit)
+            provider_note = "openai_image_edit"
         charge_result = await spend_media_factory_after_success_or_reply(update, uid, AI_IMAGE_EDIT_COST, "spend_ai_image_edit", f"AI image edit: {instruction[:120]}")
         if not charge_result.get("ok"):
             return
         charged = not is_admin_user(uid)
-        sent = await send_openai_image_result(update, result, "✅ Ảnh AI TOAN AAS đã sửa xong.")
+        if isinstance(result, dict):
+            sent, _output_file_id = await send_provider_image_result_to_chat(context, update.effective_chat.id, result, "✅ Ảnh AI TOAN AAS đã sửa xong.")
+        else:
+            sent = await send_openai_image_result(update, result, "✅ Ảnh AI TOAN AAS đã sửa xong.")
         if not sent:
-            raise RuntimeError("OpenAI image edit response did not contain b64_json or url")
-        create_media_factory_job(uid, media_factory_username(update), "ai_image_edit", instruction, image_prompt_pack=safe_prompt, cost_xu=AI_IMAGE_EDIT_COST, note="openai_image_edit")
+            raise RuntimeError("image edit response did not contain image bytes or URL")
+        create_media_factory_job(uid, media_factory_username(update), "ai_image_edit", instruction, image_prompt_pack=safe_prompt, cost_xu=AI_IMAGE_EDIT_COST, note=provider_note)
         balance = get_user(uid)[0] if not is_admin_user(uid) else "∞"
         await update.message.reply_text(f"💼 Còn lại: {balance} Xu | /naptien để nạp thêm")
     except Exception as e:
         refund_charged_credit(uid, AI_IMAGE_EDIT_COST, "ai_image_edit_refund", "", "Hoàn phí sửa ảnh AI do lỗi provider", charged)
         logger.warning(f"OpenAI image edit failed: {e}")
         await update.message.reply_text(
-            "Chỉnh sửa ảnh AI đang admin test/chưa mở public hoặc công cụ chưa sẵn sàng. Bot chưa trừ Xu."
+            "Chỉnh sửa ảnh AI đang được bảo trì/nâng cấp để đảm bảo chất lượng. TOAN AAS chưa trừ Xu của quý khách."
             if not charged else "❌ Sửa ảnh AI lỗi. Bot đã hoàn Xu."
         )
 
@@ -104081,6 +104790,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("support",     cmd_support))
     tg_app.add_handler(CommandHandler("tickets",     cmd_tickets))
     tg_app.add_handler(CommandHandler("ticket_status", cmd_tickets))
+    tg_app.add_handler(CommandHandler("support_status", cmd_support_status))
+    tg_app.add_handler(CommandHandler("support_tickets", cmd_support_tickets))
+    tg_app.add_handler(CommandHandler("support_ticket", cmd_support_ticket))
+    tg_app.add_handler(CommandHandler("support_close", cmd_support_close))
     tg_app.add_handler(CommandHandler("start",       cmd_start))
     tg_app.add_handler(CommandHandler("menu",        cmd_menu))
     tg_app.add_handler(CommandHandler("language",    cmd_language))
@@ -104161,6 +104874,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_price_test", cmd_video_price_test))
     tg_app.add_handler(CommandHandler("image_provider_status", cmd_image_provider_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
+    tg_app.add_handler(CommandHandler("key4u_usage", cmd_key4u_usage))
+    tg_app.add_handler(CommandHandler("key4u_set_manual_balance", cmd_key4u_set_manual_balance))
     tg_app.add_handler(CommandHandler("maintenance_status", cmd_maintenance_status))
     tg_app.add_handler(CommandHandler("provider_freeze", cmd_provider_freeze))
     tg_app.add_handler(CommandHandler("provider_unfreeze", cmd_provider_unfreeze))
@@ -104195,6 +104910,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_key4u_image_edit", cmd_tool_test_key4u_image_edit))
     tg_app.add_handler(CommandHandler("tool_test_key4u_video", cmd_tool_test_key4u_video))
     tg_app.add_handler(CommandHandler("key4u_video_job", cmd_key4u_video_job))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_tts", cmd_tool_test_key4u_tts))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_stt", cmd_tool_test_key4u_stt))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_suno", cmd_tool_test_key4u_suno))
+    tg_app.add_handler(CommandHandler("key4u_suno_job", cmd_key4u_suno_job))
+    tg_app.add_handler(CommandHandler("tool_test_key4u_rerank", cmd_tool_test_key4u_rerank))
     tg_app.add_handler(CommandHandler("shopaikey_image", cmd_shopaikey_image_public))
     tg_app.add_handler(CommandHandler("shopaikey_video", cmd_shopaikey_video_public))
     tg_app.add_handler(CommandHandler("shopaikey_video_from_image", cmd_shopaikey_video_from_image_public))
@@ -104205,8 +104925,16 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_video_dub", cmd_tool_test_video_dub))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_plus_dub", cmd_tool_test_subtitle_plus_dub))
     tg_app.add_handler(CommandHandler("subtitle_status", cmd_subtitle_dub_status))
+    tg_app.add_handler(CommandHandler("dub_status", cmd_subtitle_dub_status))
+    tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
+    tg_app.add_handler(CommandHandler("music_status", cmd_music_status))
+    tg_app.add_handler(CommandHandler("suno_status", cmd_suno_status))
     tg_app.add_handler(CommandHandler("video_dub_public_open", cmd_video_dub_public_open))
     tg_app.add_handler(CommandHandler("video_dub_public_close", cmd_video_dub_public_close))
+    tg_app.add_handler(CommandHandler("subtitle_public_open", cmd_video_dub_public_open))
+    tg_app.add_handler(CommandHandler("subtitle_public_close", cmd_video_dub_public_close))
+    tg_app.add_handler(CommandHandler("dub_public_open", cmd_video_dub_public_open))
+    tg_app.add_handler(CommandHandler("dub_public_close", cmd_video_dub_public_close))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
     tg_app.add_handler(CommandHandler("tool_test_image_debug", cmd_tool_test_image_debug))
     tg_app.add_handler(CommandHandler("tool_test_ai_image", cmd_tool_test_ai_image))

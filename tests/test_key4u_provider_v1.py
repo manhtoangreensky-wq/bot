@@ -22,11 +22,15 @@ def test_key4u_status_masks_api_key():
             enabled=True,
             admin_smoke_enabled=True,
             api_key="sk-key4u-secret-123456789",
+            usage_endpoint="/usage",
+            balance_endpoint="/balance",
         )
     )
     status = provider.get_status()
     assert status["configured"] is True
     assert status["api_key"] == "sk-k***6789"
+    assert status["usage_endpoint"] == "configured"
+    assert status["balance_endpoint"] == "configured"
     assert "sk-key4u-secret-123456789" not in str(status)
     assert mask_key("") == "missing"
 
@@ -42,6 +46,34 @@ def test_key4u_missing_config_no_network_no_crash():
     assert result["ok"] is False
     assert result["status"] == "NOT_CONFIGURED"
     assert result["provider"] == "key4u"
+
+
+def test_key4u_usage_and_optional_capabilities_need_docs_without_endpoint():
+    provider = Key4UProvider(
+        Key4UConfig(
+            enabled=True,
+            admin_smoke_enabled=True,
+            api_key="sk-test",
+            tts_model="tts-model",
+            stt_model="stt-model",
+            suno_model="suno-model",
+            rerank_model="rerank-model",
+        )
+    )
+    usage = asyncio.run(provider.get_usage())
+    balance = asyncio.run(provider.get_balance())
+    tts = asyncio.run(provider.tts())
+    stt = asyncio.run(provider.stt(audio_bytes=b"abc"))
+    suno = asyncio.run(provider.suno_create())
+    rerank = asyncio.run(provider.rerank("query", ["candidate"]))
+    for result in (usage, balance):
+        assert result["ok"] is False
+        assert result["status"] == "NEED_ENDPOINT"
+        assert result["provider"] == "key4u"
+    for result in (tts, stt, suno, rerank):
+        assert result["ok"] is False
+        assert result["status"] == "NEED_DOCS"
+        assert result["provider"] == "key4u"
 
 
 def test_key4u_admin_smoke_commands_do_not_deduct_xu():
@@ -63,6 +95,7 @@ def test_key4u_admin_smoke_commands_do_not_deduct_xu():
     for block in command_blocks:
         assert "is_admin_user" in block
         assert "save_tool_test_result" in block
+        assert "record_key4u_smoke_usage" in block
         for token in forbidden:
             assert token not in block
 
@@ -72,12 +105,19 @@ def test_key4u_commands_registered_and_documented():
     registry = repo_file("docs/COMMAND_REGISTRY.md")
     commands = [
         "key4u_status",
+        "key4u_usage",
+        "key4u_set_manual_balance",
         "tool_test_key4u_chat",
         "tool_test_key4u_vision",
         "tool_test_key4u_image",
         "tool_test_key4u_image_edit",
         "tool_test_key4u_video",
         "key4u_video_job",
+        "tool_test_key4u_tts",
+        "tool_test_key4u_stt",
+        "tool_test_key4u_suno",
+        "key4u_suno_job",
+        "tool_test_key4u_rerank",
     ]
     for command in commands:
         assert f'CommandHandler("{command}"' in source
@@ -97,6 +137,7 @@ def test_provider_registry_includes_key4u_and_woku_parked(monkeypatch):
     assert registry["wokushop"]["health"]["status"] == "PARKED"
     matrix_text = "\n".join(bot.provider_matrix_lines())
     assert "Key4U" in matrix_text
+    assert "parallel provider hub" in matrix_text
     assert "WokuShop" in matrix_text
     assert "cost_high" in matrix_text
 
@@ -112,8 +153,14 @@ def test_provider_router_excludes_woku_from_fallback_order(monkeypatch):
 def test_env_example_key4u_public_off_and_woku_parked():
     env_text = repo_file(".env.example")
     assert "KEY4U_ENABLED=false" in env_text
+    assert "KEY4U_SMART_ROUTING=true" in env_text
+    assert "KEY4U_USAGE_ENDPOINT=" in env_text
+    assert "KEY4U_BALANCE_ENDPOINT=" in env_text
+    assert "KEY4U_DASHBOARD_BALANCE_USD=" in env_text
     assert "KEY4U_PUBLIC_ENABLED=false" in env_text
     assert "KEY4U_ADMIN_SMOKE_ENABLED=true" in env_text
+    assert "PROVIDER_PRIMARY=shopaikey" in env_text
+    assert "PROVIDER_PARALLEL_ENABLED=true" in env_text
     assert "PROVIDER_FALLBACK_ENABLED=false" in env_text
     assert "PROVIDER_FALLBACK_ORDER=shopaikey,key4u" in env_text
     assert "WOKU_ENABLED=false" in env_text
@@ -125,3 +172,13 @@ def test_video_200_beta_daily_limit_unchanged():
     assert bot.VIDEO_BASIC_COST_XU == 300
     assert bot.VIDEO_COMMON_COST_XU == 400
     assert bot.VIDEO_BETA_200_MAX_USER_DAY == 3
+
+
+def test_key4u_usage_schema_and_status_no_secret_leak():
+    source = repo_file("bot.py")
+    assert "CREATE TABLE IF NOT EXISTS provider_usage_events" in source
+    assert "KEY4U_DASHBOARD_BALANCE_USD" in source
+    usage_impl = source_between(source, "async def cmd_key4u_usage", "async def cmd_key4u_set_manual_balance")
+    assert "key4u_usage_lines" in usage_impl
+    assert "KEY4U_API_KEY" not in usage_impl
+    assert "No API key, prompt, or raw provider response is shown." in source

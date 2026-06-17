@@ -185,13 +185,20 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tool_test_shopaikey_image` | `cmd_tool_test_shopaikey_image` | YES | YES | Admin image smoke test. |
 | `/tool_test_shopaikey_video` | `cmd_tool_test_shopaikey_video` | YES | YES | Admin video smoke test. |
 | `/tool_test_shopaikey_tts` | `cmd_tool_test_shopaikey_tts` | YES | YES | Admin TTS smoke test. |
-| `/key4u_status` | `cmd_key4u_status` | YES | YES | Key4U backup provider status; admin-only, public OFF, no secrets. |
+| `/key4u_status` | `cmd_key4u_status` | YES | YES | Key4U parallel provider hub status, smoke snapshots, usage endpoint state, and masked key. |
+| `/key4u_usage` | `cmd_key4u_usage` | YES | YES | Key4U usage dashboard: remote endpoint status, manual/dashboard balance, local usage events, warnings; no key leakage. |
+| `/key4u_set_manual_balance` | `cmd_key4u_set_manual_balance` | YES | YES | Store admin-observed Key4U dashboard balance for reporting when remote balance endpoint is unknown. |
 | `/tool_test_key4u_chat` | `cmd_tool_test_key4u_chat` | YES | YES | Key4U chat smoke test; no Xu charge and no prompt/response logging. |
 | `/tool_test_key4u_vision` | `cmd_tool_test_key4u_vision` | YES | YES | Reply to an image to test Key4U vision model; no Xu charge. |
 | `/tool_test_key4u_image` | `cmd_tool_test_key4u_image` | YES | YES | Guarded Key4U image generation placeholder until endpoint docs are verified. |
 | `/tool_test_key4u_image_edit` | `cmd_tool_test_key4u_image_edit` | YES | YES | Reply to an image to smoke test Key4U image edit/nano-banana edit. |
 | `/tool_test_key4u_video` | `cmd_tool_test_key4u_video` | YES | YES | Key4U video create smoke test; submits admin-only job if provider accepts. |
 | `/key4u_video_job` | `cmd_key4u_video_job` | YES | YES | Query Key4U video job status by provider task id. |
+| `/tool_test_key4u_tts` | `cmd_tool_test_key4u_tts` | YES | YES | Key4U TTS smoke test; returns NEED_DOCS unless endpoint/model are configured; no Xu charge. |
+| `/tool_test_key4u_stt` | `cmd_tool_test_key4u_stt` | YES | YES | Reply to audio to test Key4U STT if endpoint/model are configured; no Xu charge. |
+| `/tool_test_key4u_suno` | `cmd_tool_test_key4u_suno` | YES | YES | Key4U Suno/music smoke test; guarded by explicit endpoint/model docs; no Xu charge. |
+| `/key4u_suno_job` | `cmd_key4u_suno_job` | YES | YES | Query Key4U Suno/music job status by provider task id. |
+| `/tool_test_key4u_rerank` | `cmd_tool_test_key4u_rerank` | YES | YES | Key4U rerank smoke test if endpoint/model are configured; no prompt/response logging. |
 | `/tool_test_asr` | `cmd_tool_test_asr` | YES | YES | Reply a short audio/video file to smoke test Deepgram ASR with no Xu charge. |
 | `/tool_test_translate [text] [lang]` | `cmd_tool_test_translate` | YES | YES | Smoke test translation routing/fallback with a short text. |
 | `/tool_test_tts_for_dub` | `cmd_tool_test_tts` | YES | YES | Alias for TTS smoke when verifying dubbing readiness. |

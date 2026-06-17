@@ -27,6 +27,15 @@ def provider_fallback_enabled() -> bool:
     return _flag("PROVIDER_FALLBACK_ENABLED", "false")
 
 
+def provider_primary() -> str:
+    primary = _env("PROVIDER_PRIMARY", "shopaikey").strip().lower()
+    return primary or "shopaikey"
+
+
+def provider_parallel_enabled() -> bool:
+    return _flag("PROVIDER_PARALLEL_ENABLED", "true")
+
+
 def provider_fallback_order() -> list[str]:
     raw = _env("PROVIDER_FALLBACK_ORDER", "shopaikey,key4u")
     result: list[str] = []
@@ -66,11 +75,13 @@ def provider_matrix_payload(
 ) -> dict[str, Any]:
     return {
         "router_enabled": provider_router_enabled(),
+        "primary": provider_primary(),
+        "parallel_enabled": provider_parallel_enabled(),
         "fallback_enabled": provider_fallback_enabled(),
         "fallback_order": provider_fallback_order(),
         "providers": {
-            "shopaikey": shopaikey or {"role": "primary"},
-            "key4u": key4u or {"role": "backup", "public_enabled": False},
+            "shopaikey": shopaikey or {"role": "primary current production"},
+            "key4u": key4u or {"role": "parallel provider hub", "public_enabled": False},
             "wokushop": woku_status(),
         },
     }
