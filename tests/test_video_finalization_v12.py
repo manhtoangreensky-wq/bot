@@ -15,6 +15,14 @@ def _callbacks(markup):
     }
 
 
+def _labels(markup):
+    return [
+        str(button.text)
+        for row in markup.inline_keyboard
+        for button in row
+    ]
+
+
 def _source_between(start_marker: str, end_marker: str) -> str:
     source = Path(bot.__file__).resolve().read_text(encoding="utf-8")
     start = source.index(start_marker)
@@ -340,6 +348,83 @@ def test_ready_prompt_export_opens_public_video_tiers(monkeypatch):
     assert "vfinal|tier|common" in callbacks
     pending = bot.get_video_finalization_state(user_id)
     assert pending.get("source_payload", {}).get("video_prompt") or pending.get("source_payload", {}).get("prompt")
+
+
+def test_video_finalization_tier_menu_is_two_columns_and_not_misleading():
+    markup = bot.video_finalization_tier_keyboard("vi")
+    assert all(len(row) <= 2 for row in markup.inline_keyboard)
+    labels = _labels(markup)
+    assert any("Trải nghiệm" in label and "200 Xu" in label for label in labels)
+    assert any("Bán hàng" in label and "600 Xu" in label for label in labels)
+    assert not any("nếu" in label.lower() for label in labels)
+    callbacks = _callbacks(markup)
+    assert "vfinal|tier|low" in callbacks
+    assert "vfinal|tier|basic" in callbacks
+    assert "vfinal|tier|common" in callbacks
+    assert "vfinal|review" in callbacks
+
+
+def test_video_result_keyboard_uses_clear_ai_action_label():
+    labels = _labels(bot.guided_video_result_keyboard("promptvideo", "vi"))
+    assert "🎬 Tạo video AI" in labels
+    assert not any("nếu" in label.lower() for label in labels)
+
+
+def test_video_addon_confirm_keeps_finalization_back_context():
+    markup = bot.video_addon_confirm_keyboard("tok123", "low", "vi")
+    callbacks = _callbacks(markup)
+    assert "shopai|confirm|tok123" in callbacks
+    assert "vfinal|tier" in callbacks
+    assert "vfinal|music" in callbacks
+    assert "create_media|quick_video" not in callbacks
+
+
+def test_video_addon_back_returns_to_existing_finalization_tier(monkeypatch):
+    user_id = 991212
+    bot.clear_video_finalization_state(user_id)
+    bot.clear_video_addon_state(user_id)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    bot.set_video_finalization_state(user_id, {
+        "source": "promptvideo",
+        "source_label": "Prompt → Video AI",
+        "source_payload": {"video_prompt": "Prompt video ready"},
+        "has_script": False,
+        "has_video_prompt": True,
+        "step": "confirm",
+    })
+    bot.set_video_addon_state(user_id, {
+        "source": "ai",
+        "video_tier": "low",
+        "pending_payload": {
+            "video_tier": "low",
+            "video_prompt": "Prompt video ready",
+            "aspect_ratio": "9:16",
+        },
+    })
+
+    class FakeQuery:
+        data = "videoaddon|back"
+        from_user = SimpleNamespace(id=user_id)
+        message = SimpleNamespace(chat_id=user_id)
+        edited = None
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
+            self.edited = {"text": str(text), "parse_mode": parse_mode, "reply_markup": reply_markup}
+            return self.edited
+
+    query = FakeQuery()
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert query.edited is not None
+    assert "Chọn gói xuất video AI" in query.edited["text"]
+    callbacks = _callbacks(query.edited["reply_markup"])
+    assert "vfinal|tier|low" in callbacks
+    assert "create_media|quick_video" not in callbacks
+    current = bot.get_video_finalization_state(user_id)
+    assert current.get("step") == "tier"
 
 
 def test_local_export_without_prompt_or_images_keeps_image_slideshow_guard(monkeypatch):

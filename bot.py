@@ -44178,7 +44178,7 @@ def guided_video_result_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboar
     return video_v6_keyboard(
         strength_buttons + [
             ("🎛 Hoàn thiện video" if is_vi else "🎛 Finalize video", f"{prefix}|finalization"),
-            ("🎬 Tạo video ngay" if is_vi else "🎬 Generate AI video now", f"{prefix}|generate"),
+            ("🎬 Tạo video AI" if is_vi else "🎬 Generate AI video", f"{prefix}|generate"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", f"{prefix}|save"),
             ("✍️ Sửa prompt" if is_vi else "✍️ Edit prompt", f"{prefix}|edit_prompt"),
         ],
@@ -76066,6 +76066,7 @@ def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🎛 Thêm tính năng khác" if is_vi else "🎛 Extra features", callback_data="vfinal|menu"),
+            InlineKeyboardButton("🎬 Xem lại xác nhận" if is_vi else "🎬 Review export", callback_data="vfinal|review"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"),
@@ -77357,8 +77358,8 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
 def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export", callback_data=f"shopai|confirm|{token}"), InlineKeyboardButton("⚙️ Đổi chất lượng" if is_vi else "⚙️ Change quality", callback_data="create_media|quick_video")],
-        [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="videoaddon|back")],
+        [InlineKeyboardButton("✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export", callback_data=f"shopai|confirm|{token}"), InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier")],
+        [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
@@ -77704,6 +77705,18 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
                 frame_state["step"] = "music"
                 set_frame_video_state(uid, frame_state)
                 return await safe_edit_or_send(query, frame_video_music_text(frame_state), parse_mode="HTML", reply_markup=frame_video_music_keyboard())
+        vfinal_state = get_video_finalization_state(uid)
+        if vfinal_state:
+            pending = dict(state.get("pending_payload") or {})
+            vfinal_state["step"] = "tier"
+            if pending:
+                vfinal_state["source_payload"] = pending
+                vfinal_state["selected_video_tier"] = normalize_video_tier(pending.get("video_tier") or state.get("video_tier") or vfinal_state.get("selected_video_tier"))
+                if pending.get("aspect_ratio"):
+                    vfinal_state["selected_video_aspect_ratio"] = normalize_media_aspect_ratio(str(pending.get("aspect_ratio")), "9:16", "video")
+            set_video_finalization_state(uid, vfinal_state)
+            clear_video_addon_state(uid)
+            return await safe_edit_or_send(query, video_finalization_tier_text(vfinal_state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
         pending = dict(state.get("pending_payload") or {})
         tier = normalize_video_tier(state.get("video_tier") or pending.get("video_tier"))
         prompt = str(pending.get("original_prompt") or pending.get("prompt") or "")
