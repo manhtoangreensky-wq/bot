@@ -2062,7 +2062,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.video_tier_payload("vip")["tier"] == "future_1500"
     assert bot.video_tier_payload("future_1500")["admin_only"] is True
     assert bot.video_tier_payload("future_1500")["enabled"] is False
-    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / advanced:ON / standard:ON / high:ON / future_1000:ON / future_1500:OFF"
+    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / advanced:ON / standard:ON / high:ON / future_1000:OFF / future_1500:OFF"
     callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
     assert "shopaikey_recent_image_job_for_callback" in callback_source
     assert callback_source.index("shopaikey_recent_image_job_for_callback") < callback_source.index("common.expired_not_charged")
@@ -4922,7 +4922,7 @@ def test_video_beta_cost_status_and_public_tiers(monkeypatch):
     assert bot.video_tier_enabled_map()["advanced"] is True
     assert bot.video_tier_enabled_map()["standard"] is True
     assert bot.video_tier_enabled_map()["high"] is True
-    assert bot.video_tier_enabled_map()["future_1000"] is True
+    assert bot.video_tier_enabled_map()["future_1000"] is False
     assert bot.video_tier_enabled_map()["future_1500"] is False
     assert bot.check_video_margin("low")["status"] == "MARKETING_LOSS_ON"
     assert bot.check_video_margin("common")["status"] == "WARN_MARGIN"
@@ -6804,7 +6804,7 @@ def test_trend_guided_video_prompt_callbacks_open_finalization(monkeypatch):
 
     finalization = asyncio.run(press("trendg|finalization"))
     assert "Thêm tính năng khác" in finalization["text"]
-    assert "chưa gọi API/provider" in finalization["text"]
+    assert "chưa xử lý video" in finalization["text"]
 
     real_video = asyncio.run(press("trendg|video_real"))
     assert "Chọn gói xuất video AI" in real_video["text"]
@@ -7074,7 +7074,7 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
         "selected_music": "none",
     })
     provider_guard = asyncio.run(press(bot.handle_prompt_video_callback, "promptvideo|generate", uid))
-    assert "chưa gọi API" in provider_guard["text"]
+    assert "chưa xử lý video" in provider_guard["text"]
     assert "chưa trừ Xu" in provider_guard["text"]
 
     bot.clear_developing_video_pending(uid)
@@ -8630,14 +8630,14 @@ def test_video_export_vfinal_ready_uses_confirm_path(monkeypatch):
 
 def test_video_export_vfinal_500_600_800_public_when_gate_passes(monkeypatch):
     monkeypatch.setattr(bot, "video_public_beta_enabled_runtime", lambda: True)
-    monkeypatch.setattr(bot, "video_public_allowed_tiers", lambda: ["low", "basic", "common", "advanced", "standard", "high", "future_1000"])
-    monkeypatch.setattr(bot, "video_tier_public_flag", lambda tier: bot.normalize_video_tier(tier) in {"low", "basic", "common", "advanced", "standard", "high", "future_1000"})
+    monkeypatch.setattr(bot, "video_public_allowed_tiers", lambda: ["low", "basic", "common", "advanced", "standard", "high"])
+    monkeypatch.setattr(bot, "video_tier_public_flag", lambda tier: bot.normalize_video_tier(tier) in {"low", "basic", "common", "advanced", "standard", "high"})
     monkeypatch.setattr(
         bot,
         "video_tier_enabled_map",
-        lambda: {"low": True, "basic": True, "common": True, "advanced": True, "standard": True, "high": True, "future_1000": True, "future_1500": False},
+        lambda: {"low": True, "basic": True, "common": True, "advanced": True, "standard": True, "high": True, "future_1000": False, "future_1500": False},
     )
-    monkeypatch.setattr(bot, "video_billing_public_gate", lambda: {"ready": True, "allowed_tiers": ["advanced", "standard", "high", "future_1000"], "blockers": [], "cost_rows": []})
+    monkeypatch.setattr(bot, "video_billing_public_gate", lambda: {"ready": True, "allowed_tiers": ["advanced", "standard", "high"], "blockers": [], "cost_rows": []})
     monkeypatch.setattr(
         bot,
         "get_video_prompt_export_readiness",
@@ -8650,11 +8650,12 @@ def test_video_export_vfinal_500_600_800_public_when_gate_passes(monkeypatch):
             "reason": "ready",
         },
     )
-    for tier in ("advanced", "standard", "high", "future_1000"):
+    for tier in ("advanced", "standard", "high"):
         status = bot.get_public_video_tier_ui_status(tier, False)
         assert status["enabled"] is True
         assert status["public_status"] == "PUBLIC"
         assert "billing/cost gate" not in status["reason"]
+    assert bot.get_public_video_tier_ui_status("future_1000", False)["enabled"] is False
     assert "500 Xu" in bot.video_finalization_tier_text({}, "vi")
     assert "600 Xu" in bot.video_finalization_tier_text({}, "vi")
     assert "800 Xu" in bot.video_finalization_tier_text({}, "vi")
@@ -9359,7 +9360,7 @@ def test_video_total_price_v2_is_itemized():
         "current_video_dubbing_option": "dub_original",
         "current_video_price_preview": pricing,
     })
-    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề: <b>120 Xu</b>", "Lồng tiếng: <b>250 Xu</b>", "Tổng: <b>1.690 Xu</b>", "169.000đ"]:
+    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề: <b>+120 Xu</b>", "Lồng tiếng: <b>+250 Xu</b>", "Tổng: <b>1.690 Xu</b>", "169.000đ"]:
         assert marker in invoice
 
 
@@ -9466,6 +9467,152 @@ def test_video_addon_menu_and_shared_flow_hooks():
     assert 'start_video_addon_step(query, uid, state, "low", lang, source="frame")' in frame_source
     for flow_marker in ["trend", "selfscene", "videoref", "imagevideo", "promptvideo"]:
         assert flow_marker in source
+
+
+def test_video_order_builder_base_price():
+    order = bot.video_order_create(123, "basic", {"prompt": "video quảng cáo"}, {"video_tier": "basic"})
+    assert order["tier"] == "basic"
+    assert order["base_price_xu"] == bot.video_tier_cost_xu("basic")
+    assert order["total_xu"] == order["base_price_xu"]
+    assert order["current_screen"] == "video_addon_menu"
+
+
+def test_video_order_builder_addon_total():
+    state = {
+        "video_tier": "basic",
+        "current_video_subtitle_option": "subtitle_original",
+        "current_video_dubbing_option": "dub_original",
+    }
+    order = bot.video_order_from_state(state, 123)
+    expected = (
+        bot.video_tier_cost_xu("basic")
+        + bot.VIDEO_SUBTITLE_AUTO_BASE_XU
+        + bot.VIDEO_DUB_DEFAULT_BASE_XU
+    )
+    assert order["total_xu"] == expected
+    assert any("Phụ đề + lồng tiếng" in item["label"] for item in order["paid_items"])
+
+
+def test_video_confirm_never_zero_without_valid_discount():
+    order = bot.video_order_create(123, "basic", {}, {"video_tier": "basic"})
+    order["discounts"] = [{"label": "invalid member discount", "price_xu": order["base_price_xu"]}]
+    recalculated = bot.video_order_recalculate(order, {"video_tier": "basic"})
+    assert recalculated["total_xu"] == bot.video_tier_cost_xu("basic")
+
+
+def test_video_confirm_no_invalid_member_discount():
+    state = {"video_tier": "basic", "video_order": {"tier": "basic", "discounts": [{"label": "member", "price_xu": 300}]}}
+    text = bot.video_price_invoice_text(state, "vi")
+    assert "Ưu đãi thành viên" not in text
+    assert "Tổng: <b>0 Xu</b>" not in text
+
+
+def test_video_200_hides_paid_addons():
+    markup = bot.video_addon_menu_keyboard("vi", {"video_tier": "low"})
+    callbacks = _button_callbacks(markup)
+    assert "videoaddon|subtitle" not in callbacks
+    assert "videoaddon|dub" not in callbacks
+    assert "videoaddon|none" in callbacks
+    order = bot.video_order_from_state({"video_tier": "low", "current_video_subtitle_option": "subtitle_original"}, 123)
+    assert order["paid_items"] == []
+    assert order["total_xu"] == bot.video_tier_cost_xu("low")
+
+
+def test_video_300_shows_paid_addons():
+    markup = bot.video_addon_menu_keyboard("vi", {"video_tier": "basic"})
+    callbacks = _button_callbacks(markup)
+    assert "videoaddon|subtitle" in callbacks
+    assert "videoaddon|dub" in callbacks
+    assert "videoaddon|translate_combo" in callbacks
+
+
+def test_subtitle_dub_screen_has_clear_descriptions():
+    text = bot.video_order_screen_text("subtitle_dub", {"video_tier": "basic"}, "vi")
+    assert "Tạo phụ đề tự động" in text
+    assert "Dịch phụ đề" in text
+    assert "Lồng tiếng" in text
+    assert "hóa đơn" in text.lower()
+
+
+def test_subtitle_dub_screen_no_provider_word():
+    text = bot.video_order_screen_text("subtitle_dub", {"video_tier": "basic"}, "vi")
+    assert "provider" not in text.lower()
+    assert "api" not in text.lower()
+
+
+def test_subtitle_dub_back_returns_to_addon_menu():
+    order = bot.video_order_create(123, "basic")
+    order = bot.video_order_push_screen(order, "addon_voice")
+    order = bot.video_order_back_screen(order)
+    assert order["current_screen"] == "video_addon_menu"
+
+
+def test_music_screen_free_and_paid_clear():
+    text = bot.video_order_screen_text("music", {"video_tier": "basic"}, "vi")
+    assert "Miễn phí" in text
+    assert "Cộng phí" in text
+    assert "Suno" in text
+
+
+def test_voice_screen_free_and_paid_clear():
+    text = bot.video_order_screen_text("voice", {"video_tier": "basic"}, "vi")
+    assert "Miễn phí" in text
+    assert "Cộng phí" in text
+    assert "Lồng tiếng AI" in text
+
+
+def test_confirm_screen_professional_copy():
+    state = {"video_tier": "basic", "current_video_subtitle_option": "subtitle_original"}
+    text = bot.video_price_invoice_text(state, "vi")
+    assert "Hóa đơn xác nhận video" in text
+    assert "Dịch vụ chính" in text
+    assert "Add-on có phí" in text
+    assert "TOAN AAS chỉ bắt đầu xử lý" in text
+    assert "provider" not in text.lower()
+    assert "api" not in text.lower()
+
+
+def test_confirm_screen_total_matches_order():
+    state = {"video_tier": "basic", "current_video_subtitle_option": "subtitle_original"}
+    order = bot.video_order_from_state(state, 123)
+    text = bot.video_price_invoice_text(state, "vi")
+    assert f"Tổng: <b>{bot.xu_number(order['total_xu'])} Xu</b>" in text
+
+
+def test_no_xu_before_confirm():
+    source = source_between(bot_source_text(), "async def start_video_addon_step", "async def finalize_video_addon_confirmation")
+    assert "spend_fixed_credit_info(" not in source
+    assert "deduct" not in source.lower()
+
+
+def test_no_processing_before_confirm():
+    text = bot.video_price_invoice_text({"video_tier": "basic"}, "vi")
+    assert "sau khi bạn bấm xác nhận cuối" in text
+    assert "đã xử lý" not in text.lower()
+
+
+def test_coming_soon_1000_1500_not_billable():
+    assert bot.video_tier_enabled_map()["future_1000"] is False
+    assert bot.video_tier_enabled_map()["future_1500"] is False
+    assert bot.video_order_create(123, "future_1000")["billable"] is False
+    assert bot.video_order_create(123, "future_1500")["billable"] is False
+
+
+def test_old_addon_callback_guarded_for_200():
+    source = source_between(bot_source_text(), "async def handle_video_addon_callback", "async def cmd_video_price_test")
+    assert 'tier == "low"' in source
+    assert "video_experience_tier_lock_text" in source
+    assert '"subtitle", "dub", "combo", "translate_sub", "translate_combo", "lang", "voice"' in source
+
+
+def test_back_stack_preserves_video_order():
+    order = bot.video_order_create(123, "basic")
+    order = bot.video_order_push_screen(order, "addon_language")
+    order = bot.video_order_push_screen(order, "addon_voice")
+    order = bot.video_order_back_screen(order)
+    assert order["current_screen"] == "addon_language"
+    order = bot.video_order_back_screen(order)
+    assert order["current_screen"] == "video_addon_menu"
 
 
 def test_video_addon_provider_guard_happens_before_charge(monkeypatch):

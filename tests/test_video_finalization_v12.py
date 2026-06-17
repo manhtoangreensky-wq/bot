@@ -134,7 +134,7 @@ def test_video_finalization_summary_and_guard_are_explicit(monkeypatch):
 
     guard = bot.video_finalization_ai_guard_text("vi")
     assert "bảo trì / nâng cấp" in guard
-    assert "chưa gọi provider" in guard
+    assert "chưa xử lý video" in guard
     assert "chưa trừ Xu" in guard
 
 
