@@ -1286,6 +1286,43 @@ VIDEO_STORYBOARD_XU = max(0, env_int("VIDEO_STORYBOARD_XU", 0))
 IMAGE_TO_VIDEO_PLAN_XU = max(0, env_int("IMAGE_TO_VIDEO_PLAN_XU", 0))
 VIDEO_PRICING_ENABLED = env_flag("VIDEO_PRICING_ENABLED", "true")
 XU_TO_VND = max(1, env_int("XU_TO_VND", 100))
+VIDEO_SHORT_BASE_SECONDS = max(1, env_int("VIDEO_SHORT_BASE_SECONDS", 8))
+VIDEO_SHORT_BASE_SCENES = max(1, env_int("VIDEO_SHORT_BASE_SCENES", 1))
+VIDEO_SHORT_MAX_SECONDS = max(VIDEO_SHORT_BASE_SECONDS, env_int("VIDEO_SHORT_MAX_SECONDS", 60))
+VIDEO_LOW_EXTRA_SECOND_XU = max(0, env_int("VIDEO_LOW_EXTRA_SECOND_XU", 0))
+VIDEO_BASIC_EXTRA_SECOND_XU = max(0, env_int("VIDEO_BASIC_EXTRA_SECOND_XU", 25))
+VIDEO_COMMON_EXTRA_SECOND_XU = max(0, env_int("VIDEO_COMMON_EXTRA_SECOND_XU", 30))
+VIDEO_ADVANCED_EXTRA_SECOND_XU = max(0, env_int("VIDEO_ADVANCED_EXTRA_SECOND_XU", 40))
+VIDEO_STANDARD_EXTRA_SECOND_XU = max(0, env_int("VIDEO_STANDARD_EXTRA_SECOND_XU", 50))
+VIDEO_HIGH_EXTRA_SECOND_XU = max(0, env_int("VIDEO_HIGH_EXTRA_SECOND_XU", 70))
+VIDEO_FUTURE_1000_EXTRA_SECOND_XU = max(0, env_int("VIDEO_FUTURE_1000_EXTRA_SECOND_XU", 100))
+VIDEO_LOW_EXTRA_SCENE_XU = max(0, env_int("VIDEO_LOW_EXTRA_SCENE_XU", 0))
+VIDEO_BASIC_EXTRA_SCENE_XU = max(0, env_int("VIDEO_BASIC_EXTRA_SCENE_XU", 30))
+VIDEO_COMMON_EXTRA_SCENE_XU = max(0, env_int("VIDEO_COMMON_EXTRA_SCENE_XU", 50))
+VIDEO_ADVANCED_EXTRA_SCENE_XU = max(0, env_int("VIDEO_ADVANCED_EXTRA_SCENE_XU", 70))
+VIDEO_STANDARD_EXTRA_SCENE_XU = max(0, env_int("VIDEO_STANDARD_EXTRA_SCENE_XU", 100))
+VIDEO_HIGH_EXTRA_SCENE_XU = max(0, env_int("VIDEO_HIGH_EXTRA_SCENE_XU", 150))
+VIDEO_FUTURE_1000_EXTRA_SCENE_XU = max(0, env_int("VIDEO_FUTURE_1000_EXTRA_SCENE_XU", 200))
+VIDEO_SUBTITLE_AUTO_BASE_XU = max(0, env_int("VIDEO_SUBTITLE_AUTO_BASE_XU", 120))
+VIDEO_SUBTITLE_TRANSLATE_BASE_XU = max(0, env_int("VIDEO_SUBTITLE_TRANSLATE_BASE_XU", 150))
+VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU = max(0, env_int("VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU", 220))
+VIDEO_DUB_DEFAULT_BASE_XU = max(0, env_int("VIDEO_DUB_DEFAULT_BASE_XU", 250))
+VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU = max(0, env_int("VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU", 350))
+VIDEO_VOICE_ADVANCED_ADDON_XU = max(0, env_int("VIDEO_VOICE_ADVANCED_ADDON_XU", 100))
+VIDEO_VOICE_PRESET_TRANSFORM_XU = max(0, env_int("VIDEO_VOICE_PRESET_TRANSFORM_XU", 150))
+VIDEO_VOICE_PREMIUM_PRESET_XU = max(0, env_int("VIDEO_VOICE_PREMIUM_PRESET_XU", 200))
+VIDEO_VOICE_CLONE_CREATE_XU = max(0, env_int("VIDEO_VOICE_CLONE_CREATE_XU", 600))
+VIDEO_VOICE_CLONE_REUSE_XU = max(0, env_int("VIDEO_VOICE_CLONE_REUSE_XU", 100))
+VIDEO_SUNO_MUSIC_XU = max(0, env_int("VIDEO_SUNO_MUSIC_XU", 300))
+VIDEO_SUNO_VARIATION_XU = max(0, env_int("VIDEO_SUNO_VARIATION_XU", 150))
+VIDEO_LYRICS_AI_XU = max(0, env_int("VIDEO_LYRICS_AI_XU", 80))
+VIDEO_MUSIC_CUT_LOOP_XU = max(0, env_int("VIDEO_MUSIC_CUT_LOOP_XU", 50))
+VIDEO_SFX_AI_XU = max(0, env_int("VIDEO_SFX_AI_XU", 80))
+VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU = max(0, env_int("VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU", 80))
+VIDEO_SUBTITLE_TRANSLATE_EXTRA_BLOCK_XU = max(0, env_int("VIDEO_SUBTITLE_TRANSLATE_EXTRA_BLOCK_XU", 100))
+VIDEO_SUBTITLE_FULL_EXTRA_BLOCK_XU = max(0, env_int("VIDEO_SUBTITLE_FULL_EXTRA_BLOCK_XU", 150))
+VIDEO_DUB_EXTRA_BLOCK_XU = max(0, env_int("VIDEO_DUB_EXTRA_BLOCK_XU", 200))
+VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU = max(0, env_int("VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU", 250))
 LOCAL_FRAME_VIDEO_XU_PER_SECOND = max(0, env_int("LOCAL_FRAME_VIDEO_XU_PER_SECOND", 2))
 LOCAL_FRAME_VIDEO_MIN_XU = max(0, env_int("LOCAL_FRAME_VIDEO_MIN_XU", 20))
 VIDEO_AI_FAST_XU_PER_SECOND = max(0, env_int("VIDEO_AI_FAST_XU_PER_SECOND", 30))
@@ -33026,26 +33063,28 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
     payload = video_tier_pricing_payload().get(tier_norm) or video_tier_pricing_payload()["low"]
     cost = int(payload.get("cost") or video_tier_cost_xu(tier_norm))
     label = payload.get("label") or localized_video_tier_label(tier_norm, lang)
+    second_rate = video_tier_extra_second_xu(tier_norm)
+    scene_rate = video_tier_extra_scene_xu(tier_norm)
     if normalize_user_language(lang) != "vi":
         notes = {
-            "low": "starter/trial tier, controlled public beta",
-            "basic": "short AI video, public beta",
-            "common": "stronger short AI video, public beta",
-            "advanced": "advanced prompt, composition, lighting, brand style and motion direction",
-            "standard": "business video with selling angle, product benefit and CTA",
-            "high": "premium cinematic/commercial polish, lighting and camera direction",
-            "future_1000": "professional public tier for higher quality short videos",
+            "low": "1 scene / 8s starter trial, no extra duration",
+            "basic": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
+            "common": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
+            "advanced": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
+            "standard": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
+            "high": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
+            "future_1000": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
             "future_1500": "coming soon / premium provider development",
         }
     else:
         notes = {
-            "low": "gói trải nghiệm, có giới hạn ngày/tuần/tháng",
-            "basic": "video ngắn cơ bản, public beta",
-            "common": "video ngắn tốt hơn, public beta",
-            "advanced": "nâng prompt, bố cục, ánh sáng, brand style và chuyển động",
-            "standard": "tối ưu bán hàng: lợi ích sản phẩm, CTA và bố cục rõ",
-            "high": "phong cách cao cấp: cinematic, lighting, camera và commercial polish",
-            "future_1000": "gói chuyên nghiệp public để test/bán video chất lượng hơn",
+            "low": "1 cảnh / 8 giây, gói trải nghiệm, không bán thêm thời lượng",
+            "basic": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
+            "common": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
+            "advanced": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
+            "standard": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
+            "high": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
+            "future_1000": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
             "future_1500": "đang phát triển",
         }
     return f"• {VIDEO_TIER_ICONS.get(tier_norm, '🎬')} <b>{html.escape(str(label))}</b> — <b>{cost} Xu</b>: {html.escape(notes.get(tier_norm, ''))}"
@@ -33078,6 +33117,368 @@ def video_tier_quality_description(tier: str = "", lang: str = "vi") -> str:
 
 def video_tier_cost_xu(tier: str = "") -> int:
     return int(video_tier_payload(tier).get("cost") or 0)
+
+VIDEO_SHORT_TIER_PRICING_NOTE_VI = (
+    "Lưu ý: Gói đã bao gồm tính năng mặc định. Các mục có dấu ‘+’ là tùy chọn cộng thêm "
+    "do phát sinh tài nguyên AI/xử lý nâng cao. Kho có sẵn và thao tác cơ bản được hỗ trợ miễn phí."
+)
+VIDEO_SHORT_TIER_PRICING_NOTE_EN = (
+    "Note: the package includes its default features. Items marked with ‘+’ are optional add-ons "
+    "for extra AI resources or advanced processing. Built-in libraries and basic manual/local actions are supported free when eligible."
+)
+
+def video_tier_extra_second_xu(tier: str = "") -> int:
+    tier_norm = normalize_video_tier(tier)
+    return {
+        "low": VIDEO_LOW_EXTRA_SECOND_XU,
+        "basic": VIDEO_BASIC_EXTRA_SECOND_XU,
+        "common": VIDEO_COMMON_EXTRA_SECOND_XU,
+        "advanced": VIDEO_ADVANCED_EXTRA_SECOND_XU,
+        "standard": VIDEO_STANDARD_EXTRA_SECOND_XU,
+        "high": VIDEO_HIGH_EXTRA_SECOND_XU,
+        "future_1000": VIDEO_FUTURE_1000_EXTRA_SECOND_XU,
+    }.get(tier_norm, 0)
+
+def video_tier_extra_scene_xu(tier: str = "") -> int:
+    tier_norm = normalize_video_tier(tier)
+    return {
+        "low": VIDEO_LOW_EXTRA_SCENE_XU,
+        "basic": VIDEO_BASIC_EXTRA_SCENE_XU,
+        "common": VIDEO_COMMON_EXTRA_SCENE_XU,
+        "advanced": VIDEO_ADVANCED_EXTRA_SCENE_XU,
+        "standard": VIDEO_STANDARD_EXTRA_SCENE_XU,
+        "high": VIDEO_HIGH_EXTRA_SCENE_XU,
+        "future_1000": VIDEO_FUTURE_1000_EXTRA_SCENE_XU,
+    }.get(tier_norm, 0)
+
+def video_tier_allows_extra_duration(tier: str = "") -> bool:
+    return normalize_video_tier(tier) not in {"low", "future_1500"} and video_tier_extra_second_xu(tier) > 0
+
+def video_tier_allows_extra_scenes(tier: str = "") -> bool:
+    return normalize_video_tier(tier) not in {"low", "future_1500"} and video_tier_extra_scene_xu(tier) > 0
+
+def video_tier_allows_paid_addons(tier: str = "") -> bool:
+    tier_norm = normalize_video_tier(tier)
+    return tier_norm not in {"low", "future_1500"}
+
+def video_experience_tier_policy() -> dict:
+    return {
+        "tier": "low",
+        "name": "Video trải nghiệm",
+        "role": "experience_trial",
+        "base_price_xu": int(VIDEO_LOW_COST_XU or 200),
+        "allow_paid_addons": False,
+        "allow_free_assets": True,
+        "allow_extra_duration": False,
+        "allow_ai_music": False,
+        "allow_paid_voice": False,
+        "allow_subtitle": False,
+        "allow_dubbing": False,
+        "allow_subtitle_plus_dubbing": False,
+        "allow_quality_upgrade": False,
+        "limits": {
+            "per_day": int(VIDEO_BETA_200_MAX_USER_DAY or 3),
+            "per_week": int(VIDEO_BETA_200_MAX_USER_WEEK or 10),
+            "per_month": int(VIDEO_BETA_200_MAX_USER_MONTH or 30),
+        },
+        "upsell_to": "basic",
+        "upsell_to_xu": int(VIDEO_BASIC_COST_XU or 300),
+        "same_base_model_upsell": "basic",
+    }
+
+def video_tier_policy(tier: str = "") -> dict:
+    tier_norm = normalize_video_tier(tier)
+    if tier_norm == "low":
+        return video_experience_tier_policy()
+    return {
+        "tier": tier_norm,
+        "name": video_tier_short_label(tier_norm, "vi"),
+        "role": "paid_public" if tier_norm in video_public_current_tiers() else "coming_soon",
+        "base_price_xu": int(video_tier_cost_xu(tier_norm) or 0),
+        "same_base_model_as": "low" if tier_norm == "basic" else "",
+        "allow_paid_addons": video_tier_allows_paid_addons(tier_norm),
+        "allow_free_assets": True,
+        "allow_extra_duration": video_tier_allows_extra_duration(tier_norm),
+        "allow_ai_music": video_tier_allows_paid_addons(tier_norm),
+        "allow_paid_voice": video_tier_allows_paid_addons(tier_norm),
+        "allow_subtitle": video_tier_allows_paid_addons(tier_norm),
+        "allow_dubbing": video_tier_allows_paid_addons(tier_norm),
+        "allow_subtitle_plus_dubbing": video_tier_allows_paid_addons(tier_norm),
+        "allow_quality_upgrade": tier_norm not in {"future_1500"},
+        "limits": video_tier_limit_config(tier_norm) if tier_norm in video_high_tiers() else {},
+        "upsell_to": "",
+    }
+
+def video_addon_pricing_matrix() -> dict:
+    return {
+        "stock_music_library": {"label": "Nhạc nền từ kho có sẵn", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
+        "manual_volume_basic": {"label": "Chỉnh âm lượng cơ bản", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
+        "subtitle_from_script": {"label": "Phụ đề từ script/text có sẵn", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
+        "burn_subtitle_from_script": {"label": "Gắn phụ đề đơn giản từ script", "price_xu": 0, "unit": "included", "display": "Miễn phí nếu worker/local đủ điều kiện"},
+        "subtitle_auto": {"label": "Tạo phụ đề tự động từ video", "price_xu": VIDEO_SUBTITLE_AUTO_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu"},
+        "subtitle_translate": {"label": "Dịch phụ đề 1 ngôn ngữ", "price_xu": VIDEO_SUBTITLE_TRANSLATE_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu"},
+        "subtitle_translate_burn": {"label": "Tạo phụ đề + dịch + burn", "price_xu": VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU} Xu"},
+        "dubbing_default": {"label": "Lồng tiếng giọng mặc định", "price_xu": VIDEO_DUB_DEFAULT_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_DUB_DEFAULT_BASE_XU} Xu"},
+        "translate_dub_default": {"label": "Dịch + lồng tiếng giọng mặc định", "price_xu": VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu"},
+        "voice_advanced": {"label": "Chọn giọng nâng cao", "price_xu": VIDEO_VOICE_ADVANCED_ADDON_XU, "unit": "job", "display": f"+{VIDEO_VOICE_ADVANCED_ADDON_XU} Xu"},
+        "voice_transform": {"label": "Biến đổi giọng theo mẫu có sẵn", "price_xu": VIDEO_VOICE_PRESET_TRANSFORM_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PRESET_TRANSFORM_XU} Xu"},
+        "voice_premium_preset": {"label": "Voice preset cao cấp", "price_xu": VIDEO_VOICE_PREMIUM_PRESET_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PREMIUM_PRESET_XU} Xu"},
+        "voice_clone_create": {"label": "Upload mẫu giọng / clone voice", "price_xu": VIDEO_VOICE_CLONE_CREATE_XU, "unit": "job", "display": f"+{VIDEO_VOICE_CLONE_CREATE_XU} Xu"},
+        "voice_clone_reuse": {"label": "Dùng lại voice clone đã tạo", "price_xu": VIDEO_VOICE_CLONE_REUSE_XU, "unit": "job", "display": f"+{VIDEO_VOICE_CLONE_REUSE_XU} Xu"},
+        "suno_music": {"label": "Tạo nhạc AI Suno", "price_xu": VIDEO_SUNO_MUSIC_XU, "unit": "track", "display": f"+{VIDEO_SUNO_MUSIC_XU} Xu/bài"},
+        "suno_variation": {"label": "Tạo biến thể Suno", "price_xu": VIDEO_SUNO_VARIATION_XU, "unit": "variation", "display": f"+{VIDEO_SUNO_VARIATION_XU} Xu/lần"},
+        "lyrics_ai": {"label": "Viết lyrics bằng AI", "price_xu": VIDEO_LYRICS_AI_XU, "unit": "job", "display": f"+{VIDEO_LYRICS_AI_XU} Xu"},
+        "music_cut_loop": {"label": "Cắt/loop nhạc khớp video", "price_xu": VIDEO_MUSIC_CUT_LOOP_XU, "unit": "job", "display": f"+{VIDEO_MUSIC_CUT_LOOP_XU} Xu"},
+        "sfx_ai": {"label": "Tạo sound effect AI", "price_xu": VIDEO_SFX_AI_XU, "unit": "job", "display": f"+{VIDEO_SFX_AI_XU} Xu"},
+        "save_to_media_vault": {"label": "Lưu vào kho media", "price_xu": 0, "unit": "storage", "display": "Miễn phí trong hạn mức"},
+    }
+
+def get_allowed_addons_for_tier(tier: str = "") -> list[str]:
+    tier_norm = normalize_video_tier(tier)
+    if tier_norm == "low":
+        return [
+            "stock_music_library",
+            "stock_prompt_library",
+            "default_template",
+            "default_voice_library",
+            "local_basic_processing",
+            "manual_volume_basic",
+            "save_to_media_vault",
+        ]
+    if not video_tier_allows_paid_addons(tier_norm):
+        return []
+    return sorted(video_addon_pricing_matrix().keys())
+
+def is_addon_allowed(tier: str = "", addon_key: str = "") -> bool:
+    key = str(addon_key or "").strip().lower()
+    if not key or key in {"none", "off", "no"}:
+        return True
+    return key in set(get_allowed_addons_for_tier(tier))
+
+def get_addon_price_for_tier(tier: str = "", addon_key: str = "") -> int:
+    if not is_addon_allowed(tier, addon_key):
+        return 0
+    return int((video_addon_pricing_matrix().get(str(addon_key or "").strip().lower()) or {}).get("price_xu") or 0)
+
+def video_state_has_paid_addon_or_extension(state: dict | None = None, tier: str = "") -> dict:
+    state = state or {}
+    tier_norm = normalize_video_tier(tier or state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier"))
+    duration = int(state.get("current_video_duration_seconds") or (state.get("pending_payload") or {}).get("duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS)
+    project = state.get("video_project") or {}
+    scene_count = int(project.get("scene_count") or len(project.get("scenes") or []) or (state.get("pending_payload") or {}).get("scene_count") or 1)
+    subtitle = str(state.get("current_video_subtitle_option") or (state.get("pending_payload") or {}).get("subtitle_option") or "none").strip().lower()
+    dubbing = str(state.get("current_video_dubbing_option") or (state.get("pending_payload") or {}).get("dubbing_option") or "none").strip().lower()
+    music = str(state.get("current_video_music_option") or (state.get("pending_payload") or {}).get("music_option") or "none").strip().lower()
+    reasons = []
+    if tier_norm == "low":
+        if duration > int(VIDEO_SHORT_BASE_SECONDS or 8):
+            reasons.append("extra_duration")
+        if scene_count > int(VIDEO_SHORT_BASE_SCENES or 1):
+            reasons.append("extra_scene")
+        if subtitle not in {"", "none", "off", "no"}:
+            reasons.append("subtitle")
+        if dubbing not in {"", "none", "off", "no"}:
+            reasons.append("dubbing")
+        if music in {"ai", "ai_music", "music_ai", "suno", "sfx_ai"}:
+            reasons.append("paid_music")
+    return {
+        "tier": tier_norm,
+        "blocked": bool(reasons),
+        "reasons": reasons,
+        "duration_seconds": duration,
+        "scene_count": scene_count,
+    }
+
+def video_experience_tier_lock_text(lang: str = "vi", reasons: list[str] | tuple[str, ...] | None = None) -> str:
+    policy = video_experience_tier_policy()
+    reasons = [str(item) for item in (reasons or []) if str(item or "").strip()]
+    if normalize_user_language(lang) != "vi":
+        reason_line = f"\nReason: <code>{html.escape(', '.join(reasons))}</code>\n" if reasons else "\n"
+        return (
+            "🎬 <b>200 Xu starter video</b>\n\n"
+            "The 200 Xu package is for trying the default video creation flow only. "
+            "Paid add-ons, extra duration, subtitles, dubbing and AI music start from the 300 Xu package.\n"
+            f"{reason_line}\n"
+            f"Limit: <b>{policy['limits']['per_day']}/day, {policy['limits']['per_week']}/week, {policy['limits']['per_month']}/month</b>.\n\n"
+            "No provider was called and no Xu was charged."
+        )
+    reason_line = f"\nLý do: <code>{html.escape(', '.join(reasons))}</code>\n" if reasons else "\n"
+    return (
+        "🎬 <b>Gói 200 Xu — Video trải nghiệm</b>\n\n"
+        "Gói này giúp khách thử nhanh quy trình tạo video mặc định của TOAN AAS.\n"
+        "Gói 200 không mở add-on trả phí, không tăng thời lượng, không tạo nhạc AI, không phụ đề/lồng tiếng trả phí.\n"
+        f"{reason_line}\n"
+        "Nếu cần tạo thêm hoặc dùng tính năng nâng cao, hãy chuyển sang gói 300 Xu trở lên.\n"
+        f"Giới hạn: <b>{policy['limits']['per_day']}/ngày, {policy['limits']['per_week']}/tuần, {policy['limits']['per_month']}/tháng</b>.\n\n"
+        "Bot chưa gọi provider và chưa trừ Xu."
+    )
+
+def video_experience_tier_lock_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⬆️ Nâng lên 300 Xu" if is_vi else "⬆️ Upgrade to 300 Xu", callback_data="vfinal|tier|basic"),
+            InlineKeyboardButton("400/500/600/800" if is_vi else "400/500/600/800", callback_data="vfinal|tier"),
+        ],
+        [
+            InlineKeyboardButton("✅ Dùng 200 không add-on" if is_vi else "✅ Use 200 no add-ons", callback_data="videoaddon|none"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
+        ],
+    ])
+
+def image_tool_pricing_matrix() -> dict:
+    return {
+        "image_generate_low": {"label": "Tạo ảnh AI tiết kiệm", "price_xu": int(IMAGE_LOW_COST_XU or 0), "display": f"{int(IMAGE_LOW_COST_XU or 0)} Xu/lần"},
+        "image_generate_standard": {"label": "Tạo ảnh AI tiêu chuẩn", "price_xu": int(IMAGE_STANDARD_COST_XU or 0), "display": f"{int(IMAGE_STANDARD_COST_XU or 0)} Xu/lần"},
+        "image_generate_standard_warranty": {"label": "Tạo ảnh tiêu chuẩn + bảo hành", "price_xu": int(IMAGE_STANDARD_WARRANTY_COST_XU or 0), "display": f"{int(IMAGE_STANDARD_WARRANTY_COST_XU or 0)} Xu/lần"},
+        "image_generate_high": {"label": "Tạo ảnh AI chất lượng cao", "price_xu": int(IMAGE_HIGH_COST_XU or 0), "display": f"{int(IMAGE_HIGH_COST_XU or 0)} Xu/lần"},
+        "image_generate_high_warranty": {"label": "Tạo ảnh cao + bảo hành", "price_xu": int(IMAGE_HIGH_WARRANTY_COST_XU or 0), "display": f"{int(IMAGE_HIGH_WARRANTY_COST_XU or 0)} Xu/lần"},
+        "image_ai_edit": {"label": "Chỉnh sửa ảnh AI", "price_xu": int(AI_IMAGE_EDIT_COST or 0), "display": f"{int(AI_IMAGE_EDIT_COST or 0)} Xu/lần", "guard": "provider smoke required"},
+        "image_ai_upscale": {"label": "Nâng chất lượng ảnh AI", "price_xu": int(IMAGE_UPSCALE_AI_XU or 0), "display": f"{int(IMAGE_UPSCALE_AI_XU or 0)} Xu/lần", "guard": "provider smoke required"},
+        "image_prompt_from_image": {"label": "Tạo prompt từ ảnh", "price_xu": 0, "display": "Miễn phí nếu không gọi vision provider"},
+        "image_crop_resize_local": {"label": "Cắt / resize local", "price_xu": 0, "display": "Miễn phí"},
+        "image_add_text_logo_local": {"label": "Thêm chữ/logo thủ công/local", "price_xu": 0, "display": "Miễn phí"},
+        "image_color_formula": {"label": "Công thức màu", "price_xu": 0, "display": "Miễn phí"},
+    }
+
+def calculate_short_video_quote(
+    tier: str,
+    requested_duration_seconds: int | float | str | None = None,
+    requested_scene_count: int | float | str | None = None,
+    selected_addons: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> dict:
+    tier_norm = normalize_video_tier(tier)
+    duration = max(1, int(math.ceil(float(requested_duration_seconds or VIDEO_SHORT_BASE_SECONDS))))
+    scenes = max(1, int(math.ceil(float(requested_scene_count or VIDEO_SHORT_BASE_SCENES))))
+    if duration > int(VIDEO_SHORT_MAX_SECONDS or 60):
+        return {
+            "tier": tier_norm,
+            "route_to_long_video": True,
+            "reason": "duration_over_short_video_limit",
+            "max_short_video_seconds": int(VIDEO_SHORT_MAX_SECONDS or 60),
+            "requested_duration_seconds": duration,
+            "requested_scene_count": scenes,
+            "total_xu": 0,
+            "estimated_vnd": 0,
+        }
+    base = int(video_tier_cost_xu(tier_norm) or 0)
+    extra_seconds = max(0, duration - int(VIDEO_SHORT_BASE_SECONDS or 8))
+    extra_scenes = max(0, scenes - int(VIDEO_SHORT_BASE_SCENES or 1))
+    addon_matrix = video_addon_pricing_matrix()
+    selected_keys = [str(addon or "").strip().lower() for addon in (selected_addons or []) if str(addon or "").strip()]
+    paid_selected = [
+        key for key in selected_keys
+        if int((addon_matrix.get(key) or {}).get("price_xu") or 0) > 0
+    ]
+    if tier_norm == "low" and (extra_seconds > 0 or extra_scenes > 0 or paid_selected):
+        reasons = []
+        if extra_seconds > 0:
+            reasons.append("extra_duration")
+        if extra_scenes > 0:
+            reasons.append("extra_scene")
+        reasons.extend(paid_selected)
+        return {
+            "tier": tier_norm,
+            "label": video_tier_payload(tier_norm).get("label") or tier_norm,
+            "starter_tier_locked": True,
+            "reasons": reasons,
+            "base_price_xu": base,
+            "base_seconds": int(VIDEO_SHORT_BASE_SECONDS or 8),
+            "base_scenes": int(VIDEO_SHORT_BASE_SCENES or 1),
+            "requested_duration_seconds": duration,
+            "requested_scene_count": scenes,
+            "selected_addons": paid_selected,
+            "total_xu": base,
+            "estimated_vnd": base * int(XU_TO_VND or 100),
+            "route_to_long_video": False,
+            "upsell_to": "basic",
+            "upsell_to_xu": int(VIDEO_BASIC_COST_XU or 300),
+        }
+    extra_second_rate = video_tier_extra_second_xu(tier_norm) if video_tier_allows_extra_duration(tier_norm) else 0
+    extra_scene_rate = video_tier_extra_scene_xu(tier_norm) if video_tier_allows_extra_scenes(tier_norm) else 0
+    extra_seconds_xu = int(extra_seconds * extra_second_rate)
+    extra_scenes_xu = int(extra_scenes * extra_scene_rate)
+    addon_items = []
+    addon_total = 0
+    for key in selected_keys:
+        spec = addon_matrix.get(key)
+        if not spec:
+            continue
+        amount = int(spec.get("price_xu") or 0)
+        addon_total += amount
+        addon_items.append({"key": key, "label": spec.get("label") or key, "price_xu": amount, "display": spec.get("display") or f"+{amount} Xu"})
+    total = int(base + extra_seconds_xu + extra_scenes_xu + addon_total)
+    return {
+        "tier": tier_norm,
+        "label": video_tier_payload(tier_norm).get("label") or tier_norm,
+        "base_price_xu": base,
+        "base_seconds": int(VIDEO_SHORT_BASE_SECONDS or 8),
+        "base_scenes": int(VIDEO_SHORT_BASE_SCENES or 1),
+        "requested_duration_seconds": duration,
+        "requested_scene_count": scenes,
+        "extra_seconds": extra_seconds,
+        "extra_second_rate_xu": int(extra_second_rate),
+        "extra_seconds_xu": extra_seconds_xu,
+        "extra_scenes": extra_scenes,
+        "extra_scene_rate_xu": int(extra_scene_rate),
+        "extra_scenes_xu": extra_scenes_xu,
+        "selected_addons": addon_items,
+        "selected_addons_xu": addon_total,
+        "total_xu": total,
+        "estimated_vnd": total * int(XU_TO_VND or 100),
+        "route_to_long_video": False,
+    }
+
+def short_video_quote_lines(quote: dict, lang: str = "vi") -> list[str]:
+    if quote.get("route_to_long_video"):
+        return [
+            "🎬 <b>Báo giá Video AI</b>",
+            "",
+            f"Thời lượng yêu cầu: <b>{int(quote.get('requested_duration_seconds') or 0)} giây</b>",
+            f"Giới hạn video ngắn: <b>{int(quote.get('max_short_video_seconds') or VIDEO_SHORT_MAX_SECONDS)} giây</b>",
+            "",
+            "Video trên 60 giây thuộc quy trình Video dài. TOAN AAS sẽ chuyển sang mục Video dài để tính giá và xử lý ổn định hơn.",
+            "Bot chưa gọi provider và chưa trừ Xu.",
+        ]
+    if quote.get("starter_tier_locked"):
+        reasons = ", ".join(str(item) for item in (quote.get("reasons") or [])) or "paid_addon"
+        return [
+            "🎬 <b>Báo giá Video AI</b>",
+            "",
+            f"Gói: <b>{html.escape(str(quote.get('label') or 'Video trải nghiệm'))}</b> — <b>{xu_number(quote.get('base_price_xu'))} Xu</b>",
+            f"Mặc định: <b>{int(quote.get('base_scenes') or 1)} cảnh / {int(quote.get('base_seconds') or 8)} giây</b>",
+            f"Thời lượng yêu cầu: <b>{int(quote.get('requested_duration_seconds') or 0)} giây</b>",
+            f"Số cảnh yêu cầu: <b>{int(quote.get('requested_scene_count') or 0)}</b>",
+            "",
+            "Gói 200 Xu là gói trải nghiệm nên không mở add-on trả phí hoặc tăng thời lượng/cảnh.",
+            f"Lý do cần nâng gói: <code>{html.escape(reasons)}</code>",
+            f"Đề xuất: chuyển sang <b>{xu_number(quote.get('upsell_to_xu') or 300)} Xu</b> trở lên.",
+            "",
+            "Bot chưa gọi provider và chưa trừ Xu.",
+        ]
+    lines = [
+        "🎬 <b>Báo giá Video AI</b>",
+        "",
+        f"Gói: <b>{html.escape(str(quote.get('label') or quote.get('tier') or 'Video'))}</b> — <b>{xu_number(quote.get('base_price_xu'))} Xu</b>",
+        f"Mặc định: <b>{int(quote.get('base_scenes') or 1)} cảnh / {int(quote.get('base_seconds') or 8)} giây</b>",
+        f"Thời lượng khách chọn: <b>{int(quote.get('requested_duration_seconds') or 0)} giây</b>",
+        f"Thêm giây: <b>{int(quote.get('extra_seconds') or 0)} x {int(quote.get('extra_second_rate_xu') or 0)} Xu = {xu_number(quote.get('extra_seconds_xu'))} Xu</b>",
+        f"Số cảnh khách chọn: <b>{int(quote.get('requested_scene_count') or 0)}</b>",
+        f"Thêm cảnh: <b>{int(quote.get('extra_scenes') or 0)} x {int(quote.get('extra_scene_rate_xu') or 0)} Xu = {xu_number(quote.get('extra_scenes_xu'))} Xu</b>",
+    ]
+    addons = list(quote.get("selected_addons") or [])
+    if addons:
+        lines.append("Tùy chọn cộng thêm:")
+        lines.extend([f"• {html.escape(str(item.get('label') or item.get('key')))}: <b>+{xu_number(item.get('price_xu'))} Xu</b>" for item in addons])
+    else:
+        lines.append("Tùy chọn cộng thêm: <b>Không</b>")
+    lines.extend([
+        f"Tổng: <b>{xu_number(quote.get('total_xu'))} Xu</b>",
+        f"Tương đương: <b>{xu_number(quote.get('estimated_vnd'))}đ</b>",
+        "",
+        "TOAN AAS chỉ gọi provider và trừ Xu sau khi quý khách xác nhận.",
+    ])
+    return lines
 
 def video_tier_public_status_text() -> str:
     enabled_map = video_tier_enabled_map()
@@ -63433,24 +63834,27 @@ def calculate_video_addon_price(
     translated = bool(translation_enabled or "translated" in subtitle or "translated" in dubbing)
     has_subtitle = subtitle not in {"", "none", "off"}
     has_dubbing = dubbing not in {"", "none", "off"}
-    minutes = duration / 60.0
     subtitle_xu = 0
     dubbing_xu = 0
+    extra_blocks = max(0, int(math.ceil(max(0, duration - 60) / 60.0)))
     if has_subtitle and has_dubbing:
-        combined_rate = VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE if translated else VIDEO_SUBTITLE_PLUS_DUB_XU_PER_MINUTE
-        combined_min = (VIDEO_SUBTITLE_MIN_XU + VIDEO_DUB_MIN_XU) if not translated else max(
-            VIDEO_SUBTITLE_MIN_XU + VIDEO_DUB_MIN_XU,
-            VIDEO_TRANSLATED_SUBTITLE_PLUS_DUB_XU_PER_MINUTE,
-        )
-        combined = round_video_xu(max(float(combined_min), minutes * float(combined_rate)), VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU)
-        dubbing_xu = round_video_xu(max(float(VIDEO_DUB_MIN_XU), minutes * float(VIDEO_DUB_XU_PER_MINUTE)), VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU)
-        subtitle_xu = max(0, combined - dubbing_xu)
+        if translated:
+            total = VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU
+            dubbing_xu = VIDEO_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_DUB_EXTRA_BLOCK_XU
+            subtitle_xu = max(0, total - dubbing_xu)
+        else:
+            subtitle_xu = VIDEO_SUBTITLE_AUTO_BASE_XU + extra_blocks * VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU
+            dubbing_xu = VIDEO_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_DUB_EXTRA_BLOCK_XU
     elif has_subtitle:
-        rate = VIDEO_SUBTITLE_TRANSLATE_XU_PER_MINUTE if translated else VIDEO_SUBTITLE_CREATE_XU_PER_MINUTE
-        minimum = max(VIDEO_SUBTITLE_MIN_XU, rate)
-        subtitle_xu = round_video_xu(max(float(minimum), minutes * float(rate)), VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU)
+        if translated:
+            subtitle_xu = VIDEO_SUBTITLE_TRANSLATE_BASE_XU + extra_blocks * VIDEO_SUBTITLE_TRANSLATE_EXTRA_BLOCK_XU
+        else:
+            subtitle_xu = VIDEO_SUBTITLE_AUTO_BASE_XU + extra_blocks * VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU
     elif has_dubbing:
-        dubbing_xu = round_video_xu(max(float(VIDEO_DUB_MIN_XU), minutes * float(VIDEO_DUB_XU_PER_MINUTE)), VIDEO_SUBTITLE_DUB_PRICE_ROUND_TO_XU)
+        if translated:
+            dubbing_xu = VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU
+        else:
+            dubbing_xu = VIDEO_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_DUB_EXTRA_BLOCK_XU
     return {
         "duration_seconds": duration,
         "subtitle_option": subtitle,
@@ -63459,6 +63863,7 @@ def calculate_video_addon_price(
         "subtitle_xu": int(subtitle_xu),
         "dubbing_xu": int(dubbing_xu),
         "addon_xu": int(subtitle_xu + dubbing_xu),
+        "addon_extra_blocks": int(extra_blocks),
     }
 
 def calculate_music_price(project: dict | None = None, duration_seconds=None, music_option: str = "none", item_count: int = 0) -> dict:
@@ -76238,6 +76643,7 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
             f"{video_tier_price_line('standard', lang)}\n"
             f"{video_tier_price_line('high', lang)}\n"
             f"{video_tier_price_line('future_1000', lang)}\n\n"
+            f"{html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_EN)}\n\n"
             "TOAN AAS will show the final invoice before any provider call or Xu charge."
         )
     return (
@@ -76257,6 +76663,7 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         f"{video_tier_price_line('standard', lang)}\n"
         f"{video_tier_price_line('high', lang)}\n"
         f"{video_tier_price_line('future_1000', lang)}\n\n"
+        f"{html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_VI)}\n\n"
         "Bot sẽ báo lại lần cuối trước khi tạo job."
     )
 
@@ -77427,34 +77834,87 @@ def video_addon_selection_label(subtitle_option: str = "none", dubbing_option: s
 def video_addon_menu_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     duration = int(state.get("current_video_duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS)
+    tier_raw = state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier")
+    tier = normalize_video_tier(tier_raw) if str(tier_raw or "").strip() else ""
+    if tier == "low" and str(state.get("source") or "") != "frame":
+        policy = video_experience_tier_policy()
+        if normalize_user_language(lang) != "vi":
+            return (
+                "🎬 <b>200 Xu starter video</b>\n\n"
+                "This package keeps the default creation flow simple so customers can see the result first.\n\n"
+                "Included:\n"
+                "• Short default AI video\n"
+                "• Built-in prompt/script templates\n"
+                "• Built-in/free assets when available\n\n"
+                "Not included: paid subtitles, dubbing, AI music, extra duration/scenes or quality upgrades.\n"
+                f"Limit: <b>{policy['limits']['per_day']}/day, {policy['limits']['per_week']}/week, {policy['limits']['per_month']}/month</b>.\n\n"
+                "Upgrade to 300 Xu or above to add paid options. Preview only; no provider was called and no Xu was charged."
+            )
+        return (
+            "🎬 <b>Gói 200 Xu — Video trải nghiệm</b>\n\n"
+            "Gói này giữ quy trình mặc định đơn giản để khách thấy kết quả trước, sau đó có thể nâng lên 300 Xu trở lên.\n\n"
+            "Bao gồm:\n"
+            "• Video AI ngắn theo cấu hình mặc định\n"
+            "• Prompt/kịch bản mẫu miễn phí\n"
+            "• Tài nguyên/kho có sẵn nếu hệ thống hỗ trợ\n"
+            "• Không phát sinh add-on trả phí\n\n"
+            "Không bao gồm: tăng thời lượng, tạo nhạc AI mới, giọng đọc AI trả phí, phụ đề, dịch phụ đề, lồng tiếng, phụ đề + lồng tiếng hoặc nâng chất lượng/model.\n"
+            f"Giới hạn: <b>{policy['limits']['per_day']}/ngày, {policy['limits']['per_week']}/tuần, {policy['limits']['per_month']}/tháng</b>.\n\n"
+            "Bot chưa gọi provider và chưa trừ Xu."
+        )
     if normalize_user_language(lang) != "vi":
         return (
             "🎙 <b>Subtitles & dubbing</b>\n\n"
             f"Estimated duration: <b>{duration} seconds</b>.\n"
-            "Choose an add-on before the final itemized confirmation. Previewing does not call providers or charge Xu."
+            "Choose an add-on before the final itemized confirmation. Previewing does not call providers or charge Xu.\n\n"
+            f"• Auto subtitles: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>\n"
+            f"• Translate subtitles: <b>+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu</b>\n"
+            f"• Dubbing: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
+            f"• Translate + dub: <b>+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu</b>\n"
+            "• Built-in music/script/manual basics: <b>Free when eligible</b>"
         )
     return (
         "🎙 <b>Phụ đề & lồng tiếng</b>\n\n"
         f"Thời lượng dự kiến: <b>{duration} giây</b>.\n"
         "Bạn có muốn thêm phụ đề hoặc lồng tiếng cho video không?\n\n"
+        f"• Tạo phụ đề tự động: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>\n"
+        f"• Dịch phụ đề: <b>+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu</b>\n"
+        f"• Lồng tiếng: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>\n"
+        f"• Dịch + lồng tiếng: <b>+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu</b>\n"
+        "• Kho nhạc/script/thao tác cơ bản: <b>Miễn phí khi đủ điều kiện</b>\n\n"
         "Bot sẽ hiện hóa đơn tách riêng Video / Phụ đề / Lồng tiếng trước khi xử lý. "
         "Bước này chưa gọi provider và chưa trừ Xu."
     )
 
-def video_addon_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_addon_menu_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    state = state or {}
+    tier_raw = state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier")
+    tier = normalize_video_tier(tier_raw) if str(tier_raw or "").strip() else ""
+    if tier == "low" and str(state.get("source") or "") != "frame":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Dùng gói trải nghiệm 200" if is_vi else "✅ Use 200 starter", callback_data="videoaddon|none")],
+            [
+                InlineKeyboardButton("⬆️ Nâng lên 300 Xu" if is_vi else "⬆️ Upgrade 300 Xu", callback_data="vfinal|tier|basic"),
+                InlineKeyboardButton("400/500/600/800" if is_vi else "400/500/600/800", callback_data="vfinal|tier"),
+            ],
+            [
+                InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
+            ],
+        ])
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🚫 Không thêm" if is_vi else "🚫 None", callback_data="videoaddon|none"),
-            InlineKeyboardButton("📝 Chỉ phụ đề" if is_vi else "📝 Subtitles", callback_data="videoaddon|subtitle"),
+            InlineKeyboardButton(f"📝 +{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu" if is_vi else f"📝 +{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu", callback_data="videoaddon|subtitle"),
         ],
         [
-            InlineKeyboardButton("🎙 Chỉ lồng tiếng" if is_vi else "🎙 Dubbing", callback_data="videoaddon|dub"),
-            InlineKeyboardButton("🎬 Phụ đề + lồng tiếng" if is_vi else "🎬 Subtitles + dub", callback_data="videoaddon|combo"),
+            InlineKeyboardButton(f"🎙 +{VIDEO_DUB_DEFAULT_BASE_XU} Xu" if is_vi else f"🎙 +{VIDEO_DUB_DEFAULT_BASE_XU} Xu", callback_data="videoaddon|dub"),
+            InlineKeyboardButton(f"🎬 +{VIDEO_SUBTITLE_AUTO_BASE_XU + VIDEO_DUB_DEFAULT_BASE_XU} Xu" if is_vi else f"🎬 +{VIDEO_SUBTITLE_AUTO_BASE_XU + VIDEO_DUB_DEFAULT_BASE_XU} Xu", callback_data="videoaddon|combo"),
         ],
         [
-            InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data="videoaddon|translate_sub"),
-            InlineKeyboardButton("🌐 Dịch + lồng tiếng" if is_vi else "🌐 Translate + dub", callback_data="videoaddon|translate_combo"),
+            InlineKeyboardButton(f"🌐 +{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu" if is_vi else f"🌐 +{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu", callback_data="videoaddon|translate_sub"),
+            InlineKeyboardButton(f"🌐 +{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu" if is_vi else f"🌐 +{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu", callback_data="videoaddon|translate_combo"),
         ],
         [
             InlineKeyboardButton("⬅️ Quay lại nhạc/voice" if is_vi else "⬅️ Back", callback_data="videoaddon|back"),
@@ -77525,6 +77985,19 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     segments = int(pricing.get("segments") or 0)
     segment_seconds = int(pricing.get("segment_seconds") or 0)
     music_label = str(pricing.get("music_option") or state.get("current_video_music_option") or "none").replace("_", " ")
+    tier_raw = state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier")
+    tier_norm = normalize_video_tier(tier_raw) if str(tier_raw or "").strip() else ""
+    if tier_norm == "low" and not state.get("current_video_price_preview"):
+        starter_base = int(video_tier_cost_xu("low") or VIDEO_LOW_COST_XU or 200)
+        pricing.update({
+            "base_video_xu": starter_base,
+            "music_xu": 0,
+            "subtitle_xu": 0,
+            "dubbing_xu": 0,
+            "addon_xu": 0,
+            "total_xu": starter_base,
+            "estimated_vnd": starter_base * int(XU_TO_VND or 100),
+        })
     addon_label = video_addon_selection_label(
         state.get("current_video_subtitle_option"),
         state.get("current_video_dubbing_option"),
@@ -77534,6 +78007,37 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     discount_xu = int(pricing.get("discount_xu") or 0)
     discount_line_en = f"• Member discount: <b>-{xu_number(discount_xu)} Xu</b>\n" if discount_xu > 0 else ""
     discount_line_vi = f"• Ưu đãi thành viên: <b>-{xu_number(discount_xu)} Xu</b>\n" if discount_xu > 0 else ""
+    if tier_norm == "low":
+        policy = video_experience_tier_policy()
+        if normalize_user_language(lang) != "vi":
+            return (
+                "🧾 <b>Confirm starter video</b>\n\n"
+                f"Main package:\n• 200 Xu starter video: <b>{xu_number(pricing.get('base_video_xu'))} Xu</b>\n\n"
+                "Included free:\n"
+                "• Built-in prompt/script templates\n"
+                "• Built-in/free asset library when available\n"
+                "• Default package resources\n\n"
+                "Paid add-ons are not available in the 200 Xu starter package. Upgrade to 300 Xu or above for subtitles, dubbing, AI music or longer video.\n\n"
+                f"Limit: <b>{policy['limits']['per_day']}/day, {policy['limits']['per_week']}/week, {policy['limits']['per_month']}/month</b>\n"
+                f"{discount_line_en}"
+                f"Total: <b>{xu_number(pricing.get('total_xu'))} Xu</b>\n"
+                f"Equivalent: <b>{xu_number(pricing.get('estimated_vnd'))} VND</b>\n\n"
+                "Processing starts only after confirmation."
+            )
+        return (
+            "🧾 <b>Xác nhận gói trải nghiệm</b>\n\n"
+            f"Gói chính:\n• Video trải nghiệm: <b>{xu_number(pricing.get('base_video_xu'))} Xu</b>\n\n"
+            "Miễn phí đi kèm:\n"
+            "• Prompt/kịch bản mẫu\n"
+            "• Kho nhạc/tài nguyên có sẵn nếu đủ điều kiện\n"
+            "• Tài nguyên mặc định của gói\n\n"
+            "Gói 200 Xu không mở add-on trả phí. Muốn dùng phụ đề, lồng tiếng, tạo nhạc AI hoặc tăng thời lượng thì nâng lên gói 300 Xu trở lên.\n\n"
+            f"Giới hạn: <b>{policy['limits']['per_day']}/ngày, {policy['limits']['per_week']}/tuần, {policy['limits']['per_month']}/tháng</b>\n"
+            f"{discount_line_vi}"
+            f"Tổng cộng: <b>{xu_number(pricing.get('total_xu'))} Xu</b>\n"
+            f"Tương đương: <b>{xu_number(pricing.get('estimated_vnd'))}đ</b>\n\n"
+            "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi bạn xác nhận."
+        )
     if normalize_user_language(lang) != "vi":
         return (
             "🎬 <b>Confirm video creation</b>\n\n"
@@ -77570,6 +78074,15 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
 
 def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    if normalize_video_tier(tier) == "low":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Xác nhận tạo video" if is_vi else "✅ Confirm video", callback_data=f"shopai|confirm|{token}")],
+            [
+                InlineKeyboardButton("⬆️ Đổi lên 300 Xu" if is_vi else "⬆️ Upgrade 300 Xu", callback_data="vfinal|tier|basic"),
+                InlineKeyboardButton("⚙️ Chọn gói khác" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier"),
+            ],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export", callback_data=f"shopai|confirm|{token}"), InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier")],
         [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music")],
@@ -77761,11 +78274,20 @@ async def start_video_addon_step(query, user_id, pending_payload: dict, tier: st
     })
     if pending_payload.get("video_finalization_confirmed"):
         return await finalize_video_addon_confirmation(query, user_id, state, lang)
-    return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang))
+    return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang, state))
 
 async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: str = "vi"):
     pending_payload = dict(state.get("pending_payload") or {})
     tier = normalize_video_tier(state.get("video_tier") or pending_payload.get("video_tier"))
+    starter_block = video_state_has_paid_addon_or_extension(state, tier)
+    if state.get("source") != "frame" and starter_block.get("blocked"):
+        set_video_addon_state(user_id, state)
+        return await safe_edit_or_send(
+            query,
+            video_experience_tier_lock_text(lang, starter_block.get("reasons") or []),
+            parse_mode="HTML",
+            reply_markup=video_experience_tier_lock_keyboard(lang),
+        )
     pricing = calculate_video_total_price(
         state.get("current_video_duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS,
         state.get("current_video_processing_type") or "ai_text_to_video",
@@ -77910,7 +78432,7 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
     if not state:
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     if action == "menu":
-        return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang))
+        return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang, state))
     if action == "back":
         if state.get("source") == "frame":
             frame_state = get_frame_video_state(uid)
@@ -77940,6 +78462,14 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
     if action == "none":
         state.update({"current_video_subtitle_option": "none", "current_video_dubbing_option": "none", "translation_enabled": False})
         return await finalize_video_addon_confirmation(query, uid, state, lang)
+    tier = normalize_video_tier(state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier"))
+    if tier == "low" and str(state.get("source") or "") != "frame" and action in {"subtitle", "dub", "combo", "translate_sub", "translate_combo", "lang", "voice"}:
+        return await safe_edit_or_send(
+            query,
+            video_experience_tier_lock_text(lang, [action]),
+            parse_mode="HTML",
+            reply_markup=video_experience_tier_lock_keyboard(lang),
+        )
     if action == "subtitle":
         state.update({"current_video_subtitle_option": "subtitle_original", "current_video_dubbing_option": "none", "translation_enabled": False})
         return await finalize_video_addon_confirmation(query, uid, state, lang)
@@ -78023,6 +78553,262 @@ async def cmd_video_price_test(update: Update, context: ContextTypes.DEFAULT_TYP
         "Preview only. No job created and no Xu deducted.",
         parse_mode="HTML",
     )
+
+async def cmd_video_quote_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    if len(args) < 3:
+        return await update.message.reply_text(
+            "Cú pháp: /video_quote_test <tier> <seconds> <scenes> [addon...]\n"
+            "Ví dụ: /video_quote_test 600 20 3\n"
+            "Ví dụ: /video_quote_test 600 20 3 subtitle_auto dubbing_default"
+        )
+    tier = args[0]
+    try:
+        duration = int(float(args[1]))
+        scenes = int(float(args[2]))
+    except Exception:
+        return await update.message.reply_text("⚠️ seconds và scenes phải là số dương.")
+    quote = calculate_short_video_quote(tier, duration, scenes, args[3:])
+    await update.message.reply_text("\n".join(short_video_quote_lines(quote)), parse_mode="HTML")
+
+def calculate_named_addon_quote(addon_key: str, duration_seconds: int | float | str = 60, extra_options: list[str] | tuple[str, ...] | None = None) -> dict:
+    key = str(addon_key or "").strip().lower()
+    duration = max(1, int(math.ceil(float(duration_seconds or 60))))
+    extra_options = [str(item or "").strip().lower() for item in (extra_options or [])]
+    extra_blocks = max(0, int(math.ceil(max(0, duration - 60) / 60.0)))
+    base = 0
+    extra_block_rate = 0
+    label = key or "none"
+    if key in {"subtitle", "subtitle_auto", "create", "create_subtitle"}:
+        label = "Tạo phụ đề tự động"
+        base = VIDEO_SUBTITLE_AUTO_BASE_XU
+        extra_block_rate = VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU
+    elif key in {"translate", "subtitle_translate", "translate_subtitle"}:
+        label = "Dịch phụ đề"
+        base = VIDEO_SUBTITLE_TRANSLATE_BASE_XU
+        extra_block_rate = VIDEO_SUBTITLE_TRANSLATE_EXTRA_BLOCK_XU
+    elif key in {"full", "subtitle_translate_burn", "subtitle_full", "translate_burn"}:
+        label = "Tạo phụ đề + dịch + burn"
+        base = VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU
+        extra_block_rate = VIDEO_SUBTITLE_FULL_EXTRA_BLOCK_XU
+    elif key in {"dub", "dubbing", "dubbing_default"}:
+        label = "Lồng tiếng giọng mặc định"
+        base = VIDEO_DUB_DEFAULT_BASE_XU
+        extra_block_rate = VIDEO_DUB_EXTRA_BLOCK_XU
+    elif key in {"translate_dub", "translated_dub", "subtitle_plus_dub"}:
+        label = "Dịch + lồng tiếng"
+        base = VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU
+        extra_block_rate = VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU
+    elif key in {"suno", "ai_music", "suno_music"}:
+        label = "Tạo nhạc AI Suno"
+        base = VIDEO_SUNO_MUSIC_XU
+        extra_block_rate = 0
+    elif key in {"sfx", "sfx_ai"}:
+        label = "Tạo sound effect AI"
+        base = VIDEO_SFX_AI_XU
+        extra_block_rate = 0
+    extra_xu = extra_blocks * extra_block_rate
+    option_xu = 0
+    option_lines = []
+    option_price_map = {
+        "advanced_voice": ("Chọn giọng nâng cao", VIDEO_VOICE_ADVANCED_ADDON_XU),
+        "voice_transform": ("Biến đổi giọng theo mẫu", VIDEO_VOICE_PRESET_TRANSFORM_XU),
+        "premium_voice": ("Voice preset cao cấp", VIDEO_VOICE_PREMIUM_PRESET_XU),
+        "clone_voice": ("Clone voice mới", VIDEO_VOICE_CLONE_CREATE_XU),
+        "reuse_clone": ("Dùng lại voice clone", VIDEO_VOICE_CLONE_REUSE_XU),
+        "variation": ("Biến thể Suno", VIDEO_SUNO_VARIATION_XU),
+        "lyrics": ("Viết lyrics AI", VIDEO_LYRICS_AI_XU),
+        "cut_loop": ("Cắt/loop nhạc", VIDEO_MUSIC_CUT_LOOP_XU),
+    }
+    for option in extra_options:
+        label_option, price = option_price_map.get(option, ("", 0))
+        if label_option:
+            option_xu += int(price)
+            option_lines.append({"key": option, "label": label_option, "price_xu": int(price)})
+    total = int(base + extra_xu + option_xu)
+    return {
+        "key": key,
+        "label": label,
+        "duration_seconds": duration,
+        "base_xu": int(base),
+        "extra_blocks": int(extra_blocks),
+        "extra_block_rate_xu": int(extra_block_rate),
+        "extra_blocks_xu": int(extra_xu),
+        "options": option_lines,
+        "options_xu": int(option_xu),
+        "total_xu": total,
+        "estimated_vnd": total * int(XU_TO_VND or 100),
+    }
+
+def named_addon_quote_lines(quote: dict) -> list[str]:
+    lines = [
+        "🧾 <b>Báo giá add-on</b>",
+        "",
+        f"Add-on: <b>{html.escape(str(quote.get('label') or quote.get('key') or '-'))}</b>",
+        f"Thời lượng: <b>{int(quote.get('duration_seconds') or 0)} giây</b>",
+        f"Giá nền <=60s: <b>{xu_number(quote.get('base_xu'))} Xu</b>",
+        f"Block thêm: <b>{int(quote.get('extra_blocks') or 0)} x {int(quote.get('extra_block_rate_xu') or 0)} Xu = {xu_number(quote.get('extra_blocks_xu'))} Xu</b>",
+    ]
+    options = list(quote.get("options") or [])
+    if options:
+        lines.append("Tùy chọn cộng thêm:")
+        lines.extend([f"• {html.escape(str(item.get('label') or item.get('key')))}: <b>+{xu_number(item.get('price_xu'))} Xu</b>" for item in options])
+    lines.extend([
+        f"Tổng: <b>{xu_number(quote.get('total_xu'))} Xu</b>",
+        f"Tương đương: <b>{xu_number(quote.get('estimated_vnd'))}đ</b>",
+        "",
+        "Preview only. Bot chưa gọi provider và chưa trừ Xu.",
+    ])
+    return lines
+
+async def cmd_subtitle_quote_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    kind = args[0] if args else "subtitle"
+    duration = args[1] if len(args) > 1 else 60
+    quote = calculate_named_addon_quote(kind, duration, args[2:])
+    await update.message.reply_text("\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
+
+async def cmd_dub_quote_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    kind = args[0] if args else "dub"
+    duration = args[1] if len(args) > 1 else 60
+    quote = calculate_named_addon_quote(kind, duration, args[2:])
+    await update.message.reply_text("\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
+
+async def cmd_music_quote_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = list(getattr(context, "args", []) or [])
+    kind = args[0] if args else "suno_music"
+    duration = args[1] if len(args) > 1 else 60
+    quote = calculate_named_addon_quote(kind, duration, args[2:])
+    await update.message.reply_text("\n".join(named_addon_quote_lines(quote)), parse_mode="HTML")
+
+def video_pricing_status_lines() -> list[str]:
+    lines = [
+        "🎬 <b>Video Pricing Status</b>",
+        "",
+        f"• Pricing mode: <code>transparent_short_video_pricing</code>",
+        f"• 1 Xu: <code>{int(XU_TO_VND)}đ</code>",
+        f"• Base: <code>{int(VIDEO_SHORT_BASE_SCENES)} cảnh / {int(VIDEO_SHORT_BASE_SECONDS)} giây</code>",
+        f"• Short-video max: <code>{int(VIDEO_SHORT_MAX_SECONDS)} giây</code>",
+        f"• Source: <code>runtime constants + config/pricing_matrix_draft.json</code>",
+        "",
+    ]
+    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1500"):
+        payload = video_tier_payload(tier)
+        status = get_public_video_tier_ui_status(tier)
+        extra = "no extra duration" if tier == "low" else f"+{video_tier_extra_second_xu(tier)} Xu/s | +{video_tier_extra_scene_xu(tier)} Xu/scene"
+        lines.append(
+            f"• {tier}: <b>{int(payload.get('cost') or 0)} Xu</b> | <code>{html.escape(status.get('public_status') or 'OFF')}</code> | {html.escape(extra)}"
+        )
+    return lines
+
+def addon_pricing_status_lines() -> list[str]:
+    lines = ["🎛 <b>Add-on Pricing Status</b>", ""]
+    for key, spec in video_addon_pricing_matrix().items():
+        lines.append(f"• <code>{html.escape(key)}</code>: {html.escape(spec.get('label') or key)} — <b>{html.escape(spec.get('display') or str(spec.get('price_xu')))}</b>")
+    return lines
+
+def image_pricing_status_lines() -> list[str]:
+    lines = ["🖼 <b>Image Pricing Status</b>", ""]
+    for key, spec in image_tool_pricing_matrix().items():
+        guard = f" | guard: <code>{html.escape(spec.get('guard'))}</code>" if spec.get("guard") else ""
+        lines.append(f"• <code>{html.escape(key)}</code>: {html.escape(spec.get('label') or key)} — <b>{html.escape(spec.get('display') or str(spec.get('price_xu')))}</b>{guard}")
+    return lines
+
+async def cmd_pricing_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    lines = [
+        "🧮 <b>Pricing Status</b>",
+        "",
+        "• Mode: <code>tiered_media_pricing + transparent_addon_pricing</code>",
+        "• Source: <code>config/pricing_matrix_draft.json</code> + runtime ENV constants.",
+        "• Rule: provider/job chỉ chạy sau hóa đơn cuối và xác nhận.",
+        "• PayOS/nạp Xu/webhook: <code>NOT_TOUCHED</code>",
+        "",
+        "Commands: <code>/video_pricing_status</code> | <code>/addon_pricing_status</code> | <code>/image_pricing_status</code> | <code>/pricing_preview 600</code> | <code>/pricing_validate</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_video_pricing_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, video_pricing_status_lines())
+
+async def cmd_addon_pricing_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, addon_pricing_status_lines())
+
+async def cmd_image_pricing_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, image_pricing_status_lines())
+
+async def cmd_pricing_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(getattr(context, "args", []) or [])
+    tier = args[0] if args else "600"
+    duration = args[1] if len(args) > 1 else VIDEO_SHORT_BASE_SECONDS
+    scenes = args[2] if len(args) > 2 else VIDEO_SHORT_BASE_SCENES
+    quote = calculate_short_video_quote(tier, duration, scenes, args[3:])
+    await update.message.reply_text("\n".join(short_video_quote_lines(quote)), parse_mode="HTML")
+
+async def cmd_pricing_validate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    blockers = []
+    for tier in ("basic", "common", "advanced", "standard", "high", "future_1000"):
+        if video_tier_extra_second_xu(tier) <= 0:
+            blockers.append(f"{tier}: missing extra-second price")
+        if video_tier_extra_scene_xu(tier) <= 0:
+            blockers.append(f"{tier}: missing extra-scene price")
+    for required in ("subtitle_auto", "subtitle_translate", "dubbing_default", "translate_dub_default", "suno_music"):
+        if required not in video_addon_pricing_matrix():
+            blockers.append(f"missing addon {required}")
+    status = "PASS" if not blockers else "FAIL"
+    lines = [
+        "✅ <b>Pricing Validate</b>" if status == "PASS" else "⚠️ <b>Pricing Validate</b>",
+        "",
+        f"Status: <code>{status}</code>",
+        f"Matrix file: <code>{'exists' if os.path.exists(os.path.join('config', 'pricing_matrix_draft.json')) else 'missing'}</code>",
+        f"Video tiers: <code>{','.join(VIDEO_EXPORT_TIER_CHOICES)}</code>",
+    ]
+    if blockers:
+        lines.append("Blockers:")
+        lines.extend([f"• {html.escape(item)}" for item in blockers])
+    else:
+        lines.append("No blocking pricing gaps in current public short-video matrix.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_video_kling_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    key4u_video = preferred_tool_test_result("key4u_video", "key4u_video_model")
+    kling_configured = bool(KLING_ACCESS_KEY and KLING_SECRET_KEY)
+    future_status = get_public_video_tier_ui_status("future_1000", is_admin_user(update.effective_user.id))
+    lines = [
+        "🎬 <b>Kling / 1000 Tier Status</b>",
+        "",
+        f"• 1000 tier public status: <code>{html.escape(str(future_status.get('public_status') or '-'))}</code>",
+        f"• 1000 tier price: <code>{int(future_status.get('price_xu') or VIDEO_FUTURE_1000_COST_XU)} Xu</code>",
+        f"• Key4U video smoke: <code>{html.escape(str((key4u_video or {}).get('status') or 'NOT_TESTED'))}</code>",
+        f"• Direct Kling credentials: <code>{'configured' if kling_configured else 'missing'}</code>",
+        "• Policy: provider call only after real smoke/admin gate; no fake task_id/output.",
+        "",
+        "Manual smoke: <code>/tool_test_key4u_video_model kling-video</code>",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 def public_video_provider_fail_message(amount_xu: int = 0, refund_done: bool = False, lang: str = "vi") -> str:
     amount = int(amount_xu or 0)
@@ -84713,7 +85499,8 @@ def pricing_video_lines() -> list[str]:
     rows = [
         "🎬 <b>GIÁ VIDEO AI</b>",
         "",
-        "Chọn tier video trong flow tạo video. Bot luôn hỏi xác nhận trước khi trừ Xu.",
+        "Giá gói là giá nền. Mặc định mỗi gói gồm <b>1 cảnh / 8 giây</b>, prompt/motion/camera cơ bản theo cấp gói.",
+        "Bot luôn hiển thị hóa đơn cuối cùng và hỏi xác nhận trước khi trừ Xu.",
         "",
     ]
     for tier in VIDEO_TIER_ORDER:
@@ -84721,8 +85508,30 @@ def pricing_video_lines() -> list[str]:
         if tier == "premium":
             rows.append(f"• {payload.get('label') or 'Video premium'}: <b>admin-only / liên hệ admin</b> — {html.escape(payload.get('note') or '')}")
         else:
-            rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(payload.get('note') or '')}")
+            second_rate = video_tier_extra_second_xu(tier)
+            scene_rate = video_tier_extra_scene_xu(tier)
+            if tier == "future_1500":
+                extra = "đang phát triển"
+            elif tier == "low":
+                extra = "1 cảnh / 8 giây; không bán thêm thời lượng"
+            else:
+                extra = f"1 cảnh / 8 giây; +{second_rate} Xu/giây; +{scene_rate} Xu/cảnh"
+            rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(extra)}")
     rows.extend([
+        "",
+        "<b>Tùy chọn cộng thêm phổ biến</b>",
+        f"• Tạo phụ đề tự động từ video: <b>+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu</b>",
+        f"• Dịch phụ đề 1 ngôn ngữ: <b>+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu</b>",
+        f"• Tạo phụ đề + dịch + burn: <b>+{VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU} Xu</b>",
+        f"• Lồng tiếng giọng mặc định: <b>+{VIDEO_DUB_DEFAULT_BASE_XU} Xu</b>",
+        f"• Dịch + lồng tiếng: <b>+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu</b>",
+        f"• Tạo nhạc AI Suno: <b>+{VIDEO_SUNO_MUSIC_XU} Xu/bài</b>",
+        "",
+        "<b>Miễn phí trong giới hạn</b>",
+        "• Nhạc từ kho có sẵn, giữ âm thanh gốc, chỉnh âm lượng cơ bản.",
+        "• Prompt/kịch bản mẫu, motion/camera cơ bản, phụ đề từ script có sẵn nếu không gọi provider nặng.",
+        "",
+        html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_VI),
         "",
         "Tỉ lệ hỗ trợ: 9:16, 16:9, 1:1, 4:5, 3:4.",
         "Video sẽ vào queue và tự gửi kết quả khi hoàn tất.",
@@ -105432,6 +106241,17 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("shopaikey_status_debug", cmd_shopaikey_status_debug))
     tg_app.add_handler(CommandHandler("key4u_status", cmd_key4u_status))
     tg_app.add_handler(CommandHandler("video_price_test", cmd_video_price_test))
+    tg_app.add_handler(CommandHandler("video_quote_test", cmd_video_quote_test))
+    tg_app.add_handler(CommandHandler("subtitle_quote_test", cmd_subtitle_quote_test))
+    tg_app.add_handler(CommandHandler("dub_quote_test", cmd_dub_quote_test))
+    tg_app.add_handler(CommandHandler("music_quote_test", cmd_music_quote_test))
+    tg_app.add_handler(CommandHandler("pricing_status", cmd_pricing_status))
+    tg_app.add_handler(CommandHandler("video_pricing_status", cmd_video_pricing_status))
+    tg_app.add_handler(CommandHandler("addon_pricing_status", cmd_addon_pricing_status))
+    tg_app.add_handler(CommandHandler("image_pricing_status", cmd_image_pricing_status))
+    tg_app.add_handler(CommandHandler("pricing_preview", cmd_pricing_preview))
+    tg_app.add_handler(CommandHandler("pricing_validate", cmd_pricing_validate))
+    tg_app.add_handler(CommandHandler("video_kling_status", cmd_video_kling_status))
     tg_app.add_handler(CommandHandler("image_provider_status", cmd_image_provider_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
     tg_app.add_handler(CommandHandler("key4u_usage", cmd_key4u_usage))

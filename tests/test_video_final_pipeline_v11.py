@@ -112,10 +112,10 @@ def test_video_total_price_and_invoice_include_music():
         music_option="user_upload",
     )
     assert pricing["base_video_xu"] == 1320
-    assert pricing["addon_xu"] == 120
+    assert pricing["addon_xu"] == 370
     assert pricing["music_xu"] == 0
-    assert pricing["total_xu"] == 1440
-    assert pricing["estimated_vnd"] == 144000
+    assert pricing["total_xu"] == 1690
+    assert pricing["estimated_vnd"] == 169000
 
     text = bot.video_price_invoice_text({
         "current_video_duration_seconds": 24,
@@ -128,8 +128,8 @@ def test_video_total_price_and_invoice_include_music():
         "current_video_price_preview": pricing,
     })
     assert "Nhạc/SFX" in text
-    assert "1.440 Xu" in text
-    assert "144.000đ" in text
+    assert "1.690 Xu" in text
+    assert "169.000đ" in text
 
 
 def test_finalization_payload_preserves_music_subtitle_and_dub():

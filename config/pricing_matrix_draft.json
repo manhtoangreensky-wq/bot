@@ -1,11 +1,11 @@
 {
   "schema_version": "2026-06-20-v1",
-  "status": "draft_not_applied",
+  "status": "runtime_reference_draft",
   "notes": [
-    "This file is an audit/config draft only. It is not imported by bot.py.",
+    "This file is the human-readable reference for bot/app pricing. bot.py uses matching runtime constants with ENV overrides.",
     "1 Xu = 100 VND.",
     "Provider costs are CONFIG_ESTIMATE values from current code/env unless marked NEED_COST.",
-    "Runtime prices, PayOS, top-up, wallet, trial and package logic are not changed by this draft."
+    "PayOS, top-up, wallet, trial and package logic are not changed by this pricing matrix."
   ],
   "currency": {
     "xu_to_vnd": 100
@@ -28,7 +28,13 @@
       "limit_per_user_day": 3,
       "limit_per_user_week": 10,
       "limit_per_user_month": 30,
-      "duration_rule": "short_current_provider_default",
+      "duration_rule": "1_scene_8_seconds_only",
+      "allow_paid_addons": false,
+      "allow_extra_duration": false,
+      "allow_ai_music": false,
+      "allow_paid_voice": false,
+      "allow_subtitle": false,
+      "allow_dubbing": false,
       "margin_status": "MARKETING_LOSS",
       "upsell_to": "basic"
     },
@@ -40,6 +46,8 @@
       "role": "starter_upsell_after_200_limit",
       "public_status": "public_beta_if_provider_gate_pass",
       "duration_rule": "same_base_line_as_200",
+      "same_base_model_as": "low",
+      "allow_paid_addons": true,
       "margin_status": "YELLOW"
     },
     "common": {
@@ -50,6 +58,7 @@
       "role": "normal_public_video",
       "public_status": "public_beta_if_provider_gate_pass",
       "duration_rule": "short_current_provider_default",
+      "allow_paid_addons": true,
       "margin_status": "YELLOW"
     },
     "advanced": {
@@ -60,6 +69,7 @@
       "role": "better_prompt_style_camera",
       "public_status": "open_only_after_smoke_and_cost_pass",
       "duration_rule": "short_current_provider_default",
+      "allow_paid_addons": true,
       "margin_status": "YELLOW"
     },
     "standard": {
@@ -70,6 +80,7 @@
       "role": "main_revenue_tier",
       "public_status": "open_only_after_smoke_and_cost_pass",
       "duration_rule": "short_current_provider_default",
+      "allow_paid_addons": true,
       "margin_status": "YELLOW"
     },
     "high": {
@@ -80,15 +91,21 @@
       "role": "highest_current_provider_group",
       "public_status": "open_only_after_smoke_and_cost_pass",
       "duration_rule": "short_current_provider_default",
+      "allow_paid_addons": true,
       "margin_status": "YELLOW"
     },
     "future_1000": {
-      "label_vi": "Video Kling/Seedance",
+      "label_vi": "Video Chuyên Nghiệp",
       "price_xu": 1000,
       "price_vnd": 100000,
       "provider_cost_xu_estimate": null,
-      "role": "future_provider",
-      "public_status": "KEEP_OFF",
+      "role": "professional_public_tier_with_provider_guard",
+      "public_status": "PUBLIC_CONTROLLED",
+      "base_seconds": 8,
+      "base_scenes": 1,
+      "extra_second_xu": 100,
+      "extra_scene_xu": 200,
+      "allow_paid_addons": true,
       "margin_status": "NEED_COST"
     },
     "future_1500": {
@@ -102,24 +119,93 @@
     }
   },
   "video_duration_addons": {
-    "policy": "Do not sell extra seconds until provider duration cost is confirmed.",
+    "policy": "Short Video AI pricing uses 1 scene / 8 seconds as the base. Extra seconds/scenes are quoted before confirmation. Videos over 60 seconds route to long-video flow.",
     "rules": [
       {
-        "tiers": ["low", "basic"],
+        "tiers": ["low"],
         "extra_seconds_public": false,
-        "note": "Keep short to control marketing-loss and starter cost."
+        "extra_second_xu": 0,
+        "extra_scene_xu": 0,
+        "note": "Marketing starter tier: 1 scene / 8 seconds only."
       },
       {
-        "tiers": ["common", "advanced", "standard", "high"],
-        "extra_seconds_public": false,
-        "note": "Can introduce +2s/+4s only after provider duration pricing is verified."
+        "tiers": ["basic"],
+        "extra_seconds_public": true,
+        "extra_second_xu": 25,
+        "extra_scene_xu": 30
       },
       {
-        "tiers": ["future_1000", "future_1500"],
+        "tiers": ["common"],
+        "extra_seconds_public": true,
+        "extra_second_xu": 30,
+        "extra_scene_xu": 50
+      },
+      {
+        "tiers": ["advanced"],
+        "extra_seconds_public": true,
+        "extra_second_xu": 40,
+        "extra_scene_xu": 70
+      },
+      {
+        "tiers": ["standard"],
+        "extra_seconds_public": true,
+        "extra_second_xu": 50,
+        "extra_scene_xu": 100
+      },
+      {
+        "tiers": ["high"],
+        "extra_seconds_public": true,
+        "extra_second_xu": 70,
+        "extra_scene_xu": 150
+      },
+      {
+        "tiers": ["future_1000"],
+        "extra_seconds_public": true,
+        "extra_second_xu": 100,
+        "extra_scene_xu": 200
+      },
+      {
+        "tiers": ["future_1500"],
         "extra_seconds_public": false,
-        "note": "Provider path not ready."
+        "note": "Premium future tier remains coming soon."
       }
     ]
+  },
+  "video_addons": {
+    "free_included": {
+      "stock_music_library": "Miễn phí trong hạn mức",
+      "manual_volume_basic": "Miễn phí",
+      "subtitle_from_script": "Miễn phí nếu không gọi provider nặng",
+      "prompt_library": "Miễn phí"
+    },
+    "tier_visibility": {
+      "low_200": "paid add-ons hidden/blocked; starter flow only",
+      "basic_300_plus": "paid add-ons visible after tier selection and itemized before final confirmation"
+    },
+    "paid_addons_under_60s": {
+      "subtitle_auto": 120,
+      "subtitle_translate": 150,
+      "subtitle_translate_burn": 220,
+      "dubbing_default": 250,
+      "translate_dub_default": 350,
+      "voice_advanced": 100,
+      "voice_transform": 150,
+      "voice_premium_preset": 200,
+      "voice_clone_create": 600,
+      "voice_clone_reuse": 100,
+      "suno_music": 300,
+      "suno_variation": 150,
+      "lyrics_ai": 80,
+      "music_cut_loop": 50,
+      "sfx_ai": 80
+    },
+    "long_media_extra_block_60s": {
+      "subtitle_auto": 80,
+      "subtitle_translate": 100,
+      "subtitle_translate_burn": 150,
+      "dubbing_default": 200,
+      "translate_dub_default": 250
+    }
   },
   "image_tools": {
     "generate_low": {

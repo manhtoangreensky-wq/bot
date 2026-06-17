@@ -24,13 +24,20 @@ App là trung tâm dài hạn cho tài khoản, ví Xu, dashboard, workspace, qu
 
 ## Gói video public
 
-- 200 Xu: Video Trải Nghiệm, gói mồi marketing. Giới hạn 3 video/ngày, 10 video/tuần, 30 video/tháng mỗi tài khoản. Hết lượt thì gợi ý dùng gói 300.
-- 300 Xu: Video Cơ Bản, cùng dòng model/chất lượng nền với 200 nhưng là gói trả phí ổn định hơn.
+- 200 Xu: Video Trải Nghiệm, gói mồi marketing. Giới hạn 3 video/ngày, 10 video/tuần, 30 video/tháng mỗi tài khoản. Gói này chỉ dùng flow mặc định và tài nguyên miễn phí/kho có sẵn, không mở add-on trả phí.
+- 300 Xu: Video Cơ Bản, cùng dòng model/chất lượng nền với 200 nhưng là gói trả phí ổn định hơn, bắt đầu mở add-on trả phí như phụ đề/lồng tiếng/nhạc AI khi provider sẵn sàng.
 - 400 Xu: Video Phổ Thông, chất lượng/prompt xử lý tốt hơn.
 - 500 Xu: Video Nâng Cao, mở khi smoke/cost gate pass.
 - 600 Xu: Video Bán Hàng, gói kiếm tiền quan trọng, mở khi smoke/cost gate pass.
 - 800 Xu: Video Cao Cấp, mở khi smoke/cost gate pass.
-- 1000/1500 Xu: đang phát triển cho provider cao cấp như Kling/Seedance, chưa mở public.
+- 1000 Xu: Video Chuyên Nghiệp public-controlled, chỉ chạy khi provider/job gate sẵn sàng.
+- 1500 Xu: đang phát triển cho provider cao cấp, chưa mở public.
+
+## Vì sao gói 200 không có phụ đề/lồng tiếng/tạo nhạc AI
+
+Gói 200 Xu là gói trải nghiệm để khách dùng thử quy trình tạo video và xem kết quả nhanh. Các add-on trả phí như tạo phụ đề tự động, dịch phụ đề, lồng tiếng, tạo nhạc AI, tăng thời lượng hoặc thêm cảnh sẽ phát sinh chi phí provider/xử lý, nên bắt đầu từ gói 300 Xu trở lên.
+
+Nếu khách muốn giữ giá rẻ nhất, chọn gói 200 và không thêm add-on. Nếu muốn tạo tiếp, tăng chất lượng hoặc thêm phụ đề/lồng tiếng/nhạc AI, bot sẽ gợi ý nâng lên 300/400/500/600/800/1000 tùy nhu cầu.
 
 ## Cách tạo video
 

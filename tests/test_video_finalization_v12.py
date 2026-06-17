@@ -375,7 +375,8 @@ def test_video_addon_confirm_keeps_finalization_back_context():
     callbacks = _callbacks(markup)
     assert "shopai|confirm|tok123" in callbacks
     assert "vfinal|tier" in callbacks
-    assert "vfinal|music" in callbacks
+    assert "vfinal|music" not in callbacks
+    assert "videoaddon|menu" in callbacks
     assert "create_media|quick_video" not in callbacks
 
 

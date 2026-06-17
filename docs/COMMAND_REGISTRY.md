@@ -157,6 +157,12 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/mark_payos_test` | `cmd_mark_payos_test` | YES | YES | Admin records PayOS real test PASS/FAIL/NOT_TESTED; does not alter payments. |
 | `/pricing_admin` | `cmd_pricing_admin` | YES | YES | Admin-only formula/constants for Pricing Engine V2. |
 | `/pricing_audit` | `cmd_pricing_audit` | YES | YES | Admin-only V6 feature/price/source/guard audit; no secrets or raw provider responses. |
+| `/pricing_status` | `cmd_pricing_status` | YES | YES | Admin read-only pricing source/mode/status for transparent media pricing. |
+| `/video_pricing_status` | `cmd_video_pricing_status` | YES | YES | Admin read-only short-video tier base/extra-second/extra-scene pricing status. |
+| `/addon_pricing_status` | `cmd_addon_pricing_status` | YES | YES | Admin read-only video add-on pricing matrix with Free/+Xu display. |
+| `/image_pricing_status` | `cmd_image_pricing_status` | YES | YES | Admin read-only image generation/edit/upscale/local tool pricing status. |
+| `/pricing_preview [tier] [seconds] [scenes] [addon...]` | `cmd_pricing_preview` | YES | YES | Admin quote preview using transparent short-video pricing; no job/no Xu. |
+| `/pricing_validate` | `cmd_pricing_validate` | YES | YES | Admin validation that public tier and add-on pricing constants are present. |
 | `/banggia` | `cmd_pricing` | YES | YES | Public/admin price menu entry shown in admin menu for quick access. |
 | `/package_catalog` | `cmd_package_catalog` | YES | YES | Lists admin-grantable combo/monthly package catalog. |
 | `/grant_combo` | `cmd_grant_combo` | YES | YES | Admin grants a combo package; does not add Xu or rank/top-up points. |
@@ -202,6 +208,7 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tool_test_key4u_video_model` | `cmd_tool_test_key4u_video_model` | YES | YES | Key4U video create smoke test for one explicit model; no Xu charge and no public routing. |
 | `/tool_test_key4u_video_all` | `cmd_tool_test_key4u_video_all` | YES | YES | Lists configured Key4U video model candidates without submitting expensive batch jobs. |
 | `/key4u_video_job` | `cmd_key4u_video_job` | YES | YES | Query Key4U video job status by provider task id. |
+| `/video_kling_status` | `cmd_video_kling_status` | YES | YES | Admin read-only 1000/Kling beta status; no provider call and no Xu charge. |
 | `/tool_test_key4u_tts` | `cmd_tool_test_key4u_tts` | YES | YES | Key4U TTS smoke test; returns NEED_DOCS unless endpoint/model are configured; no Xu charge. |
 | `/tool_test_key4u_stt` | `cmd_tool_test_key4u_stt` | YES | YES | Reply to audio to test Key4U STT if endpoint/model are configured; no Xu charge. |
 | `/tool_test_key4u_suno` | `cmd_tool_test_key4u_suno` | YES | YES | Key4U Suno/music smoke test; guarded by explicit endpoint/model docs; no Xu charge. |
@@ -219,6 +226,10 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/video_dub_public_close` | `cmd_video_dub_public_close` | YES | YES | Owner-only gate; closes selected subtitle/dub public modes. |
 | `/clear_frame_video_error` | `cmd_clear_frame_video_error` | YES | YES | Clear only the stored frame-video last-error display; does not alter jobs or Xu. |
 | `/video_price_test <seconds> <type> <tier> <addon>` | `cmd_video_price_test` | YES | YES | Preview itemized video, subtitle, dubbing, total Xu, and VND pricing without creating a job or charging Xu. |
+| `/video_quote_test <tier> <seconds> <scenes> [addon...]` | `cmd_video_quote_test` | YES | YES | Preview public short-video tier pricing: base 1 scene/8s, extra seconds/scenes and selected add-ons. |
+| `/subtitle_quote_test <type> <seconds> [option...]` | `cmd_subtitle_quote_test` | YES | YES | Preview subtitle add-on pricing and long-media blocks; no provider/no Xu. |
+| `/dub_quote_test <type> <seconds> [option...]` | `cmd_dub_quote_test` | YES | YES | Preview dubbing/translate+dub add-on pricing and long-media blocks; no provider/no Xu. |
+| `/music_quote_test <type> <seconds> [option...]` | `cmd_music_quote_test` | YES | YES | Preview Suno/music/SFX add-on pricing; no provider/no Xu. |
 | `/maintenance_status` | `cmd_maintenance_status` | YES | YES | Maintenance/freeze status overview. |
 | `/maintenance_on` | `cmd_maintenance_on` | YES | YES | Enable maintenance mode. |
 | `/maintenance_off` | `cmd_maintenance_off` | YES | YES | Disable maintenance mode. |

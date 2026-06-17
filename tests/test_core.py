@@ -9327,14 +9327,14 @@ def test_video_pricing_v2_xu_conversion_and_base_prices():
 
 
 def test_video_pricing_v2_subtitle_and_dubbing_prices():
-    assert bot.calculate_video_addon_price(60, "subtitle_original", "none")["subtitle_xu"] == 20
-    assert bot.calculate_video_addon_price(180, "subtitle_original", "none")["subtitle_xu"] == 60
-    assert bot.calculate_video_addon_price(60, "none", "dub_original")["dubbing_xu"] == 100
-    assert bot.calculate_video_addon_price(180, "none", "dub_original")["dubbing_xu"] == 300
-    assert bot.calculate_video_addon_price(60, "subtitle_original", "dub_original")["addon_xu"] == 120
-    assert bot.calculate_video_addon_price(180, "subtitle_original", "dub_original")["addon_xu"] == 360
-    assert bot.calculate_video_addon_price(60, "subtitle_translated", "dub_translated", True)["addon_xu"] == 150
-    assert bot.calculate_video_addon_price(180, "subtitle_translated", "dub_translated", True)["addon_xu"] == 450
+    assert bot.calculate_video_addon_price(60, "subtitle_original", "none")["subtitle_xu"] == 120
+    assert bot.calculate_video_addon_price(180, "subtitle_original", "none")["subtitle_xu"] == 280
+    assert bot.calculate_video_addon_price(60, "none", "dub_original")["dubbing_xu"] == 250
+    assert bot.calculate_video_addon_price(180, "none", "dub_original")["dubbing_xu"] == 650
+    assert bot.calculate_video_addon_price(60, "subtitle_original", "dub_original")["addon_xu"] == 370
+    assert bot.calculate_video_addon_price(180, "subtitle_original", "dub_original")["addon_xu"] == 930
+    assert bot.calculate_video_addon_price(60, "subtitle_translated", "dub_translated", True)["addon_xu"] == 350
+    assert bot.calculate_video_addon_price(180, "subtitle_translated", "dub_translated", True)["addon_xu"] == 850
 
 
 def test_video_total_price_v2_is_itemized():
@@ -9346,11 +9346,11 @@ def test_video_total_price_v2_is_itemized():
         "dub_original",
     )
     assert pricing["base_video_xu"] == 1320
-    assert pricing["subtitle_xu"] == 20
-    assert pricing["dubbing_xu"] == 100
-    assert pricing["addon_xu"] == 120
-    assert pricing["total_xu"] == 1440
-    assert pricing["estimated_vnd"] == 144000
+    assert pricing["subtitle_xu"] == 120
+    assert pricing["dubbing_xu"] == 250
+    assert pricing["addon_xu"] == 370
+    assert pricing["total_xu"] == 1690
+    assert pricing["estimated_vnd"] == 169000
     invoice = bot.video_price_invoice_text({
         "current_video_duration_seconds": 24,
         "current_video_processing_type": "ai_image_to_video",
@@ -9359,8 +9359,30 @@ def test_video_total_price_v2_is_itemized():
         "current_video_dubbing_option": "dub_original",
         "current_video_price_preview": pricing,
     })
-    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề: <b>20 Xu</b>", "Lồng tiếng: <b>100 Xu</b>", "Tổng: <b>1.440 Xu</b>", "144.000đ"]:
+    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề: <b>120 Xu</b>", "Lồng tiếng: <b>250 Xu</b>", "Tổng: <b>1.690 Xu</b>", "169.000đ"]:
         assert marker in invoice
+
+
+def test_video_200_experience_tier_locks_paid_addons_and_extensions():
+    policy = bot.video_tier_policy("low")
+    assert policy["role"] == "experience_trial"
+    assert policy["allow_paid_addons"] is False
+    assert policy["limits"] == {"per_day": 3, "per_week": 10, "per_month": 30}
+    assert bot.video_tier_policy("basic")["same_base_model_as"] == "low"
+    assert bot.video_tier_policy("basic")["allow_paid_addons"] is True
+    for tier in ("common", "advanced", "standard", "high", "future_1000"):
+        assert bot.video_tier_policy(tier)["allow_paid_addons"] is True
+    quote = bot.calculate_short_video_quote("low", 8, 1, [])
+    assert quote["total_xu"] == 200
+    assert not quote.get("starter_tier_locked")
+    locked_quote = bot.calculate_short_video_quote("low", 20, 2, ["subtitle_auto"])
+    assert locked_quote["starter_tier_locked"] is True
+    assert locked_quote["total_xu"] == 200
+    assert "extra_duration" in locked_quote["reasons"]
+    assert "subtitle_auto" in locked_quote["reasons"]
+    assert bot.calculate_short_video_quote("standard", 20, 3, [])["total_xu"] == 1400
+    assert bot.calculate_short_video_quote("future_1000", 20, 3, [])["total_xu"] == 2600
+    assert bot.calculate_short_video_quote("standard", 61, 8, [])["route_to_long_video"] is True
 
 
 def test_video_addon_menu_and_shared_flow_hooks():
