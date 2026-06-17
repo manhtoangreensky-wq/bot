@@ -4794,6 +4794,7 @@ def test_safe_public_video_activation_commands_registered_and_admin_only():
     assert 'CommandHandler("video_beta_open", cmd_video_beta_open)' in source
     assert 'CommandHandler("video_beta_close", cmd_video_beta_close)' in source
     assert 'CommandHandler("video_beta_limits", cmd_video_beta_limits)' in source
+    assert 'CommandHandler("video_open_all_current_tiers", cmd_video_open_all_current_tiers)' in source
     assert 'CommandHandler("video_open_high_tiers", cmd_video_open_high_tiers)' in source
     assert 'CommandHandler("video_close_high_tiers", cmd_video_close_high_tiers)' in source
     assert 'CommandHandler("video_smoke_tier_500", cmd_video_smoke_tier_500)' in source
@@ -4807,6 +4808,7 @@ def test_safe_public_video_activation_commands_registered_and_admin_only():
     assert "async def cmd_video_public_open_safe" in source
     assert "async def cmd_video_beta_open" in source
     assert "async def cmd_video_cost_status" in source
+    assert "async def cmd_video_open_all_current_tiers" in source
     assert "async def cmd_video_open_high_tiers" in source
     assert "async def cmd_video_smoke_tier_600" in source
     assert source_between(source, "async def cmd_video_public_status", "async def cmd_video_gate_status").count("is_admin_user") >= 1
@@ -4858,33 +4860,75 @@ def test_video_public_open_safe_blocks_when_veo_timeout_stale(monkeypatch):
     assert bot.SHOPAIKEY_PUBLIC_VIDEO_ENABLED is False
 
 
-def test_video_beta_cost_status_and_public_tiers(monkeypatch):
-    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BETA_ENABLED", True)
+def test_video_open_all_current_tiers_opens_200_to_800_only(monkeypatch):
+    settings = {}
     monkeypatch.setattr(bot, "VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common")
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BETA_ENABLED", False)
+    monkeypatch.setattr(bot, "set_system_setting", lambda key, value, note="", updated_by="": settings.__setitem__(key, value))
+    monkeypatch.setattr(bot, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "current_system_mode", lambda: {"maintenance_mode": False, "tool_freeze": False, "provider_freeze": False})
+    monkeypatch.setattr(
+        bot,
+        "video_ai_provider_smoke_gate",
+        lambda: {"ready": True, "status": "SUCCESS", "blockers": [], "has_output": True},
+    )
+    monkeypatch.setattr(
+        bot,
+        "video_billing_public_gate",
+        lambda: {"ready": True, "allowed_tiers": ["low", "basic", "common", "advanced", "standard", "high"], "blockers": [], "cost_rows": []},
+    )
+    monkeypatch.setattr(bot, "video_tier_public_flag", lambda tier: bot.normalize_video_tier(tier) in {"low", "basic", "common", "advanced", "standard", "high"})
+    monkeypatch.setattr(bot, "video_tier_base_public_flag", lambda tier: bot.normalize_video_tier(tier) in {"low", "basic", "common", "advanced", "standard", "high"})
+
+    result = bot.video_open_all_current_tiers_result("admin-test")
+
+    assert result["status"] == "OPENED"
+    assert result["opened_tiers"] == ["low", "basic", "common", "advanced", "standard", "high"]
+    assert "video_1000" in result["kept_off"]
+    assert "video_1500" in result["kept_off"]
+    assert "key4u_public_video" in result["kept_off"]
+    assert settings["video_public_allowed_tiers"] == "low,basic,common,advanced,standard,high"
+
+
+def test_video_beta_cost_status_and_public_tiers(monkeypatch):
+    monkeypatch.setattr(bot, "get_system_setting", lambda key, default="": "")
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_BETA_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_PUBLIC_ALLOWED_TIERS", "200,300,400,500,600,800")
     monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 200)
     monkeypatch.setattr(bot, "VIDEO_BASIC_COST_XU", 300)
     monkeypatch.setattr(bot, "VIDEO_COMMON_COST_XU", 400)
+    monkeypatch.setattr(bot, "VIDEO_ADVANCED_COST_XU", 500)
+    monkeypatch.setattr(bot, "VIDEO_STANDARD_COST_XU", 600)
+    monkeypatch.setattr(bot, "VIDEO_HIGH_COST_XU", 800)
     monkeypatch.setattr(bot, "VIDEO_LOW_PROVIDER_COST_XU", 100)
     monkeypatch.setattr(bot, "VIDEO_BASIC_PROVIDER_COST_XU", 150)
     monkeypatch.setattr(bot, "VIDEO_COMMON_PROVIDER_COST_XU", 220)
+    monkeypatch.setattr(bot, "VIDEO_ADVANCED_PROVIDER_COST_XU", 0)
+    monkeypatch.setattr(bot, "VIDEO_STANDARD_PROVIDER_COST_XU", 0)
+    monkeypatch.setattr(bot, "VIDEO_HIGH_PROVIDER_COST_XU", 0)
     monkeypatch.setattr(bot, "VIDEO_TIER_LOW_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_BASIC_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_COMMON_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_500_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_600_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_TIER_800_PUBLIC_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_STANDARD_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_TIER_HIGH_ENABLED", True)
     assert bot.video_tier_enabled_map()["low"] is True
     assert bot.video_tier_enabled_map()["basic"] is True
     assert bot.video_tier_enabled_map()["common"] is True
-    assert bot.video_tier_enabled_map()["advanced"] is False
-    assert bot.video_tier_enabled_map()["standard"] is False
-    assert bot.video_tier_enabled_map()["high"] is False
+    assert bot.video_tier_enabled_map()["advanced"] is True
+    assert bot.video_tier_enabled_map()["standard"] is True
+    assert bot.video_tier_enabled_map()["high"] is True
     assert bot.video_tier_enabled_map()["future_1000"] is False
     assert bot.video_tier_enabled_map()["future_1500"] is False
     assert bot.check_video_margin("low")["status"] == "MARKETING_LOSS_ON"
     assert bot.check_video_margin("common")["status"] == "WARN_MARGIN"
+    assert bot.check_video_margin("advanced")["status"] in {"COST_REVIEW_ONLY", "PASS", "WARN_MARGIN"}
     cost_text = bot.video_cost_status_text()
     assert "VIDEO COST STATUS" in cost_text
     assert "500/600/800" in cost_text
+    assert "cost is report-only" in cost_text
     system_text = bot.system_public_status_text()
     assert "TOAN AAS PUBLIC STATUS" in system_text
     assert "Video 500" in system_text
@@ -8582,7 +8626,7 @@ def test_video_export_vfinal_ready_uses_confirm_path(monkeypatch):
     assert "vfinal|copy_prompt" in callbacks
 
 
-def test_video_export_vfinal_600_public_controlled_when_gate_passes(monkeypatch):
+def test_video_export_vfinal_500_600_800_public_when_gate_passes(monkeypatch):
     monkeypatch.setattr(bot, "video_public_beta_enabled_runtime", lambda: True)
     monkeypatch.setattr(bot, "video_public_allowed_tiers", lambda: ["low", "basic", "common", "advanced", "standard", "high"])
     monkeypatch.setattr(bot, "video_tier_public_flag", lambda tier: bot.normalize_video_tier(tier) in {"low", "basic", "common", "advanced", "standard", "high"})
@@ -8604,15 +8648,16 @@ def test_video_export_vfinal_600_public_controlled_when_gate_passes(monkeypatch)
             "reason": "ready",
         },
     )
-    status = bot.get_public_video_tier_ui_status("standard", False)
-    assert status["enabled"] is True
-    assert status["public_status"] == "PUBLIC_CONTROLLED"
-    assert bot.check_video_margin("standard")["status"] == "PUBLIC_CONTROLLED"
+    for tier in ("advanced", "standard", "high"):
+        status = bot.get_public_video_tier_ui_status(tier, False)
+        assert status["enabled"] is True
+        assert status["public_status"] == "PUBLIC"
+        assert "billing/cost gate" not in status["reason"]
     assert "500 Xu" in bot.video_finalization_tier_text({}, "vi")
     assert "600 Xu" in bot.video_finalization_tier_text({}, "vi")
     assert "800 Xu" in bot.video_finalization_tier_text({}, "vi")
     assert "billing/cost gate" not in bot.video_finalization_tier_guard_text("standard", "vi")
-    assert "PUBLIC_CONTROLLED" in bot.video_cost_status_text()
+    assert "cost is report-only" in bot.video_cost_status_text()
 
 
 def test_public_video_tier_keyboard_uses_five_beta_gate_buttons():
