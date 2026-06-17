@@ -542,6 +542,21 @@ VIDEO_TIER_STANDARD_ENABLED = env_flag("VIDEO_TIER_STANDARD_ENABLED", "true")
 VIDEO_TIER_HIGH_ENABLED = env_flag("VIDEO_TIER_HIGH_ENABLED", "true")
 VIDEO_TIER_PREMIUM_ENABLED = env_flag("VIDEO_TIER_PREMIUM_ENABLED", "false")
 VIDEO_PUBLIC_600_PLUS_ENABLED = env_flag("VIDEO_PUBLIC_600_PLUS_ENABLED", "false")
+VIDEO_TIER_500_PUBLIC_ENABLED = env_flag("VIDEO_TIER_500_PUBLIC_ENABLED", "true")
+VIDEO_TIER_600_PUBLIC_ENABLED = env_flag("VIDEO_TIER_600_PUBLIC_ENABLED", "true")
+VIDEO_TIER_800_PUBLIC_ENABLED = env_flag("VIDEO_TIER_800_PUBLIC_ENABLED", "true")
+VIDEO_TIER_500_REQUIRE_SMOKE = env_flag("VIDEO_TIER_500_REQUIRE_SMOKE", "true")
+VIDEO_TIER_600_REQUIRE_SMOKE = env_flag("VIDEO_TIER_600_REQUIRE_SMOKE", "true")
+VIDEO_TIER_800_REQUIRE_SMOKE = env_flag("VIDEO_TIER_800_REQUIRE_SMOKE", "true")
+VIDEO_TIER_500_DAILY_USER_LIMIT = max(1, env_int("VIDEO_TIER_500_DAILY_USER_LIMIT", 2))
+VIDEO_TIER_600_DAILY_USER_LIMIT = max(1, env_int("VIDEO_TIER_600_DAILY_USER_LIMIT", 2))
+VIDEO_TIER_800_DAILY_USER_LIMIT = max(1, env_int("VIDEO_TIER_800_DAILY_USER_LIMIT", 1))
+VIDEO_TIER_500_DAILY_GLOBAL_LIMIT = max(1, env_int("VIDEO_TIER_500_DAILY_GLOBAL_LIMIT", 20))
+VIDEO_TIER_600_DAILY_GLOBAL_LIMIT = max(1, env_int("VIDEO_TIER_600_DAILY_GLOBAL_LIMIT", 15))
+VIDEO_TIER_800_DAILY_GLOBAL_LIMIT = max(1, env_int("VIDEO_TIER_800_DAILY_GLOBAL_LIMIT", 10))
+VIDEO_COST_GATE_ALLOW_ADMIN_OVERRIDE = env_flag("VIDEO_COST_GATE_ALLOW_ADMIN_OVERRIDE", "true")
+VIDEO_COST_GATE_ALLOW_HIGH_TIERS_AFTER_SMOKE = env_flag("VIDEO_COST_GATE_ALLOW_HIGH_TIERS_AFTER_SMOKE", "true")
+VIDEO_HIGH_TIER_AUTO_FREEZE_ON_ERROR = env_flag("VIDEO_HIGH_TIER_AUTO_FREEZE_ON_ERROR", "true")
 VIDEO_PREMIUM_ADMIN_ONLY = env_flag("VIDEO_PREMIUM_ADMIN_ONLY", "true")
 SHOPAIKEY_VIDEO_DEFAULT_TIER = _env("SHOPAIKEY_VIDEO_DEFAULT_TIER", "low")
 SHOPAIKEY_IMAGE_COST_XU = env_int("SHOPAIKEY_IMAGE_COST_XU", 50)
@@ -1232,8 +1247,8 @@ VIDEO_VIDEO_TO_VIDEO_ENABLED = env_flag("VIDEO_VIDEO_TO_VIDEO_ENABLED", "false")
 VIDEO_LONG_RENDER_ENABLED = env_flag("VIDEO_LONG_RENDER_ENABLED", "false")
 VIDEO_TREND_RENDER_ENABLED = env_flag("VIDEO_TREND_RENDER_ENABLED", "false")
 VIDEO_PUBLIC_MAX_DURATION_SECONDS = max(1, env_int("VIDEO_PUBLIC_MAX_DURATION_SECONDS", 8))
-VIDEO_PUBLIC_ALLOWED_TIERS = _env("VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common")
-VIDEO_PUBLIC_BLOCK_TIERS = _env("VIDEO_PUBLIC_BLOCK_TIERS", "premium,future_1000,future_1500,long")
+VIDEO_PUBLIC_ALLOWED_TIERS = _env("VIDEO_PUBLIC_ALLOWED_TIERS", "low,basic,common,advanced,standard,high")
+VIDEO_PUBLIC_BLOCK_TIERS = _env("VIDEO_PUBLIC_BLOCK_TIERS", "premium,future_1000,future_1500,long,kling,seedance")
 VIDEO_PUBLIC_BETA_ENABLED = env_flag("VIDEO_PUBLIC_BETA_ENABLED", "false")
 VIDEO_PUBLIC_MAX_COST_RATIO = max(0.0, env_float("VIDEO_PUBLIC_MAX_COST_RATIO", 0.5))
 VIDEO_PUBLIC_WARN_COST_RATIO = max(VIDEO_PUBLIC_MAX_COST_RATIO, env_float("VIDEO_PUBLIC_WARN_COST_RATIO", 0.6))
@@ -33080,6 +33095,9 @@ def get_public_video_tier_ui_status(tier: str = "", user_is_admin: bool = False)
     elif enabled and tier_norm == "low" and video_beta_200_marketing_loss_enabled_runtime():
         public_status = "PUBLIC_MARKETING_LOSS"
         requires_override = False
+    elif enabled and tier_norm in video_high_tiers():
+        public_status = "PUBLIC_CONTROLLED"
+        requires_override = False
     elif enabled:
         public_status = "PUBLIC"
         requires_override = False
@@ -52646,16 +52664,16 @@ def video_beta_200_marketing_loss_enabled_runtime() -> bool:
     return bool(VIDEO_BETA_200_MARKETING_LOSS_ENABLED or runtime_enabled or beta_low_allowed)
 
 def video_public_allowed_tiers_runtime() -> str:
-    return get_system_setting("video_public_allowed_tiers", "") or str(VIDEO_PUBLIC_ALLOWED_TIERS or "low,basic,common")
+    return get_system_setting("video_public_allowed_tiers", "") or str(VIDEO_PUBLIC_ALLOWED_TIERS or "low,basic,common,advanced,standard,high")
 
 def video_public_allowed_tiers() -> list[str]:
     allowed = []
-    for tier in str(video_public_allowed_tiers_runtime() or "low,basic,common").split(","):
+    for tier in str(video_public_allowed_tiers_runtime() or "low,basic,common,advanced,standard,high").split(","):
         tier = normalize_video_tier(tier.strip())
         if tier and tier not in allowed:
             allowed.append(tier)
-    allowed = allowed or ["low", "basic", "common"]
-    allowed = [tier for tier in allowed if tier in set(video_public_launch_tiers())] or ["low", "basic", "common"]
+    allowed = allowed or ["low", "basic", "common", "advanced", "standard", "high"]
+    allowed = [tier for tier in allowed if tier in set(video_public_launch_tiers())] or ["low", "basic", "common", "advanced", "standard", "high"]
     if video_public_beta_enabled_runtime() and "low" not in allowed:
         allowed.insert(0, "low")
     return allowed
@@ -52673,6 +52691,42 @@ def video_public_beta_tiers() -> tuple[str, ...]:
 
 def video_public_launch_tiers() -> tuple[str, ...]:
     return ("low", "basic", "common", "advanced", "standard", "high")
+
+def video_high_tiers() -> tuple[str, ...]:
+    return ("advanced", "standard", "high")
+
+def video_tier_public_flag(tier: str = "") -> bool:
+    tier_norm = normalize_video_tier(tier)
+    defaults = {
+        "low": bool(VIDEO_TIER_LOW_ENABLED),
+        "basic": bool(VIDEO_TIER_BASIC_ENABLED),
+        "common": bool(VIDEO_TIER_COMMON_ENABLED),
+        "advanced": bool(VIDEO_TIER_500_PUBLIC_ENABLED and VIDEO_TIER_COMMON_ENABLED),
+        "standard": bool(VIDEO_TIER_600_PUBLIC_ENABLED and VIDEO_TIER_STANDARD_ENABLED),
+        "high": bool(VIDEO_TIER_800_PUBLIC_ENABLED and VIDEO_TIER_HIGH_ENABLED),
+    }
+    runtime_keys = {
+        "low": "video_beta_tier_200_enabled",
+        "basic": "video_beta_tier_300_enabled",
+        "common": "video_beta_tier_400_enabled",
+        "advanced": "video_beta_tier_500_enabled",
+        "standard": "video_beta_tier_600_enabled",
+        "high": "video_beta_tier_800_enabled",
+    }
+    key = runtime_keys.get(tier_norm)
+    if not key:
+        return bool(defaults.get(tier_norm, False))
+    return video_runtime_bool(key, defaults.get(tier_norm, False))
+
+def video_tier_limit_config(tier: str = "") -> dict:
+    tier_norm = normalize_video_tier(tier)
+    if tier_norm == "advanced":
+        return {"user_day": int(VIDEO_TIER_500_DAILY_USER_LIMIT), "global_day": int(VIDEO_TIER_500_DAILY_GLOBAL_LIMIT)}
+    if tier_norm == "standard":
+        return {"user_day": int(VIDEO_TIER_600_DAILY_USER_LIMIT), "global_day": int(VIDEO_TIER_600_DAILY_GLOBAL_LIMIT)}
+    if tier_norm == "high":
+        return {"user_day": int(VIDEO_TIER_800_DAILY_USER_LIMIT), "global_day": int(VIDEO_TIER_800_DAILY_GLOBAL_LIMIT)}
+    return {"user_day": int(VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY or 1), "global_day": 0}
 
 def video_public_tier_token_to_name(token: str = "") -> str:
     raw = str(token or "").strip().lower()
@@ -52732,9 +52786,9 @@ def video_public_tier_enabled(tier: str = "") -> bool:
         "low": bool(VIDEO_TIER_LOW_ENABLED),
         "basic": bool(VIDEO_TIER_BASIC_ENABLED),
         "common": bool(VIDEO_TIER_COMMON_ENABLED),
-        "advanced": bool(VIDEO_TIER_COMMON_ENABLED),
-        "standard": bool(VIDEO_TIER_STANDARD_ENABLED),
-        "high": bool(VIDEO_TIER_HIGH_ENABLED),
+        "advanced": video_tier_public_flag("advanced"),
+        "standard": video_tier_public_flag("standard"),
+        "high": video_tier_public_flag("high"),
     }.get(tier_norm, False)
     return bool(base_enabled and video_public_beta_enabled_runtime())
 
@@ -52760,6 +52814,17 @@ def check_video_margin(tier: str = "") -> dict:
         blocked.append("provider_cost_unknown")
     if ratio is not None and ratio > float(VIDEO_PUBLIC_WARN_COST_RATIO) and not marketing_loss:
         blocked.append(f"provider_cost_ratio {ratio:.2f} exceeds hard limit {VIDEO_PUBLIC_WARN_COST_RATIO:.2f}")
+    high_controlled = bool(
+        tier_norm in video_high_tiers()
+        and VIDEO_COST_GATE_ALLOW_HIGH_TIERS_AFTER_SMOKE
+        and video_tier_public_flag(tier_norm)
+    )
+    if high_controlled:
+        blocked = [
+            item for item in blocked
+            if str(item) not in {"provider_cost_unknown"}
+            and "provider_cost_ratio" not in str(item)
+        ]
     status = "PASS"
     if marketing_loss:
         status = "MARKETING_LOSS_ON"
@@ -52768,6 +52833,8 @@ def check_video_margin(tier: str = "") -> dict:
         blocked = [item for item in blocked if "price_xu missing" in str(item)]
     elif blocked:
         status = "BLOCKED"
+    elif high_controlled:
+        status = "PUBLIC_CONTROLLED"
     elif ratio is not None and ratio > float(VIDEO_PUBLIC_MAX_COST_RATIO):
         status = "WARN_MARGIN"
     return {
@@ -52777,11 +52844,12 @@ def check_video_margin(tier: str = "") -> dict:
         "revenue_vnd": revenue_vnd,
         "cost_ratio": ratio,
         "status": status,
-        "can_open": status in {"PASS", "WARN_MARGIN", "MARKETING_LOSS_ON"},
+        "can_open": status in {"PASS", "WARN_MARGIN", "MARKETING_LOSS_ON", "PUBLIC_CONTROLLED"},
         "blockers": blocked,
         "safe_ratio": float(VIDEO_PUBLIC_MAX_COST_RATIO),
         "hard_ratio": float(VIDEO_PUBLIC_WARN_COST_RATIO),
         "marketing_loss": marketing_loss,
+        "controlled": high_controlled,
     }
 
 def video_beta_200_today_counts(user_id=None) -> dict:
@@ -52882,6 +52950,71 @@ def check_video_beta_200_limit(user_id=None) -> dict:
     if global_count >= global_limit:
         return {"ok": False, **counts, "reason": "global_daily_limit", "user_limit": user_limit, "week_limit": week_limit, "month_limit": month_limit, "global_limit": global_limit}
     return {"ok": True, **counts, "reason": "ok", "user_limit": user_limit, "week_limit": week_limit, "month_limit": month_limit, "global_limit": global_limit}
+
+def video_tier_today_counts(tier: str = "", user_id=None) -> dict:
+    tier_norm = normalize_video_tier(tier)
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = db_connect()
+    try:
+        user_row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT job_id)
+            FROM shopaikey_billing_events
+            WHERE created_at LIKE ?
+              AND user_id=?
+              AND event_type IN ('video_confirmed','video_deducted','video_package_use')
+              AND reason LIKE ?
+            """,
+            (today + "%", str(user_id or ""), f"%tier={tier_norm}%"),
+        ).fetchone()
+        global_row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT job_id)
+            FROM shopaikey_billing_events
+            WHERE created_at LIKE ?
+              AND event_type IN ('video_confirmed','video_deducted','video_package_use')
+              AND reason LIKE ?
+            """,
+            (today + "%", f"%tier={tier_norm}%"),
+        ).fetchone()
+        return {
+            "tier": tier_norm,
+            "user_count": int((user_row or [0])[0] or 0),
+            "global_count": int((global_row or [0])[0] or 0),
+            "date": today,
+        }
+    except Exception:
+        return {"tier": tier_norm, "user_count": 0, "global_count": 0, "date": today}
+    finally:
+        conn.close()
+
+def check_video_high_tier_limit(user_id=None, tier: str = "") -> dict:
+    tier_norm = normalize_video_tier(tier)
+    if tier_norm not in video_high_tiers():
+        return {"ok": True, "tier": tier_norm, "reason": "not_high_tier"}
+    limits = video_tier_limit_config(tier_norm)
+    counts = video_tier_today_counts(tier_norm, user_id)
+    user_limit = max(1, int(limits.get("user_day") or 1))
+    global_limit = max(1, int(limits.get("global_day") or 1))
+    if int(counts.get("user_count") or 0) >= user_limit:
+        return {"ok": False, **counts, "reason": "user_daily_limit", "user_limit": user_limit, "global_limit": global_limit}
+    if int(counts.get("global_count") or 0) >= global_limit:
+        return {"ok": False, **counts, "reason": "global_daily_limit", "user_limit": user_limit, "global_limit": global_limit}
+    return {"ok": True, **counts, "reason": "ok", "user_limit": user_limit, "global_limit": global_limit}
+
+def video_high_tier_limit_message(tier: str = "", lang: str = "vi") -> str:
+    tier_norm = normalize_video_tier(tier)
+    label = video_tier_short_label(tier_norm, lang)
+    limits = video_tier_limit_config(tier_norm)
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"🎬 The {html.escape(label)} package has reached its controlled daily limit.\n\n"
+            f"Limit: {int(limits.get('user_day') or 1)} video/user/day. No provider was called and no Xu was charged."
+        )
+    return (
+        f"🎬 Gói {html.escape(label)} đã hết lượt kiểm soát trong ngày.\n\n"
+        f"Giới hạn: {int(limits.get('user_day') or 1)} video/người/ngày. Bot chưa gọi provider và chưa trừ Xu."
+    )
 
 def video_beta_200_limit_message(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -53019,9 +53152,9 @@ def video_billing_public_gate() -> dict:
         "low": bool(VIDEO_TIER_LOW_ENABLED),
         "basic": bool(VIDEO_TIER_BASIC_ENABLED),
         "common": bool(VIDEO_TIER_COMMON_ENABLED),
-        "advanced": bool(VIDEO_TIER_COMMON_ENABLED),
-        "standard": bool(VIDEO_TIER_STANDARD_ENABLED),
-        "high": bool(VIDEO_TIER_HIGH_ENABLED),
+        "advanced": video_tier_public_flag("advanced"),
+        "standard": video_tier_public_flag("standard"),
+        "high": video_tier_public_flag("high"),
     }
     enabled_allowed = [
         tier for tier in video_public_allowed_tiers()
@@ -53062,6 +53195,13 @@ def video_public_status_payload() -> dict:
         and ai_gate["ready"]
         and billing_gate["ready"]
     )
+    def _tier_public_conclusion(tier_name: str) -> str:
+        tier_name = normalize_video_tier(tier_name)
+        if not ai_public or tier_name not in billing_gate.get("allowed_tiers", []):
+            return "GUARDED" if tier_name in video_high_tiers() else "OFF"
+        ui_status = get_public_video_tier_ui_status(tier_name)
+        return str(ui_status.get("public_status") or "PUBLIC")
+
     return {
         "ops": ops,
         "frame_gate": frame_gate,
@@ -53107,9 +53247,9 @@ def video_public_status_payload() -> dict:
             ),
             "video_beta_300": "PUBLIC" if ai_public and "basic" in billing_gate.get("allowed_tiers", []) else "OFF",
             "video_beta_400": "PUBLIC" if ai_public and "common" in billing_gate.get("allowed_tiers", []) else "OFF",
-            "video_500": "PUBLIC" if ai_public and "advanced" in billing_gate.get("allowed_tiers", []) else "GUARDED",
-            "video_600": "PUBLIC" if ai_public and "standard" in billing_gate.get("allowed_tiers", []) else "GUARDED",
-            "video_800": "PUBLIC" if ai_public and "high" in billing_gate.get("allowed_tiers", []) else "GUARDED",
+            "video_500": _tier_public_conclusion("advanced"),
+            "video_600": _tier_public_conclusion("standard"),
+            "video_800": _tier_public_conclusion("high"),
             "video_1000": "COMING_SOON",
             "video_1500": "COMING_SOON",
             "video_600_plus": "GUARDED",
@@ -53441,7 +53581,7 @@ def video_cost_status_text() -> str:
     lines.extend([
         "",
         "<b>Blocked by policy</b>",
-        "• 500/600/800: <code>GUARDED until allowed tier + provider smoke + cost pass</code>",
+        "• 500/600/800: <code>PUBLIC_CONTROLLED when allowed + provider smoke + admin cost override pass</code>",
         "• 1000/1500 Kling/Seedance: <code>COMING_SOON</code>",
         "• long render: <code>OFF</code>",
         "• image-to-video / video-to-video: <code>OFF until separate smoke pass</code>",
@@ -53458,12 +53598,16 @@ def video_beta_limits_text() -> str:
         f"• 200 max/user/day: <code>{int(VIDEO_BETA_200_MAX_USER_DAY or 1)}</code>",
         f"• 200 max/user/week: <code>{int(VIDEO_BETA_200_MAX_USER_WEEK or 1)}</code>",
         f"• 200 max/user/month: <code>{int(VIDEO_BETA_200_MAX_USER_MONTH or 1)}</code>",
+        f"• 500 max/user/day: <code>{int(VIDEO_TIER_500_DAILY_USER_LIMIT)}</code> | global/day <code>{int(VIDEO_TIER_500_DAILY_GLOBAL_LIMIT)}</code>",
+        f"• 600 max/user/day: <code>{int(VIDEO_TIER_600_DAILY_USER_LIMIT)}</code> | global/day <code>{int(VIDEO_TIER_600_DAILY_GLOBAL_LIMIT)}</code>",
+        f"• 800 max/user/day: <code>{int(VIDEO_TIER_800_DAILY_USER_LIMIT)}</code> | global/day <code>{int(VIDEO_TIER_800_DAILY_GLOBAL_LIMIT)}</code>",
         f"• Max duration: <code>{int(VIDEO_PUBLIC_MAX_DURATION_SECONDS or 0)}s</code>",
         f"• Max jobs/user/day: <code>{int(VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY or 0)}</code>",
         f"• Max concurrent jobs: <code>{int(VIDEO_PUBLIC_MAX_CONCURRENT_JOBS or 0)}</code>",
         f"• Confirm required: <code>{video_public_bool_label(VIDEO_PUBLIC_REQUIRE_CONFIRM)}</code>",
         f"• Job lock required: <code>{video_public_bool_label(VIDEO_PUBLIC_REQUIRE_JOB_LOCK)}</code>",
         f"• Auto freeze on error: <code>{video_public_bool_label(VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR)}</code>",
+        f"• High-tier auto-freeze: <code>{video_public_bool_label(VIDEO_HIGH_TIER_AUTO_FREEZE_ON_ERROR)}</code>",
         "",
         "Public launch tiers: 200/300/400/500/600/800 if allowed + provider smoke + cost gate pass. 1000/1500 and long render stay coming soon/OFF.",
     ])
@@ -53623,6 +53767,7 @@ def video_tier_status_text() -> str:
     lines.extend([
         "",
         f"• 200 limits: <code>{int(VIDEO_BETA_200_MAX_USER_DAY)}/day, {int(VIDEO_BETA_200_MAX_USER_WEEK)}/week, {int(VIDEO_BETA_200_MAX_USER_MONTH)}/month</code>",
+        f"• 500/600/800 limits: <code>{int(VIDEO_TIER_500_DAILY_USER_LIMIT)}/{int(VIDEO_TIER_600_DAILY_USER_LIMIT)}/{int(VIDEO_TIER_800_DAILY_USER_LIMIT)} per user/day</code> | global <code>{int(VIDEO_TIER_500_DAILY_GLOBAL_LIMIT)}/{int(VIDEO_TIER_600_DAILY_GLOBAL_LIMIT)}/{int(VIDEO_TIER_800_DAILY_GLOBAL_LIMIT)} per day</code>",
         "• 1000/1500: <code>COMING_SOON; no public job</code>",
     ])
     return "\n".join(lines)
@@ -53866,6 +54011,99 @@ def video_beta_close_result(admin_id) -> dict:
 def video_beta_close_text(result: dict) -> str:
     return "🧊 <b>VIDEO BETA CLOSE</b>\n\nĐã đóng Video AI public beta trong runtime hiện tại. Planning/storyboard vẫn có thể mở nếu flag riêng đang ON.\n\nKhông gọi provider và không trừ Xu."
 
+def video_open_high_tiers_result(admin_id, args: list[str] | tuple[str, ...] | None = None) -> dict:
+    requested = [
+        tier for tier in video_beta_requested_tiers(args)
+        if tier in video_high_tiers()
+    ] or list(video_high_tiers())
+    merged = []
+    for tier in [*video_public_allowed_tiers(), *requested]:
+        if tier in video_public_launch_tiers() and tier not in merged:
+            merged.append(tier)
+    result = video_beta_open_result(admin_id, [f"tiers={','.join(merged)}"])
+    result["mode"] = "PUBLIC_CONTROLLED_HIGH_TIERS"
+    result["high_tiers_requested"] = requested
+    result["limits"] = {tier: video_tier_limit_config(tier) for tier in requested}
+    return result
+
+def video_open_high_tiers_text(result: dict) -> str:
+    opened = set(result.get("opened_tiers") or [])
+    requested = result.get("high_tiers_requested") or list(video_high_tiers())
+    blockers = result.get("blockers") or []
+    lines = ["🎬 <b>VIDEO HIGH TIERS OPEN</b>", ""]
+    if result.get("status") == "OPENED":
+        lines.append("High tiers controlled đã được mở nếu nằm trong danh sách dưới đây:")
+    else:
+        lines.append("Chưa mở được high tiers.")
+    for tier in requested:
+        payload = video_tier_pricing_payload().get(tier) or {}
+        limits = video_tier_limit_config(tier)
+        lines.append(
+            f"• <code>{int(payload.get('cost') or video_tier_cost_xu(tier))} Xu</code> "
+            f"{html.escape(str(payload.get('label') or tier))}: "
+            f"<code>{'PUBLIC_CONTROLLED' if tier in opened else 'GUARDED'}</code> "
+            f"| user/day <code>{int(limits.get('user_day') or 0)}</code> "
+            f"| global/day <code>{int(limits.get('global_day') or 0)}</code>"
+        )
+    if blockers:
+        lines.extend(["", "<b>Blockers</b>"])
+        lines.extend(f"• <code>{html.escape(str(item))}</code>" for item in blockers[:12])
+    lines.extend([
+        "",
+        "Giữ OFF: 1000/1500, long render, premium, Kling/Seedance future.",
+        "Không gọi provider trong lệnh này. Không trừ Xu.",
+    ])
+    return "\n".join(lines)
+
+def video_close_high_tiers_result(admin_id) -> dict:
+    current = [tier for tier in video_public_allowed_tiers() if tier not in video_high_tiers()]
+    safe_allowed = [tier for tier in current if tier in video_public_beta_tiers()]
+    if not safe_allowed and video_public_beta_enabled_runtime():
+        safe_allowed = list(video_public_beta_tiers())
+    global VIDEO_PUBLIC_ALLOWED_TIERS
+    VIDEO_PUBLIC_ALLOWED_TIERS = ",".join(safe_allowed)
+    set_system_setting("video_public_allowed_tiers", VIDEO_PUBLIC_ALLOWED_TIERS, "close 500/600/800 public controlled tiers", admin_id)
+    set_video_runtime_bool("video_beta_tier_500_enabled", False, admin_id, "close high video tiers")
+    set_video_runtime_bool("video_beta_tier_600_enabled", False, admin_id, "close high video tiers")
+    set_video_runtime_bool("video_beta_tier_800_enabled", False, admin_id, "close high video tiers")
+    set_video_runtime_bool("video_public_600_plus_enabled", False, admin_id, "close high video tiers")
+    set_system_setting("video_high_tiers_last_result", "CLOSED", "Closed 500/600/800 only; lower beta tiers left unchanged", admin_id)
+    record_audit_event(admin_id, "admin", "video.high_tiers_close", "video_public_gate", "close_high_tiers", before={}, after={"allowed": safe_allowed}, note="closed 500/600/800")
+    return {"status": "CLOSED", "allowed_tiers": safe_allowed, "closed_tiers": list(video_high_tiers())}
+
+def video_close_high_tiers_text(result: dict) -> str:
+    return "\n".join([
+        "🧊 <b>VIDEO HIGH TIERS CLOSE</b>",
+        "",
+        "Đã đóng 500/600/800 trong runtime hiện tại.",
+        f"Tier còn lại: <code>{html.escape(', '.join(result.get('allowed_tiers') or []) or '-')}</code>",
+        "1000/1500, long render, premium vẫn OFF/COMING_SOON.",
+        "",
+        "Không gọi provider và không trừ Xu.",
+    ])
+
+async def _cmd_video_smoke_tier(update: Update, context: ContextTypes.DEFAULT_TYPE, tier: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    tier_norm = normalize_video_tier(tier)
+    payload = video_tier_pricing_payload().get(tier_norm) or {}
+    set_system_setting(
+        f"video_tier_{int(payload.get('cost') or video_tier_cost_xu(tier_norm))}_smoke_requested",
+        now_text(),
+        f"Admin requested smoke for {tier_norm}; delegates to ShopAIKey video smoke command",
+        update.effective_user.id,
+    )
+    await update.message.reply_text(
+        "🎬 <b>Video tier smoke</b>\n\n"
+        f"• Tier: <code>{html.escape(str(payload.get('label') or tier_norm))}</code>\n"
+        f"• Cost: <code>{int(payload.get('cost') or video_tier_cost_xu(tier_norm))} Xu</code>\n"
+        "• Mode: <code>admin smoke only / no Xu</code>\n"
+        "• Next: chạy ShopAIKey video smoke chung để xác nhận provider output.\n\n"
+        "Smoke có thể tốn credit thật của provider.",
+        parse_mode="HTML",
+    )
+    return await cmd_tool_test_shopaikey_video(update, context)
+
 async def cmd_video_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
@@ -53893,6 +54131,27 @@ async def cmd_video_beta_close(update: Update, context: ContextTypes.DEFAULT_TYP
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     result = video_beta_close_result(update.effective_user.id)
     await update.message.reply_text(video_beta_close_text(result), parse_mode="HTML")
+
+async def cmd_video_open_high_tiers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    result = video_open_high_tiers_result(update.effective_user.id, getattr(context, "args", []) or [])
+    await update.message.reply_text(video_open_high_tiers_text(result), parse_mode="HTML")
+
+async def cmd_video_close_high_tiers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    result = video_close_high_tiers_result(update.effective_user.id)
+    await update.message.reply_text(video_close_high_tiers_text(result), parse_mode="HTML")
+
+async def cmd_video_smoke_tier_500(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_smoke_tier(update, context, "advanced")
+
+async def cmd_video_smoke_tier_600(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_smoke_tier(update, context, "standard")
+
+async def cmd_video_smoke_tier_800(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_smoke_tier(update, context, "high")
 
 async def cmd_video_beta_limits(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -54192,7 +54451,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
-        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/system_public_status</code> | <code>/tool_public_status</code> | <code>/image_edit_status</code> | <code>/tool_test_image_edit</code> | <code>/tool_test_gemini_image_edit</code> | <code>/tool_test_shopaikey_image_edit</code> | <code>/image_edit_public_open</code> | <code>/image_edit_public_close</code> | <code>/chat_ai_status</code> | <code>/toanaas_ai_status</code> | <code>/video_public_status</code> | <code>/video_gate_status</code> | <code>/video_tier_status</code> | <code>/video_cost_status</code> | <code>/video_beta_limits</code> | <code>/subtitle_dub_status</code> | <code>/subtitle_status</code> | <code>/video_dub_public_open</code> | <code>/video_dub_public_close</code> | <code>/video_beta_open</code> | <code>/video_beta_close</code> | <code>/video_public_open_safe</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/tool_test_asr</code> | <code>/tool_test_translate</code> | <code>/tool_test_tts_for_dub</code> | <code>/tool_test_video_subtitle</code> | <code>/tool_test_video_dub</code> | <code>/tool_test_subtitle_plus_dub</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
+        "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/system_public_status</code> | <code>/tool_public_status</code> | <code>/image_edit_status</code> | <code>/tool_test_image_edit</code> | <code>/tool_test_gemini_image_edit</code> | <code>/tool_test_shopaikey_image_edit</code> | <code>/image_edit_public_open</code> | <code>/image_edit_public_close</code> | <code>/chat_ai_status</code> | <code>/toanaas_ai_status</code> | <code>/video_public_status</code> | <code>/video_gate_status</code> | <code>/video_tier_status</code> | <code>/video_cost_status</code> | <code>/video_beta_limits</code> | <code>/subtitle_dub_status</code> | <code>/subtitle_status</code> | <code>/video_dub_public_open</code> | <code>/video_dub_public_close</code> | <code>/video_beta_open</code> | <code>/video_beta_close</code> | <code>/video_open_high_tiers</code> | <code>/video_close_high_tiers</code> | <code>/video_smoke_tier_500</code> | <code>/video_smoke_tier_600</code> | <code>/video_smoke_tier_800</code> | <code>/video_public_open_safe</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/tool_test_asr</code> | <code>/tool_test_translate</code> | <code>/tool_test_tts_for_dub</code> | <code>/tool_test_video_subtitle</code> | <code>/tool_test_video_dub</code> | <code>/tool_test_subtitle_plus_dub</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram STT: <code>{html.escape(deepgram_status)}</code>",
@@ -58119,6 +58378,15 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                             ],
                         ])
                     ),
+                )
+        if video_tier in video_high_tiers():
+            limit = check_video_high_tier_limit(uid, video_tier)
+            if not limit.get("ok"):
+                return await safe_edit_or_send(
+                    query,
+                    video_high_tier_limit_message(video_tier, lang),
+                    parse_mode="HTML",
+                    reply_markup=(video_finalization_tier_keyboard(lang) if get_video_finalization_state(uid) else public_video_tier_keyboard(lang)),
                 )
         addon_guard = video_addon_runtime_guard(pending)
         if not addon_guard.get("ok"):
@@ -77339,6 +77607,16 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
                 "\n\n🎯 <b>200 Xu starter video</b>\n"
                 "This is a controlled marketing-loss tier for short AI video trials.\n"
                 f"Limit: <b>{int(limit.get('user_limit') or 1)} video/user/day</b>."
+            )
+    if tier in video_high_tiers():
+        limit = check_video_high_tier_limit(user_id, tier)
+        if not limit.get("ok"):
+            clear_video_addon_state(user_id)
+            return await safe_edit_or_send(
+                query,
+                video_high_tier_limit_message(tier, lang),
+                parse_mode="HTML",
+                reply_markup=video_finalization_tier_keyboard(lang),
             )
     package_item = active_package_item_for_user(user_id, pending_payload.get("package_item_type") or package_item_type_for_video_tier(tier))
     markup = video_addon_confirm_keyboard(token, tier, lang)
@@ -105306,6 +105584,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_beta_open", cmd_video_beta_open))
     tg_app.add_handler(CommandHandler("video_beta_close", cmd_video_beta_close))
     tg_app.add_handler(CommandHandler("video_beta_limits", cmd_video_beta_limits))
+    tg_app.add_handler(CommandHandler("video_open_high_tiers", cmd_video_open_high_tiers))
+    tg_app.add_handler(CommandHandler("video_close_high_tiers", cmd_video_close_high_tiers))
+    tg_app.add_handler(CommandHandler("video_smoke_tier_500", cmd_video_smoke_tier_500))
+    tg_app.add_handler(CommandHandler("video_smoke_tier_600", cmd_video_smoke_tier_600))
+    tg_app.add_handler(CommandHandler("video_smoke_tier_800", cmd_video_smoke_tier_800))
     tg_app.add_handler(CommandHandler("video_cost_status", cmd_video_cost_status))
     tg_app.add_handler(CommandHandler("image_edit_status", cmd_image_edit_status))
     tg_app.add_handler(CommandHandler("chat_ai_status", cmd_chat_ai_status))

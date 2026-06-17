@@ -19,7 +19,7 @@ Date: 2026-06-17
 
 - 200 Xu can be a controlled marketing-loss product but is rate-limited.
 - 300 Xu remains the stable upsell tier for the same base quality line.
-- 500/600/800 require cost and smoke gates before opening.
+- 500/600/800 are `PUBLIC_CONTROLLED` when smoke/cost override/admin gate pass, with daily user/global limits and auto-freeze guard.
 - 1000/1500 must not call providers until the future provider path is real.
 
 ## Status commands
@@ -31,3 +31,8 @@ Date: 2026-06-17
 - `/video_beta_limits`
 - `/video_beta_open`
 - `/video_beta_close`
+- `/video_open_high_tiers`
+- `/video_close_high_tiers`
+- `/video_smoke_tier_500`
+- `/video_smoke_tier_600`
+- `/video_smoke_tier_800`
