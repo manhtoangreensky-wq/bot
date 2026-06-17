@@ -104915,6 +104915,53 @@ async def health_check():
         "timestamp": now_text(),
     }
 
+@fastapi_app.get("/api/v1/health")
+async def api_v1_health_check():
+    return await health_check()
+
+@fastapi_app.get("/api/v1/metrics-lite")
+async def api_v1_metrics_lite():
+    db_status = db_status_payload()
+    queue = {"queued": 0, "processing": 0, "failed_15m": 0}
+    try:
+        conn = db_connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN LOWER(status)='queued' THEN 1 ELSE 0 END) AS queued,
+                    SUM(CASE WHEN LOWER(status) IN ('running','processing') THEN 1 ELSE 0 END) AS processing,
+                    SUM(CASE WHEN LOWER(status)='failed' AND COALESCE(updated_at, finished_at, created_at, '') >= ? THEN 1 ELSE 0 END) AS failed_15m
+                FROM local_worker_jobs
+                """,
+                (datetime_text(datetime.now() - timedelta(minutes=15)),),
+            ).fetchone()
+            if row:
+                queue = {
+                    "queued": int(row[0] or 0),
+                    "processing": int(row[1] or 0),
+                    "failed_15m": int(row[2] or 0),
+                }
+        finally:
+            conn.close()
+    except Exception:
+        queue = {"queued": 0, "processing": 0, "failed_15m": 0}
+    return {
+        "ok": bool(db_status.get("ok")),
+        "time": now_text(),
+        "db_ok": bool(db_status.get("ok")),
+        "queue": queue,
+        "providers": {
+            "shopaikey_freeze": bool(provider_freeze_runtime_on("shopaikey")),
+            "video_freeze": bool(provider_freeze_runtime_on("shopaikey_video")),
+        },
+        "runtime": {
+            "pid": str(os.getpid()),
+            "uptime_seconds": int(time.time() - START_TIME),
+            "build": APP_BUILD,
+        },
+    }
+
 @fastapi_app.get("/runtime")
 async def runtime_health(request: Request):
     verify_runtime_access(request)
