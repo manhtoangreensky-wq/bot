@@ -119,6 +119,7 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tool_public_status` | `cmd_tool_public_status` | YES | YES | Alias-style public tool surface summary for launch checks. |
 | `/image_edit_status` | `cmd_image_edit_status` | YES | YES | Image edit provider readiness matrix; never shows keys and does not fake output. |
 | `/tool_test_image_edit` | `cmd_tool_test_ai_image_edit` | YES | YES | Alias for the real OpenAI image edit smoke test; requires replying to an image. |
+| `/tool_test_openai_image_edit` | `cmd_tool_test_ai_image_edit` | YES | YES | Explicit OpenAI image edit smoke alias; requires replying to an image and never charges Xu. |
 | `/tool_test_gemini_image_edit` | `cmd_tool_test_gemini_image_edit` | YES | YES | Guarded Gemini image-edit readiness check; no fake image and no Xu charge. |
 | `/tool_test_shopaikey_image_edit` | `cmd_tool_test_shopaikey_image_edit` | YES | YES | Guarded ShopAIKey image-edit readiness check; no fake image and no Xu charge. |
 | `/image_edit_public_open` | `cmd_image_edit_public_open` | YES | YES | Owner-only gate; opens image edit public only after real provider readiness and smoke PASS. |
@@ -212,7 +213,17 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/tool_test_key4u_tts` | `cmd_tool_test_key4u_tts` | YES | YES | Key4U TTS smoke test; returns NEED_DOCS unless endpoint/model are configured; no Xu charge. |
 | `/tool_test_key4u_stt` | `cmd_tool_test_key4u_stt` | YES | YES | Reply to audio to test Key4U STT if endpoint/model are configured; no Xu charge. |
 | `/tool_test_key4u_suno` | `cmd_tool_test_key4u_suno` | YES | YES | Key4U Suno/music smoke test; guarded by explicit endpoint/model docs; no Xu charge. |
+| `/tool_test_suno_music` | `cmd_tool_test_key4u_suno` | YES | YES | Public-facing admin smoke alias for Suno music; no Xu charge and no fake output. |
 | `/key4u_suno_job` | `cmd_key4u_suno_job` | YES | YES | Query Key4U Suno/music job status by provider task id. |
+| `/suno_job` | `cmd_key4u_suno_job` | YES | YES | Alias for querying a Suno music task id; placeholder task ids are blocked locally. |
+| `/suno_public_open` | `cmd_suno_public_open` | YES | YES | Owner-only Suno public gate; requires endpoint/model and smoke PASS before opening paid add-on use. |
+| `/suno_public_close` | `cmd_suno_public_close` | YES | YES | Owner-only Suno public close; admin smoke remains available. |
+| `/minimax_status` | `cmd_minimax_status` | YES | YES | MiniMax voice readiness, public gate and smoke status; no secrets. |
+| `/tool_test_minimax_tts` | `cmd_tool_test_minimax_tts` | YES | YES | Guarded MiniMax TTS smoke; returns NEED_DOCS/NEED_IMPLEMENTATION instead of guessing endpoints. |
+| `/tool_test_minimax_voice_clone` | `cmd_tool_test_minimax_voice_clone` | YES | YES | Guarded MiniMax voice clone smoke; requires consent/sample and does not fake voice output. |
+| `/minimax_voice_job` | `cmd_minimax_voice_job` | YES | YES | Guarded MiniMax voice job query; placeholder task ids are rejected locally. |
+| `/voice_public_open` | `cmd_voice_public_open` | YES | YES | Owner-only MiniMax voice public gate; requires readiness and smoke PASS. |
+| `/voice_public_close` | `cmd_voice_public_close` | YES | YES | Owner-only close for MiniMax voice/clone public gates. |
 | `/tool_test_key4u_rerank` | `cmd_tool_test_key4u_rerank` | YES | YES | Key4U rerank smoke test if endpoint/model are configured; no prompt/response logging. |
 | `/tool_test_asr` | `cmd_tool_test_asr` | YES | YES | Reply a short audio/video file to smoke test Deepgram ASR with no Xu charge. |
 | `/tool_test_translate [text] [lang]` | `cmd_tool_test_translate` | YES | YES | Smoke test translation routing/fallback with a short text. |
@@ -220,10 +231,15 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/subtitle_dub_status` | `cmd_subtitle_dub_status` | YES | YES | Subtitle/dub pipeline readiness: ASR, translation, TTS, mux and public mode gates. |
 | `/subtitle_status` | `cmd_subtitle_dub_status` | YES | YES | Alias for subtitle/dub readiness status. |
 | `/tool_test_video_subtitle` | `cmd_tool_test_video_subtitle` | YES | YES | Reply a short video to test ASR to SRT; admin-only and no Xu charge. |
+| `/tool_test_subtitle_generate` | `cmd_tool_test_subtitle_generate` | YES | YES | Alias for subtitle generation smoke; admin-only and no Xu charge. |
+| `/tool_test_subtitle_translate` | `cmd_tool_test_subtitle_translate` | YES | YES | Smoke test ASR + subtitle translation path; admin-only and no Xu charge. |
 | `/tool_test_video_dub [text]` | `cmd_tool_test_video_dub` | YES | YES | Test dubbing TTS output from replied media or short text; mux remains capability-guarded. |
+| `/tool_test_minimax_dub` | `cmd_tool_test_minimax_dub` | YES | YES | Guarded MiniMax dubbing smoke; does not call MiniMax until endpoint/model/docs are ready. |
 | `/tool_test_subtitle_plus_dub` | `cmd_tool_test_subtitle_plus_dub` | YES | YES | Reply a short video to test ASR, subtitle, and TTS outputs without charging Xu. |
 | `/video_dub_public_open` | `cmd_video_dub_public_open` | YES | YES | Owner-only gate; opens subtitle/dub modes only after provider readiness and smoke PASS. |
 | `/video_dub_public_close` | `cmd_video_dub_public_close` | YES | YES | Owner-only gate; closes selected subtitle/dub public modes. |
+| `/subtitle_translate_public_open` | `cmd_subtitle_translate_public_open` | YES | YES | Owner-only gate for translated subtitle public mode; requires readiness and smoke PASS. |
+| `/subtitle_dub_public_open` | `cmd_subtitle_dub_public_open` | YES | YES | Owner-only gate for subtitle+dub public mode; requires readiness and smoke PASS. |
 | `/clear_frame_video_error` | `cmd_clear_frame_video_error` | YES | YES | Clear only the stored frame-video last-error display; does not alter jobs or Xu. |
 | `/video_price_test <seconds> <type> <tier> <addon>` | `cmd_video_price_test` | YES | YES | Preview itemized video, subtitle, dubbing, total Xu, and VND pricing without creating a job or charging Xu. |
 | `/video_quote_test <tier> <seconds> <scenes> [addon...]` | `cmd_video_quote_test` | YES | YES | Preview public short-video tier pricing: base 1 scene/8s, extra seconds/scenes and selected add-ons. |

@@ -460,6 +460,17 @@ KEY4U_ADMIN_SMOKE_ENABLED = env_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true")
 KEY4U_DASHBOARD_BALANCE_USD = _env("KEY4U_DASHBOARD_BALANCE_USD", "")
 KEY4U_LOW_BALANCE_WARN_USD = env_float("KEY4U_LOW_BALANCE_WARN_USD", 5.0)
 KEY4U_LOW_BALANCE_FREEZE_USD = env_float("KEY4U_LOW_BALANCE_FREEZE_USD", 2.0)
+SUNO_PUBLIC_ENABLED = env_flag("SUNO_PUBLIC_ENABLED", "false")
+SUNO_ADMIN_SMOKE_ENABLED = env_flag("SUNO_ADMIN_SMOKE_ENABLED", "true")
+SUNO_REQUIRE_SMOKE_PASS = env_flag("SUNO_REQUIRE_SMOKE_PASS", "true")
+MINIMAX_TTS_ENDPOINT = _env("MINIMAX_TTS_ENDPOINT", "")
+MINIMAX_TTS_MODEL = _env("MINIMAX_TTS_MODEL", "")
+MINIMAX_VOICE_CLONE_ENDPOINT = _env("MINIMAX_VOICE_CLONE_ENDPOINT", "")
+MINIMAX_VOICE_JOB_ENDPOINT = _env("MINIMAX_VOICE_JOB_ENDPOINT", "")
+MINIMAX_ADMIN_SMOKE_ENABLED = env_flag("MINIMAX_ADMIN_SMOKE_ENABLED", "true")
+MINIMAX_VOICE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_PUBLIC_ENABLED", "false")
+MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_CLONE_PUBLIC_ENABLED", "false")
+MINIMAX_REQUIRE_SMOKE_PASS = env_flag("MINIMAX_REQUIRE_SMOKE_PASS", "true")
 WOKU_ENABLED = env_flag("WOKU_ENABLED", _env("WOKUSHOP_ENABLED", "false"))
 WOKU_PUBLIC_ENABLED = env_flag("WOKU_PUBLIC_ENABLED", _env("WOKUSHOP_PUBLIC_ENABLED", "false"))
 WOKU_ADMIN_SMOKE_ENABLED = env_flag("WOKU_ADMIN_SMOKE_ENABLED", _env("WOKUSHOP_ADMIN_SMOKE_ENABLED", "false"))
@@ -2429,6 +2440,36 @@ def init_db():
         worker_id TEXT,
         updated_at TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS voice_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        provider TEXT DEFAULT '',
+        provider_voice_id TEXT DEFAULT '',
+        display_name TEXT DEFAULT '',
+        consent_status TEXT DEFAULT 'required',
+        source_file_id TEXT DEFAULT '',
+        status TEXT DEFAULT 'draft',
+        created_at TEXT,
+        updated_at TEXT,
+        last_used_at TEXT,
+        metadata_json TEXT DEFAULT ''
+    )""")
+    voice_profile_columns = _table_columns(c, "voice_profiles")
+    for column_name, column_sql in [
+        ("provider", "provider TEXT DEFAULT ''"),
+        ("provider_voice_id", "provider_voice_id TEXT DEFAULT ''"),
+        ("display_name", "display_name TEXT DEFAULT ''"),
+        ("consent_status", "consent_status TEXT DEFAULT 'required'"),
+        ("source_file_id", "source_file_id TEXT DEFAULT ''"),
+        ("status", "status TEXT DEFAULT 'draft'"),
+        ("created_at", "created_at TEXT"),
+        ("updated_at", "updated_at TEXT"),
+        ("last_used_at", "last_used_at TEXT"),
+        ("metadata_json", "metadata_json TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(c, "voice_profiles", column_name, column_sql, voice_profile_columns)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_voice_profiles_user_id ON voice_profiles(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_voice_profiles_status ON voice_profiles(status)")
     c.execute("""CREATE TABLE IF NOT EXISTS shopaikey_jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -36254,16 +36295,31 @@ def get_image_edit_provider_readiness(user_id=None) -> dict:
     for item in providers:
         missing.extend(item.get("missing_env") or [])
     fallback = providers[0] if providers else {}
+    active = selected or fallback
+    smoke_lookup = {
+        "shopaikey_image_edit": "shopaikey_image_edit",
+        "key4u_image_edit": "key4u_image_edit",
+        "gemini_image_edit": "gemini_image_edit",
+        "openai_image_edit": "ai_image_edit",
+    }.get(str(active.get("provider") or ""), "ai_image_edit")
+    smoke_snapshot = get_tool_test_result(smoke_lookup)
     return {
         "ready": bool(selected),
-        "provider": (selected or fallback).get("provider"),
-        "model": (selected or fallback).get("model"),
-        "endpoint": (selected or fallback).get("endpoint"),
+        "provider": active.get("provider"),
+        "model": active.get("model"),
+        "endpoint": active.get("endpoint"),
+        "endpoint_configured": bool(active.get("endpoint") and active.get("endpoint") != "missing"),
+        "api_key_configured": not bool(active.get("missing_env") and any("API_KEY" in str(item) for item in active.get("missing_env") or [])),
         "public_enabled": bool((selected or {}).get("public_enabled")),
         "admin_tested": bool((selected or {}).get("admin_tested")),
-        "last_smoke": (selected or fallback).get("last_smoke"),
+        "admin_smoke_status": str(smoke_snapshot.get("status") or active.get("last_smoke") or "NOT_TESTED"),
+        "last_smoke": active.get("last_smoke"),
+        "last_smoke_at": smoke_snapshot.get("tested_at") or "",
         "reason": ((selected or {}).get("reason") if selected else "No real image edit provider is ready."),
+        "safe_user_message": "⚙️ Công cụ chỉnh sửa ảnh AI đang được kiểm tra nhà cung cấp. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+        "admin_debug_reason": ((selected or {}).get("reason") if selected else "No real image edit provider is ready."),
         "missing": list(dict.fromkeys(missing)),
+        "missing_env": list(dict.fromkeys(missing)),
         "providers": providers,
     }
 
@@ -54255,6 +54311,7 @@ def video_tier_status_text() -> str:
 
 def subtitle_dub_status_text() -> str:
     pipeline = video_pipeline_status_payload()
+    readiness = get_subtitle_dub_readiness()
     rows = []
     for mode in (VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB):
         cap = video_dubbing_capability(mode, public=True)
@@ -54270,6 +54327,8 @@ def subtitle_dub_status_text() -> str:
         f"• TTS: <code>{html.escape(str(pipeline.get('tts_provider') or '-'))}</code> | test <code>{html.escape(str(pipeline.get('tts_test') or '-'))}</code>",
         f"• FFmpeg mux: <code>{html.escape(str(pipeline.get('ffmpeg_mux') or '-'))}</code>",
         f"• Subtitle burn-in: <code>{html.escape(str(pipeline.get('subtitle_burn_in') or '-'))}</code>",
+        f"• Pipeline ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code> | public <code>{'YES' if readiness.get('public_enabled') else 'NO'}</code>",
+        f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or readiness.get('reason') or '-'))}</code>",
         "",
         "<b>Public modes</b>",
         *rows,
@@ -54279,13 +54338,16 @@ def subtitle_dub_status_text() -> str:
 
 def voice_status_text() -> str:
     key4u_payload = key4u_status_payload()
+    minimax = get_minimax_voice_readiness()
     return "\n".join([
         "🎙 <b>VOICE / TTS STATUS</b>",
         "",
         f"• ShopAIKey TTS: <code>{'READY_CONFIGURED' if (SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY) else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(preferred_tool_test_status_text('shopaikey_tts', 'tts'))}</code>",
         f"• ElevenLabs: <code>{'CONFIGURED' if ELEVENLABS_API_KEY else 'MISSING'}</code> | smoke <code>{html.escape(tool_test_status_text('elevenlabs_status'))}</code>",
         f"• Key4U TTS: <code>{'CONFIGURED' if (key4u_payload.get('configured') and KEY4U_TTS_ENDPOINT and KEY4U_TTS_MODEL) else 'NEED_DOCS'}</code> | smoke <code>{html.escape(tool_test_status_text('key4u_tts'))}</code>",
-        "• Public voice/TTS stays under existing product guards; no key is shown.",
+        f"• MiniMax Voice: <code>{'READY_CONFIGURED' if minimax.get('ready') else 'GUARDED/NEED_DOCS'}</code> | public <code>{'ON' if minimax.get('public_enabled') else 'OFF'}</code> | smoke <code>{html.escape(str(minimax.get('admin_smoke_status') or '-'))}</code>",
+        f"• MiniMax reason: <code>{html.escape(str(minimax.get('admin_debug_reason') or '-'))}</code>",
+        "• Public voice/TTS stays under existing product guards; 200 video tier cannot buy paid voice add-ons.",
     ])
 
 def music_status_text() -> str:
@@ -54299,20 +54361,200 @@ def music_status_text() -> str:
     ])
 
 def suno_status_text() -> str:
+    readiness = get_suno_music_readiness()
     return "\n".join([
         "🎼 <b>SUNO STATUS</b>",
         "",
-        f"• Key4U enabled: <code>{'YES' if KEY4U_ENABLED else 'NO'}</code>",
-        f"• Key4U configured: <code>{'YES' if (KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_ADMIN_SMOKE_ENABLED) else 'NO'}</code>",
-        f"• Create endpoint: <code>{'configured' if KEY4U_SUNO_CREATE_ENDPOINT else 'NEED_DOCS'}</code>",
-        f"• Query endpoint: <code>{'configured' if KEY4U_SUNO_QUERY_ENDPOINT else 'NEED_DOCS'}</code>",
-        f"• Model: <code>{html.escape(KEY4U_SUNO_MODEL or 'auto/NEED_DOCS')}</code>",
-        f"• Last smoke: <code>{html.escape(preferred_tool_test_status_text('key4u_suno', 'key4u_suno_job'))}</code>",
-        "• Public: <code>COMING_SOON</code>. Không gọi API cho user thường và không trừ Xu.",
+        f"• Provider: <code>{html.escape(str(readiness.get('provider') or '-'))}</code>",
+        f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>",
+        f"• Public enabled: <code>{'YES' if readiness.get('public_enabled') else 'NO'}</code>",
+        f"• Endpoint configured: <code>{'YES' if readiness.get('endpoint_configured') else 'NO'}</code>",
+        f"• API key configured: <code>{'YES' if readiness.get('api_key_configured') else 'NO'}</code>",
+        f"• Model: <code>{html.escape(str(readiness.get('model') or 'auto/NEED_DOCS'))}</code>",
+        f"• Last smoke: <code>{html.escape(str(readiness.get('admin_smoke_status') or '-'))}</code>",
+        f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or readiness.get('reason') or '-'))}</code>",
+        "• 200 tier add-ons: <code>locked</code>. Suno chỉ mở từ gói 300+ hoặc sản phẩm riêng có xác nhận giá.",
     ])
+
+def _media_readiness_snapshot(tool_name: str, *fallback_tool_names: str) -> dict:
+    return preferred_tool_test_result(tool_name, *fallback_tool_names) if fallback_tool_names else get_tool_test_result(tool_name)
+
+def _media_readiness_payload(
+    *,
+    name: str,
+    provider: str,
+    model: str = "",
+    endpoint: str = "",
+    api_key_configured: bool = False,
+    endpoint_configured: bool = False,
+    admin_smoke_tool: str = "",
+    public_enabled: bool = False,
+    ready: bool = False,
+    reason: str = "",
+    missing_env: list[str] | None = None,
+    safe_user_message: str = "",
+) -> dict:
+    snapshot = _media_readiness_snapshot(admin_smoke_tool) if admin_smoke_tool else {}
+    smoke_status = str(snapshot.get("status") or "NOT_TESTED")
+    return {
+        "name": name,
+        "ready": bool(ready),
+        "provider": provider,
+        "model": model or "auto/NEED_DOCS",
+        "endpoint_configured": bool(endpoint_configured),
+        "endpoint": "configured" if endpoint_configured else "NEED_DOCS/NOT_CONFIGURED",
+        "api_key_configured": bool(api_key_configured),
+        "public_enabled": bool(public_enabled),
+        "admin_smoke_status": smoke_status,
+        "last_smoke_at": snapshot.get("tested_at") or "",
+        "reason": reason or ("ready" if ready else "not_ready"),
+        "missing_env": list(dict.fromkeys(missing_env or [])),
+        "safe_user_message": safe_user_message or "⚙️ Tính năng đang được kiểm tra nhà cung cấp. TOAN AAS chưa gọi API và chưa trừ Xu.",
+        "admin_debug_reason": reason or ("ready" if ready else "not_ready"),
+    }
+
+def get_suno_music_readiness() -> dict:
+    missing = []
+    for name, ok in [
+        ("KEY4U_ENABLED", KEY4U_ENABLED),
+        ("KEY4U_API_KEY", bool(KEY4U_API_KEY)),
+        ("KEY4U_ADMIN_SMOKE_ENABLED", KEY4U_ADMIN_SMOKE_ENABLED),
+        ("KEY4U_SUNO_CREATE_ENDPOINT", bool(KEY4U_SUNO_CREATE_ENDPOINT)),
+        ("KEY4U_DEFAULT_MUSIC_MODEL/KEY4U_SUNO_MODEL", bool(KEY4U_SUNO_MODEL)),
+    ]:
+        if not ok:
+            missing.append(name)
+    smoke = preferred_tool_test_status_text("key4u_suno", "key4u_suno_job")
+    configured = not missing
+    public_ready = bool(configured and SUNO_PUBLIC_ENABLED and (smoke == "PASS_SUBMITTED" or smoke == "PASS" or not SUNO_REQUIRE_SMOKE_PASS))
+    reason = "ready" if configured else "Missing " + ", ".join(missing)
+    if configured and not public_ready:
+        reason = "configured_for_admin_smoke; public gate remains closed until smoke/cost pass"
+    return _media_readiness_payload(
+        name="suno_music",
+        provider="key4u_suno",
+        model=KEY4U_SUNO_MODEL,
+        endpoint=KEY4U_SUNO_CREATE_ENDPOINT,
+        api_key_configured=bool(KEY4U_API_KEY),
+        endpoint_configured=bool(KEY4U_SUNO_CREATE_ENDPOINT),
+        admin_smoke_tool="key4u_suno",
+        public_enabled=public_ready,
+        ready=configured,
+        reason=reason,
+        missing_env=missing,
+        safe_user_message="⚙️ Tạo nhạc AI/Suno đang được kiểm tra. Bạn vẫn có thể dùng nhạc có sẵn; TOAN AAS chưa gọi provider và chưa trừ Xu.",
+    )
+
+def get_minimax_voice_readiness() -> dict:
+    missing = []
+    for name, ok in [
+        ("MINIMAX_API_KEY", bool(MINIMAX_API_KEY)),
+        ("MINIMAX_GROUP_ID", bool(MINIMAX_GROUP_ID)),
+        ("MINIMAX_TTS_ENDPOINT", bool(MINIMAX_TTS_ENDPOINT)),
+        ("MINIMAX_TTS_MODEL", bool(MINIMAX_TTS_MODEL)),
+    ]:
+        if not ok:
+            missing.append(name)
+    smoke = preferred_tool_test_status_text("minimax_tts", "minimax_voice_clone", "minimax_voice_job")
+    configured = not missing
+    public_ready = bool(configured and MINIMAX_VOICE_PUBLIC_ENABLED and (smoke == "PASS" or not MINIMAX_REQUIRE_SMOKE_PASS))
+    reason = "ready" if configured else "Missing " + ", ".join(missing)
+    if configured and not public_ready:
+        reason = "configured_for_admin_smoke; public voice gate remains closed until smoke/cost pass"
+    return _media_readiness_payload(
+        name="minimax_voice",
+        provider="minimax",
+        model=MINIMAX_TTS_MODEL,
+        endpoint=MINIMAX_TTS_ENDPOINT,
+        api_key_configured=bool(MINIMAX_API_KEY and MINIMAX_GROUP_ID),
+        endpoint_configured=bool(MINIMAX_TTS_ENDPOINT),
+        admin_smoke_tool="minimax_tts",
+        public_enabled=public_ready,
+        ready=configured,
+        reason=reason,
+        missing_env=missing,
+        safe_user_message="⚙️ MiniMax Voice đang được kiểm tra. Voice clone chỉ mở khi có đồng ý rõ ràng; TOAN AAS chưa gọi provider và chưa trừ Xu.",
+    )
+
+def get_asr_readiness() -> dict:
+    missing = []
+    if not VIDEO_ASR_ENABLED:
+        missing.append("VIDEO_ASR_ENABLED")
+    if ASR_PROVIDER not in {"deepgram", "auto"}:
+        missing.append("ASR_PROVIDER=deepgram/auto")
+    if not DEEPGRAM_API_KEY:
+        missing.append("DEEPGRAM_API_KEY")
+    configured = not missing
+    return _media_readiness_payload(
+        name="asr",
+        provider="deepgram" if DEEPGRAM_API_KEY else "missing",
+        model=ASR_PROVIDER,
+        endpoint="Deepgram listen API",
+        api_key_configured=bool(DEEPGRAM_API_KEY),
+        endpoint_configured=bool(DEEPGRAM_API_KEY),
+        admin_smoke_tool="asr",
+        public_enabled=bool(configured and (VIDEO_SUBTITLE_PUBLIC_ENABLED or VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED or VIDEO_DUB_PUBLIC_ENABLED or VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED)),
+        ready=configured,
+        reason="ready" if configured else "Missing " + ", ".join(missing),
+        missing_env=missing,
+        safe_user_message="⚙️ Công cụ lấy lời thoại/phụ đề đang được kiểm tra. TOAN AAS chưa xử lý video và chưa trừ Xu.",
+    )
+
+def get_subtitle_dub_readiness() -> dict:
+    pipeline = video_pipeline_status_payload()
+    asr = get_asr_readiness()
+    modes = {}
+    for mode in (VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB):
+        cap = video_dubbing_capability(mode, public=True)
+        modes[mode] = {
+            "ready": bool(cap.get("ok")),
+            "reason": cap.get("reason") or "not_ready",
+            "missing": cap.get("missing") or [],
+            "public_enabled": video_dubbing_public_flag(mode),
+            "smoke_status": preferred_tool_test_status_text(_subtitle_dub_required_smoke(mode)),
+        }
+    ready = any(item.get("ready") for item in modes.values())
+    missing = []
+    for item in modes.values():
+        missing.extend(item.get("missing") or [])
+    return {
+        **_media_readiness_payload(
+            name="subtitle_dub_pipeline",
+            provider="deepgram+translation+tts+worker",
+            model=f"asr={pipeline.get('asr_provider')}; tts={pipeline.get('tts_provider')}",
+            endpoint="pipeline",
+            api_key_configured=bool(asr.get("api_key_configured")),
+            endpoint_configured=bool(asr.get("endpoint_configured")),
+            admin_smoke_tool="subtitle_plus_dub",
+            public_enabled=any(item.get("public_enabled") for item in modes.values()),
+            ready=ready,
+            reason="ready" if ready else "No subtitle/dub public mode is ready",
+            missing_env=list(dict.fromkeys(missing)),
+            safe_user_message="⚙️ Phụ đề/lồng tiếng đang được kiểm tra theo từng bước. TOAN AAS chưa xử lý video và chưa trừ Xu.",
+        ),
+        "pipeline": pipeline,
+        "modes": modes,
+    }
+
+def get_media_ai_public_status() -> dict:
+    image = get_image_edit_provider_readiness()
+    suno = get_suno_music_readiness()
+    minimax = get_minimax_voice_readiness()
+    asr = get_asr_readiness()
+    subtitle = get_subtitle_dub_readiness()
+    return {
+        "image_edit": image,
+        "suno_music": suno,
+        "minimax_voice": minimax,
+        "asr": asr,
+        "subtitle_dub": subtitle,
+        "video_200_paid_addons_locked": True,
+        "public_ready_count": sum(1 for item in (image, suno, minimax, asr, subtitle) if item.get("public_enabled")),
+    }
 
 def system_public_status_text() -> str:
     video = video_public_status_payload()
+    media_ai = get_media_ai_public_status()
     return "\n".join([
         "🌐 <b>TOAN AAS PUBLIC STATUS</b>",
         "",
@@ -54331,6 +54573,7 @@ def system_public_status_text() -> str:
         f"• Video 1500: <code>COMING_SOON</code>",
         f"• Long video: <code>OFF</code>",
         f"• Voice/Music: <code>ON/GUARDED</code>",
+        f"• Media AI: image_edit <code>{'ON' if media_ai['image_edit'].get('public_enabled') else 'GUARDED'}</code> | Suno <code>{'ON' if media_ai['suno_music'].get('public_enabled') else 'GUARDED'}</code> | MiniMax Voice <code>{'ON' if media_ai['minimax_voice'].get('public_enabled') else 'GUARDED'}</code> | subtitle/dub <code>{'ON' if media_ai['subtitle_dub'].get('public_enabled') else 'GUARDED'}</code>",
         f"• Document/PDF: <code>ON</code>",
         f"• Storage addon: <code>ON</code>",
         f"• Billing: <code>ON</code>",
@@ -54736,6 +54979,149 @@ async def cmd_suno_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await update.message.reply_text(suno_status_text(), parse_mode="HTML")
 
+async def cmd_minimax_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    readiness = get_minimax_voice_readiness()
+    lines = [
+        "🎙 <b>MINIMAX VOICE STATUS</b>",
+        "",
+        f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>",
+        f"• Public enabled: <code>{'YES' if readiness.get('public_enabled') else 'NO'}</code>",
+        f"• Endpoint configured: <code>{'YES' if readiness.get('endpoint_configured') else 'NO'}</code>",
+        f"• API key/group configured: <code>{'YES' if readiness.get('api_key_configured') else 'NO'}</code>",
+        f"• Model: <code>{html.escape(str(readiness.get('model') or '-'))}</code>",
+        f"• Last smoke: <code>{html.escape(str(readiness.get('admin_smoke_status') or '-'))}</code>",
+        f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or readiness.get('reason') or '-'))}</code>",
+        "",
+        "Voice clone/profile requires explicit user consent and stays user-scoped. No key/token is shown.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    readiness = get_minimax_voice_readiness()
+    if not readiness.get("ready"):
+        detail = f"missing={','.join(readiness.get('missing_env') or [])}; reason={readiness.get('admin_debug_reason')}"
+        save_tool_test_result("minimax_tts", "NEED_DOCS", detail, uid)
+        return await update.message.reply_text(
+            "🎙 <b>MiniMax TTS Smoke</b>\n\n"
+            "• Status: <code>NEED_DOCS/NOT_CONFIGURED</code>\n"
+            f"• Missing: <code>{html.escape(', '.join(readiness.get('missing_env') or []) or '-')}</code>\n"
+            "• Không gọi provider, không tạo audio giả, không trừ Xu.",
+            parse_mode="HTML",
+        )
+    save_tool_test_result("minimax_tts", "NEED_IMPLEMENTATION", "MiniMax endpoint configured but direct call adapter is not wired; no provider call", uid)
+    await update.message.reply_text(
+        "🎙 <b>MiniMax TTS Smoke</b>\n\n"
+        "• Status: <code>NEED_IMPLEMENTATION</code>\n"
+        "• Endpoint/model đã cấu hình nhưng bot chưa có adapter MiniMax direct đã kiểm chứng.\n"
+        "• Không gọi endpoint đoán mò, không tạo audio giả, không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    readiness = get_minimax_voice_readiness()
+    if not MINIMAX_VOICE_CLONE_ENDPOINT:
+        save_tool_test_result("minimax_voice_clone", "NEED_DOCS", "MINIMAX_VOICE_CLONE_ENDPOINT missing; no provider call", uid)
+        return await update.message.reply_text(
+            "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
+            "• Status: <code>NEED_DOCS/NOT_CONFIGURED</code>\n"
+            "• Env thiếu: <code>MINIMAX_VOICE_CLONE_ENDPOINT</code>\n"
+            "• Voice clone cần file mẫu + đồng ý rõ ràng; lệnh này chưa gọi provider và chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+    save_tool_test_result("minimax_voice_clone", "CONSENT_REQUIRED", "clone endpoint configured; admin must reply consented sample before future adapter call", uid)
+    await update.message.reply_text(
+        "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
+        "• Status: <code>CONSENT_REQUIRED / ADAPTER_GUARDED</code>\n"
+        f"• Provider ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
+        "• Bot không clone giọng nếu chưa có consent/sample hợp lệ. Không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_minimax_voice_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /minimax_voice_job <task_id>")
+    from providers.key4u_provider import is_placeholder_task_id
+    task_id = str(context.args[0] or "").strip()
+    if is_placeholder_task_id(task_id):
+        return await update.message.reply_text("Vui lòng dùng task_id thật do lệnh smoke MiniMax trả về. Hiện chưa có task_id vì adapter chưa submit thành công.")
+    save_tool_test_result("minimax_voice_job", "NEED_IMPLEMENTATION", f"task_id={sanitize_log_text(task_id)[:80]}; no direct query adapter", update.effective_user.id)
+    await update.message.reply_text(
+        "🎙 <b>MiniMax Voice Job</b>\n\n"
+        "• Status: <code>NEED_IMPLEMENTATION</code>\n"
+        "• Bot chưa có adapter query MiniMax đã kiểm chứng. Không gọi endpoint đoán mò và không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+async def cmd_suno_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global SUNO_PUBLIC_ENABLED
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    readiness = get_suno_music_readiness()
+    smoke = preferred_tool_test_status_text("key4u_suno", "key4u_suno_job")
+    if not readiness.get("ready") or (SUNO_REQUIRE_SMOKE_PASS and smoke not in {"PASS", "PASS_SUBMITTED", "SUCCESS"}):
+        return await update.message.reply_text(
+            "🎼 <b>Không mở Suno public.</b>\n\n"
+            f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
+            f"• Smoke: <code>{html.escape(smoke)}</code>\n"
+            f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or '-'))}</code>\n\n"
+            "Không gọi provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    SUNO_PUBLIC_ENABLED = True
+    set_system_setting("suno_public_enabled", "1", "Suno public opened after admin smoke", uid)
+    await update.message.reply_text("✅ Đã mở Suno public gate. Gói video 200 vẫn khóa add-on trả phí; Suno chỉ dùng từ 300+ hoặc sản phẩm riêng có xác nhận giá.")
+
+async def cmd_suno_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global SUNO_PUBLIC_ENABLED
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    SUNO_PUBLIC_ENABLED = False
+    set_system_setting("suno_public_enabled", "0", "Suno public closed", uid)
+    await update.message.reply_text("✅ Đã đóng Suno public. Admin smoke vẫn dùng được nếu cấu hình đủ.")
+
+async def cmd_voice_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global MINIMAX_VOICE_PUBLIC_ENABLED
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    readiness = get_minimax_voice_readiness()
+    smoke = preferred_tool_test_status_text("minimax_tts", "key4u_tts", "shopaikey_tts")
+    if not readiness.get("ready") or (MINIMAX_REQUIRE_SMOKE_PASS and smoke not in {"PASS", "SUCCESS"}):
+        return await update.message.reply_text(
+            "🎙 <b>Không mở MiniMax Voice public.</b>\n\n"
+            f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
+            f"• Smoke: <code>{html.escape(smoke)}</code>\n"
+            f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or '-'))}</code>\n\n"
+            "Không gọi provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    MINIMAX_VOICE_PUBLIC_ENABLED = True
+    set_system_setting("minimax_voice_public_enabled", "1", "MiniMax voice public opened after admin smoke", uid)
+    await update.message.reply_text("✅ Đã mở MiniMax Voice public gate. Voice clone vẫn yêu cầu consent và xác nhận giá riêng.")
+
+async def cmd_voice_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    MINIMAX_VOICE_PUBLIC_ENABLED = False
+    MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = False
+    set_system_setting("minimax_voice_public_enabled", "0", "MiniMax voice public closed", uid)
+    set_system_setting("minimax_voice_clone_public_enabled", "0", "MiniMax voice clone public closed", uid)
+    await update.message.reply_text("✅ Đã đóng MiniMax Voice/clone public. Admin smoke vẫn dùng được nếu cấu hình đủ.")
+
 def _subtitle_dub_open_modes_from_args(args: list[str] | tuple[str, ...] | None = None) -> list[str]:
     raw = " ".join(str(item or "") for item in (args or [])).strip().lower()
     if not raw or raw in {"all", "safe"}:
@@ -54837,6 +55223,22 @@ async def cmd_video_dub_public_close(update: Update, context: ContextTypes.DEFAU
     await update.message.reply_text(
         "✅ Đã đóng public subtitle/dub theo mode đã chọn. Bot không gọi provider và không trừ Xu.",
     )
+
+async def cmd_subtitle_translate_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    original_args = list(getattr(context, "args", []) or [])
+    context.args = ["translate"]
+    try:
+        return await cmd_video_dub_public_open(update, context)
+    finally:
+        context.args = original_args
+
+async def cmd_subtitle_dub_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    original_args = list(getattr(context, "args", []) or [])
+    context.args = ["full"]
+    try:
+        return await cmd_video_dub_public_open(update, context)
+    finally:
+        context.args = original_args
 
 async def cmd_system_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -56156,8 +56558,12 @@ async def cmd_key4u_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     if not context.args:
         return await update.message.reply_text("Cú pháp: /key4u_suno_job <task_id>")
+    from providers.key4u_provider import is_placeholder_task_id
+    task_id = str(context.args[0] or "").strip()
+    if is_placeholder_task_id(task_id):
+        return await update.message.reply_text("Vui lòng dùng task_id thật do /tool_test_suno_music hoặc /tool_test_key4u_suno trả về. Hiện chưa có task_id nếu lệnh tạo nhạc chưa submit thành công.")
     provider = key4u_provider_instance()
-    result = await provider.suno_query(str(context.args[0] or "").strip())
+    result = await provider.suno_query(task_id)
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_suno_job", result.get("status") or "FAIL", detail, update.effective_user.id)
     record_api_debug("key4u", "key4u_suno_job", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
@@ -60516,7 +60922,28 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
 async def cmd_tool_test_video_subtitle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_CREATE)
 
+async def cmd_tool_test_subtitle_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_CREATE)
+
+async def cmd_tool_test_subtitle_translate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_TRANSLATE)
+
 async def cmd_tool_test_video_dub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_DUB)
+
+async def cmd_tool_test_minimax_dub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    readiness = get_minimax_voice_readiness()
+    if not readiness.get("ready"):
+        save_tool_test_result("minimax_dub", "NEED_DOCS", f"missing={','.join(readiness.get('missing_env') or [])}", update.effective_user.id)
+        return await update.message.reply_text(
+            "🎙 <b>MiniMax Dub Smoke</b>\n\n"
+            "• Status: <code>NEED_DOCS/NOT_CONFIGURED</code>\n"
+            f"• Missing: <code>{html.escape(', '.join(readiness.get('missing_env') or []) or '-')}</code>\n"
+            "• Không gọi provider, không tạo audio giả, không trừ Xu.",
+            parse_mode="HTML",
+        )
     return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_DUB)
 
 async def cmd_tool_test_subtitle_plus_dub(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -106295,7 +106722,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_key4u_tts", cmd_tool_test_key4u_tts))
     tg_app.add_handler(CommandHandler("tool_test_key4u_stt", cmd_tool_test_key4u_stt))
     tg_app.add_handler(CommandHandler("tool_test_key4u_suno", cmd_tool_test_key4u_suno))
+    tg_app.add_handler(CommandHandler("tool_test_suno_music", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("key4u_suno_job", cmd_key4u_suno_job))
+    tg_app.add_handler(CommandHandler("suno_job", cmd_key4u_suno_job))
     tg_app.add_handler(CommandHandler("tool_test_key4u_rerank", cmd_tool_test_key4u_rerank))
     tg_app.add_handler(CommandHandler("shopaikey_image", cmd_shopaikey_image_public))
     tg_app.add_handler(CommandHandler("shopaikey_video", cmd_shopaikey_video_public))
@@ -106304,17 +106733,30 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_asr", cmd_tool_test_asr))
     tg_app.add_handler(CommandHandler("tool_test_tts_for_dub", cmd_tool_test_tts))
     tg_app.add_handler(CommandHandler("tool_test_video_subtitle", cmd_tool_test_video_subtitle))
+    tg_app.add_handler(CommandHandler("tool_test_subtitle_generate", cmd_tool_test_subtitle_generate))
+    tg_app.add_handler(CommandHandler("tool_test_subtitle_translate", cmd_tool_test_subtitle_translate))
     tg_app.add_handler(CommandHandler("tool_test_video_dub", cmd_tool_test_video_dub))
+    tg_app.add_handler(CommandHandler("tool_test_minimax_dub", cmd_tool_test_minimax_dub))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_plus_dub", cmd_tool_test_subtitle_plus_dub))
     tg_app.add_handler(CommandHandler("subtitle_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("dub_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("music_status", cmd_music_status))
     tg_app.add_handler(CommandHandler("suno_status", cmd_suno_status))
+    tg_app.add_handler(CommandHandler("suno_public_open", cmd_suno_public_open))
+    tg_app.add_handler(CommandHandler("suno_public_close", cmd_suno_public_close))
+    tg_app.add_handler(CommandHandler("minimax_status", cmd_minimax_status))
+    tg_app.add_handler(CommandHandler("tool_test_minimax_tts", cmd_tool_test_minimax_tts))
+    tg_app.add_handler(CommandHandler("tool_test_minimax_voice_clone", cmd_tool_test_minimax_voice_clone))
+    tg_app.add_handler(CommandHandler("minimax_voice_job", cmd_minimax_voice_job))
+    tg_app.add_handler(CommandHandler("voice_public_open", cmd_voice_public_open))
+    tg_app.add_handler(CommandHandler("voice_public_close", cmd_voice_public_close))
     tg_app.add_handler(CommandHandler("video_dub_public_open", cmd_video_dub_public_open))
     tg_app.add_handler(CommandHandler("video_dub_public_close", cmd_video_dub_public_close))
     tg_app.add_handler(CommandHandler("subtitle_public_open", cmd_video_dub_public_open))
     tg_app.add_handler(CommandHandler("subtitle_public_close", cmd_video_dub_public_close))
+    tg_app.add_handler(CommandHandler("subtitle_translate_public_open", cmd_subtitle_translate_public_open))
+    tg_app.add_handler(CommandHandler("subtitle_dub_public_open", cmd_subtitle_dub_public_open))
     tg_app.add_handler(CommandHandler("dub_public_open", cmd_video_dub_public_open))
     tg_app.add_handler(CommandHandler("dub_public_close", cmd_video_dub_public_close))
     tg_app.add_handler(CommandHandler("tool_test_image", cmd_tool_test_image))
@@ -106322,6 +106764,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_ai_image", cmd_tool_test_ai_image))
     tg_app.add_handler(CommandHandler("tool_test_ai_image_edit", cmd_tool_test_ai_image_edit))
     tg_app.add_handler(CommandHandler("tool_test_image_edit", cmd_tool_test_ai_image_edit))
+    tg_app.add_handler(CommandHandler("tool_test_openai_image_edit", cmd_tool_test_ai_image_edit))
     tg_app.add_handler(CommandHandler("tool_test_gemini_image_edit", cmd_tool_test_gemini_image_edit))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_image_edit", cmd_tool_test_shopaikey_image_edit))
     tg_app.add_handler(CommandHandler("image_edit_public_open", cmd_image_edit_public_open))

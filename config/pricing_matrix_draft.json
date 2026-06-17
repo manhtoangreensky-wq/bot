@@ -191,8 +191,11 @@
       "voice_advanced": 100,
       "voice_transform": 150,
       "voice_premium_preset": 200,
+      "ai_voice_minimax_basic": 150,
+      "ai_voice_minimax_custom": 250,
       "voice_clone_create": 600,
       "voice_clone_reuse": 100,
+      "voice_clone_profile": 600,
       "suno_music": 300,
       "suno_variation": 150,
       "lyrics_ai": 80,
@@ -253,6 +256,13 @@
     "ai_edit": {
       "label_vi": "Chỉnh sửa ảnh AI",
       "price_xu": 350,
+      "provider_cost_xu_estimate": null,
+      "public_status": "guarded_until_smoke_pass",
+      "margin_status": "NEED_COST"
+    },
+    "ai_upscale": {
+      "label_vi": "Nâng chất lượng ảnh AI",
+      "price_xu": 300,
       "provider_cost_xu_estimate": null,
       "public_status": "guarded_until_smoke_pass",
       "margin_status": "NEED_COST"

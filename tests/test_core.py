@@ -9385,6 +9385,69 @@ def test_video_200_experience_tier_locks_paid_addons_and_extensions():
     assert bot.calculate_short_video_quote("standard", 61, 8, [])["route_to_long_video"] is True
 
 
+def test_media_ai_readiness_contracts_and_commands_registered():
+    source = bot_source_text()
+    required_commands = {
+        "tool_test_openai_image_edit": "cmd_tool_test_ai_image_edit",
+        "tool_test_suno_music": "cmd_tool_test_key4u_suno",
+        "suno_job": "cmd_key4u_suno_job",
+        "suno_public_open": "cmd_suno_public_open",
+        "suno_public_close": "cmd_suno_public_close",
+        "minimax_status": "cmd_minimax_status",
+        "tool_test_minimax_tts": "cmd_tool_test_minimax_tts",
+        "tool_test_minimax_voice_clone": "cmd_tool_test_minimax_voice_clone",
+        "minimax_voice_job": "cmd_minimax_voice_job",
+        "voice_public_open": "cmd_voice_public_open",
+        "voice_public_close": "cmd_voice_public_close",
+        "tool_test_subtitle_generate": "cmd_tool_test_subtitle_generate",
+        "tool_test_subtitle_translate": "cmd_tool_test_subtitle_translate",
+        "tool_test_minimax_dub": "cmd_tool_test_minimax_dub",
+        "subtitle_translate_public_open": "cmd_subtitle_translate_public_open",
+        "subtitle_dub_public_open": "cmd_subtitle_dub_public_open",
+    }
+    for command, handler in required_commands.items():
+        assert len(command) <= 32
+        assert f'CommandHandler("{command}", {handler})' in source
+
+    for payload in [
+        bot.get_image_edit_provider_readiness(),
+        bot.get_suno_music_readiness(),
+        bot.get_minimax_voice_readiness(),
+        bot.get_asr_readiness(),
+        bot.get_subtitle_dub_readiness(),
+    ]:
+        for field in [
+            "ready",
+            "provider",
+            "model",
+            "endpoint_configured",
+            "api_key_configured",
+            "public_enabled",
+            "admin_smoke_status",
+            "last_smoke_at",
+            "safe_user_message",
+            "admin_debug_reason",
+        ]:
+            assert field in payload
+
+    public_status = bot.get_media_ai_public_status()
+    assert public_status["video_200_paid_addons_locked"] is True
+    assert set(public_status) >= {"image_edit", "suno_music", "minimax_voice", "asr", "subtitle_dub"}
+
+
+def test_media_ai_voice_profiles_schema_and_pricing_matrix():
+    source = bot_source_text()
+    assert "CREATE TABLE IF NOT EXISTS voice_profiles" in source
+    assert "consent_status TEXT DEFAULT 'required'" in source
+    assert "idx_voice_profiles_user_id" in source
+    matrix = json.loads(Path("config/pricing_matrix_draft.json").read_text(encoding="utf-8"))
+    paid_addons = matrix["video_addons"]["paid_addons_under_60s"]
+    assert paid_addons["ai_voice_minimax_basic"] > 0
+    assert paid_addons["voice_clone_profile"] == paid_addons["voice_clone_create"]
+    assert "ai_upscale" in matrix["image_tools"]
+    assert matrix["video_tiers"]["low"]["allow_paid_addons"] is False
+
+
 def test_video_addon_menu_and_shared_flow_hooks():
     callbacks = [button.callback_data for row in bot.video_addon_menu_keyboard("vi").inline_keyboard for button in row]
     for callback in [

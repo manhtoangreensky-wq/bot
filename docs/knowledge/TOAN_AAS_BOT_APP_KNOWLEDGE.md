@@ -55,6 +55,12 @@ Chat AI có thể phân tích ảnh, đọc chữ trong ảnh, tư vấn thiết
 
 Pipeline chuẩn: video đầu vào -> ASR -> phụ đề -> dịch nếu cần -> TTS nếu cần -> ghép audio/subtitle nếu worker sẵn sàng -> gửi file output. Mỗi mode chỉ mở public khi provider và smoke test tương ứng pass.
 
+## Media AI provider gate
+
+Chỉnh sửa ảnh AI, Suno music, MiniMax Voice và pipeline phụ đề/lồng tiếng đều đi qua cùng nguyên tắc: provider readiness -> admin smoke -> public gate -> pricing -> confirm -> job -> output thật -> lỗi thân thiện. Nếu chưa có endpoint/model/tài liệu thật, hệ thống trả NEED_DOCS/NOT_CONFIGURED cho admin và báo bảo trì/nâng cấp cho khách, không fake output.
+
+Gói Video Trải Nghiệm 200 Xu khóa toàn bộ add-on trả phí. Suno, MiniMax Voice, phụ đề/lồng tiếng chỉ mở từ gói 300 Xu trở lên hoặc thành sản phẩm riêng có màn xác nhận giá.
+
 ## Nạp Xu
 
 Người dùng mở Nạp Xu/Bảng giá trong bot hoặc app. PayOS/VND và các phương thức thủ công đã có policy riêng. Bot không tự cộng Xu nếu giao dịch chưa được xác nhận theo cơ chế thanh toán hiện hành.

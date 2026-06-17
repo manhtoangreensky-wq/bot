@@ -1,35 +1,34 @@
-# TOAN AAS Subtitle/Dub Pipeline Report 2026-06-20
-
-Date: 2026-06-17
+# TOAN AAS Subtitle/Dub Pipeline Report - 2026-06-20
 
 ## Pipeline
 
-Input video -> ASR -> subtitle SRT/VTT -> translation if selected -> TTS if selected -> mux/burn-in if worker is ready -> output file.
+Upload media -> ASR -> subtitle -> optional translate -> TTS -> worker mux/burn if ready -> output.
 
-## Modes
-
-- Tạo phụ đề: requires ASR and subtitle smoke.
-- Dịch phụ đề: requires ASR, translation provider and subtitle smoke.
-- Lồng tiếng: requires ASR, TTS provider and dub smoke.
-- Phụ đề + lồng tiếng: requires the full selected provider path and subtitle+dub smoke.
+If worker mux/burn is not ready, admin smoke can return SRT/audio separately. The bot must not claim a merged video was produced.
 
 ## Commands
 
 - `/subtitle_dub_status`
-- `/subtitle_status`
 - `/tool_test_asr`
-- `/tool_test_translate`
-- `/tool_test_tts_for_dub`
 - `/tool_test_video_subtitle`
+- `/tool_test_subtitle_generate`
+- `/tool_test_subtitle_translate`
 - `/tool_test_video_dub`
+- `/tool_test_minimax_dub`
 - `/tool_test_subtitle_plus_dub`
-- `/video_dub_public_open`
-- `/video_dub_public_close`
+- `/subtitle_public_open`
+- `/subtitle_translate_public_open`
+- `/dub_public_open`
+- `/subtitle_dub_public_open`
+- `/dub_public_close`
 
-## Public gate
+## Gates
 
-`/video_dub_public_open` is owner-only and opens only modes with provider readiness and smoke PASS. It does not call providers or deduct Xu. Missing modes stay guarded.
+Each public mode requires:
 
-## Worker rule
+- feature flag ON
+- public flag ON
+- required provider present
+- admin smoke PASS
 
-Mux/burn-in depends on Local Worker/FFmpeg readiness. If mux is not ready, the system must return separate subtitle/audio outputs or keep the mode guarded, not silently fail.
+No public mode charges Xu before final confirmation.
