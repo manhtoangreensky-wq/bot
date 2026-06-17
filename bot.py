@@ -560,6 +560,8 @@ VIDEO_TIER_500_PUBLIC_ENABLED = env_flag("VIDEO_TIER_500_PUBLIC_ENABLED", "true"
 VIDEO_TIER_600_PUBLIC_ENABLED = env_flag("VIDEO_TIER_600_PUBLIC_ENABLED", "true")
 VIDEO_TIER_800_PUBLIC_ENABLED = env_flag("VIDEO_TIER_800_PUBLIC_ENABLED", "true")
 VIDEO_TIER_1000_PUBLIC_ENABLED = env_flag("VIDEO_TIER_1000_PUBLIC_ENABLED", "true")
+VIDEO_TIER_1200_PUBLIC_ENABLED = env_flag("VIDEO_TIER_1200_PUBLIC_ENABLED", "true")
+VIDEO_TIER_1500_PUBLIC_ENABLED = env_flag("VIDEO_TIER_1500_PUBLIC_ENABLED", "true")
 VIDEO_TIER_500_REQUIRE_SMOKE = env_flag("VIDEO_TIER_500_REQUIRE_SMOKE", "true")
 VIDEO_TIER_600_REQUIRE_SMOKE = env_flag("VIDEO_TIER_600_REQUIRE_SMOKE", "true")
 VIDEO_TIER_800_REQUIRE_SMOKE = env_flag("VIDEO_TIER_800_REQUIRE_SMOKE", "true")
@@ -1222,6 +1224,7 @@ VIDEO_STANDARD_COST_XU = env_int("VIDEO_STANDARD_COST_XU", VIDEO_STANDARD_PROVID
 VIDEO_HIGH_COST_XU = env_int("VIDEO_HIGH_COST_XU", 800)
 VIDEO_PREMIUM_COST_XU = env_int("VIDEO_PREMIUM_COST_XU", VIDEO_PREMIUM_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
 VIDEO_FUTURE_1000_COST_XU = env_int("VIDEO_FUTURE_1000_COST_XU", 1000)
+VIDEO_FUTURE_1200_COST_XU = env_int("VIDEO_FUTURE_1200_COST_XU", 1200)
 VIDEO_FUTURE_1500_COST_XU = env_int("VIDEO_FUTURE_1500_COST_XU", 1500)
 WORKFLOW_TREND_ANALYSIS_COST_XU = env_int("WORKFLOW_TREND_ANALYSIS_COST_XU", 20)
 WORKFLOW_SCRIPT_STORYBOARD_COST_XU = env_int("WORKFLOW_SCRIPT_STORYBOARD_COST_XU", 30)
@@ -1262,10 +1265,10 @@ VIDEO_VIDEO_TO_VIDEO_ENABLED = env_flag("VIDEO_VIDEO_TO_VIDEO_ENABLED", "false")
 VIDEO_LONG_RENDER_ENABLED = env_flag("VIDEO_LONG_RENDER_ENABLED", "false")
 VIDEO_TREND_RENDER_ENABLED = env_flag("VIDEO_TREND_RENDER_ENABLED", "false")
 VIDEO_PUBLIC_MAX_DURATION_SECONDS = max(1, env_int("VIDEO_PUBLIC_MAX_DURATION_SECONDS", 8))
-VIDEO_PUBLIC_ALLOWED_TIERS = _env("VIDEO_PUBLIC_ALLOWED_TIERS", "200,300,400,500,600,800,1000")
-VIDEO_PUBLIC_COMING_SOON_TIERS = _env("VIDEO_PUBLIC_COMING_SOON_TIERS", "1500")
+VIDEO_PUBLIC_ALLOWED_TIERS = _env("VIDEO_PUBLIC_ALLOWED_TIERS", "200,300,400,500,600,800,1000,1200,1500")
+VIDEO_PUBLIC_COMING_SOON_TIERS = _env("VIDEO_PUBLIC_COMING_SOON_TIERS", "")
 VIDEO_PUBLIC_BLOCKED_FEATURES = _env("VIDEO_PUBLIC_BLOCKED_FEATURES", "long_video,multi_episode,kling_public,seedance_public,image_to_video,video_to_video")
-VIDEO_PUBLIC_BLOCK_TIERS = _env("VIDEO_PUBLIC_BLOCK_TIERS", "premium,future_1500,long,kling,seedance")
+VIDEO_PUBLIC_BLOCK_TIERS = _env("VIDEO_PUBLIC_BLOCK_TIERS", "premium,long,kling,seedance")
 VIDEO_PUBLIC_BETA_ENABLED = env_flag("VIDEO_PUBLIC_BETA_ENABLED", "false")
 VIDEO_PUBLIC_MAX_COST_RATIO = max(0.0, env_float("VIDEO_PUBLIC_MAX_COST_RATIO", 0.5))
 VIDEO_PUBLIC_WARN_COST_RATIO = max(VIDEO_PUBLIC_MAX_COST_RATIO, env_float("VIDEO_PUBLIC_WARN_COST_RATIO", 0.6))
@@ -1307,6 +1310,8 @@ VIDEO_ADVANCED_EXTRA_SECOND_XU = max(0, env_int("VIDEO_ADVANCED_EXTRA_SECOND_XU"
 VIDEO_STANDARD_EXTRA_SECOND_XU = max(0, env_int("VIDEO_STANDARD_EXTRA_SECOND_XU", 50))
 VIDEO_HIGH_EXTRA_SECOND_XU = max(0, env_int("VIDEO_HIGH_EXTRA_SECOND_XU", 70))
 VIDEO_FUTURE_1000_EXTRA_SECOND_XU = max(0, env_int("VIDEO_FUTURE_1000_EXTRA_SECOND_XU", 100))
+VIDEO_FUTURE_1200_EXTRA_SECOND_XU = max(0, env_int("VIDEO_FUTURE_1200_EXTRA_SECOND_XU", 120))
+VIDEO_FUTURE_1500_EXTRA_SECOND_XU = max(0, env_int("VIDEO_FUTURE_1500_EXTRA_SECOND_XU", 150))
 VIDEO_LOW_EXTRA_SCENE_XU = max(0, env_int("VIDEO_LOW_EXTRA_SCENE_XU", 0))
 VIDEO_BASIC_EXTRA_SCENE_XU = max(0, env_int("VIDEO_BASIC_EXTRA_SCENE_XU", 30))
 VIDEO_COMMON_EXTRA_SCENE_XU = max(0, env_int("VIDEO_COMMON_EXTRA_SCENE_XU", 50))
@@ -1314,6 +1319,8 @@ VIDEO_ADVANCED_EXTRA_SCENE_XU = max(0, env_int("VIDEO_ADVANCED_EXTRA_SCENE_XU", 
 VIDEO_STANDARD_EXTRA_SCENE_XU = max(0, env_int("VIDEO_STANDARD_EXTRA_SCENE_XU", 100))
 VIDEO_HIGH_EXTRA_SCENE_XU = max(0, env_int("VIDEO_HIGH_EXTRA_SCENE_XU", 150))
 VIDEO_FUTURE_1000_EXTRA_SCENE_XU = max(0, env_int("VIDEO_FUTURE_1000_EXTRA_SCENE_XU", 200))
+VIDEO_FUTURE_1200_EXTRA_SCENE_XU = max(0, env_int("VIDEO_FUTURE_1200_EXTRA_SCENE_XU", 250))
+VIDEO_FUTURE_1500_EXTRA_SCENE_XU = max(0, env_int("VIDEO_FUTURE_1500_EXTRA_SCENE_XU", 300))
 VIDEO_SUBTITLE_AUTO_BASE_XU = max(0, env_int("VIDEO_SUBTITLE_AUTO_BASE_XU", 120))
 VIDEO_SUBTITLE_TRANSLATE_BASE_XU = max(0, env_int("VIDEO_SUBTITLE_TRANSLATE_BASE_XU", 150))
 VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU = max(0, env_int("VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU", 220))
@@ -32930,7 +32937,7 @@ def image_tier_choice_rows(callback_builder, lang: str = "vi") -> list[list[Inli
         for tier in IMAGE_TIER_ORDER
     ]
 
-VIDEO_TIER_ORDER = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1500")
+VIDEO_TIER_ORDER = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
 VIDEO_TIER_ICONS = {
     "low": "🟢",
     "basic": "🔹",
@@ -32939,6 +32946,7 @@ VIDEO_TIER_ICONS = {
     "standard": "🟣",
     "high": "⭐",
     "future_1000": "👑",
+    "future_1200": "👑",
     "future_1500": "👑",
 }
 
@@ -32993,19 +33001,26 @@ def video_tier_pricing_payload() -> dict:
             "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
             "note": "Gói public cao hơn để test/bán sản phẩm chất lượng hơn. Kling/Seedance vẫn là provider future riêng.",
         },
+        "future_1200": {
+            "label": "Video Pro Plus",
+            "cost": int(VIDEO_FUTURE_1200_COST_XU or 1200),
+            "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+            "note": "Gói public chất lượng cao hơn, vẫn đi qua provider/job guard trước khi trừ Xu.",
+        },
         "future_1500": {
-            "label": "Video Premium Future",
+            "label": "Video Premium",
             "cost": int(VIDEO_FUTURE_1500_COST_XU or 1500),
             "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
-            "model": "Kling/Seedance premium future",
-            "note": "Đang phát triển, chưa mở public, không tạo job.",
+            "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+            "note": "Gói public cao nhất hiện tại. Provider/job guard vẫn kiểm tra trước khi xử lý.",
         },
         "premium": {
             "label": "Video premium/admin-only",
             "cost": media_tier_price(VIDEO_PREMIUM_COST_XU, VIDEO_PREMIUM_PROVIDER_COST_XU, max(VIDEO_SERIES_COST, 2000)),
             "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
             "model": "premium/admin-only",
-            "note": "Compatibility alias. Public users should see configured public tiers; 1500/premium remains guarded.",
+            "note": "Compatibility alias. Public users should see configured public tiers; premium alias remains guarded.",
         },
     }
 
@@ -33017,8 +33032,9 @@ def video_tier_enabled_map() -> dict:
         "advanced": video_public_tier_enabled("advanced"),
         "standard": video_public_tier_enabled("standard"),
         "high": video_public_tier_enabled("high"),
-        "future_1000": False,
-        "future_1500": False,
+        "future_1000": video_public_tier_enabled("future_1000"),
+        "future_1200": video_public_tier_enabled("future_1200"),
+        "future_1500": video_public_tier_enabled("future_1500"),
     }
 
 def normalize_video_tier(value: str = "") -> str:
@@ -33038,6 +33054,8 @@ def normalize_video_tier(value: str = "") -> str:
         return "high"
     if tier in {"1000", "1000xu", "future_1000", "pro_1000", "professional"}:
         return "future_1000"
+    if tier in {"1200", "1200xu", "future_1200", "pro_1200", "pro_plus"}:
+        return "future_1200"
     if tier in {"1500", "1500xu", "future_1500", "premium_future"}:
         return "future_1500"
     if tier in {"standard", "std", "normal", "medium", "tieu_chuan"}:
@@ -33060,7 +33078,7 @@ def video_tier_payload(tier: str = "") -> dict:
     payload = dict(pricing.get(tier_norm) or pricing["low"])
     payload["tier"] = tier_norm
     payload["enabled"] = bool(video_tier_enabled_map().get(tier_norm, False))
-    payload["admin_only"] = bool(tier_norm in {"future_1500"} or (tier_norm == "premium" and VIDEO_PREMIUM_ADMIN_ONLY))
+    payload["admin_only"] = bool(tier_norm == "premium" and VIDEO_PREMIUM_ADMIN_ONLY)
     payload["model"] = payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast"
     return payload
 
@@ -33079,7 +33097,8 @@ def video_tier_short_label(tier: str = "", lang: str = "vi") -> str:
             "standard": "Bán hàng",
             "high": "Cao cấp",
             "future_1000": "Chuyên nghiệp",
-            "future_1500": "1500 Xu - Đang phát triển",
+            "future_1200": "Pro Plus",
+            "future_1500": "Premium",
         }
     else:
         labels = {
@@ -33090,7 +33109,8 @@ def video_tier_short_label(tier: str = "", lang: str = "vi") -> str:
             "standard": "Business",
             "high": "High",
             "future_1000": "Professional",
-            "future_1500": "1500 Xu - Coming soon",
+            "future_1200": "Pro Plus",
+            "future_1500": "Premium",
         }
     return labels.get(tier_norm) or localized_video_tier_label(tier_norm, lang)
 
@@ -33115,7 +33135,8 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
             "standard": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
             "high": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
             "future_1000": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
-            "future_1500": "coming soon / premium provider development",
+            "future_1200": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
+            "future_1500": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
         }
     else:
         notes = {
@@ -33126,7 +33147,8 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
             "standard": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
             "high": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
             "future_1000": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
-            "future_1500": "đang phát triển",
+            "future_1200": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
+            "future_1500": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
         }
     return f"• {VIDEO_TIER_ICONS.get(tier_norm, '🎬')} <b>{html.escape(str(label))}</b> — <b>{cost} Xu</b>: {html.escape(notes.get(tier_norm, ''))}"
 
@@ -33141,7 +33163,8 @@ def video_tier_quality_description(tier: str = "", lang: str = "vi") -> str:
             "standard": "Business-focused video with product benefit, conversion angle, CTA and clearer structure.",
             "high": "Premium cinematic/commercial look with stronger lighting, camera movement and production polish.",
             "future_1000": "Professional public tier. Provider/job guard still applies.",
-            "future_1500": "Coming soon. No public job is created.",
+            "future_1200": "Pro Plus public tier with higher quality controls. Provider/job guard still applies.",
+            "future_1500": "Premium public tier. Provider/job guard still applies.",
         }
     else:
         descriptions = {
@@ -33152,7 +33175,8 @@ def video_tier_quality_description(tier: str = "", lang: str = "vi") -> str:
             "standard": "Tối ưu theo hướng quảng cáo/bán hàng: lợi ích sản phẩm, góc chốt đơn, CTA và bố cục rõ.",
             "high": "Phong cách cao cấp: cinematic/commercial look, ánh sáng, camera motion và độ hoàn thiện tốt hơn.",
             "future_1000": "Gói chuyên nghiệp public. Vẫn kiểm tra provider/job trước khi tạo.",
-            "future_1500": "Đang phát triển. Không tạo job public.",
+            "future_1200": "Gói Pro Plus public với kiểm soát chất lượng cao hơn. Vẫn kiểm tra provider/job trước khi tạo.",
+            "future_1500": "Gói Premium public. Vẫn kiểm tra provider/job trước khi tạo.",
         }
     return descriptions.get(tier_norm) or str((video_tier_pricing_payload().get(tier_norm) or {}).get("note") or "")
 
@@ -33178,6 +33202,8 @@ def video_tier_extra_second_xu(tier: str = "") -> int:
         "standard": VIDEO_STANDARD_EXTRA_SECOND_XU,
         "high": VIDEO_HIGH_EXTRA_SECOND_XU,
         "future_1000": VIDEO_FUTURE_1000_EXTRA_SECOND_XU,
+        "future_1200": VIDEO_FUTURE_1200_EXTRA_SECOND_XU,
+        "future_1500": VIDEO_FUTURE_1500_EXTRA_SECOND_XU,
     }.get(tier_norm, 0)
 
 def video_tier_extra_scene_xu(tier: str = "") -> int:
@@ -33190,17 +33216,19 @@ def video_tier_extra_scene_xu(tier: str = "") -> int:
         "standard": VIDEO_STANDARD_EXTRA_SCENE_XU,
         "high": VIDEO_HIGH_EXTRA_SCENE_XU,
         "future_1000": VIDEO_FUTURE_1000_EXTRA_SCENE_XU,
+        "future_1200": VIDEO_FUTURE_1200_EXTRA_SCENE_XU,
+        "future_1500": VIDEO_FUTURE_1500_EXTRA_SCENE_XU,
     }.get(tier_norm, 0)
 
 def video_tier_allows_extra_duration(tier: str = "") -> bool:
-    return normalize_video_tier(tier) not in {"low", "future_1500"} and video_tier_extra_second_xu(tier) > 0
+    return normalize_video_tier(tier) not in {"low"} and video_tier_extra_second_xu(tier) > 0
 
 def video_tier_allows_extra_scenes(tier: str = "") -> bool:
-    return normalize_video_tier(tier) not in {"low", "future_1500"} and video_tier_extra_scene_xu(tier) > 0
+    return normalize_video_tier(tier) not in {"low"} and video_tier_extra_scene_xu(tier) > 0
 
 def video_tier_allows_paid_addons(tier: str = "") -> bool:
     tier_norm = normalize_video_tier(tier)
-    return tier_norm not in {"low", "future_1500"}
+    return tier_norm not in {"low"}
 
 def video_experience_tier_policy() -> dict:
     return {
@@ -33245,7 +33273,7 @@ def video_tier_policy(tier: str = "") -> dict:
         "allow_subtitle": video_tier_allows_paid_addons(tier_norm),
         "allow_dubbing": video_tier_allows_paid_addons(tier_norm),
         "allow_subtitle_plus_dubbing": video_tier_allows_paid_addons(tier_norm),
-        "allow_quality_upgrade": tier_norm not in {"future_1500"},
+        "allow_quality_upgrade": True,
         "limits": video_tier_limit_config(tier_norm) if tier_norm in video_high_tiers() else {},
         "upsell_to": "",
     }
@@ -33276,7 +33304,7 @@ def video_addon_pricing_matrix() -> dict:
 
 VIDEO_ORDER_DEFAULT_BASE_SECONDS = 8
 VIDEO_ORDER_DEFAULT_BASE_SCENES = 1
-VIDEO_ORDER_COMING_SOON_TIERS = {"future_1000", "future_1500", "premium"}
+VIDEO_ORDER_COMING_SOON_TIERS = {"premium"}
 VIDEO_ORDER_ADDON_ACTIONS = {
     "subtitle": ("subtitle_original", "none", False),
     "dub": ("none", "dub_original", False),
@@ -33822,8 +33850,8 @@ def video_tier_public_status_text() -> str:
     enabled_map = video_tier_enabled_map()
     return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in VIDEO_TIER_ORDER)
 
-VIDEO_EXPORT_TIER_CHOICES = ("low", "basic", "common", "advanced", "standard", "high", "future_1000")
-VIDEO_PUBLIC_TIER_UI_ORDER = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1500")
+VIDEO_EXPORT_TIER_CHOICES = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
+VIDEO_PUBLIC_TIER_UI_ORDER = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
 
 def get_video_tier_status(tier: str = "", user_is_admin: bool = False) -> dict:
     tier_norm = normalize_video_tier(tier)
@@ -33835,15 +33863,11 @@ def get_video_tier_status(tier: str = "", user_is_admin: bool = False) -> dict:
     billing_allowed = set(billing_gate.get("allowed_tiers") or [])
     if tier_norm in video_public_launch_tiers():
         configured_enabled = bool(configured_enabled and billing_gate.get("ready") and tier_norm in billing_allowed)
-    if tier_norm in {"future_1500"}:
-        configured_enabled = False
     reason = "ready"
     if tier_norm == "low" and not video_beta_200_marketing_loss_enabled_runtime():
         reason = "Gói trải nghiệm 200 Xu chưa nằm trong danh sách public beta đang mở."
     elif tier_norm in video_public_launch_tiers() and tier_norm not in billing_allowed:
         reason = "Gói video này chưa nằm trong danh sách public hiện tại."
-    elif tier_norm in {"future_1500"}:
-        reason = "Gói 1500 Xu đang phát triển cho future premium, chưa mở public."
     elif tier_norm in video_public_launch_tiers() and not billing_gate.get("ready"):
         blockers = billing_gate.get("blockers") or []
         reason = str(blockers[0]) if blockers else "Cấu hình billing safety chưa sẵn sàng."
@@ -33867,7 +33891,7 @@ def get_video_tier_status(tier: str = "", user_is_admin: bool = False) -> dict:
 def get_public_video_tier_ui_status(tier: str = "", user_is_admin: bool = False) -> dict:
     tier_norm = normalize_video_tier(tier)
     status = get_video_tier_status(tier_norm, user_is_admin)
-    enabled = bool(status.get("ready"))
+    enabled = bool(status.get("public_enabled"))
     if tier_norm == "low" and not video_beta_200_marketing_loss_enabled_runtime():
         public_status = "OFF"
         requires_override = True
@@ -53465,18 +53489,18 @@ def video_beta_200_marketing_loss_enabled_runtime() -> bool:
     return bool(VIDEO_BETA_200_MARKETING_LOSS_ENABLED or runtime_enabled or beta_low_allowed)
 
 def video_public_allowed_tiers_runtime() -> str:
-    return get_system_setting("video_public_allowed_tiers", "") or str(VIDEO_PUBLIC_ALLOWED_TIERS or "200,300,400,500,600,800,1000")
+    return get_system_setting("video_public_allowed_tiers", "") or str(VIDEO_PUBLIC_ALLOWED_TIERS or "200,300,400,500,600,800,1000,1200,1500")
 
 def video_public_allowed_tiers() -> list[str]:
     allowed = []
-    for tier in str(video_public_allowed_tiers_runtime() or "200,300,400,500,600,800,1000").split(","):
+    for tier in str(video_public_allowed_tiers_runtime() or "200,300,400,500,600,800,1000,1200,1500").split(","):
         tier = normalize_video_tier(tier.strip())
         if tier and tier not in allowed:
             allowed.append(tier)
     current_public = list(video_public_current_tiers())
     for tier in current_public:
         # Older Railway/system settings may still contain only 200/300/400.
-        # The current launch decision is to keep 200/300/400/500/600/800/1000
+        # The current launch decision is to keep 200/300/400/500/600/800/1000/1200/1500
         # available whenever public video beta is open.
         if tier not in allowed:
             allowed.append(tier)
@@ -53490,25 +53514,27 @@ def video_public_allowed_tiers() -> list[str]:
     return allowed
 
 def video_public_blocked_tiers() -> set[str]:
-    blocked = {"future_1500"}
+    blocked = set()
     for tier in str(VIDEO_PUBLIC_BLOCK_TIERS or "").split(","):
         tier_norm = normalize_video_tier(tier.strip())
         if tier_norm:
             blocked.add(tier_norm)
     blocked.discard("future_1000")
+    blocked.discard("future_1200")
+    blocked.discard("future_1500")
     return blocked
 
 def video_public_beta_tiers() -> tuple[str, ...]:
     return ("low", "basic", "common")
 
 def video_public_launch_tiers() -> tuple[str, ...]:
-    return ("low", "basic", "common", "advanced", "standard", "high", "future_1000")
+    return ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
 
 def video_public_current_tiers() -> tuple[str, ...]:
-    return ("low", "basic", "common", "advanced", "standard", "high", "future_1000")
+    return ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
 
 def video_high_tiers() -> tuple[str, ...]:
-    return ("advanced", "standard", "high", "future_1000")
+    return ("advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
 
 def video_tier_base_public_flag(tier: str = "") -> bool:
     tier_norm = normalize_video_tier(tier)
@@ -53520,6 +53546,8 @@ def video_tier_base_public_flag(tier: str = "") -> bool:
         "standard": bool(VIDEO_TIER_600_PUBLIC_ENABLED and VIDEO_TIER_STANDARD_ENABLED),
         "high": bool(VIDEO_TIER_800_PUBLIC_ENABLED and VIDEO_TIER_HIGH_ENABLED),
         "future_1000": bool(VIDEO_TIER_1000_PUBLIC_ENABLED and VIDEO_TIER_HIGH_ENABLED),
+        "future_1200": bool(VIDEO_TIER_1200_PUBLIC_ENABLED and VIDEO_TIER_HIGH_ENABLED),
+        "future_1500": bool(VIDEO_TIER_1500_PUBLIC_ENABLED and VIDEO_TIER_HIGH_ENABLED),
     }
     return bool(defaults.get(tier_norm, False))
 
@@ -53533,6 +53561,8 @@ def video_tier_public_flag(tier: str = "") -> bool:
         "standard": "video_beta_tier_600_enabled",
         "high": "video_beta_tier_800_enabled",
         "future_1000": "video_beta_tier_1000_enabled",
+        "future_1200": "video_beta_tier_1200_enabled",
+        "future_1500": "video_beta_tier_1500_enabled",
     }
     key = runtime_keys.get(tier_norm)
     if not key:
@@ -53575,8 +53605,12 @@ def video_public_tier_token_to_name(token: str = "") -> str:
         "1000": "future_1000",
         "1000xu": "future_1000",
         "video_beta_1000": "future_1000",
+        "1200": "future_1200",
+        "1200xu": "future_1200",
+        "video_beta_1200": "future_1200",
         "1500": "future_1500",
         "1500xu": "future_1500",
+        "video_beta_1500": "future_1500",
     }
     return mapping.get(raw, normalize_video_tier(raw))
 
@@ -53614,6 +53648,8 @@ def video_public_tier_enabled(tier: str = "") -> bool:
         "standard": video_tier_public_flag("standard"),
         "high": video_tier_public_flag("high"),
         "future_1000": video_tier_public_flag("future_1000"),
+        "future_1200": video_tier_public_flag("future_1200"),
+        "future_1500": video_tier_public_flag("future_1500"),
     }.get(tier_norm, False)
     return bool(base_enabled and video_public_beta_enabled_runtime())
 
@@ -53630,7 +53666,7 @@ def check_video_margin(tier: str = "") -> dict:
     blocked = []
     marketing_loss = bool(tier_norm == "low" and video_beta_200_marketing_loss_enabled_runtime())
     if tier_norm not in video_public_launch_tiers():
-        blocked.append("tier is not in public launch 200/300/400/500/600/800/1000")
+        blocked.append("tier is not in public launch 200/300/400/500/600/800/1000/1200/1500")
     if tier_norm in video_public_blocked_tiers() and not marketing_loss:
         blocked.append("tier is blocked for public beta")
     if price_xu <= 0:
@@ -53661,7 +53697,7 @@ def check_video_margin(tier: str = "") -> dict:
             else:
                 config_blockers.append(item)
         if cost_warnings and not config_blockers:
-            # Current launch tiers 200/300/400/500/600/800/1000 are sold by product
+            # Current launch tiers 200/300/400/500/600/800/1000/1200/1500 are sold by product
             # policy. Provider cost is still reported to admin, but it must not
             # block customer confirmation/output paths.
             cost_review_only = True
@@ -54000,7 +54036,7 @@ def video_billing_public_gate() -> dict:
         if base_enabled.get(tier) and tier in video_public_launch_tiers()
     ]
     if not enabled_allowed:
-        blockers.append("No 200/300/400/500/600/800/1000 public video tier enabled in allowlist")
+        blockers.append("No 200/300/400/500/600/800/1000/1200/1500 public video tier enabled in allowlist")
     if VIDEO_PREMIUM_PUBLIC_ENABLED or (VIDEO_TIER_PREMIUM_ENABLED and not VIDEO_PREMIUM_ADMIN_ONLY):
         blockers.append("Premium video public must stay OFF")
     return {
@@ -54084,8 +54120,9 @@ def video_public_status_payload() -> dict:
             "video_600": _tier_public_conclusion("standard"),
             "video_800": _tier_public_conclusion("high"),
             "video_1000": _tier_public_conclusion("future_1000"),
-            "video_1500": "COMING_SOON",
-            "video_600_plus": "PUBLIC" if ai_public and any(tier in billing_gate.get("allowed_tiers", []) for tier in {"advanced", "standard", "high"}) else "OFF",
+            "video_1200": _tier_public_conclusion("future_1200"),
+            "video_1500": _tier_public_conclusion("future_1500"),
+            "video_600_plus": "PUBLIC" if ai_public and any(tier in billing_gate.get("allowed_tiers", []) for tier in {"advanced", "standard", "high", "future_1000", "future_1200", "future_1500"}) else "OFF",
             "premium_video": "OFF",
             "image_to_video": "OFF",
             "video_to_video": "OFF",
@@ -54173,9 +54210,8 @@ def video_public_status_text() -> str:
     lines.extend([
         "",
         "<b>Blocked public tiers</b>",
-        "• 500/600/800/1000: <code>PUBLIC when allowlist + provider smoke + billing safety pass; cost is report-only</code>",
-        "• 1000: <code>PUBLIC when allowlist + provider smoke + billing safety pass; cost is report-only</code>",
-        "• 1500 Kling/Seedance/premium future: <code>COMING_SOON</code>",
+        "• 500/600/800/1000/1200/1500: <code>PUBLIC when allowlist + billing safety pass; cost is report-only</code>",
+        "• provider/job errors: <code>handled after confirmation; no-charge/refund guard applies</code>",
         "• long render: <code>OFF</code>",
         "• image-to-video / video-to-video: <code>OFF until smoke pass</code>",
         "",
@@ -54335,7 +54371,9 @@ def video_public_open_safe_result(admin_id) -> dict:
         set_video_runtime_bool("video_beta_tier_600_enabled", "standard" in allowed, admin_id, "safe public video open")
         set_video_runtime_bool("video_beta_tier_800_enabled", "high" in allowed, admin_id, "safe public video open")
         set_video_runtime_bool("video_beta_tier_1000_enabled", "future_1000" in allowed, admin_id, "safe public video open")
-        set_video_runtime_bool("video_public_600_plus_enabled", any(tier in allowed for tier in {"advanced", "standard", "high", "future_1000"}), admin_id, "safe public video open")
+        set_video_runtime_bool("video_beta_tier_1200_enabled", "future_1200" in allowed, admin_id, "safe public video open")
+        set_video_runtime_bool("video_beta_tier_1500_enabled", "future_1500" in allowed, admin_id, "safe public video open")
+        set_video_runtime_bool("video_public_600_plus_enabled", any(tier in allowed for tier in {"advanced", "standard", "high", "future_1000", "future_1200", "future_1500"}), admin_id, "safe public video open")
         set_video_runtime_bool("video_premium_public_enabled", False, admin_id, "keep premium off")
         set_video_runtime_bool("video_image_to_video_enabled", False, admin_id, "keep image-to-video off")
         set_video_runtime_bool("video_video_to_video_enabled", False, admin_id, "keep video-to-video off")
@@ -54345,7 +54383,7 @@ def video_public_open_safe_result(admin_id) -> dict:
         blockers.extend(ai_gate.get("blockers") or [])
         blockers.extend(billing_gate.get("blockers") or [])
 
-    kept_off.extend(["video_1500", "premium_video", "image_to_video", "video_to_video", "long_render", "auto_publish", "ads_assistant"])
+    kept_off.extend(["premium_video", "image_to_video", "video_to_video", "long_render", "auto_publish", "ads_assistant"])
     after = video_public_status_payload()
     note = "; ".join(dict.fromkeys(str(item) for item in blockers if item))[:1000]
     set_system_setting("video_public_open_safe_last_at", now_text(), "Safe public video open command", admin_id)
@@ -54416,8 +54454,8 @@ def video_cost_status_text() -> str:
     lines.extend([
         "",
         "<b>Public policy</b>",
-        "• 200/300/400/500/600/800/1000: <code>PUBLIC when allowlist + provider smoke + billing safety pass; cost is report-only</code>",
-        "• 1500 Kling/Seedance/premium future: <code>COMING_SOON</code>",
+        "• 200/300/400/500/600/800/1000/1200/1500: <code>PUBLIC when allowlist + billing safety pass; cost is report-only</code>",
+        "• provider/job errors: <code>handled after final confirmation with refund/no-charge guard</code>",
         "• long render: <code>OFF</code>",
         "• image-to-video / video-to-video: <code>OFF until separate smoke pass</code>",
     ])
@@ -54433,7 +54471,7 @@ def video_beta_limits_text() -> str:
         f"• 200 max/user/day: <code>{int(VIDEO_BETA_200_MAX_USER_DAY or 1)}</code>",
         f"• 200 max/user/week: <code>{int(VIDEO_BETA_200_MAX_USER_WEEK or 1)}</code>",
         f"• 200 max/user/month: <code>{int(VIDEO_BETA_200_MAX_USER_MONTH or 1)}</code>",
-        "• 500/600/800/1000 limits: <code>none in this phase; queue/job lock/auto-freeze still apply</code>",
+        "• 500/600/800/1000/1200/1500 limits: <code>queue/job lock/auto-freeze still apply</code>",
         f"• Max duration: <code>{int(VIDEO_PUBLIC_MAX_DURATION_SECONDS or 0)}s</code>",
         f"• Max jobs/user/day: <code>{int(VIDEO_PUBLIC_MAX_JOBS_PER_USER_PER_DAY or 0)}</code>",
         f"• Max concurrent jobs: <code>{int(VIDEO_PUBLIC_MAX_CONCURRENT_JOBS or 0)}</code>",
@@ -54442,7 +54480,7 @@ def video_beta_limits_text() -> str:
         f"• Auto freeze on error: <code>{video_public_bool_label(VIDEO_PUBLIC_AUTO_FREEZE_ON_ERROR)}</code>",
         f"• High-tier auto-freeze: <code>{video_public_bool_label(VIDEO_HIGH_TIER_AUTO_FREEZE_ON_ERROR)}</code>",
         "",
-        "Public launch tiers: 200/300/400/500/600/800/1000 if allowed + provider smoke + billing safety pass. Cost review is report-only. 1500 and long render stay coming soon/OFF.",
+        "Public launch tiers: 200/300/400/500/600/800/1000/1200/1500 if allowed + billing safety pass. Cost review is report-only. Long render stays OFF.",
     ])
 
 def get_chat_ai_vision_readiness() -> dict:
@@ -54600,9 +54638,8 @@ def video_tier_status_text() -> str:
     lines.extend([
         "",
         f"• 200 limits: <code>{int(VIDEO_BETA_200_MAX_USER_DAY)}/day, {int(VIDEO_BETA_200_MAX_USER_WEEK)}/week, {int(VIDEO_BETA_200_MAX_USER_MONTH)}/month</code>",
-        "• 500/600/800/1000 limits: <code>none in this phase; queue/job lock/auto-freeze still apply</code>",
-        "• 1000: <code>PUBLIC when provider/job gate passes</code>",
-        "• 1500: <code>COMING_SOON; no public job</code>",
+        "• 500/600/800/1000/1200/1500 limits: <code>queue/job lock/auto-freeze still apply</code>",
+        "• 1000/1200/1500: <code>PUBLIC when allowlist + billing safety pass; provider/job guard still applies</code>",
     ])
     return "\n".join(lines)
 
@@ -54867,7 +54904,8 @@ def system_public_status_text() -> str:
         f"• Video 600: <code>{video['conclusion'].get('video_600')}</code>",
         f"• Video 800: <code>{video['conclusion'].get('video_800')}</code>",
         f"• Video 1000: <code>{video['conclusion'].get('video_1000')}</code>",
-        f"• Video 1500: <code>COMING_SOON</code>",
+        f"• Video 1200: <code>{video['conclusion'].get('video_1200')}</code>",
+        f"• Video 1500: <code>{video['conclusion'].get('video_1500')}</code>",
         f"• Long video: <code>OFF</code>",
         f"• Voice/Music: <code>ON/GUARDED</code>",
         f"• Media AI: image_edit <code>{'ON' if media_ai['image_edit'].get('public_enabled') else 'GUARDED'}</code> | Suno <code>{'ON' if media_ai['suno_music'].get('public_enabled') else 'GUARDED'}</code> | MiniMax Voice <code>{'ON' if media_ai['minimax_voice'].get('public_enabled') else 'GUARDED'}</code> | subtitle/dub <code>{'ON' if media_ai['subtitle_dub'].get('public_enabled') else 'GUARDED'}</code>",
@@ -54950,7 +54988,9 @@ def video_beta_open_result(admin_id, args: list[str] | tuple[str, ...] | None = 
     set_video_runtime_bool("video_beta_tier_600_enabled", "standard" in opened_tiers, admin_id, "video beta open")
     set_video_runtime_bool("video_beta_tier_800_enabled", "high" in opened_tiers, admin_id, "video beta open")
     set_video_runtime_bool("video_beta_tier_1000_enabled", "future_1000" in opened_tiers, admin_id, "video beta open")
-    set_video_runtime_bool("video_public_600_plus_enabled", any(tier in opened_tiers for tier in {"advanced", "standard", "high", "future_1000"}), admin_id, "video beta open")
+    set_video_runtime_bool("video_beta_tier_1200_enabled", "future_1200" in opened_tiers, admin_id, "video beta open")
+    set_video_runtime_bool("video_beta_tier_1500_enabled", "future_1500" in opened_tiers, admin_id, "video beta open")
+    set_video_runtime_bool("video_public_600_plus_enabled", any(tier in opened_tiers for tier in {"advanced", "standard", "high", "future_1000", "future_1200", "future_1500"}), admin_id, "video beta open")
     set_video_runtime_bool("video_premium_public_enabled", False, admin_id, "keep premium off")
     set_video_runtime_bool("video_image_to_video_enabled", False, admin_id, "keep image-to-video off")
     set_video_runtime_bool("video_video_to_video_enabled", False, admin_id, "keep video-to-video off")
@@ -55001,7 +55041,7 @@ def video_beta_open_text(result: dict) -> str:
         ])
     lines.extend([
         "",
-        "Giữ OFF: 1500 future premium, long render, image-to-video và video-to-video.",
+        "Giữ OFF: long render, image-to-video và video-to-video.",
         "Không gọi provider trong lệnh này. Không trừ Xu.",
     ])
     return "\n".join(lines)
@@ -55025,6 +55065,8 @@ def video_beta_close_result(admin_id) -> dict:
     set_video_runtime_bool("video_beta_tier_600_enabled", False, admin_id, "video beta close")
     set_video_runtime_bool("video_beta_tier_800_enabled", False, admin_id, "video beta close")
     set_video_runtime_bool("video_beta_tier_1000_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("video_beta_tier_1200_enabled", False, admin_id, "video beta close")
+    set_video_runtime_bool("video_beta_tier_1500_enabled", False, admin_id, "video beta close")
     set_video_runtime_bool("video_public_600_plus_enabled", False, admin_id, "video beta close")
     set_system_setting("video_beta_open_last_result", "CLOSED", "Video AI public beta closed by admin", admin_id)
     record_audit_event(admin_id, "admin", "video.beta_close", "video_public_gate", "beta_close", before={}, after={"VIDEO_PUBLIC_BETA_ENABLED": False}, note="closed")
@@ -55116,7 +55158,7 @@ def video_open_high_tiers_text(result: dict) -> str:
         lines.extend(f"• <code>{html.escape(str(item))}</code>" for item in blockers[:12])
     lines.extend([
         "",
-        "Giữ OFF: 1500, long render, premium, Kling/Seedance future.",
+        "Giữ OFF: long render, premium, Kling/Seedance future.",
         "Không gọi provider trong lệnh này. Không trừ Xu.",
     ])
     return "\n".join(lines)
@@ -55128,23 +55170,25 @@ def video_close_high_tiers_result(admin_id) -> dict:
         safe_allowed = list(video_public_beta_tiers())
     global VIDEO_PUBLIC_ALLOWED_TIERS
     VIDEO_PUBLIC_ALLOWED_TIERS = ",".join(safe_allowed)
-    set_system_setting("video_public_allowed_tiers", VIDEO_PUBLIC_ALLOWED_TIERS, "close 500/600/800/1000 public tiers", admin_id)
+    set_system_setting("video_public_allowed_tiers", VIDEO_PUBLIC_ALLOWED_TIERS, "close 500/600/800/1000/1200/1500 public tiers", admin_id)
     set_video_runtime_bool("video_beta_tier_500_enabled", False, admin_id, "close high video tiers")
     set_video_runtime_bool("video_beta_tier_600_enabled", False, admin_id, "close high video tiers")
     set_video_runtime_bool("video_beta_tier_800_enabled", False, admin_id, "close high video tiers")
     set_video_runtime_bool("video_beta_tier_1000_enabled", False, admin_id, "close high video tiers")
+    set_video_runtime_bool("video_beta_tier_1200_enabled", False, admin_id, "close high video tiers")
+    set_video_runtime_bool("video_beta_tier_1500_enabled", False, admin_id, "close high video tiers")
     set_video_runtime_bool("video_public_600_plus_enabled", False, admin_id, "close high video tiers")
-    set_system_setting("video_high_tiers_last_result", "CLOSED", "Closed 500/600/800/1000 only; lower beta tiers left unchanged", admin_id)
-    record_audit_event(admin_id, "admin", "video.high_tiers_close", "video_public_gate", "close_high_tiers", before={}, after={"allowed": safe_allowed}, note="closed 500/600/800/1000")
+    set_system_setting("video_high_tiers_last_result", "CLOSED", "Closed 500/600/800/1000/1200/1500 only; lower beta tiers left unchanged", admin_id)
+    record_audit_event(admin_id, "admin", "video.high_tiers_close", "video_public_gate", "close_high_tiers", before={}, after={"allowed": safe_allowed}, note="closed 500/600/800/1000/1200/1500")
     return {"status": "CLOSED", "allowed_tiers": safe_allowed, "closed_tiers": list(video_high_tiers())}
 
 def video_close_high_tiers_text(result: dict) -> str:
     return "\n".join([
         "🧊 <b>VIDEO HIGH TIERS CLOSE</b>",
         "",
-        "Đã đóng 500/600/800/1000 trong runtime hiện tại.",
+        "Đã đóng 500/600/800/1000/1200/1500 trong runtime hiện tại.",
         f"Tier còn lại: <code>{html.escape(', '.join(result.get('allowed_tiers') or []) or '-')}</code>",
-        "1500, long render, premium vẫn OFF/COMING_SOON.",
+        "Long render, premium vẫn OFF.",
         "",
         "Không gọi provider và không trừ Xu.",
     ])
@@ -76988,22 +77032,22 @@ def public_video_tier_selection_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "zh":
         return (
             "🎬 <b>真实 AI 视频 Beta</b>\n\n"
-            "当前开放短视频 Beta 档位：200/300/400/500/600/800/1000 Xu。200 Xu 是体验档，按每日/每周/月度限制控制。\n"
-            "1500 Xu、Premium 和长视频仍保持关闭。Bot 会先报价并等待确认。"
+            "当前开放短视频 Beta 档位：200/300/400/500/600/800/1000/1200/1500 Xu。200 Xu 是体验档，按每日/每周/月度限制控制。\n"
+            "Premium 和长视频仍保持关闭。Bot 会先报价并等待确认。"
         )
     if normalize_user_language(lang) != "vi":
         return (
             "🎬 <b>Real AI Video Beta</b>\n\n"
-            "Public beta currently supports 200/300/400/500/600/800/1000 Xu short-video tiers. "
+            "Public beta currently supports 200/300/400/500/600/800/1000/1200/1500 Xu short-video tiers. "
             "200 Xu is a controlled starter tier with daily/weekly/monthly limits.\n"
-            "1500 Xu, premium and long render remain OFF. The bot will show the invoice and ask for confirmation first."
+            "Premium and long render remain OFF. The bot will show the invoice and ask for confirmation first."
         )
     return (
         "🎬 <b>Video AI chân thật Beta</b>\n\n"
         "TOAN AAS đang mở thử nghiệm Video AI thật ở gói ngắn để kiểm soát chất lượng.\n\n"
-        "Gói public hiện có: <b>200 Xu</b>, <b>300 Xu</b>, <b>400 Xu</b>, <b>500 Xu</b>, <b>600 Xu</b>, <b>800 Xu</b> và <b>1000 Xu</b>.\n"
+        "Gói public hiện có: <b>200 Xu</b>, <b>300 Xu</b>, <b>400 Xu</b>, <b>500 Xu</b>, <b>600 Xu</b>, <b>800 Xu</b>, <b>1000 Xu</b>, <b>1200 Xu</b> và <b>1500 Xu</b>.\n"
         "Gói <b>200 Xu</b> là gói trải nghiệm, có giới hạn/ngày/tuần/tháng để kiểm soát chi phí.\n"
-        "Gói <b>1500 Xu</b>, premium và video dài đang giữ OFF.\n\n"
+        "Premium và video dài đang giữ OFF.\n\n"
         "Bot sẽ báo giá và hỏi xác nhận trước khi xử lý."
     )
 
@@ -77366,7 +77410,9 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
             f"{video_tier_price_line('advanced', lang)}\n"
             f"{video_tier_price_line('standard', lang)}\n"
             f"{video_tier_price_line('high', lang)}\n"
-            f"{video_tier_price_line('future_1000', lang)}\n\n"
+            f"{video_tier_price_line('future_1000', lang)}\n"
+            f"{video_tier_price_line('future_1200', lang)}\n"
+            f"{video_tier_price_line('future_1500', lang)}\n\n"
             f"{html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_EN)}\n\n"
             "TOAN AAS will show the final invoice before any processing or Xu charge."
         )
@@ -77386,7 +77432,9 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         f"{video_tier_price_line('advanced', lang)}\n"
         f"{video_tier_price_line('standard', lang)}\n"
         f"{video_tier_price_line('high', lang)}\n"
-        f"{video_tier_price_line('future_1000', lang)}\n\n"
+        f"{video_tier_price_line('future_1000', lang)}\n"
+        f"{video_tier_price_line('future_1200', lang)}\n"
+        f"{video_tier_price_line('future_1500', lang)}\n\n"
         f"{html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_VI)}\n\n"
         "TOAN AAS sẽ báo lại lần cuối trước khi tạo video."
     )
@@ -77409,11 +77457,18 @@ def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(label("high"), callback_data="vfinal|tier|high"),
         ],
         [
-            InlineKeyboardButton("🎛 Thêm tính năng khác" if is_vi else "🎛 Extra features", callback_data="vfinal|menu"),
-            InlineKeyboardButton("🎬 Xem lại xác nhận" if is_vi else "🎬 Review export", callback_data="vfinal|review"),
+            InlineKeyboardButton(label("future_1000"), callback_data="vfinal|tier|future_1000"),
+            InlineKeyboardButton(label("future_1200"), callback_data="vfinal|tier|future_1200"),
         ],
         [
+            InlineKeyboardButton(label("future_1500"), callback_data="vfinal|tier|future_1500"),
+            InlineKeyboardButton("🎛 Thêm tính năng khác" if is_vi else "🎛 Extra features", callback_data="vfinal|menu"),
+        ],
+        [
+            InlineKeyboardButton("🎬 Xem lại xác nhận" if is_vi else "🎬 Review export", callback_data="vfinal|review"),
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"),
+        ],
+        [
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
         ],
     ])
@@ -77790,14 +77845,13 @@ def video_finalization_local_needs_images_keyboard(state: dict | None = None, la
     is_vi = normalize_user_language(lang) == "vi"
     keyframe_callback = video_finalization_source_keyframe_callback(state)
     has_prompt = video_finalization_has_prompt(state)
-    ai_ready = bool(get_video_prompt_export_readiness(False).get("public_ready"))
     ai_label = (
-        "✅ Xác nhận xuất video" if (is_vi and has_prompt and ai_ready) else
-        "✅ Confirm video export" if (has_prompt and ai_ready) else
+        "✅ Xác nhận xuất video" if (is_vi and has_prompt) else
+        "✅ Confirm video export" if has_prompt else
         "🛡 Video AI chưa sẵn" if is_vi else
         "🛡 AI video not ready"
     )
-    ai_callback = "vfinal|export_ai" if (has_prompt and ai_ready) else "vfinal|ai_guard"
+    ai_callback = "vfinal|export_ai" if has_prompt else "vfinal|ai_guard"
     first = [
         InlineKeyboardButton(ai_label, callback_data=ai_callback),
         InlineKeyboardButton("🖼 Tạo/gửi ảnh trước" if is_vi else "🖼 Create/upload images first", callback_data=keyframe_callback),
@@ -77821,7 +77875,6 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
     has_prompt = video_finalization_has_prompt(state)
     readiness = video_finalization_readiness()
     local_ready = bool(readiness.get("local_frame"))
-    ai_ready = bool(get_video_prompt_export_readiness(False).get("public_ready"))
     if len(photos) >= 2:
         first_row = [
             InlineKeyboardButton(
@@ -77832,15 +77885,13 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
                 callback_data="vfinal|export_local" if local_ready else "vfinal|local_guard",
             ),
             InlineKeyboardButton(
-                "✅ Xác nhận xuất video" if (is_vi and has_prompt and ai_ready) else
-                "✅ Confirm video export" if (has_prompt and ai_ready) else
-                "🛡 Video AI chưa sẵn" if (is_vi and has_prompt) else
-                "🛡 AI video not ready" if has_prompt else
+                "✅ Xác nhận xuất video" if (is_vi and has_prompt) else
+                "✅ Confirm video export" if has_prompt else
                 "📋 Copy prompt" if (is_vi and has_prompt) else
                 "📋 Copy prompt" if has_prompt else
                 "📋 Xem prompt trước" if is_vi else
                 "📋 Prepare prompt first",
-                callback_data="vfinal|export_ai" if (has_prompt and ai_ready) else "vfinal|ai_guard" if has_prompt else "vfinal|copy_prompt",
+                callback_data="vfinal|export_ai" if has_prompt else "vfinal|copy_prompt",
             ),
         ]
         second_row = [
@@ -77850,11 +77901,8 @@ def video_finalization_summary_keyboard(state: dict | str | None = None, lang: s
     elif has_prompt:
         first_row = [
             InlineKeyboardButton(
-                "✅ Xác nhận xuất video" if (is_vi and ai_ready) else
-                "✅ Confirm video export" if ai_ready else
-                "🛡 Video AI chưa sẵn" if is_vi else
-                "🛡 AI video not ready",
-                callback_data="vfinal|export_ai" if ai_ready else "vfinal|ai_guard",
+                "✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export",
+                callback_data="vfinal|export_ai",
             ),
             InlineKeyboardButton("📋 Copy prompt" if is_vi else "📋 Copy prompt", callback_data="vfinal|copy_prompt"),
         ]
@@ -78386,8 +78434,6 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             payload = video_finalization_payload(state)
             if not payload or (not payload.get("resume_video_addon") and not video_finalization_has_prompt(state)):
                 return await safe_edit_or_send(query, "⚠️ Chưa có prompt/keyframe đủ điều kiện cho Video AI. TOAN AAS chưa xử lý video và chưa trừ Xu.", reply_markup=video_finalization_guard_keyboard(state, lang))
-            if not payload.get("resume_video_addon") and not get_video_prompt_export_readiness(is_admin_user(uid)).get("public_ready"):
-                return await safe_edit_or_send(query, video_finalization_ai_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
         if action == "export_local":
             local_ready = bool(video_finalization_readiness().get("local_frame"))
             if not local_ready or len(developing_video_frame_photos(state)) < 2:
@@ -78826,13 +78872,9 @@ def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         plan_label = "🧠 Tạo kế hoạch trước"
     else:
         plan_label = "🧠 Plan first"
-    rows = [
-        tier_buttons[0:2],
-        tier_buttons[2:4],
-        tier_buttons[4:6],
-        tier_buttons[6:8],
-        [InlineKeyboardButton(plan_label, callback_data="menu|main_video")],
-    ]
+    plan_button = InlineKeyboardButton(plan_label, callback_data="menu|main_video")
+    menu_buttons = [*tier_buttons, plan_button]
+    rows = [menu_buttons[index:index + 2] for index in range(0, len(menu_buttons), 2)]
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -79449,7 +79491,7 @@ def video_pricing_status_lines() -> list[str]:
         f"• Source: <code>runtime constants + config/pricing_matrix_draft.json</code>",
         "",
     ]
-    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1500"):
+    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500"):
         payload = video_tier_payload(tier)
         status = get_public_video_tier_ui_status(tier)
         extra = "no extra duration" if tier == "low" else f"+{video_tier_extra_second_xu(tier)} Xu/s | +{video_tier_extra_scene_xu(tier)} Xu/scene"
@@ -86257,9 +86299,7 @@ def pricing_video_lines() -> list[str]:
         else:
             second_rate = video_tier_extra_second_xu(tier)
             scene_rate = video_tier_extra_scene_xu(tier)
-            if tier == "future_1500":
-                extra = "đang phát triển"
-            elif tier == "low":
+            if tier == "low":
                 extra = "1 cảnh / 8 giây; không bán thêm thời lượng"
             else:
                 extra = f"1 cảnh / 8 giây; +{second_rate} Xu/giây; +{scene_rate} Xu/cảnh"

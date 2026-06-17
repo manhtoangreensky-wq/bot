@@ -2060,9 +2060,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.video_tier_payload("starter")["tier"] == "basic"
     assert bot.video_tier_payload("regular")["tier"] == "common"
     assert bot.video_tier_payload("vip")["tier"] == "future_1500"
-    assert bot.video_tier_payload("future_1500")["admin_only"] is True
-    assert bot.video_tier_payload("future_1500")["enabled"] is False
-    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / advanced:ON / standard:ON / high:ON / future_1000:OFF / future_1500:OFF"
+    assert bot.video_tier_payload("future_1500")["admin_only"] is False
+    assert bot.video_tier_payload("future_1500")["enabled"] is True
+    assert bot.video_tier_public_status_text() == "low:ON / basic:ON / common:ON / advanced:ON / standard:ON / high:ON / future_1000:ON / future_1200:ON / future_1500:ON"
     callback_source = source_between(bot_source_text(), "async def handle_shopaikey_public_callback", "class TranslationProviderError")
     assert "shopaikey_recent_image_job_for_callback" in callback_source
     assert callback_source.index("shopaikey_recent_image_job_for_callback") < callback_source.index("common.expired_not_charged")
@@ -2330,7 +2330,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video Bán Hàng: <b>999 Xu</b>" in video_price_text
     assert "Video Cao Cấp: <b>1111 Xu</b>" in video_price_text
     assert "Video Chuyên Nghiệp: <b>1000 Xu</b>" in video_price_text
-    assert "Video Premium Future: <b>1500 Xu</b>" in video_price_text
+    assert "Video Pro Plus: <b>1200 Xu</b>" in video_price_text
+    assert "Video Premium: <b>1500 Xu</b>" in video_price_text
     assert "Combo Ưu Đãi TikTok" in combo_price_text
     assert "khuyến nghị 9:16" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
@@ -4922,14 +4923,15 @@ def test_video_beta_cost_status_and_public_tiers(monkeypatch):
     assert bot.video_tier_enabled_map()["advanced"] is True
     assert bot.video_tier_enabled_map()["standard"] is True
     assert bot.video_tier_enabled_map()["high"] is True
-    assert bot.video_tier_enabled_map()["future_1000"] is False
-    assert bot.video_tier_enabled_map()["future_1500"] is False
+    assert bot.video_tier_enabled_map()["future_1000"] is True
+    assert bot.video_tier_enabled_map()["future_1200"] is True
+    assert bot.video_tier_enabled_map()["future_1500"] is True
     assert bot.check_video_margin("low")["status"] == "MARKETING_LOSS_ON"
     assert bot.check_video_margin("common")["status"] == "WARN_MARGIN"
     assert bot.check_video_margin("advanced")["status"] in {"COST_REVIEW_ONLY", "PASS", "WARN_MARGIN"}
     cost_text = bot.video_cost_status_text()
     assert "VIDEO COST STATUS" in cost_text
-    assert "500/600/800/1000" in cost_text
+    assert "500/600/800/1000/1200/1500" in cost_text
     assert "cost is report-only" in cost_text
     system_text = bot.system_public_status_text()
     assert "TOAN AAS PUBLIC STATUS" in system_text
@@ -8667,11 +8669,11 @@ def test_video_export_vfinal_500_600_800_public_when_gate_passes(monkeypatch):
 def test_public_video_tier_keyboard_uses_five_beta_gate_buttons():
     buttons = _button_texts(bot.public_video_tier_keyboard("vi"))
     callbacks = _button_callbacks(bot.public_video_tier_keyboard("vi"))
-    for label in ("200 Xu", "300 Xu", "400 Xu", "500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1500 Xu"):
+    for label in ("200 Xu", "300 Xu", "400 Xu", "500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1200 Xu", "1500 Xu"):
         assert any(label in button for button in buttons)
-    for label in ("Trải nghiệm", "Cơ bản", "Phổ thông", "Nâng cao", "Bán hàng", "Cao cấp", "Chuyên nghiệp", "Đang phát triển"):
+    for label in ("Trải nghiệm", "Cơ bản", "Phổ thông", "Nâng cao", "Bán hàng", "Cao cấp", "Chuyên nghiệp", "Pro Plus", "Premium"):
         assert any(label in button for button in buttons)
-    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1500"):
+    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500"):
         assert f"create_media|video_tier_{tier}" in callbacks
 
 
@@ -9591,11 +9593,10 @@ def test_no_processing_before_confirm():
     assert "đã xử lý" not in text.lower()
 
 
-def test_coming_soon_1000_1500_not_billable():
-    assert bot.video_tier_enabled_map()["future_1000"] is False
-    assert bot.video_tier_enabled_map()["future_1500"] is False
-    assert bot.video_order_create(123, "future_1000")["billable"] is False
-    assert bot.video_order_create(123, "future_1500")["billable"] is False
+def test_high_public_tiers_are_billable():
+    assert bot.video_order_create(123, "future_1000")["billable"] is True
+    assert bot.video_order_create(123, "future_1200")["billable"] is True
+    assert bot.video_order_create(123, "future_1500")["billable"] is True
 
 
 def test_old_addon_callback_guarded_for_200():

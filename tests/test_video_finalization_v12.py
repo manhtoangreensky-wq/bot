@@ -138,7 +138,7 @@ def test_video_finalization_summary_and_guard_are_explicit(monkeypatch):
     assert "chưa trừ Xu" in guard
 
 
-def test_video_finalization_summary_hides_prompt_export_when_ai_not_ready(monkeypatch):
+def test_video_finalization_summary_keeps_prompt_export_when_ai_not_ready(monkeypatch):
     monkeypatch.setattr(
         bot,
         "get_video_prompt_export_readiness",
@@ -163,8 +163,8 @@ def test_video_finalization_summary_hides_prompt_export_when_ai_not_ready(monkey
 
     callbacks = _callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "vfinal|export_local" not in callbacks
-    assert "vfinal|export_ai" not in callbacks
-    assert "vfinal|ai_guard" in callbacks
+    assert "vfinal|export_ai" in callbacks
+    assert "vfinal|ai_guard" not in callbacks
     assert "vfinal|copy_prompt" in callbacks
     assert "trendg|image_step" not in callbacks
 
@@ -178,8 +178,8 @@ def test_video_finalization_summary_hides_prompt_export_when_ai_not_ready(monkey
     assert "vfinal|review" in guard_callbacks
     assert "vfinal|back" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
     assert "vfinal|review" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
-    assert "vfinal|export_ai" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
-    assert "vfinal|ai_guard" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
+    assert "vfinal|export_ai" in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
+    assert "vfinal|ai_guard" not in _callbacks(bot.video_finalization_local_needs_images_keyboard(state, "vi"))
 
 
 def test_video_finalization_summary_shows_prompt_export_only_when_ai_ready(monkeypatch):
@@ -291,12 +291,13 @@ def test_stale_local_export_without_images_uses_prompt_video_path(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert "Tính năng tạo video đang bảo trì / nâng cấp" in query.edited["text"]
-    assert "TOAN AAS đã lưu prompt video" in query.edited["text"]
+    assert "Chọn gói xuất video AI" in query.edited["text"]
+    assert "Prompt video: <b>Có</b>" in query.edited["text"]
     callbacks = _callbacks(query.edited["reply_markup"])
-    assert "vfinal|review" in callbacks
+    assert "vfinal|tier|low" in callbacks
+    assert "vfinal|tier|basic" in callbacks
     assert "vfinal|export_local" not in callbacks
-    assert "vfinal|back" not in callbacks
+    assert "vfinal|back" in callbacks
 
 
 def test_ready_prompt_export_opens_public_video_tiers(monkeypatch):
