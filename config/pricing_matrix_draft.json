@@ -1,0 +1,316 @@
+{
+  "schema_version": "2026-06-20-v1",
+  "status": "draft_not_applied",
+  "notes": [
+    "This file is an audit/config draft only. It is not imported by bot.py.",
+    "1 Xu = 100 VND.",
+    "Provider costs are CONFIG_ESTIMATE values from current code/env unless marked NEED_COST.",
+    "Runtime prices, PayOS, top-up, wallet, trial and package logic are not changed by this draft."
+  ],
+  "currency": {
+    "xu_to_vnd": 100
+  },
+  "margin_policy": {
+    "green_ratio_max": 0.45,
+    "yellow_ratio_max": 0.6,
+    "marketing_loss_allowed_for": ["video_low_200"],
+    "ordinary_target_ratio_max": 0.5,
+    "premium_target_ratio_max": 0.4
+  },
+  "video_tiers": {
+    "low": {
+      "label_vi": "Video Trải Nghiệm",
+      "price_xu": 200,
+      "price_vnd": 20000,
+      "provider_cost_xu_estimate": 150,
+      "role": "marketing_starter",
+      "public_status": "controlled_public_beta_if_provider_gate_pass",
+      "limit_per_user_day": 3,
+      "limit_per_user_week": 10,
+      "limit_per_user_month": 30,
+      "duration_rule": "short_current_provider_default",
+      "margin_status": "MARKETING_LOSS",
+      "upsell_to": "basic"
+    },
+    "basic": {
+      "label_vi": "Video Cơ Bản",
+      "price_xu": 300,
+      "price_vnd": 30000,
+      "provider_cost_xu_estimate": 150,
+      "role": "starter_upsell_after_200_limit",
+      "public_status": "public_beta_if_provider_gate_pass",
+      "duration_rule": "same_base_line_as_200",
+      "margin_status": "YELLOW"
+    },
+    "common": {
+      "label_vi": "Video Phổ Thông",
+      "price_xu": 400,
+      "price_vnd": 40000,
+      "provider_cost_xu_estimate": 200,
+      "role": "normal_public_video",
+      "public_status": "public_beta_if_provider_gate_pass",
+      "duration_rule": "short_current_provider_default",
+      "margin_status": "YELLOW"
+    },
+    "advanced": {
+      "label_vi": "Video Nâng Cao",
+      "price_xu": 500,
+      "price_vnd": 50000,
+      "provider_cost_xu_estimate": 250,
+      "role": "better_prompt_style_camera",
+      "public_status": "open_only_after_smoke_and_cost_pass",
+      "duration_rule": "short_current_provider_default",
+      "margin_status": "YELLOW"
+    },
+    "standard": {
+      "label_vi": "Video Bán Hàng",
+      "price_xu": 600,
+      "price_vnd": 60000,
+      "provider_cost_xu_estimate": 300,
+      "role": "main_revenue_tier",
+      "public_status": "open_only_after_smoke_and_cost_pass",
+      "duration_rule": "short_current_provider_default",
+      "margin_status": "YELLOW"
+    },
+    "high": {
+      "label_vi": "Video Cao Cấp",
+      "price_xu": 800,
+      "price_vnd": 80000,
+      "provider_cost_xu_estimate": 400,
+      "role": "highest_current_provider_group",
+      "public_status": "open_only_after_smoke_and_cost_pass",
+      "duration_rule": "short_current_provider_default",
+      "margin_status": "YELLOW"
+    },
+    "future_1000": {
+      "label_vi": "Video Kling/Seedance",
+      "price_xu": 1000,
+      "price_vnd": 100000,
+      "provider_cost_xu_estimate": null,
+      "role": "future_provider",
+      "public_status": "KEEP_OFF",
+      "margin_status": "NEED_COST"
+    },
+    "future_1500": {
+      "label_vi": "Video Premium Future",
+      "price_xu": 1500,
+      "price_vnd": 150000,
+      "provider_cost_xu_estimate": null,
+      "role": "future_premium_provider",
+      "public_status": "KEEP_OFF",
+      "margin_status": "NEED_COST"
+    }
+  },
+  "video_duration_addons": {
+    "policy": "Do not sell extra seconds until provider duration cost is confirmed.",
+    "rules": [
+      {
+        "tiers": ["low", "basic"],
+        "extra_seconds_public": false,
+        "note": "Keep short to control marketing-loss and starter cost."
+      },
+      {
+        "tiers": ["common", "advanced", "standard", "high"],
+        "extra_seconds_public": false,
+        "note": "Can introduce +2s/+4s only after provider duration pricing is verified."
+      },
+      {
+        "tiers": ["future_1000", "future_1500"],
+        "extra_seconds_public": false,
+        "note": "Provider path not ready."
+      }
+    ]
+  },
+  "image_tools": {
+    "generate_low": {
+      "label_vi": "Ảnh tiết kiệm",
+      "price_xu": 50,
+      "provider_cost_xu_estimate": 25,
+      "public_status": "current_public_if_provider_gate_pass",
+      "retry_warranty_count": 0,
+      "margin_status": "YELLOW"
+    },
+    "generate_standard": {
+      "label_vi": "Ảnh tiêu chuẩn",
+      "price_xu": 200,
+      "provider_cost_xu_estimate": 150,
+      "public_status": "current_public_if_provider_gate_pass",
+      "retry_warranty_count": 0,
+      "margin_status": "RED"
+    },
+    "generate_standard_warranty": {
+      "label_vi": "Ảnh tiêu chuẩn + bảo hành",
+      "price_xu": 300,
+      "recommended_price_xu_if_owner_requires_lower_entry": 250,
+      "provider_cost_xu_estimate": 150,
+      "public_status": "current_public_if_provider_gate_pass",
+      "retry_warranty_count": 1,
+      "margin_status": "YELLOW"
+    },
+    "generate_high": {
+      "label_vi": "Ảnh chất lượng cao",
+      "price_xu": 400,
+      "provider_cost_xu_estimate": 250,
+      "public_status": "current_public_if_provider_gate_pass",
+      "retry_warranty_count": 0,
+      "margin_status": "RED"
+    },
+    "generate_high_warranty": {
+      "label_vi": "Ảnh chất lượng cao + bảo hành",
+      "price_xu": 600,
+      "recommended_price_xu_if_owner_requires_lower_entry": 500,
+      "provider_cost_xu_estimate": 250,
+      "public_status": "current_public_if_provider_gate_pass",
+      "retry_warranty_count": 1,
+      "margin_status": "YELLOW"
+    },
+    "ai_edit": {
+      "label_vi": "Chỉnh sửa ảnh AI",
+      "price_xu": 350,
+      "provider_cost_xu_estimate": null,
+      "public_status": "guarded_until_smoke_pass",
+      "margin_status": "NEED_COST"
+    },
+    "local_crop_resize_text_logo": {
+      "label_vi": "Cắt/resize/thêm chữ/logo local",
+      "price_xu": 0,
+      "provider_cost_xu_estimate": 0,
+      "public_status": "free_or_low_cost",
+      "margin_status": "GREEN"
+    }
+  },
+  "chat_tools": {
+    "chat_text_normal": {
+      "price_xu": 5,
+      "cost_unit": "short_text_request",
+      "provider": "configured_chat_provider",
+      "margin_status": "NEED_COST"
+    },
+    "chat_text_pro": {
+      "price_xu": 10,
+      "cost_unit": "pro_text_request",
+      "provider": "configured_chat_provider",
+      "margin_status": "NEED_COST"
+    },
+    "chat_deep_base": {
+      "price_xu": 20,
+      "cost_unit": "deep_request_base",
+      "provider": "configured_chat_provider",
+      "margin_status": "NEED_COST"
+    },
+    "vision_understanding": {
+      "price_xu": null,
+      "cost_unit": "image_request",
+      "provider": "vision_provider",
+      "margin_status": "NEED_COST"
+    },
+    "toan_aas_support_ai": {
+      "price_xu": 0,
+      "cost_unit": "sales_support",
+      "provider": "chat_provider_or_knowledge_base",
+      "margin_status": "GREEN",
+      "note": "Keep free or very low to support sales."
+    }
+  },
+  "subtitle_dub": {
+    "subtitle_create": {
+      "price_xu_per_minute": 20,
+      "minimum_xu": 20,
+      "provider_cost_xu_estimate": null,
+      "public_status": "guarded_until_asr_smoke_pass",
+      "margin_status": "NEED_COST"
+    },
+    "subtitle_translate": {
+      "price_xu_per_minute": 40,
+      "minimum_xu": 20,
+      "provider_cost_xu_estimate": null,
+      "public_status": "guarded_until_asr_translate_smoke_pass",
+      "margin_status": "NEED_COST"
+    },
+    "dub": {
+      "price_xu_per_minute": 100,
+      "minimum_xu": 100,
+      "provider_cost_xu_estimate": null,
+      "public_status": "guarded_until_asr_tts_mux_smoke_pass",
+      "margin_status": "NEED_COST"
+    },
+    "subtitle_plus_dub": {
+      "price_xu_per_minute": 120,
+      "minimum_xu": 100,
+      "provider_cost_xu_estimate": null,
+      "public_status": "guarded_until_full_pipeline_smoke_pass",
+      "margin_status": "NEED_COST"
+    },
+    "translated_subtitle_plus_dub": {
+      "price_xu_per_minute": 150,
+      "minimum_xu": 100,
+      "provider_cost_xu_estimate": null,
+      "public_status": "guarded_until_full_pipeline_smoke_pass",
+      "margin_status": "NEED_COST"
+    }
+  },
+  "addons": {
+    "prompt_enhancer": {
+      "recommended_price_xu": 0,
+      "public_status": "free_planning",
+      "margin_status": "GREEN"
+    },
+    "sales_script": {
+      "recommended_price_xu": 30,
+      "public_status": "free_or_low_cost_planning",
+      "margin_status": "NEED_COST"
+    },
+    "storyboard_pack": {
+      "recommended_price_xu": 30,
+      "public_status": "free_or_low_cost_planning",
+      "margin_status": "NEED_COST"
+    },
+    "music_library": {
+      "recommended_price_xu": 0,
+      "public_status": "if_library_assets_ready",
+      "margin_status": "GREEN"
+    },
+    "sfx_item": {
+      "recommended_price_xu": 10,
+      "public_status": "if_library_assets_ready",
+      "margin_status": "GREEN"
+    },
+    "music_ai_30_seconds": {
+      "recommended_price_xu": 300,
+      "public_status": "KEEP_OFF_until_provider_smoke",
+      "margin_status": "NEED_COST"
+    },
+    "frame_video_local_basic": {
+      "recommended_price_xu": 50,
+      "public_status": "requires_local_worker",
+      "margin_status": "GREEN"
+    },
+    "frame_video_local_motion": {
+      "recommended_price_xu": 100,
+      "public_status": "requires_local_worker",
+      "margin_status": "GREEN"
+    }
+  },
+  "documents_storage": {
+    "document_pdf_tools": {
+      "price_xu": 0,
+      "public_status": "local_free_if_worker_safe",
+      "margin_status": "GREEN"
+    },
+    "ocr": {
+      "price_xu": null,
+      "public_status": "NEED_COST",
+      "margin_status": "NEED_COST"
+    },
+    "storage_free_mb": 50,
+    "storage_addon_block_mb": 50,
+    "storage_addon_block_price_vnd": 10000
+  },
+  "coming_soon": [
+    "Kling/Seedance premium video",
+    "long video render",
+    "video-to-video",
+    "AI music generation public",
+    "full subtitle+dub render if ASR/TTS/mux not smoke-passed"
+  ]
+}
