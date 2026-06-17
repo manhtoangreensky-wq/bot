@@ -54030,6 +54030,9 @@ def video_billing_public_gate() -> dict:
         "advanced": video_tier_public_flag("advanced"),
         "standard": video_tier_public_flag("standard"),
         "high": video_tier_public_flag("high"),
+        "future_1000": video_tier_public_flag("future_1000"),
+        "future_1200": video_tier_public_flag("future_1200"),
+        "future_1500": video_tier_public_flag("future_1500"),
     }
     enabled_allowed = [
         tier for tier in video_public_allowed_tiers()
@@ -54066,9 +54069,13 @@ def video_public_status_payload() -> dict:
     )
     def _tier_public_conclusion(tier_name: str) -> str:
         tier_name = normalize_video_tier(tier_name)
-        if not ai_public or tier_name not in billing_gate.get("allowed_tiers", []):
-            return "GUARDED" if tier_name in video_high_tiers() else "OFF"
         ui_status = get_public_video_tier_ui_status(tier_name)
+        if tier_name in video_high_tiers():
+            if tier_name in billing_gate.get("allowed_tiers", []) and ui_status.get("enabled"):
+                return str(ui_status.get("public_status") or "PUBLIC") if ai_public else "PUBLIC_WITH_PROVIDER_GUARD"
+            return "PUBLIC_WITH_PROVIDER_GUARD" if video_tier_public_flag(tier_name) else "MAINTENANCE_PROVIDER"
+        if not ai_public or tier_name not in billing_gate.get("allowed_tiers", []):
+            return "OFF"
         return str(ui_status.get("public_status") or "PUBLIC")
 
     return {
@@ -55280,6 +55287,334 @@ async def cmd_video_cost_status(update: Update, context: ContextTypes.DEFAULT_TY
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await update.message.reply_text(video_cost_status_text(), parse_mode="HTML")
 
+VIDEO_TIER_TEST_COMMANDS = {
+    "video_test_tier_200": "low",
+    "video_test_tier_300": "basic",
+    "video_test_tier_400": "common",
+    "video_test_tier_500": "advanced",
+    "video_test_tier_600": "standard",
+    "video_test_tier_800": "high",
+    "video_test_tier_1000": "future_1000",
+    "video_test_tier_1200": "future_1200",
+    "video_test_tier_1500": "future_1500",
+}
+
+VIDEO_COMMAND_REGISTRY_HOTFIX = {
+    "video_tier_matrix": "cmd_video_tier_matrix",
+    "video_test_all_tiers": "cmd_video_test_all_tiers",
+    "video_recent_jobs": "cmd_video_recent_jobs",
+    "video_failed_jobs": "cmd_video_failed_jobs",
+    "video_error_report": "cmd_video_error_report",
+    "test_all_safe": "cmd_test_all_safe",
+    "test_all_video": "cmd_test_all_video",
+    "test_all_provider": "cmd_test_all_provider",
+    "test_all_system": "cmd_test_all_system",
+    **VIDEO_TIER_TEST_COMMANDS,
+}
+
+def video_tier_admin_public_state(tier: str) -> dict:
+    tier_norm = normalize_video_tier(tier)
+    status = get_public_video_tier_ui_status(tier_norm, user_is_admin=True)
+    readiness = get_video_prompt_export_readiness(True)
+    billing_gate = video_billing_public_gate()
+    allowed = tier_norm in set(billing_gate.get("allowed_tiers") or [])
+    provider_ready = bool(readiness.get("public_ready"))
+    public_enabled = bool(status.get("enabled") and allowed)
+    if public_enabled and provider_ready:
+        execution = "READY_TO_CREATE_AFTER_CONFIRM"
+    elif public_enabled:
+        execution = "PUBLIC_WITH_PROVIDER_GUARD"
+    elif video_tier_public_flag(tier_norm):
+        execution = "PUBLIC_CONFIGURED_BILLING_OR_PROVIDER_PENDING"
+    else:
+        execution = "OFF"
+    return {
+        "tier": tier_norm,
+        "label": status.get("label") or localized_video_tier_label(tier_norm),
+        "price_xu": int(status.get("price_xu") or video_tier_cost_xu(tier_norm)),
+        "public_status": status.get("public_status") or ("PUBLIC" if public_enabled else "OFF"),
+        "public_enabled": public_enabled,
+        "allowed": allowed,
+        "provider_ready": provider_ready,
+        "execution": execution,
+        "reason": status.get("reason") or readiness.get("reason") or "-",
+        "model": status.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
+        "cost_status": status.get("cost_status") or "-",
+    }
+
+def video_tier_matrix_lines() -> list[str]:
+    lines = [
+        "🎬 <b>VIDEO TIER MATRIX</b>",
+        "",
+        "Nguồn: tiered pricing + public gate hiện tại. Lệnh này chỉ đọc trạng thái, không gọi provider và không trừ Xu.",
+        "",
+    ]
+    for tier in VIDEO_TIER_ORDER:
+        state = video_tier_admin_public_state(tier)
+        lines.append(
+            f"• <code>{html.escape(tier)}</code> — <b>{html.escape(str(state['label']))}</b> "
+            f"| <code>{state['price_xu']} Xu</code> "
+            f"| public <code>{html.escape(str(state['public_status']))}</code> "
+            f"| exec <code>{html.escape(str(state['execution']))}</code> "
+            f"| model <code>{html.escape(str(state['model']))}</code>"
+        )
+    lines.extend([
+        "",
+        "<b>Safe commands</b>",
+        "• <code>/video_test_tier_200</code> ... <code>/video_test_tier_1500</code>",
+        "• <code>/video_test_all_tiers</code>",
+        "• <code>/video_recent_jobs</code> | <code>/video_failed_jobs</code> | <code>/video_error_report</code>",
+    ])
+    return lines
+
+def video_test_tier_lines(tier: str) -> list[str]:
+    state = video_tier_admin_public_state(tier)
+    blockers = []
+    if not state["public_enabled"]:
+        blockers.append("Tier chưa pass public/billing allowlist hiện tại")
+    if not state["provider_ready"]:
+        blockers.append("Provider execution đang có guard; public UI vẫn được kiểm soát bằng confirm/job gate")
+    if state["tier"] == "low":
+        blockers.append(f"200 Xu daily cap: {int(VIDEO_BETA_200_MAX_USER_DAY or 3)}/user/day")
+    return [
+        "🧪 <b>VIDEO TIER SAFE TEST</b>",
+        "",
+        f"Tier: <code>{html.escape(state['tier'])}</code>",
+        f"Gói: <b>{html.escape(str(state['label']))}</b>",
+        f"Giá: <code>{state['price_xu']} Xu</code>",
+        f"Public status: <code>{html.escape(str(state['public_status']))}</code>",
+        f"Execution path: <code>{html.escape(str(state['execution']))}</code>",
+        f"Provider ready: <code>{'YES' if state['provider_ready'] else 'NO'}</code>",
+        f"Model: <code>{html.escape(str(state['model']))}</code>",
+        f"Cost status: <code>{html.escape(str(state['cost_status']))}</code>",
+        f"Reason: <code>{html.escape(str(state['reason']))}</code>",
+        "",
+        "Mode: <code>SAFE_DRY_RUN</code>",
+        "Provider call: <code>NO</code>",
+        "Xu deducted: <code>NO</code>",
+        "Payment/PayOS: <code>NOT_TOUCHED</code>",
+        "",
+        "Blockers/notes:",
+        *[f"• {html.escape(item)}" for item in (blockers or ["Không có blocker ở tầng command/registry."])],
+    ]
+
+def video_job_admin_rows(limit: int = 8, failed_only: bool = False) -> list[dict]:
+    limit = max(1, min(int(limit or 8), 20))
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        where = "job_type='video'"
+        params: list = []
+        if failed_only:
+            where += " AND UPPER(COALESCE(status,'')) IN ('FAILED','FAIL','ERROR','TIMEOUT','CANCELLED')"
+        rows = conn.execute(
+            f"""
+            SELECT id,user_id,task_id,model,status,provider_status,error_class,provider_error_code,
+                   provider_message,xu_cost_planned,xu_deducted,refund_status,billing_status,
+                   created_at,updated_at,finished_at,package_item_type
+            FROM shopaikey_jobs
+            WHERE {where}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+def video_job_short_id(value: str = "") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    if len(text) <= 12:
+        return text
+    return f"{text[:6]}...{text[-4:]}"
+
+def video_jobs_lines(title: str, rows: list[dict]) -> list[str]:
+    lines = [title, ""]
+    if not rows:
+        lines.append("Không có job video phù hợp trong DB.")
+        return lines
+    for row in rows:
+        message = sanitize_log_text(row.get("provider_message") or row.get("error_class") or "-")[:120]
+        lines.append(
+            f"• #{int(row.get('id') or 0)} | user <code>{html.escape(str(row.get('user_id') or '-'))}</code> "
+            f"| task <code>{html.escape(video_job_short_id(row.get('task_id')))}</code> "
+            f"| status <code>{html.escape(str(row.get('status') or '-'))}</code> "
+            f"| model <code>{html.escape(str(row.get('model') or '-'))}</code> "
+            f"| cost <code>{int(row.get('xu_cost_planned') or 0)} Xu</code> "
+            f"| bill <code>{html.escape(str(row.get('billing_status') or '-'))}</code> "
+            f"| refund <code>{html.escape(str(row.get('refund_status') or '-'))}</code>"
+        )
+        if message and message != "-":
+            lines.append(f"  └ <code>{html.escape(message)}</code>")
+    return lines
+
+def video_error_report_lines() -> list[str]:
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT COALESCE(error_class, status, provider_status, 'UNKNOWN') AS error_key,
+                   COUNT(*) AS count,
+                   MAX(updated_at) AS last_seen
+            FROM shopaikey_jobs
+            WHERE job_type='video'
+              AND UPPER(COALESCE(status,'')) IN ('FAILED','FAIL','ERROR','TIMEOUT','CANCELLED')
+            GROUP BY COALESCE(error_class, status, provider_status, 'UNKNOWN')
+            ORDER BY count DESC, last_seen DESC
+            LIMIT 12
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    lines = ["📉 <b>VIDEO ERROR REPORT</b>", ""]
+    if not rows:
+        lines.append("Chưa có lỗi video terminal trong DB.")
+    else:
+        for row in rows:
+            lines.append(
+                f"• <code>{html.escape(str(row['error_key'] or 'UNKNOWN'))}</code>: "
+                f"<b>{int(row['count'] or 0)}</b> | last <code>{html.escape(str(row['last_seen'] or '-'))}</code>"
+            )
+    lines.extend(["", "Không hiển thị API key, raw provider response hoặc URL output dài."])
+    return lines
+
+def test_all_safe_lines() -> list[str]:
+    required_commands = set(VIDEO_COMMAND_REGISTRY_HOTFIX.keys())
+    command_count = len(required_commands)
+    status = video_public_status_payload()
+    lines = [
+        "✅ <b>SAFE SYSTEM TEST</b>",
+        "",
+        f"• Required P0 commands: <code>{command_count}</code>",
+        "• Provider calls: <code>NO</code>",
+        "• Xu deducted: <code>NO</code>",
+        "• PayOS/top-up/webhook: <code>NOT_TOUCHED</code>",
+        f"• Video public beta: <code>{'ON' if video_public_beta_enabled_runtime() else 'OFF'}</code>",
+        f"• Video AI conclusion: <code>{html.escape(str(status['conclusion'].get('video_ai_from_prompt')))}</code>",
+        f"• Allowed tiers: <code>{html.escape(', '.join(video_public_allowed_tiers()))}</code>",
+        "",
+        "Commands kiểm tra sâu: <code>/test_all_video</code> | <code>/test_all_provider</code> | <code>/test_all_system</code>",
+    ]
+    return lines
+
+async def cmd_video_tier_matrix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, video_tier_matrix_lines())
+
+async def _cmd_video_test_tier(update: Update, context: ContextTypes.DEFAULT_TYPE, tier: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, video_test_tier_lines(tier))
+
+async def cmd_video_test_tier_200(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "low")
+
+async def cmd_video_test_tier_300(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "basic")
+
+async def cmd_video_test_tier_400(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "common")
+
+async def cmd_video_test_tier_500(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "advanced")
+
+async def cmd_video_test_tier_600(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "standard")
+
+async def cmd_video_test_tier_800(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "high")
+
+async def cmd_video_test_tier_1000(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "future_1000")
+
+async def cmd_video_test_tier_1200(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "future_1200")
+
+async def cmd_video_test_tier_1500(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_video_test_tier(update, context, "future_1500")
+
+async def cmd_video_test_all_tiers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    lines = [
+        "🧪 <b>VIDEO ALL TIER SAFE TEST</b>",
+        "",
+        "Mode: <code>SAFE_DRY_RUN</code> | Provider call: <code>NO</code> | Xu: <code>NO</code>",
+        "",
+    ]
+    for tier in VIDEO_TIER_ORDER:
+        state = video_tier_admin_public_state(tier)
+        lines.append(
+            f"• <code>{html.escape(tier)}</code>: <code>{html.escape(str(state['execution']))}</code> "
+            f"| {int(state['price_xu'])} Xu | provider <code>{'YES' if state['provider_ready'] else 'NO'}</code>"
+        )
+    await reply_html_lines(update, lines)
+
+async def cmd_video_recent_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(getattr(context, "args", []) or [])
+    limit = int(args[0]) if args and str(args[0]).isdigit() else 8
+    await reply_html_lines(update, video_jobs_lines("🎬 <b>VIDEO RECENT JOBS</b>", video_job_admin_rows(limit, failed_only=False)))
+
+async def cmd_video_failed_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(getattr(context, "args", []) or [])
+    limit = int(args[0]) if args and str(args[0]).isdigit() else 8
+    await reply_html_lines(update, video_jobs_lines("❌ <b>VIDEO FAILED JOBS</b>", video_job_admin_rows(limit, failed_only=True)))
+
+async def cmd_video_error_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, video_error_report_lines())
+
+async def cmd_test_all_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, test_all_safe_lines())
+
+async def cmd_test_all_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    lines = [*video_tier_matrix_lines(), "", *video_error_report_lines()]
+    await reply_html_lines(update, lines)
+
+async def cmd_test_all_provider(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    lines = [
+        "🤖 <b>PROVIDER SAFE TEST</b>",
+        "",
+        f"• ShopAIKey status: <code>{html.escape(preferred_tool_test_status_text('shopaikey_video', 'shopaikey_video_job'))}</code>",
+        f"• Key4U status: <code>{html.escape(preferred_tool_test_status_text('key4u_video', 'key4u_video_model'))}</code>",
+        f"• Suno status: <code>{html.escape(preferred_tool_test_status_text('key4u_suno', 'key4u_suno_job'))}</code>",
+        f"• MiniMax status: <code>{html.escape(preferred_tool_test_status_text('minimax_tts', 'minimax_voice_clone'))}</code>",
+        "",
+        "Provider call: <code>NO</code>. Dùng smoke command riêng nếu cần gọi thật.",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_test_all_system(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    lines = [
+        *test_all_safe_lines(),
+        "",
+        "<b>Runtime links</b>",
+        "• <code>/runtime</code>",
+        "• <code>/data_status</code>",
+        "• <code>/providers</code>",
+        "• <code>/shopaikey_status</code>",
+        "• <code>/key4u_status</code>",
+    ]
+    await reply_html_lines(update, lines)
+
 async def cmd_image_edit_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
@@ -55727,6 +56062,8 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Workflow image-to-video: <code>{html.escape(workflow_image_to_video_status_text())}</code> | tested <code>{html.escape(tool_test_status_text('workflow_image_to_video'))}</code>",
         f"• Frame video / ffmpeg slideshow: <code>{'public ON' if frame_video.get('public_enabled') else 'public OFF'}</code> | base 2-5/6-10/11-20 <code>{int(frame_video.get('base_2_5_xu') or 0)}/{int(frame_video.get('base_6_10_xu') or 0)}/{int(frame_video.get('base_11_20_xu') or 0)} Xu</code> | motion +<code>{int(frame_video.get('motion_effect_extra_xu') or 0)} Xu</code> | ffmpeg <code>{'configured' if frame_video.get('ffmpeg_configured') else 'missing'}</code> | tested <code>{html.escape(tool_test_status_text('frame_video'))}</code>",
         "• Stage: <code>experimental/admin-only</code>",
+        "• Video command registry: <code>/video_tier_matrix</code> | <code>/video_test_all_tiers</code> | <code>/video_recent_jobs</code> | <code>/video_failed_jobs</code> | <code>/video_error_report</code> | <code>/test_all_safe</code> | <code>/test_all_video</code> | <code>/test_all_provider</code> | <code>/test_all_system</code>",
+        "• Video tier safe tests: <code>/video_test_tier_200</code> | <code>/video_test_tier_300</code> | <code>/video_test_tier_400</code> | <code>/video_test_tier_500</code> | <code>/video_test_tier_600</code> | <code>/video_test_tier_800</code> | <code>/video_test_tier_1000</code> | <code>/video_test_tier_1200</code> | <code>/video_test_tier_1500</code>",
         "• Commands: <code>/create_media</code> | <code>/quick_image_test</code> | <code>/quick_video_test</code> | <code>/frame_video_status</code> | <code>/tool_test_frame_video</code> | <code>/system_public_status</code> | <code>/tool_public_status</code> | <code>/image_edit_status</code> | <code>/tool_test_image_edit</code> | <code>/tool_test_gemini_image_edit</code> | <code>/tool_test_shopaikey_image_edit</code> | <code>/image_edit_public_open</code> | <code>/image_edit_public_close</code> | <code>/chat_ai_status</code> | <code>/toanaas_ai_status</code> | <code>/video_public_status</code> | <code>/video_gate_status</code> | <code>/video_tier_status</code> | <code>/video_cost_status</code> | <code>/video_beta_limits</code> | <code>/subtitle_dub_status</code> | <code>/subtitle_status</code> | <code>/video_dub_public_open</code> | <code>/video_dub_public_close</code> | <code>/video_beta_open</code> | <code>/video_beta_close</code> | <code>/video_open_all_current_tiers</code> | <code>/video_open_high_tiers</code> | <code>/video_close_high_tiers</code> | <code>/video_smoke_tier_500</code> | <code>/video_smoke_tier_600</code> | <code>/video_smoke_tier_800</code> | <code>/video_public_open_safe</code> | <code>/package_catalog</code> | <code>/grant_combo</code> | <code>/grant_monthly</code> | <code>/user_packages</code> | <code>/shopaikey_status</code> | <code>/image_provider_status</code> | <code>/shopaikey_usage</code> | <code>/tool_test_shopaikey</code> | <code>/tool_test_shopaikey_chat</code> | <code>/tool_test_shopaikey_tts</code> | <code>/tool_test_shopaikey_image</code> | <code>/tool_test_workflow_image</code> | <code>/tool_test_wf_i2v</code> | <code>/tool_test_shopaikey_video</code> | <code>/shopaikey_video_job</code> | <code>/tool_test_asr</code> | <code>/tool_test_translate</code> | <code>/tool_test_tts_for_dub</code> | <code>/tool_test_video_subtitle</code> | <code>/tool_test_video_dub</code> | <code>/tool_test_subtitle_plus_dub</code> | <code>/freeze_status</code> | <code>/freeze_video</code> | <code>/unfreeze_video</code> | <code>/queue_status</code> | <code>/job_status</code> | <code>/refund_job</code>",
         "",
         "<b>Audio</b>",
@@ -107039,6 +107376,24 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("pricing_preview", cmd_pricing_preview))
     tg_app.add_handler(CommandHandler("pricing_validate", cmd_pricing_validate))
     tg_app.add_handler(CommandHandler("video_kling_status", cmd_video_kling_status))
+    tg_app.add_handler(CommandHandler("video_tier_matrix", cmd_video_tier_matrix))
+    tg_app.add_handler(CommandHandler("video_test_tier_200", cmd_video_test_tier_200))
+    tg_app.add_handler(CommandHandler("video_test_tier_300", cmd_video_test_tier_300))
+    tg_app.add_handler(CommandHandler("video_test_tier_400", cmd_video_test_tier_400))
+    tg_app.add_handler(CommandHandler("video_test_tier_500", cmd_video_test_tier_500))
+    tg_app.add_handler(CommandHandler("video_test_tier_600", cmd_video_test_tier_600))
+    tg_app.add_handler(CommandHandler("video_test_tier_800", cmd_video_test_tier_800))
+    tg_app.add_handler(CommandHandler("video_test_tier_1000", cmd_video_test_tier_1000))
+    tg_app.add_handler(CommandHandler("video_test_tier_1200", cmd_video_test_tier_1200))
+    tg_app.add_handler(CommandHandler("video_test_tier_1500", cmd_video_test_tier_1500))
+    tg_app.add_handler(CommandHandler("video_test_all_tiers", cmd_video_test_all_tiers))
+    tg_app.add_handler(CommandHandler("video_recent_jobs", cmd_video_recent_jobs))
+    tg_app.add_handler(CommandHandler("video_failed_jobs", cmd_video_failed_jobs))
+    tg_app.add_handler(CommandHandler("video_error_report", cmd_video_error_report))
+    tg_app.add_handler(CommandHandler("test_all_safe", cmd_test_all_safe))
+    tg_app.add_handler(CommandHandler("test_all_video", cmd_test_all_video))
+    tg_app.add_handler(CommandHandler("test_all_provider", cmd_test_all_provider))
+    tg_app.add_handler(CommandHandler("test_all_system", cmd_test_all_system))
     tg_app.add_handler(CommandHandler("image_provider_status", cmd_image_provider_status))
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
     tg_app.add_handler(CommandHandler("key4u_usage", cmd_key4u_usage))

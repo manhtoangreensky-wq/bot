@@ -128,8 +128,26 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/toanaas_ai_status` | `cmd_toanaas_ai_status` | YES | YES | TOAN AAS assistant knowledge-base and AI provider readiness. |
 | `/video_public_status` | `cmd_video_public_status` | YES | YES | Video public flags, provider smoke, worker readiness, tier status and blocked tiers. |
 | `/video_gate_status` | `cmd_video_gate_status` | YES | YES | Video gate matrix for planning, frame video, Video AI, image/video-to-video and long render. |
-| `/video_tier_status` | `cmd_video_tier_status` | YES | YES | Video 200/300/400/500/600/800/1000 tier status plus 1500 coming-soon guard. |
+| `/video_tier_status` | `cmd_video_tier_status` | YES | YES | Video 200/300/400/500/600/800/1000/1200/1500 tier status and provider/billing guard summary. |
+| `/video_tier_matrix` | `cmd_video_tier_matrix` | YES | YES | Admin safe matrix for 200/300/400/500/600/800/1000/1200/1500 tiers; no provider call and no Xu charge. |
 | `/video_cost_status` | `cmd_video_cost_status` | YES | YES | Video 200/300/400/500/600/800/1000 cost ratio and margin status; no payment changes. |
+| `/video_test_tier_200` | `cmd_video_test_tier_200` | YES | YES | Admin safe dry-run for 200 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_300` | `cmd_video_test_tier_300` | YES | YES | Admin safe dry-run for 300 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_400` | `cmd_video_test_tier_400` | YES | YES | Admin safe dry-run for 400 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_500` | `cmd_video_test_tier_500` | YES | YES | Admin safe dry-run for 500 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_600` | `cmd_video_test_tier_600` | YES | YES | Admin safe dry-run for 600 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_800` | `cmd_video_test_tier_800` | YES | YES | Admin safe dry-run for 800 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_1000` | `cmd_video_test_tier_1000` | YES | YES | Admin safe dry-run for 1000 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_1200` | `cmd_video_test_tier_1200` | YES | YES | Admin safe dry-run for 1200 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_tier_1500` | `cmd_video_test_tier_1500` | YES | YES | Admin safe dry-run for 1500 Xu video tier; no provider call and no Xu charge. |
+| `/video_test_all_tiers` | `cmd_video_test_all_tiers` | YES | YES | Admin safe dry-run summary for all current video tiers; no provider call and no Xu charge. |
+| `/video_recent_jobs` | `cmd_video_recent_jobs` | YES | YES | Lists recent video jobs from `shopaikey_jobs` with sanitized IDs/messages. |
+| `/video_failed_jobs` | `cmd_video_failed_jobs` | YES | YES | Lists failed video jobs from `shopaikey_jobs` with sanitized error summaries. |
+| `/video_error_report` | `cmd_video_error_report` | YES | YES | Aggregated video error classes/statuses; no raw provider response or output URL. |
+| `/test_all_safe` | `cmd_test_all_safe` | YES | YES | Safe admin system command audit; no provider call, no Xu, no payment changes. |
+| `/test_all_video` | `cmd_test_all_video` | YES | YES | Safe video registry/tier/error audit; no provider call and no Xu charge. |
+| `/test_all_provider` | `cmd_test_all_provider` | YES | YES | Safe provider smoke snapshot summary; does not call providers. |
+| `/test_all_system` | `cmd_test_all_system` | YES | YES | Safe combined system checklist linking runtime/data/provider status commands. |
 | `/video_beta_limits` | `cmd_video_beta_limits` | YES | YES | Current public video beta limits, confirm/job-lock policy and duration caps. |
 | `/video_beta_open` | `cmd_video_beta_open` | YES | YES | Opens eligible 200/300/400/500/600/800/1000 Video AI tiers after provider smoke and billing safety pass; cost review is report-only. |
 | `/video_beta_close` | `cmd_video_beta_close` | YES | YES | Closes Video AI public beta without touching planning/storyboard or payment logic. |

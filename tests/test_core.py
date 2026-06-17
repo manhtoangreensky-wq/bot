@@ -4816,6 +4816,38 @@ def test_safe_public_video_activation_commands_registered_and_admin_only():
     assert source_between(source, "async def cmd_video_gate_status", "async def cmd_video_public_open_safe").count("is_admin_user") >= 1
 
 
+def test_p0_video_command_registry_hotfix_commands_registered_and_documented():
+    source = bot_source_text()
+    registry = (Path(bot.__file__).resolve().parent / "docs" / "COMMAND_REGISTRY.md").read_text(encoding="utf-8")
+    required = {
+        "video_tier_matrix": "cmd_video_tier_matrix",
+        "video_test_tier_200": "cmd_video_test_tier_200",
+        "video_test_tier_300": "cmd_video_test_tier_300",
+        "video_test_tier_400": "cmd_video_test_tier_400",
+        "video_test_tier_500": "cmd_video_test_tier_500",
+        "video_test_tier_600": "cmd_video_test_tier_600",
+        "video_test_tier_800": "cmd_video_test_tier_800",
+        "video_test_tier_1000": "cmd_video_test_tier_1000",
+        "video_test_tier_1200": "cmd_video_test_tier_1200",
+        "video_test_tier_1500": "cmd_video_test_tier_1500",
+        "video_test_all_tiers": "cmd_video_test_all_tiers",
+        "video_recent_jobs": "cmd_video_recent_jobs",
+        "video_failed_jobs": "cmd_video_failed_jobs",
+        "video_error_report": "cmd_video_error_report",
+        "test_all_safe": "cmd_test_all_safe",
+        "test_all_video": "cmd_test_all_video",
+        "test_all_provider": "cmd_test_all_provider",
+        "test_all_system": "cmd_test_all_system",
+    }
+    for command, handler in required.items():
+        assert f'CommandHandler("{command}", {handler})' in source
+        assert f"| `/{command}` | `{handler}` |" in registry
+    assert '"future_1000": video_tier_public_flag("future_1000")' in source
+    assert '"future_1200": video_tier_public_flag("future_1200")' in source
+    assert '"future_1500": video_tier_public_flag("future_1500")' in source
+    assert "PUBLIC_WITH_PROVIDER_GUARD" in source
+
+
 def test_video_public_open_safe_blocks_when_veo_timeout_stale(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_AI_PUBLIC_ENABLED", False)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
