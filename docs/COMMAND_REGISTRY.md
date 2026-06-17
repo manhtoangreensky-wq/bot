@@ -127,14 +127,14 @@ Admin menu groups in `bot.py` should show a short purpose and example syntax for
 | `/toanaas_ai_status` | `cmd_toanaas_ai_status` | YES | YES | TOAN AAS assistant knowledge-base and AI provider readiness. |
 | `/video_public_status` | `cmd_video_public_status` | YES | YES | Video public flags, provider smoke, worker readiness, tier status and blocked tiers. |
 | `/video_gate_status` | `cmd_video_gate_status` | YES | YES | Video gate matrix for planning, frame video, Video AI, image/video-to-video and long render. |
-| `/video_tier_status` | `cmd_video_tier_status` | YES | YES | Video 200/300/400/500/600/800 tier status plus 1000/1500 coming-soon guard. |
-| `/video_cost_status` | `cmd_video_cost_status` | YES | YES | Video 200/300/400/500/600/800 cost ratio and margin status; no payment changes. |
+| `/video_tier_status` | `cmd_video_tier_status` | YES | YES | Video 200/300/400/500/600/800/1000 tier status plus 1500 coming-soon guard. |
+| `/video_cost_status` | `cmd_video_cost_status` | YES | YES | Video 200/300/400/500/600/800/1000 cost ratio and margin status; no payment changes. |
 | `/video_beta_limits` | `cmd_video_beta_limits` | YES | YES | Current public video beta limits, confirm/job-lock policy and duration caps. |
-| `/video_beta_open` | `cmd_video_beta_open` | YES | YES | Opens eligible 200/300/400/500/600/800 Video AI tiers after provider smoke and billing safety pass; cost review is report-only. |
+| `/video_beta_open` | `cmd_video_beta_open` | YES | YES | Opens eligible 200/300/400/500/600/800/1000 Video AI tiers after provider smoke and billing safety pass; cost review is report-only. |
 | `/video_beta_close` | `cmd_video_beta_close` | YES | YES | Closes Video AI public beta without touching planning/storyboard or payment logic. |
-| `/video_open_all_current_tiers` | `cmd_video_open_all_current_tiers` | YES | YES | Opens 200/300/400/500/600/800 current Video AI tiers; keeps 1000/1500/long/Kling/Seedance/Key4U public OFF. |
-| `/video_open_high_tiers` | `cmd_video_open_high_tiers` | YES | YES | Opens 500/600/800 Video AI tiers after provider smoke and billing safety; no daily high-tier limit in this phase. |
-| `/video_close_high_tiers` | `cmd_video_close_high_tiers` | YES | YES | Closes only 500/600/800 tiers and leaves lower beta tiers unchanged. |
+| `/video_open_all_current_tiers` | `cmd_video_open_all_current_tiers` | YES | YES | Opens 200/300/400/500/600/800/1000 current Video AI tiers; keeps 1500/long/Kling/Seedance/Key4U public OFF. |
+| `/video_open_high_tiers` | `cmd_video_open_high_tiers` | YES | YES | Opens 500/600/800/1000 Video AI tiers after provider smoke and billing safety; no daily high-tier limit in this phase. |
+| `/video_close_high_tiers` | `cmd_video_close_high_tiers` | YES | YES | Closes only 500/600/800/1000 tiers and leaves lower beta tiers unchanged. |
 | `/video_smoke_tier_500` | `cmd_video_smoke_tier_500` | YES | YES | Admin-only/no-Xu smoke path for the 500 Xu tier; delegates to ShopAIKey video smoke. |
 | `/video_smoke_tier_600` | `cmd_video_smoke_tier_600` | YES | YES | Admin-only/no-Xu smoke path for the 600 Xu sales tier; delegates to ShopAIKey video smoke. |
 | `/video_smoke_tier_800` | `cmd_video_smoke_tier_800` | YES | YES | Admin-only/no-Xu smoke path for the 800 Xu high tier; delegates to ShopAIKey video smoke. |

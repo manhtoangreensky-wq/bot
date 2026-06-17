@@ -10,10 +10,11 @@ Open the current public Video AI short-video tiers:
 - 500 Xu - Video Nang Cao
 - 600 Xu - Video Ban Hang
 - 800 Xu - Video Cao Cap
+- 1000 Xu - Video Chuyen Nghiep
 
 Keep future/high-risk products closed:
 
-- 1000 Xu and 1500 Xu future premium tiers
+- 1500 Xu future premium tier
 - long video
 - multi episode
 - Kling public
@@ -24,7 +25,7 @@ Keep future/high-risk products closed:
 
 ## Root Cause
 
-The 500/600/800 tiers were present in the UI, but `get_video_tier_status()` depended on `video_billing_public_gate().allowed_tiers`.
+The 500/600/800/1000 tiers were present or needed in the UI, but `get_video_tier_status()` depended on `video_billing_public_gate().allowed_tiers`.
 That gate built `allowed_tiers` from cost/margin checks, so a cost warning or unknown provider cost could make a visible tier look closed with a message like "billing/cost gate".
 
 ## Gate Change
@@ -34,7 +35,7 @@ The public video gate now separates:
 - billing safety: confirm before deduct, refund policy, job lock, concurrency and duration caps
 - cost review: admin reporting only
 
-For current launch tiers 200/300/400/500/600/800, cost warnings no longer block the customer confirmation path.
+For current launch tiers 200/300/400/500/600/800/1000, cost warnings no longer block the customer confirmation path.
 
 ## Opened Tiers
 
@@ -44,10 +45,11 @@ For current launch tiers 200/300/400/500/600/800, cost warnings no longer block 
 - 500: public
 - 600: public
 - 800: public
+- 1000: public
 
 ## Still Closed
 
-- 1000/1500: coming soon, no confirm, no provider call
+- 1500: coming soon, no confirm, no provider call
 - long video and multi episode: off/coming soon
 - Kling and Seedance public: off/coming soon
 - Key4U public video: off; Key4U remains admin smoke/fallback candidate only
@@ -60,7 +62,7 @@ For current launch tiers 200/300/400/500/600/800, cost warnings no longer block 
 - ShopAIKey provider smoke gate
 - Auto-freeze policy remains in the existing video safety layer
 - 200 Xu starter tier keeps existing day/week/month limits
-- 500/600/800 have no daily tier limit in this phase, as requested
+- 500/600/800/1000 have no daily tier limit in this phase, as requested
 
 ## Commands
 
@@ -75,8 +77,8 @@ For current launch tiers 200/300/400/500/600/800, cost warnings no longer block 
 - `/runtime`
 - `/video_tier_status`
 - `/video_public_status`
-- Choose 500/600/800 and verify the confirmation screen appears without billing/cost gate text
-- Choose 1000/1500 and verify coming-soon guard
+- Choose 500/600/800/1000 and verify the confirmation screen appears without billing/cost gate text
+- Choose 1500 and verify coming-soon guard
 - Confirm 300/400 regression flow still reaches invoice/confirm/job path
 
 ## Not Touched
