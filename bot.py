@@ -62763,6 +62763,40 @@ def music_guided_back_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         lang=lang,
     )
 
+def music_prompt_entry_text(lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "en":
+        return (
+            "🎼 <b>Music prompt</b>\n\n"
+            "Start with a ready suggestion, generate another set, or write your own brief. "
+            "TOAN AAS will show 3 usable prompt directions before any real music generation.\n\n"
+            "No music API call and no Xu charge on this planning step."
+        )
+    if lang == "zh":
+        return (
+            "🎼 <b>音乐提示词</b>\n\n"
+            "你可以先使用建议、换一组建议，或输入自己的需求。TOAN AAS 会先给出 3 个可用方向。\n\n"
+            "本步骤不调用音乐 API、不扣 Xu。"
+        )
+    return (
+        "🎼 <b>Tạo prompt nhạc</b>\n\n"
+        "Bạn muốn bắt đầu theo cách nào?\n\n"
+        "TOAN AAS sẽ đưa 3 hướng nhạc để bạn chọn, đổi gợi ý hoặc tự sửa trước. "
+        "Chỉ khi bạn xác nhận tạo nhạc thật thì hệ thống mới đi qua báo giá/provider.\n\n"
+        "Bot chưa gọi API nhạc và chưa trừ Xu."
+    )
+
+def music_prompt_entry_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = [
+        ("✨ 3 gợi ý prompt nhạc" if is_vi else "✨ 3 suggestions", "music_quick|prompt_seed"),
+        ("🔄 Gợi ý khác" if is_vi else "🔄 More ideas", "music_quick|prompt_seed_more"),
+        ("✍️ Tự nhập mô tả" if is_vi else "✍️ Custom brief", "music_quick|prompt_custom"),
+        ("🎼 Tạo nhạc AI/Suno" if is_vi else "🎼 AI music/Suno", "music_quick|ai_music"),
+    ]
+    back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
 def music_prompt_input_text(lang: str = "vi") -> str:
     lang = music_ui_lang(lang=lang)
     if lang == "en":
@@ -62800,6 +62834,39 @@ def voice_text_input_text(lang: str = "vi") -> str:
         "Bạn hãy gửi nội dung cần đọc ở tin nhắn tiếp theo.\n\n"
         "Bot sẽ gợi ý 3 kiểu giọng để chọn trước. Chỉ khi public TTS được mở và có xác nhận phí thì mới gọi provider. Hiện bước này chưa trừ Xu."
     )
+
+def voice_prompt_entry_text(lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    if lang == "en":
+        return (
+            "🎙 <b>Create voice</b>\n\n"
+            "Choose a starting point. TOAN AAS can suggest 3 voice directions, let you write the narration, "
+            "or save a consent-based voice profile first.\n\n"
+            "No TTS provider call and no Xu charge on this planning screen."
+        )
+    if lang == "zh":
+        return (
+            "🎙 <b>生成语音</b>\n\n"
+            "请选择开始方式。TOAN AAS 可以先给 3 个声音方向，也可以让你输入文案或保存授权声音档案。\n\n"
+            "本步骤不调用 TTS provider、不扣 Xu。"
+        )
+    return (
+        "🎙 <b>Tạo giọng đọc</b>\n\n"
+        "Bạn muốn bắt đầu theo cách nào?\n\n"
+        "TOAN AAS có thể gợi ý 3 kiểu giọng, cho bạn nhập nội dung đọc, hoặc lưu voice profile/nhân bản giọng có đồng ý rõ ràng.\n\n"
+        "Màn này chưa gọi TTS provider và chưa trừ Xu."
+    )
+
+def voice_prompt_entry_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = [
+        ("✨ 3 gợi ý giọng đọc" if is_vi else "✨ 3 voice ideas", "music_quick|voice_seed"),
+        ("✍️ Tự nhập nội dung" if is_vi else "✍️ Write text", "music_quick|voice_custom"),
+        ("🧬 Nhân bản giọng" if is_vi else "🧬 Voice profile", "music_quick|voice_clone"),
+        ("🎙 Giọng đã lưu" if is_vi else "🎙 Saved voices", "music_quick|voice_profiles"),
+    ]
+    back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def music_prompt_suggestions(description: str, offset: int = 0, lang: str = "vi") -> list[dict]:
     desc = _short_pending_text(description, 220) or ("video sản phẩm" if music_ui_lang(lang=lang) == "vi" else "product video")
@@ -62905,7 +62972,7 @@ def music_prompt_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("2️⃣ Chọn gợi ý 2" if is_vi else "2️⃣ Choose 2", "music_quick|prompt_choose_2"),
         ("3️⃣ Chọn gợi ý 3" if is_vi else "3️⃣ Choose 3", "music_quick|prompt_choose_3"),
         ("🔁 Đổi prompt khác" if is_vi else "🔁 More prompts", "music_quick|prompt_more"),
-        ("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", "music_quick|prompt"),
+        ("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", "music_quick|prompt_custom"),
         ("🎵 Tìm nhạc theo prompt" if is_vi else "🎵 Search music", "music_quick|find_from_prompt"),
         ("💾 Lưu prompt" if is_vi else "💾 Save prompt", "music_quick|save_prompt"),
         ("🎼 Tạo nhạc AI Suno" if is_vi else "🎼 Generate Suno music", "music_quick|music_ai_guard"),
@@ -62936,14 +63003,14 @@ def music_ai_menu_text(lang: str = "vi") -> str:
         return (
             "🎼 <b>AI Music / Suno</b>\n\n"
             "Choose what you want to prepare. TOAN AAS creates 3 music directions first: background music, song with lyrics, lyrics/script, or melody/mood.\n\n"
-            f"<b>Provider status:</b> {html.escape(suno_music_provider_summary_text(lang))}\n\n"
-            "Real music generation uses a separate pricing/confirmation gate. No provider call and no Xu charge on this planning screen."
+            "Real music generation uses a separate pricing/confirmation gate. If Suno is not ready, the bot will keep your prompt and say it clearly.\n\n"
+            "No provider call and no Xu charge on this planning screen."
         )
     return (
         "🎼 <b>Tạo nhạc AI / Suno</b>\n\n"
         "Bạn muốn chuẩn bị loại nhạc nào? TOAN AAS sẽ tạo 3 hướng trước: nhạc nền, nhạc có lời, lời/kịch bản nhạc hoặc giai điệu/mood.\n\n"
-        f"<b>Trạng thái provider:</b> {html.escape(suno_music_provider_summary_text(lang))}\n\n"
-        "Tạo nhạc thật sẽ đi qua màn báo giá/xác nhận riêng. Màn này chưa gọi provider và chưa trừ Xu."
+        "Tạo nhạc thật sẽ đi qua màn báo giá/xác nhận riêng. Nếu Suno chưa sẵn sàng, bot vẫn giữ prompt để bạn dùng tiếp và báo rõ.\n\n"
+        "Màn này chưa gọi provider và chưa trừ Xu."
     )
 
 def music_ai_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -62985,6 +63052,114 @@ def music_ai_input_text(kind: str = "background", lang: str = "vi") -> str:
         f"🎼 <b>Tạo {html.escape(label_vi)}</b>\n\n"
         "Bạn gửi sản phẩm/chủ đề, mood, ngôn ngữ, nền tảng đăng và từ khóa muốn đưa vào. Bot sẽ trả 3 hướng để chọn/đổi/sửa trước.\n\n"
         "Bước này chưa gọi provider và chưa trừ Xu."
+    )
+
+def suno_user_guard_text(lang: str = "vi", admin_detail: str = "") -> str:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    base = (
+        "🎼 <b>Tạo nhạc AI / Suno</b>\n\n"
+        "Prompt nhạc của bạn đã được giữ lại. Khi cổng Suno sẵn sàng, TOAN AAS sẽ cho bạn xem hóa đơn và bấm xác nhận trước khi tạo nhạc thật.\n\n"
+        "Hiện bot chưa gọi provider và chưa trừ Xu."
+        if is_vi else
+        "🎼 <b>AI Music / Suno</b>\n\n"
+        "Your music prompt is saved. When the Suno gate is ready, TOAN AAS will show a price confirmation before generating real music.\n\n"
+        "No provider call and no Xu charge yet."
+    )
+    if admin_detail:
+        base += f"\n\n<b>Admin detail:</b>\n<code>{html.escape(admin_detail[:500])}</code>"
+    return base
+
+def media_merge_status_lines(user_id) -> tuple[bool, bool]:
+    has_video = bool(get_recent_media_state(LAST_USER_VIDEO, user_id))
+    has_audio = bool(get_recent_media_state(LAST_USER_AUDIO, user_id) or get_selected_media_state(SELECTED_MUSIC, user_id))
+    return has_video, has_audio
+
+def music_merge_menu_text(kind: str = "music", user_id=0, lang: str = "vi") -> str:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    has_video, has_audio = media_merge_status_lines(user_id)
+    if kind == "voice":
+        if not is_vi:
+            return (
+                "🎬 <b>Add voice to video</b>\n\n"
+                "Flow: send a video → choose/create/upload voice → confirm render. "
+                "Saved voice profiles and MiniMax voice can be used when provider/public gate is ready.\n\n"
+                f"Current session: video {'yes' if has_video else 'no'} | voice/audio {'yes' if has_audio else 'no'}.\n"
+                "Opening this menu does not charge Xu."
+            )
+        return (
+            "🎬 <b>Ghép voice vào video</b>\n\n"
+            "Quy trình: gửi video → chọn/tạo/upload voice → xác nhận ghép. "
+            "Voice đã lưu hoặc MiniMax voice sẽ dùng được khi provider/public gate sẵn sàng.\n\n"
+            f"Phiên hiện tại: video {'có' if has_video else 'chưa có'} | voice/audio {'có' if has_audio else 'chưa có'}.\n"
+            "Mở menu này chưa xử lý video và chưa trừ Xu."
+        )
+    if not is_vi:
+        return (
+            "🎬 <b>Add music to video</b>\n\n"
+            "Flow: send a video → choose library/upload/AI music → confirm render. "
+            "Existing music library/manual upload is preferred; Suno AI uses its own confirmation when ready.\n\n"
+            f"Current session: video {'yes' if has_video else 'no'} | music/audio {'yes' if has_audio else 'no'}.\n"
+            "Opening this menu does not charge Xu."
+        )
+    return (
+        "🎬 <b>Ghép nhạc vào video</b>\n\n"
+        "Quy trình: gửi video → chọn nhạc trong kho/upload/tạo nhạc AI → xác nhận ghép. "
+        "Kho nhạc hoặc upload dùng trước; Suno AI có màn xác nhận riêng khi sẵn sàng.\n\n"
+        f"Phiên hiện tại: video {'có' if has_video else 'chưa có'} | nhạc/audio {'có' if has_audio else 'chưa có'}.\n"
+        "Mở menu này chưa xử lý video và chưa trừ Xu."
+    )
+
+def music_merge_keyboard(kind: str = "music", lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    if kind == "voice":
+        buttons = [
+            ("📎 Tôi gửi video" if is_vi else "📎 Send video", "music_quick|merge_voice_video"),
+            ("🎙 Tạo giọng đọc" if is_vi else "🎙 Create voice", "music_quick|voice"),
+            ("🧬 Giọng đã lưu" if is_vi else "🧬 Saved voices", "music_quick|voice_profiles"),
+            ("📎 Tôi gửi voice/audio" if is_vi else "📎 Upload voice/audio", "music_quick|merge_voice_audio"),
+            ("✅ Kiểm tra & ghép" if is_vi else "✅ Check & merge", "music_quick|merge_voice_run"),
+        ]
+    else:
+        buttons = [
+            ("📎 Tôi gửi video" if is_vi else "📎 Send video", "music_quick|merge_music_video"),
+            ("🎧 Chọn kho nhạc" if is_vi else "🎧 Music library", "music_quick|music"),
+            ("📎 Tôi gửi nhạc/audio" if is_vi else "📎 Upload music/audio", "music_quick|merge_music_audio"),
+            ("🎼 Tạo nhạc AI/Suno" if is_vi else "🎼 AI Music/Suno", "music_quick|ai_music"),
+            ("✅ Kiểm tra & ghép" if is_vi else "✅ Check & merge", "music_quick|merge_music_run"),
+        ]
+    back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def music_merge_upload_text(kind: str, target: str, lang: str = "vi") -> str:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    if not is_vi:
+        what = "video" if target == "video" else ("voice/audio" if kind == "voice" else "music/audio")
+        return f"📎 Send the {what} file now. The bot will save it for this session only. No render and no Xu charge yet."
+    what = "video" if target == "video" else ("voice/audio" if kind == "voice" else "nhạc/audio")
+    return f"📎 Hãy gửi file {what} ở tin nhắn tiếp theo. Bot chỉ lưu vào phiên hiện tại, chưa render và chưa trừ Xu."
+
+def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    has_video, has_audio = media_merge_status_lines(user_id)
+    if not has_video or not has_audio:
+        missing = []
+        if not has_video:
+            missing.append("video")
+        if not has_audio:
+            missing.append("voice/audio" if kind == "voice" else "nhạc/audio")
+        if not is_vi:
+            return "⚠️ Missing: " + ", ".join(missing) + ". Send the missing file first. No render and no Xu charge."
+        return "⚠️ Còn thiếu: " + ", ".join(missing) + ". Hãy gửi đủ file trước. Bot chưa render và chưa trừ Xu."
+    if not is_admin_user(user_id):
+        return (
+            "⚙️ Render ghép audio/video đang chờ local worker/public gate. TOAN AAS đã nhận đủ file trong phiên này, nhưng chưa render và chưa trừ Xu."
+            if is_vi else
+            "⚙️ Audio/video merge is waiting for local worker/public gate. Files are ready in this session, but no render and no Xu charge yet."
+        )
+    return (
+        "✅ Đã đủ video và audio. Admin có thể dùng lệnh /add_music hoặc /add_voice_to_video để render test ngay, hoặc dùng nút/lệnh tương ứng khi public gate được mở."
+        if is_vi else
+        "✅ Video and audio are ready. Admin can use /add_music or /add_voice_to_video for a render smoke test."
     )
 
 def voice_clone_intro_text(lang: str = "vi") -> str:
@@ -63079,48 +63254,108 @@ def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5) -> st
     lines.append("MiniMax clone/use vẫn cần consent + smoke/provider gate. Bot chưa trừ Xu." if normalize_user_language(lang) == "vi" else "MiniMax clone/use still requires consent + smoke/provider gate. No Xu charge.")
     return "\n".join(lines)
 
-def voice_style_suggestions_text(text: str, lang: str = "vi") -> str:
+def voice_style_suggestions(text: str, offset: int = 0, lang: str = "vi") -> list[dict]:
     lang = music_ui_lang(lang=lang)
-    content = html.escape(_short_pending_text(text, 260))
-    if lang == "en":
-        return (
-            "🎙 <b>Received voice-over text</b>\n\n"
-            f"<b>Text:</b>\n{content}\n\n"
-            "<b>3 suggested voice styles:</b>\n"
-            "1. Soft female — clear and friendly, good for tutorials/explainers.\n"
-            "2. Deep male — steady and trustworthy, good for premium product/service ads.\n"
-            "3. Youthful sales — medium-fast and energetic, good for TikTok/Reels/Shorts.\n\n"
-            "Real TTS still depends on provider/quota. This step has not called a provider and has not charged Xu."
-        )
-    if lang == "zh":
-        return (
-            "🎙 <b>已收到配音文本</b>\n\n"
-            f"<b>文本:</b>\n{content}\n\n"
-            "<b>3 种声音风格建议:</b>\n"
-            "1. 温柔女声 — 清晰友好，适合教程/解释类视频。\n"
-            "2. 低沉男声 — 稳重可信，适合高端产品/服务广告。\n"
-            "3. 年轻销售感 — 速度适中、有能量，适合 TikTok/Reels/Shorts。\n\n"
-            "真实 TTS 仍取决于 provider/quota。本步骤未调用 provider，未扣 Xu。"
-        )
+    content = _short_pending_text(text, 260) or ("kịch bản quảng cáo ngắn" if lang == "vi" else "short ad script")
+    base = [
+        {
+            "name": "Nữ nhẹ nhàng",
+            "voice_id": "female-soft",
+            "tone": "ấm, rõ chữ, thân thiện",
+            "pace": "vừa phải",
+            "use_case": "hướng dẫn, giải thích, review chân thật",
+            "direction": "Đọc rõ từng ý, mỉm cười nhẹ trong giọng, không quá quảng cáo.",
+        },
+        {
+            "name": "Nam trầm tin cậy",
+            "voice_id": "male-deep",
+            "tone": "chắc, trầm, đáng tin",
+            "pace": "chậm vừa",
+            "use_case": "dịch vụ cao cấp, sản phẩm cần niềm tin, thương hiệu",
+            "direction": "Giữ nhịp chắc, nhấn nhẹ lợi ích chính, tạo cảm giác chuyên nghiệp.",
+        },
+        {
+            "name": "Trẻ trung bán hàng",
+            "voice_id": "youth-sales",
+            "tone": "năng lượng, gần gũi, có nhịp CTA",
+            "pace": "nhanh vừa",
+            "use_case": "TikTok/Reels/Shorts, affiliate, ưu đãi ngắn",
+            "direction": "Mở đầu bắt nhịp nhanh, câu ngắn, CTA gọn và tự nhiên.",
+        },
+        {
+            "name": "Luxury cinematic",
+            "voice_id": "luxury-cinematic",
+            "tone": "sang, tiết chế, cảm xúc nhẹ",
+            "pace": "chậm",
+            "use_case": "nước hoa, mỹ phẩm, thời trang, concept thương hiệu",
+            "direction": "Nói ít nhưng có trọng lượng, giữ khoảng nghỉ, tránh giọng bán hàng gấp.",
+        },
+        {
+            "name": "AI tutorial rõ ràng",
+            "voice_id": "tutorial-clear",
+            "tone": "rõ, sạch, logic",
+            "pace": "vừa",
+            "use_case": "hướng dẫn dùng app, SaaS, công cụ AI",
+            "direction": "Chia nhịp theo bước, nhấn từ khóa thao tác, không đọc quá nhanh.",
+        },
+        {
+            "name": "Faceless kể chuyện",
+            "voice_id": "faceless-story",
+            "tone": "tò mò, tự nhiên, dẫn chuyện",
+            "pace": "vừa chậm",
+            "use_case": "video kể chuyện, before/after, chia sẻ kinh nghiệm",
+            "direction": "Dẫn người xem theo mạch chuyện, mở móc câu hỏi, kết bằng lời mời nhẹ.",
+        },
+    ]
+    start = _safe_int(offset, 0) % len(base)
+    rotated = [base[(start + idx) % len(base)] for idx in range(min(3, len(base)))]
+    return [dict(item, text=content) for item in rotated]
+
+def voice_style_prompt_from_suggestion(item: dict) -> str:
     return (
-        "🎙 <b>Đã nhận nội dung giọng đọc</b>\n\n"
-        f"<b>Nội dung:</b>\n{content}\n\n"
-        "<b>3 kiểu giọng gợi ý:</b>\n"
-        "1. Nữ nhẹ nhàng — rõ chữ, thân thiện, hợp video hướng dẫn/giải thích.\n"
-        "2. Nam trầm — chắc, tin cậy, hợp quảng cáo dịch vụ/sản phẩm cao cấp.\n"
-        "3. Trẻ trung bán hàng — nhanh vừa, năng lượng, hợp TikTok/Reels/Shorts.\n\n"
-        "TTS thật vẫn phụ thuộc provider/quota. Bước này chưa gọi provider và chưa trừ Xu."
+        f"{item.get('name')}: {item.get('tone')}, pace {item.get('pace')}. "
+        f"Use for {item.get('use_case')}. Direction: {item.get('direction')}"
     )
+
+def voice_style_suggestions_text(text: str, lang: str = "vi", offset: int = 0) -> str:
+    lang = music_ui_lang(lang=lang)
+    default_content = "kịch bản quảng cáo ngắn" if lang == "vi" else ("短广告脚本" if lang == "zh" else "short ad script")
+    content = html.escape(_short_pending_text(text, 260) or default_content)
+    suggestions = voice_style_suggestions(text, offset, lang)
+    if lang == "en":
+        lines = ["🎙 <b>3 suggested voice styles</b>", "", f"<b>Text:</b>\n{content}", ""]
+        labels = ("Tone", "Pace", "Best for", "Direction")
+        footer = "Real TTS still depends on provider/quota and a final confirmation. No provider call and no Xu charge yet."
+    elif lang == "zh":
+        lines = ["🎙 <b>3 种声音风格建议</b>", "", f"<b>文本:</b>\n{content}", ""]
+        labels = ("语气", "速度", "适合", "方向")
+        footer = "真实 TTS 仍取决于 provider/quota 和最终确认。本步骤未调用 provider，未扣 Xu。"
+    else:
+        lines = ["🎙 <b>3 kiểu giọng gợi ý</b>", "", f"<b>Nội dung:</b>\n{content}", ""]
+        labels = ("Chất giọng", "Tốc độ", "Hợp với", "Cách đọc")
+        footer = "TTS thật vẫn phụ thuộc provider/quota và bước xác nhận cuối. Bot chưa gọi provider và chưa trừ Xu."
+    for idx, item in enumerate(suggestions, start=1):
+        lines.extend([
+            f"<b>{idx}. {html.escape(str(item.get('name') or 'Voice style'))}</b>",
+            f"• {labels[0]}: {html.escape(str(item.get('tone') or ''))}",
+            f"• {labels[1]}: {html.escape(str(item.get('pace') or ''))}",
+            f"• {labels[2]}: {html.escape(str(item.get('use_case') or ''))}",
+            f"• {labels[3]}: {html.escape(str(item.get('direction') or ''))}",
+            "",
+        ])
+    lines.append(footer)
+    return "\n".join(lines)
 
 def voice_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
     buttons = [
-        ("1️⃣ Nữ nhẹ nhàng" if is_vi else "1️⃣ Soft female", "music_quick|voice_style_1"),
-        ("2️⃣ Nam trầm" if is_vi else "2️⃣ Deep male", "music_quick|voice_style_2"),
-        ("3️⃣ Trẻ trung bán hàng" if is_vi else "3️⃣ Youthful sales", "music_quick|voice_style_3"),
-        ("🔁 Đổi giọng" if is_vi else "🔁 Change voice", "music_quick|voice"),
-        ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", "music_quick|voice"),
-        ("🎧 Ghép vào video (đang hoàn thiện)" if is_vi else "🎧 Add to video (in progress)", "music_quick|voice_video"),
+        ("1️⃣ Chọn giọng 1" if is_vi else "1️⃣ Choose 1", "music_quick|voice_style_1"),
+        ("2️⃣ Chọn giọng 2" if is_vi else "2️⃣ Choose 2", "music_quick|voice_style_2"),
+        ("3️⃣ Chọn giọng 3" if is_vi else "3️⃣ Choose 3", "music_quick|voice_style_3"),
+        ("🔁 Đổi giọng" if is_vi else "🔁 Change voice", "music_quick|voice_more"),
+        ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", "music_quick|voice_custom"),
+        ("🎙 Tạo voice thử" if is_vi else "🎙 Voice preview", "music_quick|voice_tts_guard"),
+        ("🎬 Dùng cho video" if is_vi else "🎬 Use in video", "music_quick|voice_video"),
     ]
     back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
@@ -63412,12 +63647,37 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     lang = music_ui_lang(user_id)
     if action == "prompt":
         await query.answer()
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(music_prompt_entry_text(lang), parse_mode="HTML", reply_markup=music_prompt_entry_keyboard(lang))
+    if action == "prompt_custom":
+        await query.answer()
         set_music_guided_pending(user_id, "music_prompt_input")
         return await query.message.reply_text(music_prompt_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+    if action in {"prompt_seed", "prompt_seed_more"}:
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        desc = result.get("description") or "video quảng cáo sản phẩm/dịch vụ, đăng TikTok/Reels, cần nhạc an toàn bản quyền"
+        offset = (_safe_int(result.get("offset"), 0) + (3 if action == "prompt_seed_more" else 0)) % 6
+        suggestions = music_prompt_suggestions(desc, offset, lang)
+        save_music_guided_result(user_id, {"description": desc, "offset": offset, "suggestions": suggestions, "selected_prompt": ""})
+        return await query.message.reply_text(music_prompt_suggestions_text(desc, offset, lang), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
     if action in {"voice", "voice_pick"}:
+        await query.answer()
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(voice_prompt_entry_text(lang), parse_mode="HTML", reply_markup=voice_prompt_entry_keyboard(lang))
+    if action == "voice_custom":
         await query.answer()
         set_music_guided_pending(user_id, "voice_text")
         return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+    if action in {"voice_seed", "voice_more"}:
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        voice_text = result.get("voice_text") or "Xin chào, đây là nội dung voice ngắn cho video quảng cáo TOAN AAS."
+        offset = (_safe_int(result.get("voice_offset"), 0) + (3 if action == "voice_more" else 0)) % 6
+        suggestions = voice_style_suggestions(voice_text, offset, lang)
+        result.update({"voice_text": voice_text, "voice_offset": offset, "voice_suggestions": suggestions, "selected_voice_style": ""})
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text(voice_style_suggestions_text(voice_text, lang, offset), parse_mode="HTML", reply_markup=voice_style_keyboard(lang))
     if action == "ai_music":
         await query.answer()
         return await query.message.reply_text(music_ai_menu_text(lang), parse_mode="HTML", reply_markup=music_ai_menu_keyboard(lang))
@@ -63467,13 +63727,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
     if action == "voice_video":
         await query.answer()
-        text = (
-            "🎬 <b>Ghép voice vào video</b>\n\n"
-            "Tính năng này đang admin test/planned theo trạng thái ffmpeg/provider. Bot chưa gọi API mới và chưa trừ Xu khi chỉ mở menu."
-            if lang == "vi" else
-            "🎬 <b>Add voice to video</b>\n\nThis is admin-test/planned depending on ffmpeg/provider status. Opening this menu does not charge Xu."
-        )
-        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
+        return await query.message.reply_text(music_merge_menu_text("voice", user_id, lang), parse_mode="HTML", reply_markup=music_merge_keyboard("voice", lang))
     if action == "music":
         await query.answer()
         return await query.message.reply_text(music_library_guide_text(lang), parse_mode="HTML", reply_markup=music_library_quick_keyboard(lang))
@@ -63485,13 +63739,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(media_library_guide_text(lang), parse_mode="HTML", reply_markup=media_library_quick_keyboard(lang))
     if action == "add_music":
         await query.answer()
-        text = (
-            "🎬 <b>Ghép nhạc vào video</b>\n\n"
-            "Tính năng ghép nhạc đang admin test/planned theo trạng thái xử lý video. Bot chưa gọi API mới và chưa trừ Xu khi chỉ mở menu."
-            if lang == "vi" else
-            "🎬 <b>Add music to video</b>\n\nThis is admin-test/planned depending on video processing status. Opening this menu does not charge Xu."
-        )
-        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang))
+        return await query.message.reply_text(music_merge_menu_text("music", user_id, lang), parse_mode="HTML", reply_markup=music_merge_keyboard("music", lang))
     if action == "policy":
         await query.answer()
         return await query.message.reply_text(
@@ -63561,22 +63809,70 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "music_ai_guard":
         await query.answer()
         readiness = get_suno_music_readiness() if "get_suno_music_readiness" in globals() else {}
-        return await query.message.reply_text(
-            "🎼 <b>Suno AI Music status</b>\n\n"
-            f"• {html.escape(suno_music_provider_summary_text(lang))}\n"
-            f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
-            f"• Public: <code>{'ON' if readiness.get('public_enabled') else 'OFF'}</code>\n"
-            f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or readiness.get('reason') or '-'))}</code>\n\n"
-            "TOAN AAS đã lưu/hiện prompt nhạc để bạn dùng tiếp. Tạo nhạc thật sẽ chỉ chạy khi Suno public gate + hóa đơn xác nhận sẵn sàng. Bot chưa gọi provider và chưa trừ Xu.",
-            parse_mode="HTML",
-            reply_markup=music_prompt_result_keyboard(lang),
-        )
+        admin_detail = ""
+        if is_admin_user(user_id):
+            admin_detail = (
+                f"{suno_music_provider_summary_text(lang)}; "
+                f"ready={'YES' if readiness.get('ready') else 'NO'}; "
+                f"public={'ON' if readiness.get('public_enabled') else 'OFF'}; "
+                f"reason={readiness.get('admin_debug_reason') or readiness.get('reason') or '-'}"
+            )
+        return await query.message.reply_text(suno_user_guard_text(lang, admin_detail), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
     if action.startswith("voice_style_"):
         await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        voice_text = result.get("voice_text") or "Xin chào, đây là nội dung voice ngắn cho video quảng cáo TOAN AAS."
+        suggestions = list(result.get("voice_suggestions") or [])
+        if not suggestions:
+            suggestions = voice_style_suggestions(voice_text, _safe_int(result.get("voice_offset"), 0), lang)
+        idx = max(1, min(3, _safe_int(action.rsplit("_", 1)[-1], 1)))
+        chosen = suggestions[idx - 1]
+        style_prompt = voice_style_prompt_from_suggestion(chosen)
+        result.update({
+            "voice_text": voice_text,
+            "voice_suggestions": suggestions,
+            "selected_voice_style": style_prompt,
+            "selected_voice_id": chosen.get("voice_id") or "",
+            "selected_voice_index": idx,
+        })
+        save_music_guided_result(user_id, result)
         return await query.message.reply_text(
-            "✅ Đã chọn kiểu giọng.\n\nTTS public thật sẽ có bước báo giá và xác nhận riêng khi được mở. Hiện TOAN AAS chưa gọi provider và chưa trừ Xu.",
+            f"✅ Đã chọn giọng {idx}.\n\n<code>{html.escape(style_prompt)}</code>\n\nTTS thật sẽ đi qua báo giá/xác nhận khi public gate sẵn sàng. Bot chưa gọi provider và chưa trừ Xu.",
+            parse_mode="HTML",
             reply_markup=voice_style_keyboard(lang),
         )
+    if action == "voice_tts_guard":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        voice_text = result.get("voice_text") or ""
+        if not voice_text:
+            set_music_guided_pending(user_id, "voice_text")
+            return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+        readiness = get_minimax_voice_readiness() if "get_minimax_voice_readiness" in globals() else {}
+        detail = ""
+        if is_admin_user(user_id):
+            detail = f"\n\nAdmin: ready={readiness.get('ready')}; public={readiness.get('public_enabled')}; smoke={readiness.get('admin_smoke_status')}; reason={readiness.get('admin_debug_reason') or readiness.get('reason')}"
+        return await query.message.reply_text(
+            "🎙 <b>Tạo voice thử</b>\n\n"
+            "TOAN AAS đã giữ nội dung và kiểu giọng bạn chọn. Voice thật sẽ có màn báo giá/xác nhận riêng trước khi gọi MiniMax/TTS.\n\n"
+            "Bot chưa gọi provider và chưa trừ Xu." + html.escape(detail),
+            parse_mode="HTML",
+            reply_markup=voice_style_keyboard(lang),
+        )
+    if action in {"merge_music_video", "merge_voice_video"}:
+        await query.answer()
+        kind = "voice" if "voice" in action else "music"
+        set_music_guided_pending(user_id, f"{kind}_merge_video")
+        return await query.message.reply_text(music_merge_upload_text(kind, "video", lang), parse_mode="HTML", reply_markup=music_merge_keyboard(kind, lang))
+    if action in {"merge_music_audio", "merge_voice_audio"}:
+        await query.answer()
+        kind = "voice" if "voice" in action else "music"
+        set_music_guided_pending(user_id, f"{kind}_merge_audio")
+        return await query.message.reply_text(music_merge_upload_text(kind, "audio", lang), parse_mode="HTML", reply_markup=music_merge_keyboard(kind, lang))
+    if action in {"merge_music_run", "merge_voice_run"}:
+        await query.answer()
+        kind = "voice" if "voice" in action else "music"
+        return await query.message.reply_text(music_merge_check_text(kind, user_id, lang), parse_mode="HTML", reply_markup=music_merge_keyboard(kind, lang))
     if namespace == "music_quick" and action in MUSIC_QUICK_QUERIES:
         await query.answer("Searching music..." if lang == "en" else ("正在查找音乐..." if lang == "zh" else "Đang tìm nhạc..."))
         return await send_music_library_results(query.message, user_id, MUSIC_QUICK_QUERIES[action])
@@ -65387,9 +65683,10 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         await send_media_library_results(update.message, uid, text)
         return True
     if action == "voice_text":
-        save_music_guided_result(uid, {"voice_text": text})
+        suggestions = voice_style_suggestions(text, 0, lang)
+        save_music_guided_result(uid, {"voice_text": text, "voice_offset": 0, "voice_suggestions": suggestions, "selected_voice_style": ""})
         await update.message.reply_text(
-            voice_style_suggestions_text(text, lang),
+            voice_style_suggestions_text(text, lang, 0),
             parse_mode="HTML",
             reply_markup=voice_style_keyboard(lang),
         )
@@ -65401,7 +65698,35 @@ async def handle_music_guided_pending_media(update: Update, context: ContextType
         return False
     uid = update.effective_user.id
     state = get_music_guided_pending(uid)
-    if not state or str(state.get("pending_action") or "") != "voice_clone_upload":
+    if not state:
+        return False
+    pending_action = str(state.get("pending_action") or "")
+    if pending_action in {"music_merge_video", "voice_merge_video", "music_merge_audio", "voice_merge_audio"}:
+        target = "video" if pending_action.endswith("_video") else "audio"
+        kind = "voice" if pending_action.startswith("voice_") else "music"
+        media_kind = cache_recent_media_state(update)
+        lang = music_ui_lang(uid)
+        if target == "video" and media_kind != "video":
+            await update.message.reply_text(
+                "⚠️ Hãy gửi file video để ghép. Bot chưa render và chưa trừ Xu.",
+                reply_markup=music_merge_keyboard(kind, lang),
+            )
+            return True
+        if target == "audio" and media_kind != "audio":
+            await update.message.reply_text(
+                "⚠️ Hãy gửi file audio/voice/nhạc hợp lệ. Bot chưa render và chưa trừ Xu.",
+                reply_markup=music_merge_keyboard(kind, lang),
+            )
+            return True
+        clear_music_guided_pending(uid)
+        await update.message.reply_text(
+            ("✅ Đã lưu video vào phiên này.\n\n" if target == "video" else "✅ Đã lưu audio/nhạc/voice vào phiên này.\n\n")
+            + music_merge_menu_text(kind, uid, lang),
+            parse_mode="HTML",
+            reply_markup=music_merge_keyboard(kind, lang),
+        )
+        return True
+    if pending_action != "voice_clone_upload":
         return False
     media, file_type = message_media_candidate(update.message)
     mime = media_content_type(media, file_type) if media else ""

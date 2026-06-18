@@ -8088,6 +8088,12 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "music_quick|voice_clone" in music_callbacks
     assert "music_quick|voice_pick" not in music_callbacks
 
+    prompt_entry_callbacks = [button.callback_data for row in bot.music_prompt_entry_keyboard("vi").inline_keyboard for button in row]
+    assert {"music_quick|prompt_seed", "music_quick|prompt_seed_more", "music_quick|prompt_custom", "music_quick|ai_music"}.issubset(set(prompt_entry_callbacks))
+
+    voice_entry_callbacks = [button.callback_data for row in bot.voice_prompt_entry_keyboard("vi").inline_keyboard for button in row]
+    assert {"music_quick|voice_seed", "music_quick|voice_custom", "music_quick|voice_clone", "music_quick|voice_profiles"}.issubset(set(voice_entry_callbacks))
+
     suggestions = bot.music_prompt_suggestions("video review máy xay sinh tố mini", 0, "vi")
     next_suggestions = bot.music_prompt_suggestions("video review máy xay sinh tố mini", 3, "vi")
     assert len(suggestions) == 3
@@ -8098,11 +8104,26 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     prompt_callbacks = [button.callback_data for row in bot.music_prompt_result_keyboard("vi").inline_keyboard for button in row]
     assert {"music_quick|prompt_choose_1", "music_quick|prompt_more", "music_quick|save_prompt", "music_quick|find_from_prompt", "music_quick|music_ai_guard"}.issubset(set(prompt_callbacks))
 
+    voice_suggestions = bot.voice_style_suggestions("Nước hoa nam cao cấp giúp tự tin hơn", 0, "vi")
+    next_voice_suggestions = bot.voice_style_suggestions("Nước hoa nam cao cấp giúp tự tin hơn", 3, "vi")
+    assert len(voice_suggestions) == 3
+    assert voice_suggestions != next_voice_suggestions
+    voice_text = bot.voice_style_suggestions_text("Nước hoa nam cao cấp giúp tự tin hơn", "vi", 0)
+    assert "3 kiểu giọng gợi ý" in voice_text
+    voice_callbacks = [button.callback_data for row in bot.voice_style_keyboard("vi").inline_keyboard for button in row]
+    assert {"music_quick|voice_style_1", "music_quick|voice_more", "music_quick|voice_custom", "music_quick|voice_tts_guard", "music_quick|voice_video"}.issubset(set(voice_callbacks))
+
+    merge_music_callbacks = [button.callback_data for row in bot.music_merge_keyboard("music", "vi").inline_keyboard for button in row]
+    assert {"music_quick|merge_music_video", "music_quick|merge_music_audio", "music_quick|merge_music_run", "music_quick|ai_music"}.issubset(set(merge_music_callbacks))
+    merge_voice_callbacks = [button.callback_data for row in bot.music_merge_keyboard("voice", "vi").inline_keyboard for button in row]
+    assert {"music_quick|merge_voice_video", "music_quick|merge_voice_audio", "music_quick|merge_voice_run", "music_quick|voice"}.issubset(set(merge_voice_callbacks))
+
     for keyboard in [bot.music_library_quick_keyboard("vi"), bot.sfx_library_quick_keyboard("vi"), bot.media_library_quick_keyboard("vi")]:
         callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
         assert "menu|main_music" in callbacks
         assert "menu|main" in callbacks
     assert "handle_music_guided_pending_text(update, context)" in message_source
+    assert "handle_music_guided_pending_media(update, context)" in source
 
 
 def test_document_pdf_tools_v6_guided_upload_confirm_flow():
