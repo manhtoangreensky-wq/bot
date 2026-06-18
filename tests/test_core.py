@@ -8105,30 +8105,30 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "memory_format_note_item_with_time" in source
 
     music_labels = [button.text for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
-    assert "🎙 Tạo giọng đọc" in music_labels
-    assert "📁 Kho voice" in music_labels
-    assert "🎵 Tạo nhạc nền" in music_labels
-    assert "🎼 Kho nhạc / SFX" in music_labels
-    assert "📁 Media âm thanh" in music_labels
+    assert music_labels[:2] == ["🎙 Giọng đọc", "🎵 Nhạc"]
+    assert "📁 Kho voice" not in music_labels
+    assert "🎼 Kho nhạc / SFX" not in music_labels
+    assert "📁 Media âm thanh" not in music_labels
     assert "🗣 Chọn giọng" not in music_labels
     music_callbacks = [button.callback_data for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
     assert "music_quick|showroom|voice_custom" in music_callbacks
-    assert "music_quick|showroom|voice_profiles" in music_callbacks
-    assert "music_quick|showroom|ai_music" in music_callbacks
     assert "music_quick|showroom|music_hub" in music_callbacks
-    assert "music_quick|showroom|media" in music_callbacks
+    assert "music_quick|showroom|voice_profiles" not in music_callbacks
+    assert "music_quick|showroom|ai_music" not in music_callbacks
+    assert "music_quick|showroom|media" not in music_callbacks
     assert "music_quick|voice_pick" not in music_callbacks
 
     voice_hub_labels = [button.text for row in bot.voice_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["🎙 Tạo giọng đọc", "📁 Kho voice", "🎵 Tạo nhạc nền", "🎼 Kho nhạc / SFX", "📁 Media âm thanh"]:
-        assert label in voice_hub_labels
+    assert voice_hub_labels[:2] == ["🎙 Giọng đọc", "🎵 Nhạc"]
+    for label in ["📁 Kho voice", "🎵 Tạo nhạc nền", "🎼 Kho nhạc / SFX", "📁 Media âm thanh"]:
+        assert label not in voice_hub_labels
     for label in ["👩 Demo giọng nữ" + " miễn phí", "👨 Demo giọng nam" + " miễn phí", "🎙 Nhập chữ" + " để đọc thử"]:
         assert label not in voice_hub_labels
     assert "🚫 Không thêm giọng" not in voice_hub_labels
     music_hub_labels = [button.text for row in bot.music_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["🎼 Nghe thử Kho nhạc", "🔊 Nghe thử Kho SFX", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền"]:
+    for label in ["🎼 Chọn nhạc có sẵn", "🔊 Chọn hiệu ứng âm thanh", "🎵 Tạo nhạc mới"]:
         assert label in music_hub_labels
-    for label in ["📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
+    for label in ["📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền", "📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
         assert label not in music_hub_labels
     assert "🚫 Không thêm nhạc" not in music_hub_labels
 
@@ -8160,7 +8160,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert len(voice_suggestions) == 3
     assert voice_suggestions != next_voice_suggestions
     voice_text = bot.voice_style_suggestions_text("Nước hoa nam cao cấp giúp tự tin hơn", "vi", 0)
-    assert "3 kiểu giọng gợi ý" in voice_text
+    assert "Chọn kiểu giọng" in voice_text
     voice_callbacks = [button.callback_data for row in bot.voice_style_keyboard("vi").inline_keyboard for button in row]
     assert {"music_quick|showroom|voice_style_1", "music_quick|showroom|voice_style_2", "music_quick|showroom|voice_style_3", "music_quick|showroom|voice_custom"}.issubset(set(voice_callbacks))
     assert "music_quick|showroom|voice_more" not in voice_callbacks
@@ -8879,7 +8879,8 @@ def test_video_prompt_result_uses_create_now_and_addons_labels():
     prompt_handler = source_between(source, "async def handle_prompt_video_callback", "async def handle_image_video_callback")
     reference_handler = source_between(source, "async def handle_video_reference_callback", "async def handle_video_dubbing_callback")
     vague_handler = source_between(source, "async def handle_public_video_prompt_pending_text", "async def cmd_shopaikey_video_public")
-    assert 'structured_video_plan(state, "promptvideo")' in prompt_handler
+    assert "open_prompt_video_finalization_from_state(query, uid, state, lang" in prompt_handler
+    assert 'structured_video_plan(state, "promptvideo")' in source_between(source, "async def open_prompt_video_finalization_from_state", "async def open_image_video_finalization_from_state")
     assert 'structured_video_plan(plan, "videoref")' in reference_handler
     assert "video_request_is_vague(prompt)" in vague_handler
     assert "TOAN AAS chưa gọi API video và chưa trừ Xu" in vague_handler
@@ -9810,7 +9811,7 @@ def test_realistic_flow_distinct():
 
 def test_free_addon_screen_before_paid_tier():
     text = bot.video_finalization_menu_text({"source": "storypack"}, "vi")
-    for marker in ["Chọn voice", "nhạc/SFX", "phụ đề", "dịch", "lồng tiếng", "Sau đó mới chọn gói"]:
+    for marker in ["Chọn giọng đọc", "nhạc", "phụ đề", "dịch", "lồng tiếng", "Sau đó mới chọn gói"]:
         assert marker in text
 
 
@@ -9836,12 +9837,12 @@ def test_music_menu_origin_back_correct():
 
 def test_stock_music_visible():
     labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
-    assert "🎼 Kho nhạc có sẵn" in labels
+    assert "🎼 Chọn nhạc có sẵn" in labels
 
 
 def test_sfx_visible():
     labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
-    assert "🔊 Kho SFX" in labels
+    assert "🔊 Chọn hiệu ứng âm thanh" in labels
 
 
 def test_my_media_visible():
@@ -9866,7 +9867,7 @@ def test_suno_missing_key_user_guard_admin_reason():
 
 def test_voice_vault_visible():
     labels = [button.text for row in bot.video_finalization_voice_keyboard("vi").inline_keyboard for button in row]
-    assert "📁 Kho voice của bạn" in labels
+    assert "📁 Voice đã lưu" in labels
 
 
 def test_create_new_voice_flow():
@@ -9903,8 +9904,8 @@ def test_voice_profile_saved():
 
 def test_default_voice_free():
     labels = [button.text for row in bot.video_finalization_voice_keyboard("vi").inline_keyboard for button in row]
-    assert "👩 Giọng nữ mặc định - Miễn phí" in labels
-    assert "👨 Giọng nam mặc định - Miễn phí" in labels
+    assert "👩 Giọng nữ miễn phí" in labels
+    assert "👨 Giọng nam miễn phí" in labels
 
 
 def test_subtitle_menu_has_4_named_modes():

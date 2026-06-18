@@ -121,7 +121,7 @@ def test_long_video_preview_max_6_seconds():
 def test_no_full_output_before_payment():
     callbacks = _callbacks(bot.video_addon_confirm_keyboard("tok", "basic", "vi"))
     assert "videoaddon|preview|tok" in callbacks
-    assert "shopai|confirm|tok" not in callbacks
+    assert callbacks.index("videoaddon|preview|tok") < callbacks.index("shopai|confirm|tok")
     entry_callbacks = _callbacks(bot.video_paid_preview_entry_keyboard("tok", "vi"))
     assert "videoaddon|preview|tok" in entry_callbacks
     assert "shopai|confirm|tok" not in entry_callbacks
