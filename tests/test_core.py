@@ -6854,8 +6854,8 @@ def test_trend_guided_video_prompt_callbacks_open_finalization(monkeypatch):
     assert "Đã chọn prompt video" in selected_prompt["text"]
 
     finalization = asyncio.run(press("trendg|finalization"))
-    assert "Thêm tính năng khác" in finalization["text"]
-    assert "chưa xử lý video" in finalization["text"]
+    assert "Tùy chọn miễn phí trước khi chọn gói" in finalization["text"]
+    assert "chỉ bắt đầu xử lý" in finalization["text"]
 
     real_video = asyncio.run(press("trendg|video_real"))
     assert "Chọn gói xuất video AI" in real_video["text"]
@@ -7126,8 +7126,8 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
         "selected_music": "none",
     })
     provider_guard = asyncio.run(press(bot.handle_prompt_video_callback, "promptvideo|generate", uid))
-    assert "chưa xử lý video" in provider_guard["text"]
-    assert "chưa trừ Xu" in provider_guard["text"]
+    assert "Tùy chọn miễn phí trước khi chọn gói" in provider_guard["text"]
+    assert "chỉ bắt đầu xử lý" in provider_guard["text"]
 
     bot.clear_developing_video_pending(uid)
     bot.clear_trend_video_flow_pending(uid)
@@ -7173,7 +7173,7 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
         "Prompt ảnh",
         "Prompt video",
         "Negative prompt",
-        "Bot chưa gọi API ảnh/video và chưa trừ Xu",
+        "TOAN AAS chỉ bắt đầu xử lý sau khi quý khách xác nhận ở bước cuối",
     ]:
         assert expected in story_text
     story_callbacks = [button.callback_data for row in bot.storyboard_pack_result_keyboard("vi").inline_keyboard for button in row]
@@ -8079,16 +8079,22 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "memory_format_note_item_with_time" in source
 
     music_labels = [button.text for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
-    assert "🎙 Tạo giọng đọc" in music_labels
-    assert "🎼 Tạo nhạc AI" in music_labels
-    assert "🧬 Nhân bản giọng" in music_labels
+    assert "🎙 Tạo giọng nói / Kho voice" in music_labels
+    assert "🎵 Tạo nhạc / Kho nhạc / SFX" in music_labels
+    assert "📁 Media của tôi" in music_labels
     assert "🗣 Chọn giọng" not in music_labels
     music_callbacks = [button.callback_data for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
-    assert "music_quick|prompt" in music_callbacks
-    assert "music_quick|voice" in music_callbacks
-    assert "music_quick|ai_music" in music_callbacks
-    assert "music_quick|voice_clone" in music_callbacks
+    assert "music_quick|voice_hub" in music_callbacks
+    assert "music_quick|music_hub" in music_callbacks
+    assert "music_quick|media" in music_callbacks
     assert "music_quick|voice_pick" not in music_callbacks
+
+    voice_hub_labels = [button.text for row in bot.voice_hub_keyboard("vi").inline_keyboard for button in row]
+    for label in ["📁 Kho voice của bạn", "🧬 Tạo giọng mới", "👩 Giọng nữ mặc định - Miễn phí", "👨 Giọng nam mặc định - Miễn phí"]:
+        assert label in voice_hub_labels
+    music_hub_labels = [button.text for row in bot.music_hub_keyboard("vi").inline_keyboard for button in row]
+    for label in ["🎼 Kho nhạc", "🔊 Kho SFX", "📁 Media của tôi", "✨ Tạo nhạc AI Suno", "🚫 Không thêm nhạc"]:
+        assert label in music_hub_labels
 
     prompt_entry_callbacks = [button.callback_data for row in bot.music_prompt_entry_keyboard("vi").inline_keyboard for button in row]
     assert {"music_quick|prompt_seed", "music_quick|prompt_seed_more", "music_quick|prompt_custom", "music_quick|ai_music"}.issubset(set(prompt_entry_callbacks))
@@ -8674,8 +8680,8 @@ def test_video_export_vfinal_addons_and_tier_gate_labels(monkeypatch):
     }
     menu_text = bot.video_finalization_menu_text(state, "vi")
     menu_buttons = _button_texts(bot.video_finalization_menu_keyboard("vi"))
-    assert "Thêm tính năng khác" in menu_text
-    assert any("Bỏ qua & chọn gói" in text for text in menu_buttons)
+    assert "Tùy chọn miễn phí trước khi chọn gói" in menu_text
+    assert any("Chọn gói xuất video" in text for text in menu_buttons)
     assert "Bỏ qua & xuất video" not in menu_buttons
     assert "Hoàn thiện video" not in menu_text
 
@@ -9458,13 +9464,13 @@ def test_video_pricing_v2_xu_conversion_and_base_prices():
 
 def test_video_pricing_v2_subtitle_and_dubbing_prices():
     assert bot.calculate_video_addon_price(60, "subtitle_original", "none")["subtitle_xu"] == 120
-    assert bot.calculate_video_addon_price(180, "subtitle_original", "none")["subtitle_xu"] == 280
+    assert bot.calculate_video_addon_price(180, "subtitle_original", "none")["subtitle_xu"] == 360
     assert bot.calculate_video_addon_price(60, "none", "dub_original")["dubbing_xu"] == 250
-    assert bot.calculate_video_addon_price(180, "none", "dub_original")["dubbing_xu"] == 650
-    assert bot.calculate_video_addon_price(60, "subtitle_original", "dub_original")["addon_xu"] == 370
-    assert bot.calculate_video_addon_price(180, "subtitle_original", "dub_original")["addon_xu"] == 930
+    assert bot.calculate_video_addon_price(180, "none", "dub_original")["dubbing_xu"] == 750
+    assert bot.calculate_video_addon_price(60, "subtitle_original", "dub_original")["addon_xu"] == 350
+    assert bot.calculate_video_addon_price(180, "subtitle_original", "dub_original")["addon_xu"] == 1050
     assert bot.calculate_video_addon_price(60, "subtitle_translated", "dub_translated", True)["addon_xu"] == 350
-    assert bot.calculate_video_addon_price(180, "subtitle_translated", "dub_translated", True)["addon_xu"] == 850
+    assert bot.calculate_video_addon_price(180, "subtitle_translated", "dub_translated", True)["addon_xu"] == 1050
 
 
 def test_video_total_price_v2_is_itemized():
@@ -9477,10 +9483,10 @@ def test_video_total_price_v2_is_itemized():
     )
     assert pricing["base_video_xu"] == 1320
     assert pricing["subtitle_xu"] == 120
-    assert pricing["dubbing_xu"] == 250
-    assert pricing["addon_xu"] == 370
-    assert pricing["total_xu"] == 1690
-    assert pricing["estimated_vnd"] == 169000
+    assert pricing["dubbing_xu"] == 230
+    assert pricing["addon_xu"] == 350
+    assert pricing["total_xu"] == 1670
+    assert pricing["estimated_vnd"] == 167000
     invoice = bot.video_price_invoice_text({
         "current_video_duration_seconds": 24,
         "current_video_processing_type": "ai_image_to_video",
@@ -9489,7 +9495,7 @@ def test_video_total_price_v2_is_itemized():
         "current_video_dubbing_option": "dub_original",
         "current_video_price_preview": pricing,
     })
-    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề: <b>+120 Xu</b>", "Lồng tiếng: <b>+250 Xu</b>", "Tổng: <b>1.690 Xu</b>", "169.000đ"]:
+    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề + lồng tiếng: <b>+350 Xu</b>", "Tổng: <b>1.670 Xu</b>", "167.000đ"]:
         assert marker in invoice
 
 
@@ -9591,7 +9597,6 @@ def test_video_addon_menu_and_shared_flow_hooks():
         "videoaddon|dub",
         "videoaddon|combo",
         "videoaddon|translate_sub",
-        "videoaddon|translate_combo",
         "videoaddon|back",
     ]:
         assert callback in callbacks
@@ -9601,6 +9606,323 @@ def test_video_addon_menu_and_shared_flow_hooks():
     assert 'start_video_addon_step(query, uid, state, "low", lang, source="frame")' in frame_source
     for flow_marker in ["trend", "selfscene", "videoref", "imagevideo", "promptvideo"]:
         assert flow_marker in source
+
+
+def test_test_all_video_does_not_crash():
+    source = bot_source_text()
+    init_source = source_between(source, "def init_db():", "def now_text():")
+    command_source = source_between(source, "async def cmd_test_all_video", "async def cmd_video_tier_status")
+    assert "error_class" in init_source
+    assert "provider_error_code" in init_source
+    assert "provider_message" in init_source
+    assert "video_error_report_lines()" in command_source
+
+
+def test_video_state_machine_stack_pop_one_step():
+    uid = "pytest_video_stack"
+    bot.clear_video_session(uid)
+    bot.push_video_screen(uid, "selfscene:upload", "selfscene")
+    bot.push_video_screen(uid, "selfscene:object", "selfscene")
+    bot.push_video_screen(uid, "selfscene:direction", "selfscene")
+    assert bot.pop_video_screen(uid, "selfscene:upload") == "selfscene:object"
+    session = bot.get_video_session(uid)
+    assert session["current_screen"] == "selfscene:object"
+    bot.clear_video_session(uid)
+
+
+def test_no_provider_call_before_confirm():
+    source = bot_source_text()
+    menu_source = source_between(source, "def video_finalization_menu_text", "def video_finalization_selected_aspect")
+    callback_source = source_between(source, "async def handle_video_finalization_callback", "if action in {\"export_local\", \"export_ai\"}:")
+    assert "spend_fixed_credit_info" not in menu_source
+    assert "set_shopaikey_pending_confirmation" not in menu_source
+    assert "spend_fixed_credit_info" not in callback_source
+
+
+def test_no_xu_before_confirm():
+    for text in [
+        bot.video_finalization_menu_text({"source": "selfscene"}, "vi"),
+        bot.self_scene_upload_text("vi", False),
+        bot.storyboard_pack_result_text({"selected_topic": "máy lọc nước"}, "vi"),
+    ]:
+        assert "chỉ bắt đầu xử lý" in text or "chưa xử lý" in text or "chưa trừ Xu" in text
+
+
+def test_no_user_copy_api_provider_env():
+    public_texts = [
+        bot.video_finalization_menu_text({"source": "storypack"}, "vi"),
+        bot.storyboard_pack_result_text({"selected_topic": "máy lọc nước"}, "vi"),
+        bot.storyboard_pack_scene_prompts_text({"selected_topic": "máy lọc nước"}, "image", "vi"),
+        bot.self_scene_upload_text("vi", False),
+        bot.USER_VIDEO_PROVIDER_FROZEN_MESSAGE,
+        bot.USER_TTS_PROVIDER_BUSY_MESSAGE,
+    ]
+    banned = ["Bot chưa gọi API", "provider", "ENV", "HTTP", "feature not public", "Traceback"]
+    for text in public_texts:
+        for marker in banned:
+            assert marker not in text
+
+
+def test_self_shot_requires_video_first():
+    source = bot_source_text()
+    handler = source_between(source, "async def handle_self_scene_ai_callback", "async def handle_long_video_callback")
+    assert 'set_developing_video_pending(uid, "selfscene", "await_video", input_type="video")' in handler
+    assert "self_scene_upload_text" in handler
+    upload_text = bot.self_scene_upload_text("vi", False)
+    assert "Hãy gửi video nguồn" in upload_text
+    assert upload_text.index("Hãy gửi video nguồn") < upload_text.index("Chọn đối tượng cần giữ ổn định")
+
+
+def test_self_shot_accepts_video():
+    source = bot_source_text()
+    upload_handler = source_between(source, "async def handle_self_scene_pending_upload", "def self_scene_input_label")
+    assert "sync_self_scene_source_video(uid, info, lang)" in upload_handler
+    assert '"object"' in upload_handler
+    assert "input_video_file_id" in source_between(source, "def sync_self_scene_source_video", "def developing_video_pending_key")
+
+
+def test_self_shot_music_back_not_reset_flow():
+    source = bot_source_text()
+    handler = source_between(source, "async def handle_self_scene_ai_callback", "async def handle_long_video_callback")
+    assert 'back=("⬅️ Quay lại nhạc/voice"' in handler
+    assert '"selfscene|plan"' in handler
+    assert 'clear_developing_video_pending(uid)' in source_between(handler, 'if action in {"music", "music_choice"}:', 'if action == "plan":')
+
+
+def test_self_shot_direction_buttons_do_not_error():
+    callbacks = [button.callback_data for row in bot.self_scene_input_keyboard("vi").inline_keyboard for button in row]
+    assert {"selfscene|direction_choice|1", "selfscene|direction_choice|2", "selfscene|direction_choice|3", "selfscene|direction_refresh"}.issubset(set(callbacks))
+
+
+def test_self_shot_subject_buttons_do_not_error():
+    callbacks = [button.callback_data for row in bot.self_scene_object_keyboard("vi").inline_keyboard for button in row]
+    assert {"selfscene|object|person", "selfscene|object|product", "selfscene|object|pet", "selfscene|object|custom"}.issubset(set(callbacks))
+
+
+def test_script_image_video_correct_order():
+    callbacks = [button.callback_data for row in bot.storyboard_pack_result_keyboard("vi").inline_keyboard for button in row]
+    assert callbacks.index("storypack|image_prompts") < callbacks.index("storypack|create_video_ai")
+    assert callbacks.index("storypack|video_prompts") < callbacks.index("storypack|create_video_ai")
+
+
+def test_storyboard_before_tier():
+    source = bot_source_text()
+    storypack_handler = source_between(source, "async def handle_storyboard_pack_callback", "def menu_text_main_ai")
+    assert '"storypack|create_video_ai"' in source
+    assert "open_video_finalization" in storypack_handler
+    assert "video_finalization_tier_keyboard" not in source_between(storypack_handler, 'if action == "concept":', 'if action in {"back_detail", "detail"}:')
+
+
+def test_storyboard_visual_canon_created():
+    payload = bot.storyboard_pack_build_payload({"selected_topic": "máy lọc nước"}, "vi")
+    canon = payload["storyboard_visual_canon"]
+    for key in ["main_subject", "product", "brand_style", "color_palette", "location_style", "lighting", "camera_style", "character_consistency", "product_consistency", "forbidden_elements"]:
+        assert key in canon
+
+
+def test_storyboard_image_prompts_match_concept():
+    payload = bot.storyboard_pack_build_payload({"selected_topic": "máy lọc nước", "selected_style": "premium"}, "vi")
+    canon = payload["storyboard_visual_canon"]
+    for shot in payload["shots"]:
+        assert canon["main_subject"] in shot["image_prompt"]
+        assert canon["product"] in shot["video_prompt"]
+        assert canon["forbidden_elements"] in shot["negative_prompt"]
+
+
+def test_scene_image_retry_same_scene():
+    payload = bot.storyboard_pack_build_payload({"selected_topic": "máy lọc nước"}, "vi")
+    assert {shot["retry_scope"] for shot in payload["shots"]} == {"retry_scene_only"}
+
+
+def test_tier_back_returns_storyboard():
+    source = bot_source_text()
+    back_source = source_between(source, "async def video_finalization_back_to_source", "async def render_video_finalization_stack_target")
+    assert 'source == "storypack"' in back_source
+    assert "storyboard_pack_result_text" in back_source
+
+
+def test_trend_flow_distinct():
+    source = bot_source_text()
+    trend_source = source_between(source, "async def handle_trend_guided_callback", "async def handle_trend_video_flow_callback")
+    assert "trend" in trend_source.lower()
+    assert "hook" in source.lower()
+    assert "CTA" in source
+
+
+def test_idea_flow_distinct():
+    source = bot_source_text()
+    idea_source = source_between(source, "def video_idea_menu_text", "def video_idea_menu_keyboard")
+    for marker in ["sales", "review", "education", "viral", "affiliate", "CSKH", "automation"]:
+        assert marker in idea_source or marker.lower() in idea_source.lower()
+
+
+def test_realistic_flow_distinct():
+    source = bot_source_text()
+    prompt_source = source_between(source, "async def handle_prompt_video_callback", "async def handle_image_video_callback")
+    assert "promptvideo" in prompt_source
+    assert "ratio" in source.lower()
+    assert "tier" in source.lower()
+
+
+def test_free_addon_screen_before_paid_tier():
+    text = bot.video_finalization_menu_text({"source": "storypack"}, "vi")
+    for marker in ["Kho nhạc có sẵn", "Kho SFX có sẵn", "Voice mặc định có sẵn", "Prompt/kịch bản mẫu", "Media của tôi", "Lưu kế hoạch video"]:
+        assert marker in text
+
+
+def test_paid_addons_only_after_tier():
+    menu_callbacks = [button.callback_data for row in bot.video_finalization_menu_keyboard("vi").inline_keyboard for button in row]
+    for paid in ["vfinal|subtitle", "vfinal|voice", "vfinal|combo", "vfinal|translate_sub", "vfinal|music_ai"]:
+        assert paid not in menu_callbacks
+    addon_callbacks = [button.callback_data for row in bot.video_addon_menu_keyboard("vi", {"video_tier": "basic"}).inline_keyboard for button in row]
+    assert {"videoaddon|subtitle", "videoaddon|dub", "videoaddon|combo", "videoaddon|translate_sub"}.issubset(set(addon_callbacks))
+
+
+def test_music_menu_not_stuck():
+    callbacks = [button.callback_data for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
+    for callback in ["vfinal|music_library", "vfinal|music_sfx", "vfinal|my_media", "vfinal|music_ai", "vfinal|music_none", "vfinal|music_upload", "vfinal|menu", "vfinal|main"]:
+        assert callback in callbacks
+
+
+def test_music_menu_origin_back_correct():
+    source = bot_source_text()
+    assert "set_music_nav_origin" in source
+    assert "get_music_nav_back_callback" in source
+    assert "get_video_finalization_state(user_id)" in source
+
+
+def test_stock_music_visible():
+    labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
+    assert "🎼 Kho nhạc" in labels
+
+
+def test_sfx_visible():
+    labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
+    assert "🔊 Kho SFX" in labels
+
+
+def test_my_media_visible():
+    labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
+    assert "📁 Media của tôi" in labels
+
+
+def test_suno_button_has_handler():
+    callbacks = [button.callback_data for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
+    assert "vfinal|music_ai" in callbacks
+    assert 'if action == "music_ai":' in bot_source_text()
+
+
+def test_suno_missing_key_user_guard_admin_reason():
+    source = bot_source_text()
+    music_ai_block = source_between(source, 'if action == "music_ai":', 'if action == "music_suggest":')
+    assert "Tính năng này đang được kiểm tra tài nguyên xử lý" in music_ai_block
+    assert "Provider:" not in music_ai_block
+    assert "admin_debug_reason" in source
+
+
+def test_voice_vault_visible():
+    labels = [button.text for row in bot.video_finalization_voice_keyboard("vi").inline_keyboard for button in row]
+    assert "📁 Kho voice của bạn" in labels
+
+
+def test_create_new_voice_flow():
+    source = bot_source_text()
+    flow = source_between(source, "def voice_clone_intro_text", "def voice_hub_text")
+    assert "Tôi xác nhận" in flow
+    assert "voice_clone_upload" in source
+    assert "voice_clone_name" in source
+    assert "voice_clone_confirm" in source
+
+
+def test_voice_requires_consent():
+    source = bot_source_text()
+    assert "consent_at=now_text()" in source
+    assert "consent_status" in source
+
+
+def test_voice_asks_name():
+    source = bot_source_text()
+    assert "voice_clone_name" in source
+    assert "Hãy đặt tên" in source or "tên" in source_between(source, "async def handle_music_guided_pending_text", "async def handle_music_guided_pending_media")
+
+
+def test_voice_preview_text():
+    assert bot.VOICE_PROFILE_PREVIEW_TEXT == "Bạn đang sử dụng trình giọng nói của TOAN AAS. Khi xác nhận, bạn có thể lưu lại tên giọng này và dùng cho các video làm nội dung hoặc lồng tiếng."
+
+
+def test_voice_profile_saved():
+    source = bot_source_text()
+    assert "def save_user_voice_profile" in source
+    assert "INSERT INTO voice_profiles" in source
+    assert "voice_profile_save" in source
+
+
+def test_default_voice_free():
+    labels = [button.text for row in bot.video_finalization_voice_keyboard("vi").inline_keyboard for button in row]
+    assert "👩 Giọng nữ mặc định - Miễn phí" in labels
+    assert "👨 Giọng nam mặc định - Miễn phí" in labels
+
+
+def test_subtitle_menu_has_4_named_modes():
+    labels = [button.text for row in bot.video_addon_menu_keyboard("vi", {"video_tier": "basic"}).inline_keyboard for button in row]
+    joined = "\n".join(labels)
+    for label in ["Tạo phụ đề tự động", "Dịch phụ đề", "Lồng tiếng", "Phụ đề + lồng tiếng"]:
+        assert label in joined
+    assert "Dịch phụ đề + lồng tiếng" not in joined
+
+
+def test_no_icon_price_only_buttons():
+    labels = [button.text for row in bot.video_addon_menu_keyboard("vi", {"video_tier": "basic"}).inline_keyboard for button in row]
+    assert not any(label.strip().startswith(("📝 +", "🎙 +", "🎬 +", "🌐 +")) for label in labels)
+
+
+def test_subtitle_price_under_60():
+    assert bot.calculate_subtitle_dub_price("subtitle", 60) == 120
+    assert bot.calculate_subtitle_dub_price("translate_subtitle", 60) == 150
+    assert bot.calculate_subtitle_dub_price("dubbing", 60) == 250
+    assert bot.calculate_subtitle_dub_price("subtitle_plus_dubbing", 60) == 350
+
+
+def test_subtitle_price_over_60_blocks():
+    assert bot.calculate_subtitle_dub_price("subtitle", 61) == 180
+    assert bot.calculate_subtitle_dub_price("translate_subtitle", 90) == 225
+    assert bot.calculate_subtitle_dub_price("dubbing", 120) == 500
+    assert bot.calculate_subtitle_dub_price("subtitle_plus_dubbing", 180) == 1050
+
+
+def test_translate_subtitle_describes_target_language():
+    source = bot_source_text()
+    translate_block = source_between(source, 'if action == "translate_sub":', 'if action == "translate_combo":')
+    assert "ngôn ngữ đích" in translate_block
+
+
+def test_subtitle_plus_dubbing_exists():
+    assert bot.normalize_subtitle_dub_mode("subtitle_plus_dub") == "subtitle_plus_dubbing"
+    assert bot.SUBTITLE_DUB_PRICE_RULES["subtitle_plus_dubbing"]["base_xu"] == 350
+
+
+def test_subtitle_updates_video_order():
+    state = {"video_tier": "basic", "current_video_subtitle_option": "subtitle_original", "current_video_dubbing_option": "dub_original"}
+    order = bot.video_order_from_state(state, 123)
+    assert any(item["key"] == "subtitle_plus_dubbing" and item["price_xu"] == 350 for item in order["paid_items"])
+
+
+def test_reference_video_channel_flow():
+    labels = [button.text for row in bot.video_reference_hub_keyboard("vi").inline_keyboard for button in row]
+    joined = "\n".join(labels)
+    for label in ["Phân tích link video", "Upload video mẫu", "Hồ sơ kênh của tôi", "Tạo video theo format"]:
+        assert label in joined
+    source = bot_source_text()
+    plan_source = source_between(source, "def video_reference_plan_text", "def video_reference_result_keyboard")
+    for marker in ["hook", "structure", "pacing", "caption", "SFX", "CTA"]:
+        assert marker.lower() in plan_source.lower()
+
+
+def test_reference_workflow_doc_created():
+    path = Path("docs/knowledge/TOAN_AAS_REFERENCE_VIDEO_WORKFLOW_20260618.md")
+    text = path.read_text(encoding="utf-8")
+    for marker in ["AI CSKH", "power, capacity, features", "trend -> hook -> script -> storyboard", "reference channel/video template"]:
+        assert marker in text
 
 
 def test_video_order_builder_base_price():
@@ -9620,8 +9942,7 @@ def test_video_order_builder_addon_total():
     order = bot.video_order_from_state(state, 123)
     expected = (
         bot.video_tier_cost_xu("basic")
-        + bot.VIDEO_SUBTITLE_AUTO_BASE_XU
-        + bot.VIDEO_DUB_DEFAULT_BASE_XU
+        + bot.calculate_subtitle_dub_price("subtitle_plus_dubbing", 60)
     )
     assert order["total_xu"] == expected
     assert any("Phụ đề + lồng tiếng" in item["label"] for item in order["paid_items"])
@@ -9657,7 +9978,9 @@ def test_video_300_shows_paid_addons():
     callbacks = _button_callbacks(markup)
     assert "videoaddon|subtitle" in callbacks
     assert "videoaddon|dub" in callbacks
-    assert "videoaddon|translate_combo" in callbacks
+    assert "videoaddon|combo" in callbacks
+    assert "videoaddon|translate_sub" in callbacks
+    assert "videoaddon|translate_combo" not in callbacks
 
 
 def test_subtitle_dub_screen_has_clear_descriptions():

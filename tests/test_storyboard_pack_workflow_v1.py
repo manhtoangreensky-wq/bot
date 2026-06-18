@@ -113,7 +113,7 @@ def test_storyboard_topic_state_and_three_concepts(monkeypatch):
     callbacks = _callbacks(concepts["reply_markup"])
     assert {"storypack|concept|1", "storypack|concept|2", "storypack|concept|3", "storypack|regenerate_concepts"}.issubset(callbacks)
     assert "storypack|back_brief" in callbacks
-    assert "Bot chưa gọi API ảnh/video và chưa trừ Xu" in concepts["text"]
+    assert "TOAN AAS chỉ bắt đầu xử lý sau khi quý khách xác nhận ở bước cuối" in concepts["text"]
 
 
 def test_storyboard_concept_generates_required_scene_pack(monkeypatch):
@@ -152,7 +152,8 @@ def test_storyboard_concept_generates_required_scene_pack(monkeypatch):
         "Kết thúc",
         "Caption ngắn",
         "Hashtag gợi ý",
-        "Bot chưa gọi API ảnh/video và chưa trừ Xu",
+        "Visual canon dùng xuyên suốt",
+        "TOAN AAS chỉ bắt đầu xử lý sau khi quý khách xác nhận ở bước cuối",
     ]:
         assert expected in text
 
@@ -189,13 +190,13 @@ def test_storyboard_prompt_views_and_video_guard(monkeypatch):
 
     meta = asyncio.run(_press("storypack|meta_ai_prompt", uid))
     assert "3 prompt Meta AI" in meta["text"]
-    assert "Bot chưa gọi Meta API" in meta["text"]
+    assert "TOAN AAS chỉ chuẩn bị prompt" in meta["text"]
     assert "Caption gợi ý" in meta["text"]
     assert {"storypack|copy_meta_1", "storypack|copy_meta_2", "storypack|copy_meta_3", "storypack|regenerate_meta_ai_prompts"}.issubset(_callbacks(meta["reply_markup"]))
 
     guard = asyncio.run(_press("storypack|create_video_ai", uid))
     assert "chưa mở render Video AI công khai" in guard["text"]
-    assert "Bot chưa gọi API và chưa trừ Xu" in guard["text"]
+    assert "TOAN AAS chưa bắt đầu xử lý" in guard["text"]
     guard_callbacks = _callbacks(guard["reply_markup"])
     assert "storypack|back_detail" in guard_callbacks
     assert "vfinal|export_local" not in guard_callbacks
@@ -242,7 +243,7 @@ def test_storyboard_product_ad_manual_path_v2(monkeypatch):
 
     meta = asyncio.run(_press("storypack|meta_ai_prompt", uid))
     assert "3 prompt Meta AI" in meta["text"]
-    assert "Bot chưa gọi Meta API" in meta["text"]
+    assert "TOAN AAS chỉ chuẩn bị prompt" in meta["text"]
 
     video_guard = asyncio.run(_press("storypack|create_video_ai", uid))
     assert "Video AI chân thật đang được kiểm soát an toàn" in video_guard["text"]

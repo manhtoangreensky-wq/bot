@@ -117,16 +117,19 @@ def test_video_finalization_state_expires():
 def test_video_finalization_menu_has_distinct_music_voice_subtitle_and_combo_paths():
     callbacks = _callbacks(bot.video_finalization_menu_keyboard("vi"))
     assert {
-        "vfinal|music",
-        "vfinal|voice",
-        "vfinal|subtitle",
-        "vfinal|combo",
-        "vfinal|skip",
+        "vfinal|music_library",
+        "vfinal|music_sfx",
+        "vfinal|voice_defaults",
+        "vfinal|my_media",
+        "vfinal|copy_prompt",
+        "vfinal|save",
+        "vfinal|tier",
         "vfinal|review",
         "vfinal|back",
         "vfinal|main",
     }.issubset(callbacks)
-    assert "vfinal|subtitle" != "vfinal|combo"
+    assert "vfinal|subtitle" not in callbacks
+    assert "vfinal|combo" not in callbacks
 
     subtitle_callbacks = _callbacks(bot.video_finalization_subtitle_keyboard("vi"))
     assert "vfinal|subtitle_manual" in subtitle_callbacks

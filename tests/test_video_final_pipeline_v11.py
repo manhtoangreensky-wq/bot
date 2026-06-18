@@ -112,10 +112,10 @@ def test_video_total_price_and_invoice_include_music():
         music_option="user_upload",
     )
     assert pricing["base_video_xu"] == 1320
-    assert pricing["addon_xu"] == 370
+    assert pricing["addon_xu"] == 350
     assert pricing["music_xu"] == 0
-    assert pricing["total_xu"] == 1690
-    assert pricing["estimated_vnd"] == 169000
+    assert pricing["total_xu"] == 1670
+    assert pricing["estimated_vnd"] == 167000
 
     text = bot.video_price_invoice_text({
         "current_video_duration_seconds": 24,
@@ -128,8 +128,8 @@ def test_video_total_price_and_invoice_include_music():
         "current_video_price_preview": pricing,
     })
     assert "Nhạc/SFX" in text
-    assert "1.690 Xu" in text
-    assert "169.000đ" in text
+    assert "1.670 Xu" in text
+    assert "167.000đ" in text
 
 
 def test_finalization_payload_preserves_music_subtitle_and_dub():
@@ -211,8 +211,8 @@ def test_music_and_addon_keyboards_have_real_callbacks():
         "vfinal|voice",
         "vfinal|combo",
         "vfinal|translate_sub",
-        "vfinal|translate_combo",
     }.issubset(addon_callbacks)
+    assert "vfinal|translate_combo" not in addon_callbacks
 
 
 def test_provider_flags_and_admin_smoke_commands_are_guarded():
