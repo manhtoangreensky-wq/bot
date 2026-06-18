@@ -2465,11 +2465,16 @@ def init_db():
         provider_voice_id TEXT DEFAULT '',
         display_name TEXT DEFAULT '',
         consent_status TEXT DEFAULT 'required',
+        consent_at TEXT,
         source_file_id TEXT DEFAULT '',
+        source_file_ref TEXT DEFAULT '',
+        preview_audio_ref TEXT DEFAULT '',
         status TEXT DEFAULT 'draft',
+        is_default INTEGER DEFAULT 0,
         created_at TEXT,
         updated_at TEXT,
         last_used_at TEXT,
+        deleted_at TEXT,
         metadata_json TEXT DEFAULT ''
     )""")
     voice_profile_columns = _table_columns(c, "voice_profiles")
@@ -2478,11 +2483,16 @@ def init_db():
         ("provider_voice_id", "provider_voice_id TEXT DEFAULT ''"),
         ("display_name", "display_name TEXT DEFAULT ''"),
         ("consent_status", "consent_status TEXT DEFAULT 'required'"),
+        ("consent_at", "consent_at TEXT"),
         ("source_file_id", "source_file_id TEXT DEFAULT ''"),
+        ("source_file_ref", "source_file_ref TEXT DEFAULT ''"),
+        ("preview_audio_ref", "preview_audio_ref TEXT DEFAULT ''"),
         ("status", "status TEXT DEFAULT 'draft'"),
+        ("is_default", "is_default INTEGER DEFAULT 0"),
         ("created_at", "created_at TEXT"),
         ("updated_at", "updated_at TEXT"),
         ("last_used_at", "last_used_at TEXT"),
+        ("deleted_at", "deleted_at TEXT"),
         ("metadata_json", "metadata_json TEXT DEFAULT ''"),
     ]:
         _add_column_if_missing(c, "voice_profiles", column_name, column_sql, voice_profile_columns)
@@ -33444,18 +33454,16 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
     subtitle = str(state.get("current_video_subtitle_option") or order["addons"].get("subtitle") or "none").strip().lower()
     dubbing = str(state.get("current_video_dubbing_option") or order["addons"].get("dub") or "none").strip().lower()
     translated = bool(state.get("translation_enabled") or "translated" in subtitle or "translated" in dubbing)
+    duration_seconds = max(1, int(order.get("requested_seconds") or VIDEO_ORDER_DEFAULT_BASE_SECONDS))
     if tier == "low":
         subtitle = "none"
         dubbing = "none"
         translated = False
     if subtitle not in {"", "none"} and dubbing not in {"", "none"}:
-        key = "translate_dub_default" if translated else "subtitle_plus_dub"
-        if key == "subtitle_plus_dub":
-            price = int(matrix["subtitle_auto"]["price_xu"] or 0) + int(matrix["dubbing_default"]["price_xu"] or 0)
-            label = "Phụ đề + lồng tiếng"
-        else:
-            price = int(matrix[key]["price_xu"] or 0)
-            label = matrix[key]["label"]
+        key = "subtitle_plus_dubbing"
+        breakdown = subtitle_dub_price_breakdown(key, duration_seconds)
+        price = int(breakdown["total_xu"])
+        label = breakdown["label"]
         order["addons"]["subtitle_plus_dub"] = key
         if video_order_paid_addons_allowed(tier):
             paid_items.append({"key": key, "label": label, "price_xu": price})
@@ -33465,14 +33473,14 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
         if translated:
             order["addons"]["subtitle_translate"] = key
         if video_order_paid_addons_allowed(tier):
-            item = matrix[key]
-            paid_items.append({"key": key, "label": item["label"], "price_xu": int(item.get("price_xu") or 0)})
+            breakdown = subtitle_dub_price_breakdown("translate_subtitle" if translated else "subtitle", duration_seconds)
+            paid_items.append({"key": key, "label": breakdown["label"], "price_xu": int(breakdown["total_xu"])})
     elif dubbing not in {"", "none"}:
-        key = "translate_dub_default" if translated else "dubbing_default"
+        key = "dubbing_default"
         order["addons"]["dub"] = key
         if video_order_paid_addons_allowed(tier):
-            item = matrix[key]
-            paid_items.append({"key": key, "label": item["label"], "price_xu": int(item.get("price_xu") or 0)})
+            breakdown = subtitle_dub_price_breakdown("dubbing", duration_seconds)
+            paid_items.append({"key": key, "label": breakdown["label"], "price_xu": int(breakdown["total_xu"])})
 
     if not free_items:
         free_items.extend([
@@ -50513,12 +50521,11 @@ def menu_text_main_audio() -> str:
 
 def menu_text_main_music() -> str:
     return (
-        "🎙 <b>VOICE / NHẠC TOAN AAS</b>\n\n"
-        "<b>A. Voice / TTS / STT</b>\n"
-        "Tạo voice từ văn bản, chọn giọng, lưu voice profile/nhân bản giọng có consent, bóc băng audio và chuẩn bị voice cho video.\n\n"
-        "<b>B. Music / SFX / Media</b>\n"
-        "Tạo nhạc AI/Suno, tạo prompt nhạc, tìm nhạc nền, SFX, media public và ghép nhạc vào video.\n\n"
-        "Chọn tác vụ bằng nút bên dưới. Tác vụ admin-test sẽ báo rõ trạng thái và không trừ Xu nếu chưa mở public."
+        "🎙🎵 <b>GIỌNG NÓI & NHẠC TOAN AAS</b>\n\n"
+        "Quý khách muốn xử lý phần nào?\n\n"
+        "• <b>Giọng nói:</b> tạo giọng đọc, dùng giọng mặc định miễn phí, hoặc quản lý giọng riêng đã lưu.\n"
+        "• <b>Nhạc/SFX:</b> chọn nhạc có sẵn, hiệu ứng âm thanh, hoặc tạo nhạc AI mới bằng Suno.\n\n"
+        "TOAN AAS chỉ tính Xu với tác vụ AI tạo mới. Mọi khoản phí đều được hiển thị trước khi xác nhận."
     )
 
 def menu_text_translate(other: bool = False) -> str:
@@ -63608,32 +63615,39 @@ def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
         "✅ Video and audio are ready. Admin can use /add_music or /add_voice_to_video for a render smoke test."
     )
 
+VOICE_PROFILE_PREVIEW_TEXT = (
+    "Bạn đang sử dụng trình giọng nói của TOAN AAS. Khi xác nhận, bạn có thể lưu lại tên giọng này "
+    "và dùng cho các video làm nội dung hoặc lồng tiếng."
+)
+
 def voice_clone_intro_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🧬 <b>Voice profile / clone voice</b>\n\n"
-            "Send an audio sample that you own or have explicit consent to use. TOAN AAS will save the Telegram file ID as a private voice profile for this account.\n\n"
-            "MiniMax voice clone remains guarded until provider smoke + consent are ready. No provider call and no Xu charge on upload."
+            "Please confirm that the voice belongs to you or that you have lawful permission to use it. "
+            "The profile remains private to this account and can be renamed, set as default or deleted.\n\n"
+            "No processing or Xu charge occurs before confirmation."
         )
     return (
         "🧬 <b>Nhân bản giọng đọc/hát</b>\n\n"
-        "Hãy gửi file voice/audio mẫu mà bạn sở hữu hoặc đã có đồng ý rõ ràng. TOAN AAS sẽ lưu file ID thành voice profile riêng của tài khoản này để sau dùng cho kịch bản/lồng tiếng.\n\n"
-        "MiniMax voice clone vẫn được guard cho đến khi smoke + consent sẵn sàng. Bước gửi file chưa gọi provider và chưa trừ Xu."
+        "Quý khách có thể gửi file voice/audio mẫu để tạo giọng đọc riêng.\n\n"
+        "Vui lòng xác nhận:\n"
+        "• File là giọng của chính quý khách hoặc quý khách có quyền sử dụng hợp pháp.\n"
+        "• Giọng chỉ được dùng theo yêu cầu của quý khách trong hệ thống.\n"
+        "• Quý khách có thể đổi tên, đặt mặc định hoặc xóa giọng đã lưu.\n\n"
+        "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu ở bước này."
     )
 
 def voice_clone_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
     buttons = [
-        ("📎 Tôi sẽ gửi file giọng" if is_vi else "📎 I will send audio", "music_quick|voice_clone_upload"),
-        ("🎙 Giọng đã lưu" if is_vi else "🎙 Saved voices", "music_quick|voice_profiles"),
-        ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", "music_quick|voice_default_female"),
-        ("👨 Giọng nam mặc định" if is_vi else "👨 Default male", "music_quick|voice_default_male"),
-        ("🔎 MiniMax status" if is_vi else "🔎 MiniMax status", "music_quick|voice_clone_guard"),
+        ("✅ Tôi xác nhận" if is_vi else "✅ I confirm", "music_quick|voice_consent"),
+        ("❌ Hủy" if is_vi else "❌ Cancel", "music_quick|voice_cancel"),
     ]
-    back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
+    back = ("⬅️ Tạo giọng nói", "music_quick|voice_hub") if is_vi else ("⬅️ Voice", "music_quick|voice_hub")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
-def save_user_voice_profile(user_id, file_id: str, file_type: str = "audio", display_name: str = "") -> int:
+def save_user_voice_profile(user_id, file_id: str, file_type: str = "audio", display_name: str = "", consent_at: str = "") -> int:
     clean_file_id = str(file_id or "").strip()[:220]
     if not clean_file_id:
         return 0
@@ -63645,17 +63659,21 @@ def save_user_voice_profile(user_id, file_id: str, file_type: str = "audio", dis
             cur.execute(
                 """
                 INSERT INTO voice_profiles
-                (user_id, provider, provider_voice_id, display_name, consent_status, source_file_id, status, created_at, updated_at, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (user_id, provider, provider_voice_id, display_name, consent_status, consent_at,
+                 source_file_id, source_file_ref, status, is_default, created_at, updated_at, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(user_id),
                     "telegram",
                     "",
-                    display_name or f"Voice profile {now[:10]}",
-                    "user_uploaded_consent_required",
+                    display_name or "",
+                    "confirmed",
+                    consent_at or now,
                     clean_file_id,
-                    "saved",
+                    clean_file_id,
+                    "pending_name",
+                    0,
                     now,
                     now,
                     json.dumps(metadata, ensure_ascii=False),
@@ -63667,6 +63685,79 @@ def save_user_voice_profile(user_id, file_id: str, file_type: str = "audio", dis
         logger.warning("save_user_voice_profile failed | %s", sanitize_log_text(str(exc))[:220])
         return 0
 
+def get_user_voice_profile(user_id, profile_id: int) -> dict:
+    try:
+        with db_connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM voice_profiles WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                (int(profile_id), str(user_id)),
+            ).fetchone()
+            return dict(row) if row else {}
+    except Exception as exc:
+        logger.warning("get_user_voice_profile failed | %s", sanitize_log_text(str(exc))[:220])
+        return {}
+
+def update_user_voice_profile(user_id, profile_id: int, **fields) -> bool:
+    allowed = {
+        "provider", "provider_voice_id", "display_name", "consent_status", "consent_at",
+        "source_file_id", "source_file_ref", "preview_audio_ref", "status", "is_default",
+        "last_used_at", "deleted_at", "metadata_json",
+    }
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    if not updates:
+        return False
+    updates["updated_at"] = now_text()
+    assignments = ", ".join(f"{key}=?" for key in updates)
+    try:
+        with db_connect() as conn:
+            cur = conn.execute(
+                f"UPDATE voice_profiles SET {assignments} WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                (*updates.values(), int(profile_id), str(user_id)),
+            )
+            conn.commit()
+            return bool(cur.rowcount)
+    except Exception as exc:
+        logger.warning("update_user_voice_profile failed | %s", sanitize_log_text(str(exc))[:220])
+        return False
+
+def set_default_voice_profile(user_id, profile_id: int) -> bool:
+    profile = get_user_voice_profile(user_id, profile_id)
+    if not profile or str(profile.get("status") or "") != "active":
+        return False
+    try:
+        with db_connect() as conn:
+            conn.execute("UPDATE voice_profiles SET is_default=0, updated_at=? WHERE user_id=?", (now_text(), str(user_id)))
+            cur = conn.execute(
+                "UPDATE voice_profiles SET is_default=1, updated_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL",
+                (now_text(), int(profile_id), str(user_id)),
+            )
+            conn.commit()
+            return bool(cur.rowcount)
+    except Exception as exc:
+        logger.warning("set_default_voice_profile failed | %s", sanitize_log_text(str(exc))[:220])
+        return False
+
+def soft_delete_voice_profile(user_id, profile_id: int) -> bool:
+    return update_user_voice_profile(user_id, profile_id, status="deleted", is_default=0, deleted_at=now_text())
+
+def user_voice_profile_rows(user_id, limit: int = 8) -> list[dict]:
+    try:
+        with db_connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT * FROM voice_profiles
+                WHERE user_id=? AND deleted_at IS NULL AND status NOT IN ('deleted')
+                ORDER BY is_default DESC, id DESC LIMIT ?
+                """,
+                (str(user_id), int(limit or 8)),
+            ).fetchall()
+            return [dict(row) for row in rows]
+    except Exception as exc:
+        logger.warning("user_voice_profile_rows failed | %s", sanitize_log_text(str(exc))[:220])
+        return []
+
 def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5) -> str:
     rows = []
     try:
@@ -63674,10 +63765,10 @@ def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5) -> st
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT id, display_name, consent_status, status, created_at
+                SELECT id, display_name, consent_status, status, created_at, is_default
                 FROM voice_profiles
-                WHERE user_id=?
-                ORDER BY id DESC
+                WHERE user_id=? AND deleted_at IS NULL AND status NOT IN ('deleted')
+                ORDER BY is_default DESC, id DESC
                 LIMIT ?
                 """,
                 (str(user_id), int(limit or 5)),
@@ -63691,14 +63782,82 @@ def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5) -> st
         lines = ["🎙 <b>Saved voices</b>", ""]
     else:
         if not rows:
-            return "🎙 <b>Giọng đã lưu</b>\n\nBạn chưa có voice profile nào. Hãy gửi file voice/audio mẫu trước. Bot chưa trừ Xu."
-        lines = ["🎙 <b>Giọng đã lưu</b>", ""]
+            return "📁 <b>Kho voice của bạn</b>\n\nQuý khách chưa có giọng đã lưu. Hãy tạo giọng mới từ file voice/audio mẫu của mình."
+        lines = ["📁 <b>Kho voice của bạn</b>", ""]
     for row in rows:
-        profile_id, name, consent, status, created = row
-        lines.append(f"• <code>#{profile_id}</code> {html.escape(str(name or 'Voice profile'))} — {html.escape(str(status or '-'))} / {html.escape(str(consent or '-'))} — {html.escape(str(created or '-')[:16])}")
+        profile_id, name, consent, status, created, is_default = row
+        default_text = " — ⭐ Mặc định" if int(is_default or 0) else ""
+        lines.append(f"• <code>#{profile_id}</code> {html.escape(str(name or 'Chưa đặt tên'))} — {html.escape(str(status or '-'))}{default_text}")
     lines.append("")
-    lines.append("MiniMax clone/use vẫn cần consent + smoke/provider gate. Bot chưa trừ Xu." if normalize_user_language(lang) == "vi" else "MiniMax clone/use still requires consent + smoke/provider gate. No Xu charge.")
+    lines.append("Chọn một giọng bên dưới để nghe thử, sử dụng, đổi tên hoặc đặt làm mặc định." if normalize_user_language(lang) == "vi" else "Choose a voice below to preview or manage it.")
     return "\n".join(lines)
+
+def voice_vault_keyboard(user_id, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = []
+    for profile in user_voice_profile_rows(user_id, 4):
+        name = str(profile.get("display_name") or f"Voice #{profile.get('id')}")[:28]
+        prefix = "⭐" if int(profile.get("is_default") or 0) else "▶️"
+        buttons.append((f"{prefix} {name}", f"music_quick|voice_profile_select:{int(profile.get('id') or 0)}"))
+    buttons.extend([
+        ("🧬 Tạo giọng mới" if is_vi else "🧬 Create voice", "music_quick|voice_clone"),
+        ("👩 Giọng nữ mặc định - Miễn phí" if is_vi else "👩 Default female - Free", "music_quick|voice_default_female"),
+        ("👨 Giọng nam mặc định - Miễn phí" if is_vi else "👨 Default male - Free", "music_quick|voice_default_male"),
+    ])
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Tạo giọng nói" if is_vi else "⬅️ Voice", "music_quick|voice_hub"), lang=lang)
+
+def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    pid = int(profile_id or 0)
+    buttons = [
+        ("▶️ Nghe thử" if is_vi else "▶️ Preview", f"music_quick|voice_profile_listen:{pid}"),
+        ("✅ Dùng giọng này" if is_vi else "✅ Use voice", f"music_quick|voice_profile_use:{pid}"),
+        ("⭐ Đặt mặc định" if is_vi else "⭐ Set default", f"music_quick|voice_profile_default:{pid}"),
+        ("✏️ Đổi tên" if is_vi else "✏️ Rename", f"music_quick|voice_profile_rename:{pid}"),
+        ("🗑 Xóa giọng" if is_vi else "🗑 Delete", f"music_quick|voice_profile_delete:{pid}"),
+        ("🧬 Tạo giọng mới" if is_vi else "🧬 Create voice", "music_quick|voice_clone"),
+    ]
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", "music_quick|voice_profiles"), lang=lang)
+
+def voice_clone_quote_text(profile: dict, lang: str = "vi") -> str:
+    name = html.escape(str(profile.get("display_name") or "Giọng mới"))
+    cost = int(VIDEO_VOICE_CLONE_CREATE_XU or 0)
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "🧾 <b>Confirm new voice creation</b>\n\n"
+            f"Name: <b>{name}</b>\nService: MiniMax consent-based voice profile\nCost: <b>{cost} Xu</b>\n\n"
+            "TOAN AAS starts processing and charges Xu only after confirmation. A failed creation is refunded."
+        )
+    return (
+        "🧾 <b>Xác nhận tạo giọng mới</b>\n\n"
+        f"Tên giọng: <b>{name}</b>\n"
+        "Dịch vụ: Tạo voice profile MiniMax từ file đã xác nhận quyền\n"
+        f"Chi phí: <b>{cost} Xu</b>\n\n"
+        "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi quý khách xác nhận. Nếu tạo giọng thất bại, Xu sẽ được hoàn theo chính sách."
+    )
+
+def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    pid = int(profile_id or 0)
+    return build_2col_keyboard(
+        [
+            ("✅ Xác nhận tạo giọng" if is_vi else "✅ Confirm", f"music_quick|voice_clone_confirm:{pid}"),
+            ("✏️ Đổi tên" if is_vi else "✏️ Rename", f"music_quick|voice_profile_rename:{pid}"),
+        ],
+        nav_back=("⬅️ Tạo giọng nói" if is_vi else "⬅️ Voice", "music_quick|voice_hub"),
+        lang=lang,
+    )
+
+def voice_clone_preview_keyboard(profile_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    pid = int(profile_id or 0)
+    buttons = [
+        ("✅ Lưu giọng này" if is_vi else "✅ Save voice", f"music_quick|voice_profile_save:{pid}"),
+        ("🔁 Tạo lại nghe thử" if is_vi else "🔁 Retry preview", f"music_quick|voice_clone_retry:{pid}"),
+        ("✏️ Đổi tên" if is_vi else "✏️ Rename", f"music_quick|voice_profile_rename:{pid}"),
+        ("🗑 Hủy" if is_vi else "🗑 Cancel", f"music_quick|voice_profile_delete:{pid}"),
+    ]
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Tạo giọng nói" if is_vi else "⬅️ Voice", "music_quick|voice_hub"), lang=lang)
 
 def voice_style_suggestions(text: str, offset: int = 0, lang: str = "vi") -> list[dict]:
     lang = music_ui_lang(lang=lang)
@@ -63824,83 +63983,81 @@ def music_license_notice_text(lang: str) -> str:
 
 def music_tools_keyboard(lang: str = "vi", back_callback: str = "menu|main") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
-    if lang == "zh":
-        labels = {
-            "voice": "🎙 生成语音",
-            "stt": "🎧 转文字/STT",
-            "ai_music": "🎼 AI音乐",
-            "voice_clone": "🧬 声音档案",
-            "voice_video": "🎬 添加语音",
-            "prompt": "🎼 音乐提示词",
-            "music": "🎧 音乐库",
-            "sfx": "🔊 音效",
-            "media": "🖼 媒体库",
-            "add_music": "🎬 添加音乐",
-            "policy": "📜 音乐政策",
-            "back": "🔙 返回",
-            "main": "🏠 主菜单",
-        }
-    elif lang == "en":
-        labels = {
-            "voice": "🎙 Create voice",
-            "stt": "🎧 STT / Transcribe",
-            "ai_music": "🎼 AI Music",
-            "voice_clone": "🧬 Voice profile",
-            "voice_video": "🎬 Add voice",
-            "prompt": "🎼 Music prompt",
-            "music": "🎧 Music library",
-            "sfx": "🔊 SFX",
-            "media": "🖼 Media library",
-            "add_music": "🎬 Add music",
-            "policy": "📜 Music policy",
-            "back": "🔙 Back",
-            "main": "🏠 Main menu",
-        }
-    else:
-        labels = {
-            "voice": "🎙 Tạo giọng đọc",
-            "stt": "🎧 STT / Bóc băng",
-            "ai_music": "🎼 Tạo nhạc AI",
-            "voice_clone": "🧬 Nhân bản giọng",
-            "voice_video": "🎬 Ghép voice",
-            "prompt": "🎼 Tạo prompt nhạc",
-            "music": "🎧 Kho nhạc",
-            "sfx": "🔊 SFX",
-            "media": "🖼 Kho media",
-            "add_music": "🎬 Ghép nhạc",
-            "policy": "📜 Chính sách",
-            "back": "🔙 Quay lại",
-            "main": "🏠 Menu chính",
-        }
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(labels["voice"], callback_data="music_quick|voice"),
-            InlineKeyboardButton(labels["stt"], callback_data="music_quick|stt"),
-        ],
-        [
-            InlineKeyboardButton(labels["ai_music"], callback_data="music_quick|ai_music"),
-            InlineKeyboardButton(labels["voice_clone"], callback_data="music_quick|voice_clone"),
-        ],
-        [
-            InlineKeyboardButton(labels["voice_video"], callback_data="music_quick|voice_video"),
-            InlineKeyboardButton(labels["prompt"], callback_data="music_quick|prompt"),
-        ],
-        [
-            InlineKeyboardButton(labels["music"], callback_data="music_quick|music"),
-            InlineKeyboardButton(labels["sfx"], callback_data="music_quick|sfx"),
-        ],
-        [
-            InlineKeyboardButton(labels["media"], callback_data="music_quick|media"),
-            InlineKeyboardButton(labels["add_music"], callback_data="music_quick|add_music"),
-        ],
-        [
-            InlineKeyboardButton(labels["policy"], callback_data="music_quick|policy"),
-        ],
-        [
-            InlineKeyboardButton(labels["back"], callback_data=back_callback or "menu|main"),
-            InlineKeyboardButton(labels["main"], callback_data="menu|main"),
-        ],
-    ])
+    is_vi = lang == "vi"
+    buttons = [
+        ("🎙 Tạo giọng nói / Kho voice" if is_vi else "🎙 Voice / Voice vault", "music_quick|voice_hub"),
+        ("🎵 Tạo nhạc / Kho nhạc / SFX" if is_vi else "🎵 Music / Library / SFX", "music_quick|music_hub"),
+        ("📁 Media của tôi" if is_vi else "📁 My media", "music_quick|media"),
+    ]
+    return build_2col_keyboard(
+        buttons,
+        nav_back=("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", back_callback or "menu|main_video"),
+        lang=lang,
+    )
+
+def voice_hub_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "🎙 <b>Create voice / Voice vault</b>\n\n"
+            "Free: no voice, default female/male voices, and reuse of an existing saved voice.\n"
+            "Paid: create a new MiniMax voice, clone a consented voice sample, or dub a video.\n\n"
+            "TOAN AAS shows the invoice before any paid processing."
+        )
+    return (
+        "🎙 <b>Tạo giọng nói / Kho voice</b>\n\n"
+        "<b>Miễn phí</b>\n"
+        "• Không thêm giọng đọc\n"
+        "• Giọng nữ/nam mặc định có sẵn\n"
+        "• Dùng lại giọng đã lưu nếu không tạo mới\n\n"
+        "<b>Có phí</b>\n"
+        "• Tạo giọng đọc AI mới bằng MiniMax\n"
+        "• Tạo giọng riêng từ file voice có xác nhận quyền\n"
+        "• Lồng tiếng video bằng giọng AI\n\n"
+        "TOAN AAS chỉ bắt đầu xử lý sau khi quý khách xác nhận hóa đơn."
+    )
+
+def voice_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = [
+        ("🚫 Không thêm giọng" if is_vi else "🚫 No voice", "music_quick|voice_none"),
+        ("📁 Kho voice của bạn" if is_vi else "📁 Your voice vault", "music_quick|voice_profiles"),
+        ("🧬 Tạo giọng mới" if is_vi else "🧬 Create voice profile", "music_quick|voice_clone"),
+        ("🎙 Tạo giọng đọc AI" if is_vi else "🎙 Create AI narration", "music_quick|voice"),
+        ("👩 Giọng nữ mặc định - Miễn phí" if is_vi else "👩 Default female - Free", "music_quick|voice_default_female"),
+        ("👨 Giọng nam mặc định - Miễn phí" if is_vi else "👨 Default male - Free", "music_quick|voice_default_male"),
+    ]
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Giọng nói & Nhạc" if is_vi else "⬅️ Voice & Music", "music_quick|root"), lang=lang)
+
+def music_hub_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "🎵 <b>Create music / Music library</b>\n\n"
+            "Free: available music, SFX and saved media.\n"
+            "Paid: generate new AI music with Suno or request advanced processing.\n\n"
+            "TOAN AAS shows the invoice before any paid processing."
+        )
+    return (
+        "🎵 <b>Tạo nhạc / Kho nhạc / SFX</b>\n\n"
+        "<b>Miễn phí</b>\n"
+        "• Chọn nhạc và SFX có sẵn\n"
+        "• Dùng media đã lưu trong hạn mức\n\n"
+        "<b>Có phí</b>\n"
+        "• Tạo nhạc AI mới bằng Suno\n"
+        "• Xử lý hoặc ghép nhạc nâng cao khi quý khách yêu cầu\n\n"
+        "TOAN AAS chỉ bắt đầu xử lý sau khi quý khách xác nhận hóa đơn."
+    )
+
+def music_hub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    buttons = [
+        ("🎼 Kho nhạc" if is_vi else "🎼 Music library", "music_quick|music"),
+        ("🔊 Kho SFX" if is_vi else "🔊 SFX library", "music_quick|sfx"),
+        ("📁 Media của tôi" if is_vi else "📁 My media", "music_quick|media"),
+        ("✨ Tạo nhạc AI Suno" if is_vi else "✨ Create Suno music", "music_quick|ai_music"),
+        ("🚫 Không thêm nhạc" if is_vi else "🚫 No music", "music_quick|music_none"),
+        ("🎬 Ghép nhạc vào video" if is_vi else "🎬 Add music to video", "music_quick|add_music"),
+    ]
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Giọng nói & Nhạc" if is_vi else "⬅️ Voice & Music", "music_quick|root"), lang=lang)
 
 def music_prompt_guide_text(lang: str = "vi") -> str:
     lang = music_ui_lang(lang=lang)
@@ -64084,6 +64241,88 @@ MEDIA_QUICK_QUERIES = {
     "product": "product showcase",
 }
 
+def voice_profile_metadata(profile: dict) -> dict:
+    try:
+        value = json.loads(str((profile or {}).get("metadata_json") or "{}"))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+async def create_minimax_voice_profile_preview(query, context, user_id, profile: dict, lang: str = "vi", retry: bool = False):
+    profile_id = int((profile or {}).get("id") or 0)
+    if not profile_id or str((profile or {}).get("consent_status") or "") != "confirmed":
+        return await query.message.reply_text(
+            "⚠️ Yêu cầu tạo giọng không còn hợp lệ hoặc chưa xác nhận quyền sử dụng.",
+            reply_markup=voice_hub_keyboard(lang),
+        )
+    readiness = get_minimax_voice_readiness()
+    if not readiness.get("ready") or (not readiness.get("public_enabled") and not is_admin_user(user_id)):
+        return await query.message.reply_text(
+            "⚙️ Tạo giọng riêng đang được kiểm tra tài nguyên xử lý. Quý khách có thể thử lại sau hoặc dùng giọng nam/nữ mặc định miễn phí.\n\nTOAN AAS chưa trừ Xu.",
+            reply_markup=voice_hub_keyboard(lang),
+        )
+    metadata = voice_profile_metadata(profile)
+    charged = int(metadata.get("charged_xu") or 0)
+    cost = int(VIDEO_VOICE_CLONE_CREATE_XU or 0)
+    if not retry and not charged:
+        charge = spend_fixed_credit_info(user_id, cost, "voice_clone_create", f"Voice profile #{profile_id}", apply_member_discount_flag=False)
+        if not charge.get("ok"):
+            return await query.message.reply_text(
+                f"⚠️ Số dư chưa đủ để tạo giọng mới ({cost} Xu). TOAN AAS chưa bắt đầu xử lý.",
+                reply_markup=voice_clone_quote_keyboard(profile_id, lang),
+            )
+        charged = int(charge.get("charged_amount") or charge.get("amount") or cost)
+        metadata["charged_xu"] = charged
+    await query.message.reply_text("🎙 TOAN AAS đang tạo bản nghe thử. Vui lòng chờ và không bấm lại nhiều lần.")
+    try:
+        telegram_file = await context.bot.get_file(str(profile.get("source_file_id") or profile.get("source_file_ref") or ""))
+        audio_bytes = bytes(await telegram_file.download_as_bytearray())
+        status, provider_file_id, detail, _http = await shopaikey_minimax_upload_voice_sample(audio_bytes)
+        if status != "PASS" or not provider_file_id:
+            raise RuntimeError(f"voice_upload:{status}:{detail[:100]}")
+        provider_voice_id = f"toanaas_{int(user_id)}_{profile_id}"[:60]
+        status, clone_payload, detail, _http = await shopaikey_minimax_voice_clone(provider_file_id, provider_voice_id)
+        if status != "PASS":
+            raise RuntimeError(f"voice_clone:{status}:{detail[:100]}")
+        provider_voice_id = str((clone_payload or {}).get("voice_id") or provider_voice_id)
+        status, preview_bytes, detail, _http = await shopaikey_minimax_tts_bytes(VOICE_PROFILE_PREVIEW_TEXT, voice_id=provider_voice_id)
+        if status != "PASS" or not preview_bytes:
+            raise RuntimeError(f"voice_preview:{status}:{detail[:100]}")
+        audio_file = io.BytesIO(preview_bytes)
+        audio_file.name = f"toan_aas_voice_{profile_id}.mp3"
+        sent = await context.bot.send_audio(
+            chat_id=query.message.chat_id,
+            audio=audio_file,
+            title=str(profile.get("display_name") or "TOAN AAS Voice Preview"),
+            caption=f"🔊 Bản nghe thử giọng “{str(profile.get('display_name') or 'Giọng mới')}”.",
+        )
+        preview_ref = str(getattr(getattr(sent, "audio", None), "file_id", "") or "")
+        metadata["preview_attempts"] = int(metadata.get("preview_attempts") or 0) + 1
+        metadata["provider_file_id"] = provider_file_id
+        update_user_voice_profile(
+            user_id,
+            profile_id,
+            provider="shopaikey_minimax",
+            provider_voice_id=provider_voice_id,
+            preview_audio_ref=preview_ref,
+            status="preview_ready",
+            metadata_json=json.dumps(metadata, ensure_ascii=False),
+        )
+        return await query.message.reply_text(
+            f"🔊 Đây là bản nghe thử giọng “{str(profile.get('display_name') or 'Giọng mới')}”.\n\nQuý khách muốn lưu giọng này vào Kho voice của bạn không?",
+            reply_markup=voice_clone_preview_keyboard(profile_id, lang),
+        )
+    except Exception as exc:
+        logger.warning("voice profile preview failed | profile=%s | %s", profile_id, sanitize_log_text(str(exc))[:220])
+        if charged and not metadata.get("refund_done"):
+            refund_charged_credit(user_id, charged, "voice_clone_refund", str(profile_id), "Hoàn phí tạo giọng do xử lý thất bại", True)
+            metadata["refund_done"] = True
+        update_user_voice_profile(user_id, profile_id, status="failed", metadata_json=json.dumps(metadata, ensure_ascii=False))
+        return await query.message.reply_text(
+            "⚙️ Tạo bản nghe thử chưa thành công. TOAN AAS đã hoàn Xu nếu có trừ. Quý khách có thể thử lại sau hoặc dùng giọng mặc định miễn phí.",
+            reply_markup=voice_hub_keyboard(lang),
+        )
+
 async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -64091,6 +64330,24 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     namespace, action = (query.data or "").split("|", 1)
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
+    if action == "root":
+        await query.answer()
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(menu_text_main_music_i18n(lang), parse_mode="HTML", reply_markup=music_tools_keyboard(lang, "menu|main_video"))
+    if action == "voice_hub":
+        await query.answer()
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(voice_hub_text(lang), parse_mode="HTML", reply_markup=voice_hub_keyboard(lang))
+    if action == "music_hub":
+        await query.answer()
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(music_hub_text(lang), parse_mode="HTML", reply_markup=music_hub_keyboard(lang))
+    if action == "music_none":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        result.update({"selected_music": "none", "music_is_free": True})
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text("✅ Đã chọn không thêm nhạc. Lựa chọn này miễn phí và không phát sinh Xu.", reply_markup=music_hub_keyboard(lang))
     if action == "prompt":
         await query.answer()
         clear_music_guided_pending(user_id)
@@ -64152,20 +64409,109 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "voice_clone":
         await query.answer()
         return await query.message.reply_text(voice_clone_intro_text(lang), parse_mode="HTML", reply_markup=voice_clone_keyboard(lang))
-    if action == "voice_clone_upload":
+    if action == "voice_consent":
         await query.answer()
-        set_music_guided_pending(user_id, "voice_clone_upload")
-        return await query.message.reply_text(voice_clone_intro_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
+        set_music_guided_pending(user_id, "voice_clone_upload", consent_at=now_text())
+        return await query.message.reply_text(
+            "🎙 <b>Vui lòng gửi file voice/audio mẫu</b>\n\n"
+            "• Đoạn nói rõ ràng, ít tạp âm\n"
+            "• Khuyến nghị 10–60 giây\n"
+            "• Nói tự nhiên, không cần nhạc nền\n\n"
+            "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này.",
+            parse_mode="HTML",
+            reply_markup=build_2col_keyboard([], nav_back=("⬅️ Quay lại", "music_quick|voice_clone"), lang=lang),
+        )
+    if action in {"voice_cancel", "voice_none"}:
+        await query.answer()
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(
+            "✅ Đã chọn không thêm giọng đọc. Lựa chọn này miễn phí và không phát sinh Xu.",
+            reply_markup=voice_hub_keyboard(lang),
+        )
     if action == "voice_profiles":
         await query.answer()
-        return await query.message.reply_text(user_voice_profiles_summary(user_id, lang), parse_mode="HTML", reply_markup=voice_clone_keyboard(lang))
+        return await query.message.reply_text(user_voice_profiles_summary(user_id, lang), parse_mode="HTML", reply_markup=voice_vault_keyboard(user_id, lang))
     if action in {"voice_default_female", "voice_default_male"}:
         await query.answer()
         label = "giọng nữ mặc định" if action.endswith("female") else "giọng nam mặc định"
+        result = get_music_guided_result(user_id) or {}
+        result.update({"selected_voice_id": action.replace("voice_default_", "default_"), "selected_voice_style": label, "voice_is_free": True})
+        save_music_guided_result(user_id, result)
         return await query.message.reply_text(
-            f"✅ Đã chọn {label} cho kế hoạch voice/lồng tiếng.\n\nTTS thật vẫn đi qua màn báo giá/xác nhận khi public gate sẵn sàng. Bot chưa gọi provider và chưa trừ Xu.",
-            reply_markup=voice_clone_keyboard(lang),
+            f"✅ Đã chọn {label}.\n\nĐây là giọng có sẵn miễn phí, không được tính là add-on tạo giọng mới.",
+            reply_markup=voice_hub_keyboard(lang),
         )
+    if action.startswith("voice_profile_select:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text("⚠️ Không tìm thấy giọng này trong tài khoản của quý khách.", reply_markup=voice_vault_keyboard(user_id, lang))
+        return await query.message.reply_text(
+            f"🎙 <b>{html.escape(str(profile.get('display_name') or 'Giọng đã lưu'))}</b>\n\n"
+            f"• Trạng thái: <b>{html.escape(str(profile.get('status') or '-'))}</b>\n"
+            f"• Mặc định: <b>{'Có' if int(profile.get('is_default') or 0) else 'Chưa'}</b>",
+            parse_mode="HTML",
+            reply_markup=voice_profile_actions_keyboard(profile_id, lang),
+        )
+    if action.startswith("voice_profile_listen:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        preview_ref = str(profile.get("preview_audio_ref") or "") if profile else ""
+        if not preview_ref:
+            return await query.message.reply_text("⚠️ Giọng này chưa có bản nghe thử. Quý khách có thể tạo lại preview.", reply_markup=voice_profile_actions_keyboard(profile_id, lang))
+        await context.bot.send_audio(chat_id=query.message.chat_id, audio=preview_ref, caption=f"🔊 {profile.get('display_name') or 'Voice preview'}")
+        return None
+    if action.startswith("voice_profile_use:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if not profile or str(profile.get("status") or "") != "active":
+            return await query.message.reply_text("⚠️ Giọng này chưa sẵn sàng để sử dụng.", reply_markup=voice_vault_keyboard(user_id, lang))
+        result = get_music_guided_result(user_id) or {}
+        result.update({"selected_voice_profile_id": profile_id, "selected_voice_id": profile.get("provider_voice_id") or "", "selected_voice_style": profile.get("display_name") or ""})
+        save_music_guided_result(user_id, result)
+        update_user_voice_profile(user_id, profile_id, last_used_at=now_text())
+        return await query.message.reply_text("✅ Đã chọn giọng này để dùng cho tác vụ hiện tại.", reply_markup=voice_profile_actions_keyboard(profile_id, lang))
+    if action.startswith("voice_profile_default:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        ok = set_default_voice_profile(user_id, profile_id)
+        return await query.message.reply_text(
+            "⭐ Đã đặt làm giọng mặc định." if ok else "⚠️ Chỉ giọng đã lưu thành công mới có thể đặt mặc định.",
+            reply_markup=voice_vault_keyboard(user_id, lang),
+        )
+    if action.startswith("voice_profile_rename:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        if not get_user_voice_profile(user_id, profile_id):
+            return await query.message.reply_text("⚠️ Không tìm thấy giọng này.", reply_markup=voice_vault_keyboard(user_id, lang))
+        set_music_guided_pending(user_id, "voice_profile_rename", profile_id=profile_id)
+        return await query.message.reply_text("✏️ Hãy nhập tên mới dễ nhớ cho giọng này.", reply_markup=build_2col_keyboard([], nav_back=("⬅️ Kho voice", "music_quick|voice_profiles"), lang=lang))
+    if action.startswith("voice_profile_delete:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        ok = soft_delete_voice_profile(user_id, profile_id)
+        return await query.message.reply_text("🗑 Đã xóa giọng khỏi Kho voice của bạn." if ok else "⚠️ Không xóa được giọng này.", reply_markup=voice_vault_keyboard(user_id, lang))
+    if action.startswith("voice_profile_save:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if not profile or not profile.get("provider_voice_id"):
+            return await query.message.reply_text("⚠️ Chưa có bản giọng hợp lệ để lưu.", reply_markup=voice_hub_keyboard(lang))
+        update_user_voice_profile(user_id, profile_id, status="active")
+        return await query.message.reply_text(
+            f"✅ Đã lưu giọng “{profile.get('display_name') or 'Giọng mới'}” vào Kho voice của bạn.",
+            reply_markup=voice_profile_actions_keyboard(profile_id, lang),
+        )
+    if action.startswith("voice_clone_confirm:") or action.startswith("voice_clone_retry:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang))
+        return await create_minimax_voice_profile_preview(query, context, user_id, profile, lang, retry=action.startswith("voice_clone_retry:"))
     if action == "voice_clone_guard":
         await query.answer()
         readiness = get_minimax_voice_readiness() if "get_minimax_voice_readiness" in globals() else {}
@@ -66087,6 +66433,23 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
     lang = music_ui_lang(uid)
     action = str(state.get("pending_action") or "")
     clear_music_guided_pending(uid)
+    if action in {"voice_clone_name", "voice_profile_rename"}:
+        profile_id = _safe_int(state.get("profile_id"), 0)
+        profile = get_user_voice_profile(uid, profile_id)
+        display_name = re.sub(r"\s+", " ", text).strip()[:80]
+        if not profile or len(display_name) < 2:
+            await update.message.reply_text("⚠️ Tên giọng chưa hợp lệ. Hãy nhập tên từ 2–80 ký tự.", reply_markup=voice_vault_keyboard(uid, lang))
+            return True
+        next_status = str(profile.get("status") or "pending_name")
+        if action == "voice_clone_name" or next_status == "pending_name":
+            next_status = "pending_confirm"
+        update_user_voice_profile(uid, profile_id, display_name=display_name, status=next_status)
+        profile = get_user_voice_profile(uid, profile_id)
+        if next_status == "pending_confirm":
+            await update.message.reply_text(voice_clone_quote_text(profile, lang), parse_mode="HTML", reply_markup=voice_clone_quote_keyboard(profile_id, lang))
+        else:
+            await update.message.reply_text(f"✅ Đã đổi tên giọng thành “{display_name}”.", reply_markup=voice_profile_actions_keyboard(profile_id, lang))
+        return True
     if action == "music_prompt_input":
         blocked = music_copyright_block_reason(text)
         if blocked:
@@ -66208,20 +66571,31 @@ async def handle_music_guided_pending_media(update: Update, context: ContextType
         )
         return True
     file_id = str(getattr(media, "file_id", "") or "")
-    profile_id = save_user_voice_profile(uid, file_id, file_type=file_type or "audio")
-    clear_music_guided_pending(uid)
+    profile_id = save_user_voice_profile(
+        uid,
+        file_id,
+        file_type=file_type or "audio",
+        consent_at=str(state.get("consent_at") or now_text()),
+    )
     lang = music_ui_lang(uid)
     if profile_id:
+        set_music_guided_pending(uid, "voice_clone_name", profile_id=profile_id)
         await update.message.reply_text(
-            f"✅ Đã lưu voice profile <code>#{profile_id}</code> cho tài khoản này.\n\n"
-            "Bạn có thể dùng lại profile này cho kịch bản/lồng tiếng sau khi MiniMax voice gate sẵn sàng. Bot chưa gọi provider và chưa trừ Xu.",
+            "✏️ <b>Đặt tên cho giọng này</b>\n\n"
+            "Ví dụ:\n"
+            "• Giọng Toàn bán hàng\n"
+            "• Giọng nữ review sản phẩm\n"
+            "• Giọng nam TikTok\n\n"
+            "Hãy nhập tên dễ nhớ để lần sau chọn nhanh trong Kho voice của bạn.\n\n"
+            "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu.",
             parse_mode="HTML",
-            reply_markup=voice_clone_keyboard(lang),
+            reply_markup=build_2col_keyboard([], nav_back=("⬅️ Tạo giọng nói", "music_quick|voice_hub"), lang=lang),
         )
     else:
+        clear_music_guided_pending(uid)
         await update.message.reply_text(
-            "⚠️ Không lưu được voice profile lúc này. Bot chưa gọi provider và chưa trừ Xu.",
-            reply_markup=voice_clone_keyboard(lang),
+            "⚠️ Không lưu được file giọng lúc này. TOAN AAS chưa trừ Xu.",
+            reply_markup=voice_hub_keyboard(lang),
         )
     return True
 
@@ -66694,6 +67068,57 @@ def calculate_video_base_price(
         "notes": notes,
     }
 
+SUBTITLE_DUB_PRICE_RULES = {
+    "subtitle": {"label": "Tạo phụ đề tự động", "base_xu": 120, "extra_30s_xu": 60},
+    "translate_subtitle": {"label": "Dịch phụ đề", "base_xu": 150, "extra_30s_xu": 75},
+    "dubbing": {"label": "Lồng tiếng", "base_xu": 250, "extra_30s_xu": 125},
+    "subtitle_plus_dubbing": {"label": "Phụ đề + lồng tiếng", "base_xu": 350, "extra_30s_xu": 175},
+}
+
+def normalize_subtitle_dub_mode(mode: str) -> str:
+    value = str(mode or "").strip().lower()
+    aliases = {
+        "subtitle": "subtitle",
+        "subtitle_auto": "subtitle",
+        "subtitle_create": "subtitle",
+        "subtitle_original": "subtitle",
+        "translate": "translate_subtitle",
+        "translate_sub": "translate_subtitle",
+        "subtitle_translate": "translate_subtitle",
+        "subtitle_translated": "translate_subtitle",
+        "dub": "dubbing",
+        "dub_original": "dubbing",
+        "dub_translated": "dubbing",
+        "subtitle_plus_dub": "subtitle_plus_dubbing",
+        "subtitle_plus_dubbing": "subtitle_plus_dubbing",
+        "translate_combo": "subtitle_plus_dubbing",
+        "translated_combo": "subtitle_plus_dubbing",
+        "combo": "subtitle_plus_dubbing",
+    }
+    return aliases.get(value, value if value in SUBTITLE_DUB_PRICE_RULES else "")
+
+def subtitle_dub_price_breakdown(mode: str, duration_seconds) -> dict:
+    normalized = normalize_subtitle_dub_mode(mode)
+    if normalized not in SUBTITLE_DUB_PRICE_RULES:
+        raise ValueError(f"unsupported subtitle/dub mode: {mode}")
+    duration = max(1, int(math.ceil(float(duration_seconds or 0))))
+    rule = SUBTITLE_DUB_PRICE_RULES[normalized]
+    extra_blocks = max(0, int(math.ceil(max(0, duration - 60) / 30.0)))
+    total = int(rule["base_xu"] + extra_blocks * rule["extra_30s_xu"])
+    return {
+        "mode": normalized,
+        "label": rule["label"],
+        "duration_seconds": duration,
+        "base_xu": int(rule["base_xu"]),
+        "extra_blocks": extra_blocks,
+        "extra_block_seconds": 30,
+        "extra_block_xu": int(rule["extra_30s_xu"]),
+        "total_xu": total,
+    }
+
+def calculate_subtitle_dub_price(mode: str, duration_seconds) -> int:
+    return int(subtitle_dub_price_breakdown(mode, duration_seconds)["total_xu"])
+
 def calculate_video_addon_price(
     duration_seconds,
     subtitle_option="none",
@@ -66708,25 +67133,15 @@ def calculate_video_addon_price(
     has_dubbing = dubbing not in {"", "none", "off"}
     subtitle_xu = 0
     dubbing_xu = 0
-    extra_blocks = max(0, int(math.ceil(max(0, duration - 60) / 60.0)))
+    extra_blocks = max(0, int(math.ceil(max(0, duration - 60) / 30.0)))
     if has_subtitle and has_dubbing:
-        if translated:
-            total = VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU
-            dubbing_xu = VIDEO_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_DUB_EXTRA_BLOCK_XU
-            subtitle_xu = max(0, total - dubbing_xu)
-        else:
-            subtitle_xu = VIDEO_SUBTITLE_AUTO_BASE_XU + extra_blocks * VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU
-            dubbing_xu = VIDEO_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_DUB_EXTRA_BLOCK_XU
+        total = calculate_subtitle_dub_price("subtitle_plus_dubbing", duration)
+        subtitle_xu = calculate_subtitle_dub_price("subtitle", duration)
+        dubbing_xu = max(0, total - subtitle_xu)
     elif has_subtitle:
-        if translated:
-            subtitle_xu = VIDEO_SUBTITLE_TRANSLATE_BASE_XU + extra_blocks * VIDEO_SUBTITLE_TRANSLATE_EXTRA_BLOCK_XU
-        else:
-            subtitle_xu = VIDEO_SUBTITLE_AUTO_BASE_XU + extra_blocks * VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU
+        subtitle_xu = calculate_subtitle_dub_price("translate_subtitle" if translated else "subtitle", duration)
     elif has_dubbing:
-        if translated:
-            dubbing_xu = VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU
-        else:
-            dubbing_xu = VIDEO_DUB_DEFAULT_BASE_XU + extra_blocks * VIDEO_DUB_EXTRA_BLOCK_XU
+        dubbing_xu = calculate_subtitle_dub_price("dubbing", duration)
     return {
         "duration_seconds": duration,
         "subtitle_option": subtitle,
