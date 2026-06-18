@@ -4761,7 +4761,7 @@ UI_TEXT = {
         "common.no_api_no_charge": "Bot chưa gọi API và chưa trừ Xu.",
         "common.cancelled_not_charged": "❌ Đã huỷ. Bot chưa trừ Xu.",
         "common.expired_not_charged": "⏰ Yêu cầu đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.",
-        "common.invalid_request": "⚠️ Yêu cầu không hợp lệ. Bot chưa gọi provider.",
+        "common.invalid_request": "⚠️ Yêu cầu không hợp lệ. TOAN AAS chưa bắt đầu xử lý.",
         "common.open_main_menu": "Mở menu chính bên dưới.",
         "common.pending_cancelled_main": "❌ Đã hủy thao tác đang chờ. Mở menu chính bên dưới.",
         "common.done": "✅ Hoàn tất",
@@ -5013,7 +5013,7 @@ UI_TEXT = {
         "common.no_api_no_charge": "The bot has not called any API and has not charged Xu.",
         "common.cancelled_not_charged": "❌ Cancelled. The bot has not charged Xu.",
         "common.expired_not_charged": "⏰ This request has expired or was already processed. The bot has not charged Xu.",
-        "common.invalid_request": "⚠️ Invalid request. The bot has not called the provider.",
+        "common.invalid_request": "⚠️ Invalid request. TOAN AAS has not started processing.",
         "common.open_main_menu": "Opening the main menu below.",
         "common.pending_cancelled_main": "❌ Pending action cancelled. Opening the main menu below.",
         "common.done": "✅ Done",
@@ -5265,7 +5265,7 @@ UI_TEXT = {
         "common.no_api_no_charge": "Bot 未调用 API，也未扣除 Xu。",
         "common.cancelled_not_charged": "❌ 已取消。本次未扣除 Xu。",
         "common.expired_not_charged": "⏰ 此请求已过期或已处理。本次未扣除 Xu。",
-        "common.invalid_request": "⚠️ 请求无效。Bot 未调用 provider。",
+        "common.invalid_request": "⚠️ 请求无效。TOAN AAS 尚未开始处理。",
         "common.open_main_menu": "下方为主菜单。",
         "common.pending_cancelled_main": "❌ 已取消等待中的操作。下方为主菜单。",
         "common.done": "✅ 完成",
@@ -32548,6 +32548,15 @@ def set_shopaikey_pending_confirmation(user_id, payload: dict) -> str:
     }
     return token
 
+def restore_shopaikey_pending_confirmation(token: str, user_id, payload: dict) -> str:
+    token = str(token or "").strip() or shopaikey_confirmation_token()
+    SHOPAIKEY_PENDING_CONFIRMATIONS[token] = {
+        **(payload or {}),
+        "user_id": str(user_id or ""),
+        "created_at_ts": float((payload or {}).get("created_at_ts") or time.time()),
+    }
+    return token
+
 def pop_shopaikey_pending_confirmation(token: str, user_id) -> dict | None:
     token = str(token or "").strip()
     item = SHOPAIKEY_PENDING_CONFIRMATIONS.get(token)
@@ -33380,8 +33389,8 @@ def video_addon_pricing_matrix() -> dict:
         "voice_premium_preset": {"label": "Voice preset cao cấp", "price_xu": VIDEO_VOICE_PREMIUM_PRESET_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PREMIUM_PRESET_XU} Xu"},
         "voice_clone_create": {"label": "Upload mẫu giọng / clone voice", "price_xu": VIDEO_VOICE_CLONE_CREATE_XU, "unit": "job", "display": f"+{VIDEO_VOICE_CLONE_CREATE_XU} Xu"},
         "voice_clone_reuse": {"label": "Dùng lại voice clone đã tạo", "price_xu": VIDEO_VOICE_CLONE_REUSE_XU, "unit": "job", "display": f"+{VIDEO_VOICE_CLONE_REUSE_XU} Xu"},
-        "suno_music": {"label": "Tạo nhạc AI Suno", "price_xu": VIDEO_SUNO_MUSIC_XU, "unit": "track", "display": f"+{VIDEO_SUNO_MUSIC_XU} Xu/bài"},
-        "suno_variation": {"label": "Tạo biến thể Suno", "price_xu": VIDEO_SUNO_VARIATION_XU, "unit": "variation", "display": f"+{VIDEO_SUNO_VARIATION_XU} Xu/lần"},
+        "suno_music": {"label": "Tạo nhạc AI", "price_xu": VIDEO_SUNO_MUSIC_XU, "unit": "track", "display": f"+{VIDEO_SUNO_MUSIC_XU} Xu/bài"},
+        "suno_variation": {"label": "Tạo biến thể nhạc AI", "price_xu": VIDEO_SUNO_VARIATION_XU, "unit": "variation", "display": f"+{VIDEO_SUNO_VARIATION_XU} Xu/lần"},
         "lyrics_ai": {"label": "Viết lyrics bằng AI", "price_xu": VIDEO_LYRICS_AI_XU, "unit": "job", "display": f"+{VIDEO_LYRICS_AI_XU} Xu"},
         "music_cut_loop": {"label": "Cắt/loop nhạc khớp video", "price_xu": VIDEO_MUSIC_CUT_LOOP_XU, "unit": "job", "display": f"+{VIDEO_MUSIC_CUT_LOOP_XU} Xu"},
         "sfx_ai": {"label": "Tạo sound effect AI", "price_xu": VIDEO_SFX_AI_XU, "unit": "job", "display": f"+{VIDEO_SFX_AI_XU} Xu"},
@@ -33398,6 +33407,17 @@ VIDEO_ORDER_ADDON_ACTIONS = {
     "translate_sub": ("subtitle_translated", "none", True),
     "translate_combo": ("subtitle_translated", "dub_translated", True),
 }
+VIDEO_ORDER_MANAGED_FREE_KEYS = {
+    "music_none",
+    "stock_music_library",
+    "stock_sfx_library",
+    "user_audio_media",
+    "music_planning",
+    "voice_none",
+    "voice_default_female",
+    "voice_default_male",
+    "voice_saved_profile",
+}
 
 def video_order_normalize_items(items) -> list[dict]:
     normalized = []
@@ -33413,6 +33433,17 @@ def video_order_normalize_items(items) -> list[dict]:
             if text:
                 normalized.append({"key": text, "label": text, "price_xu": 0})
     return normalized
+
+def video_order_dedupe_items(items) -> list[dict]:
+    deduped = []
+    seen = set()
+    for item in video_order_normalize_items(items):
+        key = str(item.get("key") or item.get("label") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
 
 def video_order_create(
     user_id=None,
@@ -33482,19 +33513,64 @@ def video_order_paid_addons_allowed(order_or_tier) -> bool:
 
 def video_order_music_item(state: dict, order: dict) -> tuple[dict | None, dict | None]:
     matrix = video_addon_pricing_matrix()
-    option = str(state.get("current_video_music_option") or (state.get("pending_payload") or {}).get("music_option") or "").strip().lower()
-    if not option or option in {"none", "off", "no"}:
+    pending = dict(state.get("pending_payload") or {})
+    finalization = dict(state.get("video_finalization") or pending.get("video_finalization") or {})
+    option = str(
+        state.get("current_video_music_choice")
+        or state.get("current_video_music_option")
+        or pending.get("music_choice_key")
+        or pending.get("music_option")
+        or finalization.get("music_choice")
+        or finalization.get("music_mode")
+        or ""
+    ).strip().lower()
+    if not option:
         return None, None
-    if option in {"suggested", "library", "stock", "stock_music", "music_library", "uploaded", "upload"}:
+    if option in {"none", "off", "no"}:
+        return {"key": "music_none", "label": "Không thêm nhạc", "price_xu": 0}, None
+    if option in {"suggested", "library", "stock", "stock_music", "music_library"}:
         item = matrix["stock_music_library"]
         return {"key": "stock_music_library", "label": item["label"], "price_xu": 0}, None
+    if option in {"sfx", "stock_sfx", "sfx_library"}:
+        return {"key": "stock_sfx_library", "label": "SFX từ kho có sẵn", "price_xu": 0}, None
+    if option in {"uploaded", "upload", "user_media", "media", "my_media"}:
+        return {"key": "user_audio_media", "label": "Audio trong Media của tôi", "price_xu": 0}, None
     if option in {"ai", "ai_music", "music_ai", "suno"}:
         item = matrix["suno_music"]
         return None, {"key": "suno_music", "label": item["label"], "price_xu": int(item.get("price_xu") or 0)}
-    if option in {"sfx", "sfx_ai"}:
+    if option in {"sfx_ai"}:
         item = matrix["sfx_ai"]
         return None, {"key": "sfx_ai", "label": item["label"], "price_xu": int(item.get("price_xu") or 0)}
     return {"key": "music_planning", "label": "Gợi ý mood/nhạc trong kế hoạch", "price_xu": 0}, None
+
+def video_order_voice_item(state: dict, order: dict) -> tuple[dict | None, dict | None]:
+    matrix = video_addon_pricing_matrix()
+    pending = dict(state.get("pending_payload") or {})
+    finalization = dict(state.get("video_finalization") or pending.get("video_finalization") or {})
+    option = str(
+        state.get("current_video_voice_choice")
+        or pending.get("voice_choice")
+        or finalization.get("voice_choice")
+        or finalization.get("voice_mode")
+        or ""
+    ).strip().lower()
+    if not option:
+        return None, None
+    if option in {"none", "off", "no"}:
+        return {"key": "voice_none", "label": "Không thêm giọng", "price_xu": 0}, None
+    if option in {"default_female", "default_female_free", "female", "female_free"}:
+        return {"key": "voice_default_female", "label": "Giọng nữ mặc định", "price_xu": 0}, None
+    if option in {"default_male", "default_male_free", "male", "male_free"}:
+        return {"key": "voice_default_male", "label": "Giọng nam mặc định", "price_xu": 0}, None
+    if option in {"saved_voice", "saved_voice_free", "voice_profile", "profile"}:
+        return {"key": "voice_saved_profile", "label": "Voice đã lưu", "price_xu": 0}, None
+    if option in {"paid_clone", "voice_clone", "voice_clone_create"}:
+        item = matrix["voice_clone_create"]
+        return None, {"key": "voice_clone_create", "label": item["label"], "price_xu": int(item.get("price_xu") or 0)}
+    if option in {"advanced_dubbing", "advanced_voice"}:
+        item = matrix["voice_advanced"]
+        return None, {"key": "voice_advanced", "label": item["label"], "price_xu": int(item.get("price_xu") or 0)}
+    return None, None
 
 def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
     order = dict(order or {})
@@ -33503,9 +33579,14 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
     tier = normalize_video_tier(order.get("tier") or state.get("video_tier") or "low")
     payload = video_tier_payload(tier)
     base_price = int(order.get("base_price_xu") or payload.get("cost") or video_tier_cost_xu(tier) or 0)
-    free_items = video_order_normalize_items(order.get("free_items"))
+    existing_addons = dict(order.get("addons") or {})
+    free_items = [
+        item for item in video_order_normalize_items(order.get("free_items"))
+        if str(item.get("key") or "") not in VIDEO_ORDER_MANAGED_FREE_KEYS
+    ]
     paid_items = []
-    order["addons"] = dict(order.get("addons") or {})
+    order["addons"] = dict(existing_addons)
+    order["addons"].update({"music": None, "voice": None, "subtitle": None, "dub": None, "subtitle_translate": None, "subtitle_plus_dub": None})
 
     music_free, music_paid = video_order_music_item(state, order)
     if music_free:
@@ -33516,8 +33597,17 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
         if video_order_paid_addons_allowed(tier):
             paid_items.append(music_paid)
 
-    subtitle = str(state.get("current_video_subtitle_option") or order["addons"].get("subtitle") or "none").strip().lower()
-    dubbing = str(state.get("current_video_dubbing_option") or order["addons"].get("dub") or "none").strip().lower()
+    voice_free, voice_paid = video_order_voice_item(state, order)
+    if voice_free:
+        free_items.append(voice_free)
+        order["addons"]["voice"] = voice_free["key"]
+    if voice_paid:
+        order["addons"]["voice"] = voice_paid["key"]
+        if video_order_paid_addons_allowed(tier):
+            paid_items.append(voice_paid)
+
+    subtitle = str(state.get("current_video_subtitle_option") or existing_addons.get("subtitle") or "none").strip().lower()
+    dubbing = str(state.get("current_video_dubbing_option") or existing_addons.get("dub") or "none").strip().lower()
     translated = bool(state.get("translation_enabled") or "translated" in subtitle or "translated" in dubbing)
     duration_seconds = max(1, int(order.get("requested_seconds") or VIDEO_ORDER_DEFAULT_BASE_SECONDS))
     if tier == "low":
@@ -33566,8 +33656,8 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
         "tier": tier,
         "tier_name": str(payload.get("label") or video_tier_short_label(tier, "vi")),
         "base_price_xu": base_price,
-        "free_items": free_items,
-        "paid_items": paid_items,
+        "free_items": video_order_dedupe_items(free_items),
+        "paid_items": video_order_dedupe_items(paid_items),
         "discounts": discount_items,
         "total_xu": total,
         "estimated_vnd": total * int(XU_TO_VND or 100),
@@ -33634,13 +33724,13 @@ def video_order_screen_text(screen: str, state: dict | None = None, lang: str = 
             return (
                 "🎵 <b>Music / SFX</b>\n\n"
                 "Free options:\n• Use built-in music when available\n• Upload your own music\n• Save a mood/SFX direction\n\n"
-                f"Paid options for 300 Xu+ packages:\n• AI music/Suno: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• AI SFX: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
+                f"Paid options for 300 Xu+ packages:\n• AI music: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• AI SFX: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
                 "The final invoice is shown before any processing or Xu charge."
             )
         return (
             "🎵 <b>Nhạc / SFX</b>\n\n"
             "Miễn phí:\n• Dùng kho nhạc có sẵn nếu đủ điều kiện\n• Upload file nhạc của bạn\n• Lưu hướng mood/SFX vào kế hoạch\n\n"
-            f"Cộng phí từ gói 300 Xu trở lên:\n• Tạo nhạc AI/Suno: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• Tạo SFX AI: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
+            f"Cộng phí từ gói 300 Xu trở lên:\n• Tạo nhạc AI: <b>+{VIDEO_SUNO_MUSIC_XU} Xu</b>\n• Tạo SFX AI: <b>+{VIDEO_SFX_AI_XU} Xu</b>\n\n"
             "TOAN AAS sẽ hiện hóa đơn cuối trước khi xử lý và trừ Xu."
         )
     if screen == "voice":
@@ -43022,10 +43112,10 @@ def main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🎙 Voice Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")), InlineKeyboardButton("🎵 Music Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub"))],
-        [InlineKeyboardButton("🌐 Dịch / Phụ đề / Lồng tiếng Studio", callback_data="menu|translate"), InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory")],
-        [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
-        [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
+        [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch / Phụ đề / Lồng tiếng Studio", callback_data="menu|translate")],
+        [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
+        [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
+        [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
         [InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
@@ -43068,11 +43158,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         rows = [
             [InlineKeyboardButton("🆓 免费工具", callback_data="freehub|main"), InlineKeyboardButton("👤 我的账户", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 AI 图片", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI 视频", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🎙 Voice Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")), InlineKeyboardButton("🎵 Music Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub"))],
-            [InlineKeyboardButton("🌐 翻译/字幕/配音 Studio", callback_data="menu|translate"), InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory")],
-            [InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
-            [InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main"), InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start")],
-            [InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🎧 音频 Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 翻译/字幕/配音 Studio", callback_data="menu|translate")],
+            [InlineKeyboardButton("📝 笔记 / 文件", callback_data="menu|main_memory"), InlineKeyboardButton("📚 使用指南", callback_data="menu|main_guide")],
+            [InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support"), InlineKeyboardButton("💰 充值 / 价格", callback_data="pricing|main")],
+            [InlineKeyboardButton("💬 反馈 / 报错", callback_data="feedback|start"), InlineKeyboardButton("🌐 社群", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
             rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -43081,11 +43170,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
         rows = [
             [InlineKeyboardButton("🆓 Công cụ miễn phí", callback_data="freehub|main"), InlineKeyboardButton("👤 Tài khoản", callback_data="menu|main_profile")],
             [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="menu|main_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="menu|main_video")],
-            [InlineKeyboardButton("🎙 Voice Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")), InlineKeyboardButton("🎵 Music Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub"))],
-            [InlineKeyboardButton("🌐 Dịch / Phụ đề / Lồng tiếng Studio", callback_data="menu|translate"), InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory")],
-            [InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support")],
-            [InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start")],
-            [InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("🎧 Studio âm thanh", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Dịch / Phụ đề / Lồng tiếng Studio", callback_data="menu|translate")],
+            [InlineKeyboardButton("📝 Ghi chú / Tài liệu", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Hướng dẫn", callback_data="menu|main_guide")],
+            [InlineKeyboardButton("👨‍💼 Hỗ trợ", callback_data="menu|support"), InlineKeyboardButton("💰 Nạp Xu / Bảng giá", callback_data="pricing|main")],
+            [InlineKeyboardButton("💬 Góp ý / Báo lỗi", callback_data="feedback|start"), InlineKeyboardButton("🌐 Trung tâm", url=TOAN_AAS_COMMUNITY_URL)],
         ]
         if is_admin:
             rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -43093,11 +43181,10 @@ def localized_main_menu_keyboard(is_admin: bool, lang: str) -> InlineKeyboardMar
     rows = [
         [InlineKeyboardButton("🆓 Free tools", callback_data="freehub|main"), InlineKeyboardButton("👤 My Account", callback_data="menu|main_profile")],
         [InlineKeyboardButton("🖼 AI Image", callback_data="menu|main_image"), InlineKeyboardButton("🎬 AI Video", callback_data="menu|main_video")],
-        [InlineKeyboardButton("🎙 Voice Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")), InlineKeyboardButton("🎵 Music Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub"))],
-        [InlineKeyboardButton("🌐 Translation / Subtitle / Dubbing Studio", callback_data="menu|translate"), InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory")],
-        [InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide"), InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")],
-        [InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main"), InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start")],
-        [InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("🎧 Audio Studio", callback_data=product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "root")), InlineKeyboardButton("🌐 Translation / Subtitle / Dubbing Studio", callback_data="menu|translate")],
+        [InlineKeyboardButton("📝 Notes / Docs", callback_data="menu|main_memory"), InlineKeyboardButton("📚 Guide", callback_data="menu|main_guide")],
+        [InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support"), InlineKeyboardButton("💰 Top up / Pricing", callback_data="pricing|main")],
+        [InlineKeyboardButton("💬 Feedback / Bug", callback_data="feedback|start"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🔐 Admin", callback_data="menu|admin")])
@@ -45367,6 +45454,16 @@ def developing_video_public_package(plan: dict | None, flow: str, lang: str = "v
         "concept_text": plan.get("selected_topic") or plan.get("product") or plan.get("selected_context") or "",
         "video_prompt": render_plan.get("prompt") or plan.get("selected_prompt") or "",
         "music_choice": {"label": self_scene_music_label(plan.get("selected_music"), lang)},
+        "source_file_id": plan.get("source_file_id") or plan.get("file_id") or "",
+        "source_video_file_id": plan.get("source_video_file_id") or plan.get("source_file_id") or "",
+        "input_video_file_id": plan.get("input_video_file_id") or plan.get("source_file_id") or "",
+        "source_file_name": plan.get("source_file_name") or "",
+        "source_mime_type": plan.get("source_mime_type") or "",
+        "source_duration": plan.get("source_duration") or "",
+        "source_file_size": plan.get("source_file_size") or "",
+        "object_prompt": plan.get("selected_topic") or plan.get("object_prompt") or "",
+        "direction_prompt": plan.get("direction") or plan.get("direction_prompt") or "",
+        "selected_motion": plan.get("selected_motion") or plan.get("selected_style") or "",
     }
 
 def detailed_video_scene_prompts_text(plan: dict | None, flow: str, lang: str = "vi", scene_count: int = 3) -> str:
@@ -46427,9 +46524,9 @@ def self_scene_upload_text(lang: str = "vi", has_recent: bool = False) -> str:
         recent_line = "A recent video is available." if has_recent else "No recent video is available yet."
         return (
             "🎥 <b>Self-shot scene AI</b>\n\n"
-            "Send the source video you want to transform. After receiving it, TOAN AAS will guide you through three transformation directions, the subject to preserve, the new scene, camera motion, and music/sound.\n\n"
+            "Send the source video you want to transform. After receiving it, TOAN AAS will guide you through three transformation directions, the subject to preserve, the new scene, camera motion, then video add-ons before package and invoice.\n\n"
             f"{recent_line}\n"
-            "You can also prepare a plan first without processing a video. Nothing is processed and no Xu is charged on this screen."
+            "Nothing is processed and no Xu is charged on this screen."
         )
     recent_line = "Đã có video gần nhất để bạn dùng tiếp." if has_recent else "Hiện chưa có video gần nhất trong phiên."
     return (
@@ -46439,9 +46536,9 @@ def self_scene_upload_text(lang: str = "vi", has_recent: bool = False) -> str:
         "2. Chọn 1 trong 3 hướng chuyển đổi\n"
         "3. Chọn bối cảnh mới\n"
         "4. Chọn chuyển động camera\n"
-        "5. Chọn nhạc/voice/phụ đề và xem lại kế hoạch\n\n"
+        "5. Chọn add-on voice/nhạc/phụ đề trước khi chọn gói và hóa đơn\n\n"
         f"{recent_line}\n"
-        "Bạn cũng có thể lập kế hoạch trước. Màn này chưa xử lý video và chưa trừ Xu."
+        "Màn này chưa xử lý video và chưa trừ Xu."
     )
 
 def self_scene_upload_keyboard(lang: str = "vi", has_recent: bool = False) -> InlineKeyboardMarkup:
@@ -46449,7 +46546,6 @@ def self_scene_upload_keyboard(lang: str = "vi", has_recent: bool = False) -> In
     items = [("📎 Tôi sẽ gửi video" if is_vi else "📎 I will send a video", "selfscene|await_video")]
     if has_recent:
         items.append(("🎬 Dùng video gần nhất" if is_vi else "🎬 Use recent video", "selfscene|use_recent_video"))
-    items.append(("✍️ Lập kế hoạch trước" if is_vi else "✍️ Plan first", "selfscene|plan_without_video"))
     return video_v6_keyboard(
         items,
         lang,
@@ -46614,25 +46710,27 @@ def self_scene_style_custom_text(lang: str = "vi") -> str:
 
 def self_scene_music_text(state: dict, lang: str = "vi") -> str:
     motion = self_scene_style_label(state.get("selected_motion") or state.get("selected_style"), lang)
-    suggestions = guided_video_music_suggestions(state, lang)
     if normalize_user_language(lang) != "vi":
-        lines = ["🎵 <b>Choose music/sound direction</b>", "", f"Camera motion: <code>{html.escape(motion)}</code>", ""]
+        return (
+            "🎛 <b>Video finishing options</b>\n\n"
+            f"Camera motion: <code>{html.escape(motion)}</code>\n\n"
+            "Choose voice, music/SFX, subtitles, translation or dubbing for this video before package and invoice. "
+            "These options are saved to the current video draft only."
+        )
     else:
-        lines = ["🎵 <b>Bạn muốn nhạc/âm thanh theo phong cách nào?</b>", "", f"Chuyển động đã chọn: <code>{html.escape(motion)}</code>", ""]
-    for idx, item in enumerate(suggestions, 1):
-        lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
-    lines.extend(["", "This step only suggests music style. It does not generate music." if normalize_user_language(lang) != "vi" else "Bước này chỉ gợi ý nhạc, chưa tạo nhạc thật và chưa trừ Xu."])
-    return "\n".join(lines)
+        return (
+            "🎛 <b>Tùy chọn hoàn thiện video</b>\n\n"
+            f"Chuyển động đã chọn: <code>{html.escape(motion)}</code>\n\n"
+            "Chọn voice, nhạc/SFX, phụ đề, dịch hoặc lồng tiếng cho video hiện tại trước khi chọn gói và hóa đơn. "
+            "Các lựa chọn chỉ lưu vào draft video này, chưa xử lý và chưa trừ Xu."
+        )
 
 def self_scene_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
-            ("1️⃣ Chọn nhạc/voice 1" if is_vi else "1️⃣ Choose music 1", "selfscene|music_choice|1"),
-            ("2️⃣ Chọn nhạc/voice 2" if is_vi else "2️⃣ Choose music 2", "selfscene|music_choice|2"),
-            ("3️⃣ Chọn nhạc/voice 3" if is_vi else "3️⃣ Choose music 3", "selfscene|music_choice|3"),
-            ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More music ideas", "selfscene|music_refresh"),
-            ("✍️ Nhập riêng" if is_vi else "✍️ Custom music", "selfscene|music_custom"),
+            ("🎛 Tùy chọn hoàn thiện video" if is_vi else "🎛 Finishing options", "selfscene|finalization"),
+            ("✅ Tiếp tục chọn gói" if is_vi else "✅ Continue to package", "selfscene|music|none"),
         ],
         lang,
         back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_style"),
@@ -49702,9 +49800,12 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             reply_markup=self_scene_upload_keyboard(lang, bool(recent.get("file_id"))),
         )
     if action == "plan_without_video":
-        set_developing_video_pending(uid, "selfscene", "direction", input_type="custom")
-        state = get_developing_video_pending(uid) or {}
-        return await safe_edit_query_message(query, self_scene_start_text(lang, state), reply_markup=self_scene_input_keyboard(lang, state))
+        set_developing_video_pending(uid, "selfscene", "await_video", input_type="video")
+        return await safe_edit_query_message(
+            query,
+            self_scene_upload_text(lang, False),
+            reply_markup=self_scene_upload_keyboard(lang, False),
+        )
     if action == "use_recent_video":
         recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
         pending_source = get_developing_video_pending(uid) or {}
@@ -49919,9 +50020,11 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             options = guided_video_motion_suggestions(pending, lang)
             selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
             style = selected.get("code") or selected.get("label") or "pushin"
-        set_developing_video_pending(uid, "selfscene", "music", selected_motion=style, selected_style=style)
+        set_developing_video_pending(uid, "selfscene", "addons", selected_motion=style, selected_style=style, selected_music="none")
         state = get_developing_video_pending(uid) or {}
-        return await safe_edit_query_message(query, self_scene_music_text(state, lang), reply_markup=self_scene_music_keyboard(lang))
+        plan = save_developing_video_plan(uid, "selfscene", state)
+        package = developing_video_public_package(plan, "selfscene", lang)
+        return await open_video_finalization(query, uid, "selfscene", plan, lang, "selfscene|back_style", package)
     if action == "music_custom":
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
@@ -49955,10 +50058,11 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
             music = selected.get("code") or selected.get("label") or "cinematic"
         state = dict(pending)
-        state["selected_music"] = music
-        clear_developing_video_pending(uid)
+        state["selected_music"] = "none" if str(music).lower() in {"none", "skip", ""} else music
+        state["step"] = "addons"
         plan = save_developing_video_plan(uid, "selfscene", state)
-        return await safe_edit_query_message(query, self_scene_plan_text(plan, lang), reply_markup=self_scene_result_keyboard(lang))
+        package = developing_video_public_package(plan, "selfscene", lang)
+        return await open_video_finalization(query, uid, "selfscene", plan, lang, "selfscene|back_style", package)
     if action == "plan":
         plan = get_latest_developing_video_plan(uid, "selfscene")
         if not plan:
@@ -50676,11 +50780,12 @@ def menu_text_main_audio() -> str:
 
 def menu_text_main_music() -> str:
     return (
-        "🎙🎵 <b>GIỌNG NÓI & NHẠC TOAN AAS</b>\n\n"
-        "Quý khách muốn xử lý phần nào?\n\n"
-        "• <b>Giọng nói:</b> tạo giọng đọc, dùng giọng mặc định miễn phí, hoặc quản lý giọng riêng đã lưu.\n"
-        "• <b>Nhạc/SFX:</b> chọn nhạc có sẵn, hiệu ứng âm thanh, hoặc tạo nhạc AI mới bằng Suno.\n\n"
-        "TOAN AAS chỉ tính Xu với tác vụ AI tạo mới. Mọi khoản phí đều được hiển thị trước khi xác nhận."
+        "🎧 <b>STUDIO ÂM THANH TOAN AAS</b>\n\n"
+        "Tạo và tải file âm thanh độc lập:\n\n"
+        "• <b>Giọng đọc:</b> nhập chữ, chọn giọng mặc định hoặc giọng đã lưu, nghe thử ngắn trước bản đầy đủ.\n"
+        "• <b>Nhạc/SFX:</b> nghe thử kho nhạc, hiệu ứng âm thanh, hoặc chuẩn bị nhạc AI mới.\n"
+        "• <b>Media âm thanh:</b> xem và quản lý file dùng riêng.\n\n"
+        "Studio này không gắn vào video hiện tại. Tác vụ có phí luôn có preview ngắn, báo giá và xác nhận cuối trước khi xử lý bản đầy đủ."
     )
 
 def menu_text_translate(other: bool = False) -> str:
@@ -50985,18 +51090,18 @@ def menu_text_main_music_i18n(lang: str) -> str:
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         return (
-            "🎵 <b>TOAN AAS 音乐 / 音效中心</b>\n\n"
-            "可制作配音文本、生成音乐提示词、查找背景音乐、音效和公开视频素材。\n\n"
+            "🎧 <b>TOAN AAS 音频 Studio</b>\n\n"
+            "可创建独立语音文件、音乐提示词、背景音乐、音效和音频素材。\n\n"
             "请使用下方按钮开始。需要输入内容时，Bot 会提示你发送文字，并给出 3 个建议、重新建议和返回按钮。\n\n"
-            "公共音乐/媒体来源有各自的授权条款。发布广告或商业内容前，请检查商业使用权。"
+            "本 Studio 不连接当前视频。付费任务会先提供短预览，再显示价格和最终确认。"
         )
     if lang == "vi":
         return menu_text_main_music()
     return (
-        "🎵 <b>TOAN AAS MUSIC / SFX CENTER</b>\n\n"
-        "Create voice-over drafts, generate music prompts, find background music, SFX, and public media.\n\n"
+        "🎧 <b>TOAN AAS AUDIO STUDIO</b>\n\n"
+        "Create standalone voice files, music prompts, background music, SFX, and audio media.\n\n"
         "Use the buttons below. When input is needed, the bot will ask for text and return 3 suggestions, more suggestions, and a back button.\n\n"
-        "Public music/media sources have their own licenses. Check commercial rights before posting ads or monetized content."
+        "This studio is not attached to a current video. Paid tasks show a short preview, price, and final confirmation before full processing."
     )
 
 def menu_text_translate_i18n(other: bool, lang: str) -> str:
@@ -61213,6 +61318,19 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     trend_output_id = int(pending.get("trend_output_id") or 0)
     scene_index = int(pending.get("scene_index") or 0)
     retry_warranty_count = max(0, int(pending.get("retry_warranty_count") or 0)) if job_type == "image" else 0
+    if video_paid_preview_required(pending) and not pending.get("paid_preview_seen"):
+        restore_shopaikey_pending_confirmation(token, uid, pending)
+        addon_state = get_video_addon_state(uid) or {"pending_payload": pending, "video_tier": video_tier}
+        addon_state["pending_confirm_token"] = token
+        addon_state["pending_payload"] = pending
+        addon_state["paid_preview_seen"] = False
+        set_video_addon_state(uid, addon_state)
+        return await safe_edit_or_send(
+            query,
+            video_paid_preview_text(addon_state, lang),
+            parse_mode="HTML",
+            reply_markup=video_paid_preview_entry_keyboard(token, lang),
+        )
     enabled, message = shopaikey_public_generation_guard(job_type)
     if not enabled:
         if job_type == "video":
@@ -61220,7 +61338,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 query,
                 "🎬 Video AI chân thật đang được kiểm soát an toàn.\n"
                 "TOAN AAS có thể giúp bạn chuẩn bị kịch bản, storyboard, prompt, nhạc, phụ đề và lồng tiếng trước.\n"
-                "Phần render AI thật sẽ mở sau khi provider ổn định.\n\nBot chưa trừ Xu.",
+                "Phần render AI thật sẽ mở sau khi tài nguyên xử lý ổn định.\n\nBot chưa trừ Xu.",
                 parse_mode=None,
                 reply_markup=(video_finalization_tier_keyboard(lang) if get_video_finalization_state(uid) else public_video_tier_keyboard(lang)),
             )
@@ -63312,7 +63430,7 @@ def music_guided_back_keyboard(lang: str = "vi", product_context: str = PRODUCT_
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
         back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music")
     else:
-        back = ("🔙 Music Studio" if is_vi else "🔙 Music Studio", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, product_area or "music_hub"))
+        back = ("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, product_area or "root"))
     return build_2col_keyboard(
         [],
         nav_back=back,
@@ -63350,9 +63468,9 @@ def music_prompt_entry_keyboard(lang: str = "vi", product_context: str = PRODUCT
         ("✨ 3 gợi ý prompt nhạc" if is_vi else "✨ 3 suggestions", cb("prompt_seed")),
         ("🔄 Gợi ý khác" if is_vi else "🔄 More ideas", cb("prompt_seed_more")),
         ("✍️ Tự nhập mô tả" if is_vi else "✍️ Custom brief", cb("prompt_custom")),
-        ("🎼 Tạo nhạc AI/Suno" if is_vi else "🎼 AI music/Suno", cb("ai_music")),
+        ("🎼 Tạo nhạc AI" if is_vi else "🎼 AI music", cb("ai_music")),
     ]
-    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Music Studio" if is_vi else "⬅️ Music Studio"), cb("music_hub"))
+    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def music_prompt_input_text(lang: str = "vi") -> str:
@@ -63425,7 +63543,7 @@ def voice_prompt_entry_keyboard(lang: str = "vi", product_context: str = PRODUCT
         ("🧬 Nhân bản giọng" if is_vi else "🧬 Voice profile", cb("voice_clone")),
         ("🎙 Giọng đã lưu" if is_vi else "🎙 Saved voices", cb("voice_profiles")),
     ]
-    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Voice Studio" if is_vi else "⬅️ Voice Studio"), cb("voice_hub"))
+    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def music_prompt_mode(description: str = "", mode: str = "") -> str:
@@ -63682,15 +63800,15 @@ def music_prompt_suggestions_text(description: str, offset: int = 0, lang: str =
     if lang == "en":
         lines = ["🎼 <b>3 suggested music prompts</b>", "", f"<b>Brief:</b> {html.escape(_short_pending_text(description, 220) or 'video/product')}", ""]
         labels = ("Mood", "Tempo", "Instruments", "Duration", "Vocal", "Use case", "Prompt")
-        footer = "The bot has not called a music API and has not charged Xu."
+        footer = "TOAN AAS has not started music processing and has not charged Xu."
     elif lang == "zh":
         lines = ["🎼 <b>3 个音乐提示词建议</b>", "", f"<b>内容:</b> {html.escape(_short_pending_text(description, 220) or '视频/产品')}", ""]
         labels = ("情绪", "速度", "乐器", "时长", "人声", "适合", "Prompt")
-        footer = "本次未调用音乐 API，未扣除 Xu。"
+        footer = "TOAN AAS 尚未开始音乐处理，也未扣除 Xu。"
     else:
         lines = ["🎼 <b>3 prompt nhạc gợi ý</b>", "", f"<b>Nội dung:</b> {html.escape(_short_pending_text(description, 220) or 'video/sản phẩm')}", ""]
         labels = ("Mood", "Tempo", "Nhạc cụ", "Thời lượng", "Vocal", "Dùng cho", "Prompt")
-        footer = "Bot chưa gọi API nhạc và chưa trừ Xu."
+        footer = "TOAN AAS chưa bắt đầu xử lý nhạc và chưa trừ Xu."
     for idx, item in enumerate(suggestions, start=1):
         prompt = music_prompt_from_suggestion(item)
         lines.extend([
@@ -63719,9 +63837,9 @@ def music_prompt_result_keyboard(lang: str = "vi", product_context: str = PRODUC
         ("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", cb("prompt_custom")),
         ("🎵 Tìm nhạc theo prompt" if is_vi else "🎵 Search music", cb("find_from_prompt")),
         ("💾 Lưu prompt" if is_vi else "💾 Save prompt", cb("save_prompt")),
-        ("🎼 Tạo nhạc AI Suno" if is_vi else "🎼 Generate Suno music", cb("music_ai_guard")),
+        ("🎼 Tạo nhạc AI" if is_vi else "🎼 Generate AI music", cb("music_ai_guard")),
     ]
-    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Music Studio" if is_vi else "⬅️ Music Studio"), cb("music_hub"))
+    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def suno_music_provider_summary_text(lang: str = "vi") -> str:
@@ -63745,13 +63863,13 @@ def suno_music_provider_summary_text(lang: str = "vi") -> str:
 def music_ai_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "🎼 <b>AI Music / Suno</b>\n\n"
+            "🎼 <b>AI Music</b>\n\n"
             "Choose what you want to prepare. TOAN AAS creates 3 music directions first: background music, song with lyrics, lyrics/script, or melody/mood.\n\n"
-            "Real music generation uses a separate pricing/confirmation gate. If processing resources are not ready, the bot will keep your prompt and say it clearly.\n\n"
+            "Real music generation uses a separate pricing and confirmation step. If processing resources are not ready, the bot will keep your prompt and say it clearly.\n\n"
             "No processing starts and no Xu is charged on this planning screen."
         )
     return (
-        "🎼 <b>Tạo nhạc AI / Suno</b>\n\n"
+        "🎼 <b>Tạo nhạc AI</b>\n\n"
         "Bạn muốn chuẩn bị loại nhạc nào? TOAN AAS sẽ tạo 3 hướng trước: nhạc nền, nhạc có lời, lời/kịch bản nhạc hoặc giai điệu/mood.\n\n"
         "Tạo nhạc thật sẽ đi qua màn báo giá/xác nhận riêng. Nếu tài nguyên xử lý chưa sẵn sàng, bot vẫn giữ prompt để bạn dùng tiếp và báo rõ.\n\n"
         "Màn này chưa bắt đầu xử lý và chưa trừ Xu."
@@ -63767,9 +63885,9 @@ def music_ai_menu_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONT
         ("📝 Gợi ý lời/kịch bản" if is_vi else "📝 Lyrics/script", cb("music_ai_script")),
         ("🎼 Gợi ý giai điệu" if is_vi else "🎼 Melody/mood", cb("music_ai_melody")),
         ("✍️ Tự nhập mô tả" if is_vi else "✍️ Custom brief", cb("music_ai_custom")),
-        ("🔎 Trạng thái Suno" if is_vi else "🔎 Suno status", cb("music_ai_guard")),
+        ("🔎 Trạng thái xử lý" if is_vi else "🔎 Processing status", cb("music_ai_guard")),
     ]
-    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Music Studio" if is_vi else "⬅️ Music Studio"), cb("music_hub"))
+    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def music_ai_input_text(kind: str = "background", lang: str = "vi") -> str:
@@ -63792,23 +63910,27 @@ def music_ai_input_text(kind: str = "background", lang: str = "vi") -> str:
         return (
             f"🎼 <b>{html.escape(label_en.title())}</b>\n\n"
             "Send the product/topic, mood, language, target platform, and any words you want included. The bot will return 3 options first.\n\n"
-            "No provider call and no Xu charge at this step."
+            "No processing starts and no Xu is charged at this step."
         )
     return (
         f"🎼 <b>Tạo {html.escape(label_vi)}</b>\n\n"
         "Bạn gửi sản phẩm/chủ đề, mood, ngôn ngữ, nền tảng đăng và từ khóa muốn đưa vào. Bot sẽ trả 3 hướng để chọn/đổi/sửa trước.\n\n"
-        "Bước này chưa gọi provider và chưa trừ Xu."
+        "Bước này chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
 def suno_user_guard_text(lang: str = "vi", admin_detail: str = "") -> str:
     is_vi = music_ui_lang(lang=lang) == "vi"
     base = (
-        "🎼 <b>Tạo nhạc AI / Suno</b>\n\n"
-        "Prompt nhạc của bạn đã được giữ lại. Khi cổng Suno sẵn sàng, TOAN AAS sẽ cho bạn xem hóa đơn và bấm xác nhận trước khi tạo nhạc thật.\n\n"
+        "🎼 <b>Tạo nhạc AI</b>\n\n"
+        "Prompt nhạc của bạn đã được giữ lại. Bạn có thể nghe/xem thử một đoạn ngắn trước. Bản đầy đủ sẽ được xử lý sau khi bạn xác nhận.\n\n"
+        "Đây chỉ là bản nghe thử ngắn để kiểm tra giọng/nhạc/phụ đề. TOAN AAS chưa xuất bản đầy đủ và chưa trừ Xu final.\n\n"
+        "Nếu chưa có cơ chế preview ngắn an toàn, TOAN AAS sẽ tạo bản đầy đủ sau khi bạn xác nhận. Bạn có thể nghe thử các mẫu nhạc/giọng có sẵn trước khi chọn.\n\n"
         "Hiện TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
         if is_vi else
-        "🎼 <b>AI Music / Suno</b>\n\n"
-        "Your music prompt is saved. When processing resources are ready, TOAN AAS will show a price confirmation before generating real music.\n\n"
+        "🎼 <b>AI Music</b>\n\n"
+        "Your music prompt is saved. You can preview a short segment first. The complete output is processed only after you confirm.\n\n"
+        "This is only a short preview step for checking voice, music, subtitles or dubbing. TOAN AAS has not produced the complete output and has not charged final Xu.\n\n"
+        "If a safe short preview is not available yet, TOAN AAS will create the complete output only after your confirmation. You can preview available music or voice samples before choosing.\n\n"
         "No processing starts and no Xu is charged yet."
     )
     if admin_detail:
@@ -63828,14 +63950,14 @@ def music_merge_menu_text(kind: str = "music", user_id=0, lang: str = "vi") -> s
             return (
                 "🎬 <b>Add voice to video</b>\n\n"
                 "Flow: send a video → choose/create/upload voice → confirm render. "
-                "Saved voice profiles and MiniMax voice can be used when processing resources are ready.\n\n"
+                "Saved and custom voice profiles can be used when processing resources are ready.\n\n"
                 f"Current session: video {'yes' if has_video else 'no'} | voice/audio {'yes' if has_audio else 'no'}.\n"
                 "Opening this menu does not charge Xu."
             )
         return (
             "🎬 <b>Ghép voice vào video</b>\n\n"
             "Quy trình: gửi video → chọn/tạo/upload voice → xác nhận ghép. "
-            "Voice đã lưu hoặc MiniMax voice sẽ dùng được khi tài nguyên xử lý sẵn sàng.\n\n"
+            "Voice đã lưu hoặc voice riêng sẽ dùng được khi tài nguyên xử lý sẵn sàng.\n\n"
             f"Phiên hiện tại: video {'có' if has_video else 'chưa có'} | voice/audio {'có' if has_audio else 'chưa có'}.\n"
             "Mở menu này chưa xử lý video và chưa trừ Xu."
         )
@@ -63843,14 +63965,14 @@ def music_merge_menu_text(kind: str = "music", user_id=0, lang: str = "vi") -> s
         return (
             "🎬 <b>Add music to video</b>\n\n"
             "Flow: send a video → choose library/upload/AI music → confirm render. "
-            "Existing music library/manual upload is preferred; Suno AI uses its own confirmation when ready.\n\n"
+            "Existing music library/manual upload is preferred; new AI music uses its own confirmation when ready.\n\n"
             f"Current session: video {'yes' if has_video else 'no'} | music/audio {'yes' if has_audio else 'no'}.\n"
             "Opening this menu does not charge Xu."
         )
     return (
         "🎬 <b>Ghép nhạc vào video</b>\n\n"
-        "Quy trình: gửi video → chọn nhạc trong kho/upload/tạo nhạc AI → xác nhận ghép. "
-        "Kho nhạc hoặc upload dùng trước; Suno AI có màn xác nhận riêng khi sẵn sàng.\n\n"
+        "Quy trình: gửi video → chọn nhạc trong kho/upload/tạo nhạc AI → nghe/xem thử ngắn → xác nhận ghép. "
+        "Kho nhạc hoặc upload dùng trước; tạo nhạc AI có màn xác nhận riêng khi sẵn sàng.\n\n"
         f"Phiên hiện tại: video {'có' if has_video else 'chưa có'} | nhạc/audio {'có' if has_audio else 'chưa có'}.\n"
         "Mở menu này chưa xử lý video và chưa trừ Xu."
     )
@@ -63872,13 +63994,13 @@ def music_merge_keyboard(kind: str = "music", lang: str = "vi", product_context:
             ("📎 Tôi gửi video" if is_vi else "📎 Send video", cb("merge_music_video")),
             ("🎧 Chọn kho nhạc" if is_vi else "🎧 Music library", cb("music")),
             ("📎 Tôi gửi nhạc/audio" if is_vi else "📎 Upload music/audio", cb("merge_music_audio")),
-            ("🎼 Tạo nhạc AI/Suno" if is_vi else "🎼 AI Music/Suno", cb("ai_music")),
+            ("🎼 Tạo nhạc AI" if is_vi else "🎼 AI Music", cb("ai_music")),
             ("✅ Kiểm tra & ghép" if is_vi else "✅ Check & merge", cb("merge_music_run")),
         ]
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
         back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice" if kind == "voice" else "vfinal|music")
     else:
-        back = (("⬅️ Voice Studio" if kind == "voice" else "⬅️ Music Studio") if is_vi else "⬅️ Studio", cb("voice_hub" if kind == "voice" else "music_hub"))
+        back = ("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def music_merge_upload_text(kind: str, target: str, lang: str = "vi") -> str:
@@ -63908,15 +64030,12 @@ def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
             "⚙️ Audio/video merge is waiting for processing resources. Files are ready in this session, but no render and no Xu charge yet."
         )
     return (
-        "✅ Đã đủ video và audio. Admin có thể dùng lệnh /add_music hoặc /add_voice_to_video để render test ngay, hoặc dùng nút/lệnh tương ứng khi public gate được mở."
+        "✅ Đã đủ video và audio. Khi mở xử lý thật, TOAN AAS sẽ cho nghe/xem thử ngắn rồi mới xác nhận bản đầy đủ."
         if is_vi else
-        "✅ Video and audio are ready. Admin can use /add_music or /add_voice_to_video for a render smoke test."
+        "✅ Video and audio are ready. Full processing will show a short preview before final confirmation."
     )
 
-VOICE_PROFILE_PREVIEW_TEXT = (
-    "Bạn đang sử dụng trình giọng nói của TOAN AAS. Khi xác nhận, bạn có thể lưu lại tên giọng này "
-    "và dùng cho các video làm nội dung hoặc lồng tiếng."
-)
+VOICE_PROFILE_PREVIEW_TEXT = "Xin chào, đây là bản nghe thử giọng TOAN AAS."
 
 def voice_clone_intro_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -63944,7 +64063,7 @@ def voice_clone_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEX
         ("✅ Tôi xác nhận" if is_vi else "✅ I confirm", cb("voice_consent")),
         ("❌ Hủy" if is_vi else "❌ Cancel", cb("voice_cancel")),
     ]
-    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Voice Studio" if is_vi else "⬅️ Voice Studio"), cb("voice_hub"))
+    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def save_user_voice_profile(user_id, file_id: str, file_type: str = "audio", display_name: str = "", consent_at: str = "") -> int:
@@ -64112,11 +64231,11 @@ def voice_vault_keyboard(user_id, lang: str = "vi", product_context: str = PRODU
         ])
         return build_2col_keyboard(buttons, nav_back=("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice"), nav_main=True, lang=lang)
     buttons.extend([
-        ("🧬 Tạo voice riêng MiniMax" if is_vi else "🧬 Create MiniMax voice", cb("voice_clone")),
+        ("🧬 Tạo voice riêng" if is_vi else "🧬 Create custom voice", cb("voice_clone")),
         ("👩 Demo giọng nữ miễn phí" if is_vi else "👩 Free female demo", cb("voice_default_female")),
         ("👨 Demo giọng nam miễn phí" if is_vi else "👨 Free male demo", cb("voice_default_male")),
     ])
-    return build_2col_keyboard(buttons, nav_back=("⬅️ Voice Studio" if is_vi else "⬅️ Voice Studio", cb("voice_hub")), nav_main=True, lang=lang)
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")), nav_main=True, lang=lang)
 
 def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
@@ -64147,13 +64266,13 @@ def voice_clone_quote_text(profile: dict, lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
         return (
             "🧾 <b>Confirm new voice creation</b>\n\n"
-            f"Name: <b>{name}</b>\nService: MiniMax consent-based voice profile\nCost: <b>{cost} Xu</b>\n\n"
+            f"Name: <b>{name}</b>\nService: consent-based custom voice profile\nCost: <b>{cost} Xu</b>\n\n"
             "TOAN AAS starts processing and charges Xu only after confirmation. A failed creation is refunded."
         )
     return (
         "🧾 <b>Xác nhận tạo giọng mới</b>\n\n"
         f"Tên giọng: <b>{name}</b>\n"
-        "Dịch vụ: Tạo voice profile MiniMax từ file đã xác nhận quyền\n"
+        "Dịch vụ: Tạo voice profile riêng từ file đã xác nhận quyền\n"
         f"Chi phí: <b>{cost} Xu</b>\n\n"
         "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi quý khách xác nhận. Nếu tạo giọng thất bại, Xu sẽ được hoàn theo chính sách."
     )
@@ -64168,7 +64287,7 @@ def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi", product_contex
             ("✅ Xác nhận tạo giọng" if is_vi else "✅ Confirm", cb(f"voice_clone_confirm:{pid}")),
             ("✏️ Đổi tên" if is_vi else "✏️ Rename", cb(f"voice_profile_rename:{pid}")),
         ],
-        nav_back=("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Voice Studio" if is_vi else "⬅️ Voice Studio"), cb("voice_hub")),
+        nav_back=("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root")),
         lang=lang,
     )
 
@@ -64177,13 +64296,30 @@ def voice_clone_preview_keyboard(profile_id: int, lang: str = "vi", product_cont
     pid = int(profile_id or 0)
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
-    buttons = [
-        ("✅ Lưu giọng này" if is_vi else "✅ Save voice", cb(f"voice_profile_save:{pid}")),
-        ("🔁 Tạo lại nghe thử" if is_vi else "🔁 Retry preview", cb(f"voice_clone_retry:{pid}")),
-        ("✏️ Đổi tên" if is_vi else "✏️ Rename", cb(f"voice_profile_rename:{pid}")),
-        ("🗑 Hủy" if is_vi else "🗑 Cancel", cb(f"voice_profile_delete:{pid}")),
-    ]
-    return build_2col_keyboard(buttons, nav_back=("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Voice Studio" if is_vi else "⬅️ Voice Studio"), cb("voice_hub")), lang=lang)
+    return paid_preview_common_keyboard(
+        cb(f"voice_profile_save:{pid}"),
+        cb("voice_hub"),
+        cb(f"voice_profile_rename:{pid}"),
+        "vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else cb("voice_clone"),
+        lang,
+    )
+
+def voice_clone_preview_entry_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    pid = int(profile_id or 0)
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶️ Tạo bản nghe thử ngắn" if is_vi else "▶️ Create short preview", callback_data=cb(f"voice_clone_confirmed:{pid}"))],
+        [
+            InlineKeyboardButton("🔁 Đổi giọng/nhạc" if is_vi else "🔁 Change voice/music", callback_data=cb("voice_hub")),
+            InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=cb(f"voice_profile_rename:{pid}")),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else cb("voice_clone")),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
 
 def voice_style_suggestions(text: str, offset: int = 0, lang: str = "vi") -> list[dict]:
     lang = music_ui_lang(lang=lang)
@@ -64256,15 +64392,15 @@ def voice_style_suggestions_text(text: str, lang: str = "vi", offset: int = 0) -
     if lang == "en":
         lines = ["🎙 <b>3 suggested voice styles</b>", "", f"<b>Text:</b>\n{content}", ""]
         labels = ("Tone", "Pace", "Best for", "Direction")
-        footer = "Real TTS still depends on provider/quota and a final confirmation. No provider call and no Xu charge yet."
+        footer = "Full voice generation still depends on processing availability and a final confirmation. No processing starts and no Xu is charged yet."
     elif lang == "zh":
         lines = ["🎙 <b>3 种声音风格建议</b>", "", f"<b>文本:</b>\n{content}", ""]
         labels = ("语气", "速度", "适合", "方向")
-        footer = "真实 TTS 仍取决于 provider/quota 和最终确认。本步骤未调用 provider，未扣 Xu。"
+        footer = "完整语音生成仍取决于处理资源和最终确认。本步骤不开始处理、不扣 Xu。"
     else:
         lines = ["🎙 <b>3 kiểu giọng gợi ý</b>", "", f"<b>Nội dung:</b>\n{content}", ""]
         labels = ("Chất giọng", "Tốc độ", "Hợp với", "Cách đọc")
-        footer = "TTS thật vẫn phụ thuộc provider/quota và bước xác nhận cuối. Bot chưa gọi provider và chưa trừ Xu."
+        footer = "Bản voice đầy đủ vẫn phụ thuộc tài nguyên xử lý và bước xác nhận cuối. TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     for idx, item in enumerate(suggestions, start=1):
         lines.extend([
             f"<b>{idx}. {html.escape(str(item.get('name') or 'Voice style'))}</b>",
@@ -64289,7 +64425,7 @@ def voice_style_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEX
         ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", cb("voice_custom")),
         ("🎙 Tạo voice thử" if is_vi else "🎙 Voice preview", cb("voice_tts_guard")),
     ]
-    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Voice Studio" if is_vi else "⬅️ Voice Studio"), cb("voice_hub"))
+    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def music_provider_error_text(lang: str) -> str:
@@ -64322,10 +64458,11 @@ def music_tools_keyboard(lang: str = "vi", back_callback: str = "menu|main") -> 
         ]
     else:
         buttons = [
-            ("🎙 Voice Studio" if is_vi else "🎙 Voice Studio", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_hub")),
-            ("🎵 Music Studio" if is_vi else "🎵 Music Studio", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
-            ("🌐 Dịch thuật Studio" if is_vi else "🌐 Translation Studio", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "translation_hub")),
-            ("📁 Media của tôi" if is_vi else "📁 My media", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "media")),
+            ("🎙 Tạo giọng đọc" if is_vi else "🎙 Create voice", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_custom")),
+            ("📁 Kho voice" if is_vi else "📁 Voice vault", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_profiles")),
+            ("🎵 Tạo nhạc nền" if is_vi else "🎵 Create music", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "ai_music")),
+            ("🎼 Kho nhạc / SFX" if is_vi else "🎼 Music / SFX library", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
+            ("📁 Media âm thanh" if is_vi else "📁 Audio media", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "media")),
         ]
     return build_2col_keyboard(
         buttons,
@@ -64362,9 +64499,9 @@ def voice_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_
         ("👨 Demo giọng nam miễn phí" if is_vi else "👨 Free male demo", cb("voice_default_male")),
         ("📁 Kho voice của bạn" if is_vi else "📁 Your voice vault", cb("voice_profiles")),
         ("🎙 Nhập chữ để đọc thử" if is_vi else "🎙 Read custom text", cb("voice_custom")),
-        ("🧬 Tạo voice riêng MiniMax" if is_vi else "🧬 Create MiniMax voice", cb("voice_clone")),
+        ("🧬 Tạo voice riêng" if is_vi else "🧬 Create custom voice", cb("voice_clone")),
     ]
-    rows = build_2col_keyboard(buttons, nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "menu|main"), nav_main=True, lang=lang).inline_keyboard
+    rows = build_2col_keyboard(buttons, nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")), nav_main=True, lang=lang).inline_keyboard
     return InlineKeyboardMarkup(rows)
 
 def music_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
@@ -64396,9 +64533,9 @@ def music_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_
         ("🔊 Nghe thử Kho SFX" if is_vi else "🔊 Preview SFX", cb("sfx")),
         ("📁 Media âm thanh của tôi" if is_vi else "📁 My audio media", cb("media")),
         ("📝 Tạo prompt nhạc" if is_vi else "📝 Music prompt", cb("prompt")),
-        ("✨ Tạo nhạc AI Suno" if is_vi else "✨ Create Suno music", cb("ai_music")),
+        ("✨ Tạo nhạc AI" if is_vi else "✨ Create AI music", cb("ai_music")),
     ]
-    rows = build_2col_keyboard(buttons, nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "menu|main"), nav_main=True, lang=lang).inline_keyboard
+    rows = build_2col_keyboard(buttons, nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")), nav_main=True, lang=lang).inline_keyboard
     return InlineKeyboardMarkup(rows)
 
 def music_prompt_guide_text(lang: str = "vi") -> str:
@@ -64613,17 +64750,9 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             reply_markup=voice_hub_keyboard(lang, ctx),
         )
     metadata = voice_profile_metadata(profile)
-    charged = int(metadata.get("charged_xu") or 0)
     cost = int(VIDEO_VOICE_CLONE_CREATE_XU or 0)
-    if not retry and not charged:
-        charge = spend_fixed_credit_info(user_id, cost, "voice_clone_create", f"Voice profile #{profile_id}", apply_member_discount_flag=False)
-        if not charge.get("ok"):
-            return await query.message.reply_text(
-                f"⚠️ Số dư chưa đủ để tạo giọng mới ({cost} Xu). TOAN AAS chưa bắt đầu xử lý.",
-                reply_markup=voice_clone_quote_keyboard(profile_id, lang, ctx),
-            )
-        charged = int(charge.get("charged_amount") or charge.get("amount") or cost)
-        metadata["charged_xu"] = charged
+    metadata["final_cost_xu"] = cost
+    metadata["preview_charged_xu"] = 0
     await query.message.reply_text("🎙 TOAN AAS đang tạo bản nghe thử. Vui lòng chờ và không bấm lại nhiều lần.")
     try:
         telegram_file = await context.bot.get_file(str(profile.get("source_file_id") or profile.get("source_file_ref") or ""))
@@ -64660,17 +64789,15 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             metadata_json=json.dumps(metadata, ensure_ascii=False),
         )
         return await query.message.reply_text(
-            f"🔊 Đây là bản nghe thử giọng “{str(profile.get('display_name') or 'Giọng mới')}”.\n\nQuý khách muốn lưu giọng này vào Kho voice của bạn không?",
+            f"🔊 Đây là bản nghe thử ngắn của giọng “{str(profile.get('display_name') or 'Giọng mới')}”.\n\n"
+            "TOAN AAS chưa trừ Xu final. Bản giọng đầy đủ chỉ được lưu sau khi quý khách xác nhận.",
             reply_markup=voice_clone_preview_keyboard(profile_id, lang, ctx),
         )
     except Exception as exc:
         logger.warning("voice profile preview failed | profile=%s | %s", profile_id, sanitize_log_text(str(exc))[:220])
-        if charged and not metadata.get("refund_done"):
-            refund_charged_credit(user_id, charged, "voice_clone_refund", str(profile_id), "Hoàn phí tạo giọng do xử lý thất bại", True)
-            metadata["refund_done"] = True
         update_user_voice_profile(user_id, profile_id, status="failed", metadata_json=json.dumps(metadata, ensure_ascii=False))
         return await query.message.reply_text(
-            "⚙️ Tạo bản nghe thử chưa thành công. TOAN AAS đã hoàn Xu nếu có trừ. Quý khách có thể thử lại sau hoặc dùng giọng mặc định miễn phí.",
+            "⚙️ Tạo bản nghe thử chưa thành công. TOAN AAS chưa trừ Xu. Quý khách có thể thử lại sau hoặc dùng giọng mặc định miễn phí.",
             reply_markup=voice_hub_keyboard(lang, ctx),
         )
 
@@ -64720,12 +64847,12 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "music_none":
         await query.answer()
         if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
-            update_video_finalization(user_id, music_enabled=False, music_mode="none", music_prompt="", music_file_id="")
-            return await video_finalization_continue_to_invoice_or_tier(query, user_id, get_video_finalization_state(user_id), lang)
+            update_video_finalization(user_id, music_enabled=False, music_mode="none", music_choice="none", music_prompt="", music_file_id="")
+            return await video_finalization_return_after_addon(query, user_id, get_video_finalization_state(user_id), lang)
         result = get_music_guided_result(user_id) or {}
         result.update({"selected_music": "none", "music_is_free": True})
         save_music_guided_result(user_id, result)
-        return await query.message.reply_text("🎵 Music Studio là khu độc lập, không cần chọn “không thêm nhạc”. Quý khách có thể nghe thử, tạo prompt hoặc quay lại menu.", reply_markup=music_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM))
+        return await query.message.reply_text("🎵 Studio âm thanh là khu độc lập, không cần chọn “không thêm nhạc”. Quý khách có thể nghe thử, tạo prompt hoặc quay lại menu.", reply_markup=music_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM))
     if action == "prompt":
         await query.answer()
         clear_music_guided_pending(user_id)
@@ -64808,11 +64935,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action in {"voice_cancel", "voice_none"}:
         await query.answer()
         if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
-            update_video_finalization(user_id, voice_enabled=False, voice_mode="none", voice_text="", voice_file_id="", dub_enabled=False)
-            return await video_finalization_continue_to_invoice_or_tier(query, user_id, get_video_finalization_state(user_id), lang)
+            update_video_finalization(user_id, voice_enabled=False, voice_mode="none", voice_choice="none", voice_text="", voice_file_id="", dub_enabled=False)
+            return await video_finalization_return_after_addon(query, user_id, get_video_finalization_state(user_id), lang)
         clear_music_guided_pending(user_id)
         return await query.message.reply_text(
-            "🎙 Voice Studio là khu độc lập, không cần chọn “không thêm giọng”. Quý khách có thể nghe thử, nhập chữ đọc thử hoặc quay lại menu.",
+            "🎙 Studio âm thanh là khu độc lập, không cần chọn “không thêm giọng”. Quý khách có thể nghe thử, nhập chữ đọc thử hoặc quay lại menu.",
             reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
         )
     if action == "voice_profiles":
@@ -64828,16 +64955,19 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 user_id,
                 voice_enabled=False,
                 voice_mode=f"default_{value}_free",
+                voice_choice=f"default_{value}",
                 voice_style=f"default_{value}_free",
                 dub_enabled=False,
             )
-            return await video_finalization_continue_to_invoice_or_tier(query, user_id, get_video_finalization_state(user_id), lang)
+            return await video_finalization_return_after_addon(query, user_id, get_video_finalization_state(user_id), lang)
         result = get_music_guided_result(user_id) or {}
         result.update({"selected_voice_id": action.replace("voice_default_", "default_"), "selected_voice_style": label, "voice_is_free": True})
         save_music_guided_result(user_id, result)
+        set_music_guided_pending(user_id, "voice_text", product_context=PRODUCT_CONTEXT_SHOWROOM)
         return await query.message.reply_text(
-            f"✅ Đã chọn {label} để đọc thử trong Voice Studio.\n\nĐây là lựa chọn demo độc lập. Chưa cập nhật video, không gắn vào video hiện tại và chưa trừ Xu.",
-            reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
+            f"✅ Đã chọn {label} trong Studio âm thanh.\n\n"
+            "Hãy gửi nội dung muốn đọc thử ở tin nhắn tiếp theo. Đây là file audio độc lập, không gắn vào video hiện tại và chưa trừ Xu.",
+            reply_markup=music_guided_back_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM, "voice_hub"),
         )
     if action.startswith("voice_profile_select:"):
         await query.answer()
@@ -64872,18 +65002,20 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 user_id,
                 voice_enabled=False,
                 voice_mode="saved_voice_free",
+                voice_choice="saved_voice",
                 voice_style=str(profile.get("display_name") or "")[:120],
                 voice_profile_id=profile_id,
                 voice_provider_voice_id=str(profile.get("provider_voice_id") or "")[:180],
                 dub_enabled=False,
             )
             update_user_voice_profile(user_id, profile_id, last_used_at=now_text())
-            return await video_finalization_continue_to_invoice_or_tier(query, user_id, get_video_finalization_state(user_id), lang)
+            return await video_finalization_return_after_addon(query, user_id, get_video_finalization_state(user_id), lang)
         result = get_music_guided_result(user_id) or {}
         result.update({"selected_voice_profile_id": profile_id, "selected_voice_id": profile.get("provider_voice_id") or "", "selected_voice_style": profile.get("display_name") or ""})
         save_music_guided_result(user_id, result)
         update_user_voice_profile(user_id, profile_id, last_used_at=now_text())
-        return await query.message.reply_text("✅ Đã chọn giọng này cho thao tác đọc thử độc lập trong Voice Studio. Chưa cập nhật video và chưa trừ Xu.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM))
+        set_music_guided_pending(user_id, "voice_profile_read_text", profile_id=profile_id, product_context=PRODUCT_CONTEXT_SHOWROOM)
+        return await query.message.reply_text("✅ Đã chọn giọng này trong Studio âm thanh.\n\nHãy gửi nội dung muốn đọc thử ở tin nhắn tiếp theo. Đây là file audio độc lập, không gắn vào video hiện tại và chưa trừ Xu.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM))
     if action.startswith("voice_profile_read:"):
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
@@ -64931,12 +65063,43 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         profile = get_user_voice_profile(user_id, profile_id)
         if not profile or not profile.get("provider_voice_id"):
             return await query.message.reply_text("⚠️ Chưa có bản giọng hợp lệ để lưu.", reply_markup=voice_hub_keyboard(lang, ctx))
-        update_user_voice_profile(user_id, profile_id, status="active")
+        metadata = voice_profile_metadata(profile)
+        charged = int(metadata.get("charged_xu") or 0)
+        cost = int(metadata.get("final_cost_xu") or VIDEO_VOICE_CLONE_CREATE_XU or 0)
+        if not charged and cost > 0:
+            charge = spend_fixed_credit_info(
+                user_id,
+                cost,
+                "voice_clone_create",
+                f"Voice profile #{profile_id}",
+                apply_member_discount_flag=False,
+            )
+            if not charge.get("ok"):
+                return await query.message.reply_text(
+                    f"⚠️ Số dư chưa đủ để lưu giọng mới ({cost} Xu). Bản nghe thử vẫn được giữ và TOAN AAS chưa tạo bản đầy đủ.",
+                    reply_markup=voice_clone_preview_keyboard(profile_id, lang, ctx),
+                )
+            charged = int(charge.get("final_cost") or cost)
+            metadata["charged_xu"] = charged
+            metadata["charged_at"] = now_text()
+        update_user_voice_profile(user_id, profile_id, status="active", metadata_json=json.dumps(metadata, ensure_ascii=False))
         return await query.message.reply_text(
-            f"✅ Đã lưu giọng “{profile.get('display_name') or 'Giọng mới'}” vào Kho voice của bạn.",
+            f"✅ Đã lưu giọng “{profile.get('display_name') or 'Giọng mới'}” vào Kho voice của bạn."
+            + (f"\nĐã trừ: {charged} Xu." if charged > 0 else ""),
             reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx),
         )
-    if action.startswith("voice_clone_confirm:") or action.startswith("voice_clone_retry:"):
+    if action.startswith("voice_clone_confirm:") and not action.startswith("voice_clone_confirmed:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang, ctx))
+        return await query.message.reply_text(
+            paid_preview_friendly_guard_text("voice_clone", lang),
+            parse_mode="HTML",
+            reply_markup=voice_clone_preview_entry_keyboard(profile_id, lang, ctx),
+        )
+    if action.startswith("voice_clone_confirmed:") or action.startswith("voice_clone_retry:"):
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         profile = get_user_voice_profile(user_id, profile_id)
@@ -64945,14 +65108,10 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await create_minimax_voice_profile_preview(query, context, user_id, profile, lang, retry=action.startswith("voice_clone_retry:"), product_context=ctx)
     if action == "voice_clone_guard":
         await query.answer()
-        readiness = get_minimax_voice_readiness() if "get_minimax_voice_readiness" in globals() else {}
         return await query.message.reply_text(
-            "🧬 <b>MiniMax Voice / Clone status</b>\n\n"
-            f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
-            f"• Public: <code>{'ON' if readiness.get('public_enabled') else 'OFF'}</code>\n"
-            f"• Smoke: <code>{html.escape(str(readiness.get('admin_smoke_status') or '-'))}</code>\n"
-            f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or readiness.get('reason') or '-'))}</code>\n\n"
-            "Voice clone chỉ dùng mẫu có quyền/consent rõ ràng. Bot chưa gọi provider và chưa trừ Xu.",
+            "🧬 <b>Tạo voice riêng</b>\n\n"
+            "TOAN AAS chỉ dùng mẫu giọng có quyền/đồng ý rõ ràng. Khi tài nguyên xử lý sẵn sàng, bạn sẽ nghe thử ngắn và xác nhận trước khi tạo bản đầy đủ.\n\n"
+            "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu.",
             parse_mode="HTML",
             reply_markup=voice_clone_keyboard(lang, ctx),
         )
@@ -64960,7 +65119,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         text = (
             "🎧 <b>STT / Bóc băng audio</b>\n\n"
-            "Gửi voice/audio/video ngắn vào chat, sau đó dùng nút bóc băng trong quick guide hoặc chạy bóc băng. Nếu provider timeout/lỗi, bot báo gọn và không trừ Xu sai."
+            "Gửi voice/audio/video ngắn vào chat, sau đó dùng nút bóc băng trong quick guide hoặc chạy bóc băng. Nếu công cụ tạm bận, TOAN AAS báo gọn và không trừ Xu sai."
             if lang == "vi" else
             "🎧 <b>STT / Transcribe</b>\n\nSend a short voice/audio/video. The bot will show transcription actions when audio is received."
         )
@@ -64969,7 +65128,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         if ctx == PRODUCT_CONTEXT_SHOWROOM:
             return await query.message.reply_text(
-                "🎙 Voice Studio tạo file audio độc lập. Nếu muốn gắn voice vào một video đang làm, hãy mở từ flow tạo video hiện tại.",
+                "🎙 Studio âm thanh tạo file audio độc lập. Nếu muốn gắn voice vào một video đang làm, hãy mở từ flow tạo video hiện tại.",
                 reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
             )
         return await query.message.reply_text(music_merge_menu_text("voice", user_id, lang), parse_mode="HTML", reply_markup=music_merge_keyboard("voice", lang, ctx))
@@ -64993,7 +65152,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         if ctx == PRODUCT_CONTEXT_SHOWROOM:
             return await query.message.reply_text(
-                "🎵 Music Studio dùng để nghe thử, tạo hoặc tải nhạc riêng. Nếu muốn gắn nhạc vào video đang làm, hãy mở từ flow tạo video hiện tại.",
+                "🎵 Studio âm thanh dùng để nghe thử, tạo hoặc tải nhạc riêng. Nếu muốn gắn nhạc vào video đang làm, hãy mở từ flow tạo video hiện tại.",
                 reply_markup=music_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
             )
         return await query.message.reply_text(music_merge_menu_text("music", user_id, lang), parse_mode="HTML", reply_markup=music_merge_keyboard("music", lang, ctx))
@@ -65076,14 +65235,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(f"💾 Đã lưu prompt nhạc vào ghi chú <code>#{note_id}</code>. Bot chưa trừ Xu.", parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang, ctx))
     if action == "music_ai_guard":
         await query.answer()
-        readiness = get_suno_music_readiness() if "get_suno_music_readiness" in globals() else {}
         admin_detail = ""
         if is_admin_user(user_id):
             admin_detail = (
-                f"{suno_music_provider_summary_text(lang)}; "
-                f"ready={'YES' if readiness.get('ready') else 'NO'}; "
-                f"public={'ON' if readiness.get('public_enabled') else 'OFF'}; "
-                f"reason={readiness.get('admin_debug_reason') or readiness.get('reason') or '-'}"
+                "preview_required=YES; "
+                "full_output_after_final_confirm=YES"
             )
         return await query.message.reply_text(suno_user_guard_text(lang, admin_detail), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang, ctx))
     if action.startswith("voice_style_"):
@@ -65116,14 +65272,10 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         if not voice_text:
             set_music_guided_pending(user_id, "voice_text", product_context=ctx)
             return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "voice_hub"))
-        readiness = get_minimax_voice_readiness() if "get_minimax_voice_readiness" in globals() else {}
-        detail = ""
-        if is_admin_user(user_id):
-            detail = f"\n\nAdmin: ready={readiness.get('ready')}; public={readiness.get('public_enabled')}; smoke={readiness.get('admin_smoke_status')}; reason={readiness.get('admin_debug_reason') or readiness.get('reason')}"
         return await query.message.reply_text(
             "🎙 <b>Tạo voice thử</b>\n\n"
-            "TOAN AAS đã giữ nội dung và kiểu giọng bạn chọn. Voice thật sẽ có màn báo giá/xác nhận riêng trước khi gọi MiniMax/TTS.\n\n"
-            "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu ở bước này." + html.escape(detail),
+            "TOAN AAS đã giữ nội dung và kiểu giọng bạn chọn. Bản voice đầy đủ sẽ có nghe thử ngắn, báo giá và xác nhận cuối trước khi xử lý.\n\n"
+            "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu ở bước này.",
             parse_mode="HTML",
             reply_markup=voice_style_keyboard(lang, ctx),
         )
@@ -65956,12 +66108,13 @@ async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYP
                 user_id,
                 music_enabled=True,
                 music_mode=music_mode,
+                music_choice="stock_sfx" if kind == "sfx" else "stock_music",
                 music_prompt=str(selected.get("title") or "")[:300],
                 music_item_count=1,
                 music_selected_item=selected_for_video,
             )
             if update.callback_query:
-                return await video_finalization_continue_to_invoice_or_tier(update.callback_query, user_id, get_video_finalization_state(user_id), lang)
+                return await video_finalization_return_after_addon(update.callback_query, user_id, get_video_finalization_state(user_id), lang)
             return await context.bot.send_message(
                 chat_id=chat_id,
                 text=f"✅ Đã chọn {'SFX' if kind == 'sfx' else 'nhạc'} miễn phí cho video hiện tại. Gói, thời lượng và file nguồn vẫn được giữ nguyên.",
@@ -65969,6 +66122,7 @@ async def select_media_preview(update: Update, context: ContextTypes.DEFAULT_TYP
         addon_state = get_video_addon_state(user_id)
         if addon_state:
             addon_state["current_video_music_option"] = music_mode
+            addon_state["current_video_music_choice"] = "stock_sfx" if kind == "sfx" else "stock_music"
             addon_state["current_video_music_item_count"] = 1
             addon_state["current_video_music_selected_item"] = selected_for_video
             set_video_addon_state(user_id, addon_state)
@@ -67079,7 +67233,7 @@ async def handle_music_guided_pending_media(update: Update, context: ContextType
     mime = media_content_type(media, file_type) if media else ""
     if not media or not (file_type in {"voice", "audio", "document"} or str(mime).startswith("audio/")):
         await update.message.reply_text(
-            "⚠️ Hãy gửi file voice/audio hợp lệ để lưu voice profile. Bot chưa gọi provider và chưa trừ Xu.",
+            "⚠️ Hãy gửi file voice/audio hợp lệ để lưu voice profile. TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu.",
             reply_markup=voice_clone_keyboard(music_ui_lang(uid), ctx),
         )
         return True
@@ -68138,6 +68292,27 @@ def frame_video_worker_payload(frame_job_id: str, user_id, chat_id, state: dict,
     }
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
+def frame_video_preview_worker_payload(frame_job_id: str, user_id, chat_id, state: dict) -> str:
+    payload = json.loads(frame_video_worker_payload(frame_job_id, user_id, chat_id, state, 0))
+    photos = list(payload.get("photos") or [])
+    preview_count = max(2, min(3, len(photos)))
+    preview_seconds = frame_video_paid_preview_seconds(state)
+    payload.update({
+        "charged_amount": 0,
+        "photos": photos[:preview_count],
+        "width": max(240, int(payload.get("width") or 720) // 2),
+        "height": max(240, int(payload.get("height") or 1280) // 2),
+        "seconds_per_image": round(preview_seconds / preview_count, 2),
+        "max_render_seconds": min(120, int(FRAME_VIDEO_MAX_RENDER_SECONDS or 180)),
+        "caption": (
+            f"▶️ Bản xem thử ngắn {preview_seconds} giây.\n"
+            "TOAN AAS chưa xuất bản đầy đủ và chưa trừ Xu final."
+        ),
+        "paid_preview": True,
+        "paid_preview_seconds": preview_seconds,
+    })
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
 def create_frame_video_job(user_id, chat_id, state: dict, charged_amount: int = 0, status: str = "queued") -> str:
     global FRAME_VIDEO_JOB_SEQ
     FRAME_VIDEO_JOB_SEQ += 1
@@ -68397,11 +68572,55 @@ def frame_video_confirm_text(state: dict, user_id=0) -> str:
         "Bot chỉ trừ Xu sau khi bạn xác nhận."
     )
 
-def frame_video_confirm_keyboard() -> InlineKeyboardMarkup:
+def frame_video_preview_entry_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Tạo video", callback_data="framevideo|confirm"), InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|music")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+        [InlineKeyboardButton("▶️ Tạo/xem preview ngắn", callback_data="framevideo|preview")],
+        [InlineKeyboardButton("🔁 Đổi giọng/nhạc", callback_data="framevideo|back|music"), InlineKeyboardButton("✏️ Sửa nội dung", callback_data="framevideo|back|planning")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|back|music"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
+
+def frame_video_preview_ready_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận tạo bản đầy đủ", callback_data="framevideo|confirm")],
+        [InlineKeyboardButton("🔁 Đổi giọng/nhạc", callback_data="framevideo|back|music"), InlineKeyboardButton("✏️ Sửa nội dung", callback_data="framevideo|back|planning")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|back|music"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+    ])
+
+def frame_video_confirm_keyboard(state: dict | None = None) -> InlineKeyboardMarkup:
+    return frame_video_preview_ready_keyboard() if (state or {}).get("paid_preview_seen") else frame_video_preview_entry_keyboard()
+
+def frame_video_preview_status_keyboard(local_job_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Kiểm tra preview", callback_data=f"framevideo|preview_check|{int(local_job_id or 0)}")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|back|music"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+    ])
+
+def invalidate_frame_video_paid_preview(state: dict | None = None) -> dict:
+    clean = dict(state or {})
+    for key in (
+        "paid_preview_seen",
+        "paid_preview_seconds",
+        "paid_preview_local_job_id",
+        "paid_preview_frame_job_id",
+        "paid_preview_video_file_id",
+    ):
+        clean.pop(key, None)
+    return clean
+
+def frame_video_paid_preview_seconds(state: dict | None = None) -> int:
+    return paid_preview_seconds(frame_video_estimated_output_seconds(state or {}))
+
+def frame_video_preview_text(state: dict | None = None, ready: bool = False) -> str:
+    seconds = frame_video_paid_preview_seconds(state)
+    if ready:
+        return (
+            f"▶️ <b>Đã có bản xem thử {seconds} giây</b>\n\n"
+            "Đây chỉ là preview ngắn để kiểm tra chuyển động và nhịp dựng. TOAN AAS chưa xuất bản đầy đủ và chưa trừ Xu final."
+        )
+    return (
+        f"▶️ <b>Preview video tối đa {seconds} giây</b>\n\n"
+        "TOAN AAS sẽ render bản xem thử ngắn bằng ảnh và cấu hình hiện tại, không tạo bản đầy đủ và không trừ Xu final."
+    )
 
 def frame_video_success_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -68460,14 +68679,14 @@ def storyboard_idea_request_text() -> str:
         "✨ <b>Bot gợi ý kịch bản</b>\n\n"
         "Hãy gửi ý tưởng sản phẩm/nội dung.\n\n"
         "Ví dụ: <code>Máy xay sinh tố mini màu xanh ngọc, bán cho dân văn phòng, video TikTok 15 giây.</code>\n\n"
-        "Bot chưa gọi API ảnh/video và chưa trừ Xu."
+        "TOAN AAS chưa bắt đầu xử lý ảnh/video và chưa trừ Xu."
     )
 
 def storyboard_script_request_text() -> str:
     return (
         "📝 <b>Gửi kịch bản sẵn</b>\n\n"
         "Hãy gửi kịch bản, mô tả, hoặc ý tưởng chính. Bot sẽ chia thành các cảnh theo thứ tự.\n\n"
-        "Bot chưa gọi API ảnh/video và chưa trừ Xu."
+        "TOAN AAS chưa bắt đầu xử lý ảnh/video và chưa trừ Xu."
     )
 
 def storyboard_safe_text(value: str, limit: int = 900) -> str:
@@ -68939,7 +69158,7 @@ def frame_video_mode_select_keyboard() -> InlineKeyboardMarkup:
 def frame_video_audio_not_ready_text() -> str:
     return (
         "🎵 Ghép nhạc/voice trực tiếp sẽ mở khi có nguồn audio đã chọn ổn định.\n\n"
-        "Bot chưa gọi API, chưa render và chưa trừ Xu. Bạn có thể bỏ qua nhạc để render video trước."
+        "TOAN AAS chưa xử lý, chưa render và chưa trừ Xu. Bạn có thể bỏ qua nhạc để render video trước."
     )
 
 def frame_video_ffmpeg_filter(width: int, height: int, seconds_per_image: float, effect: str) -> str:
@@ -69059,6 +69278,33 @@ async def render_frame_video_from_state(context: ContextTypes.DEFAULT_TYPE, stat
         int(ratio["width"]),
         int(ratio["height"]),
         float(duration["seconds"]),
+        str(effect["token"]),
+    )
+
+async def render_frame_video_preview_from_state(context: ContextTypes.DEFAULT_TYPE, state: dict, output_path: str, tmpdir: str) -> tuple[bool, str]:
+    ratio = frame_video_ratio_payload(state.get("ratio") or "9x16")
+    effect = frame_video_effect_payload(state.get("effect") or "fade")
+    photos = list(state.get("photos") or [])
+    preview_count = max(2, min(3, len(photos)))
+    preview_seconds = frame_video_paid_preview_seconds(state)
+    image_paths: list[str] = []
+    for idx, photo in enumerate(photos[:preview_count], start=1):
+        file_id = str(photo.get("file_id") or "")
+        path = os.path.join(tmpdir, f"frame_preview_input_{idx}.jpg")
+        if file_id:
+            await telegram_file_to_path(context, file_id, path)
+            image_paths.append(path)
+            continue
+        image_url = str(photo.get("image_url") or photo.get("url") or "").strip()
+        if image_url:
+            await url_to_path(image_url, path, max_bytes=10 * 1024 * 1024)
+            image_paths.append(path)
+    return await render_frame_video_paths(
+        image_paths,
+        output_path,
+        max(240, int(ratio["width"]) // 2),
+        max(240, int(ratio["height"]) // 2),
+        float(preview_seconds / preview_count),
         str(effect["token"]),
     )
 
@@ -80130,16 +80376,20 @@ def video_finalization_defaults() -> dict:
     return {
         "music_enabled": False,
         "music_mode": "none",
+        "music_choice": "none",
         "music_prompt": "",
         "music_file_id": "",
         "voice_enabled": False,
         "voice_mode": "none",
+        "voice_choice": "none",
         "voice_text": "",
         "voice_file_id": "",
         "voice_language": "",
         "voice_style": "natural",
+        "voice_profile_id": "",
         "subtitle_enabled": False,
         "subtitle_mode": "none",
+        "subtitle_dub_choice": "none",
         "subtitle_text": "",
         "subtitle_language": "",
         "subtitle_burn_in": False,
@@ -80156,11 +80406,18 @@ def video_finalization_payload(state: dict | None = None) -> dict:
     finalization = video_finalization_defaults()
     finalization.update(dict(state.get("video_finalization") or {}))
     payload = dict(state.get("source_payload") or {})
-    music_mode = str(finalization.get("music_mode") or "none").strip().lower()
+    music_choice_value = str(finalization.get("music_choice") or "").strip().lower()
+    music_mode_value = str(finalization.get("music_mode") or "").strip().lower()
+    music_mode = music_choice_value if music_choice_value not in {"", "none"} else (music_mode_value or "none")
+    voice_choice_value = str(finalization.get("voice_choice") or "").strip().lower()
+    voice_mode_value = str(finalization.get("voice_mode") or "").strip().lower()
+    voice_choice = voice_choice_value if voice_choice_value not in {"", "none"} else (voice_mode_value or "none")
+    subtitle_dub_choice = str(finalization.get("subtitle_dub_choice") or "none").strip().lower()
     payload.update({
         "video_finalization": finalization,
         "video_finalization_confirmed": bool(finalization.get("finalization_confirmed")),
         "music_option": music_mode if finalization.get("music_enabled") else "none",
+        "music_choice_key": music_mode if finalization.get("music_enabled") else "none",
         "music_choice": {
             "type": music_mode if finalization.get("music_enabled") else "none",
             "label": (
@@ -80186,9 +80443,12 @@ def video_finalization_payload(state: dict | None = None) -> dict:
         ),
         "translation_enabled": bool(finalization.get("translation_enabled")),
         "target_language": str(finalization.get("subtitle_language") or finalization.get("voice_language") or finalization.get("dub_language") or "")[:80],
+        "voice_choice": voice_choice,
+        "voice_profile_id": str(finalization.get("voice_profile_id") or "")[:80],
         "voice_style": str(finalization.get("voice_style") or "natural")[:80],
         "voice_text": str(finalization.get("voice_text") or "")[:3000],
         "voice_file_id": str(finalization.get("voice_file_id") or "")[:220],
+        "subtitle_dub_choice": subtitle_dub_choice,
         "subtitle_text": str(finalization.get("subtitle_text") or "")[:3000],
     })
     payload["video_project"] = build_video_project(
@@ -80376,48 +80636,35 @@ def video_finalization_menu_text(state: dict | None = None, lang: str = "vi") ->
     source = state.get("source_label") or video_finalization_source_label(state.get("source"), lang)
     if normalize_user_language(lang) != "vi":
         return (
-            "🎛 <b>Free planning options</b>\n\n"
+            "🎛 <b>Video finishing options</b>\n\n"
             f"Source: <b>{html.escape(str(source))}</b>\n\n"
-            "Before choosing a paid package, you can save planning assets only:\n"
-            "• Stock music and stock SFX\n"
-            "• Default voices already available\n"
-            "• Prompt/script templates\n"
-            "• My media and idea notes\n\n"
-            "Paid subtitles, dubbing, AI music and export options appear after an eligible package is selected. "
-            "Processing starts only after the final confirmation."
+            "Configure voice, music/SFX, subtitles, translation or dubbing for this video draft first. "
+            "Then choose the package, review the invoice and confirm.\n\n"
+            "The current source file, duration, package draft and video direction stay in the same video order. "
+            "No processing starts and no Xu is charged here."
         )
     return (
-        "🎛 <b>Tùy chọn miễn phí trước khi chọn gói</b>\n\n"
+        "🎛 <b>Tùy chọn hoàn thiện video</b>\n\n"
         f"Nguồn: <b>{html.escape(str(source))}</b>\n\n"
-        "Trước khi chọn gói trả phí, màn này chỉ lưu phần chuẩn bị miễn phí:\n\n"
-        "• Kho nhạc có sẵn\n"
-        "• Kho SFX có sẵn\n"
-        "• Voice mặc định có sẵn\n"
-        "• Prompt/kịch bản mẫu\n"
-        "• Media của tôi\n"
-        "• Ghi chú ý tưởng hoặc Lưu kế hoạch video\n\n"
-        "Phụ đề, dịch phụ đề, lồng tiếng, tạo nhạc AI và xuất video có phí chỉ hiện sau khi quý khách chọn gói đủ điều kiện. "
-        "TOAN AAS chỉ bắt đầu xử lý sau khi quý khách xác nhận ở bước cuối."
+        "Chọn voice, nhạc/SFX, phụ đề, dịch hoặc lồng tiếng cho draft video hiện tại trước. "
+        "Sau đó mới chọn gói, xem hóa đơn và xác nhận cuối.\n\n"
+        "TOAN AAS giữ nguyên file nguồn, thời lượng, hướng dựng và các lựa chọn add-on trong cùng đơn video. "
+        "Màn này chưa xử lý video và chưa trừ Xu."
     )
 
 def video_finalization_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎼 Kho nhạc có sẵn" if is_vi else "🎼 Stock music", callback_data="vfinal|music_library"),
-            InlineKeyboardButton("🔊 Kho SFX có sẵn" if is_vi else "🔊 Stock SFX", callback_data="vfinal|music_sfx"),
+            InlineKeyboardButton("🎙 Giọng đọc" if is_vi else "🎙 Voice", callback_data="vfinal|voice"),
+            InlineKeyboardButton("🎵 Nhạc nền / SFX" if is_vi else "🎵 Music / SFX", callback_data="vfinal|music"),
         ],
         [
-            InlineKeyboardButton("🎙 Voice mặc định có sẵn" if is_vi else "🎙 Default voices", callback_data="vfinal|voice_defaults"),
-            InlineKeyboardButton("📁 Media của tôi" if is_vi else "📁 My media", callback_data="vfinal|my_media"),
+            InlineKeyboardButton("🎞 Phụ đề / Dịch / Lồng tiếng" if is_vi else "🎞 Subtitles / Translate / Dub", callback_data="vfinal|addon"),
         ],
         [
-            InlineKeyboardButton("📋 Prompt/kịch bản mẫu" if is_vi else "📋 Prompt/script templates", callback_data="vfinal|copy_prompt"),
-            InlineKeyboardButton("💾 Lưu kế hoạch video" if is_vi else "💾 Save video plan", callback_data="vfinal|save"),
-        ],
-        [
-            InlineKeyboardButton("✅ Chọn gói xuất video" if is_vi else "✅ Choose video package", callback_data="vfinal|tier"),
-            InlineKeyboardButton("🎛 Xem hóa đơn nháp" if is_vi else "🎛 Draft summary", callback_data="vfinal|review"),
+            InlineKeyboardButton("✅ Tiếp tục chọn gói" if is_vi else "✅ Continue to package", callback_data="vfinal|tier"),
+            InlineKeyboardButton("🚫 Bỏ qua add-on" if is_vi else "🚫 Skip add-ons", callback_data="vfinal|skip"),
         ],
         [
             InlineKeyboardButton("⬅️ Quay lại prompt" if is_vi else "⬅️ Back to prompt", callback_data="vfinal|back"),
@@ -80450,7 +80697,102 @@ def video_finalization_package_from_state(state: dict | None = None) -> dict:
     package.setdefault("prompt", video_finalization_prompt_text(state))
     package.setdefault("concept_text", str((state.get("session_context") or {}).get("script") or "")[:1200])
     package.setdefault("video_project", dict(state.get("video_project") or {}))
+    for key in (
+        "source_file_id",
+        "source_video_file_id",
+        "input_video_file_id",
+        "telegram_file_id",
+        "source_file_name",
+        "source_mime_type",
+        "source_duration",
+        "source_file_size",
+        "object_prompt",
+        "direction_prompt",
+        "selected_topic",
+        "selected_context",
+        "selected_motion",
+        "selected_music",
+        "invoice_id",
+        "add_on_origin",
+        "addon_origin",
+    ):
+        if not package.get(key) and state.get(key):
+            package[key] = state.get(key)
     return package
+
+def video_finalization_invoice_active(user_id, state: dict | None = None) -> bool:
+    state = dict(state or {})
+    if str(state.get("addon_return_target") or "").strip().lower() == "invoice":
+        return True
+    addon_state = get_video_addon_state(user_id)
+    if addon_state:
+        return True
+    return str(state.get("step") or "").strip().lower() == "confirm"
+
+def video_finalization_addon_return_target(user_id, state: dict | None = None) -> str:
+    return "invoice" if video_finalization_invoice_active(user_id, state) else "hub"
+
+def video_finalization_merge_pending_payload(existing: dict | None, new_payload: dict | None) -> dict:
+    existing = dict(existing or {})
+    merged = {**existing, **dict(new_payload or {})}
+    for key in (
+        "source_file_id",
+        "source_video_file_id",
+        "input_video_file_id",
+        "telegram_file_id",
+        "source_file_name",
+        "source_mime_type",
+        "source_duration",
+        "source_file_size",
+        "object_prompt",
+        "direction_prompt",
+        "selected_topic",
+        "selected_context",
+        "selected_motion",
+        "selected_music",
+        "invoice_id",
+        "add_on_origin",
+        "addon_origin",
+    ):
+        if not merged.get(key) and existing.get(key):
+            merged[key] = existing.get(key)
+    return merged
+
+async def video_finalization_return_after_addon(query, user_id, state: dict | None = None, lang: str = "vi"):
+    current = dict(state or get_video_finalization_state(user_id) or {})
+    if not current:
+        return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+    target = video_finalization_addon_return_target(user_id, current)
+    if target == "invoice":
+        addon_state = get_video_addon_state(user_id) or {}
+        tier = normalize_video_tier(current.get("selected_video_tier") or addon_state.get("video_tier") or (addon_state.get("pending_payload") or {}).get("video_tier") or "")
+        if tier and video_finalization_has_prompt(current):
+            current["selected_video_tier"] = tier
+            current["selected_video_aspect_ratio"] = video_finalization_selected_aspect(current)
+            current["step"] = "confirm"
+            current["addon_return_target"] = "invoice"
+            set_video_finalization_state(user_id, current)
+            package = video_finalization_package_from_state(current)
+            aspect = video_finalization_selected_aspect(current)
+            pending_payload = public_video_pending_payload_from_package(tier, package, aspect)
+            pending_payload.update({
+                "video_finalization": dict(package.get("video_finalization") or {}),
+                "video_finalization_confirmed": True,
+                "source": str(current.get("source") or package.get("source") or (addon_state.get("pending_payload") or {}).get("source") or "promptvideo")[:80],
+                "source_flow": str(current.get("source") or package.get("source_flow") or (addon_state.get("pending_payload") or {}).get("source_flow") or "promptvideo")[:80],
+            })
+            pending_payload = video_finalization_merge_pending_payload(addon_state.get("pending_payload") or {}, pending_payload)
+            set_public_video_package_context(user_id, pending_payload)
+            return await start_video_addon_step(query, user_id, pending_payload, tier, lang, source=str(addon_state.get("source") or "ai"))
+    current["step"] = "menu"
+    current["addon_return_target"] = "hub"
+    set_video_finalization_state(user_id, current)
+    return await safe_edit_or_send(
+        query,
+        video_finalization_menu_text(current, lang),
+        parse_mode="HTML",
+        reply_markup=video_finalization_menu_keyboard(lang),
+    )
 
 async def video_finalization_continue_to_invoice_or_tier(query, user_id, state: dict | None = None, lang: str = "vi"):
     current = dict(state or get_video_finalization_state(user_id) or {})
@@ -80581,18 +80923,18 @@ def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def video_finalization_tier_guard_text(tier: str, lang: str = "vi") -> str:
     status = get_public_video_tier_ui_status(tier)
-    reason = str(status.get("reason") or "")
+    reason = "chưa sẵn sàng" if normalize_user_language(lang) == "vi" else "not ready"
     if normalize_user_language(lang) != "vi":
         return (
             "🛡 <b>This video package is not open yet.</b>\n\n"
             f"Package: <b>{html.escape(str(status.get('label') or tier))}</b> — <b>{int(status.get('price_xu') or 0)} Xu</b>\n"
-            f"Reason: <code>{html.escape(reason or 'not ready')}</code>\n\n"
+            f"Status: <b>{html.escape(reason)}</b>\n\n"
             "No processing started and no Xu was charged."
         )
     return (
         "🛡 <b>Gói video này chưa mở.</b>\n\n"
         f"Gói: <b>{html.escape(str(status.get('label') or tier))}</b> — <b>{int(status.get('price_xu') or 0)} Xu</b>\n"
-        f"Lý do: {html.escape(reason or 'chưa sẵn sàng')}\n\n"
+        f"Trạng thái: {html.escape(reason)}\n\n"
         "TOAN AAS chưa xử lý video và chưa trừ Xu."
     )
 
@@ -80612,8 +80954,8 @@ def video_finalization_confirm_not_ready_text(state: dict | None = None, lang: s
             f"Aspect ratio: <b>{html.escape(aspect)}</b>\n"
             f"Video prompt: <b>{'Yes' if prompt_ready else 'No'}</b>\n\n"
             "<b>Status</b>\n"
-            f"• AI video: <code>{html.escape(str(status.get('reason') or 'not ready'))}</code>\n"
-            "• Refund if provider fails: <b>Yes</b>\n\n"
+            "• AI video: <b>Under maintenance</b>\n"
+            "• Refund if processing fails: <b>Yes</b>\n\n"
             "AI video is under maintenance/upgrade or this package is not public yet. No processing started and no Xu was charged."
         )
     return (
@@ -80624,9 +80966,9 @@ def video_finalization_confirm_not_ready_text(state: dict | None = None, lang: s
         f"Tỷ lệ: <b>{html.escape(aspect)}</b>\n"
         f"Prompt video: <b>{'Có' if prompt_ready else 'Không'}</b>\n\n"
         "<b>Trạng thái</b>\n"
-        f"• Video AI: <code>{html.escape(str(status.get('reason') or 'đang bảo trì'))}</code>\n"
-        "• Job lock: <b>Sẵn sàng</b>\n"
-        "• Hoàn Xu nếu lỗi provider: <b>Có</b>\n\n"
+        "• Video AI: <b>Đang bảo trì/nâng cấp</b>\n"
+        "• Giữ lượt xử lý: <b>Sẵn sàng</b>\n"
+        "• Hoàn Xu nếu lỗi xử lý: <b>Có</b>\n\n"
         "Video AI đang bảo trì/nâng cấp hoặc chưa mở public cho gói này. TOAN AAS chưa xử lý video và chưa trừ Xu."
     )
 
@@ -80654,8 +80996,7 @@ def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -
             "• Use an audio file from My media\n"
             "• No music\n\n"
             "Paid:\n"
-            "• Create new Suno AI music\n"
-            "• Advanced audio edit/merge\n\n"
+            "• Create new AI music\n\n"
             "This only saves the current video plan. Processing starts after the final invoice confirmation."
         )
     return (
@@ -80666,8 +81007,7 @@ def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -
         "• Dùng file audio trong Media của tôi\n"
         "• Không thêm nhạc\n\n"
         "Có phí:\n"
-        "• Tạo nhạc AI Suno mới\n"
-        "• Ghép/cắt nhạc nâng cao\n\n"
+        "• Tạo nhạc AI mới\n\n"
         "Bước này chỉ lưu kế hoạch video. TOAN AAS chưa xử lý và chưa trừ Xu."
     )
 
@@ -80680,11 +81020,11 @@ def video_finalization_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📁 Media của tôi" if is_vi else "📁 My media", callback_data="vfinal|my_media"),
-            InlineKeyboardButton("✨ Tạo nhạc AI Suno" if is_vi else "✨ Create Suno music", callback_data="vfinal|music_ai"),
+            InlineKeyboardButton("🎵 Tạo nhạc AI" if is_vi else "🎵 Create AI music", callback_data="vfinal|music_ai"),
         ],
         [
             InlineKeyboardButton("🚫 Không thêm nhạc" if is_vi else "🚫 No music", callback_data="vfinal|music_none"),
-            InlineKeyboardButton("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", callback_data="vfinal|menu"),
+            InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="vfinal|menu"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
@@ -80730,15 +81070,15 @@ def video_finalization_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🚫 Không thêm" if is_vi else "🚫 None", callback_data="vfinal|addon_none"),
-            InlineKeyboardButton("📝 Tạo phụ đề tự động" if is_vi else "📝 Auto subtitles", callback_data="vfinal|subtitle"),
+            InlineKeyboardButton("📝 Tạo phụ đề +120" if is_vi else "📝 Subtitles +120", callback_data="vfinal|subtitle"),
         ],
         [
-            InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data="vfinal|translate_sub"),
-            InlineKeyboardButton("🎙 Lồng tiếng" if is_vi else "🎙 Dubbing", callback_data="vfinal|voice"),
+            InlineKeyboardButton("🌐 Dịch phụ đề +150" if is_vi else "🌐 Translate subtitles +150", callback_data="vfinal|translate_sub"),
+            InlineKeyboardButton("🎙 Lồng tiếng +250" if is_vi else "🎙 Dubbing +250", callback_data="vfinal|dub"),
         ],
         [
-            InlineKeyboardButton("🎬 Phụ đề + lồng tiếng" if is_vi else "🎬 Subtitles + dubbing", callback_data="vfinal|combo"),
-            InlineKeyboardButton("⬅️ Nhạc / SFX" if is_vi else "⬅️ Music / SFX", callback_data="vfinal|music"),
+            InlineKeyboardButton("🎬 Phụ đề + Lồng tiếng +350" if is_vi else "🎬 Subtitles + dubbing +350", callback_data="vfinal|combo"),
+            InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="vfinal|menu"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
@@ -80761,29 +81101,25 @@ def video_finalization_voice_text(state: dict | None = None, lang: str = "vi") -
     if normalize_user_language(lang) != "vi":
         return (
             "🎙 <b>Voice for this video</b>\n\n"
-            "Free planning options:\n"
+            "Free:\n"
             "• No narration\n"
             "• Default female voice\n"
             "• Default male voice\n"
             "• Use a saved voice profile if available\n\n"
             "Paid:\n"
-            "• Create a MiniMax voice profile\n"
-            "• Advanced AI dubbing\n"
-            "• Custom voice merge\n\n"
-            "Free selections only update the current video draft."
+            "• Create a custom voice profile\n\n"
+            "Selections only update the current video draft. Processing starts after the final confirmation."
         )
     return (
         "🎙 <b>Giọng đọc cho video</b>\n\n"
-        "Miễn phí trong bước kế hoạch:\n"
+        "Miễn phí:\n"
         "• Không thêm giọng đọc\n"
         "• Giọng nữ mặc định\n"
         "• Giọng nam mặc định\n"
         "• Dùng giọng đã lưu trong Kho voice của bạn nếu có\n\n"
         "Có phí:\n"
-        "• Tạo voice riêng MiniMax\n"
-        "• Lồng tiếng AI nâng cao\n"
-        "• Ghép voice tùy chỉnh vào video\n\n"
-        "Lựa chọn miễn phí chỉ cập nhật draft video hiện tại, không tạo dòng phí lồng tiếng."
+        "• Tạo voice riêng\n\n"
+        "Lựa chọn ở đây chỉ cập nhật draft video hiện tại. TOAN AAS chưa xử lý và chưa trừ Xu."
     )
 
 def video_finalization_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -80798,11 +81134,11 @@ def video_finalization_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("📁 Kho voice của bạn" if is_vi else "📁 Your voice vault", callback_data="vfinal|voice_vault"),
         ],
         [
-            InlineKeyboardButton("🧬 Tạo voice riêng có phí" if is_vi else "🧬 Paid voice clone", callback_data="vfinal|voice_create"),
-            InlineKeyboardButton("🎙 Lồng tiếng AI nâng cao" if is_vi else "🎙 Advanced dubbing", callback_data="vfinal|voice_lang|auto"),
+            InlineKeyboardButton("🧬 Tạo voice riêng" if is_vi else "🧬 Create custom voice", callback_data="vfinal|voice_create"),
+            InlineKeyboardButton("▶️ Nghe thử giọng" if is_vi else "▶️ Preview voice", callback_data="vfinal|voice_preview"),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", callback_data="vfinal|menu"),
+            InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="vfinal|menu"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
         ],
     ])
@@ -80854,6 +81190,23 @@ def video_finalization_combo_language_keyboard(lang: str = "vi") -> InlineKeyboa
         ],
     ])
 
+def video_finalization_translation_language_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="vfinal|translate_lang|vi"),
+            InlineKeyboardButton("🇺🇸 English", callback_data="vfinal|translate_lang|en"),
+        ],
+        [
+            InlineKeyboardButton("🇨🇳 中文", callback_data="vfinal|translate_lang|zh"),
+            InlineKeyboardButton("✍️ Ngôn ngữ khác" if is_vi else "✍️ Other language", callback_data="vfinal|translate_lang_custom"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="vfinal|addon"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+        ],
+    ])
+
 def video_finalization_combo_source_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
@@ -80898,7 +81251,7 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
             f"• AI video: <code>{status(readiness['ai_video'])}</code>\n"
             f"• ASR / TTS: <code>{status(readiness['asr'])} / {status(readiness['dub'])}</code>\n"
             f"• Audio/subtitle mux: <code>{status(readiness['voice_mux'])} / {status(readiness['subtitle_burn'])}</code>\n\n"
-            "No Xu has been charged. Existing pricing and confirmation remain the final billing gate."
+            "No Xu has been charged. Existing pricing and confirmation remain the final billing step."
         )
     local_frame_status = status(readiness["local_frame"]) if len(photos) >= 2 else (
         "không bắt buộc nếu xuất từ prompt" if has_prompt else "chưa có đủ ảnh"
@@ -80995,14 +81348,14 @@ def video_finalization_local_needs_images_text(state: dict | None = None, lang: 
             f"Current source: <b>{html.escape(str(source))}</b>\n\n"
             "This button assembles existing images into a video. Your current flow has a video prompt/script, but does not yet have at least 2 scene images.\n\n"
             "Choose <b>Generate AI video</b> to render from the prompt, or create/upload keyframe images first if you want the cheaper local slideshow video.\n\n"
-            "No provider was called and no Xu was charged."
+            "No processing started and no Xu was charged."
         )
     return (
         "🎞 <b>Ghép ảnh thành video cần có ảnh trước</b>\n\n"
         f"Nguồn hiện tại: <b>{html.escape(str(source))}</b>\n\n"
         "Nút này chỉ dùng để ghép các ảnh đã có thành video. Flow hiện tại đang có prompt/kịch bản video, nhưng chưa có ít nhất 2 ảnh/cảnh để ghép.\n\n"
         "Bạn hãy chọn <b>Tạo video AI chân thật</b> để render từ prompt, hoặc tạo/gửi ảnh khung chính trước nếu muốn ghép video local rẻ hơn.\n\n"
-        "Bot chưa render, chưa gọi provider và chưa trừ Xu."
+        "TOAN AAS chưa render, chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
 def video_finalization_local_needs_images_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -81128,16 +81481,16 @@ def video_finalization_local_guard_text(state: dict | str | None = None, lang: s
         "🎞 <b>Ghép ảnh thành video local chưa sẵn.</b>\n\n"
         f"Số ảnh hiện có: <b>{photo_count}</b>.\n"
         "Nhánh ghép ảnh local cần ít nhất 2 ảnh và Local Worker/ffmpeg sẵn sàng. "
-        "TOAN AAS chưa render, chưa gọi provider và chưa trừ Xu."
+        "TOAN AAS chưa render, chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
 def video_finalization_copy_prompt_text(state: dict | None = None, lang: str = "vi") -> str:
     prompt = video_finalization_prompt_text(state)
     if not prompt:
         return (
-            "📋 Chưa có prompt video để copy. Hãy tạo hoặc sửa prompt trước. Bot chưa gọi API và chưa trừ Xu."
+            "📋 Chưa có prompt video để copy. Hãy tạo hoặc sửa prompt trước. TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
             if normalize_user_language(lang) == "vi"
-            else "📋 No video prompt is available yet. Create or edit the prompt first. No API call and no Xu charge."
+            else "📋 No video prompt is available yet. Create or edit the prompt first. No processing started and no Xu was charged."
         )
     if normalize_user_language(lang) != "vi":
         return (
@@ -81371,11 +81724,13 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
     if not state:
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
-    product_area = "subtitle" if action in {"addon", "subtitle", "translate_sub", "combo", "translate_combo"} else ("voice" if action.startswith("voice") else ("music" if action.startswith("music") or action == "my_media" else "video"))
+    product_area = "subtitle" if action in {"addon", "addon_none", "subtitle", "translate_sub", "combo", "translate_combo", "dub"} else ("voice" if action.startswith("voice") else ("music" if action.startswith("music") or action == "my_media" else "video"))
     enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen=f"vfinal|{action}", product_area=product_area)
     state.setdefault("addon_origin", "vfinal|menu")
     if product_area in {"music", "voice", "subtitle"}:
         state[f"{product_area}_origin"] = f"vfinal|{action}"
+    if action in {"music", "music_library", "music_sfx", "music_ai", "my_media", "voice", "voice_vault", "voice_create", "addon", "subtitle", "translate_sub", "translate_lang", "dub", "combo"}:
+        state["addon_return_target"] = video_finalization_addon_return_target(uid, state)
     if action == "back":
         target_screen = pop_video_screen(uid, "")
         handled, rendered = await render_video_finalization_stack_target(query, uid, state, target_screen, lang)
@@ -81396,7 +81751,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             if state["step"] == "tier":
                 return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
             return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
-        if current_step in {"music", "voice", "subtitle", "combo_language", "combo_source", "voice_language"}:
+        if current_step in {"music", "voice", "subtitle", "translation_language", "combo_language", "combo_source", "voice_language"}:
             state["step"] = "menu"
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
@@ -81422,7 +81777,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
     if action == "my_media":
-        state["step"] = "menu"
+        state["step"] = "music"
         set_video_finalization_state(uid, state)
         enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen="vfinal|music", product_area="media")
         return await safe_edit_or_send(
@@ -81434,16 +81789,9 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             reply_markup=media_library_quick_keyboard(lang, PRODUCT_CONTEXT_VIDEO_ADDON),
         )
     if action == "voice_defaults":
-        state["step"] = "menu"
+        state["step"] = "voice"
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(
-            query,
-            "🎙 <b>Voice mặc định</b>\n\nGiọng nữ và giọng nam mặc định có sẵn miễn phí trong bước lập kế hoạch. Nếu quý khách chọn lồng tiếng xử lý vào video, TOAN AAS sẽ hiện hóa đơn riêng trước khi xác nhận."
-            if normalize_user_language(lang) == "vi"
-            else "🎙 <b>Default voices</b>\n\nDefault female and male voices are free for planning. If you choose processed dubbing for export, TOAN AAS shows the separate invoice before confirmation.",
-            parse_mode="HTML",
-            reply_markup=video_finalization_menu_keyboard(lang),
-        )
+        return await safe_edit_or_send(query, video_finalization_voice_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_voice_keyboard(lang))
     if action == "tier":
         if value:
             tier = normalize_video_tier(value)
@@ -81489,50 +81837,40 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if action == "music_ai":
         state["step"] = "music"
         set_video_finalization_state(uid, state)
-        readiness = get_suno_music_readiness()
-        if readiness.get("public_enabled"):
-            update_video_finalization(
-                uid,
-                music_enabled=True,
-                music_mode="suno",
-                music_prompt=str(video_finalization_prompt_text(state) or "background music matching this video")[:1000],
-                music_item_count=1,
-            )
-            return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
-        return await safe_edit_or_send(
-            query,
-            "🎼 <b>Tạo nhạc AI / Suno</b>\n\n"
-            "Tính năng này đang được kiểm tra tài nguyên xử lý. Quý khách có thể thử lại sau hoặc chọn tùy chọn khác.\n\n"
-            "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu ở bước này.",
-            parse_mode="HTML",
-            reply_markup=video_finalization_music_keyboard(lang),
+        update_video_finalization(
+            uid,
+            music_enabled=True,
+            music_mode="ai_music",
+            music_choice="ai_music",
+            music_prompt=str(video_finalization_prompt_text(state) or "nhạc nền phù hợp video hiện tại")[:1000],
+            music_item_count=1,
         )
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "music_suggest":
         state["step"] = "music_suggest"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_music_suggestion_text(lang), parse_mode="HTML", reply_markup=video_finalization_music_suggestion_keyboard(lang))
     if action == "music_use":
-        update_video_finalization(uid, music_enabled=True, music_mode="suggested", music_prompt="cinematic/electronic background, subtle whoosh, low under narration")
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        update_video_finalization(uid, music_enabled=True, music_mode="suggested", music_choice="stock_music", music_prompt="cinematic/electronic background, subtle whoosh, low under narration")
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "music_upload":
         state["step"] = "await_music_upload"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, "📎 Hãy gửi file nhạc/audio. Bot chỉ lưu file ID trong phiên, chưa ghép video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "📎 Send a music/audio file. It will only be saved in this session; no processing or Xu charge.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     if action == "music_none":
-        update_video_finalization(uid, music_enabled=False, music_mode="none", music_prompt="", music_file_id="")
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        update_video_finalization(uid, music_enabled=False, music_mode="none", music_choice="none", music_prompt="", music_file_id="")
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "addon_none":
         update_video_finalization(
             uid,
-            voice_enabled=False,
-            voice_mode="none",
             subtitle_enabled=False,
             subtitle_mode="none",
+            subtitle_dub_choice="none",
             dub_enabled=False,
             subtitle_dub_enabled=False,
             translation_enabled=False,
         )
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "voice":
         update_video_finalization(uid, translation_enabled=False)
         state["step"] = "voice"
@@ -81563,10 +81901,22 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             uid,
             voice_enabled=False,
             voice_mode=f"default_{value}_free",
+            voice_choice=f"default_{value}",
             voice_style=f"default_{value}_free",
             dub_enabled=False,
         )
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
+    if action == "voice_preview":
+        state["step"] = "voice"
+        set_video_finalization_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            "▶️ <b>Nghe thử giọng</b>\n\nQuý khách có thể chọn giọng nữ/nam mặc định hoặc mở Kho voice để nghe profile đã lưu. Nếu chưa có file mẫu, TOAN AAS chỉ lưu lựa chọn vào draft video và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi"
+            else "▶️ <b>Voice preview</b>\n\nChoose the default female/male voice or open saved voices to preview available profiles. If no sample is available, the bot only saves the draft choice.",
+            parse_mode="HTML",
+            reply_markup=video_finalization_voice_keyboard(lang),
+        )
     if action == "voice_text":
         state["step"] = "await_voice_text"
         set_video_finalization_state(uid, state)
@@ -81585,17 +81935,15 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, "🎙 Đã lấy nội dung từ kịch bản. Hãy chọn ngôn ngữ/giọng. Bot chưa gọi TTS và chưa trừ Xu.", reply_markup=video_finalization_voice_language_keyboard(lang))
     if action == "voice_none":
-        update_video_finalization(uid, voice_enabled=False, voice_mode="none", voice_text="", voice_file_id="", dub_enabled=False)
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        update_video_finalization(uid, voice_enabled=False, voice_mode="none", voice_choice="none", voice_text="", voice_file_id="", dub_enabled=False)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "voice_lang":
         voice_lang = "" if value == "auto" else re.sub(r"[^a-z]", "", value.lower())[:8]
-        update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_language=voice_lang, voice_style="natural", dub_enabled=True, dub_language=voice_lang)
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_choice="advanced_dubbing", voice_language=voice_lang, voice_style="natural", dub_enabled=True, dub_language=voice_lang)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "subtitle":
-        update_video_finalization(uid, translation_enabled=False)
-        state["step"] = "subtitle"
-        set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, video_order_screen_text("subtitle_dub", state, lang), parse_mode="HTML", reply_markup=video_finalization_subtitle_keyboard(lang))
+        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="asr", subtitle_dub_choice="subtitle", subtitle_burn_in=True, dub_enabled=False, subtitle_dub_enabled=False, translation_enabled=False)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "subtitle_manual":
         state["step"] = "await_subtitle_text"
         set_video_finalization_state(uid, state)
@@ -81604,31 +81952,47 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         script = str((state.get("session_context") or {}).get("script") or "").strip()
         if not script:
             return await safe_edit_or_send(query, "⚠️ Phiên này chưa có caption/kịch bản. Bạn có thể nhập phụ đề thủ công. TOAN AAS chưa xử lý phụ đề và chưa trừ Xu.", reply_markup=video_finalization_subtitle_keyboard(lang))
-        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="session_script", subtitle_text=script[:3000], subtitle_burn_in=True)
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="session_script", subtitle_dub_choice="subtitle", subtitle_text=script[:3000], subtitle_burn_in=True)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "subtitle_asr":
         if not is_asr_ready():
             return await safe_edit_or_send(query, "🎧 Tạo phụ đề tự động đang được kiểm tra. TOAN AAS chưa xử lý video và chưa trừ Xu. Bạn có thể nhập phụ đề thủ công hoặc dùng caption/kịch bản hiện có.", reply_markup=video_finalization_subtitle_keyboard(lang))
-        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="asr", subtitle_burn_in=True)
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="asr", subtitle_dub_choice="subtitle", subtitle_burn_in=True)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "subtitle_none":
-        update_video_finalization(uid, subtitle_enabled=False, subtitle_mode="none", subtitle_text="", subtitle_burn_in=False)
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        update_video_finalization(uid, subtitle_enabled=False, subtitle_mode="none", subtitle_dub_choice="none", subtitle_text="", subtitle_burn_in=False)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
+    if action == "dub":
+        update_video_finalization(uid, subtitle_enabled=False, subtitle_mode="none", subtitle_dub_choice="dubbing", dub_enabled=True, voice_enabled=True, voice_mode="tts", voice_choice="advanced_dubbing", translation_enabled=False)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "combo":
-        update_video_finalization(uid, translation_enabled=False)
-        state["step"] = "combo_language"
-        set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, "🌐 <b>Phụ đề + lồng tiếng</b>\n\nBạn muốn dùng ngôn ngữ nào?", parse_mode="HTML", reply_markup=video_finalization_combo_language_keyboard(lang))
+        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="asr", subtitle_dub_choice="subtitle_plus_dubbing", subtitle_burn_in=True, voice_enabled=True, voice_mode="tts", voice_choice="advanced_dubbing", dub_enabled=True, subtitle_dub_enabled=True, translation_enabled=False)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "translate_sub":
-        update_video_finalization(uid, translation_enabled=True)
+        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="translate_subtitle", subtitle_dub_choice="translate_subtitle", subtitle_burn_in=True, dub_enabled=False, subtitle_dub_enabled=False, translation_enabled=True)
         state = get_video_finalization_state(uid)
-        state["step"] = "subtitle"
+        state["step"] = "translation_language"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(
             query,
-            "🌐 <b>Dịch phụ đề</b>\n\nChọn nguồn nội dung phụ đề và ngôn ngữ đích cho bản dịch. Nếu công cụ tự động chưa sẵn sàng, TOAN AAS sẽ báo rõ và không trừ Xu.",
+            "🌐 <b>Dịch phụ đề</b>\n\nHãy chọn ngôn ngữ đích. TOAN AAS chỉ lưu lựa chọn vào video hiện tại, chưa xử lý và chưa trừ Xu.",
             parse_mode="HTML",
-            reply_markup=video_finalization_subtitle_keyboard(lang),
+            reply_markup=video_finalization_translation_language_keyboard(lang),
+        )
+    if action == "translate_lang":
+        selected = re.sub(r"[^a-z]", "", value.lower())[:8]
+        update_video_finalization(uid, subtitle_language=selected)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
+    if action == "translate_lang_custom":
+        state["step"] = "await_translation_language"
+        set_video_finalization_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            "✍️ Hãy nhập ngôn ngữ đích cho phụ đề. TOAN AAS chưa xử lý video và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|translate_sub"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+            ]]),
         )
     if action == "translate_combo":
         update_video_finalization(uid, translation_enabled=True)
@@ -81663,16 +82027,18 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             subtitle_burn_in=True,
             voice_enabled=True,
             voice_mode="tts",
+            voice_choice="advanced_dubbing",
             voice_text=script[:3000],
             dub_enabled=True,
             subtitle_dub_enabled=True,
+            subtitle_dub_choice="subtitle_plus_dubbing",
         )
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "combo_asr":
         if not (is_asr_ready() and is_dub_ready()):
             return await safe_edit_or_send(query, "🌐 Phụ đề + lồng tiếng tự động đang được kiểm tra. TOAN AAS chưa xử lý video và chưa trừ Xu. Bạn có thể nhập nội dung thủ công để lưu vào kế hoạch trước.", reply_markup=video_finalization_combo_source_keyboard(lang))
-        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="asr", subtitle_burn_in=True, voice_enabled=True, voice_mode="tts", dub_enabled=True, subtitle_dub_enabled=True)
-        return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
+        update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="asr", subtitle_burn_in=True, voice_enabled=True, voice_mode="tts", voice_choice="advanced_dubbing", dub_enabled=True, subtitle_dub_enabled=True, subtitle_dub_choice="subtitle_plus_dubbing")
+        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "skip":
         state["video_finalization"] = video_finalization_defaults()
         state["video_finalization"]["finalization_confirmed"] = False
@@ -81774,6 +82140,19 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         state["step"] = "combo_source"
         set_video_finalization_state(uid, state)
         await update.message.reply_text("🌐 Đã lưu ngôn ngữ. Hãy chọn nguồn nội dung.", reply_markup=video_finalization_combo_source_keyboard(get_user_language(uid) or "vi"))
+        return True
+    if step == "await_translation_language":
+        update_video_finalization(uid, subtitle_language=text[:80])
+        lang = get_user_language(uid) or "vi"
+        current = get_video_finalization_state(uid)
+        return_target = video_finalization_addon_return_target(uid, current)
+        if return_target == "invoice":
+            current["addon_return_target"] = "invoice"
+        set_video_finalization_state(uid, current)
+        await update.message.reply_text(
+            "🌐 Đã lưu ngôn ngữ đích. Lựa chọn dịch phụ đề vẫn gắn với video hiện tại và chưa trừ Xu.",
+            reply_markup=video_finalization_menu_keyboard(lang),
+        )
         return True
     if step == "await_combo_text":
         update_video_finalization(
@@ -82165,7 +82544,7 @@ def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> Inl
     is_vi = normalize_user_language(lang) == "vi"
     if normalize_video_tier(tier) == "low":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Xác nhận tạo video" if is_vi else "✅ Confirm video", callback_data=f"shopai|confirm|{token}")],
+            [InlineKeyboardButton("▶️ Nghe/xem thử ngắn" if is_vi else "▶️ Short preview", callback_data=f"videoaddon|preview|{token}")],
             [
                 InlineKeyboardButton("⬆️ Đổi lên 300 Xu" if is_vi else "⬆️ Upgrade 300 Xu", callback_data="vfinal|tier|basic"),
                 InlineKeyboardButton("⚙️ Chọn gói khác" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier"),
@@ -82173,10 +82552,215 @@ def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> Inl
             [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export", callback_data=f"shopai|confirm|{token}"), InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier")],
+        [InlineKeyboardButton("▶️ Nghe/xem thử ngắn" if is_vi else "▶️ Short preview", callback_data=f"videoaddon|preview|{token}"), InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier")],
         [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
+
+def paid_preview_seconds(duration_seconds) -> int:
+    try:
+        duration = int(math.ceil(float(duration_seconds or 0)))
+    except Exception:
+        duration = 0
+    return int(min(6, max(2, math.ceil(max(1, duration) / 3))))
+
+def video_paid_preview_required(payload: dict | None = None) -> bool:
+    payload = dict(payload or {})
+    return str(payload.get("job_type") or "").lower() == "video" and int(payload.get("base_cost") or 0) > 0
+
+PAID_PREVIEW_REQUIRED_TASKS = {
+    "video",
+    "ai_music",
+    "custom_voice",
+    "voice_clone",
+    "dubbing",
+    "subtitle_translation",
+    "subtitle_plus_dubbing",
+    "music_merge",
+    "voice_merge",
+    "audio_video_merge",
+}
+
+def paid_task_requires_preview(task_kind: str, payload: dict | None = None) -> bool:
+    kind = str(task_kind or "").strip().lower()
+    payload = dict(payload or {})
+    if kind == "video":
+        return video_paid_preview_required(payload)
+    if kind in PAID_PREVIEW_REQUIRED_TASKS:
+        return int(payload.get("price_xu") or payload.get("cost_xu") or payload.get("base_cost") or 1) > 0
+    return False
+
+def paid_preview_friendly_guard_text(task_kind: str = "video", lang: str = "vi") -> str:
+    is_vi = normalize_user_language(lang) == "vi"
+    label_vi = {
+        "ai_music": "nhạc AI",
+        "custom_voice": "voice riêng",
+        "voice_clone": "voice riêng",
+        "dubbing": "lồng tiếng",
+        "subtitle_translation": "dịch phụ đề",
+        "subtitle_plus_dubbing": "phụ đề + lồng tiếng",
+        "music_merge": "ghép nhạc vào video",
+        "voice_merge": "ghép voice vào video",
+        "audio_video_merge": "ghép audio vào video",
+        "video": "video",
+    }.get(str(task_kind or "").strip().lower(), "tác vụ này")
+    if not is_vi:
+        return (
+            "▶️ <b>Short preview required</b>\n\n"
+            "You can preview a short segment first. The complete output is processed only after you confirm.\n\n"
+            "This is only a short preview step for checking voice, music, subtitles or dubbing. TOAN AAS has not produced the complete output and has not charged final Xu.\n\n"
+            "If a safe short preview is not available yet, TOAN AAS will create the complete output only after your confirmation. You can preview available music or voice samples before choosing."
+        )
+    return (
+        f"▶️ <b>Nghe/xem thử {html.escape(label_vi)}</b>\n\n"
+        "Bạn có thể nghe/xem thử một đoạn ngắn trước. Bản đầy đủ sẽ được xử lý sau khi bạn xác nhận.\n\n"
+        "Đây chỉ là bản nghe thử ngắn để kiểm tra giọng/nhạc/phụ đề. TOAN AAS chưa xuất bản đầy đủ và chưa trừ Xu final.\n\n"
+        "Nếu chưa có cơ chế preview ngắn an toàn, TOAN AAS sẽ tạo bản đầy đủ sau khi bạn xác nhận. Bạn có thể nghe thử các mẫu nhạc/giọng có sẵn trước khi chọn."
+    )
+
+def paid_preview_common_keyboard(confirm_callback: str, change_callback: str, edit_callback: str, back_callback: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận tạo bản đầy đủ" if is_vi else "✅ Confirm full output", callback_data=confirm_callback)],
+        [
+            InlineKeyboardButton("🔁 Đổi giọng/nhạc" if is_vi else "🔁 Change voice/music", callback_data=change_callback),
+            InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=edit_callback),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def video_paid_preview_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = dict(state or {})
+    pending = dict(state.get("pending_payload") or state)
+    duration = int(pending.get("duration_seconds") or state.get("current_video_duration_seconds") or 0)
+    preview_seconds = paid_preview_seconds(duration)
+    music = str(pending.get("music_option") or state.get("current_video_music_option") or "none").strip().lower()
+    subtitle = str(pending.get("subtitle_option") or state.get("current_video_subtitle_option") or "none").strip().lower()
+    dubbing = str(pending.get("dubbing_option") or state.get("current_video_dubbing_option") or "none").strip().lower()
+    has_paid_music = music in {"ai", "ai_music", "music_ai", "suno"}
+    has_paid_subtitle = subtitle not in {"", "none"} or bool(pending.get("translation_enabled") or state.get("translation_enabled"))
+    has_paid_dub = dubbing not in {"", "none"}
+    if normalize_user_language(lang) != "vi":
+        lines = [
+            "▶️ <b>Short preview before full output</b>",
+            "",
+            f"Preview length: <b>{preview_seconds} seconds max</b>.",
+            "You can preview a short segment first. The complete output is processed only after you confirm.",
+            "",
+            "This is only a short preview to check voice, music, subtitles or dubbing. TOAN AAS has not produced the complete output and has not charged final Xu.",
+        ]
+        if has_paid_music:
+            lines.append("• AI music: short sample if safe; otherwise use available music samples before choosing.")
+        if has_paid_subtitle:
+            lines.append("• Subtitle/translation: preview the first lines or a short segment.")
+        if has_paid_dub:
+            lines.append("• Dubbing: preview a short voice segment only.")
+        lines.append("• Video: preview is limited to the short segment above.")
+        return "\n".join(lines)
+    lines = [
+        "▶️ <b>Nghe/xem thử trước khi tạo bản đầy đủ</b>",
+        "",
+        f"Thời lượng preview: <b>tối đa {preview_seconds} giây</b>.",
+        "Bạn có thể nghe/xem thử một đoạn ngắn trước. Bản đầy đủ sẽ được xử lý sau khi bạn xác nhận.",
+        "",
+        "Đây chỉ là bản nghe thử ngắn để kiểm tra giọng/nhạc/phụ đề. TOAN AAS chưa xuất bản đầy đủ và chưa trừ Xu final.",
+    ]
+    if has_paid_music:
+        lines.append("• Nhạc AI: chỉ nghe mẫu ngắn nếu cơ chế preview an toàn; nếu chưa sẵn sàng, hãy nghe thử các mẫu nhạc có sẵn trước khi chọn.")
+    if has_paid_subtitle:
+        lines.append("• Phụ đề/dịch: xem vài dòng đầu hoặc một đoạn ngắn.")
+    if has_paid_dub:
+        lines.append("• Lồng tiếng: nghe thử đoạn giọng ngắn, không gửi file đầy đủ.")
+    lines.append("• Video: preview giới hạn theo số giây ở trên, không gửi bản đầy đủ trước xác nhận.")
+    return "\n".join(lines)
+
+def video_paid_preview_keyboard(token: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận tạo bản đầy đủ" if is_vi else "✅ Confirm full output", callback_data=f"shopai|confirm|{token}")],
+        [InlineKeyboardButton("🔁 Đổi giọng/nhạc" if is_vi else "🔁 Change voice/music", callback_data="vfinal|music"), InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data="vfinal|menu")],
+        [InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+    ])
+
+VIDEO_PAID_PREVIEW_ARTIFACT_KEYS = (
+    "paid_preview_video_file_id",
+    "preview_video_file_id",
+    "paid_preview_video_url",
+    "preview_video_url",
+)
+
+def video_paid_preview_artifact(state: dict | None = None) -> dict:
+    state = dict(state or {})
+    pending = dict(state.get("pending_payload") or state)
+    try:
+        seconds = int(pending.get("paid_preview_seconds") or pending.get("preview_seconds") or 0)
+    except Exception:
+        seconds = 0
+    if seconds < 2 or seconds > 6:
+        return {}
+    for key in VIDEO_PAID_PREVIEW_ARTIFACT_KEYS:
+        value = str(pending.get(key) or state.get(key) or "").strip()
+        if value:
+            return {"kind": "video", "value": value, "seconds": seconds, "key": key}
+    return {}
+
+def video_paid_preview_entry_keyboard(token: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶️ Tạo/xem preview ngắn" if is_vi else "▶️ Create/view short preview", callback_data=f"videoaddon|preview|{token}")],
+        [
+            InlineKeyboardButton("🔁 Đổi giọng/nhạc" if is_vi else "🔁 Change voice/music", callback_data="vfinal|music"),
+            InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data="vfinal|menu"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
+        ],
+    ])
+
+def video_paid_preview_unavailable_text(state: dict | None = None, lang: str = "vi") -> str:
+    preview_seconds = paid_preview_seconds(
+        (state or {}).get("current_video_duration_seconds")
+        or ((state or {}).get("pending_payload") or {}).get("duration_seconds")
+        or 0
+    )
+    if normalize_user_language(lang) != "vi":
+        return (
+            "▶️ <b>Short preview is not ready</b>\n\n"
+            f"TOAN AAS has not produced a verified {preview_seconds}-second preview for this configuration. "
+            "Full-output confirmation remains locked, and no final Xu has been charged.\n\n"
+            "Change the voice/music/content or come back after a safe preview is available."
+        )
+    return (
+        "▶️ <b>Chưa có bản xem thử ngắn an toàn</b>\n\n"
+        f"TOAN AAS chưa có bản preview đã kiểm tra, dài tối đa {preview_seconds} giây, cho đúng cấu hình này. "
+        "Nút xác nhận bản đầy đủ vẫn bị khóa và chưa trừ Xu final.\n\n"
+        "Bạn có thể đổi giọng/nhạc, sửa nội dung hoặc quay lại khi bản xem thử đã sẵn sàng."
+    )
+
+async def send_video_paid_preview_artifact(context, query, state: dict, lang: str = "vi") -> bool:
+    artifact = video_paid_preview_artifact(state)
+    if not artifact:
+        return False
+    seconds = int(artifact.get("seconds") or 0)
+    caption = (
+        f"▶️ Bản xem thử ngắn {seconds} giây. TOAN AAS chưa xuất bản đầy đủ và chưa trừ Xu final."
+        if normalize_user_language(lang) == "vi"
+        else f"▶️ {seconds}-second short preview. TOAN AAS has not produced the complete output or charged final Xu."
+    )
+    try:
+        await context.bot.send_video(
+            chat_id=query.message.chat_id,
+            video=str(artifact.get("value") or ""),
+            caption=caption,
+        )
+        return True
+    except Exception as exc:
+        logger.warning("paid video preview send failed | %s", sanitize_log_text(str(exc))[:220])
+        return False
 
 def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     tier_buttons = []
@@ -82264,6 +82848,15 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         "source_job_id": str((package or {}).get("source_job_id") or "")[:80],
         "image_url": str((package or {}).get("image_url") or (package or {}).get("generated_image_url") or "")[:1000],
         "telegram_file_id": str((package or {}).get("telegram_file_id") or "")[:220],
+        "source_file_id": str((package or {}).get("source_file_id") or (package or {}).get("source_video_file_id") or (package or {}).get("input_video_file_id") or (package or {}).get("telegram_file_id") or "")[:220],
+        "source_video_file_id": str((package or {}).get("source_video_file_id") or (package or {}).get("input_video_file_id") or (package or {}).get("source_file_id") or "")[:220],
+        "input_video_file_id": str((package or {}).get("input_video_file_id") or (package or {}).get("source_video_file_id") or (package or {}).get("source_file_id") or "")[:220],
+        "source_file_name": str((package or {}).get("source_file_name") or "")[:220],
+        "source_mime_type": str((package or {}).get("source_mime_type") or "")[:120],
+        "source_duration": (package or {}).get("source_duration") or 0,
+        "source_file_size": (package or {}).get("source_file_size") or 0,
+        "object_prompt": str((package or {}).get("object_prompt") or (package or {}).get("selected_topic") or "")[:500],
+        "direction_prompt": str((package or {}).get("direction_prompt") or (package or {}).get("selected_motion") or (package or {}).get("direction") or "")[:500],
         "video_tier": tier_norm,
         "tier_label": payload.get("label") or tier_norm,
         "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
@@ -82276,8 +82869,11 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         "music_item_count": int((package or {}).get("music_item_count") or 0),
         "subtitle_option": str((package or {}).get("subtitle_option") or "none")[:80],
         "dubbing_option": str((package or {}).get("dubbing_option") or "none")[:80],
+        "subtitle_dub_choice": str((package or {}).get("subtitle_dub_choice") or "none")[:80],
         "translation_enabled": bool((package or {}).get("translation_enabled")),
         "target_language": str((package or {}).get("target_language") or "")[:80],
+        "voice_choice": str((package or {}).get("voice_choice") or "none")[:80],
+        "voice_profile_id": str((package or {}).get("voice_profile_id") or "")[:80],
         "voice_style": str((package or {}).get("voice_style") or "")[:80],
         "video_finalization": dict((package or {}).get("video_finalization") or {}),
         "video_finalization_confirmed": bool((package or {}).get("video_finalization_confirmed")),
@@ -82341,17 +82937,24 @@ async def start_video_addon_step(query, user_id, pending_payload: dict, tier: st
         "current_video_segments": max(1, int(math.ceil(duration / max(1, segment_seconds)))),
         "current_video_segment_seconds": int(segment_seconds),
         "current_video_music_option": str(pending_payload.get("music_option") or pending_payload.get("music_label") or ""),
+        "current_video_music_choice": str(pending_payload.get("music_choice_key") or pending_payload.get("music_option") or "none"),
         "current_video_music_item_count": int(pending_payload.get("music_item_count") or 0),
         "current_video_subtitle_option": str(pending_payload.get("subtitle_option") or "none"),
         "current_video_dubbing_option": str(pending_payload.get("dubbing_option") or "none"),
+        "current_video_subtitle_dub_choice": str(pending_payload.get("subtitle_dub_choice") or "none"),
         "translation_enabled": bool(pending_payload.get("translation_enabled")),
         "current_video_target_language": str(pending_payload.get("target_language") or ""),
+        "current_video_voice_choice": str(pending_payload.get("voice_choice") or "none"),
         "current_video_voice_style": str(pending_payload.get("voice_style") or ""),
         "current_video_script_text": str(pending_payload.get("original_prompt") or pending_payload.get("prompt") or "")[:2000],
         "current_video_assets": {
             "source_job_id": str(pending_payload.get("source_job_id") or "")[:80],
             "image_url": str(pending_payload.get("image_url") or "")[:1000],
             "telegram_file_id": str(pending_payload.get("telegram_file_id") or "")[:220],
+            "source_file_id": str(pending_payload.get("source_file_id") or pending_payload.get("source_video_file_id") or pending_payload.get("input_video_file_id") or "")[:220],
+            "source_file_name": str(pending_payload.get("source_file_name") or "")[:220],
+            "object_prompt": str(pending_payload.get("object_prompt") or pending_payload.get("selected_topic") or "")[:500],
+            "direction_prompt": str(pending_payload.get("direction_prompt") or pending_payload.get("selected_motion") or "")[:500],
         },
         "pending_payload": dict(pending_payload or {}),
         "video_tier": normalize_video_tier(tier),
@@ -82420,6 +83023,12 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
     old_token = str(state.get("pending_confirm_token") or "")
     if old_token:
         SHOPAIKEY_PENDING_CONFIRMATIONS.pop(old_token, None)
+        for key in VIDEO_PAID_PREVIEW_ARTIFACT_KEYS:
+            pending_payload.pop(key, None)
+        pending_payload.pop("paid_preview_seconds", None)
+        pending_payload.pop("preview_seconds", None)
+    pending_payload["paid_preview_seen"] = False
+    state["paid_preview_seen"] = False
 
     if state.get("source") == "frame":
         frame_state = get_frame_video_state(user_id)
@@ -82433,11 +83042,13 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
             "current_video_target_language": state.get("current_video_target_language") or "",
             "current_video_voice_style": state.get("current_video_voice_style") or "",
             "current_video_price_preview": pricing,
+            "paid_preview_seen": False,
             "step": "confirm",
         })
+        frame_state = invalidate_frame_video_paid_preview(frame_state)
         set_frame_video_state(user_id, frame_state)
         set_video_addon_state(user_id, state)
-        return await safe_edit_or_send(query, frame_video_confirm_text(frame_state, user_id), parse_mode="HTML", reply_markup=frame_video_confirm_keyboard())
+        return await safe_edit_or_send(query, frame_video_confirm_text(frame_state, user_id), parse_mode="HTML", reply_markup=frame_video_confirm_keyboard(frame_state))
 
     pending_payload.update({
         "base_cost": raw_total,
@@ -82450,9 +83061,12 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
         "dubbing_option": state.get("current_video_dubbing_option") or "none",
         "translation_enabled": bool(state.get("translation_enabled")),
         "target_language": state.get("current_video_target_language") or "",
+        "voice_choice": state.get("current_video_voice_choice") or "none",
         "voice_style": state.get("current_video_voice_style") or "",
-        "music_option": state.get("current_video_music_option") or "none",
+        "music_option": state.get("current_video_music_choice") or state.get("current_video_music_option") or "none",
+        "music_choice_key": state.get("current_video_music_choice") or state.get("current_video_music_option") or "none",
         "music_item_count": int(state.get("current_video_music_item_count") or 0),
+        "subtitle_dub_choice": state.get("current_video_subtitle_dub_choice") or "none",
         "video_project": dict(state.get("video_project") or {}),
         "video_price_preview": pricing,
         "video_order": order,
@@ -82535,6 +83149,21 @@ async def render_video_addon_screen(query, user_id, state: dict, target_screen: 
                 reply_markup=video_addon_confirm_keyboard(token, tier, lang),
             )
         return await finalize_video_addon_confirmation(query, user_id, state, lang)
+    if target == "preview":
+        token = str(state.get("pending_confirm_token") or "")
+        if not state.get("paid_preview_seen"):
+            return await safe_edit_or_send(
+                query,
+                video_paid_preview_unavailable_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_paid_preview_entry_keyboard(token, lang),
+            )
+        return await safe_edit_or_send(
+            query,
+            video_paid_preview_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_paid_preview_keyboard(token, lang),
+        )
     if target not in {"video_tier_detail", "tier"}:
         state = set_video_addon_screen(user_id, state, "video_addon_menu", push=False)
         return await safe_edit_or_send(
@@ -82609,6 +83238,34 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
     if action == "menu":
         state = set_video_addon_screen(uid, state, "video_addon_menu")
         return await render_video_addon_screen(query, uid, state, "video_addon_menu", lang)
+    if action == "preview":
+        token = parts[2] if len(parts) > 2 else str(state.get("pending_confirm_token") or "")
+        pending_payload = dict(state.get("pending_payload") or {})
+        if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
+            pending_payload = dict(SHOPAIKEY_PENDING_CONFIRMATIONS[token])
+        state["pending_payload"] = pending_payload
+        preview_sent = await send_video_paid_preview_artifact(context, query, state, lang)
+        if not preview_sent:
+            state["paid_preview_seen"] = False
+            state["pending_payload"] = {**pending_payload, "paid_preview_seen": False}
+            state = set_video_addon_screen(uid, state, "preview")
+            return await safe_edit_or_send(
+                query,
+                video_paid_preview_unavailable_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_paid_preview_entry_keyboard(token, lang),
+            )
+        if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
+            SHOPAIKEY_PENDING_CONFIRMATIONS[token]["paid_preview_seen"] = True
+        state["paid_preview_seen"] = True
+        state["pending_payload"] = {**pending_payload, "paid_preview_seen": True}
+        state = set_video_addon_screen(uid, state, "preview")
+        return await safe_edit_or_send(
+            query,
+            video_paid_preview_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_paid_preview_keyboard(token, lang),
+        )
     if action == "back":
         order = video_order_back_screen(video_order_from_state(state, uid), "video_addon_menu")
         state["video_order"] = order
@@ -82616,7 +83273,12 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         state = set_video_addon_state(uid, state)
         return await render_video_addon_screen(query, uid, state, target_screen, lang)
     if action == "none":
-        state.update({"current_video_subtitle_option": "none", "current_video_dubbing_option": "none", "translation_enabled": False})
+        state.update({
+            "current_video_subtitle_option": "none",
+            "current_video_dubbing_option": "none",
+            "current_video_subtitle_dub_choice": "none",
+            "translation_enabled": False,
+        })
         state["video_order"] = video_order_from_state(state, uid)
         return await finalize_video_addon_confirmation(query, uid, state, lang)
     tier = normalize_video_tier(state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier"))
@@ -82628,21 +83290,40 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
             reply_markup=video_experience_tier_lock_keyboard(lang),
         )
     if action == "subtitle":
-        state.update({"current_video_subtitle_option": "subtitle_original", "current_video_dubbing_option": "none", "translation_enabled": False})
+        state.update({
+            "current_video_subtitle_option": "subtitle_original",
+            "current_video_dubbing_option": "none",
+            "current_video_subtitle_dub_choice": "subtitle",
+            "translation_enabled": False,
+        })
         state["video_order"] = video_order_from_state(state, uid)
         return await finalize_video_addon_confirmation(query, uid, state, lang)
     if action == "dub":
-        state.update({"current_video_subtitle_option": "none", "current_video_dubbing_option": "dub_original", "translation_enabled": False})
+        state.update({
+            "current_video_subtitle_option": "none",
+            "current_video_dubbing_option": "dub_original",
+            "current_video_subtitle_dub_choice": "dubbing",
+            "current_video_voice_choice": "advanced_dubbing",
+            "translation_enabled": False,
+        })
         state = set_video_addon_screen(uid, state, "addon_voice")
         return await safe_edit_or_send(query, video_order_screen_text("voice", state, lang), parse_mode="HTML", reply_markup=video_addon_voice_keyboard(lang))
     if action == "combo":
-        state.update({"current_video_subtitle_option": "subtitle_original", "current_video_dubbing_option": "dub_original", "translation_enabled": False})
+        state.update({
+            "current_video_subtitle_option": "subtitle_original",
+            "current_video_dubbing_option": "dub_original",
+            "current_video_subtitle_dub_choice": "subtitle_plus_dubbing",
+            "current_video_voice_choice": "advanced_dubbing",
+            "translation_enabled": False,
+        })
         state = set_video_addon_screen(uid, state, "addon_voice")
         return await safe_edit_or_send(query, video_order_screen_text("voice", state, lang), parse_mode="HTML", reply_markup=video_addon_voice_keyboard(lang))
     if action in {"translate_sub", "translate_combo"}:
         state.update({
             "current_video_subtitle_option": "subtitle_translated",
             "current_video_dubbing_option": "dub_translated" if action == "translate_combo" else "none",
+            "current_video_subtitle_dub_choice": "subtitle_plus_dubbing" if action == "translate_combo" else "translate_subtitle",
+            "current_video_voice_choice": "advanced_dubbing" if action == "translate_combo" else state.get("current_video_voice_choice", "none"),
             "translation_enabled": True,
         })
         state = set_video_addon_screen(uid, state, "addon_language")
@@ -82657,6 +83338,11 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         return await finalize_video_addon_confirmation(query, uid, state, lang)
     if action == "voice" and len(parts) > 2:
         state["current_video_voice_style"] = parts[2] if parts[2] in {"female", "male", "auto"} else "auto"
+        state["current_video_voice_choice"] = {
+            "female": "default_female",
+            "male": "default_male",
+            "auto": "advanced_dubbing",
+        }.get(state["current_video_voice_style"], "advanced_dubbing")
         state["video_order"] = video_order_from_state(state, uid)
         return await finalize_video_addon_confirmation(query, uid, state, lang)
     return await safe_edit_or_send(query, ui_text(lang, "common.invalid_request"))
@@ -82764,7 +83450,7 @@ def calculate_named_addon_quote(addon_key: str, duration_seconds: int | float | 
         base = VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU
         extra_block_rate = VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU
     elif key in {"suno", "ai_music", "suno_music"}:
-        label = "Tạo nhạc AI Suno"
+        label = "Tạo nhạc AI"
         base = VIDEO_SUNO_MUSIC_XU
         extra_block_rate = 0
     elif key in {"sfx", "sfx_ai"}:
@@ -82780,7 +83466,7 @@ def calculate_named_addon_quote(addon_key: str, duration_seconds: int | float | 
         "premium_voice": ("Voice preset cao cấp", VIDEO_VOICE_PREMIUM_PRESET_XU),
         "clone_voice": ("Clone voice mới", VIDEO_VOICE_CLONE_CREATE_XU),
         "reuse_clone": ("Dùng lại voice clone", VIDEO_VOICE_CLONE_REUSE_XU),
-        "variation": ("Biến thể Suno", VIDEO_SUNO_VARIATION_XU),
+        "variation": ("Biến thể nhạc AI", VIDEO_SUNO_VARIATION_XU),
         "lyrics": ("Viết lyrics AI", VIDEO_LYRICS_AI_XU),
         "cut_loop": ("Cắt/loop nhạc", VIDEO_MUSIC_CUT_LOOP_XU),
     }
@@ -82821,7 +83507,7 @@ def named_addon_quote_lines(quote: dict) -> list[str]:
         f"Tổng: <b>{xu_number(quote.get('total_xu'))} Xu</b>",
         f"Tương đương: <b>{xu_number(quote.get('estimated_vnd'))}đ</b>",
         "",
-        "Preview only. Bot chưa gọi provider và chưa trừ Xu.",
+        "Preview only. TOAN AAS chưa xử lý bản đầy đủ và chưa trừ Xu.",
     ])
     return lines
 
@@ -86279,6 +86965,131 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
     if state.get("step") == "rendering" and action != "confirm":
         return await safe_edit_or_send(query, "Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.", parse_mode=None)
 
+    if action == "preview_check":
+        local_job_id = _safe_int(parts[2] if len(parts) > 2 else state.get("paid_preview_local_job_id"), 0)
+        job = get_local_worker_job(local_job_id) if local_job_id else {}
+        if not job:
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Không tìm thấy job preview. TOAN AAS chưa trừ Xu.",
+                parse_mode=None,
+                reply_markup=frame_video_preview_entry_keyboard(),
+            )
+        status = str(job.get("status") or "").lower()
+        if status == "succeeded" and str(job.get("output_file_id") or ""):
+            state["paid_preview_seen"] = True
+            state["paid_preview_seconds"] = frame_video_paid_preview_seconds(state)
+            state["paid_preview_video_file_id"] = str(job.get("output_file_id") or "")
+            state["step"] = "confirm"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                frame_video_preview_text(state, ready=True),
+                parse_mode="HTML",
+                reply_markup=frame_video_preview_ready_keyboard(),
+            )
+        if status in {"failed", "cancelled"}:
+            state = invalidate_frame_video_paid_preview(state)
+            state["step"] = "confirm"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Preview chưa tạo thành công. TOAN AAS chưa trừ Xu. Bạn có thể thử lại hoặc đổi cấu hình.",
+                parse_mode=None,
+                reply_markup=frame_video_preview_entry_keyboard(),
+            )
+        return await safe_edit_or_send(
+            query,
+            "▶️ Preview đang được xử lý. TOAN AAS chưa tạo bản đầy đủ và chưa trừ Xu final.",
+            parse_mode=None,
+            reply_markup=frame_video_preview_status_keyboard(local_job_id),
+        )
+
+    if action == "preview":
+        if len(state.get("photos") or []) < 2:
+            return await safe_edit_or_send(query, "⚠️ Cần ít nhất 2 ảnh để tạo preview. TOAN AAS chưa trừ Xu.", reply_markup=frame_video_collect_keyboard(), parse_mode=None)
+        existing_local_job_id = _safe_int(state.get("paid_preview_local_job_id"), 0)
+        if existing_local_job_id:
+            job = get_local_worker_job(existing_local_job_id)
+            if str((job or {}).get("status") or "").lower() in {"queued", "running"}:
+                return await safe_edit_or_send(
+                    query,
+                    "▶️ Preview đang được xử lý. TOAN AAS chưa tạo bản đầy đủ và chưa trừ Xu final.",
+                    parse_mode=None,
+                    reply_markup=frame_video_preview_status_keyboard(existing_local_job_id),
+                )
+        guard = frame_video_runtime_guard(state, uid)
+        if guard.get("action") == "worker_queue":
+            frame_job_id = create_frame_video_job(uid, query.message.chat_id, state, 0, "waiting_worker")
+            payload = frame_video_preview_worker_payload(frame_job_id, uid, query.message.chat_id, state)
+            try:
+                local_job_id = create_local_worker_job(
+                    user_id=str(uid),
+                    command="frame_video_paid_preview",
+                    job_type="frame_video_render",
+                    provider="local_ffmpeg",
+                    input_file_id=payload,
+                    xu_cost=0,
+                    admin_only=is_admin_user(uid),
+                )
+            except Exception as exc:
+                detail = sanitize_log_text(str(exc))[:220]
+                update_frame_video_job(frame_job_id, status="failed", detail=f"preview_queue:{detail}")
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Chưa tạo được preview an toàn. TOAN AAS chưa trừ Xu.",
+                    parse_mode=None,
+                    reply_markup=frame_video_preview_entry_keyboard(),
+                )
+            update_frame_video_job(frame_job_id, status="waiting_worker", detail=f"paid_preview_local_job:{local_job_id}")
+            state["paid_preview_seen"] = False
+            state["paid_preview_seconds"] = frame_video_paid_preview_seconds(state)
+            state["paid_preview_frame_job_id"] = frame_job_id
+            state["paid_preview_local_job_id"] = local_job_id
+            state["step"] = "preview_waiting"
+            set_frame_video_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                frame_video_preview_text(state, ready=False) + "\n\nPreview đang được gửi sang máy xử lý.",
+                parse_mode="HTML",
+                reply_markup=frame_video_preview_status_keyboard(local_job_id),
+            )
+        if not guard.get("ok"):
+            return await safe_edit_or_send(
+                query,
+                video_paid_preview_unavailable_text({"current_video_duration_seconds": frame_video_estimated_output_seconds(state)}, lang),
+                parse_mode="HTML",
+                reply_markup=frame_video_preview_entry_keyboard(),
+            )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "toan_aas_frame_preview.mp4")
+            ok, detail = await render_frame_video_preview_from_state(context, state, output_path, tmpdir)
+            if not ok or not os.path.exists(output_path):
+                logger.warning("frame paid preview failed | %s", sanitize_log_text(str(detail))[:220])
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Preview chưa tạo thành công. TOAN AAS chưa trừ Xu.",
+                    parse_mode=None,
+                    reply_markup=frame_video_preview_entry_keyboard(),
+                )
+            with open(output_path, "rb") as file_obj:
+                sent = await context.bot.send_video(
+                    chat_id=query.message.chat_id,
+                    video=file_obj,
+                    caption=f"▶️ Bản xem thử ngắn {frame_video_paid_preview_seconds(state)} giây. TOAN AAS chưa trừ Xu final.",
+                )
+        state["paid_preview_seen"] = True
+        state["paid_preview_seconds"] = frame_video_paid_preview_seconds(state)
+        state["paid_preview_video_file_id"] = str(getattr(getattr(sent, "video", None), "file_id", "") or "")
+        state["step"] = "confirm"
+        set_frame_video_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            frame_video_preview_text(state, ready=True),
+            parse_mode="HTML",
+            reply_markup=frame_video_preview_ready_keyboard(),
+        )
+
     if action == "mode_frame":
         photos = list(state.get("photos") or [])
         if len(photos) < 2:
@@ -86379,24 +87190,28 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_or_send(query, frame_video_ratio_text(state), parse_mode="HTML", reply_markup=frame_video_ratio_keyboard())
 
     if action == "ratio" and len(parts) > 2:
+        state = invalidate_frame_video_paid_preview(state)
         state["ratio"] = parts[2]
         state["step"] = "duration"
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_duration_text(state), parse_mode="HTML", reply_markup=frame_video_duration_keyboard())
 
     if action == "duration" and len(parts) > 2:
+        state = invalidate_frame_video_paid_preview(state)
         state["duration"] = parts[2]
         state["step"] = "effect"
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_effect_text(state), parse_mode="HTML", reply_markup=frame_video_effect_keyboard())
 
     if action == "effect" and len(parts) > 2:
+        state = invalidate_frame_video_paid_preview(state)
         state["effect"] = parts[2]
         state["step"] = "music"
         set_frame_video_state(uid, state)
         return await safe_edit_or_send(query, frame_video_music_text(state), parse_mode="HTML", reply_markup=frame_video_music_keyboard())
 
     if action == "music" and len(parts) > 2:
+        state = invalidate_frame_video_paid_preview(state)
         choice = str(parts[2] or "skip").strip().lower()
         if choice == "suggest":
             state["music_choice"] = "Vui tươi / năng động, sang trọng / nhẹ nhàng, hoặc công nghệ / hiện đại"
@@ -86441,6 +87256,13 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
     if action == "confirm":
         if len(state.get("photos") or []) < 2:
             return await safe_edit_or_send(query, "⚠️ Cần ít nhất 2 ảnh để ghép thành video. Bot chưa trừ Xu.", reply_markup=frame_video_collect_keyboard(), parse_mode=None)
+        if not state.get("paid_preview_seen") or not str(state.get("paid_preview_video_file_id") or ""):
+            return await safe_edit_or_send(
+                query,
+                frame_video_preview_text(state, ready=False),
+                parse_mode="HTML",
+                reply_markup=frame_video_preview_entry_keyboard(),
+            )
         addon_guard = video_addon_runtime_guard(state)
         if not addon_guard.get("ok"):
             return await safe_edit_or_send(

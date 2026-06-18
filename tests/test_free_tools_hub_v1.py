@@ -86,8 +86,8 @@ def test_main_menu_layout_regular_user():
 
     assert labels[0] == ["🆓 Công cụ miễn phí", "👤 Tài khoản"]
     assert labels[1] == ["🖼 Tạo ảnh AI", "🎬 Tạo video AI"]
-    assert all(len(row) == 2 for row in markup.inline_keyboard[:-1])
-    assert labels[-1] == ["🌐 Trung tâm"]
+    assert all(len(row) == 2 for row in markup.inline_keyboard)
+    assert labels[-1] == ["💬 Góp ý / Báo lỗi", "🌐 Trung tâm"]
     assert all("🔐 Admin" not in label for row in labels for label in row)
     assert "menu|main_video" in _callback_set(markup)
 
@@ -99,8 +99,8 @@ def test_main_menu_layout_admin():
     assert labels[0] == ["🆓 Công cụ miễn phí", "👤 Tài khoản"]
     assert labels[-1] == ["🔐 Admin"]
     assert len(markup.inline_keyboard[-1]) == 1
-    assert labels[-2] == ["🌐 Trung tâm"]
-    assert all(len(row) == 2 for row in markup.inline_keyboard[:-2])
+    assert labels[-2] == ["💬 Góp ý / Báo lỗi", "🌐 Trung tâm"]
+    assert all(len(row) == 2 for row in markup.inline_keyboard[:-1])
 
 
 def test_main_menu_callbacks_have_handlers():
@@ -115,8 +115,7 @@ def test_main_menu_callbacks_have_handlers():
         "menu|main_video",
         "menu|main_memory",
         "menu|translate",
-        "music_quick|showroom|voice_hub",
-        "music_quick|showroom|music_hub",
+        "music_quick|showroom|root",
         "pricing|main",
         "menu|main_guide",
         "menu|support",

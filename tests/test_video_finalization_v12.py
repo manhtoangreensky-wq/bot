@@ -117,24 +117,23 @@ def test_video_finalization_state_expires():
 def test_video_finalization_menu_has_distinct_music_voice_subtitle_and_combo_paths():
     callbacks = _callbacks(bot.video_finalization_menu_keyboard("vi"))
     assert {
-        "vfinal|music_library",
-        "vfinal|music_sfx",
-        "vfinal|voice_defaults",
-        "vfinal|my_media",
-        "vfinal|copy_prompt",
-        "vfinal|save",
+        "vfinal|voice",
+        "vfinal|music",
+        "vfinal|addon",
         "vfinal|tier",
-        "vfinal|review",
+        "vfinal|skip",
         "vfinal|back",
         "vfinal|main",
     }.issubset(callbacks)
-    assert "vfinal|subtitle" not in callbacks
+    assert "vfinal|music_library" not in callbacks
+    assert "vfinal|voice_defaults" not in callbacks
     assert "vfinal|combo" not in callbacks
 
-    subtitle_callbacks = _callbacks(bot.video_finalization_subtitle_keyboard("vi"))
-    assert "vfinal|subtitle_manual" in subtitle_callbacks
-    assert "vfinal|subtitle_asr" in subtitle_callbacks
-    assert not any("voice" in callback for callback in subtitle_callbacks)
+    addon_callbacks = _callbacks(bot.video_finalization_addon_keyboard("vi"))
+    assert "vfinal|subtitle" in addon_callbacks
+    assert "vfinal|translate_sub" in addon_callbacks
+    assert "vfinal|dub" in addon_callbacks
+    assert "vfinal|combo" in addon_callbacks
 
 
 def test_video_finalization_summary_and_guard_are_explicit(monkeypatch):
@@ -411,7 +410,8 @@ def test_video_result_keyboard_uses_clear_ai_action_label():
 def test_video_addon_confirm_keeps_finalization_back_context():
     markup = bot.video_addon_confirm_keyboard("tok123", "low", "vi")
     callbacks = _callbacks(markup)
-    assert "shopai|confirm|tok123" in callbacks
+    assert "videoaddon|preview|tok123" in callbacks
+    assert "shopai|confirm|tok123" not in callbacks
     assert "vfinal|tier" in callbacks
     assert "vfinal|music" not in callbacks
     assert "videoaddon|back" in callbacks

@@ -77,7 +77,7 @@ def test_self_scene_starts_with_source_video_gate():
         for button in row
     }
     assert "📎 Tôi sẽ gửi video" in labels
-    assert "✍️ Lập kế hoạch trước" in labels
+    assert "✍️ Lập kế hoạch trước" not in labels
     assert "selfscene|await_video" in callbacks
-    assert "selfscene|plan_without_video" in callbacks
+    assert "selfscene|plan_without_video" not in callbacks
     assert "chưa xử lý video và chưa trừ Xu" in bot.self_scene_upload_text("vi")

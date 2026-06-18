@@ -20,14 +20,13 @@ def test_main_menu_has_translation_button_and_public_rows_are_balanced():
         assert "menu|translate" in callbacks
         assert "back_lang" not in callbacks
         assert "menu|admin" not in callbacks
-        assert all(len(row) == 2 for row in public.inline_keyboard[:-1])
-        assert len(public.inline_keyboard[-1]) == 1
+        assert all(len(row) == 2 for row in public.inline_keyboard)
 
         admin = bot.localized_main_menu_keyboard(True, lang)
         assert admin.inline_keyboard[-1][0].callback_data == "menu|admin"
         assert len(admin.inline_keyboard[-1]) == 1
-        assert len(admin.inline_keyboard[-2]) == 1
-        assert all(len(row) == 2 for row in admin.inline_keyboard[:-2])
+        assert len(admin.inline_keyboard[-2]) == 2
+        assert all(len(row) == 2 for row in admin.inline_keyboard[:-1])
 
 
 def test_language_entry_is_in_account_and_translation_menu_opens():

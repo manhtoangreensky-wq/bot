@@ -208,7 +208,7 @@ def test_music_and_addon_keyboards_have_real_callbacks():
     assert {
         "vfinal|addon_none",
         "vfinal|subtitle",
-        "vfinal|voice",
+        "vfinal|dub",
         "vfinal|combo",
         "vfinal|translate_sub",
     }.issubset(addon_callbacks)

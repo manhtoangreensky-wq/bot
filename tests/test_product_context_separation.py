@@ -41,8 +41,7 @@ def test_product_context_callback_parser_is_explicit():
 def test_start_menu_routes_voice_music_translation_to_showroom():
     callbacks = _callbacks(bot.localized_main_menu_keyboard(False, "vi"))
 
-    assert "music_quick|showroom|voice_hub" in callbacks
-    assert "music_quick|showroom|music_hub" in callbacks
+    assert "music_quick|showroom|root" in callbacks
     assert "menu|translate" in callbacks
     assert "menu|main_music" not in callbacks
     assert not any(callback.startswith("vfinal|") or callback.startswith("videoaddon|") for callback in callbacks)
@@ -145,7 +144,7 @@ def test_video_addon_voice_choice_preserves_existing_video_draft(monkeypatch):
         async def answer(self, *args, **kwargs):
             return None
 
-    monkeypatch.setattr(bot, "video_finalization_continue_to_invoice_or_tier", fake_continue)
+    monkeypatch.setattr(bot, "video_finalization_return_after_addon", fake_continue)
 
     result = asyncio.run(bot.handle_music_quick_callback(
         SimpleNamespace(callback_query=FakeQuery(), effective_user=SimpleNamespace(id=user_id)),
@@ -201,7 +200,7 @@ def test_showroom_voice_choice_does_not_update_existing_video_draft():
     saved = bot.get_video_finalization_state(user_id)
 
     assert replies
-    assert "Chưa cập nhật video" in replies[-1]["text"]
+    assert "không gắn vào video hiện tại" in replies[-1]["text"]
     assert saved["source_video_file_id"] == "existing-video-file"
     assert saved["selected_video_tier"] == "standard"
     assert saved["current_video_duration_seconds"] == 42
@@ -219,7 +218,7 @@ def test_new_product_surfaces_do_not_leak_raw_provider_terms():
         bot.video_finalization_music_text({"selected_video_tier": "basic"}, "vi"),
         bot.video_addon_menu_text({"video_tier": "basic", "current_video_duration_seconds": 61}, "vi"),
     ]
-    bad_terms = ["api", "provider", "env", "traceback", "http", "raw error"]
+    bad_terms = ["api", "provider", "env", "traceback", "http", "raw error", "suno", "minimax", "key4u", "shopaikey"]
 
     for text in texts:
         lowered = text.lower()
