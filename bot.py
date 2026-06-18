@@ -43318,6 +43318,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
                 ("🧠 Ý tưởng video", "videoidea|start"),
                 ("🎥 Prompt / Chuyển động", "motion|start"),
                 ("🌐 Dịch/Lồng tiếng video", "videodub|start"),
+                ("🎵 Nhạc / Voice / SFX", "menu|main_music_video"),
                 ("🛠 Chỉnh sửa video local", "videoedit|menu"),
             ],
             lang,
@@ -43336,6 +43337,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧠 视频创意", "videoidea|start"),
             ("🎥 Prompt / 镜头运动", "motion|start"),
             ("🌐 视频翻译/配音", "videodub|start"),
+            ("🎵 音乐 / Voice / SFX", "menu|main_music_video"),
             ("🛠 本地视频编辑", "videoedit|menu"),
         ]
     else:
@@ -43351,6 +43353,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🧠 Video ideas", "videoidea|start"),
             ("🎥 Prompt / Motion", "motion|start"),
             ("🌐 Translate / Dub video", "videodub|start"),
+            ("🎵 Music / Voice / SFX", "menu|main_music_video"),
             ("🛠 Local video editor", "videoedit|menu"),
         ]
     return video_v6_keyboard(items, lang, back=(ui_text(lang, "common.back"), "menu|main"))
@@ -44182,9 +44185,9 @@ def video_self_scene_ai_text(lang: str = "vi") -> str:
             "This stage creates prompts/plans first, does not open bulk public video, and does not charge Xu."
         )
     return (
-        "🎥 <b>Tự quay & đổi cảnh AI — Đang phát triển</b>\n\n"
-        "Bạn có thể gửi ảnh/video của người, sản phẩm, vật phẩm hoặc thú cưng.\n"
-        "Bot sẽ giúp đổi bối cảnh, ánh sáng, phong cách và tạo prompt ảnh/video.\n\n"
+        "🎥 <b>Tự quay & đổi cảnh AI</b>\n\n"
+        "Hãy gửi video nguồn của người, sản phẩm, vật phẩm hoặc thú cưng.\n"
+        "TOAN AAS sẽ giữ chủ thể, gợi ý bối cảnh, chuyển động camera, nhạc/âm thanh và tạo prompt video theo từng bước.\n\n"
         "<b>Ví dụ ngữ cảnh:</b>\n"
         "1. Công nghệ tương lai\n"
         "2. Chiến tranh hành tinh / sci-fi battle\n"
@@ -44198,8 +44201,8 @@ def video_self_scene_ai_text(lang: str = "vi") -> str:
         "• Không làm méo mặt.\n"
         "• Không đổi logo/sản phẩm quá mức.\n"
         "• Người thật cần có quyền sử dụng hình ảnh/đồng ý.\n"
-        "• Giai đoạn này ưu tiên tạo prompt/kế hoạch trước, chưa mở public video hàng loạt.\n\n"
-        "Bot chưa gọi API và chưa trừ Xu."
+        "• Bạn luôn được xem kế hoạch và hóa đơn trước khi tạo video thật.\n\n"
+        "Mở màn hình này chưa xử lý video và chưa trừ Xu."
     )
 
 def video_long_script_text(lang: str = "vi", selected: str = "") -> str:
@@ -44239,6 +44242,142 @@ def video_long_script_text(lang: str = "vi", selected: str = "") -> str:
     )
 
 DEVELOPING_VIDEO_FLOWS = {"selfscene", "longvideo", "storypack", "videoidea", "promptvideo", "imagevideo", "videoref"}
+
+VIDEO_SESSION_TTL_SECONDS = 45 * 60
+VIDEO_SESSION_STACK_LIMIT = 16
+
+def video_value_present(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+def video_session_key(user_id) -> str:
+    return f"video_session:{user_id}"
+
+def default_video_session(user_id) -> dict:
+    now_ts = time.time()
+    return {
+        "pending_action": "video_session",
+        "user_id": str(user_id),
+        "entry_flow": "",
+        "current_flow": "",
+        "current_screen": "",
+        "screen_stack": [],
+        "draft": {},
+        "order": {},
+        "created_at_ts": now_ts,
+        "updated_at_ts": now_ts,
+        "expires_at_ts": now_ts + VIDEO_SESSION_TTL_SECONDS,
+    }
+
+def get_video_session(user_id) -> dict:
+    key = video_session_key(user_id)
+    session = USER_PENDING.get(key) or {}
+    if session.get("pending_action") != "video_session":
+        if session:
+            USER_PENDING.pop(key, None)
+        return default_video_session(user_id)
+    if float(session.get("expires_at_ts") or 0) < time.time():
+        USER_PENDING.pop(key, None)
+        return default_video_session(user_id)
+    base = default_video_session(user_id)
+    base.update(session)
+    base["draft"] = dict(base.get("draft") or {})
+    base["order"] = dict(base.get("order") or {})
+    base["screen_stack"] = [str(item) for item in (base.get("screen_stack") or []) if str(item or "").strip()][-VIDEO_SESSION_STACK_LIMIT:]
+    return base
+
+def save_video_session(user_id, session: dict) -> dict:
+    now_ts = time.time()
+    clean = default_video_session(user_id)
+    clean.update(dict(session or {}))
+    clean["pending_action"] = "video_session"
+    clean["user_id"] = str(user_id)
+    clean["draft"] = dict(clean.get("draft") or {})
+    clean["order"] = dict(clean.get("order") or {})
+    clean["screen_stack"] = [str(item) for item in (clean.get("screen_stack") or []) if str(item or "").strip()][-VIDEO_SESSION_STACK_LIMIT:]
+    clean.setdefault("created_at_ts", now_ts)
+    clean["updated_at_ts"] = now_ts
+    clean["expires_at_ts"] = now_ts + VIDEO_SESSION_TTL_SECONDS
+    USER_PENDING[video_session_key(user_id)] = clean
+    return clean
+
+def clear_video_session(user_id) -> bool:
+    return USER_PENDING.pop(video_session_key(user_id), None) is not None
+
+def push_video_screen(user_id, screen_id: str, flow: str | None = None) -> dict:
+    session = get_video_session(user_id)
+    screen = str(screen_id or "").strip()[:120]
+    if not screen:
+        return save_video_session(user_id, session)
+    if flow is not None:
+        flow_name = str(flow or "").strip()[:80]
+        if flow_name:
+            session.setdefault("entry_flow", flow_name)
+            if not session.get("entry_flow"):
+                session["entry_flow"] = flow_name
+            session["current_flow"] = flow_name
+    stack = [str(item) for item in (session.get("screen_stack") or []) if str(item or "").strip()]
+    current = str(session.get("current_screen") or "").strip()
+    if current and (not stack or stack[-1] != current):
+        stack.append(current)
+    if not stack or stack[-1] != screen:
+        stack.append(screen)
+    session["current_screen"] = screen
+    session["screen_stack"] = stack[-VIDEO_SESSION_STACK_LIMIT:]
+    return save_video_session(user_id, session)
+
+def go_video_screen(user_id, screen_id: str, flow: str | None = None, **draft_fields) -> dict:
+    session = push_video_screen(user_id, screen_id, flow)
+    if draft_fields:
+        draft = dict(session.get("draft") or {})
+        for key, value in draft_fields.items():
+            draft[str(key)[:80]] = value
+        session["draft"] = draft
+        session = save_video_session(user_id, session)
+    return session
+
+def pop_video_screen(user_id, fallback: str = "video_main") -> str:
+    session = get_video_session(user_id)
+    stack = [str(item) for item in (session.get("screen_stack") or []) if str(item or "").strip()]
+    current = str(session.get("current_screen") or "").strip()
+    if stack and current and stack[-1] == current:
+        stack.pop()
+    target = stack[-1] if stack else str(fallback or "video_main")
+    session["current_screen"] = target
+    session["screen_stack"] = stack or [target]
+    save_video_session(user_id, session)
+    return target
+
+def preserve_video_session_on_back(user_id) -> dict:
+    return get_video_session(user_id)
+
+def validate_video_flow_state(user_id, required_fields) -> dict:
+    session = get_video_session(user_id)
+    draft = dict(session.get("draft") or {})
+    missing = []
+    for field in required_fields or []:
+        parts = str(field or "").split(".")
+        cursor = draft if parts and parts[0] != "session" else session
+        if parts and parts[0] == "draft":
+            cursor = draft
+            parts = parts[1:]
+        elif parts and parts[0] == "session":
+            parts = parts[1:]
+        ok = True
+        for part in parts:
+            if isinstance(cursor, dict) and part in cursor and video_value_present(cursor.get(part)):
+                cursor = cursor.get(part)
+            else:
+                ok = False
+                break
+        if not ok:
+            missing.append(str(field))
+    return {"ok": not missing, "missing": missing, "session": session}
 
 def developing_video_pending_key(user_id) -> str:
     return f"developing_video:{user_id}"
@@ -44658,6 +44797,7 @@ def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> Non
             "input_type", "selected_topic", "selected_context", "selected_style",
             "selected_motion", "selected_prompt", "selected_music", "selected_output_plan",
             "duration", "structure", "goal", "topic_key", "direction",
+            "direction_code",
             "idea_kind", "product", "message", "context", "platform", "trend_type",
             "genre", "scene_context", "idea_choice", "product_type", "source_file_id",
             "source_file_name", "source_mime_type", "prompt_kind", "custom_prompt",
@@ -44673,6 +44813,21 @@ def set_developing_video_pending(user_id, flow: str, step: str, **fields) -> Non
         }:
             payload[key] = _short_pending_text(value)
     USER_PENDING[developing_video_pending_key(user_id)] = payload
+    try:
+        draft = {
+            key: payload.get(key)
+            for key in (
+                "flow", "step", "input_type", "selected_topic", "selected_context",
+                "selected_style", "selected_motion", "selected_prompt", "selected_music",
+                "source_file_id", "source_file_name", "source_mime_type",
+                "source_duration", "source_file_size", "preferred_aspect_ratio",
+                "preferred_duration_seconds", "language",
+            )
+            if video_value_present(payload.get(key))
+        }
+        go_video_screen(user_id, f"{flow}:{payload.get('step') or 'start'}", flow, **draft)
+    except Exception:
+        logger.debug("video session sync skipped for developing video pending", exc_info=True)
 
 def get_developing_video_pending(user_id) -> dict | None:
     key = developing_video_pending_key(user_id)
@@ -45928,7 +46083,7 @@ async def handle_self_scene_pending_upload(update: Update, context: ContextTypes
     set_developing_video_pending(
         uid,
         "selfscene",
-        "context",
+        "direction",
         input_type="video",
         selected_topic=self_scene_input_label("video", lang),
         source_file_id=info.get("file_id"),
@@ -45939,9 +46094,9 @@ async def handle_self_scene_pending_upload(update: Update, context: ContextTypes
     )
     state = get_developing_video_pending(uid) or {}
     await update.message.reply_text(
-        self_scene_context_text(state, lang),
+        self_scene_start_text(lang, state),
         parse_mode="HTML",
-        reply_markup=self_scene_context_keyboard(lang),
+        reply_markup=self_scene_input_keyboard(lang, state),
     )
     return True
 
@@ -46174,6 +46329,40 @@ def self_scene_context_suggestions(input_type: str, topic: str = "", lang: str =
         f"Cảnh ra mắt công nghệ tương lai cho {topic}",
     ]), offset, 3)
 
+def self_scene_upload_text(lang: str = "vi", has_recent: bool = False) -> str:
+    if normalize_user_language(lang) != "vi":
+        recent_line = "A recent video is available." if has_recent else "No recent video is available yet."
+        return (
+            "🎥 <b>Self-shot scene AI</b>\n\n"
+            "Send the source video you want to transform. After receiving it, TOAN AAS will guide you through three transformation directions, the subject to preserve, the new scene, camera motion, and music/sound.\n\n"
+            f"{recent_line}\n"
+            "You can also prepare a plan first without processing a video. Nothing is processed and no Xu is charged on this screen."
+        )
+    recent_line = "Đã có video gần nhất để bạn dùng tiếp." if has_recent else "Hiện chưa có video gần nhất trong phiên."
+    return (
+        "🎥 <b>Tự quay & đổi cảnh AI</b>\n\n"
+        "Hãy gửi video nguồn bạn muốn đổi cảnh. Sau khi nhận video, TOAN AAS sẽ hướng dẫn lần lượt:\n"
+        "1. Chọn 1 trong 3 hướng chuyển đổi\n"
+        "2. Chọn đối tượng cần giữ ổn định\n"
+        "3. Chọn bối cảnh mới\n"
+        "4. Chọn chuyển động camera\n"
+        "5. Chọn nhạc/âm thanh và xem lại kế hoạch\n\n"
+        f"{recent_line}\n"
+        "Bạn cũng có thể lập kế hoạch trước. Màn này chưa xử lý video và chưa trừ Xu."
+    )
+
+def self_scene_upload_keyboard(lang: str = "vi", has_recent: bool = False) -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    items = [("📎 Tôi sẽ gửi video" if is_vi else "📎 I will send a video", "selfscene|await_video")]
+    if has_recent:
+        items.append(("🎬 Dùng video gần nhất" if is_vi else "🎬 Use recent video", "selfscene|use_recent_video"))
+    items.append(("✍️ Lập kế hoạch trước" if is_vi else "✍️ Plan first", "selfscene|plan_without_video"))
+    return video_v6_keyboard(
+        items,
+        lang,
+        back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
+    )
+
 def self_scene_start_text(lang: str = "vi", state: dict | None = None) -> str:
     suggestions = self_scene_direction_suggestions(_safe_int((state or {}).get("style_offset"), 0), lang)
     if normalize_user_language(lang) != "vi":
@@ -46185,7 +46374,7 @@ def self_scene_start_text(lang: str = "vi", state: dict | None = None) -> str:
         ]
         for idx, item in enumerate(suggestions, 1):
             lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
-        lines.extend(["", "Planning only. No image/video provider call and no Xu deducted."])
+        lines.extend(["", "This step only prepares the plan. Nothing is processed and no Xu is charged."])
         return "\n".join(lines)
     lines = [
         "🎥 <b>Tự quay & đổi cảnh AI</b>",
@@ -46198,7 +46387,7 @@ def self_scene_start_text(lang: str = "vi", state: dict | None = None) -> str:
     ]
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
-    lines.extend(["", "Bước này chỉ tạo prompt/kế hoạch. Bot chưa gọi API ảnh/video và chưa trừ Xu."])
+    lines.extend(["", "Bước này chỉ chuẩn bị prompt/kế hoạch. TOAN AAS chưa xử lý video và chưa trừ Xu."])
     return "\n".join(lines)
 
 def self_scene_input_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
@@ -46213,7 +46402,7 @@ def self_scene_input_keyboard(lang: str = "vi", state: dict | None = None) -> In
             ("✍️ Nhập hướng riêng" if is_vi else "✍️ Custom direction", "selfscene|direction_custom"),
         ],
         lang,
-        back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"),
+        back=("🔙 Quay lại video nguồn" if is_vi else "🔙 Back to source video", "selfscene|back_upload"),
     )
 
 def self_scene_direction_custom_text(lang: str = "vi") -> str:
@@ -46244,7 +46433,7 @@ def self_scene_object_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("✍️ Nhập riêng" if is_vi else "✍️ Custom subject", "selfscene|object|custom"),
         ],
         lang,
-        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|start"),
+        back=("🔙 Quay lại" if is_vi else "🔙 Back", "selfscene|back_direction"),
     )
 
 def self_scene_describe_text(input_type: str, lang: str = "vi") -> str:
@@ -49354,7 +49543,61 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
     action = parts[1] if len(parts) > 1 else "start"
     if action == "start":
         clear_developing_video_pending(uid)
-        return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
+        recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
+        set_developing_video_pending(uid, "selfscene", "await_video", input_type="video")
+        go_video_screen(uid, "selfscene:upload", "selfscene")
+        return await safe_edit_query_message(
+            query,
+            self_scene_upload_text(lang, bool(recent.get("file_id"))),
+            reply_markup=self_scene_upload_keyboard(lang, bool(recent.get("file_id"))),
+        )
+    if action == "await_video":
+        recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
+        set_developing_video_pending(uid, "selfscene", "await_video", input_type="video")
+        return await safe_edit_query_message(
+            query,
+            self_scene_upload_text(lang, bool(recent.get("file_id"))),
+            reply_markup=self_scene_upload_keyboard(lang, bool(recent.get("file_id"))),
+        )
+    if action == "plan_without_video":
+        set_developing_video_pending(uid, "selfscene", "direction", input_type="custom")
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, self_scene_start_text(lang, state), reply_markup=self_scene_input_keyboard(lang, state))
+    if action == "use_recent_video":
+        recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
+        pending_source = get_developing_video_pending(uid) or {}
+        source = recent if recent.get("file_id") else pending_source
+        if not source.get("file_id") and not source.get("source_file_id"):
+            set_developing_video_pending(uid, "selfscene", "await_video", input_type="video")
+            return await safe_edit_query_message(
+                query,
+                self_scene_upload_text(lang, False),
+                reply_markup=self_scene_upload_keyboard(lang, False),
+            )
+        set_developing_video_pending(
+            uid,
+            "selfscene",
+            "direction",
+            input_type="video",
+            selected_topic=self_scene_input_label("video", lang),
+            source_file_id=source.get("file_id") or source.get("source_file_id"),
+            source_file_name=source.get("file_name") or source.get("source_file_name") or "self_scene_video.mp4",
+            source_mime_type=source.get("mime_type") or source.get("source_mime_type") or "video/mp4",
+            source_duration=source.get("duration") or source.get("source_duration") or 0,
+            source_file_size=source.get("file_size") or source.get("source_file_size") or 0,
+        )
+        state = get_developing_video_pending(uid) or {}
+        return await safe_edit_query_message(query, self_scene_start_text(lang, state), reply_markup=self_scene_input_keyboard(lang, state))
+    if action == "back_upload":
+        pending = get_developing_video_pending(uid) or {}
+        recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
+        has_source = bool(pending.get("source_file_id") or recent.get("file_id"))
+        pop_video_screen(uid, "selfscene:upload")
+        return await safe_edit_query_message(
+            query,
+            self_scene_upload_text(lang, has_source),
+            reply_markup=self_scene_upload_keyboard(lang, has_source),
+        )
     if action == "direction_refresh":
         current = get_developing_video_pending(uid) or {}
         offset = _safe_int(current.get("style_offset"), 0) + 3
@@ -49386,7 +49629,7 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             reply_markup=video_v6_keyboard(
                 [],
                 lang,
-                back=("⬅️ Quay lại hướng" if normalize_user_language(lang) == "vi" else "⬅️ Back to directions", "selfscene|start"),
+                back=("⬅️ Quay lại hướng" if normalize_user_language(lang) == "vi" else "⬅️ Back to directions", "selfscene|back_direction"),
             ),
         )
     if action in {"object", "input"}:
@@ -49432,6 +49675,17 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             ),
         )
     pending = get_developing_video_pending(uid)
+    if action == "back_direction":
+        if not pending:
+            recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
+            return await safe_edit_query_message(
+                query,
+                self_scene_upload_text(lang, bool(recent.get("file_id"))),
+                reply_markup=self_scene_upload_keyboard(lang, bool(recent.get("file_id"))),
+            )
+        restore_developing_video_pending(uid, "selfscene", pending, "direction")
+        state = get_developing_video_pending(uid) or pending
+        return await safe_edit_query_message(query, self_scene_start_text(lang, state), reply_markup=self_scene_input_keyboard(lang, state))
     if action == "back_object":
         if not pending:
             return await safe_edit_query_message(query, self_scene_start_text(lang), reply_markup=self_scene_input_keyboard(lang))
@@ -50682,6 +50936,8 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
     if action in {"main", "back"}:
         return localized_start_menu_text(user_id or "__customer__", lang), localized_main_menu_keyboard(is_admin, lang)
     if action == "main_video":
+        if user_id is not None:
+            go_video_screen(user_id, "video_main", "main_video")
         return menu_text_main_video_i18n(lang), main_video_keyboard(lang)
     if action == "main_ai":
         return menu_text_main_ai_i18n(lang), main_ai_keyboard(lang)
@@ -50699,6 +50955,10 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return menu_text_main_image_i18n(lang), main_image_keyboard(lang)
     if action == "main_music":
         return menu_text_main_music_i18n(lang), music_tools_keyboard(lang)
+    if action == "main_music_video":
+        if user_id is not None:
+            go_video_screen(user_id, "video_music_hub", "main_video")
+        return menu_text_main_music_i18n(lang), music_tools_keyboard(lang, back_callback="menu|main_video")
     if action == "main_audio":
         return menu_text_main_audio_i18n(lang), main_audio_keyboard(lang)
     if action == "translate":
@@ -50760,6 +51020,8 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_main_image(), main_image_keyboard()
     if action == "main_music":
         return menu_text_main_music(), music_tools_keyboard()
+    if action == "main_music_video":
+        return menu_text_main_music(), music_tools_keyboard(back_callback="menu|main_video")
     if action == "main_audio":
         return menu_text_main_audio(), main_audio_keyboard()
     if action == "translate":
@@ -52822,10 +53084,12 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=video_frame_intro_keyboard(lang),
         )
     if action.startswith("video_self_scene_ai"):
+        recent = get_recent_media_state(LAST_USER_VIDEO, query.from_user.id) or {}
+        set_developing_video_pending(query.from_user.id, "selfscene", "await_video", input_type="video")
         return await safe_edit_query_message(
             query,
-            self_scene_start_text(lang),
-            reply_markup=self_scene_input_keyboard(lang),
+            self_scene_upload_text(lang, bool(recent.get("file_id"))),
+            reply_markup=self_scene_upload_keyboard(lang, bool(recent.get("file_id"))),
         )
     if action == "video_long_script" or action.startswith("video_long_script_"):
         return await safe_edit_query_message(
@@ -63558,7 +63822,7 @@ def music_license_notice_text(lang: str) -> str:
         return "Public music/media sources have their own licenses. Check commercial rights, attribution and platform rules before posting ads or monetized content."
     return "Nhạc/kho public có license riêng từng nguồn. Kiểm tra quyền thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền."
 
-def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def music_tools_keyboard(lang: str = "vi", back_callback: str = "menu|main") -> InlineKeyboardMarkup:
     lang = music_ui_lang(lang=lang)
     if lang == "zh":
         labels = {
@@ -63633,7 +63897,7 @@ def music_tools_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(labels["policy"], callback_data="music_quick|policy"),
         ],
         [
-            InlineKeyboardButton(labels["back"], callback_data="menu|main"),
+            InlineKeyboardButton(labels["back"], callback_data=back_callback or "menu|main"),
             InlineKeyboardButton(labels["main"], callback_data="menu|main"),
         ],
     ])
@@ -79012,6 +79276,22 @@ def set_video_finalization_state(user_id, state: dict) -> dict:
     clean.setdefault("photos", [])
     clean.setdefault("source_payload", {})
     USER_PENDING[video_finalization_pending_key(user_id)] = clean
+    try:
+        session = go_video_screen(
+            user_id,
+            f"finalization:{clean.get('step') or 'menu'}",
+            str(clean.get("source") or "video_finalization"),
+        )
+        session["order"] = dict(clean.get("video_order") or session.get("order") or {})
+        session["draft"].update({
+            "finalization_source": str(clean.get("source") or "")[:80],
+            "finalization_step": str(clean.get("step") or "menu")[:80],
+            "selected_video_tier": str(clean.get("selected_video_tier") or "")[:40],
+            "selected_video_aspect_ratio": str(clean.get("selected_video_aspect_ratio") or "")[:20],
+        })
+        save_video_session(user_id, session)
+    except Exception:
+        logger.debug("video session sync skipped for finalization", exc_info=True)
     return clean
 
 def get_video_finalization_state(user_id) -> dict:
@@ -80008,6 +80288,59 @@ async def video_finalization_back_to_source(query, user_id, state: dict, lang: s
         reply_markup=main_video_keyboard(lang),
     )
 
+async def render_video_finalization_stack_target(query, user_id, state: dict, target_screen: str, lang: str = "vi"):
+    if not str(target_screen or "").startswith("finalization:"):
+        return False, None
+    step = str(target_screen).split(":", 1)[1].strip() or "menu"
+    state = dict(state or {})
+    state["step"] = step
+    set_video_finalization_state(user_id, state)
+    if step == "menu":
+        return True, await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
+    if step == "tier":
+        return True, await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+    if step in {"confirm", "review", "saved"}:
+        return True, await safe_edit_or_send(query, video_finalization_summary_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
+    if step == "music":
+        return True, await safe_edit_or_send(query, video_order_screen_text("music", state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
+    if step == "music_suggest":
+        return True, await safe_edit_or_send(query, video_finalization_music_suggestion_text(lang), parse_mode="HTML", reply_markup=video_finalization_music_suggestion_keyboard(lang))
+    if step in {"voice", "voice_language"}:
+        if step == "voice_language":
+            return True, await safe_edit_or_send(query, "🎙 <b>Chọn ngôn ngữ/giọng đọc</b>", parse_mode="HTML", reply_markup=video_finalization_voice_language_keyboard(lang))
+        return True, await safe_edit_or_send(query, video_order_screen_text("voice", state, lang), parse_mode="HTML", reply_markup=video_finalization_voice_keyboard(lang))
+    if step == "subtitle":
+        return True, await safe_edit_or_send(query, video_order_screen_text("subtitle_dub", state, lang), parse_mode="HTML", reply_markup=video_finalization_subtitle_keyboard(lang))
+    if step == "addon":
+        return True, await safe_edit_or_send(query, video_finalization_addon_text(lang), parse_mode="HTML", reply_markup=video_finalization_addon_keyboard(lang))
+    if step == "copy_prompt":
+        return True, await safe_edit_or_send(query, video_finalization_copy_prompt_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
+    if step == "ai_guard":
+        return True, await safe_edit_or_send(query, video_finalization_ai_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
+    if step == "local_guard":
+        return True, await safe_edit_or_send(query, video_finalization_local_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
+    if step == "await_music_upload":
+        text = "📎 Hãy gửi file nhạc/audio. Bot chỉ lưu file ID trong phiên, chưa ghép video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "📎 Send a music/audio file. It will only be saved in this session; no processing or Xu charge."
+        return True, await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
+    if step == "await_voice_upload":
+        text = "📎 Hãy gửi file voice/audio. Bot chỉ lưu file ID, chưa ghép video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "📎 Send a voice/audio file. It will only be saved; no processing or Xu charge."
+        return True, await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
+    if step == "await_voice_text":
+        text = "✍️ Hãy nhập nội dung cần đọc. Bot chưa gọi TTS và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "✍️ Enter the narration text. No TTS call or Xu charge yet."
+        return True, await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
+    if step == "await_subtitle_text":
+        text = "✍️ Hãy nhập nội dung phụ đề. Flow này chỉ lưu phụ đề, chưa xử lý video." if normalize_user_language(lang) == "vi" else "✍️ Enter subtitle text. This only saves subtitles; no video processing starts."
+        return True, await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
+    if step in {"combo_language", "combo_source"}:
+        if step == "combo_source":
+            return True, await safe_edit_or_send(query, "🌐 <b>Phụ đề + lồng tiếng</b>\n\nChọn nguồn nội dung để xử lý.", parse_mode="HTML", reply_markup=video_finalization_combo_source_keyboard(lang))
+        return True, await safe_edit_or_send(query, "🌐 <b>Phụ đề + lồng tiếng</b>\n\nChọn ngôn ngữ đích.", parse_mode="HTML", reply_markup=video_finalization_combo_language_keyboard(lang))
+    if step == "await_combo_language":
+        return True, await safe_edit_or_send(query, "✍️ Hãy nhập ngôn ngữ bạn muốn dùng.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
+    if step == "await_combo_text":
+        return True, await safe_edit_or_send(query, "✍️ Hãy nhập nội dung dùng chung cho phụ đề và lồng tiếng. TOAN AAS chưa xử lý video và chưa trừ Xu.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
+    return False, None
+
 async def handle_video_finalization_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -80024,6 +80357,10 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if not state:
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     if action == "back":
+        target_screen = pop_video_screen(uid, "")
+        handled, rendered = await render_video_finalization_stack_target(query, uid, state, target_screen, lang)
+        if handled:
+            return rendered
         current_step = str(state.get("step") or "")
         if current_step == "confirm":
             state["step"] = "tier"
@@ -80095,6 +80432,8 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_order_screen_text("music", state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
     if action == "music_library":
+        state["step"] = "music"
+        set_video_finalization_state(uid, state)
         return await safe_edit_or_send(
             query,
             "🎵 Kho nhạc nền đang được kiểm tra. Bạn có thể upload nhạc riêng hoặc chọn không dùng nhạc. TOAN AAS chưa xử lý audio và chưa trừ Xu."
@@ -80103,6 +80442,8 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             reply_markup=video_finalization_music_keyboard(lang),
         )
     if action == "music_sfx":
+        state["step"] = "music"
+        set_video_finalization_state(uid, state)
         return await safe_edit_or_send(
             query,
             "🔊 Kho SFX đang được kiểm tra. TOAN AAS chưa tải media, chưa xử lý audio và chưa trừ Xu."
@@ -80111,6 +80452,8 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             reply_markup=video_finalization_music_keyboard(lang),
         )
     if action == "music_ai":
+        state["step"] = "music"
+        set_video_finalization_state(uid, state)
         readiness = get_suno_music_readiness()
         if readiness.get("public_enabled"):
             update_video_finalization(
@@ -80135,6 +80478,8 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             reply_markup=video_finalization_music_keyboard(lang),
         )
     if action == "music_suggest":
+        state["step"] = "music_suggest"
+        set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_music_suggestion_text(lang), parse_mode="HTML", reply_markup=video_finalization_music_suggestion_keyboard(lang))
     if action == "music_use":
         update_video_finalization(uid, music_enabled=True, music_mode="suggested", music_prompt="cinematic/electronic background, subtle whoosh, low under narration")
@@ -80142,7 +80487,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if action == "music_upload":
         state["step"] = "await_music_upload"
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, "📎 Hãy gửi file nhạc/audio. Bot chỉ lưu file ID trong phiên, chưa ghép video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "📎 Send a music/audio file. It will only be saved in this session; no processing or Xu charge.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
+        return await safe_edit_or_send(query, "📎 Hãy gửi file nhạc/audio. Bot chỉ lưu file ID trong phiên, chưa ghép video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "📎 Send a music/audio file. It will only be saved in this session; no processing or Xu charge.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     if action == "music_none":
         update_video_finalization(uid, music_enabled=False, music_mode="none", music_prompt="", music_file_id="")
         return await video_finalization_continue_to_invoice_or_tier(query, uid, get_video_finalization_state(uid), lang)
@@ -80166,11 +80511,11 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if action == "voice_text":
         state["step"] = "await_voice_text"
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, "✍️ Hãy nhập nội dung cần đọc. Bot chưa gọi TTS và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "✍️ Enter the narration text. No TTS call or Xu charge yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|voice")]]))
+        return await safe_edit_or_send(query, "✍️ Hãy nhập nội dung cần đọc. Bot chưa gọi TTS và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "✍️ Enter the narration text. No TTS call or Xu charge yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     if action == "voice_upload":
         state["step"] = "await_voice_upload"
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, "📎 Hãy gửi file voice/audio. Bot chỉ lưu file ID, chưa ghép video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "📎 Send a voice/audio file. It will only be saved; no processing or Xu charge.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|voice")]]))
+        return await safe_edit_or_send(query, "📎 Hãy gửi file voice/audio. Bot chỉ lưu file ID, chưa ghép video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "📎 Send a voice/audio file. It will only be saved; no processing or Xu charge.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     if action == "voice_script":
         script = str((state.get("session_context") or {}).get("script") or "").strip()
         if not script:
@@ -80195,7 +80540,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if action == "subtitle_manual":
         state["step"] = "await_subtitle_text"
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, "✍️ Hãy nhập nội dung phụ đề. Flow này chỉ lưu phụ đề, chưa xử lý video.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|subtitle")]]))
+        return await safe_edit_or_send(query, "✍️ Hãy nhập nội dung phụ đề. Flow này chỉ lưu phụ đề, chưa xử lý video.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     if action == "subtitle_script":
         script = str((state.get("session_context") or {}).get("script") or "").strip()
         if not script:
@@ -80242,11 +80587,11 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if action == "combo_lang_custom":
         state["step"] = "await_combo_language"
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, "✍️ Hãy nhập ngôn ngữ bạn muốn dùng.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|combo")]]))
+        return await safe_edit_or_send(query, "✍️ Hãy nhập ngôn ngữ bạn muốn dùng.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     if action == "combo_input":
         state["step"] = "await_combo_text"
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, "✍️ Hãy nhập nội dung dùng chung cho phụ đề và lồng tiếng. TOAN AAS chưa xử lý video và chưa trừ Xu.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|combo")]]))
+        return await safe_edit_or_send(query, "✍️ Hãy nhập nội dung dùng chung cho phụ đề và lồng tiếng. TOAN AAS chưa xử lý video và chưa trừ Xu.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")]]))
     if action == "combo_script":
         script = str((state.get("session_context") or {}).get("script") or "").strip()
         if not script:
@@ -80280,10 +80625,16 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_summary_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
     if action == "ai_guard":
+        state["step"] = "ai_guard"
+        set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_ai_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
     if action == "local_guard":
+        state["step"] = "local_guard"
+        set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_local_guard_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_guard_keyboard(state, lang))
     if action == "copy_prompt":
+        state["step"] = "copy_prompt"
+        set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_copy_prompt_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
     if action == "strip_addons":
         state["video_finalization"] = video_finalization_defaults()
@@ -80353,6 +80704,9 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="manual", subtitle_text=text, subtitle_burn_in=True)
         lang = get_user_language(uid) or "vi"
         current = get_video_finalization_state(uid)
+        current["step"] = "review"
+        set_video_finalization_state(uid, current)
+        current = get_video_finalization_state(uid)
         await update.message.reply_text(video_finalization_summary_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(current, lang))
         return True
     if step == "await_combo_language":
@@ -80376,6 +80730,9 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
             subtitle_dub_enabled=True,
         )
         lang = get_user_language(uid) or "vi"
+        current = get_video_finalization_state(uid)
+        current["step"] = "review"
+        set_video_finalization_state(uid, current)
         current = get_video_finalization_state(uid)
         await update.message.reply_text(video_finalization_summary_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(current, lang))
         return True
@@ -80434,7 +80791,29 @@ def set_video_addon_state(user_id, state: dict) -> dict:
     order = video_order_from_state(clean, user_id)
     clean["video_order"] = order
     USER_PENDING[video_addon_pending_key(user_id)] = clean
+    session = go_video_screen(
+        user_id,
+        f"videoaddon:{str(order.get('current_screen') or 'video_addon_menu')}",
+        "video_finalization",
+    )
+    session["order"] = dict(order)
+    session["draft"] = {
+        **dict(session.get("draft") or {}),
+        "video_tier": clean.get("video_tier"),
+        "subtitle_option": clean.get("current_video_subtitle_option"),
+        "dubbing_option": clean.get("current_video_dubbing_option"),
+        "target_language": clean.get("current_video_target_language"),
+        "voice_style": clean.get("current_video_voice_style"),
+    }
+    save_video_session(user_id, session)
     return clean
+
+def set_video_addon_screen(user_id, state: dict, screen: str, push: bool = True) -> dict:
+    clean = dict(state or {})
+    order = video_order_from_state(clean, user_id)
+    order = video_order_push_screen(order, screen) if push else {**order, "current_screen": str(screen)}
+    clean["video_order"] = order
+    return set_video_addon_state(user_id, clean)
 
 def get_video_addon_state(user_id) -> dict:
     key = video_addon_pending_key(user_id)
@@ -80568,7 +80947,7 @@ def video_addon_language_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="videoaddon|lang|vi"), InlineKeyboardButton("🇬🇧 English", callback_data="videoaddon|lang|en")],
         [InlineKeyboardButton("🇯🇵 日本語", callback_data="videoaddon|lang|ja"), InlineKeyboardButton("🇰🇷 한국어", callback_data="videoaddon|lang|ko")],
-        [InlineKeyboardButton("🇨🇳 中文", callback_data="videoaddon|lang|zh"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu")],
+        [InlineKeyboardButton("🇨🇳 中文", callback_data="videoaddon|lang|zh"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
@@ -80576,7 +80955,7 @@ def video_addon_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👩 Giọng nữ" if is_vi else "👩 Female", callback_data="videoaddon|voice|female"), InlineKeyboardButton("👨 Giọng nam" if is_vi else "👨 Male", callback_data="videoaddon|voice|male")],
-        [InlineKeyboardButton("✨ Tự chọn phù hợp" if is_vi else "✨ Auto select", callback_data="videoaddon|voice|auto"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu")],
+        [InlineKeyboardButton("✨ Tự chọn phù hợp" if is_vi else "✨ Auto select", callback_data="videoaddon|voice|auto"), InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
@@ -80714,12 +81093,12 @@ def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> Inl
                 InlineKeyboardButton("⬆️ Đổi lên 300 Xu" if is_vi else "⬆️ Upgrade 300 Xu", callback_data="vfinal|tier|basic"),
                 InlineKeyboardButton("⚙️ Chọn gói khác" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier"),
             ],
-            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận xuất video" if is_vi else "✅ Confirm video export", callback_data=f"shopai|confirm|{token}"), InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier")],
         [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|menu"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
 def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -80917,7 +81296,7 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
             parse_mode="HTML",
             reply_markup=video_experience_tier_lock_keyboard(lang),
         )
-    order = video_order_from_state(state, user_id)
+    order = video_order_push_screen(video_order_from_state(state, user_id), "invoice")
     if tier in VIDEO_ORDER_COMING_SOON_TIERS or not order.get("billable"):
         set_video_addon_state(user_id, state)
         return await safe_edit_or_send(
@@ -81045,6 +81424,95 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
         markup = package_use_choice_keyboard("video", token, tier, lang)
     return await safe_edit_or_send(query, invoice, parse_mode="HTML", reply_markup=markup)
 
+async def render_video_addon_screen(query, user_id, state: dict, target_screen: str, lang: str = "vi"):
+    target = str(target_screen or "video_addon_menu")
+    if target == "video_addon_menu":
+        return await safe_edit_or_send(
+            query,
+            video_addon_menu_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_addon_menu_keyboard(lang, state),
+        )
+    if target == "addon_voice":
+        return await safe_edit_or_send(
+            query,
+            video_order_screen_text("voice", state, lang),
+            parse_mode="HTML",
+            reply_markup=video_addon_voice_keyboard(lang),
+        )
+    if target == "addon_language":
+        return await safe_edit_or_send(
+            query,
+            "🌐 Chọn ngôn ngữ đích. TOAN AAS chỉ lưu lựa chọn ở bước này, chưa xử lý video và chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=video_addon_language_keyboard(lang),
+        )
+    if target == "invoice":
+        token = str(state.get("pending_confirm_token") or "")
+        if token:
+            tier = normalize_video_tier(state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier"))
+            return await safe_edit_or_send(
+                query,
+                video_price_invoice_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_addon_confirm_keyboard(token, tier, lang),
+            )
+        return await finalize_video_addon_confirmation(query, user_id, state, lang)
+    if target not in {"video_tier_detail", "tier"}:
+        state = set_video_addon_screen(user_id, state, "video_addon_menu", push=False)
+        return await safe_edit_or_send(
+            query,
+            video_addon_menu_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_addon_menu_keyboard(lang, state),
+        )
+    if state.get("source") == "frame":
+        frame_state = get_frame_video_state(user_id)
+        if frame_state:
+            frame_state["step"] = "music"
+            set_frame_video_state(user_id, frame_state)
+            return await safe_edit_or_send(
+                query,
+                frame_video_music_text(frame_state),
+                parse_mode="HTML",
+                reply_markup=frame_video_music_keyboard(),
+            )
+    vfinal_state = get_video_finalization_state(user_id)
+    if vfinal_state:
+        pending = dict(state.get("pending_payload") or {})
+        vfinal_state["step"] = "tier"
+        if pending:
+            vfinal_state["source_payload"] = pending
+            vfinal_state["selected_video_tier"] = normalize_video_tier(
+                pending.get("video_tier") or state.get("video_tier") or vfinal_state.get("selected_video_tier")
+            )
+            if pending.get("aspect_ratio"):
+                vfinal_state["selected_video_aspect_ratio"] = normalize_media_aspect_ratio(
+                    str(pending.get("aspect_ratio")),
+                    "9:16",
+                    "video",
+                )
+        set_video_finalization_state(user_id, vfinal_state)
+        clear_video_addon_state(user_id)
+        return await safe_edit_or_send(
+            query,
+            video_finalization_tier_text(vfinal_state, lang),
+            parse_mode="HTML",
+            reply_markup=video_finalization_tier_keyboard(lang),
+        )
+    pending = dict(state.get("pending_payload") or {})
+    tier = normalize_video_tier(state.get("video_tier") or pending.get("video_tier"))
+    prompt = str(pending.get("original_prompt") or pending.get("prompt") or "")
+    package = dict(pending.get("package") or {})
+    clear_video_addon_state(user_id)
+    set_media_aspect_pending(user_id, "video", tier, prompt, package)
+    return await safe_edit_or_send(
+        query,
+        public_media_aspect_ratio_text("video", tier, prompt, lang),
+        parse_mode="HTML",
+        reply_markup=public_media_aspect_ratio_keyboard("video", lang),
+    )
+
 async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -81060,48 +81528,14 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
     if not state:
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     if action == "menu":
-        order = video_order_push_screen(video_order_from_state(state, uid), "video_addon_menu")
-        state["video_order"] = order
-        set_video_addon_state(uid, state)
-        return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang, state))
+        state = set_video_addon_screen(uid, state, "video_addon_menu")
+        return await render_video_addon_screen(query, uid, state, "video_addon_menu", lang)
     if action == "back":
         order = video_order_back_screen(video_order_from_state(state, uid), "video_addon_menu")
         state["video_order"] = order
         target_screen = str(order.get("current_screen") or "video_addon_menu")
-        set_video_addon_state(uid, state)
-        if target_screen == "video_addon_menu":
-            return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang, state))
-        if target_screen == "addon_voice":
-            return await safe_edit_or_send(query, video_order_screen_text("voice", state, lang), parse_mode="HTML", reply_markup=video_addon_voice_keyboard(lang))
-        if target_screen == "addon_language":
-            return await safe_edit_or_send(query, "🌐 Chọn ngôn ngữ đích. TOAN AAS chỉ lưu lựa chọn ở bước này, chưa xử lý video và chưa trừ Xu.", parse_mode=None, reply_markup=video_addon_language_keyboard(lang))
-        if target_screen not in {"video_tier_detail", "tier"}:
-            return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang, state))
-        if state.get("source") == "frame":
-            frame_state = get_frame_video_state(uid)
-            if frame_state:
-                frame_state["step"] = "music"
-                set_frame_video_state(uid, frame_state)
-                return await safe_edit_or_send(query, frame_video_music_text(frame_state), parse_mode="HTML", reply_markup=frame_video_music_keyboard())
-        vfinal_state = get_video_finalization_state(uid)
-        if vfinal_state:
-            pending = dict(state.get("pending_payload") or {})
-            vfinal_state["step"] = "tier"
-            if pending:
-                vfinal_state["source_payload"] = pending
-                vfinal_state["selected_video_tier"] = normalize_video_tier(pending.get("video_tier") or state.get("video_tier") or vfinal_state.get("selected_video_tier"))
-                if pending.get("aspect_ratio"):
-                    vfinal_state["selected_video_aspect_ratio"] = normalize_media_aspect_ratio(str(pending.get("aspect_ratio")), "9:16", "video")
-            set_video_finalization_state(uid, vfinal_state)
-            clear_video_addon_state(uid)
-            return await safe_edit_or_send(query, video_finalization_tier_text(vfinal_state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
-        pending = dict(state.get("pending_payload") or {})
-        tier = normalize_video_tier(state.get("video_tier") or pending.get("video_tier"))
-        prompt = str(pending.get("original_prompt") or pending.get("prompt") or "")
-        package = dict(pending.get("package") or {})
-        clear_video_addon_state(uid)
-        set_media_aspect_pending(uid, "video", tier, prompt, package)
-        return await safe_edit_or_send(query, public_media_aspect_ratio_text("video", tier, prompt, lang), parse_mode="HTML", reply_markup=public_media_aspect_ratio_keyboard("video", lang))
+        state = set_video_addon_state(uid, state)
+        return await render_video_addon_screen(query, uid, state, target_screen, lang)
     if action == "none":
         state.update({"current_video_subtitle_option": "none", "current_video_dubbing_option": "none", "translation_enabled": False})
         state["video_order"] = video_order_from_state(state, uid)
@@ -81120,13 +81554,11 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         return await finalize_video_addon_confirmation(query, uid, state, lang)
     if action == "dub":
         state.update({"current_video_subtitle_option": "none", "current_video_dubbing_option": "dub_original", "translation_enabled": False})
-        state["video_order"] = video_order_push_screen(video_order_from_state(state, uid), "addon_voice")
-        set_video_addon_state(uid, state)
+        state = set_video_addon_screen(uid, state, "addon_voice")
         return await safe_edit_or_send(query, video_order_screen_text("voice", state, lang), parse_mode="HTML", reply_markup=video_addon_voice_keyboard(lang))
     if action == "combo":
         state.update({"current_video_subtitle_option": "subtitle_original", "current_video_dubbing_option": "dub_original", "translation_enabled": False})
-        state["video_order"] = video_order_push_screen(video_order_from_state(state, uid), "addon_voice")
-        set_video_addon_state(uid, state)
+        state = set_video_addon_screen(uid, state, "addon_voice")
         return await safe_edit_or_send(query, video_order_screen_text("voice", state, lang), parse_mode="HTML", reply_markup=video_addon_voice_keyboard(lang))
     if action in {"translate_sub", "translate_combo"}:
         state.update({
@@ -81134,16 +81566,14 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
             "current_video_dubbing_option": "dub_translated" if action == "translate_combo" else "none",
             "translation_enabled": True,
         })
-        state["video_order"] = video_order_push_screen(video_order_from_state(state, uid), "addon_language")
-        set_video_addon_state(uid, state)
+        state = set_video_addon_screen(uid, state, "addon_language")
         return await safe_edit_or_send(query, "🌐 Chọn ngôn ngữ đích. TOAN AAS chỉ lưu lựa chọn ở bước này, chưa xử lý video và chưa trừ Xu.", parse_mode=None, reply_markup=video_addon_language_keyboard(lang))
     if action == "lang" and len(parts) > 2:
         state["current_video_target_language"] = re.sub(r"[^a-z]", "", parts[2].lower())[:5]
         set_video_addon_state(uid, state)
         if str(state.get("current_video_dubbing_option") or "none") not in {"", "none"}:
             state = get_video_addon_state(uid)
-            state["video_order"] = video_order_push_screen(video_order_from_state(state, uid), "addon_voice")
-            set_video_addon_state(uid, state)
+            state = set_video_addon_screen(uid, state, "addon_voice")
             return await safe_edit_or_send(query, video_order_screen_text("voice", state, lang), parse_mode="HTML", reply_markup=video_addon_voice_keyboard(lang))
         return await finalize_video_addon_confirmation(query, uid, state, lang)
     if action == "voice" and len(parts) > 2:

@@ -2,9 +2,11 @@
 *.env
 __pycache__/
 .pytest_cache/
+.pytest_cache*/
 .pytest_tmp/
 .pytest_tmp*/
 .tmp_pytest/
+.tmp_pytest*/
 .tmp_pytest_cache/
 *.py[cod]
 toandaas_system.db

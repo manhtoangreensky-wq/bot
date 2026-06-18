@@ -2513,6 +2513,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🧠 Ý tưởng video",
         "🎥 Prompt / Chuyển động",
         "🌐 Dịch/Lồng tiếng video",
+        "🎵 Nhạc / Voice / SFX",
         "🛠 Chỉnh sửa video local",
         "🔙 Quay lại",
         "🏠 Menu chính",
@@ -2537,8 +2538,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "📷 Bắt đầu ghép ảnh" in frame_intro_labels
     assert "Local Worker + ffmpeg" in bot.video_frame_intro_text("vi")
     assert "Không dùng VEO" in bot.video_frame_intro_text("vi")
-    assert "Đang phát triển" in bot.video_self_scene_ai_text("vi")
-    assert "Bot chưa gọi API và chưa trừ Xu" in bot.video_self_scene_ai_text("vi")
+    assert "Tự quay & đổi cảnh AI" in bot.video_self_scene_ai_text("vi")
+    assert "Mở màn hình này chưa xử lý video và chưa trừ Xu" in bot.video_self_scene_ai_text("vi")
     self_scene_labels = [button.text for row in bot.self_scene_input_keyboard("vi").inline_keyboard for button in row]
     assert "1️⃣ Chọn hướng 1" in self_scene_labels
     assert "2️⃣ Chọn hướng 2" in self_scene_labels
@@ -7079,6 +7080,7 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
     assert "Storyboard điện ảnh" in cinema_storyboard["text"]
 
     asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|start", uid))
+    asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|plan_without_video", uid))
     asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|direction_choice|1", uid))
     asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|object|product", uid))
     asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|context|1", uid))

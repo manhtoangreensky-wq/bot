@@ -411,8 +411,67 @@ def test_video_addon_confirm_keeps_finalization_back_context():
     assert "shopai|confirm|tok123" in callbacks
     assert "vfinal|tier" in callbacks
     assert "vfinal|music" not in callbacks
-    assert "videoaddon|menu" in callbacks
+    assert "videoaddon|back" in callbacks
     assert "create_media|quick_video" not in callbacks
+
+
+def test_video_addon_language_and_voice_back_use_screen_stack():
+    language_callbacks = _callbacks(bot.video_addon_language_keyboard("vi"))
+    voice_callbacks = _callbacks(bot.video_addon_voice_keyboard("vi"))
+    assert "videoaddon|back" in language_callbacks
+    assert "videoaddon|back" in voice_callbacks
+    assert "videoaddon|menu" not in language_callbacks
+    assert "videoaddon|menu" not in voice_callbacks
+
+
+def test_video_addon_invoice_back_returns_exact_previous_screen(monkeypatch):
+    user_id = 991213
+    bot.clear_video_addon_state(user_id)
+    bot.clear_video_session(user_id)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "get_user", lambda _uid: (5000, None, None))
+    monkeypatch.setattr(bot, "record_shopaikey_billing_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "set_shopaikey_pending_confirmation", lambda *_args, **_kwargs: "token-back-test")
+    monkeypatch.setattr(bot, "active_package_item_for_user", lambda *_args, **_kwargs: None)
+
+    state = bot.set_video_addon_state(user_id, {
+        "source": "ai",
+        "video_tier": "basic",
+        "pending_payload": {
+            "video_tier": "basic",
+            "video_prompt": "Prompt video ready",
+            "video_finalization_confirmed": True,
+        },
+    })
+    state = bot.set_video_addon_screen(user_id, state, "addon_voice")
+    state["current_video_dubbing_option"] = "dub_original"
+    state["current_video_voice_style"] = "female"
+
+    class FakeQuery:
+        data = "videoaddon|back"
+        from_user = SimpleNamespace(id=user_id)
+        message = SimpleNamespace(chat_id=user_id)
+        edited = None
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+        async def edit_message_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
+            self.edited = {"text": str(text), "parse_mode": parse_mode, "reply_markup": reply_markup}
+            return self.edited
+
+    query = FakeQuery()
+    asyncio.run(bot.finalize_video_addon_confirmation(query, user_id, state, "vi"))
+    saved = bot.get_video_addon_state(user_id)
+    assert saved["video_order"]["current_screen"] == "invoice"
+    assert saved["video_order"]["screen_stack"][-2:] == ["addon_voice", "invoice"]
+
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert "Voice / lồng tiếng" in query.edited["text"]
+    saved = bot.get_video_addon_state(user_id)
+    assert saved["video_order"]["current_screen"] == "addon_voice"
+    bot.clear_video_addon_state(user_id)
+    bot.clear_video_session(user_id)
 
 
 def test_video_addon_back_returns_to_existing_finalization_tier(monkeypatch):
