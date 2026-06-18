@@ -477,6 +477,11 @@ MINIMAX_VOICE_LIST_ENDPOINT = _env("MINIMAX_VOICE_LIST_ENDPOINT", "/tts/minimax/
 MINIMAX_ADMIN_SMOKE_ENABLED = env_flag("MINIMAX_ADMIN_SMOKE_ENABLED", "true")
 MINIMAX_VOICE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_PUBLIC_ENABLED", "false")
 MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_CLONE_PUBLIC_ENABLED", "false")
+VOICE_PREVIEW_FREE_PER_DAY = max(0, env_int("VOICE_PREVIEW_FREE_PER_DAY", 3))
+VOICE_PREVIEW_COOLDOWN_SECONDS = max(0, env_int("VOICE_PREVIEW_COOLDOWN_SECONDS", 45))
+VOICE_PREVIEW_MAX_CHARACTERS = max(40, min(160, env_int("VOICE_PREVIEW_MAX_CHARACTERS", 96)))
+VOICE_PREVIEW_MAX_WORDS = max(8, min(24, env_int("VOICE_PREVIEW_MAX_WORDS", 16)))
+VOICE_PREVIEW_MAX_SECONDS = max(2, min(6, env_int("VOICE_PREVIEW_MAX_SECONDS", 6)))
 MINIMAX_REQUIRE_SMOKE_PASS = env_flag("MINIMAX_REQUIRE_SMOKE_PASS", "true")
 WOKU_ENABLED = env_flag("WOKU_ENABLED", _env("WOKUSHOP_ENABLED", "false"))
 WOKU_PUBLIC_ENABLED = env_flag("WOKU_PUBLIC_ENABLED", _env("WOKUSHOP_PUBLIC_ENABLED", "false"))
@@ -32021,6 +32026,7 @@ LOCAL_WORKER_JOB_TYPES = {
     "ffmpeg_health",
     "ffmpeg_probe",
     "frame_video_render",
+    "paid_video_preview",
     "video_local_edit",
     "add_music_to_video_planned",
     "add_voice_to_video_planned",
@@ -32228,6 +32234,42 @@ def handle_frame_video_worker_job_update(previous_job: dict, updated_job: dict) 
             update_frame_video_job(frame_job_id, status="failed", detail=f"worker_failed:{reason}")
         set_frame_video_last_error(f"worker_failed:{reason}")
         save_tool_test_result("frame_video", "FAIL", f"local worker render failed:{reason}", user_id)
+
+def handle_paid_video_preview_worker_job_update(previous_job: dict, updated_job: dict) -> None:
+    if not updated_job or str(updated_job.get("job_type") or "") != "paid_video_preview":
+        return
+    previous_status = str((previous_job or {}).get("status") or "").lower()
+    status = str(updated_job.get("status") or "").lower()
+    if previous_status in {"succeeded", "failed", "cancelled"}:
+        return
+    try:
+        payload = json.loads(str(updated_job.get("input_file_id") or "") or "{}")
+    except Exception:
+        payload = {}
+    user_id = str(payload.get("user_id") or updated_job.get("user_id") or "")
+    token = str(payload.get("confirm_token") or "")
+    if not user_id:
+        return
+    state = get_video_addon_state(user_id) or {}
+    active_token = str(state.get("pending_confirm_token") or "")
+    if token and active_token and token != active_token:
+        return
+    if token and token not in SHOPAIKEY_PENDING_CONFIRMATIONS and token != active_token:
+        return
+    pending_payload = dict(state.get("pending_payload") or SHOPAIKEY_PENDING_CONFIRMATIONS.get(token) or {})
+    if status == "succeeded" and str(updated_job.get("output_file_id") or ""):
+        state, pending_payload = apply_video_paid_preview_job_result(state, pending_payload, updated_job)
+        if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
+            SHOPAIKEY_PENDING_CONFIRMATIONS[token].update(pending_payload)
+        if state:
+            state["pending_confirm_token"] = token or state.get("pending_confirm_token") or ""
+            set_video_addon_state(user_id, state)
+        return
+    if status in {"failed", "cancelled"} and state:
+        state["paid_preview_seen"] = False
+        state["pending_payload"] = {**pending_payload, "paid_preview_seen": False}
+        set_video_addon_state(user_id, state)
+
 
 def local_worker_status_payload() -> dict:
     heartbeat = local_worker_last_heartbeat()
@@ -64735,6 +64777,183 @@ def voice_profile_metadata(profile: dict) -> dict:
     except Exception:
         return {}
 
+
+def capped_voice_preview_text(text: str) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean:
+        clean = str(VOICE_PROFILE_PREVIEW_TEXT or "Xin chào từ TOAN AAS.").strip()
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", clean) if part.strip()]
+    candidate = " ".join(sentences[:2]) if sentences else clean
+    words = candidate.split()
+    if len(words) > VOICE_PREVIEW_MAX_WORDS:
+        candidate = " ".join(words[:VOICE_PREVIEW_MAX_WORDS])
+    candidate = candidate[:VOICE_PREVIEW_MAX_CHARACTERS].rstrip()
+    return candidate or "Xin chào từ TOAN AAS."
+
+
+def voice_preview_idempotency_key(user_id, profile: dict, preview_text: str, preview_mode: str = "clone_preview") -> str:
+    source_ref = str((profile or {}).get("source_file_id") or (profile or {}).get("source_file_ref") or "")
+    raw = "|".join([
+        str(user_id),
+        str((profile or {}).get("id") or ""),
+        source_ref,
+        capped_voice_preview_text(preview_text),
+        str(preview_mode or "clone_preview"),
+    ])
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def voice_preview_usage_snapshot(user_id, now: datetime | None = None) -> dict:
+    now = now or datetime.now()
+    day_key = now.strftime("%Y-%m-%d")
+    attempts = 0
+    latest_at = None
+    available = True
+    try:
+        with db_connect() as conn:
+            rows = conn.execute(
+                "SELECT metadata_json FROM voice_profiles WHERE user_id=?",
+                (str(user_id),),
+            ).fetchall()
+        for row in rows:
+            try:
+                metadata = json.loads(str(row[0] or "{}"))
+            except Exception:
+                metadata = {}
+            if str(metadata.get("preview_attempt_day") or "") == day_key:
+                attempts += max(0, int(metadata.get("preview_attempts_today") or 0))
+            attempted_at = parse_now_text(str(metadata.get("preview_attempt_at") or ""))
+            if attempted_at and (latest_at is None or attempted_at > latest_at):
+                latest_at = attempted_at
+    except Exception as exc:
+        available = False
+        logger.warning("voice preview usage read failed | %s", sanitize_log_text(str(exc))[:180])
+    return {"day": day_key, "attempts": attempts, "latest_at": latest_at, "available": available}
+
+
+def voice_preview_guard(user_id, profile_id: int, preview_text: str, preview_mode: str = "clone_preview", now: datetime | None = None) -> dict:
+    now = now or datetime.now()
+    profile = get_user_voice_profile(user_id, profile_id)
+    if not profile or str(profile.get("consent_status") or "") != "confirmed":
+        return {"ok": False, "reason": "invalid", "profile": profile}
+    capped_text = capped_voice_preview_text(preview_text)
+    preview_key = voice_preview_idempotency_key(user_id, profile, capped_text, preview_mode)
+    metadata = voice_profile_metadata(profile)
+    cached_ref = str(profile.get("preview_audio_ref") or "")
+    if cached_ref and str(metadata.get("preview_key") or "") == preview_key:
+        return {
+            "ok": True,
+            "cached": True,
+            "profile": profile,
+            "metadata": metadata,
+            "preview_key": preview_key,
+            "preview_text": capped_text,
+            "preview_audio_ref": cached_ref,
+        }
+    stale_inflight = False
+    if str(profile.get("status") or "") == "preview_generating":
+        attempted_at = parse_now_text(str(metadata.get("preview_attempt_at") or ""))
+        stale_after = max(300, int(VOICE_PREVIEW_COOLDOWN_SECONDS or 0) * 4)
+        if not attempted_at or (now - attempted_at).total_seconds() < stale_after:
+            return {"ok": False, "reason": "inflight", "profile": profile, "metadata": metadata}
+        stale_inflight = True
+    usage = voice_preview_usage_snapshot(user_id, now)
+    if not usage.get("available", True):
+        return {"ok": False, "reason": "usage_unavailable", "profile": profile, "metadata": metadata}
+    if int(usage.get("attempts") or 0) >= int(VOICE_PREVIEW_FREE_PER_DAY or 0):
+        return {"ok": False, "reason": "quota", "profile": profile, "metadata": metadata, "usage": usage}
+    latest_at = usage.get("latest_at")
+    if latest_at and VOICE_PREVIEW_COOLDOWN_SECONDS > 0:
+        elapsed = max(0, int((now - latest_at).total_seconds()))
+        if elapsed < VOICE_PREVIEW_COOLDOWN_SECONDS:
+            return {
+                "ok": False,
+                "reason": "cooldown",
+                "retry_after": VOICE_PREVIEW_COOLDOWN_SECONDS - elapsed,
+                "profile": profile,
+                "metadata": metadata,
+                "usage": usage,
+            }
+    if not frame_video_ffmpeg_path():
+        return {"ok": False, "reason": "preview_cap_unavailable", "profile": profile, "metadata": metadata}
+    return {
+        "ok": True,
+        "cached": False,
+        "profile": profile,
+        "metadata": metadata,
+        "preview_key": preview_key,
+        "preview_text": capped_text,
+        "usage": usage,
+        "stale_inflight": stale_inflight,
+    }
+
+
+def voice_preview_guard_message(reason: str, retry_after: int = 0) -> str:
+    if reason == "inflight":
+        return "TOAN AAS đang tạo bản nghe thử, bạn chờ một chút nhé."
+    if reason == "cooldown":
+        return f"Bạn chờ khoảng {max(1, int(retry_after or 1))} giây rồi nghe thử lại nhé. TOAN AAS chưa trừ Xu final."
+    if reason == "quota":
+        return "Bạn đã dùng hết lượt nghe thử miễn phí hôm nay. Bạn có thể xác nhận tạo bản đầy đủ hoặc thử lại sau."
+    if reason == "preview_cap_unavailable":
+        return "Máy tạo bản nghe thử ngắn đang tạm bận. TOAN AAS chưa xử lý bản đầy đủ và chưa trừ Xu final."
+    if reason == "usage_unavailable":
+        return "TOAN AAS chưa kiểm tra được lượt nghe thử lúc này. Bạn vui lòng thử lại sau; hệ thống chưa gọi xử lý và chưa trừ Xu final."
+    return "Yêu cầu tạo bản nghe thử không còn hợp lệ hoặc chưa xác nhận quyền sử dụng."
+
+
+def acquire_voice_preview_generation(user_id, profile_id: int, guard: dict, now: datetime | None = None) -> tuple[bool, dict]:
+    now = now or datetime.now()
+    fresh = get_user_voice_profile(user_id, profile_id)
+    if not fresh or (str(fresh.get("status") or "") == "preview_generating" and not guard.get("stale_inflight")):
+        return False, fresh
+    metadata = voice_profile_metadata(fresh)
+    day_key = now.strftime("%Y-%m-%d")
+    attempts_today = int(metadata.get("preview_attempts_today") or 0) if metadata.get("preview_attempt_day") == day_key else 0
+    metadata.update({
+        "preview_key_pending": str(guard.get("preview_key") or ""),
+        "preview_mode": "clone_preview",
+        "preview_attempt_day": day_key,
+        "preview_attempts_today": attempts_today + 1,
+        "preview_attempt_at": datetime_text(now),
+        "preview_charged_xu": 0,
+    })
+    ok = update_user_voice_profile(
+        user_id,
+        profile_id,
+        status="preview_generating",
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+    fresh.update({"status": "preview_generating", "metadata_json": json.dumps(metadata, ensure_ascii=False)})
+    return bool(ok), fresh
+
+
+async def cap_voice_preview_audio_bytes(audio_bytes: bytes, max_seconds: int = VOICE_PREVIEW_MAX_SECONDS) -> tuple[bytes, str]:
+    ffmpeg = frame_video_ffmpeg_path()
+    seconds = max(2, min(6, int(max_seconds or VOICE_PREVIEW_MAX_SECONDS)))
+    if not ffmpeg or not audio_bytes:
+        return b"", "preview_cap_unavailable"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, "voice_preview_input.mp3")
+        output_path = os.path.join(tmpdir, "voice_preview_capped.mp3")
+        with open(input_path, "wb") as handle:
+            handle.write(audio_bytes)
+        ok, detail = await run_ffmpeg_command([
+            ffmpeg,
+            "-y",
+            "-i", input_path,
+            "-t", str(seconds),
+            "-vn",
+            "-c:a", "libmp3lame",
+            "-b:a", "96k",
+            output_path,
+        ], timeout=30)
+        if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+            return b"", str(detail or "preview_cap_failed")
+        with open(output_path, "rb") as handle:
+            return handle.read(), "ok"
+
+
 async def create_minimax_voice_profile_preview(query, context, user_id, profile: dict, lang: str = "vi", retry: bool = False, product_context: str = PRODUCT_CONTEXT_SHOWROOM):
     ctx = normalize_product_context(product_context)
     profile_id = int((profile or {}).get("id") or 0)
@@ -64743,12 +64962,36 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             "⚠️ Yêu cầu tạo giọng không còn hợp lệ hoặc chưa xác nhận quyền sử dụng.",
             reply_markup=voice_hub_keyboard(lang, ctx),
         )
+    guard = voice_preview_guard(user_id, profile_id, VOICE_PROFILE_PREVIEW_TEXT, "clone_preview")
+    if guard.get("cached"):
+        cached_profile = guard.get("profile") or profile
+        await context.bot.send_audio(
+            chat_id=query.message.chat_id,
+            audio=str(guard.get("preview_audio_ref") or ""),
+            caption=f"🔊 Bản nghe thử giọng “{str(cached_profile.get('display_name') or 'Giọng mới')}” đã được dùng lại.",
+        )
+        return await query.message.reply_text(
+            "✅ TOAN AAS đã dùng lại bản nghe thử trước đó, không tạo thêm lượt xử lý và chưa trừ Xu final.",
+            reply_markup=voice_clone_preview_keyboard(profile_id, lang, ctx),
+        )
+    if not guard.get("ok"):
+        return await query.message.reply_text(
+            voice_preview_guard_message(str(guard.get("reason") or "invalid"), int(guard.get("retry_after") or 0)),
+            reply_markup=voice_clone_preview_entry_keyboard(profile_id, lang, ctx),
+        )
     readiness = get_minimax_voice_readiness()
     if not readiness.get("ready") or (not readiness.get("public_enabled") and not is_admin_user(user_id)):
         return await query.message.reply_text(
             "⚙️ Tạo giọng riêng đang được kiểm tra tài nguyên xử lý. Quý khách có thể thử lại sau hoặc dùng giọng nam/nữ mặc định miễn phí.\n\nTOAN AAS chưa trừ Xu.",
             reply_markup=voice_hub_keyboard(lang, ctx),
         )
+    acquired, locked_profile = acquire_voice_preview_generation(user_id, profile_id, guard)
+    if not acquired:
+        return await query.message.reply_text(
+            voice_preview_guard_message("inflight"),
+            reply_markup=voice_clone_preview_entry_keyboard(profile_id, lang, ctx),
+        )
+    profile = locked_profile or profile
     metadata = voice_profile_metadata(profile)
     cost = int(VIDEO_VOICE_CLONE_CREATE_XU or 0)
     metadata["final_cost_xu"] = cost
@@ -64765,10 +65008,14 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         if status != "PASS":
             raise RuntimeError(f"voice_clone:{status}:{detail[:100]}")
         provider_voice_id = str((clone_payload or {}).get("voice_id") or provider_voice_id)
-        status, preview_bytes, detail, _http = await shopaikey_minimax_tts_bytes(VOICE_PROFILE_PREVIEW_TEXT, voice_id=provider_voice_id)
+        preview_text = str(guard.get("preview_text") or capped_voice_preview_text(VOICE_PROFILE_PREVIEW_TEXT))
+        status, preview_bytes, detail, _http = await shopaikey_minimax_tts_bytes(preview_text, voice_id=provider_voice_id)
         if status != "PASS" or not preview_bytes:
             raise RuntimeError(f"voice_preview:{status}:{detail[:100]}")
-        audio_file = io.BytesIO(preview_bytes)
+        capped_bytes, cap_detail = await cap_voice_preview_audio_bytes(bytes(preview_bytes), VOICE_PREVIEW_MAX_SECONDS)
+        if not capped_bytes:
+            raise RuntimeError(f"voice_preview_cap:{cap_detail[:100]}")
+        audio_file = io.BytesIO(capped_bytes)
         audio_file.name = f"toan_aas_voice_{profile_id}.mp3"
         sent = await context.bot.send_audio(
             chat_id=query.message.chat_id,
@@ -64777,8 +65024,15 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             caption=f"🔊 Bản nghe thử giọng “{str(profile.get('display_name') or 'Giọng mới')}”.",
         )
         preview_ref = str(getattr(getattr(sent, "audio", None), "file_id", "") or "")
+        if not preview_ref:
+            raise RuntimeError("voice_preview_missing_file_id")
         metadata["preview_attempts"] = int(metadata.get("preview_attempts") or 0) + 1
         metadata["provider_file_id"] = provider_file_id
+        metadata["preview_key"] = str(guard.get("preview_key") or "")
+        metadata["preview_key_pending"] = ""
+        metadata["preview_generated_at"] = now_text()
+        metadata["preview_seconds_max"] = int(VOICE_PREVIEW_MAX_SECONDS)
+        metadata["preview_text_hash"] = hashlib.sha256(preview_text.encode("utf-8", errors="ignore")).hexdigest()[:24]
         update_user_voice_profile(
             user_id,
             profile_id,
@@ -64795,6 +65049,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
     except Exception as exc:
         logger.warning("voice profile preview failed | profile=%s | %s", profile_id, sanitize_log_text(str(exc))[:220])
+        metadata["preview_key_pending"] = ""
         update_user_voice_profile(user_id, profile_id, status="failed", metadata_json=json.dumps(metadata, ensure_ascii=False))
         return await query.message.reply_text(
             "⚙️ Tạo bản nghe thử chưa thành công. TOAN AAS chưa trừ Xu. Quý khách có thể thử lại sau hoặc dùng giọng mặc định miễn phí.",
@@ -82741,6 +82996,110 @@ def video_paid_preview_unavailable_text(state: dict | None = None, lang: str = "
         "Bạn có thể đổi giọng/nhạc, sửa nội dung hoặc quay lại khi bản xem thử đã sẵn sàng."
     )
 
+def video_paid_preview_retry_keyboard(token: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Thử tạo bản xem thử lại" if is_vi else "🔁 Retry short preview", callback_data=f"videoaddon|preview_retry|{token}")],
+        [InlineKeyboardButton("✏️ Sửa lựa chọn" if is_vi else "✏️ Edit selections", callback_data="vfinal|menu")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
+        ],
+    ])
+
+
+def video_paid_preview_status_keyboard(token: str, job_id, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Kiểm tra bản xem thử" if is_vi else "🔄 Check preview", callback_data=f"videoaddon|preview_status|{token}|{job_id}")],
+        [InlineKeyboardButton("✏️ Sửa lựa chọn" if is_vi else "✏️ Edit selections", callback_data="vfinal|menu")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
+        ],
+    ])
+
+
+def video_paid_preview_worker_available() -> bool:
+    heartbeat = local_worker_last_heartbeat()
+    return bool(LOCAL_WORKER_ENABLED and LOCAL_WORKER_POLL_ENABLED and heartbeat.get("connected"))
+
+
+def video_paid_preview_worker_payload(user_id, chat_id, state: dict, token: str = "") -> dict:
+    state = dict(state or {})
+    pending = dict(state.get("pending_payload") or {})
+    assets = dict(state.get("current_video_assets") or {})
+    processing_type = str(
+        pending.get("processing_type")
+        or state.get("current_video_processing_type")
+        or video_processing_type_for_payload(pending)
+    ).strip().lower()
+    source_file_id = str(
+        pending.get("source_file_id")
+        or pending.get("source_video_file_id")
+        or pending.get("input_video_file_id")
+        or pending.get("telegram_file_id")
+        or assets.get("source_file_id")
+        or assets.get("telegram_file_id")
+        or ""
+    ).strip()[:500]
+    source_url = str(pending.get("image_url") or assets.get("image_url") or "").strip()[:1000]
+    if "image" in processing_type or (source_url and not source_file_id):
+        source_kind = "image"
+    elif "video_to_video" in processing_type or source_file_id:
+        source_kind = "video"
+    else:
+        source_kind = "storyboard"
+    aspect = normalize_media_aspect_ratio(str(pending.get("aspect_ratio") or "9:16"), "9:16", "video")
+    width, height = ((640, 360) if aspect == "16:9" else (360, 360) if aspect == "1:1" else (360, 450) if aspect == "4:5" else (360, 640))
+    duration = int(pending.get("duration_seconds") or state.get("current_video_duration_seconds") or 0)
+    seconds = paid_preview_seconds(duration)
+    prompt = str(pending.get("original_prompt") or pending.get("prompt") or pending.get("video_prompt") or "")
+    return {
+        "preview_kind": "paid_video",
+        "user_id": str(user_id),
+        "chat_id": str(chat_id),
+        "confirm_token": str(token or "")[:120],
+        "source_kind": source_kind,
+        "source_file_id": source_file_id,
+        "source_url": source_url,
+        "prompt_preview": shopaikey_safe_prompt_preview(prompt),
+        "preview_seconds": seconds,
+        "width": width,
+        "height": height,
+        "max_render_seconds": 120,
+        "caption": f"▶️ Bản xem thử ngắn {seconds} giây. Đây chưa phải bản đầy đủ và TOAN AAS chưa trừ Xu final.",
+    }
+
+
+def apply_video_paid_preview_job_result(state: dict, pending_payload: dict, job: dict) -> tuple[dict, dict]:
+    state = dict(state or {})
+    pending_payload = dict(pending_payload or {})
+    output_file_id = str((job or {}).get("output_file_id") or "").strip()
+    payload = {}
+    try:
+        payload = json.loads(str((job or {}).get("input_file_id") or "") or "{}")
+    except Exception:
+        payload = {}
+    seconds = int(payload.get("preview_seconds") or 0)
+    if not output_file_id or seconds < 2 or seconds > 6:
+        return state, pending_payload
+    pending_payload.update({
+        "paid_preview_video_file_id": output_file_id,
+        "paid_preview_seconds": seconds,
+        "paid_preview_seen": True,
+        "paid_preview_local_job_id": int((job or {}).get("id") or 0),
+    })
+    state.update({
+        "paid_preview_video_file_id": output_file_id,
+        "paid_preview_seconds": seconds,
+        "paid_preview_seen": True,
+        "paid_preview_local_job_id": int((job or {}).get("id") or 0),
+        "pending_payload": pending_payload,
+    })
+    return state, pending_payload
+
+
 async def send_video_paid_preview_artifact(context, query, state: dict, lang: str = "vi") -> bool:
     artifact = video_paid_preview_artifact(state)
     if not artifact:
@@ -83023,10 +83382,12 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
     old_token = str(state.get("pending_confirm_token") or "")
     if old_token:
         SHOPAIKEY_PENDING_CONFIRMATIONS.pop(old_token, None)
-        for key in VIDEO_PAID_PREVIEW_ARTIFACT_KEYS:
-            pending_payload.pop(key, None)
-        pending_payload.pop("paid_preview_seconds", None)
-        pending_payload.pop("preview_seconds", None)
+    for key in VIDEO_PAID_PREVIEW_ARTIFACT_KEYS:
+        pending_payload.pop(key, None)
+        state.pop(key, None)
+    for key in ("paid_preview_seconds", "preview_seconds", "paid_preview_local_job_id"):
+        pending_payload.pop(key, None)
+        state.pop(key, None)
     pending_payload["paid_preview_seen"] = False
     state["paid_preview_seen"] = False
 
@@ -83079,6 +83440,7 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
         })
     token = set_shopaikey_pending_confirmation(user_id, pending_payload)
     state["pending_confirm_token"] = token
+    state["pending_payload"] = pending_payload
     set_video_addon_state(user_id, state)
     credits, _, _ = get_user(user_id)
     record_shopaikey_billing_event(
@@ -83238,33 +83600,130 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
     if action == "menu":
         state = set_video_addon_screen(uid, state, "video_addon_menu")
         return await render_video_addon_screen(query, uid, state, "video_addon_menu", lang)
-    if action == "preview":
+    if action in {"preview", "preview_retry", "preview_status"}:
         token = parts[2] if len(parts) > 2 else str(state.get("pending_confirm_token") or "")
         pending_payload = dict(state.get("pending_payload") or {})
         if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
             pending_payload = dict(SHOPAIKEY_PENDING_CONFIRMATIONS[token])
         state["pending_payload"] = pending_payload
-        preview_sent = await send_video_paid_preview_artifact(context, query, state, lang)
-        if not preview_sent:
-            state["paid_preview_seen"] = False
-            state["pending_payload"] = {**pending_payload, "paid_preview_seen": False}
+        artifact = video_paid_preview_artifact(state)
+        if artifact:
+            preview_sent = await send_video_paid_preview_artifact(context, query, state, lang)
+            if preview_sent:
+                pending_payload["paid_preview_seen"] = True
+                if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
+                    SHOPAIKEY_PENDING_CONFIRMATIONS[token].update(pending_payload)
+                state.update({"paid_preview_seen": True, "pending_payload": pending_payload})
+                state = set_video_addon_screen(uid, state, "preview")
+                return await safe_edit_or_send(
+                    query,
+                    video_paid_preview_text(state, lang),
+                    parse_mode="HTML",
+                    reply_markup=video_paid_preview_keyboard(token, lang),
+                )
+        requested_job_id = _safe_int(parts[3] if len(parts) > 3 else 0, 0)
+        local_job_id = requested_job_id or _safe_int(
+            state.get("paid_preview_local_job_id") or pending_payload.get("paid_preview_local_job_id"),
+            0,
+        )
+        job = get_local_worker_job(local_job_id) if local_job_id else {}
+        if job and str(job.get("user_id") or "") != str(uid):
+            job = {}
+            local_job_id = 0
+        if job:
+            try:
+                job_payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+            except Exception:
+                job_payload = {}
+            if str(job_payload.get("confirm_token") or "") != str(token or ""):
+                job = {}
+                local_job_id = 0
+        status = str((job or {}).get("status") or "").lower()
+        if status == "succeeded" and str(job.get("output_file_id") or ""):
+            state, pending_payload = apply_video_paid_preview_job_result(state, pending_payload, job)
+            if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
+                SHOPAIKEY_PENDING_CONFIRMATIONS[token].update(pending_payload)
             state = set_video_addon_screen(uid, state, "preview")
             return await safe_edit_or_send(
                 query,
-                video_paid_preview_unavailable_text(state, lang),
+                video_paid_preview_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=video_paid_preview_entry_keyboard(token, lang),
+                reply_markup=video_paid_preview_keyboard(token, lang),
             )
+        if status in {"queued", "running"}:
+            state.update({
+                "paid_preview_seen": False,
+                "paid_preview_local_job_id": local_job_id,
+                "pending_payload": {**pending_payload, "paid_preview_seen": False, "paid_preview_local_job_id": local_job_id},
+            })
+            state = set_video_addon_screen(uid, state, "preview")
+            waiting_text = (
+                "▶️ TOAN AAS đang tạo bản xem thử ngắn. Bạn chờ một chút rồi bấm kiểm tra nhé.\n\nBản đầy đủ chưa được tạo và chưa trừ Xu final."
+                if normalize_user_language(lang) == "vi"
+                else "▶️ TOAN AAS is creating the short preview. Please wait, then check again.\n\nThe full output has not been created and no final Xu was charged."
+            )
+            return await safe_edit_or_send(
+                query,
+                waiting_text,
+                parse_mode="HTML",
+                reply_markup=video_paid_preview_status_keyboard(token, local_job_id, lang),
+            )
+        if status in {"failed", "cancelled"} and action != "preview_retry":
+            state.update({"paid_preview_seen": False, "pending_payload": {**pending_payload, "paid_preview_seen": False}})
+            state = set_video_addon_screen(uid, state, "preview")
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Bản xem thử chưa tạo thành công. TOAN AAS chưa tạo bản đầy đủ và chưa trừ Xu final.",
+                parse_mode=None,
+                reply_markup=video_paid_preview_retry_keyboard(token, lang),
+            )
+        if not video_paid_preview_worker_available():
+            state.update({"paid_preview_seen": False, "pending_payload": {**pending_payload, "paid_preview_seen": False}})
+            state = set_video_addon_screen(uid, state, "preview")
+            return await safe_edit_or_send(
+                query,
+                "⚙️ Máy tạo bản xem thử đang tạm bận. Bạn có thể thử lại hoặc sửa lựa chọn; TOAN AAS chưa tạo bản đầy đủ và chưa trừ Xu final.",
+                parse_mode=None,
+                reply_markup=video_paid_preview_retry_keyboard(token, lang),
+            )
+        worker_payload = video_paid_preview_worker_payload(uid, query.message.chat_id, state, token)
+        try:
+            local_job_id = create_local_worker_job(
+                user_id=str(uid),
+                command="paid_video_preview",
+                job_type="paid_video_preview",
+                provider="local_ffmpeg",
+                input_file_id=json.dumps(worker_payload, ensure_ascii=False),
+                xu_cost=0,
+                admin_only=False,
+            )
+        except Exception as exc:
+            logger.warning("paid video preview queue failed | %s", sanitize_log_text(str(exc))[:220])
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Chưa xếp được bản xem thử. TOAN AAS chưa tạo bản đầy đủ và chưa trừ Xu final.",
+                parse_mode=None,
+                reply_markup=video_paid_preview_retry_keyboard(token, lang),
+            )
+        pending_payload.update({
+            "paid_preview_seen": False,
+            "paid_preview_seconds": int(worker_payload.get("preview_seconds") or 0),
+            "paid_preview_local_job_id": local_job_id,
+        })
         if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
-            SHOPAIKEY_PENDING_CONFIRMATIONS[token]["paid_preview_seen"] = True
-        state["paid_preview_seen"] = True
-        state["pending_payload"] = {**pending_payload, "paid_preview_seen": True}
+            SHOPAIKEY_PENDING_CONFIRMATIONS[token].update(pending_payload)
+        state.update({
+            "paid_preview_seen": False,
+            "paid_preview_seconds": int(worker_payload.get("preview_seconds") or 0),
+            "paid_preview_local_job_id": local_job_id,
+            "pending_payload": pending_payload,
+        })
         state = set_video_addon_screen(uid, state, "preview")
         return await safe_edit_or_send(
             query,
-            video_paid_preview_text(state, lang),
+            "▶️ TOAN AAS đã nhận yêu cầu tạo bản xem thử ngắn. Bạn chờ một chút rồi bấm kiểm tra nhé.\n\nBản đầy đủ chưa được tạo và chưa trừ Xu final.",
             parse_mode="HTML",
-            reply_markup=video_paid_preview_keyboard(token, lang),
+            reply_markup=video_paid_preview_status_keyboard(token, local_job_id, lang),
         )
     if action == "back":
         order = video_order_back_screen(video_order_from_state(state, uid), "video_addon_menu")
@@ -112230,6 +112689,7 @@ async def internal_worker_job_update(request: Request):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     handle_frame_video_worker_job_update(previous_job, job)
+    handle_paid_video_preview_worker_job_update(previous_job, job)
     return {"ok": True, "job": job}
 
 @fastapi_app.post("/internal/worker/upload_result")

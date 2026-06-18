@@ -202,6 +202,25 @@ def telegram_download_file(file_id: str, destination: str, max_bytes: int = 20 *
         raise RuntimeError("telegram_download_empty")
 
 
+def download_url_file(url: str, destination: str, max_bytes: int = 50 * 1024 * 1024) -> None:
+    clean_url = str(url or "").strip()
+    if not clean_url.startswith(("http://", "https://")):
+        raise RuntimeError("preview_source_url_invalid")
+    downloaded = 0
+    request = urllib.request.Request(clean_url, headers={"User-Agent": "TOAN-AAS-Local-Worker/1.0"})
+    with urllib.request.urlopen(request, timeout=60) as response, open(destination, "wb") as handle:
+        while True:
+            chunk = response.read(1024 * 256)
+            if not chunk:
+                break
+            downloaded += len(chunk)
+            if downloaded > max_bytes:
+                raise RuntimeError("preview_source_too_large")
+            handle.write(chunk)
+    if downloaded <= 0:
+        raise RuntimeError("preview_source_empty")
+
+
 def ffmpeg_filter(width: int, height: int, seconds: float, effect: str) -> str:
     base = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
     effect = str(effect or "fade").lower()
@@ -263,7 +282,7 @@ def run_frame_video_ffmpeg(image_paths: list[str], output_path: str, width: int,
         raise RuntimeError(first_line(result.stderr or result.stdout) or "ffmpeg_concat_failed")
 
 
-def telegram_send_video(chat_id: str, video_path: str, caption: str = "") -> str:
+def telegram_send_video(chat_id: str, video_path: str, caption: str = "", reply_markup: dict | None = None) -> str:
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
     boundary = "----TOANAASLocalWorkerBoundary"
@@ -273,6 +292,8 @@ def telegram_send_video(chat_id: str, video_path: str, caption: str = "") -> str
         "chat_id": str(chat_id or ""),
         "caption": str(caption or "")[:1000],
     }
+    if reply_markup:
+        fields["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
     body = bytearray()
     for key, value in fields.items():
         body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
@@ -430,6 +451,101 @@ def run_frame_video_render(job: dict) -> None:
         update_job(job_id, "failed", f"frame_video_render:{type(exc).__name__}:{first_line(str(exc))}")
 
 
+def paid_video_preview_ffmpeg_command(payload: dict, source_path: str, output_path: str) -> list[str]:
+    seconds = max(2, min(6, int(payload.get("preview_seconds") or 6)))
+    width = max(240, min(640, int(payload.get("width") or 360)))
+    height = max(240, min(960, int(payload.get("height") or 640)))
+    source_kind = str(payload.get("source_kind") or "storyboard").strip().lower()
+    command = [LOCAL_FFMPEG_PATH, "-y"]
+    if source_path:
+        if source_kind == "image":
+            command.extend(["-loop", "1", "-i", source_path])
+        else:
+            command.extend(["-stream_loop", "-1", "-i", source_path])
+    else:
+        command.extend([
+            "-f", "lavfi",
+            "-i", f"color=c=#102a35:s={width}x{height}:r=24:d={seconds}",
+        ])
+    prompt = " ".join(str(payload.get("prompt_preview") or "").split())[:48]
+    overlay = "TOAN AAS - BAN XEM THU" + (f" - {prompt}" if source_kind == "storyboard" and prompt else "")
+    base_filter = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+        "eq=brightness=-0.03:contrast=0.92:saturation=0.78"
+    )
+    text_filter = video_editor_text_filter(overlay)
+    command.extend([
+        "-t", str(seconds),
+        "-vf", ",".join(part for part in (base_filter, text_filter, "format=yuv420p") if part),
+        "-an",
+        "-r", "24",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "32",
+        "-movflags", "+faststart",
+        output_path,
+    ])
+    return command
+
+
+def run_paid_video_preview(job: dict) -> None:
+    job_id = job.get("id")
+    try:
+        payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+        chat_id = str(payload.get("chat_id") or "")
+        seconds = int(payload.get("preview_seconds") or 0)
+        if not chat_id or seconds < 2 or seconds > 6:
+            update_job(job_id, "failed", "paid_video_preview_invalid_input")
+            return
+        if not LOCAL_FFMPEG_PATH or not os.path.exists(LOCAL_FFMPEG_PATH):
+            update_job(job_id, "failed", "LOCAL_FFMPEG_PATH missing")
+            return
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = ""
+            source_file_id = str(payload.get("source_file_id") or "").strip()
+            source_url = str(payload.get("source_url") or "").strip()
+            if source_file_id:
+                source_path = os.path.join(tmpdir, "paid_preview_source.bin")
+                telegram_download_file(source_file_id, source_path, max_bytes=50 * 1024 * 1024)
+            elif source_url:
+                source_path = os.path.join(tmpdir, "paid_preview_source.bin")
+                download_url_file(source_url, source_path, max_bytes=50 * 1024 * 1024)
+            output_path = os.path.join(tmpdir, "toan_aas_paid_video_preview.mp4")
+            command = paid_video_preview_ffmpeg_command(payload, source_path, output_path)
+            timeout = min(LOCAL_WORKER_MAX_JOB_SECONDS, max(60, int(payload.get("max_render_seconds") or 120)))
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+            if result.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+                raise RuntimeError(first_line(result.stderr or result.stdout) or "paid_video_preview_ffmpeg_failed")
+            token = str(payload.get("confirm_token") or "")[:120]
+            reply_markup = None
+            if token:
+                reply_markup = {
+                    "inline_keyboard": [
+                        [{"text": "✅ Xác nhận tạo bản đầy đủ", "callback_data": f"shopai|confirm|{token}"}],
+                        [
+                            {"text": "🔁 Đổi giọng/nhạc", "callback_data": "vfinal|music"},
+                            {"text": "✏️ Sửa nội dung", "callback_data": "vfinal|menu"},
+                        ],
+                        [
+                            {"text": "⬅️ Quay lại", "callback_data": "videoaddon|back"},
+                            {"text": "🏠 Menu chính", "callback_data": "videoaddon|main"},
+                        ],
+                    ]
+                }
+            output_file_id = telegram_send_video(
+                chat_id,
+                output_path,
+                str(payload.get("caption") or ""),
+                reply_markup=reply_markup,
+            )
+        update_job(job_id, "succeeded", "paid video preview sent", output_file_id=output_file_id)
+    except subprocess.TimeoutExpired:
+        update_job(job_id, "failed", "paid_video_preview_timeout")
+    except Exception as exc:
+        update_job(job_id, "failed", f"paid_video_preview:{type(exc).__name__}:{first_line(str(exc))}")
+
+
 def process_job(job: dict) -> None:
     job_id = job.get("id")
     job_type = str(job.get("job_type") or "").strip()
@@ -443,6 +559,9 @@ def process_job(job: dict) -> None:
         return
     if job_type == "frame_video_render":
         run_frame_video_render(job)
+        return
+    if job_type == "paid_video_preview":
+        run_paid_video_preview(job)
         return
     if job_type == "video_local_edit":
         run_video_local_edit(job)

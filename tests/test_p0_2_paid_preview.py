@@ -132,12 +132,14 @@ def test_no_full_output_before_payment():
 
 def test_preview_does_not_deduct_final_xu():
     handler = _source_between("async def handle_video_addon_callback", "async def cmd_video_price_test")
-    preview_start = handler.index('if action == "preview":')
+    preview_start = handler.index('if action in {"preview", "preview_retry", "preview_status"}:')
     preview_end = handler.index('if action == "back":', preview_start)
     preview_block = handler[preview_start:preview_end]
     assert "spend_fixed_credit_info" not in preview_block
     assert "deduct_dynamic_credit" not in preview_block
-    assert preview_block.index("send_video_paid_preview_artifact") < preview_block.index('state["paid_preview_seen"] = True')
+    assert preview_block.index("send_video_paid_preview_artifact") < preview_block.index('pending_payload["paid_preview_seen"] = True')
+    assert "apply_video_paid_preview_job_result" in preview_block
+    assert 'job_type="paid_video_preview"' in preview_block
 
     confirm_block = _source_between("async def handle_shopaikey_public_callback", "async def cmd_video_price_test")
     assert confirm_block.index("video_paid_preview_required(pending)") < confirm_block.index("spend_fixed_credit_info")
