@@ -85,7 +85,8 @@ def test_video_addon_entry_points_do_not_route_to_showroom():
     assert "Music Studio" not in labels
     assert "Giọng đọc cho video" in labels
     assert "Nhạc cho video" in labels
-    assert {"vfinal|voice", "vfinal|music", "vfinal|addon", "vfinal|my_media"}.issubset(set(callbacks))
+    assert {"vfinal|voice", "vfinal|music", "vfinal|addon"}.issubset(set(callbacks))
+    assert "vfinal|my_media" not in callbacks
     assert not any("|showroom|" in callback for callback in callbacks)
 
 
@@ -96,11 +97,11 @@ def test_video_voice_and_music_keyboards_are_video_addon_only():
     music_labels = _flatten_text(bot.video_finalization_music_keyboard("vi"))
 
     assert "Không thêm giọng" in voice_labels
-    assert "Giọng nữ mặc định - Miễn phí" in voice_labels
-    assert "Kho voice của bạn" in voice_labels
+    assert "Giọng nữ miễn phí" in voice_labels
+    assert "Voice đã lưu" in voice_labels
     assert "Không thêm nhạc" in music_labels
-    assert "Kho nhạc có sẵn" in music_labels
-    assert "Kho SFX" in music_labels
+    assert "Chọn nhạc có sẵn" in music_labels
+    assert "Chọn hiệu ứng âm thanh" in music_labels
     assert all(callback.startswith("vfinal|") for callback in voice_callbacks)
     assert all(callback.startswith("vfinal|") for callback in music_callbacks)
     assert not any("|showroom|" in callback for callback in voice_callbacks + music_callbacks)

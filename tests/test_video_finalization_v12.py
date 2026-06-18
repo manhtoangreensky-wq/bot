@@ -410,10 +410,14 @@ def test_video_result_keyboard_uses_clear_ai_action_label():
 def test_video_addon_confirm_keeps_finalization_back_context():
     markup = bot.video_addon_confirm_keyboard("tok123", "low", "vi")
     callbacks = _callbacks(markup)
+    ordered_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data]
     assert "videoaddon|preview|tok123" in callbacks
-    assert "shopai|confirm|tok123" not in callbacks
+    assert "shopai|confirm|tok123" in callbacks
+    assert ordered_callbacks.index("videoaddon|preview|tok123") < ordered_callbacks.index("shopai|confirm|tok123")
     assert "vfinal|tier" in callbacks
-    assert "vfinal|music" not in callbacks
+    assert "vfinal|voice" in callbacks
+    assert "vfinal|music" in callbacks
+    assert "vfinal|addon" in callbacks
     assert "videoaddon|back" in callbacks
     assert "create_media|quick_video" not in callbacks
 
@@ -427,7 +431,7 @@ def test_video_addon_language_and_voice_back_use_screen_stack():
     assert "videoaddon|menu" not in voice_callbacks
 
 
-def test_video_addon_invoice_back_returns_exact_previous_screen(monkeypatch):
+def test_video_addon_invoice_back_returns_canonical_video_options(monkeypatch):
     user_id = 991213
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
@@ -470,9 +474,12 @@ def test_video_addon_invoice_back_returns_exact_previous_screen(monkeypatch):
     assert saved["video_order"]["screen_stack"][-2:] == ["addon_voice", "invoice"]
 
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert "Voice / lồng tiếng" in query.edited["text"]
+    assert "Tùy chọn hoàn thiện video" in query.edited["text"]
     saved = bot.get_video_addon_state(user_id)
-    assert saved["video_order"]["current_screen"] == "addon_voice"
+    assert saved["video_order"]["current_screen"] == "invoice"
+    assert "vfinal|voice" in _callbacks(query.edited["reply_markup"])
+    assert "vfinal|music" in _callbacks(query.edited["reply_markup"])
+    assert "vfinal|addon" in _callbacks(query.edited["reply_markup"])
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
 

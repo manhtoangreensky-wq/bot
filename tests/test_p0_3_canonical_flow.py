@@ -111,11 +111,11 @@ def test_audio_studio_voice_flow_does_not_render_legacy_voice_menu(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     assert query.outputs
-    assert "Bạn hãy gửi nội dung cần đọc" in query.outputs[-1]["text"]
+    assert "Bạn nhập nội dung muốn tạo giọng đọc nhé." in query.outputs[-1]["text"]
     assert "Voice Studio " + "TOAN AAS" not in query.outputs[-1]["text"]
     assert "Demo giọng" not in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
     pending = bot.get_music_guided_pending(user_id)
-    assert pending["pending_action"] == "voice_text"
+    assert pending["pending_action"] == "audio_voice_waiting_text"
     assert pending["product_context"] == bot.PRODUCT_CONTEXT_SHOWROOM
 
 
@@ -124,7 +124,7 @@ def test_audio_studio_voice_text_to_style_to_preview_path(monkeypatch):
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
 
-    bot.set_music_guided_pending(user_id, "voice_text", product_context=bot.PRODUCT_CONTEXT_SHOWROOM)
+    bot.set_music_guided_pending(user_id, "audio_voice_waiting_text", product_context=bot.PRODUCT_CONTEXT_SHOWROOM)
     message = CaptureMessage("Nước hoa nam cao cấp giúp tự tin hơn khi gặp khách hàng.")
     handled = asyncio.run(bot.handle_music_guided_pending_text(
         SimpleNamespace(message=message, effective_user=SimpleNamespace(id=user_id)),
@@ -132,11 +132,11 @@ def test_audio_studio_voice_text_to_style_to_preview_path(monkeypatch):
     ))
 
     assert handled is True
-    assert "3 kiểu giọng gợi ý" in message.outputs[-1]["text"]
+    assert "Chọn kiểu giọng" in message.outputs[-1]["text"]
     style_labels = _labels(message.outputs[-1]["reply_markup"])
-    assert "1️⃣ Giọng nữ nhẹ nhàng" in style_labels
-    assert "2️⃣ Giọng nam tin cậy" in style_labels
-    assert "3️⃣ Giọng trẻ bán hàng" in style_labels
+    assert "👩 Giọng nữ nhẹ nhàng" in style_labels
+    assert "👨 Giọng nam tin cậy" in style_labels
+    assert "⚡ Giọng bán hàng năng lượng" in style_labels
 
     query = CaptureQuery("music_quick|showroom|voice_style_1", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
@@ -174,8 +174,8 @@ def test_no_public_choose_music_voice_step():
     legacy_music_voice = "nhạc" + "/voice"
     for forbidden in ["Bạn muốn " + legacy_music_voice, "Chọn " + legacy_music_voice, legacy_music_voice, "Đổi giọng" + "/nhạc"]:
         assert forbidden not in combined
-    assert "Âm thanh cho video" in combined
-    assert "Bỏ qua âm thanh" in combined
+    assert "Tùy chọn hoàn thiện video" in combined
+    assert "Phong cách âm thanh" not in combined
 
 
 def test_video_music_addon_directly_opens_library_menu(monkeypatch):
@@ -191,16 +191,16 @@ def test_video_music_addon_directly_opens_library_menu(monkeypatch):
         "video_finalization": {},
     })
 
-    query = CaptureQuery("vfinal|music_use", user_id)
+    query = CaptureQuery("vfinal|music", user_id)
     asyncio.run(bot.handle_video_finalization_callback(
         SimpleNamespace(callback_query=query),
         SimpleNamespace(),
     ))
 
     assert query.outputs
-    assert "kho nhạc" in query.outputs[-1]["text"].lower()
+    assert "Nhạc cho video" in query.outputs[-1]["text"]
     callbacks = _callbacks(query.outputs[-1]["reply_markup"])
-    assert any(callback.startswith("music_quick|video_addon|") for callback in callbacks)
+    assert "vfinal|music_library" in callbacks
     assert not any("music_suggest" in callback or "music_use" in callback for callback in callbacks)
 
 
@@ -362,7 +362,7 @@ def test_legacy_callbacks_redirect_to_canonical_handlers(monkeypatch):
     query = CaptureQuery("music_quick|voice_pick", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert "Bạn hãy gửi nội dung cần đọc" in query.outputs[-1]["text"]
+    assert "Bạn nhập nội dung muốn tạo giọng đọc nhé." in query.outputs[-1]["text"]
     assert bot.get_music_guided_pending(user_id)["product_context"] == bot.PRODUCT_CONTEXT_SHOWROOM
 
 

@@ -43708,19 +43708,16 @@ def main_image_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
 def main_audio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎤 Media tools", callback_data="menu|hint_media_factory")],
-            [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate")],
-            [InlineKeyboardButton("⚡ Quick access", callback_data="menu|main_quick")],
-            [InlineKeyboardButton("⬅️ Main menu", callback_data="menu|main")],
-        ])
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎤 Mở công cụ âm thanh", callback_data="menu|hint_media_factory")],
-        [InlineKeyboardButton("🌐 Dịch thuật", callback_data="menu|translate")],
-        [InlineKeyboardButton("⚡ Truy cập nhanh", callback_data="menu|main_quick")],
-        [InlineKeyboardButton("⬅️ Về menu chính", callback_data="menu|main")],
-    ])
+    is_vi = normalize_user_language(lang) == "vi"
+    buttons = [
+        ("🎙 Giọng đọc" if is_vi else "🎙 Voice", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_custom")),
+        ("🎵 Nhạc" if is_vi else "🎵 Music", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
+    ]
+    return build_2col_keyboard(
+        buttons,
+        nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "menu|main"),
+        lang=lang,
+    )
 
 def translation_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "vi":
@@ -45118,14 +45115,14 @@ def prompt_video_start_text(lang: str = "vi") -> str:
         return (
             "🎬 <b>Prompt → AI Video</b>\n\n"
             "What kind of video do you want to plan?\n\n"
-            "TOAN AAS will create three prompt options, then guide camera motion and audio before showing any real-generation price.\n"
-            "This planning step does not call a provider and does not charge Xu."
+            "TOAN AAS will create three prompt options, then guide camera motion before the video finishing options.\n"
+            "This planning step only saves your choices and does not charge Xu."
         )
     return (
         "🎬 <b>Prompt → Video AI</b>\n\n"
         "Bạn muốn tạo video AI theo hướng nào?\n\n"
-        "TOAN AAS sẽ tạo 3 prompt gợi ý, sau đó hỏi chuyển động và âm thanh trước khi hiển thị tier tạo video thật.\n"
-        "Bước lập kế hoạch chưa gọi provider và chưa trừ Xu."
+        "TOAN AAS sẽ tạo 3 prompt gợi ý, sau đó hỏi chuyển động trước khi vào Tùy chọn hoàn thiện video.\n"
+        "Bước lập kế hoạch chỉ lưu lựa chọn và chưa trừ Xu."
     )
 
 def prompt_video_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -45181,7 +45178,7 @@ def prompt_video_topic_suggestions_text(state: dict | None = None, lang: str = "
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(item)}")
     lines.append("")
-    lines.append(ui_text(lang, "common.no_api_no_charge"))
+    lines.append("This step only saves your choice and does not charge Xu." if normalize_user_language(lang) != "vi" else "Bước này chỉ lưu lựa chọn và chưa trừ Xu.")
     return "\n".join(lines)
 
 def prompt_video_topic_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -45344,7 +45341,7 @@ def guided_video_motion_text(state: dict | None = None, lang: str = "vi", from_i
     suggestions = guided_video_motion_suggestions(state, lang, from_image)
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
-    lines.extend(["", ui_text(lang, "common.no_api_no_charge")])
+    lines.extend(["", "This step only saves your choice and does not charge Xu." if normalize_user_language(lang) != "vi" else "Bước này chỉ lưu lựa chọn và chưa trừ Xu."])
     return "\n".join(lines)
 
 def guided_video_motion_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -45366,12 +45363,12 @@ def guided_video_music_text(state: dict | None = None, lang: str = "vi") -> str:
     motion = self_scene_style_label((state or {}).get("selected_motion"), lang)
     suggestions = guided_video_music_suggestions(state, lang)
     if normalize_user_language(lang) != "vi":
-        lines = ["🎵 <b>Choose video audio direction</b>", "", f"Motion: <code>{html.escape(motion)}</code>", ""]
+        lines = ["🎛 <b>Video finishing options</b>", "", f"Motion: <code>{html.escape(motion)}</code>", ""]
     else:
-        lines = ["🎵 <b>Âm thanh cho video</b>", "", f"Chuyển động: <code>{html.escape(motion)}</code>", ""]
+        lines = ["🎛 <b>Tùy chọn hoàn thiện video</b>", "", f"Chuyển động: <code>{html.escape(motion)}</code>", ""]
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
-    lines.extend(["", "This step only plans the soundtrack." if normalize_user_language(lang) != "vi" else "Bước này chỉ lập kế hoạch âm thanh."])
+    lines.extend(["", "Legacy music choices now continue through the video finishing options." if normalize_user_language(lang) != "vi" else "Các lựa chọn nhạc cũ sẽ được chuyển qua Tùy chọn hoàn thiện video."])
     return "\n".join(lines)
 
 def guided_video_music_suggestions(state: dict | None = None, lang: str = "vi") -> list[dict]:
@@ -45415,15 +45412,52 @@ def guided_video_music_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboard
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
-            ("1️⃣ Phong cách âm thanh 1" if is_vi else "1️⃣ Audio option 1", f"{prefix}|music_choice|1"),
-            ("2️⃣ Phong cách âm thanh 2" if is_vi else "2️⃣ Audio option 2", f"{prefix}|music_choice|2"),
-            ("3️⃣ Phong cách âm thanh 3" if is_vi else "3️⃣ Audio option 3", f"{prefix}|music_choice|3"),
+            ("1️⃣ Hướng nhạc 1" if is_vi else "1️⃣ Music option 1", f"{prefix}|music_choice|1"),
+            ("2️⃣ Hướng nhạc 2" if is_vi else "2️⃣ Music option 2", f"{prefix}|music_choice|2"),
+            ("3️⃣ Hướng nhạc 3" if is_vi else "3️⃣ Music option 3", f"{prefix}|music_choice|3"),
             ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More music ideas", f"{prefix}|music_refresh"),
             ("✍️ Nhập riêng" if is_vi else "✍️ Custom", f"{prefix}|music_custom"),
         ],
         lang,
         back=("🔙 Quay lại" if is_vi else "🔙 Back", f"{prefix}|back_motion"),
     )
+
+async def open_prompt_video_finalization_from_state(query, user_id, state: dict | None, lang: str = "vi", back_callback: str = "promptvideo|back_motion"):
+    state = dict(state or {})
+    state.setdefault("selected_music", "none")
+    render_plan = structured_video_plan(state, "promptvideo")
+    state["video_prompt"] = render_plan.get("prompt") or state.get("selected_prompt") or ""
+    save_developing_video_plan(user_id, "promptvideo", state)
+    package = {
+        "source": "prompt_to_video",
+        "concept_text": state.get("selected_topic") or "",
+        "video_prompt": state["video_prompt"],
+        "music_choice": {"label": self_scene_music_label(state.get("selected_music"), lang)},
+    }
+    source_state = dict(state)
+    source_state["video_prompt"] = package["video_prompt"]
+    return await open_video_finalization(query, user_id, "promptvideo", source_state, lang, back_callback, package)
+
+async def open_image_video_finalization_from_state(query, user_id, state: dict | None, lang: str = "vi", back_callback: str = "imagevideo|back_motion"):
+    state = dict(state or {})
+    state.setdefault("selected_music", "none")
+    state["selected_prompt"] = state.get("selected_prompt") or image_video_prompt_from_state(state, lang)
+    render_plan = structured_video_plan(state, "imagevideo")
+    state["video_prompt"] = render_plan.get("prompt") or state.get("selected_prompt") or ""
+    save_developing_video_plan(user_id, "imagevideo", state)
+    package = {
+        "source": "image_to_video",
+        "source_file_id": state.get("source_file_id") or "",
+        "telegram_file_id": state.get("source_file_id") or "",
+        "concept_text": state.get("selected_style") or "",
+        "video_prompt": state["video_prompt"],
+        "music_choice": {"label": self_scene_music_label(state.get("selected_music"), lang)},
+    }
+    source_state = dict(state)
+    source_state["video_prompt"] = package["video_prompt"]
+    if state.get("source_file_id"):
+        source_state["photos"] = [{"file_id": state.get("source_file_id")}]
+    return await open_video_finalization(query, user_id, "imagevideo", source_state, lang, back_callback, package)
 
 def structured_video_plan(state: dict | None = None, flow: str = "promptvideo") -> dict:
     state = dict(state or {})
@@ -49271,26 +49305,26 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
             options = guided_video_motion_suggestions(state, lang)
             selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
             selected_motion = selected.get("code") or selected.get("label") or "pushin"
-        set_developing_video_pending(uid, "promptvideo", "music", selected_motion=selected_motion)
-        current = get_developing_video_pending(uid) or {}
-        return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
+        current = dict(state)
+        current["selected_motion"] = selected_motion
+        current.setdefault("selected_music", "none")
+        clear_developing_video_pending(uid)
+        return await open_prompt_video_finalization_from_state(query, uid, current, lang, "promptvideo|back_motion")
     if action == "back_motion":
         restore_developing_video_pending(uid, "promptvideo", state, "motion")
         return await safe_edit_or_send(query, guided_video_motion_text(state, lang), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("promptvideo", lang))
     if action == "music_custom":
-        restore_developing_video_pending(uid, "promptvideo", state, "music_custom")
-        text = "✍️ Hãy nhập phong cách âm thanh cho video." if normalize_user_language(lang) == "vi" else "✍️ Enter the video audio direction."
-        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ]))
+        current = dict(state)
+        current.setdefault("selected_music", "none")
+        clear_developing_video_pending(uid)
+        return await open_prompt_video_finalization_from_state(query, uid, current, lang, "promptvideo|back_motion")
     if action == "music_refresh":
         if not state.get("selected_prompt"):
             return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
-        offset = _safe_int(state.get("music_offset"), 0) + 3
-        restore_developing_video_pending(uid, "promptvideo", state, "music")
-        set_developing_video_pending(uid, "promptvideo", "music", music_offset=offset)
-        current = get_developing_video_pending(uid) or {}
-        return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
+        current = dict(state)
+        current.setdefault("selected_music", "none")
+        clear_developing_video_pending(uid)
+        return await open_prompt_video_finalization_from_state(query, uid, current, lang, "promptvideo|back_motion")
     if action in {"music", "music_choice"}:
         if not state.get("selected_prompt"):
             return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
@@ -49306,11 +49340,11 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         state = dict(state)
         state["selected_music"] = selected_music
         clear_developing_video_pending(uid)
-        plan = save_developing_video_plan(uid, "promptvideo", state)
-        return await safe_edit_or_send_long_html(query, guided_video_plan_text(plan, lang), reply_markup=guided_video_result_keyboard("promptvideo", lang))
+        return await open_prompt_video_finalization_from_state(query, uid, state, lang, "promptvideo|back_motion")
     if action == "back_music":
-        restore_developing_video_pending(uid, "promptvideo", state, "music")
-        return await safe_edit_or_send(query, guided_video_music_text(state, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("promptvideo", lang))
+        current = dict(state)
+        current.setdefault("selected_music", "none")
+        return await open_prompt_video_finalization_from_state(query, uid, current, lang, "promptvideo|back_motion")
     if action == "strength":
         prompt_strength = value if value in PROMPT_STRENGTH_LEVELS else "director"
         updated = dict(state)
@@ -49323,32 +49357,14 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         text = "✍️ Hãy gửi mô tả mới để TOAN AAS tạo lại 3 prompt." if normalize_user_language(lang) == "vi" else "✍️ Send a new description to rebuild the three prompts."
         return await safe_edit_or_send(query, text, reply_markup=prompt_video_description_keyboard(lang))
     if action == "finalization":
-        render_plan = structured_video_plan(state, "promptvideo")
-        package = {
-            "source": "prompt_to_video",
-            "concept_text": state.get("selected_topic") or "",
-            "video_prompt": render_plan.get("prompt") or state.get("selected_prompt") or "",
-            "music_choice": {"label": self_scene_music_label(state.get("selected_music"), lang)},
-        }
-        source_state = dict(state)
-        source_state["video_prompt"] = package["video_prompt"]
-        return await open_video_finalization(query, uid, "promptvideo", source_state, lang, "promptvideo|back_music", package)
+        return await open_prompt_video_finalization_from_state(query, uid, state, lang, "promptvideo|back_motion")
     if action == "save":
         text = "💾 TOAN AAS đã lưu kế hoạch trong phiên hiện tại. Bot chưa gọi API và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "💾 Plan saved in this session. No API call and no Xu charged."
         return await safe_edit_or_send(query, text, reply_markup=guided_video_result_keyboard("promptvideo", lang))
     if action == "generate":
         if shopaikey_active_job_for_user(uid, "video"):
             return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(shopaikey_active_job_for_user(uid, "video"), lang))
-        render_plan = structured_video_plan(state, "promptvideo")
-        package = {
-            "source": "prompt_to_video",
-            "concept_text": state.get("selected_topic") or "",
-            "video_prompt": render_plan.get("prompt") or state.get("selected_prompt") or "",
-            "music_choice": {"label": self_scene_music_label(state.get("selected_music"), lang)},
-        }
-        source_state = dict(state)
-        source_state["video_prompt"] = package["video_prompt"]
-        return await open_video_finalization(query, uid, "promptvideo", source_state, lang, "promptvideo|back_music", package)
+        return await open_prompt_video_finalization_from_state(query, uid, state, lang, "promptvideo|back_motion")
     return await safe_edit_or_send(query, prompt_video_start_text(lang), parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
 
 async def handle_image_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49441,26 +49457,26 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
             options = guided_video_motion_suggestions(state, lang, from_image=True)
             selected = options[idx - 1] if idx <= len(options) else (options[0] if options else {})
             selected_motion = selected.get("code") or selected.get("label") or "pushin"
-        set_developing_video_pending(uid, "imagevideo", "music", selected_motion=selected_motion)
-        current = get_developing_video_pending(uid) or {}
-        return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
+        current = dict(state)
+        current["selected_motion"] = selected_motion
+        current.setdefault("selected_music", "none")
+        clear_developing_video_pending(uid)
+        return await open_image_video_finalization_from_state(query, uid, current, lang, "imagevideo|back_motion")
     if action == "back_motion":
         restore_developing_video_pending(uid, "imagevideo", state, "motion")
         return await safe_edit_or_send(query, guided_video_motion_text(state, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("imagevideo", lang))
     if action == "music_custom":
-        restore_developing_video_pending(uid, "imagevideo", state, "music_custom")
-        text = "✍️ Hãy nhập phong cách âm thanh cho video." if normalize_user_language(lang) == "vi" else "✍️ Enter the video audio direction."
-        return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-        ]))
+        current = dict(state)
+        current.setdefault("selected_music", "none")
+        clear_developing_video_pending(uid)
+        return await open_image_video_finalization_from_state(query, uid, current, lang, "imagevideo|back_motion")
     if action == "music_refresh":
         if not state.get("source_file_id"):
             return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
-        offset = _safe_int(state.get("music_offset"), 0) + 3
-        restore_developing_video_pending(uid, "imagevideo", state, "music")
-        set_developing_video_pending(uid, "imagevideo", "music", music_offset=offset)
-        current = get_developing_video_pending(uid) or {}
-        return await safe_edit_or_send(query, guided_video_music_text(current, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
+        current = dict(state)
+        current.setdefault("selected_music", "none")
+        clear_developing_video_pending(uid)
+        return await open_image_video_finalization_from_state(query, uid, current, lang, "imagevideo|back_motion")
     if action in {"music", "music_choice"}:
         selected_music = value or "none"
         if action == "music_choice":
@@ -49475,11 +49491,11 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         state["selected_music"] = selected_music
         state["selected_prompt"] = image_video_prompt_from_state(state, lang)
         clear_developing_video_pending(uid)
-        plan = save_developing_video_plan(uid, "imagevideo", state)
-        return await safe_edit_or_send_long_html(query, guided_video_plan_text(plan, lang, from_image=True), reply_markup=guided_video_result_keyboard("imagevideo", lang))
+        return await open_image_video_finalization_from_state(query, uid, state, lang, "imagevideo|back_motion")
     if action == "back_music":
-        restore_developing_video_pending(uid, "imagevideo", state, "music")
-        return await safe_edit_or_send(query, guided_video_music_text(state, lang), parse_mode="HTML", reply_markup=guided_video_music_keyboard("imagevideo", lang))
+        current = dict(state)
+        current.setdefault("selected_music", "none")
+        return await open_image_video_finalization_from_state(query, uid, current, lang, "imagevideo|back_motion")
     if action == "strength":
         prompt_strength = value if value in PROMPT_STRENGTH_LEVELS else "director"
         updated = dict(state)
@@ -49491,23 +49507,10 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         restore_developing_video_pending(uid, "imagevideo", state, "edit_prompt")
         text = "✍️ Hãy gửi prompt video mới cho ảnh này." if normalize_user_language(lang) == "vi" else "✍️ Send a new video prompt for this image."
         return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_motion"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
     if action == "finalization":
-        render_plan = structured_video_plan(state, "imagevideo")
-        package = {
-            "source": "image_to_video",
-            "source_file_id": state.get("source_file_id") or "",
-            "telegram_file_id": state.get("source_file_id") or "",
-            "concept_text": state.get("selected_style") or "",
-            "video_prompt": render_plan.get("prompt") or state.get("selected_prompt") or "",
-            "music_choice": {"label": self_scene_music_label(state.get("selected_music"), lang)},
-        }
-        source_state = dict(state)
-        source_state["video_prompt"] = package["video_prompt"]
-        if state.get("source_file_id"):
-            source_state["photos"] = [{"file_id": state.get("source_file_id")}]
-        return await open_video_finalization(query, uid, "imagevideo", source_state, lang, "imagevideo|back_music", package)
+        return await open_image_video_finalization_from_state(query, uid, state, lang, "imagevideo|back_motion")
     if action == "save":
         text = "💾 TOAN AAS đã lưu kế hoạch ảnh → video trong phiên hiện tại. Bot chưa gọi API và chưa trừ Xu." if normalize_user_language(lang) == "vi" else "💾 Image-to-video plan saved in this session. No API call and no Xu charged."
         return await safe_edit_or_send(query, text, reply_markup=guided_video_result_keyboard("imagevideo", lang))
@@ -49515,20 +49518,7 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         active = shopaikey_active_job_for_user(uid, "video")
         if active:
             return await safe_edit_or_send(query, public_video_active_job_text(lang), reply_markup=public_video_active_job_keyboard(active, lang))
-        render_plan = structured_video_plan(state, "imagevideo")
-        package = {
-            "source": "image_to_video",
-            "source_file_id": state.get("source_file_id") or "",
-            "telegram_file_id": state.get("source_file_id") or "",
-            "concept_text": state.get("selected_style") or "",
-            "video_prompt": render_plan.get("prompt") or state.get("selected_prompt") or "",
-            "music_choice": {"label": self_scene_music_label(state.get("selected_music"), lang)},
-        }
-        source_state = dict(state)
-        source_state["video_prompt"] = package["video_prompt"]
-        if state.get("source_file_id"):
-            source_state["photos"] = [{"file_id": state.get("source_file_id")}]
-        return await open_video_finalization(query, uid, "imagevideo", source_state, lang, "imagevideo|back_music", package)
+        return await open_image_video_finalization_from_state(query, uid, state, lang, "imagevideo|back_motion")
     return await safe_edit_or_send(query, image_video_start_text(lang), parse_mode="HTML", reply_markup=image_video_start_keyboard(lang))
 
 async def handle_video_reference_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -50835,12 +50825,9 @@ def menu_text_main_audio() -> str:
 
 def menu_text_main_music() -> str:
     return (
-        "🎧 <b>STUDIO ÂM THANH TOAN AAS</b>\n\n"
-        "Tạo và tải file âm thanh độc lập:\n\n"
-        "• <b>Giọng đọc:</b> nhập chữ, chọn giọng mặc định hoặc giọng đã lưu, nghe thử ngắn trước bản đầy đủ.\n"
-        "• <b>Nhạc/SFX:</b> nghe thử kho nhạc, hiệu ứng âm thanh, hoặc chuẩn bị nhạc AI mới.\n"
-        "• <b>Media âm thanh:</b> xem và quản lý file dùng riêng.\n\n"
-        "Studio này không gắn vào video hiện tại. Tác vụ có phí luôn có preview ngắn, báo giá và xác nhận cuối trước khi xử lý bản đầy đủ."
+        "🎧 <b>Studio âm thanh</b>\n\n"
+        "Bạn muốn tạo loại âm thanh nào?\n\n"
+        "Studio này tạo file âm thanh riêng, không gắn vào video hiện tại và chưa trừ Xu."
     )
 
 def menu_text_translate(other: bool = False) -> str:
@@ -51145,18 +51132,16 @@ def menu_text_main_music_i18n(lang: str) -> str:
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         return (
-            "🎧 <b>TOAN AAS 音频 Studio</b>\n\n"
-            "可创建独立语音文件、音乐提示词、背景音乐、音效和音频素材。\n\n"
-            "请使用下方按钮开始。需要输入内容时，Bot 会提示你发送文字，并给出 3 个建议、重新建议和返回按钮。\n\n"
-            "本 Studio 不连接当前视频。付费任务会先提供短预览，再显示价格和最终确认。"
+            "🎧 <b>Audio Studio</b>\n\n"
+            "请选择要创建的音频类型。\n\n"
+            "This studio creates standalone audio files and is not attached to the current video."
         )
     if lang == "vi":
         return menu_text_main_music()
     return (
-        "🎧 <b>TOAN AAS AUDIO STUDIO</b>\n\n"
-        "Create standalone voice files, music prompts, background music, SFX, and audio media.\n\n"
-        "Use the buttons below. When input is needed, the bot will ask for text and return 3 suggestions, more suggestions, and a back button.\n\n"
-        "This studio is not attached to a current video. Paid tasks show a short preview, price, and final confirmation before full processing."
+        "🎧 <b>Audio Studio</b>\n\n"
+        "What kind of audio would you like to create?\n\n"
+        "This studio creates standalone audio files and is not attached to the current video."
     )
 
 def menu_text_translate_i18n(other: bool, lang: str) -> str:
@@ -61437,7 +61422,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 parse_mode=None,
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚫 Chọn không thêm", callback_data="videoaddon|none")],
-                    [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng", callback_data="videoaddon|menu")],
+                    [InlineKeyboardButton("🎞 Đổi phụ đề/lồng tiếng", callback_data="vfinal|addon")],
                     [InlineKeyboardButton("🏠 Menu chính", callback_data="videoaddon|main")],
                 ]),
             )
@@ -63608,13 +63593,12 @@ def music_library_keyword_text(kind: str = "music", lang: str = "vi") -> str:
 def voice_text_input_text(lang: str = "vi") -> str:
     lang = music_ui_lang(lang=lang)
     if lang == "zh":
-        return "🎙 <b>生成语音</b>\n\n请发送要朗读的文字。Bot 会先给出 3 种声音风格建议。本步骤不开始处理、不扣 Xu。"
+        return "🎙 <b>Voice</b>\n\nPlease send the text you want to turn into narration."
     if lang == "en":
-        return "🎙 <b>Create voice</b>\n\nSend the text you want read aloud. The bot will show 3 voice style suggestions and a guarded confirmation. No processing starts and no Xu is charged at this step."
+        return "🎙 <b>Voice</b>\n\nSend the text you want to turn into narration."
     return (
-        "🎙 <b>Tạo giọng đọc</b>\n\n"
-        "Bạn hãy gửi nội dung cần đọc ở tin nhắn tiếp theo.\n\n"
-        "Bot sẽ gợi ý 3 kiểu giọng để chọn trước. Tác vụ có phí sẽ có giá và xác nhận cuối trước khi xử lý. Hiện bước này chưa trừ Xu."
+        "🎙 <b>Giọng đọc</b>\n\n"
+        "Bạn nhập nội dung muốn tạo giọng đọc nhé."
     )
 
 def voice_prompt_entry_text(lang: str = "vi") -> str:
@@ -64020,8 +64004,8 @@ def music_ai_input_text(kind: str = "background", lang: str = "vi") -> str:
         )
     if kind == "custom":
         return (
-            "🎼 <b>Tạo nhạc nền</b>\n\n"
-            "Bạn mô tả kiểu nhạc muốn tạo.\n\n"
+            "🎵 <b>Tạo nhạc mới</b>\n\n"
+            "Bạn mô tả kiểu nhạc muốn tạo nhé.\n\n"
             "TOAN AAS sẽ trả 3 hướng để chọn/đổi/sửa trước. Bước này chưa bắt đầu xử lý và chưa trừ Xu."
         )
     return (
@@ -64500,39 +64484,32 @@ def voice_style_suggestions_text(text: str, lang: str = "vi", offset: int = 0) -
     lang = music_ui_lang(lang=lang)
     default_content = "kịch bản quảng cáo ngắn" if lang == "vi" else ("短广告脚本" if lang == "zh" else "short ad script")
     content = html.escape(_short_pending_text(text, 260) or default_content)
-    suggestions = voice_style_suggestions(text, offset, lang)
     if lang == "en":
-        lines = ["🎙 <b>3 suggested voice styles</b>", "", f"<b>Text:</b>\n{content}", ""]
-        labels = ("Tone", "Pace", "Best for", "Direction")
-        footer = "Full voice generation still depends on processing availability and a final confirmation. No processing starts and no Xu is charged yet."
+        return (
+            "🎙 <b>Choose voice style</b>\n\n"
+            f"<b>Text:</b> {content}\n\n"
+            "Choose a style. TOAN AAS will show a short preview or a friendly guard before the full output."
+        )
     elif lang == "zh":
-        lines = ["🎙 <b>3 种声音风格建议</b>", "", f"<b>文本:</b>\n{content}", ""]
-        labels = ("语气", "速度", "适合", "方向")
-        footer = "完整语音生成仍取决于处理资源和最终确认。本步骤不开始处理、不扣 Xu。"
-    else:
-        lines = ["🎙 <b>3 kiểu giọng gợi ý</b>", "", f"<b>Nội dung:</b>\n{content}", ""]
-        labels = ("Chất giọng", "Tốc độ", "Hợp với", "Cách đọc")
-        footer = "Bản voice đầy đủ vẫn phụ thuộc tài nguyên xử lý và bước xác nhận cuối. TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
-    for idx, item in enumerate(suggestions, start=1):
-        lines.extend([
-            f"<b>{idx}. {html.escape(str(item.get('name') or 'Voice style'))}</b>",
-            f"• {labels[0]}: {html.escape(str(item.get('tone') or ''))}",
-            f"• {labels[1]}: {html.escape(str(item.get('pace') or ''))}",
-            f"• {labels[2]}: {html.escape(str(item.get('use_case') or ''))}",
-            f"• {labels[3]}: {html.escape(str(item.get('direction') or ''))}",
-            "",
-        ])
-    lines.append(footer)
-    return "\n".join(lines)
+        return (
+            "🎙 <b>Choose voice style</b>\n\n"
+            f"<b>Text:</b> {content}\n\n"
+            "Choose a style. TOAN AAS will show a short preview before the full output."
+        )
+    return (
+        "🎙 <b>Chọn kiểu giọng</b>\n\n"
+        f"<b>Nội dung:</b> {content}\n\n"
+        "Chọn một kiểu giọng. TOAN AAS sẽ cho nghe thử ngắn hoặc báo thân thiện nếu tài nguyên xử lý chưa sẵn sàng."
+    )
 
 def voice_style_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     buttons = [
-        ("1️⃣ Giọng nữ nhẹ nhàng" if is_vi else "1️⃣ Gentle female voice", cb("voice_style_1")),
-        ("2️⃣ Giọng nam tin cậy" if is_vi else "2️⃣ Trustworthy male voice", cb("voice_style_2")),
-        ("3️⃣ Giọng trẻ bán hàng" if is_vi else "3️⃣ Young sales voice", cb("voice_style_3")),
+        ("👩 Giọng nữ nhẹ nhàng" if is_vi else "👩 Gentle female voice", cb("voice_style_1")),
+        ("👨 Giọng nam tin cậy" if is_vi else "👨 Trustworthy male voice", cb("voice_style_2")),
+        ("⚡ Giọng bán hàng năng lượng" if is_vi else "⚡ Energetic sales voice", cb("voice_style_3")),
         ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", cb("voice_custom")),
     ]
     back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
@@ -64579,15 +64556,11 @@ def music_tools_keyboard(lang: str = "vi", back_callback: str = "menu|main") -> 
             ("🎙 Giọng đọc cho video" if is_vi else "🎙 Voice for video", "vfinal|voice"),
             ("🎵 Nhạc cho video" if is_vi else "🎵 Music for video", "vfinal|music"),
             ("🎞 Phụ đề / Dịch / Lồng tiếng" if is_vi else "🎞 Subtitles / translate / dub", "vfinal|addon"),
-            ("📁 Media cho video" if is_vi else "📁 Media for video", "vfinal|my_media"),
         ]
     else:
         buttons = [
-            ("🎙 Tạo giọng đọc" if is_vi else "🎙 Create voice", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_custom")),
-            ("📁 Kho voice" if is_vi else "📁 Voice vault", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_profiles")),
-            ("🎵 Tạo nhạc nền" if is_vi else "🎵 Create music", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "ai_music")),
-            ("🎼 Kho nhạc / SFX" if is_vi else "🎼 Music / SFX library", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
-            ("📁 Media âm thanh" if is_vi else "📁 Audio media", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "media")),
+            ("🎙 Giọng đọc" if is_vi else "🎙 Voice", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "voice_custom")),
+            ("🎵 Nhạc" if is_vi else "🎵 Music", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_hub")),
         ]
     return build_2col_keyboard(
         buttons,
@@ -64601,14 +64574,12 @@ def voice_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOW
         return video_order_screen_text("voice", {}, lang)
     if music_ui_lang(lang=lang) != "vi":
         return (
-            "🎧 <b>TOAN AAS Audio Studio</b>\n\n"
-            "Create standalone narration, manage saved voices, build background music and browse audio media.\n"
-            "Choose Create voice to send text first, then select one of three voice styles."
+            "🎙 <b>Voice</b>\n\n"
+            "Send the text you want to turn into narration."
         )
     return (
-        "🎧 <b>STUDIO ÂM THANH TOAN AAS</b>\n\n"
-        "Tạo file audio độc lập: giọng đọc, kho voice, nhạc nền, kho nhạc/SFX và media âm thanh.\n"
-        "Bấm Tạo giọng đọc để gửi nội dung trước, sau đó chọn một trong 3 kiểu giọng."
+        "🎙 <b>Giọng đọc</b>\n\n"
+        "Bạn nhập nội dung muốn tạo giọng đọc nhé."
     )
 
 def voice_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
@@ -64623,16 +64594,12 @@ def music_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOW
         return video_order_screen_text("music", {}, lang)
     if music_ui_lang(lang=lang) != "vi":
         return (
-            "🎵 <b>TOAN AAS Music Studio</b>\n\n"
-            "Preview music/SFX, build music prompts, generate standalone AI music, and manage audio media.\n"
-            "This studio is independent and is not attached to a current video order.\n\n"
-            "Paid actions show a price and final confirmation before any processing."
+            "🎵 <b>Music</b>\n\n"
+            "What would you like to do?"
         )
     return (
-        "🎵 <b>Music Studio TOAN AAS</b>\n\n"
-        "Dùng để nghe thử, tìm nhạc nền, tạo prompt nhạc và tạo nhạc AI riêng để tải xuống.\n"
-        "Đây là công cụ độc lập, không gắn vào video hiện tại.\n\n"
-        "Các tác vụ có phí luôn hiện giá và hỏi xác nhận cuối trước khi xử lý."
+        "🎵 <b>Nhạc</b>\n\n"
+        "Bạn muốn làm gì?"
     )
 
 def music_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
@@ -64642,10 +64609,9 @@ def music_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_
         return video_finalization_music_keyboard(lang)
     cb = lambda action: product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, action)
     buttons = [
-        ("🎼 Nghe thử Kho nhạc" if is_vi else "🎼 Preview music library", cb("music")),
-        ("🔊 Nghe thử Kho SFX" if is_vi else "🔊 Preview SFX", cb("sfx")),
-        ("📁 Media âm thanh của tôi" if is_vi else "📁 My audio media", cb("media")),
-        ("🎵 Tạo nhạc nền" if is_vi else "🎵 Create background music", cb("ai_music")),
+        ("🎼 Chọn nhạc có sẵn" if is_vi else "🎼 Choose stock music", cb("music")),
+        ("🔊 Chọn hiệu ứng âm thanh" if is_vi else "🔊 Choose sound effects", cb("sfx")),
+        ("🎵 Tạo nhạc mới" if is_vi else "🎵 Create new music", cb("ai_music")),
     ]
     rows = build_2col_keyboard(buttons, nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")), nav_main=True, lang=lang).inline_keyboard
     return InlineKeyboardMarkup(rows)
@@ -65158,7 +65124,13 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(menu_text_main_music_i18n(lang), parse_mode="HTML", reply_markup=music_tools_keyboard(lang, back_callback))
     if action == "voice_hub":
         await query.answer()
-        set_music_guided_pending(user_id, "voice_text", product_context=ctx)
+        current_pending = get_music_guided_pending(user_id) or {}
+        if ctx == PRODUCT_CONTEXT_SHOWROOM and str(current_pending.get("pending_action") or "") in {"voice_text", "audio_voice_waiting_text"}:
+            return await query.message.reply_text(
+                "Bạn gửi nội dung cần đọc ở tin nhắn tiếp theo nhé." if lang == "vi" else "Please send the text to read in your next message.",
+                reply_markup=music_guided_back_keyboard(lang, ctx, "root"),
+            )
+        set_music_guided_pending(user_id, "audio_voice_waiting_text", product_context=ctx)
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
         return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
     if action == "music_hub":
@@ -65201,14 +65173,26 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(music_prompt_suggestions_text(desc, offset, lang, mode), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang, ctx))
     if action in {"voice", "voice_pick"}:
         await query.answer()
-        set_music_guided_pending(user_id, "voice_text", product_context=ctx)
+        current_pending = get_music_guided_pending(user_id) or {}
+        if ctx == PRODUCT_CONTEXT_SHOWROOM and str(current_pending.get("pending_action") or "") in {"voice_text", "audio_voice_waiting_text"}:
+            return await query.message.reply_text(
+                "Bạn gửi nội dung cần đọc ở tin nhắn tiếp theo nhé." if lang == "vi" else "Please send the text to read in your next message.",
+                reply_markup=music_guided_back_keyboard(lang, ctx, "root"),
+            )
+        set_music_guided_pending(user_id, "audio_voice_waiting_text", product_context=ctx)
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
         return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
     if action == "voice_custom":
         await query.answer()
-        set_music_guided_pending(user_id, "voice_text", product_context=ctx)
+        current_pending = get_music_guided_pending(user_id) or {}
+        if ctx == PRODUCT_CONTEXT_SHOWROOM and str(current_pending.get("pending_action") or "") in {"voice_text", "audio_voice_waiting_text"}:
+            return await query.message.reply_text(
+                "Bạn gửi nội dung cần đọc ở tin nhắn tiếp theo nhé." if lang == "vi" else "Please send the text to read in your next message.",
+                reply_markup=music_guided_back_keyboard(lang, ctx, "root"),
+            )
+        set_music_guided_pending(user_id, "audio_voice_waiting_text", product_context=ctx)
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "voice_hub"))
+        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
     if action in {"voice_seed", "voice_more"}:
         await query.answer()
         result = get_music_guided_result(user_id) or {}
@@ -67522,7 +67506,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
     if action == "media_library_keyword":
         await send_media_library_results(update.message, uid, text)
         return True
-    if action == "voice_text":
+    if action in {"voice_text", "audio_voice_waiting_text"}:
         suggestions = voice_style_suggestions(text, 0, lang)
         save_music_guided_result(uid, {"voice_text": text, "voice_offset": 0, "voice_suggestions": suggestions, "selected_voice_style": ""})
         await update.message.reply_text(
@@ -80978,7 +80962,7 @@ def video_finalization_menu_text(state: dict | None = None, lang: str = "vi") ->
         return (
             "🎛 <b>Video finishing options</b>\n\n"
             f"Source: <b>{html.escape(str(source))}</b>\n\n"
-            "Configure voice, music/SFX, subtitles, translation or dubbing for this video draft first. "
+            "Configure voice, music, subtitles, translation or dubbing for this video draft first. "
             "Then choose the package, review the invoice and confirm.\n\n"
             "The current source file, duration, package draft and video direction stay in the same video order. "
             "No processing starts and no Xu is charged here."
@@ -80986,7 +80970,7 @@ def video_finalization_menu_text(state: dict | None = None, lang: str = "vi") ->
     return (
         "🎛 <b>Tùy chọn hoàn thiện video</b>\n\n"
         f"Nguồn: <b>{html.escape(str(source))}</b>\n\n"
-        "Chọn voice, nhạc/SFX, phụ đề, dịch hoặc lồng tiếng cho draft video hiện tại trước. "
+        "Chọn giọng đọc, nhạc, phụ đề, dịch hoặc lồng tiếng cho draft video hiện tại trước. "
         "Sau đó mới chọn gói, xem hóa đơn và xác nhận cuối.\n\n"
         "TOAN AAS giữ nguyên file nguồn, thời lượng, hướng dựng và các lựa chọn add-on trong cùng đơn video. "
         "Màn này chưa xử lý video và chưa trừ Xu."
@@ -80997,7 +80981,7 @@ def video_finalization_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🎙 Giọng đọc" if is_vi else "🎙 Voice", callback_data="vfinal|voice"),
-            InlineKeyboardButton("🎵 Nhạc nền / SFX" if is_vi else "🎵 Music / SFX", callback_data="vfinal|music"),
+            InlineKeyboardButton("🎵 Nhạc" if is_vi else "🎵 Music", callback_data="vfinal|music"),
         ],
         [
             InlineKeyboardButton("🎞 Phụ đề / Dịch / Lồng tiếng" if is_vi else "🎞 Subtitles / Translate / Dub", callback_data="vfinal|addon"),
@@ -81007,7 +80991,7 @@ def video_finalization_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("🚫 Bỏ qua add-on" if is_vi else "🚫 Skip add-ons", callback_data="vfinal|skip"),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại prompt" if is_vi else "⬅️ Back to prompt", callback_data="vfinal|back"),
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
         ],
     ])
@@ -81173,6 +81157,40 @@ async def video_finalization_continue_to_invoice_or_tier(query, user_id, state: 
         reply_markup=video_finalization_tier_keyboard(lang),
     )
 
+def ensure_video_finalization_from_addon_state(user_id, addon_state: dict | None = None) -> dict:
+    addon_state = dict(addon_state or {})
+    pending = dict(addon_state.get("pending_payload") or {})
+    current = dict(get_video_finalization_state(user_id) or {})
+    source_payload = video_finalization_merge_pending_payload(
+        current.get("source_payload") or {},
+        pending,
+    )
+    current.update({
+        "step": "menu",
+        "addon_return_target": "hub",
+        "source_payload": source_payload,
+        "selected_video_tier": normalize_video_tier(
+            current.get("selected_video_tier")
+            or addon_state.get("video_tier")
+            or pending.get("video_tier")
+            or "low"
+        ),
+        "source": str(current.get("source") or addon_state.get("source") or pending.get("source") or "video_addon")[:80],
+        "source_label": current.get("source_label") or addon_state.get("source_label") or "",
+        "video_order": dict(addon_state.get("video_order") or current.get("video_order") or {}),
+    })
+    if pending.get("aspect_ratio") and not current.get("selected_video_aspect_ratio"):
+        current["selected_video_aspect_ratio"] = normalize_media_aspect_ratio(
+            str(pending.get("aspect_ratio")),
+            "9:16",
+            "video",
+        )
+    finalization = video_finalization_defaults()
+    finalization.update(dict(current.get("video_finalization") or {}))
+    finalization.update(dict(pending.get("video_finalization") or {}))
+    current["video_finalization"] = finalization
+    return set_video_finalization_state(user_id, current)
+
 def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
     finalization = video_finalization_defaults()
@@ -81329,7 +81347,7 @@ def video_finalization_confirm_not_ready_keyboard(state: dict | None = None, lan
 def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "🎵 <b>Music / audio for this video</b>\n\n"
+            "🎵 <b>Music for this video</b>\n\n"
             "Free:\n"
             "• Pick stock background music\n"
             "• Pick stock SFX\n"
@@ -81340,7 +81358,7 @@ def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -
             "This only saves the current video plan. Processing starts after the final invoice confirmation."
         )
     return (
-        "🎵 <b>Nhạc nền / Âm thanh cho video</b>\n\n"
+        "🎵 <b>Nhạc cho video</b>\n\n"
         "Miễn phí:\n"
         "• Chọn nhạc nền có sẵn trong Kho nhạc\n"
         "• Chọn âm thanh/SFX có sẵn\n"
@@ -81355,12 +81373,12 @@ def video_finalization_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎼 Kho nhạc có sẵn" if is_vi else "🎼 Stock music", callback_data="vfinal|music_library"),
-            InlineKeyboardButton("🔊 Kho SFX" if is_vi else "🔊 Stock SFX", callback_data="vfinal|music_sfx"),
+            InlineKeyboardButton("🎼 Chọn nhạc có sẵn" if is_vi else "🎼 Choose stock music", callback_data="vfinal|music_library"),
+            InlineKeyboardButton("🔊 Chọn hiệu ứng âm thanh" if is_vi else "🔊 Choose sound effects", callback_data="vfinal|music_sfx"),
         ],
         [
             InlineKeyboardButton("📁 Media âm thanh của tôi" if is_vi else "📁 My audio media", callback_data="vfinal|my_media"),
-            InlineKeyboardButton("🎵 Tạo nhạc AI" if is_vi else "🎵 Create AI music", callback_data="vfinal|music_ai"),
+            InlineKeyboardButton("🎵 Tạo nhạc mới" if is_vi else "🎵 Create new music", callback_data="vfinal|music_ai"),
         ],
         [
             InlineKeyboardButton("🚫 Không thêm nhạc" if is_vi else "🚫 No music", callback_data="vfinal|music_none"),
@@ -81410,14 +81428,14 @@ def video_finalization_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🚫 Không thêm" if is_vi else "🚫 None", callback_data="vfinal|addon_none"),
-            InlineKeyboardButton("📝 Tạo phụ đề +120 Xu" if is_vi else "📝 Subtitles +120 Xu", callback_data="vfinal|subtitle"),
+            InlineKeyboardButton("📝 Tạo phụ đề" if is_vi else "📝 Create subtitles", callback_data="vfinal|subtitle"),
         ],
         [
-            InlineKeyboardButton("🌐 Dịch phụ đề +150 Xu" if is_vi else "🌐 Translate subtitles +150 Xu", callback_data="vfinal|translate_sub"),
-            InlineKeyboardButton("🎙 Lồng tiếng +250 Xu" if is_vi else "🎙 Dubbing +250 Xu", callback_data="vfinal|dub"),
+            InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data="vfinal|translate_sub"),
+            InlineKeyboardButton("🎙 Lồng tiếng" if is_vi else "🎙 Dubbing", callback_data="vfinal|dub"),
         ],
         [
-            InlineKeyboardButton("🌐🎙 Phụ đề + Lồng tiếng +350 Xu" if is_vi else "🌐🎙 Subtitles + dubbing +350 Xu", callback_data="vfinal|combo"),
+            InlineKeyboardButton("🌐🎙 Phụ đề + Lồng tiếng" if is_vi else "🌐🎙 Subtitles + dubbing", callback_data="vfinal|combo"),
             InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="vfinal|menu"),
         ],
         [
@@ -81536,18 +81554,17 @@ def video_finalization_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🚫 Không thêm giọng" if is_vi else "🚫 No voice", callback_data="vfinal|voice_none"),
-            InlineKeyboardButton("👩 Giọng nữ mặc định - Miễn phí" if is_vi else "👩 Default female - Free", callback_data="vfinal|voice_default|female"),
+            InlineKeyboardButton("👩 Giọng nữ miễn phí" if is_vi else "👩 Free female voice", callback_data="vfinal|voice_default|female"),
         ],
         [
-            InlineKeyboardButton("👨 Giọng nam mặc định - Miễn phí" if is_vi else "👨 Default male - Free", callback_data="vfinal|voice_default|male"),
-            InlineKeyboardButton("📁 Kho voice của bạn" if is_vi else "📁 Your voice vault", callback_data="vfinal|voice_vault"),
+            InlineKeyboardButton("👨 Giọng nam miễn phí" if is_vi else "👨 Free male voice", callback_data="vfinal|voice_default|male"),
+            InlineKeyboardButton("📁 Voice đã lưu" if is_vi else "📁 Saved voices", callback_data="vfinal|voice_vault"),
         ],
         [
             InlineKeyboardButton("🧬 Tạo voice riêng" if is_vi else "🧬 Create custom voice", callback_data="vfinal|voice_create"),
-            InlineKeyboardButton("▶️ Nghe thử giọng" if is_vi else "▶️ Preview voice", callback_data="vfinal|voice_preview"),
+            InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="vfinal|menu"),
         ],
         [
-            InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="vfinal|menu"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
         ],
     ])
@@ -82080,7 +82097,9 @@ async def render_video_finalization_stack_target(query, user_id, state: dict, ta
     if step == "music":
         return True, await safe_edit_or_send(query, video_order_screen_text("music", state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
     if step == "music_suggest":
-        return True, await safe_edit_or_send(query, video_finalization_music_suggestion_text(lang), parse_mode="HTML", reply_markup=video_finalization_music_suggestion_keyboard(lang))
+        state["step"] = "music"
+        set_video_finalization_state(user_id, state)
+        return True, await safe_edit_or_send(query, video_finalization_music_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
     if step in {"voice", "voice_language"}:
         if step == "voice_language":
             return True, await safe_edit_or_send(query, "🎙 <b>Chọn ngôn ngữ/giọng đọc</b>", parse_mode="HTML", reply_markup=video_finalization_voice_language_keyboard(lang))
@@ -82133,6 +82152,14 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         clear_video_finalization_state(uid)
         clear_product_context(uid)
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
+    if not state:
+        addon_state = get_video_addon_state(uid)
+        if addon_state and action not in {"main"}:
+            state = ensure_video_finalization_from_addon_state(uid, addon_state)
+            if action == "back":
+                return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
+        else:
+            return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     if not state:
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     product_area = "subtitle" if action in {"addon", "addon_none", "subtitle", "translate_sub", "combo", "translate_combo", "dub"} else ("voice" if action.startswith("voice") else ("music" if action.startswith("music") or action == "my_media" else "video"))
@@ -82943,16 +82970,29 @@ def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> Inl
     if normalize_video_tier(tier) == "low":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("▶️ Nghe/xem thử ngắn" if is_vi else "▶️ Short preview", callback_data=f"videoaddon|preview|{token}")],
+            [InlineKeyboardButton("✅ Xác nhận xuất bản đầy đủ" if is_vi else "✅ Confirm full output", callback_data=f"shopai|confirm|{token}")],
             [
-                InlineKeyboardButton("⬆️ Đổi lên 300 Xu" if is_vi else "⬆️ Upgrade 300 Xu", callback_data="vfinal|tier|basic"),
-                InlineKeyboardButton("⚙️ Chọn gói khác" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier"),
+                InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change package", callback_data="vfinal|tier"),
+                InlineKeyboardButton("🎙 Đổi giọng đọc" if is_vi else "🎙 Change voice", callback_data="vfinal|voice"),
             ],
-            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+            [
+                InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music"),
+                InlineKeyboardButton("🎞 Đổi phụ đề/lồng tiếng" if is_vi else "🎞 Change subtitles/dubbing", callback_data="vfinal|addon"),
+            ],
+            [InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶️ Nghe/xem thử ngắn" if is_vi else "▶️ Short preview", callback_data=f"videoaddon|preview|{token}"), InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier")],
-        [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc nền" if is_vi else "🎵 Change music", callback_data="vfinal|music")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
+        [InlineKeyboardButton("▶️ Nghe/xem thử ngắn" if is_vi else "▶️ Short preview", callback_data=f"videoaddon|preview|{token}")],
+        [InlineKeyboardButton("✅ Xác nhận xuất bản đầy đủ" if is_vi else "✅ Confirm full output", callback_data=f"shopai|confirm|{token}")],
+        [
+            InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change package", callback_data="vfinal|tier"),
+            InlineKeyboardButton("🎙 Đổi giọng đọc" if is_vi else "🎙 Change voice", callback_data="vfinal|voice"),
+        ],
+        [
+            InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music"),
+            InlineKeyboardButton("🎞 Đổi phụ đề/lồng tiếng" if is_vi else "🎞 Change subtitles/dubbing", callback_data="vfinal|addon"),
+        ],
+        [InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
 def paid_preview_seconds(duration_seconds) -> int:
@@ -83079,7 +83119,8 @@ def video_paid_preview_keyboard(token: str, lang: str = "vi") -> InlineKeyboardM
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận tạo bản đầy đủ" if is_vi else "✅ Confirm full output", callback_data=f"shopai|confirm|{token}")],
-        [InlineKeyboardButton("🔁 Đổi giọng hoặc nhạc" if is_vi else "🔁 Change voice or music", callback_data="vfinal|music"), InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data="vfinal|menu")],
+        [InlineKeyboardButton("🎙 Đổi giọng đọc" if is_vi else "🎙 Change voice", callback_data="vfinal|voice"), InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music")],
+        [InlineKeyboardButton("🎞 Đổi phụ đề/lồng tiếng" if is_vi else "🎞 Change subtitles/dubbing", callback_data="vfinal|addon"), InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data="vfinal|menu")],
         [InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
@@ -83623,11 +83664,12 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
 async def render_video_addon_screen(query, user_id, state: dict, target_screen: str, lang: str = "vi"):
     target = str(target_screen or "video_addon_menu")
     if target == "video_addon_menu":
+        finalization_state = ensure_video_finalization_from_addon_state(user_id, state)
         return await safe_edit_or_send(
             query,
-            video_addon_menu_text(state, lang),
+            video_finalization_menu_text(finalization_state, lang),
             parse_mode="HTML",
-            reply_markup=video_addon_menu_keyboard(lang, state),
+            reply_markup=video_finalization_menu_keyboard(lang),
         )
     if target == "addon_voice":
         return await safe_edit_or_send(
@@ -83741,8 +83783,13 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen=f"videoaddon|{action}", product_area="subtitle")
     if action == "menu":
-        state = set_video_addon_screen(uid, state, "video_addon_menu")
-        return await render_video_addon_screen(query, uid, state, "video_addon_menu", lang)
+        finalization_state = ensure_video_finalization_from_addon_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            video_finalization_menu_text(finalization_state, lang),
+            parse_mode="HTML",
+            reply_markup=video_finalization_menu_keyboard(lang),
+        )
     if action in {"preview", "preview_retry", "preview_status"}:
         token = parts[2] if len(parts) > 2 else str(state.get("pending_confirm_token") or "")
         pending_payload = dict(state.get("pending_payload") or {})
@@ -83869,6 +83916,14 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
             reply_markup=video_paid_preview_status_keyboard(token, local_job_id, lang),
         )
     if action == "back":
+        if state.get("pending_confirm_token") or str((state.get("video_order") or {}).get("current_screen") or "") == "invoice":
+            finalization_state = ensure_video_finalization_from_addon_state(uid, state)
+            return await safe_edit_or_send(
+                query,
+                video_finalization_menu_text(finalization_state, lang),
+                parse_mode="HTML",
+                reply_markup=video_finalization_menu_keyboard(lang),
+            )
         order = video_order_back_screen(video_order_from_state(state, uid), "video_addon_menu")
         state["video_order"] = order
         target_screen = str(order.get("current_screen") or "video_addon_menu")
@@ -87876,7 +87931,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
                 parse_mode=None,
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚫 Chọn không thêm", callback_data="videoaddon|none")],
-                    [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng", callback_data="videoaddon|menu")],
+                    [InlineKeyboardButton("🎞 Đổi phụ đề/lồng tiếng", callback_data="vfinal|addon")],
                     [InlineKeyboardButton("🏠 Menu chính", callback_data="videoaddon|main")],
                 ]),
             )
