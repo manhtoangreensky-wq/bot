@@ -201,7 +201,7 @@ def test_music_and_addon_keyboards_have_real_callbacks():
         "vfinal|music_none",
         "vfinal|music_library",
         "vfinal|music_sfx",
-        "vfinal|music_upload",
+        "vfinal|my_media",
         "vfinal|music_ai",
     }.issubset(music_callbacks)
     addon_callbacks = _callbacks(bot.video_finalization_addon_keyboard("vi"))

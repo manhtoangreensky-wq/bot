@@ -18,11 +18,14 @@ def test_main_menu_vi_labels_are_natural_and_balanced():
     markup = bot.localized_main_menu_keyboard(False, "vi")
     labels = _labels(markup)
 
-    assert "🎙 Giọng nói / Nhạc" in labels
+    assert "🎙 Voice Studio" in labels
+    assert "🎵 Music Studio" in labels
+    assert "🌐 Dịch / Phụ đề / Lồng tiếng Studio" in labels
     assert "🌐 Trung tâm" in labels
     assert "🎙 Voice / Nhạc" not in labels
     assert "🌐 Hub" not in labels
-    assert all(len(row) == 2 for row in markup.inline_keyboard)
+    assert all(len(row) == 2 for row in markup.inline_keyboard[:-1])
+    assert len(markup.inline_keyboard[-1]) == 1
     assert "🔐 Admin" not in labels
 
 
@@ -32,7 +35,9 @@ def test_main_menu_en_labels_do_not_mix_vietnamese_public_terms():
     assert "🆓 Free tools" in labels
     assert "📝 Notes / Docs" in labels
     assert "🎬 AI Video" in labels
-    assert "🎙 Voice / Music" in labels
+    assert "🎙 Voice Studio" in labels
+    assert "🎵 Music Studio" in labels
+    assert "🌐 Translation / Subtitle / Dubbing Studio" in labels
     assert "💬 Feedback / Bug" in labels
     assert "📝 Ghi chú / Tài liệu" not in labels
     assert "🎙 Giọng nói / Nhạc" not in labels

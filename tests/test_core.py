@@ -2383,7 +2383,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🎬 Tạo video AI" in start_labels
     assert "🔥 Video theo trend" not in start_labels
     assert "📝 Ghi chú / Tài liệu" in start_labels
-    assert "🎙 Giọng nói / Nhạc" in start_labels
+    assert "🎙 Voice Studio" in start_labels
+    assert "🎵 Music Studio" in start_labels
+    assert "🌐 Dịch / Phụ đề / Lồng tiếng Studio" in start_labels
     assert "🎞 Video" not in start_labels
     assert "👨‍💼 Hỗ trợ" in start_labels
     assert "💰 Nạp Xu / Bảng giá" in start_labels
@@ -2394,8 +2396,11 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         bot.localized_main_menu_keyboard(False, "en"),
         bot.localized_main_menu_keyboard(False, "zh"),
     ]:
-        voice_rows = [row for row in keyboard.inline_keyboard if any(button.callback_data == "menu|main_music" for button in row)]
-        assert voice_rows
+        callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row if button.callback_data]
+        assert "music_quick|showroom|voice_hub" in callbacks
+        assert "music_quick|showroom|music_hub" in callbacks
+        assert "menu|translate" in callbacks
+        assert "menu|main_music" not in callbacks
     image_labels = [button.text for row in bot.main_image_keyboard("vi").inline_keyboard for button in row]
     assert "🖼 Tạo ảnh nhanh" in image_labels
     assert "✍️ Tạo prompt từ ảnh" in image_labels
@@ -8079,28 +8084,32 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "memory_format_note_item_with_time" in source
 
     music_labels = [button.text for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
-    assert "🎙 Tạo giọng nói / Kho voice" in music_labels
-    assert "🎵 Tạo nhạc / Kho nhạc / SFX" in music_labels
+    assert "🎙 Voice Studio" in music_labels
+    assert "🎵 Music Studio" in music_labels
+    assert "🌐 Dịch thuật Studio" in music_labels
     assert "📁 Media của tôi" in music_labels
     assert "🗣 Chọn giọng" not in music_labels
     music_callbacks = [button.callback_data for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
-    assert "music_quick|voice_hub" in music_callbacks
-    assert "music_quick|music_hub" in music_callbacks
-    assert "music_quick|media" in music_callbacks
+    assert "music_quick|showroom|voice_hub" in music_callbacks
+    assert "music_quick|showroom|music_hub" in music_callbacks
+    assert "music_quick|showroom|translation_hub" in music_callbacks
+    assert "music_quick|showroom|media" in music_callbacks
     assert "music_quick|voice_pick" not in music_callbacks
 
     voice_hub_labels = [button.text for row in bot.voice_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["📁 Kho voice của bạn", "🧬 Tạo giọng mới", "👩 Giọng nữ mặc định - Miễn phí", "👨 Giọng nam mặc định - Miễn phí"]:
+    for label in ["📁 Kho voice của bạn", "🧬 Tạo voice riêng MiniMax", "👩 Demo giọng nữ miễn phí", "👨 Demo giọng nam miễn phí", "🎙 Nhập chữ để đọc thử"]:
         assert label in voice_hub_labels
+    assert "🚫 Không thêm giọng" not in voice_hub_labels
     music_hub_labels = [button.text for row in bot.music_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["🎼 Kho nhạc", "🔊 Kho SFX", "📁 Media của tôi", "✨ Tạo nhạc AI Suno", "🚫 Không thêm nhạc"]:
+    for label in ["🎼 Nghe thử Kho nhạc", "🔊 Nghe thử Kho SFX", "📁 Media âm thanh của tôi", "📝 Tạo prompt nhạc", "✨ Tạo nhạc AI Suno"]:
         assert label in music_hub_labels
+    assert "🚫 Không thêm nhạc" not in music_hub_labels
 
     prompt_entry_callbacks = [button.callback_data for row in bot.music_prompt_entry_keyboard("vi").inline_keyboard for button in row]
-    assert {"music_quick|prompt_seed", "music_quick|prompt_seed_more", "music_quick|prompt_custom", "music_quick|ai_music"}.issubset(set(prompt_entry_callbacks))
+    assert {"music_quick|showroom|prompt_seed", "music_quick|showroom|prompt_seed_more", "music_quick|showroom|prompt_custom", "music_quick|showroom|ai_music"}.issubset(set(prompt_entry_callbacks))
 
     voice_entry_callbacks = [button.callback_data for row in bot.voice_prompt_entry_keyboard("vi").inline_keyboard for button in row]
-    assert {"music_quick|voice_seed", "music_quick|voice_custom", "music_quick|voice_clone", "music_quick|voice_profiles"}.issubset(set(voice_entry_callbacks))
+    assert {"music_quick|showroom|voice_seed", "music_quick|showroom|voice_custom", "music_quick|showroom|voice_clone", "music_quick|showroom|voice_profiles"}.issubset(set(voice_entry_callbacks))
 
     suggestions = bot.music_prompt_suggestions("video review máy xay sinh tố mini", 0, "vi")
     next_suggestions = bot.music_prompt_suggestions("video review máy xay sinh tố mini", 3, "vi")
@@ -8117,7 +8126,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     melody_text = bot.music_prompt_suggestions_text(bot.music_ai_default_description("melody", "vi"), 0, "vi", "melody")
     assert "giai điệu" in melody_text.lower() or "melody" in melody_text.lower()
     prompt_callbacks = [button.callback_data for row in bot.music_prompt_result_keyboard("vi").inline_keyboard for button in row]
-    assert {"music_quick|prompt_choose_1", "music_quick|prompt_more", "music_quick|save_prompt", "music_quick|find_from_prompt", "music_quick|music_ai_guard"}.issubset(set(prompt_callbacks))
+    assert {"music_quick|showroom|prompt_choose_1", "music_quick|showroom|prompt_more", "music_quick|showroom|save_prompt", "music_quick|showroom|find_from_prompt", "music_quick|showroom|music_ai_guard"}.issubset(set(prompt_callbacks))
 
     voice_suggestions = bot.voice_style_suggestions("Nước hoa nam cao cấp giúp tự tin hơn", 0, "vi")
     next_voice_suggestions = bot.voice_style_suggestions("Nước hoa nam cao cấp giúp tự tin hơn", 3, "vi")
@@ -8126,16 +8135,18 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     voice_text = bot.voice_style_suggestions_text("Nước hoa nam cao cấp giúp tự tin hơn", "vi", 0)
     assert "3 kiểu giọng gợi ý" in voice_text
     voice_callbacks = [button.callback_data for row in bot.voice_style_keyboard("vi").inline_keyboard for button in row]
-    assert {"music_quick|voice_style_1", "music_quick|voice_more", "music_quick|voice_custom", "music_quick|voice_tts_guard", "music_quick|voice_video"}.issubset(set(voice_callbacks))
+    assert {"music_quick|showroom|voice_style_1", "music_quick|showroom|voice_more", "music_quick|showroom|voice_custom", "music_quick|showroom|voice_tts_guard"}.issubset(set(voice_callbacks))
+    assert "music_quick|showroom|voice_video" not in voice_callbacks
 
     merge_music_callbacks = [button.callback_data for row in bot.music_merge_keyboard("music", "vi").inline_keyboard for button in row]
-    assert {"music_quick|merge_music_video", "music_quick|merge_music_audio", "music_quick|merge_music_run", "music_quick|ai_music"}.issubset(set(merge_music_callbacks))
+    assert {"music_quick|showroom|merge_music_video", "music_quick|showroom|merge_music_audio", "music_quick|showroom|merge_music_run", "music_quick|showroom|ai_music"}.issubset(set(merge_music_callbacks))
     merge_voice_callbacks = [button.callback_data for row in bot.music_merge_keyboard("voice", "vi").inline_keyboard for button in row]
-    assert {"music_quick|merge_voice_video", "music_quick|merge_voice_audio", "music_quick|merge_voice_run", "music_quick|voice"}.issubset(set(merge_voice_callbacks))
+    assert {"music_quick|showroom|merge_voice_video", "music_quick|showroom|merge_voice_audio", "music_quick|showroom|merge_voice_run"}.issubset(set(merge_voice_callbacks))
 
     for keyboard in [bot.music_library_quick_keyboard("vi"), bot.sfx_library_quick_keyboard("vi"), bot.media_library_quick_keyboard("vi")]:
         callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
-        assert "menu|main_music" in callbacks
+        assert any(callback.startswith(("music_quick|showroom|", "sfx_quick|showroom|", "media_quick|showroom|")) for callback in callbacks)
+        assert "menu|main_music" not in callbacks
         assert "menu|main" in callbacks
     assert "handle_music_guided_pending_text(update, context)" in message_source
     assert "handle_music_guided_pending_media(update, context)" in source
@@ -9464,13 +9475,13 @@ def test_video_pricing_v2_xu_conversion_and_base_prices():
 
 def test_video_pricing_v2_subtitle_and_dubbing_prices():
     assert bot.calculate_video_addon_price(60, "subtitle_original", "none")["subtitle_xu"] == 120
-    assert bot.calculate_video_addon_price(180, "subtitle_original", "none")["subtitle_xu"] == 360
+    assert bot.calculate_video_addon_price(180, "subtitle_original", "none")["subtitle_xu"] == 240
     assert bot.calculate_video_addon_price(60, "none", "dub_original")["dubbing_xu"] == 250
-    assert bot.calculate_video_addon_price(180, "none", "dub_original")["dubbing_xu"] == 750
+    assert bot.calculate_video_addon_price(180, "none", "dub_original")["dubbing_xu"] == 500
     assert bot.calculate_video_addon_price(60, "subtitle_original", "dub_original")["addon_xu"] == 350
-    assert bot.calculate_video_addon_price(180, "subtitle_original", "dub_original")["addon_xu"] == 1050
+    assert bot.calculate_video_addon_price(180, "subtitle_original", "dub_original")["addon_xu"] == 700
     assert bot.calculate_video_addon_price(60, "subtitle_translated", "dub_translated", True)["addon_xu"] == 350
-    assert bot.calculate_video_addon_price(180, "subtitle_translated", "dub_translated", True)["addon_xu"] == 1050
+    assert bot.calculate_video_addon_price(180, "subtitle_translated", "dub_translated", True)["addon_xu"] == 700
 
 
 def test_video_total_price_v2_is_itemized():
@@ -9780,7 +9791,7 @@ def test_paid_addons_only_after_tier():
 
 def test_music_menu_not_stuck():
     callbacks = [button.callback_data for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
-    for callback in ["vfinal|music_library", "vfinal|music_sfx", "vfinal|my_media", "vfinal|music_ai", "vfinal|music_none", "vfinal|music_upload", "vfinal|menu", "vfinal|main"]:
+    for callback in ["vfinal|music_library", "vfinal|music_sfx", "vfinal|my_media", "vfinal|music_ai", "vfinal|music_none", "vfinal|menu", "vfinal|main"]:
         assert callback in callbacks
 
 
@@ -9793,7 +9804,7 @@ def test_music_menu_origin_back_correct():
 
 def test_stock_music_visible():
     labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
-    assert "🎼 Kho nhạc" in labels
+    assert "🎼 Kho nhạc có sẵn" in labels
 
 
 def test_sfx_visible():
@@ -9866,7 +9877,7 @@ def test_default_voice_free():
 def test_subtitle_menu_has_4_named_modes():
     labels = [button.text for row in bot.video_addon_menu_keyboard("vi", {"video_tier": "basic"}).inline_keyboard for button in row]
     joined = "\n".join(labels)
-    for label in ["Tạo phụ đề tự động", "Dịch phụ đề", "Lồng tiếng", "Phụ đề + lồng tiếng"]:
+    for label in ["Tạo phụ đề", "Dịch phụ đề", "Lồng tiếng", "Phụ đề + Lồng tiếng"]:
         assert label in joined
     assert "Dịch phụ đề + lồng tiếng" not in joined
 
@@ -9886,8 +9897,8 @@ def test_subtitle_price_under_60():
 def test_subtitle_price_over_60_blocks():
     assert bot.calculate_subtitle_dub_price("subtitle", 61) == 180
     assert bot.calculate_subtitle_dub_price("translate_subtitle", 90) == 225
-    assert bot.calculate_subtitle_dub_price("dubbing", 120) == 500
-    assert bot.calculate_subtitle_dub_price("subtitle_plus_dubbing", 180) == 1050
+    assert bot.calculate_subtitle_dub_price("dubbing", 120) == 375
+    assert bot.calculate_subtitle_dub_price("subtitle_plus_dubbing", 180) == 700
 
 
 def test_translate_subtitle_describes_target_language():
