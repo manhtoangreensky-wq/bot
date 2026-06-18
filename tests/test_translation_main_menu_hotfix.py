@@ -35,10 +35,13 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
 
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
-    assert "Dịch thuật TOAN AAS" in text
+    assert "Dịch / Phụ đề / Lồng tiếng" in text
     assert callbacks == {
-        "menu|translation_language_hub",
-        "menu|translation_video_dub_menu",
+        "videodub|studio|subtitle_create",
+        "videodub|studio|subtitle_translate",
+        "videodub|studio|dub",
+        "videodub|studio|subtitle_plus_dub",
+        "music_quick|showroom|media",
         "menu|main",
     }
 
@@ -121,9 +124,11 @@ def test_language_menu_remains_accessible_from_translation_and_account():
 def test_full_translation_hub_has_voice_two_way_live_and_video_branch():
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
-    assert "Dịch / Lồng tiếng video" in text
-    assert "menu|translation_language_hub" in callbacks
-    assert "menu|translation_video_dub_menu" in callbacks
+    assert "Dịch / Phụ đề / Lồng tiếng" in text
+    assert "videodub|studio|subtitle_translate" in callbacks
+    assert "videodub|studio|subtitle_plus_dub" in callbacks
+    assert "menu|translation_language_hub" not in callbacks
+    assert "menu|translation_video_dub_menu" not in callbacks
     assert "menu|translation_voice" not in callbacks
     assert "videodub|type|subtitle_translate" not in callbacks
 
@@ -155,7 +160,7 @@ def test_video_dubbing_back_route_tracks_entry_origin():
     translation_markup = bot.video_dubbing_menu_keyboard("vi", "translation")
     video_markup = bot.video_dubbing_menu_keyboard("vi", "video")
 
-    assert "menu|translate" in _callbacks(translation_markup)
+    assert "menu|main" in _callbacks(translation_markup)
     assert "menu|main_video" not in _callbacks(translation_markup)
     assert "menu|main_video" in _callbacks(video_markup)
 
