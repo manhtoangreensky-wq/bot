@@ -21,7 +21,7 @@ def _source_between(start_marker: str, end_marker: str) -> str:
 def _assert_preview_buttons(markup):
     labels = _labels(markup)
     assert "✅ Xác nhận tạo bản đầy đủ" in labels
-    assert "🔁 Đổi giọng/nhạc" in labels
+    assert "🔁 Đổi giọng hoặc nhạc" in labels
     assert "✏️ Sửa nội dung" in labels
     assert any("Quay lại" in label for label in labels)
     assert "🏠 Menu chính" in labels

@@ -2572,7 +2572,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Prompt video" in self_scene_plan
     assert "Gợi ý chuyển động" in self_scene_plan
     assert "Lưu ý giữ nhận diện" in self_scene_plan
-    assert "TOAN AAS chưa gọi API video và chưa trừ Xu" in self_scene_plan
+    assert "TOAN AAS chưa xử lý video thật và chưa trừ Xu" in self_scene_plan
     long_script_labels = [button.text for row in bot.video_long_script_keyboard("vi").inline_keyboard for button in row]
     assert "3 phút" in long_script_labels and "60 phút" in long_script_labels
     assert "Chưa tạo video dài hàng loạt" in bot.video_long_script_text("vi")
@@ -2591,7 +2591,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Prompt video" in long_plan
     assert "Phong cách voice gợi ý" in long_plan
     assert "Nhạc/SFX gợi ý" in long_plan
-    assert "Bot chưa gọi nhà cung cấp AI và chưa trừ Xu" in long_plan
+    assert "TOAN AAS chưa xử lý thật và chưa trừ Xu" in long_plan
     vi_video_off = bot.public_video_off_options_text("vi")
     assert "Video thật chưa mở công khai" in vi_video_off
     assert "Bot chưa gọi API video" in vi_video_off
@@ -6418,7 +6418,8 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
     ]
     assert {"1️⃣ Chọn chuyển động 1", "2️⃣ Chọn chuyển động 2", "3️⃣ Chọn chuyển động 3", "🔄 Đổi gợi ý khác"}.issubset(set(motion_buttons))
     assert {"🎛 Tùy chọn hoàn thiện video", "✅ Tiếp tục chọn gói"}.issubset(set(music_buttons))
-    assert not any("Chọn nhạc/voice" in label for label in music_buttons)
+    legacy_music_voice = "Chọn nhạc" + "/voice"
+    assert not any(legacy_music_voice in label for label in music_buttons)
     selfscene_plan = bot.self_scene_plan_text(
         {
             "direction": "ad",
@@ -6645,7 +6646,7 @@ def test_video_ux_v6_shared_suggestions_and_navigation():
     motion_text = bot.creative_motion_suggestions_text({"kind": "product", "suggest_offset": 0}, "vi")
     assert "3 gợi ý Prompt / Chuyển động" in motion_text
     assert "Prompt video" in motion_text
-    assert "Nhạc/voice" in motion_text
+    assert "Âm thanh" in motion_text
     motion_callbacks = [button.callback_data for row in bot.creative_motion_suggestions_keyboard("vi").inline_keyboard for button in row]
     assert {"motion|choice|1", "motion|choice|2", "motion|choice|3", "motion|refresh"}.issubset(set(motion_callbacks))
     assert "motion|cancel" not in motion_callbacks
@@ -7173,7 +7174,7 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
     assert "Character Bible" in long_plan
     assert "Project ID" in long_plan
     assert "không bắt chước người nổi tiếng" in long_plan
-    assert "Bot chưa gọi nhà cung cấp AI và chưa trừ Xu" in long_plan
+    assert "TOAN AAS chưa xử lý thật và chưa trừ Xu" in long_plan
 
     story_state = {
         "selected_topic": "máy xay sinh tố mini cho dân văn phòng",
@@ -8110,12 +8111,16 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "music_quick|voice_pick" not in music_callbacks
 
     voice_hub_labels = [button.text for row in bot.voice_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["📁 Kho voice của bạn", "🧬 Tạo voice riêng", "👩 Demo giọng nữ miễn phí", "👨 Demo giọng nam miễn phí", "🎙 Nhập chữ để đọc thử"]:
+    for label in ["🎙 Tạo giọng đọc", "📁 Kho voice", "🎵 Tạo nhạc nền", "🎼 Kho nhạc / SFX", "📁 Media âm thanh"]:
         assert label in voice_hub_labels
+    for label in ["👩 Demo giọng nữ" + " miễn phí", "👨 Demo giọng nam" + " miễn phí", "🎙 Nhập chữ" + " để đọc thử"]:
+        assert label not in voice_hub_labels
     assert "🚫 Không thêm giọng" not in voice_hub_labels
     music_hub_labels = [button.text for row in bot.music_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["🎼 Nghe thử Kho nhạc", "🔊 Nghe thử Kho SFX", "📁 Media âm thanh của tôi", "📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
+    for label in ["🎼 Nghe thử Kho nhạc", "🔊 Nghe thử Kho SFX", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền"]:
         assert label in music_hub_labels
+    for label in ["📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
+        assert label not in music_hub_labels
     assert "🚫 Không thêm nhạc" not in music_hub_labels
 
     prompt_entry_callbacks = [button.callback_data for row in bot.music_prompt_entry_keyboard("vi").inline_keyboard for button in row]
@@ -8148,7 +8153,9 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     voice_text = bot.voice_style_suggestions_text("Nước hoa nam cao cấp giúp tự tin hơn", "vi", 0)
     assert "3 kiểu giọng gợi ý" in voice_text
     voice_callbacks = [button.callback_data for row in bot.voice_style_keyboard("vi").inline_keyboard for button in row]
-    assert {"music_quick|showroom|voice_style_1", "music_quick|showroom|voice_more", "music_quick|showroom|voice_custom", "music_quick|showroom|voice_tts_guard"}.issubset(set(voice_callbacks))
+    assert {"music_quick|showroom|voice_style_1", "music_quick|showroom|voice_style_2", "music_quick|showroom|voice_style_3", "music_quick|showroom|voice_custom"}.issubset(set(voice_callbacks))
+    assert "music_quick|showroom|voice_more" not in voice_callbacks
+    assert "music_quick|showroom|voice_tts_guard" not in voice_callbacks
     assert "music_quick|showroom|voice_video" not in voice_callbacks
 
     merge_music_callbacks = [button.callback_data for row in bot.music_merge_keyboard("music", "vi").inline_keyboard for button in row]
@@ -8994,7 +9001,7 @@ def test_video_module_v10_self_scene_source_status_and_safe_guard():
         "vi",
     )
     assert "Video đã nhận: <b>có</b>" in with_source
-    assert "chưa gọi API video" in bot.developing_video_render_guard_text("selfscene", "vi")
+    assert "chưa xử lý video thật" in bot.developing_video_render_guard_text("selfscene", "vi")
     assert "chưa trừ Xu" in bot.developing_video_render_guard_text("selfscene", "vi")
 
 
@@ -9708,7 +9715,7 @@ def test_self_shot_accepts_video():
 def test_self_shot_music_back_not_reset_flow():
     source = bot_source_text()
     handler = source_between(source, "async def handle_self_scene_ai_callback", "async def handle_long_video_callback")
-    assert 'back=("⬅️ Quay lại nhạc/voice"' in handler
+    assert 'back=("⬅️ Quay lại âm thanh"' in handler
     style_block = source_between(handler, 'if action in {"style", "style_choice"}:', 'if action == "music_custom":')
     assert 'open_video_finalization(query, uid, "selfscene"' in style_block
     assert 'clear_developing_video_pending(uid)' not in style_block
@@ -9830,7 +9837,7 @@ def test_sfx_visible():
 
 def test_my_media_visible():
     labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
-    assert "📁 Media của tôi" in labels
+    assert "📁 Media âm thanh của tôi" in labels
 
 
 def test_suno_button_has_handler():

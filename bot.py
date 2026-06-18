@@ -35112,7 +35112,7 @@ SUPPORT_CUSTOM_BOT_DETAILS = {
 SUPPORT_CONSULT_DETAILS = {
     "image": ("🖼 Tư vấn tạo ảnh", ["Ảnh sản phẩm", "Ảnh quảng cáo/social", "Ảnh thương hiệu"], "Bạn cần loại ảnh nào, số lượng bao nhiêu và dùng trên kênh nào?"),
     "video": ("🎬 Tư vấn tạo video", ["TikTok/Affiliate", "Quảng cáo sản phẩm", "Video doanh nghiệp"], "Bạn muốn làm video theo hướng nào, tần suất và ngân sách dự kiến ra sao?"),
-    "frame_video": ("🎞 Tư vấn ghép ảnh thành video", ["Slideshow sản phẩm", "Reels/Shorts", "Video có nhạc/voice"], "Bạn có bao nhiêu ảnh, cần tỷ lệ/thời lượng và có nhạc hoặc voice sẵn chưa?"),
+    "frame_video": ("🎞 Tư vấn ghép ảnh thành video", ["Slideshow sản phẩm", "Reels/Shorts", "Video có nhạc hoặc giọng đọc"], "Bạn có bao nhiêu ảnh, cần tỷ lệ/thời lượng và có nhạc hoặc voice sẵn chưa?"),
     "document": ("📄 Tư vấn tài liệu/PDF", ["Chuyển đổi PDF", "OCR/tách nội dung", "Quy trình tài liệu"], "Bạn đang có loại file nào và muốn nhận đầu ra gì?"),
     "voice": ("🎙 Tư vấn Voice/TTS", ["Voice quảng cáo", "Thuyết minh video", "Giọng đọc nội dung"], "Bạn cần giọng, ngôn ngữ, độ dài và mục đích sử dụng nào?"),
     "package": ("🎁 Tư vấn Gói/Combo", ["Gói cá nhân", "Gói shop/affiliate", "Gói doanh nghiệp"], "Bạn dùng tính năng nào nhiều nhất, tần suất và ngân sách dự kiến ra sao?"),
@@ -44302,7 +44302,7 @@ def menu_text_main_video() -> str:
     return (
         "🎬 <b>Video TOAN AAS</b>\n\n"
         "Bạn muốn tạo hoặc xử lý video theo hướng nào?\n\n"
-        "• Planning như ý tưởng, prompt, storyboard, chuyển động, nhạc/voice là miễn phí.\n"
+        "• Planning như ý tưởng, prompt, storyboard, chuyển động, nhạc hoặc giọng đọc là miễn phí.\n"
         "• Video AI chân thật chỉ gọi provider và tính Xu sau màn xác nhận.\n"
         "• Ghép ảnh thành video dùng Local Worker + ffmpeg và giữ nguyên giá render hiện tại.\n"
         "• Dịch/lồng tiếng sẽ hỏi từng bước; nếu provider chưa sẵn sàng bot chỉ lưu kế hoạch và không trừ Xu."
@@ -45111,13 +45111,13 @@ def prompt_video_start_text(lang: str = "vi") -> str:
         return (
             "🎬 <b>Prompt → AI Video</b>\n\n"
             "What kind of video do you want to plan?\n\n"
-            "TOAN AAS will create three prompt options, then guide camera motion and music/voice before showing any real-generation price.\n"
+            "TOAN AAS will create three prompt options, then guide camera motion and audio before showing any real-generation price.\n"
             "This planning step does not call a provider and does not charge Xu."
         )
     return (
         "🎬 <b>Prompt → Video AI</b>\n\n"
         "Bạn muốn tạo video AI theo hướng nào?\n\n"
-        "TOAN AAS sẽ tạo 3 prompt gợi ý, sau đó hỏi chuyển động và nhạc/voice trước khi hiển thị tier tạo video thật.\n"
+        "TOAN AAS sẽ tạo 3 prompt gợi ý, sau đó hỏi chuyển động và âm thanh trước khi hiển thị tier tạo video thật.\n"
         "Bước lập kế hoạch chưa gọi provider và chưa trừ Xu."
     )
 
@@ -45359,9 +45359,9 @@ def guided_video_music_text(state: dict | None = None, lang: str = "vi") -> str:
     motion = self_scene_style_label((state or {}).get("selected_motion"), lang)
     suggestions = guided_video_music_suggestions(state, lang)
     if normalize_user_language(lang) != "vi":
-        lines = ["🎵 <b>Choose music/voice direction</b>", "", f"Motion: <code>{html.escape(motion)}</code>", ""]
+        lines = ["🎵 <b>Choose video audio direction</b>", "", f"Motion: <code>{html.escape(motion)}</code>", ""]
     else:
-        lines = ["🎵 <b>Bạn muốn nhạc/voice theo phong cách nào?</b>", "", f"Chuyển động: <code>{html.escape(motion)}</code>", ""]
+        lines = ["🎵 <b>Âm thanh cho video</b>", "", f"Chuyển động: <code>{html.escape(motion)}</code>", ""]
     for idx, item in enumerate(suggestions, 1):
         lines.append(f"{idx}. {html.escape(str(item.get('label') or ''))}")
     lines.extend(["", "This step only plans the soundtrack." if normalize_user_language(lang) != "vi" else "Bước này chỉ lập kế hoạch âm thanh."])
@@ -45408,9 +45408,9 @@ def guided_video_music_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboard
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
-            ("1️⃣ Chọn nhạc/voice 1" if is_vi else "1️⃣ Choose music 1", f"{prefix}|music_choice|1"),
-            ("2️⃣ Chọn nhạc/voice 2" if is_vi else "2️⃣ Choose music 2", f"{prefix}|music_choice|2"),
-            ("3️⃣ Chọn nhạc/voice 3" if is_vi else "3️⃣ Choose music 3", f"{prefix}|music_choice|3"),
+            ("1️⃣ Phong cách âm thanh 1" if is_vi else "1️⃣ Audio option 1", f"{prefix}|music_choice|1"),
+            ("2️⃣ Phong cách âm thanh 2" if is_vi else "2️⃣ Audio option 2", f"{prefix}|music_choice|2"),
+            ("3️⃣ Phong cách âm thanh 3" if is_vi else "3️⃣ Audio option 3", f"{prefix}|music_choice|3"),
             ("🔄 Đổi gợi ý khác" if is_vi else "🔄 More music ideas", f"{prefix}|music_refresh"),
             ("✍️ Nhập riêng" if is_vi else "✍️ Custom", f"{prefix}|music_custom"),
         ],
@@ -45454,9 +45454,9 @@ def developing_video_render_guard_text(flow: str, lang: str = "vi", source_ready
     flow = str(flow or "").strip().lower()
     if not source_ready:
         return (
-            "⚠️ Hãy gửi video/ảnh nguồn trước khi tạo video AI. TOAN AAS chưa gọi provider và chưa trừ Xu."
+            "⚠️ Hãy gửi video/ảnh nguồn trước khi tạo video AI. TOAN AAS chưa xử lý thật và chưa trừ Xu."
             if normalize_user_language(lang) == "vi"
-            else "⚠️ Send the source video/image before generating AI video. No provider call and no Xu charged."
+            else "⚠️ Send the source video/image before generating AI video. No final processing has started and no Xu has been charged."
         )
     labels_vi = {
         "imagevideo": "Ảnh → Video AI",
@@ -45481,11 +45481,11 @@ def developing_video_render_guard_text(flow: str, lang: str = "vi", source_ready
     if normalize_user_language(lang) != "vi":
         return (
             f"🎬 <b>{html.escape(labels_en.get(flow, 'AI video rendering'))}</b> is currently guarded or not public.\n\n"
-            "You can keep the plan and scene prompts. TOAN AAS has not called a video provider and has not charged Xu."
+            "You can keep the plan and scene prompts. No final video processing has started and no Xu has been charged."
         )
     return (
         f"🎬 <b>{html.escape(labels_vi.get(flow, 'Tạo video AI chân thật'))}</b> đang được guard hoặc chưa mở công khai.\n\n"
-        "Bạn vẫn có thể lưu kế hoạch và prompt từng cảnh. TOAN AAS chưa gọi API video/provider và chưa trừ Xu."
+        "Bạn vẫn có thể lưu kế hoạch và prompt từng cảnh. TOAN AAS chưa xử lý video thật và chưa trừ Xu."
     )
 
 def developing_video_public_package(plan: dict | None, flow: str, lang: str = "vi") -> dict:
@@ -45539,7 +45539,7 @@ def detailed_video_scene_prompts_text(plan: dict | None, flow: str, lang: str = 
                 f"• Action: {html.escape(subject_motion)}; visual goal: {phase}",
                 f"• Camera: {html.escape(cameras[(idx - 1) % len(cameras)])}",
                 f"• Lighting/style: coherent lighting, {html.escape(style)}, aspect ratio {html.escape(ratio)}",
-                f"• Transition/audio: {transitions[(idx - 1) % len(transitions)]}; music/voice follows the saved plan",
+                f"• Transition/audio: {transitions[(idx - 1) % len(transitions)]}; audio follows the saved plan",
                 f"• Negative: {html.escape(negative)}",
                 "",
             ])
@@ -45555,7 +45555,7 @@ def detailed_video_scene_prompts_text(plan: dict | None, flow: str, lang: str = 
             f"• Hành động: {html.escape(subject_motion)}; mục tiêu cảnh: {phase}",
             f"• Camera: {html.escape(cameras[(idx - 1) % len(cameras)])}",
             f"• Ánh sáng/phong cách: ánh sáng nhất quán, {html.escape(style)}, tỉ lệ {html.escape(ratio)}",
-            f"• Chuyển cảnh/âm thanh: {transitions[(idx - 1) % len(transitions)]}; nhạc/voice theo kế hoạch đã chọn",
+            f"• Chuyển cảnh/âm thanh: {transitions[(idx - 1) % len(transitions)]}; âm thanh theo kế hoạch đã chọn",
             f"• Negative: {html.escape(negative)}",
             "",
         ])
@@ -45586,7 +45586,7 @@ def structured_video_preview_text(state: dict | None = None, lang: str = "vi", f
             f"Camera motion: <b>{html.escape(str(intent.get('camera_motion') or 'stable camera'))}</b>\n"
             f"Subject motion: <b>{html.escape(str(intent.get('subject_motion') or 'natural motion'))}</b>\n"
             f"Ratio/platform: <b>{html.escape(str(intent.get('ratio') or '9:16'))} / {html.escape(str(intent.get('platform') or 'custom'))}</b>\n"
-            f"Music/voice: <b>{html.escape(str(intent.get('music_voice') or 'not selected'))}</b>\n"
+            f"Audio: <b>{html.escape(str(intent.get('music_voice') or 'not selected'))}</b>\n"
             f"Must keep: <code>{html.escape(keep)}</code>\n"
             f"Must avoid: <code>{html.escape(avoid)}</code>\n\n"
             f"<b>Video prompt</b>\n<code>{html.escape(str(package.get('prompt') or ''))}</code>\n\n"
@@ -45613,7 +45613,7 @@ def structured_video_preview_text(state: dict | None = None, lang: str = "vi", f
         f"Chuyển động camera: <b>{html.escape(str(intent.get('camera_motion') or 'camera ổn định'))}</b>\n"
         f"Chuyển động chủ thể: <b>{html.escape(str(intent.get('subject_motion') or 'chuyển động tự nhiên'))}</b>\n"
         f"Tỉ lệ / nền tảng: <b>{html.escape(str(intent.get('ratio') or '9:16'))} / {html.escape(str(intent.get('platform') or 'custom'))}</b>\n"
-        f"Nhạc/voice: <b>{html.escape(str(intent.get('music_voice') or 'chưa chọn'))}</b>\n"
+        f"Âm thanh: <b>{html.escape(str(intent.get('music_voice') or 'chưa chọn'))}</b>\n"
         f"Điều cần giữ: <code>{html.escape(keep)}</code>\n"
         f"Điều cần tránh: <code>{html.escape(avoid)}</code>\n\n"
         f"<b>Prompt video</b>\n<code>{html.escape(str(package.get('prompt') or ''))}</code>"
@@ -45636,7 +45636,7 @@ def guided_video_result_keyboard(prefix: str, lang: str = "vi") -> InlineKeyboar
         ("⚡ Nhanh gọn" if is_vi else "⚡ Quick", f"{prefix}|strength|quick"),
         ("🎬 Đạo diễn phim" if is_vi else "🎬 Director", f"{prefix}|strength|director"),
         ("🔥 Viral nâng cao" if is_vi else "🔥 Advanced viral", f"{prefix}|strength|viral"),
-        ("🧪 Provider-safe", f"{prefix}|strength|provider_safe"),
+        ("🧪 An toàn xử lý", f"{prefix}|strength|provider_safe"),
         ("👑 Cao cấp" if is_vi else "👑 Premium", f"{prefix}|strength|premium"),
     ]
     return video_v6_keyboard(
@@ -45724,7 +45724,7 @@ def image_video_prompt_from_state(state: dict | None = None, lang: str = "vi") -
         )
     return (
         f"Biến ảnh đã gửi thành video ngắn phong cách {style}; dùng chuyển động {motion}; giữ nguyên chủ thể, khuôn mặt, hình dáng sản phẩm, logo và màu chính; "
-        f"tạo chiều sâu và ánh sáng tự nhiên; nhạc/voice theo hướng {music}; không watermark, không thêm chữ thừa."
+        f"tạo chiều sâu và ánh sáng tự nhiên; âm thanh theo hướng {music}; không watermark, không thêm chữ thừa."
     )
 
 def guided_video_public_guard_text(lang: str = "vi", from_image: bool = False) -> str:
@@ -45895,7 +45895,7 @@ def video_reference_start_text(lang: str = "vi") -> str:
         )
     return (
         "🎞 <b>Video mẫu → Video AI</b>\n\n"
-        f"Bạn hãy gửi hoặc reply video mẫu tối đa {VIDEO_SAMPLE_MAX_SECONDS} giây / {VIDEO_SAMPLE_MAX_MB} MB. TOAN AAS sẽ phân tích cấu trúc cảnh, phong cách hình ảnh, nhịp dựng, chuyển động camera, prompt ảnh/video và nhạc/voice.\n\n"
+        f"Bạn hãy gửi hoặc reply video mẫu tối đa {VIDEO_SAMPLE_MAX_SECONDS} giây / {VIDEO_SAMPLE_MAX_MB} MB. TOAN AAS sẽ phân tích cấu trúc cảnh, phong cách hình ảnh, nhịp dựng, chuyển động camera, prompt ảnh/video và âm thanh.\n\n"
         "TOAN AAS chỉ dùng video mẫu để phân tích cấu trúc, phong cách, nhịp cảnh và chuyển động. "
         "Vui lòng không sao chép y nguyên video, logo, khuôn mặt, giọng nói, thương hiệu hoặc nội dung có bản quyền nếu chưa có quyền sử dụng.\n\n"
         "Bước phân tích/kế hoạch chưa gọi provider video và chưa trừ Xu."
@@ -46060,7 +46060,7 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
             ])
         lines.extend([
             "",
-            "<b>4. Music/voice/SFX</b>",
+            "<b>4. Audio/SFX</b>",
             " • " + "\n • ".join(html.escape(item) for item in music),
             "",
             "<b>5. Caption/CTA</b>",
@@ -46103,7 +46103,7 @@ def video_reference_plan_text(state: dict | None = None, lang: str = "vi") -> st
         "<b>4. Phiên bản mới cho chủ đề của bạn</b>",
         f"Chủ đề: <b>{html.escape(topic)}</b>. Giữ logic nhịp/cấu trúc đã phân tích, nhưng thay toàn bộ nội dung, nhận diện và tài sản sáng tạo bằng phiên bản mới.",
         "",
-        "<b>5. Gợi ý nhạc/voice/SFX</b>",
+        "<b>5. Gợi ý âm thanh/SFX</b>",
         " • " + "\n • ".join(html.escape(item) for item in music),
         "",
         "<b>6. Caption/CTA</b>",
@@ -46164,20 +46164,20 @@ def video_reference_segment_plan_text(state: dict | None = None, lang: str = "vi
         return (
             "✂️ <b>Reference-video segment plan</b>\n\n"
             f"Reference duration: <b>{duration}s</b>\n"
-            f"Provider render limit per segment: <b>{segment_limit}s</b>\n"
+            f"Render limit per segment: <b>{segment_limit}s</b>\n"
             f"Suggested segments: <b>{segment_count}</b>\n\n"
             "Each segment keeps one hook/idea, one camera goal and a clean transition into the next segment. "
             "TOAN AAS only stores Telegram media metadata in this planning session; it does not load the full video into Railway memory.\n\n"
-            "Planning only. No provider call and no Xu charged."
+            "Planning only. No final processing has started and no Xu has been charged."
         )
     return (
         "✂️ <b>Kế hoạch chia video mẫu</b>\n\n"
         f"Thời lượng video mẫu: <b>{duration} giây</b>\n"
-        f"Giới hạn render provider mỗi đoạn: <b>{segment_limit} giây</b>\n"
+        f"Giới hạn render mỗi đoạn: <b>{segment_limit} giây</b>\n"
         f"Số đoạn đề xuất: <b>{segment_count}</b>\n\n"
         "Mỗi đoạn giữ một hook/ý chính, một mục tiêu camera và một điểm chuyển rõ sang đoạn tiếp theo. "
         "Trong bước planning, TOAN AAS chỉ giữ metadata/file ID Telegram, không nạp toàn bộ video vào RAM Railway.\n\n"
-        "Bot chưa gọi provider video và chưa trừ Xu."
+        "TOAN AAS chưa xử lý video thật và chưa trừ Xu."
     )
 
 def video_reference_media_info(message) -> dict:
@@ -46822,7 +46822,7 @@ def self_scene_plan_text(state: dict, lang: str = "vi") -> str:
             "Keep face, product shape, logo and main colors stable. Do not exaggerate body/face/product geometry.\n\n"
             "<b>Music/SFX suggestions</b>\n"
             f"{html.escape(music_label)} background, low volume under voice, no copyright-risk track.\n\n"
-            "No image/video provider was called. No Xu deducted."
+            "No final image/video processing has started and no Xu has been charged."
         )
     image_prompt = (
         f"Tạo ảnh khung chính chất lượng cao cho {topic} trong {context_text}, hướng {direction_label}, "
@@ -46848,7 +46848,7 @@ def self_scene_plan_text(state: dict, lang: str = "vi") -> str:
         "Giữ mặt, dáng sản phẩm, logo và màu chính ổn định. Không làm méo mặt/sản phẩm.\n\n"
         "<b>5. Gợi ý nhạc/SFX</b>\n"
         f"{html.escape(music_label)} nền nhẹ, âm lượng thấp dưới voice, tránh nhạc có rủi ro bản quyền.\n\n"
-        "TOAN AAS chưa gọi API video và chưa trừ Xu."
+        "TOAN AAS chưa xử lý video thật và chưa trừ Xu."
     )
 
 def self_scene_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -46877,40 +46877,40 @@ def self_scene_guard_text(action: str, lang: str = "vi", plan: dict | None = Non
                 "1. Soft cinematic piano for emotional reveal.\n"
                 "2. Ambient luxury pad for premium product scenes.\n"
                 "3. Electronic future pulse for tech/cyberpunk scenes.\n\n"
-                "This is suggestion-only. No provider call and no Xu charged."
+                "This is suggestion-only. No final processing has started and no Xu has been charged."
             )
         if action == "image_guard":
             return (
                 "🖼 <b>Keyframe image prompt</b>\n\n"
                 f"<code>{html.escape(topic)}, {html.escape(context_text)}, stable subject identity, clean composition, natural light, cinematic depth, no watermark, no extra text.</code>\n\n"
-                "This planning step has not called an image provider and has not charged Xu."
+                "This planning step has not started final image processing and has not charged Xu."
             )
         if action == "frame_hint":
             return "⚠️ There is no image set in this plan yet. Create or upload at least two images before using the image slideshow video flow. No video was rendered and no Xu was charged."
         if action == "save":
-            return "💾 Plan saved in this session. No provider call and no Xu charged."
-        return "⚙️ Real image/video creation is guarded from this planning step. TOAN AAS has not called a provider and has not charged Xu."
+            return "💾 Plan saved in this session. No final processing has started and no Xu has been charged."
+        return "⚙️ Real image/video creation is guarded from this planning step. No final processing has started and no Xu has been charged."
     if action == "music_guard":
         return (
             "🎵 <b>Gợi ý nhạc/SFX</b>\n\n"
             "1. Piano cinematic nhẹ cho cảnh cảm xúc.\n"
             "2. Ambient luxury pad cho sản phẩm cao cấp.\n"
             "3. Electronic future pulse cho cảnh công nghệ/cyberpunk.\n\n"
-            "Đây chỉ là gợi ý. Bot chưa gọi provider và chưa trừ Xu."
+            "Đây chỉ là gợi ý. TOAN AAS chưa xử lý thật và chưa trừ Xu."
         )
     if action == "image_guard":
         return (
             "🖼 <b>Prompt ảnh khung chính</b>\n\n"
             f"<code>{html.escape(topic)}, {html.escape(context_text)}, giữ nhận diện chủ thể ổn định, bố cục sạch, ánh sáng tự nhiên, chiều sâu điện ảnh, không watermark, không chữ thừa.</code>\n\n"
-            "Đây là bước lập kế hoạch. Bot chưa gọi provider ảnh và chưa trừ Xu."
+            "Đây là bước lập kế hoạch. TOAN AAS chưa xử lý ảnh thật và chưa trừ Xu."
         )
     if action == "frame_hint":
         return "⚠️ Kế hoạch này chưa có bộ ảnh để ghép video. Vui lòng tạo hoặc gửi ít nhất 2 ảnh trước. Bot chưa render video và chưa trừ Xu."
     if action == "save":
-        return "💾 TOAN AAS đã lưu kế hoạch trong phiên hiện tại. Bot chưa gọi provider và chưa trừ Xu."
+        return "💾 TOAN AAS đã lưu kế hoạch trong phiên hiện tại. TOAN AAS chưa xử lý thật và chưa trừ Xu."
     if action == "video_guard":
         return "🎬 Video AI chân thật hiện đang được bảo trì hoặc chưa mở công khai.\nTOAN AAS chưa trừ Xu.\nBạn có thể lưu kế hoạch hoặc dùng ghép ảnh thành video trước."
-    return "⚙️ Tạo ảnh/video thật đang được kiểm soát an toàn ở bước kế hoạch này. TOAN AAS chưa gọi nhà cung cấp AI và chưa trừ Xu."
+    return "⚙️ Tạo ảnh/video thật đang được kiểm soát an toàn ở bước kế hoạch này. TOAN AAS chưa xử lý thật và chưa trừ Xu."
 
 def long_video_topic_label(topic_key: str, lang: str = "vi") -> str:
     code = str(topic_key or "").strip().lower()
@@ -47318,7 +47318,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
             "Light corporate/cinematic bed under narration; subtle whoosh/click only for transitions and proof moments.\n\n"
             "<b>10. CTA/caption</b>\n"
             "Use a soft next-step CTA matching the topic; avoid repeating the same sales line in every chapter.\n\n"
-            "Planning only. No provider call and no Xu deducted."
+            "Planning only. No final processing has started and no Xu has been charged."
         )
     return (
         "📺 <b>Lộ trình video dài AI</b>\n\n"
@@ -47348,7 +47348,7 @@ def long_video_plan_text(state: dict, lang: str = "vi") -> str:
         "Nhạc corporate/điện ảnh nhẹ dưới lời đọc; whoosh/click tinh tế ở chuyển cảnh, demo và điểm bằng chứng.\n\n"
         "<b>10. CTA/caption</b>\n"
         "CTA nhẹ theo đúng mục tiêu video; không lặp câu bán hàng ở mọi chương. Caption tóm tắt lợi ích và bước tiếp theo.\n\n"
-        "Đây là kế hoạch nội dung. Bot chưa gọi nhà cung cấp AI và chưa trừ Xu."
+        "Đây là kế hoạch nội dung. TOAN AAS chưa xử lý thật và chưa trừ Xu."
     )
 
 def long_video_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -47361,7 +47361,7 @@ def long_video_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🎬 Tạo prompt video từng cảnh" if is_vi else "🎬 Video prompts by scene", "longvideo|video_prompts"),
             ("🎞 Ghép ảnh từng đoạn" if is_vi else "🎞 Assemble segment images", "longvideo|frame_video"),
             ("✨ Render AI từng đoạn" if is_vi else "✨ Render AI segments", "longvideo|render_segments"),
-            ("🎵 Gợi ý nhạc/voice" if is_vi else "🎵 Music/voice suggestions", "longvideo|music"),
+            ("🎵 Gợi ý âm thanh" if is_vi else "🎵 Audio suggestions", "longvideo|music"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save roadmap", "longvideo|save"),
         ],
         lang,
@@ -47379,22 +47379,22 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
     if action == "save":
         project_note = f"\nProject ID: <code>{int(plan.get('project_id') or 0)}</code>" if plan.get("project_id") else ""
         return (
-            f"💾 Roadmap saved in this session.{project_note}\nNo provider call and no Xu charged."
+            f"💾 Roadmap saved in this session.{project_note}\nNo final processing has started and no Xu has been charged."
             if normalize_user_language(lang) != "vi"
-            else f"💾 TOAN AAS đã lưu lộ trình trong phiên hiện tại.{project_note}\nBot chưa gọi provider và chưa trừ Xu."
+            else f"💾 TOAN AAS đã lưu lộ trình trong phiên hiện tại.{project_note}\nTOAN AAS chưa xử lý thật và chưa trừ Xu."
         )
     if action == "video_prompts":
         return detailed_video_scene_prompts_text(plan, "longvideo", lang, scene_count=scene_count)
     if normalize_user_language(lang) != "vi":
         if action == "music":
             return (
-                "🎵 <b>Music/voice for the long-form video</b>\n\n"
+                "🎵 <b>Audio for the long-form video</b>\n\n"
                 "1. Voice: confident host/teacher, medium pace, brief pauses after key points.\n"
                 "2. Music: light corporate/cinematic bed, 15–20% under narration.\n"
                 "3. SFX: subtle whoosh for chapter changes, click/pop for proof and captions.\n"
                 "4. Editing rhythm: faster opening, stable middle chapters, slower recap/CTA.\n"
                 "5. By section: cinematic pulse for hook; ambient bed for explanation; brighter lift for proof; soft resolve for CTA.\n\n"
-                "No provider call and no Xu charged."
+                "No final processing has started and no Xu has been charged."
             )
         lines = [
             "🧩 <b>Long-form storyboard by scene</b>" if action == "storyboard" else (
@@ -47434,17 +47434,17 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                     "Audio: low music bed, subtle transition SFX.",
                     "",
                 ])
-        lines.append("No image/video provider call and no Xu charged.")
+        lines.append("No final image/video processing has started and no Xu has been charged.")
         return "\n".join(lines)
     if action == "music":
         return (
-            "🎵 <b>Gợi ý nhạc/voice cho video dài</b>\n\n"
+            "🎵 <b>Gợi ý âm thanh cho video dài</b>\n\n"
             "1. <b>Phong cách voice:</b> host/giáo viên tự tin, tốc độ vừa, nghỉ ngắn sau ý quan trọng.\n"
             "2. <b>Nhạc nền:</b> corporate/cinematic nhẹ, âm lượng 15–20% dưới lời đọc.\n"
             "3. <b>SFX:</b> whoosh nhẹ khi đổi chương, click/pop ở bằng chứng và caption.\n"
             "4. <b>Nhịp dựng:</b> mở nhanh, phần thân ổn định, recap/CTA chậm hơn.\n"
             "5. <b>Theo từng đoạn:</b> cinematic pulse ở hook; ambient ở giải thích; nhạc nâng nhẹ ở proof; kết mềm ở CTA.\n\n"
-            "Bot chưa gọi provider và chưa trừ Xu."
+            "TOAN AAS chưa xử lý thật và chưa trừ Xu."
         )
     lines = [
         "🧩 <b>Storyboard video dài theo từng cảnh</b>" if action == "storyboard" else (
@@ -47484,7 +47484,7 @@ def long_video_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                 "Âm thanh/nhạc: nhạc nền thấp, SFX chuyển cảnh tinh tế.",
                 "",
             ])
-    lines.append("Bot chưa gọi API ảnh/video và chưa trừ Xu.")
+    lines.append("TOAN AAS chưa xử lý ảnh/video thật và chưa trừ Xu.")
     return "\n".join(lines)
 
 STORYBOARD_PACK_TEMPLATE_LABELS = {
@@ -48566,9 +48566,9 @@ def video_idea_result_text(state: dict, choice: int = 1, lang: str = "vi") -> st
                 f"<b>6. Image prompt</b>\n<code>{html.escape(topic)}, cinematic character study, coherent wardrobe and identity, expressive natural light, layered environment, film still, no watermark.</code>\n\n"
                 f"<b>7. Video prompt</b>\n<code>Animate {html.escape(topic)} with controlled natural movement, slow push-in, motivated camera transition, stable identity, cinematic pacing.</code>\n\n"
                 "<b>8. Camera</b>\nWide establishing shot, close-up, over-the-shoulder, slow push-in, match cut and restrained handheld movement.\n\n"
-                "<b>9. Music / voice</b>\nEmotional piano or ambient strings; concise reflective narration with intentional pauses.\n\n"
+                "<b>9. Audio</b>\nEmotional piano or ambient strings; concise reflective narration with intentional pauses.\n\n"
                 "<b>10. Caption / CTA</b>\nInvite the viewer to reflect or continue the story; avoid a hard sales ending.\n\n"
-                "No image/video provider call and no Xu deducted."
+                "No final processing has started and no Xu has been charged."
             )
         return (
             f"🎬 <b>Kế hoạch điện ảnh / kể chuyện #{choice}</b>\n\n"
@@ -48589,11 +48589,11 @@ def video_idea_result_text(state: dict, choice: int = 1, lang: str = "vi") -> st
             f"<code>Chuyển động có kiểm soát cho {html.escape(topic)}, slow push-in, camera chuyển theo động cơ câu chuyện, giữ nhận diện ổn định, nhịp điện ảnh.</code>\n\n"
             "<b>8. Chuyển động camera</b>\n"
             "Wide establishing, close-up, over-the-shoulder, slow push-in, match cut và handheld tiết chế.\n\n"
-            "<b>9. Nhạc/voice</b>\n"
+            "<b>9. Gợi ý âm thanh</b>\n"
             "Piano cảm xúc hoặc ambient strings; voice kể chuyện ngắn, có khoảng dừng.\n\n"
             "<b>10. Caption/CTA</b>\n"
             "Mời người xem suy ngẫm hoặc xem tiếp câu chuyện, không kết bằng lời bán hàng gượng ép.\n\n"
-            "TOAN AAS chưa gọi API ảnh/video và chưa trừ Xu."
+            "TOAN AAS chưa xử lý thật và chưa trừ Xu."
         )
     if normalize_user_language(lang) != "vi":
         return (
@@ -48608,7 +48608,7 @@ def video_idea_result_text(state: dict, choice: int = 1, lang: str = "vi") -> st
             f"<b>Video prompt</b>: <code>Animate {html.escape(topic)} with natural motion, slow push-in, stable identity/product, clear result reveal.</code>\n"
             "<b>Music/SFX</b>: light cinematic or modern pulse; subtle whoosh on transitions.\n"
             "<b>Caption/CTA</b>: State the benefit, invite the viewer to learn more, keep the CTA soft.\n\n"
-            "No provider call and no Xu deducted."
+            "No final processing has started and no Xu has been charged."
         )
     return (
         f"📢 <b>Ý tưởng quảng cáo hoàn chỉnh #{choice}</b>\n\n"
@@ -48639,7 +48639,7 @@ def video_idea_result_text(state: dict, choice: int = 1, lang: str = "vi") -> st
         "Mời người xem xem thêm, lưu video hoặc tìm hiểu sản phẩm; không ép mua quá mạnh.\n\n"
         "<b>12. Hashtag</b>\n"
         "#toanaas #videoquangcao #contentcreator + hashtag theo sản phẩm và nền tảng.\n\n"
-        "TOAN AAS chưa gọi API ảnh/video và chưa trừ Xu."
+        "TOAN AAS chưa xử lý thật và chưa trừ Xu."
     )
 
 def video_idea_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -48652,7 +48652,7 @@ def video_idea_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🎬 Prompt video từng cảnh" if is_vi else "🎬 Video prompts", "videoidea|video_prompts"),
             ("🎞 Ghép ảnh thành video" if is_vi else "🎞 Assemble scene images", "videoidea|frame_video"),
             ("✨ Tạo video AI chân thật" if is_vi else "✨ Generate AI video", "videoidea|render_ai"),
-            ("🎵 Gợi ý nhạc/voice" if is_vi else "🎵 Music/voice", "videoidea|music"),
+            ("🎵 Gợi ý âm thanh" if is_vi else "🎵 Audio", "videoidea|music"),
             ("💾 Lưu kế hoạch" if is_vi else "💾 Save plan", "videoidea|save"),
         ],
         lang,
@@ -48671,7 +48671,7 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                 return (
                     f"🧩 <b>Cinematic storyboard — {html.escape(topic)}</b>\n\n"
                     "1. Establishing wide shot and visual motif.\n2. Character close-up and desire.\n3. Conflict detail.\n"
-                    "4. Turning-point action.\n5. Emotional consequence.\n6. Symbolic final frame.\n\nNo provider call and no Xu charged."
+                    "4. Turning-point action.\n5. Emotional consequence.\n6. Symbolic final frame.\n\nNo final processing has started and no Xu has been charged."
                 )
             if action == "image_prompts":
                 return (
@@ -48679,7 +48679,7 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                     f"1. <code>{html.escape(topic)}, atmospheric establishing shot, layered environment, cinematic natural light</code>\n"
                     f"2. <code>{html.escape(topic)}, intimate character close-up, stable identity, expressive eyes, film still</code>\n"
                     f"3. <code>{html.escape(topic)}, turning-point action, motivated light, coherent wardrobe and setting</code>\n\n"
-                    "No image API call and no Xu charged."
+                    "No final image processing has started and no Xu has been charged."
                 )
             if action == "video_prompts":
                 return (
@@ -48687,14 +48687,14 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                     "1. Slow establishing dolly, restrained environmental motion.\n"
                     "2. Slow push-in on the character as tension rises.\n"
                     "3. Motivated match cut into the turning point, then a quiet pull-out ending.\n\n"
-                    "No video API call and no Xu charged."
+                    "No final video processing has started and no Xu has been charged."
                 )
-            return "🎵 <b>Cinematic music/voice</b>\n\nEmotional piano, ambient strings or restrained electronic texture. Voice: reflective, concise, with pauses.\n\nNo provider call and no Xu charged."
+            return "🎵 <b>Cinematic audio</b>\n\nEmotional piano, ambient strings or restrained electronic texture. Voice: reflective, concise, with pauses.\n\nNo final processing has started and no Xu has been charged."
         if action == "storyboard":
             return (
                 f"🧩 <b>Storyboard điện ảnh — {html.escape(topic)}</b>\n\n"
                 "1. Wide shot dựng bối cảnh và motif thị giác.\n2. Close-up nhân vật và mong muốn.\n3. Chi tiết mâu thuẫn.\n"
-                "4. Hành động tạo bước ngoặt.\n5. Hệ quả cảm xúc.\n6. Khung hình biểu tượng kết.\n\nBot chưa gọi provider và chưa trừ Xu."
+                "4. Hành động tạo bước ngoặt.\n5. Hệ quả cảm xúc.\n6. Khung hình biểu tượng kết.\n\nTOAN AAS chưa xử lý thật và chưa trừ Xu."
             )
         if action == "image_prompts":
             return (
@@ -48702,7 +48702,7 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                 f"1. <code>{html.escape(topic)}, atmospheric establishing shot, bối cảnh nhiều lớp, ánh sáng tự nhiên điện ảnh</code>\n"
                 f"2. <code>{html.escape(topic)}, close-up nhân vật, nhận diện ổn định, ánh mắt giàu cảm xúc, film still</code>\n"
                 f"3. <code>{html.escape(topic)}, hành động bước ngoặt, ánh sáng có động cơ, trang phục và bối cảnh nhất quán</code>\n\n"
-                "Bot chưa gọi API ảnh và chưa trừ Xu."
+                "TOAN AAS chưa xử lý ảnh thật và chưa trừ Xu."
             )
         if action == "video_prompts":
             return (
@@ -48710,9 +48710,9 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                 "1. Establishing dolly chậm, chuyển động môi trường tiết chế.\n"
                 "2. Slow push-in vào nhân vật khi căng thẳng tăng.\n"
                 "3. Match cut có động cơ sang bước ngoặt, kết bằng pull-out yên.\n\n"
-                "Bot chưa gọi API video và chưa trừ Xu."
+                "TOAN AAS chưa xử lý video thật và chưa trừ Xu."
             )
-        return "🎵 <b>Nhạc/voice điện ảnh</b>\n\nPiano cảm xúc, ambient strings hoặc electronic tiết chế. Voice kể chuyện ngắn, có khoảng dừng.\n\nBot chưa gọi provider và chưa trừ Xu."
+        return "🎵 <b>Gợi ý âm thanh điện ảnh</b>\n\nPiano cảm xúc, ambient strings hoặc electronic tiết chế. Giọng đọc kể chuyện ngắn, có khoảng dừng.\n\nTOAN AAS chưa xử lý thật và chưa trừ Xu."
     if normalize_user_language(lang) != "vi":
         if action == "storyboard":
             return (
@@ -48723,7 +48723,7 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                 "4. 8–12s: over-the-shoulder demo and proof.\n"
                 "5. 12–15s: before/after result.\n"
                 "6. Final: clean product shot and soft CTA.\n\n"
-                "No provider call and no Xu charged."
+                "No final processing has started and no Xu has been charged."
             )
         if action == "image_prompts":
             return (
@@ -48734,7 +48734,7 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                 f"4. <code>{html.escape(topic)}, practical demo, hands/product accurate, no distorted logo</code>\n"
                 f"5. <code>{html.escape(topic)}, visible before/after result, matching composition</code>\n"
                 f"6. <code>{html.escape(topic)}, final hero shot, CTA space, no extra text</code>\n\n"
-                "No image API call and no Xu charged."
+                "No final image processing has started and no Xu has been charged."
             )
         if action == "video_prompts":
             return (
@@ -48745,9 +48745,9 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
                 "4. Stable demo cutaways, 4 seconds.\n"
                 "5. Before/after match cut, 3 seconds.\n"
                 "6. Clean hero ending and soft CTA, 2 seconds.\n\n"
-                "No video API call and no Xu charged."
+                "No final video processing has started and no Xu has been charged."
             )
-        return "🎵 <b>Music/voice</b>\n\nVoice: confident, conversational, concise.\nMusic: modern cinematic/electronic bed.\nSFX: subtle whoosh, click and reveal hit.\n\nNo provider call and no Xu charged."
+        return "🎵 <b>Audio</b>\n\nVoice: confident, conversational, concise.\nMusic: modern cinematic/electronic bed.\nSFX: subtle whoosh, click and reveal hit.\n\nNo final processing has started and no Xu has been charged."
     if action == "storyboard":
         return (
             f"🧩 <b>Storyboard quảng cáo — {html.escape(topic)}</b>\n\n"
@@ -48757,7 +48757,7 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
             "4. 8–12s: over-the-shoulder demo và bằng chứng.\n"
             "5. 12–15s: kết quả before/after.\n"
             "6. Kết: hero shot sạch và CTA nhẹ.\n\n"
-            "Bot chưa gọi provider và chưa trừ Xu."
+            "TOAN AAS chưa xử lý thật và chưa trừ Xu."
         )
     if action == "image_prompts":
         return (
@@ -48768,7 +48768,7 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
             f"4. <code>{html.escape(topic)}, demo thực tế, bàn tay/sản phẩm chính xác, không méo logo</code>\n"
             f"5. <code>{html.escape(topic)}, kết quả before/after rõ, bố cục tương ứng</code>\n"
             f"6. <code>{html.escape(topic)}, hero shot kết, chừa vùng CTA, không chữ thừa</code>\n\n"
-            "Bot chưa gọi API ảnh và chưa trừ Xu."
+            "TOAN AAS chưa xử lý ảnh thật và chưa trừ Xu."
         )
     if action == "video_prompts":
         return (
@@ -48779,9 +48779,9 @@ def video_idea_followup_text(action: str, plan: dict | None, lang: str = "vi") -
             "4. Cutaway demo ổn định, 4 giây.\n"
             "5. Match cut before/after, 3 giây.\n"
             "6. Hero ending sạch và CTA nhẹ, 2 giây.\n\n"
-            "Bot chưa gọi API video và chưa trừ Xu."
+            "TOAN AAS chưa xử lý video thật và chưa trừ Xu."
         )
-    return "🎵 <b>Gợi ý nhạc/voice</b>\n\nVoice: tự tin, gần gũi, câu ngắn.\nNhạc: cinematic/electronic hiện đại.\nSFX: whoosh, click và reveal hit nhẹ.\n\nBot chưa gọi provider và chưa trừ Xu."
+    return "🎵 <b>Gợi ý âm thanh</b>\n\nGiọng đọc: tự tin, gần gũi, câu ngắn.\nNhạc: cinematic/electronic hiện đại.\nSFX: whoosh, click và reveal hit nhẹ.\n\nTOAN AAS chưa xử lý thật và chưa trừ Xu."
 
 async def handle_developing_video_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text or not update.effective_user:
@@ -48878,7 +48878,7 @@ async def handle_developing_video_pending_text(update: Update, context: ContextT
                 )
             clear_developing_video_pending(uid)
             await update.message.reply_text(
-                "🔗 Đã lưu link tham khảo. TOAN AAS chưa tải video từ nền tảng. Hãy upload file hoặc mô tả thủ công để phân tích format. Bot chưa gọi provider và chưa trừ Xu.",
+                "🔗 Đã lưu link tham khảo. TOAN AAS chưa tải video từ nền tảng. Hãy upload file hoặc mô tả thủ công để phân tích format. TOAN AAS chưa xử lý thật và chưa trừ Xu.",
                 reply_markup=video_v6_keyboard(
                     [("📤 Upload video mẫu", "videoref|start"), ("✍️ Mô tả thủ công", "videoref|manual")],
                     lang,
@@ -49266,7 +49266,7 @@ async def handle_prompt_video_callback(update: Update, context: ContextTypes.DEF
         return await safe_edit_or_send(query, guided_video_motion_text(state, lang), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("promptvideo", lang))
     if action == "music_custom":
         restore_developing_video_pending(uid, "promptvideo", state, "music_custom")
-        text = "✍️ Hãy nhập phong cách nhạc/voice." if normalize_user_language(lang) == "vi" else "✍️ Enter the music/voice direction."
+        text = "✍️ Hãy nhập phong cách âm thanh cho video." if normalize_user_language(lang) == "vi" else "✍️ Enter the video audio direction."
         return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="promptvideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
@@ -49436,7 +49436,7 @@ async def handle_image_video_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_or_send(query, guided_video_motion_text(state, lang, from_image=True), parse_mode="HTML", reply_markup=guided_video_motion_keyboard("imagevideo", lang))
     if action == "music_custom":
         restore_developing_video_pending(uid, "imagevideo", state, "music_custom")
-        text = "✍️ Hãy nhập phong cách nhạc/voice." if normalize_user_language(lang) == "vi" else "✍️ Enter the music/voice direction."
+        text = "✍️ Hãy nhập phong cách âm thanh cho video." if normalize_user_language(lang) == "vi" else "✍️ Enter the video audio direction."
         return await safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Quay lại" if normalize_user_language(lang) == "vi" else "🔙 Back", callback_data="imagevideo|back_music"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]))
@@ -49728,7 +49728,7 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
             "source": "reference_video_plan",
             "concept_text": plan.get("selected_topic") or "",
             "video_prompt": render_plan.get("prompt") or "",
-            "music_choice": {"label": "reference-plan music/voice"},
+            "music_choice": {"label": "reference-plan audio"},
         }
         source_state = dict(plan)
         source_state["video_prompt"] = package["video_prompt"]
@@ -49796,7 +49796,7 @@ async def handle_video_reference_callback(update: Update, context: ContextTypes.
             "source": "reference_video_plan",
             "concept_text": plan.get("selected_topic") or "",
             "video_prompt": render_plan.get("prompt") or "",
-            "music_choice": {"label": "reference-plan music/voice"},
+            "music_choice": {"label": "reference-plan audio"},
         }
         source_state = dict(plan)
         source_state["video_prompt"] = package["video_prompt"]
@@ -50077,7 +50077,7 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
             reply_markup=video_v6_keyboard(
                 [],
                 lang,
-                back=("⬅️ Quay lại nhạc/voice" if normalize_user_language(lang) == "vi" else "⬅️ Back to music", "selfscene|back_music"),
+                back=("⬅️ Quay lại âm thanh" if normalize_user_language(lang) == "vi" else "⬅️ Back to audio", "selfscene|back_music"),
             ),
         )
     if action == "music_refresh":
@@ -51059,7 +51059,7 @@ def menu_text_main_video_i18n(lang: str) -> str:
     return (
         "🎬 <b>TOAN AAS VIDEO</b>\n\n"
         "Choose how you want to create or process video.\n\n"
-        "• Ideas, prompts, storyboards, motion and music/voice planning are free.\n"
+        "• Ideas, prompts, storyboards, motion and audio planning are free.\n"
         "• Real AI Video only calls providers and charges Xu after confirmation.\n"
         "• Image slideshow video uses Local Worker + ffmpeg and keeps existing render pricing.\n"
         "• Translation/dubbing is guided step by step; no provider call or Xu charge when the provider is unavailable."
@@ -63311,6 +63311,47 @@ def music_no_xu_text(lang: str) -> str:
 PRODUCT_CONTEXT_SHOWROOM = "showroom"
 PRODUCT_CONTEXT_VIDEO_ADDON = "video_addon"
 PRODUCT_CONTEXTS = {PRODUCT_CONTEXT_SHOWROOM, PRODUCT_CONTEXT_VIDEO_ADDON}
+CANONICAL_FLOW_REGISTRY = {
+    "audio_showroom": (
+        "audio_studio",
+        "audio_voice_text",
+        "audio_voice_style",
+        "audio_voice_preview",
+        "audio_music_prompt",
+        "audio_music_preview",
+        "audio_library",
+        "audio_media",
+    ),
+    "video_addon": (
+        "video_finalize_addons",
+        "video_addon_voice",
+        "video_addon_music",
+        "video_addon_subdub",
+        "video_package",
+        "video_invoice",
+        "video_preview",
+        "video_final_confirm",
+    ),
+    "selfshot": (
+        "selfshot_upload",
+        "selfshot_object",
+        "selfshot_direction",
+        "selfshot_addons",
+        "selfshot_package",
+        "selfshot_invoice",
+        "selfshot_preview",
+        "selfshot_confirm",
+    ),
+}
+LEGACY_CANONICAL_CALLBACK_REDIRECTS = {
+    "music_quick|showroom|voice_hub": "music_quick|showroom|voice_custom",
+    "music_quick|voice_hub": "music_quick|showroom|voice_custom",
+    "music_quick|showroom|voice": "music_quick|showroom|voice_custom",
+    "music_quick|voice_pick": "music_quick|showroom|voice_custom",
+    "vfinal|music_suggest": "vfinal|music",
+    "vfinal|music_use": "vfinal|music_library",
+    "suggest_music|start": "music_quick|showroom|music_hub",
+}
 PRODUCT_CONTEXT_TTL_SECONDS = 60 * 60
 
 def product_context_key(user_id) -> str:
@@ -63954,6 +63995,12 @@ def music_ai_input_text(kind: str = "background", lang: str = "vi") -> str:
             "Send the product/topic, mood, language, target platform, and any words you want included. The bot will return 3 options first.\n\n"
             "No processing starts and no Xu is charged at this step."
         )
+    if kind == "custom":
+        return (
+            "🎼 <b>Tạo nhạc nền</b>\n\n"
+            "Bạn mô tả kiểu nhạc muốn tạo.\n\n"
+            "TOAN AAS sẽ trả 3 hướng để chọn/đổi/sửa trước. Bước này chưa bắt đầu xử lý và chưa trừ Xu."
+        )
     return (
         f"🎼 <b>Tạo {html.escape(label_vi)}</b>\n\n"
         "Bạn gửi sản phẩm/chủ đề, mood, ngôn ngữ, nền tảng đăng và từ khóa muốn đưa vào. Bot sẽ trả 3 hướng để chọn/đổi/sửa trước.\n\n"
@@ -64274,8 +64321,8 @@ def voice_vault_keyboard(user_id, lang: str = "vi", product_context: str = PRODU
         return build_2col_keyboard(buttons, nav_back=("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice"), nav_main=True, lang=lang)
     buttons.extend([
         ("🧬 Tạo voice riêng" if is_vi else "🧬 Create custom voice", cb("voice_clone")),
-        ("👩 Demo giọng nữ miễn phí" if is_vi else "👩 Free female demo", cb("voice_default_female")),
-        ("👨 Demo giọng nam miễn phí" if is_vi else "👨 Free male demo", cb("voice_default_male")),
+        ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female voice", cb("voice_default_female")),
+        ("👨 Giọng nam mặc định" if is_vi else "👨 Default male voice", cb("voice_default_male")),
     ])
     return build_2col_keyboard(buttons, nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")), nav_main=True, lang=lang)
 
@@ -64354,7 +64401,7 @@ def voice_clone_preview_entry_keyboard(profile_id: int, lang: str = "vi", produc
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("▶️ Tạo bản nghe thử ngắn" if is_vi else "▶️ Create short preview", callback_data=cb(f"voice_clone_confirmed:{pid}"))],
         [
-            InlineKeyboardButton("🔁 Đổi giọng/nhạc" if is_vi else "🔁 Change voice/music", callback_data=cb("voice_hub")),
+            InlineKeyboardButton("🔁 Đổi giọng" if is_vi else "🔁 Change voice", callback_data=cb("voice_custom")),
             InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=cb(f"voice_profile_rename:{pid}")),
         ],
         [
@@ -64460,15 +64507,28 @@ def voice_style_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEX
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     buttons = [
-        ("1️⃣ Chọn giọng 1" if is_vi else "1️⃣ Choose 1", cb("voice_style_1")),
-        ("2️⃣ Chọn giọng 2" if is_vi else "2️⃣ Choose 2", cb("voice_style_2")),
-        ("3️⃣ Chọn giọng 3" if is_vi else "3️⃣ Choose 3", cb("voice_style_3")),
-        ("🔁 Đổi giọng" if is_vi else "🔁 Change voice", cb("voice_more")),
+        ("1️⃣ Giọng nữ nhẹ nhàng" if is_vi else "1️⃣ Gentle female voice", cb("voice_style_1")),
+        ("2️⃣ Giọng nam tin cậy" if is_vi else "2️⃣ Trustworthy male voice", cb("voice_style_2")),
+        ("3️⃣ Giọng trẻ bán hàng" if is_vi else "3️⃣ Young sales voice", cb("voice_style_3")),
         ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", cb("voice_custom")),
-        ("🎙 Tạo voice thử" if is_vi else "🎙 Voice preview", cb("voice_tts_guard")),
     ]
     back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
+
+def audio_voice_preview_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    back_callback = "vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else cb("root")
+    return build_2col_keyboard(
+        [
+            ("✅ Tạo bản đầy đủ" if is_vi else "✅ Create full version", cb("voice_tts_guard")),
+            ("🔁 Đổi giọng" if is_vi else "🔁 Change voice", cb("voice_more")),
+            ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", cb("voice_custom")),
+        ],
+        nav_back=("⬅️ Studio âm thanh" if is_vi and ctx == PRODUCT_CONTEXT_SHOWROOM else ("⬅️ Quay lại" if is_vi else "⬅️ Back"), back_callback),
+        lang=lang,
+    )
 
 def music_provider_error_text(lang: str) -> str:
     lang = music_ui_lang(lang=lang)
@@ -64518,33 +64578,21 @@ def voice_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOW
         return video_order_screen_text("voice", {}, lang)
     if music_ui_lang(lang=lang) != "vi":
         return (
-            "🎙 <b>TOAN AAS Voice Studio</b>\n\n"
-            "Create narration demos, manage saved voice profiles, read custom text, and download standalone audio outputs.\n"
-            "This is an independent studio and is not attached to a current video order.\n\n"
-            "Paid actions show a price and final confirmation before any processing."
+            "🎧 <b>TOAN AAS Audio Studio</b>\n\n"
+            "Create standalone narration, manage saved voices, build background music and browse audio media.\n"
+            "Choose Create voice to send text first, then select one of three voice styles."
         )
     return (
-        "🎙 <b>Voice Studio TOAN AAS</b>\n\n"
-        "Dùng để tạo giọng đọc, nghe thử giọng, tạo voice profile riêng và tải file audio.\n"
-        "Đây là công cụ độc lập, không gắn vào video hiện tại.\n\n"
-        "Các tác vụ có phí luôn hiện giá và hỏi xác nhận cuối trước khi xử lý."
+        "🎧 <b>STUDIO ÂM THANH TOAN AAS</b>\n\n"
+        "Tạo file audio độc lập: giọng đọc, kho voice, nhạc nền, kho nhạc/SFX và media âm thanh.\n"
+        "Bấm Tạo giọng đọc để gửi nội dung trước, sau đó chọn một trong 3 kiểu giọng."
     )
 
 def voice_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
-    is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
         return video_finalization_voice_keyboard(lang)
-    cb = lambda action: product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, action)
-    buttons = [
-        ("👩 Demo giọng nữ miễn phí" if is_vi else "👩 Free female demo", cb("voice_default_female")),
-        ("👨 Demo giọng nam miễn phí" if is_vi else "👨 Free male demo", cb("voice_default_male")),
-        ("📁 Kho voice của bạn" if is_vi else "📁 Your voice vault", cb("voice_profiles")),
-        ("🎙 Nhập chữ để đọc thử" if is_vi else "🎙 Read custom text", cb("voice_custom")),
-        ("🧬 Tạo voice riêng" if is_vi else "🧬 Create custom voice", cb("voice_clone")),
-    ]
-    rows = build_2col_keyboard(buttons, nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")), nav_main=True, lang=lang).inline_keyboard
-    return InlineKeyboardMarkup(rows)
+    return music_tools_keyboard(lang, "menu|main")
 
 def music_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
     ctx = normalize_product_context(product_context)
@@ -64574,8 +64622,7 @@ def music_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_
         ("🎼 Nghe thử Kho nhạc" if is_vi else "🎼 Preview music library", cb("music")),
         ("🔊 Nghe thử Kho SFX" if is_vi else "🔊 Preview SFX", cb("sfx")),
         ("📁 Media âm thanh của tôi" if is_vi else "📁 My audio media", cb("media")),
-        ("📝 Tạo prompt nhạc" if is_vi else "📝 Music prompt", cb("prompt")),
-        ("✨ Tạo nhạc AI" if is_vi else "✨ Create AI music", cb("ai_music")),
+        ("🎵 Tạo nhạc nền" if is_vi else "🎵 Create background music", cb("ai_music")),
     ]
     rows = build_2col_keyboard(buttons, nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb("root")), nav_main=True, lang=lang).inline_keyboard
     return InlineKeyboardMarkup(rows)
@@ -65060,7 +65107,9 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     if not query:
         return
-    namespace, product_context, action = parse_product_context_callback(query.data or "", PRODUCT_CONTEXT_SHOWROOM)
+    raw_callback = str(query.data or "")
+    canonical_callback = LEGACY_CANONICAL_CALLBACK_REDIRECTS.get(raw_callback, raw_callback)
+    namespace, product_context, action = parse_product_context_callback(canonical_callback, PRODUCT_CONTEXT_SHOWROOM)
     user_id = update.effective_user.id if update.effective_user else 0
     lang = music_ui_lang(user_id)
     ctx = normalize_product_context(product_context)
@@ -65086,9 +65135,9 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(menu_text_main_music_i18n(lang), parse_mode="HTML", reply_markup=music_tools_keyboard(lang, back_callback))
     if action == "voice_hub":
         await query.answer()
-        clear_music_guided_pending(user_id)
+        set_music_guided_pending(user_id, "voice_text", product_context=ctx)
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        return await query.message.reply_text(voice_hub_text(lang, ctx), parse_mode="HTML", reply_markup=voice_hub_keyboard(lang, ctx))
+        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
     if action == "music_hub":
         await query.answer()
         clear_music_guided_pending(user_id)
@@ -65129,9 +65178,9 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         return await query.message.reply_text(music_prompt_suggestions_text(desc, offset, lang, mode), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang, ctx))
     if action in {"voice", "voice_pick"}:
         await query.answer()
-        clear_music_guided_pending(user_id)
+        set_music_guided_pending(user_id, "voice_text", product_context=ctx)
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        return await query.message.reply_text(voice_prompt_entry_text(lang), parse_mode="HTML", reply_markup=voice_prompt_entry_keyboard(lang, ctx))
+        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
     if action == "voice_custom":
         await query.answer()
         set_music_guided_pending(user_id, "voice_text", product_context=ctx)
@@ -65149,7 +65198,18 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "ai_music":
         await query.answer()
         enter_product_context(user_id, ctx, origin_screen=origin_screen, product_area="music")
-        return await query.message.reply_text(music_ai_menu_text(lang), parse_mode="HTML", reply_markup=music_ai_menu_keyboard(lang, ctx))
+        if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
+            update_video_finalization(
+                user_id,
+                music_enabled=True,
+                music_mode="ai_music",
+                music_choice="ai_music",
+                music_prompt=str(video_finalization_prompt_text(get_video_finalization_state(user_id) or {}) or "nhạc nền phù hợp video hiện tại")[:1000],
+                music_item_count=1,
+            )
+            return await video_finalization_return_after_addon(query, user_id, get_video_finalization_state(user_id), lang)
+        set_music_guided_pending(user_id, "music_ai_custom", product_context=ctx)
+        return await query.message.reply_text(music_ai_input_text("custom", lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
     if action in {"music_ai_background", "music_ai_lyrics", "music_ai_script", "music_ai_melody", "music_ai_custom"}:
         await query.answer()
         kind = action.replace("music_ai_", "", 1)
@@ -65516,9 +65576,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         })
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(
-            f"✅ Đã chọn giọng {idx}.\n\n<code>{html.escape(style_prompt)}</code>\n\nVoice thật sẽ đi qua báo giá/xác nhận khi tài nguyên xử lý sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu.",
+            f"🔊 <b>Bản nghe thử ngắn</b>\n\n"
+            f"Đã chọn kiểu giọng {idx}: <code>{html.escape(style_prompt)}</code>\n\n"
+            "TOAN AAS có thể nghe thử ngắn trước. Bản đầy đủ chỉ xử lý sau khi bạn xác nhận cuối; hiện chưa trừ Xu.",
             parse_mode="HTML",
-            reply_markup=voice_style_keyboard(lang, ctx),
+            reply_markup=audio_voice_preview_keyboard(lang, ctx),
         )
     if action == "voice_tts_guard":
         await query.answer()
@@ -67476,7 +67538,7 @@ async def handle_music_guided_pending_media(update: Update, context: ContextType
             return True
         clear_music_guided_pending(uid)
         await update.message.reply_text(
-            ("✅ Đã lưu video vào phiên này.\n\n" if target == "video" else "✅ Đã lưu audio/nhạc/voice vào phiên này.\n\n")
+            ("✅ Đã lưu video vào phiên này.\n\n" if target == "video" else "✅ Đã lưu audio/nhạc/giọng đọc vào phiên này.\n\n")
             + music_merge_menu_text(kind, uid, lang),
             parse_mode="HTML",
             reply_markup=music_merge_keyboard(kind, lang, ctx),
@@ -68705,7 +68767,7 @@ def frame_video_planning_text(state: dict | None = None, lang: str = "vi") -> st
             f"{motion_lines}\n\n"
             "<b>Suggested transition:</b>\n"
             f"{transition_lines}\n\n"
-            "<b>Suggested music/voice:</b>\n"
+            "<b>Suggested audio:</b>\n"
             f"{music_lines}\n\n"
             "<b>Suggested CTA/caption:</b>\n"
             f"{cta_lines}"
@@ -68720,7 +68782,7 @@ def frame_video_planning_text(state: dict | None = None, lang: str = "vi") -> st
         f"{motion_lines}\n\n"
         "<b>Gợi ý transition:</b>\n"
         f"{transition_lines}\n\n"
-        "<b>Gợi ý nhạc/voice:</b>\n"
+        "<b>Gợi ý âm thanh:</b>\n"
         f"{music_lines}\n\n"
         "<b>Gợi ý caption/CTA:</b>\n"
         f"{cta_lines}"
@@ -68785,16 +68847,16 @@ def frame_video_effect_keyboard() -> InlineKeyboardMarkup:
 def frame_video_music_text(state: dict) -> str:
     effect = frame_video_effect_payload(state.get("effect") or "fade")
     return (
-        "🎵 <b>Bạn có muốn thêm nhạc/voice không?</b>\n\n"
+        "🎵 <b>Bạn có muốn thêm âm thanh cho video không?</b>\n\n"
         f"• Hiệu ứng đã chọn: <b>{html.escape(effect['label'])}</b>\n\n"
-        "Nghe thử nhạc không trừ Xu. Ghép nhạc/voice chỉ tính theo giá hệ thống khi nguồn audio đã sẵn sàng.\n"
+        "Nghe thử nhạc không trừ Xu. Ghép nhạc hoặc giọng đọc chỉ tính theo giá hệ thống khi nguồn audio đã sẵn sàng.\n"
         "Nếu chưa có nguồn audio ổn định, bot sẽ báo chưa mở và không trừ Xu."
     )
 
 def frame_video_music_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎵 Chọn nhạc có sẵn", callback_data="framevideo|music|library"), InlineKeyboardButton("🎙 Thêm voice/TTS", callback_data="framevideo|music|voice")],
-        [InlineKeyboardButton("⏭ Bỏ qua nhạc/voice", callback_data="framevideo|music|skip")],
+        [InlineKeyboardButton("⏭ Bỏ qua âm thanh", callback_data="framevideo|music|skip")],
         [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|effect"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
@@ -68830,14 +68892,14 @@ def frame_video_confirm_text(state: dict, user_id=0) -> str:
 def frame_video_preview_entry_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("▶️ Tạo/xem preview ngắn", callback_data="framevideo|preview")],
-        [InlineKeyboardButton("🔁 Đổi giọng/nhạc", callback_data="framevideo|back|music"), InlineKeyboardButton("✏️ Sửa nội dung", callback_data="framevideo|back|planning")],
+        [InlineKeyboardButton("🔁 Đổi âm thanh", callback_data="framevideo|back|music"), InlineKeyboardButton("✏️ Sửa nội dung", callback_data="framevideo|back|planning")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|back|music"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
 def frame_video_preview_ready_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận tạo bản đầy đủ", callback_data="framevideo|confirm")],
-        [InlineKeyboardButton("🔁 Đổi giọng/nhạc", callback_data="framevideo|back|music"), InlineKeyboardButton("✏️ Sửa nội dung", callback_data="framevideo|back|planning")],
+        [InlineKeyboardButton("🔁 Đổi âm thanh", callback_data="framevideo|back|music"), InlineKeyboardButton("✏️ Sửa nội dung", callback_data="framevideo|back|planning")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="framevideo|back|music"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
@@ -69412,7 +69474,7 @@ def frame_video_mode_select_keyboard() -> InlineKeyboardMarkup:
 
 def frame_video_audio_not_ready_text() -> str:
     return (
-        "🎵 Ghép nhạc/voice trực tiếp sẽ mở khi có nguồn audio đã chọn ổn định.\n\n"
+        "🎵 Ghép nhạc hoặc giọng đọc trực tiếp sẽ mở khi có nguồn audio đã chọn ổn định.\n\n"
         "TOAN AAS chưa xử lý, chưa render và chưa trừ Xu. Bạn có thể bỏ qua nhạc để render video trước."
     )
 
@@ -69589,7 +69651,7 @@ async def handle_frame_video_photo(update: Update, context: ContextTypes.DEFAULT
 async def render_video_with_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, video_info: dict, audio_info: dict, mode: str):
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
-        return await update.message.reply_text("⚠️ Server chưa có ffmpeg. Admin cần cài ffmpeg để ghép nhạc/voice vào video. Bot chưa trừ Xu.")
+        return await update.message.reply_text("⚠️ Hệ thống chưa sẵn sàng để ghép nhạc hoặc giọng đọc vào video. TOAN AAS chưa trừ Xu.")
     if not video_info:
         return await update.message.reply_text("⚠️ Chưa có video. Hãy gửi video hoặc reply video rồi dùng lệnh này. Bot chưa trừ Xu.")
     if not audio_info:
@@ -77342,7 +77404,7 @@ def creative_motion_suggestions_text(state: dict | None = None, lang: str = "vi"
             "Chọn một gợi ý, đổi bộ khác hoặc nhập chủ đề riêng.",
             "",
         ]
-        prompt_label, motion_label, music_label = "Prompt video", "Chuyển động", "Nhạc/voice"
+        prompt_label, motion_label, music_label = "Prompt video", "Chuyển động", "Âm thanh"
     else:
         lines = [
             "🎥 <b>Three Prompt / Motion suggestions</b>",
@@ -77351,7 +77413,7 @@ def creative_motion_suggestions_text(state: dict | None = None, lang: str = "vi"
             "Choose one suggestion, refresh the set, or enter your own topic.",
             "",
         ]
-        prompt_label, motion_label, music_label = "Video prompt", "Motion", "Music/voice"
+        prompt_label, motion_label, music_label = "Video prompt", "Motion", "Audio"
     for idx, item in enumerate(suggestions, 1):
         lines.extend([
             f"<b>{idx}. {html.escape(item['title'])}</b>",
@@ -81274,7 +81336,7 @@ def video_finalization_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔊 Kho SFX" if is_vi else "🔊 Stock SFX", callback_data="vfinal|music_sfx"),
         ],
         [
-            InlineKeyboardButton("📁 Media của tôi" if is_vi else "📁 My media", callback_data="vfinal|my_media"),
+            InlineKeyboardButton("📁 Media âm thanh của tôi" if is_vi else "📁 My audio media", callback_data="vfinal|my_media"),
             InlineKeyboardButton("🎵 Tạo nhạc AI" if is_vi else "🎵 Create AI music", callback_data="vfinal|music_ai"),
         ],
         [
@@ -81968,7 +82030,9 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     await query.answer()
     uid = query.from_user.id if query.from_user else 0
     lang = get_user_language(uid) or "vi"
-    parts = str(query.data or "").split("|")
+    raw_callback = str(query.data or "")
+    canonical_callback = LEGACY_CANONICAL_CALLBACK_REDIRECTS.get(raw_callback, raw_callback)
+    parts = canonical_callback.split("|")
     action = parts[1] if len(parts) > 1 else "menu"
     value = parts[2] if len(parts) > 2 else ""
     state = get_video_finalization_state(uid)
@@ -82102,12 +82166,15 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         )
         return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "music_suggest":
-        state["step"] = "music_suggest"
+        state["step"] = "music"
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, video_finalization_music_suggestion_text(lang), parse_mode="HTML", reply_markup=video_finalization_music_suggestion_keyboard(lang))
+        return await safe_edit_or_send(query, video_finalization_music_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
     if action == "music_use":
-        update_video_finalization(uid, music_enabled=True, music_mode="suggested", music_choice="stock_music", music_prompt="cinematic/electronic background, subtle whoosh, low under narration")
-        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
+        state["step"] = "music"
+        set_video_finalization_state(uid, state)
+        enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen="vfinal|music", product_area="music")
+        set_video_music_context(uid, "video_finalization")
+        return await safe_edit_or_send(query, music_library_guide_text(lang), parse_mode="HTML", reply_markup=music_library_quick_keyboard(lang, PRODUCT_CONTEXT_VIDEO_ADDON))
     if action == "music_upload":
         state["step"] = "await_music_upload"
         set_video_finalization_state(uid, state)
@@ -82808,7 +82875,7 @@ def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> Inl
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("▶️ Nghe/xem thử ngắn" if is_vi else "▶️ Short preview", callback_data=f"videoaddon|preview|{token}"), InlineKeyboardButton("⚙️ Đổi gói" if is_vi else "⚙️ Change tier", callback_data="vfinal|tier")],
-        [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music")],
+        [InlineKeyboardButton("🎙 Đổi phụ đề/lồng tiếng" if is_vi else "🎙 Change add-ons", callback_data="videoaddon|menu"), InlineKeyboardButton("🎵 Đổi nhạc nền" if is_vi else "🎵 Change music", callback_data="vfinal|music")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
@@ -82878,7 +82945,7 @@ def paid_preview_common_keyboard(confirm_callback: str, change_callback: str, ed
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận tạo bản đầy đủ" if is_vi else "✅ Confirm full output", callback_data=confirm_callback)],
         [
-            InlineKeyboardButton("🔁 Đổi giọng/nhạc" if is_vi else "🔁 Change voice/music", callback_data=change_callback),
+            InlineKeyboardButton("🔁 Đổi giọng hoặc nhạc" if is_vi else "🔁 Change voice or music", callback_data=change_callback),
             InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=edit_callback),
         ],
         [
@@ -82936,7 +83003,7 @@ def video_paid_preview_keyboard(token: str, lang: str = "vi") -> InlineKeyboardM
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận tạo bản đầy đủ" if is_vi else "✅ Confirm full output", callback_data=f"shopai|confirm|{token}")],
-        [InlineKeyboardButton("🔁 Đổi giọng/nhạc" if is_vi else "🔁 Change voice/music", callback_data="vfinal|music"), InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data="vfinal|menu")],
+        [InlineKeyboardButton("🔁 Đổi giọng hoặc nhạc" if is_vi else "🔁 Change voice or music", callback_data="vfinal|music"), InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data="vfinal|menu")],
         [InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
@@ -82967,7 +83034,7 @@ def video_paid_preview_entry_keyboard(token: str, lang: str = "vi") -> InlineKey
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("▶️ Tạo/xem preview ngắn" if is_vi else "▶️ Create/view short preview", callback_data=f"videoaddon|preview|{token}")],
         [
-            InlineKeyboardButton("🔁 Đổi giọng/nhạc" if is_vi else "🔁 Change voice/music", callback_data="vfinal|music"),
+            InlineKeyboardButton("🔁 Đổi giọng hoặc nhạc" if is_vi else "🔁 Change voice or music", callback_data="vfinal|music"),
             InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data="vfinal|menu"),
         ],
         [
@@ -87271,7 +87338,7 @@ async def cmd_frame_video_status(update: Update, context: ContextTypes.DEFAULT_T
         f"• Fast >5 extra: <code>{int(status.get('fast_extra_per_image_after_5_xu') or 0)} Xu/ảnh từ ảnh thứ 6</code>",
         f"• Duration standard/slow extra: <code>{int(status.get('duration_standard_extra_xu') or 0)}/{int(status.get('duration_slow_extra_xu') or 0)} Xu</code>",
         f"• Effect zoom/pan/slide/random: <code>{int(status.get('motion_effect_extra_xu') or 0)}/{int(status.get('random_effect_extra_xu') or 0)} Xu</code>",
-        f"• Music/voice merge price if ready: <code>{int(status.get('music_price_xu') or 0)} Xu</code>",
+        f"• Audio merge price if ready: <code>{int(status.get('music_price_xu') or 0)} Xu</code>",
         f"• Max images: <code>{int(status.get('max_images') or 0)}</code>",
         f"• Max output/input/render: <code>{int(status.get('max_output_seconds') or 0)}s / {int(status.get('max_input_mb') or 0)}MB / {int(status.get('max_render_seconds') or 0)}s</code>",
         f"• Max concurrent jobs: <code>{int(status.get('max_concurrent_jobs') or 0)}</code> | active <code>{int(status.get('active_jobs') or 0)}</code>",
@@ -87698,7 +87765,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
                 frame_video_audio_not_ready_text(),
                 parse_mode=None,
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⏭ Bỏ qua nhạc/voice", callback_data="framevideo|music|skip")],
+                    [InlineKeyboardButton("⏭ Bỏ qua âm thanh", callback_data="framevideo|music|skip")],
                     [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|effect")],
                     [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
                 ]),
@@ -87887,7 +87954,7 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
                 "✅ Đã ghép ảnh thành video.\n"
                 f"Job: {job_id}\n"
                 f"Đã trừ: {charged_amount} Xu.\n"
-                "Bạn có thể thêm nhạc/voice ở bước sau nếu cần."
+                "Bạn có thể thêm nhạc hoặc giọng đọc ở bước sau nếu cần."
             )
             try:
                 with open(out_path, "rb") as f:
@@ -90300,7 +90367,7 @@ def pricing_free_lines() -> list[str]:
         "• Ghi chú text cơ bản: tạo, xem, sửa, tìm kiếm trong quota lưu trữ.",
         "• Tạo prompt ảnh, prompt từ ảnh, 3 biến thể prompt, lưu prompt.",
         "• Ý tưởng video, kịch bản video dài dạng plan/text, storyboard text.",
-        "• Prompt ảnh từng cảnh, prompt video từng cảnh, gợi ý nhạc/voice dạng text.",
+        "• Prompt ảnh từng cảnh, prompt video từng cảnh, gợi ý âm thanh dạng text.",
         "• Gợi ý chuyển động, concept quảng cáo, video theo trend dạng kế hoạch khi chưa tạo thật.",
         "• Tìm nhạc/SFX/library, nghe thử và chọn nguồn nếu chưa xử lý file/provider.",
         "• Admin smoke test: không trừ Xu, nhưng provider có thể tốn credit thật.",
@@ -90862,7 +90929,7 @@ def pricing_main_lines() -> list[str]:
         "",
         "<b>1. 🆓 Miễn phí / 0 Xu</b>",
         "• Mở menu, bảng giá, hướng dẫn, đổi ngôn ngữ.",
-        "• Tạo prompt ảnh, prompt video, ý tưởng video, storyboard text, concept quảng cáo, gợi ý nhạc/voice dạng text.",
+        "• Tạo prompt ảnh, prompt video, ý tưởng video, storyboard text, concept quảng cáo, gợi ý âm thanh dạng text.",
         "• Các bước chuẩn bị chưa gọi provider: <b>0 Xu</b>. Bot sẽ nói rõ “chưa gọi API và chưa trừ Xu”.",
         "",
         "<b>AI Chat</b>",
@@ -110592,7 +110659,7 @@ def video_upload_received_text(lang: str = "vi") -> str:
             "✅ <b>TOAN AAS received your video.</b>\n\n"
             "What would you like to do with it?\n\n"
             "• Self-shot scene AI: change scene, lighting and style while preserving the subject.\n"
-            "• Add music/voice: find a music direction or prepare audio.\n"
+            "• Add audio: find a music direction or prepare audio.\n"
             "• Video ideas: create hooks, captions, storyboard and prompts from this reference.\n"
             "• Prompt/motion: create camera and movement guidance.\n"
             "• Enhance video: available only when the AI provider is ready.\n\n"
