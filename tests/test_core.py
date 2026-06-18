@@ -8101,6 +8101,13 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     suggestions_text = bot.music_prompt_suggestions_text("video review máy xay sinh tố mini", 0, "vi")
     assert "3 prompt nhạc gợi ý" in suggestions_text
     assert "Prompt:" in suggestions_text
+    lyrics_desc = bot.music_ai_default_description("lyrics", "vi")
+    lyrics_suggestions = bot.music_prompt_suggestions(lyrics_desc, 0, "vi", "lyrics")
+    assert len(lyrics_suggestions) == 3
+    assert any("no vocal" not in str(item.get("vocal") or "").lower() for item in lyrics_suggestions)
+    assert "original lyrics" in bot.music_prompt_from_suggestion(lyrics_suggestions[0])
+    melody_text = bot.music_prompt_suggestions_text(bot.music_ai_default_description("melody", "vi"), 0, "vi", "melody")
+    assert "giai điệu" in melody_text.lower() or "melody" in melody_text.lower()
     prompt_callbacks = [button.callback_data for row in bot.music_prompt_result_keyboard("vi").inline_keyboard for button in row]
     assert {"music_quick|prompt_choose_1", "music_quick|prompt_more", "music_quick|save_prompt", "music_quick|find_from_prompt", "music_quick|music_ai_guard"}.issubset(set(prompt_callbacks))
 
@@ -8124,6 +8131,51 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
         assert "menu|main" in callbacks
     assert "handle_music_guided_pending_text(update, context)" in message_source
     assert "handle_music_guided_pending_media(update, context)" in source
+
+
+def test_music_ai_buttons_open_suggestions_without_waiting_for_text():
+    replies = []
+    uid = 88123
+    bot.clear_music_guided_pending(uid)
+    bot.USER_PENDING.pop(bot.music_guided_result_key(uid), None)
+
+    class FakeMessage:
+        async def reply_text(self, text, parse_mode=None, reply_markup=None, disable_web_page_preview=None):
+            replies.append({
+                "text": str(text),
+                "parse_mode": parse_mode,
+                "reply_markup": reply_markup,
+                "disable_web_page_preview": disable_web_page_preview,
+            })
+            return SimpleNamespace(text=text, reply_markup=reply_markup)
+
+    class FakeQuery:
+        def __init__(self, data):
+            self.data = data
+            self.message = FakeMessage()
+
+        async def answer(self, *args, **kwargs):
+            return None
+
+    async def press(data):
+        await bot.handle_music_quick_callback(
+            SimpleNamespace(callback_query=FakeQuery(data), effective_user=SimpleNamespace(id=uid)),
+            SimpleNamespace(),
+        )
+
+    asyncio.run(press("music_quick|music_ai_lyrics"))
+    assert replies
+    assert "3 prompt nhạc gợi ý" in replies[-1]["text"]
+    assert "Nhạc có lời" in replies[-1]["text"]
+    assert bot.get_music_guided_pending(uid) is None
+    result = bot.get_music_guided_result(uid) or {}
+    assert result.get("music_ai_kind") == "lyrics"
+    assert any("no vocal" not in str(item.get("vocal") or "").lower() for item in result.get("suggestions") or [])
+
+    asyncio.run(press("music_quick|music_ai_background"))
+    result = bot.get_music_guided_result(uid) or {}
+    assert result.get("music_ai_kind") == "background"
+    assert all("no vocal" in str(item.get("vocal") or "").lower() for item in result.get("suggestions") or [])
 
 
 def test_document_pdf_tools_v6_guided_upload_confirm_flow():

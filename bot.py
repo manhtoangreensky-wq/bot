@@ -62868,71 +62868,257 @@ def voice_prompt_entry_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     back = ("🔙 Giọng nói / Nhạc", "menu|main_music") if is_vi else ("🔙 Voice / Music", "menu|main_music")
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
-def music_prompt_suggestions(description: str, offset: int = 0, lang: str = "vi") -> list[dict]:
+def music_prompt_mode(description: str = "", mode: str = "") -> str:
+    explicit = str(mode or "").strip().lower()
+    if explicit in {"background", "lyrics", "script", "melody", "custom"}:
+        return explicit
+    text = unicodedata.normalize("NFKD", str(description or "").lower())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch)).replace("đ", "d")
+    if any(token in text for token in ("co loi", "lyrics", "lyric", "loi bai hat", "kich ban bai nhac", "song with lyrics")):
+        return "lyrics"
+    if any(token in text for token in ("giai dieu", "melody", "mood", "hook nhac")):
+        return "melody"
+    return "background"
+
+def music_prompt_from_suggestion(item: dict) -> str:
+    kind = music_prompt_mode(item.get("description"), item.get("kind"))
+    if kind in {"lyrics", "script"}:
+        lyric_line = str(item.get("lyric_direction") or "original Vietnamese hook, short verse, clear chorus, soft CTA")
+        return (
+            f"{item['name']} song for {item['description']}, "
+            f"mood {item['mood']}, tempo {item['tempo']}, instruments {item['instrument']}, "
+            f"duration {item['duration']}, vocal direction {item['vocal']}, lyric direction {lyric_line}, "
+            "copyright-safe, original lyrics, no famous melody, no artist imitation."
+        )
+    if kind == "melody":
+        return (
+            f"{item['name']} melody/mood direction for {item['description']}, "
+            f"mood {item['mood']}, tempo {item['tempo']}, instruments {item['instrument']}, "
+            f"duration {item['duration']}, {item['vocal']}, clear motif, copyright-safe, no famous melody."
+        )
+    return (
+        f"{item['name']} background music for {item['description']}, "
+        f"mood {item['mood']}, tempo {item['tempo']}, instruments {item['instrument']}, "
+        f"duration {item['duration']}, {item['vocal']}, copyright-safe, no famous melody."
+    )
+
+def music_ai_default_description(kind: str = "background", lang: str = "vi") -> str:
+    kind = str(kind or "background").strip().lower()
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    if kind == "lyrics":
+        return (
+            "Nhạc có lời cho video sản phẩm/dịch vụ, hook dễ nhớ, lời tự viết, verse/chorus ngắn, "
+            "phù hợp TikTok/Reels, không bắt chước nghệ sĩ/bài nổi tiếng"
+            if is_vi else
+            "Song with original lyrics for a product/service video, memorable hook, short verse/chorus, TikTok/Reels safe"
+        )
+    if kind == "script":
+        return (
+            "Lời/kịch bản bài nhạc quảng cáo ngắn: hook 1 câu, verse giải thích lợi ích, chorus dễ nhớ, CTA nhẹ"
+            if is_vi else
+            "Short ad-song lyrics/script: one-line hook, benefit verse, memorable chorus, soft CTA"
+        )
+    if kind == "melody":
+        return (
+            "Gợi ý giai điệu/mood cho video thương hiệu: motif rõ, tempo vừa, dễ ghép voice, an toàn bản quyền"
+            if is_vi else
+            "Melody/mood direction for brand video: clear motif, medium tempo, voice-over friendly, copyright-safe"
+        )
+    if kind == "custom":
+        return "Nhạc AI theo mô tả riêng" if is_vi else "Custom AI music brief"
+    return (
+        "Nhạc nền không lời cho video sản phẩm/social, hiện đại, dễ nghe, không lấn voice, an toàn bản quyền"
+        if is_vi else
+        "Instrumental background music for product/social video, modern, clean, voice-over friendly, copyright-safe"
+    )
+
+def music_prompt_suggestions(description: str, offset: int = 0, lang: str = "vi", mode: str = "") -> list[dict]:
     desc = _short_pending_text(description, 220) or ("video sản phẩm" if music_ui_lang(lang=lang) == "vi" else "product video")
-    base = [
-        {
-            "name": "Vui tươi / bán hàng",
-            "mood": "sáng, tích cực, tạo cảm giác dễ mua",
-            "tempo": "110-125 BPM",
-            "instrument": "light drums, soft synth, pluck, clap nhẹ",
-            "duration": "15-30s",
-            "vocal": "no vocal",
-            "use_case": "TikTok/Reels/Shorts, review sản phẩm, CTA rõ",
-        },
-        {
-            "name": "Cinematic / cao cấp",
-            "mood": "sang, cảm xúc vừa phải, thương hiệu",
-            "tempo": "80-95 BPM",
-            "instrument": "piano, soft strings, ambient pad, sub bass nhẹ",
-            "duration": "30-60s",
-            "vocal": "no vocal",
-            "use_case": "quảng cáo premium, key visual, reveal sản phẩm",
-        },
-        {
-            "name": "Nhẹ nhàng / cảm xúc",
-            "mood": "ấm, tin cậy, kể chuyện",
-            "tempo": "70-90 BPM",
-            "instrument": "acoustic guitar, piano nhẹ, pad mềm",
-            "duration": "30-45s",
-            "vocal": "no vocal",
-            "use_case": "voice-over, review chân thật, before/after",
-        },
-        {
-            "name": "Công nghệ / tương lai",
-            "mood": "sạch, hiện đại, tự động hóa",
-            "tempo": "100-118 BPM",
-            "instrument": "minimal synth, digital pulse, clean percussion",
-            "duration": "15-30s",
-            "vocal": "no vocal",
-            "use_case": "AI tool, SaaS, dashboard, automation",
-        },
-        {
-            "name": "Viral short / bắt tai",
-            "mood": "nhanh, bắt nhịp, trẻ trung",
-            "tempo": "125-140 BPM",
-            "instrument": "snappy drums, bass ngắn, hook synth",
-            "duration": "10-20s",
-            "vocal": "no vocal",
-            "use_case": "hook đầu video, trend, UGC ngắn",
-        },
-        {
-            "name": "Luxury tối giản",
-            "mood": "tĩnh, đắt tiền, ít chi tiết",
-            "tempo": "65-85 BPM",
-            "instrument": "felt piano, deep pad, soft ticks",
-            "duration": "20-40s",
-            "vocal": "no vocal",
-            "use_case": "nước hoa, mỹ phẩm, thời trang, brand ad",
-        },
-    ]
+    prompt_kind = music_prompt_mode(desc, mode)
+    if prompt_kind in {"lyrics", "script"}:
+        base = [
+            {
+                "name": "Pop hook bán hàng",
+                "mood": "tươi, dễ nhớ, có năng lượng mua hàng",
+                "tempo": "105-125 BPM",
+                "instrument": "pop drums, clean bass, synth hook, clap nhẹ",
+                "duration": "30-45s",
+                "vocal": "Vietnamese vocal, clear hook, no artist imitation",
+                "lyric_direction": "hook 1 câu, verse nêu vấn đề, chorus nhắc lợi ích, CTA nhẹ",
+                "use_case": "TikTok/Reels quảng cáo sản phẩm, affiliate, launch offer",
+            },
+            {
+                "name": "Storytelling acoustic",
+                "mood": "ấm, chân thật, kể chuyện",
+                "tempo": "75-95 BPM",
+                "instrument": "acoustic guitar, piano pad, soft percussion",
+                "duration": "45-60s",
+                "vocal": "natural vocal, gentle emotion, original lyrics",
+                "lyric_direction": "mở bằng tình huống đời thường, chuyển sang giải pháp, kết bằng câu nhớ thương hiệu",
+                "use_case": "brand story, UGC cảm xúc, before/after",
+            },
+            {
+                "name": "Jingle thương hiệu ngắn",
+                "mood": "sáng, gọn, dễ thuộc",
+                "tempo": "115-130 BPM",
+                "instrument": "pluck, bell, light beat, simple bass",
+                "duration": "15-25s",
+                "vocal": "short vocal hook, chant-safe, original melody",
+                "lyric_direction": "tên sản phẩm + lợi ích chính + nhịp slogan ngắn",
+                "use_case": "intro/outro quảng cáo, brand recall, shop nhỏ",
+            },
+            {
+                "name": "Luxury vocal nhẹ",
+                "mood": "sang, tiết chế, cảm xúc nhẹ",
+                "tempo": "70-88 BPM",
+                "instrument": "felt piano, cinematic pad, soft strings",
+                "duration": "30-50s",
+                "vocal": "soft premium vocal, minimal lyrics, no famous melody",
+                "lyric_direction": "ít lời, nhiều khoảng nghỉ, nhấn cảm xúc và hình ảnh thương hiệu",
+                "use_case": "nước hoa, mỹ phẩm, thời trang, cinematic ad",
+            },
+            {
+                "name": "Viral chant ngắn",
+                "mood": "bắt tai, nhanh, nhớ ngay",
+                "tempo": "125-145 BPM",
+                "instrument": "short drums, punchy bass, vocal chops tự tạo",
+                "duration": "10-20s",
+                "vocal": "short chant, original phrase, no copyrighted hook",
+                "lyric_direction": "một câu hook lặp 2 lần, câu sau là lợi ích hoặc CTA",
+                "use_case": "Shorts/Reels, meme-safe, video bán hàng nhanh",
+            },
+            {
+                "name": "Corporate anthem mini",
+                "mood": "tin cậy, tích cực, chuyên nghiệp",
+                "tempo": "90-110 BPM",
+                "instrument": "piano, light drums, warm pad, clean guitar",
+                "duration": "45-60s",
+                "vocal": "clear inspirational vocal, original lyrics",
+                "lyric_direction": "tầm nhìn, niềm tin, kết quả, lời mời hợp tác",
+                "use_case": "SaaS, doanh nghiệp, video giới thiệu dịch vụ",
+            },
+        ]
+    elif prompt_kind == "melody":
+        base = [
+            {
+                "name": "Motif 3 nốt dễ nhớ",
+                "mood": "sáng, gọn, có nhận diện",
+                "tempo": "100-118 BPM",
+                "instrument": "piano pluck, bell, soft synth",
+                "duration": "10-20s",
+                "vocal": "no vocal or light hum placeholder",
+                "use_case": "logo sound, intro ngắn, brand cue",
+            },
+            {
+                "name": "Cinematic rise",
+                "mood": "tăng dần, cảm xúc, mở rộng",
+                "tempo": "75-90 BPM",
+                "instrument": "strings, piano, airy pad, low hit",
+                "duration": "20-40s",
+                "vocal": "no vocal",
+                "use_case": "reveal sản phẩm, before/after, ad premium",
+            },
+            {
+                "name": "Clean tech pulse",
+                "mood": "hiện đại, sạch, tự động hóa",
+                "tempo": "105-124 BPM",
+                "instrument": "digital pulse, minimal synth, soft kick",
+                "duration": "15-30s",
+                "vocal": "no vocal",
+                "use_case": "AI tool, app, dashboard, tutorial",
+            },
+            {
+                "name": "Warm acoustic motif",
+                "mood": "ấm, gần gũi, tin cậy",
+                "tempo": "78-96 BPM",
+                "instrument": "acoustic guitar, piano, brushed percussion",
+                "duration": "20-45s",
+                "vocal": "no vocal",
+                "use_case": "review, storytelling, gia đình/cảm xúc",
+            },
+            {
+                "name": "Viral loop",
+                "mood": "ngắn, bắt nhịp, dễ loop",
+                "tempo": "128-140 BPM",
+                "instrument": "snappy drums, bass stab, synth lead",
+                "duration": "8-15s",
+                "vocal": "no vocal",
+                "use_case": "hook đầu video, UGC, reels ngắn",
+            },
+            {
+                "name": "Luxury minimal",
+                "mood": "tĩnh, đắt tiền, ít nốt",
+                "tempo": "62-82 BPM",
+                "instrument": "felt piano, deep pad, subtle texture",
+                "duration": "20-35s",
+                "vocal": "no vocal",
+                "use_case": "nước hoa, mỹ phẩm, fashion, hero shot",
+            },
+        ]
+    else:
+        base = [
+            {
+                "name": "Vui tươi / bán hàng",
+                "mood": "sáng, tích cực, tạo cảm giác dễ mua",
+                "tempo": "110-125 BPM",
+                "instrument": "light drums, soft synth, pluck, clap nhẹ",
+                "duration": "15-30s",
+                "vocal": "no vocal",
+                "use_case": "TikTok/Reels/Shorts, review sản phẩm, CTA rõ",
+            },
+            {
+                "name": "Cinematic / cao cấp",
+                "mood": "sang, cảm xúc vừa phải, thương hiệu",
+                "tempo": "80-95 BPM",
+                "instrument": "piano, soft strings, ambient pad, sub bass nhẹ",
+                "duration": "30-60s",
+                "vocal": "no vocal",
+                "use_case": "quảng cáo premium, key visual, reveal sản phẩm",
+            },
+            {
+                "name": "Nhẹ nhàng / cảm xúc",
+                "mood": "ấm, tin cậy, kể chuyện",
+                "tempo": "70-90 BPM",
+                "instrument": "acoustic guitar, piano nhẹ, pad mềm",
+                "duration": "30-45s",
+                "vocal": "no vocal",
+                "use_case": "voice-over, review chân thật, before/after",
+            },
+            {
+                "name": "Công nghệ / tương lai",
+                "mood": "sạch, hiện đại, tự động hóa",
+                "tempo": "100-118 BPM",
+                "instrument": "minimal synth, digital pulse, clean percussion",
+                "duration": "15-30s",
+                "vocal": "no vocal",
+                "use_case": "AI tool, SaaS, dashboard, automation",
+            },
+            {
+                "name": "Viral short / bắt tai",
+                "mood": "nhanh, bắt nhịp, trẻ trung",
+                "tempo": "125-140 BPM",
+                "instrument": "snappy drums, bass ngắn, hook synth",
+                "duration": "10-20s",
+                "vocal": "no vocal",
+                "use_case": "hook đầu video, trend, UGC ngắn",
+            },
+            {
+                "name": "Luxury tối giản",
+                "mood": "tĩnh, đắt tiền, ít chi tiết",
+                "tempo": "65-85 BPM",
+                "instrument": "felt piano, deep pad, soft ticks",
+                "duration": "20-40s",
+                "vocal": "no vocal",
+                "use_case": "nước hoa, mỹ phẩm, thời trang, brand ad",
+            },
+        ]
     start = _safe_int(offset, 0) % len(base)
     rotated = [base[(start + idx) % len(base)] for idx in range(min(3, len(base)))]
-    return [dict(item, description=desc) for item in rotated]
+    return [dict(item, description=desc, kind=prompt_kind) for item in rotated]
 
-def music_prompt_suggestions_text(description: str, offset: int = 0, lang: str = "vi") -> str:
+def music_prompt_suggestions_text(description: str, offset: int = 0, lang: str = "vi", mode: str = "") -> str:
     lang = music_ui_lang(lang=lang)
-    suggestions = music_prompt_suggestions(description, offset, lang)
+    suggestions = music_prompt_suggestions(description, offset, lang, mode)
     if lang == "en":
         lines = ["🎼 <b>3 suggested music prompts</b>", "", f"<b>Brief:</b> {html.escape(_short_pending_text(description, 220) or 'video/product')}", ""]
         labels = ("Mood", "Tempo", "Instruments", "Duration", "Vocal", "Use case", "Prompt")
@@ -62946,11 +63132,7 @@ def music_prompt_suggestions_text(description: str, offset: int = 0, lang: str =
         labels = ("Mood", "Tempo", "Nhạc cụ", "Thời lượng", "Vocal", "Dùng cho", "Prompt")
         footer = "Bot chưa gọi API nhạc và chưa trừ Xu."
     for idx, item in enumerate(suggestions, start=1):
-        prompt = (
-            f"{item['name']} background music for {item['description']}, "
-            f"mood {item['mood']}, tempo {item['tempo']}, instruments {item['instrument']}, "
-            f"duration {item['duration']}, {item['vocal']}, copyright-safe, no famous melody."
-        )
+        prompt = music_prompt_from_suggestion(item)
         lines.extend([
             f"<b>{idx}. {html.escape(item['name'])}</b>",
             f"• {labels[0]}: {html.escape(item['mood'])}",
@@ -63658,9 +63840,10 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         desc = result.get("description") or "video quảng cáo sản phẩm/dịch vụ, đăng TikTok/Reels, cần nhạc an toàn bản quyền"
         offset = (_safe_int(result.get("offset"), 0) + (3 if action == "prompt_seed_more" else 0)) % 6
-        suggestions = music_prompt_suggestions(desc, offset, lang)
-        save_music_guided_result(user_id, {"description": desc, "offset": offset, "suggestions": suggestions, "selected_prompt": ""})
-        return await query.message.reply_text(music_prompt_suggestions_text(desc, offset, lang), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
+        mode = str(result.get("music_ai_kind") or "")
+        suggestions = music_prompt_suggestions(desc, offset, lang, mode)
+        save_music_guided_result(user_id, {"description": desc, "offset": offset, "suggestions": suggestions, "selected_prompt": "", "music_ai_kind": mode})
+        return await query.message.reply_text(music_prompt_suggestions_text(desc, offset, lang, mode), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
     if action in {"voice", "voice_pick"}:
         await query.answer()
         clear_music_guided_pending(user_id)
@@ -63684,6 +63867,22 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action in {"music_ai_background", "music_ai_lyrics", "music_ai_script", "music_ai_melody", "music_ai_custom"}:
         await query.answer()
         kind = action.replace("music_ai_", "", 1)
+        if kind != "custom":
+            desc = music_ai_default_description(kind, lang)
+            suggestions = music_prompt_suggestions(desc, 0, lang, kind)
+            save_music_guided_result(user_id, {
+                "description": desc,
+                "offset": 0,
+                "suggestions": suggestions,
+                "selected_prompt": "",
+                "music_ai_kind": kind,
+            })
+            return await query.message.reply_text(
+                music_prompt_suggestions_text(desc, 0, lang, kind),
+                parse_mode="HTML",
+                reply_markup=music_prompt_result_keyboard(lang),
+                disable_web_page_preview=True,
+            )
         set_music_guided_pending(user_id, f"music_ai_{kind}")
         return await query.message.reply_text(music_ai_input_text(kind, lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang))
     if action == "voice_clone":
@@ -63764,21 +63963,24 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         desc = result.get("description") or "video sản phẩm"
         offset = _safe_int(result.get("offset"), 0) + 3
-        suggestions = music_prompt_suggestions(desc, offset, lang)
-        save_music_guided_result(user_id, {"description": desc, "offset": offset, "suggestions": suggestions, "selected_prompt": ""})
-        return await query.message.reply_text(music_prompt_suggestions_text(desc, offset, lang), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
+        mode = str(result.get("music_ai_kind") or "")
+        suggestions = music_prompt_suggestions(desc, offset, lang, mode)
+        save_music_guided_result(user_id, {"description": desc, "offset": offset, "suggestions": suggestions, "selected_prompt": "", "music_ai_kind": mode})
+        return await query.message.reply_text(music_prompt_suggestions_text(desc, offset, lang, mode), parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang))
     if action.startswith("prompt_choose_"):
         await query.answer()
         result = get_music_guided_result(user_id) or {}
         suggestions = list(result.get("suggestions") or [])
         idx = max(1, min(3, _safe_int(action.rsplit("_", 1)[-1], 1)))
         if not suggestions:
-            suggestions = music_prompt_suggestions(result.get("description") or "video sản phẩm", _safe_int(result.get("offset"), 0), lang)
+            suggestions = music_prompt_suggestions(
+                result.get("description") or "video sản phẩm",
+                _safe_int(result.get("offset"), 0),
+                lang,
+                str(result.get("music_ai_kind") or ""),
+            )
         chosen = suggestions[idx - 1]
-        prompt_text = (
-            f"{chosen['name']} background music for {chosen['description']}, mood {chosen['mood']}, tempo {chosen['tempo']}, "
-            f"instruments {chosen['instrument']}, duration {chosen['duration']}, {chosen['vocal']}, copyright-safe, no famous melody."
-        )
+        prompt_text = music_prompt_from_suggestion(chosen)
         result.update({"suggestions": suggestions, "selected_prompt": prompt_text, "selected_index": idx})
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(
@@ -63796,9 +63998,14 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         prompt_text = result.get("selected_prompt")
         if not prompt_text:
-            suggestions = result.get("suggestions") or music_prompt_suggestions(result.get("description") or "video sản phẩm", _safe_int(result.get("offset"), 0), lang)
+            suggestions = result.get("suggestions") or music_prompt_suggestions(
+                result.get("description") or "video sản phẩm",
+                _safe_int(result.get("offset"), 0),
+                lang,
+                str(result.get("music_ai_kind") or ""),
+            )
             prompt_text = "\n\n".join(
-                f"{item['name']}: {item['mood']} | {item['tempo']} | {item['instrument']} | {item['duration']}"
+                music_prompt_from_suggestion(item)
                 for item in suggestions[:3]
             )
         if not memory_can_use_full(user_id):
@@ -65658,7 +65865,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             "custom": "Nhạc AI",
         }.get(kind, "Nhạc AI")
         enriched = f"{prefix}: {text}"
-        suggestions = music_prompt_suggestions(enriched, 0, lang)
+        suggestions = music_prompt_suggestions(enriched, 0, lang, kind)
         save_music_guided_result(uid, {
             "description": enriched,
             "offset": 0,
@@ -65667,7 +65874,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             "music_ai_kind": kind,
         })
         await update.message.reply_text(
-            music_prompt_suggestions_text(enriched, 0, lang),
+            music_prompt_suggestions_text(enriched, 0, lang, kind),
             parse_mode="HTML",
             reply_markup=music_prompt_result_keyboard(lang),
             disable_web_page_preview=True,
