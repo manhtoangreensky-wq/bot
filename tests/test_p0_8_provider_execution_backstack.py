@@ -295,7 +295,7 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
     assert "Xin chào" in query.outputs[-1]["text"]
 
 
-def test_invoice_change_package_back_returns_invoice(monkeypatch):
+def test_package_back_returns_video_options(monkeypatch):
     user_id = 980804
     _reset(user_id)
     bot.set_video_finalization_state(user_id, {
@@ -305,17 +305,20 @@ def test_invoice_change_package_back_returns_invoice(monkeypatch):
         "source": "selfscene",
         "source_payload": {"source_file_id": "file-1", "object_prompt": "object", "direction_prompt": "direction"},
     })
-    calls = []
+    outputs = []
 
-    async def render_invoice(query, uid, state=None, lang="vi"):
-        calls.append((uid, state.get("source_payload")))
+    async def render(query, text, **kwargs):
+        outputs.append((text, kwargs.get("reply_markup")))
         return None
 
-    monkeypatch.setattr(bot, "video_finalization_render_invoice", render_invoice)
+    monkeypatch.setattr(bot, "safe_edit_or_send", render)
     query = CaptureQuery("vfinal|back", user_id)
     asyncio.run(bot.handle_video_finalization_callback(_callback_update(query, user_id), SimpleNamespace()))
-    assert calls and calls[0][0] == user_id
-    assert calls[0][1]["source_file_id"] == "file-1"
+    assert outputs
+    assert "Tùy chọn hoàn thiện video" in outputs[-1][0]
+    saved = bot.get_video_finalization_state(user_id)
+    assert saved["step"] == "menu"
+    assert saved["return_to_invoice"] is False
 
 
 def test_invoice_origin_stack_is_explicit():

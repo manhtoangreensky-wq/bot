@@ -50,15 +50,19 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
     assert {
         "menu|translation_text",
         "menu|translation_voice",
-        "menu|translation_two_way",
-        "menu|translation_live_conversation",
         "menu|translation_document",
-        "menu|translation_transcript",
+        "menu|translation_image",
         "menu|translation_language",
         "menu|main",
         "menu|translate",
-        "menu|translation_stop_session",
     }.issubset(language_callbacks)
+    secondary_callbacks = _callbacks(bot.translation_language_options_keyboard("vi"))
+    assert {
+        "menu|translation_two_way",
+        "menu|translation_live_conversation",
+        "menu|translation_transcript",
+        "menu|translation_stop_session",
+    }.issubset(secondary_callbacks)
 
 
 def test_translation_child_callbacks_have_handlers_or_existing_routes():
@@ -132,8 +136,10 @@ def test_full_translation_hub_has_voice_two_way_live_and_video_branch():
     _, language_markup = bot.localized_menu_content("translation_language_hub", False, "vi", user_id=123)
     language_callbacks = _callbacks(language_markup)
     assert "menu|translation_voice" in language_callbacks
-    assert "menu|translation_two_way" in language_callbacks
-    assert "menu|translation_live_conversation" in language_callbacks
+    assert "menu|translation_language" in language_callbacks
+    secondary_callbacks = _callbacks(bot.translation_language_options_keyboard("vi"))
+    assert "menu|translation_two_way" in secondary_callbacks
+    assert "menu|translation_live_conversation" in secondary_callbacks
 
 
 def test_translation_pair_uses_separate_source_target_controls():
