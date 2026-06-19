@@ -3,592 +3,974 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TOAN AAS - AI Automation System</title>
-  <meta name="description" content="Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.">
-  <meta name="theme-color" content="#063b2b">
-  <meta property="og:title" content="TOAN AAS - AI Automation System">
-  <meta property="og:description" content="Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.">
-  <meta property="og:image" content="https://www.toanaas.vn/banner.png?v=20260614">
+  <title>TOAN AAS — AI Automation System</title>
+  <meta name="description" content="Hệ thống tự động hóa AI cho hình ảnh, nội dung, video, âm thanh, tài liệu và marketing. Tạo nội dung bằng bot Telegram, báo giá trước khi xử lý và hỗ trợ Xu.">
+  <meta name="theme-color" content="#052e24">
+  <meta property="og:title" content="TOAN AAS — AI Automation System">
+  <meta property="og:description" content="Hệ thống tự động hóa AI cho hình ảnh, nội dung, video, âm thanh, tài liệu và marketing.">
+  <meta property="og:image" content="https://www.toanaas.vn/banner.png?v=20260619">
+  <meta property="og:image:alt" content="TOAN AAS — Hệ thống tự động hóa AI">
+  <meta property="og:url" content="https://www.toanaas.vn/">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="TOAN AAS - AI Automation System">
-  <meta name="twitter:description" content="Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.">
-  <meta name="twitter:image" content="https://www.toanaas.vn/banner.png?v=20260614">
-  <link rel="icon" type="image/png" href="/LOGO.png?v=20260614">
-  <link rel="apple-touch-icon" href="/LOGO.png?v=20260614">
+  <meta name="twitter:title" content="TOAN AAS — AI Automation System">
+  <meta name="twitter:description" content="Hệ thống tự động hóa AI cho hình ảnh, nội dung, video, âm thanh, tài liệu và marketing.">
+  <meta name="twitter:image" content="https://www.toanaas.vn/banner.png?v=20260619">
+  <link rel="canonical" href="https://www.toanaas.vn/">
+  <link rel="icon" type="image/png" href="/logo.png?v=20260619">
+  <link rel="apple-touch-icon" href="/logo.png?v=20260619">
   <style>
     :root {
-      --ink: #14221c;
-      --muted: #53645c;
-      --green-950: #031f17;
-      --green-900: #063b2b;
-      --green-800: #075b40;
-      --green-600: #0aa56e;
-      --green-500: #17c784;
-      --mint: #e9f7f0;
-      --paper: #fbfdfc;
+      --ink: #10271f;
+      --muted: #5a6e65;
+      --jade-950: #031f18;
+      --jade-900: #052e24;
+      --jade-800: #074b38;
+      --jade-700: #087b55;
+      --jade-600: #0b9b68;
+      --jade-500: #14c784;
+      --jade-100: #dff5ea;
+      --jade-50: #f1faf6;
+      --mint: #eaf8f1;
+      --paper: #f7faf8;
       --white: #ffffff;
-      --gold: #c99a2e;
-      --line: #cfe0d7;
-      --radius: 8px;
-      --shadow: 0 18px 46px rgba(3, 31, 23, 0.12);
+      --amber: #f5b94c;
+      --line: #d8e7df;
+      --line-dark: rgba(255, 255, 255, 0.14);
+      --shadow-sm: 0 10px 28px rgba(3, 31, 24, 0.07);
+      --shadow-lg: 0 24px 72px rgba(3, 31, 24, 0.15);
+      --radius-sm: 14px;
+      --radius: 22px;
+      --radius-lg: 30px;
     }
 
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    [hidden] { display: none !important; }
+    html { scroll-behavior: smooth; scroll-padding-top: 116px; }
     body {
       margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow-x: hidden;
       color: var(--ink);
       background: var(--paper);
-      line-height: 1.6;
-      letter-spacing: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
     }
+    button, input, select, textarea { font: inherit; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
     a { color: inherit; text-decoration: none; }
     img { display: block; max-width: 100%; }
     button, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid rgba(20, 199, 132, 0.5); outline-offset: 3px; }
+
+    .skip-link {
+      position: fixed;
+      left: 16px;
+      top: -80px;
+      z-index: 100;
+      padding: 10px 14px;
+      border-radius: 10px;
+      color: var(--jade-950);
+      background: var(--white);
+      font-weight: 800;
+      transition: top 0.2s ease;
+    }
+    .skip-link:focus { top: 12px; }
 
     .container {
-      width: min(1160px, calc(100% - 40px));
-      margin: 0 auto;
+      width: min(1180px, calc(100% - 40px));
+      margin-inline: auto;
     }
 
     .topbar {
       position: sticky;
       top: 0;
       z-index: 50;
-      background: rgba(3, 31, 23, 0.96);
-      border-bottom: 1px solid rgba(255,255,255,0.12);
+      color: var(--white);
+      background: rgba(3, 31, 24, 0.96);
+      border-bottom: 1px solid var(--line-dark);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14);
+      backdrop-filter: blur(16px);
     }
-    .nav {
-      min-height: 68px;
+    .nav-main {
+      min-height: 76px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 24px;
     }
     .brand {
+      min-width: 206px;
       display: inline-flex;
       align-items: center;
       gap: 12px;
-      color: var(--white);
-      font-weight: 850;
+      font-weight: 900;
+      letter-spacing: -0.02em;
     }
-    .logo-img {
-      width: 52px;
-      height: 52px;
-      object-fit: contain;
-      display: block;
-      border-radius: 10px;
-    }
-    .brand .logo-img {
-      width: 42px;
-      height: 42px;
-      border-radius: 6px;
+    .brand-logo,
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+      border-radius: 12px;
       background: var(--white);
+      object-fit: contain;
     }
-    .brand small {
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      color: var(--jade-800);
+      font-size: 15px;
+      letter-spacing: -0.06em;
+    }
+    .brand-copy { line-height: 1.05; }
+    .brand-copy small {
       display: block;
-      color: #b9d6c8;
-      font-size: 11px;
-      font-weight: 650;
+      margin-top: 5px;
+      color: #a8cabe;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
     .nav-links {
       display: flex;
       align-items: center;
-      gap: 22px;
-      color: #d8ece2;
-      font-size: 14px;
-      font-weight: 700;
+      justify-content: flex-end;
+      gap: 20px;
+      color: #d7ebe3;
+      font-size: 13px;
+      font-weight: 750;
+      white-space: nowrap;
     }
-    .nav-links a:hover { color: var(--green-500); }
-    .nav-button {
+    .nav-links a:not(.nav-cta):hover { color: #72efb8; }
+    .nav-cta {
+      min-height: 42px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 40px;
-      padding: 0 16px;
-      border-radius: 6px;
-      color: var(--green-950);
-      background: var(--green-500);
-      font-weight: 850;
+      padding: 0 17px;
+      border-radius: 12px;
+      color: var(--jade-950);
+      background: var(--jade-500);
+      box-shadow: 0 8px 22px rgba(20, 199, 132, 0.2);
+      font-weight: 900;
     }
 
-    .hero {
-      position: relative;
-      min-height: 590px;
-      height: calc(86svh - 68px);
-      max-height: 760px;
-      display: flex;
-      align-items: flex-end;
-      color: var(--white);
-      background-color: #043526;
+    .hero-shell {
+      padding: 46px 0 0;
+      background:
+        radial-gradient(circle at 14% 18%, rgba(20, 199, 132, 0.18), transparent 28%),
+        linear-gradient(180deg, #e9f8f1 0%, #f7faf8 82%);
+    }
+    .hero-banner-card {
       overflow: hidden;
+      border: 1px solid rgba(7, 75, 56, 0.24);
+      border-radius: var(--radius-lg);
+      background: var(--jade-950);
+      box-shadow: var(--shadow-lg);
     }
-    .hero-banner-img {
+    .hero-banner-card img {
       width: 100%;
-      max-width: 1100px;
       height: auto;
-      display: block;
-      object-fit: contain;
-    }
-    .hero > .hero-banner-img {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      max-width: none;
-      height: 100%;
+      aspect-ratio: 4 / 1;
       object-fit: cover;
-      object-position: center;
     }
-    .hero::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      background: rgba(1, 25, 18, 0.38);
+    .banner-fallback {
+      min-height: 280px;
+      display: grid;
+      place-items: center;
+      padding: 42px;
+      color: var(--white);
+      background: linear-gradient(135deg, var(--jade-950), var(--jade-700));
+      text-align: center;
+      font-size: clamp(30px, 5vw, 64px);
+      font-weight: 900;
+      letter-spacing: -0.04em;
     }
-    .hero-content {
-      position: relative;
-      z-index: 2;
-      max-width: 820px;
-      padding: 68px 0 62px;
+
+    .hero-copy-panel {
+      max-width: 930px;
+      margin: 0 auto;
+      padding: 64px 0 76px;
+      text-align: center;
     }
-    .eyebrow {
+    .eyebrow,
+    .section-label {
       margin-bottom: 12px;
-      color: #7cf0bd;
-      font-size: 13px;
-      font-weight: 850;
+      color: var(--jade-700);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
     }
-    h1, h2, h3, p { margin-top: 0; }
     h1 {
-      margin-bottom: 14px;
-      font-size: 58px;
-      line-height: 1.04;
+      max-width: 900px;
+      margin: 0 auto 20px;
+      font-size: clamp(40px, 5.8vw, 70px);
+      line-height: 1.06;
+      letter-spacing: -0.055em;
       font-weight: 900;
     }
     .hero-lead {
-      max-width: 760px;
-      margin-bottom: 10px;
-      color: #e6f5ed;
-      font-size: 21px;
-      line-height: 1.45;
-      font-weight: 720;
+      max-width: 850px;
+      margin: 0 auto 14px;
+      color: #345348;
+      font-size: clamp(18px, 2.15vw, 22px);
+      line-height: 1.55;
+      font-weight: 650;
     }
-    .hero-copy {
+    .hero-description {
       max-width: 760px;
-      margin-bottom: 26px;
-      color: #cbe0d5;
+      margin: 0 auto 30px;
+      color: var(--muted);
       font-size: 16px;
     }
-    .hero-actions {
+    .cta-primary-row,
+    .cta-secondary-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
+      justify-content: center;
+      gap: 12px;
     }
+    .cta-secondary-row { margin-top: 12px; }
     .button {
+      min-height: 50px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 46px;
-      padding: 0 18px;
-      border: 1px solid rgba(255,255,255,0.42);
-      border-radius: 6px;
-      color: var(--white);
-      background: rgba(3,31,23,0.48);
-      font-weight: 820;
+      gap: 8px;
+      padding: 0 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--jade-900);
+      background: var(--white);
+      cursor: pointer;
+      font-weight: 850;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
     }
+    .button:hover { transform: translateY(-2px); border-color: #9ccdb8; box-shadow: var(--shadow-sm); }
     .button.primary {
-      border-color: var(--green-500);
-      color: var(--green-950);
-      background: var(--green-500);
-    }
-    .button.light {
-      border-color: var(--green-800);
+      min-height: 56px;
+      padding-inline: 26px;
+      border-color: var(--jade-600);
       color: var(--white);
-      background: var(--green-800);
+      background: linear-gradient(135deg, var(--jade-700), var(--jade-600));
+      box-shadow: 0 14px 30px rgba(8, 123, 85, 0.22);
     }
+    .button.secondary {
+      min-height: 56px;
+      padding-inline: 24px;
+      border-color: #9fc8b6;
+      background: transparent;
+    }
+    .button.subtle { min-height: 42px; padding-inline: 14px; border-color: transparent; background: transparent; font-size: 14px; }
+    .button.light { border-color: transparent; color: var(--jade-950); background: var(--jade-500); }
 
-    .band { padding: 78px 0; }
-    .band.compact { padding: 48px 0; }
-    .band.white { background: var(--white); }
-    .band.mint { background: var(--mint); }
-    .band.dark { color: var(--white); background: var(--green-950); }
-    .band.dark .section-copy { color: #bdd5c9; }
-
+    .section { padding: 92px 0; }
+    .section.white { background: var(--white); }
+    .section.mint { background: var(--mint); }
+    .section.soft { background: var(--jade-50); }
+    .section.dark { color: var(--white); background: var(--jade-950); }
     .section-head {
-      max-width: 760px;
-      margin-bottom: 34px;
+      max-width: 780px;
+      margin-bottom: 38px;
     }
-    .section-label {
-      margin-bottom: 7px;
-      color: var(--green-800);
-      font-size: 12px;
-      font-weight: 900;
-      text-transform: uppercase;
-    }
-    .dark .section-label { color: #62e9aa; }
+    .section-head.center { margin-inline: auto; text-align: center; }
+    .section.dark .section-label { color: #6beeb5; }
     h2 {
-      margin-bottom: 10px;
-      font-size: 35px;
-      line-height: 1.18;
-      font-weight: 880;
+      margin-bottom: 14px;
+      font-size: clamp(32px, 4vw, 48px);
+      line-height: 1.12;
+      letter-spacing: -0.04em;
+      font-weight: 900;
     }
     h3 {
-      margin-bottom: 7px;
-      font-size: 18px;
-      line-height: 1.3;
-      font-weight: 820;
+      margin-bottom: 9px;
+      font-size: 19px;
+      line-height: 1.35;
+      letter-spacing: -0.015em;
+      font-weight: 850;
     }
-    .section-copy { margin-bottom: 0; color: var(--muted); }
+    .section-copy { margin-bottom: 0; color: var(--muted); font-size: 17px; }
+    .section.dark .section-copy { color: #b9d0c6; }
 
     .feature-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 16px;
+      gap: 18px;
     }
-    .feature-card {
-      min-height: 184px;
-      padding: 22px;
+    .feature-card,
+    .compact-card {
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--white);
-      box-shadow: 0 8px 24px rgba(3,31,23,0.05);
+      box-shadow: var(--shadow-sm);
     }
-    .feature-card .icon { margin-bottom: 16px; font-size: 27px; }
-    .feature-card p { margin-bottom: 0; color: var(--muted); font-size: 14px; }
+    .feature-card {
+      min-height: 245px;
+      padding: 25px;
+      transition: transform 0.18s ease, border-color 0.18s ease;
+    }
+    .feature-card:hover { transform: translateY(-4px); border-color: #99cbb6; }
+    .icon-box {
+      width: 46px;
+      height: 46px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 20px;
+      border-radius: 14px;
+      background: var(--jade-100);
+      font-size: 23px;
+    }
+    .feature-card p,
+    .compact-card p { margin-bottom: 0; color: var(--muted); font-size: 14px; }
 
-    .facts {
+    .workflow-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .workflow-step {
+      min-height: 225px;
+      padding: 25px;
+      border: 1px solid var(--line-dark);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.055);
+    }
+    .step-number {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 28px;
+      border: 1px solid rgba(111, 240, 184, 0.36);
+      border-radius: 50%;
+      color: #7cf0bd;
+      font-size: 13px;
+      font-weight: 900;
+    }
+    .workflow-step p { margin-bottom: 0; color: #b9d0c6; font-size: 14px; }
+    .guard-note {
+      margin-top: 22px;
+      padding: 18px 20px;
+      border: 1px solid rgba(245, 185, 76, 0.35);
+      border-radius: 16px;
+      color: #f8e2b8;
+      background: rgba(245, 185, 76, 0.08);
+      font-size: 14px;
+    }
+
+    .two-column {
+      display: grid;
+      grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
+      gap: 70px;
+      align-items: start;
+    }
+    .sticky-intro { position: sticky; top: 126px; }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .compact-card { min-height: 178px; padding: 23px; }
+    .compact-card .mini-label {
+      display: inline-flex;
+      margin-bottom: 16px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      color: var(--jade-800);
+      background: var(--jade-100);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .capability-list,
+    .trust-list,
+    .pricing-list {
+      display: grid;
+      gap: 13px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .capability-list li,
+    .trust-list li,
+    .pricing-list li {
+      position: relative;
+      padding-left: 28px;
+    }
+    .capability-list li::before,
+    .trust-list li::before,
+    .pricing-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: var(--jade-600);
+      font-weight: 950;
+    }
+    .image-doc-panel {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1px;
       overflow: hidden;
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--line);
+      box-shadow: var(--shadow-sm);
     }
-    .fact {
-      min-height: 138px;
-      padding: 24px;
-      background: var(--white);
-    }
-    .fact strong {
-      display: block;
-      margin-bottom: 5px;
-      color: var(--green-800);
-      font-size: 24px;
-    }
-    .fact span { color: var(--muted); }
+    .capability-item { min-height: 122px; padding: 21px; background: var(--white); }
+    .capability-item strong { display: block; margin-bottom: 5px; }
+    .capability-item span { color: var(--muted); font-size: 14px; }
 
-    .split {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 56px;
-      align-items: start;
+    .roadmap-shell {
+      padding: 44px;
+      border: 1px solid #bddfce;
+      border-radius: var(--radius-lg);
+      background: linear-gradient(135deg, #ffffff 0%, #edf9f3 100%);
+      box-shadow: var(--shadow-sm);
     }
-    .check-list {
+    .roadmap-grid {
       display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
-      margin: 0;
-      padding: 0;
-      list-style: none;
+      margin-top: 28px;
     }
-    .check-list li {
-      position: relative;
-      padding-left: 24px;
-      color: inherit;
-    }
-    .check-list li::before {
-      content: "✓";
-      position: absolute;
-      left: 0;
-      color: var(--green-500);
-      font-weight: 900;
-    }
-    .policy-note {
-      padding: 22px;
-      border-left: 4px solid var(--gold);
-      background: #fff9e9;
-      color: #493b1d;
-    }
-    .policy-note p:last-child { margin-bottom: 0; }
-
-    .video-list {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px 34px;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
-    .video-list li {
-      padding: 15px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.16);
-      color: #e1eee8;
-    }
-    .video-list strong { color: #77efb8; }
-
-    .support-grid {
-      display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
-      gap: 40px;
-      align-items: center;
-    }
-    .support-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-    .support-panel {
-      padding: 26px;
+    .roadmap-item {
+      min-height: 105px;
+      padding: 18px;
       border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--white);
-      box-shadow: var(--shadow);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.82);
     }
-    .support-panel p:last-child { margin-bottom: 0; }
+    .roadmap-item strong { display: block; margin-bottom: 4px; }
+    .roadmap-item span { color: var(--muted); font-size: 13px; }
+    .status-pill {
+      display: inline-flex;
+      margin-top: 20px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      color: #684a10;
+      background: #fff2cf;
+      font-size: 12px;
+      font-weight: 850;
+    }
 
-    .docs-list {
+    .pricing-shell {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-    }
-    .doc-link {
-      display: flex;
+      grid-template-columns: 1fr 0.9fr;
+      gap: 48px;
       align-items: center;
-      justify-content: space-between;
-      gap: 18px;
-      min-height: 82px;
-      padding: 18px 20px;
+    }
+    .pricing-card {
+      padding: 34px;
+      border: 1px solid var(--line-dark);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .pricing-card h3 { color: #7cf0bd; font-size: 24px; }
+    .pricing-card p { color: #bed5cb; }
+    .pricing-list { margin: 24px 0 28px; color: #e5f2ec; }
+    .pricing-list li::before { color: #6beeb5; }
+    .pricing-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+    .trust-grid {
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: 58px;
+      align-items: center;
+    }
+    .trust-badge {
+      min-height: 330px;
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      padding: 38px;
+      border-radius: var(--radius-lg);
+      color: var(--white);
+      background:
+        radial-gradient(circle at 50% 28%, rgba(20, 199, 132, 0.32), transparent 35%),
+        var(--jade-950);
+      text-align: center;
+      box-shadow: var(--shadow-lg);
+    }
+    .trust-badge-icon {
+      width: 76px;
+      height: 76px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 20px;
+      border: 1px solid rgba(124, 240, 189, 0.38);
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.07);
+      font-size: 32px;
+    }
+    .trust-badge p { max-width: 300px; margin-bottom: 0; color: #bed5cb; }
+    .trust-list { gap: 17px; }
+    .trust-list li { padding: 0 0 17px 32px; border-bottom: 1px solid var(--line); }
+
+    .contact-shell {
+      display: grid;
+      grid-template-columns: 0.82fr 1.18fr;
+      gap: 54px;
+      padding: 48px;
       border: 1px solid var(--line);
-      border-radius: var(--radius);
+      border-radius: var(--radius-lg);
       background: var(--white);
-      font-weight: 800;
+      box-shadow: var(--shadow-lg);
     }
-    .doc-link span:last-child { color: var(--green-800); }
+    .contact-links { display: grid; gap: 10px; margin-top: 24px; }
+    .contact-links a { color: var(--jade-700); font-weight: 850; }
+    .lead-form { display: grid; gap: 16px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .field { display: grid; gap: 7px; }
+    .field label { font-size: 13px; font-weight: 850; }
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      border: 1px solid #c8ddd3;
+      border-radius: 13px;
+      color: var(--ink);
+      background: #fbfdfc;
+      outline: none;
+    }
+    .field input,
+    .field select { min-height: 50px; padding: 0 14px; }
+    .field textarea { min-height: 124px; padding: 13px 14px; resize: vertical; }
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus { border-color: var(--jade-600); box-shadow: 0 0 0 4px rgba(11, 155, 104, 0.1); }
+    .form-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .form-note { margin: 0; color: var(--muted); font-size: 12px; }
+    .form-status {
+      min-height: 24px;
+      margin: 0;
+      color: var(--jade-800);
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .form-status.error { color: #8a3f27; }
+    .form-status a { text-decoration: underline; }
 
-    footer {
-      padding: 34px 0;
-      color: #c4d9ce;
-      background: #021812;
-    }
-    .footer-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 28px;
-      align-items: center;
-    }
-    .footer-links { display: flex; flex-wrap: wrap; gap: 18px; }
-    .footer-links a:hover { color: var(--green-500); }
-    .footer-brand { display: flex; align-items: center; gap: 12px; }
-    .footer-brand img {
-      width: 50px;
-      height: 50px;
-      object-fit: contain;
-      border-radius: 6px;
-      background: var(--white);
-    }
+    footer { padding: 42px 0; color: #c6dcd2; background: #021812; }
+    .footer-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 30px; }
+    .footer-title { display: block; color: var(--white); font-size: 18px; }
+    .footer-copy { max-width: 480px; margin: 6px 0 0; color: #91ada1; font-size: 13px; }
+    .footer-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 16px; font-size: 13px; font-weight: 750; }
+    .footer-links a:hover { color: #6beeb5; }
 
-    @media (max-width: 920px) {
-      .nav-links a:not(.nav-button) { display: none; }
+    @media (max-width: 1050px) {
+      .nav-links { gap: 14px; }
+      .nav-links a:nth-child(4),
+      .nav-links a:nth-child(5) { display: none; }
       .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .facts { grid-template-columns: 1fr; }
-      .split, .support-grid { grid-template-columns: 1fr; gap: 30px; }
-      h1 { font-size: 48px; }
+      .workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .two-column { gap: 40px; }
     }
 
-    @media (max-width: 620px) {
-      .container { width: calc(100% - 28px); }
-      .nav { min-height: 62px; gap: 8px; }
-      .nav-links { gap: 8px; }
-      .brand small { display: none; }
-      .nav-button { display: none; }
-      .hero {
-        min-height: 0;
-        height: auto;
-        max-height: none;
-        display: block;
-        background: var(--green-950);
+    @media (max-width: 780px) {
+      html { scroll-padding-top: 128px; }
+      .container { width: min(100% - 28px, 1180px); }
+      .topbar .container { width: 100%; }
+      .nav-main { min-height: 64px; padding: 0 14px; }
+      .brand { min-width: 0; }
+      .brand-logo, .brand-mark { width: 38px; height: 38px; flex-basis: 38px; border-radius: 10px; }
+      .brand-copy small { display: none; }
+      .nav-links {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 64px;
+        min-height: 48px;
+        justify-content: flex-start;
+        gap: 18px;
+        padding: 0 14px;
+        overflow-x: auto;
+        color: #cfe6dc;
+        background: var(--jade-900);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        scrollbar-width: none;
       }
-      .hero > .hero-banner-img {
-        position: relative;
-        width: 100%;
+      .nav-links::-webkit-scrollbar { display: none; }
+      .nav-links a:nth-child(4), .nav-links a:nth-child(5) { display: inline-flex; }
+      .nav-cta { min-height: 34px; padding: 0 13px; order: -1; }
+      .hero-shell { padding-top: 76px; }
+      .hero-banner-card { border-radius: 18px; }
+      .hero-copy-panel { padding: 46px 0 62px; }
+      .section { padding: 72px 0; }
+      .two-column,
+      .pricing-shell,
+      .trust-grid,
+      .contact-shell { grid-template-columns: 1fr; gap: 34px; }
+      .sticky-intro { position: static; }
+      .roadmap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .contact-shell { padding: 32px; }
+      .footer-row { flex-direction: column; }
+      .footer-links { justify-content: flex-start; }
+    }
+
+    @media (max-width: 560px) {
+      .hero-banner-card img { aspect-ratio: 4 / 1; object-fit: contain; }
+      .banner-fallback { min-height: 160px; padding: 24px; }
+      .hero-copy-panel { overflow: hidden; }
+      h1 {
         max-width: 100%;
-        height: auto;
-        min-height: 150px;
-        aspect-ratio: 4 / 1;
-        object-fit: contain;
+        font-size: clamp(31px, 8.6vw, 38px);
+        line-height: 1.14;
+        letter-spacing: -0.045em;
+        overflow-wrap: break-word;
       }
-      .hero::before { display: none; }
-      .hero-content { width: calc(100% - 28px); max-width: none; padding: 34px 0 40px; }
-      h1 { font-size: 40px; }
-      .hero-lead { font-size: 18px; }
-      .hero-copy { font-size: 14px; overflow-wrap: anywhere; }
-      .hero-actions { width: 350px; max-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-      .button { width: 100%; min-width: 0; padding: 0 8px; font-size: 12px; text-align: center; overflow-wrap: anywhere; }
-      .band { padding: 58px 0; }
-      h2 { font-size: 29px; }
-      .feature-grid, .docs-list, .video-list { grid-template-columns: 1fr; }
+      .hero-lead { font-size: 16px; }
+      .hero-lead,
+      .hero-description { overflow-wrap: break-word; }
+      .cta-primary-row,
+      .cta-secondary-row { display: grid; grid-template-columns: 1fr; }
+      .button, .button.primary, .button.secondary { width: 100%; }
+      .button.subtle { min-height: 44px; border-color: var(--line); background: var(--white); }
+      .feature-grid,
+      .workflow-grid,
+      .card-grid,
+      .image-doc-panel,
+      .roadmap-grid,
+      .form-row { grid-template-columns: 1fr; }
       .feature-card { min-height: 0; }
-      .footer-row { align-items: flex-start; flex-direction: column; }
+      .workflow-step { min-height: 0; }
+      .roadmap-shell, .pricing-card, .contact-shell { padding: 24px; border-radius: 20px; }
+      .trust-badge { min-height: 270px; padding: 28px; }
+      .pricing-actions { display: grid; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition-duration: 0.01ms !important; }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Bỏ qua điều hướng</a>
+
   <header class="topbar">
-    <div class="container nav">
-      <a class="brand" href="#top" aria-label="TOAN AAS">
-        <img src="/LOGO.png?v=20260614" alt="TOAN AAS logo" class="logo-img">
-        <span>TOAN AAS<small>AI Automation System</small></span>
+    <div class="container nav-main">
+      <a class="brand" href="#top" aria-label="TOAN AAS — Trang chủ">
+        <img src="/logo.png?v=20260619" alt="" class="brand-logo" width="44" height="44" onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+        <span class="brand-mark" hidden aria-hidden="true">TA</span>
+        <span class="brand-copy">TOAN AAS<small>AI Automation System</small></span>
       </a>
       <nav class="nav-links" aria-label="Điều hướng chính">
         <a href="#features">Tính năng</a>
-        <a href="#payment">Thanh toán</a>
         <a href="#video">Video</a>
-        <a href="#support">Hỗ trợ</a>
-        <a href="#docs">Tài liệu</a>
-        <a class="nav-button" href="https://t.me/toanaasbot" target="_blank" rel="noopener">Mở bot</a>
+        <a href="#audio">Âm thanh</a>
+        <a href="#pricing">Thanh toán</a>
+        <a href="#documents">Tài liệu</a>
+        <a href="#contact">Hỗ trợ</a>
+        <a class="nav-cta" href="https://t.me/toanaasbot" target="_blank" rel="noopener">Mở bot</a>
       </nav>
     </div>
   </header>
 
-  <main id="top">
-    <section class="hero" aria-label="TOAN AAS AI Automation System">
-      <img src="/banner.png?v=20260614" alt="TOAN AAS - Hệ thống tự động hóa AI" class="hero-banner-img" loading="eager" fetchpriority="high">
-      <div class="container hero-content">
-        <div class="eyebrow">AI Automation System</div>
-        <h1>TOAN AAS</h1>
-        <p class="hero-lead">Hệ thống tự động hóa AI cho vận hành, bot, hình ảnh, nội dung, video, âm nhạc và lồng tiếng.</p>
-        <p class="hero-copy">TOAN AAS kết nối các công cụ AI thành quy trình rõ ràng cho cá nhân, creator, shop và doanh nghiệp.</p>
-        <div class="hero-actions">
-          <a class="button primary" href="https://t.me/toanaasbot" target="_blank" rel="noopener">Mở bot Telegram</a>
-          <a class="button" href="/download/huong-dan-toan-aas.docx">Hướng dẫn V2</a>
-          <a class="button" href="#payment">Bảng giá / Nạp Xu</a>
-          <a class="button" href="https://t.me/toanaas" target="_blank" rel="noopener">Liên hệ admin</a>
+  <main id="main-content">
+    <section id="top" class="hero-shell" aria-label="Giới thiệu TOAN AAS">
+      <div class="container">
+        <div class="hero-banner-card">
+          <img src="/banner.png?v=20260619" alt="TOAN AAS — Hệ thống tự động hóa AI" width="2048" height="512" fetchpriority="high" onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+          <div class="banner-fallback" hidden>TOAN AAS — AI Automation System</div>
+        </div>
+
+        <div class="hero-copy-panel">
+          <div class="eyebrow">Nền tảng sáng tạo &amp; vận hành AI</div>
+          <h1>Hệ thống tự động hóa AI cho nội dung, video, âm thanh và vận hành số</h1>
+          <p class="hero-lead">TOAN AAS giúp cá nhân, creator, shop và doanh nghiệp tạo hình ảnh, video, giọng đọc, nhạc, phụ đề, tài liệu và gói nội dung marketing bằng AI trong một quy trình dễ dùng.</p>
+          <p class="hero-description">Bắt đầu từ bot Telegram, khách có thể chọn công cụ, nhập ý tưởng, xem báo giá, nghe hoặc xem thử ngắn và xác nhận trước khi hệ thống xử lý bản đầy đủ.</p>
+          <div class="cta-primary-row">
+            <a class="button primary" href="https://t.me/toanaasbot" target="_blank" rel="noopener">🚀 Mở bot Telegram</a>
+            <a class="button secondary" href="/download/huong-dan-toan-aas.docx">📘 Xem hướng dẫn</a>
+          </div>
+          <div class="cta-secondary-row">
+            <a class="button subtle" href="#pricing">💰 Bảng giá / Nạp Xu</a>
+            <a class="button subtle" href="https://t.me/toanaas" target="_blank" rel="noopener">👤 Liên hệ admin</a>
+          </div>
         </div>
       </div>
     </section>
 
-    <section id="features" class="band white">
+    <section id="features" class="section white">
       <div class="container">
-        <div class="section-head">
-          <div class="section-label">Hệ sinh thái công cụ</div>
-          <h2>TOAN AAS làm được gì?</h2>
-          <p class="section-copy">Các công cụ được tổ chức thành quy trình rõ ràng. Tính năng chưa sẵn sàng sẽ có guard và không trừ Xu.</p>
+        <div class="section-head center">
+          <div class="section-label">Hệ sinh thái TOAN AAS</div>
+          <h2>Một nơi cho toàn bộ quy trình sáng tạo số</h2>
+          <p class="section-copy">Chọn đúng công cụ, nhận báo giá rõ ràng và kiểm soát từng bước trước khi xử lý bản đầy đủ.</p>
         </div>
         <div class="feature-grid">
-          <article class="feature-card"><div class="icon">🤖</div><h3>Hỏi AI / Viết nội dung</h3><p>Hỏi đáp, phân tích, hook, script, caption, CTA và nội dung công việc.</p></article>
-          <article class="feature-card"><div class="icon">🖼</div><h3>Ảnh / Media Studio</h3><p>Tạo ảnh, prompt ảnh, ảnh sản phẩm, banner và công cụ xử lý ảnh.</p></article>
-          <article class="feature-card"><div class="icon">🎬</div><h3>Video / Content Factory</h3><p>Ý tưởng, storyboard, prompt, ghép ảnh và Video AI chân thật.</p></article>
-          <article class="feature-card"><div class="icon">🎙</div><h3>Voice / Phụ đề</h3><p>TTS, tạo phụ đề, dịch, lồng tiếng và ghép audio/video.</p></article>
-          <article class="feature-card"><div class="icon">📄</div><h3>PDF / Word / Tài liệu</h3><p>Chuyển đổi, nén, tách, gộp và lưu tài liệu theo công cụ đang mở.</p></article>
-          <article class="feature-card"><div class="icon">🎧</div><h3>Hỗ trợ / Ticket</h3><p>Nhận trả lời nhanh, tạo ticket, đối soát thanh toán và báo lỗi job.</p></article>
-          <article class="feature-card"><div class="icon">🚀</div><h3>Premium / Bot riêng</h3><p>Bot bán hàng, CSKH, content, vận hành nội bộ và workflow riêng.</p></article>
-          <article class="feature-card"><div class="icon">⚙️</div><h3>Automation có kiểm soát</h3><p>Queue, xác nhận chi phí, refund guard và trạng thái provider minh bạch.</p></article>
+          <article class="feature-card"><div class="icon-box">🎬</div><h3>Tạo video AI</h3><p>Tạo video từ ý tưởng, prompt, ảnh hoặc workflow có sẵn. Hệ thống hỗ trợ chọn add-on, xem thử ngắn và xác nhận trước khi xuất bản đầy đủ.</p></article>
+          <article class="feature-card"><div class="icon-box">📈</div><h3>Trend &amp; Storyboard</h3><p>Gợi ý trend, concept, storyboard, chuyển động camera, caption và hashtag cho Facebook, TikTok, YouTube.</p></article>
+          <article class="feature-card"><div class="icon-box">🎧</div><h3>Studio âm thanh</h3><p>Văn bản thành giọng nói, giọng nói thành văn bản, kho voice, tạo voice riêng, nhạc nền và bài hát có lời.</p></article>
+          <article class="feature-card"><div class="icon-box">🌐</div><h3>Phụ đề / Dịch / Lồng tiếng</h3><p>Tạo phụ đề, dịch phụ đề, lồng tiếng và chuẩn bị nội dung đa ngôn ngữ cho video.</p></article>
+          <article class="feature-card"><div class="icon-box">🖼</div><h3>Hình ảnh AI</h3><p>Tạo ảnh, chỉnh sửa ảnh bằng AI, cắt hoặc đổi tỉ lệ, thêm chữ/logo và nâng chất lượng ảnh.</p></article>
+          <article class="feature-card"><div class="icon-box">📄</div><h3>Tài liệu / PDF</h3><p>Công cụ tài liệu, ghi chú, PDF, gộp PDF và xử lý file phục vụ vận hành.</p></article>
+          <article class="feature-card"><div class="icon-box">💰</div><h3>Xu &amp; Thanh toán</h3><p>Nạp Xu, kiểm tra số dư, báo giá trước khi xử lý và chỉ trừ Xu sau bước xác nhận theo chính sách.</p></article>
+          <article class="feature-card"><div class="icon-box">🤖</div><h3>Marketing tự động</h3><p>Định hướng gói nội dung marketing, caption, lịch đăng, chiến dịch và tự động hóa đăng bài sau khi khách kết nối tài khoản và xác nhận.</p></article>
         </div>
       </div>
     </section>
 
-    <section id="payment" class="band mint">
+    <section id="video" class="section dark">
       <div class="container">
         <div class="section-head">
-          <div class="section-label">Thanh toán & Xu</div>
-          <h2>Một đơn vị nội bộ, nhiều phương thức thanh toán</h2>
-          <p class="section-copy">Xu chỉ dùng trong hệ thống TOAN AAS, không phải tiền điện tử và không có giá trị thanh toán bên ngoài.</p>
+          <div class="section-label">Video workflow</div>
+          <h2>Quy trình tạo video TOAN AAS</h2>
+          <p class="section-copy">Một luồng rõ ràng từ ý tưởng đến preview và xác nhận, giúp khách biết mình đang chọn gì trước khi hệ thống xử lý.</p>
         </div>
-        <div class="facts">
-          <div class="fact"><strong>1 Xu = 100đ</strong><span>1.000 Xu tương đương 100.000đ giá trị sử dụng nội bộ.</span></div>
-          <div class="fact"><strong>VND nội địa</strong><span>PayOS QR tự động; ACB/VietQR, ZaloPay và MoMo đối soát thủ công.</span></div>
-          <div class="fact"><strong>USD / CNY / USDT</strong><span>Nạp thủ công theo tỉ giá nội bộ; TXID hoặc ảnh bill không tự xác nhận.</span></div>
+        <div class="workflow-grid">
+          <article class="workflow-step"><div class="step-number">01</div><h3>Chọn loại video</h3><p>Trend, prompt, storyboard, ảnh thành video, tự quay hoặc đổi cảnh, hoặc video beta.</p></article>
+          <article class="workflow-step"><div class="step-number">02</div><h3>Nhập ý tưởng hoặc upload file</h3><p>Nhập mô tả, ảnh, video nguồn hoặc nội dung sản phẩm cần triển khai.</p></article>
+          <article class="workflow-step"><div class="step-number">03</div><h3>Chọn add-on</h3><p>Giọng đọc, nhạc, phụ đề, dịch, lồng tiếng, SFX hoặc media riêng của khách.</p></article>
+          <article class="workflow-step"><div class="step-number">04</div><h3>Chọn gói và xem hóa đơn</h3><p>Gói trải nghiệm, cơ bản hoặc phổ thông; add-on miễn phí hoặc có phí; tổng Xu được hiển thị rõ ràng.</p></article>
+          <article class="workflow-step"><div class="step-number">05</div><h3>Nghe hoặc xem thử ngắn</h3><p>Preview tối đa 6 giây, không gửi full output trước bước xác nhận.</p></article>
+          <article class="workflow-step"><div class="step-number">06</div><h3>Xác nhận xuất bản đầy đủ</h3><p>Hệ thống chỉ tiếp tục xử lý bản đầy đủ sau khi khách xác nhận.</p></article>
         </div>
-        <div class="split" style="margin-top:38px;">
-          <div>
-            <h3>Tỉ giá quốc tế đang áp dụng</h3>
-            <ul class="check-list">
-              <li>1 USD = 25.000đ.</li>
-              <li>1 CNY = 3.800đ.</li>
-              <li>USDT TRC20 là phương thức dự phòng cuối cùng.</li>
-              <li>Admin chỉ cộng Xu sau khi đối soát giao dịch thật.</li>
-            </ul>
-          </div>
-          <div class="policy-note">
-            <h3>Chính sách ưu đãi</h3>
-            <p>Ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50/100/200/500 và các ưu đãi cộng Xu chỉ áp dụng cho khách nội địa Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.</p>
-            <p>ZaloPay, MoMo và nạp quốc tế USD/CNY/USDT không áp dụng bonus cộng Xu. Chiết khấu phần trăm theo hạng thành viên vẫn được giữ khi đủ điều kiện.</p>
-          </div>
+        <div class="guard-note"><strong>Lưu ý kiểm soát chất lượng:</strong> Video AI beta mở theo kiểm soát. Gói 600 Xu trở lên, premium hoặc video dài có thể được giữ lại để kiểm tra chất lượng trước khi xử lý.</div>
+      </div>
+    </section>
+
+    <section id="audio" class="section mint">
+      <div class="container two-column">
+        <div class="sticky-intro">
+          <div class="section-label">Voice, music &amp; sound</div>
+          <h2>Studio âm thanh TOAN AAS</h2>
+          <p class="section-copy">Từ chọn giọng, nhập text đến nghe thử; từ nhạc nền theo thời lượng đến bài hát có lời theo phạm vi khách chọn.</p>
+          <ul class="capability-list" style="margin-top:26px;">
+            <li>Voice riêng lần đầu có thể được mở dùng thử theo chính sách.</li>
+            <li>Nhạc có lựa chọn 15, 30, 60 giây hoặc thời lượng tùy chỉnh.</li>
+            <li>Bài hát có lời hỗ trợ theo giây, nửa bài hoặc full bài.</li>
+            <li>Preview là bản nghe thử ngắn, không phải bản đầy đủ.</li>
+          </ul>
+        </div>
+        <div class="card-grid">
+          <article class="compact-card"><span class="mini-label">TTS</span><h3>Văn bản thành giọng nói</h3><p>Chọn giọng, nhập nội dung, kiểm tra cấu hình và nghe bản thử ngắn trước khi xác nhận.</p></article>
+          <article class="compact-card"><span class="mini-label">STT</span><h3>Giọng nói thành văn bản</h3><p>Chuyển audio thành nội dung chữ để làm phụ đề, ghi chú hoặc tái sử dụng nội dung.</p></article>
+          <article class="compact-card"><span class="mini-label">Voice</span><h3>Kho voice &amp; voice riêng</h3><p>Chọn voice có sẵn hoặc tạo voice riêng theo phạm vi sử dụng hợp lệ và được kiểm soát.</p></article>
+          <article class="compact-card"><span class="mini-label">Music</span><h3>Nhạc nền AI</h3><p>Tạo nhạc theo phong cách và thời lượng 15, 30, 60 giây hoặc tùy chỉnh.</p></article>
+          <article class="compact-card"><span class="mini-label">Song</span><h3>Bài hát có lời</h3><p>Chuẩn bị ý tưởng, lời và phạm vi theo giây, nửa bài hoặc full bài trước khi xử lý.</p></article>
+          <article class="compact-card"><span class="mini-label">Library</span><h3>Kho nhạc / SFX / Media</h3><p>Hỗ trợ chọn tài nguyên âm thanh và media phù hợp cho từng nội dung hoặc video.</p></article>
         </div>
       </div>
     </section>
 
-    <section id="video" class="band dark">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-label">Video / Content Factory</div>
-          <h2>Từ ý tưởng đến video theo từng bước</h2>
-          <p class="section-copy">Video được tính theo số giây, chất lượng, số đoạn và add-on. Bot chỉ render sau khi có xác nhận chi phí rõ ràng.</p>
-        </div>
-        <ul class="video-list">
-          <li><strong>Ý tưởng video</strong><br>Hook, script, caption và CTA theo mục tiêu.</li>
-          <li><strong>Video theo trend</strong><br>Gợi ý trend content-only hoặc nguồn live khi được mở.</li>
-          <li><strong>Kịch bản -> ảnh -> video</strong><br>Storyboard, prompt ảnh và prompt chuyển động theo cảnh.</li>
-          <li><strong>Ghép ảnh thành video</strong><br>Render local bằng worker/FFmpeg khi hạ tầng sẵn sàng.</li>
-          <li><strong>Video AI chân thật</strong><br>Phụ thuộc provider và trạng thái public/freeze.</li>
-          <li><strong>Video dài chia đoạn</strong><br>Giảm lỗi, kiểm soát thời lượng và chi phí.</li>
-          <li><strong>Phụ đề add-on</strong><br>Tạo hoặc dịch phụ đề theo pipeline riêng.</li>
-          <li><strong>Lồng tiếng add-on</strong><br>TTS, dịch giọng và ghép audio-video khi provider sẵn.</li>
-        </ul>
-      </div>
-    </section>
-
-    <section id="support" class="band white">
-      <div class="container support-grid">
+    <section id="documents" class="section white">
+      <div class="container two-column">
         <div>
-          <div class="section-label">Hỗ trợ / Ticket</div>
-          <h2>Trả lời trước, lưu ticket khi cần kiểm tra sâu</h2>
-          <p class="section-copy">TOAN AAS trả lời câu hỏi phổ biến ngay trong bot. Ticket lưu thông tin hậu trường để admin đối soát thanh toán, job, hoàn Xu hoặc lỗi công cụ.</p>
-          <div class="support-actions" style="margin-top:22px;">
-            <a class="button light" href="https://t.me/toanaasbot" target="_blank" rel="noopener">Mở bot hỗ trợ</a>
-            <a class="button light" href="https://t.me/toanaas" target="_blank" rel="noopener">Nhắn admin</a>
+          <div class="section-label">Image &amp; document tools</div>
+          <h2>Hình ảnh &amp; Tài liệu</h2>
+          <p class="section-copy">Những công cụ thiết thực để tạo, chỉnh sửa và chuẩn bị tài sản số cho công việc hằng ngày. Một số chức năng được hỗ trợ hoặc đang mở dần theo trạng thái hệ thống.</p>
+          <div class="cta-secondary-row" style="justify-content:flex-start;margin-top:26px;">
+            <a class="button secondary" href="https://t.me/toanaasbot" target="_blank" rel="noopener">Thử trong bot</a>
+            <a class="button subtle" href="/download/huong-dan-toan-aas.docx">Xem hướng dẫn</a>
           </div>
         </div>
-        <div class="support-panel">
-          <h3>Khi nào nên tạo ticket?</h3>
-          <ul class="check-list">
-            <li>Đối soát PayOS hoặc nạp thủ công.</li>
-            <li>Job ảnh/video/voice/tài liệu bị lỗi.</li>
-            <li>Kiểm tra hoàn Xu hoặc giao dịch trùng.</li>
-            <li>Tư vấn Premium, bot riêng hoặc workflow doanh nghiệp.</li>
+        <div class="image-doc-panel">
+          <div class="capability-item"><strong>✨ Tạo ảnh nhanh</strong><span>Tạo hình ảnh từ ý tưởng và prompt.</span></div>
+          <div class="capability-item"><strong>🪄 Chỉnh sửa ảnh AI</strong><span>Hỗ trợ chỉnh sửa theo yêu cầu cụ thể.</span></div>
+          <div class="capability-item"><strong>✂️ Cắt / đổi tỉ lệ</strong><span>Chuẩn bị ảnh cho nhiều nền tảng.</span></div>
+          <div class="capability-item"><strong>🏷 Thêm chữ / logo</strong><span>Tạo phiên bản truyền thông nhất quán.</span></div>
+          <div class="capability-item"><strong>🔎 Nâng chất lượng AI</strong><span>Hỗ trợ cải thiện độ rõ và kích thước ảnh.</span></div>
+          <div class="capability-item"><strong>📚 Ghi chú / PDF</strong><span>Tài liệu, chuyển đổi, gộp và xử lý PDF.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="marketing" class="section soft">
+      <div class="container">
+        <div class="roadmap-shell">
+          <div class="section-label">Định hướng phát triển</div>
+          <h2>Marketing Automation Roadmap</h2>
+          <p class="section-copy">TOAN AAS hướng tới quy trình từ tạo video đến gợi ý nội dung đăng bài, caption, hashtag, lịch đăng, phân tích hiệu quả và tự động hóa chiến dịch sau khi khách kết nối tài khoản và xác nhận.</p>
+          <div class="roadmap-grid">
+            <div class="roadmap-item"><strong>Gợi ý trend</strong><span>Khám phá góc nội dung phù hợp.</span></div>
+            <div class="roadmap-item"><strong>Caption &amp; hashtag</strong><span>Chuẩn bị gói nội dung cho từng nền tảng.</span></div>
+            <div class="roadmap-item"><strong>Lịch đăng bài</strong><span>Lên kế hoạch nội dung có kiểm soát.</span></div>
+            <div class="roadmap-item"><strong>Kết nối social</strong><span>Đang chuẩn bị luồng kết nối tài khoản.</span></div>
+            <div class="roadmap-item"><strong>Duyệt trước khi đăng</strong><span>Khách kiểm tra và xác nhận trước hành động.</span></div>
+            <div class="roadmap-item"><strong>Ads assistant</strong><span>Định hướng giai đoạn sau, chưa tự chạy quảng cáo.</span></div>
+          </div>
+          <span class="status-pill">Đang phát triển — không tự đăng hoặc chạy quảng cáo khi chưa có kết nối và xác nhận</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="pricing" class="section dark">
+      <div class="container pricing-shell">
+        <div>
+          <div class="section-label">Xu &amp; thanh toán</div>
+          <h2>Biết chi phí trước khi hệ thống xử lý</h2>
+          <p class="section-copy">Xu là đơn vị sử dụng trong bot TOAN AAS. Giá cuối cùng được hiển thị theo công cụ, gói và add-on khách chọn.</p>
+        </div>
+        <div class="pricing-card">
+          <h3>Nguyên tắc rõ ràng</h3>
+          <ul class="pricing-list">
+            <li>Bot luôn báo giá trước khi xử lý.</li>
+            <li>Tác vụ trả phí chỉ xử lý sau khi xác nhận.</li>
+            <li>Video beta có thể mở các mức 200, 300 hoặc 400 Xu.</li>
+            <li>Gói cao hơn, premium hoặc video dài mở sau khi kiểm tra chất lượng.</li>
+          </ul>
+          <div class="pricing-actions">
+            <a class="button light" href="https://t.me/toanaasbot" target="_blank" rel="noopener">💰 Nạp Xu trong bot</a>
+            <a class="button" href="/download/huong-dan-toan-aas.docx">📘 Xem hướng dẫn</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="trust" class="section white">
+      <div class="container trust-grid">
+        <div class="trust-badge">
+          <div class="trust-badge-icon">🛡</div>
+          <h2>Minh bạch ở từng bước</h2>
+          <p>Khách biết giá, được xem hoặc nghe thử ngắn và xác nhận trước khi xử lý bản đầy đủ.</p>
+        </div>
+        <div>
+          <div class="section-label">An toàn &amp; tin cậy</div>
+          <h2>AI có kiểm soát, vận hành có trách nhiệm</h2>
+          <ul class="trust-list">
+            <li>Báo giá trước khi xử lý.</li>
+            <li>Preview ngắn trước khi xuất bản đầy đủ.</li>
+            <li>Không tự đăng bài hoặc chạy quảng cáo nếu khách chưa kết nối và xác nhận.</li>
+            <li>Không hỗ trợ deepfake, gian mạo danh tính hoặc nội dung vi phạm.</li>
+            <li>Nội dung cần tuân thủ quyền sử dụng, bản quyền và chính sách nền tảng.</li>
+            <li>Khi dịch vụ chưa sẵn sàng, hệ thống báo rõ và không trừ Xu sai.</li>
           </ul>
         </div>
       </div>
     </section>
 
-    <section id="docs" class="band mint">
-      <div class="container">
-        <div class="section-head">
-          <div class="section-label">Tài liệu chính thức</div>
-          <h2>Chính sách public hiện hành</h2>
-          <p class="section-copy">Các đường dẫn dưới đây luôn trỏ đến bản V2 đang được sử dụng công khai.</p>
+    <section id="contact" class="section mint">
+      <div class="container contact-shell">
+        <div>
+          <div class="section-label">Liên hệ &amp; tư vấn</div>
+          <h2>Bạn muốn bắt đầu từ đâu?</h2>
+          <p class="section-copy">Gửi nhu cầu để TOAN AAS tư vấn công cụ, gói hoặc workflow phù hợp. Không cần mô tả kỹ thuật.</p>
+          <div class="contact-links">
+            <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">→ Mở bot @toanaasbot</a>
+            <a href="https://t.me/toanaas" target="_blank" rel="noopener">→ Nhắn trực tiếp admin</a>
+          </div>
         </div>
-        <div class="docs-list">
-          <a class="doc-link" href="/download/huong-dan-toan-aas.docx"><span>Hướng dẫn sử dụng V2</span><span>Tải DOCX</span></a>
-          <a class="doc-link" href="/download/dieu-khoan-su-dung-toan-aas.pdf" target="_blank" rel="noopener"><span>Điều khoản & Chính sách V2</span><span>Mở PDF</span></a>
-          <a class="doc-link" href="#payment"><span>Bảng giá / Nạp Xu</span><span>Xem chính sách</span></a>
-          <a class="doc-link" href="https://t.me/toanaasbot" target="_blank" rel="noopener"><span>Hỗ trợ / Ticket</span><span>Mở bot</span></a>
-        </div>
+
+        <form id="lead-form" class="lead-form">
+          <div class="form-row">
+            <div class="field">
+              <label for="lead-name">Tên</label>
+              <input id="lead-name" name="name" autocomplete="name" minlength="2" maxlength="120" required placeholder="Tên của bạn">
+            </div>
+            <div class="field">
+              <label for="lead-phone">Số điện thoại / Zalo</label>
+              <input id="lead-phone" name="phone" autocomplete="tel" minlength="6" maxlength="30" required placeholder="Số liên hệ">
+            </div>
+          </div>
+          <div class="field">
+            <label for="lead-topic">Nền tảng / chủ đề quan tâm</label>
+            <select id="lead-topic" name="topic" required>
+              <option value="" selected disabled>Chọn một chủ đề</option>
+              <option>Video AI</option>
+              <option>Studio âm thanh</option>
+              <option>Hình ảnh AI</option>
+              <option>Tài liệu / PDF</option>
+              <option>Marketing automation</option>
+              <option>Nạp Xu / hỗ trợ tài khoản</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="lead-need">Nhu cầu</label>
+            <textarea id="lead-need" name="need" maxlength="1000" required placeholder="Ví dụ: cần làm video giới thiệu sản phẩm có voice và phụ đề..."></textarea>
+          </div>
+          <div class="form-actions">
+            <button id="lead-submit" class="button primary" type="submit">Gửi nhu cầu</button>
+            <p class="form-note">Thông tin chỉ dùng để TOAN AAS liên hệ tư vấn.</p>
+          </div>
+          <p id="lead-status" class="form-status" role="status" aria-live="polite"></p>
+        </form>
       </div>
     </section>
   </main>
 
   <footer>
     <div class="container footer-row">
-      <div class="footer-brand">
-        <img src="/LOGO.png?v=20260614" alt="TOAN AAS logo" class="logo-img" loading="lazy">
-        <div><strong>TOAN AAS</strong><br><small>Cập nhật chính sách theo từng giai đoạn vận hành.</small></div>
+      <div>
+        <strong class="footer-title">TOAN AAS — AI Automation System</strong>
+        <p class="footer-copy">Hệ thống AI cho nội dung, video, âm thanh, hình ảnh, tài liệu và vận hành số — bắt đầu đơn giản từ Telegram.</p>
       </div>
       <div class="footer-links">
         <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">Bot Telegram</a>
         <a href="https://t.me/toanaas" target="_blank" rel="noopener">Admin</a>
-        <a href="https://www.toanaas.vn/">www.toanaas.vn</a>
+        <a href="/download/huong-dan-toan-aas.docx">Hướng dẫn</a>
+        <a href="/download/dieu-khoan-su-dung-toan-aas.pdf" target="_blank" rel="noopener">Điều khoản</a>
       </div>
     </div>
   </footer>
+
+  <script>
+    (function () {
+      const scrollToHash = function () {
+        const hash = window.location.hash;
+        if (!hash || hash.length < 2) return;
+        try {
+          const target = document.querySelector(hash);
+          if (target) target.scrollIntoView({ block: 'start' });
+        } catch (error) {
+          return;
+        }
+      };
+      window.addEventListener('load', function () {
+        window.setTimeout(scrollToHash, 80);
+      });
+      window.addEventListener('hashchange', function () {
+        window.setTimeout(scrollToHash, 30);
+      });
+
+      const form = document.getElementById('lead-form');
+      const status = document.getElementById('lead-status');
+      const submit = document.getElementById('lead-submit');
+      if (!form || !status || !submit) return;
+
+      form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+
+        const data = new FormData(form);
+        submit.disabled = true;
+        submit.textContent = 'Đang gửi...';
+        status.className = 'form-status';
+        status.textContent = '';
+
+        try {
+          const response = await fetch('/lead', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: String(data.get('name') || '').trim(),
+              phone: String(data.get('phone') || '').trim(),
+              services: [String(data.get('topic') || '').trim()],
+              note: String(data.get('need') || '').trim(),
+              source: 'landing-clean-clear-v2'
+            })
+          });
+          if (!response.ok) throw new Error('request_failed');
+          const result = await response.json();
+          if (!result || result.ok !== true) throw new Error('request_failed');
+          form.reset();
+          status.textContent = 'Đã gửi nhu cầu. TOAN AAS sẽ liên hệ với bạn sớm.';
+        } catch (error) {
+          status.className = 'form-status error';
+          status.innerHTML = 'Chưa gửi được biểu mẫu. Quý khách vui lòng nhắn trực tiếp Telegram <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">@toanaasbot</a>.';
+        } finally {
+          submit.disabled = false;
+          submit.textContent = 'Gửi nhu cầu';
+        }
+      });
+    }());
+  </script>
 </body>
 </html>
