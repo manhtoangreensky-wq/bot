@@ -455,6 +455,7 @@ class Key4UProvider:
         prompt: str = "Trả lời đúng một câu tiếng Việt có chữ TEST_OK.",
         model: str = "",
         timeout_seconds: float = 30.0,
+        max_tokens: int = 1200,
     ) -> dict[str, Any]:
         selected_model = model or self.config.chat_model
         if not self.is_configured():
@@ -471,8 +472,8 @@ class Key4UProvider:
         started = time.perf_counter()
         payload = {
             "model": selected_model,
-            "messages": [{"role": "user", "content": str(prompt or "")[:500]}],
-            "max_tokens": 80,
+            "messages": [{"role": "user", "content": str(prompt or "")[:6000]}],
+            "max_tokens": max(80, min(4000, int(max_tokens or 1200))),
             "temperature": 0.2,
         }
         try:
@@ -771,14 +772,28 @@ class Key4UProvider:
         except Exception as exc:
             return _result(ok=False, capability="stt", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
-    async def suno_create(self, prompt: str = "Short upbeat TOAN AAS intro.", model: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def suno_create(
+        self,
+        prompt: str = "Short upbeat TOAN AAS intro.",
+        model: str = "",
+        timeout_seconds: float = 30.0,
+        duration_seconds: int = 30,
+        instrumental: bool = True,
+        title: str = "TOAN AAS Music",
+    ) -> dict[str, Any]:
         selected_model = model or self.config.suno_model
         if not self.is_configured():
             return self._missing_result("suno", selected_model)
         if not self.config.suno_create_endpoint or not selected_model:
             return self._needs_docs_result("suno", selected_model, "KEY4U_SUNO_CREATE_ENDPOINT/KEY4U_DEFAULT_MUSIC_MODEL")
         endpoint = safe_join_url(self.config.base_url, self.config.suno_create_endpoint)
-        payload = {"model": selected_model, "prompt": str(prompt or "")[:600]}
+        payload = {
+            "model": selected_model,
+            "prompt": str(prompt or "")[:1200],
+            "duration": max(1, min(600, int(duration_seconds or 30))),
+            "make_instrumental": bool(instrumental),
+            "title": str(title or "TOAN AAS Music")[:120],
+        }
         started = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
