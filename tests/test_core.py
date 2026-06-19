@@ -237,9 +237,9 @@ def test_public_branding_and_scope_static_guard():
     assert bot.make_payos_description("50k") == "AAS50K"
     assert bot.manual_qr_url(123, 50000, 999).find("AAS+123+999") >= 0
     assert "https://t.me/toanaasbot" in index_html
-    assert "Hướng dẫn sử dụng V2" in index_html
-    assert "Điều khoản &amp; Chính sách V2" in index_html or "Điều khoản & Chính sách V2" in index_html
-    assert "1.000 Xu tương đương 100.000đ" in index_html
+    assert "Quy trình tạo video TOAN AAS" in index_html
+    assert "Xu là đơn vị sử dụng trong bot TOAN AAS" in index_html
+    assert "/download/dieu-khoan-su-dung-toan-aas.pdf" in index_html
     assert "https://t.me/Httdhtoan" not in public_surface
     assert "@Httdhtoan" not in public_surface
     assert "TOAN DAAS" not in public_surface
@@ -7678,8 +7678,8 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     async def fake_translate(text, target):
         return {"text": f"{text} translated to {target}"}
 
-    async def fake_tts(text, voice_style=""):
-        return "Test TTS", b"audio-bytes", f"voice={voice_style}; chars={len(text)}"
+    async def fake_tts(text, voice_style="", voice_id=""):
+        return "Test TTS", b"audio-bytes", f"voice={voice_style}; voice_id={voice_id}; chars={len(text)}"
 
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
