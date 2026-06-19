@@ -157,7 +157,7 @@ def test_audio_music_menu_simple(monkeypatch):
     labels = _labels(query.outputs[-1]["reply_markup"])
 
     assert "Bạn muốn làm gì?" in query.outputs[-1]["text"]
-    assert labels[:4] == ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc mới"]
+    assert labels[:5] == ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền", "🎤 Tạo bài hát có lời"]
     assert "🚫 Không thêm nhạc" not in labels
 
 

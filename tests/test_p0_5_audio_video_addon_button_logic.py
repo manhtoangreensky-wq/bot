@@ -136,9 +136,9 @@ def test_music_inner_menu_restores_stock_sfx_user_media_create_new_music():
     labels = _labels(bot.music_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     callbacks = _callbacks(bot.music_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
 
-    for label in ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc mới"]:
+    for label in ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền", "🎤 Tạo bài hát có lời"]:
         assert label in labels
-    for callback in ["music_quick|showroom|music", "music_quick|showroom|sfx", "music_quick|showroom|media", "music_quick|showroom|ai_music"]:
+    for callback in ["music_quick|showroom|music", "music_quick|showroom|sfx", "music_quick|showroom|media", "music_quick|showroom|ai_music", "music_quick|showroom|song_menu"]:
         assert callback in callbacks
     assert "Không thêm nhạc" not in "\n".join(labels)
 
@@ -215,7 +215,7 @@ def test_showroom_music_create_new_asks_prompt_then_suggestions(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(style, user_id), SimpleNamespace()))
     mood = CaptureQuery("music_quick|showroom|music_ai_mood_cheerful", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(mood, user_id), SimpleNamespace()))
-    duration = CaptureQuery("music_quick|showroom|music_ai_duration_6s", user_id)
+    duration = CaptureQuery("music_quick|showroom|music_ai_duration_30s", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(duration, user_id), SimpleNamespace()))
     assert "3 prompt nhạc gợi ý" in duration.outputs[-1]["text"]
     assert "Chọn gợi ý 1" in _joined(duration.outputs[-1]["reply_markup"])

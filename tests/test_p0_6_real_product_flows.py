@@ -171,7 +171,7 @@ def test_guided_music_creation_reaches_three_prompt_choices(monkeypatch):
         query = CaptureQuery(data, user_id)
         asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    duration = CaptureQuery("music_quick|showroom|music_ai_duration_6s", user_id)
+    duration = CaptureQuery("music_quick|showroom|music_ai_duration_30s", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(duration, user_id), SimpleNamespace()))
     assert "3 prompt nhạc gợi ý" in duration.outputs[-1]["text"]
     assert "Chọn gợi ý 1" in _joined(duration.outputs[-1]["reply_markup"])
