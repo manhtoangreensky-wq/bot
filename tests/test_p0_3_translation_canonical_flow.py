@@ -136,20 +136,15 @@ def test_standalone_translate_menu_no_api_text():
     labels = _labels(bot.translation_menu_keyboard("vi"))
     callbacks = _callbacks(bot.translation_menu_keyboard("vi"))
 
-    assert "🌐 <b>Dịch / Phụ đề / Lồng tiếng</b>" in text
+    assert "🌐 <b>Trung tâm dịch thuật TOAN AAS</b>" in text
     assert labels == [
-        "📝 Tạo phụ đề",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
-        "🌐🎙 Phụ đề + Lồng tiếng",
-        "📁 Media của tôi",
+        "🌐 Dịch ngôn ngữ",
+        "🎬 Dịch phụ đề / Lồng tiếng video",
         "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
-    assert f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_CREATE}" in callbacks
-    assert f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_TRANSLATE}" in callbacks
-    assert f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_DUB}" in callbacks
-    assert f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}" in callbacks
+    assert "menu|translation_language_hub" in callbacks
+    assert "menu|translation_video_factory" in callbacks
     assert not any(callback.startswith(("vfinal|", "videoaddon|")) for callback in callbacks)
     _assert_public_clean("\n".join([text, *labels]))
 
@@ -163,6 +158,11 @@ def test_standalone_subtitle_asks_upload(monkeypatch):
 
     state = bot.get_video_dubbing_pending(user_id)
     assert state["origin"] == "translation"
+    assert state["step"] == "source"
+    assert "Chọn nguồn video/audio" in query.outputs[-1]["text"]
+
+    query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
+    state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "await_video"
     assert "Bạn gửi hoặc reply video/audio cần xử lý nhé" in query.outputs[-1]["text"]
     assert bot.current_product_context(user_id) == bot.PRODUCT_CONTEXT_SHOWROOM
@@ -176,7 +176,8 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
 
-    query = asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_TRANSLATE}", user_id))
+    asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_TRANSLATE}", user_id))
+    query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
     assert bot.get_video_dubbing_pending(user_id)["step"] == "await_video"
     assert "Bạn gửi hoặc reply video/audio cần xử lý nhé" in query.outputs[-1]["text"]
 
@@ -190,7 +191,7 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "language"
     assert state["video_file_id"] == "translate-video"
-    assert "Bạn muốn dịch/lồng tiếng sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "Bạn muốn dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
     _assert_public_clean(message.outputs[-1]["text"])
 
 
@@ -201,7 +202,8 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
 
-    query = asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_DUB}", user_id))
+    asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_DUB}", user_id))
+    query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
     assert "Bạn gửi hoặc reply video/audio cần xử lý nhé" in query.outputs[-1]["text"]
 
     message = CaptureMessage(file_id="dub-video")
@@ -211,8 +213,8 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
     )) is True
 
     state = bot.get_video_dubbing_pending(user_id)
-    assert state["step"] in {"language", "voice"}
-    assert "Bạn muốn dịch/lồng tiếng sang ngôn ngữ nào" in message.outputs[-1]["text"] or "Chọn kiểu lồng tiếng" in message.outputs[-1]["text"]
+    assert state["step"] == "language_strategy"
+    assert "giữ nguyên ngôn ngữ gốc hay lồng tiếng sang ngôn ngữ khác" in message.outputs[-1]["text"]
     _assert_public_clean(message.outputs[-1]["text"])
 
 
@@ -224,6 +226,7 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
 
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}", user_id))
+    asyncio.run(_press_videodub("videodub|source_upload", user_id))
     message = CaptureMessage(file_id="combo-video")
     asyncio.run(bot.handle_video_dubbing_pending_upload(
         SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=message),
@@ -234,15 +237,18 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     lang_query = asyncio.run(_press_videodub("videodub|language|English", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["target_language"] == "English"
-    assert state["step"] == "voice"
-    assert "Chọn kiểu lồng tiếng" in lang_query.outputs[-1]["text"]
+    assert state["step"] == "output"
+    assert "Xuất bản dịch phụ đề" in lang_query.outputs[-1]["text"]
+    assert "🗣 Tiếp tục lồng tiếng" in _labels(lang_query.outputs[-1]["reply_markup"])
 
-    voice_query = asyncio.run(_press_videodub("videodub|voice|Nữ tự nhiên", user_id))
+    continue_query = asyncio.run(_press_videodub("videodub|continue_dubbing", user_id))
+    assert "Chọn kiểu lồng tiếng" in continue_query.outputs[-1]["text"]
+
+    voice_query = asyncio.run(_press_videodub("videodub|voice|default_female", user_id))
     state = bot.get_video_dubbing_pending(user_id)
-    assert state["voice_style"] == "Nữ tự nhiên"
-    assert state["step"] == "confirm"
-    assert "Xác nhận phụ đề + lồng tiếng" in voice_query.outputs[-1]["text"]
-    assert "▶️ Nghe/xem thử ngắn" in _labels(voice_query.outputs[-1]["reply_markup"])
+    assert state["voice_style"]
+    assert state["step"] == "voice_settings"
+    assert "Cài đặt giọng lồng tiếng" in voice_query.outputs[-1]["text"]
     _assert_public_clean(voice_query.outputs[-1]["text"])
 
 

@@ -130,10 +130,12 @@ def test_video_finalization_menu_has_distinct_music_voice_subtitle_and_combo_pat
     assert "vfinal|combo" not in callbacks
 
     addon_callbacks = _callbacks(bot.video_finalization_addon_keyboard("vi"))
-    assert "vfinal|subtitle" in addon_callbacks
-    assert "vfinal|translate_sub" in addon_callbacks
-    assert "vfinal|dub" in addon_callbacks
-    assert "vfinal|combo" in addon_callbacks
+    assert "videodub|start|video_addon" in addon_callbacks
+    assert "vfinal|addon_none" in addon_callbacks
+    assert "vfinal|subtitle" not in addon_callbacks
+    assert "vfinal|translate_sub" not in addon_callbacks
+    assert "vfinal|dub" not in addon_callbacks
+    assert "vfinal|combo" not in addon_callbacks
 
 
 def test_video_finalization_summary_and_guard_are_explicit(monkeypatch):
@@ -412,9 +414,9 @@ def test_video_addon_confirm_keeps_finalization_back_context():
     markup = bot.video_addon_confirm_keyboard("tok123", "low", "vi")
     callbacks = _callbacks(markup)
     ordered_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data]
-    assert "videoaddon|preview|tok123" in callbacks
+    assert "videoaddon|preview_locked|tok123" in callbacks
     assert "shopai|confirm|tok123" in callbacks
-    assert ordered_callbacks.index("videoaddon|preview|tok123") < ordered_callbacks.index("shopai|confirm|tok123")
+    assert ordered_callbacks.index("videoaddon|preview_locked|tok123") < ordered_callbacks.index("shopai|confirm|tok123")
     assert "vfinal|tier" in callbacks
     assert "vfinal|voice" in callbacks
     assert "vfinal|music" in callbacks
@@ -432,7 +434,7 @@ def test_video_addon_language_and_voice_back_use_screen_stack():
     assert "videoaddon|menu" not in voice_callbacks
 
 
-def test_video_addon_invoice_back_returns_canonical_video_options(monkeypatch):
+def test_video_addon_invoice_back_returns_package_selection(monkeypatch):
     user_id = 991213
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
@@ -475,12 +477,14 @@ def test_video_addon_invoice_back_returns_canonical_video_options(monkeypatch):
     assert saved["video_order"]["screen_stack"][-2:] == ["addon_voice", "invoice"]
 
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert "Tùy chọn hoàn thiện video" in query.edited["text"]
-    saved = bot.get_video_addon_state(user_id)
-    assert saved["video_order"]["current_screen"] == "invoice"
-    assert "vfinal|voice" in _callbacks(query.edited["reply_markup"])
-    assert "vfinal|music" in _callbacks(query.edited["reply_markup"])
-    assert "vfinal|addon" in _callbacks(query.edited["reply_markup"])
+    assert "Chọn gói xuất video AI" in query.edited["text"]
+    saved_finalization = bot.get_video_finalization_state(user_id)
+    assert saved_finalization["step"] == "tier"
+    assert not bot.get_video_addon_state(user_id)
+    callbacks = _callbacks(query.edited["reply_markup"])
+    assert "vfinal|tier|low" in callbacks
+    assert "vfinal|tier|basic" in callbacks
+    assert "vfinal|back" in callbacks
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
 

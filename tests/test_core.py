@@ -2517,7 +2517,6 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "📤 Video mẫu / Kênh mẫu",
         "🧠 Ý tưởng video",
         "🎥 Prompt / Chuyển động",
-        "🌐 Dịch/Lồng tiếng video",
         "🎵 Nhạc / Voice / SFX",
         "🛠 Chỉnh sửa video local",
         "🔙 Quay lại",
@@ -7379,7 +7378,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     monkeypatch.setattr(bot, "is_admin_user", lambda user_id: str(user_id) == "1")
 
     main_labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
-    assert "🌐 Dịch/Lồng tiếng video" in main_labels
+    assert "🌐 Dịch/Lồng tiếng video" not in main_labels
     assert "🎞 Video mẫu → Video AI" in [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert "🎞 Video mẫu → Video AI" not in main_labels
 
@@ -7398,7 +7397,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert {"videoref|image_prompts", "videoref|frame_plan", "videoref|generate", "videoref|save"}.issubset(set(ref_result_callbacks))
 
     dub_labels = [button.text for row in bot.video_dubbing_menu_keyboard("vi").inline_keyboard for button in row]
-    assert {"📝 Tạo phụ đề", "🌐 Dịch phụ đề", "🎙 Lồng tiếng", "🎬 Phụ đề + lồng tiếng", "💰 Bảng giá"}.issubset(set(dub_labels))
+    assert {"👁 Tạo phụ đề", "🌐 Dịch phụ đề", "🗣 Lồng tiếng tự động", "🎬 Dịch + lồng tiếng tự động"}.issubset(set(dub_labels))
     assert "🎭 Dịch + lồng tiếng" not in dub_labels
     assert "🎬 Dịch + lồng tiếng + video" not in dub_labels
     assert "🎙 Lồng tiếng voice" not in dub_labels
@@ -7412,12 +7411,12 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
         },
         "vi",
     )
-    assert "Xác nhận phụ đề + lồng tiếng" in dub_confirm
+    assert "Xác nhận dịch + lồng tiếng tự động" in dub_confirm
     assert "7 phút" in dub_confirm
     assert "1.050 Xu" not in dub_confirm
     assert "1050 Xu" in dub_confirm
     assert "trừ Xu" in dub_confirm
-    assert "Kiểu xử lý: <b>Phụ đề + lồng tiếng</b>" in dub_confirm
+    assert "Kiểu xử lý: <b>Dịch + lồng tiếng tự động</b>" in dub_confirm
 
     subtitle_confirm = bot.video_dubbing_confirm_text(
         {"mode": "subtitle", "video_file_id": "video-2", "source_language": "auto", "video_duration": 45},
@@ -7555,13 +7554,17 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         (71001, bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề"),
         (71002, bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch phụ đề"),
         (71003, bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng"),
-        (71004, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Phụ đề + lồng tiếng"),
+        (71004, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Dịch + lồng tiếng tự động"),
     ]
     for uid, mode, expected_text in cases:
         bot.clear_video_dubbing_pending(uid)
         result = asyncio.run(press(f"videodub|type|{mode}", uid))
         state = bot.get_video_dubbing_pending(uid)
         assert state["video_processing_mode"] == mode
+        assert state["step"] == "source"
+        assert "chọn nguồn video/audio" in result["text"].lower()
+        result = asyncio.run(press("videodub|source_upload", uid))
+        state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == "await_video"
         assert expected_text.lower() in result["text"].lower()
         assert "gửi hoặc reply video/audio" in result["text"].lower()
@@ -7584,36 +7587,44 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     assert bot.get_video_dubbing_pending(71004)["step"] == "language"
     asyncio.run(press("videodub|language|English", 71004))
     plus_state = bot.get_video_dubbing_pending(71004)
-    assert plus_state["step"] == "voice"
+    assert plus_state["step"] == "output"
     assert plus_state["target_language"] == "English"
-    asyncio.run(press("videodub|voice|Nữ tự nhiên", 71004))
+    asyncio.run(press("videodub|continue_dubbing", 71004))
+    assert bot.get_video_dubbing_pending(71004)["step"] == "voice"
+    asyncio.run(press("videodub|voice|default_female", 71004))
+    assert bot.get_video_dubbing_pending(71004)["step"] == "voice_settings"
+    asyncio.run(press("videodub|dubbing_output", 71004))
+    asyncio.run(press("videodub|output|video_subtitle", 71004))
     assert bot.get_video_dubbing_pending(71004)["step"] == "confirm"
 
     upload_cases = [
-        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "confirm_subtitle_create", "Tạo phụ đề"),
+        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|output|srt", "Xuất phụ đề"),
         (
             71102,
             bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
             {"target_language": "English", "translate_requested": "1"},
-            "confirm_subtitle_translate",
-            "Dịch phụ đề",
+            "output",
+            "videodub|output|srt",
+            "Xuất bản dịch phụ đề",
         ),
         (
             71103,
             bot.VIDEO_SUBTITLE_MODE_DUB,
             {"target_language": "Tiếng Việt", "voice_style": "Nữ tự nhiên"},
-            "confirm_dub",
+            "confirm",
+            "videodub|confirm_dub",
             "Lồng tiếng",
         ),
         (
             71104,
             bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             {"target_language": "English", "voice_style": "Nữ tự nhiên", "translate_requested": "1"},
-            "confirm_subtitle_plus_dub",
-            "Phụ đề + lồng tiếng",
+            "confirm",
+            "videodub|confirm_subtitle_plus_dub",
+            "Xác nhận dịch + lồng tiếng tự động",
         ),
     ]
-    for uid, mode, extra, confirm_action, expected_label in upload_cases:
+    for uid, mode, extra, expected_step, expected_callback, expected_label in upload_cases:
         bot.clear_video_dubbing_pending(uid)
         bot.set_video_dubbing_pending(uid, "await_video", video_processing_mode=mode, **extra)
         message = FakeMessage(f"video-{uid}")
@@ -7624,7 +7635,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         handled = asyncio.run(bot.handle_video_dubbing_pending_upload(update, SimpleNamespace()))
         assert handled is True
         state = bot.get_video_dubbing_pending(uid)
-        assert state["step"] == "confirm"
+        assert state["step"] == expected_step
         assert state["video_processing_mode"] == mode
         assert expected_label in message.sent[-1]["text"]
         callbacks = [
@@ -7632,7 +7643,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
             for row in message.sent[-1]["reply_markup"].inline_keyboard
             for button in row
         ]
-        assert f"videodub|{confirm_action}" in callbacks
+        assert expected_callback in callbacks
 
 
 def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
@@ -7651,7 +7662,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         (bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề"),
         (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch phụ đề"),
         (bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng"),
-        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Phụ đề + lồng tiếng"),
+        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Dịch + lồng tiếng tự động"),
     ]:
         capability = bot.video_dubbing_capability(mode, {})
         assert capability["reason"] == "mode_disabled"
@@ -9537,7 +9548,7 @@ def test_video_total_price_v2_is_itemized():
         "current_video_dubbing_option": "dub_original",
         "current_video_price_preview": pricing,
     })
-    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề + lồng tiếng: <b>+350 Xu</b>", "Tổng: <b>1.670 Xu</b>", "167.000đ"]:
+    for marker in ["Video: <b>1.320 Xu</b>", "Phụ đề và lồng tiếng: <b>+350 Xu</b>", "Tổng: <b>1.670 Xu</b>", "167.000đ"]:
         assert marker in invoice
 
 
@@ -9820,7 +9831,9 @@ def test_paid_addons_are_configured_before_tier():
     menu_callbacks = [button.callback_data for row in bot.video_finalization_menu_keyboard("vi").inline_keyboard for button in row]
     assert {"vfinal|voice", "vfinal|music", "vfinal|addon", "vfinal|tier"}.issubset(set(menu_callbacks))
     addon_callbacks = [button.callback_data for row in bot.video_finalization_addon_keyboard("vi").inline_keyboard for button in row]
-    assert {"vfinal|subtitle", "vfinal|dub", "vfinal|combo", "vfinal|translate_sub"}.issubset(set(addon_callbacks))
+    assert "videodub|start|video_addon" in addon_callbacks
+    assert "vfinal|addon_none" in addon_callbacks
+    assert {"vfinal|subtitle", "vfinal|dub", "vfinal|combo", "vfinal|translate_sub"}.isdisjoint(set(addon_callbacks))
 
 
 def test_music_menu_not_stuck():
@@ -9913,7 +9926,7 @@ def test_default_voice_free():
 def test_subtitle_menu_has_4_named_modes():
     labels = [button.text for row in bot.video_addon_menu_keyboard("vi", {"video_tier": "basic"}).inline_keyboard for button in row]
     joined = "\n".join(labels)
-    for label in ["Tạo phụ đề", "Dịch phụ đề", "Lồng tiếng", "Phụ đề + Lồng tiếng"]:
+    for label in ["Tạo phụ đề", "Dịch phụ đề", "Lồng tiếng", "Dịch + lồng tiếng tự động"]:
         assert label in joined
     assert "Dịch phụ đề + lồng tiếng" not in joined
 
@@ -10005,7 +10018,7 @@ def test_video_order_builder_addon_total():
         + bot.calculate_subtitle_dub_price("subtitle_plus_dubbing", 60)
     )
     assert order["total_xu"] == expected
-    assert any("Phụ đề + lồng tiếng" in item["label"] for item in order["paid_items"])
+    assert any("Phụ đề và lồng tiếng" in item["label"] for item in order["paid_items"])
 
 
 def test_video_confirm_never_zero_without_valid_discount():

@@ -141,9 +141,9 @@ def test_audio_voice_text_to_style_to_preview_flow(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(preview, user_id), SimpleNamespace()))
     preview_labels = _labels(preview.outputs[-1]["reply_markup"])
     assert "Bản nghe thử ngắn" in preview.outputs[-1]["text"]
-    assert "✅ Tạo bản đầy đủ" in preview_labels
+    assert "🎙 Tạo giọng đọc" in preview_labels
     assert "🔁 Đổi giọng" in preview_labels
-    assert "✏️ Sửa nội dung" in preview_labels
+    assert "📝 Sửa nội dung giọng đọc" in preview_labels
     assert "🏠 Menu chính" in preview_labels
 
 
@@ -169,8 +169,8 @@ def test_audio_music_create_asks_prompt(monkeypatch):
     query = CaptureQuery("music_quick|showroom|ai_music", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert "Tạo nhạc theo hướng dẫn" in query.outputs[-1]["text"]
-    assert "Nhạc nền cho video" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "Tạo nhạc nền" in query.outputs[-1]["text"]
+    assert "Video bán hàng" in _joined_markup(query.outputs[-1]["reply_markup"])
 
 
 def test_no_old_voice_studio_public():
@@ -328,7 +328,7 @@ def test_invoice_change_music_returns_invoice(monkeypatch):
     assert captured["pending_payload"]["video_finalization"]["music_mode"] == "none"
 
 
-def test_invoice_back_returns_video_addons(monkeypatch):
+def test_invoice_back_returns_package_selection(monkeypatch):
     user_id = 940410
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
@@ -348,8 +348,9 @@ def test_invoice_back_returns_video_addons(monkeypatch):
     query = CaptureQuery("videoaddon|back", user_id)
     asyncio.run(bot.handle_video_addon_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert "Tùy chọn hoàn thiện video" in query.outputs[-1]["text"]
-    assert "vfinal|music" in _callbacks(query.outputs[-1]["reply_markup"])
+    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
+    assert "vfinal|tier|basic" in _callbacks(query.outputs[-1]["reply_markup"])
+    assert "vfinal|back" in _callbacks(query.outputs[-1]["reply_markup"])
 
 
 def test_invoice_no_duplicate_free_lines():

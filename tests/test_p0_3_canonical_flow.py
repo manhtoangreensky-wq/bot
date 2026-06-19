@@ -141,9 +141,9 @@ def test_audio_studio_voice_text_to_style_to_preview_path(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
     assert "Bản nghe thử ngắn" in query.outputs[-1]["text"]
     preview_labels = _labels(query.outputs[-1]["reply_markup"])
-    assert "✅ Tạo bản đầy đủ" in preview_labels
+    assert "🎙 Tạo giọng đọc" in preview_labels
     assert "🔁 Đổi giọng" in preview_labels
-    assert "✏️ Sửa nội dung" in preview_labels
+    assert "📝 Sửa nội dung giọng đọc" in preview_labels
     assert "🔁 Đổi giọng" + "/nhạc" not in preview_labels
 
 
@@ -156,8 +156,8 @@ def test_audio_studio_music_prompt_does_not_show_suno_or_provider(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     text = query.outputs[-1]["text"]
-    assert "Tạo nhạc theo hướng dẫn" in text
-    assert "Nhạc nền cho video" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
+    assert "Tạo nhạc nền" in text
+    assert "Video bán hàng" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
     assert "Suno" not in text
     assert "provider" not in text.lower()
     assert "api" not in text.lower()

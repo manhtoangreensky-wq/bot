@@ -35,13 +35,10 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
 
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
-    assert "Dịch / Phụ đề / Lồng tiếng" in text
+    assert "Trung tâm dịch thuật TOAN AAS" in text
     assert callbacks == {
-        "videodub|studio|subtitle_create",
-        "videodub|studio|subtitle_translate",
-        "videodub|studio|dub",
-        "videodub|studio|subtitle_plus_dub",
-        "music_quick|showroom|media",
+        "menu|translation_language_hub",
+        "menu|translation_video_factory",
         "menu|main",
     }
 
@@ -68,13 +65,14 @@ def test_translation_child_callbacks_have_handlers_or_existing_routes():
     source = inspect.getsource(bot)
     assert 'CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\\|")' in source
     assert 'CallbackQueryHandler(handle_video_dubbing_callback, pattern=r"^videodub\\|")' in source
-    assert 'if action in {"translation_text", "translation_transcript"}' in source
+    assert 'if action == "translation_text"' in source
+    assert 'if action == "translation_transcript"' in source
     assert 'if action == "translation_voice"' in source
     assert 'if action == "translation_two_way"' in source
     assert 'if action == "translation_live_conversation"' in source
     assert 'if action == "translation_document"' in source
     assert 'if action == "translation_language"' in source
-    assert 'if action == "translation_video_dub_menu"' in source
+    assert 'if action == "translation_video_factory"' in source
     assert 'if action.startswith("translation_pair_source_") or action.startswith("translation_pair_target_")' in source
     assert 'if action.startswith("translation_pair_start_")' in source
     assert 'if action in {"translation_stop_session", "translation_cancel"}' in source
@@ -124,10 +122,9 @@ def test_language_menu_remains_accessible_from_translation_and_account():
 def test_full_translation_hub_has_voice_two_way_live_and_video_branch():
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
-    assert "Dịch / Phụ đề / Lồng tiếng" in text
-    assert "videodub|studio|subtitle_translate" in callbacks
-    assert "videodub|studio|subtitle_plus_dub" in callbacks
-    assert "menu|translation_language_hub" not in callbacks
+    assert "Trung tâm dịch thuật TOAN AAS" in text
+    assert "menu|translation_language_hub" in callbacks
+    assert "menu|translation_video_factory" in callbacks
     assert "menu|translation_video_dub_menu" not in callbacks
     assert "menu|translation_voice" not in callbacks
     assert "videodub|type|subtitle_translate" not in callbacks
@@ -160,7 +157,7 @@ def test_video_dubbing_back_route_tracks_entry_origin():
     translation_markup = bot.video_dubbing_menu_keyboard("vi", "translation")
     video_markup = bot.video_dubbing_menu_keyboard("vi", "video")
 
-    assert "menu|main" in _callbacks(translation_markup)
+    assert "menu|translate" in _callbacks(translation_markup)
     assert "menu|main_video" not in _callbacks(translation_markup)
     assert "menu|main_video" in _callbacks(video_markup)
 

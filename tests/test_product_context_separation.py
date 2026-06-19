@@ -69,7 +69,9 @@ def test_showroom_translation_is_not_video_order_menu():
     labels = _flatten_text(bot.translation_menu_keyboard("vi"))
     callbacks = _callbacks(bot.translation_menu_keyboard("vi"))
 
-    assert "Studio" in text
+    assert "Trung tâm dịch thuật TOAN AAS" in text
+    assert "Dịch ngôn ngữ" in labels
+    assert "Dịch phụ đề / Lồng tiếng video" in labels
     assert "hóa đơn video" not in text.lower()
     assert "Không thêm" not in labels
     assert "Chọn cho video" not in labels

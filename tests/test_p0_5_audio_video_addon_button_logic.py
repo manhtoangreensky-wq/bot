@@ -206,12 +206,12 @@ def test_showroom_music_create_new_asks_prompt_then_suggestions(monkeypatch):
 
     query = CaptureQuery("music_quick|showroom|ai_music", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
-    assert "Tạo nhạc theo hướng dẫn" in query.outputs[-1]["text"]
-    assert "Nhạc nền cho video" in _joined(query.outputs[-1]["reply_markup"])
+    assert "Tạo nhạc nền" in query.outputs[-1]["text"]
+    assert "Video bán hàng" in _joined(query.outputs[-1]["reply_markup"])
 
-    purpose = CaptureQuery("music_quick|showroom|music_ai_purpose_background", user_id)
+    purpose = CaptureQuery("music_quick|showroom|music_ai_purpose_sales_video", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(purpose, user_id), SimpleNamespace()))
-    style = CaptureQuery("music_quick|showroom|music_ai_style_pop", user_id)
+    style = CaptureQuery("music_quick|showroom|music_ai_style_cinematic", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(style, user_id), SimpleNamespace()))
     mood = CaptureQuery("music_quick|showroom|music_ai_mood_cheerful", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(mood, user_id), SimpleNamespace()))
@@ -238,13 +238,13 @@ def test_video_addon_music_menu_shows_free_and_paid_choices():
     assert f"🎵 Tạo nhạc mới +{bot.VIDEO_SUNO_MUSIC_XU} Xu" in labels
 
 
-def test_video_addon_subtitle_dub_menu_shows_prices():
-    labels = "\n".join(_labels(bot.video_finalization_addon_keyboard("vi")))
+def test_video_addon_subtitle_dub_menu_opens_factory():
+    labels = _labels(bot.video_finalization_addon_keyboard("vi"))
+    callbacks = _callbacks(bot.video_finalization_addon_keyboard("vi"))
 
-    assert f"Tạo phụ đề +{bot.calculate_subtitle_dub_price('subtitle', 60)} Xu" in labels
-    assert f"Dịch phụ đề +{bot.calculate_subtitle_dub_price('translate_subtitle', 60)} Xu" in labels
-    assert f"Lồng tiếng +{bot.calculate_subtitle_dub_price('dubbing', 60)} Xu" in labels
-    assert f"Phụ đề + Lồng tiếng +{bot.calculate_subtitle_dub_price('subtitle_plus_dubbing', 60)} Xu" in labels
+    assert "🌐 Phụ đề / Dịch / Lồng tiếng" in labels
+    assert "videodub|start|video_addon" in callbacks
+    assert not any("Dịch phụ đề +" in label or "Lồng tiếng +" in label for label in labels)
 
 
 def test_video_addon_paid_voice_updates_invoice_line(monkeypatch):
@@ -278,8 +278,8 @@ def test_video_addon_paid_music_asks_prompt_before_invoice(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert called["invoice"] is False
-    assert "Tạo nhạc theo hướng dẫn" in query.outputs[-1]["text"]
-    assert "Nhạc nền cho video" in _joined(query.outputs[-1]["reply_markup"])
+    assert "Tạo nhạc nền" in query.outputs[-1]["text"]
+    assert "Video bán hàng" in _joined(query.outputs[-1]["reply_markup"])
     assert bot.get_video_finalization_state(user_id)["video_finalization"]["music_mode"] == "none"
 
 
