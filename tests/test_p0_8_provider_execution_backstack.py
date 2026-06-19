@@ -175,7 +175,7 @@ def test_music_price_increases_with_duration():
 
 def test_song_menu_has_seconds_half_full():
     labels = _labels(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert labels[:3] == ["⏱ Theo số giây", "1️⃣ Nửa bài đủ lời", "2️⃣ Hoàn chỉnh một bài"]
+    assert labels[:3] == ["⏱ Theo số giây", "1️⃣ Nửa bài", "2️⃣ Full bài"]
 
 
 def test_song_seconds_has_15_30_60_custom():

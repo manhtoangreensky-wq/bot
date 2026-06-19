@@ -201,8 +201,8 @@ def test_song_product_has_half_and_full_complete_lyrics_choices():
     labels = _labels(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     text = bot.music_song_product_text("vi")
 
-    assert "1️⃣ Nửa bài đủ lời" in labels
-    assert "2️⃣ Hoàn chỉnh một bài" in labels
+    assert "1️⃣ Nửa bài" in labels
+    assert "2️⃣ Full bài" in labels
     assert "không cắt giữa câu" in text
 
 

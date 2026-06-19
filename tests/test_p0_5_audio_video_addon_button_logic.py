@@ -113,7 +113,7 @@ def test_voice_inner_menu_restores_default_saved_custom_voice():
     labels = _labels(bot.voice_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     callbacks = _callbacks(bot.voice_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
 
-    for label in ["✍️ Văn bản thành giọng nói", "🎧 Giọng nói thành văn bản", "👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📁 Kho voice của tôi", "🧬 Tạo voice riêng"]:
+    for label in ["✍️ Văn bản thành giọng nói", "🎧 Giọng nói thành văn bản", "👩 Giọng nữ", "👨 Giọng nam", "📂 Kho voice", "🎙 Tạo voice riêng"]:
         assert label in labels
     for callback in ["music_quick|showroom|voice_tts_text", "music_quick|showroom|stt", "music_quick|showroom|voice_default_female", "music_quick|showroom|voice_default_male", "music_quick|showroom|voice_profiles", "music_quick|showroom|voice_clone"]:
         assert callback in callbacks
@@ -128,7 +128,7 @@ def test_showroom_voice_hub_callback_opens_inner_menu(monkeypatch):
     query = CaptureQuery("music_quick|showroom|voice_hub", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert "Kho voice của tôi" in _joined(query.outputs[-1]["reply_markup"])
+    assert "Kho voice" in _joined(query.outputs[-1]["reply_markup"])
     assert bot.get_music_guided_pending(user_id) is None
 
 
@@ -136,9 +136,9 @@ def test_music_inner_menu_restores_stock_sfx_user_media_create_new_music():
     labels = _labels(bot.music_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     callbacks = _callbacks(bot.music_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
 
-    for label in ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền", "🎤 Tạo bài hát có lời"]:
+    for label in ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]:
         assert label in labels
-    for callback in ["music_quick|showroom|music", "music_quick|showroom|sfx", "music_quick|showroom|media", "music_quick|showroom|ai_music", "music_quick|showroom|song_menu"]:
+    for callback in ["music_quick|showroom|music", "music_quick|showroom|music_edit", "music_quick|showroom|ai_music", "music_quick|showroom|song_menu"]:
         assert callback in callbacks
     assert "Không thêm nhạc" not in "\n".join(labels)
 
@@ -182,8 +182,8 @@ def test_showroom_saved_voice_profile_asks_text_then_preview(monkeypatch):
     result = bot.get_music_guided_result(user_id)
     assert handled is True
     assert result["selected_voice_profile_id"] == 77
-    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
-    assert "Voice bán hàng" in message.outputs[-1]["caption"]
+    assert "Xác nhận tạo giọng đọc" in message.outputs[-1]["text"]
+    assert "music_quick|showroom|voice_profile_generate:77" in _callbacks(message.outputs[-1]["reply_markup"])
     assert touched.get("last_used_at")
 
 
@@ -419,7 +419,7 @@ def test_legacy_voice_pick_redirects_to_voice_hub(monkeypatch):
     query = CaptureQuery("music_quick|voice_pick", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert "Kho voice của tôi" in _joined(query.outputs[-1]["reply_markup"])
+    assert "Kho voice" in _joined(query.outputs[-1]["reply_markup"])
     assert bot.get_music_guided_pending(user_id) is None
 
 

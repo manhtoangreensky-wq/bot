@@ -8130,7 +8130,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "music_quick|voice_pick" not in music_callbacks
 
     voice_hub_labels = [button.text for row in bot.voice_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["✍️ Văn bản thành giọng nói", "🎧 Giọng nói thành văn bản", "👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📁 Kho voice của tôi", "🧬 Tạo voice riêng"]:
+    for label in ["✍️ Văn bản thành giọng nói", "🎧 Giọng nói thành văn bản", "👩 Giọng nữ", "👨 Giọng nam", "📂 Kho voice", "🎙 Tạo voice riêng"]:
         assert label in voice_hub_labels
     for label in ["🎵 Tạo nhạc nền", "🎼 Kho nhạc / SFX", "📁 Media âm thanh"]:
         assert label not in voice_hub_labels
@@ -8138,7 +8138,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
         assert label not in voice_hub_labels
     assert "🚫 Không thêm giọng" not in voice_hub_labels
     music_hub_labels = [button.text for row in bot.music_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền", "🎤 Tạo bài hát có lời"]:
+    for label in ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]:
         assert label in music_hub_labels
     for label in ["📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
         assert label not in music_hub_labels

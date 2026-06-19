@@ -368,7 +368,12 @@ def _install_voice_provider_success(monkeypatch, calls):
         calls["cap_seconds"] = max_seconds
         return b"capped-preview-audio", "ok"
 
-    monkeypatch.setattr(bot, "get_minimax_voice_readiness", lambda: {"ready": True, "public_enabled": True})
+    monkeypatch.setattr(bot, "get_minimax_voice_clone_readiness", lambda: {
+        "ready": True,
+        "public_enabled": True,
+        "shopaikey_configured": True,
+        "key4u_configured": False,
+    })
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
     monkeypatch.setattr(bot, "shopaikey_minimax_upload_voice_sample", upload)
     monkeypatch.setattr(bot, "shopaikey_minimax_voice_clone", clone)

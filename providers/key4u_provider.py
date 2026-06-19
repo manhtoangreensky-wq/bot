@@ -46,6 +46,16 @@ def safe_join_url(base_url: str, endpoint: str) -> str:
     return f"{base}/{path.lstrip('/')}"
 
 
+def scoped_join_url(api_base_url: str, scoped_base_url: str, endpoint: str, scope_prefix: str) -> str:
+    path = str(endpoint or "").strip()
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    clean_scope = "/" + str(scope_prefix or "").strip().strip("/")
+    if clean_scope != "/" and path.startswith(clean_scope + "/"):
+        return safe_join_url(api_base_url, path)
+    return safe_join_url(scoped_base_url, path)
+
+
 def _safe_message(value: Any, limit: int = 220) -> str:
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
     redacted_markers = ("sk-", "Bearer ", "apiKey=", "token=", "key=")
@@ -220,6 +230,9 @@ class Key4UConfig:
     api_key: str = ""
     base_url: str = "https://api.key4u.shop"
     openai_base_url: str = "https://api.key4u.shop/v1"
+    minimax_base_url: str = "https://api.key4u.shop/minimax/v1"
+    voice_base_url: str = "https://voice.key4u.shop/api/v1"
+    suno_base_url: str = "https://api.key4u.shop/suno"
     smart_routing: bool = True
     public_enabled: bool = False
     admin_smoke_enabled: bool = True
@@ -232,27 +245,42 @@ class Key4UConfig:
     video_create_endpoint: str = "/v1/video/create"
     video_query_endpoint: str = "/v1/video/query"
     tts_endpoint: str = ""
+    tts_async_endpoint: str = ""
+    tts_query_endpoint: str = ""
+    tts_retrieve_endpoint: str = ""
+    voice_tts_endpoint: str = ""
+    minimax_upload_endpoint: str = ""
+    minimax_clone_endpoint: str = ""
     stt_endpoint: str = ""
     suno_create_endpoint: str = ""
     suno_query_endpoint: str = ""
+    suno_lyrics_endpoint: str = ""
+    suno_wav_endpoint: str = ""
+    suno_timing_endpoint: str = ""
     rerank_endpoint: str = ""
     chat_model: str = "qwen-plus"
     vision_model: str = "gemini-2.5-flash"
     image_edit_model: str = "grok-imagine-image-pro"
     nano_banana_edit_model: str = "nano-banana"
     video_model: str = "veo3.1-fast"
-    tts_model: str = ""
+    tts_model: str = "speech-02-hd"
+    tts_alt_model: str = "speech-2.6-hd"
+    clone_model: str = "speech-2.8-hd"
     stt_model: str = ""
-    suno_model: str = ""
+    suno_model: str = "chirp-v4"
     rerank_model: str = ""
 
 
 def config_from_env() -> Key4UConfig:
+    api_base = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
     return Key4UConfig(
         enabled=_flag("KEY4U_ENABLED", "false"),
-        api_key=_env("KEY4U_API_KEY", ""),
-        base_url=_env("KEY4U_BASE_URL", "https://api.key4u.shop"),
-        openai_base_url=_env("KEY4U_OPENAI_BASE_URL", "https://api.key4u.shop/v1"),
+        api_key=_env("KEY4U_TOKEN", _env("KEY4U_API_KEY", "")),
+        base_url=api_base,
+        openai_base_url=_env("KEY4U_OPENAI_BASE_URL", safe_join_url(api_base, "/v1")),
+        minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax/v1")),
+        voice_base_url=_env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1"),
+        suno_base_url=_env("KEY4U_SUNO_BASE", safe_join_url(api_base, "/suno")),
         smart_routing=_flag("KEY4U_SMART_ROUTING", "true"),
         public_enabled=_flag("KEY4U_PUBLIC_ENABLED", "false"),
         admin_smoke_enabled=_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true"),
@@ -264,19 +292,30 @@ def config_from_env() -> Key4UConfig:
         nano_banana_edit_endpoint=_env("KEY4U_NANO_BANANA_EDIT_ENDPOINT", "/fal-ai/nano-banana/edit"),
         video_create_endpoint=_env("KEY4U_VIDEO_CREATE_ENDPOINT", "/v1/video/create"),
         video_query_endpoint=_env("KEY4U_VIDEO_QUERY_ENDPOINT", "/v1/video/query"),
-        tts_endpoint=_env("KEY4U_TTS_ENDPOINT", ""),
+        tts_endpoint=_env("KEY4U_TTS_ENDPOINT", "/t2a_v2"),
+        tts_async_endpoint=_env("KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT", "/t2a_async_v2"),
+        tts_query_endpoint=_env("KEY4U_MINIMAX_TTS_QUERY_ENDPOINT", "/query/t2a_async_query_v2"),
+        tts_retrieve_endpoint=_env("KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT", "/files/retrieve"),
+        voice_tts_endpoint=_env("KEY4U_VOICE_TTS_ENDPOINT", "/tts"),
+        minimax_upload_endpoint=_env("KEY4U_MINIMAX_UPLOAD_ENDPOINT", "/files"),
+        minimax_clone_endpoint=_env("KEY4U_MINIMAX_CLONE_ENDPOINT", "/voice_clone"),
         stt_endpoint=_env("KEY4U_STT_ENDPOINT", ""),
-        suno_create_endpoint=_env("KEY4U_SUNO_CREATE_ENDPOINT", ""),
-        suno_query_endpoint=_env("KEY4U_SUNO_QUERY_ENDPOINT", ""),
+        suno_create_endpoint=_env("KEY4U_SUNO_CREATE_ENDPOINT", "/submit/music"),
+        suno_query_endpoint=_env("KEY4U_SUNO_QUERY_ENDPOINT", "/fetch/{taskId}"),
+        suno_lyrics_endpoint=_env("KEY4U_SUNO_LYRICS_ENDPOINT", "/submit/lyrics"),
+        suno_wav_endpoint=_env("KEY4U_SUNO_WAV_ENDPOINT", "/act/wav/{clipId}"),
+        suno_timing_endpoint=_env("KEY4U_SUNO_TIMING_ENDPOINT", "/act/timing/{clipId}"),
         rerank_endpoint=_env("KEY4U_RERANK_ENDPOINT", ""),
         chat_model=_env("KEY4U_DEFAULT_CHAT_MODEL", _env("KEY4U_CHAT_MODEL", "qwen-plus")),
         vision_model=_env("KEY4U_DEFAULT_VISION_MODEL", _env("KEY4U_VISION_MODEL", "gemini-2.5-flash")),
         image_edit_model=_env("KEY4U_DEFAULT_IMAGE_EDIT_MODEL", _env("KEY4U_IMAGE_EDIT_MODEL", "grok-imagine-image-pro")),
         nano_banana_edit_model=_env("KEY4U_NANO_BANANA_EDIT_MODEL", "nano-banana"),
         video_model=_env("KEY4U_DEFAULT_VIDEO_MODEL", _env("KEY4U_VIDEO_MODEL", "veo3.1-fast")),
-        tts_model=_env("KEY4U_DEFAULT_TTS_MODEL", _env("KEY4U_TTS_MODEL", "")),
+        tts_model=_env("KEY4U_DEFAULT_TTS_MODEL", _env("KEY4U_TTS_MODEL", "speech-02-hd")),
+        tts_alt_model=_env("KEY4U_ALT_TTS_MODEL", "speech-2.6-hd"),
+        clone_model=_env("KEY4U_MINIMAX_CLONE_MODEL", "speech-2.8-hd"),
         stt_model=_env("KEY4U_STT_MODEL", ""),
-        suno_model=_env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", "")),
+        suno_model=_env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", "chirp-v4")),
         rerank_model=_env("KEY4U_RERANK_MODEL", ""),
     )
 
@@ -299,6 +338,9 @@ class Key4UProvider:
             "configured": self.is_configured(),
             "base_url": self.config.base_url,
             "openai_base_url": self.config.openai_base_url,
+            "minimax_base_url": self.config.minimax_base_url,
+            "voice_base_url": self.config.voice_base_url,
+            "suno_base_url": self.config.suno_base_url,
             "usage_endpoint": "configured" if self.config.usage_endpoint else "NEED_ENDPOINT",
             "balance_endpoint": "configured" if self.config.balance_endpoint else "NEED_ENDPOINT",
             "models_endpoint": "configured" if self.config.models_endpoint else "NEED_ENDPOINT",
@@ -308,6 +350,8 @@ class Key4UProvider:
             "nano_banana_edit_model": self.config.nano_banana_edit_model or "",
             "video_model": self.config.video_model or "",
             "tts_model": self.config.tts_model or "",
+            "tts_alt_model": self.config.tts_alt_model or "",
+            "clone_model": self.config.clone_model or "",
             "stt_model": self.config.stt_model or "",
             "suno_model": self.config.suno_model or "",
             "rerank_model": self.config.rerank_model or "",
@@ -323,9 +367,14 @@ class Key4UProvider:
             "video_query": "ready_for_task_id",
             "image_generate": "planned_needs_docs",
             "tts": "needs_endpoint_docs" if not self.config.tts_endpoint else "admin_smoke",
+            "tts_async": "needs_endpoint_docs" if not self.config.tts_async_endpoint else "admin_smoke",
+            "voice_tts_fallback": "needs_endpoint_docs" if not self.config.voice_tts_endpoint else "admin_smoke",
             "stt": "needs_endpoint_docs" if not self.config.stt_endpoint else "admin_smoke",
             "translate": "via_chat_if_chat_model_pass",
             "suno": "needs_endpoint_docs" if not self.config.suno_create_endpoint else "admin_smoke",
+            "suno_lyrics": "needs_endpoint_docs" if not self.config.suno_lyrics_endpoint else "admin_smoke",
+            "suno_wav": "needs_endpoint_docs" if not self.config.suno_wav_endpoint else "admin_smoke",
+            "suno_timing": "needs_endpoint_docs" if not self.config.suno_timing_endpoint else "admin_smoke",
             "rerank": "local_keyword_fallback" if not self.config.rerank_endpoint else "admin_smoke",
         }
 
@@ -334,6 +383,29 @@ class Key4UProvider:
             "Authorization": f"Bearer {self.config.api_key}",
             "Accept": "application/json",
         }
+
+    def _minimax_url(self, endpoint: str) -> str:
+        return scoped_join_url(self.config.base_url, self.config.minimax_base_url, endpoint, "/minimax/v1")
+
+    def _voice_url(self, endpoint: str) -> str:
+        return scoped_join_url(self.config.base_url, self.config.voice_base_url, endpoint, "/api/v1")
+
+    def _suno_url(self, endpoint: str) -> str:
+        return scoped_join_url(self.config.base_url, self.config.suno_base_url, endpoint, "/suno")
+
+    @staticmethod
+    def _path_with_id(endpoint: str, value: str, *names: str) -> str:
+        safe_value = str(value or "").strip()
+        path = str(endpoint or "")
+        changed = False
+        for name in names:
+            token = "{" + name + "}"
+            if token in path:
+                path = path.replace(token, safe_value)
+                changed = True
+        if not changed and safe_value:
+            path = path.rstrip("/") + "/" + safe_value
+        return path
 
     async def request_json(
         self,
@@ -717,31 +789,323 @@ class Key4UProvider:
         except Exception as exc:
             return _result(ok=False, capability="video_query", model=self.config.video_model, status="FAIL_EXCEPTION", task_id=safe_task_id, error_class=type(exc).__name__, error_message_safe=exc)
 
-    async def tts(self, text: str = "Xin chào TOAN AAS.", model: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def tts(self, text: str = "Xin chào TOAN AAS.", model: str = "", voice_id: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = model or self.config.tts_model
         if not self.is_configured():
             return self._missing_result("tts", selected_model)
         if not self.config.tts_endpoint or not selected_model:
             return self._needs_docs_result("tts", selected_model, "KEY4U_TTS_ENDPOINT/KEY4U_DEFAULT_TTS_MODEL")
-        endpoint = safe_join_url(self.config.openai_base_url, self.config.tts_endpoint)
-        payload = {"model": selected_model, "input": str(text or "")[:500]}
+        endpoint = self._minimax_url(self.config.tts_endpoint)
+        payload = {
+            "model": selected_model,
+            "text": str(text or "")[:3500],
+            "voice_setting": {
+                "voice_id": str(voice_id or "male-qn-qingse")[:256],
+                "speed": 1,
+                "vol": 1,
+                "pitch": 0,
+            },
+            "audio_setting": {
+                "sample_rate": 32000,
+                "bitrate": 128000,
+                "format": "mp3",
+                "channel": 1,
+            },
+            "language_boost": "Vietnamese",
+            "stream": False,
+            "subtitle_enable": False,
+        }
         started = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
                 response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json=payload)
             latency_ms = int((time.perf_counter() - started) * 1000)
             content_type = response.headers.get("content-type", "")
-            if 200 <= response.status_code < 300 and (content_type.startswith("audio/") or response.content):
+            if 200 <= response.status_code < 300 and content_type.startswith("audio/") and response.content:
                 return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=response.content)
             try:
                 data = response.json()
             except Exception:
                 data = {}
+            body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+            audio_value = str((body or {}).get("audio") or (body or {}).get("audio_url") or (body or {}).get("url") or "").strip() if isinstance(body, dict) else ""
+            if 200 <= response.status_code < 300 and audio_value.startswith(("http://", "https://")):
+                return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_url=audio_value)
+            if 200 <= response.status_code < 300 and audio_value:
+                audio_bytes = b""
+                try:
+                    if re.fullmatch(r"[0-9a-fA-F]+", audio_value) and len(audio_value) % 2 == 0:
+                        audio_bytes = bytes.fromhex(audio_value)
+                    else:
+                        audio_bytes = base64.b64decode(audio_value, validate=False)
+                except Exception:
+                    audio_bytes = b""
+                if len(audio_bytes) > 512:
+                    return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=audio_bytes)
             return _result(ok=False, capability="tts", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
             return _result(ok=False, capability="tts", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
             return _result(ok=False, capability="tts", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def voice_tts_fallback(self, text: str = "Xin chào TOAN AAS.", voice_id: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
+        selected_model = self.config.tts_alt_model or "speech-2.6-hd"
+        if not self.is_configured():
+            return self._missing_result("voice_tts_fallback", selected_model)
+        if not self.config.voice_tts_endpoint:
+            return self._needs_docs_result("voice_tts_fallback", selected_model, "KEY4U_VOICE_TTS_ENDPOINT")
+        endpoint = self._voice_url(self.config.voice_tts_endpoint)
+        payload = {
+            "model": selected_model,
+            "text": str(text or "")[:3500],
+            "stream": False,
+            "voice_setting": {
+                "voice_id": str(voice_id or "English_expressive_narrator")[:256],
+                "speed": 1,
+                "vol": 1,
+                "pitch": 0,
+            },
+            "audio_setting": {
+                "sample_rate": 32000,
+                "bitrate": 128000,
+                "format": "mp3",
+                "channel": 1,
+            },
+            "language_boost": "auto",
+            "output_format": "hex",
+        }
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json=payload)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+            audio_value = str((body or {}).get("audio") or (body or {}).get("audio_url") or (body or {}).get("url") or "").strip() if isinstance(body, dict) else ""
+            if 200 <= response.status_code < 300 and audio_value.startswith(("http://", "https://")):
+                return _result(ok=True, capability="voice_tts_fallback", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_url=audio_value)
+            if 200 <= response.status_code < 300 and audio_value:
+                try:
+                    audio_bytes = bytes.fromhex(audio_value) if re.fullmatch(r"[0-9a-fA-F]+", audio_value) and len(audio_value) % 2 == 0 else base64.b64decode(audio_value, validate=False)
+                except Exception:
+                    audio_bytes = b""
+                if len(audio_bytes) > 512:
+                    return _result(ok=True, capability="voice_tts_fallback", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=audio_bytes)
+            return _result(ok=False, capability="voice_tts_fallback", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="voice_tts_fallback", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="voice_tts_fallback", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def tts_async(self, text: str, voice_id: str = "", model: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
+        selected_model = model or self.config.tts_model
+        if not self.is_configured():
+            return self._missing_result("tts_async", selected_model)
+        if not self.config.tts_async_endpoint or not selected_model:
+            return self._needs_docs_result("tts_async", selected_model, "KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT/KEY4U_DEFAULT_TTS_MODEL")
+        endpoint = self._minimax_url(self.config.tts_async_endpoint)
+        payload = {
+            "model": selected_model,
+            "text": str(text or "")[:10000],
+            "voice_setting": {
+                "voice_id": str(voice_id or "male-qn-qingse")[:256],
+                "speed": 1,
+                "vol": 1,
+                "pitch": 0,
+            },
+        }
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json=payload)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+            task_id = str((body or {}).get("task_id") or (body or {}).get("taskId") or data.get("task_id") or "").strip() if isinstance(data, dict) else ""
+            file_id = str((body or {}).get("file_id") or data.get("file_id") or "").strip() if isinstance(data, dict) else ""
+            task_token = str((body or {}).get("task_token") or data.get("task_token") or "").strip() if isinstance(data, dict) else ""
+            ok = bool(200 <= response.status_code < 300 and task_id)
+            result = _result(ok=ok, capability="tts_async", model=selected_model, status="PASS_SUBMITTED" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data)
+            result["file_id"] = file_id
+            result["task_token"] = task_token
+            return result
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="tts_async", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="tts_async", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def query_tts_task(self, task_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
+        selected_model = self.config.tts_model
+        safe_task_id = str(task_id or "").strip()
+        if not self.is_configured():
+            return self._missing_result("tts_query", selected_model)
+        if not self.config.tts_query_endpoint:
+            return self._needs_docs_result("tts_query", selected_model, "KEY4U_MINIMAX_TTS_QUERY_ENDPOINT")
+        if not safe_task_id:
+            return _result(ok=False, capability="tts_query", model=selected_model, status="NEED_TASK_ID", error_class="NEED_TASK_ID", error_message_safe="Missing task_id")
+        endpoint = self._minimax_url(self.config.tts_query_endpoint)
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.get(endpoint, headers=self._headers(), params={"task_id": safe_task_id})
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+            status = str((body or {}).get("status") or data.get("status") or "").strip() if isinstance(data, dict) else ""
+            file_id = str((body or {}).get("file_id") or data.get("file_id") or "").strip() if isinstance(data, dict) else ""
+            ok = bool(200 <= response.status_code < 300 and status.lower() in {"success", "succeeded", "completed"} and file_id)
+            result = _result(ok=ok, capability="tts_query", model=selected_model, status="SUCCESS" if ok else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, error_class="" if response.status_code < 400 else _classify_http(response.status_code, data), error_message_safe="" if response.status_code < 400 else data)
+            result["file_id"] = file_id
+            return result
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="tts_query", model=selected_model, status="FAIL_TIMEOUT", task_id=safe_task_id, error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="tts_query", model=selected_model, status="FAIL_EXCEPTION", task_id=safe_task_id, error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def retrieve_file(self, file_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
+        safe_file_id = str(file_id or "").strip()
+        if not self.is_configured():
+            return self._missing_result("file_retrieve", self.config.tts_model)
+        if not self.config.tts_retrieve_endpoint:
+            return self._needs_docs_result("file_retrieve", self.config.tts_model, "KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT")
+        if not safe_file_id:
+            return _result(ok=False, capability="file_retrieve", model=self.config.tts_model, status="NEED_FILE_ID", error_class="NEED_FILE_ID", error_message_safe="Missing file_id")
+        endpoint = self._minimax_url(self.config.tts_retrieve_endpoint)
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.get(endpoint, headers=self._headers(), params={"file_id": safe_file_id})
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            file_obj = data.get("file") if isinstance(data, dict) and isinstance(data.get("file"), dict) else {}
+            download_url = str((file_obj or {}).get("download_url") or (data or {}).get("download_url") or "").strip() if isinstance(data, dict) else ""
+            return _result(ok=bool(200 <= response.status_code < 300 and download_url), capability="file_retrieve", model=self.config.tts_model, status="PASS" if download_url else "FAIL", http_status=response.status_code, latency_ms=latency_ms, output_url=download_url, error_class="" if download_url else _classify_http(response.status_code, data), error_message_safe="" if download_url else data)
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="file_retrieve", model=self.config.tts_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="file_retrieve", model=self.config.tts_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def upload_voice_sample(
+        self,
+        audio_bytes: bytes,
+        filename: str = "voice-sample.mp3",
+        content_type: str = "audio/mpeg",
+        timeout_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        if not self.is_configured():
+            return self._missing_result("voice_upload", self.config.tts_model)
+        if not self.config.minimax_upload_endpoint:
+            return self._needs_docs_result("voice_upload", self.config.tts_model, "KEY4U_MINIMAX_UPLOAD_ENDPOINT")
+        if not audio_bytes:
+            return _result(ok=False, capability="voice_upload", status="NEED_AUDIO_INPUT", error_class="NEED_AUDIO_INPUT", error_message_safe="missing audio sample")
+        endpoint = self._minimax_url(self.config.minimax_upload_endpoint)
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(filename or "voice-sample.mp3"))[:80]
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.post(
+                    endpoint,
+                    headers=self._headers(),
+                    data={"purpose": "prompt_audio"},
+                    files={"file": (safe_name, audio_bytes, str(content_type or "audio/mpeg"))},
+                )
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                payload = response.json()
+            except Exception:
+                payload = {}
+            file_obj = payload.get("file") if isinstance(payload, dict) and isinstance(payload.get("file"), dict) else {}
+            file_id = str((file_obj or {}).get("file_id") or (payload or {}).get("file_id") or "").strip() if isinstance(payload, dict) else ""
+            result = _result(
+                ok=bool(200 <= response.status_code < 300 and file_id),
+                capability="voice_upload",
+                model=self.config.tts_model,
+                status="PASS" if file_id else "FAIL",
+                http_status=response.status_code,
+                latency_ms=latency_ms,
+                error_class="" if file_id else _classify_http(response.status_code, payload),
+                error_message_safe="" if file_id else payload,
+            )
+            result["file_id"] = file_id
+            return result
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="voice_upload", model=self.config.tts_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="voice_upload", model=self.config.tts_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def clone_voice(
+        self,
+        file_id: str,
+        voice_id: str,
+        prompt_text: str,
+        timeout_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        if not self.is_configured():
+            return self._missing_result("voice_clone", self.config.tts_model)
+        if not self.config.minimax_clone_endpoint:
+            return self._needs_docs_result("voice_clone", self.config.tts_model, "KEY4U_MINIMAX_CLONE_ENDPOINT")
+        safe_file_id = str(file_id or "").strip()
+        safe_voice_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(voice_id or "").strip())[:128].strip("_-")
+        if not safe_file_id or not safe_voice_id:
+            return _result(ok=False, capability="voice_clone", model=self.config.tts_model, status="FAIL_BAD_REQUEST", error_class="FAIL_BAD_REQUEST", error_message_safe="missing file_id or voice_id")
+        endpoint = self._minimax_url(self.config.minimax_clone_endpoint)
+        payload = {
+            "file_id": int(safe_file_id) if safe_file_id.isdigit() else safe_file_id,
+            "voice_id": safe_voice_id,
+            "clone_prompt": {
+                "prompt_audio": int(safe_file_id) if safe_file_id.isdigit() else safe_file_id,
+                "prompt_text": str(prompt_text or "")[:500],
+            },
+            "text": str(prompt_text or "")[:500],
+            "model": self.config.clone_model or "speech-2.8-hd",
+            "language_boost": "Vietnamese",
+            "need_noise_reduction": True,
+            "need_volume_normalization": True,
+            "aigc_watermark": False,
+        }
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json=payload)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            base_resp = data.get("base_resp") if isinstance(data, dict) and isinstance(data.get("base_resp"), dict) else {}
+            provider_code = str((base_resp or {}).get("status_code") or "0")
+            ok = bool(200 <= response.status_code < 300 and provider_code in {"0", "1", ""})
+            demo_audio = str((data or {}).get("demo_audio") or (data or {}).get("trial_audio") or "") if isinstance(data, dict) else ""
+            result = _result(
+                ok=ok,
+                capability="voice_clone",
+                model=self.config.clone_model or self.config.tts_model,
+                status="PASS" if ok else "FAIL",
+                http_status=response.status_code,
+                latency_ms=latency_ms,
+                output_url=demo_audio if demo_audio.startswith(("http://", "https://")) else "",
+                error_class="" if ok else _classify_http(response.status_code, data),
+                error_message_safe="" if ok else data,
+            )
+            result["voice_id"] = safe_voice_id if ok else ""
+            result["demo_audio"] = demo_audio
+            return result
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="voice_clone", model=self.config.clone_model or self.config.tts_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="voice_clone", model=self.config.clone_model or self.config.tts_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
     async def stt(self, audio_bytes: bytes | None = None, model: str = "", timeout_seconds: float = 60.0) -> dict[str, Any]:
         selected_model = model or self.config.stt_model
@@ -780,20 +1144,26 @@ class Key4UProvider:
         duration_seconds: int = 30,
         instrumental: bool = True,
         title: str = "TOAN AAS Music",
+        lyrics: str = "",
+        tags: str = "",
     ) -> dict[str, Any]:
         selected_model = model or self.config.suno_model
         if not self.is_configured():
             return self._missing_result("suno", selected_model)
         if not self.config.suno_create_endpoint or not selected_model:
             return self._needs_docs_result("suno", selected_model, "KEY4U_SUNO_CREATE_ENDPOINT/KEY4U_DEFAULT_MUSIC_MODEL")
-        endpoint = safe_join_url(self.config.base_url, self.config.suno_create_endpoint)
+        endpoint = self._suno_url(self.config.suno_create_endpoint)
+        lyrics_text = str(lyrics or "").strip()
         payload = {
-            "model": selected_model,
-            "prompt": str(prompt or "")[:1200],
-            "duration": max(1, min(600, int(duration_seconds or 30))),
+            "mv": selected_model,
             "make_instrumental": bool(instrumental),
             "title": str(title or "TOAN AAS Music")[:120],
+            "tags": str(tags or ("instrumental" if instrumental else "vocal, original"))[:240],
         }
+        if lyrics_text:
+            payload["prompt"] = lyrics_text[:4000]
+        else:
+            payload["gpt_description_prompt"] = str(prompt or "")[:1200]
         started = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
@@ -803,8 +1173,12 @@ class Key4UProvider:
                 data = response.json()
             except Exception:
                 data = {}
-            body = data.get("data") if isinstance(data.get("data"), dict) else data
-            task_id = str((body or {}).get("task_id") or (body or {}).get("id") or data.get("task_id") or "")
+            data_value = data.get("data") if isinstance(data, dict) else ""
+            if isinstance(data_value, str):
+                task_id = data_value.strip()
+            else:
+                body = data_value if isinstance(data_value, dict) else data
+                task_id = str((body or {}).get("task_id") or (body or {}).get("taskId") or (body or {}).get("id") or data.get("task_id") or "")
             if 200 <= response.status_code < 300 and task_id:
                 return _result(ok=True, capability="suno", model=selected_model, status="PASS_SUBMITTED", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id)
             return _result(ok=False, capability="suno", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
@@ -822,24 +1196,139 @@ class Key4UProvider:
         safe_task_id = str(task_id or "").strip()
         if not safe_task_id:
             return _result(ok=False, capability="suno_query", model=selected_model, status="NEED_TASK_ID", error_class="NEED_TASK_ID", error_message_safe="Missing task_id")
-        endpoint = safe_join_url(self.config.base_url, self.config.suno_query_endpoint)
+        endpoint_path = str(self.config.suno_query_endpoint or "")
+        if "{taskId}" in endpoint_path:
+            endpoint_path = endpoint_path.replace("{taskId}", safe_task_id)
+        elif "{task_id}" in endpoint_path:
+            endpoint_path = endpoint_path.replace("{task_id}", safe_task_id)
+        else:
+            endpoint_path = endpoint_path.rstrip("/") + "/" + safe_task_id
+        endpoint = self._suno_url(endpoint_path)
         started = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-                response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json={"task_id": safe_task_id})
+                response = await client.get(endpoint, headers=self._headers())
             latency_ms = int((time.perf_counter() - started) * 1000)
             try:
                 data = response.json()
             except Exception:
                 data = {}
-            body = data.get("data") if isinstance(data.get("data"), dict) else data
-            output_url = str((body or {}).get("audio_url") or (body or {}).get("url") or data.get("audio_url") or "")
-            status = str((body or {}).get("status") or data.get("status") or "")
-            return _result(ok=bool(output_url), capability="suno_query", model=selected_model, status="SUCCESS" if output_url else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, output_url=output_url)
+            body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+            items = (body or {}).get("data") if isinstance(body, dict) else []
+            if isinstance(items, dict):
+                items = [items]
+            output_url = ""
+            output_id = ""
+            lyrics_text = ""
+            for item in items or []:
+                if isinstance(item, dict) and (item.get("audio_url") or item.get("url")):
+                    output_url = str(item.get("audio_url") or item.get("url") or "")
+                    output_id = str(item.get("clip_id") or item.get("id") or "")
+                    lyrics_text = str(item.get("prompt") or item.get("text") or "")
+                    break
+                if isinstance(item, dict) and item.get("text") and not lyrics_text:
+                    lyrics_text = str(item.get("text") or "")
+                    output_id = str(item.get("id") or "")
+            if not output_url and isinstance(body, dict):
+                output_url = str(body.get("audio_url") or body.get("url") or "")
+            status = str((body or {}).get("status") or data.get("status") or "") if isinstance(data, dict) else ""
+            fail_reason = str((body or {}).get("fail_reason") or (body or {}).get("failReason") or data.get("message") or "") if isinstance(data, dict) and isinstance(body, dict) else ""
+            result = _result(ok=bool(output_url or (status.upper() == "SUCCESS" and lyrics_text)), capability="suno_query", model=selected_model, status="SUCCESS" if (output_url or (status.upper() == "SUCCESS" and lyrics_text)) else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, output_url=output_url, error_message_safe=fail_reason)
+            result["clip_id"] = output_id
+            result["text"] = lyrics_text
+            return result
         except httpx.TimeoutException as exc:
             return _result(ok=False, capability="suno_query", model=selected_model, status="FAIL_TIMEOUT", task_id=safe_task_id, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
             return _result(ok=False, capability="suno_query", model=selected_model, status="FAIL_EXCEPTION", task_id=safe_task_id, error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def suno_lyrics(self, prompt: str, title: str = "TOAN AAS Lyrics", tags: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
+        selected_model = self.config.suno_model
+        if not self.is_configured():
+            return self._missing_result("suno_lyrics", selected_model)
+        if not self.config.suno_lyrics_endpoint:
+            return self._needs_docs_result("suno_lyrics", selected_model, "KEY4U_SUNO_LYRICS_ENDPOINT")
+        endpoint = self._suno_url(self.config.suno_lyrics_endpoint)
+        payload = {
+            "prompt": str(prompt or "")[:1200],
+            "title": str(title or "TOAN AAS Lyrics")[:120],
+            "tags": str(tags or "pop, vietnamese")[:240],
+        }
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json=payload)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            data_value = data.get("data") if isinstance(data, dict) else ""
+            task_id = data_value.strip() if isinstance(data_value, str) else str((data_value or {}).get("task_id") or (data_value or {}).get("taskId") or "")
+            ok = bool(200 <= response.status_code < 300 and task_id)
+            return _result(ok=ok, capability="suno_lyrics", model=selected_model, status="PASS_SUBMITTED" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data)
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="suno_lyrics", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="suno_lyrics", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def suno_wav(self, clip_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
+        selected_model = self.config.suno_model
+        safe_clip_id = str(clip_id or "").strip()
+        if not self.is_configured():
+            return self._missing_result("suno_wav", selected_model)
+        if not self.config.suno_wav_endpoint:
+            return self._needs_docs_result("suno_wav", selected_model, "KEY4U_SUNO_WAV_ENDPOINT")
+        if not safe_clip_id:
+            return _result(ok=False, capability="suno_wav", model=selected_model, status="NEED_CLIP_ID", error_class="NEED_CLIP_ID", error_message_safe="Missing clip_id")
+        endpoint = self._suno_url(self._path_with_id(self.config.suno_wav_endpoint, safe_clip_id, "clipId", "clip_id"))
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.get(endpoint, headers=self._headers())
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            content_type = response.headers.get("content-type", "")
+            if 200 <= response.status_code < 300 and content_type.startswith("audio/") and response.content:
+                return _result(ok=True, capability="suno_wav", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=response.content)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+            output_url = str((body or {}).get("url") or (body or {}).get("download_url") or (body or {}).get("audio_url") or "").strip() if isinstance(body, dict) else ""
+            return _result(ok=bool(200 <= response.status_code < 300 and output_url), capability="suno_wav", model=selected_model, status="PASS" if output_url else "FAIL", http_status=response.status_code, latency_ms=latency_ms, output_url=output_url, error_class="" if output_url else _classify_http(response.status_code, data), error_message_safe="" if output_url else data)
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="suno_wav", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="suno_wav", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def suno_timing(self, clip_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
+        selected_model = self.config.suno_model
+        safe_clip_id = str(clip_id or "").strip()
+        if not self.is_configured():
+            return self._missing_result("suno_timing", selected_model)
+        if not self.config.suno_timing_endpoint:
+            return self._needs_docs_result("suno_timing", selected_model, "KEY4U_SUNO_TIMING_ENDPOINT")
+        if not safe_clip_id:
+            return _result(ok=False, capability="suno_timing", model=selected_model, status="NEED_CLIP_ID", error_class="NEED_CLIP_ID", error_message_safe="Missing clip_id")
+        endpoint = self._suno_url(self._path_with_id(self.config.suno_timing_endpoint, safe_clip_id, "clipId", "clip_id"))
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.get(endpoint, headers=self._headers())
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            ok = bool(200 <= response.status_code < 300 and data)
+            result = _result(ok=ok, capability="suno_timing", model=selected_model, status="PASS" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data, raw_debug_admin_only={"keys": sorted(data.keys())[:8] if isinstance(data, dict) else []})
+            result["data"] = data if ok else {}
+            return result
+        except httpx.TimeoutException as exc:
+            return _result(ok=False, capability="suno_timing", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+        except Exception as exc:
+            return _result(ok=False, capability="suno_timing", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
     async def rerank(self, query: str, candidates: list[str] | None = None, model: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = model or self.config.rerank_model

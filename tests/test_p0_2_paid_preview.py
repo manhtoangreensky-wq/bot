@@ -46,9 +46,8 @@ def test_paid_voice_requires_preview_before_final_confirm():
     assert len(bot.VOICE_PROFILE_PREVIEW_TEXT.split()) <= 12
 
     block = _source_between('if action.startswith("voice_clone_confirm:")', 'if action == "voice_clone_guard":')
-    assert "paid_preview_friendly_guard_text" in block
-    assert "voice_clone_confirmed" in block
-    assert block.index("paid_preview_friendly_guard_text") < block.index("create_minimax_voice_profile_preview")
+    assert "create_minimax_voice_profile_preview" in block
+    assert "paid_preview_friendly_guard_text" not in block
     preview_function = _source_between("async def create_minimax_voice_profile_preview", "async def handle_music_quick_callback")
     assert "spend_fixed_credit_info" not in preview_function
     save_block = _source_between('if action.startswith("voice_profile_save:")', 'if action.startswith("voice_clone_confirm:")')

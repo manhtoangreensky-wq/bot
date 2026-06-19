@@ -141,9 +141,9 @@ def test_audio_voice_text_to_style_to_preview_flow(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(preview, user_id), SimpleNamespace()))
     preview_labels = _labels(preview.outputs[-1]["reply_markup"])
     assert "Bản nghe thử ngắn" in preview.outputs[-1]["text"]
-    assert "🎙 Tạo giọng đọc" in preview_labels
+    assert "✅ Tạo giọng đọc" in preview_labels
     assert "🔁 Đổi giọng" in preview_labels
-    assert "📝 Sửa nội dung giọng đọc" in preview_labels
+    assert "✏️ Sửa nội dung" in preview_labels
     assert "🏠 Menu chính" in preview_labels
 
 
@@ -157,7 +157,7 @@ def test_audio_music_menu_simple(monkeypatch):
     labels = _labels(query.outputs[-1]["reply_markup"])
 
     assert "Bạn muốn làm gì?" in query.outputs[-1]["text"]
-    assert labels[:5] == ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền", "🎤 Tạo bài hát có lời"]
+    assert labels[:4] == ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]
     assert "🚫 Không thêm nhạc" not in labels
 
 
