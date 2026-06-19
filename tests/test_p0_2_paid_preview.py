@@ -36,7 +36,7 @@ def _assert_public_copy_safe(text: str):
 def test_paid_voice_requires_preview_before_final_confirm():
     assert bot.paid_task_requires_preview("voice_clone", {"price_xu": 120})
     text = bot.paid_preview_friendly_guard_text("voice_clone", "vi")
-    assert "Bạn có thể nghe/xem thử một đoạn ngắn trước" in text
+    assert "Nghe thử voice riêng" in text
     assert "chưa xuất bản đầy đủ" in text
     _assert_public_copy_safe(text)
     entry_callbacks = _callbacks(bot.voice_clone_preview_entry_keyboard(1, "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
@@ -58,7 +58,7 @@ def test_paid_voice_requires_preview_before_final_confirm():
 def test_paid_music_requires_preview_before_final_confirm():
     assert bot.paid_task_requires_preview("ai_music", {"price_xu": 180})
     text = bot.suno_user_guard_text("vi")
-    assert "Bạn có thể nghe/xem thử một đoạn ngắn trước" in text
+    assert "nghe thử nhạc" in text
     assert "TOAN AAS chưa xuất bản đầy đủ" in text
     _assert_public_copy_safe(text)
 
@@ -90,13 +90,14 @@ def test_paid_subtitle_translation_preview_before_final_confirm():
             "translation_enabled": True,
         }
     }, "vi")
-    assert "Phụ đề/dịch" in text
+    assert "Phụ đề:" in text
     assert "vài dòng đầu" in text
     _assert_public_copy_safe(text)
 
 
 def test_paid_video_preview_max_6_seconds():
-    assert bot.video_paid_preview_required({"job_type": "video", "base_cost": 300})
+    assert not bot.video_paid_preview_required({"job_type": "video", "base_cost": 300})
+    assert bot.video_paid_preview_required({"job_type": "video", "base_cost": 300, "preview_required": True})
     text = bot.video_paid_preview_text({"pending_payload": {"job_type": "video", "base_cost": 300, "duration_seconds": 120}}, "vi")
     assert "tối đa 6 giây" in text
     assert not bot.video_paid_preview_artifact({"pending_payload": {"paid_preview_video_file_id": "full-file", "paid_preview_seconds": 7}})
@@ -118,7 +119,8 @@ def test_long_video_preview_max_6_seconds():
     assert bot.paid_preview_seconds(120) == 6
 
 
-def test_no_full_output_before_payment():
+def test_preview_optional_full_output_stays_active(monkeypatch):
+    monkeypatch.setattr(bot, "video_paid_preview_worker_available", lambda: True)
     callbacks = _callbacks(bot.video_addon_confirm_keyboard("tok", "basic", "vi"))
     assert "videoaddon|preview|tok" in callbacks
     assert callbacks.index("videoaddon|preview|tok") < callbacks.index("shopai|confirm|tok")

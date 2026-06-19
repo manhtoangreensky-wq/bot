@@ -416,6 +416,73 @@ def run_video_local_edit(job: dict) -> None:
         update_job(job_id, "failed", f"video_local_edit:{type(exc).__name__}:{first_line(str(exc))}")
 
 
+def run_social_link_import(job: dict) -> None:
+    job_id = job.get("id")
+    try:
+        from yt_dlp import YoutubeDL
+
+        payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+        source_url = str(payload.get("source_url") or "").strip()
+        chat_id = str(payload.get("chat_id") or "").strip()
+        if not source_url.startswith(("http://", "https://")) or not chat_id:
+            update_job(job_id, "failed", "social_link_import_invalid_input")
+            return
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_template = os.path.join(tmpdir, "toan_aas_social_%(id)s.%(ext)s")
+            options = {
+                "format": "bestvideo[filesize<45M]+bestaudio/best[filesize<45M]/best",
+                "outtmpl": output_template,
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "socket_timeout": 45,
+                "retries": 2,
+                "fragment_retries": 2,
+                "max_filesize": 45 * 1024 * 1024,
+                "merge_output_format": "mp4",
+            }
+            with YoutubeDL(options) as downloader:
+                info = downloader.extract_info(source_url, download=True)
+                if not info or info.get("is_live"):
+                    raise RuntimeError("social_link_import_unsupported_live")
+                duration = int(info.get("duration") or 0)
+                if duration and duration > 60 * 30:
+                    raise RuntimeError("social_link_import_duration_too_long")
+                output_path = downloader.prepare_filename(info)
+                merged_path = os.path.splitext(output_path)[0] + ".mp4"
+                if os.path.exists(merged_path):
+                    output_path = merged_path
+            if not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+                raise RuntimeError("social_link_import_empty")
+            if os.path.getsize(output_path) > 50 * 1024 * 1024:
+                raise RuntimeError("social_link_import_too_large")
+            reply_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "👁 Tạo phụ đề", "callback_data": "videodub|type|subtitle_create"},
+                        {"text": "🌐 Dịch phụ đề", "callback_data": "videodub|type|subtitle_translate"},
+                    ],
+                    [
+                        {"text": "🗣 Lồng tiếng tự động", "callback_data": "videodub|type|dub"},
+                        {"text": "🎬 Dịch + lồng tiếng tự động", "callback_data": "videodub|type|subtitle_plus_dub"},
+                    ],
+                    [
+                        {"text": "📂 Lưu vào Media", "callback_data": "videodub|source_media"},
+                        {"text": "🏠 Menu chính", "callback_data": "menu|main"},
+                    ],
+                ]
+            }
+            output_file_id = telegram_send_video(
+                chat_id,
+                output_path,
+                "✅ Đã tải video thành công.\nPhí tải link: 10 Xu.\n\nBạn muốn làm gì tiếp?",
+                reply_markup=reply_markup,
+            )
+        update_job(job_id, "succeeded", "social link imported", output_file_id=output_file_id)
+    except Exception as exc:
+        update_job(job_id, "failed", f"social_link_import:{type(exc).__name__}:{first_line(str(exc))}")
+
+
 def run_frame_video_render(job: dict) -> None:
     job_id = job.get("id")
     try:
@@ -565,6 +632,9 @@ def process_job(job: dict) -> None:
         return
     if job_type == "video_local_edit":
         run_video_local_edit(job)
+        return
+    if job_type == "social_link_import":
+        run_social_link_import(job)
         return
     if job_type.startswith("comfy_"):
         update_job(job_id, "failed", "ComfyUI Phase 1 planned/not_ready.")

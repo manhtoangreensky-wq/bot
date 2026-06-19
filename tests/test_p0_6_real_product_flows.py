@@ -160,12 +160,12 @@ def test_guided_music_creation_reaches_three_prompt_choices(monkeypatch):
 
     start = CaptureQuery("music_quick|showroom|ai_music", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(start, user_id), SimpleNamespace()))
-    assert "Tạo nhạc theo hướng dẫn" in start.outputs[-1]["text"]
-    assert "Nhạc nền cho video" in _joined(start.outputs[-1]["reply_markup"])
+    assert "Tạo nhạc nền" in start.outputs[-1]["text"]
+    assert "Video bán hàng" in _joined(start.outputs[-1]["reply_markup"])
 
     for data in [
-        "music_quick|showroom|music_ai_purpose_background",
-        "music_quick|showroom|music_ai_style_pop",
+        "music_quick|showroom|music_ai_purpose_sales_video",
+        "music_quick|showroom|music_ai_style_cinematic",
         "music_quick|showroom|music_ai_mood_cheerful",
     ]:
         query = CaptureQuery(data, user_id)

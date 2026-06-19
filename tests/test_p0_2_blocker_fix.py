@@ -109,9 +109,9 @@ def test_paid_video_missing_preview_does_not_dead_end(monkeypatch):
     monkeypatch.setattr(bot, "get_local_worker_job", lambda _job_id: {})
     query = _run_video_callback(monkeypatch, user_id, f"videoaddon|preview|{token}")
     callbacks = _callbacks(query.edited["reply_markup"])
-    assert f"videoaddon|preview_retry|{token}" in callbacks
-    assert "vfinal|menu" in callbacks
-    assert "videoaddon|invoice" in callbacks
+    assert f"videoaddon|preview_locked|{token}" in callbacks
+    assert f"shopai|confirm|{token}" in callbacks
+    assert "videoaddon|back" in callbacks
     assert "videoaddon|main" in callbacks
 
 
@@ -119,6 +119,7 @@ def test_paid_video_final_confirm_visible_after_real_preview(monkeypatch):
     user_id = 992004
     token = "worker-success"
     _video_state(user_id, token)
+    monkeypatch.setattr(bot, "video_paid_preview_worker_available", lambda: True)
     state = bot.get_video_addon_state(user_id)
     state["paid_preview_local_job_id"] = 703
     state["pending_payload"]["paid_preview_local_job_id"] = 703

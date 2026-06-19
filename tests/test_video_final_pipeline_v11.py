@@ -205,13 +205,8 @@ def test_music_and_addon_keyboards_have_real_callbacks():
         "vfinal|music_ai",
     }.issubset(music_callbacks)
     addon_callbacks = _callbacks(bot.video_finalization_addon_keyboard("vi"))
-    assert {
-        "vfinal|addon_none",
-        "vfinal|subtitle",
-        "vfinal|dub",
-        "vfinal|combo",
-        "vfinal|translate_sub",
-    }.issubset(addon_callbacks)
+    assert {"vfinal|addon_none", "videodub|start|video_addon"}.issubset(addon_callbacks)
+    assert {"vfinal|subtitle", "vfinal|dub", "vfinal|combo", "vfinal|translate_sub"}.isdisjoint(addon_callbacks)
     assert "vfinal|translate_combo" not in addon_callbacks
 
 
