@@ -227,7 +227,7 @@ def test_change_music_suggestion_preserves_duration_and_song_product(monkeypatch
     assert len(saved["suggestions"]) == 3
 
 
-def test_music_preview_does_not_submit_and_confirm_submits_real_job(monkeypatch):
+def test_music_preview_submits_preview_job_and_confirm_submits_full_job(monkeypatch):
     user_id = 970702
     _reset_user(user_id)
     bot.save_music_guided_result(user_id, {
@@ -239,23 +239,31 @@ def test_music_preview_does_not_submit_and_confirm_submits_real_job(monkeypatch)
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {"public_enabled": True, "ready": True})
     submitted = []
 
-    async def fake_submit(result):
-        submitted.append(dict(result))
-        return {"ok": True, "task_id": "music-task-1", "provider": "test-route", "status": "SUBMITTED"}
+    async def fake_submit(result, preview=False):
+        submitted.append({"result": dict(result), "preview": preview})
+        task_id = "music-preview-1" if preview else "music-task-1"
+        return {"ok": True, "task_id": task_id, "provider": "test-route", "status": "SUBMITTED"}
 
     monkeypatch.setattr(bot, "submit_music_generation_job", fake_submit)
 
     preview = CaptureQuery("music_quick|showroom|music_ai_preview", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(preview, user_id), SimpleNamespace()))
-    assert submitted == []
-    assert bot.get_music_guided_result(user_id)["music_preview_seen"] is True
+    assert len(submitted) == 1
+    assert submitted[0]["preview"] is True
+    preview_state = bot.get_music_guided_result(user_id)
+    assert preview_state["music_preview_seen"] is False
+    assert preview_state["music_preview_task_id"] == "music-preview-1"
+
+    preview_state["music_preview_seen"] = True
+    bot.save_music_guided_result(user_id, preview_state)
 
     monkeypatch.setattr(bot, "get_user", lambda uid: (5000, None, None))
     monkeypatch.setattr(bot, "spend_fixed_credit_info", lambda *args, **kwargs: {"ok": True, "final_cost": 300})
     confirm = CaptureQuery("music_quick|showroom|music_ai_confirm", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(confirm, user_id), SimpleNamespace()))
 
-    assert len(submitted) == 1
+    assert len(submitted) == 2
+    assert submitted[1]["preview"] is False
     assert bot.get_music_guided_result(user_id)["music_task_id"] == "music-task-1"
     assert "Đã xác nhận tạo bản đầy đủ" in confirm.outputs[-1]["text"]
 
