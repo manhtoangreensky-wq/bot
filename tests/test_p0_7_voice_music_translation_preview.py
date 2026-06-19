@@ -127,7 +127,7 @@ def test_voice_vault_is_paginated_with_five_numeric_profile_buttons(monkeypatch)
     assert _labels(first)[:5] == ["1", "2", "3", "4", "5"]
     assert "music_quick|showroom|voice_profiles_page:1" in _callbacks(first)
     assert "music_quick|showroom|voice_profiles_page:0" in _callbacks(second)
-    assert len([cb for cb in _callbacks(first) if "voice_profile_select:" in cb]) == 5
+    assert len([cb for cb in _callbacks(first) if "voice_profile_select_code:" in cb]) == 5
 
 
 def test_failed_voice_profile_cannot_generate_or_offer_final_use():

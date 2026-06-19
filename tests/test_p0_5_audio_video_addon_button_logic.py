@@ -226,7 +226,7 @@ def test_video_addon_voice_menu_shows_free_and_paid_choices():
 
     for label in ["🚫 Không thêm giọng", "👩 Giọng nữ miễn phí", "👨 Giọng nam miễn phí", "📁 Voice đã lưu"]:
         assert label in labels
-    assert f"🧬 Tạo voice riêng +{bot.VIDEO_VOICE_CLONE_CREATE_XU} Xu" in labels
+    assert f"🧬 Tạo voice riêng free/{bot.VOICE_PROFILE_PRICE_XU} Xu" in labels
     assert "▶️ Nghe thử giọng" in labels
 
 
@@ -257,7 +257,7 @@ def test_video_addon_paid_voice_updates_invoice_line(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     order = bot.video_order_from_state(bot.get_video_finalization_state(user_id), user_id=user_id)
 
-    assert any(item["key"] == "voice_clone_create" and item["price_xu"] == bot.VIDEO_VOICE_CLONE_CREATE_XU for item in order["paid_items"])
+    assert any(item["key"] == "voice_clone_create" and item["price_xu"] == 0 for item in order["paid_items"])
     assert "chưa trừ Xu" in query.outputs[-1]["text"]
 
 

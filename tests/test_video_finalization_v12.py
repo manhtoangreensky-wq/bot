@@ -327,11 +327,11 @@ def test_stale_local_export_without_images_uses_prompt_video_path(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert "Chọn gói xuất video AI" in query.edited["text"]
-    assert "Prompt video: <b>Có</b>" in query.edited["text"]
+    assert "Tùy chọn hoàn thiện video" in query.edited["text"]
     callbacks = _callbacks(query.edited["reply_markup"])
-    assert "vfinal|tier|low" in callbacks
-    assert "vfinal|tier|basic" in callbacks
+    assert "vfinal|tier" in callbacks
+    assert "vfinal|voice" in callbacks
+    assert "vfinal|music" in callbacks
     assert "vfinal|export_local" not in callbacks
     assert "vfinal|back" in callbacks
 
@@ -379,10 +379,11 @@ def test_ready_prompt_export_opens_public_video_tiers(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert "Chọn gói xuất video AI" in query.edited["text"]
+    assert "Tùy chọn hoàn thiện video" in query.edited["text"]
     callbacks = _callbacks(query.edited["reply_markup"])
-    assert "vfinal|tier|basic" in callbacks
-    assert "vfinal|tier|common" in callbacks
+    assert "vfinal|tier" in callbacks
+    assert "vfinal|voice" in callbacks
+    assert "vfinal|music" in callbacks
     pending = bot.get_video_finalization_state(user_id)
     assert pending.get("source_payload", {}).get("video_prompt") or pending.get("source_payload", {}).get("prompt")
 

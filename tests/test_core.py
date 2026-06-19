@@ -7678,8 +7678,8 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     async def fake_translate(text, target):
         return {"text": f"{text} translated to {target}"}
 
-    async def fake_tts(text, voice_style=""):
-        return "Test TTS", b"audio-bytes", f"voice={voice_style}; chars={len(text)}"
+    async def fake_tts(text, voice_style="", voice_id=""):
+        return "Test TTS", b"audio-bytes", f"voice={voice_style}; voice_id={voice_id}; chars={len(text)}"
 
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
