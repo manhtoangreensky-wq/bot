@@ -242,7 +242,7 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     assert state["voice_style"] == "Nữ tự nhiên"
     assert state["step"] == "confirm"
     assert "Xác nhận phụ đề + lồng tiếng" in voice_query.outputs[-1]["text"]
-    assert "✅ Xác nhận tạo bản đầy đủ" in _labels(voice_query.outputs[-1]["reply_markup"])
+    assert "▶️ Nghe/xem thử ngắn" in _labels(voice_query.outputs[-1]["reply_markup"])
     _assert_public_clean(voice_query.outputs[-1]["text"])
 
 
