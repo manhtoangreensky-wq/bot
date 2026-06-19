@@ -127,9 +127,9 @@ def test_dubbing_voice_selection_passes_voice_id_to_minimax(monkeypatch):
 
     labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     callbacks = _callbacks(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
-    assert "👩 Giọng nữ" in labels
-    assert "👨 Giọng nam" in labels
-    assert "📁 Kho voice" in labels
+    assert "👩 Giọng nữ mặc định" in labels
+    assert "👨 Giọng nam mặc định" in labels
+    assert "📁 Kho voice đã lưu" in labels
     assert "videodub|voice|default_female" in callbacks
     assert "videodub|voice_saved" in callbacks
 

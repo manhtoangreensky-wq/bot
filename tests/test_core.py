@@ -7397,8 +7397,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert {"videoref|image_prompts", "videoref|frame_plan", "videoref|generate", "videoref|save"}.issubset(set(ref_result_callbacks))
 
     dub_labels = [button.text for row in bot.video_dubbing_menu_keyboard("vi").inline_keyboard for button in row]
-    assert {"📝 Tạo phụ đề", "🌐 Dịch phụ đề", "🗣 Lồng tiếng"}.issubset(set(dub_labels))
-    assert not any("Dịch + lồng tiếng" in label for label in dub_labels)
+    assert {"👁 Tạo phụ đề", "🌐 Dịch phụ đề", "🗣 Lồng tiếng tự động", "🎬 Dịch + lồng tiếng tự động"}.issubset(set(dub_labels))
     assert "🎭 Dịch + lồng tiếng" not in dub_labels
     assert "🎬 Dịch + lồng tiếng + video" not in dub_labels
     assert "🎙 Lồng tiếng voice" not in dub_labels
@@ -7448,8 +7447,8 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert "provider" not in pricing_text.lower()
     dub_voice_buttons = [button for row in bot.video_dubbing_voice_keyboard("vi", {"mode": "dub"}).inline_keyboard for button in row]
     translate_dub_voice_buttons = [button for row in bot.video_dubbing_voice_keyboard("vi", {"mode": "translate_dub"}).inline_keyboard for button in row]
-    assert any(button.text == "⬅️ Quay lại" and button.callback_data == "videodub|back_voice" for button in dub_voice_buttons)
-    assert any(button.text == "⬅️ Quay lại" and button.callback_data == "videodub|back_voice" for button in translate_dub_voice_buttons)
+    assert any(button.text == "⬅️ Quay lại loại xử lý" and button.callback_data == "videodub|back_voice" for button in dub_voice_buttons)
+    assert any(button.text == "⬅️ Quay lại ngôn ngữ" and button.callback_data == "videodub|back_voice" for button in translate_dub_voice_buttons)
 
     bot.clear_video_dubbing_pending("dub-state")
     bot.set_video_dubbing_pending("dub-state", "await_video", mode="translate_subtitle")
@@ -7606,7 +7605,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
             {"target_language": "English", "translate_requested": "1"},
             "output",
             "videodub|output|srt",
-            "Xuất bản dịch",
+            "Xuất bản dịch phụ đề",
         ),
         (
             71103,

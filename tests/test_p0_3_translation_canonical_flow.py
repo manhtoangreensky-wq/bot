@@ -139,7 +139,7 @@ def test_standalone_translate_menu_no_api_text():
     assert "🌐 <b>Trung tâm dịch thuật TOAN AAS</b>" in text
     assert labels == [
         "🌐 Dịch ngôn ngữ",
-        "🎬 Dịch video",
+        "🎬 Dịch phụ đề / Lồng tiếng video",
         "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
@@ -238,8 +238,8 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     state = bot.get_video_dubbing_pending(user_id)
     assert state["target_language"] == "English"
     assert state["step"] == "output"
-    assert "Xuất bản dịch" in lang_query.outputs[-1]["text"]
-    assert "🗣 Lồng tiếng" in _labels(lang_query.outputs[-1]["reply_markup"])
+    assert "Xuất bản dịch phụ đề" in lang_query.outputs[-1]["text"]
+    assert "🗣 Tiếp tục lồng tiếng" in _labels(lang_query.outputs[-1]["reply_markup"])
 
     continue_query = asyncio.run(_press_videodub("videodub|continue_dubbing", user_id))
     assert "Chọn kiểu lồng tiếng" in continue_query.outputs[-1]["text"]

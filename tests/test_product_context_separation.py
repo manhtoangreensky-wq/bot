@@ -71,7 +71,7 @@ def test_showroom_translation_is_not_video_order_menu():
 
     assert "Trung tâm dịch thuật TOAN AAS" in text
     assert "Dịch ngôn ngữ" in labels
-    assert "Dịch video" in labels
+    assert "Dịch phụ đề / Lồng tiếng video" in labels
     assert "hóa đơn video" not in text.lower()
     assert "Không thêm" not in labels
     assert "Chọn cho video" not in labels
