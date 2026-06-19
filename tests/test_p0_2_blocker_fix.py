@@ -307,6 +307,10 @@ class _VoiceQuery:
 
 
 def _voice_profile(profile_id=1, status="pending_name", metadata=None, preview_ref=""):
+    metadata = {
+        "confirmation_sample_text": bot.VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT,
+        **(metadata or {}),
+    }
     return {
         "id": profile_id,
         "user_id": "1",
@@ -317,7 +321,7 @@ def _voice_profile(profile_id=1, status="pending_name", metadata=None, preview_r
         "preview_audio_ref": preview_ref,
         "provider_voice_id": "",
         "status": status,
-        "metadata_json": json.dumps(metadata or {}, ensure_ascii=False),
+        "metadata_json": json.dumps(metadata, ensure_ascii=False),
     }
 
 
@@ -335,6 +339,15 @@ def _install_voice_store(monkeypatch, profile):
     monkeypatch.setattr(bot, "update_user_voice_profile", update_profile)
     monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(bot, "voice_preview_usage_snapshot", lambda _uid, now=None: {"day": "2026-06-18", "attempts": 0, "latest_at": None})
+    monkeypatch.setattr(bot, "get_minimax_voice_clone_readiness", lambda: {
+        "ready": True,
+        "public_enabled": True,
+        "shopaikey_configured": True,
+        "key4u_configured": False,
+        "tts_smoke": "PASS",
+        "clone_smoke": "PASS",
+        "routes": ["shopaikey_minimax"],
+    })
     return store
 
 
@@ -373,6 +386,9 @@ def _install_voice_provider_success(monkeypatch, calls):
         "public_enabled": True,
         "shopaikey_configured": True,
         "key4u_configured": False,
+        "tts_smoke": "PASS",
+        "clone_smoke": "PASS",
+        "routes": ["shopaikey_minimax"],
     })
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
     monkeypatch.setattr(bot, "shopaikey_minimax_upload_voice_sample", upload)
@@ -385,7 +401,10 @@ def _install_voice_provider_success(monkeypatch, calls):
 def test_voice_preview_idempotency_reuses_existing_preview(monkeypatch):
     profile = _voice_profile()
     key = bot.voice_preview_idempotency_key(1, profile, bot.VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT)
-    profile["metadata_json"] = json.dumps({"preview_key": key})
+    profile["metadata_json"] = json.dumps({
+        "preview_key": key,
+        "confirmation_sample_text": bot.VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT,
+    })
     profile["preview_audio_ref"] = "cached-preview-file"
     _install_voice_store(monkeypatch, profile)
     sent = {"count": 0}
@@ -503,7 +522,7 @@ def test_repeated_voice_preview_callback_single_provider_call(monkeypatch):
     assert calls["clone"] == 1
     assert calls["tts"] == 1
     assert calls["send"] == 2
-    assert store["status"] == "preview_ready"
+    assert store["status"] == "ready"
 
 
 def test_no_payos_changes():

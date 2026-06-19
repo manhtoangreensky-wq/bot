@@ -39077,6 +39077,19 @@ async def _download_audio_url_bytes(url: str, timeout_seconds: float = 60.0) -> 
         return bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; content_type={content_type or '-'}", int(res.status_code)
     return b"", shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}"), int(res.status_code)
 
+async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
+    candidates = _minimax_audio_candidates(value if isinstance(value, (dict, list)) else {"audio": value})
+    for candidate in candidates:
+        if str(candidate).startswith(("http://", "https://")):
+            audio_bytes, detail, _http_status = await _download_audio_url_bytes(str(candidate))
+            if audio_bytes:
+                return audio_bytes, f"url:{detail}"
+            continue
+        audio_bytes, encoding = _decode_minimax_audio_string(str(candidate))
+        if audio_bytes:
+            return audio_bytes, encoding
+    return b"", "empty_demo_audio"
+
 async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", allow_admin: bool = False) -> tuple[str, bytes, str, int]:
     if not key4u_minimax_tts_configured(require_public=not allow_admin):
         return "MISSING", b"", "KEY4U_ENABLED/KEY4U_API_KEY/KEY4U_TTS_ENDPOINT/KEY4U_TTS_MODEL missing", 0
@@ -64902,6 +64915,11 @@ def music_prompt_suggestions_text(description: str, offset: int = 0, lang: str =
             f"• {labels[3]}: {html.escape(item['duration'])}",
             f"• {labels[4]}: {html.escape(item['vocal'])}",
             f"• {labels[5]}: {html.escape(item['use_case'])}",
+        ])
+        if item.get("lyric_direction"):
+            lyric_label = "Lyric direction" if lang != "vi" else "Hướng lời"
+            lines.append(f"• {lyric_label}: {html.escape(str(item.get('lyric_direction') or ''))}")
+        lines.extend([
             f"• {labels[6]}: <code>{html.escape(prompt)}</code>",
             "",
         ])
@@ -64912,6 +64930,21 @@ def music_prompt_result_keyboard(lang: str = "vi", product_context: str = PRODUC
     is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
+    if (result or {}).get("song_product"):
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("1️⃣ Chọn PA1" if is_vi else "1️⃣ Choose A1", callback_data=cb("prompt_choose_1")),
+                InlineKeyboardButton("2️⃣ Chọn PA2" if is_vi else "2️⃣ Choose A2", callback_data=cb("prompt_choose_2")),
+            ],
+            [
+                InlineKeyboardButton("3️⃣ Chọn PA3" if is_vi else "3️⃣ Choose A3", callback_data=cb("prompt_choose_3")),
+                InlineKeyboardButton("🔁 Gợi ý lại" if is_vi else "🔁 Regenerate", callback_data=cb("prompt_more")),
+            ],
+            [
+                InlineKeyboardButton("✏️ Sửa chủ đề" if is_vi else "✏️ Edit topic", callback_data=cb("song_back_topic")),
+                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("song_back_vocal")),
+            ],
+        ])
     buttons = [
         ("1️⃣ Chọn gợi ý 1" if is_vi else "1️⃣ Choose 1", cb("prompt_choose_1")),
         ("2️⃣ Chọn gợi ý 2" if is_vi else "2️⃣ Choose 2", cb("prompt_choose_2")),
@@ -65429,9 +65462,9 @@ async def submit_music_generation_job(result: dict, preview: bool = False) -> di
     if preview:
         prompt += " This is a short preview only; produce one coherent excerpt and do not expand to the full requested song."
     if product_kind == "song_half":
-        prompt += " Create a coherent half-song with complete original lyrics and no sentence cut off."
+        prompt += " Create a coherent half-song with complete original lyrics, verse plus hook/chorus, and no sentence cut off."
     elif product_kind == "song_full":
-        prompt += " Create a complete original song with a finished verse, chorus and bridge structure."
+        prompt += " Create a complete original song with intro, verse, chorus, bridge and outro structure."
     providers = dict(readiness.get("providers") or {})
 
     async def submit_key4u() -> dict:
@@ -65670,11 +65703,20 @@ def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
 
 VOICE_PROFILE_PREVIEW_TEXT = "Xin chào, đây là bản nghe thử giọng TOAN AAS."
 VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT = "Cảm ơn bạn đã sử dụng trình nhân bản giọng nói của TOAN AAS."
+VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI = (
+    "Tạo voice riêng chưa hoàn tất vì tài nguyên xử lý chưa sẵn sàng. "
+    "TOAN AAS chưa trừ Xu. Bạn có thể dùng giọng mặc định hoặc thử lại sau."
+)
 
 def voice_clone_public_guard_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
         return "Custom voice creation is checking processing resources. TOAN AAS has not charged Xu. You can use a default voice or try again later."
     return "Tạo voice riêng đang được kiểm tra tài nguyên xử lý. TOAN AAS chưa trừ Xu. Bạn có thể dùng giọng mặc định hoặc thử lại sau."
+
+def voice_clone_provider_not_ready_public_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "Custom voice creation did not finish because processing resources are not ready. TOAN AAS has not charged Xu. You can use a default voice or try again later."
+    return VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
 
 def voice_clone_intro_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -65891,7 +65933,7 @@ def active_voice_profile_count(user_id, exclude_profile_id: int = 0) -> int:
                 f"""
                 SELECT COUNT(1)
                 FROM voice_profiles
-                WHERE user_id=? AND deleted_at IS NULL AND status IN ('active', 'preview_ready', 'pending_confirm', 'pending_name')
+                WHERE user_id=? AND deleted_at IS NULL AND status IN ('active', 'ready', 'preview_ready', 'pending_confirm', 'pending_name')
                 {exclude_sql}
                 """,
                 tuple(params),
@@ -66118,37 +66160,32 @@ def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_co
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     final_ready = True if profile is None else voice_profile_can_generate_tts(profile)
     preview_ready = True if profile is None else voice_profile_can_preview(profile)
+    has_demo = bool((profile or {}).get("preview_audio_ref"))
     profile_status = str((profile or {}).get("status") or "").strip().lower()
-    if profile_status in {"failed", "error", "rejected", "deleted"}:
+    if profile_status in {"error", "rejected", "deleted"}:
         final_ready = False
         preview_ready = False
-    if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
-        buttons = []
-        if final_ready:
-            buttons.append(("✅ Chọn giọng này cho video" if is_vi else "✅ Use for this video", cb(f"voice_profile_use:{pid}")))
-        if preview_ready:
-            buttons.append(("▶️ Nghe thử" if is_vi else "▶️ Preview", cb(f"voice_profile_listen:{pid}")))
-        if final_ready:
-            buttons.append(("⭐ Đặt mặc định" if is_vi else "⭐ Set default", cb(f"voice_profile_default:{pid}")))
-        buttons.extend([
-            ("⬇️ Tải file demo nếu có" if is_vi else "⬇️ Download demo if available", cb(f"voice_profile_download:{pid}")),
+    if not final_ready:
+        buttons = [
+            ("🔁 Tạo/nghe thử lại" if is_vi else "🔁 Retry preview/create", cb(f"voice_clone_retry:{pid}")),
             ("✏️ Đổi tên" if is_vi else "✏️ Rename", cb(f"voice_profile_rename:{pid}")),
             ("🗑 Xóa" if is_vi else "🗑 Delete", cb(f"voice_profile_delete:{pid}")),
-        ])
+        ]
         return build_2col_keyboard(buttons, nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")), nav_main=True, lang=lang)
-    buttons = []
-    if preview_ready:
-        buttons.append(("▶️ Nghe thử" if is_vi else "▶️ Preview", cb(f"voice_profile_listen:{pid}")))
-    if final_ready:
-        buttons.append(("✅ Tạo giọng đọc" if is_vi else "✅ Create voice audio", cb(f"voice_profile_read:{pid}")))
+    video_callback = cb(f"voice_profile_use:{pid}") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else cb(f"voice_profile_video_hint:{pid}")
+    buttons = [
+        ("▶️ Nghe demo" if is_vi else "▶️ Demo", cb(f"voice_profile_listen:{pid}")),
+        ("✍️ Đọc thử" if is_vi else "✍️ Read test", cb(f"voice_profile_read:{pid}")),
+        ("⭐ Đặt mặc định" if is_vi else "⭐ Set default", cb(f"voice_profile_default:{pid}")),
+        ("🎬 Dùng cho video" if is_vi else "🎬 Use for video", video_callback),
+    ]
+    if has_demo:
+        buttons.append(("⬇️ Tải demo" if is_vi else "⬇️ Download demo", cb(f"voice_profile_download:{pid}")))
     buttons.extend([
-        ("⬇️ Tải file demo nếu có" if is_vi else "⬇️ Download demo if available", cb(f"voice_profile_download:{pid}")),
         ("✏️ Đổi tên" if is_vi else "✏️ Rename", cb(f"voice_profile_rename:{pid}")),
         ("🗑 Xóa" if is_vi else "🗑 Delete", cb(f"voice_profile_delete:{pid}")),
     ])
-    if final_ready:
-        buttons.insert(2 if preview_ready else 1, ("⭐ Đặt mặc định" if is_vi else "⭐ Set default", cb(f"voice_profile_default:{pid}")))
-    return build_2col_keyboard(buttons, nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")), lang=lang)
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")), nav_main=ctx == PRODUCT_CONTEXT_VIDEO_ADDON, lang=lang)
 
 def voice_clone_quote_text(profile: dict, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
     name = html.escape(str(profile.get("display_name") or "Giọng mới"))
@@ -66410,6 +66447,22 @@ def voice_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_
         lang=lang,
     ).inline_keyboard
     return InlineKeyboardMarkup(rows)
+
+def voice_preview_quota_exhausted_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    pid = int(profile_id or 0)
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Tạo bản đầy đủ" if is_vi else "✅ Create full output", callback_data=cb(f"voice_clone_full:{pid}")),
+            InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=cb(f"voice_profile_rename:{pid}")),
+        ],
+        [
+            InlineKeyboardButton("🔄 Đổi giọng" if is_vi else "🔄 Change voice", callback_data=cb("voice_custom")),
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else cb("voice_clone")),
+        ],
+    ])
 
 def music_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
     ctx = normalize_product_context(product_context)
@@ -66691,7 +66744,7 @@ def voice_preview_usage_snapshot(user_id, now: datetime | None = None) -> dict:
     return {"day": day_key, "attempts": attempts, "latest_at": latest_at, "available": available}
 
 
-def voice_preview_guard(user_id, profile_id: int, preview_text: str, preview_mode: str = "clone_preview", now: datetime | None = None) -> dict:
+def voice_preview_guard(user_id, profile_id: int, preview_text: str, preview_mode: str = "clone_preview", now: datetime | None = None, bypass_limits: bool = False) -> dict:
     now = now or datetime.now()
     profile = get_user_voice_profile(user_id, profile_id)
     if not profile or str(profile.get("consent_status") or "") != "confirmed":
@@ -66711,29 +66764,30 @@ def voice_preview_guard(user_id, profile_id: int, preview_text: str, preview_mod
             "preview_audio_ref": cached_ref,
         }
     stale_inflight = False
-    if str(profile.get("status") or "") == "preview_generating":
+    if str(profile.get("status") or "") in {"preview_generating", "processing"}:
         attempted_at = parse_now_text(str(metadata.get("preview_attempt_at") or ""))
         stale_after = max(300, int(VOICE_PREVIEW_COOLDOWN_SECONDS or 0) * 4)
         if not attempted_at or (now - attempted_at).total_seconds() < stale_after:
             return {"ok": False, "reason": "inflight", "profile": profile, "metadata": metadata}
         stale_inflight = True
-    usage = voice_preview_usage_snapshot(user_id, now)
-    if not usage.get("available", True):
-        return {"ok": False, "reason": "usage_unavailable", "profile": profile, "metadata": metadata}
-    if int(usage.get("attempts") or 0) >= int(VOICE_PREVIEW_FREE_PER_DAY or 0):
-        return {"ok": False, "reason": "quota", "profile": profile, "metadata": metadata, "usage": usage}
-    latest_at = usage.get("latest_at")
-    if latest_at and VOICE_PREVIEW_COOLDOWN_SECONDS > 0:
-        elapsed = max(0, int((now - latest_at).total_seconds()))
-        if elapsed < VOICE_PREVIEW_COOLDOWN_SECONDS:
-            return {
-                "ok": False,
-                "reason": "cooldown",
-                "retry_after": VOICE_PREVIEW_COOLDOWN_SECONDS - elapsed,
-                "profile": profile,
-                "metadata": metadata,
-                "usage": usage,
-            }
+    usage = {"bypassed": True} if bypass_limits else voice_preview_usage_snapshot(user_id, now)
+    if not bypass_limits:
+        if not usage.get("available", True):
+            return {"ok": False, "reason": "usage_unavailable", "profile": profile, "metadata": metadata}
+        if int(usage.get("attempts") or 0) >= int(VOICE_PREVIEW_FREE_PER_DAY or 0):
+            return {"ok": False, "reason": "quota", "profile": profile, "metadata": metadata, "usage": usage}
+        latest_at = usage.get("latest_at")
+        if latest_at and VOICE_PREVIEW_COOLDOWN_SECONDS > 0:
+            elapsed = max(0, int((now - latest_at).total_seconds()))
+            if elapsed < VOICE_PREVIEW_COOLDOWN_SECONDS:
+                return {
+                    "ok": False,
+                    "reason": "cooldown",
+                    "retry_after": VOICE_PREVIEW_COOLDOWN_SECONDS - elapsed,
+                    "profile": profile,
+                    "metadata": metadata,
+                    "usage": usage,
+                }
     if not frame_video_ffmpeg_path():
         return {"ok": False, "reason": "preview_cap_unavailable", "profile": profile, "metadata": metadata}
     return {
@@ -66765,7 +66819,7 @@ def voice_preview_guard_message(reason: str, retry_after: int = 0) -> str:
 def acquire_voice_preview_generation(user_id, profile_id: int, guard: dict, now: datetime | None = None) -> tuple[bool, dict]:
     now = now or datetime.now()
     fresh = get_user_voice_profile(user_id, profile_id)
-    if not fresh or (str(fresh.get("status") or "") == "preview_generating" and not guard.get("stale_inflight")):
+    if not fresh or (str(fresh.get("status") or "") in {"preview_generating", "processing"} and not guard.get("stale_inflight")):
         return False, fresh
     metadata = voice_profile_metadata(fresh)
     day_key = now.strftime("%Y-%m-%d")
@@ -66777,14 +66831,15 @@ def acquire_voice_preview_generation(user_id, profile_id: int, guard: dict, now:
         "preview_attempts_today": attempts_today + 1,
         "preview_attempt_at": datetime_text(now),
         "preview_charged_xu": 0,
+        "preview_limits_bypassed": bool((guard.get("usage") or {}).get("bypassed")),
     })
     ok = update_user_voice_profile(
         user_id,
         profile_id,
-        status="preview_generating",
+        status="processing",
         metadata_json=json.dumps(metadata, ensure_ascii=False),
     )
-    fresh.update({"status": "preview_generating", "metadata_json": json.dumps(metadata, ensure_ascii=False)})
+    fresh.update({"status": "processing", "metadata_json": json.dumps(metadata, ensure_ascii=False)})
     return bool(ok), fresh
 
 
@@ -66813,8 +66868,44 @@ async def cap_voice_preview_audio_bytes(audio_bytes: bytes, max_seconds: int = V
         with open(output_path, "rb") as handle:
             return handle.read(), "ok"
 
+def voice_clone_admin_blocker(readiness: dict | None = None) -> str:
+    readiness = dict(readiness or get_minimax_voice_clone_readiness())
+    blockers = []
+    blockers.extend(readiness.get("missing_env") or [])
+    if not readiness.get("ready"):
+        blockers.append(readiness.get("reason") or "voice clone route not configured")
+    if not readiness.get("public_enabled"):
+        blockers.append(readiness.get("reason") or "voice clone public gate closed")
+    if MINIMAX_REQUIRE_SMOKE_PASS:
+        tts_smoke = str(readiness.get("tts_smoke") or "NOT_TESTED")
+        clone_smoke = str(readiness.get("clone_smoke") or "NOT_TESTED")
+        if tts_smoke != "PASS":
+            blockers.append(f"minimax_tts smoke={tts_smoke}")
+        if clone_smoke != "PASS":
+            blockers.append(f"minimax_voice_clone smoke={clone_smoke}")
+    routes = ",".join(readiness.get("routes") or [])
+    if routes:
+        blockers.append(f"configured_routes={routes}")
+    return sanitize_log_text("; ".join(str(item) for item in blockers if str(item or "").strip()))[:700] or "voice clone provider not ready"
 
-async def create_minimax_voice_profile_preview(query, context, user_id, profile: dict, lang: str = "vi", retry: bool = False, product_context: str = PRODUCT_CONTEXT_SHOWROOM):
+def mark_voice_profile_activation_failed(user_id, profile_id: int, profile: dict | None, status: str, admin_error: str) -> dict:
+    metadata = voice_profile_metadata(profile or {})
+    metadata["activation_status"] = str(status or "failed")
+    metadata["activation_admin_error"] = sanitize_log_text(str(admin_error or ""))[:700]
+    metadata["activation_failed_at"] = now_text()
+    metadata["preview_key_pending"] = ""
+    update_user_voice_profile(
+        user_id,
+        profile_id,
+        status=str(status or "failed"),
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+    fresh = get_user_voice_profile(user_id, profile_id) or dict(profile or {})
+    fresh.update({"status": str(status or "failed"), "metadata_json": json.dumps(metadata, ensure_ascii=False)})
+    return fresh
+
+
+async def create_minimax_voice_profile_preview(query, context, user_id, profile: dict, lang: str = "vi", retry: bool = False, product_context: str = PRODUCT_CONTEXT_SHOWROOM, full_generation: bool = False):
     ctx = normalize_product_context(product_context)
     profile_id = int((profile or {}).get("id") or 0)
     if not profile_id or str((profile or {}).get("consent_status") or "") != "confirmed":
@@ -66822,7 +66913,46 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             "⚠️ Yêu cầu tạo giọng không còn hợp lệ hoặc chưa xác nhận quyền sử dụng.",
             reply_markup=voice_hub_keyboard(lang, ctx),
         )
-    guard = voice_preview_guard(user_id, profile_id, VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT, "clone_preview")
+    metadata = voice_profile_metadata(profile)
+    missing_draft = []
+    if not str(profile.get("source_file_id") or profile.get("source_file_ref") or "").strip():
+        missing_draft.append("source_file_id/source_file_ref")
+    if not str(profile.get("display_name") or "").strip():
+        missing_draft.append("display_name")
+    if str(metadata.get("confirmation_sample_text") or "") != VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT:
+        missing_draft.append("confirmation_sample_text")
+    if missing_draft:
+        failed_profile = mark_voice_profile_activation_failed(
+            user_id,
+            profile_id,
+            profile,
+            "failed_invalid_voice_draft",
+            "missing " + ",".join(missing_draft),
+        )
+        return await query.message.reply_text(
+            "⚠️ Yêu cầu tạo giọng còn thiếu mẫu giọng, tên hoặc câu xác nhận. TOAN AAS chưa trừ Xu. Bạn có thể tạo lại voice riêng.",
+            reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
+        )
+    readiness = get_minimax_voice_clone_readiness()
+    if not readiness.get("ready") or (not readiness.get("public_enabled") and not is_admin_user(user_id)):
+        failed_profile = mark_voice_profile_activation_failed(
+            user_id,
+            profile_id,
+            profile,
+            "failed_provider_not_ready",
+            voice_clone_admin_blocker(readiness),
+        )
+        return await query.message.reply_text(
+            voice_clone_provider_not_ready_public_text(lang),
+            reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
+        )
+    guard = voice_preview_guard(
+        user_id,
+        profile_id,
+        VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT,
+        "clone_preview",
+        bypass_limits=bool(full_generation),
+    )
     if guard.get("cached"):
         cached_profile = guard.get("profile") or profile
         await context.bot.send_audio(
@@ -66832,18 +66962,17 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
         return await query.message.reply_text(
             "✅ TOAN AAS đã dùng lại bản nghe thử trước đó, không tạo thêm lượt xử lý và chưa trừ Xu final.",
-            reply_markup=voice_clone_preview_keyboard(profile_id, lang, ctx),
+            reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, cached_profile),
         )
     if not guard.get("ok"):
+        if str(guard.get("reason") or "") == "quota":
+            return await query.message.reply_text(
+                voice_preview_guard_message("quota"),
+                reply_markup=voice_preview_quota_exhausted_keyboard(profile_id, lang, ctx),
+            )
         return await query.message.reply_text(
             voice_preview_guard_message(str(guard.get("reason") or "invalid"), int(guard.get("retry_after") or 0)),
             reply_markup=voice_clone_preview_entry_keyboard(profile_id, lang, ctx),
-        )
-    readiness = get_minimax_voice_clone_readiness()
-    if not readiness.get("ready") or (not readiness.get("public_enabled") and not is_admin_user(user_id)):
-        return await query.message.reply_text(
-            voice_clone_public_guard_text(lang),
-            reply_markup=voice_hub_keyboard(lang, ctx),
         )
     acquired, locked_profile = acquire_voice_preview_generation(user_id, profile_id, guard)
     if not acquired:
@@ -66867,10 +66996,13 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         preview_bytes = b""
         route_errors = []
         route_attempts = []
-        if readiness.get("shopaikey_configured"):
-            route_attempts.append(("shopaikey_minimax", shopaikey_minimax_upload_voice_sample, shopaikey_minimax_voice_clone, shopaikey_minimax_tts_bytes))
         if readiness.get("key4u_configured") and KEY4U_PUBLIC_ENABLED:
             route_attempts.append(("key4u_minimax", key4u_minimax_upload_voice_sample, key4u_minimax_voice_clone, key4u_minimax_tts_bytes))
+        smoke_ok = str(readiness.get("tts_smoke") or "") == "PASS" and str(readiness.get("clone_smoke") or "") == "PASS"
+        if readiness.get("shopaikey_configured") and (smoke_ok or not MINIMAX_REQUIRE_SMOKE_PASS):
+            route_attempts.append(("shopaikey_minimax", shopaikey_minimax_upload_voice_sample, shopaikey_minimax_voice_clone, shopaikey_minimax_tts_bytes))
+        if not route_attempts:
+            raise RuntimeError("voice_routes_not_ready:" + voice_clone_admin_blocker(readiness))
         for route_name, upload_call, clone_call, tts_call in route_attempts:
             status, candidate_file_id, detail, _http = await upload_call(audio_bytes)
             if status != "PASS" or not candidate_file_id:
@@ -66881,14 +67013,23 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
                 route_errors.append(f"{route_name}:clone:{status}:{detail[:80]}")
                 continue
             candidate_voice_id = str((clone_payload or {}).get("voice_id") or provider_voice_id)
-            status, candidate_preview, detail, _http = await tts_call(preview_text, voice_id=candidate_voice_id)
-            if status != "PASS" or not candidate_preview:
-                route_errors.append(f"{route_name}:preview:{status}:{detail[:80]}")
-                continue
+            candidate_preview = b""
+            demo_audio_ref = str((clone_payload or {}).get("demo_audio") or "")
+            demo_detail = ""
+            if demo_audio_ref:
+                candidate_preview, demo_detail = await minimax_audio_reference_to_bytes(demo_audio_ref)
+            if not candidate_preview:
+                status, candidate_preview, detail, _http = await tts_call(preview_text, voice_id=candidate_voice_id)
+                if status != "PASS" or not candidate_preview:
+                    route_errors.append(f"{route_name}:preview:{status}:{detail[:80]}; demo={demo_detail[:60]}")
+                    continue
             provider_file_id = candidate_file_id
             provider_voice_id = candidate_voice_id
             preview_bytes = bytes(candidate_preview)
             provider_name = route_name
+            if demo_audio_ref:
+                metadata["provider_demo_audio_ref"] = demo_audio_ref[:500] if demo_audio_ref.startswith(("http://", "https://")) else "inline_audio"
+                metadata["provider_demo_audio_detail"] = demo_detail[:160]
             break
         if not provider_name or not preview_bytes:
             raise RuntimeError("voice_routes_failed:" + " | ".join(route_errors)[:260])
@@ -66909,32 +67050,42 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         metadata["preview_attempts"] = int(metadata.get("preview_attempts") or 0) + 1
         metadata["provider_file_id"] = provider_file_id
         metadata["provider_route"] = provider_name
+        metadata["provider_voice_id"] = provider_voice_id
         metadata["preview_key"] = str(guard.get("preview_key") or "")
         metadata["preview_key_pending"] = ""
         metadata["preview_generated_at"] = now_text()
         metadata["preview_seconds_max"] = int(VOICE_PREVIEW_MAX_SECONDS)
         metadata["preview_text_hash"] = hashlib.sha256(preview_text.encode("utf-8", errors="ignore")).hexdigest()[:24]
+        metadata["activation_status"] = "ready"
+        metadata["activation_ready_at"] = now_text()
         update_user_voice_profile(
             user_id,
             profile_id,
             provider=provider_name,
             provider_voice_id=provider_voice_id,
             preview_audio_ref=preview_ref,
-            status="preview_ready",
+            status="ready",
             metadata_json=json.dumps(metadata, ensure_ascii=False),
         )
+        fresh_profile = get_user_voice_profile(user_id, profile_id) or {
+            **dict(profile or {}),
+            "provider": provider_name,
+            "provider_voice_id": provider_voice_id,
+            "preview_audio_ref": preview_ref,
+            "status": "ready",
+            "metadata_json": json.dumps(metadata, ensure_ascii=False),
+        }
         return await query.message.reply_text(
-            f"🔊 Đây là bản nghe thử ngắn của giọng “{str(profile.get('display_name') or 'Giọng mới')}”.\n\n"
-            "TOAN AAS chưa trừ Xu final. Bản giọng đầy đủ chỉ được lưu sau khi quý khách xác nhận.",
-            reply_markup=voice_clone_preview_keyboard(profile_id, lang, ctx),
+            f"✅ Đã tạo voice riêng “{str(profile.get('display_name') or 'Giọng mới')}” và lưu vào Kho voice.\n\n"
+            "Bạn có thể nghe demo, đọc thử bằng nội dung riêng, đặt mặc định hoặc dùng cho video.",
+            reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, fresh_profile),
         )
     except Exception as exc:
         logger.warning("voice profile preview failed | profile=%s | %s", profile_id, sanitize_log_text(str(exc))[:220])
-        metadata["preview_key_pending"] = ""
-        update_user_voice_profile(user_id, profile_id, status="failed", metadata_json=json.dumps(metadata, ensure_ascii=False))
+        failed_profile = mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed", str(exc))
         return await query.message.reply_text(
             "⚙️ Bản nghe thử giọng chưa tạo được. TOAN AAS chưa trừ Xu. Bạn có thể dùng giọng mặc định miễn phí hoặc thử lại sau.",
-            reply_markup=voice_hub_keyboard(lang, ctx),
+            reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
         )
 
 async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67520,6 +67671,14 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             return_to="voice_profile_detail",
         )
         return await query.message.reply_text("✅ Đã chọn giọng này trong Studio âm thanh.\n\nHãy gửi nội dung muốn đọc ở tin nhắn tiếp theo. TOAN AAS sẽ báo số ký tự, credit dự kiến và chi phí trước khi gọi xử lý.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM, profile))
+    if action.startswith("voice_profile_video_hint:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        return await query.message.reply_text(
+            "🎬 Giọng này đã sẵn sàng. Để gắn vào video, hãy mở Kho voice từ flow tạo video hiện tại rồi chọn giọng này.",
+            reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM, profile),
+        )
     if action.startswith("voice_profile_read:"):
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
@@ -67654,6 +67813,13 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         if not profile:
             return await query.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang, ctx))
         return await create_minimax_voice_profile_preview(query, context, user_id, profile, lang, retry=action.startswith("voice_clone_retry:"), product_context=ctx)
+    if action.startswith("voice_clone_full:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang, ctx))
+        return await create_minimax_voice_profile_preview(query, context, user_id, profile, lang, retry=True, product_context=ctx, full_generation=True)
     if action == "voice_clone_guard":
         await query.answer()
         return await query.message.reply_text(
