@@ -182,14 +182,15 @@ def test_voice_vault_ready_buttons():
         assert label in labels
 
 
-def test_voice_vault_pending_buttons_no_download_primary():
+def test_voice_vault_pending_buttons_no_download_primary(monkeypatch):
+    monkeypatch.setattr(bot, "get_minimax_voice_clone_readiness", lambda: {"public_enabled": False})
     labels = _labels(bot.voice_profile_actions_keyboard(
         8,
         "vi",
         bot.PRODUCT_CONTEXT_SHOWROOM,
         {"id": 8, "status": "failed_provider_not_ready", "provider_voice_id": "", "preview_audio_ref": ""},
     ))
-    assert "🔁 Tạo/nghe thử lại" in labels
+    assert "🔁 Tạo/nghe thử lại" not in labels
     assert "✏️ Đổi tên" in labels
     assert "🗑 Xóa" in labels
     assert not any("Tải" in label for label in labels)

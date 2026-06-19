@@ -32074,6 +32074,169 @@ def preferred_tool_test_status_text(*tool_names: str) -> str:
     tested_at = result.get("tested_at") or ""
     return f"{status}" + (f" at {tested_at}" if tested_at else "")
 
+PROVIDER_SMOKE_PASS_STATUSES = {"PASS", "SUCCESS", "OK", "PASS_SUBMITTED"}
+
+def provider_status_base(status: str) -> str:
+    return str(status or "NOT_TESTED").strip().upper().split(" ", 1)[0]
+
+def provider_status_is_pass(status: str) -> bool:
+    return provider_status_base(status) in PROVIDER_SMOKE_PASS_STATUSES
+
+def _provider_attempt_setting(kind: str) -> str:
+    clean = re.sub(r"[^a-z0-9_:-]", "_", str(kind or "").strip().lower())
+    return f"provider_attempt:{clean}"
+
+def _safe_attempt_error(value) -> str:
+    text = sanitize_provider_error(value or "")
+    return sanitize_log_text(text)[:320] if text else "-"
+
+def _safe_set_provider_setting(key: str, value, note: str = "", updated_by="") -> bool:
+    try:
+        set_system_setting(key, value, note, updated_by)
+        return True
+    except Exception as exc:
+        logger.warning("provider status persistence failed | key=%s | %s", key, sanitize_log_text(str(exc))[:180])
+        return False
+
+def save_provider_attempt(kind: str, payload: dict | None = None, updated_by="") -> dict:
+    data = dict(payload or {})
+    data["called"] = bool(data.get("called", True))
+    data["at"] = str(data.get("at") or now_text())
+    data["status"] = provider_status_base(str(data.get("status") or data.get("submit_status") or "UNKNOWN"))
+    data["error"] = _safe_attempt_error(data.get("error") or data.get("detail") or "")
+    clean = {}
+    for key, value in data.items():
+        if isinstance(value, bool):
+            clean[key] = value
+        elif isinstance(value, int):
+            clean[key] = value
+        else:
+            clean[key] = sanitize_log_text(str(value or ""))[:500]
+    _safe_set_provider_setting(_provider_attempt_setting(kind), json.dumps(clean, ensure_ascii=False), clean.get("error") or "", updated_by)
+    return clean
+
+def load_provider_attempt(kind: str) -> dict:
+    raw = get_system_setting(_provider_attempt_setting(kind), "")
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+def record_voice_tts_attempt(
+    *,
+    status: str,
+    provider: str = "",
+    route: str = "",
+    voice_id: str = "",
+    bytes_count: int = 0,
+    output_sent: bool = False,
+    error: str = "",
+    updated_by="",
+) -> dict:
+    payload = save_provider_attempt(
+        "voice_tts",
+        {
+            "called": True,
+            "provider": provider,
+            "route": route,
+            "voice_id": voice_id,
+            "bytes": int(bytes_count or 0),
+            "output_sent": bool(output_sent),
+            "status": status,
+            "error": "-" if provider_status_is_pass(status) else error,
+        },
+        updated_by,
+    )
+    _safe_set_provider_setting("last_tts_attempt_at", payload.get("at", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_tts_provider", payload.get("provider", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_tts_route", payload.get("route", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_tts_status", payload.get("status", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_tts_error", payload.get("error", "-"), payload.get("error", ""), updated_by)
+    return payload
+
+def record_voice_clone_attempt(
+    *,
+    status: str,
+    provider: str = "",
+    route: str = "",
+    upload_status: str = "",
+    clone_status: str = "",
+    tts_status: str = "",
+    provider_voice_id: str = "",
+    demo_audio: str = "",
+    error: str = "",
+    updated_by="",
+) -> dict:
+    payload = save_provider_attempt(
+        "voice_clone",
+        {
+            "called": True,
+            "provider": provider,
+            "route": route,
+            "upload_status": upload_status,
+            "clone_status": clone_status,
+            "tts_status": tts_status,
+            "provider_voice_id": provider_voice_id,
+            "demo_audio": "yes" if str(demo_audio or "").strip() else "",
+            "status": status,
+            "error": "-" if provider_status_is_pass(status) else error,
+        },
+        updated_by,
+    )
+    _safe_set_provider_setting("last_clone_attempt_at", payload.get("at", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_clone_status", payload.get("status", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_clone_error", payload.get("error", "-"), payload.get("error", ""), updated_by)
+    return payload
+
+def record_music_provider_attempt(
+    *,
+    provider: str = "",
+    submit_status: str = "",
+    task_id: str = "",
+    fetch_status: str = "",
+    download_status: str = "",
+    error: str = "",
+    updated_by="",
+) -> dict:
+    status = submit_status or fetch_status or download_status or "UNKNOWN"
+    payload = save_provider_attempt(
+        "music",
+        {
+            "called": True,
+            "provider": provider,
+            "submit_status": submit_status,
+            "task_id": task_id,
+            "fetch_status": fetch_status,
+            "download_status": download_status,
+            "status": status,
+            "error": "-" if provider_status_is_pass(status) else error,
+        },
+        updated_by,
+    )
+    _safe_set_provider_setting("last_music_submit_attempt_at", payload.get("at", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_music_provider", payload.get("provider", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_music_submit_status", payload.get("submit_status", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_music_task_id", payload.get("task_id", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_music_fetch_status", payload.get("fetch_status", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_music_download_status", payload.get("download_status", ""), payload.get("error", ""), updated_by)
+    _safe_set_provider_setting("last_music_error", payload.get("error", "-"), payload.get("error", ""), updated_by)
+    return payload
+
+def admin_attempt_summary(label: str, attempt: dict) -> str:
+    called = "YES" if attempt.get("called") else "NO"
+    at = str(attempt.get("at") or "-")
+    provider = str(attempt.get("provider") or "-")
+    status = str(attempt.get("status") or attempt.get("submit_status") or "NOT_TESTED")
+    error = str(attempt.get("error") or "-")
+    return (
+        f"• {label} called: <code>{called}</code> | at <code>{html.escape(at)}</code> | "
+        f"provider <code>{html.escape(provider)}</code> | status <code>{html.escape(status)}</code> | "
+        f"error <code>{html.escape(error[:180])}</code>"
+    )
+
 LOCAL_WORKER_JOB_TYPES = {
     "worker_ping",
     "ffmpeg_health",
@@ -56062,6 +56225,12 @@ def voice_status_text() -> str:
     minimax = get_minimax_voice_readiness()
     clone = get_minimax_voice_clone_readiness()
     voice_map = default_tts_voice_map()
+    tts_attempt = load_provider_attempt("voice_tts")
+    clone_attempt = load_provider_attempt("voice_clone")
+    voice_action = "WAIT" if provider_status_base(str(clone_attempt.get("status") or "")) in {"PROCESSING", "SUBMITTED", "PENDING"} else ("READY" if clone.get("public_enabled") else "BLOCKED")
+    clone_gate_note = ""
+    if minimax.get("public_enabled") and not clone.get("public_enabled"):
+        clone_gate_note = " — clone smoke not tested" if not provider_status_is_pass(str(clone.get("clone_smoke") or "")) else " — clone gate closed"
     return "\n".join([
         "🎙 <b>VOICE / TTS STATUS</b>",
         "",
@@ -56075,12 +56244,20 @@ def voice_status_text() -> str:
         f"• TTS endpoint ready: <code>{'YES' if minimax.get('tts_endpoint_ready') else 'NO'}</code>",
         f"• Voice clone endpoint ready: <code>{'YES' if minimax.get('clone_endpoint_ready') else 'NO'}</code>",
         f"• Voice clone configured: <code>{'YES' if clone.get('ready') else 'NO'}</code>",
-        f"• Voice clone public: <code>{'ON' if clone.get('public_enabled') else 'OFF'}</code>",
+        f"• Default TTS public: <code>{'ON' if minimax.get('public_enabled') else 'OFF'}</code>",
+        f"• Voice clone public: <code>{'ON' if clone.get('public_enabled') else 'OFF'}</code>{html.escape(clone_gate_note)}",
         f"• Voice clone routes: <code>{html.escape(', '.join(clone.get('routes') or []) or '-')}</code>",
         f"• Voice clone missing: <code>{html.escape(', '.join(clone.get('missing_env') or []) or '-')}</code>",
         f"• Saved voice_id available: <code>{'YES' if minimax.get('saved_voice_id_available') else 'NO'}</code>",
         f"• Last TTS smoke result: <code>{html.escape(str(minimax.get('last_tts_smoke') or '-'))}</code>",
+        f"• ShopAIKey MiniMax route smoke: <code>{html.escape(tool_test_status_text('minimax_tts_shopaikey'))}</code>",
+        f"• Key4U MiniMax route smoke: <code>{html.escape(tool_test_status_text('minimax_tts_key4u'))}</code>",
         f"• Last clone smoke result: <code>{html.escape(str(minimax.get('last_clone_smoke') or '-'))}</code>",
+        admin_attempt_summary("Last TTS", tts_attempt),
+        admin_attempt_summary("Last clone", clone_attempt),
+        f"• Last TTS route: <code>{html.escape(str(tts_attempt.get('route') or '-'))}</code>",
+        f"• Last clone route: <code>{html.escape(str(clone_attempt.get('route') or '-'))}</code>",
+        f"• User action: <code>{voice_action}</code>",
         f"• Last error sanitized: <code>{html.escape(str(minimax.get('last_error_sanitized') or '-'))}</code>",
         f"• MiniMax public: <code>{'ON' if minimax.get('public_enabled') else 'OFF'}</code>",
         f"• Default female voice ID: <code>{html.escape(str(voice_map.get('female') or 'MISSING'))}</code>",
@@ -56096,6 +56273,8 @@ def music_status_text() -> str:
     providers = dict(readiness.get("providers") or {})
     key4u = dict(providers.get("key4u_suno") or {})
     shopaikey = dict(providers.get("shopaikey_music") or {})
+    music_attempt = load_provider_attempt("music")
+    music_action = "WAIT" if provider_status_base(str(music_attempt.get("fetch_status") or music_attempt.get("status") or "")) in {"PROCESSING", "SUBMITTED", "PENDING", "QUEUED"} else ("READY" if readiness.get("public_enabled") else "BLOCKED")
     submit_smoke = preferred_tool_test_result("key4u_suno", "shopaikey_music")
     fetch_smoke = preferred_tool_test_result("key4u_suno_job", "shopaikey_music_job")
     download_smoke = preferred_tool_test_result("music_ai_download", "music_ai_preview_download")
@@ -56124,9 +56303,14 @@ def music_status_text() -> str:
         f"• ShopAIKey missing: <code>{html.escape(', '.join(shopaikey.get('missing_env') or []) or '-')}</code>",
         f"• Key4U Suno: <code>{'CONFIGURED' if key4u.get('configured') else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(str(key4u.get('smoke') or '-'))}</code>",
         f"• Key4U missing: <code>{html.escape(', '.join(key4u.get('missing_env') or []) or '-')}</code>",
-        f"• Last submit smoke: <code>{html.escape(str(submit_smoke.get('status') or 'NOT_TESTED'))}</code>",
-        f"• Last fetch smoke: <code>{html.escape(str(fetch_smoke.get('status') or 'NOT_TESTED'))}</code>",
-        f"• Last download smoke: <code>{html.escape(str(download_smoke.get('status') or 'NOT_TESTED'))}</code>",
+        f"• Last submit smoke: <code>{html.escape(str(submit_smoke.get('status') or 'NOT_TESTED'))}{(' at ' + html.escape(str(submit_smoke.get('tested_at') or ''))) if submit_smoke.get('tested_at') else ''}</code>",
+        f"• Last fetch smoke: <code>{html.escape(str(fetch_smoke.get('status') or 'NOT_TESTED'))}{(' at ' + html.escape(str(fetch_smoke.get('tested_at') or ''))) if fetch_smoke.get('tested_at') else ''}</code>",
+        f"• Last download smoke: <code>{html.escape(str(download_smoke.get('status') or 'NOT_TESTED'))}{(' at ' + html.escape(str(download_smoke.get('tested_at') or ''))) if download_smoke.get('tested_at') else ''}</code>",
+        admin_attempt_summary("Last music", music_attempt),
+        f"• Last music task_id: <code>{html.escape(str(music_attempt.get('task_id') or '-'))}</code>",
+        f"• Last music fetch/download: <code>{html.escape(str(music_attempt.get('fetch_status') or '-'))}</code>/<code>{html.escape(str(music_attempt.get('download_status') or '-'))}</code>",
+        f"• User action: <code>{music_action}</code>",
+        f"• Exact blocker: <code>{html.escape(', '.join(music_ai_admin_blockers()) or '-')}</code>",
         f"• Last sanitized error: <code>{html.escape(sanitize_log_text(last_error)[:240])}</code>",
         f"• Public Suno gate: <code>{'ON' if readiness.get('public_enabled') else 'OFF'}</code> | reason <code>{html.escape(str(readiness.get('reason') or '-'))}</code>",
         "• Local SFX/library stays separate. Music AI public remains guarded until smoke + cost pass.",
@@ -56212,7 +56396,7 @@ def get_suno_music_readiness() -> dict:
     key4u_configured = not key4u_missing
     shopaikey_configured = not shopaikey_missing
     configured = bool(key4u_configured or shopaikey_configured)
-    smoke_ok = any(status in {"PASS_SUBMITTED", "PASS", "OK", "SUCCESS"} for status in (key4u_smoke, shopaikey_smoke))
+    smoke_ok = any(provider_status_is_pass(status) for status in (key4u_smoke, shopaikey_smoke))
     preferred_provider = "key4u_suno" if key4u_configured else ("shopaikey_music" if shopaikey_configured else "none")
     preferred_model = KEY4U_SUNO_MODEL if key4u_configured else (SHOPAIKEY_MUSIC_MODEL or "auto")
     preferred_endpoint = KEY4U_SUNO_CREATE_ENDPOINT if key4u_configured else (SHOPAIKEY_MUSIC_ENDPOINT or "")
@@ -56235,7 +56419,7 @@ def get_suno_music_readiness() -> dict:
         ready=configured,
         reason=reason,
         missing_env=missing,
-        safe_user_message="Nhạc AI đang được kiểm tra tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu.",
+        safe_user_message="Nhạc AI đang chờ kiểm tra tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu.",
     )
     payload.update({
         "providers": {
@@ -56304,12 +56488,12 @@ def get_minimax_voice_readiness() -> dict:
     ]:
         if not ok:
             missing.append(name)
-    tts_snapshot = preferred_tool_test_result("minimax_tts", "minimax_voice_job")
+    tts_snapshot = preferred_tool_test_result("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job")
     clone_snapshot = preferred_tool_test_result("minimax_voice_clone")
     smoke = str(tts_snapshot.get("status") or "NOT_TESTED")
     configured = not missing
     provider_public = bool(shopaikey_voice_ready or direct_voice_ready or (key4u_voice_ready and KEY4U_PUBLIC_ENABLED))
-    public_ready = bool(configured and provider_public and MINIMAX_VOICE_PUBLIC_ENABLED and (smoke == "PASS" or not MINIMAX_REQUIRE_SMOKE_PASS))
+    public_ready = bool(configured and provider_public and MINIMAX_VOICE_PUBLIC_ENABLED and (provider_status_is_pass(smoke) or not MINIMAX_REQUIRE_SMOKE_PASS))
     reason = "ready" if configured else "Missing " + ", ".join(missing)
     if configured and not public_ready:
         reason = "configured_for_admin_smoke; public voice gate remains closed until smoke/cost pass"
@@ -56337,8 +56521,8 @@ def get_minimax_voice_readiness() -> dict:
         "clone_endpoint_ready": bool((MINIMAX_VOICE_CLONE_ENDPOINT and SHOPAIKEY_API_KEY) or (KEY4U_MINIMAX_CLONE_ENDPOINT and KEY4U_API_KEY)),
         "saved_voice_id_available": bool(saved_profile.get("provider_voice_id")),
         "saved_voice_id": str(saved_profile.get("provider_voice_id") or "")[:180],
-        "last_tts_smoke": smoke,
-        "last_clone_smoke": str(clone_snapshot.get("status") or "NOT_TESTED"),
+        "last_tts_smoke": preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job"),
+        "last_clone_smoke": preferred_tool_test_status_text("minimax_voice_clone"),
         "last_error_sanitized": shopaikey_sanitize_error(sanitize_log_text(last_error)[:260]) if last_error else "",
     })
     return payload
@@ -56362,9 +56546,9 @@ def get_minimax_voice_clone_readiness() -> dict:
     missing = [] if (shopaikey_configured or key4u_configured) else [
         "ShopAIKey MiniMax upload+clone+TTS or Key4U MiniMax upload+clone+TTS"
     ]
-    tts_smoke = preferred_tool_test_status_text("minimax_tts", "minimax_voice_job")
+    tts_smoke = preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job")
     clone_smoke = preferred_tool_test_status_text("minimax_voice_clone")
-    smoke_ok = tts_smoke == "PASS" and clone_smoke == "PASS"
+    smoke_ok = provider_status_is_pass(tts_smoke) and provider_status_is_pass(clone_smoke)
     configured = bool(shopaikey_configured or key4u_configured)
     provider_public = bool(shopaikey_configured or (key4u_configured and KEY4U_PUBLIC_ENABLED))
     public_ready = bool(
@@ -57399,6 +57583,17 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
     if not readiness.get("ready"):
         detail = f"missing={','.join(readiness.get('missing_env') or [])}; reason={readiness.get('admin_debug_reason')}"
         save_tool_test_result("minimax_tts", "NEED_DOCS", detail, uid)
+        save_provider_attempt(
+            "voice_tts",
+            {
+                "called": False,
+                "provider": "none",
+                "route": "minimax_tts",
+                "status": "NEED_DOCS",
+                "error": detail,
+            },
+            uid,
+        )
         return await update.message.reply_text(
             "🎙 <b>MiniMax TTS Smoke</b>\n\n"
             "• Status: <code>NEED_DOCS/NOT_CONFIGURED</code>\n"
@@ -57431,6 +57626,33 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
                     caption=f"🎙 MiniMax TTS smoke: {route}/{label}\nAdmin-only / 0 Xu. Provider có thể tốn credit thật.",
                 )
                 output_sent = True
+            provider_name = "key4u_minimax" if route == "key4u" else "shopaikey_minimax"
+            attempt = record_voice_tts_attempt(
+                status=status,
+                provider=provider_name,
+                route=f"{route}/{label}",
+                voice_id=voice_id,
+                bytes_count=len(audio_bytes or b""),
+                output_sent=output_sent,
+                error=detail,
+                updated_by=uid,
+            )
+            route_tool = "minimax_tts_key4u" if route == "key4u" else "minimax_tts_shopaikey"
+            if status == "PASS" and output_sent:
+                save_tool_test_result(
+                    route_tool,
+                    "PASS",
+                    json.dumps({
+                        "provider": provider_name,
+                        "route": f"{route}/{label}",
+                        "voice_id": voice_id,
+                        "bytes": int(attempt.get("bytes") or 0),
+                        "output_sent": True,
+                    }, ensure_ascii=False)[:900],
+                    uid,
+                )
+            else:
+                save_tool_test_result(route_tool, status, sanitize_log_text(detail)[:900], uid)
             results.append({
                 "label": f"{route}/{label}",
                 "voice_id": voice_id,
@@ -57460,18 +57682,28 @@ async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextType
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
     readiness = get_minimax_voice_readiness()
-    if not MINIMAX_VOICE_CLONE_ENDPOINT:
-        save_tool_test_result("minimax_voice_clone", "NEED_DOCS", "MINIMAX_VOICE_CLONE_ENDPOINT missing; no provider call", uid)
+    clone_routes = []
+    async def key4u_clone_tts_admin(text: str, voice_id: str = "", voice_style: str = ""):
+        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=True)
+    if KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_MINIMAX_UPLOAD_ENDPOINT and KEY4U_MINIMAX_CLONE_ENDPOINT:
+        clone_routes.append(("key4u_minimax", key4u_minimax_upload_voice_sample, key4u_minimax_voice_clone, key4u_clone_tts_admin))
+    if SHOPAIKEY_API_KEY and MINIMAX_VOICE_UPLOAD_ENDPOINT and MINIMAX_VOICE_CLONE_ENDPOINT:
+        clone_routes.append(("shopaikey_minimax", shopaikey_minimax_upload_voice_sample, shopaikey_minimax_voice_clone, shopaikey_minimax_tts_bytes))
+    if not clone_routes:
+        detail = "MiniMax upload/clone route missing; no provider call"
+        save_tool_test_result("minimax_voice_clone", "NEED_DOCS", detail, uid)
+        save_provider_attempt("voice_clone", {"called": False, "provider": "none", "status": "NEED_DOCS", "error": detail}, uid)
         return await update.message.reply_text(
             "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
             "• Status: <code>NEED_DOCS/NOT_CONFIGURED</code>\n"
-            "• Env thiếu: <code>MINIMAX_VOICE_CLONE_ENDPOINT</code>\n"
+            "• Env thiếu: <code>MiniMax upload/clone route</code>\n"
             "• Voice clone cần file mẫu + đồng ý rõ ràng; lệnh này chưa gọi provider và chưa trừ Xu.",
             parse_mode="HTML",
         )
     media_info = await resolve_stt_test_media(update, context)
     if not media_info or not media_info.get("bytes"):
         save_tool_test_result("minimax_voice_clone", "NEED_AUDIO_INPUT", "reply audio sample required; no provider call", uid)
+        save_provider_attempt("voice_clone", {"called": False, "provider": "none", "status": "NEED_AUDIO_INPUT", "error": "reply audio sample required"}, uid)
         return await update.message.reply_text(
             "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
             "• Status: <code>NEED_AUDIO_INPUT</code>\n"
@@ -57480,45 +57712,92 @@ async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextType
             parse_mode="HTML",
         )
     voice_id = "toanaas-voice-" + re.sub(r"[^0-9A-Za-z]+", "", str(uid))[-10:] + f"-{int(time.time())}"
-    upload_status, file_id, upload_detail, upload_http = await shopaikey_minimax_upload_voice_sample(
-        media_info.get("bytes") or b"",
-        media_info.get("file_name") or "voice_sample.mp3",
-        media_info.get("content_type") or "audio/mpeg",
-    )
-    if upload_status != "PASS" or not file_id:
-        save_tool_test_result("minimax_voice_clone", upload_status, f"upload_http={upload_http}; {upload_detail}", uid)
-        return await update.message.reply_text(
-            "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
-            f"• Status: <code>{html.escape(upload_status)}</code>\n"
-            f"• Step: <code>upload_sample</code>\n"
-            f"• HTTP: <code>{int(upload_http or 0)}</code>\n"
-            "• No Xu deducted: <code>yes</code>\n"
-            f"• Detail: <code>{html.escape(sanitize_log_text(upload_detail)[:220])}</code>",
-            parse_mode="HTML",
+    route_results = []
+    final_status = "FAIL"
+    final_voice_id = ""
+    final_demo = ""
+    for route_name, upload_call, clone_call, tts_call in clone_routes:
+        upload_status, file_id, upload_detail, upload_http = await upload_call(
+            media_info.get("bytes") or b"",
+            media_info.get("file_name") or "voice_sample.mp3",
+            media_info.get("content_type") or "audio/mpeg",
         )
-    clone_status, clone_payload, clone_detail, clone_http = await shopaikey_minimax_voice_clone(file_id, voice_id)
-    demo_sent = False
-    demo_audio = str((clone_payload or {}).get("demo_audio") or "").strip()
-    if clone_status == "PASS" and demo_audio.startswith(("http://", "https://")):
-        try:
-            await context.bot.send_audio(
-                chat_id=update.effective_chat.id,
-                audio=demo_audio,
-                caption="🧬 MiniMax voice clone preview\nAdmin-only / 0 Xu.",
+        save_tool_test_result("minimax_voice_clone_upload", upload_status, f"provider={route_name}; upload_http={upload_http}; {upload_detail}", uid)
+        if upload_status != "PASS" or not file_id:
+            record_voice_clone_attempt(
+                status=upload_status,
+                provider=route_name,
+                route=f"{route_name}/upload",
+                upload_status=upload_status,
+                error=upload_detail,
+                updated_by=uid,
             )
-            demo_sent = True
-        except Exception:
-            demo_sent = False
-    save_tool_test_result("minimax_voice_clone", clone_status, f"upload=PASS; clone_http={clone_http}; voice_id={voice_id}; demo_sent={'yes' if demo_sent else 'no'}; {clone_detail}", uid)
+            route_results.append(f"{route_name}:upload={upload_status}")
+            continue
+        clone_status, clone_payload, clone_detail, clone_http = await clone_call(file_id, voice_id)
+        provider_voice_id = str((clone_payload or {}).get("voice_id") or voice_id).strip()
+        demo_sent = False
+        demo_audio = str((clone_payload or {}).get("demo_audio") or "").strip()
+        tts_status = "NOT_RUN"
+        tts_detail = ""
+        if clone_status == "PASS" and demo_audio.startswith(("http://", "https://")):
+            try:
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=demo_audio,
+                    caption=f"🧬 MiniMax voice clone preview: {route_name}\nAdmin-only / 0 Xu.",
+                )
+                demo_sent = True
+            except Exception as exc:
+                tts_detail = sanitize_provider_error(exc)[:180]
+        if clone_status == "PASS" and provider_voice_id:
+            tts_status, tts_bytes, tts_detail, tts_http = await tts_call(
+                VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT,
+                voice_id=provider_voice_id,
+            )
+            save_tool_test_result(
+                "minimax_voice_clone_tts",
+                tts_status,
+                f"provider={route_name}; http={tts_http}; voice_id={provider_voice_id}; bytes={len(tts_bytes or b'')}; {tts_detail}",
+                uid,
+            )
+            if tts_status == "PASS" and tts_bytes:
+                audio = io.BytesIO(tts_bytes)
+                audio.name = f"toan_aas_voice_clone_{route_name}.{MINIMAX_AUDIO_FORMAT or 'mp3'}"
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=audio,
+                    caption=f"🧬 MiniMax clone TTS smoke: {route_name}\nAdmin-only / 0 Xu.",
+                )
+                demo_sent = True
+        status_for_route = "PASS" if clone_status == "PASS" and (tts_status == "PASS" or demo_sent) else (clone_status or "FAIL")
+        record_voice_clone_attempt(
+            status=status_for_route,
+            provider=route_name,
+            route=f"{route_name}/upload_clone_tts",
+            upload_status=upload_status,
+            clone_status=clone_status,
+            tts_status=tts_status,
+            provider_voice_id=provider_voice_id,
+            demo_audio=demo_audio,
+            error=clone_detail or tts_detail,
+            updated_by=uid,
+        )
+        route_results.append(f"{route_name}:upload={upload_status}; clone={clone_status}; tts={tts_status}; demo={'yes' if demo_sent else 'no'}")
+        if status_for_route == "PASS":
+            final_status = "PASS"
+            final_voice_id = provider_voice_id
+            final_demo = "yes" if demo_sent else "no"
+            break
+    detail = " | ".join(route_results)[:900]
+    save_tool_test_result("minimax_voice_clone", final_status, f"voice_id={final_voice_id or voice_id}; demo_sent={final_demo or 'no'}; {detail}", uid)
     await update.message.reply_text(
         "🧬 <b>MiniMax Voice Clone Smoke</b>\n\n"
-        f"• Status: <code>{html.escape(clone_status)}</code>\n"
-        f"• Upload: <code>PASS</code>\n"
-        f"• HTTP: <code>{int(clone_http or 0)}</code>\n"
-        f"• Voice ID: <code>{html.escape(voice_id)}</code>\n"
-        f"• Demo sent: <code>{'yes' if demo_sent else 'no'}</code>\n"
+        f"• Status: <code>{html.escape(final_status)}</code>\n"
+        f"• Voice ID: <code>{html.escape(final_voice_id or voice_id)}</code>\n"
+        f"• Demo sent: <code>{html.escape(final_demo or 'no')}</code>\n"
         "• No Xu deducted: <code>yes</code>\n"
-        f"• Detail: <code>{html.escape(sanitize_log_text(clone_detail)[:220])}</code>",
+        f"• Detail: <code>{html.escape(sanitize_log_text(detail)[:500])}</code>",
         parse_mode="HTML",
     )
 
@@ -57597,6 +57876,40 @@ async def cmd_suno_public_close(update: Update, context: ContextTypes.DEFAULT_TY
     set_system_setting("suno_public_enabled", "0", "Suno public closed", uid)
     await update.message.reply_text("✅ Đã đóng Suno public. Admin smoke vẫn dùng được nếu cấu hình đủ.")
 
+async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global SUNO_PUBLIC_ENABLED
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    readiness = get_suno_music_readiness()
+    submit = preferred_tool_test_result("key4u_suno", "shopaikey_music")
+    fetch = preferred_tool_test_result("key4u_suno_job", "shopaikey_music_job")
+    download = preferred_tool_test_result("music_ai_download", "music_ai_preview_download")
+    blockers = []
+    if not readiness.get("ready"):
+        blockers.extend(readiness.get("missing_env") or ["music route not configured"])
+    if not provider_status_is_pass(str(submit.get("status") or "")):
+        blockers.append("submit smoke not PASS")
+    if not provider_status_is_pass(str(fetch.get("status") or "")):
+        blockers.append("fetch/status smoke not PASS")
+    if not provider_status_is_pass(str(download.get("status") or "")):
+        blockers.append("download smoke not PASS")
+    if blockers:
+        SUNO_PUBLIC_ENABLED = False
+        set_system_setting("suno_public_enabled", "0", "Music public open safe blocked", uid)
+        return await update.message.reply_text(
+            "🎼 <b>Không mở Music public.</b>\n\n"
+            f"• Submit smoke: <code>{html.escape(str(submit.get('status') or 'NOT_TESTED'))}</code>\n"
+            f"• Fetch smoke: <code>{html.escape(str(fetch.get('status') or 'NOT_TESTED'))}</code>\n"
+            f"• Download smoke: <code>{html.escape(str(download.get('status') or 'NOT_TESTED'))}</code>\n"
+            f"• Blocker: <code>{html.escape('; '.join(blockers))}</code>\n\n"
+            "Không gọi thêm provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    SUNO_PUBLIC_ENABLED = True
+    set_system_setting("suno_public_enabled", "1", "Music public opened after safe smoke", uid)
+    await update.message.reply_text("✅ Đã mở Music public gate sau khi submit/fetch/download smoke PASS. Chưa claim live pass.")
+
 async def cmd_voice_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global MINIMAX_VOICE_PUBLIC_ENABLED
     uid = update.effective_user.id
@@ -57616,6 +57929,49 @@ async def cmd_voice_public_open(update: Update, context: ContextTypes.DEFAULT_TY
     MINIMAX_VOICE_PUBLIC_ENABLED = True
     set_system_setting("minimax_voice_public_enabled", "1", "MiniMax voice public opened after admin smoke", uid)
     await update.message.reply_text("✅ Đã mở MiniMax Voice public gate. Voice clone vẫn yêu cầu consent và xác nhận giá riêng.")
+
+def voice_pricing_configured() -> bool:
+    return int(VOICE_TTS_BASE_CHARS or 0) > 0 and int(VOICE_TTS_BASE_PRICE_XU or 0) >= 0 and int(VOICE_PROFILE_PRICE_XU or 0) >= 0
+
+async def cmd_voice_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
+    uid = update.effective_user.id
+    if not is_owner_user(uid):
+        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    readiness = get_minimax_voice_readiness()
+    clone = get_minimax_voice_clone_readiness()
+    tts_smoke = preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job")
+    clone_smoke = preferred_tool_test_status_text("minimax_voice_clone")
+    blockers = []
+    if not readiness.get("ready"):
+        blockers.extend(readiness.get("missing_env") or ["MiniMax TTS route not configured"])
+    if not provider_status_is_pass(tts_smoke):
+        blockers.append("TTS smoke not PASS")
+    if not voice_pricing_configured():
+        blockers.append("voice pricing config missing")
+    if blockers:
+        MINIMAX_VOICE_PUBLIC_ENABLED = False
+        MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = False
+        set_system_setting("minimax_voice_public_enabled", "0", "Voice public open safe blocked", uid)
+        set_system_setting("minimax_voice_clone_public_enabled", "0", "Voice clone public open safe blocked", uid)
+        return await update.message.reply_text(
+            "🎙 <b>Không mở Voice public.</b>\n\n"
+            f"• TTS smoke: <code>{html.escape(tts_smoke)}</code>\n"
+            f"• Clone smoke: <code>{html.escape(clone_smoke)}</code>\n"
+            f"• Blocker: <code>{html.escape('; '.join(blockers))}</code>\n\n"
+            "Không gọi provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    MINIMAX_VOICE_PUBLIC_ENABLED = True
+    set_system_setting("minimax_voice_public_enabled", "1", "Default TTS public opened after safe smoke", uid)
+    clone_ready = bool(clone.get("ready") and provider_status_is_pass(clone_smoke))
+    MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = bool(clone_ready)
+    set_system_setting("minimax_voice_clone_public_enabled", "1" if clone_ready else "0", "Voice clone public safe gate", uid)
+    if clone_ready:
+        msg = "✅ Default TTS public: ON\n✅ Voice clone public: ON"
+    else:
+        msg = "✅ Default TTS public: ON\n⚠️ Voice clone public: OFF — clone smoke not tested"
+    await update.message.reply_text(msg + "\n\nChưa claim live pass.", parse_mode="HTML")
 
 async def cmd_voice_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
@@ -64902,7 +65258,8 @@ def music_prompt_suggestions_text(description: str, offset: int = 0, lang: str =
         labels = ("情绪", "速度", "乐器", "时长", "人声", "适合", "Prompt")
         footer = "TOAN AAS 尚未开始音乐处理，也未扣除 Xu。"
     else:
-        lines = ["🎼 <b>3 prompt nhạc gợi ý</b>", "", f"<b>Nội dung:</b> {html.escape(_short_pending_text(description, 220) or 'video/sản phẩm')}", ""]
+        title = "🎤 <b>Chọn hướng bài hát — 3 prompt nhạc gợi ý</b>" if str(mode or "").strip().lower() == "lyrics" else "🎼 <b>3 prompt nhạc gợi ý</b>"
+        lines = [title, "", f"<b>Nội dung:</b> {html.escape(_short_pending_text(description, 220) or 'video/sản phẩm')}", ""]
         labels = ("Mood", "Tempo", "Nhạc cụ", "Thời lượng", "Vocal", "Dùng cho", "Prompt")
         footer = "TOAN AAS chưa bắt đầu xử lý nhạc và chưa trừ Xu."
     for idx, item in enumerate(suggestions, start=1):
@@ -65055,6 +65412,20 @@ MUSIC_SONG_GENRES = [
     ("bolero", "Bolero", "Bolero"),
     ("custom", "Tự nhập thể loại", "Custom genre"),
 ]
+MUSIC_SONG_TOPICS = [
+    ("brand_story", "Câu chuyện thương hiệu", "Brand story"),
+    ("thank_customers", "Cảm ơn khách hàng", "Customer appreciation"),
+    ("product_launch", "Ra mắt sản phẩm", "Product launch"),
+    ("motivation", "Truyền cảm hứng", "Motivation"),
+    ("love", "Tình yêu", "Love"),
+    ("birthday", "Sinh nhật / chúc mừng", "Birthday / celebration"),
+    ("family", "Gia đình", "Family"),
+    ("friendship", "Tình bạn", "Friendship"),
+    ("hometown", "Quê hương", "Hometown"),
+    ("business_journey", "Hành trình khởi nghiệp", "Business journey"),
+    ("team_spirit", "Tinh thần đội nhóm", "Team spirit"),
+    ("seasonal", "Lễ hội / mùa đặc biệt", "Seasonal celebration"),
+]
 MUSIC_SONG_MOODS = [
     ("cheerful", "Vui", "Cheerful"),
     ("sad", "Buồn", "Sad"),
@@ -65204,6 +65575,30 @@ def music_song_options_keyboard(step: str, lang: str = "vi", product_context: st
         lang=lang,
     )
 
+def music_song_topic_keyboard(
+    lang: str = "vi",
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+    offset: int = 0,
+    back_action: str = "song_back_duration",
+) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    total = len(MUSIC_SONG_TOPICS)
+    start = max(0, int(offset or 0)) % total
+    selected = [MUSIC_SONG_TOPICS[(start + index) % total] for index in range(3)]
+    buttons = [(vi if is_vi else en, cb(f"song_topic_pick:{key}")) for key, vi, en in selected]
+    buttons.extend([
+        ("🔁 Gợi ý chủ đề khác" if is_vi else "🔁 More topics", cb("song_topic_more")),
+        ("✍️ Tự nhập chủ đề" if is_vi else "✍️ Custom topic", cb("song_topic_custom")),
+    ])
+    return build_2col_keyboard(
+        buttons,
+        nav_back=("⬅️ Quay lại" if is_vi else "⬅️ Back", cb(back_action)),
+        nav_main=True,
+        lang=lang,
+    )
+
 def music_song_step_text(step: str, result: dict | None = None, lang: str = "vi") -> str:
     result = dict(result or {})
     if music_ui_lang(lang=lang) != "vi":
@@ -65215,17 +65610,23 @@ def music_song_step_text(step: str, result: dict | None = None, lang: str = "vi"
         }
         return f"🎤 <b>Song with lyrics</b>\n\n{labels.get(step, 'Choose an option.')}"
     labels = {
-        "topic": "Bạn muốn bài hát nói về điều gì? Hãy gửi chủ đề ở tin nhắn tiếp theo.",
+        "topic": "Bạn muốn bài hát nói về điều gì? Chọn 1 trong 3 chủ đề gợi ý bên dưới, bấm gợi ý khác hoặc tự nhập chủ đề của bạn.",
         "genre": "Chọn thể loại nhạc.",
         "mood": "Chọn cảm xúc của bài hát.",
         "vocal": "Chọn hướng giọng hát.",
+    }
+    titles = {
+        "topic": "🎤 <b>Tạo bài hát có lời</b>",
+        "genre": "🎼 <b>Chọn thể loại nhạc</b>",
+        "mood": "🎭 <b>Chọn cảm xúc</b>",
+        "vocal": "🎤 <b>Chọn giọng hát</b>",
     }
     product = {
         "seconds": f"Có lời theo {music_result_duration_seconds(result)} giây",
         "half": "Nửa bài đủ lời",
         "full": "Hoàn chỉnh một bài",
     }.get(str(result.get("song_product") or ""), "Bài hát có lời")
-    return f"🎤 <b>Tạo bài hát có lời</b>\n\nSản phẩm: <b>{product}</b>\n\n{labels.get(step, 'Chọn một lựa chọn bên dưới.')}"
+    return f"{titles.get(step, '🎤 <b>Tạo bài hát có lời</b>')}\n\nSản phẩm: <b>{product}</b>\n\n{labels.get(step, 'Chọn một lựa chọn bên dưới.')}"
 
 def music_guided_label(options: list[tuple[str, str, str]], key: str, lang: str = "vi") -> str:
     lang = music_ui_lang(lang=lang)
@@ -65446,13 +65847,43 @@ def music_ai_admin_blockers() -> list[str]:
 def music_ai_public_guard_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
         return (
-            "AI music is checking processing resources. TOAN AAS has not processed this request and has not charged Xu."
+            "AI music is waiting for processing resource checks. TOAN AAS has not processed this request and has not charged Xu."
         )
-    return "Nhạc AI đang được kiểm tra tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu."
+    return "Nhạc AI đang chờ kiểm tra tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu."
 
-async def submit_music_generation_job(result: dict, preview: bool = False) -> dict:
+def music_ai_guarded_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, admin: bool = False) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    rows = []
+    if admin:
+        rows.append([
+            InlineKeyboardButton("🧪 Kiểm tra nhạc AI" if is_vi else "🧪 Test AI music", callback_data=cb("music_admin_test")),
+            InlineKeyboardButton("⚙️ Trạng thái nhạc" if is_vi else "⚙️ Music status", callback_data=cb("music_admin_status")),
+        ])
+    rows.extend([
+        [
+            InlineKeyboardButton("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", callback_data=cb("music_ai_edit_description")),
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("music_ai_back_suggestions")),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def music_ai_gate_keyboard(
+    user_id,
+    lang: str = "vi",
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+    result: dict | None = None,
+) -> InlineKeyboardMarkup:
     readiness = get_suno_music_readiness()
-    if not readiness.get("public_enabled"):
+    if readiness.get("public_enabled"):
+        return music_ai_preview_keyboard(lang, product_context, preview_seen=bool((result or {}).get("music_preview_seen")), result=result)
+    return music_ai_guarded_keyboard(lang, product_context, admin=is_admin_user(user_id))
+
+async def submit_music_generation_job(result: dict, preview: bool = False, admin_smoke: bool = False, updated_by="") -> dict:
+    readiness = get_suno_music_readiness()
+    if not readiness.get("public_enabled") and not admin_smoke:
         return {"ok": False, "status": "NOT_READY", "detail": ",".join(music_ai_admin_blockers())}
     prompt = str(result.get("selected_prompt") or result.get("description") or "").strip()[:1200]
     full_duration = music_result_duration_seconds(result)
@@ -65468,17 +65899,31 @@ async def submit_music_generation_job(result: dict, preview: bool = False) -> di
     providers = dict(readiness.get("providers") or {})
 
     async def submit_key4u() -> dict:
-        provider_result = await key4u_provider_instance().suno_create(
-            prompt=prompt,
-            duration_seconds=duration,
-            instrumental=product_kind == "background",
-            title="TOAN AAS Preview" if preview else "TOAN AAS Music",
+        try:
+            provider_result = await key4u_provider_instance().suno_create(
+                prompt=prompt,
+                duration_seconds=duration,
+                instrumental=product_kind == "background",
+                title="TOAN AAS Preview" if preview else "TOAN AAS Music",
+            )
+        except Exception as exc:
+            safe_error = sanitize_provider_error(exc)[:240]
+            record_music_provider_attempt(provider="key4u_suno", submit_status="FAIL_PROVIDER_ERROR", error=safe_error, updated_by=updated_by)
+            return {"ok": False, "status": "FAIL_PROVIDER_ERROR", "provider": "key4u_suno", "task_id": "", "detail": safe_error}
+        status_value = str(provider_result.get("status") or ("PASS_SUBMITTED" if provider_result.get("ok") else "FAIL"))
+        task_id = str(provider_result.get("task_id") or "")
+        record_music_provider_attempt(
+            provider="key4u_suno",
+            submit_status=status_value,
+            task_id=task_id,
+            error=str(provider_result.get("error_message_safe") or ""),
+            updated_by=updated_by,
         )
         return {
             "ok": bool(provider_result.get("ok") and provider_result.get("task_id")),
-            "status": str(provider_result.get("status") or ""),
+            "status": status_value,
             "provider": "key4u_suno",
-            "task_id": str(provider_result.get("task_id") or ""),
+            "task_id": task_id,
             "detail": str(provider_result.get("error_message_safe") or provider_result.get("status") or "")[:240],
         }
 
@@ -65501,15 +65946,25 @@ async def submit_music_generation_job(result: dict, preview: bool = False) -> di
             payload = response.json() if response.content else {}
             data = payload.get("data") if isinstance(payload, dict) else {}
             task_id = str(data if isinstance(data, str) else ((data or {}).get("task_id") or (data or {}).get("taskId") or (data or {}).get("id") or "")).strip()
+            status_value = "PASS_SUBMITTED" if task_id else "FAILED"
+            record_music_provider_attempt(
+                provider="shopaikey_music",
+                submit_status=status_value,
+                task_id=task_id,
+                error=sanitize_provider_error((payload or {}).get("message") if isinstance(payload, dict) else "")[:240],
+                updated_by=updated_by,
+            )
             return {
                 "ok": bool(200 <= int(response.status_code or 0) < 300 and task_id),
-                "status": "PASS_SUBMITTED" if task_id else "FAILED",
+                "status": status_value,
                 "provider": "shopaikey_music",
                 "task_id": task_id,
                 "detail": sanitize_provider_error((payload or {}).get("message") if isinstance(payload, dict) else "")[:240],
             }
         except Exception as exc:
-            return {"ok": False, "status": "FAILED", "provider": "shopaikey_music", "task_id": "", "detail": sanitize_provider_error(exc)[:240]}
+            safe_error = sanitize_provider_error(exc)[:240]
+            record_music_provider_attempt(provider="shopaikey_music", submit_status="FAILED", error=safe_error, updated_by=updated_by)
+            return {"ok": False, "status": "FAILED", "provider": "shopaikey_music", "task_id": "", "detail": safe_error}
 
     preferred = str(readiness.get("preferred_provider") or readiness.get("provider") or "")
     route_order = ["key4u_suno", "shopaikey_music"] if preferred == "key4u_suno" else ["shopaikey_music", "key4u_suno"]
@@ -65520,21 +65975,30 @@ async def submit_music_generation_job(result: dict, preview: bool = False) -> di
         route_smoke = str(route_info.get("smoke") or "").upper().split(" ", 1)[0]
         if not bool(route_info.get("configured")):
             continue
-        if SUNO_REQUIRE_SMOKE_PASS and route_smoke not in smoke_pass_values:
+        if SUNO_REQUIRE_SMOKE_PASS and route_smoke not in smoke_pass_values and not admin_smoke:
             continue
         submitted = await (submit_key4u() if route == "key4u_suno" else submit_shopaikey())
         if submitted.get("ok"):
             return submitted
         failures.append(f"{route}:{submitted.get('status')}:{submitted.get('detail')}")
-    return {"ok": False, "status": "FAILED", "provider": "fallback_exhausted", "task_id": "", "detail": " | ".join(failures)[:240]}
+    detail = " | ".join(failures)[:240]
+    record_music_provider_attempt(provider="fallback_exhausted", submit_status="FAILED", error=detail, updated_by=updated_by)
+    return {"ok": False, "status": "FAILED", "provider": "fallback_exhausted", "task_id": "", "detail": detail}
 
-async def poll_music_generation_job(result: dict) -> dict:
+async def poll_music_generation_job(result: dict, updated_by="") -> dict:
     provider = str(result.get("music_provider") or "")
     task_id = str(result.get("music_task_id") or "")
     if not task_id:
         return {"ok": False, "status": "MISSING_TASK", "output_url": ""}
     if provider == "key4u_suno":
         polled = await key4u_provider_instance().suno_query(task_id)
+        record_music_provider_attempt(
+            provider=provider,
+            task_id=task_id,
+            fetch_status=str(polled.get("status") or ("PASS" if polled.get("ok") else "FAIL")),
+            error=str(polled.get("error_message_safe") or ""),
+            updated_by=updated_by,
+        )
         return {
             "ok": bool(polled.get("ok") and polled.get("output_url")),
             "status": str(polled.get("status") or ""),
@@ -65564,23 +66028,35 @@ async def poll_music_generation_job(result: dict) -> dict:
                 output_url = str(item.get("audio_url") or "")
                 break
         status = str((data or {}).get("status") if isinstance(data, dict) else "") or str((payload or {}).get("status") or "")
-        return {"ok": bool(output_url), "status": status or ("SUCCESS" if output_url else "PROCESSING"), "output_url": output_url, "detail": ""}
+        final_status = status or ("SUCCESS" if output_url else "PROCESSING")
+        record_music_provider_attempt(provider=provider, task_id=task_id, fetch_status=final_status, error="", updated_by=updated_by)
+        return {"ok": bool(output_url), "status": final_status, "output_url": output_url, "detail": ""}
     except Exception as exc:
-        return {"ok": False, "status": "FAILED", "output_url": "", "detail": sanitize_provider_error(exc)[:240]}
+        safe_error = sanitize_provider_error(exc)[:240]
+        record_music_provider_attempt(provider=provider, task_id=task_id, fetch_status="FAILED", error=safe_error, updated_by=updated_by)
+        return {"ok": False, "status": "FAILED", "output_url": "", "detail": safe_error}
 
-async def poll_music_preview_job(result: dict) -> dict:
+async def poll_music_preview_job(result: dict, updated_by="") -> dict:
     preview_state = dict(result or {})
     preview_state["music_provider"] = str(result.get("music_preview_provider") or "")
     preview_state["music_task_id"] = str(result.get("music_preview_task_id") or "")
-    return await poll_music_generation_job(preview_state)
+    return await poll_music_generation_job(preview_state, updated_by=updated_by)
 
-async def send_music_preview_output(query, context, result: dict, lang: str = "vi") -> tuple[bool, dict]:
-    polled = await poll_music_preview_job(result)
+async def send_music_preview_output(query, context, result: dict, lang: str = "vi", updated_by="") -> tuple[bool, dict]:
+    polled = await poll_music_preview_job(result, updated_by=updated_by)
     output_url = str(polled.get("output_url") or "").strip()
     if not polled.get("ok") or not output_url:
         return False, polled
     try:
         audio_bytes, _detail, _status = await _download_audio_url_bytes(output_url, timeout_seconds=60.0)
+        record_music_provider_attempt(
+            provider=str(result.get("music_preview_provider") or ""),
+            task_id=str(result.get("music_preview_task_id") or ""),
+            fetch_status=str(polled.get("status") or ""),
+            download_status="PASS" if audio_bytes else "FAIL_DOWNLOAD",
+            error=_detail,
+            updated_by=updated_by,
+        )
         preview_seconds = calculate_preview_seconds(music_result_duration_seconds(result))
         capped_bytes, _cap_detail = await cap_voice_preview_audio_bytes(audio_bytes, preview_seconds)
         if not capped_bytes:
@@ -65704,8 +66180,8 @@ def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
 VOICE_PROFILE_PREVIEW_TEXT = "Xin chào, đây là bản nghe thử giọng TOAN AAS."
 VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT = "Cảm ơn bạn đã sử dụng trình nhân bản giọng nói của TOAN AAS."
 VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI = (
-    "Tạo voice riêng chưa hoàn tất vì tài nguyên xử lý chưa sẵn sàng. "
-    "TOAN AAS chưa trừ Xu. Bạn có thể dùng giọng mặc định hoặc thử lại sau."
+    "Tạo voice riêng đang khóa thử nghiệm. TOAN AAS chưa trừ Xu. "
+    "Admin cần chạy kiểm tra hệ thống trước."
 )
 
 def voice_clone_public_guard_text(lang: str = "vi") -> str:
@@ -65715,8 +66191,24 @@ def voice_clone_public_guard_text(lang: str = "vi") -> str:
 
 def voice_clone_provider_not_ready_public_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
-        return "Custom voice creation did not finish because processing resources are not ready. TOAN AAS has not charged Xu. You can use a default voice or try again later."
+        return "Custom voice creation is locked for system testing. TOAN AAS has not charged Xu. Admin must run system checks first."
     return VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
+
+def voice_clone_admin_guard_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🧪 Kiểm tra voice clone" if is_vi else "🧪 Test voice clone", callback_data=cb("voice_admin_test_clone")),
+            InlineKeyboardButton("⚙️ Trạng thái voice" if is_vi else "⚙️ Voice status", callback_data=cb("voice_admin_status")),
+        ],
+        [
+            InlineKeyboardButton("✏️ Đổi tên" if is_vi else "✏️ Rename", callback_data=cb(f"voice_profile_rename:{int(profile_id or 0)}")),
+            InlineKeyboardButton("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", callback_data=cb("voice_vault")),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
 
 def voice_clone_intro_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -66070,6 +66562,26 @@ def user_voice_profile_by_display_code(user_id, display_code: int, page_size: in
     rows = user_voice_profile_rows(user_id, 1, code - 1)
     return dict(rows[0]) if rows else None
 
+def voice_profile_status_label(status: str, lang: str = "vi") -> str:
+    value = str(status or "").strip().lower()
+    if music_ui_lang(lang=lang) != "vi":
+        if value in VOICE_PROFILE_FINAL_READY_STATUSES:
+            return "ready"
+        if value in {"failed_provider_not_ready", "waiting_provider", "waiting_admin_smoke"}:
+            return "waiting for provider/admin smoke"
+        if value.startswith("failed") or value in {"error", "rejected"}:
+            return "failed"
+        return value or "draft"
+    if value in VOICE_PROFILE_FINAL_READY_STATUSES:
+        return "sẵn sàng"
+    if value in {"failed_provider_not_ready", "waiting_provider", "waiting_admin_smoke"}:
+        return "chờ provider/admin smoke"
+    if value.startswith("failed") or value in {"error", "rejected"}:
+        return "thất bại"
+    if value in {"pending_confirm", "pending_name", "processing", "preview_generating"}:
+        return "đang chờ hoàn tất"
+    return value or "bản nháp"
+
 def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5, product_context: str = PRODUCT_CONTEXT_SHOWROOM, page: int = 0) -> str:
     ctx = normalize_product_context(product_context)
     rows = []
@@ -66105,7 +66617,8 @@ def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5, produ
         profile_id, name, consent, status, created, is_default = row
         default_text = " — ⭐ Mặc định" if int(is_default or 0) else ""
         display_code = voice_profile_display_code(page, index_on_page, page_size)
-        lines.append(f"• <b>{display_code}</b>. <code>#{profile_id}</code> {html.escape(str(name or 'Chưa đặt tên'))} — {html.escape(str(status or '-'))}{default_text}")
+        status_label = voice_profile_status_label(str(status or ""), lang)
+        lines.append(f"• <b>{display_code}</b>. <code>#{profile_id}</code> {html.escape(str(name or 'Chưa đặt tên'))} — {html.escape(status_label)}{default_text}")
     lines.append("")
     if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
         lines.append("Bấm mã số hoặc nhập số voice (1–999) để gắn vào kế hoạch video hiện tại." if normalize_user_language(lang) == "vi" else "Tap a code or type a voice number (1-999) for the current video plan.")
@@ -66166,11 +66679,14 @@ def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_co
         final_ready = False
         preview_ready = False
     if not final_ready:
-        buttons = [
-            ("🔁 Tạo/nghe thử lại" if is_vi else "🔁 Retry preview/create", cb(f"voice_clone_retry:{pid}")),
+        clone_gate = get_minimax_voice_clone_readiness()
+        buttons = []
+        if clone_gate.get("public_enabled"):
+            buttons.append(("🔁 Tạo/nghe thử lại" if is_vi else "🔁 Retry preview/create", cb(f"voice_clone_retry:{pid}")))
+        buttons.extend([
             ("✏️ Đổi tên" if is_vi else "✏️ Rename", cb(f"voice_profile_rename:{pid}")),
             ("🗑 Xóa" if is_vi else "🗑 Delete", cb(f"voice_profile_delete:{pid}")),
-        ]
+        ])
         return build_2col_keyboard(buttons, nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")), nav_main=True, lang=lang)
     video_callback = cb(f"voice_profile_use:{pid}") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else cb(f"voice_profile_video_hint:{pid}")
     buttons = [
@@ -66808,7 +67324,7 @@ def voice_preview_guard_message(reason: str, retry_after: int = 0) -> str:
     if reason == "cooldown":
         return f"Bạn chờ khoảng {max(1, int(retry_after or 1))} giây rồi nghe thử lại nhé. TOAN AAS chưa trừ Xu final."
     if reason == "quota":
-        return "Bạn đã dùng hết lượt nghe thử miễn phí hôm nay. Bạn có thể xác nhận tạo bản đầy đủ hoặc thử lại sau."
+        return "Bạn đã hết lượt nghe thử miễn phí hôm nay. Bạn vẫn có thể tạo bản đầy đủ sau khi xác nhận."
     if reason == "preview_cap_unavailable":
         return "Máy tạo bản nghe thử ngắn đang tạm bận. TOAN AAS chưa xử lý bản đầy đủ và chưa trừ Xu final."
     if reason == "usage_unavailable":
@@ -66934,7 +67450,18 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
         )
     readiness = get_minimax_voice_clone_readiness()
-    if not readiness.get("ready") or (not readiness.get("public_enabled") and not is_admin_user(user_id)):
+    if not readiness.get("ready") or not readiness.get("public_enabled"):
+        if not load_provider_attempt("voice_clone"):
+            save_provider_attempt(
+                "voice_clone",
+                {
+                    "called": False,
+                    "provider": ",".join(readiness.get("routes") or []) or "none",
+                    "status": "BLOCKED",
+                    "error": voice_clone_admin_blocker(readiness),
+                },
+                user_id,
+            )
         failed_profile = mark_voice_profile_activation_failed(
             user_id,
             profile_id,
@@ -66944,7 +67471,11 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
         return await query.message.reply_text(
             voice_clone_provider_not_ready_public_text(lang),
-            reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
+            reply_markup=(
+                voice_clone_admin_guard_keyboard(profile_id, lang, ctx)
+                if is_admin_user(user_id)
+                else voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile)
+            ),
         )
     guard = voice_preview_guard(
         user_id,
@@ -66985,7 +67516,11 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
     cost = voice_profile_storage_price_xu(user_id, ctx, profile_id)
     metadata["final_cost_xu"] = cost
     metadata["preview_charged_xu"] = 0
-    await query.message.reply_text("🎙 TOAN AAS đang tạo bản nghe thử. Vui lòng chờ và không bấm lại nhiều lần.")
+    await query.message.reply_text(
+        "🎙 TOAN AAS đang tạo voice riêng. Vui lòng chờ và không bấm lại nhiều lần."
+        if full_generation
+        else "🎙 TOAN AAS đang tạo bản nghe thử. Vui lòng chờ và không bấm lại nhiều lần."
+    )
     try:
         telegram_file = await context.bot.get_file(str(profile.get("source_file_id") or profile.get("source_file_ref") or ""))
         audio_bytes = bytes(await telegram_file.download_as_bytearray())
@@ -67006,10 +67541,27 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         for route_name, upload_call, clone_call, tts_call in route_attempts:
             status, candidate_file_id, detail, _http = await upload_call(audio_bytes)
             if status != "PASS" or not candidate_file_id:
+                record_voice_clone_attempt(
+                    status=status,
+                    provider=route_name,
+                    route=f"{route_name}/upload",
+                    upload_status=status,
+                    error=detail,
+                    updated_by=user_id,
+                )
                 route_errors.append(f"{route_name}:upload:{status}:{detail[:80]}")
                 continue
             status, clone_payload, detail, _http = await clone_call(candidate_file_id, provider_voice_id)
             if status != "PASS":
+                record_voice_clone_attempt(
+                    status=status,
+                    provider=route_name,
+                    route=f"{route_name}/clone",
+                    upload_status="PASS",
+                    clone_status=status,
+                    error=detail,
+                    updated_by=user_id,
+                )
                 route_errors.append(f"{route_name}:clone:{status}:{detail[:80]}")
                 continue
             candidate_voice_id = str((clone_payload or {}).get("voice_id") or provider_voice_id)
@@ -67021,6 +67573,18 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             if not candidate_preview:
                 status, candidate_preview, detail, _http = await tts_call(preview_text, voice_id=candidate_voice_id)
                 if status != "PASS" or not candidate_preview:
+                    record_voice_clone_attempt(
+                        status=status,
+                        provider=route_name,
+                        route=f"{route_name}/tts",
+                        upload_status="PASS",
+                        clone_status="PASS",
+                        tts_status=status,
+                        provider_voice_id=candidate_voice_id,
+                        demo_audio=demo_audio_ref,
+                        error=detail,
+                        updated_by=user_id,
+                    )
                     route_errors.append(f"{route_name}:preview:{status}:{detail[:80]}; demo={demo_detail[:60]}")
                     continue
             provider_file_id = candidate_file_id
@@ -67030,6 +67594,18 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             if demo_audio_ref:
                 metadata["provider_demo_audio_ref"] = demo_audio_ref[:500] if demo_audio_ref.startswith(("http://", "https://")) else "inline_audio"
                 metadata["provider_demo_audio_detail"] = demo_detail[:160]
+            record_voice_clone_attempt(
+                status="PASS",
+                provider=route_name,
+                route=f"{route_name}/upload_clone_tts",
+                upload_status="PASS",
+                clone_status="PASS",
+                tts_status="PASS" if candidate_preview else "DEMO",
+                provider_voice_id=provider_voice_id,
+                demo_audio=demo_audio_ref,
+                error="-",
+                updated_by=user_id,
+            )
             break
         if not provider_name or not preview_bytes:
             raise RuntimeError("voice_routes_failed:" + " | ".join(route_errors)[:260])
@@ -67244,6 +67820,8 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         step = action.replace("song_back_", "", 1)
         if step == "topic":
             result["guided_step"] = "song_topic"
+            result["lyrics_state"] = "lyrics_wait_topic"
+            result.setdefault("song_topic_offset", 0)
             save_music_guided_result(user_id, result)
             set_music_guided_pending(
                 user_id,
@@ -67256,9 +67834,14 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             return await query.message.reply_text(
                 music_song_step_text("topic", result, lang),
                 parse_mode="HTML",
-                reply_markup=music_flow_back_keyboard(back_action, lang, ctx),
+                reply_markup=music_song_topic_keyboard(lang, ctx, _safe_int(result.get("song_topic_offset"), 0), back_action),
             )
         result["guided_step"] = f"song_{step}"
+        result["lyrics_state"] = {
+            "genre": "lyrics_select_genre",
+            "mood": "lyrics_select_mood",
+            "vocal": "lyrics_select_vocal",
+        }.get(step, "lyrics_wait_topic")
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(
             music_song_step_text(step, result, lang),
@@ -67272,6 +67855,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "music_ai_kind": "lyrics",
             "song_product": "seconds",
             "guided_step": "song_duration",
+            "lyrics_state": "lyrics_select_duration",
         })
         return await query.message.reply_text(
             "⏱ <b>Bài hát có lời theo thời lượng</b>\n\nChọn thời lượng bản đầy đủ. 6 giây chỉ là giới hạn bản nghe thử, không phải thời lượng bài hát.",
@@ -67288,13 +67872,15 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "guided_duration": "60s" if product == "half" else "120s",
             "guided_duration_seconds": 60 if product == "half" else 120,
             "guided_step": "song_topic",
+            "lyrics_state": "lyrics_wait_topic",
+            "song_topic_offset": 0,
         }
         save_music_guided_result(user_id, result)
         set_music_guided_pending(user_id, "music_song_topic", product_context=ctx, previous_screen="song_product", return_to="song_menu")
         return await query.message.reply_text(
             music_song_step_text("topic", result, lang),
             parse_mode="HTML",
-            reply_markup=music_flow_back_keyboard("song_menu", lang, ctx),
+            reply_markup=music_song_topic_keyboard(lang, ctx, 0, "song_menu"),
         )
     if action == "song_duration_custom":
         await query.answer()
@@ -67314,13 +67900,66 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "guided_duration": f"{duration}s",
             "guided_duration_seconds": duration,
             "guided_step": "song_topic",
+            "lyrics_state": "lyrics_wait_topic",
+            "song_topic_offset": 0,
         })
         save_music_guided_result(user_id, result)
         set_music_guided_pending(user_id, "music_song_topic", product_context=ctx, previous_screen="song_duration", return_to="song_back_duration")
         return await query.message.reply_text(
             music_song_step_text("topic", result, lang),
             parse_mode="HTML",
-            reply_markup=music_flow_back_keyboard("song_back_duration", lang, ctx),
+            reply_markup=music_song_topic_keyboard(lang, ctx, 0, "song_back_duration"),
+        )
+    if action == "song_topic_more":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        offset = (_safe_int(result.get("song_topic_offset"), 0) + 3) % max(1, len(MUSIC_SONG_TOPICS))
+        result.update({"song_topic_offset": offset, "guided_step": "song_topic", "lyrics_state": "lyrics_wait_topic"})
+        save_music_guided_result(user_id, result)
+        set_music_guided_pending(
+            user_id,
+            "music_song_topic",
+            product_context=ctx,
+            previous_screen="song_product" if result.get("song_product") in {"half", "full"} else "song_duration",
+            return_to="song_menu" if result.get("song_product") in {"half", "full"} else "song_back_duration",
+        )
+        back_action = "song_menu" if result.get("song_product") in {"half", "full"} else "song_back_duration"
+        return await query.message.reply_text(
+            music_song_step_text("topic", result, lang),
+            parse_mode="HTML",
+            reply_markup=music_song_topic_keyboard(lang, ctx, offset, back_action),
+        )
+    if action == "song_topic_custom":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        set_music_guided_pending(
+            user_id,
+            "music_song_topic",
+            product_context=ctx,
+            previous_screen="song_topic",
+            return_to="song_back_topic",
+        )
+        return await query.message.reply_text(
+            "✍️ Hãy nhập chủ đề bài hát của bạn. Sau đó TOAN AAS sẽ cho chọn thể loại, cảm xúc và giọng hát.",
+            reply_markup=music_flow_back_keyboard("song_back_topic", lang, ctx),
+        )
+    if action.startswith("song_topic_pick:"):
+        await query.answer()
+        key = action.split(":", 1)[1]
+        topic = music_guided_label(MUSIC_SONG_TOPICS, key, lang)
+        result = get_music_guided_result(user_id) or {}
+        result.update({
+            "song_topic": topic,
+            "song_topic_key": key,
+            "guided_step": "song_genre",
+            "lyrics_state": "lyrics_select_genre",
+        })
+        save_music_guided_result(user_id, result)
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(
+            music_song_step_text("genre", result, lang),
+            parse_mode="HTML",
+            reply_markup=music_song_options_keyboard("genre", lang, ctx),
         )
     if action.startswith("song_genre_"):
         await query.answer()
@@ -67329,7 +67968,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         if key == "custom":
             set_music_guided_pending(user_id, "music_song_genre_custom", product_context=ctx, previous_screen="song_genre", return_to="song_back_genre")
             return await query.message.reply_text("✍️ Hãy nhập thể loại nhạc bạn muốn.", reply_markup=music_flow_back_keyboard("song_back_genre", lang, ctx))
-        result.update({"song_genre": key, "guided_style": key, "guided_step": "song_mood"})
+        result.update({"song_genre": key, "guided_style": key, "guided_step": "song_mood", "lyrics_state": "lyrics_select_mood"})
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(music_song_step_text("mood", result, lang), parse_mode="HTML", reply_markup=music_song_options_keyboard("mood", lang, ctx))
     if action.startswith("song_mood_"):
@@ -67339,7 +67978,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         if key == "custom":
             set_music_guided_pending(user_id, "music_song_mood_custom", product_context=ctx, previous_screen="song_mood", return_to="song_back_mood")
             return await query.message.reply_text("✍️ Hãy nhập cảm xúc/mood bạn muốn.", reply_markup=music_flow_back_keyboard("song_back_mood", lang, ctx))
-        result.update({"song_mood": key, "guided_mood": key, "guided_step": "song_vocal"})
+        result.update({"song_mood": key, "guided_mood": key, "guided_step": "song_vocal", "lyrics_state": "lyrics_select_vocal"})
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(music_song_step_text("vocal", result, lang), parse_mode="HTML", reply_markup=music_song_options_keyboard("vocal", lang, ctx))
     if action.startswith("song_vocal_"):
@@ -67349,7 +67988,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         if key == "custom":
             set_music_guided_pending(user_id, "music_song_vocal_custom", product_context=ctx, previous_screen="song_vocal", return_to="song_back_vocal")
             return await query.message.reply_text("✍️ Hãy nhập hướng giọng hát bạn muốn.", reply_markup=music_flow_back_keyboard("song_back_vocal", lang, ctx))
-        result.update({"song_vocal": key, "guided_step": "prompt"})
+        result.update({"song_vocal": key, "guided_step": "prompt", "lyrics_state": "lyrics_options"})
         topic = str(result.get("song_topic") or "câu chuyện thương hiệu")
         genre = music_guided_label(MUSIC_SONG_GENRES, str(result.get("song_genre") or result.get("guided_style") or "pop"), lang)
         mood = music_guided_label(MUSIC_SONG_MOODS, str(result.get("song_mood") or result.get("guided_mood") or "emotional"), lang)
@@ -67364,7 +68003,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "lời nguyên bản, đủ câu, cấu trúc rõ ràng, không cắt giữa câu, không bắt chước nghệ sĩ hoặc giai điệu nổi tiếng"
         )
         suggestions = music_prompt_suggestions(desc, 0, lang, "lyrics")
-        result.update({"description": desc, "suggestions": suggestions, "selected_prompt": "", "offset": 0})
+        result.update({"description": desc, "suggestions": suggestions, "selected_prompt": "", "offset": 0, "lyrics_state": "lyrics_options"})
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(
             music_prompt_suggestions_text(desc, 0, lang, "lyrics"),
@@ -67474,6 +68113,18 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "voice_clone":
         await query.answer()
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
+        clone_readiness = get_minimax_voice_clone_readiness()
+        if not clone_readiness.get("public_enabled"):
+            clear_music_guided_pending(user_id)
+            return await query.message.reply_text(
+                voice_clone_provider_not_ready_public_text(lang),
+                parse_mode="HTML",
+                reply_markup=(
+                    voice_clone_admin_guard_keyboard(0, lang, ctx)
+                    if is_admin_user(user_id)
+                    else voice_hub_keyboard(lang, ctx)
+                ),
+            )
         set_music_guided_pending(user_id, "voice_clone_intro", product_context=ctx, previous_screen="voice_hub", return_to="voice_hub")
         return await query.message.reply_text(voice_clone_intro_text(lang), parse_mode="HTML", reply_markup=voice_clone_keyboard(lang, ctx))
     if action.startswith("voice_clone_back_upload:"):
@@ -67915,6 +68566,13 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         if not str(result.get("selected_prompt") or "").strip():
             return await query.message.reply_text("⚠️ Hãy chọn một phương án trước.", reply_markup=music_prompt_result_keyboard(lang, ctx, result))
+        readiness = get_suno_music_readiness()
+        if not readiness.get("public_enabled"):
+            return await query.message.reply_text(
+                music_ai_public_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=is_admin_user(user_id)),
+            )
         return await query.message.reply_text(
             music_ai_preview_text(result, lang),
             parse_mode="HTML",
@@ -67966,7 +68624,12 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             )
         chosen = suggestions[idx - 1]
         prompt_text = music_prompt_from_suggestion(chosen)
-        result.update({"suggestions": suggestions, "selected_prompt": prompt_text, "selected_index": idx})
+        result.update({
+            "suggestions": suggestions,
+            "selected_prompt": prompt_text,
+            "selected_index": idx,
+            "lyrics_state": "lyrics_invoice_preview" if result.get("song_product") else result.get("lyrics_state", ""),
+        })
         save_music_guided_result(user_id, result)
         if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
             updated_state = update_video_finalization(
@@ -67981,6 +68644,13 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 updated_state["step"] = "music"
                 set_video_finalization_state(user_id, updated_state)
                 return await video_finalization_return_after_addon(query, user_id, updated_state, lang)
+        readiness = get_suno_music_readiness()
+        if not readiness.get("public_enabled"):
+            return await query.message.reply_text(
+                f"✅ Đã chọn phương án {idx}.\n\n" + music_ai_public_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=is_admin_user(user_id)),
+            )
         return await query.message.reply_text(
             f"✅ Đã chọn gợi ý {idx}.\n\n<code>{html.escape(prompt_text)}</code>\n\n"
             f"Thời lượng bản đầy đủ: <b>{music_result_duration_seconds(result)} giây</b>. "
@@ -68017,6 +68687,33 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         note_id = memory_create_note(user_id, prompt_text, source_type="music_prompt")
         memory_record_event(user_id, "note_created", note_id=note_id, detail="music_prompt")
         return await query.message.reply_text(f"💾 Đã lưu prompt nhạc vào ghi chú <code>#{note_id}</code>. Bot chưa trừ Xu.", parse_mode="HTML", reply_markup=music_prompt_result_keyboard(lang, ctx, result))
+    if action == "music_admin_status":
+        await query.answer()
+        if not is_admin_user(user_id):
+            return await query.message.reply_text(music_ai_public_guard_text(lang), reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False))
+        return await query.message.reply_text(music_status_text(), parse_mode="HTML", reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=True))
+    if action == "music_admin_test":
+        await query.answer()
+        if not is_admin_user(user_id):
+            return await query.message.reply_text(music_ai_public_guard_text(lang), reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False))
+        return await query.message.reply_text(
+            "🧪 Để gọi smoke thật, admin chạy: <code>/tool_test_music_ai</code>\nBot sẽ lưu submit/fetch/download vào /music_provider_status.",
+            parse_mode="HTML",
+            reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=True),
+        )
+    if action == "voice_admin_status":
+        await query.answer()
+        if not is_admin_user(user_id):
+            return await query.message.reply_text(voice_clone_provider_not_ready_public_text(lang), reply_markup=voice_hub_keyboard(lang, ctx))
+        return await query.message.reply_text(voice_status_text(), parse_mode="HTML")
+    if action == "voice_admin_test_clone":
+        await query.answer()
+        if not is_admin_user(user_id):
+            return await query.message.reply_text(voice_clone_provider_not_ready_public_text(lang), reply_markup=voice_hub_keyboard(lang, ctx))
+        return await query.message.reply_text(
+            "🧪 Để gọi smoke thật, admin reply một file voice/audio mẫu rồi chạy: <code>/tool_test_voice_clone</code>\nBot sẽ lưu upload/clone/TTS vào /voice_provider_status.",
+            parse_mode="HTML",
+        )
     if action in {"music_ai_guard", "music_ai_preview"}:
         await query.answer()
         result = get_music_guided_result(user_id) or {}
@@ -68035,9 +68732,9 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             })
             save_music_guided_result(user_id, result)
             return await query.message.reply_text(
-                music_ai_preview_text(result, lang) + "\n\n" + music_ai_public_guard_text(lang),
+                music_ai_public_guard_text(lang),
                 parse_mode="HTML",
-                reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
+                reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=is_admin_user(user_id)),
             )
         if result.get("music_preview_task_id"):
             sent, preview_result = await send_music_preview_output(query, context, result, lang)
@@ -68073,9 +68770,9 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             })
             save_music_guided_result(user_id, result)
             return await query.message.reply_text(
-                music_ai_preview_text(result, lang) + "\n\n" + music_ai_public_guard_text(lang),
+                music_ai_public_guard_text(lang),
                 parse_mode="HTML",
-                reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
+                reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=is_admin_user(user_id)),
             )
         result.update({
             "music_preview_seen": False,
@@ -68105,7 +68802,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             )
         readiness = get_suno_music_readiness()
         if not readiness.get("public_enabled"):
-            return await query.message.reply_text(music_ai_public_guard_text(lang), parse_mode="HTML", reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result))
+            return await query.message.reply_text(
+                music_ai_public_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=is_admin_user(user_id)),
+            )
         price = music_result_price_xu(result)
         credits, _, _ = get_user(user_id)
         if not is_admin_user(user_id) and int(credits or 0) < price:
@@ -70172,7 +70873,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             )
             return True
         result = get_music_guided_result(uid) or {}
-        result.update({"song_topic": text, "guided_step": "song_genre"})
+        result.update({"song_topic": text, "guided_step": "song_genre", "lyrics_state": "lyrics_select_genre"})
         save_music_guided_result(uid, result)
         await update.message.reply_text(
             music_song_step_text("genre", result, lang),
@@ -70182,7 +70883,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         return True
     if action == "music_song_genre_custom":
         result = get_music_guided_result(uid) or {}
-        result.update({"song_genre": text, "guided_style": text, "guided_step": "song_mood"})
+        result.update({"song_genre": text, "guided_style": text, "guided_step": "song_mood", "lyrics_state": "lyrics_select_mood"})
         save_music_guided_result(uid, result)
         await update.message.reply_text(
             music_song_step_text("mood", result, lang),
@@ -70192,7 +70893,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         return True
     if action == "music_song_mood_custom":
         result = get_music_guided_result(uid) or {}
-        result.update({"song_mood": text, "guided_mood": text, "guided_step": "song_vocal"})
+        result.update({"song_mood": text, "guided_mood": text, "guided_step": "song_vocal", "lyrics_state": "lyrics_select_vocal"})
         save_music_guided_result(uid, result)
         await update.message.reply_text(
             music_song_step_text("vocal", result, lang),
@@ -70202,7 +70903,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         return True
     if action == "music_song_vocal_custom":
         result = get_music_guided_result(uid) or {}
-        result.update({"song_vocal": text, "guided_step": "prompt"})
+        result.update({"song_vocal": text, "guided_step": "prompt", "lyrics_state": "lyrics_options"})
         topic = str(result.get("song_topic") or "câu chuyện thương hiệu")
         genre = music_guided_label(MUSIC_SONG_GENRES, str(result.get("song_genre") or result.get("guided_style") or "pop"), lang)
         mood = music_guided_label(MUSIC_SONG_MOODS, str(result.get("song_mood") or result.get("guided_mood") or "emotional"), lang)
@@ -70216,7 +70917,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             "lời nguyên bản, đủ câu, cấu trúc rõ ràng, không cắt giữa câu, không bắt chước nghệ sĩ hoặc giai điệu nổi tiếng"
         )
         suggestions = music_prompt_suggestions(desc, 0, lang, "lyrics")
-        result.update({"description": desc, "suggestions": suggestions, "selected_prompt": "", "offset": 0})
+        result.update({"description": desc, "suggestions": suggestions, "selected_prompt": "", "offset": 0, "lyrics_state": "lyrics_options"})
         save_music_guided_result(uid, result)
         await update.message.reply_text(
             music_prompt_suggestions_text(desc, 0, lang, "lyrics"),
@@ -70243,13 +70944,15 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             "guided_duration": f"{seconds}s",
             "guided_duration_seconds": seconds,
             "guided_step": "song_topic",
+            "lyrics_state": "lyrics_wait_topic",
+            "song_topic_offset": 0,
         })
         save_music_guided_result(uid, result)
         set_music_guided_pending(uid, "music_song_topic", product_context=ctx, previous_screen="song_duration", return_to="song_back_duration")
         await update.message.reply_text(
             music_song_step_text("topic", result, lang),
             parse_mode="HTML",
-            reply_markup=music_flow_back_keyboard("song_back_duration", lang, ctx),
+            reply_markup=music_song_topic_keyboard(lang, ctx, 0, "song_back_duration"),
         )
         return True
     if action == "music_ai_edit_description":
@@ -72906,14 +73609,90 @@ async def cmd_tool_test_media_library(update: Update, context: ContextTypes.DEFA
 async def cmd_tool_test_music_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
     provider_summary = music_ai_provider_summary()
-    status = "CONFIGURED" if provider_summary != "missing" else "MISSING"
-    save_tool_test_result("music_ai", status, f"providers={provider_summary}; no paid call", update.effective_user.id)
+    readiness = get_suno_music_readiness()
+    if not readiness.get("ready"):
+        detail = f"providers={provider_summary}; missing={','.join(readiness.get('missing_env') or [])}"
+        save_tool_test_result("music_ai", "MISSING", detail, uid)
+        save_provider_attempt("music", {"called": False, "provider": str(readiness.get("provider") or "none"), "status": "MISSING", "error": detail}, uid)
+        return await update.message.reply_text(
+            "🎵 <b>AI Music Provider Smoke</b>\n\n"
+            f"• Providers: <code>{html.escape(provider_summary)}</code>\n"
+            "• Status: <code>MISSING/NOT_CONFIGURED</code>\n"
+            f"• Blocker: <code>{html.escape(detail[:300])}</code>\n"
+            "• Không gọi provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    smoke_result = {
+        "selected_prompt": "Original short upbeat TOAN AAS admin smoke test, copyright-safe, no artist imitation.",
+        "description": "admin music smoke",
+        "guided_duration_seconds": 15,
+        "music_ai_kind": "guided",
+    }
+    submitted = await submit_music_generation_job(smoke_result, preview=True, admin_smoke=True, updated_by=uid)
+    provider = str(submitted.get("provider") or str(readiness.get("provider") or ""))
+    submit_tool = "key4u_suno" if provider == "key4u_suno" else ("shopaikey_music" if provider == "shopaikey_music" else "music_ai")
+    submit_status = str(submitted.get("status") or ("PASS_SUBMITTED" if submitted.get("ok") else "FAIL"))
+    submit_detail = f"provider={provider}; task_id={sanitize_log_text(str(submitted.get('task_id') or ''))[:100]}; {sanitize_log_text(str(submitted.get('detail') or ''))[:300]}"
+    save_tool_test_result(submit_tool, submit_status, submit_detail, uid)
+    save_tool_test_result("music_ai", submit_status, submit_detail, uid)
+    fetch_status = "NOT_RUN"
+    download_status = "NOT_RUN"
+    output_url = ""
+    download_detail = ""
+    if submitted.get("ok") and submitted.get("task_id"):
+        poll_state = {"music_provider": provider, "music_task_id": str(submitted.get("task_id") or "")}
+        polled = await poll_music_generation_job(poll_state, updated_by=uid)
+        output_url = str(polled.get("output_url") or "")
+        fetch_status = "PASS" if polled.get("ok") and output_url else str(polled.get("status") or "PROCESSING")
+        fetch_tool = "key4u_suno_job" if provider == "key4u_suno" else "shopaikey_music_job"
+        save_tool_test_result(fetch_tool, fetch_status, f"provider={provider}; task_id={submitted.get('task_id')}; audio_url={'yes' if output_url else 'no'}; {sanitize_log_text(str(polled.get('detail') or ''))[:260]}", uid)
+        if output_url:
+            audio_bytes, download_detail, download_http = await _download_audio_url_bytes(output_url, timeout_seconds=60.0)
+            download_status = "PASS" if audio_bytes else "FAIL_DOWNLOAD"
+            save_tool_test_result("music_ai_download", download_status, f"provider={provider}; http={download_http}; bytes={len(audio_bytes or b'')}; {download_detail}", uid)
+            record_music_provider_attempt(
+                provider=provider,
+                submit_status=submit_status,
+                task_id=str(submitted.get("task_id") or ""),
+                fetch_status=fetch_status,
+                download_status=download_status,
+                error=download_detail,
+                updated_by=uid,
+            )
+            if audio_bytes:
+                audio = io.BytesIO(audio_bytes)
+                audio.name = "toan_aas_music_smoke.mp3"
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=audio,
+                    caption="🎵 AI Music smoke audio\nAdmin-only / 0 Xu charged by TOAN AAS. Provider may charge real credits.",
+                )
+        else:
+            save_tool_test_result("music_ai_download", "NOT_READY", f"provider={provider}; task_id={submitted.get('task_id')}; fetch_status={fetch_status}; no audio_url yet", uid)
+            record_music_provider_attempt(
+                provider=provider,
+                submit_status=submit_status,
+                task_id=str(submitted.get("task_id") or ""),
+                fetch_status=fetch_status,
+                download_status="NOT_READY",
+                error=str(polled.get("detail") or fetch_status),
+                updated_by=uid,
+            )
+    else:
+        save_tool_test_result("music_ai_download", "NOT_RUN", "submit failed; no download", uid)
+        record_music_provider_attempt(provider=provider, submit_status=submit_status, error=str(submitted.get("detail") or ""), updated_by=uid)
     await update.message.reply_text(
-        "🎵 <b>AI Music Provider Check</b>\n\n"
+        "🎵 <b>AI Music Provider Smoke</b>\n\n"
         f"• Providers: <code>{html.escape(provider_summary)}</code>\n"
-        f"• Status: <code>{html.escape(status)} / NOT_TESTED</code>\n"
-        "• Không gọi API tạo nhạc, không fake PASS.",
+        f"• Submit: <code>{html.escape(submit_status)}</code>\n"
+        f"• Provider: <code>{html.escape(provider or '-')}</code>\n"
+        f"• Task ID: <code>{html.escape(str(submitted.get('task_id') or '-'))}</code>\n"
+        f"• Fetch: <code>{html.escape(fetch_status)}</code>\n"
+        f"• Download: <code>{html.escape(download_status)}</code>\n"
+        f"• Audio URL: <code>{'yes' if output_url else 'no'}</code>\n"
+        "• TOAN AAS không trừ Xu. Provider có thể tốn credit thật nếu submit thành công.",
         parse_mode="HTML",
     )
 
@@ -116353,15 +117132,21 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("dub_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_provider_status", cmd_voice_status))
+    tg_app.add_handler(CommandHandler("voice_public_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("music_status", cmd_music_status))
+    tg_app.add_handler(CommandHandler("music_public_status", cmd_music_provider_status))
     tg_app.add_handler(CommandHandler("suno_status", cmd_suno_status))
     tg_app.add_handler(CommandHandler("suno_public_open", cmd_suno_public_open))
     tg_app.add_handler(CommandHandler("suno_public_close", cmd_suno_public_close))
+    tg_app.add_handler(CommandHandler("music_public_open_safe", cmd_music_public_open_safe))
+    tg_app.add_handler(CommandHandler("music_public_close", cmd_suno_public_close))
     tg_app.add_handler(CommandHandler("minimax_status", cmd_minimax_status))
     tg_app.add_handler(CommandHandler("tool_test_minimax_tts", cmd_tool_test_minimax_tts))
     tg_app.add_handler(CommandHandler("tool_test_minimax_voice_clone", cmd_tool_test_minimax_voice_clone))
+    tg_app.add_handler(CommandHandler("tool_test_voice_clone", cmd_tool_test_minimax_voice_clone))
     tg_app.add_handler(CommandHandler("minimax_voice_job", cmd_minimax_voice_job))
     tg_app.add_handler(CommandHandler("voice_public_open", cmd_voice_public_open))
+    tg_app.add_handler(CommandHandler("voice_public_open_safe", cmd_voice_public_open_safe))
     tg_app.add_handler(CommandHandler("voice_public_close", cmd_voice_public_close))
     tg_app.add_handler(CommandHandler("video_dub_public_open", cmd_video_dub_public_open))
     tg_app.add_handler(CommandHandler("video_dub_public_close", cmd_video_dub_public_close))
