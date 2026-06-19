@@ -100,8 +100,8 @@ def test_video_voice_and_music_keyboards_are_video_addon_only():
     assert "Giọng nữ miễn phí" in voice_labels
     assert "Voice đã lưu" in voice_labels
     assert "Không thêm nhạc" in music_labels
-    assert "Chọn nhạc có sẵn" in music_labels
-    assert "Chọn hiệu ứng âm thanh" in music_labels
+    assert "Kho nhạc có sẵn" in music_labels
+    assert "Kho hiệu ứng âm thanh" in music_labels
     assert all(callback.startswith("vfinal|") for callback in voice_callbacks)
     assert all(callback.startswith("vfinal|") for callback in music_callbacks)
     assert not any("|showroom|" in callback for callback in voice_callbacks + music_callbacks)

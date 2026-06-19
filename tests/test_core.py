@@ -8111,7 +8111,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "📁 Media âm thanh" not in music_labels
     assert "🗣 Chọn giọng" not in music_labels
     music_callbacks = [button.callback_data for row in bot.music_tools_keyboard("vi").inline_keyboard for button in row]
-    assert "music_quick|showroom|voice_custom" in music_callbacks
+    assert "music_quick|showroom|voice_hub" in music_callbacks
     assert "music_quick|showroom|music_hub" in music_callbacks
     assert "music_quick|showroom|voice_profiles" not in music_callbacks
     assert "music_quick|showroom|ai_music" not in music_callbacks
@@ -8119,16 +8119,17 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "music_quick|voice_pick" not in music_callbacks
 
     voice_hub_labels = [button.text for row in bot.voice_hub_keyboard("vi").inline_keyboard for button in row]
-    assert voice_hub_labels[:2] == ["🎙 Giọng đọc", "🎵 Nhạc"]
-    for label in ["📁 Kho voice", "🎵 Tạo nhạc nền", "🎼 Kho nhạc / SFX", "📁 Media âm thanh"]:
+    for label in ["👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📁 Kho voice của tôi", "🧬 Tạo voice riêng", "✍️ Nhập nội dung đọc"]:
+        assert label in voice_hub_labels
+    for label in ["🎵 Tạo nhạc nền", "🎼 Kho nhạc / SFX", "📁 Media âm thanh"]:
         assert label not in voice_hub_labels
     for label in ["👩 Demo giọng nữ" + " miễn phí", "👨 Demo giọng nam" + " miễn phí", "🎙 Nhập chữ" + " để đọc thử"]:
         assert label not in voice_hub_labels
     assert "🚫 Không thêm giọng" not in voice_hub_labels
     music_hub_labels = [button.text for row in bot.music_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["🎼 Chọn nhạc có sẵn", "🔊 Chọn hiệu ứng âm thanh", "🎵 Tạo nhạc mới"]:
+    for label in ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc mới"]:
         assert label in music_hub_labels
-    for label in ["📁 Media âm thanh của tôi", "🎵 Tạo nhạc nền", "📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
+    for label in ["🎵 Tạo nhạc nền", "📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
         assert label not in music_hub_labels
     assert "🚫 Không thêm nhạc" not in music_hub_labels
 
@@ -9837,12 +9838,12 @@ def test_music_menu_origin_back_correct():
 
 def test_stock_music_visible():
     labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
-    assert "🎼 Chọn nhạc có sẵn" in labels
+    assert "🎼 Kho nhạc có sẵn" in labels
 
 
 def test_sfx_visible():
     labels = [button.text for row in bot.video_finalization_music_keyboard("vi").inline_keyboard for button in row]
-    assert "🔊 Chọn hiệu ứng âm thanh" in labels
+    assert "🔊 Kho hiệu ứng âm thanh" in labels
 
 
 def test_my_media_visible():
@@ -9858,9 +9859,10 @@ def test_suno_button_has_handler():
 
 def test_suno_missing_key_user_guard_admin_reason():
     source = bot_source_text()
-    music_ai_block = source_between(source, 'if action == "music_ai":', 'if action == "music_suggest":')
-    assert 'music_choice="ai_music"' in music_ai_block
-    assert "video_finalization_return_after_addon" in music_ai_block
+    video_handler = source_between(source, "async def handle_video_finalization_callback", "async def handle_video_finalization_pending_text")
+    music_ai_block = source_between(video_handler, 'if action == "music_ai":', 'if action == "music_suggest":')
+    assert 'set_music_guided_pending(uid, "music_ai_custom", product_context=PRODUCT_CONTEXT_VIDEO_ADDON)' in music_ai_block
+    assert "music_ai_input_text" in music_ai_block
     assert "Provider:" not in music_ai_block
     assert "spend_fixed_credit_info" not in music_ai_block
 
