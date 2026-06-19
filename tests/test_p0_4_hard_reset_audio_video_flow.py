@@ -98,7 +98,7 @@ def test_audio_studio_top_level_only_two_buttons():
     callbacks = _callbacks(bot.music_tools_keyboard("vi"))
 
     assert labels[:2] == ["🎙 Giọng đọc", "🎵 Nhạc"]
-    assert callbacks[:2] == ["music_quick|showroom|voice_custom", "music_quick|showroom|music_hub"]
+    assert callbacks[:2] == ["music_quick|showroom|voice_hub", "music_quick|showroom|music_hub"]
     assert "📁 Kho voice" not in labels
     assert "🎼 Kho nhạc / SFX" not in labels
     assert "📁 Media âm thanh" not in labels
@@ -157,8 +157,7 @@ def test_audio_music_menu_simple(monkeypatch):
     labels = _labels(query.outputs[-1]["reply_markup"])
 
     assert "Bạn muốn làm gì?" in query.outputs[-1]["text"]
-    assert labels[:3] == ["🎼 Chọn nhạc có sẵn", "🔊 Chọn hiệu ứng âm thanh", "🎵 Tạo nhạc mới"]
-    assert "📁 Media âm thanh của tôi" not in labels
+    assert labels[:4] == ["🎼 Kho nhạc có sẵn", "🔊 Kho hiệu ứng âm thanh", "📁 Media âm thanh của tôi", "🎵 Tạo nhạc mới"]
     assert "🚫 Không thêm nhạc" not in labels
 
 
@@ -241,8 +240,8 @@ def test_video_music_direct_library_no_suggestion_step(monkeypatch):
     labels = _labels(query.outputs[-1]["reply_markup"])
     callbacks = _callbacks(query.outputs[-1]["reply_markup"])
     assert "Nhạc cho video" in text
-    assert "🎼 Chọn nhạc có sẵn" in labels
-    assert "🔊 Chọn hiệu ứng âm thanh" in labels
+    assert "🎼 Kho nhạc có sẵn" in labels
+    assert "🔊 Kho hiệu ứng âm thanh" in labels
     assert "vfinal|music_library" in callbacks
     assert "vfinal|music_suggest" not in callbacks
     assert "Phong cách âm thanh" not in text + "\n".join(labels)

@@ -111,12 +111,11 @@ def test_audio_studio_voice_flow_does_not_render_legacy_voice_menu(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     assert query.outputs
-    assert "Bạn nhập nội dung muốn tạo giọng đọc nhé." in query.outputs[-1]["text"]
+    assert "Giọng đọc" in query.outputs[-1]["text"]
     assert "Voice Studio " + "TOAN AAS" not in query.outputs[-1]["text"]
     assert "Demo giọng" not in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
-    pending = bot.get_music_guided_pending(user_id)
-    assert pending["pending_action"] == "audio_voice_waiting_text"
-    assert pending["product_context"] == bot.PRODUCT_CONTEXT_SHOWROOM
+    assert "Kho voice" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
+    assert bot.get_music_guided_pending(user_id) is None
 
 
 def test_audio_studio_voice_text_to_style_to_preview_path(monkeypatch):
@@ -355,15 +354,16 @@ def test_legacy_callbacks_redirect_to_canonical_handlers(monkeypatch):
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
 
-    assert bot.LEGACY_CANONICAL_CALLBACK_REDIRECTS["music_quick|voice_pick"] == "music_quick|showroom|voice_custom"
+    assert bot.LEGACY_CANONICAL_CALLBACK_REDIRECTS["music_quick|voice_pick"] == "music_quick|showroom|voice_hub"
     assert bot.LEGACY_CANONICAL_CALLBACK_REDIRECTS["vfinal|music_use"] == "vfinal|music_library"
     assert bot.LEGACY_CANONICAL_CALLBACK_REDIRECTS["vfinal|music_suggest"] == "vfinal|music"
 
     query = CaptureQuery("music_quick|voice_pick", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert "Bạn nhập nội dung muốn tạo giọng đọc nhé." in query.outputs[-1]["text"]
-    assert bot.get_music_guided_pending(user_id)["product_context"] == bot.PRODUCT_CONTEXT_SHOWROOM
+    assert "Giọng đọc" in query.outputs[-1]["text"]
+    assert "Kho voice" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
+    assert bot.get_music_guided_pending(user_id) is None
 
 
 def test_no_provider_call_before_preview_guards():
