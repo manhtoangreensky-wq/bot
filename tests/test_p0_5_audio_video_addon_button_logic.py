@@ -35,6 +35,11 @@ class CaptureMessage:
         self.outputs.append(item)
         return SimpleNamespace(text=text, reply_markup=reply_markup)
 
+    async def reply_audio(self, audio=None, filename=None, caption=None, **kwargs):
+        item = {"audio": audio, "filename": filename, "caption": str(caption or ""), **kwargs}
+        self.outputs.append(item)
+        return SimpleNamespace(audio=audio, caption=caption)
+
 
 class CaptureQuery:
     def __init__(self, data, user_id=950500):
@@ -108,9 +113,9 @@ def test_voice_inner_menu_restores_default_saved_custom_voice():
     labels = _labels(bot.voice_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     callbacks = _callbacks(bot.voice_hub_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
 
-    for label in ["👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📁 Kho voice của tôi", "🧬 Tạo voice riêng", "✍️ Nhập nội dung đọc"]:
+    for label in ["✍️ Văn bản thành giọng nói", "🎧 Giọng nói thành văn bản", "👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📁 Kho voice của tôi", "🧬 Tạo voice riêng"]:
         assert label in labels
-    for callback in ["music_quick|showroom|voice_default_female", "music_quick|showroom|voice_default_male", "music_quick|showroom|voice_profiles", "music_quick|showroom|voice_clone", "music_quick|showroom|voice_custom"]:
+    for callback in ["music_quick|showroom|voice_tts_text", "music_quick|showroom|stt", "music_quick|showroom|voice_default_female", "music_quick|showroom|voice_default_male", "music_quick|showroom|voice_profiles", "music_quick|showroom|voice_clone"]:
         assert callback in callbacks
     assert "Không thêm giọng" not in "\n".join(labels)
 
@@ -142,6 +147,9 @@ def test_showroom_voice_default_asks_text_then_preview(monkeypatch):
     user_id = 950501
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    async def fake_tts(text, voice_id="", voice_style="", speed="normal"):
+        return True, b"mp3-bytes", "ok"
+    monkeypatch.setattr(bot, "synthesize_standalone_tts_audio", fake_tts)
 
     query = CaptureQuery("music_quick|showroom|voice_default_female", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
@@ -151,8 +159,8 @@ def test_showroom_voice_default_asks_text_then_preview(monkeypatch):
     handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert handled is True
-    assert "Bản nghe thử ngắn" in message.outputs[-1]["text"]
-    assert "giọng nữ mặc định" in message.outputs[-1]["text"]
+    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
+    assert "giọng nữ mặc định" in message.outputs[-1]["caption"]
 
 
 def test_showroom_saved_voice_profile_asks_text_then_preview(monkeypatch):
@@ -163,6 +171,9 @@ def test_showroom_saved_voice_profile_asks_text_then_preview(monkeypatch):
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
     monkeypatch.setattr(bot, "get_user_voice_profile", lambda uid, profile_id: profile if profile_id == 77 else None)
     monkeypatch.setattr(bot, "update_user_voice_profile", lambda uid, profile_id, **fields: touched.update(fields) or True)
+    async def fake_tts(text, voice_id="", voice_style="", speed="normal"):
+        return True, b"mp3-bytes", "ok"
+    monkeypatch.setattr(bot, "synthesize_standalone_tts_audio", fake_tts)
     bot.set_music_guided_pending(user_id, "voice_profile_read_text", profile_id=77, product_context=bot.PRODUCT_CONTEXT_SHOWROOM)
 
     message = CaptureMessage("Đọc câu này bằng voice đã lưu.", user_id)
@@ -171,7 +182,8 @@ def test_showroom_saved_voice_profile_asks_text_then_preview(monkeypatch):
     result = bot.get_music_guided_result(user_id)
     assert handled is True
     assert result["selected_voice_profile_id"] == 77
-    assert "Bản nghe thử ngắn" in message.outputs[-1]["text"]
+    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
+    assert "Voice bán hàng" in message.outputs[-1]["caption"]
     assert touched.get("last_used_at")
 
 
@@ -194,13 +206,19 @@ def test_showroom_music_create_new_asks_prompt_then_suggestions(monkeypatch):
 
     query = CaptureQuery("music_quick|showroom|ai_music", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
-    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_ai_custom"
+    assert "Tạo nhạc theo hướng dẫn" in query.outputs[-1]["text"]
+    assert "Nhạc nền cho video" in _joined(query.outputs[-1]["reply_markup"])
 
-    message = CaptureMessage("nhạc vui tươi cho video bán hàng", user_id)
-    handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
-    assert handled is True
-    assert "3 prompt nhạc gợi ý" in message.outputs[-1]["text"]
-    assert "Chọn gợi ý 1" in _joined(message.outputs[-1]["reply_markup"])
+    purpose = CaptureQuery("music_quick|showroom|music_ai_purpose_background", user_id)
+    asyncio.run(bot.handle_music_quick_callback(_callback_update(purpose, user_id), SimpleNamespace()))
+    style = CaptureQuery("music_quick|showroom|music_ai_style_pop", user_id)
+    asyncio.run(bot.handle_music_quick_callback(_callback_update(style, user_id), SimpleNamespace()))
+    mood = CaptureQuery("music_quick|showroom|music_ai_mood_cheerful", user_id)
+    asyncio.run(bot.handle_music_quick_callback(_callback_update(mood, user_id), SimpleNamespace()))
+    duration = CaptureQuery("music_quick|showroom|music_ai_duration_6s", user_id)
+    asyncio.run(bot.handle_music_quick_callback(_callback_update(duration, user_id), SimpleNamespace()))
+    assert "3 prompt nhạc gợi ý" in duration.outputs[-1]["text"]
+    assert "Chọn gợi ý 1" in _joined(duration.outputs[-1]["reply_markup"])
 
 
 def test_video_addon_voice_menu_shows_free_and_paid_choices():
@@ -260,8 +278,8 @@ def test_video_addon_paid_music_asks_prompt_before_invoice(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert called["invoice"] is False
-    assert "Bạn mô tả kiểu nhạc muốn tạo nhé." in query.outputs[-1]["text"]
-    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_ai_custom"
+    assert "Tạo nhạc theo hướng dẫn" in query.outputs[-1]["text"]
+    assert "Nhạc nền cho video" in _joined(query.outputs[-1]["reply_markup"])
     assert bot.get_video_finalization_state(user_id)["video_finalization"]["music_mode"] == "none"
 
 
@@ -321,7 +339,8 @@ def test_video_addon_return_from_hub_stays_on_video_options(monkeypatch):
     query = CaptureQuery("vfinal|voice_default|female", user_id)
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
-    assert "Tùy chọn hoàn thiện video" in query.outputs[-1]["text"]
+    assert "gửi nội dung/kịch bản cần đọc" in query.outputs[-1]["text"]
+    assert bot.get_video_finalization_state(user_id)["step"] == "await_voice_script"
     assert bot.get_video_finalization_state(user_id)["source_file_id"] == "source-file-id"
 
 
@@ -365,6 +384,7 @@ def test_selfshot_state_preserved_after_voice_choice(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     state = bot.get_video_finalization_state(user_id)
 
+    assert state["step"] == "await_voice_script"
     assert state["source"] == "selfscene"
     assert state["source_file_id"] == "source-file-id"
     assert state["source_video_file_id"] == "source-video-file-id"
@@ -424,7 +444,7 @@ def test_no_video_addon_music_ai_direct_invoice_jump():
 
     assert "start_video_addon_step" not in block
     assert "video_finalization_return_after_addon" not in block
-    assert 'set_music_guided_pending(uid, "music_ai_custom", product_context=PRODUCT_CONTEXT_VIDEO_ADDON)' in block
+    assert 'music_guided_step_keyboard("purpose", lang, PRODUCT_CONTEXT_VIDEO_ADDON, 0)' in block
 
 
 def test_no_forbidden_payment_files_touched():

@@ -375,7 +375,7 @@ def _install_voice_provider_success(monkeypatch, calls):
 
 def test_voice_preview_idempotency_reuses_existing_preview(monkeypatch):
     profile = _voice_profile()
-    key = bot.voice_preview_idempotency_key(1, profile, bot.VOICE_PROFILE_PREVIEW_TEXT)
+    key = bot.voice_preview_idempotency_key(1, profile, bot.VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT)
     profile["metadata_json"] = json.dumps({"preview_key": key})
     profile["preview_audio_ref"] = "cached-preview-file"
     _install_voice_store(monkeypatch, profile)

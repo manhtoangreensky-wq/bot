@@ -169,8 +169,8 @@ def test_audio_music_create_asks_prompt(monkeypatch):
     query = CaptureQuery("music_quick|showroom|ai_music", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert "Bạn mô tả kiểu nhạc muốn tạo nhé." in query.outputs[-1]["text"]
-    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_ai_custom"
+    assert "Tạo nhạc theo hướng dẫn" in query.outputs[-1]["text"]
+    assert "Nhạc nền cho video" in _joined_markup(query.outputs[-1]["reply_markup"])
 
 
 def test_no_old_voice_studio_public():
@@ -247,7 +247,7 @@ def test_video_music_direct_library_no_suggestion_step(monkeypatch):
     assert "Phong cách âm thanh" not in text + "\n".join(labels)
 
 
-def test_video_voice_free_selection_returns_origin(monkeypatch):
+def test_video_voice_free_selection_asks_script(monkeypatch):
     user_id = 940406
     _reset_user(user_id)
     monkeypatch.setattr(bot, "get_user_language", lambda uid: "vi")
@@ -259,7 +259,8 @@ def test_video_voice_free_selection_returns_origin(monkeypatch):
 
     assert finalization["voice_mode"] == "default_female_free"
     assert finalization["dub_enabled"] is False
-    assert "Tùy chọn hoàn thiện video" in query.outputs[-1]["text"]
+    assert bot.get_video_finalization_state(user_id)["step"] == "await_voice_script"
+    assert "gửi nội dung/kịch bản cần đọc" in query.outputs[-1]["text"]
 
 
 def test_video_music_free_selection_returns_origin(monkeypatch):

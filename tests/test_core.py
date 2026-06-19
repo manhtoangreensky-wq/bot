@@ -8119,7 +8119,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     assert "music_quick|voice_pick" not in music_callbacks
 
     voice_hub_labels = [button.text for row in bot.voice_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📁 Kho voice của tôi", "🧬 Tạo voice riêng", "✍️ Nhập nội dung đọc"]:
+    for label in ["✍️ Văn bản thành giọng nói", "🎧 Giọng nói thành văn bản", "👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📁 Kho voice của tôi", "🧬 Tạo voice riêng"]:
         assert label in voice_hub_labels
     for label in ["🎵 Tạo nhạc nền", "🎼 Kho nhạc / SFX", "📁 Media âm thanh"]:
         assert label not in voice_hub_labels
@@ -9861,8 +9861,8 @@ def test_suno_missing_key_user_guard_admin_reason():
     source = bot_source_text()
     video_handler = source_between(source, "async def handle_video_finalization_callback", "async def handle_video_finalization_pending_text")
     music_ai_block = source_between(video_handler, 'if action == "music_ai":', 'if action == "music_suggest":')
-    assert 'set_music_guided_pending(uid, "music_ai_custom", product_context=PRODUCT_CONTEXT_VIDEO_ADDON)' in music_ai_block
-    assert "music_ai_input_text" in music_ai_block
+    assert 'music_guided_step_keyboard("purpose", lang, PRODUCT_CONTEXT_VIDEO_ADDON, 0)' in music_ai_block
+    assert "music_guided_step_text" in music_ai_block
     assert "Provider:" not in music_ai_block
     assert "spend_fixed_credit_info" not in music_ai_block
 

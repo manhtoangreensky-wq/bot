@@ -156,11 +156,12 @@ def test_audio_studio_music_prompt_does_not_show_suno_or_provider(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     text = query.outputs[-1]["text"]
-    assert "Bạn mô tả kiểu nhạc muốn tạo" in text
+    assert "Tạo nhạc theo hướng dẫn" in text
+    assert "Nhạc nền cho video" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
     assert "Suno" not in text
     assert "provider" not in text.lower()
     assert "api" not in text.lower()
-    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_ai_custom"
+    assert bot.get_music_guided_result(user_id)["guided_step"] == "purpose"
 
 
 def test_no_public_choose_music_voice_step():

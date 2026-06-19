@@ -133,29 +133,30 @@ def test_video_addon_voice_choice_preserves_existing_video_draft(monkeypatch):
         "video_order": {"invoice_id": "invoice-123", "package": "basic"},
         "video_finalization": {"music_mode": "library", "music_item_count": 1},
     })
-    captured = {}
-
-    async def fake_continue(query, uid, state, lang):
-        captured["state"] = dict(state)
-        return "continued"
 
     class FakeQuery:
         data = "music_quick|video_addon|voice_default_female"
+        outputs = []
+        message = SimpleNamespace()
 
         async def answer(self, *args, **kwargs):
             return None
 
-    monkeypatch.setattr(bot, "video_finalization_return_after_addon", fake_continue)
+        async def edit_message_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
+            self.outputs.append({"text": str(text), "parse_mode": parse_mode, "reply_markup": reply_markup, **kwargs})
+            return SimpleNamespace(text=text, reply_markup=reply_markup)
 
-    result = asyncio.run(bot.handle_music_quick_callback(
-        SimpleNamespace(callback_query=FakeQuery(), effective_user=SimpleNamespace(id=user_id)),
+    query = FakeQuery()
+    asyncio.run(bot.handle_music_quick_callback(
+        SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=user_id)),
         SimpleNamespace(),
     ))
     saved = bot.get_video_finalization_state(user_id)
     finalization = saved["video_finalization"]
 
-    assert result == "continued"
-    assert captured["state"]["source_video_file_id"] == "video-file-id"
+    assert saved["step"] == "await_voice_script"
+    assert "gửi nội dung/kịch bản cần đọc" in query.outputs[-1]["text"]
+    assert saved["source_video_file_id"] == "video-file-id"
     assert saved["source_payload"]["source_file_id"] == "source-file-id"
     assert saved["video_order"]["invoice_id"] == "invoice-123"
     assert saved["selected_video_tier"] == "basic"
