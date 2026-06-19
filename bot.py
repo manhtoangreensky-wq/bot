@@ -469,6 +469,8 @@ MINIMAX_TTS_QUERY_ENDPOINT = _env("MINIMAX_TTS_QUERY_ENDPOINT", "/tts/minimax/qu
 MINIMAX_TTS_FILE_RETRIEVE_ENDPOINT = _env("MINIMAX_TTS_FILE_RETRIEVE_ENDPOINT", "/tts/minimax/files/retrieve")
 MINIMAX_TTS_MODEL = _env("MINIMAX_TTS_MODEL", "speech-02-hd")
 MINIMAX_DEFAULT_VOICE_ID = _env("MINIMAX_DEFAULT_VOICE_ID", "male-qn-qingse")
+MINIMAX_DEFAULT_MALE_VOICE_ID = _env("MINIMAX_DEFAULT_MALE_VOICE_ID", MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse")
+MINIMAX_DEFAULT_FEMALE_VOICE_ID = _env("MINIMAX_DEFAULT_FEMALE_VOICE_ID", "female-shaonv")
 MINIMAX_AUDIO_FORMAT = _env("MINIMAX_AUDIO_FORMAT", "mp3")
 MINIMAX_VOICE_UPLOAD_ENDPOINT = _env("MINIMAX_VOICE_UPLOAD_ENDPOINT", "/tts/minimax/files/upload")
 MINIMAX_VOICE_CLONE_ENDPOINT = _env("MINIMAX_VOICE_CLONE_ENDPOINT", "/tts/minimax/voice_clone")
@@ -482,6 +484,12 @@ VOICE_PREVIEW_COOLDOWN_SECONDS = max(0, env_int("VOICE_PREVIEW_COOLDOWN_SECONDS"
 VOICE_PREVIEW_MAX_CHARACTERS = max(40, min(160, env_int("VOICE_PREVIEW_MAX_CHARACTERS", 96)))
 VOICE_PREVIEW_MAX_WORDS = max(8, min(24, env_int("VOICE_PREVIEW_MAX_WORDS", 16)))
 VOICE_PREVIEW_MAX_SECONDS = max(2, min(6, env_int("VOICE_PREVIEW_MAX_SECONDS", 6)))
+VOICE_PROFILE_FIRST_FREE = env_flag("VOICE_PROFILE_FIRST_FREE", "true")
+VOICE_PROFILE_PRICE_XU = max(0, env_int("VOICE_PROFILE_PRICE_XU", 50))
+VOICE_PROFILE_MAX_FREE_PER_USER = max(0, env_int("VOICE_PROFILE_MAX_FREE_PER_USER", 1))
+TTS_BASE_SECONDS = max(1, env_int("TTS_BASE_SECONDS", 30))
+TTS_BASE_PRICE_XU = max(0, env_int("TTS_BASE_PRICE_XU", 30))
+TTS_EXTRA_30S_PRICE_XU = max(0, env_int("TTS_EXTRA_30S_PRICE_XU", 20))
 MINIMAX_REQUIRE_SMOKE_PASS = env_flag("MINIMAX_REQUIRE_SMOKE_PASS", "true")
 WOKU_ENABLED = env_flag("WOKU_ENABLED", _env("WOKUSHOP_ENABLED", "false"))
 WOKU_PUBLIC_ENABLED = env_flag("WOKU_PUBLIC_ENABLED", _env("WOKUSHOP_PUBLIC_ENABLED", "false"))
@@ -63592,13 +63600,148 @@ def music_library_keyword_text(kind: str = "music", lang: str = "vi") -> str:
 def voice_text_input_text(lang: str = "vi") -> str:
     lang = music_ui_lang(lang=lang)
     if lang == "zh":
-        return "🎙 <b>Voice</b>\n\nPlease send the text you want to turn into narration."
+        return "🎙 <b>Voice</b>\n\nPlease send the text you want to turn into narration.\n\n10s: about 25-35 Vietnamese words. 30s: about 75-100 words. 60s: about 150-200 words."
     if lang == "en":
-        return "🎙 <b>Voice</b>\n\nSend the text you want to turn into narration."
+        return "🎙 <b>Voice</b>\n\nSend the text you want to turn into narration.\n\nLength guide:\n• 10 seconds: about 25-35 Vietnamese words\n• 20 seconds: about 50-70 words\n• 30 seconds: about 75-100 words\n• 60 seconds: about 150-200 words\n\nA slower read needs fewer words; a faster read can fit more."
     return (
         "🎙 <b>Giọng đọc</b>\n\n"
-        "Bạn nhập nội dung muốn tạo giọng đọc nhé."
+        "Bạn nhập nội dung muốn tạo giọng đọc nhé.\n\n"
+        "Hướng dẫn độ dài:\n"
+        "• 10 giây: khoảng 25–35 từ tiếng Việt\n"
+        "• 20 giây: khoảng 50–70 từ\n"
+        "• 30 giây: khoảng 75–100 từ\n"
+        "• 60 giây: khoảng 150–200 từ\n\n"
+        "Đọc chậm sẽ ngắn chữ hơn, đọc nhanh có thể nhiều chữ hơn. Nếu làm voice cho video, nên viết ngắn hơn thời lượng video một chút."
     )
+
+def voice_speed_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, back_area: str = "voice_hub") -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    return build_2col_keyboard(
+        [
+            ("🐢 Đọc chậm" if is_vi else "🐢 Slow", cb("voice_speed_slow")),
+            ("🎙 Bình thường" if is_vi else "🎙 Normal", cb("voice_speed_normal")),
+            ("⚡ Đọc nhanh" if is_vi else "⚡ Fast", cb("voice_speed_fast")),
+        ],
+        nav_back=("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio", cb(back_area or "voice_hub")),
+        nav_main=True,
+        lang=lang,
+    )
+
+def voice_tts_choice_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    buttons = [
+        ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", cb("voice_tts_default_female")),
+        ("👨 Giọng nam mặc định" if is_vi else "👨 Default male", cb("voice_tts_default_male")),
+        ("📁 Kho voice đã lưu" if is_vi else "📁 Saved voices", cb("voice_profiles")),
+        ("🧬 Tạo voice riêng" if is_vi else "🧬 Custom voice", cb("voice_clone")),
+        ("✏️ Sửa nội dung" if is_vi else "✏️ Edit text", cb("voice_tts_text")),
+    ]
+    return build_2col_keyboard(buttons, nav_back=("⬅️ Giọng đọc" if is_vi else "⬅️ Voice", cb("voice_hub")), nav_main=True, lang=lang)
+
+def voice_tts_ready_text(text: str, lang: str = "vi", speed: str = "normal") -> str:
+    seconds = estimate_voice_duration_seconds(text, speed)
+    price = tts_full_price_xu(text, speed)
+    preview_seconds = max(2, min(6, int(math.ceil(max(1, seconds) / 3))))
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "✅ <b>Text saved</b>\n\n"
+            f"Estimated read time: <b>{seconds}s</b>\n"
+            f"Short preview: <b>{preview_seconds}s max</b>\n"
+            f"Full output estimate: <b>{price} Xu</b>\n\n"
+            "Choose the voice to create the audio file. TOAN AAS has not charged Xu."
+        )
+    return (
+        "✅ <b>Đã lưu nội dung đọc</b>\n\n"
+        f"Thời lượng ước tính: <b>{seconds} giây</b>\n"
+        f"Bản nghe thử ngắn: <b>tối đa {preview_seconds} giây</b>\n"
+        f"Dự kiến bản đầy đủ: <b>{price} Xu</b>\n\n"
+        "Chọn giọng để TOAN AAS tạo file audio. Bước này chưa trừ Xu."
+    )
+
+def standalone_tts_guard_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "⚙️ Voice generation is temporarily being checked. TOAN AAS has not charged Xu. You can try a default voice or send shorter text."
+    return "⚙️ Tạo giọng đọc đang được kiểm tra tài nguyên xử lý. TOAN AAS chưa trừ Xu. Bạn có thể thử giọng mặc định hoặc gửi nội dung ngắn hơn."
+
+async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_style: str = "", speed: str = "normal") -> tuple[bool, bytes, str]:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()[:3500]
+    if not clean:
+        return False, b"", "empty_text"
+    selected_voice = str(voice_id or "").strip()
+    if selected_voice in {"default_female", "female"}:
+        selected_voice = default_tts_voice_id("female")
+    elif selected_voice in {"default_male", "male"}:
+        selected_voice = default_tts_voice_id("male")
+    candidates = [
+        lambda: shopaikey_minimax_tts_bytes(clean, voice_id=selected_voice, voice_style=voice_style),
+        lambda: shopaikey_tts_bytes(clean),
+        lambda: video_dubbing_tts_bytes(clean, voice_style=selected_voice or voice_style),
+    ]
+    last_detail = ""
+    for make_call in candidates:
+        try:
+            result = await make_call()
+            status = str(result[0] if result else "")
+            audio_bytes = bytes(result[1] if len(result) > 1 and result[1] else b"")
+            detail = str(result[2] if len(result) > 2 else "")
+            if audio_bytes and (status == "PASS" or not status.upper().startswith(("FAIL", "MISSING", "NEED_"))):
+                return True, audio_bytes, detail
+            last_detail = detail or status
+        except Exception as exc:
+            last_detail = sanitize_log_text(str(exc))[:160]
+    return False, b"", last_detail or "not_ready"
+
+async def send_standalone_tts_result(message, user_id, text: str, voice_label: str, voice_id: str = "", voice_style: str = "", speed: str = "normal", lang: str = "vi") -> bool:
+    ok, audio_bytes, detail = await synthesize_standalone_tts_audio(text, voice_id=voice_id, voice_style=voice_style, speed=speed)
+    if not ok or not audio_bytes:
+        logger.info("standalone tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
+        await message.reply_text(standalone_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM))
+        return False
+    audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_voice.mp3")
+    price = tts_full_price_xu(text, speed)
+    duration = estimate_voice_duration_seconds(text, speed)
+    caption = (
+        f"✅ Đã tạo file giọng đọc bằng {voice_label}.\n"
+        f"Ước tính {duration} giây. Dự kiến bản đầy đủ {price} Xu.\n"
+        "TOAN AAS chưa trừ Xu final trong bước Studio này."
+        if music_ui_lang(lang=lang) == "vi" else
+        f"✅ Voice file created with {voice_label}.\nEstimated {duration}s. Full output estimate {price} Xu.\nTOAN AAS has not charged final Xu."
+    )
+    if hasattr(message, "reply_audio"):
+        await message.reply_audio(audio=audio_file, filename="toan_aas_voice.mp3", caption=caption)
+    else:
+        await message.reply_document(document=audio_file, filename="toan_aas_voice.mp3", caption=caption)
+    return True
+
+async def transcribe_standalone_audio_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str, str]:
+    media, file_type = message_media_candidate(update.message)
+    if not media:
+        return False, "", "missing_media"
+    file_id = str(getattr(media, "file_id", "") or "").strip()
+    if not file_id:
+        return False, "", "missing_file_id"
+    try:
+        tg_file = await context.bot.get_file(file_id)
+        audio_bytes = bytes(await tg_file.download_as_bytearray())
+    except Exception as exc:
+        logger.warning("standalone stt download failed | %s", sanitize_log_text(str(exc))[:180])
+        return False, "", "download_failed"
+    content_type = media_content_type(media, file_type)
+    status, transcript, detail, _http = await shopaikey_audio_transcribe_bytes(audio_bytes, content_type)
+    if status == "PASS" and transcript:
+        return True, transcript.strip(), detail
+    if video_asr_provider_available():
+        try:
+            status, transcript, detail = await video_dubbing_transcribe_bytes(audio_bytes, context, content_type)
+            if transcript:
+                return True, transcript.strip(), detail
+        except Exception as exc:
+            detail = sanitize_log_text(str(exc))[:160]
+    return False, "", detail or status or "not_ready"
 
 def voice_prompt_entry_text(lang: str = "vi") -> str:
     lang = music_ui_lang(lang=lang)
@@ -63979,6 +64122,100 @@ def music_ai_menu_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONT
     back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Studio âm thanh" if is_vi else "⬅️ Audio Studio"), cb("root"))
     return build_2col_keyboard(buttons, nav_back=back, lang=lang)
 
+MUSIC_GUIDED_PURPOSES = [
+    ("background", "Nhạc nền cho video", "background music for a video"),
+    ("song", "Bài hát có lời", "song with lyrics"),
+    ("jingle", "Jingle/quảng cáo ngắn", "short ad jingle"),
+    ("sfx", "Hiệu ứng âm thanh", "sound effects"),
+    ("intro", "Intro/outro thương hiệu", "brand intro/outro"),
+    ("story", "Nhạc kể chuyện", "storytelling music"),
+]
+MUSIC_GUIDED_STYLES = [
+    ("pop", "Pop hiện đại", "modern pop"),
+    ("cinematic", "Cinematic cao cấp", "premium cinematic"),
+    ("acoustic", "Acoustic ấm áp", "warm acoustic"),
+    ("tech", "Công nghệ sạch", "clean tech"),
+    ("lofi", "Lo-fi nhẹ", "soft lo-fi"),
+    ("dance", "Dance/viral", "viral dance"),
+]
+MUSIC_GUIDED_MOODS = [
+    ("cheerful", "Vui tươi", "cheerful"),
+    ("emotional", "Cảm xúc", "emotional"),
+    ("luxury", "Sang trọng", "luxury"),
+    ("calm", "Nhẹ nhàng", "calm"),
+    ("energetic", "Năng lượng", "energetic"),
+    ("trust", "Tin cậy", "trustworthy"),
+]
+MUSIC_GUIDED_DURATIONS = [
+    ("6s", "6 giây nghe thử", "6-second preview"),
+    ("15s", "15 giây", "15 seconds"),
+    ("30s", "30 giây", "30 seconds"),
+    ("45s", "45 giây", "45 seconds"),
+    ("60s", "60 giây", "60 seconds"),
+    ("loop", "Loop ngắn", "short loop"),
+]
+
+def music_guided_label(options: list[tuple[str, str, str]], key: str, lang: str = "vi") -> str:
+    lang = music_ui_lang(lang=lang)
+    for item_key, vi, en in options:
+        if item_key == key:
+            return vi if lang == "vi" else en
+    return str(key or "")
+
+def music_guided_step_text(step: str, lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        labels = {
+            "purpose": "Step 1/4: choose the music purpose.",
+            "style": "Step 2/4: choose a style.",
+            "mood": "Step 3/4: choose the mood.",
+            "duration": "Step 4/4: choose the duration.",
+        }
+        return f"🎵 <b>Guided music creation</b>\n\n{labels.get(step, 'Choose an option.')} TOAN AAS will create 3 directions before any paid full output."
+    labels = {
+        "purpose": "Bước 1/4: chọn mục đích dùng nhạc.",
+        "style": "Bước 2/4: chọn phong cách nhạc.",
+        "mood": "Bước 3/4: chọn cảm xúc/mood.",
+        "duration": "Bước 4/4: chọn thời lượng mong muốn.",
+    }
+    return (
+        "🎵 <b>Tạo nhạc theo hướng dẫn</b>\n\n"
+        f"{labels.get(step, 'Chọn một lựa chọn bên dưới.')} TOAN AAS sẽ tạo 3 hướng nhạc để bạn chọn/đổi/sửa trước.\n\n"
+        "Bước này chưa tạo bản đầy đủ và chưa trừ Xu."
+    )
+
+def music_guided_step_keyboard(step: str, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, offset: int = 0) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    options = {
+        "purpose": MUSIC_GUIDED_PURPOSES,
+        "style": MUSIC_GUIDED_STYLES,
+        "mood": MUSIC_GUIDED_MOODS,
+        "duration": MUSIC_GUIDED_DURATIONS,
+    }.get(step, MUSIC_GUIDED_PURPOSES)
+    start = _safe_int(offset, 0) % len(options)
+    selected = [options[(start + idx) % len(options)] for idx in range(min(3, len(options)))]
+    prefix = {
+        "purpose": "music_ai_purpose",
+        "style": "music_ai_style",
+        "mood": "music_ai_mood",
+        "duration": "music_ai_duration",
+    }.get(step, "music_ai_purpose")
+    buttons = [(vi if is_vi else en, cb(f"{prefix}_{key}")) for key, vi, en in selected]
+    buttons.append(("🔁 Gợi ý khác" if is_vi else "🔁 More ideas", cb(f"{prefix}_more")))
+    buttons.append(("✍️ Tự nhập mô tả" if is_vi else "✍️ Custom brief", cb("music_ai_custom")))
+    back = ("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|music") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Nhạc" if is_vi else "⬅️ Music"), cb("music_hub"))
+    return build_2col_keyboard(buttons, nav_back=back, nav_main=True, lang=lang)
+
+def music_guided_description_from_result(result: dict, lang: str = "vi") -> str:
+    purpose = music_guided_label(MUSIC_GUIDED_PURPOSES, str(result.get("guided_purpose") or "background"), lang)
+    style = music_guided_label(MUSIC_GUIDED_STYLES, str(result.get("guided_style") or "pop"), lang)
+    mood = music_guided_label(MUSIC_GUIDED_MOODS, str(result.get("guided_mood") or "cheerful"), lang)
+    duration = music_guided_label(MUSIC_GUIDED_DURATIONS, str(result.get("guided_duration") or "30s"), lang)
+    if music_ui_lang(lang=lang) != "vi":
+        return f"Guided AI music: purpose={purpose}; style={style}; mood={mood}; duration={duration}; original safe melody; no famous artist imitation."
+    return f"Tạo nhạc theo hướng dẫn: mục đích {purpose}; phong cách {style}; cảm xúc {mood}; thời lượng {duration}; giai điệu nguyên bản, an toàn để dùng cho nội dung TOAN AAS."
+
 def music_ai_input_text(kind: str = "background", lang: str = "vi") -> str:
     is_vi = music_ui_lang(lang=lang) == "vi"
     label_vi = {
@@ -64131,6 +64368,7 @@ def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
     )
 
 VOICE_PROFILE_PREVIEW_TEXT = "Xin chào, đây là bản nghe thử giọng TOAN AAS."
+VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT = "Cảm ơn bạn đã sử dụng trình nhân bản giọng nói của TOAN AAS."
 
 def voice_clone_intro_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -64272,6 +64510,65 @@ def user_voice_profile_rows(user_id, limit: int = 8) -> list[dict]:
         logger.warning("user_voice_profile_rows failed | %s", sanitize_log_text(str(exc))[:220])
         return []
 
+def active_voice_profile_count(user_id, exclude_profile_id: int = 0) -> int:
+    try:
+        with db_connect() as conn:
+            params: list[object] = [str(user_id)]
+            exclude_sql = ""
+            if int(exclude_profile_id or 0) > 0:
+                exclude_sql = " AND id<>?"
+                params.append(int(exclude_profile_id or 0))
+            row = conn.execute(
+                f"""
+                SELECT COUNT(1)
+                FROM voice_profiles
+                WHERE user_id=? AND deleted_at IS NULL AND status IN ('active', 'preview_ready', 'pending_confirm', 'pending_name')
+                {exclude_sql}
+                """,
+                tuple(params),
+            ).fetchone()
+            return int((row or [0])[0] or 0)
+    except Exception as exc:
+        logger.warning("active_voice_profile_count failed | %s", sanitize_log_text(str(exc))[:220])
+        return 0
+
+def voice_profile_storage_price_xu(user_id, product_context: str = PRODUCT_CONTEXT_SHOWROOM, profile_id: int = 0) -> int:
+    ctx = normalize_product_context(product_context)
+    if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
+        return int(VIDEO_VOICE_CLONE_CREATE_XU or 0)
+    if VOICE_PROFILE_FIRST_FREE and active_voice_profile_count(user_id, profile_id) < int(VOICE_PROFILE_MAX_FREE_PER_USER or 0):
+        return 0
+    return int(VOICE_PROFILE_PRICE_XU or 0)
+
+def default_tts_voice_id(choice: str = "") -> str:
+    value = str(choice or "").strip().lower()
+    if "female" in value or "nữ" in value or "nu" in value:
+        return str(MINIMAX_DEFAULT_FEMALE_VOICE_ID or MINIMAX_DEFAULT_VOICE_ID or "female-shaonv")
+    if "male" in value or "nam" in value:
+        return str(MINIMAX_DEFAULT_MALE_VOICE_ID or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse")
+    return str(MINIMAX_DEFAULT_VOICE_ID or MINIMAX_DEFAULT_MALE_VOICE_ID or "male-qn-qingse")
+
+def estimate_voice_duration_seconds(text: str, speed: str = "normal") -> int:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean:
+        return 0
+    words = len(clean.split())
+    words_per_second = {
+        "slow": 2.35,
+        "normal": 2.85,
+        "fast": 3.35,
+    }.get(str(speed or "normal").strip().lower(), 2.85)
+    return max(1, int(math.ceil(words / words_per_second)))
+
+def tts_full_price_xu(text: str, speed: str = "normal") -> int:
+    seconds = estimate_voice_duration_seconds(text, speed)
+    if seconds <= 0:
+        return 0
+    if seconds <= TTS_BASE_SECONDS:
+        return int(TTS_BASE_PRICE_XU or 0)
+    extra_blocks = int(math.ceil((seconds - TTS_BASE_SECONDS) / 30.0))
+    return int(TTS_BASE_PRICE_XU or 0) + max(0, extra_blocks) * int(TTS_EXTRA_30S_PRICE_XU or 0)
+
 def user_voice_profiles_summary(user_id, lang: str = "vi", limit: int = 5, product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
     ctx = normalize_product_context(product_context)
     rows = []
@@ -64355,20 +64652,25 @@ def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_co
     ]
     return build_2col_keyboard(buttons, nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")), lang=lang)
 
-def voice_clone_quote_text(profile: dict, lang: str = "vi") -> str:
+def voice_clone_quote_text(profile: dict, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
     name = html.escape(str(profile.get("display_name") or "Giọng mới"))
-    cost = int(VIDEO_VOICE_CLONE_CREATE_XU or 0)
+    user_id = str(profile.get("user_id") or "")
+    profile_id = int(profile.get("id") or 0)
+    cost = voice_profile_storage_price_xu(user_id, product_context, profile_id)
+    cost_label = "Miễn phí lượt đầu" if cost <= 0 else f"{cost} Xu"
     if music_ui_lang(lang=lang) != "vi":
+        cost_label = "First profile free" if cost <= 0 else f"{cost} Xu"
         return (
             "🧾 <b>Confirm new voice creation</b>\n\n"
-            f"Name: <b>{name}</b>\nService: consent-based custom voice profile\nCost: <b>{cost} Xu</b>\n\n"
+            f"Name: <b>{name}</b>\nService: consent-based custom voice profile\nCost: <b>{cost_label}</b>\n\n"
             "TOAN AAS starts processing and charges Xu only after confirmation. A failed creation is refunded."
         )
     return (
         "🧾 <b>Xác nhận tạo giọng mới</b>\n\n"
         f"Tên giọng: <b>{name}</b>\n"
         "Dịch vụ: Tạo voice profile riêng từ file đã xác nhận quyền\n"
-        f"Chi phí: <b>{cost} Xu</b>\n\n"
+        f"Chi phí: <b>{cost_label}</b>\n\n"
+        f"Câu nghe thử cố định: <i>{html.escape(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT)}</i>\n\n"
         "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi quý khách xác nhận. Nếu tạo giọng thất bại, Xu sẽ được hoàn theo chính sách."
     )
 
@@ -64578,7 +64880,7 @@ def voice_hub_text(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOW
         )
     return (
         "🎙 <b>Giọng đọc</b>\n\n"
-        "Chọn giọng nữ/nam mặc định, mở Kho voice đã lưu, tạo voice riêng hoặc nhập nội dung để tạo file audio độc lập.\n\n"
+        "Tạo file giọng đọc riêng, bóc băng audio hoặc quản lý Kho voice đã lưu. Chọn giọng xong chỉ cần gửi văn bản, TOAN AAS sẽ tạo file audio bằng đúng giọng đó.\n\n"
         "Khu này không gắn vào đơn video hiện tại và chưa trừ Xu."
     )
 
@@ -64589,11 +64891,12 @@ def voice_hub_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_
     is_vi = music_ui_lang(lang=lang) == "vi"
     cb = lambda action: product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, action)
     buttons = [
+        ("✍️ Văn bản thành giọng nói" if is_vi else "✍️ Text to speech", cb("voice_tts_text")),
+        ("🎧 Giọng nói thành văn bản" if is_vi else "🎧 Speech to text", cb("stt")),
         ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female voice", cb("voice_default_female")),
         ("👨 Giọng nam mặc định" if is_vi else "👨 Default male voice", cb("voice_default_male")),
         ("📁 Kho voice của tôi" if is_vi else "📁 My voice vault", cb("voice_profiles")),
         ("🧬 Tạo voice riêng" if is_vi else "🧬 Create custom voice", cb("voice_clone")),
-        ("✍️ Nhập nội dung đọc" if is_vi else "✍️ Enter narration text", cb("voice_custom")),
     ]
     rows = build_2col_keyboard(
         buttons,
@@ -65014,7 +65317,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             "⚠️ Yêu cầu tạo giọng không còn hợp lệ hoặc chưa xác nhận quyền sử dụng.",
             reply_markup=voice_hub_keyboard(lang, ctx),
         )
-    guard = voice_preview_guard(user_id, profile_id, VOICE_PROFILE_PREVIEW_TEXT, "clone_preview")
+    guard = voice_preview_guard(user_id, profile_id, VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT, "clone_preview")
     if guard.get("cached"):
         cached_profile = guard.get("profile") or profile
         await context.bot.send_audio(
@@ -65045,7 +65348,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
     profile = locked_profile or profile
     metadata = voice_profile_metadata(profile)
-    cost = int(VIDEO_VOICE_CLONE_CREATE_XU or 0)
+    cost = voice_profile_storage_price_xu(user_id, ctx, profile_id)
     metadata["final_cost_xu"] = cost
     metadata["preview_charged_xu"] = 0
     await query.message.reply_text("🎙 TOAN AAS đang tạo bản nghe thử. Vui lòng chờ và không bấm lại nhiều lần.")
@@ -65060,7 +65363,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         if status != "PASS":
             raise RuntimeError(f"voice_clone:{status}:{detail[:100]}")
         provider_voice_id = str((clone_payload or {}).get("voice_id") or provider_voice_id)
-        preview_text = str(guard.get("preview_text") or capped_voice_preview_text(VOICE_PROFILE_PREVIEW_TEXT))
+        preview_text = str(guard.get("preview_text") or capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT))
         status, preview_bytes, detail, _http = await shopaikey_minimax_tts_bytes(preview_text, voice_id=provider_voice_id)
         if status != "PASS" or not preview_bytes:
             raise RuntimeError(f"voice_preview:{status}:{detail[:100]}")
@@ -65191,7 +65494,29 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             )
         set_music_guided_pending(user_id, "audio_voice_waiting_text", product_context=ctx)
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
+        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "root"))
+    if action == "voice_tts_text":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        result.setdefault("tts_speed", "normal")
+        save_music_guided_result(user_id, result)
+        set_music_guided_pending(user_id, "voice_tts_text_input", product_context=ctx)
+        enter_product_context(user_id, ctx, origin_screen="menu|main", product_area="voice")
+        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"))
+    if action in {"voice_speed_slow", "voice_speed_normal", "voice_speed_fast"}:
+        await query.answer()
+        speed = action.rsplit("_", 1)[-1]
+        result = get_music_guided_result(user_id) or {}
+        result["tts_speed"] = speed
+        save_music_guided_result(user_id, result)
+        pending = get_music_guided_pending(user_id) or {}
+        if not pending:
+            set_music_guided_pending(user_id, "voice_tts_text_input", product_context=ctx)
+        label = {"slow": "đọc chậm", "normal": "bình thường", "fast": "đọc nhanh"}.get(speed, "bình thường")
+        return await query.message.reply_text(
+            f"✅ Đã chọn tốc độ {label}.\n\nBạn gửi văn bản cần đọc ở tin nhắn tiếp theo nhé.",
+            reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"),
+        )
     if action == "voice_custom":
         await query.answer()
         current_pending = get_music_guided_pending(user_id) or {}
@@ -65202,7 +65527,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             )
         set_music_guided_pending(user_id, "audio_voice_waiting_text", product_context=ctx)
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
+        return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "root"))
     if action in {"voice_seed", "voice_more"}:
         await query.answer()
         result = get_music_guided_result(user_id) or {}
@@ -65215,15 +65540,62 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "ai_music":
         await query.answer()
         enter_product_context(user_id, ctx, origin_screen=origin_screen, product_area="music")
-        if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
-            set_music_guided_pending(user_id, "music_ai_custom", product_context=ctx)
-            return await query.message.reply_text(
-                music_ai_input_text("custom", lang),
-                parse_mode="HTML",
-                reply_markup=music_guided_back_keyboard(lang, ctx, "music_hub"),
-            )
-        set_music_guided_pending(user_id, "music_ai_custom", product_context=ctx)
-        return await query.message.reply_text(music_ai_input_text("custom", lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "root"))
+        save_music_guided_result(user_id, {"guided_step": "purpose", "guided_offset": 0, "music_ai_kind": "guided"})
+        return await query.message.reply_text(
+            music_guided_step_text("purpose", lang),
+            parse_mode="HTML",
+            reply_markup=music_guided_step_keyboard("purpose", lang, ctx, 0),
+        )
+    if action in {"music_ai_purpose_more", "music_ai_style_more", "music_ai_mood_more", "music_ai_duration_more"}:
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        step = action.replace("music_ai_", "").replace("_more", "")
+        offset_key = f"guided_{step}_offset"
+        offset = (_safe_int(result.get(offset_key), 0) + 3) % 6
+        result[offset_key] = offset
+        result["guided_step"] = step
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text(
+            music_guided_step_text(step, lang),
+            parse_mode="HTML",
+            reply_markup=music_guided_step_keyboard(step, lang, ctx, offset),
+        )
+    if action.startswith("music_ai_purpose_"):
+        await query.answer()
+        key = action.replace("music_ai_purpose_", "", 1)
+        result = get_music_guided_result(user_id) or {}
+        result.update({"guided_purpose": key, "guided_step": "style"})
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text(music_guided_step_text("style", lang), parse_mode="HTML", reply_markup=music_guided_step_keyboard("style", lang, ctx, _safe_int(result.get("guided_style_offset"), 0)))
+    if action.startswith("music_ai_style_"):
+        await query.answer()
+        key = action.replace("music_ai_style_", "", 1)
+        result = get_music_guided_result(user_id) or {}
+        result.update({"guided_style": key, "guided_step": "mood"})
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text(music_guided_step_text("mood", lang), parse_mode="HTML", reply_markup=music_guided_step_keyboard("mood", lang, ctx, _safe_int(result.get("guided_mood_offset"), 0)))
+    if action.startswith("music_ai_mood_"):
+        await query.answer()
+        key = action.replace("music_ai_mood_", "", 1)
+        result = get_music_guided_result(user_id) or {}
+        result.update({"guided_mood": key, "guided_step": "duration"})
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text(music_guided_step_text("duration", lang), parse_mode="HTML", reply_markup=music_guided_step_keyboard("duration", lang, ctx, _safe_int(result.get("guided_duration_offset"), 0)))
+    if action.startswith("music_ai_duration_"):
+        await query.answer()
+        key = action.replace("music_ai_duration_", "", 1)
+        result = get_music_guided_result(user_id) or {}
+        result.update({"guided_duration": key, "guided_step": "prompt"})
+        desc = music_guided_description_from_result(result, lang)
+        suggestions = music_prompt_suggestions(desc, 0, lang, "guided")
+        result.update({"description": desc, "offset": 0, "suggestions": suggestions, "selected_prompt": "", "music_ai_kind": "guided"})
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text(
+            music_prompt_suggestions_text(desc, 0, lang, "guided"),
+            parse_mode="HTML",
+            reply_markup=music_prompt_result_keyboard(lang, ctx),
+            disable_web_page_preview=True,
+        )
     if action in {"music_ai_background", "music_ai_lyrics", "music_ai_script", "music_ai_melody", "music_ai_custom"}:
         await query.answer()
         kind = action.replace("music_ai_", "", 1)
@@ -65264,7 +65636,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action in {"voice_cancel", "voice_none"}:
         await query.answer()
         if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
-            update_video_finalization(user_id, voice_enabled=False, voice_mode="none", voice_choice="none", voice_text="", voice_file_id="", dub_enabled=False)
+            update_video_finalization(user_id, voice_enabled=False, voice_mode="none", voice_choice="none", voice_text="", voice_script="", voice_file_id="", dub_enabled=False)
             return await video_finalization_return_after_addon(query, user_id, get_video_finalization_state(user_id), lang)
         clear_music_guided_pending(user_id)
         return await query.message.reply_text(
@@ -65279,25 +65651,31 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         label = "giọng nữ mặc định" if action.endswith("female") else "giọng nam mặc định"
         if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
-            value = "female" if action.endswith("female") else "male"
-            update_video_finalization(
-                user_id,
-                voice_enabled=False,
-                voice_mode=f"default_{value}_free",
-                voice_choice=f"default_{value}",
-                voice_style=f"default_{value}_free",
-                dub_enabled=False,
-            )
-            return await video_finalization_return_after_addon(query, user_id, get_video_finalization_state(user_id), lang)
+            return await start_video_voice_script_step(query, user_id, "female" if action.endswith("female") else "male", label, lang)
         result = get_music_guided_result(user_id) or {}
-        result.update({"selected_voice_id": action.replace("voice_default_", "default_"), "selected_voice_style": label, "voice_is_free": True})
+        result.update({"selected_voice_id": default_tts_voice_id("female" if action.endswith("female") else "male"), "selected_voice_style": label, "voice_is_free": True})
         save_music_guided_result(user_id, result)
         set_music_guided_pending(user_id, "voice_text", product_context=PRODUCT_CONTEXT_SHOWROOM)
         return await query.message.reply_text(
             f"✅ Đã chọn {label} trong Studio âm thanh.\n\n"
-            "Hãy gửi nội dung muốn đọc thử ở tin nhắn tiếp theo. Đây là file audio độc lập, không gắn vào video hiện tại và chưa trừ Xu.",
-            reply_markup=music_guided_back_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM, "voice_hub"),
+            "Hãy gửi nội dung muốn đọc ở tin nhắn tiếp theo. Đây là file audio độc lập, không gắn vào video hiện tại và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=voice_speed_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM, "voice_hub"),
         )
+    if action in {"voice_tts_default_female", "voice_tts_default_male"}:
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        voice_text = str(result.get("voice_text") or "").strip()
+        if not voice_text:
+            set_music_guided_pending(user_id, "voice_tts_text_input", product_context=ctx)
+            return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"))
+        is_female = action.endswith("female")
+        label = "giọng nữ mặc định" if is_female else "giọng nam mặc định"
+        voice_id = default_tts_voice_id("female" if is_female else "male")
+        result.update({"selected_voice_id": voice_id, "selected_voice_style": label, "voice_is_free": True})
+        save_music_guided_result(user_id, result)
+        await query.message.reply_text(f"✅ Đã chọn {label}. TOAN AAS đang tạo file audio theo văn bản đã nhập.")
+        return await send_standalone_tts_result(query.message, user_id, voice_text, label, voice_id=voice_id, voice_style=label, speed=str(result.get("tts_speed") or "normal"), lang=lang)
     if action.startswith("voice_profile_select:"):
         await query.answer()
         profile_id = _safe_int(action.split(":", 1)[1], 0)
@@ -65327,18 +65705,15 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         if not profile or str(profile.get("status") or "") != "active":
             return await query.message.reply_text("⚠️ Giọng này chưa sẵn sàng để sử dụng.", reply_markup=voice_vault_keyboard(user_id, lang, ctx))
         if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
-            update_video_finalization(
-                user_id,
-                voice_enabled=False,
-                voice_mode="saved_voice_free",
-                voice_choice="saved_voice",
-                voice_style=str(profile.get("display_name") or "")[:120],
-                voice_profile_id=profile_id,
-                voice_provider_voice_id=str(profile.get("provider_voice_id") or "")[:180],
-                dub_enabled=False,
-            )
             update_user_voice_profile(user_id, profile_id, last_used_at=now_text())
-            return await video_finalization_return_after_addon(query, user_id, get_video_finalization_state(user_id), lang)
+            return await start_video_voice_script_step(
+                query,
+                user_id,
+                "saved",
+                str(profile.get("display_name") or "voice đã lưu"),
+                lang,
+                profile=profile,
+            )
         result = get_music_guided_result(user_id) or {}
         result.update({"selected_voice_profile_id": profile_id, "selected_voice_id": profile.get("provider_voice_id") or "", "selected_voice_style": profile.get("display_name") or ""})
         save_music_guided_result(user_id, result)
@@ -65394,7 +65769,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             return await query.message.reply_text("⚠️ Chưa có bản giọng hợp lệ để lưu.", reply_markup=voice_hub_keyboard(lang, ctx))
         metadata = voice_profile_metadata(profile)
         charged = int(metadata.get("charged_xu") or 0)
-        cost = int(metadata.get("final_cost_xu") or VIDEO_VOICE_CLONE_CREATE_XU or 0)
+        cost = int(metadata.get("final_cost_xu") if metadata.get("final_cost_xu") is not None else voice_profile_storage_price_xu(user_id, ctx, profile_id))
         if not charged and cost > 0:
             charge = spend_fixed_credit_info(
                 user_id,
@@ -65446,13 +65821,15 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         )
     if action == "stt":
         await query.answer()
+        set_music_guided_pending(user_id, "speech_to_text_upload", product_context=ctx)
         text = (
             "🎧 <b>STT / Bóc băng audio</b>\n\n"
-            "Gửi voice/audio/video ngắn vào chat, sau đó dùng nút bóc băng trong quick guide hoặc chạy bóc băng. Nếu công cụ tạm bận, TOAN AAS báo gọn và không trừ Xu sai."
+            "Gửi voice/audio/video ngắn vào chat. TOAN AAS sẽ chuyển thành văn bản nếu tài nguyên xử lý sẵn sàng.\n\n"
+            "Bước này chưa trừ Xu."
             if lang == "vi" else
-            "🎧 <b>STT / Transcribe</b>\n\nSend a short voice/audio/video. The bot will show transcription actions when audio is received."
+            "🎧 <b>STT / Transcribe</b>\n\nSend a short voice/audio/video. TOAN AAS will transcribe it when processing resources are ready. No Xu charge yet."
         )
-        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_tools_keyboard(lang, "menu|main_video" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main"))
+        return await query.message.reply_text(text, parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "voice_hub"))
     if action == "voice_video":
         await query.answer()
         if ctx == PRODUCT_CONTEXT_SHOWROOM:
@@ -65615,13 +65992,24 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         voice_text = result.get("voice_text") or ""
         if not voice_text:
             set_music_guided_pending(user_id, "voice_text", product_context=ctx)
-            return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=music_guided_back_keyboard(lang, ctx, "voice_hub"))
+            return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"))
+        selected_voice = str(result.get("selected_voice_style") or result.get("selected_voice_id") or "").strip()
+        if selected_voice:
+            await query.message.reply_text("🎙 TOAN AAS đang tạo file audio bằng giọng đã chọn.")
+            return await send_standalone_tts_result(
+                query.message,
+                user_id,
+                str(voice_text),
+                selected_voice,
+                voice_id=str(result.get("selected_voice_id") or ""),
+                voice_style=str(result.get("selected_voice_style") or selected_voice),
+                speed=str(result.get("tts_speed") or "normal"),
+                lang=lang,
+            )
         return await query.message.reply_text(
-            "🎙 <b>Tạo voice thử</b>\n\n"
-            "TOAN AAS đã giữ nội dung và kiểu giọng bạn chọn. Bản voice đầy đủ sẽ có nghe thử ngắn, báo giá và xác nhận cuối trước khi xử lý.\n\n"
-            "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu ở bước này.",
+            voice_tts_ready_text(str(voice_text), lang, str(result.get("tts_speed") or "normal")),
             parse_mode="HTML",
-            reply_markup=voice_style_keyboard(lang, ctx),
+            reply_markup=voice_tts_choice_keyboard(lang, ctx),
         )
     if action in {"merge_music_video", "merge_voice_video"}:
         await query.answer()
@@ -67450,7 +67838,11 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         update_user_voice_profile(uid, profile_id, display_name=display_name, status=next_status)
         profile = get_user_voice_profile(uid, profile_id)
         if next_status == "pending_confirm":
-            await update.message.reply_text(voice_clone_quote_text(profile, lang), parse_mode="HTML", reply_markup=voice_clone_quote_keyboard(profile_id, lang, ctx))
+            metadata = voice_profile_metadata(profile)
+            metadata["final_cost_xu"] = voice_profile_storage_price_xu(uid, ctx, profile_id)
+            update_user_voice_profile(uid, profile_id, metadata_json=json.dumps(metadata, ensure_ascii=False))
+            profile = get_user_voice_profile(uid, profile_id)
+            await update.message.reply_text(voice_clone_quote_text(profile, lang, ctx), parse_mode="HTML", reply_markup=voice_clone_quote_keyboard(profile_id, lang, ctx))
         else:
             await update.message.reply_text(f"✅ Đã đổi tên giọng thành “{display_name}”.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx))
         return True
@@ -67511,6 +67903,16 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             disable_web_page_preview=True,
         )
         return True
+    if action == "voice_tts_text_input":
+        result = get_music_guided_result(uid) or {}
+        result.update({"voice_text": text, "tts_speed": str(result.get("tts_speed") or "normal")})
+        save_music_guided_result(uid, result)
+        await update.message.reply_text(
+            voice_tts_ready_text(text, lang, str(result.get("tts_speed") or "normal")),
+            parse_mode="HTML",
+            reply_markup=voice_tts_choice_keyboard(lang, ctx),
+        )
+        return True
     if action == "music_library_keyword":
         if ctx == PRODUCT_CONTEXT_VIDEO_ADDON:
             enter_product_context(uid, ctx, origin_screen="vfinal|music", product_area="music")
@@ -67542,12 +67944,15 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         })
         save_music_guided_result(uid, result)
         update_user_voice_profile(uid, profile_id, last_used_at=now_text())
-        await update.message.reply_text(
-            "🔊 <b>Bản nghe thử ngắn</b>\n\n"
-            f"Đã chọn voice “{html.escape(str(profile.get('display_name') or 'đã lưu'))}” và giữ nội dung cần đọc.\n\n"
-            "Đây là file audio độc lập trong Studio âm thanh. TOAN AAS chưa tạo bản đầy đủ và chưa trừ Xu.",
-            parse_mode="HTML",
-            reply_markup=audio_voice_preview_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
+        await send_standalone_tts_result(
+            update.message,
+            uid,
+            text,
+            str(profile.get("display_name") or "voice đã lưu"),
+            voice_id=str(profile.get("provider_voice_id") or ""),
+            voice_style=str(profile.get("display_name") or ""),
+            speed=str(result.get("tts_speed") or "normal"),
+            lang=lang,
         )
         return True
     if action in {"voice_text", "audio_voice_waiting_text"}:
@@ -67564,12 +67969,15 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
                 "selected_voice_style": selected_voice[:180],
             })
             save_music_guided_result(uid, result)
-            await update.message.reply_text(
-                "🔊 <b>Bản nghe thử ngắn</b>\n\n"
-                f"Đã giữ nội dung và giọng “{html.escape(selected_voice[:120])}”.\n\n"
-                "Đây là file audio độc lập trong Studio âm thanh. TOAN AAS chưa tạo bản đầy đủ và chưa trừ Xu.",
-                parse_mode="HTML",
-                reply_markup=audio_voice_preview_keyboard(lang, ctx),
+            await send_standalone_tts_result(
+                update.message,
+                uid,
+                text,
+                selected_voice[:120],
+                voice_id=str(result.get("selected_voice_id") or ""),
+                voice_style=str(result.get("selected_voice_style") or selected_voice),
+                speed=str(result.get("tts_speed") or "normal"),
+                lang=lang,
             )
             return True
         suggestions = voice_style_suggestions(text, 0, lang)
@@ -67614,6 +68022,33 @@ async def handle_music_guided_pending_media(update: Update, context: ContextType
             + music_merge_menu_text(kind, uid, lang),
             parse_mode="HTML",
             reply_markup=music_merge_keyboard(kind, lang, ctx),
+        )
+        return True
+    if pending_action == "speech_to_text_upload":
+        lang = music_ui_lang(uid)
+        media, file_type = message_media_candidate(update.message)
+        mime = media_content_type(media, file_type) if media else ""
+        if not media or not (file_type in {"voice", "audio", "video", "document"} or str(mime).startswith(("audio/", "video/"))):
+            await update.message.reply_text(
+                "⚠️ Hãy gửi voice/audio/video hợp lệ để chuyển thành văn bản. TOAN AAS chưa xử lý và chưa trừ Xu.",
+                reply_markup=music_guided_back_keyboard(lang, ctx, "voice_hub"),
+            )
+            return True
+        clear_music_guided_pending(uid)
+        ok, transcript, detail = await transcribe_standalone_audio_message(update, context)
+        if ok and transcript:
+            await update.message.reply_text(
+                "📝 <b>Bản chuyển văn bản</b>\n\n"
+                f"{html.escape(transcript[:3500])}\n\n"
+                "TOAN AAS chưa trừ Xu final.",
+                parse_mode="HTML",
+                reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
+            )
+            return True
+        logger.info("standalone stt not ready | user=%s | detail=%s", uid, sanitize_log_text(detail)[:160])
+        await update.message.reply_text(
+            "⚙️ Chuyển giọng nói thành văn bản đang được kiểm tra tài nguyên xử lý. TOAN AAS chưa trừ Xu. Bạn có thể thử lại với file ngắn/rõ hơn.",
+            reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
         )
         return True
     if pending_action != "voice_clone_upload":
@@ -80772,6 +81207,7 @@ def video_finalization_defaults() -> dict:
         "voice_mode": "none",
         "voice_choice": "none",
         "voice_text": "",
+        "voice_script": "",
         "voice_file_id": "",
         "voice_language": "",
         "voice_style": "natural",
@@ -80836,6 +81272,7 @@ def video_finalization_payload(state: dict | None = None) -> dict:
         "voice_profile_id": str(finalization.get("voice_profile_id") or "")[:80],
         "voice_style": str(finalization.get("voice_style") or "natural")[:80],
         "voice_text": str(finalization.get("voice_text") or "")[:3000],
+        "voice_script": str(finalization.get("voice_script") or finalization.get("voice_text") or "")[:3000],
         "voice_file_id": str(finalization.get("voice_file_id") or "")[:220],
         "subtitle_dub_choice": subtitle_dub_choice,
         "subtitle_text": str(finalization.get("subtitle_text") or "")[:3000],
@@ -81641,6 +82078,66 @@ def video_finalization_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
     ])
 
+def video_voice_script_prompt_text(state: dict | None = None, voice_label: str = "", lang: str = "vi") -> str:
+    state = dict(state or {})
+    payload = dict(state.get("source_payload") or {})
+    duration = int(
+        state.get("duration_seconds")
+        or state.get("selected_duration")
+        or payload.get("duration_seconds")
+        or payload.get("requested_seconds")
+        or (state.get("video_order") or {}).get("requested_seconds")
+        or VIDEO_ORDER_DEFAULT_BASE_SECONDS
+        or 30
+    )
+    low_words = max(1, int(duration * 2.5))
+    high_words = max(low_words + 1, int(duration * 3.3))
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"✅ Voice selected: <b>{html.escape(voice_label or 'voice')}</b>\n\n"
+            "Send the narration/script for this video. TOAN AAS will save it to the current video draft; no voice rendering or Xu charge happens now.\n\n"
+            f"Current video duration: <b>{duration}s</b>\n"
+            f"Suggested script length: about <b>{low_words}-{high_words} Vietnamese words</b>.\n"
+            "Write slightly shorter than the video duration if you want room for visuals."
+        )
+    return (
+        f"✅ Đã chọn <b>{html.escape(voice_label or 'giọng đọc')}</b> cho video này.\n\n"
+        "Bạn gửi nội dung/kịch bản cần đọc cho video ở tin nhắn tiếp theo. TOAN AAS chỉ lưu vào draft video hiện tại, chưa render voice và chưa trừ Xu.\n\n"
+        f"Thời lượng video hiện tại: <b>{duration} giây</b>\n"
+        f"Gợi ý độ dài: khoảng <b>{low_words}-{high_words} từ tiếng Việt</b>.\n"
+        "Nên viết ngắn hơn thời lượng video một chút để giọng đọc không bị chật."
+    )
+
+async def start_video_voice_script_step(query, user_id, voice_key: str, voice_label: str, lang: str = "vi", profile: dict | None = None):
+    value = str(voice_key or "").strip().lower()
+    mode = f"default_{value}_free" if value in {"female", "male"} else "saved_voice_free"
+    choice = f"default_{value}" if value in {"female", "male"} else "saved_voice"
+    fields = {
+        "voice_enabled": True,
+        "voice_mode": mode,
+        "voice_choice": choice,
+        "voice_style": str(voice_label or choice)[:120],
+        "dub_enabled": False,
+    }
+    if value in {"female", "male"}:
+        fields["voice_provider_voice_id"] = default_tts_voice_id(value)
+    if profile:
+        fields["voice_profile_id"] = int(profile.get("id") or 0)
+        fields["voice_provider_voice_id"] = str(profile.get("provider_voice_id") or "")[:180]
+    state = update_video_finalization(user_id, **fields)
+    if state:
+        state["step"] = "await_voice_script"
+        set_video_finalization_state(user_id, state)
+    return await safe_edit_or_send(
+        query,
+        video_voice_script_prompt_text(state, voice_label, lang),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|voice"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+        ]]),
+    )
+
 def video_finalization_voice_language_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
@@ -82269,7 +82766,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             state["step"] = "music"
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_music_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
-        if current_step == "await_voice_text":
+        if current_step in {"await_voice_text", "await_voice_script"}:
             state["step"] = "voice"
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_voice_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_voice_keyboard(lang))
@@ -82348,12 +82845,12 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         state["step"] = "music"
         set_video_finalization_state(uid, state)
         enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen="vfinal|music", product_area="music")
-        set_music_guided_pending(uid, "music_ai_custom", product_context=PRODUCT_CONTEXT_VIDEO_ADDON)
+        save_music_guided_result(uid, {"guided_step": "purpose", "guided_offset": 0, "music_ai_kind": "guided"})
         return await safe_edit_or_send(
             query,
-            music_ai_input_text("custom", lang),
+            music_guided_step_text("purpose", lang),
             parse_mode="HTML",
-            reply_markup=music_guided_back_keyboard(lang, PRODUCT_CONTEXT_VIDEO_ADDON, "music_hub"),
+            reply_markup=music_guided_step_keyboard("purpose", lang, PRODUCT_CONTEXT_VIDEO_ADDON, 0),
         )
     if action == "music_suggest":
         state["step"] = "music"
@@ -82417,15 +82914,8 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             reply_markup=voice_clone_keyboard(lang, PRODUCT_CONTEXT_VIDEO_ADDON),
         )
     if action == "voice_default" and value in {"female", "male"}:
-        update_video_finalization(
-            uid,
-            voice_enabled=False,
-            voice_mode=f"default_{value}_free",
-            voice_choice=f"default_{value}",
-            voice_style=f"default_{value}_free",
-            dub_enabled=False,
-        )
-        return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
+        label = "giọng nữ mặc định" if value == "female" else "giọng nam mặc định"
+        return await start_video_voice_script_step(query, uid, value, label, lang)
     if action == "voice_preview":
         state["step"] = "voice"
         set_video_finalization_state(uid, state)
@@ -82449,13 +82939,13 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         script = str((state.get("session_context") or {}).get("script") or "").strip()
         if not script:
             return await safe_edit_or_send(query, "⚠️ Phiên này chưa có caption/kịch bản để dùng làm voice. Bạn có thể nhập nội dung đọc thủ công. TOAN AAS chưa xử lý voice và chưa trừ Xu.", reply_markup=video_finalization_voice_keyboard(lang))
-        update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_text=script[:3000])
+        update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_text=script[:3000], voice_script=script[:3000])
         state = get_video_finalization_state(uid)
         state["step"] = "voice_language"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, "🎙 Đã lấy nội dung từ kịch bản. Hãy chọn ngôn ngữ/giọng. Bot chưa gọi TTS và chưa trừ Xu.", reply_markup=video_finalization_voice_language_keyboard(lang))
     if action == "voice_none":
-        update_video_finalization(uid, voice_enabled=False, voice_mode="none", voice_choice="none", voice_text="", voice_file_id="", dub_enabled=False)
+        update_video_finalization(uid, voice_enabled=False, voice_mode="none", voice_choice="none", voice_text="", voice_script="", voice_file_id="", dub_enabled=False)
         return await video_finalization_return_after_addon(query, uid, get_video_finalization_state(uid), lang)
     if action == "voice_lang":
         voice_lang = "" if value == "auto" else re.sub(r"[^a-z]", "", value.lower())[:8]
@@ -82533,6 +83023,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             voice_mode="tts",
             voice_choice="advanced_dubbing",
             voice_text=script[:3000],
+            voice_script=script[:3000],
             dub_enabled=True,
             subtitle_dub_enabled=True,
             subtitle_dub_choice="subtitle_plus_dubbing",
@@ -82623,11 +83114,22 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
     step = str(state.get("step") or "")
     text = re.sub(r"\s+", " ", update.message.text.strip())[:3000]
     if step == "await_voice_text":
-        update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_text=text, dub_enabled=True)
+        update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_text=text, voice_script=text, dub_enabled=True)
         state = get_video_finalization_state(uid)
         state["step"] = "voice_language"
         set_video_finalization_state(uid, state)
         await update.message.reply_text("🎙 Đã lưu nội dung đọc. Hãy chọn ngôn ngữ/giọng. Bot chưa gọi TTS và chưa trừ Xu.", reply_markup=video_finalization_voice_language_keyboard(get_user_language(uid) or "vi"))
+        return True
+    if step == "await_voice_script":
+        update_video_finalization(uid, voice_enabled=True, voice_text=text, voice_script=text, dub_enabled=False)
+        lang = get_user_language(uid) or "vi"
+        current = get_video_finalization_state(uid)
+        current["step"] = "menu"
+        set_video_finalization_state(uid, current)
+        await update.message.reply_text(
+            "✅ Đã lưu nội dung giọng đọc vào draft video hiện tại. Gói, thời lượng, file nguồn và các add-on khác vẫn được giữ nguyên.",
+            reply_markup=video_finalization_menu_keyboard(lang),
+        )
         return True
     if step == "await_subtitle_text":
         update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="manual", subtitle_text=text, subtitle_burn_in=True)
@@ -82668,6 +83170,7 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
             voice_enabled=True,
             voice_mode="tts",
             voice_text=text,
+            voice_script=text,
             dub_enabled=True,
             subtitle_dub_enabled=True,
         )
