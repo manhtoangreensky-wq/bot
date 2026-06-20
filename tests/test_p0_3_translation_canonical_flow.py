@@ -177,6 +177,7 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
+    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
 
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_TRANSLATE}", user_id))
     query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
@@ -226,6 +227,7 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
+    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
         translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")

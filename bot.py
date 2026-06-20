@@ -31089,6 +31089,9 @@ def is_admin_user(user_id) -> bool:
     uid = str(user_id)
     return uid in OWNER_IDS or uid in ADMIN_IDS
 
+def is_translation_admin(user_id) -> bool:
+    return is_admin_user(user_id)
+
 def is_owner_user(user_id) -> bool:
     return str(user_id) in OWNER_IDS
 
@@ -57739,7 +57742,7 @@ async def cmd_subtitle_dub_status(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(subtitle_dub_status_text(), parse_mode="HTML")
 
 async def cmd_translation_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin_user(update.effective_user.id):
+    if not is_translation_admin(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await update.message.reply_text(translation_provider_status_text(), parse_mode="HTML")
 
@@ -57895,7 +57898,7 @@ Avoid gpt-5-mini as main fallback. Never expose provider names publicly. This ap
     return chunks
 
 async def cmd_translation_provider_curl(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin_user(update.effective_user.id):
+    if not is_translation_admin(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     for idx, chunk in enumerate(translation_provider_curl_appendix_chunks(), start=1):
         await update.message.reply_text(
@@ -57904,7 +57907,7 @@ async def cmd_translation_provider_curl(update: Update, context: ContextTypes.DE
         )
 
 async def cmd_tool_test_translation_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin_user(update.effective_user.id):
+    if not is_translation_admin(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     uid = update.effective_user.id
     media_info = {}
@@ -114095,9 +114098,11 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
     )
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await handle_free_hub_pending_upload(update, context):
+    if await handle_video_dubbing_pending_upload(update, context):
         return
     if await handle_translation_session_media(update, context):
+        return
+    if await handle_free_hub_pending_upload(update, context):
         return
     if await handle_music_guided_pending_media(update, context):
         return
@@ -115327,6 +115332,8 @@ def video_pipeline_status_payload() -> dict:
 
 def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "vi", admin: bool = False) -> str:
     mode = normalize_video_translate_mode(mode)
+    state = dict(state or {})
+    combo_guard = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB or normalize_video_translate_mode(state.get("requested_mode")) == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     if normalize_user_language(lang) != "vi":
         text = "This tool is waiting for processing resources. TOAN AAS has not processed the file and has not charged Xu."
     else:
@@ -115334,8 +115341,10 @@ def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "
             VIDEO_SUBTITLE_MODE_CREATE: "Tạo phụ đề tự động đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu.",
             VIDEO_SUBTITLE_MODE_TRANSLATE: "Dịch phụ đề đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu.",
             VIDEO_SUBTITLE_MODE_DUB: "Lồng tiếng tự động đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu.",
-            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Dịch phụ đề đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu.",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Dịch phụ đề/lồng tiếng đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu.",
         }.get(mode, "Công cụ đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu.")
+        if combo_guard:
+            text = "Dịch phụ đề/lồng tiếng đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu."
     if admin:
         blockers = video_translation_admin_blockers(mode, state)
         text += (
@@ -115371,6 +115380,12 @@ def video_dubbing_back_route(state: dict | None, action: str) -> str:
     )
     requested = normalize_video_translate_mode(state.get("requested_mode"))
     combo_subtitle_stage = mode == VIDEO_SUBTITLE_MODE_TRANSLATE and requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    if str(state.get("step") or "") == "guarded" and action in {"guard_back", "back_confirm"}:
+        if mode == VIDEO_SUBTITLE_MODE_CREATE:
+            return "source"
+        if mode == VIDEO_SUBTITLE_MODE_TRANSLATE or combo_subtitle_stage:
+            return "language"
+        return "voice_speed"
     if action in {"preview_back", "guard_back"}:
         if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} or combo_subtitle_stage:
             return "output"
@@ -115872,7 +115887,7 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         return False
     uid = update.effective_user.id
     state = get_video_dubbing_pending(uid)
-    if not state or state.get("step") != "await_video":
+    if not state or state.get("step") not in {"source", "await_video"}:
         return False
     info = video_reference_media_info(update.message)
     if not info:
@@ -115904,6 +115919,15 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
     )
     lang = get_user_language(uid) or "vi"
     if mode == VIDEO_SUBTITLE_MODE_CREATE:
+        if not video_dubbing_capability(mode, state).get("ok"):
+            state = set_video_dubbing_pending(uid, "guarded", processing="0")
+            admin = is_translation_admin(uid)
+            await update.message.reply_text(
+                video_dubbing_guard_text(mode, state, lang, admin=admin),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_guard_keyboard(lang, admin=admin),
+            )
+            return True
         state = set_video_dubbing_pending(uid, "output")
         await update.message.reply_text(
             video_dubbing_output_text(state, lang),
@@ -116130,6 +116154,15 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
             )
             return True
         state = set_video_dubbing_pending(uid, "confirm", voice_speed=speed)
+        if not video_dubbing_capability(mode, state).get("ok"):
+            state = set_video_dubbing_pending(uid, "guarded", processing="0")
+            admin = is_translation_admin(uid)
+            await update.message.reply_text(
+                video_dubbing_guard_text(mode, state, lang, admin=admin),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_guard_keyboard(lang, admin=admin),
+            )
+            return True
         await update.message.reply_text(
             video_dubbing_confirm_text(state, lang),
             parse_mode="HTML",
@@ -116204,6 +116237,16 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
                     "requested_mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
                 }
             state = set_video_dubbing_pending(uid, "output", **fields)
+            guarded_mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
+            if not video_dubbing_capability(guarded_mode, state).get("ok"):
+                state = set_video_dubbing_pending(uid, "guarded", processing="0")
+                admin = is_translation_admin(uid)
+                await update.message.reply_text(
+                    video_dubbing_guard_text(guarded_mode, state, lang, admin=admin),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_guard_keyboard(lang, admin=admin),
+                )
+                return True
             await update.message.reply_text(
                 video_dubbing_output_text(state, lang),
                 parse_mode="HTML",
@@ -116251,7 +116294,15 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
                 video_processing_mode=VIDEO_SUBTITLE_MODE_TRANSLATE,
                 requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             )
+            if not video_dubbing_capability(VIDEO_SUBTITLE_MODE_TRANSLATE, state).get("ok"):
+                state = set_video_dubbing_pending(user_id, "guarded", processing="0")
+                admin = is_translation_admin(user_id)
+                return state, video_dubbing_guard_text(VIDEO_SUBTITLE_MODE_TRANSLATE, state, lang, admin=admin), video_dubbing_guard_keyboard(lang, admin=admin)
             return state, video_dubbing_output_text(state, lang), video_dubbing_output_keyboard(lang, state)
+        if not video_dubbing_capability(mode, state).get("ok"):
+            state = set_video_dubbing_pending(user_id, "guarded", processing="0")
+            admin = is_translation_admin(user_id)
+            return state, video_dubbing_guard_text(mode, state, lang, admin=admin), video_dubbing_guard_keyboard(lang, admin=admin)
         state = set_video_dubbing_pending(user_id, "output")
         return state, video_dubbing_output_text(state, lang), video_dubbing_output_keyboard(lang, state)
     if mode == VIDEO_SUBTITLE_MODE_TRANSLATE and not state.get("target_language"):
@@ -116279,11 +116330,11 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
     value = parts[2] if len(parts) > 2 else ""
     state = get_video_dubbing_pending(uid) or {}
     if action == "admin_status":
-        if not is_admin_user(uid):
+        if not is_translation_admin(uid):
             return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
         return await safe_edit_or_send(query, translation_provider_status_text(), parse_mode="HTML", reply_markup=video_dubbing_guard_keyboard(lang, admin=True))
     if action == "admin_smoke":
-        if not is_admin_user(uid):
+        if not is_translation_admin(uid):
             return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
         smoke_update = SimpleNamespace(
             effective_user=query.from_user,
@@ -116292,7 +116343,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         )
         return await cmd_tool_test_translation_factory(smoke_update, context)
     if action == "admin_curl":
-        if not is_admin_user(uid):
+        if not is_translation_admin(uid):
             return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
         curl_update = SimpleNamespace(
             effective_user=query.from_user,
@@ -116394,6 +116445,12 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         state = set_video_dubbing_pending(uid, destination, processing="0")
         if destination == "output":
             return await safe_edit_or_send(query, video_dubbing_output_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_output_keyboard(lang, state))
+        if destination == "source":
+            return await safe_edit_or_send(query, video_dubbing_source_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
+        if destination == "language":
+            return await safe_edit_or_send(query, video_dubbing_language_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_language_keyboard(lang, state))
+        if destination == "voice_speed":
+            return await safe_edit_or_send(query, video_dubbing_voice_speed_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_speed_keyboard(lang))
         return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
     if action == "source_media":
         source = video_dubbing_recent_source(uid)
@@ -116513,16 +116570,16 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     context,
                     state,
                     uid,
-                    allow_admin=is_admin_user(uid),
+                    allow_admin=is_translation_admin(uid),
                 )
                 state = dict(prepared.get("state") or state)
             except Exception:
-                state = set_video_dubbing_pending(uid, "output", processing="0")
+                state = set_video_dubbing_pending(uid, "guarded", processing="0")
                 return await safe_edit_or_send(
                     query,
-                    video_dubbing_guard_text(VIDEO_SUBTITLE_MODE_TRANSLATE, state, lang, admin=is_admin_user(uid)),
+                    video_dubbing_guard_text(VIDEO_SUBTITLE_MODE_TRANSLATE, state, lang, admin=is_translation_admin(uid)),
                     parse_mode="HTML",
-                    reply_markup=video_dubbing_guard_keyboard(lang, admin=is_admin_user(uid)),
+                    reply_markup=video_dubbing_guard_keyboard(lang, admin=is_translation_admin(uid)),
                 )
             state = set_video_dubbing_pending(
                 uid,
@@ -116567,10 +116624,28 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             fields["smart_voice"] = value
         state = set_video_dubbing_pending(uid, "confirm" if key == "speed" else "voice_speed", **fields)
         if key == "speed":
+            if not video_dubbing_capability(mode, state).get("ok"):
+                state = set_video_dubbing_pending(uid, "guarded", processing="0")
+                admin = is_translation_admin(uid)
+                return await safe_edit_or_send(
+                    query,
+                    video_dubbing_guard_text(mode, state, lang, admin=admin),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_guard_keyboard(lang, admin=admin),
+                )
             return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
         return await safe_edit_or_send(query, video_dubbing_voice_speed_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_speed_keyboard(lang))
     if action == "speed_default":
         state = set_video_dubbing_pending(uid, "confirm", voice_speed="1.0")
+        if not video_dubbing_capability(mode, state).get("ok"):
+            state = set_video_dubbing_pending(uid, "guarded", processing="0")
+            admin = is_translation_admin(uid)
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_guard_text(mode, state, lang, admin=admin),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_guard_keyboard(lang, admin=admin),
+            )
         return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
     if action == "back_speed":
         state = set_video_dubbing_pending(uid, video_dubbing_back_route(state, action))
@@ -116663,6 +116738,16 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                         "requested_mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
                     }
                 state = set_video_dubbing_pending(uid, "output", **fields)
+                guarded_mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
+                if not video_dubbing_capability(guarded_mode, state).get("ok"):
+                    state = set_video_dubbing_pending(uid, "guarded", processing="0")
+                    admin = is_translation_admin(uid)
+                    return await safe_edit_or_send(
+                        query,
+                        video_dubbing_guard_text(guarded_mode, state, lang, admin=admin),
+                        parse_mode="HTML",
+                        reply_markup=video_dubbing_guard_keyboard(lang, admin=admin),
+                    )
                 return await safe_edit_or_send(query, video_dubbing_output_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_output_keyboard(lang, state))
             if video_dubbing_requires_voice(mode):
                 state = set_video_dubbing_pending(uid, "voice")
@@ -116758,6 +116843,8 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         state = set_video_dubbing_pending(uid, destination)
         if destination == "output":
             return await safe_edit_or_send(query, video_dubbing_output_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_output_keyboard(lang, state))
+        if destination == "language":
+            return await safe_edit_or_send(query, video_dubbing_language_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_language_keyboard(lang, state))
         if destination == "voice_speed":
             return await safe_edit_or_send(query, video_dubbing_voice_speed_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_speed_keyboard(lang))
         return await safe_edit_or_send(query, video_dubbing_source_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
@@ -116805,9 +116892,9 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
             return await safe_edit_or_send(
                 query,
-                video_dubbing_guard_text(mode, state, lang, admin=is_admin_user(uid)),
+                video_dubbing_guard_text(mode, state, lang, admin=is_translation_admin(uid)),
                 parse_mode="HTML",
-                reply_markup=video_dubbing_guard_keyboard(lang, admin=is_admin_user(uid)),
+                reply_markup=video_dubbing_guard_keyboard(lang, admin=is_translation_admin(uid)),
             )
         if is_preview_action:
             try:
@@ -116834,7 +116921,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 reply_markup=(
                     video_dubbing_preview_ready_keyboard(lang, state)
                     if preview_result.get("ok")
-                    else video_dubbing_guard_keyboard(lang, admin=is_admin_user(uid))
+                    else video_dubbing_guard_keyboard(lang, admin=is_translation_admin(uid))
                 ),
             )
         if not (state.get("preview_seen") or state.get("preview_guard_acknowledged")):
@@ -116856,14 +116943,14 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return await query.message.reply_text(
                 "⚙️ Công cụ xử lý video đang bận hoặc lỗi tạm thời.\n"
                 "TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu lỗi xảy ra khi gửi kết quả. Vui lòng thử lại sau.",
-                reply_markup=video_dubbing_guard_keyboard(lang, admin=is_admin_user(uid)),
+                reply_markup=video_dubbing_guard_keyboard(lang, admin=is_translation_admin(uid)),
             )
         if not result.get("ok"):
             set_video_dubbing_pending(uid, "guarded", processing="0")
             return await query.message.reply_text(
                 result.get("text") or video_dubbing_guard_text(mode, state, lang, admin=False),
                 parse_mode="HTML",
-                reply_markup=video_dubbing_guard_keyboard(lang, admin=is_admin_user(uid)),
+                reply_markup=video_dubbing_guard_keyboard(lang, admin=is_translation_admin(uid)),
             )
         set_video_dubbing_pending(
             uid,
@@ -117462,9 +117549,11 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
     return await safe_edit_or_send(query, video_upload_received_text(lang), reply_markup=video_upload_received_keyboard(uid, lang))
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await handle_free_hub_pending_upload(update, context):
+    if await handle_video_dubbing_pending_upload(update, context):
         return
     if await handle_translation_session_media(update, context):
+        return
+    if await handle_free_hub_pending_upload(update, context):
         return
     if await handle_music_guided_pending_media(update, context):
         return
@@ -117475,8 +117564,6 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
     if await handle_video_reference_pending_upload(update, context):
         return
     if await handle_self_scene_pending_upload(update, context):
-        return
-    if await handle_video_dubbing_pending_upload(update, context):
         return
     media_kind = cache_recent_media_state(update)
     remember_last_media(update)
@@ -117878,7 +117965,7 @@ async def handle_translation_session_media(update: Update, context: ContextTypes
     media_info = await resolve_stt_test_media(update, context)
     if not media_info or media_info.get("error") or not media_info.get("bytes"):
         await update.message.reply_text(
-            translation_voice_guard_text(is_admin_user(uid)),
+            translation_voice_guard_text(is_translation_admin(uid)),
             parse_mode="HTML",
             reply_markup=translation_session_keyboard(lang, session.get("mode")),
         )
@@ -117923,7 +118010,7 @@ async def handle_translation_session_media(update: Update, context: ContextTypes
         return True
     except Exception:
         await update.message.reply_text(
-            translation_voice_guard_text(is_admin_user(uid)),
+            translation_voice_guard_text(is_translation_admin(uid)),
             parse_mode="HTML",
             reply_markup=translation_session_keyboard(lang, session.get("mode")),
         )

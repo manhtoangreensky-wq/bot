@@ -7549,6 +7549,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
+    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
         translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")

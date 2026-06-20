@@ -87,7 +87,8 @@ def test_dubbing_requires_voice_only_in_dubbing():
         assert label in labels
 
 
-def test_subtitle_plus_dubbing_export_before_voice():
+def test_subtitle_plus_dubbing_export_before_voice(monkeypatch):
+    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     uid = "task2-plus-export"
     bot.clear_video_dubbing_pending(uid)
     state = {
@@ -257,7 +258,7 @@ def test_shopaikey_stt_probe_not_hardcoded():
 
 def test_translation_provider_status_admin_only():
     source = inspect.getsource(bot.cmd_translation_provider_status)
-    assert "is_admin_user" in source
+    assert "is_translation_admin" in source
     app_source = Path(bot.__file__).resolve().read_text(encoding="utf-8")
     assert 'CommandHandler("translation_provider_status", cmd_translation_provider_status)' in app_source
     assert 'CommandHandler("translation_provider_curl", cmd_translation_provider_curl)' in app_source

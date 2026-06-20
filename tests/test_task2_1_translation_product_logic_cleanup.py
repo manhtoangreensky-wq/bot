@@ -207,7 +207,8 @@ def test_subtitle_dubbing_translate_subtitle_first():
     assert "Dịch phụ đề sang ngôn ngữ nào" in text
 
 
-def test_subtitle_dubbing_export_before_voice():
+def test_subtitle_dubbing_export_before_voice(monkeypatch):
+    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     uid = "task21-combo-export"
     bot.clear_video_dubbing_pending(uid)
     state = {
