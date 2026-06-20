@@ -139,7 +139,7 @@ def test_standalone_translate_menu_no_api_text():
     assert "🌐 <b>Trung tâm dịch</b>" in text
     assert labels == [
         "🌐 Dịch ngôn ngữ",
-        "🎬 Dịch video",
+        "🎬 Dịch phụ đề, lồng tiếng",
         "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
@@ -159,12 +159,14 @@ def test_standalone_subtitle_asks_upload(monkeypatch):
     state = bot.get_video_dubbing_pending(user_id)
     assert state["origin"] == "translation"
     assert state["step"] == "source"
-    assert "Chọn nguồn video/audio" in query.outputs[-1]["text"]
+    assert "Tạo phụ đề tự động" in query.outputs[-1]["text"]
+    assert "đúng ngôn ngữ đang nói" in query.outputs[-1]["text"]
+    assert "videodub|link_start" not in _callbacks(query.outputs[-1]["reply_markup"])
 
     query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "await_video"
-    assert "Bạn gửi hoặc reply video/audio cần xử lý nhé" in query.outputs[-1]["text"]
+    assert "Bạn gửi hoặc reply video/audio cần xử lý" in query.outputs[-1]["text"]
     assert bot.current_product_context(user_id) == bot.PRODUCT_CONTEXT_SHOWROOM
     _assert_public_clean(query.outputs[-1]["text"])
 
@@ -179,7 +181,7 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_TRANSLATE}", user_id))
     query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
     assert bot.get_video_dubbing_pending(user_id)["step"] == "await_video"
-    assert "Bạn gửi hoặc reply video/audio cần xử lý nhé" in query.outputs[-1]["text"]
+    assert "Bạn gửi hoặc reply video/audio cần xử lý" in query.outputs[-1]["text"]
 
     message = CaptureMessage(file_id="translate-video")
     handled = asyncio.run(bot.handle_video_dubbing_pending_upload(
@@ -191,7 +193,7 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "language"
     assert state["video_file_id"] == "translate-video"
-    assert "Bạn muốn dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
     _assert_public_clean(message.outputs[-1]["text"])
 
 
@@ -204,7 +206,7 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
 
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_DUB}", user_id))
     query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
-    assert "Bạn gửi hoặc reply video/audio cần xử lý nhé" in query.outputs[-1]["text"]
+    assert "Bạn gửi hoặc reply video/audio cần xử lý" in query.outputs[-1]["text"]
 
     message = CaptureMessage(file_id="dub-video")
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(
@@ -232,25 +234,23 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
         SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=message),
         SimpleNamespace(),
     ))
-    assert bot.get_video_dubbing_pending(user_id)["step"] == "output"
-
-    lang_query = message
-    state = bot.get_video_dubbing_pending(user_id)
-    assert state["step"] == "output"
-    assert "Xuất phụ đề" in lang_query.outputs[-1]["text"]
-    assert "🗣 Lồng tiếng" in _labels(lang_query.outputs[-1]["reply_markup"])
-
-    continue_query = asyncio.run(_press_videodub("videodub|continue_dubbing", user_id))
-    assert "Chọn ngôn ngữ lồng tiếng" in continue_query.outputs[-1]["text"]
+    assert bot.get_video_dubbing_pending(user_id)["step"] == "language"
+    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
 
     lang_query = asyncio.run(_press_videodub("videodub|language|English", user_id))
-    assert "Chọn kiểu lồng tiếng" in lang_query.outputs[-1]["text"]
+    state = bot.get_video_dubbing_pending(user_id)
+    assert state["step"] == "output"
+    assert "Xuất phụ đề dịch" in lang_query.outputs[-1]["text"]
+    assert "🗣 Tiếp tục lồng tiếng" in _labels(lang_query.outputs[-1]["reply_markup"])
+
+    continue_query = asyncio.run(_press_videodub("videodub|continue_dubbing", user_id))
+    assert "Chọn giọng lồng tiếng" in continue_query.outputs[-1]["text"]
 
     voice_query = asyncio.run(_press_videodub("videodub|voice|default_female", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["voice_style"]
-    assert state["step"] == "voice_settings"
-    assert "Cài đặt giọng lồng tiếng" in voice_query.outputs[-1]["text"]
+    assert state["step"] == "voice_speed"
+    assert "Tốc độ giọng" in voice_query.outputs[-1]["text"]
     _assert_public_clean(voice_query.outputs[-1]["text"])
 
 

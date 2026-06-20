@@ -7397,7 +7397,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert {"videoref|image_prompts", "videoref|frame_plan", "videoref|generate", "videoref|save"}.issubset(set(ref_result_callbacks))
 
     dub_labels = [button.text for row in bot.video_dubbing_menu_keyboard("vi").inline_keyboard for button in row]
-    assert {"👁 Tạo phụ đề", "🗣 Lồng tiếng", "🎬 Phụ đề + lồng tiếng", "🔗 Tải link"}.issubset(set(dub_labels))
+    assert {"👁 Tạo phụ đề tự động", "🗣 Lồng tiếng tự động", "🎬 Phụ đề + lồng tiếng", "🔗 Tải video từ link"}.issubset(set(dub_labels))
     assert "🎭 Dịch + lồng tiếng" not in dub_labels
     assert "🎬 Dịch + lồng tiếng + video" not in dub_labels
     assert "🎙 Lồng tiếng voice" not in dub_labels
@@ -7551,9 +7551,9 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
 
     cases = [
-        (71001, bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề"),
+        (71001, bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề tự động"),
         (71002, bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch phụ đề"),
-        (71003, bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng"),
+        (71003, bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng tự động"),
         (71004, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Phụ đề + lồng tiếng"),
     ]
     for uid, mode, expected_text in cases:
@@ -7562,7 +7562,9 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         state = bot.get_video_dubbing_pending(uid)
         assert state["video_processing_mode"] == mode
         assert state["step"] == "source"
-        assert "chọn nguồn video/audio" in result["text"].lower()
+        assert "gửi video/audio" in result["text"].lower()
+        callbacks = [button.callback_data for row in result["reply_markup"].inline_keyboard for button in row]
+        assert "videodub|link_start" not in callbacks
         result = asyncio.run(press("videodub|source_upload", uid))
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == "await_video"
@@ -7584,17 +7586,16 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     message = FakeMessage("video-71004")
     update = SimpleNamespace(effective_user=SimpleNamespace(id=71004), message=message)
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(update, SimpleNamespace())) is True
-    assert bot.get_video_dubbing_pending(71004)["step"] == "output"
-    asyncio.run(press("videodub|continue_dubbing", 71004))
     assert bot.get_video_dubbing_pending(71004)["step"] == "language"
     asyncio.run(press("videodub|language|English", 71004))
     plus_state = bot.get_video_dubbing_pending(71004)
-    assert plus_state["step"] == "voice"
+    assert plus_state["step"] == "output"
     assert plus_state["target_language"] == "English"
+    asyncio.run(press("videodub|continue_dubbing", 71004))
+    assert bot.get_video_dubbing_pending(71004)["step"] == "voice"
     asyncio.run(press("videodub|voice|default_female", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] == "voice_settings"
-    asyncio.run(press("videodub|dubbing_output", 71004))
-    asyncio.run(press("videodub|output|video_subtitle", 71004))
+    assert bot.get_video_dubbing_pending(71004)["step"] == "voice_speed"
+    asyncio.run(press("videodub|speed_default", 71004))
     assert bot.get_video_dubbing_pending(71004)["step"] == "confirm"
 
     upload_cases = [
@@ -7610,7 +7611,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         (
             71103,
             bot.VIDEO_SUBTITLE_MODE_DUB,
-            {"target_language": "Tiếng Việt", "voice_style": "Nữ tự nhiên"},
+            {"target_language": "Tiếng Việt", "voice_style": "Nữ tự nhiên", "voice_speed": "1.0"},
             "confirm",
             "videodub|confirm_dub",
             "Lồng tiếng",
@@ -7618,7 +7619,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         (
             71104,
             bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-            {"target_language": "English", "voice_style": "Nữ tự nhiên", "translate_requested": "1"},
+            {"target_language": "English", "translate_requested": "1"},
             "output",
             "videodub|output|srt",
             "Xuất phụ đề",
@@ -7636,7 +7637,11 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         assert handled is True
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == expected_step
-        assert state["video_processing_mode"] == mode
+        if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            assert state["video_processing_mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
+            assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        else:
+            assert state["video_processing_mode"] == mode
         assert expected_label in message.sent[-1]["text"]
         callbacks = [
             button.callback_data
@@ -7659,10 +7664,10 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_DUB_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PLUS_DUB_ENABLED", False)
     for mode, label in [
-        (bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề"),
+        (bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề tự động"),
         (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch phụ đề"),
-        (bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng"),
-        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Lồng tiếng"),
+        (bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng tự động"),
+        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Dịch phụ đề"),
     ]:
         capability = bot.video_dubbing_capability(mode, {})
         assert capability["reason"] == "mode_disabled"
@@ -7689,8 +7694,8 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     async def fake_translate(text, target, **_kwargs):
         return {"text": f"{text} translated to {target}"}
 
-    async def fake_tts(text, voice_style="", voice_id=""):
-        return "Test TTS", b"audio-bytes", f"voice={voice_style}; voice_id={voice_id}; chars={len(text)}"
+    async def fake_tts(text, voice_style="", voice_id="", voice_speed="1.0"):
+        return "Test TTS", b"audio-bytes", f"voice={voice_style}; voice_id={voice_id}; speed={voice_speed}; chars={len(text)}"
 
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)

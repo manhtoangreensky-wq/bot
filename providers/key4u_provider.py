@@ -859,7 +859,7 @@ class Key4UProvider:
         except Exception as exc:
             return _result(ok=False, capability="video_query", model=self.config.video_model, status="FAIL_EXCEPTION", task_id=safe_task_id, error_class=type(exc).__name__, error_message_safe=exc)
 
-    async def tts(self, text: str = "Xin chào TOAN AAS.", model: str = "", voice_id: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def tts(self, text: str = "Xin chào TOAN AAS.", model: str = "", voice_id: str = "", speed: float = 1.0, timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = model or self.config.tts_model
         if not self.is_configured():
             return self._missing_result("tts", selected_model)
@@ -871,7 +871,7 @@ class Key4UProvider:
             "text": str(text or "")[:3500],
             "voice_setting": {
                 "voice_id": str(voice_id or "male-qn-qingse")[:256],
-                "speed": 1,
+                "speed": float(speed or 1.0),
                 "vol": 1,
                 "pitch": 0,
             },
@@ -918,7 +918,7 @@ class Key4UProvider:
         except Exception as exc:
             return _result(ok=False, capability="tts", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
-    async def voice_tts_fallback(self, text: str = "Xin chào TOAN AAS.", voice_id: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def voice_tts_fallback(self, text: str = "Xin chào TOAN AAS.", voice_id: str = "", speed: float = 1.0, timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = self.config.tts_alt_model or "speech-2.6-hd"
         if not self.is_configured():
             return self._missing_result("voice_tts_fallback", selected_model)
@@ -931,7 +931,7 @@ class Key4UProvider:
             "stream": False,
             "voice_setting": {
                 "voice_id": str(voice_id or "English_expressive_narrator")[:256],
-                "speed": 1,
+                "speed": float(speed or 1.0),
                 "vol": 1,
                 "pitch": 0,
             },
@@ -970,7 +970,7 @@ class Key4UProvider:
         except Exception as exc:
             return _result(ok=False, capability="voice_tts_fallback", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
-    async def tts_async(self, text: str, voice_id: str = "", model: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
+    async def tts_async(self, text: str, voice_id: str = "", model: str = "", speed: float = 1.0, timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = model or self.config.tts_model
         if not self.is_configured():
             return self._missing_result("tts_async", selected_model)
@@ -982,7 +982,7 @@ class Key4UProvider:
             "text": str(text or "")[:10000],
             "voice_setting": {
                 "voice_id": str(voice_id or "male-qn-qingse")[:256],
-                "speed": 1,
+                "speed": float(speed or 1.0),
                 "vol": 1,
                 "pitch": 0,
             },
