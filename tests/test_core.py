@@ -7550,6 +7550,13 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
 
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
+        translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
+        state = bot.set_video_dubbing_pending(user_id, state.get("step") or "output", translated_subtitle_ref=translated_ref)
+        return {"state": state, "output_subtitle": "Translated subtitle", "output_script": "Translated subtitle"}
+
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
+
     cases = [
         (71001, bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề tự động"),
         (71002, bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch phụ đề"),
@@ -7654,10 +7661,13 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
 def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     source = bot_source_text()
     pipeline_source = source_between(source, "async def execute_video_dubbing_pipeline", "async def handle_video_dubbing_pending_upload")
-    assert "video_dubbing_transcribe_bytes" in pipeline_source
-    assert "translate_subtitle_text" in pipeline_source
+    prepare_source = source_between(source, "async def video_dubbing_prepare_subtitles", "async def execute_video_dubbing_pipeline")
+    resolver_source = source_between(source, "async def video_dubbing_resolve_source_script", "async def video_dubbing_render_video")
+    assert "video_dubbing_prepare_subtitles" in pipeline_source
+    assert "video_dubbing_transcribe_bytes" in resolver_source
+    assert "translate_subtitle_text" in prepare_source
     assert "video_dubbing_tts_bytes" in pipeline_source
-    assert pipeline_source.index("video_dubbing_download_source") < pipeline_source.index("spend_fixed_credit_info")
+    assert pipeline_source.index("video_dubbing_prepare_subtitles") < pipeline_source.index("spend_fixed_credit_info")
 
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_TRANSLATE_SUBTITLE_ENABLED", False)

@@ -227,6 +227,13 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
 
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
+        translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
+        state = bot.set_video_dubbing_pending(user_id, state.get("step") or "output", translated_subtitle_ref=translated_ref)
+        return {"state": state, "output_subtitle": "Translated subtitle", "output_script": "Translated subtitle"}
+
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
+
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}", user_id))
     asyncio.run(_press_videodub("videodub|source_upload", user_id))
     message = CaptureMessage(file_id="combo-video")
