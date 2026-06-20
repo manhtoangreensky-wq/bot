@@ -311,7 +311,8 @@ def test_prompt_create_video_ai_guard_has_no_local_export():
     callbacks = _callbacks(bot.free_hub_video_ai_guard_keyboard("vi"))
     text = bot.free_hub_video_ai_guard_text({"selected_prompt": "prompt test"}, "vi")
 
-    assert "chưa gọi API" in text
+    assert "chưa xử lý video" in text
+    assert "bảo trì/nâng cấp nhẹ" in text
     assert "chưa trừ Xu" in text
     assert "freehub|prompt_back" in callbacks
     assert "vfinal|export_local" not in callbacks

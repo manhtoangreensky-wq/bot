@@ -397,13 +397,13 @@ def test_video_finalization_tier_menu_is_two_columns_and_not_misleading():
     assert any("Trải nghiệm" in label and "200 Xu" in label for label in labels)
     assert any("Cơ bản" in label and "300 Xu" in label for label in labels)
     assert any("Phổ thông" in label and "400 Xu" in label for label in labels)
-    assert not any("600 Xu" in label for label in labels)
+    for price in ("500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1200 Xu", "1500 Xu"):
+        assert any(price in label for label in labels)
     assert not any("nếu" in label.lower() for label in labels)
     callbacks = _callbacks(markup)
-    assert "vfinal|tier|low" in callbacks
-    assert "vfinal|tier|basic" in callbacks
-    assert "vfinal|tier|common" in callbacks
-    assert "vfinal|review" in callbacks
+    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500"):
+        assert f"vfinal|tier|{tier}" in callbacks
+    assert "vfinal|menu" in callbacks
 
 
 def test_video_result_keyboard_uses_clear_ai_action_label():
@@ -416,13 +416,10 @@ def test_video_addon_confirm_keeps_finalization_back_context():
     markup = bot.video_addon_confirm_keyboard("tok123", "low", "vi")
     callbacks = _callbacks(markup)
     ordered_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data]
-    assert "videoaddon|preview_locked|tok123" in callbacks
+    assert "videoaddon|preview_locked|tok123" not in callbacks
     assert "shopai|confirm|tok123" in callbacks
-    assert ordered_callbacks.index("videoaddon|preview_locked|tok123") < ordered_callbacks.index("shopai|confirm|tok123")
-    assert "vfinal|tier" in callbacks
-    assert "vfinal|voice" in callbacks
-    assert "vfinal|music" in callbacks
-    assert "vfinal|addon" in callbacks
+    assert ordered_callbacks == ["shopai|confirm|tok123", "vfinal|menu", "videoaddon|back", "videoaddon|main"]
+    assert "vfinal|menu" in callbacks
     assert "videoaddon|back" in callbacks
     assert "create_media|quick_video" not in callbacks
 

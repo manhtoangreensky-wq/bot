@@ -37,6 +37,18 @@ PRODUCT_FIELDS = (
     "admin_status_fields",
 )
 
+PUBLIC_VIDEO_PACKAGES = (
+    "package_200",
+    "package_300",
+    "package_400",
+    "package_500",
+    "package_600",
+    "package_800",
+    "package_1000",
+    "package_1200",
+    "package_1500",
+)
+
 
 def _product(
     product_id: str,
@@ -85,41 +97,41 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
     "video_trend": _product(
         "video_trend", "🔥 Video theo trend",
         "Tạo trend angle, hook, kịch bản, caption và storyboard prompt từ chủ đề.",
-        "topic|product|niche", "plan|script|prompt_pack", "free_planning", ("package_200", "package_300", "package_400"),
+        "topic|product|niche", "plan|script|prompt_pack", "free_planning", PUBLIC_VIDEO_PACKAGES,
         template="tiktok_hook", next_steps=("generate_plan", "export_prompt_pack", "render_video"),
     ),
     "video_idea": _product(
         "video_idea", "🧠 Ý tưởng video",
         "Tạo 5–10 ý tưởng, hook và format theo chủ đề, sản phẩm và nền tảng.",
-        "topic|product|platform", "idea_pack", "free_planning", ("package_200", "package_300", "package_400"),
+        "topic|product|platform", "idea_pack", "free_planning", PUBLIC_VIDEO_PACKAGES,
         template="youtube_short_script", next_steps=("generate_ideas", "export_prompt_pack", "render_video"),
     ),
     "storyboard_prompt": _product(
         "storyboard_prompt", "🎞 Storyboard + Prompt",
         "Tạo storyboard 6/9/12/16 panel, prompt ảnh/video từng shot và batch multishot 2 shot.",
         "topic|story|product|reference", "storyboard_table|image_prompts|video_prompts|prompt_pack", "free_planning_paid_render",
-        ("package_200", "package_300", "package_400"), template="seedance_multishot", max_duration=96,
+        PUBLIC_VIDEO_PACKAGES, template="seedance_multishot", max_duration=96,
         next_steps=("image_prompts", "video_prompts", "render_one_shot", "export_prompt_pack"),
     ),
     "script_image_video": _product(
         "script_image_video", "🧩 Kịch bản → Ảnh → Video",
         "Tạo kịch bản, shot list, prompt ảnh rồi prompt chuyển động/video từng cảnh.",
         "topic|script|product", "script|shot_list|image_prompts|video_prompts", "free_planning_paid_render",
-        ("package_200", "package_300", "package_400"), template="product_ad", max_duration=60,
+        PUBLIC_VIDEO_PACKAGES, template="product_ad", max_duration=60,
         next_steps=("export_prompt_pack", "create_scene_image", "render_scene", "assemble_multiscene"),
     ),
     "video_ai_real": _product(
         "video_ai_real", "🎬 Video AI chân thật",
         "Biến prompt hoặc ảnh tham chiếu thành một video AI ngắn, chân thật.",
         "text_prompt|optional_reference_image", "rendered_video", "paid_after_final_confirm",
-        ("package_200", "package_300", "package_400"), provider=True, template="realistic_video", max_duration=12,
+        PUBLIC_VIDEO_PACKAGES, provider=True, template="realistic_video", max_duration=12,
         next_steps=("improve_prompt", "choose_package", "final_confirm", "provider_job"),
     ),
     "image_to_video": _product(
         "image_to_video", "🖼 Ảnh → Video",
         "Tạo motion prompt miễn phí hoặc render video từ 1–4 ảnh.",
         "1_to_4_images|scene_description", "motion_prompt|rendered_video", "free_prompt_paid_render",
-        ("package_200", "package_300", "package_400"), provider=True, template="image_to_video_motion", max_duration=12,
+        PUBLIC_VIDEO_PACKAGES, provider=True, template="image_to_video_motion", max_duration=12,
         next_steps=("motion_prompt", "choose_package", "final_confirm", "provider_job"),
     ),
     "frame_video_local": _product(
@@ -132,21 +144,21 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
         "self_shot_scene_change", "🎥 Tự quay & đổi cảnh AI",
         "Giữ chủ thể/hướng chuyển động từ video hoặc ảnh nguồn rồi đổi bối cảnh, ánh sáng và phong cách.",
         "user_video|user_image", "video_to_video_plan|edited_video", "free_plan_paid_guarded_render",
-        ("package_300", "package_400"), provider=True, template="transformation_video", max_duration=12,
+        PUBLIC_VIDEO_PACKAGES, provider=True, template="transformation_video", max_duration=12,
         next_steps=("collect_source", "preserve_subject", "scene_plan", "choose_package"),
     ),
     "multi_scene_film": _product(
         "multi_scene_film", "🎬 Phim AI nhiều cảnh",
         "Lập kế hoạch phim/quảng cáo nhiều cảnh và render theo từng scene khi gói phù hợp.",
         "story|product|script", "scene_plan|prompt_pack|optional_scene_renders", "free_planning_paid_higher_tier_render",
-        ("package_300", "package_400"), provider=True, template="cinematic_story", max_duration=120,
+        PUBLIC_VIDEO_PACKAGES, provider=True, template="cinematic_story", max_duration=120,
         next_steps=("scene_plan", "export_prompt_pack", "render_scene_batches"),
-        guard="Gói 200 chỉ render một shot ngắn, không render phim nhiều cảnh.",
+        guard="Gói 200 xuất một cảnh trải nghiệm từ kế hoạch; chọn gói cao hơn khi muốn xuất thêm cảnh.",
     ),
     "motion_prompt": _product(
         "motion_prompt", "🎥 Prompt / Chuyển động",
         "Tạo prompt camera, chuyển động chủ thể và chuyển cảnh chuyên nghiệp.",
-        "image|scene_description", "camera_motion_prompt", "free_planning", ("package_200", "package_300", "package_400"), template="image_to_video_motion",
+        "image|scene_description", "camera_motion_prompt", "free_planning", PUBLIC_VIDEO_PACKAGES, template="image_to_video_motion",
         next_steps=("generate_motion_prompt", "export_prompt_pack", "render_video"),
     ),
     "video_reference": _product(
@@ -185,7 +197,7 @@ VIDEO_PACKAGE_REGISTRY: dict[str, dict[str, Any]] = {
     "package_200": {
         "package_id": "package_200", "price_xu": 200, "duration_seconds": 6,
         "max_scenes": 1, "max_shots": 1, "aspect_ratios": ["9:16", "16:9", "1:1"],
-        "provider_quality": "basic_short_default", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt"],
+        "provider_quality": "basic_short_default", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free"], "preview_policy": "not_required",
         "public_enabled": True, "cost_gate": "intentional_starter_boundary",
     },
@@ -203,6 +215,48 @@ VIDEO_PACKAGE_REGISTRY: dict[str, dict[str, Any]] = {
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"], "preview_policy": "optional",
         "public_enabled": True, "cost_gate": "provider_cost_must_be_known_safe",
     },
+    "package_500": {
+        "package_id": "package_500", "price_xu": 500, "duration_seconds": 12,
+        "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
+        "provider_quality": "advanced", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
+        "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
+        "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
+    },
+    "package_600": {
+        "package_id": "package_600", "price_xu": 600, "duration_seconds": 12,
+        "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
+        "provider_quality": "business", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
+        "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
+        "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
+    },
+    "package_800": {
+        "package_id": "package_800", "price_xu": 800, "duration_seconds": 12,
+        "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
+        "provider_quality": "high", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
+        "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
+        "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
+    },
+    "package_1000": {
+        "package_id": "package_1000", "price_xu": 1000, "duration_seconds": 12,
+        "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
+        "provider_quality": "professional", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
+        "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
+        "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
+    },
+    "package_1200": {
+        "package_id": "package_1200", "price_xu": 1200, "duration_seconds": 12,
+        "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
+        "provider_quality": "pro_plus", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
+        "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
+        "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
+    },
+    "package_1500": {
+        "package_id": "package_1500", "price_xu": 1500, "duration_seconds": 12,
+        "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
+        "provider_quality": "premium", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
+        "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"],
+        "preview_policy": "optional", "public_enabled": True, "cost_gate": "open_business_package",
+    },
     "package_600_off": {
         "package_id": "package_600_off", "price_xu": 600, "duration_seconds": 0, "max_scenes": 0, "max_shots": 0,
         "aspect_ratios": [], "provider_quality": "off", "allowed_products": [], "allowed_addons": [],
@@ -216,7 +270,11 @@ VIDEO_PACKAGE_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 
-LEGACY_TIER_TO_PACKAGE = {"low": "package_200", "basic": "package_300", "common": "package_400"}
+LEGACY_TIER_TO_PACKAGE = {
+    "low": "package_200", "basic": "package_300", "common": "package_400",
+    "advanced": "package_500", "standard": "package_600", "high": "package_800",
+    "future_1000": "package_1000", "future_1200": "package_1200", "future_1500": "package_1500",
+}
 
 
 def package_for_tier(tier: str) -> dict[str, Any]:

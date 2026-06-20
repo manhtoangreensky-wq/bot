@@ -296,7 +296,7 @@ def test_free_products_do_not_show_packages_before_prompt_output():
         assert "400 Xu" not in labels
 
 
-def test_use_to_create_video_shows_200_300_400():
+def test_use_to_create_video_shows_all_business_packages_only_after_output():
     user_id = 993110
     bot.clear_video_session(user_id)
     bundle = bot.task3d_trend_output_from_source(bot.TASK3D_TREND_STORE.list_sources(limit=1)[0])
@@ -304,8 +304,19 @@ def test_use_to_create_video_shows_200_300_400():
     labels = _labels(bot.task3d_result_keyboard("video_trend", "vi"))
     assert "🎬 Dùng để tạo video" in labels
     assert not any("200 Xu" in label or "300 Xu" in label or "400 Xu" in label for label in labels)
+    tier_labels = _labels(bot.video_finalization_tier_keyboard("vi"))
+    tier_text = bot.video_finalization_tier_text({}, "vi")
+    for price in ("200 Xu", "300 Xu", "400 Xu", "500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1200 Xu", "1500 Xu"):
+        assert any(price in label for label in tier_labels)
+        assert price in tier_text
     callbacks = _callbacks(bot.video_finalization_tier_keyboard("vi"))
-    assert {"vfinal|tier|low", "vfinal|tier|basic", "vfinal|tier|common"} <= set(callbacks)
+    assert {
+        "vfinal|tier|low", "vfinal|tier|basic", "vfinal|tier|common",
+        "vfinal|tier|advanced", "vfinal|tier|standard", "vfinal|tier|high",
+        "vfinal|tier|future_1000", "vfinal|tier|future_1200", "vfinal|tier|future_1500",
+    } <= set(callbacks)
+    assert "đang ẩn" not in tier_text.lower()
+    assert "kiểm soát chi phí" not in tier_text.lower()
     assert validate_package_selection("video_trend", "package_200", ["none"])["ok"] is True
     bot.clear_video_session(user_id)
 
@@ -318,6 +329,80 @@ def test_video_ai_real_shows_packages_after_prompt_exists():
     bundle = _bundle(product_id="video_ai_real", shots=1)
     bot.task3d_session_step(user_id, "result", product_id="video_ai_real", prompt_bundle=bundle.to_dict())
     assert "🎬 Dùng để tạo video" in _labels(bot.task3d_result_keyboard("video_ai_real", "vi"))
+    bot.clear_video_session(user_id)
+
+
+def test_video_ai_real_intro_has_guided_suggestions_and_motion():
+    labels = _labels(bot.task3d_product_intro_keyboard("video_ai_real", "vi"))
+    callbacks = _callbacks(bot.task3d_product_intro_keyboard("video_ai_real", "vi"))
+    for label in ("💡 Gợi ý ý tưởng", "✍️ Nhập prompt", "🔥 Trend hôm nay", "📷 Gửi ảnh tham khảo", "🎥 Gợi ý chuyển động"):
+        assert label in labels
+    assert "vproduct|ideas|video_ai_real" in callbacks
+    assert "vproduct|motion_suggest|video_ai_real" in callbacks
+    assert "menu|main_video" in callbacks
+
+
+@pytest.mark.parametrize(
+    ("product_id", "required_labels"),
+    [
+        ("video_idea", ("💡 Gợi ý chủ đề", "✍️ Nhập chủ đề")),
+        ("storyboard_prompt", ("🎞 Mẫu storyboard", "➕ Thêm cảnh", "⏭ Bỏ qua thêm cảnh")),
+        ("motion_prompt", ("🎥 Gợi ý chuyển động", "⏭ Bỏ qua")),
+        ("image_to_video", ("📷 Gửi ảnh", "🎥 Gợi ý chuyển động", "⏭ Bỏ qua mô tả")),
+        ("script_image_video", ("💡 Gợi ý kịch bản", "➕ Thêm cảnh", "⏭ Bỏ qua")),
+        ("multi_scene_film", ("🎞 Mẫu phim ngắn", "➕ Thêm cảnh", "⏭ Bỏ qua")),
+        ("self_shot_scene_change", ("💡 Gợi ý cảnh mới", "⏭ Bỏ qua add-on")),
+    ],
+)
+def test_video_products_have_guided_or_skip_flow(product_id, required_labels):
+    labels = _labels(bot.task3d_product_intro_keyboard(product_id, "vi"))
+    for label in required_labels:
+        assert label in labels
+    assert "menu|main_video" in _callbacks(bot.task3d_product_intro_keyboard(product_id, "vi"))
+
+
+def test_final_confirmation_keyboard_exact_two_column_export_options():
+    markup = bot.video_addon_confirm_keyboard("token200", "low", "vi", {"pending_payload": {"video_tier": "low"}})
+    labels_by_row = [[button.text for button in row] for row in markup.inline_keyboard]
+    callbacks_by_row = [[button.callback_data for button in row] for row in markup.inline_keyboard]
+    assert labels_by_row == [
+        ["🎬 Xuất video", "⚙️ Đổi tùy chọn"],
+        ["⬅️ Quay lại", "🏠 Menu chính"],
+    ]
+    assert callbacks_by_row == [
+        ["shopai|confirm|token200", "vfinal|menu"],
+        ["videoaddon|back", "videoaddon|main"],
+    ]
+
+
+def test_guided_idea_motion_and_scene_skip_are_free_prompt_steps():
+    user_id = 993115
+    query, session = _press_vproduct(user_id, "video_ai_real", "vproduct|ideas|video_ai_real")
+    assert session["current_step"] == "idea_suggestions"
+    assert "chưa xử lý video và chưa trừ Xu" in query.edits[-1][0]
+
+    query = _FakeQuery(user_id, "vproduct|idea_select|0")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] == "platform"
+    assert session["draft"]["provider_called"] is not True
+    assert session["draft"].get("xu_charged", 0) == 0
+
+    bot.clear_video_session(user_id)
+    _press_vproduct(user_id, "video_ai_real", "vproduct|motion_suggest|video_ai_real")
+    query = _FakeQuery(user_id, "vproduct|motion|skip")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] in {"platform", "result"}
+    assert session["draft"]["motion_skipped"] is True
+    assert session["draft"].get("xu_charged", 0) == 0
+
+    bot.clear_video_session(user_id)
+    _press_vproduct(user_id, "script_image_video", "vproduct|scene_skip")
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] in {"platform", "result"}
+    assert session["draft"]["extra_scene_skipped"] is True
+    assert session["draft"].get("xu_charged", 0) == 0
     bot.clear_video_session(user_id)
 
 
@@ -457,7 +542,7 @@ def test_script_image_video_generates_image_and_video_prompts():
 
 
 def test_video_ai_real_package_selection():
-    for package_id in ("package_200", "package_300", "package_400"):
+    for package_id in ("package_200", "package_300", "package_400", "package_500", "package_600", "package_800", "package_1000", "package_1200", "package_1500"):
         assert validate_package_selection("video_ai_real", package_id, ["none"])["ok"]
 
 
@@ -481,13 +566,15 @@ def test_video_200_no_paid_addons():
     assert not any(item in allowed for item in ("ai_music", "paid_voice", "dubbing", "translated_subtitle"))
 
 
-def test_video_200_paid_addon_requires_upgrade_or_remove():
+def test_video_200_paid_addon_requires_upgrade_or_back():
     result = validate_package_selection("video_ai_real", "package_200", ["ai_music"])
     assert result["ok"] is False
     assert result["reason"] == "paid_addon_not_allowed"
     callbacks = _callbacks(bot.video_experience_tier_lock_keyboard("vi"))
-    assert "videoaddon|remove_paid_addons" in callbacks
-    assert "vfinal|tier|basic" in callbacks
+    assert callbacks == ["vfinal|tier|basic", "vfinal|menu"]
+    text = bot.video_experience_tier_lock_text("vi", ["paid_music"])
+    assert "Gói trải nghiệm 200 Xu không dùng được tính năng có phí" in text
+    assert "TOAN AAS chưa xử lý video và chưa trừ Xu" in text
 
 
 def test_video_200_creates_provider_job_after_confirm():
@@ -510,7 +597,7 @@ def test_video_200_refund_or_no_charge_on_fail():
     source = inspect.getsource(bot.handle_shopaikey_public_callback)
     assert "provider_rejected_not_charged" in source
     assert 'refund_status="not_charged"' in source
-    assert "Provider không nhận job" in source
+    assert "Hệ thống tạo video đang bảo trì/nâng cấp nhẹ" in source
 
 
 def test_video_200_final_export_path():
@@ -533,11 +620,24 @@ def test_video_400_package_path():
     assert validate_package_selection("multi_scene_film", "package_400", ["none"])["ok"]
 
 
-def test_video_600_hidden_or_guarded():
-    assert VIDEO_PACKAGE_REGISTRY["package_600_off"]["public_enabled"] is False
+def test_video_business_packages_visible_and_open():
     labels = _labels(bot.video_finalization_tier_keyboard("vi"))
-    assert not any("600 Xu" in label for label in labels)
-    assert "vfinal|tier|standard" not in _callbacks(bot.video_finalization_tier_keyboard("vi"))
+    callbacks = _callbacks(bot.video_finalization_tier_keyboard("vi"))
+    for package_id in ("package_500", "package_600", "package_800", "package_1000", "package_1200", "package_1500"):
+        assert VIDEO_PACKAGE_REGISTRY[package_id]["public_enabled"] is True
+        assert VIDEO_PACKAGE_REGISTRY[package_id]["cost_gate"] == "open_business_package"
+    for label in ("500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1200 Xu", "1500 Xu"):
+        assert any(label in item for item in labels)
+    for tier in ("advanced", "standard", "high", "future_1000", "future_1200", "future_1500"):
+        assert f"vfinal|tier|{tier}" in callbacks
+        status = bot.get_public_video_tier_ui_status(tier, False)
+        assert status["enabled"] is True
+        assert status["visible"] is True
+        assert status["public_status"] == "PUBLIC"
+    guard_text = bot.video_finalization_tier_guard_text("standard", "vi")
+    assert "bảo trì/nâng cấp" in guard_text
+    assert "kiểm soát chi phí" not in guard_text.lower()
+    assert "provider" not in guard_text.lower()
 
 
 def test_video_paid_addon_requires_upgrade_on_200():
@@ -656,10 +756,11 @@ def test_prompt_pack_exports_json_markdown_and_plain_text_content():
     assert "no watermark" in markdown.lower()
 
 
-def test_multiscene_200_is_blocked_but_one_shot_pipeline_is_allowed():
-    assert validate_package_selection("multi_scene_film", "package_200", ["none"])["ok"] is False
+def test_multiscene_200_can_export_one_experience_shot():
+    assert validate_package_selection("multi_scene_film", "package_200", ["none"])["ok"] is True
     assert validate_package_selection("script_image_video", "package_200", ["none"])["ok"] is True
     assert VIDEO_PACKAGE_REGISTRY["package_200"]["max_shots"] == 1
+    assert "một cảnh trải nghiệm" in VIDEO_PRODUCT_REGISTRY["multi_scene_film"]["public_guard_message"]
 
 
 def test_task3d_commands_are_registered():

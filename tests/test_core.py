@@ -866,8 +866,8 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert bot.public_image_provider_fail_message(0, False) == "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau."
     assert bot.public_image_provider_fail_message(50, True) == "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau."
     assert "Admin đã được ghi nhận" in bot.public_image_provider_fail_message(50, False)
-    assert bot.public_video_provider_fail_message(0, False) == "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau."
-    assert bot.public_video_provider_fail_message(300, True) == "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại 300 Xu cho bạn. Vui lòng thử lại sau."
+    assert bot.public_video_provider_fail_message(0, False) == "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS chưa trừ Xu của bạn. Vui lòng thử lại sau."
+    assert bot.public_video_provider_fail_message(300, True) == "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS đã hoàn lại 300 Xu cho bạn. Vui lòng thử lại sau."
     assert "Admin đã được ghi nhận" in bot.public_video_provider_fail_message(300, False)
 
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", False)
@@ -1544,7 +1544,8 @@ def test_shopaikey_video_status_extractors_job_lock_and_public_guard(monkeypatch
     assert "secret" not in bot.shopaikey_sanitize_error("https://x.test/usage?apiKey=secret")
     assert len(bot.shopaikey_sanitize_error("x" * 1000)) <= 500
     failed_text = bot.public_video_status_message("FAILED", job={}, fail_summary={"not_charged": True}, lang="vi")
-    assert "Video tạo thất bại" in failed_text
+    assert "Video tạm thời chưa xuất được" in failed_text
+    assert "bảo trì/nâng cấp nhẹ" in failed_text
     assert "Video sẽ được gửi tự động" not in failed_text
     failed_buttons = [button.text for row in bot.public_video_failed_keyboard(123, "vi").inline_keyboard for button in row]
     assert "🔁 Thử tạo lại" in failed_buttons
@@ -1944,7 +1945,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert 'start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")' in quick_source
     assert "video_addon_menu_text" in source
     assert "video_addon_runtime_guard(pending)" in source
-    assert "Video AI chân thật đang được kiểm soát an toàn" in source
+    assert "Hệ thống tạo video đang bảo trì/nâng cấp nhẹ" in source
     assert "public_image_prompt" in source
     assert "set_public_image_prompt_pending(uid, tier)" in source
     assert "clear_public_image_prompt_pending(uid)" in source
@@ -2230,8 +2231,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.callback_data == "create_media|video_tier_low" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_basic" for button in video_tier_buttons)
     assert any(button.callback_data == "create_media|video_tier_common" for button in video_tier_buttons)
-    assert not any(button.callback_data == "create_media|video_tier_standard" for button in video_tier_buttons)
-    assert not any(button.callback_data == "create_media|video_tier_high" for button in video_tier_buttons)
+    assert any(button.callback_data == "create_media|video_tier_standard" for button in video_tier_buttons)
+    assert any(button.callback_data == "create_media|video_tier_high" for button in video_tier_buttons)
+    assert any(button.callback_data == "create_media|video_tier_future_1500" for button in video_tier_buttons)
     assert not any(button.callback_data == "create_media|video_tier_premium" for button in video_tier_buttons)
     assert any("Trải nghiệm" in button.text and "654 Xu" in button.text for button in video_tier_buttons)
     assert any("Cơ bản" in button.text and "765 Xu" in button.text for button in video_tier_buttons)
@@ -2602,15 +2604,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Nhạc/SFX gợi ý" in long_plan
     assert "TOAN AAS chưa xử lý thật và chưa trừ Xu" in long_plan
     vi_video_off = bot.public_video_off_options_text("vi")
-    assert "Video thật chưa mở công khai" in vi_video_off
-    assert "Bot chưa gọi API video" in vi_video_off
+    assert "Hệ thống tạo video đang bảo trì/nâng cấp nhẹ" in vi_video_off
+    assert "TOAN AAS chưa xử lý video" in vi_video_off
     assert "chưa trừ Xu" in vi_video_off
     en_video_off = bot.public_video_off_options_text("en")
     assert "Real video generation is not public yet" in en_video_off
     assert "has not called the video API" in en_video_off
     from_image_off = bot.image_to_video_public_off_prompt(0, "u_video_off", "vi")
-    assert "Prompt image-to-video" in from_image_off
-    assert "Bot chưa gọi API video" in from_image_off
+    assert "Prompt ảnh thành video" in from_image_off
+    assert "TOAN AAS chưa xử lý video" in from_image_off
     assert "shopaikey_video_create" not in from_image_off
     docs_labels = [button.text for row in bot.main_docs_keyboard("vi").inline_keyboard for button in row]
     assert "💰 Xem giá" not in docs_labels
@@ -7032,8 +7034,8 @@ def test_free_tools_followup_buttons_have_handlers(monkeypatch):
     assert "Prompt video AI" in prompts["text"]
 
     use_video = asyncio.run(press("freehub|use_video", uid))
-    assert "Video AI chân thật đang được kiểm soát an toàn" in use_video["text"]
-    assert "chưa gọi API" in use_video["text"]
+    assert "Hệ thống tạo video đang bảo trì/nâng cấp nhẹ" in use_video["text"]
+    assert "chưa xử lý video" in use_video["text"]
     use_video_buttons = [button.text for row in use_video["reply_markup"].inline_keyboard for button in row]
     assert "⬅️ Quay lại prompt" in use_video_buttons
     assert "🎞 Xuất video local" not in use_video_buttons
@@ -7215,7 +7217,7 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
         "storypack|create_or_upload_images",
         "storypack|save",
     }.issubset(set(story_callbacks))
-    assert "chưa mở render Video AI công khai" in bot.storyboard_pack_guard_text("ai_video", "vi")
+    assert "Hệ thống tạo video đang bảo trì/nâng cấp nhẹ" in bot.storyboard_pack_guard_text("ai_video", "vi")
 
     db_path = tmp_path / "long-story.db"
     monkeypatch.setattr(bot, "DB_FILE", str(db_path))
@@ -8770,18 +8772,11 @@ def test_video_export_vfinal_addons_and_tier_gate_labels(monkeypatch):
     tier_markup = bot.video_finalization_tier_keyboard("vi")
     tier_callbacks = _button_callbacks(tier_markup)
     assert "Chọn gói xuất video AI" in tier_text
-    assert "200 Xu" in tier_text
-    assert "300 Xu" in tier_text
-    assert "400 Xu" in tier_text
-    assert "500 Xu" not in tier_text
-    assert "600 Xu" not in tier_text
-    assert "800 Xu" not in tier_text
-    assert "vfinal|tier|low" in tier_callbacks
-    assert "vfinal|tier|basic" in tier_callbacks
-    assert "vfinal|tier|common" in tier_callbacks
-    assert "vfinal|tier|advanced" not in tier_callbacks
-    assert "vfinal|tier|standard" not in tier_callbacks
-    assert "vfinal|tier|high" not in tier_callbacks
+    for price in ("200 Xu", "300 Xu", "400 Xu", "500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1200 Xu", "1500 Xu"):
+        assert price in tier_text
+    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500"):
+        assert f"vfinal|tier|{tier}" in tier_callbacks
+    assert "kiểm soát chi phí" not in tier_text.lower()
 
 
 def test_video_export_vfinal_not_ready_hides_fake_maintenance_action(monkeypatch):
@@ -8799,7 +8794,7 @@ def test_video_export_vfinal_not_ready_hides_fake_maintenance_action(monkeypatch
     text = bot.video_finalization_confirm_not_ready_text(state, "vi")
     buttons = _button_texts(bot.video_finalization_confirm_not_ready_keyboard(state, "vi"))
     callbacks = _button_callbacks(bot.video_finalization_confirm_not_ready_keyboard(state, "vi"))
-    assert "Video AI đang bảo trì/nâng cấp" in text
+    assert "Đang bảo trì/nâng cấp nhẹ" in text
     assert "✅ Xác nhận xuất video" not in buttons
     assert "Video AI bảo trì/nâng cấp" not in buttons
     assert "📋 Copy prompt" in buttons
@@ -8834,7 +8829,7 @@ def test_video_export_vfinal_ready_uses_confirm_path(monkeypatch):
     }
     status = bot.get_public_video_tier_ui_status("basic", False)
     assert status["enabled"] is True
-    assert bot.get_public_video_tier_ui_status("low", False)["enabled"] is False
+    assert bot.get_public_video_tier_ui_status("low", False)["enabled"] is True
     buttons = _button_texts(bot.video_finalization_summary_keyboard(state, "vi"))
     callbacks = _button_callbacks(bot.video_finalization_summary_keyboard(state, "vi"))
     assert "✅ Xác nhận xuất video" in buttons
@@ -8844,7 +8839,7 @@ def test_video_export_vfinal_ready_uses_confirm_path(monkeypatch):
     assert "vfinal|copy_prompt" in callbacks
 
 
-def test_video_export_vfinal_hides_unverified_tiers_even_when_legacy_gate_passes(monkeypatch):
+def test_video_export_vfinal_restores_business_tiers_even_when_old_gate_is_stale(monkeypatch):
     monkeypatch.setattr(bot, "video_public_beta_enabled_runtime", lambda: True)
     monkeypatch.setattr(bot, "video_public_allowed_tiers", lambda: ["low", "basic", "common", "advanced", "standard", "high"])
     monkeypatch.setattr(bot, "video_tier_public_flag", lambda tier: bot.normalize_video_tier(tier) in {"low", "basic", "common", "advanced", "standard", "high"})
@@ -8868,29 +8863,26 @@ def test_video_export_vfinal_hides_unverified_tiers_even_when_legacy_gate_passes
     )
     for tier in ("advanced", "standard", "high"):
         status = bot.get_public_video_tier_ui_status(tier, False)
-        assert status["enabled"] is False
-        assert status["visible"] is False
-        assert status["public_status"] == "HIDDEN"
-        assert "200/300/400" in status["reason"]
-    assert bot.get_public_video_tier_ui_status("future_1000", False)["enabled"] is False
-    assert "500 Xu" not in bot.video_finalization_tier_text({}, "vi")
-    assert "600 Xu" not in bot.video_finalization_tier_text({}, "vi")
-    assert "800 Xu" not in bot.video_finalization_tier_text({}, "vi")
-    assert "1000 Xu" not in bot.video_finalization_tier_text({}, "vi")
+        assert status["enabled"] is True
+        assert status["visible"] is True
+        assert status["public_status"] == "PUBLIC"
+        assert status["reason"] == "ready"
+    assert bot.get_public_video_tier_ui_status("future_1000", False)["enabled"] is True
+    tier_text = bot.video_finalization_tier_text({}, "vi")
+    for price in ("500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1200 Xu", "1500 Xu"):
+        assert price in tier_text
     assert "cost is report-only" in bot.video_cost_status_text()
 
 
-def test_public_video_tier_keyboard_exposes_only_task3d_verified_packages():
+def test_public_video_tier_keyboard_exposes_all_business_packages():
     buttons = _button_texts(bot.public_video_tier_keyboard("vi"))
     callbacks = _button_callbacks(bot.public_video_tier_keyboard("vi"))
-    for label in ("200 Xu", "300 Xu", "400 Xu"):
+    for label in ("200 Xu", "300 Xu", "400 Xu", "500 Xu", "600 Xu", "800 Xu", "1000 Xu", "1200 Xu", "1500 Xu"):
         assert any(label in button for button in buttons)
-    for label in ("Trải nghiệm", "Cơ bản", "Phổ thông"):
+    for label in ("Trải nghiệm", "Cơ bản", "Phổ thông", "Nâng cao", "Bán hàng", "Cao cấp", "Chuyên nghiệp", "Pro Plus", "Premium"):
         assert any(label in button for button in buttons)
-    for tier in ("low", "basic", "common"):
+    for tier in ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500"):
         assert f"create_media|video_tier_{tier}" in callbacks
-    for tier in ("advanced", "standard", "high", "future_1000", "future_1200", "future_1500"):
-        assert f"create_media|video_tier_{tier}" not in callbacks
 
 
 def test_video_prompt_result_uses_create_now_and_addons_labels():
@@ -8926,7 +8918,7 @@ def test_video_prompt_result_uses_create_now_and_addons_labels():
     assert 'structured_video_plan(state, "promptvideo")' in source_between(source, "async def open_prompt_video_finalization_from_state", "async def open_image_video_finalization_from_state")
     assert 'structured_video_plan(plan, "videoref")' in reference_handler
     assert "video_request_is_vague(prompt)" in vague_handler
-    assert "TOAN AAS chưa gọi API video và chưa trừ Xu" in vague_handler
+    assert "TOAN AAS chưa xử lý video và chưa trừ Xu" in vague_handler
 
 
 def test_video_module_v10_feature_flags_callbacks_and_detailed_prompts(monkeypatch):

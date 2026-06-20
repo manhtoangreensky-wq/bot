@@ -121,8 +121,8 @@ def test_long_video_preview_max_6_seconds():
 def test_preview_optional_full_output_stays_active(monkeypatch):
     monkeypatch.setattr(bot, "video_paid_preview_worker_available", lambda: True)
     callbacks = _callbacks(bot.video_addon_confirm_keyboard("tok", "basic", "vi"))
-    assert "videoaddon|preview|tok" in callbacks
-    assert callbacks.index("videoaddon|preview|tok") < callbacks.index("shopai|confirm|tok")
+    assert "videoaddon|preview|tok" not in callbacks
+    assert callbacks == ["shopai|confirm|tok", "vfinal|menu", "videoaddon|back", "videoaddon|main"]
     entry_callbacks = _callbacks(bot.video_paid_preview_entry_keyboard("tok", "vi"))
     assert "videoaddon|preview|tok" in entry_callbacks
     assert "shopai|confirm|tok" not in entry_callbacks

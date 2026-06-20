@@ -73,7 +73,7 @@ def test_storyboard_entry_opens_template_menu(monkeypatch):
     callbacks = _callbacks(bot.storyboard_pack_start_keyboard("vi"))
 
     assert "Storyboard + Prompt điện ảnh" in text
-    assert "Bot chưa gọi provider và chưa trừ Xu" in text
+    assert "TOAN AAS chưa xử lý video và chưa trừ Xu" in text
     assert {
         "storypack|template|product_ad",
         "storypack|template|cinematic_story",
@@ -195,7 +195,8 @@ def test_storyboard_prompt_views_and_video_guard(monkeypatch):
     assert {"storypack|copy_meta_1", "storypack|copy_meta_2", "storypack|copy_meta_3", "storypack|regenerate_meta_ai_prompts"}.issubset(_callbacks(meta["reply_markup"]))
 
     guard = asyncio.run(_press("storypack|create_video_ai", uid))
-    assert "chưa mở render Video AI công khai" in guard["text"]
+    assert "Hệ thống tạo video đang bảo trì/nâng cấp nhẹ" in guard["text"]
+    assert "chưa bắt đầu xử lý và chưa trừ Xu" in guard["text"]
     assert "TOAN AAS chưa bắt đầu xử lý" in guard["text"]
     guard_callbacks = _callbacks(guard["reply_markup"])
     assert "storypack|back_detail" in guard_callbacks
@@ -246,7 +247,7 @@ def test_storyboard_product_ad_manual_path_v2(monkeypatch):
     assert "TOAN AAS chỉ chuẩn bị prompt" in meta["text"]
 
     video_guard = asyncio.run(_press("storypack|create_video_ai", uid))
-    assert "Video AI chân thật đang được kiểm soát an toàn" in video_guard["text"]
+    assert "Hệ thống tạo video đang bảo trì/nâng cấp nhẹ" in video_guard["text"]
     assert "storypack|back_detail" in _callbacks(video_guard["reply_markup"])
     assert "vfinal|export_local" not in _callbacks(video_guard["reply_markup"])
 

@@ -4958,14 +4958,14 @@ UI_TEXT = {
         "video.tier.high": "Video Cao Cấp",
         "video.tier.premium": "Video premium/admin-only",
         "video.waiting": "🎞 TOAN AAS đang tạo video cho bạn. Quá trình này có thể mất vài phút. Không cần gửi lại lệnh.",
-        "video.tier_disabled_message": "🧪 Tier video này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
-        "video.premium_message": "👑 Video premium đang mở theo dạng admin duyệt vì chi phí cao. Vui lòng liên hệ admin nếu cần.\nBot chưa gọi API và chưa trừ Xu.",
+        "video.tier_disabled_message": "🛠 Gói video này đang bảo trì/nâng cấp nhẹ. TOAN AAS chưa xử lý video và chưa trừ Xu.",
+        "video.premium_message": "🛠 Gói video cao cấp đang bảo trì/nâng cấp nhẹ. TOAN AAS chưa xử lý video và chưa trừ Xu.",
         "video.active_job": "Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.",
         "video.source_invalid": "⚠️ Ảnh nguồn không còn hợp lệ hoặc thiếu dữ liệu để tạo video. Bot chưa trừ Xu.\nBạn có thể tạo lại ảnh, tạo video từ prompt text hoặc quay lại menu chính.",
         "video.queue_submitted": "✅ Video đã được gửi vào hàng chờ tạo.\n\nTOAN AAS đang tạo video cho bạn.\nVideo sẽ được gửi tự động trong vài phút khi hoàn tất.\n\nVui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần để tránh trùng job.\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "Bạn muốn làm gì tiếp?",
-        "video.fail.not_charged": "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. Bot chưa trừ Xu của bạn. Vui lòng thử lại sau.",
-        "video.fail.refunded": "⚙️ Model tạo video đang bận hoặc lỗi tạm thời. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau.",
+        "video.fail.not_charged": "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS chưa trừ Xu của bạn. Vui lòng thử lại sau.",
+        "video.fail.refunded": "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau.",
         "video.fail.refund_failed": "⚠️ Tác vụ tạo video lỗi sau khi đã trừ Xu. Bot chưa hoàn tự động được. Admin đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ.",
         "video.prompt.ask": "🎞 <b>{label}</b>\n\nGửi mô tả video bạn muốn tạo.\n\nVí dụ: logo TOAN AAS màu xanh ngọc chuyển động nhẹ, nền trắng sạch, phong cách công nghệ tối giản.\n\nTimeout: 10 phút. Gõ /cancel để hủy.\nBot chưa gọi API và chưa trừ Xu.",
         "video.confirm.cost": "🎞 <b>Tạo video {label} sẽ tốn {cost} Xu.</b>\n\n• Số dư hiện tại: <b>{credits} Xu</b>\n• Prompt: <code>{prompt}</code>\n\nVideo AI có thể mất vài phút xử lý.\nBot chỉ trừ Xu sau khi bạn xác nhận.\nKhông gửi lại lệnh trong lúc bot đang chạy.\n\nBạn có muốn tiếp tục không?",
@@ -5098,7 +5098,7 @@ UI_TEXT = {
         "concept.saved_video_prompt": "✅ Prompt video đã được lưu cho concept này. Bot chưa gọi API video và chưa trừ Xu.",
         "concept.saved_music": "✅ Gợi ý nhạc đã được lưu cho concept này. Bot chưa gọi API và chưa trừ Xu.",
         "video.public_off_prompt_only": "Tạo video thật đang thử nghiệm nội bộ. TOAN AAS đã chuẩn bị prompt video để bạn dùng khi tính năng mở công khai.",
-        "video.public_off_options": "🎬 <b>Video thật chưa mở công khai.</b>\n\nHiện tại bot có thể giúp bạn chuẩn bị:\n• Prompt video\n• Motion guide\n• Storyboard\n• Gợi ý nhạc\n\nKhi video public bật, bạn sẽ chọn tier và xác nhận giá trước khi tạo.\nBot chưa gọi API video và chưa trừ Xu.",
+        "video.public_off_options": "🎬 <b>Hệ thống tạo video đang bảo trì/nâng cấp nhẹ.</b>\n\nHiện tại TOAN AAS vẫn có thể giúp bạn chuẩn bị:\n• Prompt video\n• Hướng chuyển động\n• Storyboard\n• Gợi ý nhạc\n\nKhi xuất video sẵn sàng, bạn sẽ chọn gói và xác nhận giá trước khi tạo.\nTOAN AAS chưa xử lý video và chưa trừ Xu.",
         "video.admin_smoke_warning": "🔐 Admin smoke test: không trừ Xu nội bộ, nhưng provider có thể tốn credit thật. Không cần gửi lại lệnh.",
         "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\nGửi prompt video ngắn để test provider.\n\n{warning}",
         "video.check_job": "🔄 Kiểm tra trạng thái video",
@@ -5109,7 +5109,7 @@ UI_TEXT = {
         "music.genre.viral": "🔥 TikTok / Reels vui tươi",
         "music.genre.chill": "😌 Chill / nhẹ nhàng",
         "music.genre.custom": "✍️ Nhập từ khóa khác",
-        "video.from_image_public_off": "🎬 <b>Video thật chưa mở công khai.</b>\n\nTOAN AAS đã chuẩn bị prompt image-to-video từ ảnh này. Khi public video bật, nút này sẽ chuyển sang bước chọn tier video và xác nhận giá.\n\n<b>Prompt image-to-video</b>\n<code>{prompt}</code>\n\nBot chưa gọi API video và chưa trừ Xu.",
+        "video.from_image_public_off": "🎬 <b>Hệ thống tạo video đang bảo trì/nâng cấp nhẹ.</b>\n\nTOAN AAS đã chuẩn bị prompt chuyển ảnh thành video từ ảnh này. Khi xuất video sẵn sàng, nút này sẽ chuyển sang bước chọn gói video và xác nhận giá.\n\n<b>Prompt ảnh thành video</b>\n<code>{prompt}</code>\n\nTOAN AAS chưa xử lý video và chưa trừ Xu.",
         "workflow.from_concept_confirm": "Tạo workflow đầy đủ từ concept này sẽ tốn {cost} Xu. Bao gồm hook/script/storyboard/prompt ảnh/prompt video. Bạn có muốn tiếp tục không?",
         "workflow.from_concept_title": "🎬 Workflow đầy đủ từ concept này",
         "workflow.image_scene_1": "🖼 Tạo ảnh từ Scene 1",
@@ -5210,14 +5210,14 @@ UI_TEXT = {
         "video.tier.high": "Premium video",
         "video.tier.premium": "Premium/admin-only video",
         "video.waiting": "🎞 TOAN AAS is creating your video. This may take a few minutes. No need to send the command again.",
-        "video.tier_disabled_message": "🧪 This video tier is currently disabled. The bot has not called any API and has not charged Xu.",
-        "video.premium_message": "👑 Premium video requires admin approval because provider cost is high. Please contact admin if needed.\nThe bot has not called any API and has not charged Xu.",
+        "video.tier_disabled_message": "🛠 This video package is temporarily under maintenance / upgrade. TOAN AAS has not processed the video or charged Xu.",
+        "video.premium_message": "🛠 This premium video package is temporarily under maintenance / upgrade. TOAN AAS has not processed the video or charged Xu.",
         "video.active_job": "You already have a video being processed. Please wait until it finishes before creating another one.",
         "video.source_invalid": "⚠️ The source image is no longer valid or is missing data for video generation. The bot has not charged Xu.\nYou can recreate the image, create a video from a text prompt, or return to the main menu.",
         "video.queue_submitted": "✅ Your video has been sent to the creation queue.\n\nTOAN AAS is creating the video for you.\nThe video will be sent automatically in a few minutes when it is ready.\n\nPlease do not send the command again or create multiple jobs to avoid duplicates.\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "What would you like to do next?",
-        "video.fail.not_charged": "⚙️ The video model is busy or temporarily unavailable. The bot has not charged Xu. Please try again later.",
-        "video.fail.refunded": "⚙️ The video model is busy or temporarily unavailable. TOAN AAS has refunded {amount} Xu. Please try again later.",
+        "video.fail.not_charged": "🛠 Video export is temporarily under maintenance / upgrade. TOAN AAS has not charged Xu. Please try again later.",
+        "video.fail.refunded": "🛠 Video export is temporarily under maintenance / upgrade. TOAN AAS has refunded {amount} Xu. Please try again later.",
         "video.fail.refund_failed": "⚠️ The video task failed after Xu was charged. The bot could not refund automatically. Admin has been notified to review and refund manually if valid.",
         "video.prompt.ask": "🎞 <b>{label}</b>\n\nSend the video description you want to generate.\n\nExample: TOAN AAS turquoise logo with gentle motion, clean white background, minimalist tech style.\n\nTimeout: 10 minutes. Use /cancel to cancel.\nThe bot has not called any API and has not charged Xu.",
         "video.confirm.cost": "🎞 <b>Creating {label} costs {cost} Xu.</b>\n\n• Current balance: <b>{credits} Xu</b>\n• Prompt: <code>{prompt}</code>\n\nAI video can take a few minutes.\nThe bot charges Xu only after you confirm.\nDo not resend the command while the bot is working.\n\nDo you want to continue?",
@@ -5351,7 +5351,7 @@ UI_TEXT = {
         "concept.saved_music": "✅ The music suggestion is saved for this concept. The bot has not called any API and has not charged Xu.",
         "video.public_off_prompt_only": "Real video generation is still in internal testing. TOAN AAS has prepared the video prompt for you to use when the feature opens publicly.",
         "video.public_off_options": "🎬 <b>Real video generation is not public yet.</b>\n\nThe bot can still prepare:\n• Video prompts\n• Motion guide\n• Storyboard\n• Music suggestions\n\nWhen public video is enabled, you will choose a tier and confirm pricing before generation.\nThe bot has not called the video API and has not charged Xu.",
-        "video.admin_smoke_warning": "🔐 Admin smoke test: no internal Xu deduction, but the provider may consume real credits. No need to resend the command.",
+        "video.admin_smoke_warning": "🔐 Admin smoke test: no internal Xu deduction, but external processing may consume real credits. No need to resend the command.",
         "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\nSend a short video prompt to test the provider.\n\n{warning}",
         "video.check_job": "🔄 Check video status",
         "video.resend": "📤 Resend video",
@@ -5468,8 +5468,8 @@ UI_TEXT = {
         "video.source_invalid": "⚠️ 源图片缺少数据或已不适用于生成视频。本次未扣除 Xu。\n你可以重新生成图片、用文字 prompt 生成视频，或返回主菜单。",
         "video.queue_submitted": "✅ 视频已发送到生成队列。\n\nTOAN AAS 正在为你生成视频。\n视频完成后将在几分钟内自动发送。\n\n请不要重复发送命令或连续创建多个任务，以避免重复 job。\n\nTask: {task_id}\nAuto poll: {auto_poll}",
         "video.next_action": "你想下一步做什么？",
-        "video.fail.not_charged": "⚙️ 视频模型正忙或暂时不可用。本次未扣除 Xu。请稍后再试。",
-        "video.fail.refunded": "⚙️ 视频模型正忙或暂时不可用。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
+        "video.fail.not_charged": "🛠 视频导出正在维护/升级，暂时无法完成。本次未扣除 Xu。请稍后再试。",
+        "video.fail.refunded": "🛠 视频导出正在维护/升级，暂时无法完成。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
         "video.fail.refund_failed": "⚠️ 视频任务在扣除 Xu 后失败。Bot 暂时无法自动退款，Admin 已收到记录，会在符合条件时人工处理退款。",
         "video.prompt.ask": "🎞 <b>{label}</b>\n\n请发送你想生成的视频描述。\n\n示例：TOAN AAS 青绿色 logo 轻微运动，白色干净背景，极简科技风。\n\n超时：10 分钟。使用 /cancel 取消。\nBot 未调用 API，也未扣除 Xu。",
         "video.confirm.cost": "🎞 <b>生成 {label} 需要 {cost} Xu。</b>\n\n• 当前余额：<b>{credits} Xu</b>\n• Prompt：<code>{prompt}</code>\n\nAI 视频可能需要几分钟。\n只有确认后 Bot 才会扣除 Xu。\n处理期间请不要重复发送命令。\n\n是否继续？",
@@ -33490,13 +33490,13 @@ def image_tier_choice_rows(callback_builder, lang: str = "vi") -> list[list[Inli
 VIDEO_TIER_ORDER = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
 VIDEO_TIER_ICONS = {
     "low": "🟢",
-    "basic": "🔹",
+    "basic": "🔷",
     "common": "🔵",
     "advanced": "🟣",
-    "standard": "🟣",
-    "high": "⭐",
-    "future_1000": "👑",
-    "future_1200": "👑",
+    "standard": "🟠",
+    "high": "🔴",
+    "future_1000": "⭐",
+    "future_1200": "💎",
     "future_1500": "👑",
 }
 
@@ -33556,14 +33556,14 @@ def video_tier_pricing_payload() -> dict:
             "cost": int(VIDEO_FUTURE_1200_COST_XU or 1200),
             "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Gói public chất lượng cao hơn, vẫn đi qua provider/job guard trước khi trừ Xu.",
+            "note": "Gói public chất lượng cao hơn, vẫn xác nhận lần cuối trước khi xử lý và trừ Xu.",
         },
         "future_1500": {
             "label": "Video Premium",
             "cost": int(VIDEO_FUTURE_1500_COST_XU or 1500),
             "provider_cost": int(VIDEO_PREMIUM_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
-            "note": "Gói public cao nhất hiện tại. Provider/job guard vẫn kiểm tra trước khi xử lý.",
+            "note": "Gói public cao nhất hiện tại. TOAN AAS luôn xác nhận lần cuối trước khi xử lý.",
         },
         "premium": {
             "label": "Video premium/admin-only",
@@ -33712,9 +33712,9 @@ def video_tier_quality_description(tier: str = "", lang: str = "vi") -> str:
             "advanced": "Optimized prompt, composition, lighting, brand style and motion direction.",
             "standard": "Business-focused video with product benefit, conversion angle, CTA and clearer structure.",
             "high": "Premium cinematic/commercial look with stronger lighting, camera movement and production polish.",
-            "future_1000": "Professional public tier. Provider/job guard still applies.",
-            "future_1200": "Pro Plus public tier with higher quality controls. Provider/job guard still applies.",
-            "future_1500": "Premium public tier. Provider/job guard still applies.",
+            "future_1000": "Professional public tier with stronger production guidance.",
+            "future_1200": "Pro Plus public tier with higher quality controls.",
+            "future_1500": "Premium public tier with the strongest current package.",
         }
     else:
         descriptions = {
@@ -33724,9 +33724,9 @@ def video_tier_quality_description(tier: str = "", lang: str = "vi") -> str:
             "advanced": "Tối ưu prompt, bố cục, ánh sáng, brand style và hướng chuyển động.",
             "standard": "Tối ưu theo hướng quảng cáo/bán hàng: lợi ích sản phẩm, góc chốt đơn, CTA và bố cục rõ.",
             "high": "Phong cách cao cấp: cinematic/commercial look, ánh sáng, camera motion và độ hoàn thiện tốt hơn.",
-            "future_1000": "Gói chuyên nghiệp public. Vẫn kiểm tra provider/job trước khi tạo.",
-            "future_1200": "Gói Pro Plus public với kiểm soát chất lượng cao hơn. Vẫn kiểm tra provider/job trước khi tạo.",
-            "future_1500": "Gói Premium public. Vẫn kiểm tra provider/job trước khi tạo.",
+            "future_1000": "Gói chuyên nghiệp public, tối ưu hướng sản xuất rõ hơn.",
+            "future_1200": "Gói Pro Plus public với kiểm soát chất lượng cao hơn.",
+            "future_1500": "Gói Premium public, gói cao nhất đang mở hiện tại.",
         }
     return descriptions.get(tier_norm) or str((video_tier_pricing_payload().get(tier_norm) or {}).get("note") or "")
 
@@ -34460,39 +34460,28 @@ def video_experience_tier_lock_text(lang: str = "vi", reasons: list[str] | tuple
     }
     if normalize_user_language(lang) != "vi":
         readable = [reason_labels_en.get(item, item.replace("_", " ")) for item in reasons]
-        reason_line = "\nSelected paid items: <b>{}</b>\n".format(html.escape(", ".join(readable))) if readable else "\n"
+        reason_line = "\nSelected: <b>{}</b>\n".format(html.escape(", ".join(readable))) if readable else "\n"
         return (
-            "🎬 <b>200 Xu starter video</b>\n\n"
-            "The 200 Xu package is for trying the default video creation flow only. "
-            "Paid add-ons, extra duration, subtitles, dubbing and AI music start from the 300 Xu package.\n"
+            "⚠️ <b>The 200 Xu starter package cannot use paid features.</b>\n"
             f"{reason_line}\n"
-            f"Limit: <b>{policy['limits']['per_day']}/day, {policy['limits']['per_week']}/week, {policy['limits']['per_month']}/month</b>.\n\n"
-            "TOAN AAS has not started processing and no Xu was charged."
+            "Please remove paid add-ons or upgrade to the 300 Xu package to continue.\n\n"
+            "TOAN AAS has not processed anything and no Xu was charged."
         )
     readable = [reason_labels_vi.get(item, item.replace("_", " ")) for item in reasons]
     reason_line = "\nBạn đang chọn: <b>{}</b>\n".format(html.escape(", ".join(readable))) if readable else "\n"
     return (
-        "🎬 <b>Gói 200 Xu — Video trải nghiệm</b>\n\n"
-        "Gói này giúp khách thử nhanh quy trình tạo video mặc định của TOAN AAS.\n"
-        "Gói 200 không mở add-on trả phí, không tăng thời lượng, không tạo nhạc AI, không dùng phụ đề trả phí hoặc lồng tiếng trả phí.\n"
+        "⚠️ <b>Gói trải nghiệm 200 Xu không dùng được tính năng có phí.</b>\n"
         f"{reason_line}\n"
-        "Nếu cần tạo thêm hoặc dùng tính năng nâng cao, hãy chuyển sang gói 300 Xu trở lên.\n"
-        f"Giới hạn: <b>{policy['limits']['per_day']}/ngày, {policy['limits']['per_week']}/tuần, {policy['limits']['per_month']}/tháng</b>.\n\n"
-        "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
+        "Vui lòng bỏ add-on trả phí hoặc nâng lên gói 300 Xu để tiếp tục.\n\n"
+        "TOAN AAS chưa xử lý video và chưa trừ Xu."
     )
 
 def video_experience_tier_lock_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔧 Bỏ add-on trả phí" if is_vi else "🔧 Remove paid add-ons", callback_data="videoaddon|remove_paid_addons"),
-        ],
-        [
-            InlineKeyboardButton("🔷 Nâng lên Cơ bản 300 Xu" if is_vi else "🔷 Upgrade to Basic 300 Xu", callback_data="vfinal|tier|basic"),
-        ],
-        [
-            InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="vfinal|menu"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+            InlineKeyboardButton("🔷 Nâng lên 300 Xu" if is_vi else "🔷 Upgrade to 300 Xu", callback_data="vfinal|tier|basic"),
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|menu"),
         ],
     ])
 
@@ -34655,11 +34644,10 @@ def video_tier_public_status_text() -> str:
     return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in VIDEO_TIER_ORDER)
 
 VIDEO_EXPORT_TIER_CHOICES = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
-# Task 3D public render boundary: the customer-facing flow exposes exactly the
-# verified 200/300/400 Xu products. Higher tiers remain in the internal registry
-# for admin diagnostics and historical jobs, but must not become selectable via
-# a stale runtime flag or a handcrafted callback.
-VIDEO_PUBLIC_TIER_UI_ORDER = ("low", "basic", "common")
+# Task 3D.2 public business list: restore every current business package.
+# Runtime/system outages are handled by the final friendly maintenance message,
+# not by hiding 500/600/800/1000/1200/1500 from the package menu.
+VIDEO_PUBLIC_TIER_UI_ORDER = VIDEO_EXPORT_TIER_CHOICES
 
 def get_video_tier_status(tier: str = "", user_is_admin: bool = False) -> dict:
     tier_norm = normalize_video_tier(tier)
@@ -34700,12 +34688,17 @@ def get_public_video_tier_ui_status(tier: str = "", user_is_admin: bool = False)
     tier_norm = normalize_video_tier(tier)
     status = get_video_tier_status(tier_norm, user_is_admin)
     enabled = bool(status.get("public_enabled"))
-    public_reason = str(status.get("reason") or "not ready")
+    public_reason = str(status.get("reason") or "ready")
     if tier_norm not in VIDEO_PUBLIC_TIER_UI_ORDER:
         enabled = False
         public_status = "HIDDEN"
         requires_override = False
-        public_reason = "Gói này đang ẩn khỏi luồng public Task 3D; chỉ các gói 200/300/400 Xu được chọn."
+        public_reason = "Gói này chưa nằm trong danh sách gói video public hiện tại."
+    elif tier_norm in video_public_launch_tiers():
+        enabled = True
+        public_status = "PUBLIC_MARKETING_LOSS" if tier_norm == "low" else "PUBLIC"
+        requires_override = False
+        public_reason = "ready"
     elif tier_norm == "low" and not video_beta_200_marketing_loss_enabled_runtime():
         public_status = "OFF"
         requires_override = True
@@ -43741,10 +43734,10 @@ def free_hub_video_ai_guard_text(result: dict | None = None, lang: str = "vi") -
     selected = str((result or {}).get("selected_prompt") or "").strip()
     selected_line = f"\n\nPrompt đã chọn:\n<code>{html.escape(selected)}</code>" if selected else ""
     if normalize_user_language(lang) != "vi":
-        return "🎬 <b>AI video rendering is under safety control.</b>\n\nPublic rendering is not stable yet. No provider was called and no Xu was charged. Save, edit or copy the prompt first."
+        return "🎬 <b>Video export is temporarily under maintenance / upgrade.</b>\n\nTOAN AAS has kept your prompt/plan. No video processing has started and no Xu was charged. Save, edit or copy the prompt first."
     return (
-        "🎬 <b>Video AI chân thật đang được kiểm soát an toàn.</b>\n\n"
-        "TOAN AAS chưa mở render Video AI công khai vì provider/video job chưa ổn định. Bot chưa gọi API và chưa trừ Xu.\n\n"
+        "🎬 <b>Hệ thống tạo video đang bảo trì/nâng cấp nhẹ.</b>\n\n"
+        "TOAN AAS đã giữ lại prompt/kế hoạch của bạn. Bot chưa xử lý video và chưa trừ Xu.\n\n"
         "Bạn có thể lưu prompt/kế hoạch, sửa prompt hoặc dùng prompt này với Meta AI/công cụ ngoài trước."
         f"{selected_line}"
     )
@@ -44613,6 +44606,53 @@ TASK3D_SAMPLE_TOPICS = {
     "self_shot_scene_change": "giữ nhân vật chính, đổi bối cảnh thành phố đêm cinematic",
 }
 
+TASK3D_GUIDED_IDEAS = {
+    "video_ai_real": [
+        "Video UGC chân thật giới thiệu sản phẩm trong 8 giây, mở đầu bằng kết quả trước/sau.",
+        "Cảnh người thật cầm sản phẩm, ánh sáng tự nhiên, camera push-in chậm và CTA mềm.",
+        "Video quảng cáo ngắn kiểu testimonial: vấn đề, khoảnh khắc dùng thử, kết quả rõ.",
+        "Product reveal chân thật trên bàn, chuyển động tay nhẹ, nền sạch và màu thương hiệu.",
+        "Cảnh lifestyle đời thường, một hành động nhỏ làm nổi bật lợi ích sản phẩm.",
+    ],
+    "video_idea": [
+        "3 sai lầm phổ biến khách hay gặp và cách sản phẩm/dịch vụ của bạn giải quyết.",
+        "Before/after ngắn: trước khi dùng, khoảnh khắc chuyển đổi, kết quả cuối.",
+        "Một ngày dùng sản phẩm theo format POV, dễ quay lại thành nhiều tập.",
+        "So sánh 2 lựa chọn: cách cũ mất thời gian và cách mới nhanh hơn.",
+        "Hook dạng checklist: 3 dấu hiệu bạn cần giải pháp này ngay hôm nay.",
+    ],
+    "script_image_video": [
+        "Kịch bản affiliate 20 giây: vấn đề, demo sản phẩm, bằng chứng, CTA lưu lại.",
+        "Câu chuyện khách hàng: trước bối rối, sau khi dùng thấy kết quả rõ.",
+        "Kịch bản 4 cảnh cho mỹ phẩm/đồ gia dụng: hook, close-up, demo, CTA.",
+        "Kịch bản giáo dục ngắn: sai lầm thường gặp, mẹo sửa, đề xuất sản phẩm.",
+        "Kịch bản review chân thật: kỳ vọng ban đầu, trải nghiệm, điểm đáng mua.",
+    ],
+    "multi_scene_film": [
+        "Phim ngắn 5 cảnh về một cửa hàng nhỏ tìm ra cách tăng đơn nhờ AI.",
+        "Mini drama 30 giây: nhân vật gặp vấn đề, thử giải pháp, nhận kết quả.",
+        "Phim thương hiệu cảm xúc: hành trình sản phẩm từ chi tiết nhỏ tới thành quả.",
+        "Câu chuyện biến đổi không gian: trước lộn xộn, sau gọn gàng và đẹp hơn.",
+        "Phim nhiều cảnh cho chiến dịch sale: teaser, demo, phản hồi, ưu đãi, CTA.",
+    ],
+    "self_shot_scene_change": [
+        "Giữ nhân vật thật, đổi bối cảnh sang phố đêm cinematic với ánh sáng neon.",
+        "Giữ khuôn mặt và dáng đứng, đổi nền thành studio sản phẩm sạch.",
+        "Biến video tự quay thành cảnh văn phòng hiện đại, ánh sáng tự nhiên.",
+        "Đổi hậu cảnh thành quán cà phê ấm, camera handheld UGC nhẹ.",
+        "Giữ chuyển động gốc, thêm bối cảnh showroom cao cấp và ánh sáng rim light.",
+    ],
+}
+
+TASK3D_MOTION_SUGGESTIONS = [
+    ("dolly_in", "Dolly in chậm"),
+    ("slow_push_in", "Slow push-in"),
+    ("handheld_ugc", "Handheld UGC"),
+    ("orbit_shot", "Orbit shot"),
+    ("product_reveal", "Product reveal"),
+    ("cinematic_pan", "Cinematic pan"),
+]
+
 TASK3D_PUBLIC_COPY = {
     "video_trend": (
         "🔥 <b>Video theo trend</b>\n\n"
@@ -44656,12 +44696,14 @@ TASK3D_PUBLIC_COPY = {
     "video_ai_real": (
         "🎬 <b>Video AI chân thật</b>\n\n"
         "Tạo video AI ngắn từ mô tả hoặc ảnh tham khảo.\n\n"
+        "Bạn có thể chọn gợi ý để bắt đầu nhanh, hoặc nhập prompt riêng.\n\n"
         "Quy trình:\n"
-        "1. Nhập ý tưởng hoặc gửi ảnh\n"
-        "2. TOAN AAS tối ưu prompt\n"
-        "3. Chọn gói sau khi có prompt\n"
-        "4. Xem lại và xác nhận\n"
-        "5. Bot mới xử lý và tính Xu"
+        "1. Gợi ý ý tưởng hoặc nhập prompt\n"
+        "2. Chọn phong cách\n"
+        "3. Chọn chuyển động/camera hoặc bỏ qua\n"
+        "4. TOAN AAS tối ưu prompt\n"
+        "5. Dùng để tạo video rồi mới chọn gói\n"
+        "6. Xem lại và xác nhận cuối"
     ),
     "script_image_video": (
         "🧩 <b>Kịch bản → Ảnh → Video</b>\n\n"
@@ -44714,6 +44756,7 @@ def task3d_text_input_prompt(product_id: str, lang: str = "vi") -> str:
         "script_image_video": "✍️ Nhập sản phẩm/chủ đề/kịch bản thô. Bot sẽ tạo kịch bản, cảnh, prompt ảnh và prompt video miễn phí trước.",
         "self_shot_scene_change": "✍️ Mô tả bối cảnh muốn đổi. Ví dụ: giữ người thật, đổi sang phố đêm cinematic, ánh sáng neon...",
         "multi_scene_film": "✍️ Nhập cốt truyện hoặc ý tưởng phim ngắn nhiều cảnh. Bot sẽ lập kế hoạch miễn phí trước.",
+        "video_reference": "✍️ Nhập link mẫu hoặc mô tả phong cách video/kênh bạn thích. TOAN AAS chỉ dùng để tạo style brief mới, không copy/reup.",
     }
     return prompts.get(str(product_id or ""), "✍️ Nhập nội dung bạn muốn tạo. Bot chưa xử lý video và chưa trừ Xu.")
 
@@ -44751,40 +44794,60 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
             [("🔁 Gợi ý trend khác", "vproduct|trend_more"), (menu_label, parent_callback)],
         ],
         "video_idea": [
-            [("✍️ Nhập chủ đề", "vproduct|input_text|video_idea"), ("🎲 Gợi ý mẫu", "vproduct|sample|video_idea")],
+            [("💡 Gợi ý chủ đề", "vproduct|ideas|video_idea"), ("✍️ Nhập chủ đề", "vproduct|input_text|video_idea")],
+            [("🎲 Gợi ý ngẫu nhiên", "vproduct|ideas|video_idea"), (menu_label, parent_callback)],
         ],
         "storyboard_prompt": [
-            [("✍️ Nhập ý tưởng", "vproduct|input_text|storyboard_prompt"), ("🎞 Dùng mẫu storyboard", "vproduct|sample|storyboard_prompt")],
+            [("🎞 Mẫu storyboard", "vproduct|sample|storyboard_prompt"), ("✍️ Nhập ý tưởng", "vproduct|input_text|storyboard_prompt")],
+            [("➕ Thêm cảnh", "vproduct|scene_add"), ("⏭ Bỏ qua thêm cảnh", "vproduct|scene_skip")],
+            [(menu_label, parent_callback)],
         ],
         "motion_prompt": [
-            [("✍️ Mô tả cảnh", "vproduct|input_text|motion_prompt"), ("📷 Gửi ảnh", "vproduct|input_media|motion_prompt")],
+            [("🎥 Gợi ý chuyển động", "vproduct|motion_suggest|motion_prompt"), ("✍️ Mô tả cảnh", "vproduct|input_text|motion_prompt")],
+            [("📷 Gửi ảnh", "vproduct|input_media|motion_prompt"), ("⏭ Bỏ qua", "vproduct|motion|skip")],
+            [(menu_label, parent_callback)],
         ],
         "image_to_video": [
-            [("📷 Gửi ảnh", "vproduct|input_media|image_to_video"), ("✍️ Mô tả chuyển động", "vproduct|input_text|image_to_video")],
+            [("📷 Gửi ảnh", "vproduct|input_media|image_to_video"), ("🎥 Gợi ý chuyển động", "vproduct|motion_suggest|image_to_video")],
+            [("✍️ Mô tả thêm", "vproduct|input_text|image_to_video"), ("⏭ Bỏ qua mô tả", "vproduct|motion|skip")],
+            [(menu_label, parent_callback)],
         ],
         "frame_video_local": [
-            [("▶️ Bắt đầu ghép ảnh", "vproduct|legacy|frame_video_local")],
+            [("📷 Gửi ảnh", "vproduct|legacy|frame_video_local"), ("🎞 Chọn hiệu ứng", "vproduct|legacy|frame_video_local")],
+            [("⏭ Dùng mặc định", "vproduct|legacy|frame_video_local"), (menu_label, parent_callback)],
         ],
         "video_ai_real": [
-            [("✍️ Nhập prompt", "vproduct|input_text|video_ai_real"), ("📷 Gửi ảnh tham khảo", "vproduct|input_media|video_ai_real")],
+            [("💡 Gợi ý ý tưởng", "vproduct|ideas|video_ai_real"), ("✍️ Nhập prompt", "vproduct|input_text|video_ai_real")],
+            [("🔥 Trend hôm nay", "vproduct|trend_today"), ("📷 Gửi ảnh tham khảo", "vproduct|input_media|video_ai_real")],
+            [("🎥 Gợi ý chuyển động", "vproduct|motion_suggest|video_ai_real"), (menu_label, parent_callback)],
         ],
         "script_image_video": [
-            [("✍️ Nhập kịch bản/chủ đề", "vproduct|input_text|script_image_video"), ("🎲 Dùng mẫu nhanh", "vproduct|sample|script_image_video")],
+            [("💡 Gợi ý kịch bản", "vproduct|ideas|script_image_video"), ("✍️ Nhập kịch bản", "vproduct|input_text|script_image_video")],
+            [("➕ Thêm cảnh", "vproduct|scene_add"), ("⏭ Bỏ qua", "vproduct|scene_skip")],
+            [(menu_label, parent_callback)],
         ],
         "self_shot_scene_change": [
-            [("📎 Gửi video/ảnh", "vproduct|input_media|self_shot_scene_change"), ("✍️ Mô tả cảnh muốn đổi", "vproduct|input_text|self_shot_scene_change")],
+            [("📎 Gửi video/ảnh", "vproduct|input_media|self_shot_scene_change"), ("💡 Gợi ý cảnh mới", "vproduct|ideas|self_shot_scene_change")],
+            [("✍️ Mô tả cảnh muốn đổi", "vproduct|input_text|self_shot_scene_change"), ("⏭ Bỏ qua add-on", "vproduct|addon_skip")],
+            [(menu_label, parent_callback)],
         ],
         "multi_scene_film": [
-            [("✍️ Nhập cốt truyện", "vproduct|input_text|multi_scene_film"), ("🎞 Dùng mẫu phim ngắn", "vproduct|sample|multi_scene_film")],
+            [("🎞 Mẫu phim ngắn", "vproduct|ideas|multi_scene_film"), ("✍️ Nhập cốt truyện", "vproduct|input_text|multi_scene_film")],
+            [("➕ Thêm cảnh", "vproduct|scene_add"), ("⏭ Bỏ qua", "vproduct|scene_skip")],
+            [(menu_label, parent_callback)],
         ],
         "video_reference": [
-            [("📥 Phân tích video/kênh mẫu", "vproduct|legacy|video_reference"), ("✍️ Nhập phong cách thủ công", "vproduct|input_text|video_reference")],
+            [("📎 Gửi video mẫu", "vproduct|legacy|video_reference"), ("🔗 Gửi link mẫu", "vproduct|input_text|video_reference")],
+            [("✍️ Mô tả phong cách", "vproduct|input_text|video_reference"), (menu_label, parent_callback)],
         ],
         "audio_addons": [
-            [("🎵 Mở Nhạc / Voice / SFX", "vproduct|legacy|audio_addons")],
+            [("🎵 Không thêm", "vproduct|addon_skip"), ("🎙 Voice mặc định", "vproduct|legacy|audio_addons")],
+            [("📂 Chọn từ kho", "vproduct|legacy|audio_addons"), (menu_label, parent_callback)],
         ],
         "video_local_edit": [
-            [("🛠 Bắt đầu chỉnh sửa", "vproduct|legacy|video_local_edit")],
+            [("📎 Gửi video", "vproduct|legacy|video_local_edit"), ("✂️ Cắt video", "vproduct|legacy|video_local_edit")],
+            [("📐 Đổi tỉ lệ", "vproduct|legacy|video_local_edit"), ("🗜 Nén video", "vproduct|legacy|video_local_edit")],
+            [(menu_label, parent_callback)],
         ],
     }
     rows = [
@@ -44796,6 +44859,115 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
     else:
         rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+def task3d_idea_suggestions(product_id: str, lang: str = "vi", offset: int = 0) -> list[str]:
+    suggestions = list(TASK3D_GUIDED_IDEAS.get(str(product_id or "")) or [])
+    if suggestions:
+        offset = safe_int(offset, 0)
+        if offset > 0:
+            product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
+            public_label = str(product.get("public_label") or "video")
+            round_no = offset // max(len(suggestions), 1) + 1
+            suggestions = suggestions + [
+                f"Phiên bản khác {round_no}: mở đầu bằng câu hỏi đau điểm rồi chốt lợi ích rõ cho {public_label}.",
+                f"Phiên bản khác {round_no}: kể chuyện trước/sau, thêm cảnh demo ngắn và CTA lưu lại.",
+                f"Phiên bản khác {round_no}: góc quay đời thường, chuyển động nhẹ, nội dung tự nhiên như UGC.",
+                f"Phiên bản khác {round_no}: phong cách quảng cáo nhanh, 1 hook mạnh, 1 bằng chứng, 1 lời kêu gọi hành động.",
+                f"Phiên bản khác {round_no}: cinematic sạch, nhấn vào cảm xúc và kết quả cuối.",
+            ]
+        if suggestions:
+            start = offset % len(suggestions)
+            rotated = suggestions[start:] + suggestions[:start]
+            return rotated[:5]
+    sample = TASK3D_SAMPLE_TOPICS.get(str(product_id or "")) or "ý tưởng video ngắn dễ xem"
+    return [
+        f"Video hook 8 giây cho {sample}",
+        f"Storyboard before/after cho {sample}",
+        f"Video UGC chân thật xoay quanh {sample}",
+        f"Prompt cinematic ngắn cho {sample}",
+    ]
+
+def task3d_idea_suggestions_text(session: dict, lang: str = "vi") -> str:
+    product_id = str(session.get("product_id") or "")
+    product = VIDEO_PRODUCT_REGISTRY.get(product_id) or {}
+    ideas = task3d_idea_suggestions(product_id, lang, safe_int((session.get("draft") or {}).get("idea_offset"), 0))
+    lines = [
+        f"💡 <b>Gợi ý nhanh cho {html.escape(str(product.get('public_label') or 'video'))}</b>",
+        "",
+        "Chọn một ý tưởng để TOAN AAS đi tiếp qua phong cách/chuyển động và tạo prompt miễn phí.",
+        "",
+    ]
+    for idx, idea in enumerate(ideas[:5], 1):
+        lines.append(f"{idx}. {html.escape(idea)}")
+    lines.append("\nBạn cũng có thể quay lại để nhập thủ công. Bước này chưa xử lý video và chưa trừ Xu.")
+    return "\n".join(lines)
+
+def task3d_idea_suggestions_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    ideas = task3d_idea_suggestions(str(session.get("product_id") or ""), lang, safe_int((session.get("draft") or {}).get("idea_offset"), 0))
+    rows = []
+    for index in range(0, len(ideas[:5]), 2):
+        rows.append([
+            InlineKeyboardButton(str(i + 1), callback_data=f"vproduct|idea_select|{i}")
+            for i in range(index, min(index + 2, len(ideas[:5])))
+        ])
+    rows.append([
+        InlineKeyboardButton("✍️ Nhập thủ công", callback_data=f"vproduct|input_text|{session.get('product_id') or ''}"),
+        InlineKeyboardButton("🔁 Gợi ý khác", callback_data="vproduct|ideas_refresh"),
+    ])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def task3d_motion_text(session: dict, lang: str = "vi") -> str:
+    topic = str(session.get("topic") or (session.get("draft") or {}).get("topic") or TASK3D_SAMPLE_TOPICS.get(str(session.get("product_id") or ""), "video của bạn"))
+    lines = [
+        "🎥 <b>Gợi ý chuyển động / camera</b>",
+        "",
+        f"Chủ đề hiện tại: <code>{html.escape(topic)}</code>",
+        "",
+        "Chọn một hướng chuyển động hoặc bấm Bỏ qua để dùng chuyển động mặc định:",
+    ]
+    for _, label in TASK3D_MOTION_SUGGESTIONS:
+        lines.append(f"• {html.escape(label)}")
+    lines.append("\nBước này chỉ tối ưu prompt, chưa xử lý video và chưa trừ Xu.")
+    return "\n".join(lines)
+
+def task3d_motion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    for index in range(0, len(TASK3D_MOTION_SUGGESTIONS), 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"vproduct|motion|{code}")
+            for code, label in TASK3D_MOTION_SUGGESTIONS[index:index + 2]
+        ])
+    rows.append([InlineKeyboardButton("⏭ Bỏ qua", callback_data="vproduct|motion|skip")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def task3d_extra_scene_text(session: dict, lang: str = "vi") -> str:
+    product_id = str(session.get("product_id") or "")
+    scene_default = 6 if product_id in {"storyboard_prompt", "script_image_video", "multi_scene_film"} else 1
+    return (
+        "➕ <b>Thêm cảnh cho video</b>\n\n"
+        f"Mặc định hiện tại: <b>{scene_default} cảnh</b>.\n"
+        "Bạn có thể chọn thêm cảnh để prompt/storyboard chi tiết hơn, hoặc bỏ qua để đi tiếp nhanh.\n\n"
+        "Bước này miễn phí và chưa xử lý video."
+    )
+
+def task3d_extra_scene_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Thêm 1 cảnh", callback_data="vproduct|scene_count|1"), InlineKeyboardButton("➕ Thêm 2 cảnh", callback_data="vproduct|scene_count|2")],
+        [InlineKeyboardButton("⏭ Bỏ qua", callback_data="vproduct|scene_skip")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def task3d_result_or_next_step_after_optional(user_id, session: dict, product_id: str, **fields) -> dict:
+    draft = dict(session.get("draft") or {})
+    merged = {**draft, **fields}
+    if session.get("platform") or draft.get("platform"):
+        session = task3d_session_step(user_id, "result", **fields)
+        bundle = task3d_build_bundle_from_session(session)
+        return task3d_session_step(user_id, "result", prompt_bundle=bundle, prompt_bundle_id=bundle.get("bundle_id"), free_generation=True, provider_called=False, xu_charged=0)
+    sample_topic = str(session.get("topic") or draft.get("topic") or TASK3D_SAMPLE_TOPICS.get(product_id) or "ý tưởng video ngắn dễ xem")
+    return task3d_session_step(user_id, "platform", topic=sample_topic, input_collected=True, **fields)
 
 
 def task3d_platform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -45050,6 +45222,12 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
         return await safe_edit_or_send(target, "🎨 <b>Chọn phong cách</b>", parse_mode="HTML", reply_markup=task3d_style_keyboard(lang))
     if step == "output_target":
         return await safe_edit_or_send(target, "📦 <b>Chọn đầu ra miễn phí</b>", parse_mode="HTML", reply_markup=task3d_output_target_keyboard(lang))
+    if step == "idea_suggestions":
+        return await safe_edit_or_send(target, task3d_idea_suggestions_text(session, lang), parse_mode="HTML", reply_markup=task3d_idea_suggestions_keyboard(session, lang))
+    if step == "movement":
+        return await safe_edit_or_send(target, task3d_motion_text(session, lang), parse_mode="HTML", reply_markup=task3d_motion_keyboard(lang))
+    if step == "extra_scene":
+        return await safe_edit_or_send(target, task3d_extra_scene_text(session, lang), parse_mode="HTML", reply_markup=task3d_extra_scene_keyboard(lang))
     if step == "trend_ideas":
         return await safe_edit_or_send(target, task3d_trend_ideas_text(session, lang), parse_mode="HTML", reply_markup=task3d_trend_ideas_keyboard(session, lang))
     if step == "result":
@@ -45134,6 +45312,83 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             provider_called=False, xu_charged=0,
         )
         return await task3d_render_step(query, uid, session, lang)
+    if action in {"ideas", "ideas_refresh"}:
+        session = task3d_session_step(
+            uid,
+            "idea_suggestions",
+            idea_offset=safe_int((session.get("draft") or {}).get("idea_offset"), 0) + (5 if action == "ideas_refresh" else 0),
+            free_generation=True,
+            provider_called=False,
+            xu_charged=0,
+        )
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "idea_select":
+        ideas = task3d_idea_suggestions(product_id, lang, safe_int((session.get("draft") or {}).get("idea_offset"), 0))
+        selected = ideas[max(0, min(len(ideas) - 1, safe_int(value, 0)))] if ideas else TASK3D_SAMPLE_TOPICS.get(product_id, "ý tưởng video ngắn dễ xem")
+        session = task3d_session_step(
+            uid,
+            "platform",
+            topic=selected,
+            input_collected=True,
+            suggestion_used=True,
+            free_generation=True,
+            provider_called=False,
+            xu_charged=0,
+        )
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "motion_suggest":
+        if not str(session.get("topic") or (session.get("draft") or {}).get("topic") or "").strip():
+            sample_topic = TASK3D_SAMPLE_TOPICS.get(product_id) or "ý tưởng video ngắn dễ xem"
+            session = task3d_session_step(uid, "movement", topic=sample_topic, input_collected=True, free_generation=True, provider_called=False, xu_charged=0)
+        else:
+            session = task3d_session_step(uid, "movement", free_generation=True, provider_called=False, xu_charged=0)
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "motion":
+        selected_motion = "chuyển động mặc định"
+        if value != "skip":
+            selected_motion = dict(TASK3D_MOTION_SUGGESTIONS).get(value, value.replace("_", " "))
+        session = task3d_result_or_next_step_after_optional(
+            uid,
+            session,
+            product_id,
+            selected_motion=selected_motion,
+            reference_style=selected_motion,
+            motion_skipped=(value == "skip"),
+            free_generation=True,
+            provider_called=False,
+            xu_charged=0,
+        )
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "scene_add":
+        session = task3d_session_step(uid, "extra_scene", free_generation=True, provider_called=False, xu_charged=0)
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "scene_count":
+        add_count = max(1, min(4, safe_int(value, 1)))
+        draft = dict(session.get("draft") or {})
+        base_count = safe_int(draft.get("panel_count") or draft.get("scene_count") or (6 if product_id in {"storyboard_prompt", "script_image_video", "multi_scene_film"} else 1), 6)
+        session = task3d_result_or_next_step_after_optional(
+            uid,
+            session,
+            product_id,
+            scene_count=base_count + add_count,
+            extra_scene_count=add_count,
+            free_generation=True,
+            provider_called=False,
+            xu_charged=0,
+        )
+        return await task3d_render_step(query, uid, session, lang)
+    if action in {"scene_skip", "addon_skip"}:
+        session = task3d_result_or_next_step_after_optional(
+            uid,
+            session,
+            product_id,
+            extra_scene_skipped=True,
+            addon_skipped=(action == "addon_skip"),
+            free_generation=True,
+            provider_called=False,
+            xu_charged=0,
+        )
+        return await task3d_render_step(query, uid, session, lang)
     if action == "sample":
         sample_topic = TASK3D_SAMPLE_TOPICS.get(product_id) or TASK3D_SAMPLE_TOPICS.get(value) or "ý tưởng video ngắn dễ xem"
         session = task3d_session_step(uid, "platform", topic=sample_topic, input_collected=True, sample_used=True)
@@ -45157,7 +45412,12 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "style", panel_count=max(6, min(16, safe_int(value, 9))))
         return await task3d_render_step(query, uid, session, lang)
     if action == "style":
-        next_step = "output_target" if product_id == "storyboard_prompt" else "result"
+        if product_id in {"video_ai_real", "image_to_video", "motion_prompt"}:
+            next_step = "movement"
+        elif product_id in {"script_image_video", "multi_scene_film"}:
+            next_step = "extra_scene"
+        else:
+            next_step = "output_target" if product_id == "storyboard_prompt" else "result"
         session = task3d_session_step(uid, next_step, style=value.replace("_", " "))
         if next_step == "result":
             bundle = task3d_build_bundle_from_session(session)
@@ -49334,7 +49594,7 @@ def storyboard_pack_start_text(lang: str = "vi") -> str:
         "TOAN AAS sẽ dựng kế hoạch video theo từng cảnh:\n"
         "• hook mở đầu\n• shot list\n• góc máy\n• chuyển động\n• ánh sáng\n"
         "• prompt ảnh\n• prompt video\n• negative prompt\n• caption/voice gợi ý\n• nhạc/SFX gợi ý\n\n"
-        "Bước này chỉ lập kế hoạch. Bot chưa gọi provider và chưa trừ Xu."
+        "Bước này chỉ lập kế hoạch. TOAN AAS chưa xử lý video và chưa trừ Xu."
     )
 
 def storyboard_pack_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -49890,11 +50150,11 @@ def storyboard_pack_guard_text(action: str, lang: str = "vi") -> str:
         )
     if action in {"ai_video", "create_video_ai"}:
         return (
-            "🎬 <b>Video AI chân thật đang được kiểm soát an toàn.</b>\n\n"
-            "TOAN AAS chưa mở render Video AI công khai vì tài nguyên xử lý video cần kiểm tra thêm. TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu ở bước này.\n\n"
+            "🎬 <b>Hệ thống tạo video đang bảo trì/nâng cấp nhẹ.</b>\n\n"
+            "TOAN AAS đã giữ lại storyboard/prompt của bạn. TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu ở bước này.\n\n"
             "Bạn có thể copy prompt, dùng Meta AI, lưu kế hoạch hoặc tạo/gửi ảnh trước."
             if normalize_user_language(lang) == "vi"
-            else "🎬 Realistic AI video is currently under TOAN AAS safety control. No processing has started and no Xu was charged. You can copy prompts, use Meta AI, save the plan, or create/upload images first."
+            else "🎬 Video export is temporarily under maintenance / upgrade. No processing has started and no Xu was charged. You can copy prompts, use Meta AI, save the plan, or create/upload images first."
         )
     if action == "preview":
         return (
@@ -56312,13 +56572,11 @@ def video_public_tier_enabled(tier: str = "") -> bool:
     tier_norm = normalize_video_tier(tier)
     if tier_norm not in video_public_launch_tiers():
         return False
+    if video_public_beta_enabled_runtime():
+        return True
     marketing_loss = bool(tier_norm == "low" and video_beta_200_marketing_loss_enabled_runtime())
-    if tier_norm == "low" and not marketing_loss:
-        return False
-    if tier_norm in video_public_blocked_tiers() and not marketing_loss:
-        return False
-    if tier_norm not in video_public_allowed_tiers():
-        return False
+    if tier_norm == "low":
+        return marketing_loss
     base_enabled = {
         "low": bool(VIDEO_TIER_LOW_ENABLED),
         "basic": bool(VIDEO_TIER_BASIC_ENABLED),
@@ -63961,13 +64219,13 @@ async def handle_public_video_prompt_pending_text(update: Update, context: Conte
                 "🎬 <b>Yêu cầu video còn quá chung chung</b>\n\n"
                 "Hãy nêu rõ chủ thể/sản phẩm, mục tiêu, nền tảng và chuyển động mong muốn trước khi render.\n"
                 "Ví dụ: video quảng cáo chai nước hoa nam cho TikTok 9:16, camera zoom nhẹ vào chai, ánh sáng luxury, không thêm chữ.\n\n"
-                "TOAN AAS chưa gọi API video và chưa trừ Xu."
+                "TOAN AAS chưa xử lý video và chưa trừ Xu."
             )
         else:
             message = (
                 "🎬 <b>The video request is too general</b>\n\n"
                 "Please specify the subject/product, goal, platform and desired motion before rendering.\n\n"
-                "TOAN AAS has not called a video provider or charged Xu."
+                "TOAN AAS has not processed the video or charged Xu."
             )
         await update.message.reply_text(message, parse_mode="HTML", reply_markup=prompt_video_start_keyboard(lang))
         return True
@@ -64107,9 +64365,9 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         if job_type == "video":
             return await safe_edit_or_send(
                 query,
-                "🎬 Video AI chân thật đang được kiểm soát an toàn.\n"
-                "TOAN AAS có thể giúp bạn chuẩn bị kịch bản, storyboard, prompt, nhạc, phụ đề và lồng tiếng trước.\n"
-                "Phần render AI thật sẽ mở sau khi tài nguyên xử lý ổn định.\n\nBot chưa trừ Xu.",
+                "🎬 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên hiện chưa xuất được video lúc này.\n"
+                "TOAN AAS đã giữ lại phần kịch bản, storyboard, prompt, nhạc, phụ đề hoặc lồng tiếng bạn đã chuẩn bị.\n"
+                "Bạn quay lại thử sau một chút nhé — bot chưa xử lý video và chưa trừ Xu.",
                 parse_mode=None,
                 reply_markup=(video_finalization_tier_keyboard(lang) if get_video_finalization_state(uid) else public_video_tier_keyboard(lang)),
             )
@@ -64557,7 +64815,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             )
             return await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text="⚠️ Provider không nhận job. TOAN AAS chưa dùng lượt gói và chưa trừ Xu.",
+                text="🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS chưa dùng lượt gói và chưa trừ Xu.",
             )
         refunded = refund_shopaikey_job_if_needed(uid, job_id, "", provider_error_text) if deducted_amount > 0 else False
         balance_after_failure, _, _ = get_user(uid)
@@ -86086,16 +86344,16 @@ def image_to_video_public_off_from_prompt_text(job_id: int = 0, user_id=0, index
         )
     if normalize_user_language(lang) != "vi":
         return (
-            "🎬 <b>Real video generation is not public yet.</b>\n\n"
+            "🎬 <b>Video export is temporarily under maintenance / upgrade.</b>\n\n"
             "TOAN AAS saved this image-to-video prompt.\n"
-            "When public video is enabled, this button will move to video quality selection and price confirmation.\n\n"
-            f"<code>{html.escape(prompt)}</code>\n\nThe bot has not called the video API and has not charged Xu."
+            "When video export is ready, this button will move to package selection and price confirmation.\n\n"
+            f"<code>{html.escape(prompt)}</code>\n\nTOAN AAS has not processed the video or charged Xu."
         )
     return (
-        "🎬 <b>Video thật chưa mở công khai.</b>\n\n"
+        "🎬 <b>Hệ thống tạo video đang bảo trì/nâng cấp nhẹ.</b>\n\n"
         "TOAN AAS đã lưu prompt image-to-video này.\n"
-        "Khi public video bật, nút này sẽ chuyển sang bước chọn chất lượng video và xác nhận giá.\n\n"
-        f"<code>{html.escape(prompt)}</code>\n\nBot chưa gọi API video và chưa trừ Xu."
+        "Khi xuất video sẵn sàng, nút này sẽ chuyển sang bước chọn gói video và xác nhận giá.\n\n"
+        f"<code>{html.escape(prompt)}</code>\n\nTOAN AAS chưa xử lý video và chưa trừ Xu."
     )
 
 def image_to_video_public_off_keyboard(job_id: int = 0, index: int = 1, lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -86742,7 +87000,7 @@ async def video_finalization_continue_to_invoice_or_tier(query, user_id, state: 
                 query,
                 video_finalization_tier_guard_text(tier, lang),
                 parse_mode="HTML",
-                reply_markup=video_finalization_tier_keyboard(lang),
+                reply_markup=video_finalization_tier_guard_keyboard(lang),
             )
         package = video_finalization_package_from_state(current)
         aspect = video_finalization_selected_aspect(current)
@@ -86817,10 +87075,9 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
             f"Voice/dubbing: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
             f"Subtitles: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
             "Choose the right package:\n"
-            f"{video_tier_price_line('low', lang)}\n"
-            f"{video_tier_price_line('basic', lang)}\n"
-            f"{video_tier_price_line('common', lang)}\n\n"
-            "Packages 600+ and premium are hidden until provider cost is verified.\n\n"
+            + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
+            + "\n\n"
+            "All current business packages are available. TOAN AAS always shows the final confirmation before processing or charging Xu.\n\n"
             "TOAN AAS will show the final invoice before any processing or Xu charge."
         )
     return (
@@ -86833,10 +87090,9 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         f"Voice/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
         f"Phụ đề: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
         "Chọn gói phù hợp:\n"
-        f"{video_tier_price_line('low', lang)}\n"
-        f"{video_tier_price_line('basic', lang)}\n"
-        f"{video_tier_price_line('common', lang)}\n\n"
-        "Gói 600+ và premium đang ẩn cho tới khi xác minh an toàn chi phí provider.\n\n"
+        + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
+        + "\n\n"
+        "Các gói video hiện tại đã được mở lại đầy đủ. TOAN AAS luôn báo lại lần cuối trước khi xử lý và trừ Xu.\n\n"
         "TOAN AAS sẽ báo lại lần cuối trước khi tạo video."
     )
 
@@ -86844,40 +87100,39 @@ def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     def label(tier: str) -> str:
         return video_tier_button_text(tier, lang)
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(label("low"), callback_data="vfinal|tier|low"),
-            InlineKeyboardButton(label("basic"), callback_data="vfinal|tier|basic"),
-        ],
-        [
-            InlineKeyboardButton(label("common"), callback_data="vfinal|tier|common"),
-            InlineKeyboardButton("🎛 Thêm tính năng khác" if is_vi else "🎛 Extra features", callback_data="vfinal|menu"),
-        ],
-        [
-            InlineKeyboardButton("🎬 Xem lại xác nhận" if is_vi else "🎬 Review export", callback_data="vfinal|review"),
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"),
-        ],
-        [
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
-        ],
+    buttons = [
+        InlineKeyboardButton(label(tier), callback_data=f"vfinal|tier|{tier}")
+        for tier in VIDEO_PUBLIC_TIER_UI_ORDER
+    ]
+    buttons.append(InlineKeyboardButton("⚙️ Tính năng khác" if is_vi else "⚙️ Options", callback_data="vfinal|menu"))
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
     ])
+    return InlineKeyboardMarkup(rows)
 
 def video_finalization_tier_guard_text(tier: str, lang: str = "vi") -> str:
     status = get_public_video_tier_ui_status(tier)
-    reason = "chưa sẵn sàng" if normalize_user_language(lang) == "vi" else "not ready"
     if normalize_user_language(lang) != "vi":
         return (
-            "🛡 <b>This video package is not open yet.</b>\n\n"
-            f"Package: <b>{html.escape(str(status.get('label') or tier))}</b> — <b>{int(status.get('price_xu') or 0)} Xu</b>\n"
-            f"Status: <b>{html.escape(reason)}</b>\n\n"
-            "No processing started and no Xu was charged."
+            "🛠 <b>Video export is temporarily under maintenance.</b>\n\n"
+            f"Package: <b>{html.escape(str(status.get('label') or tier))}</b> — <b>{int(status.get('price_xu') or 0)} Xu</b>\n\n"
+            "TOAN AAS is upgrading the video system, so this export has not started and no Xu was charged.\n"
+            "You can choose another package or return later."
         )
     return (
-        "🛡 <b>Gói video này chưa mở.</b>\n\n"
+        "🛠 <b>Hệ thống tạo video đang bảo trì/nâng cấp.</b>\n\n"
         f"Gói: <b>{html.escape(str(status.get('label') or tier))}</b> — <b>{int(status.get('price_xu') or 0)} Xu</b>\n"
-        f"Trạng thái: {html.escape(reason)}\n\n"
-        "TOAN AAS chưa xử lý video và chưa trừ Xu."
+        "TOAN AAS chưa xử lý video và chưa trừ Xu.\n"
+        "Bạn có thể chọn gói khác hoặc quay lại sau."
     )
+
+def video_finalization_tier_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Chọn gói khác" if normalize_user_language(lang) == "vi" else "⬅️ Choose another package", callback_data="vfinal|tier"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+    ]])
 
 def video_finalization_confirm_not_ready_text(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
@@ -86895,9 +87150,9 @@ def video_finalization_confirm_not_ready_text(state: dict | None = None, lang: s
             f"Aspect ratio: <b>{html.escape(aspect)}</b>\n"
             f"Video prompt: <b>{'Yes' if prompt_ready else 'No'}</b>\n\n"
             "<b>Status</b>\n"
-            "• AI video: <b>Under maintenance</b>\n"
+            "• AI video: <b>Temporarily under maintenance / upgrade</b>\n"
             "• Refund if processing fails: <b>Yes</b>\n\n"
-            "AI video is under maintenance/upgrade or this package is not public yet. No processing started and no Xu was charged."
+            "Video export is temporarily unavailable while TOAN AAS upgrades the system. No processing started and no Xu was charged."
         )
     return (
         "🎬 <b>Xác nhận xuất video AI</b>\n\n"
@@ -86907,10 +87162,10 @@ def video_finalization_confirm_not_ready_text(state: dict | None = None, lang: s
         f"Tỷ lệ: <b>{html.escape(aspect)}</b>\n"
         f"Prompt video: <b>{'Có' if prompt_ready else 'Không'}</b>\n\n"
         "<b>Trạng thái</b>\n"
-        "• Video AI: <b>Đang bảo trì/nâng cấp</b>\n"
+        "• Video AI: <b>Đang bảo trì/nâng cấp nhẹ</b>\n"
         "• Giữ lượt xử lý: <b>Sẵn sàng</b>\n"
         "• Hoàn Xu nếu lỗi xử lý: <b>Có</b>\n\n"
-        "Video AI đang bảo trì/nâng cấp hoặc chưa mở public cho gói này. TOAN AAS chưa xử lý video và chưa trừ Xu."
+        "Hệ thống tạo video tạm thời chưa xuất được trong lúc TOAN AAS nâng cấp. TOAN AAS chưa xử lý video và chưa trừ Xu."
     )
 
 def video_finalization_confirm_not_ready_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -87895,7 +88150,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
                 or ""
             ).strip()
             task3d_package_id = {"low": "package_200", "basic": "package_300", "common": "package_400"}.get(tier, "")
-            if task3d_product_id in VIDEO_PRODUCT_REGISTRY:
+            if task3d_product_id in VIDEO_PRODUCT_REGISTRY and task3d_package_id:
                 task3d_fit = validate_package_selection(task3d_product_id, task3d_package_id, ["none"])
                 if not task3d_fit.get("ok"):
                     reason = str(task3d_fit.get("reason") or "package_not_allowed_for_product")
@@ -87915,7 +88170,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             set_video_finalization_state(uid, state)
             status = get_public_video_tier_ui_status(tier, is_admin_user(uid))
             if not status.get("enabled"):
-                return await safe_edit_or_send(query, video_finalization_tier_guard_text(tier, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+                return await safe_edit_or_send(query, video_finalization_tier_guard_text(tier, lang), parse_mode="HTML", reply_markup=video_finalization_tier_guard_keyboard(lang))
             if not video_finalization_has_prompt(state):
                 return await safe_edit_or_send(query, video_finalization_confirm_not_ready_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_confirm_not_ready_keyboard(state, lang))
             package = video_finalization_package_from_state(state)
@@ -88627,6 +88882,20 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     discount_lines = lines(order.get("discounts")) if order.get("discounts") else ""
     total_xu = int(order.get("total_xu") or pricing.get("total_xu") or 0)
     equivalent = int(order.get("estimated_vnd") or pricing.get("estimated_vnd") or total_xu * int(XU_TO_VND or 100))
+    base_price_xu = int(order.get("base_price_xu") or 0)
+    if tier_norm:
+        package_label_vi = f"{video_tier_short_label(tier_norm, 'vi')} {base_price_xu} Xu"
+        package_label_en = f"{video_tier_short_label(tier_norm, 'en')} {base_price_xu} Xu"
+    else:
+        package_label_vi = str(order.get("tier_name") or "Video AI")
+        package_label_en = package_label_vi
+    paid_option_labels = [
+        str(item.get("label") or item.get("key") or "").strip()
+        for item in (order.get("paid_items") or [])
+        if str(item.get("label") or item.get("key") or "").strip()
+    ]
+    option_summary_vi = ", ".join(paid_option_labels[:4]) if paid_option_labels else "mặc định"
+    option_summary_en = ", ".join(paid_option_labels[:4]) if paid_option_labels else "default"
 
     if normalize_user_language(lang) != "vi":
         starter_note = (
@@ -88636,6 +88905,11 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
         )
         discount_block = f"\nDiscounts:\n{discount_lines}\n" if discount_lines else ""
         return (
+            "🎬 <b>Confirm video export</b>\n\n"
+            f"Package: <b>{html.escape(package_label_en)}</b>\n"
+            "Content: <b>ready</b>\n"
+            f"Options: <b>{html.escape(option_summary_en)}</b>\n"
+            "TOAN AAS has not processed anything and no Xu was charged.\n\n"
             "🧾 <b>Final video invoice</b>\n\n"
             f"Package: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
             f"Duration: <b>{duration} seconds</b>\n\n"
@@ -88656,6 +88930,11 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     )
     discount_block = f"\nƯu đãi hợp lệ:\n{discount_lines}\n" if discount_lines else ""
     return (
+        "🎬 <b>Xác nhận xuất video</b>\n\n"
+        f"Gói: <b>{html.escape(package_label_vi)}</b>\n"
+        "Nội dung: <b>đã sẵn sàng</b>\n"
+        f"Tùy chọn: <b>{html.escape(option_summary_vi)}</b>\n"
+        "TOAN AAS chưa xử lý và chưa trừ Xu.\n\n"
         "🧾 <b>Hóa đơn xác nhận video</b>\n\n"
         f"Gói chính: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
         f"Thời lượng: <b>{duration} giây</b>\n\n"
@@ -88684,28 +88963,15 @@ def video_preview_locked_text(state: dict | None = None, lang: str = "vi") -> st
 
 def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    pending = dict((state or {}).get("pending_payload") or {})
-    if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
-        pending.update(dict(SHOPAIKEY_PENDING_CONFIRMATIONS[token] or {}))
-    duration_model = video_final_duration_model(pending, state, tier)
-    preview_enabled = bool(duration_model.get("preview_enabled"))
-    preview_label = "▶️ Xem thử video" if (is_vi and preview_enabled) else ("🔒 Xem thử video" if is_vi else ("▶️ Video preview" if preview_enabled else "🔒 Video preview"))
-    preview_callback = f"videoaddon|preview|{token}" if preview_enabled else f"videoaddon|preview_locked|{token}"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(preview_label, callback_data=preview_callback)],
-        [InlineKeyboardButton("✅ Xuất bản đầy đủ" if is_vi else "✅ Create full video", callback_data=f"shopai|confirm|{token}")],
         [
-            InlineKeyboardButton("🔄 Đổi gói" if is_vi else "🔄 Change package", callback_data="vfinal|tier"),
-            InlineKeyboardButton("🎙 Đổi giọng đọc" if is_vi else "🎙 Change voice", callback_data="vfinal|voice"),
+            InlineKeyboardButton("🎬 Xuất video" if is_vi else "🎬 Create video", callback_data=f"shopai|confirm|{token}"),
+            InlineKeyboardButton("⚙️ Đổi tùy chọn" if is_vi else "⚙️ Change options", callback_data="vfinal|menu"),
         ],
         [
-            InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music"),
-            InlineKeyboardButton("👁 Đổi phụ đề" if is_vi else "👁 Change subtitles", callback_data="vfinal|addon"),
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
         ],
-        [
-            InlineKeyboardButton("🗣 Đổi lồng tiếng" if is_vi else "🗣 Change dubbing", callback_data="vfinal|addon"),
-        ],
-        [InlineKeyboardButton("⬅️ Chọn gói" if is_vi else "⬅️ Choose package", callback_data="videoaddon|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main")],
     ])
 
 def calculate_preview_seconds(duration_seconds) -> int:
@@ -89036,7 +89302,7 @@ async def send_video_paid_preview_artifact(context, query, state: dict, lang: st
 
 def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     tier_buttons = []
-    for tier in ("low", "basic", "common"):
+    for tier in VIDEO_PUBLIC_TIER_UI_ORDER:
         tier_buttons.append(InlineKeyboardButton(
             video_tier_button_text(tier, lang),
             callback_data=f"create_media|video_tier_{tier}",
@@ -90165,8 +90431,8 @@ def public_video_terminal_failure_text(lang: str = "vi", package_refunded: bool 
         elif no_charge:
             refund_line = "TOAN AAS 未扣 Xu。"
         return (
-            "❌ <b>视频生成失败</b>\n\n"
-            "原因：AI 模型繁忙、provider 错误或临时过载。\n"
+            "🛠 <b>视频暂时无法导出</b>\n\n"
+            "系统正在维护/升级，请稍后再试。\n"
             f"{refund_line}\n\n"
             "你可以稍后重试，或选择其他视频套餐。"
         )
@@ -90179,8 +90445,8 @@ def public_video_terminal_failure_text(lang: str = "vi", package_refunded: bool 
         elif no_charge:
             refund_line = "TOAN AAS did not charge Xu."
         return (
-            "❌ <b>Video creation failed</b>\n\n"
-            "Reason: the AI model is busy, the provider failed, or the provider is overloaded.\n"
+            "🛠 <b>Video export is temporarily unavailable</b>\n\n"
+            "TOAN AAS is maintaining/upgrading the video system. Please try again later.\n"
             f"{refund_line}\n\n"
             "You can retry in a few minutes or choose another video tier."
         )
@@ -90192,8 +90458,8 @@ def public_video_terminal_failure_text(lang: str = "vi", package_refunded: bool 
     elif no_charge:
         refund_line = "TOAN AAS chưa trừ Xu cho tác vụ này."
     return (
-        "❌ <b>Video tạo thất bại</b>\n\n"
-        "Lý do: Model AI đang bận, provider lỗi hoặc quá tải.\n"
+        "🛠 <b>Video tạm thời chưa xuất được</b>\n\n"
+        "Hệ thống tạo video đang bảo trì/nâng cấp nhẹ, bạn thử lại sau một chút nhé.\n"
         f"{refund_line}\n\n"
         "Bạn có thể thử lại sau vài phút hoặc chọn gói khác."
     )

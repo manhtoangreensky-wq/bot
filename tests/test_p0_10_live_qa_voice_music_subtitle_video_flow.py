@@ -37,8 +37,8 @@ def test_public_video_labels_use_xem_not_nghe_xem(monkeypatch):
         {"pending_payload": {"video_tier": "basic", "duration_seconds": 18, "scene_count": 3}},
     )
     labels = _labels(markup)
-    assert "▶️ Xem thử video" in labels
-    assert "✅ Xuất bản đầy đủ" in labels
+    assert "🎬 Xuất video" in labels
+    assert "⚙️ Đổi tùy chọn" in labels
     assert not any("nghe/xem" in label.lower() for label in labels)
 
 
@@ -207,9 +207,9 @@ def test_preview_locked_for_200_but_full_export_active(monkeypatch):
     markup = bot.video_addon_confirm_keyboard("tok", "low", "vi", state)
     labels = _labels(markup)
     callbacks = _callbacks(markup)
-    assert "🔒 Xem thử video" in labels
-    assert "videoaddon|preview_locked|tok" in callbacks
-    assert "✅ Xuất bản đầy đủ" in labels
+    assert "🔒 Xem thử video" not in labels
+    assert "videoaddon|preview_locked|tok" not in callbacks
+    assert "🎬 Xuất video" in labels
     assert "shopai|confirm|tok" in callbacks
 
 
@@ -224,7 +224,7 @@ def test_video_backstack_labels_match_business_steps():
     invoice = bot.video_addon_confirm_keyboard("tok", "basic", "vi")
     package = bot.video_finalization_tier_keyboard("vi")
     addons = bot.video_finalization_menu_keyboard("vi")
-    assert "⬅️ Chọn gói" in _labels(invoice)
+    assert "⬅️ Quay lại" in _labels(invoice)
     assert "videoaddon|back" in _callbacks(invoice)
     assert "vfinal|back" in _callbacks(package)
     assert "vfinal|back" in _callbacks(addons)
@@ -250,7 +250,7 @@ def test_200_no_paid_addons_can_full_export():
     assert guard["blocked"] is False
 
 
-def test_200_paid_addon_blocked_with_remove_or_upgrade():
+def test_200_paid_addon_blocked_with_upgrade_or_back():
     state = {
         "video_tier": "low",
         "current_video_duration_seconds": 18,
@@ -266,5 +266,4 @@ def test_200_paid_addon_blocked_with_remove_or_upgrade():
     assert guard["blocked"] is True
     assert "paid_music" in guard["reasons"]
     callbacks = _callbacks(bot.video_experience_tier_lock_keyboard("vi"))
-    assert "videoaddon|remove_paid_addons" in callbacks
-    assert "vfinal|tier|basic" in callbacks
+    assert callbacks == ["vfinal|tier|basic", "vfinal|menu"]
