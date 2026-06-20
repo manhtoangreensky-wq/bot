@@ -123,7 +123,7 @@ def test_social_link_rights_notice():
 def test_subtitle_flow_no_voice_selection():
     labels = _labels(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
     assert "📄 Xuất SRT" in labels
-    assert "🎞 Gắn phụ đề vào video" in labels
+    assert "🎞 Gắn vào video" in labels
     assert not any("giọng" in label.lower() for label in labels)
     assert not any("lồng tiếng" in label.lower() for label in labels)
 
@@ -180,10 +180,9 @@ def test_auto_dubbing_voice_settings():
 
 def test_auto_dubbing_itemized_invoice():
     text = bot.video_dubbing_confirm_text({"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "video_duration": 61, "voice_style": "Giọng nữ"}, "vi")
-    assert "Tạo phụ đề" in text
-    assert "Tạo giọng lồng tiếng" in text
-    assert "Ghép audio/video" in text
-    assert "Tổng Xu" in text
+    assert "Xác nhận lồng tiếng" in text
+    assert "Chi phí dự kiến" in text
+    assert "TOAN AAS chưa xử lý và chưa trừ Xu" in text
 
 
 def test_translate_dub_translate_first_then_voice():
@@ -191,6 +190,7 @@ def test_translate_dub_translate_first_then_voice():
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "target_language": "English",
+        "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
     assert "📄 Xuất SRT" in labels
@@ -203,7 +203,13 @@ def test_translate_dub_can_export_srt_before_voice():
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }))
     assert "videodub|output|srt" in callbacks
-    assert "videodub|continue_dubbing" in callbacks
+    assert "videodub|continue_dubbing" not in callbacks
+    ready_callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {
+        "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
+    }))
+    assert "videodub|continue_dubbing" in ready_callbacks
 
 
 def test_subtitle_editor_line_number_edit():

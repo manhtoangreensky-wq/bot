@@ -249,8 +249,11 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     lang_query = asyncio.run(_press_videodub("videodub|language|English", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "output"
-    assert "Xuất phụ đề dịch" in lang_query.outputs[-1]["text"]
-    assert "🗣 Tiếp tục lồng tiếng" in _labels(lang_query.outputs[-1]["reply_markup"])
+    assert "Xác nhận tạo phụ đề dịch" in lang_query.outputs[-1]["text"]
+    assert "🗣 Tiếp tục lồng tiếng" not in _labels(lang_query.outputs[-1]["reply_markup"])
+
+    translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
+    bot.set_video_dubbing_pending(user_id, "output", translated_subtitle_ref=translated_ref)
 
     continue_query = asyncio.run(_press_videodub("videodub|continue_dubbing", user_id))
     assert "Chọn giọng lồng tiếng" in continue_query.outputs[-1]["text"]
@@ -271,8 +274,8 @@ def test_translation_public_guard_no_api_provider_words():
         bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     ]:
         text = bot.video_dubbing_guard_text(mode, {}, "vi")
-        assert "đang chờ tài nguyên xử lý" in text
-        assert "chưa xử lý và chưa trừ Xu" in text
+        assert "chưa sẵn sàng xử lý" in text
+        assert "chưa trừ Xu" in text
         _assert_public_clean(text)
 
 

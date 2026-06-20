@@ -7411,12 +7411,11 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
         },
         "vi",
     )
-    assert "Xác nhận phụ đề + lồng tiếng" in dub_confirm
-    assert "6 phút 23 giây" in dub_confirm
+    assert "Xác nhận lồng tiếng" in dub_confirm
     assert "1.050 Xu" not in dub_confirm
-    assert "Tổng Xu" in dub_confirm
+    assert "Chi phí dự kiến" in dub_confirm
     assert "trừ Xu" in dub_confirm
-    assert "Kiểu xử lý: <b>Phụ đề + lồng tiếng</b>" in dub_confirm
+    assert "Tác vụ: <b>Phụ đề + lồng tiếng</b>" in dub_confirm
 
     subtitle_confirm = bot.video_dubbing_confirm_text(
         {"mode": "subtitle", "video_file_id": "video-2", "source_language": "auto", "video_duration": 45},
@@ -7607,14 +7606,14 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     assert bot.get_video_dubbing_pending(71004)["step"] == "confirm"
 
     upload_cases = [
-        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|output|srt", "Xuất phụ đề"),
+        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|output|srt", "TOAN AAS đã nhận video"),
         (
             71102,
             bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
             {"target_language": "English", "translate_requested": "1"},
             "output",
             "videodub|output|srt",
-            "Xuất phụ đề",
+            "Xuất phụ đề dịch",
         ),
         (
             71103,
@@ -7630,7 +7629,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
             {"target_language": "English", "translate_requested": "1"},
             "output",
             "videodub|output|srt",
-            "Xuất phụ đề",
+            "Xác nhận tạo phụ đề dịch",
         ),
     ]
     for uid, mode, extra, expected_step, expected_callback, expected_label in upload_cases:
@@ -7684,7 +7683,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         assert capability["reason"] == "mode_disabled"
         guard = bot.video_dubbing_guard_text(mode, {}, "vi")
         assert label in guard
-        assert "chưa xử lý" in guard
+        assert "chưa sẵn sàng xử lý" in guard
         assert "chưa trừ Xu" in guard
         assert "API" not in guard
         assert "provider" not in guard.lower()
@@ -10220,8 +10219,7 @@ def test_provider_pipeline_v32_public_subtitle_guards_are_separate(monkeypatch):
     assert capability["ok"] is False
     assert capability["reason"] == "public_disabled"
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
-    assert "đang chờ tài nguyên xử lý" in guard
-    assert "chưa xử lý" in guard
+    assert "chưa sẵn sàng xử lý" in guard
     assert "chưa trừ Xu" in guard
     assert "API" not in guard
     assert "provider" not in guard.lower()

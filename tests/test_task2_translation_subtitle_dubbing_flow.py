@@ -69,8 +69,9 @@ def test_subtitle_auto_no_translation_no_voice():
 
 def test_subtitle_output_preview_dub_srt_burn():
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
-    assert callbacks[:4] == [
+    assert callbacks[:5] == [
         "videodub|confirm_subtitle_create",
+        "videodub|final",
         "videodub|output|srt",
         "videodub|output|burn",
         "videodub|subtitle_editor",
@@ -104,9 +105,9 @@ def test_subtitle_plus_dubbing_export_before_voice(monkeypatch):
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
     labels = _labels(markup)
     assert state["step"] == "output"
-    assert "Xuất phụ đề dịch" in text
+    assert "Xác nhận tạo phụ đề dịch" in text
     assert "📄 Xuất SRT" in labels
-    assert "🗣 Tiếp tục lồng tiếng" in labels
+    assert "🗣 Tiếp tục lồng tiếng" not in labels
     assert not any("Giọng" in label for label in labels)
 
 
@@ -142,7 +143,7 @@ def test_auto_subtitle_input_and_output_are_basic_product():
     assert "🗣 Lồng tiếng" not in labels
     assert "🗣 Tiếp tục lồng tiếng" not in labels
     assert "📄 Xuất SRT" in labels
-    assert "🎞 Gắn phụ đề vào video" in labels
+    assert "🎞 Gắn vào video" in labels
 
 
 def test_auto_dubbing_language_voice_speed_numeric():
@@ -163,6 +164,7 @@ def test_subtitle_dubbing_continue_voice_after_output():
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "target_language": "Tiếng Việt",
+        "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
     assert "🗣 Tiếp tục lồng tiếng" in labels
@@ -216,7 +218,7 @@ def test_key4u_asr_adapter_or_guard():
     assert bot.KEY4U_STT_ENDPOINT == "/audio/transcriptions"
     assert bot.KEY4U_STT_MODEL == "whisper-1"
     assert hasattr(bot.key4u_provider_instance(), "stt")
-    assert "Tạo phụ đề tự động đang chờ tài nguyên xử lý" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
+    assert "Tạo phụ đề tự động chưa sẵn sàng xử lý" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
 
 
 def test_key4u_translation_adapter_or_guard():
@@ -232,7 +234,7 @@ def test_key4u_minimax_tts_for_dubbing_or_guard():
     assert "key4u_minimax_tts_public_ready" in source
     assert "key4u_minimax_tts_bytes" in source
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi")
-    assert "Lồng tiếng tự động đang chờ tài nguyên xử lý" in guard
+    assert "Lồng tiếng tự động chưa sẵn sàng xử lý" in guard
 
 
 def test_shopaikey_base_url_no_double_v1():

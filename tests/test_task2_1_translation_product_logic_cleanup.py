@@ -165,8 +165,8 @@ def test_auto_dubbing_invoice_after_speed():
         },
         "vi",
     )
-    assert "Tốc độ giọng: <b>1.5</b>" in text
-    assert "Tổng Xu" in text
+    assert "Tốc độ: <b>1.5</b>" in text
+    assert "Chi phí dự kiến" in text
 
 
 def test_auto_dubbing_preview_6s():
@@ -221,7 +221,7 @@ def test_subtitle_dubbing_export_before_voice(monkeypatch):
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
     assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
     assert state["step"] == "output"
-    assert "Xuất phụ đề dịch" in text
+    assert "Xác nhận tạo phụ đề dịch" in text
     assert "📄 Xuất SRT" in _labels(markup)
     assert not any("Giọng nữ" in label for label in _labels(markup))
 
@@ -231,6 +231,7 @@ def test_subtitle_dubbing_continue_voice_after_output():
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "target_language": "English",
+        "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
     assert "🗣 Tiếp tục lồng tiếng" in _labels(bot.video_dubbing_output_keyboard("vi", state))
 
@@ -294,7 +295,7 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
 def test_public_guard_no_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi", admin=False)
     assert "Admin blocker" not in text
-    assert "Tạo phụ đề tự động đang chờ tài nguyên xử lý" in text
+    assert "Tạo phụ đề tự động chưa sẵn sàng xử lý" in text
 
 
 def test_admin_guard_can_show_blocker():
@@ -384,7 +385,7 @@ def test_subtitle_dubbing_back_continue_voice_to_subtitle_output(monkeypatch):
     state = bot.get_video_dubbing_pending(uid)
     assert state["step"] == "output"
     assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
-    assert "Xuất phụ đề dịch" in query.outputs[-1]["text"]
+    assert "Xác nhận tạo phụ đề dịch" in query.outputs[-1]["text"]
 
 
 def test_translation_provider_curl_appendix_complete():

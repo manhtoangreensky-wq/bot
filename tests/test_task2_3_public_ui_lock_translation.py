@@ -45,7 +45,7 @@ def _prepare_upload(monkeypatch, uid, mode, step="source"):
 
 def test_public_translation_guard_hides_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi", admin=False)
-    assert text == "Lồng tiếng tự động đang chờ tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu."
+    assert text == "Lồng tiếng tự động chưa sẵn sàng xử lý. TOAN AAS chưa trừ Xu."
     assert "Admin blocker" not in text
 
 
@@ -105,8 +105,8 @@ def test_task2_upload_video_stays_in_auto_subtitle(monkeypatch):
     state = bot.get_video_dubbing_pending(uid)
     assert state["product"] == "auto_subtitle"
     assert state["source_ref"] == "auto-subtitle"
-    assert state["step"] == "guarded"
-    assert "Tạo phụ đề tự động đang chờ tài nguyên xử lý" in message.outputs[-1]["text"]
+    assert state["step"] == "output"
+    assert "TOAN AAS đã nhận video" in message.outputs[-1]["text"]
 
 
 def test_task2_upload_video_stays_in_auto_dubbing(monkeypatch):
@@ -147,7 +147,7 @@ def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):
     asyncio.run(bot.handle_media_cache_only(_update(uid, message), SimpleNamespace()))
     joined = " ".join(item["text"] for item in message.outputs)
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
-    assert "Tạo phụ đề tự động đang chờ tài nguyên xử lý" in joined
+    assert "TOAN AAS đã nhận video" in joined
 
 
 def test_auto_subtitle_preview_back_to_output():
