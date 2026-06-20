@@ -72,6 +72,20 @@ from video_prompt_quality import (
     video_prompt_library_summary,
     video_request_is_vague,
 )
+from video_product_system import (
+    VIDEO_MENU_ROWS,
+    VIDEO_PACKAGE_REGISTRY,
+    VIDEO_PRODUCT_REGISTRY,
+    PromptVault,
+    VideoPromptEngine,
+    VideoPromptRequest,
+    bundle_to_markdown,
+    package_for_tier,
+    provider_curl_examples,
+    registry_audit,
+    validate_package_selection,
+    validate_video_prompt_bundle,
+)
 from operations_v1a import (
     EXPENSE_CATEGORIES as OPERATIONS_EXPENSE_CATEGORIES,
     INTERNAL_DOC_DEPARTMENT_DESCRIPTIONS,
@@ -34640,7 +34654,11 @@ def video_tier_public_status_text() -> str:
     return " / ".join(f"{name}:{'ON' if enabled_map.get(name) else 'OFF'}" for name in VIDEO_TIER_ORDER)
 
 VIDEO_EXPORT_TIER_CHOICES = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
-VIDEO_PUBLIC_TIER_UI_ORDER = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
+# Task 3D public render boundary: the customer-facing flow exposes exactly the
+# verified 200/300/400 Xu products. Higher tiers remain in the internal registry
+# for admin diagnostics and historical jobs, but must not become selectable via
+# a stale runtime flag or a handcrafted callback.
+VIDEO_PUBLIC_TIER_UI_ORDER = ("low", "basic", "common")
 
 def get_video_tier_status(tier: str = "", user_is_admin: bool = False) -> dict:
     tier_norm = normalize_video_tier(tier)
@@ -34681,7 +34699,13 @@ def get_public_video_tier_ui_status(tier: str = "", user_is_admin: bool = False)
     tier_norm = normalize_video_tier(tier)
     status = get_video_tier_status(tier_norm, user_is_admin)
     enabled = bool(status.get("public_enabled"))
-    if tier_norm == "low" and not video_beta_200_marketing_loss_enabled_runtime():
+    public_reason = str(status.get("reason") or "not ready")
+    if tier_norm not in VIDEO_PUBLIC_TIER_UI_ORDER:
+        enabled = False
+        public_status = "HIDDEN"
+        requires_override = False
+        public_reason = "Gói này đang ẩn khỏi luồng public Task 3D; chỉ các gói 200/300/400 Xu được chọn."
+    elif tier_norm == "low" and not video_beta_200_marketing_loss_enabled_runtime():
         public_status = "OFF"
         requires_override = True
     elif enabled and tier_norm == "low" and video_beta_200_marketing_loss_enabled_runtime():
@@ -34699,7 +34723,7 @@ def get_public_video_tier_ui_status(tier: str = "", user_is_admin: bool = False)
         "label": status.get("label") or localized_video_tier_label(tier_norm),
         "visible": tier_norm in VIDEO_PUBLIC_TIER_UI_ORDER,
         "enabled": enabled,
-        "reason": str(status.get("reason") or "not ready"),
+        "reason": public_reason,
         "public_status": public_status,
         "cost_status": (check_video_margin(tier_norm).get("status") if tier_norm in video_public_launch_tiers() else "LOCKED"),
         "requires_override": requires_override,
@@ -44528,56 +44552,469 @@ def video_editor_worker_ready() -> bool:
 
 def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
-    if lang == "vi":
-        return video_v6_keyboard(
-            [
-                ("🔥 Video theo trend", "trendg|start"),
-                ("🎬 Video AI chân thật", "menu|video_ai_true"),
-                ("🧩 Kịch bản → Ảnh → Video", "storyboard|start"),
-                ("🎞 Ghép ảnh thành video", "menu|video_frame_intro"),
-                ("🎥 Tự quay & đổi cảnh AI", "selfscene|start"),
-                ("🎬 Phim AI nhiều cảnh", "longvideo|start"),
-                ("🎞 Storyboard + Prompt điện ảnh", "storypack|start"),
-                ("📤 Video mẫu / Kênh mẫu", "videoref|hub"),
-                ("🧠 Ý tưởng video", "videoidea|start"),
-                ("🎥 Prompt / Chuyển động", "motion|start"),
-                ("🎵 Nhạc / Voice / SFX", "menu|main_music_video"),
-                ("🛠 Chỉnh sửa video local", "videoedit|menu"),
-            ],
-            lang,
-            back=("🔙 Quay lại", "menu|main"),
+    translated = {
+        "en": {
+            "video_trend": "🔥 Trend video", "video_idea": "🧠 Video ideas",
+            "storyboard_prompt": "🎞 Storyboard + Prompt", "motion_prompt": "🎥 Prompt / Motion",
+            "video_ai_real": "🎬 Real AI Video", "script_image_video": "🧩 Script → Images → Video",
+            "image_to_video": "🖼 Image → Video", "frame_video_local": "🎞 Image slideshow video",
+            "self_shot_scene_change": "🎥 Self-shot scene AI", "multi_scene_film": "🎬 Multi-scene AI film",
+            "video_reference": "📥 Reference video / Channel", "audio_addons": "🎵 Music / Voice / SFX",
+            "video_local_edit": "🛠 Local video editor",
+        },
+        "zh": {
+            "video_trend": "🔥 Trend 视频", "video_idea": "🧠 视频创意",
+            "storyboard_prompt": "🎞 分镜 + Prompt", "motion_prompt": "🎥 Prompt / 镜头运动",
+            "video_ai_real": "🎬 真实 AI 视频", "script_image_video": "🧩 脚本 → 图片 → 视频",
+            "image_to_video": "🖼 图片 → 视频", "frame_video_local": "🎞 图片合成视频",
+            "self_shot_scene_change": "🎥 自拍换场景 AI", "multi_scene_film": "🎬 多场景 AI 影片",
+            "video_reference": "📥 参考视频 / 频道", "audio_addons": "🎵 音乐 / Voice / SFX",
+            "video_local_edit": "🛠 本地视频编辑",
+        },
+    }
+    rows = []
+    for product_ids in VIDEO_MENU_ROWS:
+        row = []
+        for product_id in product_ids:
+            if product_id == "main_menu":
+                row.append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"))
+                continue
+            label = VIDEO_PRODUCT_REGISTRY[product_id]["public_label"]
+            if lang != "vi":
+                label = translated.get(lang, translated["en"]).get(product_id, label)
+            row.append(InlineKeyboardButton(label, callback_data=f"vproduct|open|{product_id}"))
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
+TASK3D_PROMPT_VAULT = PromptVault(Path(__file__).resolve().parent / "docs" / "prompt_vault" / "video_prompts.seed.json")
+TASK3D_PROMPT_ENGINE = VideoPromptEngine()
+TASK3D_LEGACY_ROUTES = {
+    "frame_video_local": "menu|video_frame_intro",
+    "self_shot_scene_change": "selfscene|start",
+    "video_reference": "videoref|hub",
+    "audio_addons": "menu|main_music_video",
+    "video_local_edit": "videoedit|menu",
+}
+TASK3D_FREE_PRODUCT_IDS = {
+    "video_trend", "video_idea", "storyboard_prompt", "motion_prompt", "video_reference",
+}
+
+
+def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
+    product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
+    if not product:
+        return "⚠️ Sản phẩm video không tồn tại. Bot chưa trừ Xu."
+    free_line = {
+        "free_planning": "Miễn phí: chỉ tạo ý tưởng/kế hoạch/prompt; không gọi video provider và không trừ Xu.",
+        "free_planning_paid_render": "Lập kế hoạch và xuất prompt miễn phí. Chỉ render sau khi chọn gói 200/300/400 và xác nhận cuối.",
+        "free_prompt_paid_render": "Tạo motion prompt miễn phí. Chỉ render sau khi chọn gói và xác nhận cuối.",
+        "paid_after_final_confirm": "Render trả phí 200/300/400 Xu. Bot chỉ gọi provider sau xác nhận cuối và chỉ trừ Xu sau khi provider nhận job.",
+        "free_planning_paid_higher_tier_render": "Lập kế hoạch miễn phí. Render phim nhiều cảnh chỉ dùng gói 300/400 và xác nhận cuối.",
+        "local_render_policy": "Chỉ dùng Local Worker/FFmpeg, không gọi AI video provider. Giá local hiện hành được xác nhận trước khi xử lý.",
+        "free_default_optional_paid": "Chọn mặc định/kế hoạch là miễn phí; audio tùy chỉnh theo trạng thái Task 1 và hóa đơn riêng.",
+        "free_guarded_analysis": "Style brief miễn phí/guarded; không sao chép nguyên tác có bản quyền.",
+        "free_plan_paid_guarded_render": "Lập kế hoạch miễn phí; video-to-video chỉ mở khi provider route sẵn sàng và đã xác nhận.",
+    }.get(str(product.get("free_or_paid") or ""), "Bot báo rõ phí trước mọi xử lý thật.")
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"{product.get('public_label')}\n\n"
+            f"{product.get('purpose')}\n\n"
+            f"Input: <code>{html.escape(str(product.get('user_input_type') or '-'))}</code>\n"
+            f"Output: <code>{html.escape(str(product.get('output_type') or '-'))}</code>\n\n"
+            "Planning never calls a video provider or charges Xu. Rendering uses only the visible 200/300/400 packages and final confirmation."
         )
-    if lang == "zh":
-        items = [
-            ("🔥 Trend 视频", "trendg|start"),
-            ("🎬 真实 AI 视频", "menu|video_ai_true"),
-            ("🧩 脚本 → 图片 → 视频", "storyboard|start"),
-            ("🎞 图片合成视频", "menu|video_frame_intro"),
-            ("🎥 自拍换场景 AI", "selfscene|start"),
-            ("🎬 多场景 AI 故事片", "longvideo|start"),
-            ("🎞 电影分镜 Prompt 包", "storypack|start"),
-            ("📤 参考视频 / 频道资料", "videoref|hub"),
-            ("🧠 视频创意", "videoidea|start"),
-            ("🎥 Prompt / 镜头运动", "motion|start"),
-            ("🎵 音乐 / Voice / SFX", "menu|main_music_video"),
-            ("🛠 本地视频编辑", "videoedit|menu"),
-        ]
+    return (
+        f"{product.get('public_label')}\n\n"
+        f"{html.escape(str(product.get('purpose') or ''))}\n\n"
+        f"<b>Đầu vào:</b> <code>{html.escape(str(product.get('user_input_type') or '-'))}</code>\n"
+        f"<b>Đầu ra:</b> <code>{html.escape(str(product.get('output_type') or '-'))}</code>\n\n"
+        f"<b>Ranh giới:</b> {html.escape(free_line)}"
+    )
+
+
+def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
+    is_vi = normalize_user_language(lang) == "vi"
+    parent_callback = str(product.get("parent_menu_callback") or "menu|main_video")
+    if product_id in TASK3D_LEGACY_ROUTES:
+        first = "▶️ Bắt đầu đúng quy trình" if is_vi else "▶️ Start product flow"
+        first_callback = f"vproduct|legacy|{product_id}"
+    elif "image" in str(product.get("user_input_type") or "") and product_id == "image_to_video":
+        first = "📷 Gửi ảnh" if is_vi else "📷 Send image"
+        first_callback = f"vproduct|input_media|{product_id}"
     else:
-        items = [
-            ("🔥 Trend video", "trendg|start"),
-            ("🎬 Real AI Video", "menu|video_ai_true"),
-            ("🧩 Script → Images → Video", "storyboard|start"),
-            ("🎞 Image slideshow video", "menu|video_frame_intro"),
-            ("🎥 Self-shot scene AI", "selfscene|start"),
-            ("🎬 Multi-scene AI story film", "longvideo|start"),
-            ("🎞 Cinematic storyboard prompt pack", "storypack|start"),
-            ("📤 Reference video / Channel", "videoref|hub"),
-            ("🧠 Video ideas", "videoidea|start"),
-            ("🎥 Prompt / Motion", "motion|start"),
-            ("🎵 Music / Voice / SFX", "menu|main_music_video"),
-            ("🛠 Local video editor", "videoedit|menu"),
-        ]
-    return video_v6_keyboard(items, lang, back=(ui_text(lang, "common.back"), "menu|main"))
+        first = "✍️ Nhập nội dung" if is_vi else "✍️ Enter input"
+        first_callback = f"vproduct|input_text|{product_id}"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(first, callback_data=first_callback)],
+        [InlineKeyboardButton("⬅️ Menu video" if is_vi else "⬅️ Video menu", callback_data=parent_callback), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def task3d_platform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("TikTok/Reels", callback_data="vproduct|platform|TikTok_Reels"), InlineKeyboardButton("YouTube Shorts", callback_data="vproduct|platform|YouTube_Shorts")],
+        [InlineKeyboardButton("Facebook Ads", callback_data="vproduct|platform|Facebook_Ads"), InlineKeyboardButton("Landing video", callback_data="vproduct|platform|Landing_video")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def task3d_aspect_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("9:16", callback_data="vproduct|aspect|9:16"), InlineKeyboardButton("16:9", callback_data="vproduct|aspect|16:9")],
+        [InlineKeyboardButton("1:1", callback_data="vproduct|aspect|1:1")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def task3d_panel_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("6 panel", callback_data="vproduct|panels|6"), InlineKeyboardButton("9 panel", callback_data="vproduct|panels|9")],
+        [InlineKeyboardButton("12 panel", callback_data="vproduct|panels|12"), InlineKeyboardButton("16 panel", callback_data="vproduct|panels|16")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def task3d_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    styles = [
+        ("Chân thật", "realistic"), ("Cinematic", "cinematic"),
+        ("Hoạt hình 3D", "cute_3d"), ("Anime gốc", "original_anime"),
+        ("Quảng cáo sản phẩm", "product_ad"), ("UGC", "ugc"),
+        ("Kinh dị", "horror"), ("Hành động", "action"),
+    ]
+    rows = [[InlineKeyboardButton(styles[i][0], callback_data=f"vproduct|style|{styles[i][1]}"), InlineKeyboardButton(styles[i + 1][0], callback_data=f"vproduct|style|{styles[i + 1][1]}")] for i in range(0, len(styles), 2)]
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+
+def task3d_output_target_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Chỉ prompt", callback_data="vproduct|target|prompt"), InlineKeyboardButton("🖼 Prompt ảnh", callback_data="vproduct|target|image")],
+        [InlineKeyboardButton("🎥 Prompt video", callback_data="vproduct|target|video"), InlineKeyboardButton("📦 Cả bộ", callback_data="vproduct|target|all")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def task3d_session_step(user_id, step: str, **fields) -> dict:
+    session = get_video_session(user_id)
+    current = str(session.get("current_step") or "")
+    history = [str(item) for item in (session.get("step_history") or []) if str(item or "")]
+    if current and current != step and (not history or history[-1] != current):
+        history.append(current)
+    session["previous_step"] = current
+    session["current_step"] = str(step or "")
+    session["step_history"] = history[-12:]
+    draft = dict(session.get("draft") or {})
+    for key, value in fields.items():
+        if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to"}:
+            session[key] = value
+        draft[key] = value
+    session["draft"] = draft
+    return save_video_session(user_id, session)
+
+
+def task3d_back_step(user_id) -> tuple[str, dict]:
+    session = get_video_session(user_id)
+    history = [str(item) for item in (session.get("step_history") or []) if str(item or "")]
+    current = str(session.get("current_step") or "")
+    target = history.pop() if history else "intro"
+    session["previous_step"] = current
+    session["current_step"] = target
+    session["step_history"] = history
+    return target, save_video_session(user_id, session)
+
+
+def task3d_build_bundle_from_session(session: dict) -> dict:
+    draft = dict(session.get("draft") or {})
+    product_id = str(session.get("product_id") or draft.get("product_id") or "")
+    count = safe_int(draft.get("panel_count") or draft.get("scene_count") or (1 if product_id in {"video_ai_real", "image_to_video", "motion_prompt"} else 6), 6)
+    request = VideoPromptRequest(
+        product_id=product_id,
+        user_topic=str(session.get("topic") or draft.get("topic") or draft.get("media_description") or "Ảnh/video người dùng cung cấp"),
+        platform=str(session.get("platform") or draft.get("platform") or "TikTok/Reels"),
+        aspect_ratio=str(session.get("aspect_ratio") or draft.get("aspect_ratio") or "9:16"),
+        duration=max(6, count * 4),
+        package_id=str(session.get("package_id") or ""),
+        objective=str(draft.get("objective") or "engagement"),
+        style=str(session.get("style") or draft.get("style") or "realistic cinematic"),
+        tone="clear, original and audience-appropriate",
+        language="vi",
+        scene_count=count,
+        shot_count=count,
+        reference_style=str(draft.get("reference_style") or ""),
+        source_media_ref=str(session.get("source_media_ref") or draft.get("source_media_ref") or ""),
+        provider_target="configured_shopAIKey_or_Key4U_route",
+        safety_flags=["no_artist_imitation", "no_copyrighted_character_without_rights", "no_watermark"],
+    )
+    return TASK3D_PROMPT_ENGINE.build(request).to_dict()
+
+
+def task3d_result_text(session: dict, lang: str = "vi") -> str:
+    bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
+    shots = list(bundle.get("shot_table") or [])
+    batches = list((bundle.get("render_plan") or {}).get("batches") or [])
+    lines = [
+        "🎞 <b>Prompt pack đã sẵn sàng</b>", "",
+        f"<b>{html.escape(str(bundle.get('title') or 'TOAN AAS Video'))}</b>",
+        html.escape(str(bundle.get("short_summary") or "")), "",
+        f"<b>Hook:</b> {html.escape(str(bundle.get('hook') or ''))}", "",
+        "<b>Storyboard / shot table</b>",
+    ]
+    for shot in shots[:6]:
+        lines.append(
+            f"• Shot {shot.get('shot_number')} · {shot.get('duration_seconds')}s · "
+            f"{html.escape(str(shot.get('camera_angle') or ''))} · {html.escape(str(shot.get('camera_movement') or ''))}\n"
+            f"  {html.escape(str(shot.get('scene_purpose') or ''))}"
+        )
+    if len(shots) > 6:
+        lines.append(f"• … còn {len(shots) - 6} shot trong prompt pack xuất file.")
+    if batches:
+        batch_text = ", ".join(f"B{item.get('batch_number')}: {','.join(map(str, item.get('shot_numbers') or []))}" for item in batches)
+        lines.extend(["", f"<b>Multishot 2 shot/batch:</b> <code>{html.escape(batch_text)}</code>"])
+    lines.extend(["", "Bước này miễn phí: chưa gọi video provider, chưa tạo paid job và chưa trừ Xu."])
+    return "\n".join(lines)
+
+
+def task3d_result_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    rows = [
+        [InlineKeyboardButton("🖼 Tạo prompt ảnh" if is_vi else "🖼 Image prompts", callback_data="vproduct|view|image"), InlineKeyboardButton("🎥 Tạo prompt video" if is_vi else "🎥 Video prompts", callback_data="vproduct|view|video")],
+        [InlineKeyboardButton("📦 Xuất prompt pack" if is_vi else "📦 Export prompt pack", callback_data="vproduct|export_menu"), InlineKeyboardButton("🔁 Đổi phong cách" if is_vi else "🔁 Change style", callback_data="vproduct|restyle")],
+    ]
+    if VIDEO_PRODUCT_REGISTRY.get(product_id, {}).get("allowed_packages"):
+        render_label = "🎬 Render thử 1 shot" if product_id in {"storyboard_prompt", "script_image_video"} else "🎬 Dùng để tạo video"
+        rows.append([InlineKeyboardButton(render_label, callback_data="vproduct|render")])
+    rows.extend([
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def task3d_result_parent_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    """Return from a result child screen to the menu that launched it."""
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⬅️ Prompt pack" if is_vi else "⬅️ Prompt pack", callback_data="vproduct|result"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
+    step = str(session.get("current_step") or "intro")
+    product_id = str(session.get("product_id") or "")
+    if step == "intro":
+        return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
+    if step in {"collect_input", "input_review"}:
+        topic = str(session.get("topic") or (session.get("draft") or {}).get("topic") or "")
+        return await safe_edit_or_send(
+            target,
+            f"✍️ <b>Đầu vào sản phẩm</b>\n\nĐã lưu: <code>{html.escape(topic or 'media trong phiên')}</code>\n\nBạn có thể tiếp tục mà không cần gửi lại file/nội dung.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("➡️ Tiếp tục", callback_data="vproduct|continue_platform")], [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
+    if step == "platform":
+        return await safe_edit_or_send(target, "📱 <b>Chọn mục đích / nền tảng</b>", parse_mode="HTML", reply_markup=task3d_platform_keyboard(lang))
+    if step == "aspect":
+        return await safe_edit_or_send(target, "📐 <b>Chọn tỉ lệ khung hình</b>", parse_mode="HTML", reply_markup=task3d_aspect_keyboard(lang))
+    if step == "panels":
+        return await safe_edit_or_send(target, "🎞 <b>Chọn số panel storyboard</b>\n\nMỗi 2 shot sẽ được gom thành một batch multishot.", parse_mode="HTML", reply_markup=task3d_panel_keyboard(lang))
+    if step == "style":
+        return await safe_edit_or_send(target, "🎨 <b>Chọn phong cách</b>", parse_mode="HTML", reply_markup=task3d_style_keyboard(lang))
+    if step == "output_target":
+        return await safe_edit_or_send(target, "📦 <b>Chọn đầu ra miễn phí</b>", parse_mode="HTML", reply_markup=task3d_output_target_keyboard(lang))
+    if step == "result":
+        return await safe_edit_or_send(target, task3d_result_text(session, lang), parse_mode="HTML", reply_markup=task3d_result_keyboard(product_id, lang))
+    return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
+
+
+async def handle_video_product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "open"
+    value = parts[2] if len(parts) > 2 else ""
+    # Delegated legacy handlers answer their own callback. Answering here as
+    # well can produce a Telegram "query is too old/already answered" error.
+    if action != "legacy":
+        await query.answer()
+    if action == "open":
+        if value not in VIDEO_PRODUCT_REGISTRY:
+            return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
+        clear_video_session(uid)
+        parent_callback = str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
+        session = task3d_session_step(uid, "intro", product_id=value, return_to=parent_callback)
+        return await task3d_render_step(query, uid, session, lang)
+    session = get_video_session(uid)
+    product_id = str(session.get("product_id") or "")
+    if not product_id or product_id not in VIDEO_PRODUCT_REGISTRY:
+        if action == "legacy":
+            await query.answer()
+        return await safe_edit_or_send(query, "⌛ Phiên video đã hết hạn. Bot chưa trừ Xu.", reply_markup=main_video_keyboard(lang))
+    if action == "legacy":
+        route = TASK3D_LEGACY_ROUTES.get(value or product_id)
+        if not route:
+            await query.answer()
+            return await safe_edit_or_send(query, VIDEO_PRODUCT_REGISTRY[product_id]["public_guard_message"])
+        prefix, legacy_action = route.split("|", 1)
+        query.data = route
+        if prefix == "menu":
+            await query.answer()
+            text, markup = localized_menu_content(legacy_action, is_admin_user(uid), lang, uid)
+            return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=markup)
+        if prefix == "selfscene":
+            return await handle_self_scene_ai_callback(update, context)
+        if prefix == "videoref":
+            return await handle_video_reference_callback(update, context)
+        if prefix == "videoedit":
+            return await handle_video_editor_callback(update, context)
+    if action == "result":
+        # View/export/finalization are children of the result menu. Returning to
+        # their parent must not pop the workflow history back to style/output.
+        session["previous_step"] = str(session.get("current_step") or "")
+        session["current_step"] = "result"
+        session = save_video_session(uid, session)
+        return await task3d_render_step(query, uid, session, lang)
+    if action in {"input_text", "input_media"}:
+        step = "collect_input"
+        session = task3d_session_step(uid, step, input_mode="media" if action == "input_media" else "text")
+        prompt = "📷 Hãy gửi 1–4 ảnh. Bot chỉ lưu file ID trong phiên; chưa gọi provider và chưa trừ Xu." if action == "input_media" else "✍️ Hãy nhập chủ đề, sản phẩm, câu chuyện hoặc prompt. Bot chưa gọi provider và chưa trừ Xu."
+        return await safe_edit_or_send(query, prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+    if action == "continue_platform":
+        session = task3d_session_step(uid, "platform")
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "platform":
+        session = task3d_session_step(uid, "aspect", platform=value.replace("_", " "))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "aspect":
+        next_step = "panels" if product_id == "storyboard_prompt" else "style"
+        session = task3d_session_step(uid, next_step, aspect_ratio=value)
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "panels":
+        session = task3d_session_step(uid, "style", panel_count=max(6, min(16, safe_int(value, 9))))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "style":
+        next_step = "output_target" if product_id == "storyboard_prompt" else "result"
+        session = task3d_session_step(uid, next_step, style=value.replace("_", " "))
+        if next_step == "result":
+            bundle = task3d_build_bundle_from_session(session)
+            session = task3d_session_step(uid, "result", prompt_bundle=bundle, prompt_bundle_id=bundle.get("bundle_id"), free_generation=True, provider_called=False, xu_charged=0)
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "target":
+        session = task3d_session_step(uid, "result", output_target=value)
+        bundle = task3d_build_bundle_from_session(session)
+        session = task3d_session_step(uid, "result", prompt_bundle=bundle, prompt_bundle_id=bundle.get("bundle_id"), free_generation=True, provider_called=False, xu_charged=0)
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "restyle":
+        session = task3d_session_step(uid, "style")
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "view":
+        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
+        prompts = bundle.get("image_prompts") if value == "image" else bundle.get("video_prompts")
+        lines = [f"{idx}. {item}" for idx, item in enumerate(list(prompts or [])[:8], start=1)]
+        text = ("🖼 <b>Prompt ảnh</b>" if value == "image" else "🎥 <b>Prompt video</b>") + "\n\n<code>" + html.escape("\n\n".join(lines)[:3600]) + "</code>"
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=task3d_result_parent_keyboard(lang))
+    if action == "export_menu":
+        return await safe_edit_or_send(query, "📦 <b>Xuất prompt pack</b>\n\nChọn định dạng:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("JSON", callback_data="vproduct|export|json"), InlineKeyboardButton("Markdown", callback_data="vproduct|export|markdown"), InlineKeyboardButton("TXT", callback_data="vproduct|export|txt")],
+            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|result"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ]))
+    if action == "export":
+        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
+        if not bundle:
+            return await safe_edit_or_send(query, "⚠️ Prompt pack chưa sẵn sàng. Bot chưa trừ Xu.")
+        if value == "json":
+            content, suffix = json.dumps(bundle, ensure_ascii=False, indent=2), "json"
+        elif value == "markdown":
+            content, suffix = bundle_to_markdown(bundle), "md"
+        else:
+            content, suffix = bundle_to_markdown(bundle), "txt"
+        output = io.BytesIO(content.encode("utf-8"))
+        output.name = f"toan_aas_{product_id}_{str(bundle.get('bundle_id') or 'prompt_pack')[:12]}.{suffix}"
+        await context.bot.send_document(chat_id=query.message.chat_id, document=output, filename=output.name, caption="✅ Prompt pack miễn phí. Bot chưa gọi video provider và chưa trừ Xu.")
+        return None
+    if action == "render":
+        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
+        if not bundle:
+            return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
+        first_shot = dict((bundle.get("shot_table") or [{}])[0])
+        source_state = {
+            "product_id": product_id,
+            "selected_topic": session.get("topic"),
+            "selected_style": session.get("style"),
+            "preferred_aspect_ratio": session.get("aspect_ratio"),
+            "source_media_ref": session.get("source_media_ref"),
+            "video_prompt": first_shot.get("video_prompt") or (bundle.get("video_prompts") or [""])[0],
+            "script": bundle.get("script"),
+            "prompt_bundle": bundle,
+            "scene_count": len(bundle.get("shot_table") or []),
+        }
+        package = {
+            "source": product_id,
+            "product_id": product_id,
+            "concept_text": bundle.get("short_summary"),
+            "video_prompt": source_state["video_prompt"],
+            "prompt_bundle_id": bundle.get("bundle_id"),
+            "source_media_ref": session.get("source_media_ref"),
+            "scene_count": 1 if product_id in {"storyboard_prompt", "script_image_video"} else len(bundle.get("shot_table") or []),
+        }
+        return await open_video_finalization(query, uid, product_id, source_state, lang, "vproduct|result", package)
+    if action == "back":
+        target_step, session = task3d_back_step(uid)
+        return await task3d_render_step(query, uid, session, lang)
+    return await task3d_render_step(query, uid, session, lang)
+
+
+async def handle_video_product_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    session = get_video_session(uid)
+    if str(session.get("current_step") or "") != "collect_input" or str((session.get("draft") or {}).get("input_mode") or "") != "text":
+        return False
+    text = re.sub(r"\s+", " ", update.message.text.strip())[:1200]
+    if not text:
+        return True
+    session = task3d_session_step(uid, "platform", topic=text, input_collected=True)
+    await update.message.reply_text("✅ Đã lưu đầu vào. Chọn nền tảng/mục đích tiếp theo.", reply_markup=task3d_platform_keyboard(get_user_language(uid) or "vi"))
+    return True
+
+
+async def handle_video_product_pending_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    session = get_video_session(uid)
+    if str(session.get("current_step") or "") != "collect_input" or str((session.get("draft") or {}).get("input_mode") or "") != "media":
+        return False
+    media = None
+    media_type = ""
+    if getattr(update.message, "photo", None):
+        media = update.message.photo[-1]
+        media_type = "image"
+    elif getattr(update.message, "video", None):
+        media = update.message.video
+        media_type = "video"
+    elif getattr(update.message, "document", None):
+        media = update.message.document
+        media_type = "document"
+    if not media:
+        return False
+    draft = dict(session.get("draft") or {})
+    refs = list(draft.get("source_media_refs") or [])
+    file_id = str(getattr(media, "file_id", "") or "")
+    if file_id and file_id not in refs:
+        refs.append(file_id)
+    refs = refs[:4]
+    session = task3d_session_step(
+        uid, "platform", source_media_ref=refs[0] if refs else "", source_media_refs=refs,
+        media_type=media_type, media_description=f"{len(refs)} ảnh/video người dùng cung cấp", topic=f"Media người dùng cung cấp ({len(refs)} file)", input_collected=True,
+    )
+    await update.message.reply_text(f"✅ Đã lưu {len(refs)} file trong phiên. Chọn nền tảng/mục đích tiếp theo; quay lại sẽ không phải upload lại.", reply_markup=task3d_platform_keyboard(get_user_language(uid) or "vi"))
+    return True
 
 def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) == "zh":
@@ -45494,7 +45931,22 @@ def default_video_session(user_id) -> dict:
     now_ts = time.time()
     return {
         "pending_action": "video_session",
+        "video_session_id": hashlib.sha256(f"{user_id}:{now_ts}".encode()).hexdigest()[:32],
         "user_id": str(user_id),
+        "product_id": "",
+        "current_step": "",
+        "previous_step": "",
+        "source_media_ref": "",
+        "topic": "",
+        "platform": "",
+        "aspect_ratio": "",
+        "style": "",
+        "package_id": "",
+        "prompt_bundle_id": "",
+        "selected_addons": [],
+        "provider_job_id": "",
+        "invoice_id": "",
+        "return_to": "",
         "entry_flow": "",
         "current_flow": "",
         "current_screen": "",
@@ -63437,6 +63889,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         if not image_size_info.get("provider_supported"):
             return await safe_edit_or_send(query, IMAGE_RATIO_UNSUPPORTED_MESSAGE, parse_mode=None)
     package_used = False
+    video_deferred_billing = job_type == "video"
+    package_item = {}
     package_item_type = normalize_package_item_type(
         pending.get("package_item_type") or (
             package_item_type_for_image_tier(image_tier) if job_type == "image" else package_item_type_for_video_tier(video_tier)
@@ -63466,38 +63920,47 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             package_item_type=package_item_type,
             package_units_used=1,
         )
-        package_use_result = deduct_package_item_for_job(
-            uid,
-            package_item_type,
-            job_id,
-            f"shopaikey_{job_type}; tier={image_tier if job_type == 'image' else video_tier}",
-        )
-        if not package_use_result.get("ok"):
-            update_shopaikey_job(job_id=job_id, status="CANCELLED", billing_status="package_unavailable")
-            return await safe_edit_or_send(
-                query,
-                "⚠️ Lượt trong gói không còn khả dụng hoặc đã hết hạn. Bot chưa gọi API và chưa trừ Xu.",
+        if video_deferred_billing:
+            package_use_result = {"ok": True, "deferred": True, "item": package_item}
+        else:
+            package_use_result = deduct_package_item_for_job(
+                uid,
+                package_item_type,
+                job_id,
+                f"shopaikey_{job_type}; tier={image_tier if job_type == 'image' else video_tier}",
             )
+            if not package_use_result.get("ok"):
+                update_shopaikey_job(job_id=job_id, status="CANCELLED", billing_status="package_unavailable")
+                return await safe_edit_or_send(
+                    query,
+                    "⚠️ Lượt trong gói không còn khả dụng hoặc đã hết hạn. Bot chưa gọi API và chưa trừ Xu.",
+                )
         deducted = 0
         balance_after = balance_before
         package_used = True
     else:
-        charge = spend_fixed_credit_info(
-            uid,
-            base_cost,
-            f"shopaikey_{job_type}",
-            f"ShopAIKey {job_type}: {shopaikey_safe_prompt_preview(prompt)}",
-            True,
-        )
-        if not charge.get("ok"):
-            credits_now, _, _ = get_user(uid)
-            if job_type == "image":
-                record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_image; tier={image_tier}; required={int(charge.get('final_cost') or base_cost)}")
-            if job_type == "video":
-                record_shopaikey_billing_event(uid, 0, "video_insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_video; tier={video_tier}; required={int(charge.get('final_cost') or base_cost)}")
-            return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or base_cost), uid)
-        deducted = int(charge.get("final_cost") or 0)
-        balance_after, _, _ = get_user(uid)
+        if video_deferred_billing:
+            required_now = int(shopaikey_preview_final_cost(uid, base_cost, "shopaikey_video") or base_cost)
+            if int(balance_before or 0) < required_now and not is_admin_user(uid):
+                record_shopaikey_billing_event(uid, 0, "video_insufficient_balance", 0, int(balance_before or 0), int(balance_before or 0), f"shopaikey_video; tier={video_tier}; required={required_now}")
+                return await edit_insufficient_credits(query, int(balance_before or 0), required_now, uid)
+            deducted = 0
+            balance_after = balance_before
+        else:
+            charge = spend_fixed_credit_info(
+                uid,
+                base_cost,
+                f"shopaikey_{job_type}",
+                f"ShopAIKey {job_type}: {shopaikey_safe_prompt_preview(prompt)}",
+                True,
+            )
+            if not charge.get("ok"):
+                credits_now, _, _ = get_user(uid)
+                if job_type == "image":
+                    record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits_now or 0), int(credits_now or 0), f"shopaikey_image; tier={image_tier}; required={int(charge.get('final_cost') or base_cost)}")
+                return await edit_insufficient_credits(query, int(credits_now or 0), int(charge.get("final_cost") or base_cost), uid)
+            deducted = int(charge.get("final_cost") or 0)
+            balance_after, _, _ = get_user(uid)
         job_id = create_shopaikey_job(
             uid,
             query.message.chat_id,
@@ -63514,14 +63977,14 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     update_shopaikey_job(
         job_id=job_id,
         xu_deducted=deducted,
-        billing_status="package_deducted" if package_used else ("deducted" if deducted > 0 else "admin_free"),
+        billing_status=("awaiting_provider_accept" if video_deferred_billing else ("package_deducted" if package_used else ("deducted" if deducted > 0 else "admin_free"))),
         confirm_required=1 if SHOPAIKEY_REQUIRE_CONFIRM_BEFORE_DEDUCT else 0,
         confirmed_at=confirmed_at,
         retry_warranty_count=retry_warranty_count,
         package_id=int((package_use_result.get("item") or {}).get("package_id") or 0) if package_used else 0,
         package_item_id=int((package_use_result.get("item") or {}).get("id") or 0) if package_used else 0,
         package_item_type=package_item_type if package_used else "",
-        package_units_used=1 if package_used else 0,
+        package_units_used=0 if video_deferred_billing else (1 if package_used else 0),
     )
     marketing_loss_note = ""
     if job_type == "video" and video_tier == "low" and pending.get("marketing_loss"):
@@ -63530,29 +63993,22 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         marketing_loss_note = f"; marketing_loss=true; marketing_loss_reason=starter_product; cost_ratio={ratio_text}"
     tier_reason = f"; tier={image_tier}; label={tier_label}" if job_type == "image" else f"; tier={video_tier}; label={tier_label}{marketing_loss_note}"
     record_shopaikey_billing_event(uid, job_id, "confirm" if job_type == "image" else "video_confirmed", 0, int(balance_before or 0), int(balance_before or 0), f"confirmed_at={confirmed_at}; job_type={job_type}{tier_reason}")
-    record_shopaikey_billing_event(
-        uid,
-        job_id,
-        ("package_use" if job_type == "image" else "video_package_use") if package_used else ("deduct" if job_type == "image" else "video_deducted"),
-        0 if package_used else deducted,
-        int(balance_before or 0),
-        int(balance_after or 0),
-        f"shopaikey_{job_type}{tier_reason}; package_item={package_item_type if package_used else '-'}",
-    )
-    if job_type == "video" and video_tier == "low" and pending.get("marketing_loss") and getattr(context, "bot", None) and ADMIN_ID:
-        try:
-            await context.bot.send_message(
-                chat_id=int(ADMIN_ID),
-                text=(
-                    "🎯 Có user dùng gói mồi Video 200 Xu.\n"
-                    f"• User: <code>{html.escape(str(uid))}</code>\n"
-                    f"• Job: <code>{int(job_id or 0)}</code>\n"
-                    "• Theo dõi usage/cost."
-                ),
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
+    if video_deferred_billing:
+        record_shopaikey_billing_event(
+            uid, job_id, "video_billing_deferred", 0,
+            int(balance_before or 0), int(balance_before or 0),
+            f"awaiting_provider_accept{tier_reason}; package_item={package_item_type if package_used else '-'}",
+        )
+    else:
+        record_shopaikey_billing_event(
+            uid,
+            job_id,
+            "package_use" if package_used else "deduct",
+            0 if package_used else deducted,
+            int(balance_before or 0),
+            int(balance_after or 0),
+            f"shopaikey_{job_type}{tier_reason}; package_item={package_item_type if package_used else '-'}",
+        )
     if job_type == "image":
         await safe_edit_or_send(query, public_image_waiting_text(image_tier, lang), parse_mode=None)
         result = await shopaikey_image_generate(prompt, model, aspect_ratio=image_aspect_ratio, tier=image_tier)
@@ -63702,6 +64158,61 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         task_id = str(result.get("task_id") or "")
         attempts = result.get("attempts") or []
         if status == "PASS_SUBMITTED" and task_id:
+            if package_used:
+                package_use_result = deduct_package_item_for_job(
+                    uid,
+                    package_item_type,
+                    job_id,
+                    f"shopaikey_video_provider_accepted; tier={video_tier}; task_id={task_id}",
+                )
+                if not package_use_result.get("ok"):
+                    update_shopaikey_job(
+                        job_id=job_id, task_id=task_id, status="IN_PROGRESS",
+                        billing_status="package_billing_failed_after_provider_accept",
+                        provider_message="provider accepted; package slot unavailable; no Xu charged",
+                        model=result.get("selected_model") or result.get("model") or model,
+                        attempts=len(attempts),
+                    )
+                    record_shopaikey_billing_event(uid, job_id, "video_billing_failed_after_provider_accept", 0, int(balance_before or 0), int(balance_before or 0), f"task_id={task_id}; package_item={package_item_type}")
+                    if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
+                        asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
+                    return await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ Provider đã nhận job nhưng lượt gói không còn khả dụng. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra job này.", reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=True))
+                deducted = 0
+                balance_after = balance_before
+                update_shopaikey_job(
+                    job_id=job_id,
+                    billing_status="package_deducted_after_provider_accept",
+                    package_id=int((package_use_result.get("item") or {}).get("package_id") or 0),
+                    package_item_id=int((package_use_result.get("item") or {}).get("id") or 0),
+                    package_item_type=package_item_type,
+                    package_units_used=1,
+                )
+                record_shopaikey_billing_event(uid, job_id, "video_package_use_after_provider_accept", 0, int(balance_before or 0), int(balance_before or 0), f"task_id={task_id}; tier={video_tier}; package_item={package_item_type}")
+            else:
+                charge = spend_fixed_credit_info(
+                    uid,
+                    base_cost,
+                    "shopaikey_video",
+                    f"ShopAIKey video accepted: {shopaikey_safe_prompt_preview(prompt)}",
+                    True,
+                )
+                if not charge.get("ok"):
+                    credits_now, _, _ = get_user(uid)
+                    update_shopaikey_job(
+                        job_id=job_id, task_id=task_id, status="IN_PROGRESS",
+                        billing_status="billing_failed_after_provider_accept",
+                        provider_message="provider accepted; balance changed; no Xu charged",
+                        model=result.get("selected_model") or result.get("model") or model,
+                        attempts=len(attempts),
+                    )
+                    record_shopaikey_billing_event(uid, job_id, "video_billing_failed_after_provider_accept", 0, int(credits_now or 0), int(credits_now or 0), f"task_id={task_id}; tier={video_tier}")
+                    if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
+                        asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
+                    return await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ Provider đã nhận job nhưng số dư vừa thay đổi. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra job này.", reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=True))
+                deducted = int(charge.get("final_cost") or 0)
+                balance_after, _, _ = get_user(uid)
+                update_shopaikey_job(job_id=job_id, xu_deducted=deducted, billing_status="deducted_after_provider_accept")
+                record_shopaikey_billing_event(uid, job_id, "video_deducted_after_provider_accept", deducted, int(balance_before or 0), int(balance_after or 0), f"task_id={task_id}; tier={video_tier}")
             update_shopaikey_job(
                 job_id=job_id,
                 task_id=task_id,
@@ -63710,6 +64221,20 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 attempts=len(attempts),
             )
             record_shopaikey_billing_event(uid, job_id, "video_provider_submitted", deducted, int(balance_after or 0), int(balance_after or 0), f"task_id={task_id}; tier={video_tier}; provider_status={result.get('provider_status') or '-'}")
+            if video_tier == "low" and pending.get("marketing_loss") and getattr(context, "bot", None) and ADMIN_ID:
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(ADMIN_ID),
+                        text=(
+                            "🎯 Provider đã nhận gói Video 200 Xu.\n"
+                            f"• User: <code>{html.escape(str(uid))}</code>\n"
+                            f"• Job: <code>{int(job_id or 0)}</code>\n"
+                            f"• Task: <code>{html.escape(task_id)}</code>"
+                        ),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=ui_text(lang, "video.queue_submitted", task_id=html.escape(task_id), auto_poll="ON" if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else "OFF"),
@@ -63728,7 +64253,6 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         deducted_amount = int(deducted or 0)
         record_shopaikey_billing_event(uid, job_id, "video_provider_fail", 0, int(balance_after or 0), int(balance_after or 0), f"shopaikey_video; tier={video_tier}; error={provider_error_text}")
         if package_used:
-            package_refunded = refund_package_item_for_job(uid, job_id, provider_error_text)
             update_shopaikey_job(
                 job_id=job_id,
                 status="FAILED",
@@ -63737,15 +64261,15 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 provider_message=provider_error_text,
                 attempts=len(attempts),
                 finished_at=now_text(),
-                refund_status="not_applicable",
+                refund_status="not_charged",
                 refund_amount=0,
                 refund_reason=provider_error_text,
-                billing_status="package_refunded" if package_refunded else "package_refund_failed",
-                package_refund_status="refunded" if package_refunded else "refund_failed",
+                billing_status="provider_rejected_not_charged",
+                package_refund_status="not_needed",
             )
             return await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text=package_provider_fail_message(lang) if package_refunded else "⚠️ Provider lỗi. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra lượt gói nếu cần.",
+                text="⚠️ Provider không nhận job. TOAN AAS chưa dùng lượt gói và chưa trừ Xu.",
             )
         refunded = refund_shopaikey_job_if_needed(uid, job_id, "", provider_error_text) if deducted_amount > 0 else False
         balance_after_failure, _, _ = get_user(uid)
@@ -85605,6 +86129,19 @@ def update_video_finalization(user_id, **fields) -> dict:
 def video_finalization_source_label(source: str, lang: str = "vi") -> str:
     key = str(source or "video_plan").strip().lower()
     labels_vi = {
+        "video_trend": "Video theo trend",
+        "video_idea": "Ý tưởng video",
+        "storyboard_prompt": "Storyboard + Prompt",
+        "script_image_video": "Kịch bản → Ảnh → Video",
+        "video_ai_real": "Video AI chân thật",
+        "image_to_video": "Ảnh → Video",
+        "frame_video_local": "Ghép ảnh thành video",
+        "self_shot_scene_change": "Tự quay & đổi cảnh AI",
+        "multi_scene_film": "Phim AI nhiều cảnh",
+        "motion_prompt": "Prompt / Chuyển động",
+        "video_reference": "Video mẫu / Kênh mẫu",
+        "audio_addons": "Nhạc / Voice / SFX",
+        "video_local_edit": "Chỉnh sửa video local",
         "videoidea": "Ý tưởng quảng cáo / điện ảnh",
         "longvideo": "Kịch bản video dài",
         "storypack": "Storyboard + Prompt điện ảnh",
@@ -85994,14 +86531,8 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
             "Choose the right package:\n"
             f"{video_tier_price_line('low', lang)}\n"
             f"{video_tier_price_line('basic', lang)}\n"
-            f"{video_tier_price_line('common', lang)}\n"
-            f"{video_tier_price_line('advanced', lang)}\n"
-            f"{video_tier_price_line('standard', lang)}\n"
-            f"{video_tier_price_line('high', lang)}\n"
-            f"{video_tier_price_line('future_1000', lang)}\n"
-            f"{video_tier_price_line('future_1200', lang)}\n"
-            f"{video_tier_price_line('future_1500', lang)}\n\n"
-            f"{html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_EN)}\n\n"
+            f"{video_tier_price_line('common', lang)}\n\n"
+            "Packages 600+ and premium are hidden until provider cost is verified.\n\n"
             "TOAN AAS will show the final invoice before any processing or Xu charge."
         )
     return (
@@ -86016,14 +86547,8 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         "Chọn gói phù hợp:\n"
         f"{video_tier_price_line('low', lang)}\n"
         f"{video_tier_price_line('basic', lang)}\n"
-        f"{video_tier_price_line('common', lang)}\n"
-        f"{video_tier_price_line('advanced', lang)}\n"
-        f"{video_tier_price_line('standard', lang)}\n"
-        f"{video_tier_price_line('high', lang)}\n"
-        f"{video_tier_price_line('future_1000', lang)}\n"
-        f"{video_tier_price_line('future_1200', lang)}\n"
-        f"{video_tier_price_line('future_1500', lang)}\n\n"
-        f"{html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_VI)}\n\n"
+        f"{video_tier_price_line('common', lang)}\n\n"
+        "Gói 600+ và premium đang ẩn cho tới khi xác minh an toàn chi phí provider.\n\n"
         "TOAN AAS sẽ báo lại lần cuối trước khi tạo video."
     )
 
@@ -86038,18 +86563,6 @@ def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(label("common"), callback_data="vfinal|tier|common"),
-            InlineKeyboardButton(label("advanced"), callback_data="vfinal|tier|advanced"),
-        ],
-        [
-            InlineKeyboardButton(label("standard"), callback_data="vfinal|tier|standard"),
-            InlineKeyboardButton(label("high"), callback_data="vfinal|tier|high"),
-        ],
-        [
-            InlineKeyboardButton(label("future_1000"), callback_data="vfinal|tier|future_1000"),
-            InlineKeyboardButton(label("future_1200"), callback_data="vfinal|tier|future_1200"),
-        ],
-        [
-            InlineKeyboardButton(label("future_1500"), callback_data="vfinal|tier|future_1500"),
             InlineKeyboardButton("🎛 Thêm tính năng khác" if is_vi else "🎛 Extra features", callback_data="vfinal|menu"),
         ],
         [
@@ -87087,6 +87600,27 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if action == "tier":
         if value:
             tier = normalize_video_tier(value)
+            task3d_product_id = str(
+                (state.get("source_payload") or {}).get("product_id")
+                or (state.get("source_payload") or {}).get("source")
+                or state.get("source")
+                or ""
+            ).strip()
+            task3d_package_id = {"low": "package_200", "basic": "package_300", "common": "package_400"}.get(tier, "")
+            if task3d_product_id in VIDEO_PRODUCT_REGISTRY:
+                task3d_fit = validate_package_selection(task3d_product_id, task3d_package_id, ["none"])
+                if not task3d_fit.get("ok"):
+                    reason = str(task3d_fit.get("reason") or "package_not_allowed_for_product")
+                    guard = VIDEO_PRODUCT_REGISTRY[task3d_product_id].get("public_guard_message") or "Gói này không phù hợp với sản phẩm đã chọn."
+                    return await safe_edit_or_send(
+                        query,
+                        f"🛡 <b>Gói chưa phù hợp</b>\n\n{html.escape(str(guard))}\n\nMã kiểm tra: <code>{html.escape(reason)}</code>\nBot chưa gọi provider và chưa trừ Xu.",
+                        parse_mode="HTML",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("300 Xu", callback_data="vfinal|tier|basic"), InlineKeyboardButton("400 Xu", callback_data="vfinal|tier|common")],
+                            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")],
+                        ]),
+                    )
             state["selected_video_tier"] = tier
             state["selected_video_aspect_ratio"] = video_finalization_selected_aspect(state)
             state["step"] = "confirm"
@@ -88214,7 +88748,7 @@ async def send_video_paid_preview_artifact(context, query, state: dict, lang: st
 
 def public_video_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     tier_buttons = []
-    for tier in VIDEO_PUBLIC_TIER_UI_ORDER:
+    for tier in ("low", "basic", "common"):
         tier_buttons.append(InlineKeyboardButton(
             video_tier_button_text(tier, lang),
             callback_data=f"create_media|video_tier_{tier}",
@@ -88308,9 +88842,13 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         "object_prompt": str((package or {}).get("object_prompt") or (package or {}).get("selected_topic") or "")[:500],
         "direction_prompt": str((package or {}).get("direction_prompt") or (package or {}).get("selected_motion") or (package or {}).get("direction") or "")[:500],
         "video_tier": tier_norm,
+        "task3d_package_id": {"low": "package_200", "basic": "package_300", "common": "package_400"}.get(tier_norm, ""),
+        "preview_required": False if tier_norm == "low" else bool((package or {}).get("preview_required", False)),
         "tier_label": payload.get("label") or tier_norm,
         "model": payload.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
         "package_id": str((package or {}).get("package_id") or "")[:80],
+        "product_id": str((package or {}).get("product_id") or (package or {}).get("source") or "")[:80],
+        "prompt_bundle_id": str((package or {}).get("prompt_bundle_id") or "")[:80],
         "source": str((package or {}).get("source") or "")[:80],
         "music_label": music_label,
         "music_option": str((package or {}).get("music_option") or "none")[:80],
@@ -94902,47 +95440,168 @@ async def cmd_media_factory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_video_factory_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(video_factory_flow_text(), parse_mode="HTML")
 
+def video_provider_task3d_status_payload() -> dict:
+    # Current public execution is wired to ShopAIKey in handle_shopaikey_public_callback.
+    # Key4U remains an audited admin/alternative route until a separate public
+    # router is explicitly enabled and tested end-to-end.
+    selected = "shopaikey"
+    key4u_status = key4u_provider_instance().get_status()
+    shop_submit = str(SHOPAIKEY_VIDEO_URL or "").strip()
+    shop_fetch = (shop_submit.rstrip("/") + "/{task_id}") if shop_submit else ""
+    parsed = urlparse(shop_submit) if shop_submit else None
+    base_url = f"{parsed.scheme}://{parsed.netloc}" if parsed and parsed.scheme and parsed.netloc else ""
+    submit_endpoint = str(parsed.path or "") if parsed else ""
+    fetch_endpoint = (str(parsed.path or "").rstrip("/") + "/{task_id}") if parsed else ""
+    final_submit = shop_submit
+    final_fetch = shop_fetch
+    enabled = bool(SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY and shop_submit)
+    smoke = str((shopaikey_video_status_snapshot() or {}).get("status") or "NOT_TESTED")
+    recent = shopaikey_component_status_snapshot("video", ["shopaikey_video"], ["video"])
+    safe_error = shopaikey_sanitize_error(str(recent.get("detail") or ""))
+    cost_rows = []
+    for package_id in ("package_200", "package_300", "package_400"):
+        package = VIDEO_PACKAGE_REGISTRY[package_id]
+        cost_rows.append(f"{package['price_xu']}:{package['cost_gate']}")
+    return {
+        "selected_provider": selected,
+        "base_url": base_url,
+        "submit_endpoint": submit_endpoint,
+        "fetch_endpoint": fetch_endpoint,
+        "final_submit_url": final_submit,
+        "final_fetch_url": final_fetch,
+        "enabled_flags": {
+            "provider_configured": enabled,
+            "video_public_beta": bool(video_public_beta_enabled_runtime()),
+            "video_ai_public": bool(video_ai_public_enabled_runtime()),
+            "shopaikey_public_video": bool(shopaikey_public_video_enabled_runtime()),
+        },
+        "smoke_status": smoke,
+        "cost_gate": "; ".join(cost_rows),
+        "last_job_id": str(get_system_setting("shopaikey_video_last_task_id", "") or recent.get("last_job_id") or ""),
+        "last_error_safe": safe_error[:220],
+        "key4u": key4u_status,
+        "routes": {
+            "shopaikey": {"submit": shop_submit, "fetch": shop_fetch, "public_execution": True},
+            "key4u": {
+                "submit": str(key4u_status.get("video_submit_final_url") or ""),
+                "fetch": str(key4u_status.get("video_fetch_final_url") or ""),
+                "public_execution": False,
+                "admin_smoke_enabled": bool(key4u_status.get("admin_smoke_enabled")),
+            },
+        },
+    }
+
+
+async def cmd_video_provider_curl(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    status = video_provider_task3d_status_payload()
+    key4u = status.get("key4u") or {}
+    key4u_curl_status = {
+        "selected_provider": "key4u",
+        "final_submit_url": key4u.get("video_submit_final_url") or "",
+        "final_fetch_url": key4u.get("video_fetch_final_url") or "",
+    }
+    curls = provider_curl_examples(status) + "\n\n" + provider_curl_examples(key4u_curl_status)
+    await update.message.reply_text(
+        "🧪 <b>Masked video provider cURL</b>\n\n<pre>" + html.escape(curls) + "</pre>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_video_200(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    fit = validate_package_selection("video_ai_real", "package_200", ["none"])
+    provider = video_provider_task3d_status_payload()
+    checks = {
+        "package_fit": bool(fit.get("ok")),
+        "preview_required": VIDEO_PACKAGE_REGISTRY["package_200"]["preview_policy"] == "required",
+        "paid_addons": VIDEO_PACKAGE_REGISTRY["package_200"]["allowed_addons"],
+        "submit_url": provider.get("final_submit_url") or "missing endpoint",
+        "fetch_url": provider.get("final_fetch_url") or "missing endpoint",
+        "provider_call": False,
+        "xu_charged": False,
+    }
+    await update.message.reply_text(
+        "🎬 <b>Task 3D — gói 200 diagnostic</b>\n\n<pre>" + html.escape(json.dumps(checks, ensure_ascii=False, indent=2)) + "</pre>\n\n"
+        "Lệnh này chỉ audit đường đi; không submit provider và không trừ Xu.",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_prompt_vault_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text("🗄 <b>Prompt vault status</b>\n\n<pre>" + html.escape(json.dumps(TASK3D_PROMPT_VAULT.status(), ensure_ascii=False, indent=2)) + "</pre>", parse_mode="HTML")
+
+
+async def cmd_prompt_vault_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    result = TASK3D_PROMPT_VAULT.refresh()
+    await update.message.reply_text("✅ Local prompt vault refreshed. Không scrape website và không gọi remote source.\n\n<pre>" + html.escape(json.dumps(result, ensure_ascii=False, indent=2)) + "</pre>", parse_mode="HTML")
+
+
+async def cmd_prompt_vault_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    keyword = " ".join(context.args or []).strip()
+    if not keyword:
+        return await update.message.reply_text("Cú pháp: /prompt_vault_search <keyword>")
+    matches = TASK3D_PROMPT_VAULT.search(keyword)
+    lines = ["🔎 <b>Prompt vault search</b>", ""]
+    for item in matches:
+        lines.append(f"• <code>{html.escape(str(item.get('prompt_id')))}</code> · {html.escape(str(item.get('category')))} · score {item.get('quality_score')}")
+    if not matches:
+        lines.append("Không có kết quả.")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_prompt_vault_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    raw = " ".join(context.args or []).strip()
+    if not raw:
+        return await update.message.reply_text("Cú pháp: /prompt_vault_add {JSON object}\nNguồn phải có license_note; không dùng dữ liệu scrape trái phép.")
+    try:
+        item = json.loads(raw)
+    except Exception:
+        return await update.message.reply_text("⚠️ JSON không hợp lệ. Prompt vault chưa thay đổi.")
+    result = TASK3D_PROMPT_VAULT.add(item if isinstance(item, dict) else {})
+    await update.message.reply_text("<pre>" + html.escape(json.dumps(result, ensure_ascii=False, indent=2)) + "</pre>", parse_mode="HTML")
+
+
+async def cmd_prompt_vault_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    output = io.BytesIO(TASK3D_PROMPT_VAULT.export().encode("utf-8"))
+    output.name = "toan_aas_video_prompt_vault.json"
+    await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename=output.name, caption="Prompt vault export — secrets/customer data excluded.")
+
+
 async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        lines = [
-            "🎬 <b>Trạng thái Video AI TOAN AAS</b>",
-            "",
-            "• Tạo video thật: <code>admin/internal test</code>",
-            "• Customer access: <code>OFF</code>",
-            "• Hiện đang mở cho khách: <code>script/storyboard/image prompt/video prompt pack/caption/hashtag/CTA</code>",
-            "• Customer publish: <code>OFF</code>",
-            "",
-            "TOAN AAS hiện tạo content/video pack để bạn tự dựng hoặc tự đăng. Công cụ tạo video thật chỉ mở sau khi admin test ổn.",
-        ]
-        return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-    providers = provider_status_payload()
-    real_video_configured = bool(providers["video"].get("kling") or providers["video"].get("runway"))
-    real_video_stage = providers["media_factory"].get("real_video_stage") or "DISABLED"
-    real_video_status = "ADMIN_ONLY / configured / not tested" if real_video_configured else f"{real_video_stage} / provider missing"
-    customer_publish = bool(providers["media_factory"].get("customer_publish"))
-    serpapi_configured = bool(providers["search"].get("serpapi"))
-    trend_live_stage = providers["media_factory"].get("trend_live_stage") or "DISABLED"
-    trend_live_status = (
-        f"{trend_live_stage} / SerpAPI configured / tested {tool_test_status_text('trend_live')}"
-        if serpapi_configured
-        else f"{trend_live_stage} / SerpAPI missing / tested {tool_test_status_text('trend_live')}"
-    )
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin. Người dùng public không thấy URL, cURL hoặc lỗi provider.")
+    status = video_provider_task3d_status_payload()
     lines = [
-        "🎬 <b>Video Provider Status</b>",
+        "🎬 <b>Video Provider Status — Task 3D</b>",
         "",
-        video_provider_status_line("Kling Video", bool(providers["video"].get("kling")), "kling_video", providers["media_factory"].get("kling_video_stage") or "DISABLED"),
-        video_provider_status_line("Runway Video", bool(providers["video"].get("runway")), "runway_video", providers["media_factory"].get("runway_video_stage") or "DISABLED"),
-        video_provider_status_line("HeyGen Avatar", bool(providers["video"].get("heygen")), "heygen_avatar", providers["media_factory"].get("heygen_avatar_stage") or "DISABLED"),
-        f"• Real video generation: <code>{html.escape(real_video_status)}</code>",
-        f"• Customer access: <code>{'ON' if customer_publish else 'OFF'}</code>",
-        "• Current available: <code>script/storyboard/image prompt/video prompt pack/caption/hashtag/CTA</code>",
-        f"• Trend Live: <code>{html.escape(trend_live_status)}</code>",
-        f"• Admin publish: <code>{'enabled/internal' if providers['media_factory'].get('admin_publish') else 'disabled/internal'}</code>",
-        "• Customer publish: <code>OFF</code>",
-        "• Open customer video generation: <code>NO</code>",
+        f"• Selected provider: <code>{html.escape(status['selected_provider'])}</code>",
+        f"• Base URL: <code>{html.escape(status['base_url'] or 'missing endpoint')}</code>",
+        f"• Submit endpoint: <code>{html.escape(status['submit_endpoint'] or 'missing endpoint')}</code>",
+        f"• Fetch/status endpoint: <code>{html.escape(status['fetch_endpoint'] or 'missing endpoint')}</code>",
+        f"• Final submit URL: <code>{html.escape(status['final_submit_url'] or 'missing endpoint')}</code>",
+        f"• Final fetch URL: <code>{html.escape(status['final_fetch_url'] or 'missing endpoint')}</code>",
+        f"• Enabled flags: <code>{html.escape(json.dumps(status['enabled_flags'], ensure_ascii=False))}</code>",
+        f"• Smoke status: <code>{html.escape(status['smoke_status'])}</code>",
+        f"• Cost gate: <code>{html.escape(status['cost_gate'])}</code>",
+        f"• Last job id: <code>{html.escape(status['last_job_id'] or '-')}</code>",
+        f"• Last error: <code>{html.escape(status['last_error_safe'] or '-')}</code>",
+        f"• ShopAIKey route: <code>{html.escape(str((status['routes']['shopaikey'].get('submit') or 'missing endpoint')))} → {html.escape(str((status['routes']['shopaikey'].get('fetch') or 'missing endpoint')))}</code>",
+        f"• Key4U route (admin/alternative): <code>{html.escape(str((status['routes']['key4u'].get('submit') or 'missing endpoint')))} → {html.escape(str((status['routes']['key4u'].get('fetch') or 'missing endpoint')))}</code>",
         "",
-        "Hiện TOAN AAS hỗ trợ script, storyboard, image prompt, video prompt pack, caption/hashtag/CTA.",
-        "Tạo video thật cần chọn provider video AI, test chi phí/provider trước và chỉ mở khi admin duyệt.",
+        "Provider chưa có endpoint sẽ hiện đúng 'missing endpoint'; status không tự nhận PASS khi chưa có file/result.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -114444,6 +115103,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_upload(update, context):
         return
 
+    if await handle_video_product_pending_media(update, context):
+        return
+
     if await handle_developing_video_pending_image(update, context):
         return
 
@@ -114465,6 +115127,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_video_product_pending_media(update, context):
+        return
     if await handle_free_hub_pending_upload(update, context):
         return
 
@@ -117988,6 +118652,8 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
     return await safe_edit_or_send(query, video_upload_received_text(lang), reply_markup=video_upload_received_keyboard(uid, lang))
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_video_product_pending_media(update, context):
+        return
     if await handle_video_dubbing_pending_upload(update, context):
         return
     if await handle_translation_session_media(update, context):
@@ -118488,6 +119154,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_doc_tool_pending_text(update, context):
         return
 
+    if await handle_video_product_pending_text(update, context):
+        return
+
     if await handle_storage_addon_pending_text(update, context):
         return
 
@@ -118972,6 +119641,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_wf_i2v", cmd_tool_test_workflow_image_to_video))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_video", cmd_tool_test_shopaikey_video))
     tg_app.add_handler(CommandHandler("shopaikey_video_job", cmd_shopaikey_video_job))
+    tg_app.add_handler(CommandHandler("tool_test_video_submit", cmd_tool_test_shopaikey_video))
+    tg_app.add_handler(CommandHandler("tool_test_video_fetch", cmd_shopaikey_video_job))
+    tg_app.add_handler(CommandHandler("tool_test_video_200", cmd_tool_test_video_200))
     tg_app.add_handler(CommandHandler("tool_test_key4u_chat", cmd_tool_test_key4u_chat))
     tg_app.add_handler(CommandHandler("tool_test_key4u_vision", cmd_tool_test_key4u_vision))
     tg_app.add_handler(CommandHandler("tool_test_key4u_image", cmd_tool_test_key4u_image))
@@ -119399,6 +120071,13 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
     tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
     tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
+    tg_app.add_handler(CommandHandler("video_provider_curl", cmd_video_provider_curl))
+    tg_app.add_handler(CommandHandler("prompt_vault_status", cmd_prompt_vault_status))
+    tg_app.add_handler(CommandHandler("prompt_vault_refresh", cmd_prompt_vault_refresh))
+    tg_app.add_handler(CommandHandler("prompt_vault_search", cmd_prompt_vault_search))
+    tg_app.add_handler(CommandHandler("prompt_vault_add", cmd_prompt_vault_add))
+    tg_app.add_handler(CommandHandler("prompt_vault_import", cmd_prompt_vault_add))
+    tg_app.add_handler(CommandHandler("prompt_vault_export", cmd_prompt_vault_export))
     tg_app.add_handler(CommandHandler("video_public_status", cmd_video_public_status))
     tg_app.add_handler(CommandHandler("video_gate_status", cmd_video_gate_status))
     tg_app.add_handler(CommandHandler("video_public_open_safe", cmd_video_public_open_safe))
@@ -119573,6 +120252,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_guided_callback, pattern=r"^trendg\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_trend_video_flow_callback, pattern=r"^tvflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_creative_motion_callback, pattern=r"^motion\|"))

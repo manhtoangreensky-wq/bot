@@ -376,6 +376,13 @@ class Key4UProvider:
             "image_edit_model": self.config.image_edit_model or "",
             "nano_banana_edit_model": self.config.nano_banana_edit_model or "",
             "video_model": self.config.video_model or "",
+            "video_create_endpoint": self.config.video_create_endpoint or "missing endpoint",
+            "video_query_endpoint": self.config.video_query_endpoint or "missing endpoint",
+            "video_submit_final_url": safe_join_url(self.config.base_url, self.config.video_create_endpoint) if self.config.video_create_endpoint else "",
+            "video_fetch_final_url": (
+                safe_join_url(self.config.base_url, self.config.video_query_endpoint) + "?id={task_id}"
+                if self.config.video_query_endpoint else ""
+            ),
             "tts_model": self.config.tts_model or "",
             "tts_alt_model": self.config.tts_alt_model or "",
             "clone_model": self.config.clone_model or "",

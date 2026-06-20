@@ -395,7 +395,9 @@ def test_video_finalization_tier_menu_is_two_columns_and_not_misleading():
     assert all(len(row) <= 2 for row in markup.inline_keyboard)
     labels = _labels(markup)
     assert any("Trải nghiệm" in label and "200 Xu" in label for label in labels)
-    assert any("Bán hàng" in label and "600 Xu" in label for label in labels)
+    assert any("Cơ bản" in label and "300 Xu" in label for label in labels)
+    assert any("Phổ thông" in label and "400 Xu" in label for label in labels)
+    assert not any("600 Xu" in label for label in labels)
     assert not any("nếu" in label.lower() for label in labels)
     callbacks = _callbacks(markup)
     assert "vfinal|tier|low" in callbacks
