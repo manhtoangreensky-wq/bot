@@ -35,7 +35,7 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
 
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
-    assert "Trung tâm dịch thuật TOAN AAS" in text
+    assert "Trung tâm dịch" in text
     assert callbacks == {
         "menu|translation_language_hub",
         "menu|translation_video_factory",
@@ -55,6 +55,7 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
         "menu|translation_document",
         "menu|translation_transcript",
         "menu|translation_language",
+        "menu|translation_auto_target",
         "menu|main",
         "menu|translate",
         "menu|translation_stop_session",
@@ -122,7 +123,7 @@ def test_language_menu_remains_accessible_from_translation_and_account():
 def test_full_translation_hub_has_voice_two_way_live_and_video_branch():
     text, markup = bot.localized_menu_content("translate", False, "vi", user_id=123)
     callbacks = _callbacks(markup)
-    assert "Trung tâm dịch thuật TOAN AAS" in text
+    assert "Trung tâm dịch" in text
     assert "menu|translation_language_hub" in callbacks
     assert "menu|translation_video_factory" in callbacks
     assert "menu|translation_video_dub_menu" not in callbacks

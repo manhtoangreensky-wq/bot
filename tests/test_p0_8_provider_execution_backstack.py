@@ -277,7 +277,7 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
     async def transcribe(data, context, content_type):
         return "route", "Hello from preview", "ok"
 
-    async def translate(text, target):
+    async def translate(text, target, **_kwargs):
         return {"provider": "route", "text": "Xin chào từ bản thử"}
 
     def forbidden_spend(*args, **kwargs):
@@ -286,7 +286,7 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_download_source", download)
     monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", cap)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", transcribe)
-    monkeypatch.setattr(bot, "translate_to_language", translate)
+    monkeypatch.setattr(bot, "translate_subtitle_text", translate)
     monkeypatch.setattr(bot, "spend_fixed_credit_info", forbidden_spend)
     query = CaptureQuery("videodub|preview")
     result = asyncio.run(bot.execute_video_dubbing_preview(query, SimpleNamespace(), state, "vi"))

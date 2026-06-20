@@ -299,7 +299,7 @@ def config_from_env() -> Key4UConfig:
         voice_tts_endpoint=_env("KEY4U_VOICE_TTS_ENDPOINT", "/tts"),
         minimax_upload_endpoint=_env("KEY4U_MINIMAX_UPLOAD_ENDPOINT", "/files"),
         minimax_clone_endpoint=_env("KEY4U_MINIMAX_CLONE_ENDPOINT", "/voice_clone"),
-        stt_endpoint=_env("KEY4U_STT_ENDPOINT", ""),
+        stt_endpoint=_env("KEY4U_STT_ENDPOINT", "/audio/transcriptions"),
         suno_create_endpoint=_env("KEY4U_SUNO_CREATE_ENDPOINT", "/submit/music"),
         suno_query_endpoint=_env("KEY4U_SUNO_QUERY_ENDPOINT", "/fetch/{taskId}"),
         suno_lyrics_endpoint=_env("KEY4U_SUNO_LYRICS_ENDPOINT", "/submit/lyrics"),
@@ -314,7 +314,7 @@ def config_from_env() -> Key4UConfig:
         tts_model=_env("KEY4U_DEFAULT_TTS_MODEL", _env("KEY4U_TTS_MODEL", "speech-02-hd")),
         tts_alt_model=_env("KEY4U_ALT_TTS_MODEL", "speech-2.6-hd"),
         clone_model=_env("KEY4U_MINIMAX_CLONE_MODEL", "speech-2.8-hd"),
-        stt_model=_env("KEY4U_STT_MODEL", ""),
+        stt_model=_env("KEY4U_STT_MODEL", "whisper-1"),
         suno_model=_env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", "chirp-v4")),
         rerank_model=_env("KEY4U_RERANK_MODEL", ""),
     )
@@ -595,6 +595,76 @@ class Key4UProvider:
             return _timeout_result("text_brain", selected_model, exc)
         except Exception as exc:
             return _result(ok=False, capability="text_brain", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+
+    async def translate(
+        self,
+        text: str,
+        target_lang: str,
+        source_lang: str = "auto",
+        model: str = "qwen-mt-turbo",
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        selected_model = str(model or "qwen-mt-turbo").strip()
+        if not self.is_configured():
+            return self._missing_result("translation", selected_model)
+        content = str(text or "").strip()[:6000]
+        if not content or not str(target_lang or "").strip():
+            return _result(
+                ok=False,
+                capability="translation",
+                model=selected_model,
+                status="FAIL_BAD_REQUEST",
+                error_class="FAIL_BAD_REQUEST",
+                error_message_safe="Missing text or target language",
+            )
+        endpoint = safe_join_url(self.config.openai_base_url, self.config.chat_endpoint)
+        payload = {
+            "model": selected_model,
+            "messages": [{"role": "user", "content": content}],
+            "translation_options": {
+                "source_lang": str(source_lang or "auto").strip() or "auto",
+                "target_lang": str(target_lang or "").strip(),
+            },
+        }
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.post(
+                    endpoint,
+                    headers={**self._headers(), "Content-Type": "application/json"},
+                    json=payload,
+                )
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
+            translated = str((((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")).strip()
+            if 200 <= response.status_code < 300 and translated:
+                return _result(
+                    ok=True,
+                    capability="translation",
+                    model=selected_model,
+                    status="PASS",
+                    http_status=response.status_code,
+                    latency_ms=latency_ms,
+                    text=translated,
+                    raw_debug_admin_only={"response_shape": sorted(data.keys())[:8]},
+                )
+            return _result(
+                ok=False,
+                capability="translation",
+                model=selected_model,
+                status="FAIL_CONTENT_EMPTY" if response.status_code < 300 else "FAIL",
+                http_status=response.status_code,
+                latency_ms=latency_ms,
+                error_class="FAIL_CONTENT_EMPTY" if response.status_code < 300 else _classify_http(response.status_code, data),
+                error_message_safe="empty content" if response.status_code < 300 else data,
+            )
+        except httpx.TimeoutException as exc:
+            return _timeout_result("translation", selected_model, exc)
+        except Exception as exc:
+            return _result(ok=False, capability="translation", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
 
     async def vision_analysis(
         self,

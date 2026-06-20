@@ -122,14 +122,17 @@ def test_dubbing_voice_selection_passes_voice_id_to_minimax(monkeypatch):
         return "PASS", b"audio-bytes", "ok", 200
 
     monkeypatch.setattr(bot, "TTS_PROVIDER", "auto")
-    monkeypatch.setattr(bot, "minimax_tts_configured", lambda: True)
+    monkeypatch.setattr(bot, "key4u_minimax_tts_public_ready", lambda: False)
+    monkeypatch.setattr(bot, "shopaikey_minimax_tts_public_ready", lambda: True)
+    monkeypatch.setattr(bot, "direct_minimax_tts_public_ready", lambda: False)
+    monkeypatch.setattr(bot, "shopaikey_tts_fallback_public_ready", lambda: False)
     monkeypatch.setattr(bot, "shopaikey_minimax_tts_bytes", fake_minimax)
 
     labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     callbacks = _callbacks(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
-    assert "👩 Giọng nữ mặc định" in labels
-    assert "👨 Giọng nam mặc định" in labels
-    assert "📁 Kho voice đã lưu" in labels
+    assert "👩 Giọng nữ" in labels
+    assert "👨 Giọng nam" in labels
+    assert "📂 Kho voice" in labels
     assert "videodub|voice|default_female" in callbacks
     assert "videodub|voice_saved" in callbacks
 
@@ -150,7 +153,8 @@ def test_dubbing_confirm_shows_voice_text_pricing():
         "vi",
     )
 
-    assert "Phí xử lý nền" in text
-    assert "1050 Xu" in text
-    assert "Ước tính voice theo chữ" in text
-    assert "Tổng phí dự kiến" in text
+    assert "Tạo phụ đề" in text
+    assert "Dịch phụ đề" in text
+    assert "Tạo giọng lồng tiếng" in text
+    assert "Ghép audio/video" in text
+    assert "Tổng Xu" in text
