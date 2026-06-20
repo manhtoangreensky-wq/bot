@@ -98,14 +98,12 @@ def test_auto_subtitle_after_upload_shows_product_confirmation(monkeypatch):
     assert state["step"] == "output"
     text = message.outputs[-1]["text"]
     labels = _labels(message.outputs[-1]["reply_markup"])
-    assert "TOAN AAS đã nhận video" in text
-    assert "Tác vụ: <b>Tạo phụ đề tự động</b>" in text
+    assert "Video đã sẵn sàng tạo phụ đề" in text
+    assert "Tác vụ:" not in text
+    assert "Nguồn:" not in text
     assert labels == [
-        "👁 Xem thử phụ đề",
-        "✅ Xác nhận xuất phụ đề",
-        "📄 Xuất SRT",
-        "🎞 Gắn vào video",
-        "📝 Chỉnh phụ đề",
+        "👁 Xem thử",
+        "✅ Xác nhận tạo đầy đủ",
         "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
@@ -132,7 +130,7 @@ def test_auto_subtitle_provider_off_clean_buttons(monkeypatch):
     text = query.edits[-1]["text"]
     markup = query.edits[-1]["reply_markup"]
     assert text == "Tạo phụ đề tự động chưa sẵn sàng xử lý. TOAN AAS chưa trừ Xu."
-    assert _callbacks(markup) == ["videodub|back_confirm", "videodub|guard_back", "menu|main"]
+    assert _callbacks(markup) == ["videodub|final", "videodub|guard_back", "menu|main"]
     assert "Admin blocker" not in text
 
 
@@ -151,11 +149,12 @@ def test_auto_dubbing_confirmation_has_preview_and_full():
     }
     text = bot.video_dubbing_confirm_text(state, "vi")
     labels = _labels(bot.video_dubbing_confirm_keyboard("vi", state))
-    assert "✅ <b>Xác nhận lồng tiếng</b>" in text
-    assert "Tác vụ: <b>Lồng tiếng tự động</b>" in text
+    assert "✅ <b>Video đã sẵn sàng lồng tiếng</b>" in text
+    assert "Tác vụ:" not in text
+    assert "Nguồn:" not in text
+    assert "Chi phí dự kiến" not in text
     assert "Tốc độ: <b>0.9</b>" in text
-    assert "▶️ Nghe thử 6 giây" in labels
-    assert "✅ Xác nhận xuất lồng tiếng" in labels
+    assert labels == ["▶️ Nghe thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
 
 
 def test_auto_dubbing_provider_off_no_debug_buttons(monkeypatch):
@@ -203,7 +202,7 @@ def test_auto_dubbing_no_reupload_after_guard_back(monkeypatch):
     state = bot.get_video_dubbing_pending(uid)
     assert state["source_file_id"] == "kept-dub-file"
     assert state["step"] == "confirm"
-    assert "Xác nhận lồng tiếng" in query.edits[-1]["text"]
+    assert "Video đã sẵn sàng lồng tiếng" in query.edits[-1]["text"]
 
 
 def test_subtitle_plus_confirmation_has_preview_and_full_subtitle():
@@ -215,12 +214,11 @@ def test_subtitle_plus_confirmation_has_preview_and_full_subtitle():
     }
     text = bot.video_dubbing_output_text(state, "vi")
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
-    assert "Xác nhận tạo phụ đề dịch" in text
-    assert "Kết quả trước mắt: phụ đề dịch, giữ âm thanh gốc." in text
-    assert "👁 Xem thử phụ đề" in labels
-    assert "✅ Xác nhận tạo phụ đề" in labels
-    assert "📄 Xuất SRT" in labels
-    assert "🎞 Gắn phụ đề vào video" in labels
+    assert "Video đã sẵn sàng tạo phụ đề dịch" in text
+    assert "TOAN AAS sẽ tạo phụ đề dịch trước" in text
+    assert labels == ["👁 Xem thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert "📄 Xuất SRT" not in labels
+    assert "🎞 Gắn phụ đề vào video" not in labels
 
 
 def test_subtitle_plus_provider_off_no_debug_buttons(monkeypatch):
@@ -241,7 +239,7 @@ def test_subtitle_plus_provider_off_no_debug_buttons(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "dịch phụ đề/lồng tiếng chưa sẵn sàng xử lý" in ui
+    assert "phụ đề dịch chưa sẵn sàng xử lý" in ui
     assert "admin blocker" not in ui
     assert "curl provider" not in ui
 
@@ -268,10 +266,10 @@ def test_subtitle_plus_dubbing_confirmation_has_preview_and_full():
     }
     text = bot.video_dubbing_confirm_text(state, "vi")
     labels = _labels(bot.video_dubbing_confirm_keyboard("vi", state))
-    assert "Xác nhận lồng tiếng" in text
-    assert "Tác vụ: <b>Phụ đề + lồng tiếng</b>" in text
-    assert "▶️ Nghe thử 6 giây" in labels
-    assert "✅ Xác nhận xuất lồng tiếng" in labels
+    assert "Video đã sẵn sàng lồng tiếng" in text
+    assert "Tác vụ:" not in text
+    assert "Chi phí dự kiến" not in text
+    assert labels == ["▶️ Nghe thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
 
 
 def test_link_import_top_level_usable_or_guarded():
@@ -353,7 +351,7 @@ def test_task2_upload_does_not_open_generic_video_menu(monkeypatch):
     asyncio.run(bot.handle_media_cache_only(_update(uid, message), SimpleNamespace()))
     joined = " ".join(item["text"] for item in message.outputs)
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
-    assert "TOAN AAS đã nhận video" in joined
+    assert "Video đã sẵn sàng tạo phụ đề" in joined
 
 
 def test_task2_upload_preserves_session_source_ref(monkeypatch):

@@ -61,7 +61,7 @@ def test_video_translation_menu_labels_auto():
 def test_subtitle_auto_no_translation_no_voice():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
-    assert "👁 Xem thử phụ đề" in labels
+    assert "👁 Xem thử" in labels
     assert "🗣 Lồng tiếng" not in labels
     assert not any("giọng" in label.lower() for label in labels)
     assert not bot.video_dubbing_requires_voice(bot.VIDEO_SUBTITLE_MODE_CREATE)
@@ -69,13 +69,14 @@ def test_subtitle_auto_no_translation_no_voice():
 
 def test_subtitle_output_preview_dub_srt_burn():
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
-    assert callbacks[:5] == [
+    assert callbacks[:4] == [
         "videodub|confirm_subtitle_create",
         "videodub|final",
-        "videodub|output|srt",
-        "videodub|output|burn",
-        "videodub|subtitle_editor",
+        "videodub|output_back",
+        "menu|main",
     ]
+    assert "videodub|output|srt" not in callbacks
+    assert "videodub|output|burn" not in callbacks
     assert "videodub|continue_dubbing" not in callbacks
 
 
@@ -105,8 +106,9 @@ def test_subtitle_plus_dubbing_export_before_voice(monkeypatch):
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
     labels = _labels(markup)
     assert state["step"] == "output"
-    assert "Xác nhận tạo phụ đề dịch" in text
-    assert "📄 Xuất SRT" in labels
+    assert "Video đã sẵn sàng tạo phụ đề dịch" in text
+    assert "✅ Xác nhận tạo đầy đủ" in labels
+    assert "📄 Xuất SRT" not in labels
     assert "🗣 Tiếp tục lồng tiếng" not in labels
     assert not any("Giọng" in label for label in labels)
 
@@ -142,8 +144,9 @@ def test_auto_subtitle_input_and_output_are_basic_product():
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
     assert "🗣 Lồng tiếng" not in labels
     assert "🗣 Tiếp tục lồng tiếng" not in labels
-    assert "📄 Xuất SRT" in labels
-    assert "🎞 Gắn vào video" in labels
+    assert "👁 Xem thử" in labels
+    assert "✅ Xác nhận tạo đầy đủ" in labels
+    assert "📄 Xuất SRT" not in labels
 
 
 def test_auto_dubbing_language_voice_speed_numeric():

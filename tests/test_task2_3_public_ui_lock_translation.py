@@ -51,7 +51,7 @@ def test_public_translation_guard_hides_admin_blocker():
 
 def test_public_translation_guard_hides_factory_status_buttons():
     callbacks = _callbacks(bot.video_dubbing_guard_keyboard("vi", admin=False))
-    assert callbacks == ["videodub|back_confirm", "videodub|guard_back", "menu|main"]
+    assert callbacks == ["videodub|final", "videodub|guard_back", "menu|main"]
     assert "videodub|admin_smoke" not in callbacks
     assert "videodub|admin_status" not in callbacks
 
@@ -106,7 +106,7 @@ def test_task2_upload_video_stays_in_auto_subtitle(monkeypatch):
     assert state["product"] == "auto_subtitle"
     assert state["source_ref"] == "auto-subtitle"
     assert state["step"] == "output"
-    assert "TOAN AAS đã nhận video" in message.outputs[-1]["text"]
+    assert "Video đã sẵn sàng tạo phụ đề" in message.outputs[-1]["text"]
 
 
 def test_task2_upload_video_stays_in_auto_dubbing(monkeypatch):
@@ -147,7 +147,7 @@ def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):
     asyncio.run(bot.handle_media_cache_only(_update(uid, message), SimpleNamespace()))
     joined = " ".join(item["text"] for item in message.outputs)
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
-    assert "TOAN AAS đã nhận video" in joined
+    assert "Video đã sẵn sàng tạo phụ đề" in joined
 
 
 def test_auto_subtitle_preview_back_to_output():

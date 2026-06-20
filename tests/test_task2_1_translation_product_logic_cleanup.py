@@ -123,7 +123,13 @@ def test_auto_subtitle_output_no_dubbing_button_basic_product():
 
 def test_auto_subtitle_output_srt_burn_edit():
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
-    assert {"videodub|output|srt", "videodub|output|burn", "videodub|subtitle_editor"}.issubset(callbacks)
+    assert callbacks == ["videodub|confirm_subtitle_create", "videodub|final", "videodub|output_back", "menu|main"]
+    assert not {"videodub|output|srt", "videodub|output|burn", "videodub|subtitle_editor"}.intersection(callbacks)
+    ready_callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {
+        "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
+        "subtitle_ref": "video_dubbing_artifact:test:subtitle",
+    }))
+    assert {"videodub|output|srt", "videodub|output|burn", "videodub|subtitle_editor"}.issubset(ready_callbacks)
 
 
 def test_auto_dubbing_input_no_link_button():
@@ -166,7 +172,7 @@ def test_auto_dubbing_invoice_after_speed():
         "vi",
     )
     assert "Tốc độ: <b>1.5</b>" in text
-    assert "Chi phí dự kiến" in text
+    assert "Chi phí dự kiến" not in text
 
 
 def test_auto_dubbing_preview_6s():
@@ -221,8 +227,9 @@ def test_subtitle_dubbing_export_before_voice(monkeypatch):
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
     assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
     assert state["step"] == "output"
-    assert "Xác nhận tạo phụ đề dịch" in text
-    assert "📄 Xuất SRT" in _labels(markup)
+    assert "Video đã sẵn sàng tạo phụ đề dịch" in text
+    assert "✅ Xác nhận tạo đầy đủ" in _labels(markup)
+    assert "📄 Xuất SRT" not in _labels(markup)
     assert not any("Giọng nữ" in label for label in _labels(markup))
 
 
@@ -385,7 +392,7 @@ def test_subtitle_dubbing_back_continue_voice_to_subtitle_output(monkeypatch):
     state = bot.get_video_dubbing_pending(uid)
     assert state["step"] == "output"
     assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
-    assert "Xác nhận tạo phụ đề dịch" in query.outputs[-1]["text"]
+    assert "Video đã sẵn sàng tạo phụ đề dịch" in query.outputs[-1]["text"]
 
 
 def test_translation_provider_curl_appendix_complete():

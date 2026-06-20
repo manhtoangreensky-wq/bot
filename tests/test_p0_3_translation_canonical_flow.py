@@ -249,7 +249,7 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     lang_query = asyncio.run(_press_videodub("videodub|language|English", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "output"
-    assert "Xác nhận tạo phụ đề dịch" in lang_query.outputs[-1]["text"]
+    assert "Video đã sẵn sàng tạo phụ đề dịch" in lang_query.outputs[-1]["text"]
     assert "🗣 Tiếp tục lồng tiếng" not in _labels(lang_query.outputs[-1]["reply_markup"])
 
     translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
