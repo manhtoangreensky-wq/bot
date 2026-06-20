@@ -2,7 +2,7 @@ import inspect
 from pathlib import Path
 
 import bot
-from providers.key4u_provider import Key4UConfig, Key4UProvider, scoped_join_url
+from providers.key4u_provider import Key4UConfig, Key4UProvider, join_provider_url, scoped_join_url
 
 
 def _labels(markup):
@@ -226,6 +226,37 @@ def test_music_provider_status_admin_only():
     assert "Last sanitized error" in status
 
 
+def test_audio_provider_admin_commands_registered_and_guarded():
+    source = Path(bot.__file__).resolve().read_text(encoding="utf-8")
+    required = {
+        "audio_provider_status": "cmd_provider_status",
+        "voice_provider_status": "cmd_voice_status",
+        "music_provider_status": "cmd_music_provider_status",
+        "tool_test_voice_tts": "cmd_tool_test_minimax_tts",
+        "tool_test_voice_clone": "cmd_tool_test_minimax_voice_clone",
+        "tool_test_music_suno": "cmd_tool_test_key4u_suno",
+        "audio_provider_curl": "cmd_audio_provider_curl",
+    }
+    for command, handler in required.items():
+        assert f'CommandHandler("{command}", {handler})' in source
+    assert "is_admin_user" in inspect.getsource(bot.cmd_audio_provider_curl)
+    curl_text = bot.audio_provider_curl_text()
+    assert "https://api.key4u.shop/minimax/v1/t2a_v2" in curl_text
+    assert "https://api.key4u.shop/suno/submit/music" in curl_text
+    assert "/minimax/v1/minimax/v1" not in curl_text
+    assert "/suno/suno" not in curl_text
+
+
+def test_audio_provider_status_shows_canonical_final_urls():
+    voice_status = bot.voice_status_text()
+    music_status = bot.music_status_text()
+    assert "https://api.key4u.shop/minimax/v1/t2a_v2" in voice_status
+    assert "https://api.key4u.shop/minimax/v1/files" in voice_status
+    assert "https://api.key4u.shop/minimax/v1/voice_clone" in voice_status
+    assert "https://api.key4u.shop/suno/submit/music" in music_status
+    assert "https://api.key4u.shop/suno/fetch/{taskId}" in music_status
+
+
 def test_shopaikey_tts_fallback_no_double_v1(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_TTS_BASE_URL", "https://api.shopaikey.com")
     monkeypatch.setattr(bot, "SHOPAIKEY_TTS_ENDPOINT", "/tts/openai/speech")
@@ -289,24 +320,92 @@ def test_shopaikey_suno_submit_and_fetch_match_documented_schema():
 
 def test_key4u_voice_music_routes_match_reference():
     assert bot.KEY4U_BASE_URL == "https://api.key4u.shop"
-    assert bot.KEY4U_MINIMAX_BASE_URL == "https://api.key4u.shop/minimax/v1"
+    assert bot.KEY4U_MINIMAX_BASE_URL == "https://api.key4u.shop/minimax"
     assert bot.KEY4U_VOICE_BASE_URL == "https://voice.key4u.shop/api/v1"
     assert bot.KEY4U_SUNO_BASE_URL == "https://api.key4u.shop/suno"
-    assert bot.KEY4U_TTS_ENDPOINT == "/minimax/v1/t2a_v2"
-    assert bot.KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT == "/minimax/v1/t2a_async_v2"
-    assert bot.KEY4U_MINIMAX_TTS_QUERY_ENDPOINT == "/minimax/v1/query/t2a_async_query_v2"
-    assert bot.KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT == "/minimax/v1/files/retrieve"
-    assert bot.KEY4U_MINIMAX_UPLOAD_ENDPOINT == "/minimax/v1/files"
-    assert bot.KEY4U_MINIMAX_CLONE_ENDPOINT == "/minimax/v1/voice_clone"
-    assert bot.KEY4U_SUNO_CREATE_ENDPOINT == "/suno/submit/music"
-    assert bot.KEY4U_SUNO_QUERY_ENDPOINT == "/suno/fetch/{taskId}"
-    assert bot.KEY4U_SUNO_LYRICS_ENDPOINT == "/suno/submit/lyrics"
-    assert bot.KEY4U_SUNO_WAV_ENDPOINT == "/suno/act/wav/{clipId}"
-    assert bot.KEY4U_SUNO_TIMING_ENDPOINT == "/suno/act/timing/{clipId}"
+    assert bot.KEY4U_TTS_ENDPOINT == "/v1/t2a_v2"
+    assert bot.KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT == "/v1/t2a_async_v2"
+    assert bot.KEY4U_MINIMAX_TTS_QUERY_ENDPOINT == "/v1/query/t2a_async_query_v2"
+    assert bot.KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT == "/v1/files/retrieve"
+    assert bot.KEY4U_MINIMAX_UPLOAD_ENDPOINT == "/v1/files"
+    assert bot.KEY4U_MINIMAX_CLONE_ENDPOINT == "/v1/voice_clone"
+    assert bot.KEY4U_SUNO_CREATE_ENDPOINT == "/submit/music"
+    assert bot.KEY4U_SUNO_QUERY_ENDPOINT == "/fetch/{taskId}"
+    assert bot.KEY4U_SUNO_LYRICS_ENDPOINT == "/submit/lyrics"
+    assert bot.KEY4U_SUNO_WAV_ENDPOINT == "/act/wav/{clipId}"
+    assert bot.KEY4U_SUNO_TIMING_ENDPOINT == "/act/timing/{clipId}"
     assert bot.KEY4U_TTS_MODEL
     assert bot.KEY4U_TTS_ALT_MODEL == "speech-2.6-hd"
     assert bot.KEY4U_MINIMAX_CLONE_MODEL == "speech-2.8-hd"
     assert bot.KEY4U_SUNO_MODEL
+
+
+def test_key4u_audio_env_example_uses_canonical_scoped_urls():
+    env_example = Path(".env.example").read_text(encoding="utf-8")
+    assert "KEY4U_MINIMAX_BASE=https://api.key4u.shop/minimax" in env_example
+    assert "KEY4U_TTS_ENDPOINT=/v1/t2a_v2" in env_example
+    assert "KEY4U_MINIMAX_CLONE_ENDPOINT=/v1/voice_clone" in env_example
+    assert "KEY4U_SUNO_BASE=https://api.key4u.shop/suno" in env_example
+    assert "KEY4U_SUNO_CREATE_ENDPOINT=/submit/music" in env_example
+    assert "KEY4U_SUNO_QUERY_ENDPOINT=/fetch/{taskId}" in env_example
+
+
+def test_join_provider_url_no_v1_v1():
+    assert bot.join_provider_url("https://api.key4u.shop/v1", "/v1/chat/completions") == "https://api.key4u.shop/v1/chat/completions"
+    assert join_provider_url("https://api.key4u.shop/v1", "/v1/chat/completions") == "https://api.key4u.shop/v1/chat/completions"
+
+
+def test_key4u_minimax_final_tts_url_exact():
+    assert bot.key4u_minimax_final_url(bot.KEY4U_TTS_ENDPOINT) == "https://api.key4u.shop/minimax/v1/t2a_v2"
+
+
+def test_key4u_minimax_no_duplicate_minimax_v1():
+    cases = [
+        ("https://api.key4u.shop/minimax", "/v1/t2a_v2"),
+        ("https://api.key4u.shop", "/minimax/v1/t2a_v2"),
+        ("https://api.key4u.shop/minimax/v1", "/t2a_v2"),
+        ("https://api.key4u.shop/minimax/v1", "/minimax/v1/t2a_v2"),
+    ]
+    for base, endpoint in cases:
+        url = join_provider_url(base, endpoint)
+        assert url == "https://api.key4u.shop/minimax/v1/t2a_v2"
+        assert "/minimax/v1/minimax/v1" not in url
+
+
+def test_key4u_minimax_clone_urls_exact():
+    assert bot.key4u_minimax_final_url(bot.KEY4U_MINIMAX_UPLOAD_ENDPOINT) == "https://api.key4u.shop/minimax/v1/files"
+    assert bot.key4u_minimax_final_url(bot.KEY4U_MINIMAX_CLONE_ENDPOINT) == "https://api.key4u.shop/minimax/v1/voice_clone"
+
+
+def test_key4u_suno_submit_url_exact():
+    assert bot.key4u_suno_final_url(bot.KEY4U_SUNO_CREATE_ENDPOINT) == "https://api.key4u.shop/suno/submit/music"
+
+
+def test_key4u_suno_fetch_url_exact():
+    assert bot.key4u_suno_fetch_final_url("task-123") == "https://api.key4u.shop/suno/fetch/task-123"
+
+
+def test_key4u_suno_no_duplicate_suno():
+    cases = [
+        ("https://api.key4u.shop/suno", "/submit/music"),
+        ("https://api.key4u.shop", "/suno/submit/music"),
+        ("https://api.key4u.shop/suno", "/suno/submit/music"),
+        ("https://api.key4u.shop/suno/", "suno/fetch/task-123"),
+    ]
+    expected = [
+        "https://api.key4u.shop/suno/submit/music",
+        "https://api.key4u.shop/suno/submit/music",
+        "https://api.key4u.shop/suno/submit/music",
+        "https://api.key4u.shop/suno/fetch/task-123",
+    ]
+    for (base, endpoint), url in zip(cases, expected):
+        joined = join_provider_url(base, endpoint)
+        assert joined == url
+        assert "/suno/suno" not in joined
+
+
+def test_join_provider_url_absolute_endpoint():
+    assert bot.join_provider_url("https://api.key4u.shop/suno", "https://example.com/path/") == "https://example.com/path"
 
 
 def test_key4u_adapter_supports_scoped_voice_music_routes():
@@ -316,6 +415,12 @@ def test_key4u_adapter_supports_scoped_voice_music_routes():
         "/t2a_v2",
         "/minimax/v1",
     ) == "https://api.key4u.shop/minimax/v1/t2a_v2"
+    assert scoped_join_url(
+        "https://api.key4u.shop",
+        "https://api.key4u.shop/suno",
+        "/suno/submit/music",
+        "/suno",
+    ) == "https://api.key4u.shop/suno/submit/music"
     assert scoped_join_url(
         "https://api.key4u.shop",
         "https://api.key4u.shop/minimax/v1",

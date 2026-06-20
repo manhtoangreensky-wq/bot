@@ -380,17 +380,36 @@ def effective_public_base_url() -> str:
 def effective_public_site_url() -> str:
     return (PUBLIC_SITE_URL or WEBSITE_URL or "").strip().rstrip("/")
 
-def join_shopaikey_url(base_url: str, endpoint: str) -> str:
+def join_provider_url(base_url: str, endpoint: str) -> str:
     base = str(base_url or "").strip().rstrip("/")
     target = str(endpoint or "").strip()
     if not target:
         return base
     if target.startswith(("http://", "https://")):
         return target.rstrip("/")
-    path = "/" + target.lstrip("/")
-    if base.endswith("/v1") and (path == "/v1" or path.startswith("/v1/")):
-        path = path[3:] or "/"
-    return base + path
+    match = re.match(r"^(https?://[^/]+)(/.*)?$", base)
+    if not match:
+        base_segments = [segment for segment in base.split("/") if segment]
+        path_segments = [segment for segment in target.strip("/").split("/") if segment]
+        prefix = ""
+    else:
+        prefix = match.group(1)
+        base_segments = [segment for segment in (match.group(2) or "").strip("/").split("/") if segment]
+        path_segments = [segment for segment in target.strip("/").split("/") if segment]
+    overlap = 0
+    max_overlap = min(len(base_segments), len(path_segments))
+    for size in range(max_overlap, 0, -1):
+        if base_segments[-size:] == path_segments[:size]:
+            overlap = size
+            break
+    joined_segments = [*base_segments, *path_segments[overlap:]]
+    joined_path = "/".join(joined_segments)
+    if prefix:
+        return prefix + ("/" + joined_path if joined_path else "")
+    return "/" + joined_path if joined_path else ""
+
+def join_shopaikey_url(base_url: str, endpoint: str) -> str:
+    return join_provider_url(base_url, endpoint)
 
 ACTIVE_TELEGRAM_UPDATE_MODE = ""
 ACTIVE_TELEGRAM_WEBHOOK_URL = ""
@@ -432,9 +451,9 @@ KEY4U_ENABLED = env_flag("KEY4U_ENABLED", "false")
 KEY4U_API_KEY = _env("KEY4U_TOKEN", _env("KEY4U_API_KEY", ""))
 KEY4U_BASE_URL = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
 KEY4U_OPENAI_BASE_URL = _env("KEY4U_OPENAI_BASE_URL", join_shopaikey_url(KEY4U_BASE_URL, "/v1"))
-KEY4U_MINIMAX_BASE_URL = _env("KEY4U_MINIMAX_BASE", join_shopaikey_url(KEY4U_BASE_URL, "/minimax/v1"))
+KEY4U_MINIMAX_BASE_URL = _env("KEY4U_MINIMAX_BASE", join_provider_url(KEY4U_BASE_URL, "/minimax"))
 KEY4U_VOICE_BASE_URL = _env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1")
-KEY4U_SUNO_BASE_URL = _env("KEY4U_SUNO_BASE", join_shopaikey_url(KEY4U_BASE_URL, "/suno"))
+KEY4U_SUNO_BASE_URL = _env("KEY4U_SUNO_BASE", join_provider_url(KEY4U_BASE_URL, "/suno"))
 KEY4U_SMART_ROUTING = env_flag("KEY4U_SMART_ROUTING", "true")
 KEY4U_USAGE_ENDPOINT = _env("KEY4U_USAGE_ENDPOINT", "")
 KEY4U_BALANCE_ENDPOINT = _env("KEY4U_BALANCE_ENDPOINT", "")
@@ -444,19 +463,19 @@ KEY4U_IMAGE_EDIT_ENDPOINT = _env("KEY4U_IMAGE_EDITS_ENDPOINT", _env("KEY4U_IMAGE
 KEY4U_NANO_BANANA_EDIT_ENDPOINT = _env("KEY4U_NANO_BANANA_EDIT_ENDPOINT", "/fal-ai/nano-banana/edit")
 KEY4U_VIDEO_CREATE_ENDPOINT = _env("KEY4U_VIDEO_CREATE_ENDPOINT", "/v1/video/create")
 KEY4U_VIDEO_QUERY_ENDPOINT = _env("KEY4U_VIDEO_QUERY_ENDPOINT", "/v1/video/query")
-KEY4U_TTS_ENDPOINT = _env("KEY4U_TTS_ENDPOINT", "/minimax/v1/t2a_v2")
-KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT = _env("KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT", "/minimax/v1/t2a_async_v2")
-KEY4U_MINIMAX_TTS_QUERY_ENDPOINT = _env("KEY4U_MINIMAX_TTS_QUERY_ENDPOINT", "/minimax/v1/query/t2a_async_query_v2")
-KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT = _env("KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT", "/minimax/v1/files/retrieve")
+KEY4U_TTS_ENDPOINT = _env("KEY4U_TTS_ENDPOINT", "/v1/t2a_v2")
+KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT = _env("KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT", "/v1/t2a_async_v2")
+KEY4U_MINIMAX_TTS_QUERY_ENDPOINT = _env("KEY4U_MINIMAX_TTS_QUERY_ENDPOINT", "/v1/query/t2a_async_query_v2")
+KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT = _env("KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT", "/v1/files/retrieve")
 KEY4U_VOICE_TTS_ENDPOINT = _env("KEY4U_VOICE_TTS_ENDPOINT", "/tts")
-KEY4U_MINIMAX_UPLOAD_ENDPOINT = _env("KEY4U_MINIMAX_UPLOAD_ENDPOINT", "/minimax/v1/files")
-KEY4U_MINIMAX_CLONE_ENDPOINT = _env("KEY4U_MINIMAX_CLONE_ENDPOINT", "/minimax/v1/voice_clone")
+KEY4U_MINIMAX_UPLOAD_ENDPOINT = _env("KEY4U_MINIMAX_UPLOAD_ENDPOINT", "/v1/files")
+KEY4U_MINIMAX_CLONE_ENDPOINT = _env("KEY4U_MINIMAX_CLONE_ENDPOINT", "/v1/voice_clone")
 KEY4U_STT_ENDPOINT = _env("KEY4U_STT_ENDPOINT", "/audio/transcriptions")
-KEY4U_SUNO_CREATE_ENDPOINT = _env("KEY4U_SUNO_CREATE_ENDPOINT", "/suno/submit/music")
-KEY4U_SUNO_QUERY_ENDPOINT = _env("KEY4U_SUNO_QUERY_ENDPOINT", "/suno/fetch/{taskId}")
-KEY4U_SUNO_LYRICS_ENDPOINT = _env("KEY4U_SUNO_LYRICS_ENDPOINT", "/suno/submit/lyrics")
-KEY4U_SUNO_WAV_ENDPOINT = _env("KEY4U_SUNO_WAV_ENDPOINT", "/suno/act/wav/{clipId}")
-KEY4U_SUNO_TIMING_ENDPOINT = _env("KEY4U_SUNO_TIMING_ENDPOINT", "/suno/act/timing/{clipId}")
+KEY4U_SUNO_CREATE_ENDPOINT = _env("KEY4U_SUNO_CREATE_ENDPOINT", "/submit/music")
+KEY4U_SUNO_QUERY_ENDPOINT = _env("KEY4U_SUNO_QUERY_ENDPOINT", "/fetch/{taskId}")
+KEY4U_SUNO_LYRICS_ENDPOINT = _env("KEY4U_SUNO_LYRICS_ENDPOINT", "/submit/lyrics")
+KEY4U_SUNO_WAV_ENDPOINT = _env("KEY4U_SUNO_WAV_ENDPOINT", "/act/wav/{clipId}")
+KEY4U_SUNO_TIMING_ENDPOINT = _env("KEY4U_SUNO_TIMING_ENDPOINT", "/act/timing/{clipId}")
 KEY4U_RERANK_ENDPOINT = _env("KEY4U_RERANK_ENDPOINT", "")
 KEY4U_CHAT_MODEL = _env("KEY4U_DEFAULT_CHAT_MODEL", _env("KEY4U_CHAT_MODEL", "qwen-plus"))
 KEY4U_TRANSLATION_MODEL = _env("KEY4U_TRANSLATION_MODEL", "qwen-mt-turbo")
@@ -481,6 +500,29 @@ KEY4U_LOW_BALANCE_FREEZE_USD = env_float("KEY4U_LOW_BALANCE_FREEZE_USD", 2.0)
 SUNO_PUBLIC_ENABLED = env_flag("SUNO_PUBLIC_ENABLED", "false")
 SUNO_ADMIN_SMOKE_ENABLED = env_flag("SUNO_ADMIN_SMOKE_ENABLED", "true")
 SUNO_REQUIRE_SMOKE_PASS = env_flag("SUNO_REQUIRE_SMOKE_PASS", "true")
+
+def key4u_minimax_final_url(endpoint: str = "") -> str:
+    return join_provider_url(KEY4U_MINIMAX_BASE_URL, endpoint or "")
+
+def key4u_suno_final_url(endpoint: str = "") -> str:
+    return join_provider_url(KEY4U_SUNO_BASE_URL, endpoint or "")
+
+def key4u_endpoint_with_id(endpoint: str, value: str, *names: str) -> str:
+    path = str(endpoint or "")
+    replacement = str(value or "")
+    changed = False
+    for name in names:
+        token = "{" + name + "}"
+        if token in path:
+            path = path.replace(token, replacement)
+            changed = True
+    if not changed and replacement:
+        path = path.rstrip("/") + "/" + replacement
+    return path
+
+def key4u_suno_fetch_final_url(task_id: str = "{taskId}") -> str:
+    return key4u_suno_final_url(key4u_endpoint_with_id(KEY4U_SUNO_QUERY_ENDPOINT, task_id, "taskId", "task_id"))
+
 MINIMAX_TTS_ENDPOINT = _env("MINIMAX_TTS_ENDPOINT", "/tts/minimax/t2a_v2")
 MINIMAX_DIRECT_BASE_URL = _env("MINIMAX_DIRECT_BASE_URL", "https://api.minimax.chat/v1")
 MINIMAX_DIRECT_TTS_ENDPOINT = _env("MINIMAX_DIRECT_TTS_ENDPOINT", "/t2a_v2")
@@ -56454,6 +56496,10 @@ def voice_status_text() -> str:
         f"• ShopAIKey TTS: <code>{'READY_CONFIGURED' if (SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY) else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(preferred_tool_test_status_text('shopaikey_tts', 'tts'))}</code>",
         f"• ElevenLabs: <code>{'CONFIGURED' if ELEVENLABS_API_KEY else 'MISSING'}</code> | smoke <code>{html.escape(tool_test_status_text('elevenlabs_status'))}</code>",
         f"• Key4U TTS: <code>{'CONFIGURED' if (key4u_payload.get('configured') and KEY4U_TTS_ENDPOINT and KEY4U_TTS_MODEL) else 'NEED_DOCS'}</code> | smoke <code>{html.escape(tool_test_status_text('key4u_tts'))}</code>",
+        f"• Key4U MiniMax base: <code>{html.escape(str(key4u_payload.get('minimax_base_url') or KEY4U_MINIMAX_BASE_URL or '-'))}</code>",
+        f"• Key4U MiniMax TTS final URL: <code>{html.escape(str(key4u_payload.get('minimax_tts_final_url') or key4u_minimax_final_url(KEY4U_TTS_ENDPOINT) or '-'))}</code>",
+        f"• Key4U MiniMax clone upload URL: <code>{html.escape(str(key4u_payload.get('minimax_clone_upload_final_url') or key4u_minimax_final_url(KEY4U_MINIMAX_UPLOAD_ENDPOINT) or '-'))}</code>",
+        f"• Key4U MiniMax clone URL: <code>{html.escape(str(key4u_payload.get('minimax_clone_final_url') or key4u_minimax_final_url(KEY4U_MINIMAX_CLONE_ENDPOINT) or '-'))}</code>",
         f"• MiniMax configured: <code>{'YES' if minimax.get('ready') else 'NO'}</code>",
         f"• MiniMax base URL present: <code>{'YES' if minimax.get('base_url_present') else 'NO'}</code>",
         f"• MiniMax API key present: <code>{'YES' if minimax.get('minimax_api_key_present') else 'NO'}</code>",
@@ -56519,6 +56565,10 @@ def music_status_text() -> str:
         f"• ShopAIKey Music/Suno: <code>{'CONFIGURED' if shopaikey.get('configured') else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(str(shopaikey.get('smoke') or '-'))}</code>",
         f"• ShopAIKey missing: <code>{html.escape(', '.join(shopaikey.get('missing_env') or []) or '-')}</code>",
         f"• Key4U Suno: <code>{'CONFIGURED' if key4u.get('configured') else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(str(key4u.get('smoke') or '-'))}</code>",
+        f"• Key4U Suno base: <code>{html.escape(KEY4U_SUNO_BASE_URL or '-')}</code>",
+        f"• Key4U Suno submit URL: <code>{html.escape(str(key4u.get('submit_final_url') or key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT) or '-'))}</code>",
+        f"• Key4U Suno fetch URL: <code>{html.escape(str(key4u.get('fetch_final_url') or key4u_suno_fetch_final_url() or '-'))}</code>",
+        f"• Key4U Suno lyrics URL: <code>{html.escape(str(key4u.get('lyrics_final_url') or key4u_suno_final_url(KEY4U_SUNO_LYRICS_ENDPOINT) or '-'))}</code>",
         f"• Key4U missing: <code>{html.escape(', '.join(key4u.get('missing_env') or []) or '-')}</code>",
         f"• Last submit smoke: <code>{html.escape(str(submit_smoke.get('status') or 'NOT_TESTED'))}{(' at ' + html.escape(str(submit_smoke.get('tested_at') or ''))) if submit_smoke.get('tested_at') else ''}</code>",
         f"• Last fetch smoke: <code>{html.escape(str(fetch_smoke.get('status') or 'NOT_TESTED'))}{(' at ' + html.escape(str(fetch_smoke.get('tested_at') or ''))) if fetch_smoke.get('tested_at') else ''}</code>",
@@ -56644,6 +56694,9 @@ def get_suno_music_readiness() -> dict:
                 "configured": key4u_configured,
                 "model": KEY4U_SUNO_MODEL or "",
                 "endpoint_configured": bool(KEY4U_SUNO_CREATE_ENDPOINT),
+                "submit_final_url": key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT) if KEY4U_SUNO_CREATE_ENDPOINT else "",
+                "fetch_final_url": key4u_suno_fetch_final_url() if KEY4U_SUNO_QUERY_ENDPOINT else "",
+                "lyrics_final_url": key4u_suno_final_url(KEY4U_SUNO_LYRICS_ENDPOINT) if KEY4U_SUNO_LYRICS_ENDPOINT else "",
                 "smoke": key4u_smoke,
                 "missing_env": key4u_missing,
             },
@@ -56736,6 +56789,9 @@ def get_minimax_voice_readiness() -> dict:
         "group_or_project_id_present": bool(MINIMAX_GROUP_ID),
         "tts_endpoint_ready": bool((MINIMAX_TTS_ENDPOINT and SHOPAIKEY_API_KEY) or (KEY4U_TTS_ENDPOINT and KEY4U_API_KEY) or (MINIMAX_DIRECT_TTS_ENDPOINT and MINIMAX_API_KEY and MINIMAX_GROUP_ID)),
         "clone_endpoint_ready": bool((MINIMAX_VOICE_CLONE_ENDPOINT and SHOPAIKEY_API_KEY) or (KEY4U_MINIMAX_CLONE_ENDPOINT and KEY4U_API_KEY)),
+        "minimax_tts_final_url": key4u_minimax_final_url(KEY4U_TTS_ENDPOINT) if KEY4U_TTS_ENDPOINT else "",
+        "minimax_clone_upload_final_url": key4u_minimax_final_url(KEY4U_MINIMAX_UPLOAD_ENDPOINT) if KEY4U_MINIMAX_UPLOAD_ENDPOINT else "",
+        "minimax_clone_final_url": key4u_minimax_final_url(KEY4U_MINIMAX_CLONE_ENDPOINT) if KEY4U_MINIMAX_CLONE_ENDPOINT else "",
         "saved_voice_id_available": bool(saved_profile.get("provider_voice_id")),
         "saved_voice_id": str(saved_profile.get("provider_voice_id") or "")[:180],
         "last_tts_smoke": preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job"),
@@ -58022,6 +58078,57 @@ async def cmd_music_provider_status(update: Update, context: ContextTypes.DEFAUL
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await update.message.reply_text(music_status_text(), parse_mode="HTML")
+
+def audio_provider_curl_text() -> str:
+    minimax_tts_url = key4u_minimax_final_url(KEY4U_TTS_ENDPOINT)
+    minimax_upload_url = key4u_minimax_final_url(KEY4U_MINIMAX_UPLOAD_ENDPOINT)
+    minimax_clone_url = key4u_minimax_final_url(KEY4U_MINIMAX_CLONE_ENDPOINT)
+    suno_submit_url = key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT)
+    suno_fetch_url = key4u_suno_fetch_final_url("<TASK_ID>")
+    suno_lyrics_url = key4u_suno_final_url(KEY4U_SUNO_LYRICS_ENDPOINT)
+    return "\n".join([
+        "AUDIO PROVIDER cURL - admin only",
+        "Never paste a real token into chat history.",
+        "",
+        "KEY4U MiniMax TTS",
+        f"curl --location '{minimax_tts_url}' \\",
+        "--header 'Authorization: Bearer <KEY4U_TOKEN>' \\",
+        "--header 'Content-Type: application/json' \\",
+        """--data '{"model":"speech-02-hd","text":"Xin chao TOAN AAS","voice_setting":{"voice_id":"male-qn-qingse","speed":1,"vol":1,"pitch":0},"audio_setting":{"sample_rate":32000,"bitrate":128000,"format":"mp3","channel":1},"language_boost":"Vietnamese","stream":false,"subtitle_enable":false}'""",
+        "",
+        "KEY4U MiniMax voice upload",
+        f"curl --location '{minimax_upload_url}' \\",
+        "--header 'Authorization: Bearer <KEY4U_TOKEN>' \\",
+        "--form 'purpose=\"prompt_audio\"' \\",
+        "--form 'file=@\"C:\\\\path\\\\voice-sample.mp3\"'",
+        "",
+        "KEY4U MiniMax voice clone",
+        f"curl --location '{minimax_clone_url}' \\",
+        "--header 'Authorization: Bearer <KEY4U_TOKEN>' \\",
+        "--header 'Content-Type: application/json' \\",
+        """--data '{"file_id":"<FILE_ID>","voice_id":"toan-aas-test","clone_prompt":{"prompt_audio":"<FILE_ID>","prompt_text":"Xin chao TOAN AAS"},"model":"speech-2.8-hd","language_boost":"Vietnamese","aigc_watermark":false}'""",
+        "",
+        "KEY4U Suno submit music",
+        f"curl --location '{suno_submit_url}' \\",
+        "--header 'Authorization: Bearer <KEY4U_TOKEN>' \\",
+        "--header 'Content-Type: application/json' \\",
+        """--data '{"mv":"chirp-v4","gpt_description_prompt":"Short upbeat TOAN AAS intro music","title":"TOAN AAS Smoke Test","tags":"cinematic, tech, uplifting","make_instrumental":true}'""",
+        "",
+        "KEY4U Suno fetch",
+        f"curl --location '{suno_fetch_url}' \\",
+        "--header 'Authorization: Bearer <KEY4U_TOKEN>'",
+        "",
+        "KEY4U Suno lyrics",
+        f"curl --location '{suno_lyrics_url}' \\",
+        "--header 'Authorization: Bearer <KEY4U_TOKEN>' \\",
+        "--header 'Content-Type: application/json' \\",
+        """--data '{"prompt":"Write a short TOAN AAS brand song","title":"TOAN AAS Lyrics","tags":"pop, vietnamese"}'""",
+    ])
+
+async def cmd_audio_provider_curl(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(f"<pre>{html.escape(audio_provider_curl_text())}</pre>", parse_mode="HTML")
 
 async def cmd_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -59398,6 +59505,7 @@ def key4u_result_lines(title: str, result: dict) -> list[str]:
         f"• HTTP: <code>{html.escape(str(result.get('http_status') or 0))}</code>",
         f"• Capability: <code>{html.escape(str(result.get('capability') or '-'))}</code>",
         f"• Model: <code>{html.escape(str(result.get('model') or '-'))}</code>",
+        f"• Final URL: <code>{html.escape(str(result.get('final_url') or '-'))}</code>",
         f"• Models tried: <code>{html.escape(', '.join(result.get('models_tried') or []) or '-')}</code>",
         f"• Fallback used: <code>{'yes' if result.get('fallback_used') else 'no'}</code>",
         f"• Task ID: <code>{html.escape(str(result.get('task_id') or '-'))}</code>",
@@ -118659,6 +118767,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_key4u_stt", cmd_tool_test_key4u_stt))
     tg_app.add_handler(CommandHandler("tool_test_key4u_suno", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("tool_test_suno_music", cmd_tool_test_key4u_suno))
+    tg_app.add_handler(CommandHandler("tool_test_music_suno", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("key4u_suno_job", cmd_key4u_suno_job))
     tg_app.add_handler(CommandHandler("suno_job", cmd_key4u_suno_job))
     tg_app.add_handler(CommandHandler("tool_test_key4u_rerank", cmd_tool_test_key4u_rerank))
@@ -118681,6 +118790,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("voice_public_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("music_status", cmd_music_status))
     tg_app.add_handler(CommandHandler("music_public_status", cmd_music_provider_status))
+    tg_app.add_handler(CommandHandler("audio_provider_status", cmd_provider_status))
+    tg_app.add_handler(CommandHandler("audio_provider_curl", cmd_audio_provider_curl))
     tg_app.add_handler(CommandHandler("suno_status", cmd_suno_status))
     tg_app.add_handler(CommandHandler("suno_public_open", cmd_suno_public_open))
     tg_app.add_handler(CommandHandler("suno_public_close", cmd_suno_public_close))
@@ -118688,6 +118799,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("music_public_close", cmd_suno_public_close))
     tg_app.add_handler(CommandHandler("minimax_status", cmd_minimax_status))
     tg_app.add_handler(CommandHandler("tool_test_minimax_tts", cmd_tool_test_minimax_tts))
+    tg_app.add_handler(CommandHandler("tool_test_voice_tts", cmd_tool_test_minimax_tts))
     tg_app.add_handler(CommandHandler("tool_test_minimax_voice_clone", cmd_tool_test_minimax_voice_clone))
     tg_app.add_handler(CommandHandler("tool_test_voice_clone", cmd_tool_test_minimax_voice_clone))
     tg_app.add_handler(CommandHandler("minimax_voice_job", cmd_minimax_voice_job))

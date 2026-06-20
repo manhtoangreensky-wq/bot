@@ -34,26 +34,45 @@ def mask_key(value: str | None) -> str:
     return f"{raw[:4]}***{raw[-4:]}"
 
 
-def safe_join_url(base_url: str, endpoint: str) -> str:
+def join_provider_url(base_url: str, endpoint: str) -> str:
     base = str(base_url or "").strip().rstrip("/")
     path = str(endpoint or "").strip()
     if not path:
         return base
     if path.startswith("http://") or path.startswith("https://"):
-        return path
-    if base.endswith("/v1") and path.startswith("/v1/"):
-        path = path[3:]
-    return f"{base}/{path.lstrip('/')}"
+        return path.rstrip("/")
+    match = re.match(r"^(https?://[^/]+)(/.*)?$", base)
+    if not match:
+        base_segments = [segment for segment in base.split("/") if segment]
+        path_segments = [segment for segment in path.strip("/").split("/") if segment]
+        prefix = ""
+    else:
+        prefix = match.group(1)
+        base_segments = [segment for segment in (match.group(2) or "").strip("/").split("/") if segment]
+        path_segments = [segment for segment in path.strip("/").split("/") if segment]
+    overlap = 0
+    max_overlap = min(len(base_segments), len(path_segments))
+    for size in range(max_overlap, 0, -1):
+        if base_segments[-size:] == path_segments[:size]:
+            overlap = size
+            break
+    joined_segments = [*base_segments, *path_segments[overlap:]]
+    joined_path = "/".join(joined_segments)
+    if prefix:
+        return prefix + ("/" + joined_path if joined_path else "")
+    return "/" + joined_path if joined_path else ""
+
+
+def safe_join_url(base_url: str, endpoint: str) -> str:
+    return join_provider_url(base_url, endpoint)
 
 
 def scoped_join_url(api_base_url: str, scoped_base_url: str, endpoint: str, scope_prefix: str) -> str:
     path = str(endpoint or "").strip()
     if path.startswith("http://") or path.startswith("https://"):
-        return path
-    clean_scope = "/" + str(scope_prefix or "").strip().strip("/")
-    if clean_scope != "/" and path.startswith(clean_scope + "/"):
-        return safe_join_url(api_base_url, path)
-    return safe_join_url(scoped_base_url, path)
+        return path.rstrip("/")
+    scoped_base = str(scoped_base_url or "").strip() or join_provider_url(api_base_url, scope_prefix)
+    return join_provider_url(scoped_base, path)
 
 
 def _safe_message(value: Any, limit: int = 220) -> str:
@@ -202,6 +221,7 @@ def _result(
     output_url: str = "",
     output_bytes: bytes | None = None,
     text: str = "",
+    final_url: str = "",
     error_class: str = "",
     error_message_safe: str = "",
     raw_debug_admin_only: dict[str, Any] | None = None,
@@ -215,6 +235,7 @@ def _result(
         "output_url": output_url or "",
         "output_bytes": output_bytes or b"",
         "text": text or "",
+        "final_url": final_url or "",
         "status": status or ("PASS" if ok else "FAIL"),
         "http_status": int(http_status or 0),
         "latency_ms": int(latency_ms or 0),
@@ -230,7 +251,7 @@ class Key4UConfig:
     api_key: str = ""
     base_url: str = "https://api.key4u.shop"
     openai_base_url: str = "https://api.key4u.shop/v1"
-    minimax_base_url: str = "https://api.key4u.shop/minimax/v1"
+    minimax_base_url: str = "https://api.key4u.shop/minimax"
     voice_base_url: str = "https://voice.key4u.shop/api/v1"
     suno_base_url: str = "https://api.key4u.shop/suno"
     smart_routing: bool = True
@@ -278,7 +299,7 @@ def config_from_env() -> Key4UConfig:
         api_key=_env("KEY4U_TOKEN", _env("KEY4U_API_KEY", "")),
         base_url=api_base,
         openai_base_url=_env("KEY4U_OPENAI_BASE_URL", safe_join_url(api_base, "/v1")),
-        minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax/v1")),
+        minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax")),
         voice_base_url=_env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1"),
         suno_base_url=_env("KEY4U_SUNO_BASE", safe_join_url(api_base, "/suno")),
         smart_routing=_flag("KEY4U_SMART_ROUTING", "true"),
@@ -292,13 +313,13 @@ def config_from_env() -> Key4UConfig:
         nano_banana_edit_endpoint=_env("KEY4U_NANO_BANANA_EDIT_ENDPOINT", "/fal-ai/nano-banana/edit"),
         video_create_endpoint=_env("KEY4U_VIDEO_CREATE_ENDPOINT", "/v1/video/create"),
         video_query_endpoint=_env("KEY4U_VIDEO_QUERY_ENDPOINT", "/v1/video/query"),
-        tts_endpoint=_env("KEY4U_TTS_ENDPOINT", "/t2a_v2"),
-        tts_async_endpoint=_env("KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT", "/t2a_async_v2"),
-        tts_query_endpoint=_env("KEY4U_MINIMAX_TTS_QUERY_ENDPOINT", "/query/t2a_async_query_v2"),
-        tts_retrieve_endpoint=_env("KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT", "/files/retrieve"),
+        tts_endpoint=_env("KEY4U_TTS_ENDPOINT", "/v1/t2a_v2"),
+        tts_async_endpoint=_env("KEY4U_MINIMAX_TTS_ASYNC_ENDPOINT", "/v1/t2a_async_v2"),
+        tts_query_endpoint=_env("KEY4U_MINIMAX_TTS_QUERY_ENDPOINT", "/v1/query/t2a_async_query_v2"),
+        tts_retrieve_endpoint=_env("KEY4U_MINIMAX_TTS_RETRIEVE_ENDPOINT", "/v1/files/retrieve"),
         voice_tts_endpoint=_env("KEY4U_VOICE_TTS_ENDPOINT", "/tts"),
-        minimax_upload_endpoint=_env("KEY4U_MINIMAX_UPLOAD_ENDPOINT", "/files"),
-        minimax_clone_endpoint=_env("KEY4U_MINIMAX_CLONE_ENDPOINT", "/voice_clone"),
+        minimax_upload_endpoint=_env("KEY4U_MINIMAX_UPLOAD_ENDPOINT", "/v1/files"),
+        minimax_clone_endpoint=_env("KEY4U_MINIMAX_CLONE_ENDPOINT", "/v1/voice_clone"),
         stt_endpoint=_env("KEY4U_STT_ENDPOINT", "/audio/transcriptions"),
         suno_create_endpoint=_env("KEY4U_SUNO_CREATE_ENDPOINT", "/submit/music"),
         suno_query_endpoint=_env("KEY4U_SUNO_QUERY_ENDPOINT", "/fetch/{taskId}"),
@@ -341,6 +362,12 @@ class Key4UProvider:
             "minimax_base_url": self.config.minimax_base_url,
             "voice_base_url": self.config.voice_base_url,
             "suno_base_url": self.config.suno_base_url,
+            "minimax_tts_final_url": self._minimax_url(self.config.tts_endpoint) if self.config.tts_endpoint else "",
+            "minimax_clone_upload_final_url": self._minimax_url(self.config.minimax_upload_endpoint) if self.config.minimax_upload_endpoint else "",
+            "minimax_clone_final_url": self._minimax_url(self.config.minimax_clone_endpoint) if self.config.minimax_clone_endpoint else "",
+            "suno_submit_final_url": self._suno_url(self.config.suno_create_endpoint) if self.config.suno_create_endpoint else "",
+            "suno_fetch_final_url": self._suno_url(self._path_with_id(self.config.suno_query_endpoint, "{taskId}", "taskId", "task_id")) if self.config.suno_query_endpoint else "",
+            "suno_lyrics_final_url": self._suno_url(self.config.suno_lyrics_endpoint) if self.config.suno_lyrics_endpoint else "",
             "usage_endpoint": "configured" if self.config.usage_endpoint else "NEED_ENDPOINT",
             "balance_endpoint": "configured" if self.config.balance_endpoint else "NEED_ENDPOINT",
             "models_endpoint": "configured" if self.config.models_endpoint else "NEED_ENDPOINT",
@@ -892,7 +919,7 @@ class Key4UProvider:
             latency_ms = int((time.perf_counter() - started) * 1000)
             content_type = response.headers.get("content-type", "")
             if 200 <= response.status_code < 300 and content_type.startswith("audio/") and response.content:
-                return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=response.content)
+                return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=response.content, final_url=endpoint)
             try:
                 data = response.json()
             except Exception:
@@ -900,7 +927,7 @@ class Key4UProvider:
             body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
             audio_value = str((body or {}).get("audio") or (body or {}).get("audio_url") or (body or {}).get("url") or "").strip() if isinstance(body, dict) else ""
             if 200 <= response.status_code < 300 and audio_value.startswith(("http://", "https://")):
-                return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_url=audio_value)
+                return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_url=audio_value, final_url=endpoint)
             if 200 <= response.status_code < 300 and audio_value:
                 audio_bytes = b""
                 try:
@@ -911,12 +938,12 @@ class Key4UProvider:
                 except Exception:
                     audio_bytes = b""
                 if len(audio_bytes) > 512:
-                    return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=audio_bytes)
-            return _result(ok=False, capability="tts", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+                    return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=audio_bytes, final_url=endpoint)
+            return _result(ok=False, capability="tts", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, final_url=endpoint, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="tts", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="tts", model=selected_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="tts", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="tts", model=selected_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def voice_tts_fallback(self, text: str = "Xin chào TOAN AAS.", voice_id: str = "", speed: float = 1.0, timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = self.config.tts_alt_model or "speech-2.6-hd"
@@ -1001,14 +1028,14 @@ class Key4UProvider:
             file_id = str((body or {}).get("file_id") or data.get("file_id") or "").strip() if isinstance(data, dict) else ""
             task_token = str((body or {}).get("task_token") or data.get("task_token") or "").strip() if isinstance(data, dict) else ""
             ok = bool(200 <= response.status_code < 300 and task_id)
-            result = _result(ok=ok, capability="tts_async", model=selected_model, status="PASS_SUBMITTED" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data)
+            result = _result(ok=ok, capability="tts_async", model=selected_model, status="PASS_SUBMITTED" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, final_url=endpoint, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data)
             result["file_id"] = file_id
             result["task_token"] = task_token
             return result
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="tts_async", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="tts_async", model=selected_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="tts_async", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="tts_async", model=selected_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def query_tts_task(self, task_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = self.config.tts_model
@@ -1033,13 +1060,13 @@ class Key4UProvider:
             status = str((body or {}).get("status") or data.get("status") or "").strip() if isinstance(data, dict) else ""
             file_id = str((body or {}).get("file_id") or data.get("file_id") or "").strip() if isinstance(data, dict) else ""
             ok = bool(200 <= response.status_code < 300 and status.lower() in {"success", "succeeded", "completed"} and file_id)
-            result = _result(ok=ok, capability="tts_query", model=selected_model, status="SUCCESS" if ok else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, error_class="" if response.status_code < 400 else _classify_http(response.status_code, data), error_message_safe="" if response.status_code < 400 else data)
+            result = _result(ok=ok, capability="tts_query", model=selected_model, status="SUCCESS" if ok else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, final_url=endpoint, error_class="" if response.status_code < 400 else _classify_http(response.status_code, data), error_message_safe="" if response.status_code < 400 else data)
             result["file_id"] = file_id
             return result
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="tts_query", model=selected_model, status="FAIL_TIMEOUT", task_id=safe_task_id, error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="tts_query", model=selected_model, status="FAIL_TIMEOUT", task_id=safe_task_id, final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="tts_query", model=selected_model, status="FAIL_EXCEPTION", task_id=safe_task_id, error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="tts_query", model=selected_model, status="FAIL_EXCEPTION", task_id=safe_task_id, final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def retrieve_file(self, file_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
         safe_file_id = str(file_id or "").strip()
@@ -1061,11 +1088,11 @@ class Key4UProvider:
                 data = {}
             file_obj = data.get("file") if isinstance(data, dict) and isinstance(data.get("file"), dict) else {}
             download_url = str((file_obj or {}).get("download_url") or (data or {}).get("download_url") or "").strip() if isinstance(data, dict) else ""
-            return _result(ok=bool(200 <= response.status_code < 300 and download_url), capability="file_retrieve", model=self.config.tts_model, status="PASS" if download_url else "FAIL", http_status=response.status_code, latency_ms=latency_ms, output_url=download_url, error_class="" if download_url else _classify_http(response.status_code, data), error_message_safe="" if download_url else data)
+            return _result(ok=bool(200 <= response.status_code < 300 and download_url), capability="file_retrieve", model=self.config.tts_model, status="PASS" if download_url else "FAIL", http_status=response.status_code, latency_ms=latency_ms, output_url=download_url, final_url=endpoint, error_class="" if download_url else _classify_http(response.status_code, data), error_message_safe="" if download_url else data)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="file_retrieve", model=self.config.tts_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="file_retrieve", model=self.config.tts_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="file_retrieve", model=self.config.tts_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="file_retrieve", model=self.config.tts_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def upload_voice_sample(
         self,
@@ -1105,15 +1132,16 @@ class Key4UProvider:
                 status="PASS" if file_id else "FAIL",
                 http_status=response.status_code,
                 latency_ms=latency_ms,
+                final_url=endpoint,
                 error_class="" if file_id else _classify_http(response.status_code, payload),
                 error_message_safe="" if file_id else payload,
             )
             result["file_id"] = file_id
             return result
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="voice_upload", model=self.config.tts_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="voice_upload", model=self.config.tts_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="voice_upload", model=self.config.tts_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="voice_upload", model=self.config.tts_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def clone_voice(
         self,
@@ -1127,7 +1155,7 @@ class Key4UProvider:
         if not self.config.minimax_clone_endpoint:
             return self._needs_docs_result("voice_clone", self.config.tts_model, "KEY4U_MINIMAX_CLONE_ENDPOINT")
         safe_file_id = str(file_id or "").strip()
-        safe_voice_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(voice_id or "").strip())[:128].strip("_-")
+        safe_voice_id = re.sub(r"[^A-Za-z0-9-]+", "-", str(voice_id or "").strip())[:128].strip("-")
         if not safe_file_id or not safe_voice_id:
             return _result(ok=False, capability="voice_clone", model=self.config.tts_model, status="FAIL_BAD_REQUEST", error_class="FAIL_BAD_REQUEST", error_message_safe="missing file_id or voice_id")
         endpoint = self._minimax_url(self.config.minimax_clone_endpoint)
@@ -1166,6 +1194,7 @@ class Key4UProvider:
                 http_status=response.status_code,
                 latency_ms=latency_ms,
                 output_url=demo_audio if demo_audio.startswith(("http://", "https://")) else "",
+                final_url=endpoint,
                 error_class="" if ok else _classify_http(response.status_code, data),
                 error_message_safe="" if ok else data,
             )
@@ -1173,9 +1202,9 @@ class Key4UProvider:
             result["demo_audio"] = demo_audio
             return result
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="voice_clone", model=self.config.clone_model or self.config.tts_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="voice_clone", model=self.config.clone_model or self.config.tts_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="voice_clone", model=self.config.clone_model or self.config.tts_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="voice_clone", model=self.config.clone_model or self.config.tts_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def stt(self, audio_bytes: bytes | None = None, model: str = "", timeout_seconds: float = 60.0) -> dict[str, Any]:
         selected_model = model or self.config.stt_model
@@ -1250,12 +1279,12 @@ class Key4UProvider:
                 body = data_value if isinstance(data_value, dict) else data
                 task_id = str((body or {}).get("task_id") or (body or {}).get("taskId") or (body or {}).get("id") or data.get("task_id") or "")
             if 200 <= response.status_code < 300 and task_id:
-                return _result(ok=True, capability="suno", model=selected_model, status="PASS_SUBMITTED", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id)
-            return _result(ok=False, capability="suno", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
+                return _result(ok=True, capability="suno", model=selected_model, status="PASS_SUBMITTED", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, final_url=endpoint)
+            return _result(ok=False, capability="suno", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, final_url=endpoint, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="suno", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="suno", model=selected_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="suno", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="suno", model=selected_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def suno_query(self, task_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = self.config.suno_model
@@ -1303,14 +1332,14 @@ class Key4UProvider:
                 output_url = str(body.get("audio_url") or body.get("url") or "")
             status = str((body or {}).get("status") or data.get("status") or "") if isinstance(data, dict) else ""
             fail_reason = str((body or {}).get("fail_reason") or (body or {}).get("failReason") or data.get("message") or "") if isinstance(data, dict) and isinstance(body, dict) else ""
-            result = _result(ok=bool(output_url or (status.upper() == "SUCCESS" and lyrics_text)), capability="suno_query", model=selected_model, status="SUCCESS" if (output_url or (status.upper() == "SUCCESS" and lyrics_text)) else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, output_url=output_url, error_message_safe=fail_reason)
+            result = _result(ok=bool(output_url or (status.upper() == "SUCCESS" and lyrics_text)), capability="suno_query", model=selected_model, status="SUCCESS" if (output_url or (status.upper() == "SUCCESS" and lyrics_text)) else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, output_url=output_url, final_url=endpoint, error_message_safe=fail_reason)
             result["clip_id"] = output_id
             result["text"] = lyrics_text
             return result
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="suno_query", model=selected_model, status="FAIL_TIMEOUT", task_id=safe_task_id, error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="suno_query", model=selected_model, status="FAIL_TIMEOUT", task_id=safe_task_id, final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="suno_query", model=selected_model, status="FAIL_EXCEPTION", task_id=safe_task_id, error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="suno_query", model=selected_model, status="FAIL_EXCEPTION", task_id=safe_task_id, final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def suno_lyrics(self, prompt: str, title: str = "TOAN AAS Lyrics", tags: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = self.config.suno_model
@@ -1336,11 +1365,11 @@ class Key4UProvider:
             data_value = data.get("data") if isinstance(data, dict) else ""
             task_id = data_value.strip() if isinstance(data_value, str) else str((data_value or {}).get("task_id") or (data_value or {}).get("taskId") or "")
             ok = bool(200 <= response.status_code < 300 and task_id)
-            return _result(ok=ok, capability="suno_lyrics", model=selected_model, status="PASS_SUBMITTED" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data)
+            return _result(ok=ok, capability="suno_lyrics", model=selected_model, status="PASS_SUBMITTED" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, task_id=task_id, final_url=endpoint, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="suno_lyrics", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="suno_lyrics", model=selected_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="suno_lyrics", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="suno_lyrics", model=selected_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def suno_wav(self, clip_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = self.config.suno_model
@@ -1359,18 +1388,18 @@ class Key4UProvider:
             latency_ms = int((time.perf_counter() - started) * 1000)
             content_type = response.headers.get("content-type", "")
             if 200 <= response.status_code < 300 and content_type.startswith("audio/") and response.content:
-                return _result(ok=True, capability="suno_wav", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=response.content)
+                return _result(ok=True, capability="suno_wav", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=response.content, final_url=endpoint)
             try:
                 data = response.json()
             except Exception:
                 data = {}
             body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
             output_url = str((body or {}).get("url") or (body or {}).get("download_url") or (body or {}).get("audio_url") or "").strip() if isinstance(body, dict) else ""
-            return _result(ok=bool(200 <= response.status_code < 300 and output_url), capability="suno_wav", model=selected_model, status="PASS" if output_url else "FAIL", http_status=response.status_code, latency_ms=latency_ms, output_url=output_url, error_class="" if output_url else _classify_http(response.status_code, data), error_message_safe="" if output_url else data)
+            return _result(ok=bool(200 <= response.status_code < 300 and output_url), capability="suno_wav", model=selected_model, status="PASS" if output_url else "FAIL", http_status=response.status_code, latency_ms=latency_ms, output_url=output_url, final_url=endpoint, error_class="" if output_url else _classify_http(response.status_code, data), error_message_safe="" if output_url else data)
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="suno_wav", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="suno_wav", model=selected_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="suno_wav", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="suno_wav", model=selected_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def suno_timing(self, clip_id: str, timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = self.config.suno_model
@@ -1392,13 +1421,13 @@ class Key4UProvider:
             except Exception:
                 data = {}
             ok = bool(200 <= response.status_code < 300 and data)
-            result = _result(ok=ok, capability="suno_timing", model=selected_model, status="PASS" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data, raw_debug_admin_only={"keys": sorted(data.keys())[:8] if isinstance(data, dict) else []})
+            result = _result(ok=ok, capability="suno_timing", model=selected_model, status="PASS" if ok else "FAIL", http_status=response.status_code, latency_ms=latency_ms, final_url=endpoint, error_class="" if ok else _classify_http(response.status_code, data), error_message_safe="" if ok else data, raw_debug_admin_only={"keys": sorted(data.keys())[:8] if isinstance(data, dict) else []})
             result["data"] = data if ok else {}
             return result
         except httpx.TimeoutException as exc:
-            return _result(ok=False, capability="suno_timing", model=selected_model, status="FAIL_TIMEOUT", error_class="FAIL_TIMEOUT", error_message_safe=exc)
+            return _result(ok=False, capability="suno_timing", model=selected_model, status="FAIL_TIMEOUT", final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
         except Exception as exc:
-            return _result(ok=False, capability="suno_timing", model=selected_model, status="FAIL_EXCEPTION", error_class=type(exc).__name__, error_message_safe=exc)
+            return _result(ok=False, capability="suno_timing", model=selected_model, status="FAIL_EXCEPTION", final_url=endpoint, error_class=type(exc).__name__, error_message_safe=exc)
 
     async def rerank(self, query: str, candidates: list[str] | None = None, model: str = "", timeout_seconds: float = 30.0) -> dict[str, Any]:
         selected_model = model or self.config.rerank_model

@@ -3,10 +3,12 @@ from pathlib import Path
 
 import bot
 import provider_router
+import providers.key4u_provider as key4u_provider_module
 from providers.key4u_provider import (
     Key4UConfig,
     Key4UProvider,
     is_placeholder_task_id,
+    join_provider_url,
     mask_key,
     safe_join_url,
     should_try_model_fallback,
@@ -45,6 +47,45 @@ def test_key4u_status_masks_api_key():
 def test_key4u_url_join_keeps_v1_clean():
     assert safe_join_url("https://api.key4u.shop/v1", "/v1/chat/completions") == "https://api.key4u.shop/v1/chat/completions"
     assert safe_join_url("https://api.key4u.shop", "/v1/video/create") == "https://api.key4u.shop/v1/video/create"
+
+
+def test_key4u_provider_url_join_avoids_scoped_duplicates():
+    assert join_provider_url("https://api.key4u.shop/minimax", "/v1/t2a_v2") == "https://api.key4u.shop/minimax/v1/t2a_v2"
+    assert join_provider_url("https://api.key4u.shop/minimax/v1", "/minimax/v1/t2a_v2") == "https://api.key4u.shop/minimax/v1/t2a_v2"
+    assert join_provider_url("https://api.key4u.shop/suno", "/suno/submit/music") == "https://api.key4u.shop/suno/submit/music"
+    assert join_provider_url("https://api.key4u.shop/suno/", "suno/fetch/task-1") == "https://api.key4u.shop/suno/fetch/task-1"
+
+
+def test_key4u_provider_status_includes_final_audio_urls():
+    provider = Key4UProvider(
+        Key4UConfig(
+            enabled=True,
+            admin_smoke_enabled=True,
+            api_key="sk-test",
+            minimax_base_url="https://api.key4u.shop/minimax",
+            tts_endpoint="/v1/t2a_v2",
+            minimax_upload_endpoint="/v1/files",
+            minimax_clone_endpoint="/v1/voice_clone",
+            suno_base_url="https://api.key4u.shop/suno",
+            suno_create_endpoint="/submit/music",
+            suno_query_endpoint="/fetch/{taskId}",
+            suno_lyrics_endpoint="/submit/lyrics",
+        )
+    )
+    status = provider.get_status()
+    assert status["minimax_tts_final_url"] == "https://api.key4u.shop/minimax/v1/t2a_v2"
+    assert status["minimax_clone_upload_final_url"] == "https://api.key4u.shop/minimax/v1/files"
+    assert status["minimax_clone_final_url"] == "https://api.key4u.shop/minimax/v1/voice_clone"
+    assert status["suno_submit_final_url"] == "https://api.key4u.shop/suno/submit/music"
+    assert status["suno_fetch_final_url"] == "https://api.key4u.shop/suno/fetch/{taskId}"
+    assert status["suno_lyrics_final_url"] == "https://api.key4u.shop/suno/submit/lyrics"
+
+
+def test_key4u_voice_clone_id_uses_hyphen_not_underscore():
+    source = Path(key4u_provider_module.__file__).read_text(encoding="utf-8")
+    clone_block = source_between(source, "async def clone_voice(", "async def stt(")
+    assert 'r"[^A-Za-z0-9-]+"' in clone_block
+    assert 'replace("_"' not in clone_block
 
 
 def test_key4u_default_models_are_not_empty():
