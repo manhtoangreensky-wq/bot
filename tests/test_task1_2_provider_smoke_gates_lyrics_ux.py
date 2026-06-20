@@ -183,6 +183,67 @@ def test_voice_clone_off_does_not_leave_pending_confirm(monkeypatch):
     assert "khóa thử nghiệm" in query.message.outputs[-1]["text"]
 
 
+def test_admin_voice_clone_bypasses_public_gate_when_configured(monkeypatch):
+    user_id = 12014
+    _reset_music(user_id)
+    monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    monkeypatch.setattr(bot, "get_minimax_voice_clone_readiness", lambda: {
+        "ready": True,
+        "public_enabled": False,
+        "clone_smoke": "NOT_TESTED",
+    })
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    update, query = _callback_update("music_quick|showroom|voice_clone", user_id)
+    asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
+    assert bot.get_music_guided_pending(user_id)["pending_action"] == "voice_clone_intro"
+    assert "khóa thử nghiệm" not in query.message.outputs[-1]["text"]
+
+
+def test_admin_failed_voice_profile_keeps_retry_when_provider_configured(monkeypatch):
+    monkeypatch.setattr(bot, "get_minimax_voice_clone_readiness", lambda: {
+        "ready": True,
+        "public_enabled": False,
+    })
+    monkeypatch.setattr(bot, "is_admin_user", lambda uid: str(uid) == "12014")
+    labels = _labels(bot.voice_profile_actions_keyboard(
+        9,
+        "vi",
+        bot.PRODUCT_CONTEXT_SHOWROOM,
+        {"id": 9, "user_id": 12014, "status": "failed", "provider_voice_id": ""},
+    ))
+    assert "🔁 Tạo/nghe thử lại" in labels
+
+
+def test_admin_standalone_tts_passes_key4u_admin_bypass(monkeypatch):
+    calls = []
+
+    async def key4u_tts(_text, **kwargs):
+        calls.append(kwargs)
+        return "PASS", b"admin-audio", "ok", 200
+
+    monkeypatch.setattr(bot, "key4u_minimax_tts_bytes", key4u_tts)
+    result = asyncio.run(bot.synthesize_standalone_tts_audio(
+        "Admin TTS",
+        voice_id="default_male",
+        provider_hint="key4u_minimax",
+        allow_admin=True,
+    ))
+    assert result[0] is True
+    assert calls[0]["allow_admin"] is True
+
+
+def test_admin_not_owner_can_close_voice_music_public_gates(monkeypatch):
+    _settings_store(monkeypatch)
+    monkeypatch.setattr(bot, "is_owner_user", lambda _uid: False)
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    music_update, music_message = _command_update(12018)
+    voice_update, voice_message = _command_update(12018)
+    asyncio.run(bot.cmd_suno_public_close(music_update, SimpleNamespace(args=[])))
+    asyncio.run(bot.cmd_voice_public_close(voice_update, SimpleNamespace(args=[])))
+    assert "Đã đóng Suno public" in music_message.outputs[-1]["text"]
+    assert "Đã đóng MiniMax Voice/clone public" in voice_message.outputs[-1]["text"]
+
+
 def test_tool_test_voice_clone_persists_upload_clone_tts_results(monkeypatch):
     store = _settings_store(monkeypatch)
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
@@ -413,6 +474,95 @@ def test_music_gate_off_admin_shows_smoke_buttons():
     labels = _labels(bot.music_ai_guarded_keyboard("vi", admin=True))
     assert "🧪 Kiểm tra nhạc AI" in labels
     assert "⚙️ Trạng thái nhạc" in labels
+
+
+def test_admin_music_gate_shows_output_buttons_when_provider_configured(monkeypatch):
+    monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
+        "ready": True,
+        "public_enabled": False,
+    })
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    labels = _labels(bot.music_ai_gate_keyboard(
+        12012,
+        "vi",
+        result={"song_product": "seconds"},
+    ))
+    assert "▶️ Nghe thử" in labels
+    assert "✅ Tạo bài hát" in labels
+
+
+def test_admin_music_preview_bypasses_public_gate(monkeypatch):
+    user_id = 12015
+    _reset_music(user_id)
+    bot.save_music_guided_result(user_id, {
+        "selected_prompt": "Original admin music test",
+        "guided_duration_seconds": 30,
+        "music_ai_kind": "guided",
+    })
+    monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
+        "ready": True,
+        "public_enabled": False,
+    })
+    calls = []
+
+    async def submit(_result, preview=False, admin_smoke=False, updated_by=""):
+        calls.append({"preview": preview, "admin_smoke": admin_smoke, "updated_by": updated_by})
+        return {"ok": True, "status": "PASS_SUBMITTED", "provider": "test", "task_id": "admin-preview"}
+
+    monkeypatch.setattr(bot, "submit_music_generation_job", submit)
+    update, _query = _callback_update("music_quick|showroom|music_ai_preview", user_id)
+    asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
+    assert calls == [{"preview": True, "admin_smoke": True, "updated_by": user_id}]
+    assert bot.get_music_guided_result(user_id)["music_preview_task_id"] == "admin-preview"
+
+
+def test_admin_music_full_create_is_zero_xu_and_bypasses_public_gate(monkeypatch):
+    user_id = 12016
+    _reset_music(user_id)
+    bot.save_music_guided_result(user_id, {
+        "selected_prompt": "Original admin full music test",
+        "guided_duration_seconds": 30,
+        "music_ai_kind": "guided",
+    })
+    monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(bot, "get_user", lambda _uid: (0, None, None))
+    monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
+        "ready": True,
+        "public_enabled": False,
+    })
+    calls = []
+
+    async def submit(_result, preview=False, admin_smoke=False, updated_by=""):
+        calls.append({"preview": preview, "admin_smoke": admin_smoke, "updated_by": updated_by})
+        return {"ok": True, "status": "PASS_SUBMITTED", "provider": "test", "task_id": "admin-full"}
+
+    monkeypatch.setattr(bot, "submit_music_generation_job", submit)
+    update, query = _callback_update("music_quick|showroom|music_ai_confirm", user_id)
+    asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
+    assert calls == [{"preview": False, "admin_smoke": True, "updated_by": user_id}]
+    result = bot.get_music_guided_result(user_id)
+    assert result["music_charged_xu"] == 0
+    assert "Đã trừ: 0 Xu" in query.message.outputs[-1]["text"]
+
+
+def test_admin_music_test_button_runs_real_smoke_command(monkeypatch):
+    user_id = 12017
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    called = []
+
+    async def smoke(update, context):
+        called.append((update.effective_user.id, update.effective_chat.id, context))
+        return await update.message.reply_text("smoke-called")
+
+    monkeypatch.setattr(bot, "cmd_tool_test_music_ai", smoke)
+    context = SimpleNamespace(bot=CaptureBot())
+    update, query = _callback_update("music_quick|showroom|music_admin_test", user_id)
+    asyncio.run(bot.handle_music_quick_callback(update, context))
+    assert called == [(user_id, user_id, context)]
+    assert query.message.outputs[-1]["text"] == "smoke-called"
 
 
 def test_music_gate_on_preview_creates_job(monkeypatch):

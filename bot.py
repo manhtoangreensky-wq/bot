@@ -57850,7 +57850,7 @@ async def cmd_minimax_voice_job(update: Update, context: ContextTypes.DEFAULT_TY
 async def cmd_suno_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global SUNO_PUBLIC_ENABLED
     uid = update.effective_user.id
-    if not is_owner_user(uid):
+    if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
     readiness = get_suno_music_readiness()
     smoke = preferred_tool_test_status_text("key4u_suno", "key4u_suno_job")
@@ -57870,7 +57870,7 @@ async def cmd_suno_public_open(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cmd_suno_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global SUNO_PUBLIC_ENABLED
     uid = update.effective_user.id
-    if not is_owner_user(uid):
+    if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
     SUNO_PUBLIC_ENABLED = False
     set_system_setting("suno_public_enabled", "0", "Suno public closed", uid)
@@ -57879,7 +57879,7 @@ async def cmd_suno_public_close(update: Update, context: ContextTypes.DEFAULT_TY
 async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global SUNO_PUBLIC_ENABLED
     uid = update.effective_user.id
-    if not is_owner_user(uid):
+    if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
     readiness = get_suno_music_readiness()
     submit = preferred_tool_test_result("key4u_suno", "shopaikey_music")
@@ -57913,7 +57913,7 @@ async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAU
 async def cmd_voice_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global MINIMAX_VOICE_PUBLIC_ENABLED
     uid = update.effective_user.id
-    if not is_owner_user(uid):
+    if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
     readiness = get_minimax_voice_readiness()
     smoke = preferred_tool_test_status_text("minimax_tts", "key4u_tts", "shopaikey_tts")
@@ -57936,7 +57936,7 @@ def voice_pricing_configured() -> bool:
 async def cmd_voice_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
     uid = update.effective_user.id
-    if not is_owner_user(uid):
+    if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
     readiness = get_minimax_voice_readiness()
     clone = get_minimax_voice_clone_readiness()
@@ -57976,7 +57976,7 @@ async def cmd_voice_public_open_safe(update: Update, context: ContextTypes.DEFAU
 async def cmd_voice_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
     uid = update.effective_user.id
-    if not is_owner_user(uid):
+    if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
     MINIMAX_VOICE_PUBLIC_ENABLED = False
     MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = False
@@ -64809,7 +64809,7 @@ def standalone_tts_guard_text(lang: str = "vi") -> str:
         return "The voice preview could not be created. TOAN AAS has not charged Xu. You can try again later."
     return "Bản nghe thử giọng chưa tạo được. TOAN AAS chưa trừ Xu. Bạn có thể thử lại sau."
 
-async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_style: str = "", speed: str = "normal", provider_hint: str = "") -> tuple[bool, bytes, str]:
+async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_style: str = "", speed: str = "normal", provider_hint: str = "", allow_admin: bool = False) -> tuple[bool, bytes, str]:
     clean = re.sub(r"\s+", " ", str(text or "")).strip()[:3500]
     if not clean:
         return False, b"", "empty_text"
@@ -64819,7 +64819,7 @@ async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_s
     is_default_female = requested_kind in {"default_female", "female"} or selected_voice == default_tts_voice_id("female")
     is_default_male = requested_kind in {"default_male", "male"} or selected_voice == default_tts_voice_id("male")
     shopaikey_call = lambda: shopaikey_minimax_tts_bytes(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style)
-    key4u_call = lambda: key4u_minimax_tts_bytes(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style)
+    key4u_call = lambda: key4u_minimax_tts_bytes(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style, allow_admin=allow_admin)
     simple_shopaikey_call = lambda: shopaikey_tts_bytes(clean)
     minimax_candidates = [key4u_call, shopaikey_call] if str(provider_hint or "").startswith("key4u") else [shopaikey_call, key4u_call]
     if selected_voice:
@@ -64849,7 +64849,10 @@ async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_s
     return False, b"", last_detail or "not_ready"
 
 async def send_standalone_tts_result(message, user_id, text: str, voice_label: str, voice_id: str = "", voice_style: str = "", speed: str = "normal", lang: str = "vi") -> bool:
-    ok, audio_bytes, detail = await synthesize_standalone_tts_audio(text, voice_id=voice_id, voice_style=voice_style, speed=speed)
+    if is_admin_user(user_id):
+        ok, audio_bytes, detail = await synthesize_standalone_tts_audio(text, voice_id=voice_id, voice_style=voice_style, speed=speed, allow_admin=True)
+    else:
+        ok, audio_bytes, detail = await synthesize_standalone_tts_audio(text, voice_id=voice_id, voice_style=voice_style, speed=speed)
     if not ok or not audio_bytes:
         logger.info("standalone tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
         await message.reply_text(standalone_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM))
@@ -64897,13 +64900,15 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
             )
             return False
         charged = int(charge.get("final_cost") or price)
-    ok, audio_bytes, detail = await synthesize_standalone_tts_audio(
-        text,
-        voice_id=str(profile.get("provider_voice_id") or ""),
-        voice_style=str(profile.get("display_name") or ""),
-        speed=speed,
-        provider_hint=str(profile.get("provider") or ""),
-    )
+    tts_kwargs = {
+        "voice_id": str(profile.get("provider_voice_id") or ""),
+        "voice_style": str(profile.get("display_name") or ""),
+        "speed": speed,
+        "provider_hint": str(profile.get("provider") or ""),
+    }
+    if is_admin_user(user_id):
+        tts_kwargs["allow_admin"] = True
+    ok, audio_bytes, detail = await synthesize_standalone_tts_audio(text, **tts_kwargs)
     if not ok or not audio_bytes:
         refund_charged_credit(
             user_id,
@@ -65870,6 +65875,12 @@ def music_ai_guarded_keyboard(lang: str = "vi", product_context: str = PRODUCT_C
     ])
     return InlineKeyboardMarkup(rows)
 
+def music_ai_access_allowed(user_id, readiness: dict | None = None) -> bool:
+    readiness = dict(readiness or get_suno_music_readiness())
+    if not readiness.get("ready"):
+        return False
+    return bool(readiness.get("public_enabled") or is_admin_user(user_id))
+
 def music_ai_gate_keyboard(
     user_id,
     lang: str = "vi",
@@ -65877,7 +65888,7 @@ def music_ai_gate_keyboard(
     result: dict | None = None,
 ) -> InlineKeyboardMarkup:
     readiness = get_suno_music_readiness()
-    if readiness.get("public_enabled"):
+    if music_ai_access_allowed(user_id, readiness):
         return music_ai_preview_keyboard(lang, product_context, preview_seen=bool((result or {}).get("music_preview_seen")), result=result)
     return music_ai_guarded_keyboard(lang, product_context, admin=is_admin_user(user_id))
 
@@ -66681,7 +66692,8 @@ def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_co
     if not final_ready:
         clone_gate = get_minimax_voice_clone_readiness()
         buttons = []
-        if clone_gate.get("public_enabled"):
+        profile_user_id = (profile or {}).get("user_id")
+        if clone_gate.get("public_enabled") or (clone_gate.get("ready") and is_admin_user(profile_user_id)):
             buttons.append(("🔁 Tạo/nghe thử lại" if is_vi else "🔁 Retry preview/create", cb(f"voice_clone_retry:{pid}")))
         buttons.extend([
             ("✏️ Đổi tên" if is_vi else "✏️ Rename", cb(f"voice_profile_rename:{pid}")),
@@ -67404,6 +67416,12 @@ def voice_clone_admin_blocker(readiness: dict | None = None) -> str:
         blockers.append(f"configured_routes={routes}")
     return sanitize_log_text("; ".join(str(item) for item in blockers if str(item or "").strip()))[:700] or "voice clone provider not ready"
 
+def voice_clone_access_allowed(user_id, readiness: dict | None = None) -> bool:
+    readiness = dict(readiness or get_minimax_voice_clone_readiness())
+    if not readiness.get("ready"):
+        return False
+    return bool(readiness.get("public_enabled") or is_admin_user(user_id))
+
 def mark_voice_profile_activation_failed(user_id, profile_id: int, profile: dict | None, status: str, admin_error: str) -> dict:
     metadata = voice_profile_metadata(profile or {})
     metadata["activation_status"] = str(status or "failed")
@@ -67450,7 +67468,8 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
         )
     readiness = get_minimax_voice_clone_readiness()
-    if not readiness.get("ready") or not readiness.get("public_enabled"):
+    admin_access = is_admin_user(user_id)
+    if not voice_clone_access_allowed(user_id, readiness):
         if not load_provider_attempt("voice_clone"):
             save_provider_attempt(
                 "voice_clone",
@@ -67482,7 +67501,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         profile_id,
         VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT,
         "clone_preview",
-        bypass_limits=bool(full_generation),
+        bypass_limits=bool(full_generation or admin_access),
     )
     if guard.get("cached"):
         cached_profile = guard.get("profile") or profile
@@ -67531,10 +67550,12 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         preview_bytes = b""
         route_errors = []
         route_attempts = []
-        if readiness.get("key4u_configured") and KEY4U_PUBLIC_ENABLED:
-            route_attempts.append(("key4u_minimax", key4u_minimax_upload_voice_sample, key4u_minimax_voice_clone, key4u_minimax_tts_bytes))
+        async def key4u_clone_tts(text: str, voice_id: str = "", voice_style: str = ""):
+            return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=admin_access)
+        if readiness.get("key4u_configured") and (KEY4U_PUBLIC_ENABLED or admin_access):
+            route_attempts.append(("key4u_minimax", key4u_minimax_upload_voice_sample, key4u_minimax_voice_clone, key4u_clone_tts))
         smoke_ok = str(readiness.get("tts_smoke") or "") == "PASS" and str(readiness.get("clone_smoke") or "") == "PASS"
-        if readiness.get("shopaikey_configured") and (smoke_ok or not MINIMAX_REQUIRE_SMOKE_PASS):
+        if readiness.get("shopaikey_configured") and (admin_access or smoke_ok or not MINIMAX_REQUIRE_SMOKE_PASS):
             route_attempts.append(("shopaikey_minimax", shopaikey_minimax_upload_voice_sample, shopaikey_minimax_voice_clone, shopaikey_minimax_tts_bytes))
         if not route_attempts:
             raise RuntimeError("voice_routes_not_ready:" + voice_clone_admin_blocker(readiness))
@@ -68114,7 +68135,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
         clone_readiness = get_minimax_voice_clone_readiness()
-        if not clone_readiness.get("public_enabled"):
+        if not voice_clone_access_allowed(user_id, clone_readiness):
             clear_music_guided_pending(user_id)
             return await query.message.reply_text(
                 voice_clone_provider_not_ready_public_text(lang),
@@ -68567,7 +68588,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         if not str(result.get("selected_prompt") or "").strip():
             return await query.message.reply_text("⚠️ Hãy chọn một phương án trước.", reply_markup=music_prompt_result_keyboard(lang, ctx, result))
         readiness = get_suno_music_readiness()
-        if not readiness.get("public_enabled"):
+        if not music_ai_access_allowed(user_id, readiness):
             return await query.message.reply_text(
                 music_ai_public_guard_text(lang),
                 parse_mode="HTML",
@@ -68645,7 +68666,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 set_video_finalization_state(user_id, updated_state)
                 return await video_finalization_return_after_addon(query, user_id, updated_state, lang)
         readiness = get_suno_music_readiness()
-        if not readiness.get("public_enabled"):
+        if not music_ai_access_allowed(user_id, readiness):
             return await query.message.reply_text(
                 f"✅ Đã chọn phương án {idx}.\n\n" + music_ai_public_guard_text(lang),
                 parse_mode="HTML",
@@ -68691,16 +68712,17 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         await query.answer()
         if not is_admin_user(user_id):
             return await query.message.reply_text(music_ai_public_guard_text(lang), reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False))
-        return await query.message.reply_text(music_status_text(), parse_mode="HTML", reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=True))
+        return await query.message.reply_text(music_status_text(), parse_mode="HTML", reply_markup=music_ai_gate_keyboard(user_id, lang, ctx, get_music_guided_result(user_id) or {}))
     if action == "music_admin_test":
         await query.answer()
         if not is_admin_user(user_id):
             return await query.message.reply_text(music_ai_public_guard_text(lang), reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False))
-        return await query.message.reply_text(
-            "🧪 Để gọi smoke thật, admin chạy: <code>/tool_test_music_ai</code>\nBot sẽ lưu submit/fetch/download vào /music_provider_status.",
-            parse_mode="HTML",
-            reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=True),
+        smoke_update = SimpleNamespace(
+            effective_user=query.from_user,
+            effective_chat=SimpleNamespace(id=query.message.chat_id),
+            message=query.message,
         )
+        return await cmd_tool_test_music_ai(smoke_update, context)
     if action == "voice_admin_status":
         await query.answer()
         if not is_admin_user(user_id):
@@ -68723,7 +68745,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=music_prompt_result_keyboard(lang, ctx, result),
             )
         readiness = get_suno_music_readiness()
-        if not readiness.get("public_enabled"):
+        if not music_ai_access_allowed(user_id, readiness):
             result.update({
                 "music_preview_seen": False,
                 "music_preview_guard_acknowledged": True,
@@ -68760,7 +68782,10 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 )
             result.pop("music_preview_task_id", None)
             result.pop("music_preview_provider", None)
-        submitted = await submit_music_generation_job(result, preview=True)
+        if is_admin_user(user_id):
+            submitted = await submit_music_generation_job(result, preview=True, admin_smoke=True, updated_by=user_id)
+        else:
+            submitted = await submit_music_generation_job(result, preview=True)
         if not submitted.get("ok"):
             logger.warning("music preview submit failed | user=%s | %s", user_id, sanitize_log_text(str(submitted.get("detail") or submitted.get("status")))[:220])
             result.update({
@@ -68801,7 +68826,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=music_ai_status_keyboard(lang, ctx),
             )
         readiness = get_suno_music_readiness()
-        if not readiness.get("public_enabled"):
+        if not music_ai_access_allowed(user_id, readiness):
             return await query.message.reply_text(
                 music_ai_public_guard_text(lang),
                 parse_mode="HTML",
@@ -68817,8 +68842,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         charge = spend_fixed_credit_info(user_id, price, "music_ai_full", f"music duration={music_result_duration_seconds(result)}s")
         if not charge.get("ok"):
             return await query.message.reply_text("⚠️ Chưa thể xác nhận số dư. TOAN AAS chưa tạo job nhạc.", reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result))
-        charged = int(charge.get("final_cost") or price)
-        submitted = await submit_music_generation_job(result)
+        charged = 0 if is_admin_user(user_id) else int(charge.get("final_cost") if charge.get("final_cost") is not None else price)
+        if is_admin_user(user_id):
+            submitted = await submit_music_generation_job(result, admin_smoke=True, updated_by=user_id)
+        else:
+            submitted = await submit_music_generation_job(result)
         if not submitted.get("ok"):
             refund_charged_credit(user_id, charged, event_type="music_ai_submit_refund", note="music provider submit failed", was_charged=charged > 0)
             logger.warning("music submit failed | user=%s | %s", user_id, sanitize_log_text(str(submitted.get("detail") or submitted.get("status")))[:220])
