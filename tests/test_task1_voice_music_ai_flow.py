@@ -265,18 +265,19 @@ def test_shopaikey_tts_fallback_no_double_v1(monkeypatch):
     assert "/v1/v1/" not in endpoint
     source = inspect.getsource(bot.synthesize_standalone_tts_audio)
     assert "shopaikey_tts_public_smoke_ready()" in source
-    assert "_download_audio_url_bytes" in inspect.getsource(bot.shopaikey_tts_bytes)
+    assert "resolve_shopaikey_tts_audio_bytes" in inspect.getsource(bot.shopaikey_tts_bytes)
+    assert "_download_audio_url_bytes" in inspect.getsource(bot.resolve_shopaikey_tts_audio_bytes)
 
 
 def test_no_shopaikey_music_hardcode_without_smoke():
     source = Path(bot.__file__).resolve().read_text(encoding="utf-8")
     submit_source = inspect.getsource(bot.submit_music_generation_job)
-    assert 'SHOPAIKEY_MUSIC_ENDPOINT = _env("SHOPAIKEY_MUSIC_ENDPOINT", "/suno/submit/music")' in source
-    assert 'SHOPAIKEY_MUSIC_STATUS_ENDPOINT = _env("SHOPAIKEY_MUSIC_STATUS_ENDPOINT", "/suno/fetch/{taskId}")' in source
+    assert 'SHOPAIKEY_MUSIC_ENDPOINT = _env("SHOPAIKEY_MUSIC_ENDPOINT", "/submit/music")' in source
+    assert 'SHOPAIKEY_MUSIC_STATUS_ENDPOINT = _env("SHOPAIKEY_MUSIC_STATUS_ENDPOINT", "/fetch/{taskId}")' in source
     assert '"/music/generations"' not in source
     assert "SUNO_REQUIRE_SMOKE_PASS" in submit_source
     assert "route_smoke not in smoke_pass_values" in submit_source
-    assert "SHOPAIKEY_SUNO_BASE_URL" in submit_source
+    assert "shopaikey_suno_final_url" in submit_source
 
 
 def test_no_public_provider_terms_voice_music():
@@ -310,12 +311,13 @@ def test_shopaikey_minimax_clone_payload_matches_documented_voice_id_rules():
 def test_shopaikey_suno_submit_and_fetch_match_documented_schema():
     submit = inspect.getsource(bot.submit_music_generation_job)
     poll = inspect.getsource(bot.poll_music_generation_job)
-    assert '"gpt_description_prompt": prompt' in submit
-    assert '"make_instrumental"' in submit
+    payload_source = inspect.getsource(bot.shopaikey_suno_submit_payload)
+    assert '"gpt_description_prompt": str(prompt or "")' in payload_source
+    assert '"make_instrumental": bool(instrumental)' in payload_source
     assert '"duration": duration' not in submit
-    assert 'item.get("audio_url")' in poll
-    assert "SHOPAIKEY_SUNO_BASE_URL" in submit
-    assert "SHOPAIKEY_SUNO_BASE_URL" in poll
+    assert "extract_shopaikey_suno_audio_urls" in poll
+    assert "shopaikey_suno_final_url" in submit
+    assert "shopaikey_suno_final_url" in poll
 
 
 def test_key4u_voice_music_routes_match_reference():

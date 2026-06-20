@@ -430,7 +430,7 @@ SHOPAIKEY_API_KEY = _env("SHOPAIKEY_API_KEY")
 SHOPAIKEY_BASE_URL = _env("SHOPAIKEY_BASE_URL", "https://api.shopaikey.com/v1")
 SHOPAIKEY_MEDIA_BASE_URL = _env("SHOPAIKEY_MEDIA_BASE_URL", "https://api.shopaikey.com")
 SHOPAIKEY_TTS_BASE_URL = _env("SHOPAIKEY_TTS_BASE_URL", SHOPAIKEY_MEDIA_BASE_URL)
-SHOPAIKEY_SUNO_BASE_URL = _env("SHOPAIKEY_SUNO_BASE_URL", SHOPAIKEY_MEDIA_BASE_URL)
+SHOPAIKEY_SUNO_BASE_URL = _env("SHOPAIKEY_SUNO_BASE_URL", join_provider_url(SHOPAIKEY_MEDIA_BASE_URL, "/suno"))
 SHOPAIKEY_ENABLED = env_flag("SHOPAIKEY_ENABLED", "false")
 SHOPAIKEY_ADMIN_ONLY = env_flag("SHOPAIKEY_ADMIN_ONLY", "true")
 SHOPAIKEY_DEFAULT_MODEL = _env("SHOPAIKEY_DEFAULT_MODEL") or "gpt-4o-mini"
@@ -500,6 +500,7 @@ KEY4U_LOW_BALANCE_FREEZE_USD = env_float("KEY4U_LOW_BALANCE_FREEZE_USD", 2.0)
 SUNO_PUBLIC_ENABLED = env_flag("SUNO_PUBLIC_ENABLED", "false")
 SUNO_ADMIN_SMOKE_ENABLED = env_flag("SUNO_ADMIN_SMOKE_ENABLED", "true")
 SUNO_REQUIRE_SMOKE_PASS = env_flag("SUNO_REQUIRE_SMOKE_PASS", "true")
+SUNO_ALLOW_PROCESSING_GATE = env_flag("SUNO_ALLOW_PROCESSING_GATE", "false")
 
 def key4u_minimax_final_url(endpoint: str = "") -> str:
     return join_provider_url(KEY4U_MINIMAX_BASE_URL, endpoint or "")
@@ -611,10 +612,13 @@ except Exception as e:
     FREE_PROMPT_LIBRARY_ERROR = type(e).__name__
     logger.warning("Free prompt library unavailable | error=%s", FREE_PROMPT_LIBRARY_ERROR)
 SHOPAIKEY_TTS_ENABLED = env_flag("SHOPAIKEY_TTS_ENABLED", "false")
-SHOPAIKEY_TTS_ENDPOINT = _env("SHOPAIKEY_TTS_ENDPOINT", "/tts/openai/speech")
+SHOPAIKEY_TTS_ENDPOINT = _env("SHOPAIKEY_TTS_ENDPOINT", "/tts/minimax/t2a_v2")
 SHOPAIKEY_DUBBING_TTS_ENDPOINT = _env("SHOPAIKEY_DUBBING_TTS_ENDPOINT", "/audio/speech")
-SHOPAIKEY_TTS_MODEL = _env("SHOPAIKEY_TTS_MODEL", "tts-1")
-SHOPAIKEY_TTS_VOICE = _env("SHOPAIKEY_TTS_VOICE", "alloy")
+SHOPAIKEY_TTS_MODEL = _env("SHOPAIKEY_TTS_MODEL", "speech-2.6-turbo")
+SHOPAIKEY_TTS_DEFAULT_VOICE = _env("SHOPAIKEY_TTS_DEFAULT_VOICE", "Vietnamese_Cute_Girl_v1")
+SHOPAIKEY_TTS_VOICE = _env("SHOPAIKEY_TTS_VOICE", SHOPAIKEY_TTS_DEFAULT_VOICE)
+SHOPAIKEY_OPENAI_TTS_MODEL = _env("SHOPAIKEY_OPENAI_TTS_MODEL", "tts-1")
+SHOPAIKEY_OPENAI_TTS_VOICE = _env("SHOPAIKEY_OPENAI_TTS_VOICE", "alloy")
 SHOPAIKEY_TTS_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TIMEOUT_SECONDS", 60)
 SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TELEGRAM_SEND_TIMEOUT_SECONDS", 60)
 SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS = env_int("SHOPAIKEY_TTS_TELEGRAM_RETRY_TIMEOUT_SECONDS", 90)
@@ -637,11 +641,11 @@ SHOPAIKEY_VIDEO_MODEL_PRIMARY = _env("SHOPAIKEY_VIDEO_MODEL_PRIMARY", _env("SHOP
 SHOPAIKEY_VIDEO_MODEL = SHOPAIKEY_VIDEO_MODEL_PRIMARY
 SHOPAIKEY_VIDEO_FALLBACK_MODELS = _env("SHOPAIKEY_VIDEO_FALLBACK_MODELS", "veo3.1,veo3.1-fast,veo3.1-pro,veo3.1-4k,veo3.1-fast-components,grok-video-3,grok-video-3-10s")
 SHOPAIKEY_MUSIC_ENABLED = env_flag("SHOPAIKEY_MUSIC_ENABLED", "false")
-SHOPAIKEY_MUSIC_ENDPOINT = _env("SHOPAIKEY_MUSIC_ENDPOINT", "/suno/submit/music")
+SHOPAIKEY_MUSIC_ENDPOINT = _env("SHOPAIKEY_MUSIC_ENDPOINT", "/submit/music")
 SHOPAIKEY_MUSIC_LYRICS_ENDPOINT = _env("SHOPAIKEY_MUSIC_LYRICS_ENDPOINT", "/suno/submit/lyrics")
-SHOPAIKEY_MUSIC_STATUS_ENDPOINT = _env("SHOPAIKEY_MUSIC_STATUS_ENDPOINT", "/suno/fetch/{taskId}")
+SHOPAIKEY_MUSIC_STATUS_ENDPOINT = _env("SHOPAIKEY_MUSIC_STATUS_ENDPOINT", "/fetch/{taskId}")
 SHOPAIKEY_MUSIC_CONTENT_ENDPOINT = _env("SHOPAIKEY_MUSIC_CONTENT_ENDPOINT", "")
-SHOPAIKEY_MUSIC_MODEL = _env("SHOPAIKEY_MUSIC_MODEL", "chirp-v4")
+SHOPAIKEY_MUSIC_MODEL = _env("SHOPAIKEY_MUSIC_MODEL", "chirp-fenix")
 SHOPAIKEY_MUSIC_GROUP = _env("SHOPAIKEY_MUSIC_GROUP")
 SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "true")
 SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true"))
@@ -7891,11 +7895,13 @@ def calculate_member_discounted_cost(user_id, tool_name: str, base_cost: int) ->
 def member_discount_display_line(charge: dict) -> str:
     if int((charge or {}).get("discount_xu") or 0) <= 0:
         return ""
+    final_cost = int(charge.get("final_cost") or 0)
+    final_line = f"Đã trừ: {final_cost} Xu" if final_cost > 0 else "Sau ưu đãi: 0 Xu"
     return (
         f"Giá gốc: {int(charge.get('base_cost') or 0)} Xu\n"
         f"Ưu đãi thành viên {html.escape(str(charge.get('badge') or ''))}: "
         f"-{int(charge.get('discount_xu') or 0)} Xu ({int(charge.get('discount_rate') or 0)}%)\n"
-        f"Đã trừ: {int(charge.get('final_cost') or 0)} Xu"
+        f"{final_line}"
     )
 
 def user_exists(user_id, conn=None) -> bool:
@@ -38742,7 +38748,7 @@ def save_shopaikey_component_snapshot(component: str, result: dict, detail: str,
     if component == "chat":
         model = model or SHOPAIKEY_CHAT_MODEL or SHOPAIKEY_DEFAULT_MODEL or ""
     elif component == "tts":
-        model = model or f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}"
+        model = model or f"{SHOPAIKEY_TTS_MODEL or 'speech-2.6-turbo'}/{SHOPAIKEY_TTS_VOICE or 'male-qn-qingse'}"
     elif component == "image":
         model = model or SHOPAIKEY_IMAGE_MODEL or "nano-banana"
     elif component == "video":
@@ -39160,33 +39166,33 @@ async def shopaikey_chat_completion(system_prompt: str, user_text: str, user_id,
 async def shopaikey_tts_smoke_test() -> tuple[str, bytes, str, int]:
     if not SHOPAIKEY_API_KEY:
         return "MISSING", b"", "SHOPAIKEY_API_KEY missing", 0
-    endpoint = join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, SHOPAIKEY_TTS_ENDPOINT)
+    endpoint = shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT)
+    text_value = "Xin chào, đây là bài kiểm tra giọng nói của TOAN AAS."
+    payload = (
+        shopaikey_official_tts_payload(text_value, voice_id=SHOPAIKEY_TTS_VOICE)
+        if shopaikey_tts_uses_official_minimax(SHOPAIKEY_TTS_ENDPOINT)
+        else shopaikey_legacy_tts_payload(text_value)
+    )
     try:
         async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60)) as client:
             res = await client.post(
                 endpoint,
                 headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": SHOPAIKEY_TTS_MODEL or "tts-1",
-                    "voice": SHOPAIKEY_TTS_VOICE or "alloy",
-                    "input": "Xin chào, đây là bài kiểm tra giọng nói của TOAN AAS.",
-                    "response_format": "mp3",
-                    "speed": 1.0,
-                },
+                json=payload,
             )
         content_type = str(res.headers.get("content-type") or "")
-        if res.status_code < 400 and res.content and (len(res.content) > 1024 or "audio" in content_type):
+        if res.status_code < 400 and res.content and content_type.startswith("audio/"):
             return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; model={SHOPAIKEY_TTS_MODEL}; voice={SHOPAIKEY_TTS_VOICE}", int(res.status_code)
         try:
             payload = res.json()
         except Exception:
             payload = {}
         if res.status_code < 400 and isinstance(payload, dict):
-            for candidate in _minimax_audio_candidates(payload):
-                if candidate.startswith(("http://", "https://")):
-                    audio_bytes, detail, http_status = await _download_audio_url_bytes(candidate)
-                    if audio_bytes:
-                        return "PASS", audio_bytes, f"http={res.status_code}; audio_url=yes; {detail}; model={SHOPAIKEY_TTS_MODEL}; voice={SHOPAIKEY_TTS_VOICE}", int(http_status or res.status_code)
+            audio_bytes, detail, http_status = await resolve_shopaikey_tts_audio_bytes(payload)
+            if audio_bytes:
+                return "PASS", audio_bytes, f"http={res.status_code}; {detail}; model={SHOPAIKEY_TTS_MODEL}; voice={SHOPAIKEY_TTS_VOICE}", int(http_status or res.status_code)
+        elif res.status_code < 400 and res.content and len(res.content) > 512:
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; content_type={content_type or '-'}; model={SHOPAIKEY_TTS_MODEL}", int(res.status_code)
         detail = shopaikey_sanitize_error(res.text[:400] if getattr(res, "text", "") else f"HTTP {res.status_code}; bytes={len(res.content or b'')}")
         return shopaikey_classify_error(res.status_code, detail), b"", detail, int(res.status_code)
     except Exception as e:
@@ -39196,33 +39202,32 @@ async def shopaikey_tts_bytes(text: str, endpoint_override: str = "") -> tuple[s
     if not SHOPAIKEY_API_KEY or not SHOPAIKEY_ENABLED or not SHOPAIKEY_TTS_ENABLED:
         return "MISSING", b"", "ShopAIKey TTS disabled or key missing", 0
     endpoint_path = str(endpoint_override or SHOPAIKEY_TTS_ENDPOINT).strip()
-    endpoint = join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, endpoint_path)
+    endpoint = shopaikey_tts_final_url(endpoint_path)
+    payload = (
+        shopaikey_official_tts_payload(text, voice_id=SHOPAIKEY_TTS_VOICE)
+        if shopaikey_tts_uses_official_minimax(endpoint_path)
+        else shopaikey_legacy_tts_payload(text)
+    )
     try:
         async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60)) as client:
             res = await client.post(
                 endpoint,
                 headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": SHOPAIKEY_TTS_MODEL or "tts-1",
-                    "voice": SHOPAIKEY_TTS_VOICE or "alloy",
-                    "input": str(text or "")[:3500],
-                    "response_format": "mp3",
-                    "speed": 1.0,
-                },
+                json=payload,
             )
         content_type = str(res.headers.get("content-type") or "")
-        if res.status_code < 400 and res.content and (len(res.content) > 1024 or "audio" in content_type):
+        if res.status_code < 400 and res.content and content_type.startswith("audio/"):
             return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; model={SHOPAIKEY_TTS_MODEL}", int(res.status_code)
         try:
             payload = res.json()
         except Exception:
             payload = {}
         if res.status_code < 400 and isinstance(payload, dict):
-            for candidate in _minimax_audio_candidates(payload):
-                if candidate.startswith(("http://", "https://")):
-                    audio_bytes, detail, http_status = await _download_audio_url_bytes(candidate)
-                    if audio_bytes:
-                        return "PASS", audio_bytes, f"http={res.status_code}; audio_url=yes; {detail}; model={SHOPAIKEY_TTS_MODEL}", int(http_status or res.status_code)
+            audio_bytes, detail, http_status = await resolve_shopaikey_tts_audio_bytes(payload)
+            if audio_bytes:
+                return "PASS", audio_bytes, f"http={res.status_code}; {detail}; model={SHOPAIKEY_TTS_MODEL}", int(http_status or res.status_code)
+        elif res.status_code < 400 and res.content and len(res.content) > 512:
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; content_type={content_type or '-'}; model={SHOPAIKEY_TTS_MODEL}", int(res.status_code)
         detail = shopaikey_sanitize_error(res.text[:300] if getattr(res, "text", "") else f"HTTP {res.status_code}")
         return shopaikey_classify_error(res.status_code, detail), b"", detail, int(res.status_code)
     except Exception as exc:
@@ -39263,6 +39268,8 @@ def shopaikey_minimax_tts_public_ready() -> bool:
     smoke = str(preferred_tool_test_result("minimax_tts_shopaikey", "minimax_tts").get("status") or "").upper()
     return bool(
         shopaikey_minimax_tts_configured()
+        and SHOPAIKEY_ENABLED
+        and SHOPAIKEY_TTS_ENABLED
         and MINIMAX_VOICE_PUBLIC_ENABLED
         and (provider_status_is_pass(smoke) or not MINIMAX_REQUIRE_SMOKE_PASS)
     )
@@ -39373,6 +39380,204 @@ def _minimax_audio_candidates(payload) -> list[str]:
             deduped.append(value)
     return deduped
 
+def shopaikey_tts_final_url(endpoint: str = "") -> str:
+    return join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, endpoint or SHOPAIKEY_TTS_ENDPOINT)
+
+def shopaikey_suno_final_url(endpoint: str = "") -> str:
+    return join_shopaikey_url(SHOPAIKEY_SUNO_BASE_URL, endpoint or "")
+
+def shopaikey_suno_fetch_endpoint(task_id: str) -> str:
+    raw_task_id = str(task_id or "").strip()
+    encoded = raw_task_id if raw_task_id in {"{taskId}", "{task_id}", "<TASK_ID>"} else quote(raw_task_id, safe="")
+    return key4u_endpoint_with_id(SHOPAIKEY_MUSIC_STATUS_ENDPOINT, encoded, "taskId", "task_id")
+
+def shopaikey_suno_fetch_final_url(task_id: str = "{task_id}") -> str:
+    return shopaikey_suno_final_url(shopaikey_suno_fetch_endpoint(task_id))
+
+def shopaikey_tts_uses_official_minimax(endpoint_path: str = "") -> bool:
+    endpoint_path = str(endpoint_path or SHOPAIKEY_TTS_ENDPOINT or "").lower()
+    return "/tts/minimax/" in endpoint_path or endpoint_path.rstrip("/").endswith("/t2a_v2")
+
+def shopaikey_official_tts_payload(text: str, voice_id: str = "", speed: float | str = 1.0) -> dict:
+    selected_voice = str(voice_id or SHOPAIKEY_TTS_VOICE or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
+    return {
+        "model": SHOPAIKEY_TTS_MODEL or "speech-2.6-turbo",
+        "text": str(text or "").strip()[:3500],
+        "voice_setting": {
+            "voice_id": selected_voice,
+        },
+        "audio_setting": {
+            "format": "mp3",
+        },
+    }
+
+def shopaikey_legacy_tts_payload(text: str) -> dict:
+    return {
+        "model": SHOPAIKEY_OPENAI_TTS_MODEL or "tts-1",
+        "voice": SHOPAIKEY_OPENAI_TTS_VOICE or "alloy",
+        "input": str(text or "").strip()[:3500],
+        "response_format": "mp3",
+        "speed": 1.0,
+    }
+
+def shopaikey_suno_submit_payload(
+    prompt: str,
+    *,
+    title: str = "TOAN AAS Music",
+    tags: str = "original",
+    instrumental: bool = True,
+    model: str = "",
+) -> dict:
+    return {
+        "mv": model or SHOPAIKEY_MUSIC_MODEL or "chirp-fenix",
+        "make_instrumental": bool(instrumental),
+        "gpt_description_prompt": str(prompt or "").strip()[:1200],
+        "title": str(title or "TOAN AAS Music").strip()[:160],
+        "tags": str(tags or "original").strip()[:240],
+    }
+
+def extract_shopaikey_suno_task_id(payload) -> str:
+    if isinstance(payload, str):
+        return payload.strip()
+    if not isinstance(payload, dict):
+        return ""
+    data = payload.get("data")
+    if isinstance(data, str):
+        return data.strip()
+    candidates: list[str] = []
+
+    def visit(value):
+        if isinstance(value, dict):
+            for key in ("task_id", "taskId", "taskID", "id"):
+                raw = value.get(key)
+                if isinstance(raw, (str, int)) and str(raw).strip():
+                    candidates.append(str(raw).strip())
+            for child in ("data", "result", "task", "job"):
+                if child in value:
+                    visit(value.get(child))
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return candidates[0] if candidates else ""
+
+def _shopaikey_suno_status_raw(payload) -> str:
+    values: list[str] = []
+
+    def visit(value):
+        if isinstance(value, dict):
+            for key in ("status", "state", "task_status", "taskStatus"):
+                raw = value.get(key)
+                if isinstance(raw, str) and raw.strip():
+                    values.append(raw.strip())
+            for child in ("data", "result", "task", "job"):
+                if child in value:
+                    visit(value.get(child))
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    if values:
+        return values[0]
+    if isinstance(payload, dict):
+        code = str(payload.get("code") or "").strip()
+        if code:
+            return code
+    return ""
+
+def extract_shopaikey_suno_audio_urls(payload) -> list[str]:
+    urls: list[str] = []
+    audio_keys = {
+        "audio_url", "audioUrl", "audio", "download_url", "downloadUrl",
+        "stream_url", "streamUrl", "source_audio_url", "sourceAudioUrl",
+        "output_url", "outputUrl", "file_url", "fileUrl", "url",
+    }
+
+    def add_candidate(key: str, raw):
+        if not isinstance(raw, str):
+            return
+        value = raw.strip()
+        if not value.startswith(("http://", "https://")):
+            return
+        lowered_key = str(key or "").lower()
+        lowered_url = value.lower()
+        looks_audio = (
+            "audio" in lowered_key
+            or lowered_url.split("?", 1)[0].endswith((".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"))
+            or "/audio" in lowered_url
+        )
+        if looks_audio and value not in urls:
+            urls.append(value)
+
+    def visit(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in audio_keys:
+                    add_candidate(key, child)
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return urls
+
+def extract_shopaikey_suno_media_presence(payload) -> dict:
+    presence = {"audio": False, "video": False, "image": False}
+
+    def visit(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                lowered_key = str(key or "").lower()
+                raw = str(child or "").strip() if isinstance(child, str) else ""
+                if raw.startswith(("http://", "https://")):
+                    lowered_url = raw.lower().split("?", 1)[0]
+                    if "audio" in lowered_key or lowered_url.endswith((".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")):
+                        presence["audio"] = True
+                    if "video" in lowered_key or lowered_url.endswith((".mp4", ".mov", ".webm", ".mkv")):
+                        presence["video"] = True
+                    if "image" in lowered_key or lowered_url.endswith((".jpg", ".jpeg", ".png", ".webp")):
+                        presence["image"] = True
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    if extract_shopaikey_suno_audio_urls(payload):
+        presence["audio"] = True
+    return presence
+
+def normalize_shopaikey_suno_fetch_status(payload, http_status: int = 0) -> str:
+    raw = _shopaikey_suno_status_raw(payload).strip()
+    lowered = raw.lower()
+    has_audio = bool(extract_shopaikey_suno_audio_urls(payload))
+    if has_audio and lowered in {"", "success", "ok", "complete", "completed", "succeeded", "done", "finish", "finished"}:
+        return "SUCCESS"
+    if lowered in {"success", "ok", "complete", "completed", "succeeded", "done", "finish", "finished"}:
+        return "COMPLETED_NO_AUDIO"
+    if lowered in {"submitted", "queued", "queue", "pending", "processing", "running", "in_progress", "generating"}:
+        return "PROCESSING"
+    if lowered in {"fail", "failed", "error", "cancelled", "canceled", "timeout"}:
+        return "FAILED"
+    if http_status and int(http_status or 0) >= 400:
+        return classify_provider_error(http_status, "FAIL_PROVIDER_ERROR", raw)
+    return raw.upper() if raw else ("SUCCESS" if has_audio else "PROCESSING")
+
+async def resolve_shopaikey_tts_audio_bytes(payload) -> tuple[bytes, str, int]:
+    for candidate in _minimax_audio_candidates(payload):
+        if candidate.startswith(("http://", "https://")):
+            audio_bytes, detail, http_status = await _download_audio_url_bytes(candidate, timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60))
+            if audio_bytes:
+                return audio_bytes, f"audio_url=yes; {detail}", int(http_status or 0)
+            continue
+        audio_bytes, encoding = _decode_minimax_audio_string(candidate)
+        if audio_bytes:
+            return audio_bytes, f"bytes={len(audio_bytes)}; encoding={encoding}", 0
+    return b"", "no_audio", 0
+
 async def _download_audio_url_bytes(url: str, timeout_seconds: float = 60.0) -> tuple[bytes, str, int]:
     target = str(url or "").strip()
     if not target.startswith(("http://", "https://")):
@@ -39443,12 +39648,12 @@ async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style
         if direct_minimax_tts_configured():
             return await direct_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style)
         return "MISSING", b"", "SHOPAIKEY_API_KEY/MINIMAX_TTS_ENDPOINT/MINIMAX_TTS_MODEL missing", 0
-    endpoint = join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, MINIMAX_TTS_ENDPOINT)
+    endpoint = shopaikey_tts_final_url(MINIMAX_TTS_ENDPOINT)
     selected_voice = str(voice_id or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
     text_value = str(text or "").strip()[:3500]
     if not text_value:
         return "FAIL_BAD_REQUEST", b"", "empty_text", 0
-    payload = minimax_tts_payload(text_value, voice_id=selected_voice, voice_style=voice_style)
+    payload = shopaikey_official_tts_payload(text_value, voice_id=selected_voice)
     try:
         async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60), follow_redirects=True) as client:
             res = await client.post(
@@ -39458,20 +39663,17 @@ async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style
             )
         content_type = str(res.headers.get("content-type") or "")
         if res.status_code < 400 and res.content and content_type.startswith("audio/"):
-            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; model={MINIMAX_TTS_MODEL}; voice={selected_voice}", int(res.status_code)
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; model={SHOPAIKEY_TTS_MODEL}; voice={selected_voice}", int(res.status_code)
         try:
             data = res.json()
         except Exception:
             data = {}
         if res.status_code < 400 and isinstance(data, dict):
-            for candidate in _minimax_audio_candidates(data):
-                if candidate.startswith(("http://", "https://")):
-                    audio_bytes, detail, http_status = await _download_audio_url_bytes(candidate)
-                    if audio_bytes:
-                        return "PASS", audio_bytes, f"http={res.status_code}; audio_url=yes; {detail}; model={MINIMAX_TTS_MODEL}; voice={selected_voice}", int(http_status or res.status_code)
-                audio_bytes, encoding = _decode_minimax_audio_string(candidate)
-                if audio_bytes:
-                    return "PASS", audio_bytes, f"http={res.status_code}; bytes={len(audio_bytes)}; encoding={encoding}; model={MINIMAX_TTS_MODEL}; voice={selected_voice}", int(res.status_code)
+            audio_bytes, detail, http_status = await resolve_shopaikey_tts_audio_bytes(data)
+            if audio_bytes:
+                return "PASS", audio_bytes, f"http={res.status_code}; {detail}; model={SHOPAIKEY_TTS_MODEL}; voice={selected_voice}", int(http_status or res.status_code)
+        elif res.status_code < 400 and res.content and len(res.content) > 512:
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; content_type={content_type or '-'}; model={SHOPAIKEY_TTS_MODEL}; voice={selected_voice}", int(res.status_code)
         detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}; no_audio")
         return shopaikey_classify_error(res.status_code, detail), b"", detail, int(res.status_code)
     except httpx.TimeoutException as exc:
@@ -56494,6 +56696,7 @@ def voice_status_text() -> str:
         "🎙 <b>VOICE / TTS STATUS</b>",
         "",
         f"• ShopAIKey TTS: <code>{'READY_CONFIGURED' if (SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY) else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(preferred_tool_test_status_text('shopaikey_tts', 'tts'))}</code>",
+        f"• ShopAIKey MiniMax TTS final URL: <code>{html.escape(shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT) or '-')}</code>",
         f"• ElevenLabs: <code>{'CONFIGURED' if ELEVENLABS_API_KEY else 'MISSING'}</code> | smoke <code>{html.escape(tool_test_status_text('elevenlabs_status'))}</code>",
         f"• Key4U TTS: <code>{'CONFIGURED' if (key4u_payload.get('configured') and KEY4U_TTS_ENDPOINT and KEY4U_TTS_MODEL) else 'NEED_DOCS'}</code> | smoke <code>{html.escape(tool_test_status_text('key4u_tts'))}</code>",
         f"• Key4U MiniMax base: <code>{html.escape(str(key4u_payload.get('minimax_base_url') or KEY4U_MINIMAX_BASE_URL or '-'))}</code>",
@@ -56563,6 +56766,9 @@ def music_status_text() -> str:
         f"• Preferred Suno provider: <code>{html.escape(str(readiness.get('provider') or '-'))}</code>",
         f"• Selected endpoint: <code>{html.escape(str(readiness.get('endpoint') or '-'))}</code>",
         f"• ShopAIKey Music/Suno: <code>{'CONFIGURED' if shopaikey.get('configured') else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(str(shopaikey.get('smoke') or '-'))}</code>",
+        f"• ShopAIKey Suno base: <code>{html.escape(SHOPAIKEY_SUNO_BASE_URL or '-')}</code>",
+        f"• ShopAIKey Suno submit URL: <code>{html.escape(shopaikey_suno_final_url(SHOPAIKEY_MUSIC_ENDPOINT) or '-')}</code>",
+        f"• ShopAIKey Suno fetch URL: <code>{html.escape(shopaikey_suno_fetch_final_url() or '-')}</code>",
         f"• ShopAIKey missing: <code>{html.escape(', '.join(shopaikey.get('missing_env') or []) or '-')}</code>",
         f"• Key4U Suno: <code>{'CONFIGURED' if key4u.get('configured') else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(str(key4u.get('smoke') or '-'))}</code>",
         f"• Key4U Suno base: <code>{html.escape(KEY4U_SUNO_BASE_URL or '-')}</code>",
@@ -56660,10 +56866,19 @@ def get_suno_music_readiness() -> dict:
             shopaikey_missing.append(name)
     key4u_smoke = preferred_tool_test_status_text("key4u_suno", "key4u_suno_job")
     shopaikey_smoke = preferred_tool_test_status_text("shopaikey_music", "shopaikey_music_job")
+    submit_smoke = preferred_tool_test_result("key4u_suno", "shopaikey_music")
+    fetch_smoke = preferred_tool_test_result("key4u_suno_job", "shopaikey_music_job")
+    download_smoke = preferred_tool_test_result("music_ai_download", "music_ai_preview_download")
     key4u_configured = not key4u_missing
     shopaikey_configured = not shopaikey_missing
     configured = bool(key4u_configured or shopaikey_configured)
-    smoke_ok = any(provider_status_is_pass(status) for status in (key4u_smoke, shopaikey_smoke))
+    fetch_status = str(fetch_smoke.get("status") or "").upper()
+    full_result_ok = bool(fetch_status == "PASS_FULL_RESULT" and provider_status_is_pass(str(download_smoke.get("status") or "")))
+    processing_gate_ok = bool(
+        SUNO_ALLOW_PROCESSING_GATE
+        and provider_status_base(fetch_status) in {"PROCESSING", "SUBMITTED", "PENDING", "QUEUED", "RUNNING"}
+    )
+    smoke_ok = bool(provider_status_is_pass(str(submit_smoke.get("status") or "")) and (full_result_ok or processing_gate_ok))
     preferred_provider = "key4u_suno" if key4u_configured else ("shopaikey_music" if shopaikey_configured else "none")
     preferred_model = KEY4U_SUNO_MODEL if key4u_configured else (SHOPAIKEY_MUSIC_MODEL or "auto")
     preferred_endpoint = KEY4U_SUNO_CREATE_ENDPOINT if key4u_configured else (SHOPAIKEY_MUSIC_ENDPOINT or "")
@@ -56704,12 +56919,18 @@ def get_suno_music_readiness() -> dict:
                 "configured": shopaikey_configured,
                 "model": SHOPAIKEY_MUSIC_MODEL or "",
                 "endpoint_configured": bool(SHOPAIKEY_MUSIC_ENDPOINT),
+                "submit_final_url": shopaikey_suno_final_url(SHOPAIKEY_MUSIC_ENDPOINT) if SHOPAIKEY_MUSIC_ENDPOINT else "",
+                "fetch_final_url": shopaikey_suno_fetch_final_url() if SHOPAIKEY_MUSIC_STATUS_ENDPOINT else "",
                 "smoke": shopaikey_smoke,
                 "missing_env": shopaikey_missing,
             },
         },
         "admin_smoke_status": f"key4u={key4u_smoke}; shopaikey={shopaikey_smoke}",
         "preferred_provider": preferred_provider,
+        "full_result_smoke": fetch_status,
+        "full_result_ok": full_result_ok,
+        "processing_gate_allowed": bool(SUNO_ALLOW_PROCESSING_GATE),
+        "cost_gate_ok": music_pricing_configured(),
     })
     return payload
 
@@ -56762,7 +56983,11 @@ def get_minimax_voice_readiness() -> dict:
     clone_snapshot = preferred_tool_test_result("minimax_voice_clone")
     smoke = str(tts_snapshot.get("status") or "NOT_TESTED")
     configured = not missing
-    provider_public = bool(shopaikey_voice_ready or direct_voice_ready or (key4u_voice_ready and KEY4U_PUBLIC_ENABLED))
+    provider_public = bool(
+        (shopaikey_voice_ready and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED)
+        or direct_voice_ready
+        or (key4u_voice_ready and KEY4U_PUBLIC_ENABLED)
+    )
     public_ready = bool(configured and provider_public and MINIMAX_VOICE_PUBLIC_ENABLED and (provider_status_is_pass(smoke) or not MINIMAX_REQUIRE_SMOKE_PASS))
     reason = "ready" if configured else "Missing " + ", ".join(missing)
     if configured and not public_ready:
@@ -56823,7 +57048,10 @@ def get_minimax_voice_clone_readiness() -> dict:
     clone_smoke = preferred_tool_test_status_text("minimax_voice_clone")
     smoke_ok = provider_status_is_pass(tts_smoke) and provider_status_is_pass(clone_smoke)
     configured = bool(shopaikey_configured or key4u_configured)
-    provider_public = bool(shopaikey_configured or (key4u_configured and KEY4U_PUBLIC_ENABLED))
+    provider_public = bool(
+        (shopaikey_configured and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED)
+        or (key4u_configured and KEY4U_PUBLIC_ENABLED)
+    )
     public_ready = bool(
         configured
         and provider_public
@@ -58083,12 +58311,31 @@ def audio_provider_curl_text() -> str:
     minimax_tts_url = key4u_minimax_final_url(KEY4U_TTS_ENDPOINT)
     minimax_upload_url = key4u_minimax_final_url(KEY4U_MINIMAX_UPLOAD_ENDPOINT)
     minimax_clone_url = key4u_minimax_final_url(KEY4U_MINIMAX_CLONE_ENDPOINT)
-    suno_submit_url = key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT)
+    suno_submit_url = key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT) or "https://api.key4u.shop/suno/submit/music"
     suno_fetch_url = key4u_suno_fetch_final_url("<TASK_ID>")
     suno_lyrics_url = key4u_suno_final_url(KEY4U_SUNO_LYRICS_ENDPOINT)
+    shopaikey_tts_url = shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT)
+    shopaikey_suno_submit_url = shopaikey_suno_final_url(SHOPAIKEY_MUSIC_ENDPOINT)
+    shopaikey_suno_fetch_url = shopaikey_suno_fetch_final_url("<TASK_ID>")
     return "\n".join([
         "AUDIO PROVIDER cURL - admin only",
         "Never paste a real token into chat history.",
+        "",
+        "ShopAIKey MiniMax TTS official",
+        f"curl --location '{shopaikey_tts_url}' \\",
+        "--header 'Authorization: Bearer <SHOPAIKEY_API_KEY>' \\",
+        "--header 'Content-Type: application/json' \\",
+        """--data '{"model":"speech-2.6-turbo","text":"Xin chao TOAN AAS","voice_setting":{"voice_id":"male-qn-qingse"},"audio_setting":{"format":"mp3"}}'""",
+        "",
+        "ShopAIKey Suno submit music official",
+        f"curl --location '{shopaikey_suno_submit_url}' \\",
+        "--header 'Authorization: Bearer <SHOPAIKEY_API_KEY>' \\",
+        "--header 'Content-Type: application/json' \\",
+        """--data '{"mv":"chirp-fenix","make_instrumental":true,"gpt_description_prompt":"Short upbeat TOAN AAS intro music","title":"TOAN AAS Smoke Test","tags":"cinematic, tech, uplifting"}'""",
+        "",
+        "ShopAIKey Suno fetch official",
+        f"curl --location '{shopaikey_suno_fetch_url}' \\",
+        "--header 'Authorization: Bearer <SHOPAIKEY_API_KEY>'",
         "",
         "KEY4U MiniMax TTS",
         f"curl --location '{minimax_tts_url}' \\",
@@ -58219,7 +58466,7 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
                 await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=audio,
-                    caption=f"🎙 MiniMax TTS smoke: {route}/{label}\nAdmin-only / 0 Xu. Provider có thể tốn credit thật.",
+                    caption=f"🎙 MiniMax TTS smoke: {route}/{label}\nAdmin test: không trừ Xu. Provider có thể tốn credit thật.",
                 )
                 output_sent = True
             provider_name = "key4u_minimax" if route == "key4u" else "shopaikey_minimax"
@@ -58341,7 +58588,7 @@ async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextType
                 await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=demo_audio,
-                    caption=f"🧬 MiniMax voice clone preview: {route_name}\nAdmin-only / 0 Xu.",
+                    caption=f"🧬 MiniMax voice clone preview: {route_name}\nAdmin test: không trừ Xu.",
                 )
                 demo_sent = True
             except Exception as exc:
@@ -58363,7 +58610,7 @@ async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextType
                 await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=audio,
-                    caption=f"🧬 MiniMax clone TTS smoke: {route_name}\nAdmin-only / 0 Xu.",
+                    caption=f"🧬 MiniMax clone TTS smoke: {route_name}\nAdmin test: không trừ Xu.",
                 )
                 demo_sent = True
         status_for_route = "PASS" if clone_status == "PASS" and (tts_status == "PASS" or demo_sent) else (clone_status or "FAIL")
@@ -58486,10 +58733,16 @@ async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAU
         blockers.extend(readiness.get("missing_env") or ["music route not configured"])
     if not provider_status_is_pass(str(submit.get("status") or "")):
         blockers.append("submit smoke not PASS")
-    if not provider_status_is_pass(str(fetch.get("status") or "")):
-        blockers.append("fetch/status smoke not PASS")
-    if not provider_status_is_pass(str(download.get("status") or "")):
-        blockers.append("download smoke not PASS")
+    fetch_status = str(fetch.get("status") or "").upper()
+    full_result_ok = bool(fetch_status == "PASS_FULL_RESULT" and provider_status_is_pass(str(download.get("status") or "")))
+    processing_gate_ok = bool(
+        SUNO_ALLOW_PROCESSING_GATE
+        and provider_status_base(fetch_status) in {"PROCESSING", "SUBMITTED", "PENDING", "QUEUED", "RUNNING"}
+    )
+    if not (full_result_ok or processing_gate_ok):
+        blockers.append("Suno requires PASS_FULL_RESULT or SUNO_ALLOW_PROCESSING_GATE=true")
+    if not music_pricing_configured():
+        blockers.append("music pricing/cost gate missing")
     if blockers:
         SUNO_PUBLIC_ENABLED = False
         set_system_setting("suno_public_enabled", "0", "Music public open safe blocked", uid)
@@ -58505,6 +58758,117 @@ async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAU
     SUNO_PUBLIC_ENABLED = True
     set_system_setting("suno_public_enabled", "1", "Music public opened after safe smoke", uid)
     await update.message.reply_text("✅ Đã mở Music public gate sau khi submit/fetch/download smoke PASS. Chưa claim live pass.")
+
+def music_pricing_configured() -> bool:
+    return bool(
+        int(MUSIC_AI_15S_PRICE_XU or 0) > 0
+        and int(MUSIC_AI_30S_PRICE_XU or 0) > 0
+        and int(MUSIC_AI_EXTRA_30S_PRICE_XU or 0) >= 0
+        and int(MUSIC_AI_PRICE_ROUND_TO_XU or 0) > 0
+    )
+
+async def cmd_audio_public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    voice = get_minimax_voice_readiness()
+    clone = get_minimax_voice_clone_readiness()
+    stt = get_asr_readiness()
+    music = get_suno_music_readiness()
+    await update.message.reply_text(
+        "\n".join([
+            "🎧 <b>AUDIO PUBLIC STATUS</b>",
+            "",
+            f"• Voice ready: <code>{'YES' if voice.get('ready') else 'NO'}</code> | public <code>{'ON' if voice.get('public_enabled') else 'OFF'}</code>",
+            f"• Voice clone public: <code>{'ON' if clone.get('public_enabled') else 'OFF'}</code>",
+            f"• STT public: <code>{'ON' if stt.get('public_enabled') else 'OFF'}</code> | smoke <code>{html.escape(str(stt.get('admin_smoke_status') or 'NOT_TESTED'))}</code>",
+            f"• Voice smoke: <code>{html.escape(preferred_tool_test_status_text('minimax_tts', 'minimax_tts_key4u', 'minimax_tts_shopaikey', 'shopaikey_tts'))}</code>",
+            f"• Music ready: <code>{'YES' if music.get('ready') else 'NO'}</code> | public <code>{'ON' if music.get('public_enabled') else 'OFF'}</code>",
+            f"• Music submit: <code>{html.escape(preferred_tool_test_status_text('key4u_suno', 'shopaikey_music'))}</code>",
+            f"• Music fetch: <code>{html.escape(preferred_tool_test_status_text('key4u_suno_job', 'shopaikey_music_job'))}</code>",
+            f"• Music download: <code>{html.escape(preferred_tool_test_status_text('music_ai_download', 'music_ai_preview_download'))}</code>",
+            f"• Voice cost gate: <code>{'PASS' if voice_pricing_configured() else 'BLOCKED'}</code>",
+            f"• Music cost gate: <code>{'PASS' if music_pricing_configured() else 'BLOCKED'}</code>",
+            f"• Selected voice route: <code>{html.escape(str(voice.get('provider') or '-'))}</code>",
+            f"• Selected music route: <code>{html.escape(str(music.get('provider') or '-'))}</code>",
+            f"• ShopAIKey TTS URL: <code>{html.escape(shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT))}</code>",
+            f"• ShopAIKey Suno submit/fetch: <code>{html.escape(shopaikey_suno_final_url(SHOPAIKEY_MUSIC_ENDPOINT))}</code> / <code>{html.escape(shopaikey_suno_fetch_final_url())}</code>",
+            f"• Key4U TTS URL: <code>{html.escape(key4u_minimax_final_url(KEY4U_TTS_ENDPOINT))}</code>",
+            f"• Key4U Suno submit/fetch: <code>{html.escape(key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT))}</code> / <code>{html.escape(key4u_suno_fetch_final_url())}</code>",
+            "• Required flags: "
+            f"<code>KEY4U_PUBLIC_ENABLED={str(KEY4U_PUBLIC_ENABLED).lower()}</code>, "
+            f"<code>MINIMAX_VOICE_PUBLIC_ENABLED={str(MINIMAX_VOICE_PUBLIC_ENABLED).lower()}</code>, "
+            f"<code>MINIMAX_VOICE_CLONE_PUBLIC_ENABLED={str(MINIMAX_VOICE_CLONE_PUBLIC_ENABLED).lower()}</code>, "
+            f"<code>SUNO_PUBLIC_ENABLED={str(SUNO_PUBLIC_ENABLED).lower()}</code>, "
+            f"<code>MUSIC_AI_ENABLED={str(MUSIC_AI_ENABLED).lower()}</code>, "
+            f"<code>SHOPAIKEY_TTS_ENABLED={str(SHOPAIKEY_TTS_ENABLED).lower()}</code>, "
+            f"<code>SHOPAIKEY_MUSIC_ENABLED={str(SHOPAIKEY_MUSIC_ENABLED).lower()}</code>",
+            "",
+            "Không gọi provider và không trừ Xu.",
+        ]),
+        parse_mode="HTML",
+    )
+
+async def cmd_audio_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED, SUNO_PUBLIC_ENABLED
+    uid = update.effective_user.id
+    if not is_admin_or_owner(uid):
+        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    voice = get_minimax_voice_readiness()
+    clone = get_minimax_voice_clone_readiness()
+    music = get_suno_music_readiness()
+    voice_smoke = preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job")
+    clone_smoke = preferred_tool_test_status_text("minimax_voice_clone")
+    music_submit = preferred_tool_test_result("key4u_suno", "shopaikey_music")
+    music_fetch = preferred_tool_test_result("key4u_suno_job", "shopaikey_music_job")
+    music_download = preferred_tool_test_result("music_ai_download", "music_ai_preview_download")
+    blockers = []
+    if not voice.get("ready"):
+        blockers.extend(voice.get("missing_env") or ["voice route not configured"])
+    if not provider_status_is_pass(voice_smoke):
+        blockers.append("voice TTS smoke not PASS")
+    if not voice_pricing_configured():
+        blockers.append("voice pricing config missing")
+    if not music.get("ready"):
+        blockers.extend(music.get("missing_env") or ["music route not configured"])
+    if not provider_status_is_pass(str(music_submit.get("status") or "")):
+        blockers.append("music submit smoke not PASS")
+    music_fetch_status = str(music_fetch.get("status") or "").upper()
+    full_result_ok = bool(music_fetch_status == "PASS_FULL_RESULT" and provider_status_is_pass(str(music_download.get("status") or "")))
+    processing_gate_ok = bool(
+        SUNO_ALLOW_PROCESSING_GATE
+        and provider_status_base(music_fetch_status) in {"PROCESSING", "SUBMITTED", "PENDING", "QUEUED", "RUNNING"}
+    )
+    if not (full_result_ok or processing_gate_ok):
+        blockers.append("music requires PASS_FULL_RESULT or SUNO_ALLOW_PROCESSING_GATE=true")
+    if not music_pricing_configured():
+        blockers.append("music pricing/cost gate missing")
+    if blockers:
+        MINIMAX_VOICE_PUBLIC_ENABLED = False
+        MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = False
+        SUNO_PUBLIC_ENABLED = False
+        set_system_setting("minimax_voice_public_enabled", "0", "Audio public open safe blocked", uid)
+        set_system_setting("minimax_voice_clone_public_enabled", "0", "Audio public open safe blocked", uid)
+        set_system_setting("suno_public_enabled", "0", "Audio public open safe blocked", uid)
+        return await update.message.reply_text(
+            "🎧 <b>Không mở Audio public.</b>\n\n"
+            f"• Voice smoke: <code>{html.escape(voice_smoke)}</code>\n"
+            f"• Music submit/fetch/download: <code>{html.escape(str(music_submit.get('status') or 'NOT_TESTED'))}</code> / <code>{html.escape(str(music_fetch.get('status') or 'NOT_TESTED'))}</code> / <code>{html.escape(str(music_download.get('status') or 'NOT_TESTED'))}</code>\n"
+            f"• Blocker: <code>{html.escape('; '.join(blockers))}</code>\n\n"
+            "Không gọi provider và không trừ Xu.",
+            parse_mode="HTML",
+        )
+    MINIMAX_VOICE_PUBLIC_ENABLED = True
+    MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = bool(clone.get("ready") and provider_status_is_pass(clone_smoke))
+    SUNO_PUBLIC_ENABLED = True
+    set_system_setting("minimax_voice_public_enabled", "1", "Audio public opened after safe smoke", uid)
+    set_system_setting("minimax_voice_clone_public_enabled", "1" if MINIMAX_VOICE_CLONE_PUBLIC_ENABLED else "0", "Audio public safe clone gate", uid)
+    set_system_setting("suno_public_enabled", "1", "Audio public opened after safe smoke", uid)
+    await update.message.reply_text(
+        "✅ Đã mở Audio public gate sau khi voice/music smoke đủ điều kiện.\n"
+        f"Voice clone public: {'ON' if MINIMAX_VOICE_CLONE_PUBLIC_ENABLED else 'OFF - clone smoke chưa PASS'}\n"
+        "Chưa claim live pass.",
+        parse_mode="HTML",
+    )
 
 async def cmd_voice_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global MINIMAX_VOICE_PUBLIC_ENABLED
@@ -58828,7 +59192,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Chat model tests: <code>{html.escape(shopaikey_chat_model_status_summary())}</code>",
         f"• Chat manual baseline: <code>gpt-4o-mini PASS; gpt-4.1-mini PASS; qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY</code>",
         f"• TTS tested: <code>{html.escape(shopaikey_tts_status_text())}</code>",
-        "• TTS manual baseline: <code>/v1/audio/speech tts-1 PASS</code>",
+        "• TTS manual baseline: <code>/tts/minimax/t2a_v2 speech-2.6-turbo PASS</code>",
         f"• Public voice: <code>{html.escape(public_voice_runtime_status_text())}</code>",
         f"• Image tested: <code>{html.escape(shopaikey_image_status_text())}</code>",
         f"• Public image generation: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
@@ -60026,8 +60390,10 @@ async def cmd_key4u_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE)
     provider = key4u_provider_instance()
     result = await provider.suno_query(task_id)
     detail = key4u_smoke_detail(result)
-    save_tool_test_result("key4u_suno_job", result.get("status") or "FAIL", detail, update.effective_user.id)
-    record_api_debug("key4u", "key4u_suno_job", result.get("status") or "FAIL", int(result.get("http_status") or 0), detail)
+    full_result = bool(result.get("ok") and str(result.get("output_url") or "").strip())
+    smoke_status = "PASS_FULL_RESULT" if full_result else str(result.get("status") or "FAIL")
+    save_tool_test_result("key4u_suno_job", smoke_status, detail, update.effective_user.id)
+    record_api_debug("key4u", "key4u_suno_job", smoke_status, int(result.get("http_status") or 0), detail)
     record_key4u_smoke_usage(update.effective_user.id, result, "key4u_suno_poll")
     await reply_html_lines(update, key4u_result_lines("Key4U Suno Job", result))
 
@@ -60272,7 +60638,7 @@ async def _cmd_shopaikey_status_impl(update: Update, context: ContextTypes.DEFAU
         f"• Token: <code>{html.escape(str(usage.get('token_name') or '-'))}</code>",
         f"• Last check: <code>{html.escape(str(usage.get('last_at') or '-'))}</code>",
         "",
-        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS tts-1 PASS; image uses configurable primary/fallback models; custom video endpoint admin smoke available; public image/video controlled by ENV and billing guard.",
+        "Manual known results: chat gpt-4o-mini/gpt-4.1-mini/qwen-plus PASS; gpt-5-mini FAIL_CONTENT_EMPTY; TTS speech-2.6-turbo PASS; image uses configurable primary/fallback models; custom video endpoint admin smoke available; public image/video controlled by ENV and billing guard.",
         "",
         "ShopAIKey không thay OpenRouter/OpenAI/Gemini; raw provider public vẫn đóng, customer flow đi qua guard ENV/billing.",
     ]
@@ -60998,7 +61364,7 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
         )
         tts_snapshot = {
             "status": final_status,
-            "model": f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}",
+            "model": f"{SHOPAIKEY_TTS_MODEL or 'speech-2.6-turbo'}/{SHOPAIKEY_TTS_VOICE or 'male-qn-qingse'}",
             "http_status": int(http_status or 0),
             "latency_ms": 0,
         }
@@ -61051,7 +61417,7 @@ async def cmd_tool_test_shopaikey_tts(update: Update, context: ContextTypes.DEFA
         error_class = classify_provider_error(http_status or 0, "FAIL_PROVIDER_ERROR", safe_error)
         finish_generation_pending_job(uid, tool_type, normalized_prompt, "FAIL_PROVIDER_ERROR")
         save_tool_test_result("shopaikey_tts", "FAIL_PROVIDER_ERROR", safe_error, uid)
-        save_shopaikey_component_snapshot("tts", {"status": "FAIL_PROVIDER_ERROR", "model": f"{SHOPAIKEY_TTS_MODEL or 'tts-1'}/{SHOPAIKEY_TTS_VOICE or 'alloy'}", "http_status": int(http_status or 0), "latency_ms": 0}, safe_error, uid)
+        save_shopaikey_component_snapshot("tts", {"status": "FAIL_PROVIDER_ERROR", "model": f"{SHOPAIKEY_TTS_MODEL or 'speech-2.6-turbo'}/{SHOPAIKEY_TTS_VOICE or 'male-qn-qingse'}", "http_status": int(http_status or 0), "latency_ms": 0}, safe_error, uid)
         record_api_debug("shopaikey", "tool_test_shopaikey_tts", "FAIL_PROVIDER_ERROR", int(http_status or 0), safe_error)
         await send_tts_smoke_final_report()
         return
@@ -61070,7 +61436,7 @@ async def cmd_shopaikey_music_test(update: Update, context: ContextTypes.DEFAULT
     ]:
         if not ok:
             missing.append(name)
-    model = SHOPAIKEY_MUSIC_MODEL or "chirp-v4"
+    model = SHOPAIKEY_MUSIC_MODEL or "chirp-fenix"
     if missing:
         detail = "missing=" + ",".join(missing)
         save_tool_test_result("shopaikey_music", "DISABLED", detail, uid)
@@ -61086,14 +61452,14 @@ async def cmd_shopaikey_music_test(update: Update, context: ContextTypes.DEFAULT
     if not prompt_text:
         prompt_text = "Nhạc nền công nghệ xanh ngọc cho video TOAN AAS, hiện đại, sạch, tích cực, không lời"
     prompt_text = prompt_text[:500]
-    body = {
-        "mv": model,
-        "gpt_description_prompt": prompt_text,
-        "title": "TOAN AAS Smoke Test",
-        "tags": "cinematic, tech, uplifting",
-        "make_instrumental": True,
-    }
-    url = join_shopaikey_url(SHOPAIKEY_SUNO_BASE_URL, SHOPAIKEY_MUSIC_ENDPOINT)
+    body = shopaikey_suno_submit_payload(
+        prompt_text,
+        title="TOAN AAS Smoke Test",
+        tags="cinematic, tech, uplifting",
+        instrumental=True,
+        model=model,
+    )
+    url = shopaikey_suno_final_url(SHOPAIKEY_MUSIC_ENDPOINT)
     http_status = 0
     status = "FAIL_PROVIDER_ERROR"
     task_id = ""
@@ -61113,11 +61479,7 @@ async def cmd_shopaikey_music_test(update: Update, context: ContextTypes.DEFAULT
             payload = res.json() if res.content else {}
         except Exception:
             payload = {}
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if isinstance(data, str):
-            task_id = data.strip()
-        elif isinstance(data, dict):
-            task_id = str(data.get("task_id") or data.get("taskId") or data.get("id") or "").strip()
+        task_id = extract_shopaikey_suno_task_id(payload)
         provider_message = sanitize_provider_error(
             (payload.get("message") if isinstance(payload, dict) else "")
             or (payload.get("error", {}).get("message") if isinstance(payload, dict) and isinstance(payload.get("error"), dict) else "")
@@ -61183,15 +61545,8 @@ async def cmd_shopaikey_music_job(update: Update, context: ContextTypes.DEFAULT_
             "Không gọi provider và không trừ Xu.",
             parse_mode="HTML",
         )
-    endpoint = SHOPAIKEY_MUSIC_STATUS_ENDPOINT
-    encoded_task_id = quote(task_id, safe="")
-    if "{taskId}" in endpoint:
-        endpoint = endpoint.replace("{taskId}", encoded_task_id)
-    elif "{task_id}" in endpoint:
-        endpoint = endpoint.replace("{task_id}", encoded_task_id)
-    else:
-        endpoint = endpoint.rstrip("/") + "/" + encoded_task_id
-    url = join_shopaikey_url(SHOPAIKEY_SUNO_BASE_URL, endpoint)
+    endpoint = shopaikey_suno_fetch_endpoint(task_id)
+    url = shopaikey_suno_final_url(endpoint)
     http_status = 0
     status = "FAIL_PROVIDER_ERROR"
     progress = "-"
@@ -61207,34 +61562,29 @@ async def cmd_shopaikey_music_job(update: Update, context: ContextTypes.DEFAULT_
             payload = res.json() if res.content else {}
         except Exception:
             payload = {}
+        status = normalize_shopaikey_suno_fetch_status(payload, http_status)
         data = payload.get("data") if isinstance(payload, dict) else {}
-        status = str((data.get("status") if isinstance(data, dict) else "") or payload.get("status") or payload.get("code") or "").strip() or classify_provider_error(http_status, "FAIL_PROVIDER_ERROR", res.text[:180])
-        progress = str((data.get("progress") if isinstance(data, dict) else "") or payload.get("progress") or "-")
-        fail_reason = sanitize_provider_error((data.get("fail_reason") if isinstance(data, dict) else "") or payload.get("message") or payload.get("error") or "")
-        items = data.get("data") if isinstance(data, dict) else None
-        if isinstance(items, dict):
-            items = [items]
-        if isinstance(items, list):
-            for item in items[:3]:
-                if not isinstance(item, dict):
-                    continue
-                audio_present = audio_present or bool(item.get("audio_url"))
-                video_present = video_present or bool(item.get("video_url"))
-                image_present = image_present or bool(item.get("image_url"))
+        progress = str((data.get("progress") if isinstance(data, dict) else "") or (payload.get("progress") if isinstance(payload, dict) else "") or "-")
+        fail_reason = sanitize_provider_error((data.get("fail_reason") if isinstance(data, dict) else "") or (payload.get("message") if isinstance(payload, dict) else "") or (payload.get("error") if isinstance(payload, dict) else "") or "")
+        media = extract_shopaikey_suno_media_presence(payload)
+        audio_present = bool(media.get("audio"))
+        video_present = bool(media.get("video"))
+        image_present = bool(media.get("image"))
     except httpx.TimeoutException:
         status = "FAIL_TIMEOUT"
         fail_reason = "request timeout"
     except Exception as exc:
         status = "FAIL_PROVIDER_ERROR"
         fail_reason = sanitize_provider_error(exc)
-    detail = f"http={http_status}; status={status}; task_id={task_id[:24]}; audio={audio_present}; video={video_present}; message={fail_reason[:220]}"
-    save_tool_test_result("shopaikey_music_job", status, detail, uid)
-    record_api_debug("shopaikey", "shopaikey_music_job", status, http_status, detail)
+    smoke_status = "PASS_FULL_RESULT" if status == "SUCCESS" and audio_present else status
+    detail = f"http={http_status}; status={smoke_status}; task_id={task_id[:24]}; audio={audio_present}; video={video_present}; message={fail_reason[:220]}"
+    save_tool_test_result("shopaikey_music_job", smoke_status, detail, uid)
+    record_api_debug("shopaikey", "shopaikey_music_job", smoke_status, http_status, detail)
     await update.message.reply_text(
         "🎼 <b>ShopAIKey Suno Music Job</b>\n\n"
         f"• Task ID: <code>{html.escape(task_id)}</code>\n"
         f"• HTTP: <code>{http_status or '-'}</code>\n"
-        f"• Status: <code>{html.escape(status)}</code>\n"
+        f"• Status: <code>{html.escape(smoke_status)}</code>\n"
         f"• Progress: <code>{html.escape(progress)}</code>\n"
         f"• Audio URL: <code>{'yes' if audio_present else 'no'}</code>\n"
         f"• Video URL: <code>{'yes' if video_present else 'no'}</code>\n"
@@ -66593,15 +66943,14 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
         }
 
     async def submit_shopaikey() -> dict:
-        body = {
-            "mv": SHOPAIKEY_MUSIC_MODEL or "chirp-v4",
-            "gpt_description_prompt": prompt,
-            "title": "TOAN AAS Music",
-            "tags": str(result.get("guided_style") or result.get("music_ai_kind") or "original"),
-            "make_instrumental": not bool(result.get("song_product") or str(result.get("music_ai_kind") or "") in {"lyrics", "song"}),
-        }
+        body = shopaikey_suno_submit_payload(
+            prompt,
+            title="TOAN AAS Music",
+            tags=str(result.get("guided_style") or result.get("music_ai_kind") or "original"),
+            instrumental=not bool(result.get("song_product") or str(result.get("music_ai_kind") or "") in {"lyrics", "song"}),
+        )
         try:
-            url = join_shopaikey_url(SHOPAIKEY_SUNO_BASE_URL, SHOPAIKEY_MUSIC_ENDPOINT)
+            url = shopaikey_suno_final_url(SHOPAIKEY_MUSIC_ENDPOINT)
             async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
                 response = await client.post(
                     url,
@@ -66609,9 +66958,9 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
                     json=body,
                 )
             payload = response.json() if response.content else {}
-            data = payload.get("data") if isinstance(payload, dict) else {}
-            task_id = str(data if isinstance(data, str) else ((data or {}).get("task_id") or (data or {}).get("taskId") or (data or {}).get("id") or "")).strip()
-            status_value = "PASS_SUBMITTED" if task_id else "FAILED"
+            task_id = extract_shopaikey_suno_task_id(payload)
+            code = str(payload.get("code") or "").lower() if isinstance(payload, dict) else ""
+            status_value = "PASS_SUBMITTED" if 200 <= int(response.status_code or 0) < 300 and task_id and code in {"", "success", "ok"} else classify_provider_error(int(response.status_code or 0), "FAIL_PROVIDER_ERROR", str((payload or {}).get("message") if isinstance(payload, dict) else ""))
             record_music_provider_attempt(
                 provider="shopaikey_music",
                 submit_status=status_value,
@@ -66620,7 +66969,7 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
                 updated_by=updated_by,
             )
             return {
-                "ok": bool(200 <= int(response.status_code or 0) < 300 and task_id),
+                "ok": bool(status_value == "PASS_SUBMITTED"),
                 "status": status_value,
                 "provider": "shopaikey_music",
                 "task_id": task_id,
@@ -66670,30 +67019,15 @@ async def poll_music_generation_job(result: dict, updated_by="") -> dict:
             "output_url": str(polled.get("output_url") or ""),
             "detail": str(polled.get("error_message_safe") or "")[:240],
         }
-    endpoint = str(SHOPAIKEY_MUSIC_STATUS_ENDPOINT or "")
-    encoded = quote(task_id, safe="")
-    if "{taskId}" in endpoint:
-        endpoint = endpoint.replace("{taskId}", encoded)
-    elif "{task_id}" in endpoint:
-        endpoint = endpoint.replace("{task_id}", encoded)
-    else:
-        endpoint = endpoint.rstrip("/") + "/" + encoded
+    endpoint = shopaikey_suno_fetch_endpoint(task_id)
     try:
-        url = join_shopaikey_url(SHOPAIKEY_SUNO_BASE_URL, endpoint)
+        url = shopaikey_suno_final_url(endpoint)
         async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
             response = await client.get(url, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}"})
         payload = response.json() if response.content else {}
-        data = payload.get("data") if isinstance(payload, dict) else {}
-        items = data.get("data") if isinstance(data, dict) else []
-        if isinstance(items, dict):
-            items = [items]
-        output_url = ""
-        for item in items or []:
-            if isinstance(item, dict) and item.get("audio_url"):
-                output_url = str(item.get("audio_url") or "")
-                break
-        status = str((data or {}).get("status") if isinstance(data, dict) else "") or str((payload or {}).get("status") or "")
-        final_status = status or ("SUCCESS" if output_url else "PROCESSING")
+        output_urls = extract_shopaikey_suno_audio_urls(payload)
+        output_url = output_urls[0] if output_urls else ""
+        final_status = normalize_shopaikey_suno_fetch_status(payload, int(response.status_code or 0))
         record_music_provider_attempt(provider=provider, task_id=task_id, fetch_status=final_status, error="", updated_by=updated_by)
         return {"ok": bool(output_url), "status": final_status, "output_url": output_url, "detail": ""}
     except Exception as exc:
@@ -74349,7 +74683,7 @@ async def cmd_tool_test_music_ai(update: Update, context: ContextTypes.DEFAULT_T
                 await context.bot.send_audio(
                     chat_id=update.effective_chat.id,
                     audio=audio,
-                    caption="🎵 AI Music smoke audio\nAdmin-only / 0 Xu charged by TOAN AAS. Provider may charge real credits.",
+                    caption="🎵 AI Music smoke audio\nAdmin test: không trừ Xu. Provider có thể tốn credit thật.",
                 )
         else:
             save_tool_test_result("music_ai_download", "NOT_READY", f"provider={provider}; task_id={submitted.get('task_id')}; fetch_status={fetch_status}; no audio_url yet", uid)
@@ -97350,12 +97684,18 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "telegram_ownership": ownership,
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
     }
+    env_warning_text = (
+        "⚠️ <b>ENV warning:</b> Railway ENV <code>TELEGRAM_UPDATE_MODE</code> đang bị dính nhiều dòng. "
+        "Hãy đặt <code>TELEGRAM_UPDATE_MODE=webhook</code> và <code>BOT_USERNAME=toanaasbot</code> ở hai biến riêng.\n\n"
+        if TELEGRAM_UPDATE_MODE_ENV_WARNING else ""
+    )
     await update.message.reply_text(
         "🧬 <b>TOAN AAS RUNTIME</b>\n\n"
         f"<pre>{html_pre(json.dumps(payload, ensure_ascii=False, indent=2), 1900)}</pre>\n\n"
         f"<b>Telegram ownership:</b> <code>{html.escape(ownership.get('level') or '-')}</code>\n"
         f"• {html.escape(ownership.get('message') or '')}\n"
         f"• Next: <code>{html.escape(ownership.get('next_action') or '')}</code>\n\n"
+        f"{env_warning_text}"
         "Nếu Telegram vẫn hiện A_TOOLS X khi <code>/runtime</code> không trả về bản này, "
         "đang có deployment/process cũ dùng cùng TELEGRAM_TOKEN. Nếu runtime đang polling và webhook là '-', "
         "Railway cần PUBLIC_BASE_URL hoặc RAILWAY_PUBLIC_DOMAIN để bot tự chiếm webhook.",
@@ -118703,6 +119043,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("voice_public_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("music_status", cmd_music_status))
     tg_app.add_handler(CommandHandler("music_public_status", cmd_music_provider_status))
+    tg_app.add_handler(CommandHandler("audio_public_status", cmd_audio_public_status))
+    tg_app.add_handler(CommandHandler("audio_public_open_safe", cmd_audio_public_open_safe))
     tg_app.add_handler(CommandHandler("audio_provider_status", cmd_provider_status))
     tg_app.add_handler(CommandHandler("audio_provider_curl", cmd_audio_provider_curl))
     tg_app.add_handler(CommandHandler("suno_status", cmd_suno_status))

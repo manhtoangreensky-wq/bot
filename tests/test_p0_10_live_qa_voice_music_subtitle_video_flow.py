@@ -90,7 +90,7 @@ def test_minimax_public_guard_clean():
 def test_paid_voice_real_route_or_admin_blocker_only():
     source = _source_between("async def shopaikey_minimax_tts_bytes", "async def direct_minimax_tts_bytes")
     assert "direct_minimax_tts_bytes" in source
-    assert "minimax_tts_payload" in source
+    assert "shopaikey_official_tts_payload" in source
     assert "httpx.AsyncClient" in source
     public_guard = bot.voice_profile_not_ready_text({"display_name": "Lỗi", "status": "failed"}, "vi")
     assert "API" not in public_guard
