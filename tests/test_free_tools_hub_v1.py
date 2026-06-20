@@ -134,8 +134,8 @@ def test_video_main_button_opens_video_menu():
     callbacks = _callback_set(markup)
 
     assert "VIDEO TOAN AAS" in text.upper()
-    assert "menu|video_ai_true" in callbacks
-    assert "trendg|start" in callbacks
+    assert "vproduct|open|video_ai_real" in callbacks
+    assert "vproduct|open|video_trend" in callbacks
     assert "menu|main" in callbacks
 
 
