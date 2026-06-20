@@ -11,7 +11,7 @@ import json
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -85,13 +85,13 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
     "video_trend": _product(
         "video_trend", "🔥 Video theo trend",
         "Tạo trend angle, hook, kịch bản, caption và storyboard prompt từ chủ đề.",
-        "topic|product|niche", "plan|script|prompt_pack", "free_planning", (),
+        "topic|product|niche", "plan|script|prompt_pack", "free_planning", ("package_200", "package_300", "package_400"),
         template="tiktok_hook", next_steps=("generate_plan", "export_prompt_pack", "render_video"),
     ),
     "video_idea": _product(
         "video_idea", "🧠 Ý tưởng video",
         "Tạo 5–10 ý tưởng, hook và format theo chủ đề, sản phẩm và nền tảng.",
-        "topic|product|platform", "idea_pack", "free_planning", (),
+        "topic|product|platform", "idea_pack", "free_planning", ("package_200", "package_300", "package_400"),
         template="youtube_short_script", next_steps=("generate_ideas", "export_prompt_pack", "render_video"),
     ),
     "storyboard_prompt": _product(
@@ -146,7 +146,7 @@ VIDEO_PRODUCT_REGISTRY: dict[str, dict[str, Any]] = {
     "motion_prompt": _product(
         "motion_prompt", "🎥 Prompt / Chuyển động",
         "Tạo prompt camera, chuyển động chủ thể và chuyển cảnh chuyên nghiệp.",
-        "image|scene_description", "camera_motion_prompt", "free_planning", (), template="image_to_video_motion",
+        "image|scene_description", "camera_motion_prompt", "free_planning", ("package_200", "package_300", "package_400"), template="image_to_video_motion",
         next_steps=("generate_motion_prompt", "export_prompt_pack", "render_video"),
     ),
     "video_reference": _product(
@@ -185,21 +185,21 @@ VIDEO_PACKAGE_REGISTRY: dict[str, dict[str, Any]] = {
     "package_200": {
         "package_id": "package_200", "price_xu": 200, "duration_seconds": 6,
         "max_scenes": 1, "max_shots": 1, "aspect_ratios": ["9:16", "16:9", "1:1"],
-        "provider_quality": "basic_short_default", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video"],
+        "provider_quality": "basic_short_default", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free"], "preview_policy": "not_required",
         "public_enabled": True, "cost_gate": "intentional_starter_boundary",
     },
     "package_300": {
         "package_id": "package_300", "price_xu": 300, "duration_seconds": 8,
         "max_scenes": 2, "max_shots": 2, "aspect_ratios": ["9:16", "16:9", "1:1"],
-        "provider_quality": "standard_short", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "self_shot_scene_change", "multi_scene_film"],
+        "provider_quality": "standard_short", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script"], "preview_policy": "optional",
         "public_enabled": True, "cost_gate": "provider_cost_must_be_known_safe",
     },
     "package_400": {
         "package_id": "package_400", "price_xu": 400, "duration_seconds": 12,
         "max_scenes": 4, "max_shots": 4, "aspect_ratios": ["9:16", "16:9", "1:1"],
-        "provider_quality": "enhanced_short", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "self_shot_scene_change", "multi_scene_film"],
+        "provider_quality": "enhanced_short", "allowed_products": ["video_ai_real", "image_to_video", "storyboard_prompt", "script_image_video", "video_trend", "video_idea", "motion_prompt", "self_shot_scene_change", "multi_scene_film"],
         "allowed_addons": ["none", "default_no_audio", "stock_music_free", "subtitle_from_script", "default_voice_if_cost_safe"], "preview_policy": "optional",
         "public_enabled": True, "cost_gate": "provider_cost_must_be_known_safe",
     },
@@ -548,6 +548,164 @@ class PromptVault:
         # Local refresh only. Remote imports require an explicit URL/license and are
         # intentionally not scraped or fetched by this runtime command.
         return {"ok": True, "source": "local_seed", **self.status(), "refreshed_at": datetime.now(timezone.utc).isoformat()}
+
+
+@dataclass
+class TrendSource:
+    source_id: str
+    title: str
+    category: str
+    platform: str
+    region: str
+    summary: str
+    use_cases: list[str] = field(default_factory=list)
+    example_hooks: list[str] = field(default_factory=list)
+    example_formats: list[str] = field(default_factory=list)
+    updated_at: str = ""
+    source_type: str = "local_seed"
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        if not data.get("updated_at"):
+            data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        return data
+
+
+def _trend_seed(source_id: str, title: str, category: str, use_cases: list[str], summary: str, hooks: list[str], formats: list[str]) -> dict[str, Any]:
+    return TrendSource(
+        source_id=source_id,
+        title=title,
+        category=category,
+        platform="TikTok/Reels/Shorts",
+        region="VN/global",
+        summary=summary,
+        use_cases=use_cases,
+        example_hooks=hooks,
+        example_formats=formats,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        source_type="built_in_seed",
+        enabled=True,
+    ).to_dict()
+
+
+BUILTIN_TREND_SOURCES: tuple[dict[str, Any], ...] = (
+    _trend_seed("before_after_transformation", "Before/After transformation", "before_after_transformation", ["làm đẹp", "fitness", "decor", "SaaS"], "So sánh trước/sau thật rõ trong vài giây đầu để tạo cảm giác đã mắt.", ["Trước khi dùng, mọi thứ trông như thế này...", "Sau 7 ngày thử, kết quả khiến mình bất ngờ"], ["before_after", "split_screen", "quick_reveal"]),
+    _trend_seed("pov_review", "POV trải nghiệm thật", "POV_review", ["affiliate", "review", "dịch vụ"], "Đặt người xem vào góc nhìn người dùng thật, kể lại trải nghiệm ngắn và có CTA mềm.", ["POV: bạn vừa tìm được món này...", "Mình đã thử để bạn khỏi mất tiền oan"], ["POV", "UGC_review", "handheld"]),
+    _trend_seed("three_mistakes", "3 sai lầm phổ biến", "3_mistakes", ["giáo dục", "dịch vụ", "sản phẩm kỹ thuật"], "Nêu ba lỗi người xem hay gặp rồi gợi ý cách sửa nhanh.", ["3 lỗi làm video của bạn bị lướt qua", "Nếu bạn đang mua món này, tránh 3 điều sau"], ["listicle", "talking_head", "caption_first"]),
+    _trend_seed("listicle_top5", "Top 5 lựa chọn nhanh", "listicle_top5", ["affiliate", "ẩm thực", "du lịch", "tool AI"], "Xếp hạng ngắn, dễ lưu, dễ chia sẻ.", ["Top 5 món đáng thử tuần này", "5 cách dùng AI tiết kiệm một giờ mỗi ngày"], ["top5", "fast_cut", "saveable"]),
+    _trend_seed("myth_vs_fact", "Myth vs Fact", "myth_vs_fact", ["giáo dục", "sức khỏe", "công nghệ"], "Lật lại một hiểu lầm phổ biến bằng hình ảnh rõ và lời giải thích ngắn.", ["Ai cũng tưởng điều này đúng...", "Sự thật phía sau mẹo này là gì?"], ["myth_fact", "duet_style", "caption_compare"]),
+    _trend_seed("mini_story_character", "Mini story nhân vật", "mini_story_character", ["nhân vật dễ thương", "thú cưng", "kênh kể chuyện"], "Một nhân vật nhỏ gặp vấn đề, thử giải pháp và có kết thúc đáng yêu.", ["Chú mèo này chỉ muốn một điều...", "Một ngày đi làm của nhân vật mini"], ["character_story", "cute_3d", "mini_arc"]),
+    _trend_seed("storyboard_to_video", "Storyboard → Video", "storyboard_to_video", ["quảng cáo", "phim ngắn", "video sản phẩm"], "Biến ý tưởng thành 5–7 cảnh, mỗi cảnh có hành động và nhịp chuyển rõ.", ["Từ một câu idea thành video 7 cảnh", "Storyboard này đủ để dựng ngay"], ["storyboard", "multishot", "scene_plan"]),
+    _trend_seed("product_unboxing", "Mở hộp / dùng thử sản phẩm", "product_unboxing", ["mỹ phẩm", "đồ gia dụng", "đồ công nghệ"], "Tập trung khoảnh khắc mở hộp, texture và cảm nhận thật.", ["Mở hộp món đang được hỏi nhiều", "Ấn tượng đầu tiên sau 10 giây"], ["unboxing", "macro_detail", "UGC"]),
+    _trend_seed("affiliate_soft_sell", "Affiliate soft-sell", "affiliate_soft_sell", ["affiliate", "review", "mẹo mua sắm"], "Bán bằng trải nghiệm và lợi ích, tránh cảm giác quảng cáo gắt.", ["Mình không nghĩ món này cần thiết cho tới khi...", "Nếu chỉ mua một món, mình chọn món này"], ["soft_sell", "problem_solution", "CTA_soft"]),
+    _trend_seed("ugc_testimonial", "UGC testimonial", "UGC_testimonial", ["dịch vụ", "khóa học", "spa", "fitness"], "Lời chứng thực tự nhiên, có vấn đề ban đầu và kết quả cụ thể.", ["Mình đã thử trong một tuần", "Điều thay đổi rõ nhất là..."], ["testimonial", "talking_head", "before_after"]),
+    _trend_seed("behind_the_scenes", "Behind the scenes", "behind_the_scenes", ["quán cà phê", "xưởng", "dịch vụ", "creator"], "Cho xem hậu trường thật để tăng tin cậy và cảm giác gần gũi.", ["Đằng sau một ly cà phê đẹp là...", "Một ngày chuẩn bị đơn hàng"], ["BTS", "process", "day_in_life"]),
+    _trend_seed("ai_generated_scene", "AI-generated scene reveal", "AI_generated_scene", ["AI art", "video AI", "sản phẩm sáng tạo"], "Từ prompt hoặc ảnh gốc chuyển thành cảnh AI ấn tượng.", ["Từ một dòng mô tả thành cảnh này", "Mình biến ảnh này thành video AI"], ["prompt_reveal", "AI_scene", "transition"]),
+    _trend_seed("pet_cute_story", "Storyboard thú cưng dễ thương", "pet_cute_story", ["thú cưng", "nhân vật 3D", "kênh viral"], "Câu chuyện ngắn đáng yêu, biểu cảm rõ, dễ chia sẻ.", ["Chú mèo cam và nhiệm vụ bất khả thi", "Khi thú cưng tưởng mình là boss"], ["cute_pet", "mini_story", "3D_cartoon"]),
+    _trend_seed("action_multishot", "Action multishot", "action_multishot", ["game", "thể thao", "phim ngắn", "sản phẩm năng động"], "Nhiều cảnh hành động ngắn, nhịp nhanh, chuyển cảnh mạnh.", ["5 cảnh hành động trong 10 giây", "Cú chuyển cảnh khiến video bốc hơn"], ["action", "multishot", "fast_cut"]),
+    _trend_seed("horror_short_story", "Horror short story", "horror_short_story", ["phim ngắn", "kể chuyện", "kênh horror"], "Mở đầu bình thường, tăng căng thẳng và kết bằng cú twist.", ["Đừng nhìn vào góc phòng", "Căn phòng này có một chi tiết lạ"], ["horror", "slow_push", "twist"]),
+    _trend_seed("luxury_product_ad", "Luxury product ad", "luxury_product_ad", ["nước hoa", "đồng hồ", "mỹ phẩm cao cấp"], "Ánh sáng sang, cận cảnh chất liệu, nhịp cinematic.", ["Một sản phẩm, cảm giác như phim điện ảnh", "Quảng cáo luxury trong 8 giây"], ["luxury_ad", "macro", "cinematic"]),
+)
+
+
+class TrendSourceStore:
+    REQUIRED_FIELDS = (
+        "source_id", "title", "category", "platform", "region", "summary",
+        "use_cases", "example_hooks", "example_formats", "updated_at", "source_type", "enabled",
+    )
+
+    def __init__(self, cache_path: str | Path, seeds: tuple[dict[str, Any], ...] = BUILTIN_TREND_SOURCES):
+        self.cache_path = Path(cache_path)
+        self.seeds = [dict(item) for item in seeds]
+
+    def _load_cache(self) -> dict[str, Any]:
+        if not self.cache_path.exists():
+            return {"updated_at": "", "sources": []}
+        try:
+            data = json.loads(self.cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"updated_at": "", "sources": []}
+        if not isinstance(data, dict):
+            return {"updated_at": "", "sources": []}
+        return {"updated_at": str(data.get("updated_at") or ""), "sources": list(data.get("sources") or [])}
+
+    def _merged_sources(self) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        rows: list[dict[str, Any]] = []
+        for item in list(self._load_cache().get("sources") or []) + self.seeds:
+            if not isinstance(item, dict) or not item.get("enabled", True):
+                continue
+            source_id = str(item.get("source_id") or "").strip()
+            if not source_id or source_id in seen:
+                continue
+            seen.add(source_id)
+            row = {field: item.get(field) for field in self.REQUIRED_FIELDS}
+            row["enabled"] = bool(item.get("enabled", True))
+            row["use_cases"] = list(item.get("use_cases") or [])
+            row["example_hooks"] = list(item.get("example_hooks") or [])
+            row["example_formats"] = list(item.get("example_formats") or [])
+            rows.append(row)
+        return rows
+
+    def list_sources(self, limit: int = 5, offset: int = 0) -> list[dict[str, Any]]:
+        rows = self._merged_sources()
+        if not rows:
+            rows = [dict(item) for item in self.seeds]
+        if not rows:
+            return []
+        limit = max(1, min(5, int(limit or 5)))
+        offset = max(0, int(offset or 0)) % len(rows)
+        rotated = rows[offset:] + rows[:offset]
+        return [dict(item) for item in rotated[:limit]]
+
+    def status(self) -> dict[str, Any]:
+        cache = self._load_cache()
+        rows = self._merged_sources()
+        updated = str(cache.get("updated_at") or "")
+        stale = True
+        if updated:
+            try:
+                stale = datetime.now(timezone.utc) - datetime.fromisoformat(updated.replace("Z", "+00:00")) > timedelta(days=7)
+            except Exception:
+                stale = True
+        return {
+            "path": str(self.cache_path),
+            "cache_exists": self.cache_path.exists(),
+            "count": len(rows),
+            "seed_count": len(self.seeds),
+            "updated_at": updated,
+            "stale": stale,
+            "source": "cache_plus_seed" if self.cache_path.exists() else "built_in_seed",
+        }
+
+    def refresh(self) -> dict[str, Any]:
+        data = {"updated_at": datetime.now(timezone.utc).isoformat(), "sources": self.seeds}
+        try:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self.cache_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError:
+            return {"ok": True, "source": "built_in_seed", "storage": "read_only", **self.status()}
+        return {"ok": True, "source": "built_in_seed", "storage": "cache_updated", **self.status()}
+
+    def add(self, item: dict[str, Any]) -> dict[str, Any]:
+        missing = [field for field in self.REQUIRED_FIELDS if field not in item]
+        if missing:
+            return {"ok": False, "reason": "missing_fields", "missing": missing}
+        data = self._load_cache()
+        source_id = str(item.get("source_id") or "").strip()
+        sources = list(data.get("sources") or [])
+        sources = [row for row in sources if str((row or {}).get("source_id") or "") != source_id]
+        clean = {field: item.get(field) for field in self.REQUIRED_FIELDS}
+        clean["enabled"] = bool(item.get("enabled", True))
+        sources.insert(0, clean)
+        data = {"updated_at": datetime.now(timezone.utc).isoformat(), "sources": sources}
+        try:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self.cache_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError:
+            return {"ok": False, "reason": "trend_cache_storage_read_only"}
+        return {"ok": True, "source_id": source_id}
 
 
 def provider_curl_examples(status: dict[str, Any]) -> str:

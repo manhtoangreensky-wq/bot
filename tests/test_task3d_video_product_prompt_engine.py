@@ -13,6 +13,7 @@ from video_product_system import (
     VIDEO_PACKAGE_REGISTRY,
     VIDEO_PRODUCT_REGISTRY,
     PromptVault,
+    TrendSourceStore,
     VideoPromptEngine,
     VideoPromptRequest,
     bundle_to_markdown,
@@ -29,6 +30,42 @@ def _callbacks(markup):
 
 def _labels(markup):
     return [button.text for row in markup.inline_keyboard for button in row]
+
+
+class _FakeMessage:
+    chat_id = 123456
+
+    def __init__(self):
+        self.replies = []
+
+    async def reply_text(self, text, **kwargs):
+        self.replies.append((text, kwargs))
+        return None
+
+
+class _FakeQuery:
+    def __init__(self, user_id: int, data: str):
+        self.from_user = SimpleNamespace(id=user_id, first_name="Task3D")
+        self.data = data
+        self.message = _FakeMessage()
+        self.answered = False
+        self.edits = []
+
+    async def answer(self, *args, **kwargs):
+        self.answered = True
+
+    async def edit_message_text(self, text, **kwargs):
+        self.edits.append((text, kwargs))
+        return None
+
+
+def _press_vproduct(user_id: int, product_id: str, data: str):
+    bot.clear_video_session(user_id)
+    bot.task3d_session_step(user_id, "intro", product_id=product_id, return_to="menu|main_video")
+    query = _FakeQuery(user_id, data)
+    update = SimpleNamespace(callback_query=query)
+    asyncio.run(bot.handle_video_product_callback(update, SimpleNamespace()))
+    return query, bot.get_video_session(user_id)
 
 
 def _bundle(product_id="storyboard_prompt", shots=9, package_id=""):
@@ -65,6 +102,61 @@ def test_video_menu_no_dead_buttons():
     assert audit["wrong_parent_routes"] == []
 
 
+def test_video_public_copy_no_technical_schema_terms():
+    forbidden = (
+        "topic|product|niche", "plan|script|prompt_pack", "input_type", "output_type",
+        "provider_required", "prompt_pack", "rendered_video", "camera_motion_prompt",
+        "local_mp4", "product_id", "registry", "schema", "free_or_paid",
+    )
+    for product_id in VIDEO_PRODUCT_REGISTRY:
+        public_text = bot.task3d_product_intro_text(product_id, "vi")
+        labels = " ".join(_labels(bot.task3d_product_intro_keyboard(product_id, "vi")))
+        combined = f"{public_text}\n{labels}".lower()
+        for term in forbidden:
+            assert term.lower() not in combined, (product_id, term, combined)
+
+
+def test_video_trend_intro_has_today_trends_button():
+    labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
+    assert "🔥 Xem trend hôm nay" in labels
+    assert "200 Xu" not in " ".join(labels)
+
+
+def test_video_trend_intro_has_custom_topic_button():
+    labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
+    assert "✍️ Nhập chủ đề riêng" in labels
+
+
+def test_video_idea_copy_plain_vietnamese():
+    text = bot.task3d_product_intro_text("video_idea", "vi")
+    assert "Bạn nhập sản phẩm" in text
+    assert "topic|product" not in text
+
+
+def test_storyboard_copy_plain_vietnamese():
+    text = bot.task3d_product_intro_text("storyboard_prompt", "vi")
+    assert "storyboard 6/9/12/16 cảnh" in text
+    assert "prompt_pack" not in text
+
+
+def test_motion_prompt_copy_plain_vietnamese():
+    text = bot.task3d_product_intro_text("motion_prompt", "vi")
+    assert "Mô tả cảnh" in " ".join(_labels(bot.task3d_product_intro_keyboard("motion_prompt", "vi")))
+    assert "camera_motion_prompt" not in text
+
+
+def test_image_to_video_copy_plain_vietnamese():
+    text = bot.task3d_product_intro_text("image_to_video", "vi")
+    assert "Gửi 1–4 ảnh" in text
+    assert "rendered_video" not in text
+
+
+def test_frame_video_copy_plain_vietnamese():
+    text = bot.task3d_product_intro_text("frame_video_local", "vi")
+    assert "Ghép ảnh thành video" in text
+    assert "local_mp4" not in text
+
+
 @pytest.mark.parametrize("product_id", sorted(VIDEO_PRODUCT_REGISTRY))
 def test_every_product_intro_returns_to_its_containing_video_menu(product_id):
     assert VIDEO_PRODUCT_REGISTRY[product_id]["parent_menu_callback"] == "menu|main_video"
@@ -81,6 +173,232 @@ def test_preserved_legacy_product_roots_return_to_video_menu():
     )
     for markup in legacy_root_markups:
         assert "menu|main_video" in _callbacks(markup)
+
+
+def test_trend_today_button_returns_3_to_5_ideas():
+    query, session = _press_vproduct(993101, "video_trend", "vproduct|trend_today")
+    ideas = session["draft"]["trend_ideas"]
+    assert query.answered is True
+    assert session["current_step"] == "trend_ideas"
+    assert 3 <= len(ideas) <= 5
+    assert "Gợi ý trend hôm nay" in query.edits[-1][0]
+    bot.clear_video_session(993101)
+
+
+def test_trend_seed_cache_works_without_external_api(tmp_path):
+    store = TrendSourceStore(tmp_path / "missing.json")
+    ideas = store.list_sources(limit=5)
+    assert 3 <= len(ideas) <= 5
+    assert store.status()["source"] == "built_in_seed"
+
+
+def test_trend_refresh_command_admin_only():
+    source = inspect.getsource(bot.cmd_trend_source_refresh)
+    assert "if not is_admin_user" in source
+    assert "Không scrape web" in source
+
+
+def test_trend_stale_cache_does_not_block_public(tmp_path):
+    store = TrendSourceStore(tmp_path / "old.json")
+    (tmp_path / "old.json").write_text(json.dumps({"updated_at": "2000-01-01T00:00:00+00:00", "sources": []}), encoding="utf-8")
+    assert store.status()["stale"] is True
+    assert store.list_sources(limit=3)
+
+
+def test_trend_select_generates_hook_script_storyboard_prompt():
+    user_id = 993102
+    _press_vproduct(user_id, "video_trend", "vproduct|trend_today")
+    query = _FakeQuery(user_id, "vproduct|trend_select|0")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    bundle = session["draft"]["prompt_bundle"]
+    assert session["current_step"] == "result"
+    assert bundle["trend_hooks"]
+    assert bundle["script"]
+    assert bundle["storyboard_panels"]
+    assert bundle["video_prompts"]
+    assert bundle["caption"]
+    bot.clear_video_session(user_id)
+
+
+def test_trend_does_not_charge_or_call_provider():
+    user_id = 993103
+    _press_vproduct(user_id, "video_trend", "vproduct|trend_today")
+    query = _FakeQuery(user_id, "vproduct|trend_select|0")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["draft"]["provider_called"] is False
+    assert session["draft"]["xu_charged"] == 0
+    bot.clear_video_session(user_id)
+
+
+def test_video_trend_input_button_sets_waiting_topic():
+    query, session = _press_vproduct(993104, "video_trend", "vproduct|trend_custom")
+    assert session["current_step"] == "collect_input"
+    assert session["draft"]["input_mode"] == "text"
+    assert "sản phẩm/chủ đề" in query.edits[-1][0]
+    bot.clear_video_session(993104)
+
+
+def test_video_idea_input_button_sets_waiting_topic():
+    query, session = _press_vproduct(993105, "video_idea", "vproduct|input_text|video_idea")
+    assert session["current_step"] == "collect_input"
+    assert session["draft"]["input_mode"] == "text"
+    assert "sản phẩm" in query.edits[-1][0]
+    bot.clear_video_session(993105)
+
+
+def test_storyboard_input_button_sets_waiting_topic():
+    query, session = _press_vproduct(993106, "storyboard_prompt", "vproduct|input_text|storyboard_prompt")
+    assert session["current_step"] == "collect_input"
+    assert session["draft"]["input_mode"] == "text"
+    assert "storyboard" in query.edits[-1][0]
+    bot.clear_video_session(993106)
+
+
+def test_motion_prompt_input_button_sets_waiting_scene_description():
+    query, session = _press_vproduct(993107, "motion_prompt", "vproduct|input_text|motion_prompt")
+    assert session["current_step"] == "collect_input"
+    assert session["draft"]["input_mode"] == "text"
+    assert "Mô tả cảnh" in query.edits[-1][0]
+    bot.clear_video_session(993107)
+
+
+def test_image_to_video_send_image_button_sets_waiting_images():
+    query, session = _press_vproduct(993108, "image_to_video", "vproduct|input_media|image_to_video")
+    assert session["current_step"] == "collect_input"
+    assert session["draft"]["input_mode"] == "media"
+    assert "1–4 ảnh" in query.edits[-1][0]
+    bot.clear_video_session(993108)
+
+
+def test_frame_video_start_button_sets_waiting_images(monkeypatch):
+    monkeypatch.setattr(bot, "FRAME_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_REQUIRE_LOCAL_WORKER", False)
+    monkeypatch.setattr(bot, "FRAME_VIDEO_DIRECT_RENDER_ENABLED", True)
+    monkeypatch.setattr(bot, "frame_video_active_jobs_count", lambda: 0)
+    user_id = 993109
+    bot.clear_video_session(user_id)
+    query = _FakeQuery(user_id, "framevideo|start")
+    asyncio.run(bot.handle_frame_video_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    state = bot.get_frame_video_state(user_id)
+    assert state["step"] == "collect"
+    assert state["photos"] == []
+    bot.clear_frame_video_state(user_id)
+
+
+def test_free_products_do_not_show_packages_before_prompt_output():
+    for product_id in ("video_trend", "video_idea", "storyboard_prompt", "motion_prompt"):
+        labels = " ".join(_labels(bot.task3d_product_intro_keyboard(product_id, "vi")))
+        assert "200 Xu" not in labels
+        assert "300 Xu" not in labels
+        assert "400 Xu" not in labels
+
+
+def test_use_to_create_video_shows_200_300_400():
+    user_id = 993110
+    bot.clear_video_session(user_id)
+    bundle = bot.task3d_trend_output_from_source(bot.TASK3D_TREND_STORE.list_sources(limit=1)[0])
+    session = bot.task3d_session_step(user_id, "result", product_id="video_trend", prompt_bundle=bundle)
+    labels = _labels(bot.task3d_result_keyboard("video_trend", "vi"))
+    assert "🎬 Dùng để tạo video" in labels
+    assert not any("200 Xu" in label or "300 Xu" in label or "400 Xu" in label for label in labels)
+    callbacks = _callbacks(bot.video_finalization_tier_keyboard("vi"))
+    assert {"vfinal|tier|low", "vfinal|tier|basic", "vfinal|tier|common"} <= set(callbacks)
+    assert validate_package_selection("video_trend", "package_200", ["none"])["ok"] is True
+    bot.clear_video_session(user_id)
+
+
+def test_video_ai_real_shows_packages_after_prompt_exists():
+    user_id = 993111
+    bot.clear_video_session(user_id)
+    labels = _labels(bot.task3d_product_intro_keyboard("video_ai_real", "vi"))
+    assert not any("200 Xu" in label or "300 Xu" in label or "400 Xu" in label for label in labels)
+    bundle = _bundle(product_id="video_ai_real", shots=1)
+    bot.task3d_session_step(user_id, "result", product_id="video_ai_real", prompt_bundle=bundle.to_dict())
+    assert "🎬 Dùng để tạo video" in _labels(bot.task3d_result_keyboard("video_ai_real", "vi"))
+    bot.clear_video_session(user_id)
+
+
+def test_trend_back_from_ideas_to_intro():
+    user_id = 993112
+    _press_vproduct(user_id, "video_trend", "vproduct|trend_today")
+    target, session = bot.task3d_back_step(user_id)
+    assert target == "intro"
+    assert session["product_id"] == "video_trend"
+    bot.clear_video_session(user_id)
+
+
+def test_trend_back_from_output_to_ideas():
+    user_id = 993113
+    _press_vproduct(user_id, "video_trend", "vproduct|trend_today")
+    query = _FakeQuery(user_id, "vproduct|trend_select|0")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    target, session = bot.task3d_back_step(user_id)
+    assert target == "trend_ideas"
+    assert session["draft"]["trend_ideas"]
+    bot.clear_video_session(user_id)
+
+
+def test_package_back_to_prompt_output():
+    source = inspect.getsource(bot.handle_video_product_callback)
+    assert 'open_video_finalization(query, uid, product_id, source_state, lang, "vproduct|result", package)' in source
+
+
+def test_confirmation_back_to_package():
+    source = inspect.getsource(bot.handle_video_finalization_callback)
+    assert 'current_step == "confirm"' in source
+    assert 'state["step"] = "tier"' in source
+
+
+def test_no_reinput_after_back():
+    user_id = 993114
+    bot.clear_video_session(user_id)
+    bot.task3d_session_step(user_id, "intro", product_id="image_to_video")
+    bot.task3d_session_step(user_id, "collect_input", input_mode="media", source_media_ref="file-a")
+    bot.task3d_session_step(user_id, "platform", input_collected=True)
+    target, session = bot.task3d_back_step(user_id)
+    assert target == "collect_input"
+    assert session["source_media_ref"] == "file-a"
+    bot.clear_video_session(user_id)
+
+
+def test_task1_not_touched():
+    hotfix_source = "\n".join(
+        inspect.getsource(obj)
+        for obj in (
+            bot.task3d_product_intro_text,
+            bot.task3d_product_intro_keyboard,
+            bot.task3d_trend_ideas_text,
+            bot.cmd_trend_source_refresh,
+        )
+    ).lower()
+    assert "audio provider" not in hotfix_source
+    assert "voice provider" not in hotfix_source
+    assert "music provider" not in hotfix_source
+
+
+def test_task2_not_touched():
+    hotfix_source = inspect.getsource(bot.handle_video_product_callback).lower()
+    assert "translation" not in hotfix_source
+    assert "subtitle" not in hotfix_source
+    assert "dubbing" not in hotfix_source
+
+
+def test_payos_not_touched():
+    hotfix_source = "\n".join(
+        inspect.getsource(obj)
+        for obj in (
+            bot.task3d_product_intro_text,
+            bot.handle_video_product_callback,
+            bot.cmd_trend_source_status,
+            bot.cmd_trend_source_refresh,
+        )
+    ).lower()
+    assert "payos" not in hotfix_source
+    assert "naptien" not in hotfix_source
+    assert "payment webhook" not in hotfix_source
 
 
 def test_result_child_buttons_return_to_the_result_menu_that_contains_them():
@@ -350,5 +668,6 @@ def test_task3d_commands_are_registered():
         "video_provider_status", "video_provider_curl", "tool_test_video_submit", "tool_test_video_fetch",
         "tool_test_video_200", "prompt_vault_status", "prompt_vault_refresh", "prompt_vault_search",
         "prompt_vault_add", "prompt_vault_import", "prompt_vault_export",
+        "trend_source_status", "trend_source_refresh", "trend_source_add", "trend_source_list",
     ):
         assert f'CommandHandler("{command}"' in source

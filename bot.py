@@ -33,7 +33,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
@@ -77,6 +77,7 @@ from video_product_system import (
     VIDEO_PACKAGE_REGISTRY,
     VIDEO_PRODUCT_REGISTRY,
     PromptVault,
+    TrendSourceStore,
     VideoPromptEngine,
     VideoPromptRequest,
     bundle_to_markdown,
@@ -42973,7 +42974,7 @@ TOOL_FREEZE_COMMANDS = {
     "music_policy", "music_bg", "music_song", "add_music", "add_voice_to_video",
     "image_to_music_video", "add_music_status", "video_music", "suggest_music",
     "video_upscale", "video_enhance", "image_enhance", "image_upscale",
-    "media_factory", "video_factory_flow", "video_provider_status", "remove_bg",
+    "media_factory", "video_factory_flow", "video_provider_status", "trend_source_status", "trend_source_refresh", "trend_source_add", "trend_source_list", "remove_bg",
     "source_help", "dubbing_help", "story_video_factory", "story_motion_prompt", "translate_text",
     "chat_pro", "chat_deep", "chat_pro_on", "chat_deep_on", "growth_ai",
     "campaign_report", "produce", "pipeline", "tool_test_ai", "tool_test_translate",
@@ -44588,9 +44589,10 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 
 TASK3D_PROMPT_VAULT = PromptVault(Path(__file__).resolve().parent / "docs" / "prompt_vault" / "video_prompts.seed.json")
+TASK3D_TREND_STORE = TrendSourceStore(Path(__file__).resolve().parent / "docs" / "trend_cache" / "video_trends.seed.json")
 TASK3D_PROMPT_ENGINE = VideoPromptEngine()
 TASK3D_LEGACY_ROUTES = {
-    "frame_video_local": "menu|video_frame_intro",
+    "frame_video_local": "framevideo|start",
     "self_shot_scene_change": "selfscene|start",
     "video_reference": "videoref|hub",
     "audio_addons": "menu|main_music_video",
@@ -44600,56 +44602,200 @@ TASK3D_FREE_PRODUCT_IDS = {
     "video_trend", "video_idea", "storyboard_prompt", "motion_prompt", "video_reference",
 }
 
+TASK3D_SAMPLE_TOPICS = {
+    "video_idea": "quán cà phê nhỏ muốn tăng khách cuối tuần",
+    "storyboard_prompt": "mèo cam mập đi công viên và tìm thấy món đồ bí mật",
+    "motion_prompt": "cảnh sản phẩm nước hoa nam trên bàn đá, ánh sáng sang trọng",
+    "image_to_video": "ảnh sản phẩm chuyển động nhẹ, camera push-in và ánh sáng mềm",
+    "video_ai_real": "một video quảng cáo ngắn cho nước hoa nam, chân thật và sang",
+    "script_image_video": "affiliate mỹ phẩm dưỡng da cho người mới bắt đầu",
+    "multi_scene_film": "phim ngắn 30 giây về một cửa hàng nhỏ thay đổi sau khi dùng AI",
+    "self_shot_scene_change": "giữ nhân vật chính, đổi bối cảnh thành phố đêm cinematic",
+}
+
+TASK3D_PUBLIC_COPY = {
+    "video_trend": (
+        "🔥 <b>Video theo trend</b>\n\n"
+        "TOAN AAS sẽ gợi ý các ý tưởng video đang dễ bắt trend, sau đó tạo sẵn hook, kịch bản ngắn, caption và prompt video cho bạn.\n\n"
+        "Bạn có thể:\n"
+        "• Xem trend gợi ý hôm nay\n"
+        "• Nhập sản phẩm/chủ đề của bạn\n"
+        "• Tạo kịch bản/prompt theo trend đã chọn\n\n"
+        "Miễn phí ở bước lên ý tưởng. Chỉ tính Xu nếu bạn chọn tạo video AI ở bước sau."
+    ),
+    "video_idea": (
+        "🧠 <b>Ý tưởng video</b>\n\n"
+        "Bạn nhập sản phẩm, chủ đề hoặc lĩnh vực. TOAN AAS sẽ gợi ý 5–10 ý tưởng video, hook mở đầu và format phù hợp cho TikTok/Reels/Shorts.\n\n"
+        "Miễn phí ở bước lên ý tưởng. Chỉ tính Xu nếu bạn chọn tạo video AI ở bước sau."
+    ),
+    "storyboard_prompt": (
+        "🎞 <b>Storyboard + Prompt</b>\n\n"
+        "TOAN AAS sẽ biến ý tưởng của bạn thành storyboard 6/9/12/16 cảnh, kèm prompt ảnh và prompt video cho từng cảnh.\n\n"
+        "Phù hợp với:\n"
+        "• Storyboard → Video\n"
+        "• Multishot 2 cảnh/lần\n"
+        "• Quảng cáo sản phẩm\n"
+        "• Video kể chuyện nhân vật\n\n"
+        "Miễn phí khi xuất prompt. Chỉ tính Xu nếu bạn chọn tạo video."
+    ),
+    "motion_prompt": (
+        "🎥 <b>Prompt / Chuyển động</b>\n\n"
+        "Bạn mô tả cảnh hoặc gửi ảnh. TOAN AAS sẽ tạo prompt chuyển động camera, hành động nhân vật, ánh sáng và nhịp chuyển cảnh chuyên nghiệp.\n\n"
+        "Miễn phí khi tạo prompt. Chỉ tính Xu nếu bạn chọn tạo video."
+    ),
+    "image_to_video": (
+        "🖼 <b>Ảnh → Video</b>\n\n"
+        "Gửi 1–4 ảnh. TOAN AAS sẽ gợi ý chuyển động, camera và prompt video để biến ảnh thành video ngắn.\n\n"
+        "Bạn có thể lấy prompt miễn phí. Nếu muốn tạo video thật, bot sẽ hỏi gói và xác nhận ở bước sau."
+    ),
+    "frame_video_local": (
+        "🎞 <b>Ghép ảnh thành video</b>\n\n"
+        "Gửi nhiều ảnh để ghép thành video MP4 bằng hiệu ứng chuyển cảnh đơn giản. Chức năng này dùng Local Worker/FFmpeg, không dùng hệ tạo video AI.\n\n"
+        "Bot sẽ hỏi xác nhận theo quy trình ghép ảnh hiện có trước khi xử lý."
+    ),
+    "video_ai_real": (
+        "🎬 <b>Video AI chân thật</b>\n\n"
+        "Tạo video AI ngắn từ mô tả hoặc ảnh tham khảo.\n\n"
+        "Quy trình:\n"
+        "1. Nhập ý tưởng hoặc gửi ảnh\n"
+        "2. TOAN AAS tối ưu prompt\n"
+        "3. Chọn gói sau khi có prompt\n"
+        "4. Xem lại và xác nhận\n"
+        "5. Bot mới xử lý và tính Xu"
+    ),
+    "script_image_video": (
+        "🧩 <b>Kịch bản → Ảnh → Video</b>\n\n"
+        "Bạn nhập sản phẩm, câu chuyện hoặc ý tưởng. TOAN AAS sẽ tạo kịch bản ngắn, danh sách cảnh, prompt ảnh và prompt video theo từng cảnh.\n\n"
+        "Miễn phí ở bước chuẩn bị. Chỉ tính Xu nếu bạn chọn tạo video ở bước sau."
+    ),
+    "self_shot_scene_change": (
+        "🎥 <b>Tự quay & đổi cảnh AI</b>\n\n"
+        "Gửi video/ảnh tự quay. TOAN AAS sẽ giúp tạo prompt đổi bối cảnh, ánh sáng, phong cách hoặc chuyển cảnh AI.\n\n"
+        "Chưa xử lý ngay và chưa trừ Xu ở bước này."
+    ),
+    "multi_scene_film": (
+        "🎬 <b>Phim AI nhiều cảnh</b>\n\n"
+        "Tạo kịch bản và prompt cho video nhiều cảnh. Phần lên kế hoạch miễn phí. Render nhiều cảnh sẽ cần gói phù hợp và xác nhận riêng từng bước."
+    ),
+    "video_reference": (
+        "📥 <b>Video mẫu / Kênh mẫu</b>\n\n"
+        "TOAN AAS giúp bạn phân tích nhịp dựng, hook, bố cục và phong cách từ video/kênh tham khảo để tạo nội dung mới của riêng bạn.\n\n"
+        "Không khuyến khích copy/reup. Bước lập ý tưởng không trừ Xu."
+    ),
+    "audio_addons": (
+        "🎵 <b>Nhạc / Voice / SFX</b>\n\n"
+        "Chọn nhạc, voice hoặc hiệu ứng âm thanh cho video hiện tại. Các lựa chọn có phí sẽ được báo riêng theo quy trình audio hiện có."
+    ),
+    "video_local_edit": (
+        "🛠 <b>Chỉnh sửa video local</b>\n\n"
+        "Trim, crop, resize, nén hoặc ghép video bằng Local Worker/FFmpeg. Bot sẽ hỏi lựa chọn và xác nhận trước khi xử lý."
+    ),
+}
+
+
+def task3d_public_copy(product_id: str, lang: str = "vi") -> str:
+    text = TASK3D_PUBLIC_COPY.get(str(product_id or ""))
+    if text:
+        return text
+    product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
+    label = html.escape(str(product.get("public_label") or "Video TOAN AAS"))
+    purpose = html.escape(str(product.get("purpose") or "Tạo ý tưởng, prompt hoặc video theo quy trình TOAN AAS."))
+    return f"{label}\n\n{purpose}\n\nBot sẽ báo rõ trước mọi bước có tính Xu."
+
+
+def task3d_text_input_prompt(product_id: str, lang: str = "vi") -> str:
+    prompts = {
+        "video_trend": "✍️ Bạn muốn làm video về sản phẩm/chủ đề gì? Ví dụ: nước hoa nam, quán cà phê, khóa học AI, affiliate mỹ phẩm, kênh thú cưng...",
+        "video_idea": "✍️ Nhập sản phẩm, chủ đề hoặc lĩnh vực bạn muốn làm video. Ví dụ: quán cà phê, khóa học AI, mỹ phẩm, đồ gia dụng...",
+        "storyboard_prompt": "✍️ Nhập ý tưởng/câu chuyện bạn muốn biến thành storyboard. Ví dụ: mèo cam mập đi công viên, quảng cáo nước hoa nam, video kể chuyện sản phẩm...",
+        "motion_prompt": "🎥 Mô tả cảnh bạn muốn tạo chuyển động. Ví dụ: sản phẩm đặt trên bàn đá, camera push-in, ánh sáng luxury...",
+        "image_to_video": "✍️ Mô tả chuyển động bạn muốn cho ảnh. Ví dụ: camera zoom nhẹ, tóc bay, ánh sáng đổi từ sáng sang hoàng hôn...",
+        "video_ai_real": "✍️ Nhập prompt hoặc ý tưởng video ngắn. TOAN AAS sẽ tối ưu prompt trước; chưa hiện gói và chưa trừ Xu.",
+        "script_image_video": "✍️ Nhập sản phẩm/chủ đề/kịch bản thô. Bot sẽ tạo kịch bản, cảnh, prompt ảnh và prompt video miễn phí trước.",
+        "self_shot_scene_change": "✍️ Mô tả bối cảnh muốn đổi. Ví dụ: giữ người thật, đổi sang phố đêm cinematic, ánh sáng neon...",
+        "multi_scene_film": "✍️ Nhập cốt truyện hoặc ý tưởng phim ngắn nhiều cảnh. Bot sẽ lập kế hoạch miễn phí trước.",
+    }
+    return prompts.get(str(product_id or ""), "✍️ Nhập nội dung bạn muốn tạo. Bot chưa xử lý video và chưa trừ Xu.")
+
+
+def task3d_media_input_prompt(product_id: str, lang: str = "vi") -> str:
+    if product_id == "video_ai_real":
+        return "📷 Gửi ảnh tham khảo cho video. Bot chỉ lưu ảnh trong phiên; chưa hiện gói, chưa xử lý video và chưa trừ Xu."
+    if product_id == "self_shot_scene_change":
+        return "📎 Gửi video/ảnh tự quay. Bot chỉ lưu file trong phiên để lên prompt đổi cảnh; chưa xử lý và chưa trừ Xu."
+    return "📷 Gửi 1–4 ảnh. Bot chỉ lưu file trong phiên; chưa xử lý video và chưa trừ Xu."
+
 
 def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
     product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
     if not product:
         return "⚠️ Sản phẩm video không tồn tại. Bot chưa trừ Xu."
-    free_line = {
-        "free_planning": "Miễn phí: chỉ tạo ý tưởng/kế hoạch/prompt; không gọi video provider và không trừ Xu.",
-        "free_planning_paid_render": "Lập kế hoạch và xuất prompt miễn phí. Chỉ render sau khi chọn gói 200/300/400 và xác nhận cuối.",
-        "free_prompt_paid_render": "Tạo motion prompt miễn phí. Chỉ render sau khi chọn gói và xác nhận cuối.",
-        "paid_after_final_confirm": "Render trả phí 200/300/400 Xu. Bot chỉ gọi provider sau xác nhận cuối và chỉ trừ Xu sau khi provider nhận job.",
-        "free_planning_paid_higher_tier_render": "Lập kế hoạch miễn phí. Render phim nhiều cảnh chỉ dùng gói 300/400 và xác nhận cuối.",
-        "local_render_policy": "Chỉ dùng Local Worker/FFmpeg, không gọi AI video provider. Giá local hiện hành được xác nhận trước khi xử lý.",
-        "free_default_optional_paid": "Chọn mặc định/kế hoạch là miễn phí; audio tùy chỉnh theo trạng thái Task 1 và hóa đơn riêng.",
-        "free_guarded_analysis": "Style brief miễn phí/guarded; không sao chép nguyên tác có bản quyền.",
-        "free_plan_paid_guarded_render": "Lập kế hoạch miễn phí; video-to-video chỉ mở khi provider route sẵn sàng và đã xác nhận.",
-    }.get(str(product.get("free_or_paid") or ""), "Bot báo rõ phí trước mọi xử lý thật.")
     if normalize_user_language(lang) != "vi":
         return (
             f"{product.get('public_label')}\n\n"
             f"{product.get('purpose')}\n\n"
-            f"Input: <code>{html.escape(str(product.get('user_input_type') or '-'))}</code>\n"
-            f"Output: <code>{html.escape(str(product.get('output_type') or '-'))}</code>\n\n"
-            "Planning never calls a video provider or charges Xu. Rendering uses only the visible 200/300/400 packages and final confirmation."
+            "Start with an idea, prompt, image or video reference. TOAN AAS will guide the next step in plain language.\n\n"
+            "Free planning does not process a paid video and does not charge Xu. Paid rendering appears only after a prompt is ready."
         )
-    return (
-        f"{product.get('public_label')}\n\n"
-        f"{html.escape(str(product.get('purpose') or ''))}\n\n"
-        f"<b>Đầu vào:</b> <code>{html.escape(str(product.get('user_input_type') or '-'))}</code>\n"
-        f"<b>Đầu ra:</b> <code>{html.escape(str(product.get('output_type') or '-'))}</code>\n\n"
-        f"<b>Ranh giới:</b> {html.escape(free_line)}"
-    )
+    return task3d_public_copy(product_id, lang)
 
 
 def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
     product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
     is_vi = normalize_user_language(lang) == "vi"
     parent_callback = str(product.get("parent_menu_callback") or "menu|main_video")
-    if product_id in TASK3D_LEGACY_ROUTES:
-        first = "▶️ Bắt đầu đúng quy trình" if is_vi else "▶️ Start product flow"
-        first_callback = f"vproduct|legacy|{product_id}"
-    elif "image" in str(product.get("user_input_type") or "") and product_id == "image_to_video":
-        first = "📷 Gửi ảnh" if is_vi else "📷 Send image"
-        first_callback = f"vproduct|input_media|{product_id}"
+    menu_label = "⬅️ Menu video" if is_vi else "⬅️ Video menu"
+    rows_by_product = {
+        "video_trend": [
+            [("🔥 Xem trend hôm nay", "vproduct|trend_today"), ("✍️ Nhập chủ đề riêng", "vproduct|trend_custom")],
+            [("🔁 Gợi ý trend khác", "vproduct|trend_more"), (menu_label, parent_callback)],
+        ],
+        "video_idea": [
+            [("✍️ Nhập chủ đề", "vproduct|input_text|video_idea"), ("🎲 Gợi ý mẫu", "vproduct|sample|video_idea")],
+        ],
+        "storyboard_prompt": [
+            [("✍️ Nhập ý tưởng", "vproduct|input_text|storyboard_prompt"), ("🎞 Dùng mẫu storyboard", "vproduct|sample|storyboard_prompt")],
+        ],
+        "motion_prompt": [
+            [("✍️ Mô tả cảnh", "vproduct|input_text|motion_prompt"), ("📷 Gửi ảnh", "vproduct|input_media|motion_prompt")],
+        ],
+        "image_to_video": [
+            [("📷 Gửi ảnh", "vproduct|input_media|image_to_video"), ("✍️ Mô tả chuyển động", "vproduct|input_text|image_to_video")],
+        ],
+        "frame_video_local": [
+            [("▶️ Bắt đầu ghép ảnh", "vproduct|legacy|frame_video_local")],
+        ],
+        "video_ai_real": [
+            [("✍️ Nhập prompt", "vproduct|input_text|video_ai_real"), ("📷 Gửi ảnh tham khảo", "vproduct|input_media|video_ai_real")],
+        ],
+        "script_image_video": [
+            [("✍️ Nhập kịch bản/chủ đề", "vproduct|input_text|script_image_video"), ("🎲 Dùng mẫu nhanh", "vproduct|sample|script_image_video")],
+        ],
+        "self_shot_scene_change": [
+            [("📎 Gửi video/ảnh", "vproduct|input_media|self_shot_scene_change"), ("✍️ Mô tả cảnh muốn đổi", "vproduct|input_text|self_shot_scene_change")],
+        ],
+        "multi_scene_film": [
+            [("✍️ Nhập cốt truyện", "vproduct|input_text|multi_scene_film"), ("🎞 Dùng mẫu phim ngắn", "vproduct|sample|multi_scene_film")],
+        ],
+        "video_reference": [
+            [("📥 Phân tích video/kênh mẫu", "vproduct|legacy|video_reference"), ("✍️ Nhập phong cách thủ công", "vproduct|input_text|video_reference")],
+        ],
+        "audio_addons": [
+            [("🎵 Mở Nhạc / Voice / SFX", "vproduct|legacy|audio_addons")],
+        ],
+        "video_local_edit": [
+            [("🛠 Bắt đầu chỉnh sửa", "vproduct|legacy|video_local_edit")],
+        ],
+    }
+    rows = [
+        [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
+        for row in rows_by_product.get(product_id, [[("✍️ Nhập nội dung", f"vproduct|input_text|{product_id}")]])
+    ]
+    if not any(parent_callback in (button.callback_data for button in row) for row in rows):
+        rows.append([InlineKeyboardButton(menu_label, callback_data=parent_callback), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     else:
-        first = "✍️ Nhập nội dung" if is_vi else "✍️ Enter input"
-        first_callback = f"vproduct|input_text|{product_id}"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(first, callback_data=first_callback)],
-        [InlineKeyboardButton("⬅️ Menu video" if is_vi else "⬅️ Video menu", callback_data=parent_callback), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+        rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
 
 
 def task3d_platform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -44755,24 +44901,32 @@ def task3d_result_text(session: dict, lang: str = "vi") -> str:
     shots = list(bundle.get("shot_table") or [])
     batches = list((bundle.get("render_plan") or {}).get("batches") or [])
     lines = [
-        "🎞 <b>Prompt pack đã sẵn sàng</b>", "",
+        "🎞 <b>Bộ ý tưởng và prompt đã sẵn sàng</b>", "",
         f"<b>{html.escape(str(bundle.get('title') or 'TOAN AAS Video'))}</b>",
         html.escape(str(bundle.get("short_summary") or "")), "",
         f"<b>Hook:</b> {html.escape(str(bundle.get('hook') or ''))}", "",
-        "<b>Storyboard / shot table</b>",
+        "<b>Storyboard / các cảnh chính</b>",
     ]
+    trend_hooks = list(bundle.get("trend_hooks") or [])
+    if trend_hooks:
+        lines.extend(["", "<b>3 hook gợi ý</b>"])
+        for hook in trend_hooks[:3]:
+            lines.append(f"• {html.escape(str(hook))}")
+    caption = str(bundle.get("caption") or "").strip()
+    if caption:
+        lines.extend(["", f"<b>Caption:</b> {html.escape(caption)}"])
     for shot in shots[:6]:
         lines.append(
-            f"• Shot {shot.get('shot_number')} · {shot.get('duration_seconds')}s · "
+            f"• Cảnh {shot.get('shot_number')} · {shot.get('duration_seconds')}s · "
             f"{html.escape(str(shot.get('camera_angle') or ''))} · {html.escape(str(shot.get('camera_movement') or ''))}\n"
             f"  {html.escape(str(shot.get('scene_purpose') or ''))}"
         )
     if len(shots) > 6:
-        lines.append(f"• … còn {len(shots) - 6} shot trong prompt pack xuất file.")
+        lines.append(f"• … còn {len(shots) - 6} cảnh trong file xuất.")
     if batches:
         batch_text = ", ".join(f"B{item.get('batch_number')}: {','.join(map(str, item.get('shot_numbers') or []))}" for item in batches)
-        lines.extend(["", f"<b>Multishot 2 shot/batch:</b> <code>{html.escape(batch_text)}</code>"])
-    lines.extend(["", "Bước này miễn phí: chưa gọi video provider, chưa tạo paid job và chưa trừ Xu."])
+        lines.extend(["", f"<b>Gợi ý chia cảnh:</b> <code>{html.escape(batch_text)}</code>"])
+    lines.extend(["", "Bước này miễn phí: chưa xử lý video AI, chưa tạo lệnh xử lý trả phí và chưa trừ Xu."])
     return "\n".join(lines)
 
 
@@ -44780,10 +44934,10 @@ def task3d_result_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardM
     is_vi = normalize_user_language(lang) == "vi"
     rows = [
         [InlineKeyboardButton("🖼 Tạo prompt ảnh" if is_vi else "🖼 Image prompts", callback_data="vproduct|view|image"), InlineKeyboardButton("🎥 Tạo prompt video" if is_vi else "🎥 Video prompts", callback_data="vproduct|view|video")],
-        [InlineKeyboardButton("📦 Xuất prompt pack" if is_vi else "📦 Export prompt pack", callback_data="vproduct|export_menu"), InlineKeyboardButton("🔁 Đổi phong cách" if is_vi else "🔁 Change style", callback_data="vproduct|restyle")],
+        [InlineKeyboardButton("📦 Xuất bộ prompt" if is_vi else "📦 Export prompts", callback_data="vproduct|export_menu"), InlineKeyboardButton("🔁 Đổi phong cách" if is_vi else "🔁 Change style", callback_data="vproduct|restyle")],
     ]
     if VIDEO_PRODUCT_REGISTRY.get(product_id, {}).get("allowed_packages"):
-        render_label = "🎬 Render thử 1 shot" if product_id in {"storyboard_prompt", "script_image_video"} else "🎬 Dùng để tạo video"
+        render_label = "🎬 Dùng để tạo video"
         rows.append([InlineKeyboardButton(render_label, callback_data="vproduct|render")])
     rows.extend([
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
@@ -44796,10 +44950,81 @@ def task3d_result_parent_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⬅️ Prompt pack" if is_vi else "⬅️ Prompt pack", callback_data="vproduct|result"),
+            InlineKeyboardButton("⬅️ Bộ prompt" if is_vi else "⬅️ Prompt set", callback_data="vproduct|result"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
+
+
+def task3d_trend_ideas_text(session: dict, lang: str = "vi") -> str:
+    ideas = list((session.get("draft") or {}).get("trend_ideas") or [])
+    lines = ["🔥 <b>Gợi ý trend hôm nay</b>", ""]
+    if not ideas:
+        lines.append("Chưa có gợi ý trend. Bấm “Gợi ý khác” để tải bộ seed local.")
+    for index, item in enumerate(ideas[:5], start=1):
+        use_cases = ", ".join(str(value) for value in (item.get("use_cases") or [])[:4])
+        hooks = list(item.get("example_hooks") or [])
+        lines.extend([
+            f"{index}. <b>{html.escape(str(item.get('title') or 'Trend video'))}</b>",
+            f"   Dùng cho: {html.escape(use_cases or 'sản phẩm, dịch vụ, affiliate, kênh cá nhân')}",
+            f"   Ý tưởng: {html.escape(str(item.get('summary') or 'Tạo video ngắn dễ bắt nhịp người xem.'))}",
+        ])
+        if hooks:
+            lines.append(f"   Hook mẫu: {html.escape(str(hooks[0]))}")
+        lines.append("")
+    lines.append("Chọn một trend để TOAN AAS tạo hook, kịch bản, storyboard, caption và prompt video miễn phí.")
+    return "\n".join(lines).strip()
+
+
+def task3d_trend_ideas_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    ideas = list((session.get("draft") or {}).get("trend_ideas") or [])
+    number_buttons = [
+        InlineKeyboardButton(str(index), callback_data=f"vproduct|trend_select|{index - 1}")
+        for index, _ in enumerate(ideas[:5], start=1)
+    ]
+    rows = []
+    if number_buttons:
+        rows.append(number_buttons)
+    rows.extend([
+        [InlineKeyboardButton("🔁 Gợi ý khác", callback_data="vproduct|trend_more"), InlineKeyboardButton("✍️ Nhập chủ đề riêng", callback_data="vproduct|trend_custom")],
+        [InlineKeyboardButton("⬅️ Menu video", callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def task3d_trend_output_from_source(source: dict, user_topic: str = "") -> dict:
+    title = str(source.get("title") or user_topic or "Video theo trend").strip()
+    use_cases = ", ".join(str(value) for value in (source.get("use_cases") or [])[:4])
+    hooks = list(source.get("example_hooks") or [])
+    formats = ", ".join(str(value) for value in (source.get("example_formats") or [])[:3])
+    topic = str(user_topic or f"{title} cho {use_cases or 'sản phẩm/dịch vụ'}").strip()
+    request = VideoPromptRequest(
+        product_id="video_trend",
+        user_topic=topic,
+        platform=str(source.get("platform") or "TikTok/Reels"),
+        aspect_ratio="9:16",
+        duration=28,
+        objective="trend engagement",
+        style="social short video, natural UGC, clear hook",
+        tone="friendly, practical, easy to adapt",
+        language="vi",
+        scene_count=6,
+        shot_count=6,
+        reference_style=formats,
+        provider_target="none_free_planning",
+        safety_flags=["original_content", "no_reupload", "no_watermark"],
+    )
+    bundle = TASK3D_PROMPT_ENGINE.build(request).to_dict()
+    bundle["trend_source"] = dict(source)
+    bundle["trend_hooks"] = hooks[:3] or [
+        f"Bạn đã thử trend {title} chưa?",
+        f"Đây là cách biến {topic} thành video dễ xem.",
+        f"3 giây đầu quyết định người xem có dừng lại hay không.",
+    ]
+    bundle["caption"] = (
+        f"{title}: {topic}. Lưu lại nếu bạn muốn TOAN AAS dựng prompt/storyboard theo format này."
+    )[:500]
+    return bundle
 
 
 async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
@@ -44825,6 +45050,8 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
         return await safe_edit_or_send(target, "🎨 <b>Chọn phong cách</b>", parse_mode="HTML", reply_markup=task3d_style_keyboard(lang))
     if step == "output_target":
         return await safe_edit_or_send(target, "📦 <b>Chọn đầu ra miễn phí</b>", parse_mode="HTML", reply_markup=task3d_output_target_keyboard(lang))
+    if step == "trend_ideas":
+        return await safe_edit_or_send(target, task3d_trend_ideas_text(session, lang), parse_mode="HTML", reply_markup=task3d_trend_ideas_keyboard(session, lang))
     if step == "result":
         return await safe_edit_or_send(target, task3d_result_text(session, lang), parse_mode="HTML", reply_markup=task3d_result_keyboard(product_id, lang))
     return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
@@ -44865,6 +45092,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             await query.answer()
             text, markup = localized_menu_content(legacy_action, is_admin_user(uid), lang, uid)
             return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=markup)
+        if prefix == "framevideo":
+            return await handle_frame_video_callback(update, context)
         if prefix == "selfscene":
             return await handle_self_scene_ai_callback(update, context)
         if prefix == "videoref":
@@ -44878,10 +45107,41 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session["current_step"] = "result"
         session = save_video_session(uid, session)
         return await task3d_render_step(query, uid, session, lang)
+    if action in {"trend_today", "trend_more"}:
+        draft = dict(session.get("draft") or {})
+        offset = safe_int(draft.get("trend_offset"), 0)
+        if action == "trend_more":
+            offset += 5
+        ideas = TASK3D_TREND_STORE.list_sources(limit=5, offset=offset)
+        session = task3d_session_step(uid, "trend_ideas", trend_ideas=ideas, trend_offset=offset)
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "trend_custom":
+        session = task3d_session_step(uid, "collect_input", input_mode="text", trend_custom=True)
+        return await safe_edit_or_send(
+            query,
+            task3d_text_input_prompt("video_trend", lang),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
+    if action == "trend_select":
+        ideas = list((session.get("draft") or {}).get("trend_ideas") or [])
+        selected = ideas[max(0, min(len(ideas) - 1, safe_int(value, 0)))] if ideas else {}
+        bundle = task3d_trend_output_from_source(selected)
+        topic = str(bundle.get("user_topic") or selected.get("title") or "Video theo trend")
+        session = task3d_session_step(
+            uid, "result",
+            topic=topic, selected_trend_source=selected, prompt_bundle=bundle,
+            prompt_bundle_id=bundle.get("bundle_id"), free_generation=True,
+            provider_called=False, xu_charged=0,
+        )
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "sample":
+        sample_topic = TASK3D_SAMPLE_TOPICS.get(product_id) or TASK3D_SAMPLE_TOPICS.get(value) or "ý tưởng video ngắn dễ xem"
+        session = task3d_session_step(uid, "platform", topic=sample_topic, input_collected=True, sample_used=True)
+        return await task3d_render_step(query, uid, session, lang)
     if action in {"input_text", "input_media"}:
         step = "collect_input"
         session = task3d_session_step(uid, step, input_mode="media" if action == "input_media" else "text")
-        prompt = "📷 Hãy gửi 1–4 ảnh. Bot chỉ lưu file ID trong phiên; chưa gọi provider và chưa trừ Xu." if action == "input_media" else "✍️ Hãy nhập chủ đề, sản phẩm, câu chuyện hoặc prompt. Bot chưa gọi provider và chưa trừ Xu."
+        prompt = task3d_media_input_prompt(product_id, lang) if action == "input_media" else task3d_text_input_prompt(product_id, lang)
         return await safe_edit_or_send(query, prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if action == "continue_platform":
         session = task3d_session_step(uid, "platform")
@@ -44933,8 +45193,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         else:
             content, suffix = bundle_to_markdown(bundle), "txt"
         output = io.BytesIO(content.encode("utf-8"))
-        output.name = f"toan_aas_{product_id}_{str(bundle.get('bundle_id') or 'prompt_pack')[:12]}.{suffix}"
-        await context.bot.send_document(chat_id=query.message.chat_id, document=output, filename=output.name, caption="✅ Prompt pack miễn phí. Bot chưa gọi video provider và chưa trừ Xu.")
+        output.name = f"toan_aas_{product_id}_{str(bundle.get('bundle_id') or 'bo_prompt')[:12]}.{suffix}"
+        await context.bot.send_document(chat_id=query.message.chat_id, document=output, filename=output.name, caption="✅ Bộ prompt miễn phí. Bot chưa xử lý video AI và chưa trừ Xu.")
         return None
     if action == "render":
         bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
@@ -44977,6 +45237,34 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         return False
     text = re.sub(r"\s+", " ", update.message.text.strip())[:1200]
     if not text:
+        return True
+    product_id = str(session.get("product_id") or "")
+    if product_id == "video_trend":
+        source = {
+            "source_id": "custom_topic",
+            "title": "Chủ đề riêng của bạn",
+            "category": "custom_topic",
+            "platform": "TikTok/Reels/Shorts",
+            "region": "VN/global",
+            "summary": f"Tạo video theo trend dựa trên chủ đề: {text}",
+            "use_cases": [text],
+            "example_hooks": [
+                f"Bạn có biết cách biến {text} thành video dễ bắt trend?",
+                f"3 giây đầu cho video về {text} nên bắt đầu thế nào?",
+                f"Nếu chỉ có một video về {text}, hãy thử format này.",
+            ],
+            "example_formats": ["trend_custom", "storyboard", "UGC"],
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source_type": "user_topic",
+            "enabled": True,
+        }
+        bundle = task3d_trend_output_from_source(source, text)
+        session = task3d_session_step(
+            uid, "result", topic=text, selected_trend_source=source, prompt_bundle=bundle,
+            prompt_bundle_id=bundle.get("bundle_id"), input_collected=True,
+            free_generation=True, provider_called=False, xu_charged=0,
+        )
+        await update.message.reply_text(task3d_result_text(session, get_user_language(uid) or "vi"), parse_mode="HTML", reply_markup=task3d_result_keyboard("video_trend", get_user_language(uid) or "vi"))
         return True
     session = task3d_session_step(uid, "platform", topic=text, input_collected=True)
     await update.message.reply_text("✅ Đã lưu đầu vào. Chọn nền tảng/mục đích tiếp theo.", reply_markup=task3d_platform_keyboard(get_user_language(uid) or "vi"))
@@ -95580,6 +95868,51 @@ async def cmd_prompt_vault_export(update: Update, context: ContextTypes.DEFAULT_
     await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename=output.name, caption="Prompt vault export — secrets/customer data excluded.")
 
 
+async def cmd_trend_source_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(
+        "🔥 <b>Trend source status</b>\n\n<pre>" + html.escape(json.dumps(TASK3D_TREND_STORE.status(), ensure_ascii=False, indent=2)) + "</pre>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_trend_source_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    result = TASK3D_TREND_STORE.refresh()
+    await update.message.reply_text(
+        "✅ Trend source refresh dùng seed/cache local. Không scrape web và không gọi API ngoài.\n\n<pre>"
+        + html.escape(json.dumps(result, ensure_ascii=False, indent=2))
+        + "</pre>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_trend_source_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    rows = TASK3D_TREND_STORE.list_sources(limit=10, offset=0)
+    lines = ["🔥 <b>Trend sources</b>", ""]
+    for item in rows:
+        lines.append(f"• <code>{html.escape(str(item.get('source_id')))}</code> · {html.escape(str(item.get('title')))} · {html.escape(str(item.get('source_type')))}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_trend_source_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    raw = " ".join(context.args or []).strip()
+    if not raw:
+        return await update.message.reply_text("Cú pháp: /trend_source_add {JSON object}\nKhông dùng dữ liệu scrape trái phép.")
+    try:
+        item = json.loads(raw)
+    except Exception:
+        return await update.message.reply_text("⚠️ JSON không hợp lệ. Trend cache chưa thay đổi.")
+    result = TASK3D_TREND_STORE.add(item if isinstance(item, dict) else {})
+    await update.message.reply_text("<pre>" + html.escape(json.dumps(result, ensure_ascii=False, indent=2)) + "</pre>", parse_mode="HTML")
+
+
 async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin. Người dùng public không thấy URL, cURL hoặc lỗi provider.")
@@ -120078,6 +120411,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("prompt_vault_add", cmd_prompt_vault_add))
     tg_app.add_handler(CommandHandler("prompt_vault_import", cmd_prompt_vault_add))
     tg_app.add_handler(CommandHandler("prompt_vault_export", cmd_prompt_vault_export))
+    tg_app.add_handler(CommandHandler("trend_source_status", cmd_trend_source_status))
+    tg_app.add_handler(CommandHandler("trend_source_refresh", cmd_trend_source_refresh))
+    tg_app.add_handler(CommandHandler("trend_source_add", cmd_trend_source_add))
+    tg_app.add_handler(CommandHandler("trend_source_list", cmd_trend_source_list))
     tg_app.add_handler(CommandHandler("video_public_status", cmd_video_public_status))
     tg_app.add_handler(CommandHandler("video_gate_status", cmd_video_gate_status))
     tg_app.add_handler(CommandHandler("video_public_open_safe", cmd_video_public_open_safe))
