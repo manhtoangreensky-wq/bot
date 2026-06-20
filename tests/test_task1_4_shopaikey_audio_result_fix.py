@@ -145,7 +145,29 @@ def test_audio_public_open_safe_requires_full_suno_smoke(monkeypatch):
     monkeypatch.setattr(bot, "preferred_tool_test_result", fake_result)
     source = inspect.getsource(bot.cmd_audio_public_open_safe)
     assert 'music_fetch_status == "PASS_FULL_RESULT"' in source
-    assert "SUNO_ALLOW_PROCESSING_GATE" in source
+    assert "submitted/processing stays guarded" in source
+    assert "processing_gate_ok" not in source
+
+
+def test_legacy_public_open_commands_use_safe_gates():
+    assert "cmd_music_public_open_safe" in inspect.getsource(bot.cmd_suno_public_open)
+    assert "cmd_voice_public_open_safe" in inspect.getsource(bot.cmd_voice_public_open)
+
+
+def test_suno_processing_state_never_counts_as_public_ready(monkeypatch):
+    source = inspect.getsource(bot.get_suno_music_readiness)
+    assert "and full_result_ok" in source
+    assert "processing_gate_ok" not in source
+    assert '"processing_gate_allowed": False' in source
+
+
+def test_audio_public_status_names_locked_states_clearly():
+    source = inspect.getsource(bot.cmd_audio_public_status)
+    assert "Voice TTS: smoke" in source
+    assert "Voice clone:" in source
+    assert "Music/Suno:" in source
+    assert "no full audio result" in source
+    assert "GUARDED" in source
 
 
 def test_runtime_multiline_env_warning_is_explicit():

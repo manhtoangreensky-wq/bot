@@ -56874,11 +56874,7 @@ def get_suno_music_readiness() -> dict:
     configured = bool(key4u_configured or shopaikey_configured)
     fetch_status = str(fetch_smoke.get("status") or "").upper()
     full_result_ok = bool(fetch_status == "PASS_FULL_RESULT" and provider_status_is_pass(str(download_smoke.get("status") or "")))
-    processing_gate_ok = bool(
-        SUNO_ALLOW_PROCESSING_GATE
-        and provider_status_base(fetch_status) in {"PROCESSING", "SUBMITTED", "PENDING", "QUEUED", "RUNNING"}
-    )
-    smoke_ok = bool(provider_status_is_pass(str(submit_smoke.get("status") or "")) and (full_result_ok or processing_gate_ok))
+    smoke_ok = bool(provider_status_is_pass(str(submit_smoke.get("status") or "")) and full_result_ok)
     preferred_provider = "key4u_suno" if key4u_configured else ("shopaikey_music" if shopaikey_configured else "none")
     preferred_model = KEY4U_SUNO_MODEL if key4u_configured else (SHOPAIKEY_MUSIC_MODEL or "auto")
     preferred_endpoint = KEY4U_SUNO_CREATE_ENDPOINT if key4u_configured else (SHOPAIKEY_MUSIC_ENDPOINT or "")
@@ -56929,7 +56925,8 @@ def get_suno_music_readiness() -> dict:
         "preferred_provider": preferred_provider,
         "full_result_smoke": fetch_status,
         "full_result_ok": full_result_ok,
-        "processing_gate_allowed": bool(SUNO_ALLOW_PROCESSING_GATE),
+        "processing_gate_allowed": False,
+        "processing_gate_requested": bool(SUNO_ALLOW_PROCESSING_GATE),
         "cost_gate_ok": music_pricing_configured(),
     })
     return payload
@@ -58691,24 +58688,7 @@ async def cmd_minimax_voice_job(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("🎙 MiniMax Voice Job: FAIL_PROVIDER_ERROR. Không trừ Xu.")
 
 async def cmd_suno_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global SUNO_PUBLIC_ENABLED
-    uid = update.effective_user.id
-    if not is_admin_or_owner(uid):
-        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
-    readiness = get_suno_music_readiness()
-    smoke = preferred_tool_test_status_text("key4u_suno", "key4u_suno_job")
-    if not readiness.get("ready") or (SUNO_REQUIRE_SMOKE_PASS and smoke not in {"PASS", "PASS_SUBMITTED", "SUCCESS"}):
-        return await update.message.reply_text(
-            "🎼 <b>Không mở Suno public.</b>\n\n"
-            f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
-            f"• Smoke: <code>{html.escape(smoke)}</code>\n"
-            f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or '-'))}</code>\n\n"
-            "Không gọi provider và không trừ Xu.",
-            parse_mode="HTML",
-        )
-    SUNO_PUBLIC_ENABLED = True
-    set_system_setting("suno_public_enabled", "1", "Suno public opened after admin smoke", uid)
-    await update.message.reply_text("✅ Đã mở Suno public gate. Gói video 200 vẫn khóa add-on trả phí; Suno chỉ dùng từ 300+ hoặc sản phẩm riêng có xác nhận giá.")
+    return await cmd_music_public_open_safe(update, context)
 
 async def cmd_suno_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global SUNO_PUBLIC_ENABLED
@@ -58735,12 +58715,8 @@ async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAU
         blockers.append("submit smoke not PASS")
     fetch_status = str(fetch.get("status") or "").upper()
     full_result_ok = bool(fetch_status == "PASS_FULL_RESULT" and provider_status_is_pass(str(download.get("status") or "")))
-    processing_gate_ok = bool(
-        SUNO_ALLOW_PROCESSING_GATE
-        and provider_status_base(fetch_status) in {"PROCESSING", "SUBMITTED", "PENDING", "QUEUED", "RUNNING"}
-    )
-    if not (full_result_ok or processing_gate_ok):
-        blockers.append("Suno requires PASS_FULL_RESULT or SUNO_ALLOW_PROCESSING_GATE=true")
+    if not full_result_ok:
+        blockers.append("Suno requires PASS_FULL_RESULT and download PASS; submitted/processing stays guarded")
     if not music_pricing_configured():
         blockers.append("music pricing/cost gate missing")
     if blockers:
@@ -58774,18 +58750,27 @@ async def cmd_audio_public_status(update: Update, context: ContextTypes.DEFAULT_
     clone = get_minimax_voice_clone_readiness()
     stt = get_asr_readiness()
     music = get_suno_music_readiness()
+    voice_smoke = preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "shopaikey_tts")
+    clone_smoke = preferred_tool_test_status_text("minimax_voice_clone")
+    music_submit = preferred_tool_test_status_text("key4u_suno", "shopaikey_music")
+    music_fetch = preferred_tool_test_status_text("key4u_suno_job", "shopaikey_music_job")
+    music_download = preferred_tool_test_status_text("music_ai_download", "music_ai_preview_download")
+    music_guard_reason = (
+        "full audio result verified; public gate/cost remains controlled"
+        if music.get("full_result_ok")
+        else "no full audio result; requires PASS_FULL_RESULT and download PASS"
+    )
     await update.message.reply_text(
         "\n".join([
             "🎧 <b>AUDIO PUBLIC STATUS</b>",
             "",
-            f"• Voice ready: <code>{'YES' if voice.get('ready') else 'NO'}</code> | public <code>{'ON' if voice.get('public_enabled') else 'OFF'}</code>",
-            f"• Voice clone public: <code>{'ON' if clone.get('public_enabled') else 'OFF'}</code>",
+            f"• Voice TTS: smoke <code>{html.escape(voice_smoke)}</code> | public <code>{'CONTROLLED_ON' if voice.get('public_enabled') else 'OFF'}</code>",
+            f"• Voice clone: <code>{'CONTROLLED_ON' if clone.get('public_enabled') else 'GUARDED'}</code> | smoke <code>{html.escape(clone_smoke)}</code>",
             f"• STT public: <code>{'ON' if stt.get('public_enabled') else 'OFF'}</code> | smoke <code>{html.escape(str(stt.get('admin_smoke_status') or 'NOT_TESTED'))}</code>",
-            f"• Voice smoke: <code>{html.escape(preferred_tool_test_status_text('minimax_tts', 'minimax_tts_key4u', 'minimax_tts_shopaikey', 'shopaikey_tts'))}</code>",
-            f"• Music ready: <code>{'YES' if music.get('ready') else 'NO'}</code> | public <code>{'ON' if music.get('public_enabled') else 'OFF'}</code>",
-            f"• Music submit: <code>{html.escape(preferred_tool_test_status_text('key4u_suno', 'shopaikey_music'))}</code>",
-            f"• Music fetch: <code>{html.escape(preferred_tool_test_status_text('key4u_suno_job', 'shopaikey_music_job'))}</code>",
-            f"• Music download: <code>{html.escape(preferred_tool_test_status_text('music_ai_download', 'music_ai_preview_download'))}</code>",
+            f"• Music/Suno: <code>{'CONTROLLED_ON' if music.get('public_enabled') else 'GUARDED'}</code> | reason <code>{html.escape(music_guard_reason)}</code>",
+            f"• Music submit: <code>{html.escape(music_submit)}</code>",
+            f"• Music fetch: <code>{html.escape(music_fetch)}</code>",
+            f"• Music download: <code>{html.escape(music_download)}</code>",
             f"• Voice cost gate: <code>{'PASS' if voice_pricing_configured() else 'BLOCKED'}</code>",
             f"• Music cost gate: <code>{'PASS' if music_pricing_configured() else 'BLOCKED'}</code>",
             f"• Selected voice route: <code>{html.escape(str(voice.get('provider') or '-'))}</code>",
@@ -58834,12 +58819,8 @@ async def cmd_audio_public_open_safe(update: Update, context: ContextTypes.DEFAU
         blockers.append("music submit smoke not PASS")
     music_fetch_status = str(music_fetch.get("status") or "").upper()
     full_result_ok = bool(music_fetch_status == "PASS_FULL_RESULT" and provider_status_is_pass(str(music_download.get("status") or "")))
-    processing_gate_ok = bool(
-        SUNO_ALLOW_PROCESSING_GATE
-        and provider_status_base(music_fetch_status) in {"PROCESSING", "SUBMITTED", "PENDING", "QUEUED", "RUNNING"}
-    )
-    if not (full_result_ok or processing_gate_ok):
-        blockers.append("music requires PASS_FULL_RESULT or SUNO_ALLOW_PROCESSING_GATE=true")
+    if not full_result_ok:
+        blockers.append("music requires PASS_FULL_RESULT and download PASS; submitted/processing stays guarded")
     if not music_pricing_configured():
         blockers.append("music pricing/cost gate missing")
     if blockers:
@@ -58871,24 +58852,7 @@ async def cmd_audio_public_open_safe(update: Update, context: ContextTypes.DEFAU
     )
 
 async def cmd_voice_public_open(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global MINIMAX_VOICE_PUBLIC_ENABLED
-    uid = update.effective_user.id
-    if not is_admin_or_owner(uid):
-        return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
-    readiness = get_minimax_voice_readiness()
-    smoke = preferred_tool_test_status_text("minimax_tts", "key4u_tts", "shopaikey_tts")
-    if not readiness.get("ready") or (MINIMAX_REQUIRE_SMOKE_PASS and smoke not in {"PASS", "SUCCESS"}):
-        return await update.message.reply_text(
-            "🎙 <b>Không mở MiniMax Voice public.</b>\n\n"
-            f"• Ready: <code>{'YES' if readiness.get('ready') else 'NO'}</code>\n"
-            f"• Smoke: <code>{html.escape(smoke)}</code>\n"
-            f"• Reason: <code>{html.escape(str(readiness.get('admin_debug_reason') or '-'))}</code>\n\n"
-            "Không gọi provider và không trừ Xu.",
-            parse_mode="HTML",
-        )
-    MINIMAX_VOICE_PUBLIC_ENABLED = True
-    set_system_setting("minimax_voice_public_enabled", "1", "MiniMax voice public opened after admin smoke", uid)
-    await update.message.reply_text("✅ Đã mở MiniMax Voice public gate. Voice clone vẫn yêu cầu consent và xác nhận giá riêng.")
+    return await cmd_voice_public_open_safe(update, context)
 
 def voice_pricing_configured() -> bool:
     return int(VOICE_TTS_BASE_CHARS or 0) > 0 and int(VOICE_TTS_BASE_PRICE_XU or 0) >= 0 and int(VOICE_PROFILE_PRICE_XU or 0) >= 0
