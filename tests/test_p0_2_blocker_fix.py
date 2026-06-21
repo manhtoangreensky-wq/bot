@@ -110,7 +110,7 @@ def test_paid_video_missing_preview_does_not_dead_end(monkeypatch):
     query = _run_video_callback(monkeypatch, user_id, f"videoaddon|preview|{token}")
     callbacks = _callbacks(query.edited["reply_markup"])
     assert f"videoaddon|preview_locked|{token}" not in callbacks
-    assert f"shopai|confirm|{token}" in callbacks
+    assert f"videoaddon|export|{token}" in callbacks
     assert "vfinal|menu" in callbacks
     assert "videoaddon|back" in callbacks
     assert "videoaddon|main" in callbacks

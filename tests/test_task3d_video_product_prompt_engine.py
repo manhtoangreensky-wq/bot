@@ -211,6 +211,13 @@ def test_trend_select_generates_hook_script_storyboard_prompt():
     query = _FakeQuery(user_id, "vproduct|trend_select|0")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
+    assert session["current_step"] == "style"
+    prepared = session["draft"]["prepared_prompt_bundle"]
+    assert prepared["trend_hooks"]
+    for callback in ("vproduct|style|ugc", "vproduct|color|bright", "vproduct|motion|skip"):
+        query = _FakeQuery(user_id, callback)
+        asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
     bundle = session["draft"]["prompt_bundle"]
     assert session["current_step"] == "result"
     assert bundle["trend_hooks"]
@@ -332,33 +339,103 @@ def test_video_ai_real_shows_packages_after_prompt_exists():
     bot.clear_video_session(user_id)
 
 
-def test_video_ai_real_intro_has_guided_suggestions_and_motion():
-    labels = _labels(bot.task3d_product_intro_keyboard("video_ai_real", "vi"))
-    callbacks = _callbacks(bot.task3d_product_intro_keyboard("video_ai_real", "vi"))
-    for label in ("💡 Gợi ý ý tưởng", "✍️ Nhập prompt", "🔥 Trend hôm nay", "📷 Gửi ảnh tham khảo", "🎥 Gợi ý chuyển động"):
+def test_video_ai_real_intro_no_motion_button():
+    markup = bot.task3d_product_intro_keyboard("video_ai_real", "vi")
+    labels = _labels(markup)
+    callbacks = _callbacks(markup)
+    for label in ("💡 Gợi ý ý tưởng", "✍️ Nhập prompt", "🔥 Trend hôm nay", "📷 Gửi ảnh tham khảo"):
         assert label in labels
+    assert "🎥 Gợi ý chuyển động" not in labels
     assert "vproduct|ideas|video_ai_real" in callbacks
-    assert "vproduct|motion_suggest|video_ai_real" in callbacks
+    assert "vproduct|motion_suggest|video_ai_real" not in callbacks
     assert "menu|main_video" in callbacks
+    assert [[button.text for button in row] for row in markup.inline_keyboard] == [
+        ["💡 Gợi ý ý tưởng", "✍️ Nhập prompt"],
+        ["🔥 Trend hôm nay", "📷 Gửi ảnh tham khảo"],
+        ["⬅️ Menu video", "🏠 Menu chính"],
+    ]
 
 
-@pytest.mark.parametrize(
-    ("product_id", "required_labels"),
-    [
-        ("video_idea", ("💡 Gợi ý chủ đề", "✍️ Nhập chủ đề")),
-        ("storyboard_prompt", ("🎞 Mẫu storyboard", "➕ Thêm cảnh", "⏭ Bỏ qua thêm cảnh")),
-        ("motion_prompt", ("🎥 Gợi ý chuyển động", "⏭ Bỏ qua")),
-        ("image_to_video", ("📷 Gửi ảnh", "🎥 Gợi ý chuyển động", "⏭ Bỏ qua mô tả")),
-        ("script_image_video", ("💡 Gợi ý kịch bản", "➕ Thêm cảnh", "⏭ Bỏ qua")),
-        ("multi_scene_film", ("🎞 Mẫu phim ngắn", "➕ Thêm cảnh", "⏭ Bỏ qua")),
-        ("self_shot_scene_change", ("💡 Gợi ý cảnh mới", "⏭ Bỏ qua add-on")),
-    ],
-)
-def test_video_products_have_guided_or_skip_flow(product_id, required_labels):
-    labels = _labels(bot.task3d_product_intro_keyboard(product_id, "vi"))
-    for label in required_labels:
-        assert label in labels
-    assert "menu|main_video" in _callbacks(bot.task3d_product_intro_keyboard(product_id, "vi"))
+def test_all_video_products_have_guided_flow():
+    assert set(bot.TASK3D_GUIDED_FLOW_STEPS) == set(VIDEO_PRODUCT_REGISTRY)
+    for product_id, steps in bot.TASK3D_GUIDED_FLOW_STEPS.items():
+        assert steps, product_id
+        assert "menu|main_video" in _callbacks(bot.task3d_product_intro_keyboard(product_id, "vi"))
+
+
+def test_guidance_buttons_live_in_guided_steps_not_product_intro():
+    premature = {"🎥 Gợi ý chuyển động", "➕ Thêm cảnh", "⏭ Bỏ qua thêm cảnh", "⏭ Bỏ qua add-on"}
+    for product_id in ("video_ai_real", "storyboard_prompt", "motion_prompt", "image_to_video", "script_image_video", "multi_scene_film", "self_shot_scene_change"):
+        assert premature.isdisjoint(set(_labels(bot.task3d_product_intro_keyboard(product_id, "vi"))))
+    assert "⏭ Dùng mặc định" in _labels(bot.task3d_style_keyboard("vi", "video_ai_real"))
+    assert "⏭ Dùng mặc định" in _labels(bot.task3d_color_mood_keyboard("vi"))
+    assert "⏭ Bỏ qua" in _labels(bot.task3d_motion_keyboard("vi", "video_ai_real"))
+    assert "⏭ Bỏ qua" in _labels(bot.task3d_extra_scene_keyboard("vi"))
+    assert "🖼 Gợi ý tạo ảnh" in _labels(bot.task3d_image_plan_keyboard("vi"))
+
+
+def test_video_ai_real_motion_step_after_prompt_or_image():
+    user_id = 993216
+    _press_vproduct(user_id, "video_ai_real", "vproduct|ideas|video_ai_real")
+    query = _FakeQuery(user_id, "vproduct|idea_select|0")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert bot.get_video_session(user_id)["current_step"] == "style"
+    assert "🎥 Gợi ý chuyển động" not in _labels(bot.task3d_product_intro_keyboard("video_ai_real", "vi"))
+    query = _FakeQuery(user_id, "vproduct|style|realistic")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert bot.get_video_session(user_id)["current_step"] == "color"
+    query = _FakeQuery(user_id, "vproduct|color|warm")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert bot.get_video_session(user_id)["current_step"] == "movement"
+    assert "Slow push-in" in _labels(bot.task3d_motion_keyboard("vi", "video_ai_real"))
+    bot.clear_video_session(user_id)
+
+
+def test_video_ai_real_style_color_motion_sequence():
+    assert bot.task3d_guided_steps("video_ai_real") == ("style", "color", "movement", "result")
+    assert "🎬 Chân thật" in _labels(bot.task3d_style_keyboard("vi", "video_ai_real"))
+    assert "Ấm áp" in _labels(bot.task3d_color_mood_keyboard("vi"))
+    assert "Orbit shot" in _labels(bot.task3d_motion_keyboard("vi", "video_ai_real"))
+
+
+def test_guided_flow_has_style_color_motion_scene_or_skip_where_applicable():
+    style_products = {"video_trend", "video_idea", "storyboard_prompt", "image_to_video", "video_ai_real", "script_image_video", "self_shot_scene_change", "multi_scene_film", "video_reference"}
+    color_products = {"video_trend", "storyboard_prompt", "image_to_video", "video_ai_real", "script_image_video", "multi_scene_film"}
+    motion_products = {"video_trend", "motion_prompt", "image_to_video", "video_ai_real", "self_shot_scene_change"}
+    scene_products = {"storyboard_prompt", "script_image_video", "multi_scene_film"}
+    for product_id in style_products:
+        assert "style" in bot.task3d_guided_steps(product_id)
+    for product_id in color_products:
+        assert "color" in bot.task3d_guided_steps(product_id)
+    for product_id in motion_products:
+        assert "movement" in bot.task3d_guided_steps(product_id)
+    for product_id in scene_products:
+        assert "extra_scene" in bot.task3d_guided_steps(product_id)
+    assert "⏭ Dùng mặc định" in _labels(bot.task3d_style_keyboard("vi", "storyboard_prompt"))
+    assert "⏭ Dùng mặc định" in _labels(bot.task3d_color_mood_keyboard("vi"))
+    assert "⏭ Bỏ qua" in _labels(bot.task3d_motion_keyboard("vi", "image_to_video"))
+    assert "⏭ Bỏ qua" in _labels(bot.task3d_extra_scene_keyboard("vi"))
+
+
+def test_optional_skip_continues_to_prompt_output():
+    user_id = 993217
+    bot.clear_video_session(user_id)
+    bot.task3d_session_step(user_id, "style", product_id="video_ai_real", topic="video thử")
+    for callback in ("vproduct|style|default", "vproduct|color|default", "vproduct|motion|skip"):
+        query = _FakeQuery(user_id, callback)
+        asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] == "result"
+    assert session["draft"]["prompt_bundle"]
+    assert session["draft"]["provider_called"] is False
+    assert session["draft"]["xu_charged"] == 0
+    bot.clear_video_session(user_id)
+
+
+def test_existing_trend_flow_preserved_with_optional_guidance():
+    labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
+    assert {"🔥 Xem trend hôm nay", "✍️ Nhập chủ đề riêng", "🔁 Gợi ý trend khác"}.issubset(set(labels))
+    assert bot.task3d_guided_steps("video_trend") == ("style", "color", "movement", "result")
 
 
 def test_final_confirmation_keyboard_exact_two_column_export_options():
@@ -370,7 +447,7 @@ def test_final_confirmation_keyboard_exact_two_column_export_options():
         ["⬅️ Quay lại", "🏠 Menu chính"],
     ]
     assert callbacks_by_row == [
-        ["shopai|confirm|token200", "vfinal|menu"],
+        ["videoaddon|export|token200", "vfinal|menu"],
         ["videoaddon|back", "videoaddon|main"],
     ]
 
@@ -384,23 +461,29 @@ def test_guided_idea_motion_and_scene_skip_are_free_prompt_steps():
     query = _FakeQuery(user_id, "vproduct|idea_select|0")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "platform"
+    assert session["current_step"] == "style"
     assert session["draft"]["provider_called"] is not True
     assert session["draft"].get("xu_charged", 0) == 0
 
-    bot.clear_video_session(user_id)
-    _press_vproduct(user_id, "video_ai_real", "vproduct|motion_suggest|video_ai_real")
+    query = _FakeQuery(user_id, "vproduct|style|realistic")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert bot.get_video_session(user_id)["current_step"] == "color"
+    query = _FakeQuery(user_id, "vproduct|color|default")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert bot.get_video_session(user_id)["current_step"] == "movement"
     query = _FakeQuery(user_id, "vproduct|motion|skip")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] in {"platform", "result"}
+    assert session["current_step"] == "result"
     assert session["draft"]["motion_skipped"] is True
     assert session["draft"].get("xu_charged", 0) == 0
 
     bot.clear_video_session(user_id)
-    _press_vproduct(user_id, "script_image_video", "vproduct|scene_skip")
+    bot.task3d_session_step(user_id, "extra_scene", product_id="script_image_video", topic="kịch bản thử")
+    query = _FakeQuery(user_id, "vproduct|scene_skip")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] in {"platform", "result"}
+    assert session["current_step"] == "result"
     assert session["draft"]["extra_scene_skipped"] is True
     assert session["draft"].get("xu_charged", 0) == 0
     bot.clear_video_session(user_id)
@@ -549,7 +632,7 @@ def test_video_ai_real_package_selection():
 def test_video_200_free_default_can_reach_final_confirm():
     state = {"pending_payload": {"job_type": "video", "video_tier": "low", "preview_required": False}}
     callbacks = _callbacks(bot.video_addon_confirm_keyboard("token200", "low", "vi", state))
-    assert "shopai|confirm|token200" in callbacks
+    assert "videoaddon|export|token200" in callbacks
     assert validate_package_selection("video_ai_real", "package_200", ["none"])["ok"]
 
 
@@ -571,10 +654,146 @@ def test_video_200_paid_addon_requires_upgrade_or_back():
     assert result["ok"] is False
     assert result["reason"] == "paid_addon_not_allowed"
     callbacks = _callbacks(bot.video_experience_tier_lock_keyboard("vi"))
-    assert callbacks == ["vfinal|tier|basic", "vfinal|menu"]
+    assert callbacks == ["videoaddon|upgrade_300", "videoaddon|export_back"]
     text = bot.video_experience_tier_lock_text("vi", ["paid_music"])
     assert "Gói trải nghiệm 200 Xu không dùng được tính năng có phí" in text
     assert "TOAN AAS chưa xử lý video và chưa trừ Xu" in text
+
+
+def test_select_200_always_shows_final_confirmation(monkeypatch):
+    user_id = 993220
+    bot.clear_video_addon_state(user_id)
+    monkeypatch.setattr(bot, "get_user", lambda _uid: (5000, None, None))
+    monkeypatch.setattr(bot, "record_shopaikey_billing_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "set_shopaikey_pending_confirmation", lambda *_args, **_kwargs: "token-select-200")
+    monkeypatch.setattr(bot, "active_package_item_for_user", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bot, "check_video_beta_200_limit", lambda _uid: {"ok": True, "user_limit": 3})
+    state = bot.set_video_addon_state(user_id, {
+        "source": "ai",
+        "video_tier": "low",
+        "current_video_music_option": "ai_music",
+        "current_video_music_choice": "ai_music",
+        "pending_payload": {
+            "job_type": "video",
+            "video_tier": "low",
+            "prompt": "Prompt video đã sẵn sàng",
+            "original_prompt": "Prompt video đã sẵn sàng",
+            "music_option": "ai_music",
+            "video_finalization_confirmed": True,
+        },
+    })
+    query = _FakeQuery(user_id, "vfinal|tier|low")
+    asyncio.run(bot.finalize_video_addon_confirmation(query, user_id, state, "vi"))
+    text, kwargs = query.edits[-1]
+    assert "Xác nhận xuất video" in text
+    assert "không dùng được tính năng có phí" not in text
+    assert "videoaddon|export|token-select-200" in _callbacks(kwargs["reply_markup"])
+
+    block_query = _FakeQuery(user_id, "videoaddon|export|token-select-200")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=block_query), SimpleNamespace()))
+    assert "không dùng được tính năng có phí" in block_query.edits[-1][0]
+
+    back_query = _FakeQuery(user_id, "videoaddon|export_back")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=back_query), SimpleNamespace()))
+    assert "Xác nhận xuất video" in back_query.edits[-1][0]
+
+    upgrade_query = _FakeQuery(user_id, "videoaddon|upgrade_300")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=upgrade_query), SimpleNamespace()))
+    upgraded = bot.get_video_addon_state(user_id)
+    assert upgraded["video_tier"] == "basic"
+    assert "300 Xu" in upgrade_query.edits[-1][0]
+    assert "videoaddon|export|token-select-200" in _callbacks(upgrade_query.edits[-1][1]["reply_markup"])
+    bot.clear_video_addon_state(user_id)
+
+
+def test_200_paid_addon_blocks_only_on_export_action(monkeypatch):
+    user_id = 993221
+    bot.clear_video_addon_state(user_id)
+    pending = {
+        "job_type": "video", "video_tier": "low", "prompt": "Prompt sẵn sàng",
+        "original_prompt": "Prompt sẵn sàng", "music_option": "ai_music",
+    }
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai", "video_tier": "low", "current_video_music_option": "ai_music",
+        "current_video_music_choice": "ai_music", "pending_confirm_token": token,
+        "pending_payload": pending,
+    })
+    query = _FakeQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    text, kwargs = query.edits[-1]
+    assert "Gói trải nghiệm 200 Xu không dùng được tính năng có phí" in text
+    assert _callbacks(kwargs["reply_markup"]) == ["videoaddon|upgrade_300", "videoaddon|export_back"]
+    assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
+def test_200_free_default_export_path_allowed(monkeypatch):
+    user_id = 993222
+    pending = {"job_type": "video", "video_tier": "low", "prompt": "Prompt sẵn sàng", "music_option": "none"}
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {"source": "ai", "video_tier": "low", "pending_confirm_token": token, "pending_payload": pending})
+    delegated = {}
+
+    async def fake_confirm(update, context):
+        delegated["callback"] = update.callback_query.data
+        await update.callback_query.answer()
+        return None
+
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (True, "ready"))
+    monkeypatch.setattr(bot, "video_addon_runtime_guard", lambda _pending: {"ok": True})
+    monkeypatch.setattr(bot, "handle_shopaikey_public_callback", fake_confirm)
+    query = _FakeQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert delegated["callback"] == f"shopai|confirm|{token}"
+    assert query.answered is True
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
+def test_200_paid_addon_block_back_and_upgrade_routes():
+    callbacks = _callbacks(bot.video_experience_tier_lock_keyboard("vi"))
+    assert callbacks == ["videoaddon|upgrade_300", "videoaddon|export_back"]
+    source = inspect.getsource(bot.handle_video_addon_callback)
+    assert 'if action == "export_back"' in source
+    assert 'render_video_addon_screen(query, uid, state, "invoice", lang)' in source
+    assert 'if action == "upgrade_300"' in source
+    assert '"video_tier": "basic"' in source
+
+
+def test_final_confirmation_two_column_buttons_all_packages():
+    for tier in bot.VIDEO_PUBLIC_TIER_UI_ORDER:
+        markup = bot.video_addon_confirm_keyboard(f"token-{tier}", tier, "vi", {"video_tier": tier})
+        assert [[button.text for button in row] for row in markup.inline_keyboard] == [
+            ["🎬 Xuất video", "⚙️ Đổi tùy chọn"],
+            ["⬅️ Quay lại", "🏠 Menu chính"],
+        ]
+
+
+def test_export_action_guards_if_provider_unavailable(monkeypatch):
+    user_id = 993223
+    pending = {
+        "job_type": "video", "video_tier": "low", "prompt": "Prompt sẵn sàng",
+        "original_prompt": "Prompt sẵn sàng", "preview_required": False,
+    }
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {"source": "ai", "video_tier": "low", "pending_confirm_token": token, "pending_payload": pending})
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (False, "maintenance"))
+    query = _FakeQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    text, kwargs = query.edits[-1]
+    assert "Hệ thống tạo video đang bảo trì hoặc chưa sẵn sàng" in text
+    assert "chưa xử lý và chưa trừ Xu" in text
+    assert _callbacks(kwargs["reply_markup"]) == ["videoaddon|export_back", "videoaddon|main"]
+    assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
+def test_no_prompt_vault_added_to_task3d3_public_flow():
+    public_flow_source = inspect.getsource(bot.handle_video_product_callback).lower()
+    assert "prompt_vault" not in public_flow_source
 
 
 def test_video_200_creates_provider_job_after_confirm():
@@ -679,7 +898,7 @@ def test_video_upload_stays_in_product_session():
     assert handled is True
     assert session["product_id"] == "image_to_video"
     assert session["source_media_ref"] == "photo-task3d"
-    assert session["current_step"] == "platform"
+    assert session["current_step"] == "detail"
     bot.clear_video_session(user_id)
 
 

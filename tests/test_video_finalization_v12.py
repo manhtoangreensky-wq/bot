@@ -417,8 +417,8 @@ def test_video_addon_confirm_keeps_finalization_back_context():
     callbacks = _callbacks(markup)
     ordered_callbacks = [button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data]
     assert "videoaddon|preview_locked|tok123" not in callbacks
-    assert "shopai|confirm|tok123" in callbacks
-    assert ordered_callbacks == ["shopai|confirm|tok123", "vfinal|menu", "videoaddon|back", "videoaddon|main"]
+    assert "videoaddon|export|tok123" in callbacks
+    assert ordered_callbacks == ["videoaddon|export|tok123", "vfinal|menu", "videoaddon|back", "videoaddon|main"]
     assert "vfinal|menu" in callbacks
     assert "videoaddon|back" in callbacks
     assert "create_media|quick_video" not in callbacks

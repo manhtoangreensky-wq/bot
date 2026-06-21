@@ -471,7 +471,7 @@ def test_no_full_output_before_final_confirm():
     assert "send_document" not in preview_block
     assert "send_video" not in preview_block
     assert "send_audio" not in voice_preview_block
-    assert "shopai|confirm|" in _joined_markup(bot.video_addon_confirm_keyboard("tok", "basic", "vi"))
+    assert "videoaddon|export|" in _joined_markup(bot.video_addon_confirm_keyboard("tok", "basic", "vi"))
 
 
 def test_payos_not_touched():

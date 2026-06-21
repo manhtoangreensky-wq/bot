@@ -10151,11 +10151,13 @@ def test_high_public_tiers_are_billable():
     assert bot.video_order_create(123, "future_1500")["billable"] is True
 
 
-def test_old_addon_callback_guarded_for_200():
+def test_200_addon_callback_guard_runs_only_on_export():
     source = source_between(bot_source_text(), "async def handle_video_addon_callback", "async def cmd_video_price_test")
+    assert 'if action == "export"' in source
     assert 'tier == "low"' in source
     assert "video_experience_tier_lock_text" in source
-    assert '"subtitle", "dub", "combo", "translate_sub", "translate_combo", "lang", "voice"' in source
+    assert source.index("validate_video_tier_selection(state, tier)") < source.index('query.data = f"shopai|confirm|{token}"')
+    assert 'tier == "low" and str(state.get("source")' not in source
 
 
 def test_back_stack_preserves_video_order():

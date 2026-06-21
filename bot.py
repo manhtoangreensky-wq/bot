@@ -34480,10 +34480,16 @@ def video_experience_tier_lock_keyboard(lang: str = "vi") -> InlineKeyboardMarku
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔷 Nâng lên 300 Xu" if is_vi else "🔷 Upgrade to 300 Xu", callback_data="vfinal|tier|basic"),
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|menu"),
+            InlineKeyboardButton("🔷 Nâng lên 300 Xu" if is_vi else "🔷 Upgrade to 300 Xu", callback_data="videoaddon|upgrade_300"),
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|export_back"),
         ],
     ])
+
+def video_export_maintenance_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", callback_data="videoaddon|export_back"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
+    ]])
 
 def image_tool_pricing_matrix() -> dict:
     return {
@@ -44653,6 +44659,62 @@ TASK3D_MOTION_SUGGESTIONS = [
     ("cinematic_pan", "Cinematic pan"),
 ]
 
+# Task 3D.3 keeps every completed product route and restores only the guided
+# choices that belong after the user has supplied an idea, prompt or media.
+# Legacy/local products retain their existing handlers; their entries here
+# document the guided route instead of replacing those working flows.
+TASK3D_GUIDED_FLOW_STEPS = {
+    "video_trend": ("style", "color", "movement", "result"),
+    "video_idea": ("platform", "aspect", "style", "result"),
+    "storyboard_prompt": ("platform", "aspect", "panels", "style", "color", "image_plan", "extra_scene", "output_target", "result"),
+    "motion_prompt": ("subject", "movement", "camera", "result"),
+    "image_to_video": ("detail", "platform", "aspect", "style", "movement", "color", "result"),
+    "frame_video_local": ("collect_images", "effect", "music", "defaults", "local_confirm"),
+    "video_ai_real": ("style", "color", "movement", "result"),
+    "script_image_video": ("platform", "aspect", "panels", "style", "color", "image_plan", "extra_scene", "result"),
+    "self_shot_scene_change": ("subject", "scene_idea", "platform", "aspect", "style", "movement", "result"),
+    "multi_scene_film": ("platform", "aspect", "panels", "style", "color", "pace", "image_plan", "extra_scene", "result"),
+    "video_reference": ("platform", "style", "format", "result"),
+    "audio_addons": ("audio_choice", "return_video_session"),
+    "video_local_edit": ("collect_video", "edit_operation", "local_confirm"),
+}
+
+TASK3D_COLOR_MOOD_SUGGESTIONS = [
+    ("warm", "Ấm áp"),
+    ("bright", "Tươi sáng"),
+    ("premium", "Cao cấp"),
+    ("dark_cinematic", "Tối điện ảnh"),
+    ("cheerful", "Vui vẻ"),
+]
+
+TASK3D_SUBJECT_SUGGESTIONS = [
+    ("person", "Người / nhân vật"),
+    ("product", "Sản phẩm"),
+    ("animal", "Thú cưng / động vật"),
+    ("space", "Không gian / bối cảnh"),
+]
+
+TASK3D_CAMERA_SUGGESTIONS = [
+    ("close_up", "Cận cảnh"),
+    ("medium", "Trung cảnh"),
+    ("wide", "Toàn cảnh"),
+    ("pov", "POV tự nhiên"),
+]
+
+TASK3D_PACE_SUGGESTIONS = [
+    ("slow_emotional", "Chậm, cảm xúc"),
+    ("balanced", "Vừa, dễ xem"),
+    ("fast_dynamic", "Nhanh, dồn dập"),
+    ("ad_rhythm", "Nhịp quảng cáo"),
+]
+
+TASK3D_SCENE_IDEA_SUGGESTIONS = [
+    ("night_city", "Phố đêm điện ảnh"),
+    ("clean_studio", "Studio sạch"),
+    ("warm_cafe", "Quán cà phê ấm"),
+    ("premium_showroom", "Showroom cao cấp"),
+]
+
 TASK3D_PUBLIC_COPY = {
     "video_trend": (
         "🔥 <b>Video theo trend</b>\n\n"
@@ -44700,10 +44762,11 @@ TASK3D_PUBLIC_COPY = {
         "Quy trình:\n"
         "1. Gợi ý ý tưởng hoặc nhập prompt\n"
         "2. Chọn phong cách\n"
-        "3. Chọn chuyển động/camera hoặc bỏ qua\n"
-        "4. TOAN AAS tối ưu prompt\n"
-        "5. Dùng để tạo video rồi mới chọn gói\n"
-        "6. Xem lại và xác nhận cuối"
+        "3. Chọn màu sắc/cảm xúc hoặc dùng mặc định\n"
+        "4. Chọn chuyển động/camera hoặc bỏ qua\n"
+        "5. TOAN AAS tối ưu prompt\n"
+        "6. Dùng để tạo video rồi mới chọn gói\n"
+        "7. Xem lại và xác nhận cuối"
     ),
     "script_image_video": (
         "🧩 <b>Kịch bản → Ảnh → Video</b>\n\n"
@@ -44799,17 +44862,14 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
         ],
         "storyboard_prompt": [
             [("🎞 Mẫu storyboard", "vproduct|sample|storyboard_prompt"), ("✍️ Nhập ý tưởng", "vproduct|input_text|storyboard_prompt")],
-            [("➕ Thêm cảnh", "vproduct|scene_add"), ("⏭ Bỏ qua thêm cảnh", "vproduct|scene_skip")],
             [(menu_label, parent_callback)],
         ],
         "motion_prompt": [
-            [("🎥 Gợi ý chuyển động", "vproduct|motion_suggest|motion_prompt"), ("✍️ Mô tả cảnh", "vproduct|input_text|motion_prompt")],
-            [("📷 Gửi ảnh", "vproduct|input_media|motion_prompt"), ("⏭ Bỏ qua", "vproduct|motion|skip")],
+            [("✍️ Mô tả cảnh", "vproduct|input_text|motion_prompt"), ("📷 Gửi ảnh", "vproduct|input_media|motion_prompt")],
             [(menu_label, parent_callback)],
         ],
         "image_to_video": [
-            [("📷 Gửi ảnh", "vproduct|input_media|image_to_video"), ("🎥 Gợi ý chuyển động", "vproduct|motion_suggest|image_to_video")],
-            [("✍️ Mô tả thêm", "vproduct|input_text|image_to_video"), ("⏭ Bỏ qua mô tả", "vproduct|motion|skip")],
+            [("📷 Gửi ảnh", "vproduct|input_media|image_to_video"), ("✍️ Mô tả cảnh", "vproduct|input_text|image_to_video")],
             [(menu_label, parent_callback)],
         ],
         "frame_video_local": [
@@ -44819,21 +44879,18 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
         "video_ai_real": [
             [("💡 Gợi ý ý tưởng", "vproduct|ideas|video_ai_real"), ("✍️ Nhập prompt", "vproduct|input_text|video_ai_real")],
             [("🔥 Trend hôm nay", "vproduct|trend_today"), ("📷 Gửi ảnh tham khảo", "vproduct|input_media|video_ai_real")],
-            [("🎥 Gợi ý chuyển động", "vproduct|motion_suggest|video_ai_real"), (menu_label, parent_callback)],
+            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "script_image_video": [
             [("💡 Gợi ý kịch bản", "vproduct|ideas|script_image_video"), ("✍️ Nhập kịch bản", "vproduct|input_text|script_image_video")],
-            [("➕ Thêm cảnh", "vproduct|scene_add"), ("⏭ Bỏ qua", "vproduct|scene_skip")],
             [(menu_label, parent_callback)],
         ],
         "self_shot_scene_change": [
-            [("📎 Gửi video/ảnh", "vproduct|input_media|self_shot_scene_change"), ("💡 Gợi ý cảnh mới", "vproduct|ideas|self_shot_scene_change")],
-            [("✍️ Mô tả cảnh muốn đổi", "vproduct|input_text|self_shot_scene_change"), ("⏭ Bỏ qua add-on", "vproduct|addon_skip")],
+            [("📎 Gửi video/ảnh", "vproduct|input_media|self_shot_scene_change"), ("✍️ Mô tả cảnh muốn đổi", "vproduct|input_text|self_shot_scene_change")],
             [(menu_label, parent_callback)],
         ],
         "multi_scene_film": [
             [("🎞 Mẫu phim ngắn", "vproduct|ideas|multi_scene_film"), ("✍️ Nhập cốt truyện", "vproduct|input_text|multi_scene_film")],
-            [("➕ Thêm cảnh", "vproduct|scene_add"), ("⏭ Bỏ qua", "vproduct|scene_skip")],
             [(menu_label, parent_callback)],
         ],
         "video_reference": [
@@ -44854,10 +44911,15 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
         [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
         for row in rows_by_product.get(product_id, [[("✍️ Nhập nội dung", f"vproduct|input_text|{product_id}")]])
     ]
-    if not any(parent_callback in (button.callback_data for button in row) for row in rows):
+    has_parent = any(parent_callback in (button.callback_data for button in row) for row in rows)
+    has_main = any("menu|main" in (button.callback_data for button in row) for row in rows)
+    if not has_parent:
         rows.append([InlineKeyboardButton(menu_label, callback_data=parent_callback), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    else:
-        rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    elif not has_main:
+        if rows and len(rows[-1]) == 1 and rows[-1][0].callback_data == parent_callback:
+            rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"))
+        else:
+            rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def task3d_idea_suggestions(product_id: str, lang: str = "vi", offset: int = 0) -> list[str]:
@@ -44894,7 +44956,7 @@ def task3d_idea_suggestions_text(session: dict, lang: str = "vi") -> str:
     lines = [
         f"💡 <b>Gợi ý nhanh cho {html.escape(str(product.get('public_label') or 'video'))}</b>",
         "",
-        "Chọn một ý tưởng để TOAN AAS đi tiếp qua phong cách/chuyển động và tạo prompt miễn phí.",
+        "Chọn một ý tưởng để TOAN AAS đi tiếp qua các bước gợi ý phù hợp và tạo prompt miễn phí.",
         "",
     ]
     for idx, idea in enumerate(ideas[:5], 1):
@@ -44917,8 +44979,205 @@ def task3d_idea_suggestions_keyboard(session: dict, lang: str = "vi") -> InlineK
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
+def task3d_guided_steps(product_id: str) -> tuple[str, ...]:
+    return tuple(TASK3D_GUIDED_FLOW_STEPS.get(str(product_id or "")) or ("platform", "aspect", "style", "result"))
+
+def task3d_next_guided_step(product_id: str, completed_step: str = "") -> str:
+    steps = task3d_guided_steps(product_id)
+    if not completed_step:
+        return steps[0] if steps else "result"
+    try:
+        position = steps.index(str(completed_step))
+    except ValueError:
+        return steps[0] if steps else "result"
+    return steps[position + 1] if position + 1 < len(steps) else "result"
+
+def task3d_complete_guided_result(user_id, session: dict, **fields) -> dict:
+    session = task3d_session_step(user_id, "result", **fields)
+    draft = dict(session.get("draft") or {})
+    bundle = dict(draft.get("prepared_prompt_bundle") or {})
+    if not bundle:
+        bundle = task3d_build_bundle_from_session(session)
+    guided_choices = {
+        "style": str(session.get("style") or draft.get("style") or "default"),
+        "color_mood": str(draft.get("color_mood") or "default"),
+        "motion": str(draft.get("selected_motion") or "default"),
+        "subject": str(draft.get("main_subject") or "default"),
+        "camera": str(draft.get("camera_choice") or "default"),
+        "pace": str(draft.get("film_pace") or "default"),
+        "scene": str(draft.get("suggested_scene") or "default"),
+        "image_plan": str(draft.get("image_plan") or "skipped"),
+    }
+    bundle["guided_choices"] = guided_choices
+    if draft.get("prepared_prompt_bundle"):
+        qualifier = ", ".join(
+            value for value in (
+                guided_choices["style"], guided_choices["color_mood"], guided_choices["motion"],
+                guided_choices["camera"], guided_choices["pace"], guided_choices["scene"],
+            ) if value and value != "default"
+        )
+        if qualifier:
+            for prompt_key in ("video_prompts", "motion_prompts"):
+                prompts = list(bundle.get(prompt_key) or [])
+                bundle[prompt_key] = [f"{prompt}. Guided direction: {qualifier}." for prompt in prompts]
+        provider_payload = dict(bundle.get("provider_payload") or {})
+        provider_payload["guided_choices"] = guided_choices
+        bundle["provider_payload"] = provider_payload
+    return task3d_session_step(
+        user_id,
+        "result",
+        prompt_bundle=bundle,
+        prompt_bundle_id=bundle.get("bundle_id"),
+        free_generation=True,
+        provider_called=False,
+        xu_charged=0,
+    )
+
+def task3d_advance_guided_flow(user_id, session: dict, completed_step: str, **fields) -> dict:
+    product_id = str(session.get("product_id") or "")
+    next_step = task3d_next_guided_step(product_id, completed_step)
+    if next_step == "result":
+        return task3d_complete_guided_result(user_id, session, **fields)
+    return task3d_session_step(
+        user_id,
+        next_step,
+        free_generation=True,
+        provider_called=False,
+        xu_charged=0,
+        **fields,
+    )
+
+def task3d_color_mood_text(session: dict, lang: str = "vi") -> str:
+    return (
+        "🎨 <b>Chọn màu sắc / cảm xúc</b>\n\n"
+        "Chọn một hướng màu cho video, hoặc dùng mặc định nếu bạn muốn TOAN AAS tự cân bằng theo nội dung.\n\n"
+        "Bước này chỉ bổ sung prompt, chưa xử lý video và chưa trừ Xu."
+    )
+
+def task3d_color_mood_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    for index in range(0, len(TASK3D_COLOR_MOOD_SUGGESTIONS), 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"vproduct|color|{code}")
+            for code, label in TASK3D_COLOR_MOOD_SUGGESTIONS[index:index + 2]
+        ])
+    if len(rows[-1]) == 1:
+        rows[-1].append(InlineKeyboardButton("⏭ Dùng mặc định", callback_data="vproduct|color|default"))
+    else:
+        rows.append([InlineKeyboardButton("⏭ Dùng mặc định", callback_data="vproduct|color|default")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def task3d_subject_text(session: dict, lang: str = "vi") -> str:
+    return (
+        "🎯 <b>Chọn chủ thể chính</b>\n\n"
+        "Chủ thể chính giúp TOAN AAS giữ đúng đối tượng khi gợi ý chuyển động, camera và đổi cảnh.\n\n"
+        "Bạn có thể dùng mặc định nếu mô tả/ảnh đã đủ rõ."
+    )
+
+def task3d_subject_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    for index in range(0, len(TASK3D_SUBJECT_SUGGESTIONS), 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"vproduct|subject|{code}")
+            for code, label in TASK3D_SUBJECT_SUGGESTIONS[index:index + 2]
+        ])
+    rows.append([InlineKeyboardButton("⏭ Dùng mặc định", callback_data="vproduct|subject|default")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def task3d_scene_idea_text(session: dict, lang: str = "vi") -> str:
+    return (
+        "💡 <b>Gợi ý cảnh mới</b>\n\n"
+        "Chọn bối cảnh mới cho ảnh/video tự quay. TOAN AAS vẫn giữ chủ thể và media đã gửi trong phiên.\n\n"
+        "Bạn có thể dùng mặc định nếu đã mô tả cảnh mong muốn."
+    )
+
+def task3d_scene_idea_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    for index in range(0, len(TASK3D_SCENE_IDEA_SUGGESTIONS), 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"vproduct|scene_idea|{code}")
+            for code, label in TASK3D_SCENE_IDEA_SUGGESTIONS[index:index + 2]
+        ])
+    rows.append([InlineKeyboardButton("⏭ Dùng mặc định", callback_data="vproduct|scene_idea|default")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def task3d_camera_text(session: dict, lang: str = "vi") -> str:
+    return (
+        "📹 <b>Chọn góc máy / camera</b>\n\n"
+        "Chọn góc máy phù hợp, hoặc bỏ qua để giữ camera mặc định từ bước chuyển động.\n\n"
+        "Bước này chỉ tối ưu prompt, chưa xử lý video và chưa trừ Xu."
+    )
+
+def task3d_camera_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    for index in range(0, len(TASK3D_CAMERA_SUGGESTIONS), 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"vproduct|camera|{code}")
+            for code, label in TASK3D_CAMERA_SUGGESTIONS[index:index + 2]
+        ])
+    rows.append([InlineKeyboardButton("⏭ Bỏ qua", callback_data="vproduct|camera|skip")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def task3d_pace_text(session: dict, lang: str = "vi") -> str:
+    return "🎞 <b>Chọn nhịp phim</b>\n\nChọn nhịp dựng phù hợp với câu chuyện, hoặc dùng mặc định để TOAN AAS tự cân bằng."
+
+def task3d_pace_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    for index in range(0, len(TASK3D_PACE_SUGGESTIONS), 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"vproduct|pace|{code}")
+            for code, label in TASK3D_PACE_SUGGESTIONS[index:index + 2]
+        ])
+    rows.append([InlineKeyboardButton("⏭ Dùng mặc định", callback_data="vproduct|pace|default")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def task3d_detail_text(session: dict, lang: str = "vi") -> str:
+    return (
+        "✍️ <b>Bổ sung mô tả cho ảnh</b>\n\n"
+        "Bạn có thể mô tả thêm hành động mong muốn, hoặc bỏ qua để dùng nội dung ảnh làm mặc định.\n\n"
+        "Ảnh đã được giữ trong phiên, quay lại không cần upload lại."
+    )
+
+def task3d_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Mô tả thêm", callback_data="vproduct|input_detail|image_to_video"), InlineKeyboardButton("⏭ Bỏ qua", callback_data="vproduct|detail|skip")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def task3d_image_plan_text(session: dict, lang: str = "vi") -> str:
+    return (
+        "🖼 <b>Gợi ý ảnh cho từng cảnh</b>\n\n"
+        "TOAN AAS có thể thêm gợi ý tạo ảnh và prompt ảnh cho từng cảnh trước khi làm video.\n"
+        "Nếu bạn đã có ảnh hoặc chưa cần, hãy bấm Bỏ qua.\n\n"
+        "Bước này chỉ tạo gợi ý/prompt, không gọi công cụ ảnh và không trừ Xu."
+    )
+
+def task3d_image_plan_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖼 Gợi ý tạo ảnh", callback_data="vproduct|image_plan|suggest"), InlineKeyboardButton("⏭ Bỏ qua", callback_data="vproduct|image_plan|skip")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def task3d_format_text(session: dict, lang: str = "vi") -> str:
+    return "📐 <b>Gợi ý format tương tự</b>\n\nChọn format mới để áp dụng style brief mà không sao chép/reup nội dung mẫu."
+
+def task3d_format_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 UGC ngắn", callback_data="vproduct|format|ugc_short"), InlineKeyboardButton("🎬 Kể chuyện", callback_data="vproduct|format|story")],
+        [InlineKeyboardButton("🛍 Quảng cáo", callback_data="vproduct|format|product_ad"), InlineKeyboardButton("⏭ Dùng mặc định", callback_data="vproduct|format|default")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
 def task3d_motion_text(session: dict, lang: str = "vi") -> str:
     topic = str(session.get("topic") or (session.get("draft") or {}).get("topic") or TASK3D_SAMPLE_TOPICS.get(str(session.get("product_id") or ""), "video của bạn"))
+    suggestions = list(TASK3D_MOTION_SUGGESTIONS)
+    if str(session.get("product_id") or "") == "video_ai_real":
+        suggestions = [item for item in suggestions if item[0] != "cinematic_pan"]
     lines = [
         "🎥 <b>Gợi ý chuyển động / camera</b>",
         "",
@@ -44926,25 +45185,32 @@ def task3d_motion_text(session: dict, lang: str = "vi") -> str:
         "",
         "Chọn một hướng chuyển động hoặc bấm Bỏ qua để dùng chuyển động mặc định:",
     ]
-    for _, label in TASK3D_MOTION_SUGGESTIONS:
+    for _, label in suggestions:
         lines.append(f"• {html.escape(label)}")
     lines.append("\nBước này chỉ tối ưu prompt, chưa xử lý video và chưa trừ Xu.")
     return "\n".join(lines)
 
-def task3d_motion_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def task3d_motion_keyboard(lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
+    suggestions = list(TASK3D_MOTION_SUGGESTIONS)
+    if str(product_id or "") == "video_ai_real":
+        suggestions = [item for item in suggestions if item[0] != "cinematic_pan"]
     rows = []
-    for index in range(0, len(TASK3D_MOTION_SUGGESTIONS), 2):
+    for index in range(0, len(suggestions), 2):
         rows.append([
             InlineKeyboardButton(label, callback_data=f"vproduct|motion|{code}")
-            for code, label in TASK3D_MOTION_SUGGESTIONS[index:index + 2]
+            for code, label in suggestions[index:index + 2]
         ])
-    rows.append([InlineKeyboardButton("⏭ Bỏ qua", callback_data="vproduct|motion|skip")])
+    if rows and len(rows[-1]) == 1:
+        rows[-1].append(InlineKeyboardButton("⏭ Bỏ qua", callback_data="vproduct|motion|skip"))
+    else:
+        rows.append([InlineKeyboardButton("⏭ Bỏ qua", callback_data="vproduct|motion|skip")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def task3d_extra_scene_text(session: dict, lang: str = "vi") -> str:
     product_id = str(session.get("product_id") or "")
-    scene_default = 6 if product_id in {"storyboard_prompt", "script_image_video", "multi_scene_film"} else 1
+    draft = dict(session.get("draft") or {})
+    scene_default = safe_int(draft.get("panel_count") or draft.get("scene_count"), 6 if product_id in {"storyboard_prompt", "script_image_video", "multi_scene_film"} else 1)
     return (
         "➕ <b>Thêm cảnh cho video</b>\n\n"
         f"Mặc định hiện tại: <b>{scene_default} cảnh</b>.\n"
@@ -44986,21 +45252,30 @@ def task3d_aspect_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 
-def task3d_panel_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def task3d_panel_keyboard(lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
+    unit = "panel" if str(product_id or "") == "storyboard_prompt" else "cảnh"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("6 panel", callback_data="vproduct|panels|6"), InlineKeyboardButton("9 panel", callback_data="vproduct|panels|9")],
-        [InlineKeyboardButton("12 panel", callback_data="vproduct|panels|12"), InlineKeyboardButton("16 panel", callback_data="vproduct|panels|16")],
+        [InlineKeyboardButton(f"6 {unit}", callback_data="vproduct|panels|6"), InlineKeyboardButton(f"9 {unit}", callback_data="vproduct|panels|9")],
+        [InlineKeyboardButton(f"12 {unit}", callback_data="vproduct|panels|12"), InlineKeyboardButton(f"16 {unit}", callback_data="vproduct|panels|16")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
-def task3d_style_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    styles = [
-        ("Chân thật", "realistic"), ("Cinematic", "cinematic"),
-        ("Hoạt hình 3D", "cute_3d"), ("Anime gốc", "original_anime"),
-        ("Quảng cáo sản phẩm", "product_ad"), ("UGC", "ugc"),
-        ("Kinh dị", "horror"), ("Hành động", "action"),
-    ]
+def task3d_style_keyboard(lang: str = "vi", product_id: str = "") -> InlineKeyboardMarkup:
+    if str(product_id or "") == "video_ai_real":
+        styles = [
+            ("🎬 Chân thật", "realistic"), ("🎥 Điện ảnh", "cinematic"),
+            ("📱 UGC tự nhiên", "ugc"), ("🛍 Quảng cáo sản phẩm", "product_ad"),
+            ("✨ Sang trọng", "luxury"), ("⏭ Dùng mặc định", "default"),
+        ]
+    else:
+        styles = [
+            ("Chân thật", "realistic"), ("Điện ảnh", "cinematic"),
+            ("Hoạt hình 3D", "cute_3d"), ("Anime gốc", "original_anime"),
+            ("Quảng cáo sản phẩm", "product_ad"), ("UGC tự nhiên", "ugc"),
+            ("Kinh dị", "horror"), ("Hành động", "action"),
+            ("✨ Sang trọng", "luxury"), ("⏭ Dùng mặc định", "default"),
+        ]
     rows = [[InlineKeyboardButton(styles[i][0], callback_data=f"vproduct|style|{styles[i][1]}"), InlineKeyboardButton(styles[i + 1][0], callback_data=f"vproduct|style|{styles[i + 1][1]}")] for i in range(0, len(styles), 2)]
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
@@ -45047,6 +45322,14 @@ def task3d_build_bundle_from_session(session: dict) -> dict:
     draft = dict(session.get("draft") or {})
     product_id = str(session.get("product_id") or draft.get("product_id") or "")
     count = safe_int(draft.get("panel_count") or draft.get("scene_count") or (1 if product_id in {"video_ai_real", "image_to_video", "motion_prompt"} else 6), 6)
+    reference_parts = [
+        str(draft.get("selected_motion") or ""),
+        str(draft.get("camera_choice") or ""),
+        str(draft.get("film_pace") or ""),
+        str(draft.get("suggested_scene") or ""),
+        str(draft.get("reference_format") or ""),
+        str(draft.get("reference_style") or ""),
+    ]
     request = VideoPromptRequest(
         product_id=product_id,
         user_topic=str(session.get("topic") or draft.get("topic") or draft.get("media_description") or "Ảnh/video người dùng cung cấp"),
@@ -45056,12 +45339,14 @@ def task3d_build_bundle_from_session(session: dict) -> dict:
         package_id=str(session.get("package_id") or ""),
         objective=str(draft.get("objective") or "engagement"),
         style=str(session.get("style") or draft.get("style") or "realistic cinematic"),
-        tone="clear, original and audience-appropriate",
+        tone=str(draft.get("color_mood") or "clear, original and audience-appropriate"),
         language="vi",
+        character_description=str(draft.get("main_subject") or ""),
         scene_count=count,
         shot_count=count,
-        reference_style=str(draft.get("reference_style") or ""),
+        reference_style=", ".join(item for item in reference_parts if item and item not in {"mặc định", "bỏ qua"}),
         source_media_ref=str(session.get("source_media_ref") or draft.get("source_media_ref") or ""),
+        user_constraints=([str(draft.get("image_plan"))] if draft.get("image_plan") and draft.get("image_plan") != "bỏ qua" else []),
         provider_target="configured_shopAIKey_or_Key4U_route",
         safety_flags=["no_artist_imitation", "no_copyrighted_character_without_rights", "no_watermark"],
     )
@@ -45210,22 +45495,43 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
             target,
             f"✍️ <b>Đầu vào sản phẩm</b>\n\nĐã lưu: <code>{html.escape(topic or 'media trong phiên')}</code>\n\nBạn có thể tiếp tục mà không cần gửi lại file/nội dung.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("➡️ Tiếp tục", callback_data="vproduct|continue_platform")], [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("➡️ Tiếp tục", callback_data="vproduct|continue_guided")], [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
     if step == "platform":
         return await safe_edit_or_send(target, "📱 <b>Chọn mục đích / nền tảng</b>", parse_mode="HTML", reply_markup=task3d_platform_keyboard(lang))
     if step == "aspect":
         return await safe_edit_or_send(target, "📐 <b>Chọn tỉ lệ khung hình</b>", parse_mode="HTML", reply_markup=task3d_aspect_keyboard(lang))
     if step == "panels":
-        return await safe_edit_or_send(target, "🎞 <b>Chọn số panel storyboard</b>\n\nMỗi 2 shot sẽ được gom thành một batch multishot.", parse_mode="HTML", reply_markup=task3d_panel_keyboard(lang))
+        panel_text = (
+            "🎞 <b>Chọn số panel storyboard</b>\n\nMỗi 2 shot sẽ được gom thành một batch multishot."
+            if product_id == "storyboard_prompt"
+            else "🎞 <b>Chọn số cảnh</b>\n\nBạn có thể thêm cảnh hoặc bỏ qua ở bước sau."
+        )
+        return await safe_edit_or_send(target, panel_text, parse_mode="HTML", reply_markup=task3d_panel_keyboard(lang, product_id))
     if step == "style":
-        return await safe_edit_or_send(target, "🎨 <b>Chọn phong cách</b>", parse_mode="HTML", reply_markup=task3d_style_keyboard(lang))
+        return await safe_edit_or_send(target, "🎨 <b>Chọn phong cách video</b>\n\nBạn có thể chọn một phong cách hoặc dùng mặc định.", parse_mode="HTML", reply_markup=task3d_style_keyboard(lang, product_id))
+    if step == "color":
+        return await safe_edit_or_send(target, task3d_color_mood_text(session, lang), parse_mode="HTML", reply_markup=task3d_color_mood_keyboard(lang))
+    if step == "subject":
+        return await safe_edit_or_send(target, task3d_subject_text(session, lang), parse_mode="HTML", reply_markup=task3d_subject_keyboard(lang))
+    if step == "scene_idea":
+        return await safe_edit_or_send(target, task3d_scene_idea_text(session, lang), parse_mode="HTML", reply_markup=task3d_scene_idea_keyboard(lang))
+    if step == "camera":
+        return await safe_edit_or_send(target, task3d_camera_text(session, lang), parse_mode="HTML", reply_markup=task3d_camera_keyboard(lang))
+    if step == "pace":
+        return await safe_edit_or_send(target, task3d_pace_text(session, lang), parse_mode="HTML", reply_markup=task3d_pace_keyboard(lang))
+    if step == "detail":
+        return await safe_edit_or_send(target, task3d_detail_text(session, lang), parse_mode="HTML", reply_markup=task3d_detail_keyboard(lang))
+    if step == "image_plan":
+        return await safe_edit_or_send(target, task3d_image_plan_text(session, lang), parse_mode="HTML", reply_markup=task3d_image_plan_keyboard(lang))
+    if step == "format":
+        return await safe_edit_or_send(target, task3d_format_text(session, lang), parse_mode="HTML", reply_markup=task3d_format_keyboard(lang))
     if step == "output_target":
         return await safe_edit_or_send(target, "📦 <b>Chọn đầu ra miễn phí</b>", parse_mode="HTML", reply_markup=task3d_output_target_keyboard(lang))
     if step == "idea_suggestions":
         return await safe_edit_or_send(target, task3d_idea_suggestions_text(session, lang), parse_mode="HTML", reply_markup=task3d_idea_suggestions_keyboard(session, lang))
     if step == "movement":
-        return await safe_edit_or_send(target, task3d_motion_text(session, lang), parse_mode="HTML", reply_markup=task3d_motion_keyboard(lang))
+        return await safe_edit_or_send(target, task3d_motion_text(session, lang), parse_mode="HTML", reply_markup=task3d_motion_keyboard(lang, product_id))
     if step == "extra_scene":
         return await safe_edit_or_send(target, task3d_extra_scene_text(session, lang), parse_mode="HTML", reply_markup=task3d_extra_scene_keyboard(lang))
     if step == "trend_ideas":
@@ -45306,10 +45612,15 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         bundle = task3d_trend_output_from_source(selected)
         topic = str(bundle.get("user_topic") or selected.get("title") or "Video theo trend")
         session = task3d_session_step(
-            uid, "result",
-            topic=topic, selected_trend_source=selected, prompt_bundle=bundle,
-            prompt_bundle_id=bundle.get("bundle_id"), free_generation=True,
-            provider_called=False, xu_charged=0,
+            uid,
+            task3d_next_guided_step(product_id),
+            topic=topic,
+            selected_trend_source=selected,
+            prepared_prompt_bundle=bundle,
+            input_collected=True,
+            free_generation=True,
+            provider_called=False,
+            xu_charged=0,
         )
         return await task3d_render_step(query, uid, session, lang)
     if action in {"ideas", "ideas_refresh"}:
@@ -45327,7 +45638,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         selected = ideas[max(0, min(len(ideas) - 1, safe_int(value, 0)))] if ideas else TASK3D_SAMPLE_TOPICS.get(product_id, "ý tưởng video ngắn dễ xem")
         session = task3d_session_step(
             uid,
-            "platform",
+            task3d_next_guided_step(product_id),
             topic=selected,
             input_collected=True,
             suggestion_used=True,
@@ -45347,10 +45658,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         selected_motion = "chuyển động mặc định"
         if value != "skip":
             selected_motion = dict(TASK3D_MOTION_SUGGESTIONS).get(value, value.replace("_", " "))
-        session = task3d_result_or_next_step_after_optional(
+        session = task3d_advance_guided_flow(
             uid,
             session,
-            product_id,
+            "movement",
             selected_motion=selected_motion,
             reference_style=selected_motion,
             motion_skipped=(value == "skip"),
@@ -45366,10 +45677,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         add_count = max(1, min(4, safe_int(value, 1)))
         draft = dict(session.get("draft") or {})
         base_count = safe_int(draft.get("panel_count") or draft.get("scene_count") or (6 if product_id in {"storyboard_prompt", "script_image_video", "multi_scene_film"} else 1), 6)
-        session = task3d_result_or_next_step_after_optional(
+        session = task3d_advance_guided_flow(
             uid,
             session,
-            product_id,
+            "extra_scene",
             scene_count=base_count + add_count,
             extra_scene_count=add_count,
             free_generation=True,
@@ -45377,56 +45688,80 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             xu_charged=0,
         )
         return await task3d_render_step(query, uid, session, lang)
-    if action in {"scene_skip", "addon_skip"}:
-        session = task3d_result_or_next_step_after_optional(
-            uid,
-            session,
-            product_id,
-            extra_scene_skipped=True,
-            addon_skipped=(action == "addon_skip"),
-            free_generation=True,
-            provider_called=False,
-            xu_charged=0,
-        )
+    if action == "scene_skip":
+        session = task3d_advance_guided_flow(uid, session, "extra_scene", extra_scene_skipped=True)
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "addon_skip":
+        session = task3d_complete_guided_result(uid, session, addon_skipped=True)
         return await task3d_render_step(query, uid, session, lang)
     if action == "sample":
         sample_topic = TASK3D_SAMPLE_TOPICS.get(product_id) or TASK3D_SAMPLE_TOPICS.get(value) or "ý tưởng video ngắn dễ xem"
-        session = task3d_session_step(uid, "platform", topic=sample_topic, input_collected=True, sample_used=True)
+        session = task3d_session_step(uid, task3d_next_guided_step(product_id), topic=sample_topic, input_collected=True, sample_used=True)
         return await task3d_render_step(query, uid, session, lang)
-    if action in {"input_text", "input_media"}:
+    if action in {"input_text", "input_media", "input_detail"}:
         step = "collect_input"
-        session = task3d_session_step(uid, step, input_mode="media" if action == "input_media" else "text")
+        session = task3d_session_step(
+            uid,
+            step,
+            input_mode="media" if action == "input_media" else "text",
+            input_purpose="detail" if action == "input_detail" else "primary",
+        )
         prompt = task3d_media_input_prompt(product_id, lang) if action == "input_media" else task3d_text_input_prompt(product_id, lang)
         return await safe_edit_or_send(query, prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
-    if action == "continue_platform":
-        session = task3d_session_step(uid, "platform")
+    if action in {"continue_platform", "continue_guided"}:
+        session = task3d_session_step(uid, task3d_next_guided_step(product_id))
         return await task3d_render_step(query, uid, session, lang)
     if action == "platform":
-        session = task3d_session_step(uid, "aspect", platform=value.replace("_", " "))
+        session = task3d_advance_guided_flow(uid, session, "platform", platform=value.replace("_", " "))
         return await task3d_render_step(query, uid, session, lang)
     if action == "aspect":
-        next_step = "panels" if product_id == "storyboard_prompt" else "style"
-        session = task3d_session_step(uid, next_step, aspect_ratio=value)
+        session = task3d_advance_guided_flow(uid, session, "aspect", aspect_ratio=value)
         return await task3d_render_step(query, uid, session, lang)
     if action == "panels":
-        session = task3d_session_step(uid, "style", panel_count=max(6, min(16, safe_int(value, 9))))
+        session = task3d_advance_guided_flow(uid, session, "panels", panel_count=max(6, min(16, safe_int(value, 9))))
         return await task3d_render_step(query, uid, session, lang)
     if action == "style":
-        if product_id in {"video_ai_real", "image_to_video", "motion_prompt"}:
-            next_step = "movement"
-        elif product_id in {"script_image_video", "multi_scene_film"}:
-            next_step = "extra_scene"
-        else:
-            next_step = "output_target" if product_id == "storyboard_prompt" else "result"
-        session = task3d_session_step(uid, next_step, style=value.replace("_", " "))
-        if next_step == "result":
-            bundle = task3d_build_bundle_from_session(session)
-            session = task3d_session_step(uid, "result", prompt_bundle=bundle, prompt_bundle_id=bundle.get("bundle_id"), free_generation=True, provider_called=False, xu_charged=0)
+        style_value = "mặc định" if value == "default" else value.replace("_", " ")
+        session = task3d_advance_guided_flow(uid, session, "style", style=style_value, style_default=(value == "default"))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "color":
+        color_value = "mặc định" if value == "default" else dict(TASK3D_COLOR_MOOD_SUGGESTIONS).get(value, value.replace("_", " "))
+        session = task3d_advance_guided_flow(uid, session, "color", color_mood=color_value, color_default=(value == "default"))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "subject":
+        subject_value = "mặc định" if value == "default" else dict(TASK3D_SUBJECT_SUGGESTIONS).get(value, value.replace("_", " "))
+        session = task3d_advance_guided_flow(uid, session, "subject", main_subject=subject_value, subject_default=(value == "default"))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "scene_idea":
+        scene_value = "mặc định" if value == "default" else dict(TASK3D_SCENE_IDEA_SUGGESTIONS).get(value, value.replace("_", " "))
+        session = task3d_advance_guided_flow(uid, session, "scene_idea", suggested_scene=scene_value, scene_default=(value == "default"))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "camera":
+        camera_value = "mặc định" if value == "skip" else dict(TASK3D_CAMERA_SUGGESTIONS).get(value, value.replace("_", " "))
+        session = task3d_advance_guided_flow(uid, session, "camera", camera_choice=camera_value, camera_skipped=(value == "skip"))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "pace":
+        pace_value = "mặc định" if value == "default" else dict(TASK3D_PACE_SUGGESTIONS).get(value, value.replace("_", " "))
+        session = task3d_advance_guided_flow(uid, session, "pace", film_pace=pace_value, pace_default=(value == "default"))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "detail":
+        session = task3d_advance_guided_flow(uid, session, "detail", detail_skipped=(value == "skip"))
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "image_plan":
+        session = task3d_advance_guided_flow(
+            uid,
+            session,
+            "image_plan",
+            image_plan="gợi ý prompt ảnh cho từng cảnh" if value == "suggest" else "bỏ qua",
+            image_plan_skipped=(value == "skip"),
+        )
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "format":
+        format_value = "mặc định" if value == "default" else value.replace("_", " ")
+        session = task3d_advance_guided_flow(uid, session, "format", reference_format=format_value)
         return await task3d_render_step(query, uid, session, lang)
     if action == "target":
-        session = task3d_session_step(uid, "result", output_target=value)
-        bundle = task3d_build_bundle_from_session(session)
-        session = task3d_session_step(uid, "result", prompt_bundle=bundle, prompt_bundle_id=bundle.get("bundle_id"), free_generation=True, provider_called=False, xu_charged=0)
+        session = task3d_advance_guided_flow(uid, session, "output_target", output_target=value)
         return await task3d_render_step(query, uid, session, lang)
     if action == "restyle":
         session = task3d_session_step(uid, "style")
@@ -45488,6 +45823,22 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     return await task3d_render_step(query, uid, session, lang)
 
 
+async def task3d_reply_current_guided_step(message, session: dict, lang: str = "vi"):
+    step = str(session.get("current_step") or "")
+    product_id = str(session.get("product_id") or "")
+    if step == "style":
+        return await message.reply_text("🎨 <b>Chọn phong cách video</b>\n\nBạn có thể chọn một phong cách hoặc dùng mặc định.", parse_mode="HTML", reply_markup=task3d_style_keyboard(lang, product_id))
+    if step == "subject":
+        return await message.reply_text(task3d_subject_text(session, lang), parse_mode="HTML", reply_markup=task3d_subject_keyboard(lang))
+    if step == "detail":
+        return await message.reply_text(task3d_detail_text(session, lang), parse_mode="HTML", reply_markup=task3d_detail_keyboard(lang))
+    if step == "platform":
+        return await message.reply_text("✅ Đã lưu đầu vào. Chọn nền tảng/mục đích tiếp theo.", reply_markup=task3d_platform_keyboard(lang))
+    if step == "result":
+        return await message.reply_text(task3d_result_text(session, lang), parse_mode="HTML", reply_markup=task3d_result_keyboard(product_id, lang))
+    return await message.reply_text("✅ Đã giữ nội dung trong phiên. Bấm tiếp tục để hoàn thiện video.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("➡️ Tiếp tục", callback_data="vproduct|continue_guided")], [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+
+
 async def handle_video_product_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
@@ -45499,6 +45850,7 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
     if not text:
         return True
     product_id = str(session.get("product_id") or "")
+    input_purpose = str((session.get("draft") or {}).get("input_purpose") or "primary")
     if product_id == "video_trend":
         source = {
             "source_id": "custom_topic",
@@ -45520,14 +45872,25 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         }
         bundle = task3d_trend_output_from_source(source, text)
         session = task3d_session_step(
-            uid, "result", topic=text, selected_trend_source=source, prompt_bundle=bundle,
-            prompt_bundle_id=bundle.get("bundle_id"), input_collected=True,
-            free_generation=True, provider_called=False, xu_charged=0,
+            uid,
+            task3d_next_guided_step(product_id),
+            topic=text,
+            selected_trend_source=source,
+            prepared_prompt_bundle=bundle,
+            input_collected=True,
+            free_generation=True,
+            provider_called=False,
+            xu_charged=0,
         )
-        await update.message.reply_text(task3d_result_text(session, get_user_language(uid) or "vi"), parse_mode="HTML", reply_markup=task3d_result_keyboard("video_trend", get_user_language(uid) or "vi"))
+        await task3d_reply_current_guided_step(update.message, session, get_user_language(uid) or "vi")
         return True
-    session = task3d_session_step(uid, "platform", topic=text, input_collected=True)
-    await update.message.reply_text("✅ Đã lưu đầu vào. Chọn nền tảng/mục đích tiếp theo.", reply_markup=task3d_platform_keyboard(get_user_language(uid) or "vi"))
+    if input_purpose == "detail" and product_id == "image_to_video":
+        session = task3d_advance_guided_flow(uid, session, "detail", media_description=text, detail_skipped=False)
+    elif product_id == "image_to_video":
+        session = task3d_advance_guided_flow(uid, session, "detail", topic=text, media_description=text, detail_from_primary_text=True)
+    else:
+        session = task3d_session_step(uid, task3d_next_guided_step(product_id), topic=text, input_collected=True)
+    await task3d_reply_current_guided_step(update.message, session, get_user_language(uid) or "vi")
     return True
 
 
@@ -45551,17 +45914,20 @@ async def handle_video_product_pending_media(update: Update, context: ContextTyp
         media_type = "document"
     if not media:
         return False
+    product_id = str(session.get("product_id") or "")
     draft = dict(session.get("draft") or {})
     refs = list(draft.get("source_media_refs") or [])
     file_id = str(getattr(media, "file_id", "") or "")
     if file_id and file_id not in refs:
         refs.append(file_id)
     refs = refs[:4]
+    next_step = task3d_next_guided_step(product_id)
     session = task3d_session_step(
-        uid, "platform", source_media_ref=refs[0] if refs else "", source_media_refs=refs,
+        uid, next_step, source_media_ref=refs[0] if refs else "", source_media_refs=refs,
         media_type=media_type, media_description=f"{len(refs)} ảnh/video người dùng cung cấp", topic=f"Media người dùng cung cấp ({len(refs)} file)", input_collected=True,
     )
-    await update.message.reply_text(f"✅ Đã lưu {len(refs)} file trong phiên. Chọn nền tảng/mục đích tiếp theo; quay lại sẽ không phải upload lại.", reply_markup=task3d_platform_keyboard(get_user_language(uid) or "vi"))
+    await update.message.reply_text(f"✅ Đã lưu {len(refs)} file trong phiên. Quay lại sẽ không phải upload lại.")
+    await task3d_reply_current_guided_step(update.message, session, get_user_language(uid) or "vi")
     return True
 
 def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -88965,7 +89331,7 @@ def video_addon_confirm_keyboard(token: str, tier: str, lang: str = "vi", state:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎬 Xuất video" if is_vi else "🎬 Create video", callback_data=f"shopai|confirm|{token}"),
+            InlineKeyboardButton("🎬 Xuất video" if is_vi else "🎬 Create video", callback_data=f"videoaddon|export|{token}"),
             InlineKeyboardButton("⚙️ Đổi tùy chọn" if is_vi else "⚙️ Change options", callback_data="vfinal|menu"),
         ],
         [
@@ -89542,15 +89908,6 @@ async def start_video_addon_step(query, user_id, pending_payload: dict, tier: st
 async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: str = "vi"):
     pending_payload = dict(state.get("pending_payload") or {})
     tier = normalize_video_tier(state.get("video_tier") or pending_payload.get("video_tier"))
-    starter_block = validate_video_tier_selection(state, tier)
-    if state.get("source") != "frame" and starter_block.get("blocked"):
-        set_video_addon_state(user_id, state)
-        return await safe_edit_or_send(
-            query,
-            video_experience_tier_lock_text(lang, starter_block.get("reasons") or []),
-            parse_mode="HTML",
-            reply_markup=video_experience_tier_lock_keyboard(lang),
-        )
     order = video_order_push_screen(video_order_from_state(state, user_id), "invoice")
     if tier in VIDEO_ORDER_COMING_SOON_TIERS or not order.get("billable"):
         set_video_addon_state(user_id, state)
@@ -89809,9 +90166,10 @@ async def render_video_addon_screen(query, user_id, state: dict, target_screen: 
 
 async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "menu"
+    if action != "export":
+        await query.answer()
     uid = query.from_user.id
     lang = user_ui_lang(uid)
     state = get_video_addon_state(uid)
@@ -89821,7 +90179,60 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         clear_product_context(uid)
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
     if not state:
+        if action == "export":
+            await query.answer()
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+    if action == "export":
+        token = parts[2] if len(parts) > 2 else str(state.get("pending_confirm_token") or "")
+        pending_payload = dict(state.get("pending_payload") or {})
+        if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
+            pending_payload.update(dict(SHOPAIKEY_PENDING_CONFIRMATIONS[token] or {}))
+            state["pending_payload"] = pending_payload
+            set_video_addon_state(uid, state)
+        tier = normalize_video_tier(state.get("video_tier") or pending_payload.get("video_tier"))
+        starter_block = validate_video_tier_selection(state, tier)
+        if state.get("source") != "frame" and tier == "low" and starter_block.get("blocked"):
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                video_experience_tier_lock_text(lang, starter_block.get("reasons") or []),
+                parse_mode="HTML",
+                reply_markup=video_experience_tier_lock_keyboard(lang),
+            )
+        export_enabled, _export_message = shopaikey_public_generation_guard("video")
+        addon_guard = video_addon_runtime_guard(pending_payload)
+        if not export_enabled or not addon_guard.get("ok"):
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                "🛠 Hệ thống tạo video đang bảo trì hoặc chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu.\n\n"
+                "Nội dung, tùy chọn và file trong phiên của bạn vẫn được giữ nguyên.",
+                parse_mode=None,
+                reply_markup=video_export_maintenance_keyboard(lang),
+            )
+        query.data = f"shopai|confirm|{token}"
+        return await handle_shopaikey_public_callback(update, context)
+    if action == "export_back":
+        return await render_video_addon_screen(query, uid, state, "invoice", lang)
+    if action == "upgrade_300":
+        pending_payload = dict(state.get("pending_payload") or {})
+        state.update({
+            "video_tier": "basic",
+            "selected_tier": "basic",
+            "current_video_quality_tier": video_quality_from_tier("basic"),
+        })
+        pending_payload.update({
+            "video_tier": "basic",
+            "selected_tier": "basic",
+            "task3d_package_id": "package_300",
+        })
+        state["pending_payload"] = pending_payload
+        finalization_state = get_video_finalization_state(uid)
+        if finalization_state:
+            finalization_state["selected_video_tier"] = "basic"
+            finalization_state["step"] = "confirm"
+            set_video_finalization_state(uid, finalization_state)
+        return await finalize_video_addon_confirmation(query, uid, state, lang)
     enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen=f"videoaddon|{action}", product_area="subtitle")
     if action == "menu":
         finalization_state = ensure_video_finalization_from_addon_state(uid, state)
@@ -90020,14 +90431,6 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         state = clear_video_paid_addons_from_state(state)
         state["video_order"] = video_order_from_state(state, uid)
         return await finalize_video_addon_confirmation(query, uid, state, lang)
-    tier = normalize_video_tier(state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier"))
-    if tier == "low" and str(state.get("source") or "") != "frame" and action in {"subtitle", "dub", "combo", "translate_sub", "translate_combo", "lang", "voice"}:
-        return await safe_edit_or_send(
-            query,
-            video_experience_tier_lock_text(lang, [action]),
-            parse_mode="HTML",
-            reply_markup=video_experience_tier_lock_keyboard(lang),
-        )
     if action == "subtitle":
         state.update({
             "current_video_subtitle_option": "subtitle_original",

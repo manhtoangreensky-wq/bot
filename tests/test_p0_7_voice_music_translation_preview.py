@@ -318,7 +318,7 @@ def test_video_200_lock_returns_to_options_and_public_copy_is_clean():
     text = bot.video_experience_tier_lock_text("vi", ["paid_music"])
 
     assert labels == ["🔷 Nâng lên 300 Xu", "⬅️ Quay lại"]
-    assert callbacks == ["vfinal|tier|basic", "vfinal|menu"]
+    assert callbacks == ["videoaddon|upgrade_300", "videoaddon|export_back"]
     _assert_public_copy_safe(text)
 
 

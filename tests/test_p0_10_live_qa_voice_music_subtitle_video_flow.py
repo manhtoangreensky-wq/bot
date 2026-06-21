@@ -210,7 +210,7 @@ def test_preview_locked_for_200_but_full_export_active(monkeypatch):
     assert "🔒 Xem thử video" not in labels
     assert "videoaddon|preview_locked|tok" not in callbacks
     assert "🎬 Xuất video" in labels
-    assert "shopai|confirm|tok" in callbacks
+    assert "videoaddon|export|tok" in callbacks
 
 
 def test_full_export_does_not_route_to_preview():
@@ -266,4 +266,4 @@ def test_200_paid_addon_blocked_with_upgrade_or_back():
     assert guard["blocked"] is True
     assert "paid_music" in guard["reasons"]
     callbacks = _callbacks(bot.video_experience_tier_lock_keyboard("vi"))
-    assert callbacks == ["vfinal|tier|basic", "vfinal|menu"]
+    assert callbacks == ["videoaddon|upgrade_300", "videoaddon|export_back"]
