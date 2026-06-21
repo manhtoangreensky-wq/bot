@@ -80,8 +80,8 @@ def test_export_ai_opens_addons_before_package():
     source = inspect.getsource(bot.handle_video_finalization_callback)
     export_block = source.split('if action in {"export_local", "export_ai"}:', 1)[1].split('if action == "save":', 1)[0]
 
-    assert "video_finalization_menu_text" in export_block
-    assert export_block.index("video_finalization_menu_text") < export_block.index("video_finalization_tier_text")
+    assert "video_finalization_render_menu" in export_block
+    assert export_block.index("video_finalization_render_menu") < export_block.index("video_finalization_tier_text")
 
 
 def test_voice_vault_uses_dynamic_number_codes(monkeypatch):

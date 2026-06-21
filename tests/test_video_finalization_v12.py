@@ -120,7 +120,6 @@ def test_video_finalization_menu_has_distinct_music_voice_subtitle_and_combo_pat
         "vfinal|voice",
         "vfinal|music",
         "vfinal|addon",
-        "vfinal|tier",
         "vfinal|skip",
         "vfinal|back",
         "vfinal|main",
@@ -329,11 +328,11 @@ def test_stale_local_export_without_images_uses_prompt_video_path(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert "Tùy chọn hoàn thiện video" in query.edited["text"]
+    assert "Chọn tỉ lệ khung hình video" in query.edited["text"]
     callbacks = _callbacks(query.edited["reply_markup"])
-    assert "vfinal|tier" in callbacks
-    assert "vfinal|voice" in callbacks
-    assert "vfinal|music" in callbacks
+    assert "vfinal|aspect|9x16" in callbacks
+    assert "vfinal|aspect|16x9" in callbacks
+    assert "vfinal|aspect|4x5" in callbacks
     assert "vfinal|export_local" not in callbacks
     assert "vfinal|back" in callbacks
 
@@ -381,11 +380,11 @@ def test_ready_prompt_export_opens_public_video_tiers(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert "Tùy chọn hoàn thiện video" in query.edited["text"]
+    assert "Chọn tỉ lệ khung hình video" in query.edited["text"]
     callbacks = _callbacks(query.edited["reply_markup"])
-    assert "vfinal|tier" in callbacks
-    assert "vfinal|voice" in callbacks
-    assert "vfinal|music" in callbacks
+    assert "vfinal|aspect|9x16" in callbacks
+    assert "vfinal|aspect|16x9" in callbacks
+    assert "vfinal|aspect|4x5" in callbacks
     pending = bot.get_video_finalization_state(user_id)
     assert pending.get("source_payload", {}).get("video_prompt") or pending.get("source_payload", {}).get("prompt")
 
@@ -433,7 +432,7 @@ def test_video_addon_language_and_voice_back_use_screen_stack():
     assert "videoaddon|menu" not in voice_callbacks
 
 
-def test_video_addon_invoice_back_returns_tools_then_scene_count(monkeypatch):
+def test_video_addon_invoice_back_returns_scene_count(monkeypatch):
     user_id = 991213
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
@@ -475,17 +474,6 @@ def test_video_addon_invoice_back_returns_tools_then_scene_count(monkeypatch):
     assert saved["video_order"]["current_screen"] == "invoice"
     assert saved["video_order"]["screen_stack"][-2:] == ["addon_voice", "invoice"]
 
-    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert "Công cụ hoàn thiện video" in query.edited["text"]
-    saved_addon = bot.get_video_addon_state(user_id)
-    assert saved_addon["video_order"]["current_screen"] == "video_addon_menu"
-    callbacks = _callbacks(query.edited["reply_markup"])
-    assert "videoaddon|voice_menu" in callbacks
-    assert "videoaddon|music_menu" in callbacks
-    assert "videoaddon|subtitle_menu" in callbacks
-    assert "videoaddon|back" in callbacks
-
-    query.data = "videoaddon|back"
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     assert "Chọn số cảnh video" in query.edited["text"]
     saved_finalization = bot.get_video_finalization_state(user_id)

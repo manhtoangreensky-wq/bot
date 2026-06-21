@@ -256,22 +256,11 @@ def test_selfshot_full_path_no_music_returns_package_or_invoice_correctly(monkey
     assert captured["back_callback"] == "selfscene|back_style"
 
 
-def test_invoice_change_music_returns_invoice_without_legacy_step(monkeypatch):
+def test_invoice_change_music_returns_package_without_legacy_step(monkeypatch):
     user_id = 930306
     _reset_user(user_id)
-    captured = {}
-
-    async def fake_start_video_addon_step(query, uid, pending_payload, tier, lang="vi", source="ai"):
-        captured.update({
-            "uid": uid,
-            "pending_payload": dict(pending_payload or {}),
-            "tier": tier,
-            "source": source,
-        })
-        return "invoice"
 
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
-    monkeypatch.setattr(bot, "start_video_addon_step", fake_start_video_addon_step)
     bot.set_video_finalization_state(user_id, {
         "source": "promptvideo",
         "selected_prompt": "Video quảng cáo sản phẩm.",
@@ -286,13 +275,13 @@ def test_invoice_change_music_returns_invoice_without_legacy_step(monkeypatch):
     query = CaptureQuery("music_quick|video_addon|music_none", user_id)
     result = asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert result == "invoice"
+    assert result is not None
     saved = bot.get_video_finalization_state(user_id)
-    assert saved["step"] == "confirm"
-    assert saved["addon_return_target"] == "invoice"
-    assert captured["tier"] == "basic"
-    assert captured["pending_payload"]["source_video_file_id"] == "video-file-id"
-    assert captured["pending_payload"]["source_file_id"] == "source-file-id"
+    assert saved["step"] == "tier"
+    assert saved["addon_return_target"] == "package"
+    assert saved["selected_video_tier"] == "basic"
+    assert saved["source_video_file_id"] == "video-file-id"
+    assert saved["source_file_id"] == "source-file-id"
     assert "music_suggest" not in "\n".join(str(output["text"]) for output in query.outputs)
     assert "Chọn nhạc" + "/voice" not in "\n".join(str(output["text"]) for output in query.outputs)
 
@@ -324,9 +313,9 @@ def test_video_addons_before_package_invoice():
     assert registry["video_addon"].index("video_preview") < registry["video_addon"].index("video_final_confirm")
 
     callbacks = _callbacks(bot.video_finalization_menu_keyboard("vi"))
-    assert callbacks.index("vfinal|voice") < callbacks.index("vfinal|tier")
-    assert callbacks.index("vfinal|music") < callbacks.index("vfinal|tier")
-    assert callbacks.index("vfinal|addon") < callbacks.index("vfinal|tier")
+    assert callbacks.index("vfinal|voice") < callbacks.index("vfinal|skip")
+    assert callbacks.index("vfinal|music") < callbacks.index("vfinal|skip")
+    assert callbacks.index("vfinal|addon") < callbacks.index("vfinal|skip")
 
 
 def test_public_ui_no_provider_vendor_admin_terms():

@@ -221,10 +221,10 @@ def test_video_addons_before_package_invoice():
 
     assert registry.index("video_finalize_addons") < registry.index("video_package")
     assert registry.index("video_package") < registry.index("video_invoice")
-    assert callbacks.index("vfinal|voice") < callbacks.index("vfinal|tier")
-    assert callbacks.index("vfinal|music") < callbacks.index("vfinal|tier")
-    assert callbacks.index("vfinal|addon") < callbacks.index("vfinal|tier")
-    assert "Tùy chọn hoàn thiện video" in bot.video_finalization_menu_text({"source": "selfscene"}, "vi")
+    assert callbacks.index("vfinal|voice") < callbacks.index("vfinal|skip")
+    assert callbacks.index("vfinal|music") < callbacks.index("vfinal|skip")
+    assert callbacks.index("vfinal|addon") < callbacks.index("vfinal|skip")
+    assert "Công cụ hoàn thiện video" in bot.video_finalization_menu_text({"source": "selfscene"}, "vi")
 
 
 def test_video_music_direct_library_no_suggestion_step(monkeypatch):
@@ -275,7 +275,7 @@ def test_video_music_free_selection_returns_origin(monkeypatch):
 
     assert finalization["music_mode"] == "none"
     assert finalization["music_enabled"] is False
-    assert "Tùy chọn hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
 
 
 def test_video_subdub_selection_returns_origin(monkeypatch):
@@ -290,20 +290,13 @@ def test_video_subdub_selection_returns_origin(monkeypatch):
 
     assert finalization["translation_enabled"] is True
     assert finalization["subtitle_dub_choice"] == "translate_subtitle"
-    assert "Tùy chọn hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
 
 
-def test_invoice_change_music_returns_invoice(monkeypatch):
+def test_invoice_change_music_returns_package(monkeypatch):
     user_id = 940409
     _reset_user(user_id)
-    captured = {}
-
-    async def fake_start(query, uid, pending_payload, tier, lang="vi", source="ai"):
-        captured.update(uid=uid, pending_payload=dict(pending_payload or {}), tier=tier, source=source)
-        return "invoice"
-
     monkeypatch.setattr(bot, "get_user_language", lambda uid: "vi")
-    monkeypatch.setattr(bot, "start_video_addon_step", fake_start)
     _seed_video_state(user_id, addon_return_target="invoice")
     bot.set_video_addon_state(user_id, {
         "source": "ai",
@@ -321,14 +314,13 @@ def test_invoice_change_music_returns_invoice(monkeypatch):
     query = CaptureQuery("vfinal|music_none", user_id)
     result = asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
-    assert result == "invoice"
-    assert captured["tier"] == "basic"
-    assert captured["pending_payload"]["source_file_id"] == "source-file-id"
-    assert captured["pending_payload"]["source_video_file_id"] == "source-video-file-id"
-    assert captured["pending_payload"]["video_finalization"]["music_mode"] == "none"
+    assert result is not None
+    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
+    assert bot.get_video_finalization_state(user_id)["step"] == "tier"
+    assert bot.get_video_finalization_state(user_id)["video_finalization"]["music_mode"] == "none"
 
 
-def test_invoice_back_returns_tools_then_scene_count(monkeypatch):
+def test_invoice_back_returns_scene_count(monkeypatch):
     user_id = 940410
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
@@ -346,14 +338,6 @@ def test_invoice_back_returns_tools_then_scene_count(monkeypatch):
     })
 
     query = CaptureQuery("videoaddon|back", user_id)
-    asyncio.run(bot.handle_video_addon_callback(_callback_update(query, user_id), SimpleNamespace()))
-
-    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
-    assert "videoaddon|voice_menu" in _callbacks(query.outputs[-1]["reply_markup"])
-    assert "videoaddon|music_menu" in _callbacks(query.outputs[-1]["reply_markup"])
-    assert "videoaddon|subtitle_menu" in _callbacks(query.outputs[-1]["reply_markup"])
-
-    query.data = "videoaddon|back"
     asyncio.run(bot.handle_video_addon_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     assert "Chọn số cảnh video" in query.outputs[-1]["text"]

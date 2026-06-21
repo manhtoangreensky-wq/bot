@@ -1474,7 +1474,7 @@ def test_all_video_products_output_use_same_action_menu():
         assert required <= set(_callbacks(bot.task3d_result_keyboard(product_id, "vi"))), product_id
 
 
-def test_use_to_create_video_opens_package_before_scene_count(monkeypatch):
+def test_use_to_create_video_opens_aspect_gate_before_tools_package(monkeypatch):
     user_id = 993290
     bot.clear_video_session(user_id)
     bundle = _bundle(shots=3).to_dict()
@@ -1489,7 +1489,7 @@ def test_use_to_create_video_opens_package_before_scene_count(monkeypatch):
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
     assert session["current_step"] == "result"
-    assert captured["kwargs"]["initial_step"] == "tier"
+    assert captured["kwargs"]["initial_step"] == "aspect"
     assert captured["args"][5] == "vproduct|result"
     assert "selected_scene_count" not in captured["args"][6]
     bot.clear_video_session(user_id)
@@ -1500,6 +1500,13 @@ def test_task3d_aspect_keyboard_includes_4x5():
     callbacks = _callbacks(bot.task3d_aspect_keyboard("vi"))
     assert "🖼 4:5" in labels
     assert "vproduct|aspect|4:5" in callbacks
+
+
+def test_video_finalization_aspect_screen_has_required_ratios():
+    labels = _labels(bot.video_finalization_aspect_keyboard("vi"))
+    callbacks = _callbacks(bot.video_finalization_aspect_keyboard("vi"))
+    assert labels[:4] == ["📱 9:16", "📺 16:9", "⬛ 1:1", "🖼 4:5"]
+    assert callbacks[:4] == ["vfinal|aspect|9x16", "vfinal|aspect|16x9", "vfinal|aspect|1x1", "vfinal|aspect|4x5"]
 
 
 def test_scene_count_screen_has_required_buttons_and_no_skip():
@@ -1541,6 +1548,8 @@ def test_package_selection_opens_scene_count(monkeypatch):
         "source_payload": {"video_prompt": "Prompt video ready"},
         "has_video_prompt": True,
         "session_context": {"video_prompt": "Prompt video ready"},
+        "selected_video_aspect_ratio": "9:16",
+        "aspect_source": "user_selected",
     })
 
     async def forbidden_start(*args, **kwargs):
@@ -1592,7 +1601,7 @@ def test_scene_count_then_final_quote(monkeypatch):
     bot.clear_video_session(user_id)
 
 
-def test_scene_count_opens_tools_before_final_invoice(monkeypatch):
+def test_scene_count_opens_final_invoice_after_tools(monkeypatch):
     user_id = 993295
     bot.clear_video_finalization_state(user_id)
     bot.clear_video_addon_state(user_id)
@@ -1606,18 +1615,25 @@ def test_scene_count_opens_tools_before_final_invoice(monkeypatch):
         "has_video_prompt": True,
         "session_context": {"video_prompt": "Prompt video ready"},
     })
+    captured = {}
+
+    async def fake_start(*args, **kwargs):
+        captured.update({"args": args, "kwargs": kwargs})
+        return "invoice"
+
+    monkeypatch.setattr(bot, "start_video_addon_step", fake_start)
     monkeypatch.setattr(bot, "get_public_video_tier_ui_status", lambda tier, _admin=False: {"enabled": True, "label": tier, "price_xu": bot.video_tier_cost_xu(tier)})
     query = _FakeQuery(user_id, "vfinal|scene_count|3")
 
-    asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    result = asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
-    assert "Công cụ hoàn thiện video" in query.edits[-1][0]
-    assert "Tạm tính video: <b>300 × 90% = 270 Xu/cảnh; 270 × 3 = 810 Xu</b>" in query.edits[-1][0]
-    callbacks = _callbacks(query.edits[-1][1]["reply_markup"])
-    assert {"videoaddon|voice_menu", "videoaddon|music_menu", "videoaddon|subtitle_menu", "videoaddon|none"} <= set(callbacks)
-    assert "videoaddon|export" not in "\n".join(callbacks)
-    addon_state = bot.get_video_addon_state(user_id)
-    assert addon_state["video_order"]["current_screen"] == "video_addon_menu"
+    assert result == "invoice"
+    pending_payload = captured["args"][2]
+    assert pending_payload["selected_scene_count"] == 3
+    assert pending_payload["duration_seconds"] == 18
+    assert pending_payload["video_addon_ready_for_invoice"] is True
+    assert captured["args"][3] == "basic"
+    assert captured["kwargs"]["source"] == "ai"
     bot.clear_video_finalization_state(user_id)
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
@@ -1896,7 +1912,7 @@ def test_prompt_video_detail_shows_video_prompt():
     assert bundle["video_prompts"][2][:80] in text
 
 
-def test_prompt_video_create_routes_to_package_before_scene_count(monkeypatch):
+def test_prompt_video_create_routes_to_aspect_gate_before_tools_package(monkeypatch):
     user_id = 993304
     bot.clear_video_session(user_id)
     bundle = _bundle(shots=3).to_dict()
@@ -1917,7 +1933,7 @@ def test_prompt_video_create_routes_to_package_before_scene_count(monkeypatch):
     package = captured["args"][6]
     assert package["selected_shots"] == [2]
     assert bundle["video_prompts"][1] in package["video_prompt"]
-    assert captured["kwargs"]["initial_step"] == "tier"
+    assert captured["kwargs"]["initial_step"] == "aspect"
     assert captured["args"][5] == "vproduct|prompt_video_detail"
     bot.clear_video_session(user_id)
 

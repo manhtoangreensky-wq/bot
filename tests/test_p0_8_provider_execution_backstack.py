@@ -59,6 +59,9 @@ class CaptureQuery:
     async def answer(self, *args, **kwargs):
         return None
 
+    async def edit_message_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
+        return await self.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup, **kwargs)
+
 
 def _callback_update(query, user_id):
     return SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(id=user_id))
@@ -300,7 +303,7 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
     assert "Xin chào" in query.outputs[-1]["text"]
 
 
-def test_invoice_change_package_back_returns_invoice(monkeypatch):
+def test_package_back_returns_tools_from_invoice_change(monkeypatch):
     user_id = 980804
     _reset(user_id)
     bot.set_video_finalization_state(user_id, {
@@ -310,17 +313,11 @@ def test_invoice_change_package_back_returns_invoice(monkeypatch):
         "source": "selfscene",
         "source_payload": {"source_file_id": "file-1", "object_prompt": "object", "direction_prompt": "direction"},
     })
-    calls = []
-
-    async def render_invoice(query, uid, state=None, lang="vi"):
-        calls.append((uid, state.get("source_payload")))
-        return None
-
-    monkeypatch.setattr(bot, "video_finalization_render_invoice", render_invoice)
     query = CaptureQuery("vfinal|back", user_id)
     asyncio.run(bot.handle_video_finalization_callback(_callback_update(query, user_id), SimpleNamespace()))
-    assert calls and calls[0][0] == user_id
-    assert calls[0][1]["source_file_id"] == "file-1"
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "vfinal|voice" in _callbacks(query.outputs[-1]["reply_markup"])
+    assert "vfinal|music" in _callbacks(query.outputs[-1]["reply_markup"])
 
 
 def test_invoice_origin_stack_is_explicit():

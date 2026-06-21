@@ -6888,11 +6888,11 @@ def test_trend_guided_video_prompt_callbacks_open_finalization(monkeypatch):
     assert "Đã chọn prompt video" in selected_prompt["text"]
 
     finalization = asyncio.run(press("trendg|finalization"))
-    assert "Tùy chọn hoàn thiện video" in finalization["text"]
+    assert "Chọn tỉ lệ khung hình video" in finalization["text"]
     assert "chưa xử lý video và chưa trừ Xu" in finalization["text"]
 
     real_video = asyncio.run(press("trendg|video_real"))
-    assert "Chọn gói xuất video AI" in real_video["text"]
+    assert "Chọn tỉ lệ khung hình video" in real_video["text"]
 
 
 def test_free_tools_guided_outputs_and_followups(monkeypatch):
@@ -7127,7 +7127,7 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
     asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|direction_choice|1", uid))
     asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|context|1", uid))
     selfscene_result = asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|style_choice|1", uid))
-    assert "Tùy chọn hoàn thiện video" in selfscene_result["text"]
+    assert "Công cụ hoàn thiện video" in selfscene_result["text"]
     assert bot.get_latest_developing_video_plan(uid, "selfscene")["source_file_id"] == "self-shot-video-file"
     music_result = asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|music_guard", uid))
     assert "Gợi ý nhạc/SFX" in music_result["text"]
@@ -7168,7 +7168,7 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
         "selected_music": "none",
     })
     provider_guard = asyncio.run(press(bot.handle_prompt_video_callback, "promptvideo|generate", uid))
-    assert "Tùy chọn hoàn thiện video" in provider_guard["text"]
+    assert "Chọn tỉ lệ khung hình video" in provider_guard["text"]
     assert "chưa xử lý video và chưa trừ Xu" in provider_guard["text"]
 
     bot.clear_developing_video_pending(uid)
@@ -8773,8 +8773,8 @@ def test_video_export_vfinal_addons_and_tier_gate_labels(monkeypatch):
     }
     menu_text = bot.video_finalization_menu_text(state, "vi")
     menu_buttons = _button_texts(bot.video_finalization_menu_keyboard("vi"))
-    assert "Tùy chọn hoàn thiện video" in menu_text
-    assert any("Tiếp tục chọn gói" in text for text in menu_buttons)
+    assert "Công cụ hoàn thiện video" in menu_text
+    assert any("Không thêm" in text for text in menu_buttons)
     assert "Bỏ qua & xuất video" not in menu_buttons
     assert "Hoàn thiện video" not in menu_text
 
@@ -9855,13 +9855,13 @@ def test_realistic_flow_distinct():
 
 def test_free_addon_screen_before_paid_tier():
     text = bot.video_finalization_menu_text({"source": "storypack"}, "vi")
-    for marker in ["Chọn giọng đọc", "nhạc", "phụ đề", "dịch", "lồng tiếng", "Sau đó mới chọn gói"]:
+    for marker in ["Chọn giọng/lồng tiếng", "nhạc", "phụ đề", "Bước kế tiếp là chọn gói"]:
         assert marker in text
 
 
 def test_paid_addons_are_configured_before_tier():
     menu_callbacks = [button.callback_data for row in bot.video_finalization_menu_keyboard("vi").inline_keyboard for button in row]
-    assert {"vfinal|voice", "vfinal|music", "vfinal|addon", "vfinal|tier"}.issubset(set(menu_callbacks))
+    assert {"vfinal|voice", "vfinal|music", "vfinal|addon", "vfinal|skip"}.issubset(set(menu_callbacks))
     addon_callbacks = [button.callback_data for row in bot.video_finalization_addon_keyboard("vi").inline_keyboard for button in row]
     assert "videodub|start|video_addon" in addon_callbacks
     assert "vfinal|addon_none" in addon_callbacks
