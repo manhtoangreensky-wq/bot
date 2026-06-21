@@ -261,6 +261,88 @@ def test_public_start_menu_does_not_leak_admin_commands():
     assert "📊 Quản Trị" not in button_texts
 
 
+def _plain_start_text(text: str) -> str:
+    return re.sub(r"</?(?:b|code)>", "", text)
+
+
+def _patched_vi_start_text(monkeypatch):
+    monkeypatch.setattr(bot, "get_user", lambda user_id, *args, **kwargs: (777, 0, False))
+    monkeypatch.setattr(bot, "is_admin_user", lambda user_id: False)
+    monkeypatch.setattr(bot, "get_role_badge", lambda user_id: "🌱 Newbie")
+    monkeypatch.setattr(bot, "user_language_label", lambda lang: "Tiếng Việt")
+    return bot.localized_start_menu_text(424242, "vi")
+
+
+def test_start_text_contains_toan_aas_title(monkeypatch):
+    text = _plain_start_text(_patched_vi_start_text(monkeypatch))
+    assert text.startswith("👑 TOAN AAS — AI AUTOMATION SYSTEM")
+    assert "Trợ lý AI tự động hóa công việc trên Telegram:" in text
+
+
+def test_start_text_contains_dynamic_balance_id_tier_language(monkeypatch):
+    text = _plain_start_text(_patched_vi_start_text(monkeypatch))
+    assert "🎁 Số dư: 777 Xu" in text
+    assert "👤 ID: 424242" in text
+    assert "🪪 Hạng: 🌱 Newbie" in text
+    assert "🌐 Ngôn ngữ: Tiếng Việt" in text
+
+
+def test_start_text_contains_all_product_categories(monkeypatch):
+    text = _plain_start_text(_patched_vi_start_text(monkeypatch))
+    expected_lines = [
+        "🎬 Tạo nội dung: Kịch bản, storyboard, chia cảnh, caption, prompt video.",
+        "🤖 Hỏi AI: Viết bài, lên ý tưởng, sửa nội dung, viết code, lập kế hoạch.",
+        "📄 Tài liệu: PDF, Word, ảnh sang PDF, nén/tách/gộp tài liệu.",
+        "🖼 Hình ảnh: Prompt ảnh, xử lý ảnh, tách nền, chuẩn bị hình ảnh cho video.",
+        "🎵 Nhạc / SFX: Tìm nhạc nền, hiệu ứng âm thanh và chuẩn bị âm thanh cho video.",
+        "🎤 Voice: Bóc băng audio/video, tạo giọng đọc và chuẩn bị voice cho nội dung.",
+        "🌐 Dịch thuật: Dịch văn bản, transcript, phụ đề và nội dung video.",
+        "🧠 Ghi nhớ: Lưu ghi chú, tìm lại thông tin, đặt nhắc việc.",
+        "💳 Xu dịch vụ: dùng để sử dụng các dịch vụ của toanaasbot.",
+    ]
+    for line in expected_lines:
+        assert line in text
+    assert "Trước khi nạp xu mọi người nhớ vào kiểm tra và gửi mã khuyến mãi theo hướng dẫn trước nhé!" in text
+
+
+def test_start_text_contains_legal_links(monkeypatch):
+    text = _plain_start_text(_patched_vi_start_text(monkeypatch))
+    for command in ["/legal", "/privacy", "/dieukhoan_xu", "/refund_policy"]:
+        assert command in text
+    assert "chính sách sở hữu trí tuệ của TOAN AAS" in text
+
+
+def test_start_keyboard_callbacks_unchanged():
+    rows = [
+        [(button.text, button.callback_data, button.url) for button in row]
+        for row in bot.localized_main_menu_keyboard(False, "vi").inline_keyboard
+    ]
+    assert rows == [
+        [("🆓 Công cụ miễn phí", "freehub|main", None), ("👤 Tài khoản", "menu|main_profile", None)],
+        [("🖼 Tạo ảnh AI", "menu|main_image", None), ("🎬 Tạo video AI", "menu|main_video", None)],
+        [("🎧 Studio âm thanh", "music_quick|showroom|root", None), ("🌐 Dịch / Phụ đề / Lồng tiếng Studio", "menu|translate", None)],
+        [("📝 Ghi chú / Tài liệu", "menu|main_memory", None), ("📚 Hướng dẫn", "menu|main_guide", None)],
+        [("👨‍💼 Hỗ trợ", "menu|support", None), ("💰 Nạp Xu / Bảng giá", "pricing|main", None)],
+        [("💬 Góp ý / Báo lỗi", "feedback|start", None), ("🌐 Trung tâm", None, bot.TOAN_AAS_COMMUNITY_URL)],
+    ]
+
+
+def test_no_payos_touched():
+    source = bot_source_text()
+    start_source = source_between(source, "def localized_start_menu_text", "def public_back_keyboard")
+    assert "PAYOS" not in start_source.upper()
+    assert "/naptien" not in start_source
+    assert "wallet" not in start_source.lower()
+    assert "webhook" not in start_source.lower()
+
+
+def test_no_provider_logic_touched():
+    source = bot_source_text()
+    start_source = source_between(source, "def localized_start_menu_text", "def public_back_keyboard")
+    forbidden = ["provider", "export_video", "finalize_video", "Task 1", "Task 2", "Task 3D"]
+    assert not any(item.lower() in start_source.lower() for item in forbidden)
+
+
 def test_admin_menu_contains_grouped_operator_and_system():
     text = bot.build_start_message_text(bot.ADMIN_ID)
     assert "Runtime" in text
