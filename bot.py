@@ -28958,6 +28958,7 @@ MANUAL_APPROVAL_STATE: dict = {}
 USER_PENDING: dict = {}
 GENERATION_PENDING_JOBS: dict[tuple, dict] = {}
 SHOPAIKEY_PENDING_CONFIRMATIONS: dict[str, dict] = {}
+VIDEO_LAST_EXPORT_ERROR: dict[str, object] = {}
 LAST_TREND_VIDEO_WORKFLOWS: dict[str, dict] = {}
 LAST_WORKFLOW_IMAGES: dict[str, dict] = {}
 LAST_DEVELOPING_VIDEO_PLANS: dict[str, dict] = {}
@@ -34725,6 +34726,91 @@ def normalize_video_export_payload_for_classifier(state: dict, classification: d
     clean["pending_payload"] = pending
     return clean
 
+def build_legacy_shopaikey_video_order_from_task3d_session(
+    session: dict | None,
+    user_id=None,
+    addon_state: dict | None = None,
+) -> dict:
+    """Fill only the legacy fields required by the existing ShopAIKey video core."""
+    task3d = dict(session or {})
+    addon = dict(addon_state or {})
+    draft = dict(task3d.get("draft") or {})
+    pending = dict(addon.get("pending_payload") or {})
+    bundle = dict(draft.get("prompt_bundle") or pending.get("prompt_bundle") or {})
+    first_shot = dict((bundle.get("shot_table") or [{}])[0] or {})
+    video_prompts = list(bundle.get("video_prompts") or [])
+    prompt = str(
+        pending.get("prompt") or pending.get("video_prompt")
+        or (video_prompts[0] if video_prompts else first_shot.get("video_prompt")) or ""
+    ).strip()
+    tier = normalize_video_tier(addon.get("video_tier") or pending.get("video_tier") or "low")
+    base_price = int(video_tier_cost_xu(tier) or (video_tier_payload(tier).get("cost") or 0) or 0)
+    preview = dict(addon.get("current_video_price_preview") or pending.get("video_price_preview") or {})
+    order = dict(addon.get("video_order") or pending.get("video_order") or {})
+    total_xu = max(base_price, _video_addon_int(preview.get("total_xu")), _video_addon_int(order.get("total_xu")), _video_addon_int(pending.get("base_cost")))
+    duration_seconds = max(1, _video_addon_int(pending.get("final_duration_seconds") or pending.get("duration_seconds")) or sum(_video_addon_int(item.get("duration_seconds")) for item in (bundle.get("shot_table") or []) if isinstance(item, dict)) or int(VIDEO_AI_DEFAULT_SEGMENT_SECONDS or 8))
+    product_id = str(pending.get("product_id") or task3d.get("product_id") or "video_ai_real")
+    package_price = total_xu if total_xu in {200, 300, 400, 500, 600, 800, 1000, 1200, 1500} else base_price
+    package_id = str(pending.get("task3d_package_id") or pending.get("package_id") or f"package_{package_price}")
+    media_ref = str(pending.get("source_media_ref") or task3d.get("source_media_ref") or "")
+    legacy = dict(pending)
+    legacy.update({
+        "job_type": "video",
+        "user_id": str(user_id or pending.get("user_id") or ""),
+        "product_id": product_id,
+        "prompt": prompt,
+        "original_prompt": str(pending.get("original_prompt") or prompt),
+        "video_prompt": str(pending.get("video_prompt") or prompt),
+        "video_tier": tier,
+        "selected_tier": tier,
+        "task3d_package_id": package_id,
+        "base_cost": int(total_xu),
+        "duration_seconds": int(duration_seconds),
+        "aspect_ratio": str(pending.get("aspect_ratio") or task3d.get("aspect_ratio") or "9:16"),
+        "style": str(pending.get("style") or task3d.get("style") or ""),
+        "motion": str(pending.get("motion") or draft.get("selected_motion") or ""),
+        "source_media_ref": media_ref,
+        "prompt_bundle": bundle,
+        "prompt_bundle_id": str(bundle.get("bundle_id") or pending.get("prompt_bundle_id") or ""),
+        "package_item_type": str(pending.get("package_item_type") or package_item_type_for_video_tier(tier)),
+        "preview_required": False,
+        "task3d_legacy_order": True,
+    })
+    return legacy
+
+def record_video_last_export_error(exc: Exception, user_id, callback_data: str, state: dict, legacy_order: dict | None = None) -> dict:
+    legacy_order = dict(legacy_order or {})
+    trace = sanitize_log_text(traceback.format_exc(limit=6))
+    trace = re.sub(r"(?i)(api[_-]?key|authorization|bearer|secret|token)\s*[:=]?\s*[^\s,;]+", r"\1=***", trace)[:1200]
+    diagnostic = {
+        "recorded_at": now_text(),
+        "callback_data": "videoaddon|export|***",
+        "function_path": "handle_video_export_confirm -> shopai|confirm -> handle_shopaikey_public_callback",
+        "package_id": str(legacy_order.get("task3d_package_id") or ""),
+        "product_id": str(legacy_order.get("product_id") or ""),
+        "has_legacy_order": bool(legacy_order),
+        "has_token": bool((state or {}).get("pending_confirm_token")),
+        "has_prompt": bool(str(legacy_order.get("prompt") or "").strip()),
+        "has_media": bool(str(legacy_order.get("source_media_ref") or "").strip()),
+        "exception_class": exc.__class__.__name__,
+        "traceback": trace,
+    }
+    VIDEO_LAST_EXPORT_ERROR.clear()
+    VIDEO_LAST_EXPORT_ERROR.update(diagnostic)
+    return diagnostic
+
+async def cmd_video_last_export_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    item = dict(VIDEO_LAST_EXPORT_ERROR)
+    if not item:
+        return await update.message.reply_text("✅ Chưa ghi nhận lỗi nút Xuất video trong runtime hiện tại.")
+    lines = ["🎬 <b>VIDEO LAST EXPORT ERROR</b>", ""]
+    for key in ("recorded_at", "callback_data", "function_path", "package_id", "product_id", "has_legacy_order", "has_token", "has_prompt", "has_media", "exception_class"):
+        lines.append(f"• {html.escape(key)}: <code>{html.escape(str(item.get(key) or '-'))}</code>")
+    lines.extend(["", "<b>Traceback đã lọc:</b>", f"<pre>{html.escape(str(item.get('traceback') or '-'))}</pre>"])
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
 async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE, session_id: str = ""):
     """Bridge Task 3D final export to the old stable ShopAIKey video core."""
     query = update.callback_query
@@ -34776,13 +34862,28 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         )
 
     state = normalize_video_export_payload_for_classifier(state, classification)
-    pending_payload = dict(state.get("pending_payload") or {})
-    if token:
-        restore_shopaikey_pending_confirmation(token, uid, pending_payload)
-        state["pending_confirm_token"] = token
+    legacy_order = build_legacy_shopaikey_video_order_from_task3d_session(get_video_session(uid), uid, state)
+    token = token or shopaikey_confirmation_token()
+    restore_shopaikey_pending_confirmation(token, uid, legacy_order)
+    state["pending_confirm_token"] = token
+    state["pending_payload"] = legacy_order
     set_video_addon_state(uid, state)
-    query.data = f"shopai|confirm|{token}"
-    return await handle_shopaikey_public_callback(update, context)
+    canonical_callback = f"shopai|confirm|{token}"
+    try:
+        return await handle_shopaikey_public_callback(update, context, canonical_callback)
+    except Exception as exc:
+        restore_shopaikey_pending_confirmation(token, uid, legacy_order)
+        state["pending_confirm_token"] = token
+        state["pending_payload"] = legacy_order
+        set_video_addon_state(uid, state)
+        record_video_last_export_error(exc, uid, str(query.data or ""), state, legacy_order)
+        logger.exception("Task3D video export bridge failed | package=%s | product=%s", legacy_order.get("task3d_package_id"), legacy_order.get("product_id"))
+        return await safe_edit_or_send(
+            query,
+            "TOAN AAS chưa tạo được video ở bước này. Bot chưa trừ Xu. Nội dung và tùy chọn của bạn vẫn được giữ nguyên.",
+            parse_mode=None,
+            reply_markup=video_export_maintenance_keyboard(lang),
+        )
 
 def image_tool_pricing_matrix() -> dict:
     return {
@@ -64960,10 +65061,10 @@ async def cmd_shopaikey_video_public(update: Update, context: ContextTypes.DEFAU
 async def cmd_shopaikey_video_from_image_public(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_shopaikey_video_public(update, context, from_image=True)
 
-async def handle_shopaikey_public_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_shopaikey_public_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data_override: str = ""):
     query = update.callback_query
     await query.answer()
-    parts = (query.data or "").split("|")
+    parts = (callback_data_override or query.data or "").split("|")
     uid = query.from_user.id
     lang = user_ui_lang(uid)
     if len(parts) != 3:
@@ -120873,6 +120974,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_recent_jobs", cmd_video_recent_jobs))
     tg_app.add_handler(CommandHandler("video_failed_jobs", cmd_video_failed_jobs))
     tg_app.add_handler(CommandHandler("video_error_report", cmd_video_error_report))
+    tg_app.add_handler(CommandHandler("video_last_export_error", cmd_video_last_export_error))
     tg_app.add_handler(CommandHandler("test_all_safe", cmd_test_all_safe))
     tg_app.add_handler(CommandHandler("test_all_video", cmd_test_all_video))
     tg_app.add_handler(CommandHandler("test_all_provider", cmd_test_all_provider))

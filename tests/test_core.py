@@ -10159,7 +10159,9 @@ def test_200_addon_callback_guard_runs_only_on_export():
     assert 'tier == "low"' in dispatcher
     assert "classify_video_addons_for_package(state)" in dispatcher
     assert "video_experience_tier_lock_text" in dispatcher
-    assert dispatcher.index("classify_video_addons_for_package(state)") < dispatcher.index('query.data = f"shopai|confirm|{token}"')
+    assert dispatcher.index("classify_video_addons_for_package(state)") < dispatcher.index('canonical_callback = f"shopai|confirm|{token}"')
+    assert "handle_shopaikey_public_callback(update, context, canonical_callback)" in dispatcher
+    assert 'query.data = f"shopai|confirm|{token}"' not in dispatcher
     assert 'tier == "low" and str(state.get("source")' not in source
 
 

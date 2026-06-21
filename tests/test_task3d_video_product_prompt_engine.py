@@ -59,6 +59,28 @@ class _FakeQuery:
         return None
 
 
+class _ImmutableDataQuery:
+    """Matches Telegram's read-only callback data behavior more closely."""
+
+    def __init__(self, user_id: int, data: str):
+        self.from_user = SimpleNamespace(id=user_id, first_name="Task3D")
+        self._data = data
+        self.message = _FakeMessage()
+        self.answered = False
+        self.edits = []
+
+    @property
+    def data(self):
+        return self._data
+
+    async def answer(self, *args, **kwargs):
+        self.answered = True
+
+    async def edit_message_text(self, text, **kwargs):
+        self.edits.append((text, kwargs))
+        return None
+
+
 def _press_vproduct(user_id: int, product_id: str, data: str):
     bot.clear_video_session(user_id)
     bot.task3d_session_step(user_id, "intro", product_id=product_id, return_to="menu|main_video")
@@ -736,8 +758,8 @@ def test_200_free_default_export_path_allowed(monkeypatch):
     bot.set_video_addon_state(user_id, {"source": "ai", "video_tier": "low", "pending_confirm_token": token, "pending_payload": pending})
     delegated = {}
 
-    async def fake_confirm(update, context):
-        delegated["callback"] = update.callback_query.data
+    async def fake_confirm(update, context, callback_data_override=""):
+        delegated["callback"] = callback_data_override or update.callback_query.data
         await update.callback_query.answer()
         return None
 
@@ -863,8 +885,8 @@ def test_200_export_with_free_default_voice_reaches_old_video_core(monkeypatch):
     })
     delegated = {}
 
-    async def fake_confirm(update, context):
-        delegated["callback"] = update.callback_query.data
+    async def fake_confirm(update, context, callback_data_override=""):
+        delegated["callback"] = callback_data_override or update.callback_query.data
         delegated["pending"] = dict(bot.SHOPAIKEY_PENDING_CONFIRMATIONS[token])
         await update.callback_query.answer()
         return None
@@ -930,8 +952,8 @@ def test_300_export_stays_in_video_flow_and_uses_same_dispatcher(monkeypatch):
     })
     delegated = {}
 
-    async def fake_confirm(update, context):
-        delegated["callback"] = update.callback_query.data
+    async def fake_confirm(update, context, callback_data_override=""):
+        delegated["callback"] = callback_data_override or update.callback_query.data
         await update.callback_query.answer()
         return None
 
@@ -943,6 +965,142 @@ def test_300_export_stays_in_video_flow_and_uses_same_dispatcher(monkeypatch):
     assert not query.edits
     bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
     bot.clear_video_addon_state(user_id)
+
+
+def test_task3d_session_builds_legacy_shopaikey_order():
+    session = {
+        "product_id": "video_trend",
+        "topic": "mèo cam đi cà phê",
+        "aspect_ratio": "9:16",
+        "style": "cinematic",
+        "source_media_ref": "telegram-file-ref",
+        "draft": {
+            "selected_motion": "camera dolly in",
+            "prompt_bundle": {
+                "bundle_id": "bundle-legacy-1",
+                "script": "Kịch bản Task 3D",
+                "video_prompts": ["Mèo cam bước vào quán cà phê, camera dolly in"],
+                "shot_table": [{"video_prompt": "Mèo cam bước vào quán cà phê", "duration_seconds": 8}],
+            },
+        },
+    }
+    addon = {
+        "source": "ai",
+        "video_tier": "basic",
+        "pending_payload": {"job_type": "video", "video_tier": "basic", "base_cost": 300},
+        "current_video_price_preview": {"total_xu": 300, "addon_xu": 0},
+    }
+    legacy = bot.build_legacy_shopaikey_video_order_from_task3d_session(session, 99100, addon)
+    assert legacy["job_type"] == "video"
+    assert legacy["product_id"] == "video_trend"
+    assert legacy["prompt"] == "Mèo cam bước vào quán cà phê, camera dolly in"
+    assert legacy["video_tier"] == "basic"
+    assert legacy["task3d_package_id"] == "package_300"
+    assert legacy["base_cost"] == 300
+    assert legacy["duration_seconds"] == 8
+    assert legacy["source_media_ref"] == "telegram-file-ref"
+    assert legacy["aspect_ratio"] == "9:16"
+    assert legacy["motion"] == "camera dolly in"
+    assert legacy["preview_required"] is False
+    assert legacy["task3d_legacy_order"] is True
+
+
+def test_export_button_uses_old_shopaikey_core_without_mutating_telegram_query(monkeypatch):
+    user_id = 993227
+    bot.clear_video_session(user_id)
+    bot.task3d_session_step(user_id, "result", product_id="video_ai_real", topic="Prompt Task 3D")
+    pending = {"job_type": "video", "video_tier": "low", "prompt": "Prompt xuất video", "base_cost": 200}
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai", "video_tier": "low", "pending_confirm_token": token, "pending_payload": pending,
+        "current_video_price_preview": {"total_xu": 200, "addon_xu": 0},
+    })
+    delegated = {}
+
+    async def fake_old_core(update, context, callback_data_override=""):
+        delegated["callback"] = callback_data_override or update.callback_query.data
+        delegated["legacy"] = dict(bot.SHOPAIKEY_PENDING_CONFIRMATIONS[token])
+        await update.callback_query.answer()
+
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (True, "ready"))
+    monkeypatch.setattr(bot, "handle_shopaikey_public_callback", fake_old_core)
+    original_callback = f"videoaddon|export|{token}"
+    query = _ImmutableDataQuery(user_id, original_callback)
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert query.data == original_callback
+    assert delegated["callback"] == f"shopai|confirm|{token}"
+    assert delegated["legacy"]["task3d_legacy_order"] is True
+    assert delegated["legacy"]["prompt"] == "Prompt xuất video"
+    assert query.answered is True
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+    bot.clear_video_session(user_id)
+
+
+@pytest.mark.parametrize("tier,cost", [("basic", 300), ("common", 400), ("future_1000", 1000)])
+def test_paid_packages_call_old_shopaikey_core_for_now(monkeypatch, tier, cost):
+    user_id = 994000 + cost
+    pending = {"job_type": "video", "video_tier": tier, "prompt": f"Prompt gói {cost}", "base_cost": cost}
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai", "video_tier": tier, "pending_confirm_token": token, "pending_payload": pending,
+        "current_video_price_preview": {"total_xu": cost, "addon_xu": 0},
+    })
+    delegated = {}
+
+    async def fake_old_core(update, context, callback_data_override=""):
+        delegated["callback"] = callback_data_override or update.callback_query.data
+        delegated["job_type"] = bot.SHOPAIKEY_PENDING_CONFIRMATIONS[token]["job_type"]
+        await update.callback_query.answer()
+
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (True, "ready"))
+    monkeypatch.setattr(bot, "handle_shopaikey_public_callback", fake_old_core)
+    query = _ImmutableDataQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert delegated == {"callback": f"shopai|confirm|{token}", "job_type": "video"}
+    assert not query.edits
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
+def test_export_exception_has_clean_public_message_and_admin_diagnostic(monkeypatch):
+    user_id = 993228
+    pending = {"job_type": "video", "video_tier": "basic", "prompt": "Prompt giữ nguyên", "base_cost": 300}
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai", "video_tier": "basic", "pending_confirm_token": token, "pending_payload": pending,
+        "current_video_price_preview": {"total_xu": 300, "addon_xu": 0},
+    })
+
+    async def broken_old_core(update, context, callback_data_override=""):
+        raise RuntimeError("provider token=super-secret-value")
+
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (True, "ready"))
+    monkeypatch.setattr(bot, "handle_shopaikey_public_callback", broken_old_core)
+    query = _ImmutableDataQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    text, kwargs = query.edits[-1]
+    assert text == "TOAN AAS chưa tạo được video ở bước này. Bot chưa trừ Xu. Nội dung và tùy chọn của bạn vẫn được giữ nguyên."
+    assert "Có lỗi khi xử lý lệnh" not in text
+    assert _callbacks(kwargs["reply_markup"]) == ["videoaddon|export_back", "videoaddon|main"]
+    assert bot.VIDEO_LAST_EXPORT_ERROR["function_path"].endswith("handle_shopaikey_public_callback")
+    assert bot.VIDEO_LAST_EXPORT_ERROR["exception_class"] == "RuntimeError"
+    assert "super-secret-value" not in bot.VIDEO_LAST_EXPORT_ERROR["traceback"]
+    assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
+def test_video_last_export_error_is_admin_only(monkeypatch):
+    update = SimpleNamespace(effective_user=SimpleNamespace(id=123), message=_FakeMessage())
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
+    asyncio.run(bot.cmd_video_last_export_error(update, SimpleNamespace()))
+    assert "chỉ dành cho admin" in update.message.replies[-1][0]
+
+
+def test_video_last_export_error_command_registered():
+    source = Path(bot.__file__).read_text(encoding="utf-8")
+    assert 'CommandHandler("video_last_export_error", cmd_video_last_export_error)' in source
 
 
 def test_200_paid_addon_block_back_and_upgrade_routes():
