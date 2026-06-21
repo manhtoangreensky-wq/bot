@@ -2684,6 +2684,15 @@ def init_db():
         result_url TEXT,
         result_sent INTEGER DEFAULT 0,
         output_file_id TEXT,
+        output_send_claimed_at TEXT DEFAULT '',
+        output_sent_at TEXT DEFAULT '',
+        output_sent_message_id TEXT DEFAULT '',
+        output_sent_result_url TEXT DEFAULT '',
+        output_sent_source TEXT DEFAULT '',
+        completed_notified_at TEXT DEFAULT '',
+        telegram_video_file_id TEXT DEFAULT '',
+        duplicate_prevented_count INTEGER DEFAULT 0,
+        last_telegram_send_error TEXT DEFAULT '',
         xu_cost_planned INTEGER DEFAULT 0,
         xu_deducted INTEGER DEFAULT 0,
         refund_status TEXT DEFAULT '',
@@ -2718,6 +2727,15 @@ def init_db():
         ("package_item_type", "package_item_type TEXT DEFAULT ''"),
         ("package_units_used", "package_units_used INTEGER DEFAULT 0"),
         ("package_refund_status", "package_refund_status TEXT DEFAULT ''"),
+        ("output_send_claimed_at", "output_send_claimed_at TEXT DEFAULT ''"),
+        ("output_sent_at", "output_sent_at TEXT DEFAULT ''"),
+        ("output_sent_message_id", "output_sent_message_id TEXT DEFAULT ''"),
+        ("output_sent_result_url", "output_sent_result_url TEXT DEFAULT ''"),
+        ("output_sent_source", "output_sent_source TEXT DEFAULT ''"),
+        ("completed_notified_at", "completed_notified_at TEXT DEFAULT ''"),
+        ("telegram_video_file_id", "telegram_video_file_id TEXT DEFAULT ''"),
+        ("duplicate_prevented_count", "duplicate_prevented_count INTEGER DEFAULT 0"),
+        ("last_telegram_send_error", "last_telegram_send_error TEXT DEFAULT ''"),
     ]:
         _add_column_if_missing(c, "shopaikey_jobs", column_name, column_sql, shopaikey_job_columns)
     c.execute("CREATE INDEX IF NOT EXISTS idx_shopaikey_jobs_user_status ON shopaikey_jobs(user_id, status)")
@@ -34794,6 +34812,10 @@ def record_video_last_export_error(exc: Exception, user_id, callback_data: str, 
         "has_prompt": bool(str(legacy_order.get("prompt") or "").strip()),
         "has_media": bool(str(legacy_order.get("source_media_ref") or "").strip()),
         "exception_class": exc.__class__.__name__,
+        "error_after_output_sent": False,
+        "user_notified": True,
+        "task_id": "",
+        "job_id": 0,
         "traceback": trace,
     }
     VIDEO_LAST_EXPORT_ERROR.clear()
@@ -34807,10 +34829,120 @@ async def cmd_video_last_export_error(update: Update, context: ContextTypes.DEFA
     if not item:
         return await update.message.reply_text("✅ Chưa ghi nhận lỗi nút Xuất video trong runtime hiện tại.")
     lines = ["🎬 <b>VIDEO LAST EXPORT ERROR</b>", ""]
-    for key in ("recorded_at", "callback_data", "function_path", "package_id", "product_id", "has_legacy_order", "has_token", "has_prompt", "has_media", "exception_class"):
+    for key in ("recorded_at", "callback_data", "function_path", "package_id", "product_id", "has_legacy_order", "has_token", "has_prompt", "has_media", "exception_class", "error_after_output_sent", "user_notified", "task_id", "job_id"):
         lines.append(f"• {html.escape(key)}: <code>{html.escape(str(item.get(key) or '-'))}</code>")
     lines.extend(["", "<b>Traceback đã lọc:</b>", f"<pre>{html.escape(str(item.get('traceback') or '-'))}</pre>"])
     return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+def completed_video_job_for_callback_error(update: object) -> dict | None:
+    if not isinstance(update, Update) or not update.callback_query:
+        return None
+    callback_data = str(update.callback_query.data or "").strip()
+    if not callback_data.startswith("shopai_video_job|"):
+        return None
+    parts = callback_data.split("|")
+    if len(parts) >= 3 and parts[1] in {"status", "resend"}:
+        task_id = str(parts[2] or "").strip()
+    else:
+        task_id = str(parts[1] if len(parts) >= 2 else "").strip()
+    job = shopaikey_job_by_task_id(task_id) if task_id else None
+    if not job or not bool(int(job.get("result_sent") or 0)):
+        return None
+    if update.effective_user and str(job.get("user_id") or "") != str(update.effective_user.id):
+        return None
+    return job
+
+def record_video_post_output_error(exc: Exception | None, job: dict, callback_data: str = "") -> dict:
+    trace = sanitize_log_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)) if exc else "post_output_error")[:1200]
+    diagnostic = {
+        "recorded_at": now_text(),
+        "callback_data": str(callback_data or "")[:120],
+        "function_path": "completed video callback after output_sent",
+        "package_id": "",
+        "product_id": "",
+        "has_legacy_order": False,
+        "has_token": False,
+        "has_prompt": bool(str(job.get("prompt_preview") or "").strip()),
+        "has_media": bool(str(job.get("result_url") or "").strip()),
+        "exception_class": exc.__class__.__name__ if exc else "UnknownError",
+        "error_after_output_sent": True,
+        "user_notified": False,
+        "task_id": str(job.get("task_id") or "")[:180],
+        "job_id": int(job.get("id") or 0),
+        "traceback": trace,
+    }
+    VIDEO_LAST_EXPORT_ERROR.clear()
+    VIDEO_LAST_EXPORT_ERROR.update(diagnostic)
+    return diagnostic
+
+def video_job_dedupe_status_payload() -> dict:
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """SELECT
+                   SUM(CASE WHEN job_type='video' AND UPPER(status)='SUCCESS' THEN 1 ELSE 0 END) AS completed_jobs,
+                   SUM(CASE WHEN job_type='video' AND COALESCE(result_sent,0)=1 THEN 1 ELSE 0 END) AS output_sent_jobs,
+                   SUM(CASE WHEN job_type='video' THEN COALESCE(duplicate_prevented_count,0) ELSE 0 END) AS duplicate_prevented
+               FROM shopaikey_jobs"""
+        ).fetchone()
+        aggregate = dict(row) if row else {}
+        return {
+            "completed_jobs": int(aggregate.get("completed_jobs") or 0),
+            "output_sent_jobs": int(aggregate.get("output_sent_jobs") or 0),
+            "duplicate_prevented": int(aggregate.get("duplicate_prevented") or 0),
+            "last_duplicate_task_id": get_system_setting("video_job_last_duplicate_task_id", ""),
+            "last_output_sent_source": get_system_setting("video_job_last_output_sent_source", ""),
+            "last_telegram_send_error": get_system_setting("video_job_last_telegram_send_error", ""),
+        }
+    finally:
+        conn.close()
+
+async def cmd_video_job_dedupe_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    item = video_job_dedupe_status_payload()
+    return await update.message.reply_text(
+        "🎞 <b>VIDEO JOB DEDUPE STATUS</b>\n\n"
+        f"• Completed jobs: <code>{item['completed_jobs']}</code>\n"
+        f"• output_sent=true: <code>{item['output_sent_jobs']}</code>\n"
+        f"• Duplicate prevented: <code>{item['duplicate_prevented']}</code>\n"
+        f"• Last duplicate task: <code>{html.escape(str(item['last_duplicate_task_id'] or '-'))}</code>\n"
+        f"• Last sent source: <code>{html.escape(str(item['last_output_sent_source'] or '-'))}</code>\n"
+        f"• Last Telegram error: <code>{html.escape(str(item['last_telegram_send_error'] or '-'))}</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_video_last_result_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """SELECT id, task_id, status, result_sent, output_sent_at, output_sent_source,
+                      completed_notified_at, telegram_video_file_id, duplicate_prevented_count,
+                      last_telegram_send_error
+               FROM shopaikey_jobs WHERE job_type='video'
+               ORDER BY COALESCE(output_sent_at, finished_at, updated_at, created_at) DESC, id DESC LIMIT 1"""
+        ).fetchone()
+        item = dict(row) if row else {}
+    finally:
+        conn.close()
+    if not item:
+        return await update.message.reply_text("ℹ️ Chưa có video result trong cơ sở dữ liệu.")
+    return await update.message.reply_text(
+        "🎞 <b>VIDEO LAST RESULT STATUS</b>\n\n"
+        f"• Job ID: <code>{int(item.get('id') or 0)}</code>\n"
+        f"• Task ID: <code>{html.escape(str(item.get('task_id') or '-'))}</code>\n"
+        f"• Status: <code>{html.escape(str(item.get('status') or '-'))}</code>\n"
+        f"• output_sent: <code>{'yes' if int(item.get('result_sent') or 0) else 'no'}</code>\n"
+        f"• sent_at: <code>{html.escape(str(item.get('output_sent_at') or '-'))}</code>\n"
+        f"• source: <code>{html.escape(str(item.get('output_sent_source') or '-'))}</code>\n"
+        f"• duplicate prevented: <code>{int(item.get('duplicate_prevented_count') or 0)}</code>\n"
+        f"• Telegram send error: <code>{html.escape(str(item.get('last_telegram_send_error') or '-'))}</code>",
+        parse_mode="HTML",
+    )
 
 async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE, session_id: str = ""):
     """Bridge Task 3D final export to the old stable ShopAIKey video core."""
@@ -34847,6 +34979,18 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
             video_experience_tier_lock_text(lang, list(dict.fromkeys(reasons)) or ["paid_addon"]),
             parse_mode="HTML",
             reply_markup=video_experience_tier_lock_keyboard(lang),
+        )
+
+    voice_mux_guard = video_voice_mux_export_guard(state)
+    if not voice_mux_guard.get("ok"):
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Ghép giọng vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu."
+            if normalize_user_language(lang) == "vi" else
+            "Voice mux is under maintenance/upgrading. Please try again later. TOAN AAS has not processed the request or charged Xu.",
+            parse_mode=None,
+            reply_markup=video_export_maintenance_keyboard(lang),
         )
 
     # Public readiness is checked here so a missing/closed provider gives a clean
@@ -41480,6 +41624,9 @@ def create_shopaikey_job(user_id, chat_id, job_type: str, model: str = "", promp
 def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
     allowed = {
         "model", "task_id", "status", "result_url", "result_sent", "output_file_id",
+        "output_send_claimed_at", "output_sent_at", "output_sent_message_id",
+        "output_sent_result_url", "output_sent_source", "completed_notified_at",
+        "telegram_video_file_id", "duplicate_prevented_count", "last_telegram_send_error",
         "error_class", "provider_error_code", "provider_message", "fail_reason",
         "attempts", "poll_count", "finished_at", "xu_deducted", "refund_status", "refund_amount", "refund_reason",
         "billing_status", "confirm_required", "confirmed_at", "source_job_id",
@@ -41498,8 +41645,12 @@ def update_shopaikey_job(job_id: int = 0, task_id: str = "", **fields) -> None:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:260]
         elif key == "result_url":
             updates[key] = str(value or "").strip()[:1000]
-        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted", "refund_amount", "confirm_required", "retry_warranty_count", "retry_warranty_used", "retry_warranty_parent_job_id", "package_id", "package_item_id", "package_units_used"}:
+        elif key in {"result_sent", "attempts", "poll_count", "xu_deducted", "refund_amount", "confirm_required", "retry_warranty_count", "retry_warranty_used", "retry_warranty_parent_job_id", "package_id", "package_item_id", "package_units_used", "duplicate_prevented_count"}:
             updates[key] = int(value or 0)
+        elif key in {"last_telegram_send_error"}:
+            updates[key] = shopaikey_sanitize_error(str(value or ""))[:260]
+        elif key in {"output_sent_result_url"}:
+            updates[key] = str(value or "").strip()[:1000]
         elif key in {"refund_status", "refund_reason", "billing_status", "package_refund_status"}:
             updates[key] = shopaikey_sanitize_error(str(value or ""))[:160]
         elif key == "package_item_type":
@@ -42116,9 +42267,9 @@ async def send_shopaikey_video_result(bot_client, chat_id, task_id: str, result_
             await bot_client.send_message(
                 chat_id=chat_id,
                 text=(
-                    "🎞 <b>ShopAIKey Video Result</b>\n\n"
+                    "🎞 <b>Video đã tạo xong</b>\n\n"
                     f"• <a href=\"{html.escape(result_url, quote=True)}\">Mở video kết quả</a>\n"
-                    "Telegram không gửi trực tiếp được video từ URL, bot gửi link thay thế."
+                    "Telegram không gửi trực tiếp được file, bot gửi link kết quả."
                 ),
                 parse_mode="HTML",
                 disable_web_page_preview=False,
@@ -42126,6 +42277,169 @@ async def send_shopaikey_video_result(bot_client, chat_id, task_id: str, result_
             return True, ""
         except Exception:
             return False, ""
+
+def _video_output_claim_is_stale(claimed_at: str, max_age_seconds: int = 600) -> bool:
+    value = str(claimed_at or "").strip()
+    if not value:
+        return True
+    try:
+        claimed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        return (datetime.now() - claimed).total_seconds() > max(60, int(max_age_seconds or 600))
+    except Exception:
+        return True
+
+def _safe_set_video_system_setting(key: str, value, note: str = "") -> None:
+    try:
+        set_system_setting(key, value, note)
+    except Exception:
+        logger.warning("video result telemetry setting failed | key=%s", sanitize_log_text(str(key))[:80])
+
+def claim_shopaikey_video_output(
+    task_id: str = "",
+    job_id: int = 0,
+    result_url: str = "",
+    source: str = "",
+    explicit_resend: bool = False,
+) -> dict:
+    """Atomically reserve the one public result send for a provider video task."""
+    safe_task_id = str(task_id or "").strip()[:180]
+    safe_source = str(source or "video_result")[:80]
+    safe_url = str(result_url or "").strip()[:1000]
+    if not safe_task_id and not int(job_id or 0):
+        return {"claimed": False, "reason": "missing_job", "already_sent": False}
+    conn = db_connect()
+    conn.row_factory = sqlite3.Row
+    duplicate = False
+    row_dict: dict = {}
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if int(job_id or 0):
+            row = conn.execute("SELECT * FROM shopaikey_jobs WHERE id=? LIMIT 1", (int(job_id),)).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM shopaikey_jobs WHERE task_id=? ORDER BY id DESC LIMIT 1", (safe_task_id,)).fetchone()
+        if not row:
+            conn.rollback()
+            return {"claimed": False, "reason": "job_not_found", "already_sent": False}
+        row_dict = dict(row)
+        resolved_job_id = int(row_dict.get("id") or 0)
+        already_sent = bool(int(row_dict.get("result_sent") or 0) or str(row_dict.get("output_sent_at") or "").strip())
+        same_output_sent = False
+        if safe_url and not explicit_resend:
+            same_output = conn.execute(
+                """SELECT id FROM shopaikey_jobs
+                   WHERE user_id=? AND job_type='video' AND COALESCE(result_sent,0)=1
+                     AND (output_sent_result_url=? OR (result_url=? AND output_sent_at<>''))
+                   LIMIT 1""",
+                (str(row_dict.get("user_id") or ""), safe_url, safe_url),
+            ).fetchone()
+            same_output_sent = bool(same_output)
+        active_claim = str(row_dict.get("output_send_claimed_at") or "").strip()
+        if not explicit_resend and (already_sent or same_output_sent or (active_claim and not _video_output_claim_is_stale(active_claim))):
+            duplicate = True
+            conn.execute(
+                "UPDATE shopaikey_jobs SET duplicate_prevented_count=COALESCE(duplicate_prevented_count,0)+1, updated_at=? WHERE id=?",
+                (now_text(), resolved_job_id),
+            )
+            conn.commit()
+            return {
+                "claimed": False,
+                "reason": "already_sent" if (already_sent or same_output_sent) else "send_in_progress",
+                "already_sent": bool(already_sent or same_output_sent),
+                "job_id": resolved_job_id,
+                "task_id": str(row_dict.get("task_id") or safe_task_id),
+                "duplicate_prevented": True,
+            }
+        claimed_at = now_text()
+        conn.execute(
+            """UPDATE shopaikey_jobs
+               SET output_send_claimed_at=?, output_sent_source=?, output_sent_result_url=?,
+                   last_telegram_send_error='', updated_at=?
+               WHERE id=?""",
+            (claimed_at, safe_source, safe_url or str(row_dict.get("result_url") or "")[:1000], claimed_at, resolved_job_id),
+        )
+        conn.commit()
+        return {
+            "claimed": True,
+            "reason": "explicit_resend" if explicit_resend else "first_send",
+            "already_sent": already_sent,
+            "job_id": resolved_job_id,
+            "task_id": str(row_dict.get("task_id") or safe_task_id),
+            "explicit_resend": bool(explicit_resend),
+        }
+    finally:
+        conn.close()
+        if duplicate:
+            _safe_set_video_system_setting("video_job_last_duplicate_task_id", str(row_dict.get("task_id") or safe_task_id), "duplicate public video result prevented")
+
+def complete_shopaikey_video_output_claim(
+    job_id: int,
+    task_id: str,
+    result_url: str,
+    source: str,
+    telegram_video_file_id: str = "",
+    explicit_resend: bool = False,
+) -> None:
+    sent_at = now_text()
+    fields = {
+        "output_send_claimed_at": "",
+        "result_sent": 1,
+        "output_sent_at": sent_at,
+        "completed_notified_at": sent_at,
+        "output_sent_result_url": str(result_url or "")[:1000],
+        "output_sent_source": str(source or "video_result")[:80],
+        "telegram_video_file_id": str(telegram_video_file_id or "")[:180],
+        "output_file_id": str(telegram_video_file_id or "")[:180],
+        "last_telegram_send_error": "",
+    }
+    update_shopaikey_job(job_id=job_id, task_id=task_id, **fields)
+    _safe_set_video_system_setting("video_job_last_output_sent_source", str(source or "video_result")[:80], "public video result sent")
+    _safe_set_video_system_setting("video_job_last_output_task_id", str(task_id or "")[:180], "public video result sent")
+    if not explicit_resend:
+        _safe_set_video_system_setting("video_job_last_completed_at", sent_at, "public video result sent")
+
+def release_shopaikey_video_output_claim(job_id: int, task_id: str, error: str = "telegram_send_failed") -> None:
+    safe_error = shopaikey_sanitize_error(str(error or "telegram_send_failed"))[:260]
+    update_shopaikey_job(
+        job_id=job_id,
+        task_id=task_id,
+        output_send_claimed_at="",
+        last_telegram_send_error=safe_error,
+    )
+    _safe_set_video_system_setting("video_job_last_telegram_send_error", safe_error, "public video result send failed")
+
+async def send_shopaikey_video_result_once(
+    bot_client,
+    chat_id,
+    task_id: str,
+    result_url: str,
+    *,
+    job_id: int = 0,
+    source: str = "video_result",
+    explicit_resend: bool = False,
+) -> dict:
+    claim = claim_shopaikey_video_output(
+        task_id=task_id,
+        job_id=job_id,
+        result_url=result_url,
+        source=source,
+        explicit_resend=explicit_resend,
+    )
+    if not claim.get("claimed"):
+        return {**claim, "sent": False}
+    resolved_job_id = int(claim.get("job_id") or job_id or 0)
+    output_sent, file_id = await send_shopaikey_video_result(bot_client, chat_id, task_id, result_url)
+    if output_sent:
+        complete_shopaikey_video_output_claim(
+            resolved_job_id,
+            task_id,
+            result_url,
+            source,
+            file_id,
+            explicit_resend=explicit_resend,
+        )
+        return {**claim, "sent": True, "output_file_id": file_id, "link_fallback": not bool(file_id)}
+    release_shopaikey_video_output_claim(resolved_job_id, task_id)
+    return {**claim, "sent": False, "reason": "telegram_send_failed"}
 
 def mark_shopaikey_video_output_confirmed(task_id: str = "", model: str = "", updated_by="", source: str = "video_output") -> None:
     safe_task_id = str(task_id or "").strip()[:180]
@@ -42175,13 +42489,22 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
         credits_polling, _, _ = get_user(user_id)
         record_shopaikey_billing_event(user_id, job_id, "video_polling", 0, int(credits_polling or 0), int(credits_polling or 0), f"task_id={task_id}; attempt={attempt}; status={status}")
         if status == "SUCCESS":
-            output_sent, file_id = await send_shopaikey_video_result(bot_client, chat_id, task_id, result_url)
+            send_result = await send_shopaikey_video_result_once(
+                bot_client,
+                chat_id,
+                task_id,
+                result_url,
+                job_id=job_id,
+                source=f"auto_poll_{provider_route}",
+            )
+            output_sent = bool(send_result.get("sent"))
+            already_sent = bool(send_result.get("already_sent") or send_result.get("duplicate_prevented"))
+            file_id = str(send_result.get("output_file_id") or "")
             update_shopaikey_job(
                 job_id=job_id,
                 task_id=task_id,
                 status="SUCCESS",
-                result_sent=1 if output_sent else 0,
-                output_file_id=file_id,
+                result_sent=1 if (output_sent or already_sent) else 0,
                 finished_at=now_text(),
             )
             if output_sent and provider_route == "shopaikey":
@@ -42190,14 +42513,15 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
                 save_tool_test_result("key4u_video_job", "SUCCESS", f"public fallback task_id={task_id}; output_sent=yes", user_id)
             credits_now, _, _ = get_user(user_id)
             record_shopaikey_billing_event(user_id, job_id, "video_success", 0, int(credits_now or 0), int(credits_now or 0), f"task_id={task_id}; result_url={'yes' if result_url else 'no'}")
-            try:
-                await bot_client.send_message(
-                    chat_id=chat_id,
-                    text=ui_text(lang, "video.next_action"),
-                    reply_markup=public_video_success_keyboard(lang=lang),
-                )
-            except Exception:
-                pass
+            if output_sent:
+                try:
+                    await bot_client.send_message(
+                        chat_id=chat_id,
+                        text=ui_text(lang, "video.next_action"),
+                        reply_markup=public_video_success_keyboard(lang=lang, task_id=task_id),
+                    )
+                except Exception:
+                    pass
             return
         if status in {"FAILED", "FAILURE"} or str(result.get("error_class") or "").upper().startswith("FAIL_"):
             provider_error_text = result.get("fail_reason") or result.get("detail") or "video_provider_failed"
@@ -55591,6 +55915,7 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     callback_data = ""
     if isinstance(update, Update) and update.callback_query:
         callback_data = str(update.callback_query.data or "").strip()
+    completed_video_job = completed_video_job_for_callback_error(update)
     image_to_pdf_safe_error = (
         message_text.startswith("/image_to_pdf")
         or ('unsupported start tag "yêu"' in error_text.lower())
@@ -55615,6 +55940,15 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         logger.error("Telegram handler error | type=%s", error_name)
+
+    if completed_video_job:
+        record_video_post_output_error(error, completed_video_job, callback_data)
+        logger.warning(
+            "suppressed public error after completed video output | job_id=%s | task_id=%s",
+            completed_video_job.get("id"),
+            sanitize_log_text(str(completed_video_job.get("task_id") or ""))[:180],
+        )
+        return
 
     if shopaikey_image_error_already_notified:
         return
@@ -64062,11 +64396,16 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
     await update_waiting_message(waiting_message, "✅ ShopAIKey video submit đã xử lý xong. Không trừ Xu.")
     output_sent = False
     if db_status == "SUCCESS" and result.get("result_url"):
-        output_sent, output_file_id = await send_shopaikey_video_result(
-            context.bot, update.effective_chat.id, task_id, str(result.get("result_url") or "")
+        send_result = await send_shopaikey_video_result_once(
+            context.bot,
+            update.effective_chat.id,
+            task_id,
+            str(result.get("result_url") or ""),
+            job_id=job_id,
+            source="admin_video_smoke",
         )
+        output_sent = bool(send_result.get("sent") or send_result.get("already_sent"))
         if output_sent:
-            update_shopaikey_job(job_id=job_id, task_id=task_id, result_sent=1, output_file_id=output_file_id)
             mark_shopaikey_video_output_confirmed(task_id, result.get("model") or selected_model or SHOPAIKEY_VIDEO_MODEL, uid, "tool_test_shopaikey_video")
     if task_id and db_status == "IN_PROGRESS" and SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
         asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, update.effective_chat.id, uid, task_id))
@@ -64134,10 +64473,16 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
     if result_url:
         if already_sent:
             output_sent = True
-        else:
-            output_sent, output_file_id = await send_shopaikey_video_result(context.bot, update.effective_chat.id, task_id, result_url)
-            if output_sent:
-                update_shopaikey_job(job_id=job_id, task_id=task_id, output_file_id=output_file_id, result_sent=1)
+        elif bool(int((db_job or {}).get("admin_only") or 0)):
+            send_result = await send_shopaikey_video_result_once(
+                context.bot,
+                update.effective_chat.id,
+                task_id,
+                result_url,
+                job_id=job_id,
+                source="admin_video_job_status",
+            )
+            output_sent = bool(send_result.get("sent") or send_result.get("already_sent"))
     if result_url and (output_sent or already_sent):
         mark_shopaikey_video_output_confirmed(task_id, (db_job or {}).get("model") or SHOPAIKEY_VIDEO_MODEL, uid, "shopaikey_video_job")
     normalized_db_status = shopaikey_db_video_status(status)
@@ -64233,6 +64578,47 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
         )
     if len(raw_parts) >= 3 and raw_parts[1] == "retry":
         return await handle_public_video_retry_callback(query, uid, raw_parts[2], lang)
+    if len(raw_parts) >= 3 and raw_parts[1] == "resend":
+        task_id = str(raw_parts[2] or "").strip()
+        db_job = shopaikey_job_by_task_id(task_id)
+        if (
+            not db_job
+            or str(db_job.get("user_id") or "") != str(uid)
+            or bool(int(db_job.get("admin_only") or 0))
+        ):
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Không tìm thấy kết quả video của bạn. TOAN AAS chưa gọi API mới và chưa trừ thêm Xu.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")]]),
+            )
+        result_url = str(db_job.get("output_sent_result_url") or db_job.get("result_url") or "").strip()
+        if not result_url or shopaikey_db_video_status(db_job.get("status") or "") != "SUCCESS":
+            return await safe_edit_or_send(
+                query,
+                "⏳ Kết quả video chưa sẵn sàng để gửi lại. Bạn có thể kiểm tra trạng thái sau.",
+                reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=True),
+            )
+        resend = await send_shopaikey_video_result_once(
+            context.bot,
+            query.message.chat_id,
+            task_id,
+            result_url,
+            job_id=int(db_job.get("id") or 0),
+            source="explicit_public_resend",
+            explicit_resend=True,
+        )
+        if not resend.get("sent"):
+            return await safe_edit_or_send(
+                query,
+                "🛠 Kết quả đang được gửi lại nhưng Telegram chưa nhận được file. Xin vui lòng thử lại sau. TOAN AAS chưa trừ thêm Xu.",
+                reply_markup=public_video_success_keyboard(public_video_job_tier(db_job), lang, task_id=task_id),
+            )
+        return await safe_edit_or_send(
+            query,
+            public_video_status_message("SUCCESS", output_sent=True, job=db_job, lang=lang),
+            parse_mode="HTML",
+            reply_markup=public_video_success_keyboard(public_video_job_tier(db_job), lang, task_id=task_id),
+        )
     if len(raw_parts) >= 2 and raw_parts[1] == "status":
         if not is_admin_user(uid):
             status_detail_text = (
@@ -64282,10 +64668,18 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
     result_url = str(result.get("result_url") or "")
     output_sent = False
     already_sent = bool(int((db_job or {}).get("result_sent") or 0))
-    if result_url and query.message and not already_sent:
-        output_sent, output_file_id = await send_shopaikey_video_result(context.bot, query.message.chat_id, task_id, result_url)
-        if output_sent and job_id:
-            update_shopaikey_job(job_id=job_id, task_id=task_id, output_file_id=output_file_id, result_sent=1)
+    callback_may_deliver_result = not is_admin_user(uid) or bool(int((db_job or {}).get("admin_only") or 0))
+    if result_url and query.message and callback_may_deliver_result:
+        send_result = await send_shopaikey_video_result_once(
+            context.bot,
+            query.message.chat_id,
+            task_id,
+            result_url,
+            job_id=job_id,
+            source="public_status_check",
+        )
+        output_sent = bool(send_result.get("sent"))
+        already_sent = bool(already_sent or send_result.get("already_sent") or send_result.get("duplicate_prevented"))
     previous_db_status = shopaikey_db_video_status((db_job or {}).get("status") or "")
     if db_status in {"FAILED", "TIMEOUT"} and previous_db_status not in {"FAILED", "TIMEOUT"}:
         record_provider_error(
@@ -69143,11 +69537,7 @@ def music_ai_admin_blockers() -> list[str]:
     return list(dict.fromkeys(str(item) for item in blockers if str(item or "").strip()))
 
 def music_ai_public_guard_text(lang: str = "vi") -> str:
-    if music_ui_lang(lang=lang) != "vi":
-        return (
-            "AI music is waiting for processing resource checks. TOAN AAS has not processed this request and has not charged Xu."
-        )
-    return "Nhạc AI đang chờ kiểm tra tài nguyên xử lý. TOAN AAS chưa xử lý và chưa trừ Xu."
+    return public_product_maintenance_text(lang, "Nhạc AI" if music_ui_lang(lang=lang) == "vi" else "AI music")
 
 def music_ai_guarded_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, admin: bool = False) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
@@ -69468,19 +69858,19 @@ def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
 VOICE_PROFILE_PREVIEW_TEXT = "Xin chào, đây là bản nghe thử giọng TOAN AAS."
 VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT = "Cảm ơn bạn đã sử dụng trình nhân bản giọng nói của TOAN AAS."
 VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI = (
-    "Tạo voice riêng đang khóa thử nghiệm. TOAN AAS chưa trừ Xu. "
-    "Admin cần chạy kiểm tra hệ thống trước."
+    "Tạo voice riêng: Sản phẩm đang bảo trì/nâng cấp, xin vui lòng thử lại sau. "
+    "TOAN AAS chưa xử lý và chưa trừ Xu."
 )
 
 def voice_clone_public_guard_text(lang: str = "vi") -> str:
-    if music_ui_lang(lang=lang) != "vi":
-        return "Custom voice creation is checking processing resources. TOAN AAS has not charged Xu. You can use a default voice or try again later."
-    return "Tạo voice riêng đang được kiểm tra tài nguyên xử lý. TOAN AAS chưa trừ Xu. Bạn có thể dùng giọng mặc định hoặc thử lại sau."
+    if music_ui_lang(lang=lang) == "vi":
+        return "Tạo voice riêng: Sản phẩm đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa trừ Xu và chưa xử lý yêu cầu."
+    return public_product_maintenance_text(lang, "Custom voice")
 
 def voice_clone_provider_not_ready_public_text(lang: str = "vi") -> str:
-    if music_ui_lang(lang=lang) != "vi":
-        return "Custom voice creation is locked for system testing. TOAN AAS has not charged Xu. Admin must run system checks first."
-    return VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
+    if music_ui_lang(lang=lang) == "vi":
+        return VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI + " Tính năng đang khóa thử nghiệm trong thời gian bảo trì."
+    return public_product_maintenance_text(lang, "Custom voice")
 
 def voice_clone_admin_guard_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
@@ -87773,6 +88163,11 @@ def image_to_video_public_off_prompt(job_id: int = 0, user_id=0, lang: str = "vi
 
 VIDEO_FINALIZATION_STATE_TTL_SECONDS = 30 * 60
 VIDEO_FINALIZATION_LOCK_SECONDS = 12
+# Product lock requested after Task 3D.7: no menu/package/prompt/export redesign.
+# Only narrow bug fixes for result dedupe, back routes, provider output and mux/public guards are allowed.
+VIDEO_FLOW_LOCKED_AFTER_TASK3D7 = True  # specification spelling: VIDEO_FLOW_LOCKED_AFTER_TASK3D7 = true
+PUBLIC_PRODUCT_MAINTENANCE_VI = "Sản phẩm đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu."
+PUBLIC_PRODUCT_MAINTENANCE_EN = "This product is under maintenance/upgrading. Please try again later. TOAN AAS has not processed the request or charged Xu."
 
 def video_finalization_pending_key(user_id) -> str:
     return f"video_finalization:{user_id}"
@@ -87805,7 +88200,88 @@ def video_finalization_defaults() -> dict:
         "music_item_count": 0,
         "subtitle_dub_enabled": False,
         "finalization_confirmed": False,
+        "scene_voice_map": [],
+        "narration_segments": [],
+        "tts_audio_refs": [],
+        "mux_status": "not_requested",
     }
+
+def public_product_maintenance_text(lang: str = "vi", product: str = "") -> str:
+    base = PUBLIC_PRODUCT_MAINTENANCE_VI if normalize_user_language(lang) == "vi" else PUBLIC_PRODUCT_MAINTENANCE_EN
+    if not product:
+        return base
+    label = html.escape(str(product)[:80])
+    return f"{label}: {base}"
+
+def video_voice_scene_sync_schema(state: dict | None = None) -> dict:
+    """Small future-ready schema only; Task 3D.7 does not generate TTS or run ffmpeg."""
+    state = dict(state or {})
+    finalization = video_finalization_defaults()
+    finalization.update(dict(state.get("video_finalization") or {}))
+    source_payload = dict(state.get("source_payload") or state.get("pending_payload") or {})
+    prompt_bundle = dict(source_payload.get("prompt_bundle") or state.get("prompt_bundle") or {})
+    scenes = list(prompt_bundle.get("shot_table") or source_payload.get("shot_table") or source_payload.get("scenes") or [])
+    voice_id = str(finalization.get("voice_profile_id") or finalization.get("voice_choice") or "")[:80]
+    full_script = str(finalization.get("voice_script") or finalization.get("voice_text") or "").strip()
+    scene_voice_map = []
+    narration_segments = []
+    for index, scene in enumerate(scenes[:30], start=1):
+        item = dict(scene) if isinstance(scene, dict) else {"description": str(scene or "")}
+        scene_number = int(item.get("scene_number") or item.get("shot_number") or item.get("index") or index)
+        duration_seconds = max(1, int(item.get("duration_seconds") or item.get("duration") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS or 8))
+        narration = str(item.get("narration_text") or item.get("narration") or item.get("voiceover") or "").strip()
+        scene_voice_map.append({
+            "scene_number": scene_number,
+            "narration_text": narration,
+            "duration_seconds": duration_seconds,
+            "voice_id": voice_id,
+        })
+        if narration:
+            narration_segments.append({"scene_number": scene_number, "text": narration, "duration_seconds": duration_seconds})
+    if not scene_voice_map and full_script:
+        duration_seconds = max(1, int(source_payload.get("duration_seconds") or state.get("current_video_duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS or 8))
+        scene_voice_map.append({"scene_number": 1, "narration_text": full_script[:3000], "duration_seconds": duration_seconds, "voice_id": voice_id})
+        narration_segments.append({"scene_number": 1, "text": full_script[:3000], "duration_seconds": duration_seconds})
+    voice_requested = bool(finalization.get("voice_enabled") or full_script or voice_id)
+    return {
+        "scene_voice_map": scene_voice_map,
+        "narration_segments": narration_segments,
+        "tts_audio_refs": list(finalization.get("tts_audio_refs") or []),
+        "mux_status": "ready" if voice_requested and is_voice_mux_ready() else ("maintenance" if voice_requested else "not_requested"),
+    }
+
+def video_voice_mux_export_guard(state: dict | None = None) -> dict:
+    state = dict(state or {})
+    pending = dict(state.get("pending_payload") or {})
+    finalization = video_finalization_defaults()
+    finalization.update(dict(state.get("video_finalization") or pending.get("video_finalization") or {}))
+    choice = str(
+        state.get("current_video_voice_choice")
+        or pending.get("voice_choice")
+        or finalization.get("voice_choice")
+        or finalization.get("voice_mode")
+        or "none"
+    ).strip().lower()
+    default_voice = choice in {"female", "male", "auto", "default_female", "default_male", "default", "free_default"}
+    selected = bool(
+        finalization.get("voice_enabled")
+        or choice not in {"", "none", "off", "no"}
+        or str(pending.get("dubbing_option") or "none").lower() not in {"", "none", "off", "no"}
+    )
+    paid_voice = choice in {"paid_clone", "voice_clone", "voice_clone_create", "voice_clone_reuse", "advanced_dubbing", "uploaded", "custom"}
+    try:
+        classified = classify_video_addons_for_package(state)
+        paid_voice = paid_voice or any(
+            str(item.get("key") or "") in {"voice_clone_create", "voice_advanced", "voice_clone_reuse", "paid_voice"}
+            for item in (classified.get("paid_addons") or [])
+        )
+    except Exception:
+        pass
+    if selected and not is_voice_mux_ready() and paid_voice and not default_voice:
+        return {"ok": False, "reason": "paid_voice_mux_maintenance", "selected": True, "default_voice": False}
+    if selected and not is_voice_mux_ready():
+        return {"ok": True, "reason": "default_voice_saved_not_muxed", "selected": True, "default_voice": default_voice}
+    return {"ok": True, "reason": "ready" if selected else "none", "selected": selected, "default_voice": default_voice}
 
 def video_finalization_payload(state: dict | None = None) -> dict:
     state = dict(state or {})
@@ -87864,6 +88340,7 @@ def video_finalization_payload(state: dict | None = None) -> dict:
         payload,
         finalization,
     )
+    payload.update(video_voice_scene_sync_schema({**state, "video_finalization": finalization, "source_payload": payload}))
     return payload
 
 def set_video_finalization_state(user_id, state: dict) -> dict:
@@ -88818,6 +89295,15 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
     yes = "Có" if normalize_user_language(lang) == "vi" else "Yes"
     no = "Không" if normalize_user_language(lang) == "vi" else "No"
     status = lambda value: "ready" if value else "not ready"
+    voice_guard = video_voice_mux_export_guard(state)
+    voice_notice_en = (
+        "\n• Voice note: <b>saved separately; not muxed into this video version</b>"
+        if voice_guard.get("selected") and voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
+    )
+    voice_notice_vi = (
+        "\n• Giọng đọc: <b>đã lưu nội dung nhưng chưa ghép vào video ở bản hiện tại</b>"
+        if voice_guard.get("selected") and voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
+    )
     if normalize_user_language(lang) != "vi":
         local_frame_status = status(readiness["local_frame"]) if len(photos) >= 2 else (
             "not required for prompt export" if has_prompt else "missing images"
@@ -88829,7 +89315,7 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
             f"Script: <b>{yes if state.get('has_script') else no}</b> | Video prompt: <b>{yes if state.get('has_video_prompt') else no}</b>\n\n"
             "<b>Finalization</b>\n"
             f"• Music: <b>{yes if finalization['music_enabled'] else no}</b>\n"
-            f"• Voice/dubbing: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
+            f"• Voice/dubbing: <b>{yes if finalization['voice_enabled'] else no}</b>{voice_notice_en}\n"
             f"• Subtitles: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n"
             f"• Subtitles + dubbing: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n\n"
             "<b>Readiness</b>\n"
@@ -88849,7 +89335,7 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
         f"Kịch bản: <b>{yes if state.get('has_script') else no}</b> | Prompt video: <b>{yes if state.get('has_video_prompt') else no}</b>\n\n"
         "<b>Hoàn thiện</b>\n"
         f"• Nhạc: <b>{yes if finalization['music_enabled'] else no}</b>\n"
-        f"• Voice/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
+        f"• Voice/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>{voice_notice_vi}\n"
         f"• Phụ đề: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n"
         f"• Phụ đề và lồng tiếng: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n\n"
         "<b>Trạng thái xử lý</b>\n"
@@ -90067,13 +90553,7 @@ def video_addon_runtime_guard(state: dict | None = None) -> dict:
     return {"ok": True, "reason": "ready"}
 
 def video_addon_guard_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
-        return "📝 Subtitle/dubbing is still being verified. No processing started and no Xu was charged. You can return and choose no add-on."
-    return (
-        "📝 Phụ đề/lồng tiếng đang được kiểm tra trước khi mở rộng.\n"
-        "TOAN AAS chưa xử lý video và chưa trừ Xu.\n"
-        "Bạn có thể quay lại chọn Không thêm để tạo video trước."
-    )
+    return public_product_maintenance_text(lang, "Phụ đề/lồng tiếng" if normalize_user_language(lang) == "vi" else "Subtitle/dubbing")
 
 def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     state = dict(state or {})
@@ -90151,6 +90631,15 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     ]
     option_summary_vi = ", ".join(paid_option_labels[:4]) if paid_option_labels else "mặc định"
     option_summary_en = ", ".join(paid_option_labels[:4]) if paid_option_labels else "default"
+    voice_guard = video_voice_mux_export_guard(state)
+    voice_invoice_note_en = (
+        "\nVoice: <b>default narration saved, not muxed into this video version</b>.\n"
+        if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
+    )
+    voice_invoice_note_vi = (
+        "\nGiọng đọc mặc định đã được lưu nhưng chưa ghép vào video ở bản hiện tại.\n"
+        if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
+    )
 
     if normalize_user_language(lang) != "vi":
         starter_note = (
@@ -90164,6 +90653,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
             f"Package: <b>{html.escape(package_label_en)}</b>\n"
             "Content: <b>ready</b>\n"
             f"Options: <b>{html.escape(option_summary_en)}</b>\n"
+            f"{voice_invoice_note_en}"
             "TOAN AAS has not processed anything and no Xu was charged.\n\n"
             "🧾 <b>Final video invoice</b>\n\n"
             f"Package: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
@@ -90189,6 +90679,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
         f"Gói: <b>{html.escape(package_label_vi)}</b>\n"
         "Nội dung: <b>đã sẵn sàng</b>\n"
         f"Tùy chọn: <b>{html.escape(option_summary_vi)}</b>\n"
+        f"{voice_invoice_note_vi}"
         "TOAN AAS chưa xử lý và chưa trừ Xu.\n\n"
         "🧾 <b>Hóa đơn xác nhận video</b>\n\n"
         f"Gói chính: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
@@ -91810,7 +92301,7 @@ def public_video_status_keyboard(task_id: str, job: dict | None = None, status: 
     if db_status in {"FAILED", "TIMEOUT"}:
         return public_video_failed_keyboard(int(job.get("id") or 0), lang)
     if db_status == "SUCCESS" and output_sent:
-        return public_video_success_keyboard(public_video_job_tier(job), lang)
+        return public_video_success_keyboard(public_video_job_tier(job), lang, task_id=task_id)
     return shopaikey_video_job_check_keyboard(task_id, lang, public_user=True)
 
 def finalize_public_video_terminal_failure(job: dict | None, result: dict | None = None, status: str = "FAILED") -> dict:
@@ -91923,17 +92414,25 @@ async def handle_public_video_retry_callback(query, user_id, job_id_text: str, l
     record_shopaikey_billing_event(user_id, 0, "video_retry_addon_shown", 0, int(credits or 0), int(credits or 0), f"retry_from_job={job_id}; tier={tier}")
     return await start_video_addon_step(query, user_id, pending_payload, tier, lang, source="ai")
 
-def public_video_success_keyboard(tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
+def public_video_success_keyboard(tier: str = "", lang: str = "vi", task_id: str = "") -> InlineKeyboardMarkup:
     tier_norm = normalize_video_tier(tier)
-    return InlineKeyboardMarkup([
+    rows = []
+    resend_callback = f"shopai_video_job|resend|{str(task_id or '').strip()}"
+    if task_id and len(resend_callback.encode("utf-8")) <= 64:
+        rows.append([
+            InlineKeyboardButton("🔁 Gửi lại kết quả" if normalize_user_language(lang) == "vi" else "🔁 Resend result", callback_data=resend_callback),
+            InlineKeyboardButton(ui_text(lang, "video.create_another"), callback_data=f"create_media|video_tier_{tier_norm}"),
+        ])
+    rows.extend([
         [InlineKeyboardButton("🎵 Thêm nhạc nếu chưa có" if normalize_user_language(lang) == "vi" else "🎵 Add music if needed", callback_data="menu|main_music")],
-        [InlineKeyboardButton(ui_text(lang, "video.create_another"), callback_data=f"create_media|video_tier_{tier_norm}")],
+        *([] if task_id and len(resend_callback.encode("utf-8")) <= 64 else [[InlineKeyboardButton(ui_text(lang, "video.create_another"), callback_data=f"create_media|video_tier_{tier_norm}")]]),
         [InlineKeyboardButton(ui_text(lang, "video.edit_prompt"), callback_data=f"create_media|video_tier_{tier_norm}")],
         [InlineKeyboardButton(ui_text(lang, "video.create_image"), callback_data="create_media|quick_image")],
         [InlineKeyboardButton("🔥 Tạo video theo trend" if normalize_user_language(lang) == "vi" else "🔥 Trend video", callback_data="trendg|start")],
         [InlineKeyboardButton("💬 Góp ý kết quả" if normalize_user_language(lang) == "vi" else "💬 Give feedback", callback_data="feedback|start")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
     ])
+    return InlineKeyboardMarkup(rows)
 
 def quick_media_pending_key(user_id) -> str:
     return f"quick_media:{user_id}"
@@ -118280,7 +118779,28 @@ def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
     combo_guard = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB or normalize_video_translate_mode(state.get("requested_mode")) == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    if normalize_user_language(lang) != "vi":
+    is_video_addon = str(state.get("origin") or "").strip().lower() == "video_addon"
+    if is_video_addon and not admin:
+        labels_vi = {
+            VIDEO_SUBTITLE_MODE_CREATE: "Tạo phụ đề tự động",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "Dịch phụ đề",
+            VIDEO_SUBTITLE_MODE_DUB: "Lồng tiếng tự động",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Phụ đề và lồng tiếng",
+        }
+        labels_en = {
+            VIDEO_SUBTITLE_MODE_CREATE: "Automatic subtitles",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "Subtitle translation",
+            VIDEO_SUBTITLE_MODE_DUB: "Automatic dubbing",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "Subtitles and dubbing",
+        }
+        if combo_guard and mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
+            labels_vi[mode] = "Phụ đề dịch"
+            labels_en[mode] = "Translated subtitles"
+        text = public_product_maintenance_text(
+            lang,
+            (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(mode, "Công cụ video" if normalize_user_language(lang) == "vi" else "Video tool"),
+        )
+    elif normalize_user_language(lang) != "vi":
         text = "This tool is not ready to process yet. TOAN AAS has not charged Xu."
     else:
         text = {
@@ -121470,6 +121990,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_failed_jobs", cmd_video_failed_jobs))
     tg_app.add_handler(CommandHandler("video_error_report", cmd_video_error_report))
     tg_app.add_handler(CommandHandler("video_last_export_error", cmd_video_last_export_error))
+    tg_app.add_handler(CommandHandler("video_job_dedupe_status", cmd_video_job_dedupe_status))
+    tg_app.add_handler(CommandHandler("video_last_result_status", cmd_video_last_result_status))
     tg_app.add_handler(CommandHandler("test_all_safe", cmd_test_all_safe))
     tg_app.add_handler(CommandHandler("test_all_video", cmd_test_all_video))
     tg_app.add_handler(CommandHandler("test_all_provider", cmd_test_all_provider))
