@@ -45192,6 +45192,23 @@ TASK3D_SCENE_IDEA_SUGGESTIONS = [
     ("premium_showroom", "Showroom cao cấp"),
 ]
 
+# These packages belong only to the prompt-image action inside the Video flow.
+# They intentionally do not alter the standalone Image menu or its pricing table.
+TASK3D_VIDEO_IMAGE_PACKAGE_ORDER = ("50", "150", "200", "300", "400", "500", "600")
+TASK3D_VIDEO_IMAGE_PACKAGES = {
+    "50": {"label": "Tiết kiệm", "unit_cost_xu": 50, "provider_tier": "low", "warranty_retries": 0},
+    "150": {"label": "Phổ thông", "unit_cost_xu": 150, "provider_tier": "standard", "warranty_retries": 0},
+    "200": {"label": "Phổ thông có bảo hành", "unit_cost_xu": 200, "provider_tier": "standard_warranty", "warranty_retries": 1},
+    "300": {"label": "Cao cấp", "unit_cost_xu": 300, "provider_tier": "high", "warranty_retries": 0},
+    "400": {"label": "Cao cấp có bảo hành", "unit_cost_xu": 400, "provider_tier": "high_warranty", "warranty_retries": 1},
+    "500": {"label": "Cao cấp+", "unit_cost_xu": 500, "provider_tier": "high", "warranty_retries": 0},
+    "600": {"label": "Cao cấp+ có bảo hành", "unit_cost_xu": 600, "provider_tier": "high_warranty", "warranty_retries": 1},
+}
+TASK3D_VIDEO_PROMPT_OUTPUT_PRODUCTS = {
+    "video_trend", "video_idea", "storyboard_prompt", "motion_prompt", "video_ai_real",
+    "script_image_video", "image_to_video", "multi_scene_film", "self_shot_scene_change", "video_reference",
+}
+
 TASK3D_PUBLIC_COPY = {
     "video_trend": (
         "🔥 <b>Video theo trend</b>\n\n"
@@ -45867,14 +45884,14 @@ def task3d_result_text(session: dict, lang: str = "vi") -> str:
 def task3d_result_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     rows = [
-        [InlineKeyboardButton("🖼 Tạo prompt ảnh" if is_vi else "🖼 Image prompts", callback_data="vproduct|view|image"), InlineKeyboardButton("🎥 Tạo prompt video" if is_vi else "🎥 Video prompts", callback_data="vproduct|view|video")],
+        [InlineKeyboardButton("🖼 Tạo prompt ảnh" if is_vi else "🖼 Image prompts", callback_data="vproduct|prompt_image"), InlineKeyboardButton("🎥 Tạo prompt video" if is_vi else "🎥 Video prompts", callback_data="vproduct|prompt_video")],
         [InlineKeyboardButton("📦 Xuất bộ prompt" if is_vi else "📦 Export prompts", callback_data="vproduct|export_menu"), InlineKeyboardButton("🔁 Đổi phong cách" if is_vi else "🔁 Change style", callback_data="vproduct|restyle")],
     ]
-    if VIDEO_PRODUCT_REGISTRY.get(product_id, {}).get("allowed_packages"):
+    if VIDEO_PRODUCT_REGISTRY.get(product_id, {}).get("allowed_packages") or product_id in TASK3D_VIDEO_PROMPT_OUTPUT_PRODUCTS:
         render_label = "🎬 Dùng để tạo video"
         rows.append([InlineKeyboardButton(render_label, callback_data="vproduct|render")])
     rows.extend([
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("⬅️ Quay lại" if is_vi else ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -45888,6 +45905,242 @@ def task3d_result_parent_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
+
+
+def task3d_video_prompt_bundle(session: dict) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    return dict(draft.get("prompt_bundle") or draft.get("prepared_prompt_bundle") or {})
+
+
+def task3d_video_prompt_entries(session: dict, kind: str) -> list[str]:
+    bundle = task3d_video_prompt_bundle(session)
+    prompt_key = "image_prompts" if kind == "image" else "video_prompts"
+    shot_key = "image_prompt" if kind == "image" else "video_prompt"
+    prompts = [str(item or "").strip() for item in (bundle.get(prompt_key) or []) if str(item or "").strip()]
+    if not prompts:
+        prompts = [
+            str(shot.get(shot_key) or "").strip()
+            for shot in (bundle.get("shot_table") or [])
+            if str(shot.get(shot_key) or "").strip()
+        ]
+    overrides = dict(((session or {}).get("draft") or {}).get(f"prompt_{kind}_overrides") or {})
+    return [str(overrides.get(str(index)) or prompt).strip() for index, prompt in enumerate(prompts, start=1)]
+
+
+def task3d_video_prompt_selection(session: dict, kind: str) -> list[int]:
+    prompts = task3d_video_prompt_entries(session, kind)
+    raw = list(((session or {}).get("draft") or {}).get(f"prompt_{kind}_selection") or [])
+    selected = []
+    for item in raw:
+        index = safe_int(item, 0)
+        if 1 <= index <= len(prompts) and index not in selected:
+            selected.append(index)
+    return selected or ([1] if prompts else [])
+
+
+def task3d_video_prompt_selected_entries(session: dict, kind: str) -> list[tuple[int, str]]:
+    prompts = task3d_video_prompt_entries(session, kind)
+    return [(index, prompts[index - 1]) for index in task3d_video_prompt_selection(session, kind) if index <= len(prompts)]
+
+
+def task3d_prompt_number_rows(count: int, action: str, prefix: str = "") -> list[list[InlineKeyboardButton]]:
+    buttons = [
+        InlineKeyboardButton(f"{prefix}{index}", callback_data=f"vproduct|{action}|{index}")
+        for index in range(1, max(0, min(16, int(count or 0))) + 1)
+    ]
+    return [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+
+
+def task3d_prompt_image_scene_text(session: dict, lang: str = "vi") -> str:
+    count = len(task3d_video_prompt_entries(session, "image"))
+    return (
+        "🖼 <b>Tạo prompt ảnh từ video</b>\n\n"
+        f"TOAN AAS đã có <b>{count}</b> cảnh/prompt trong video này.\n"
+        "Bạn muốn xem hoặc tạo prompt ảnh cho cảnh nào?\n\n"
+        "Chọn “Tất cả cảnh” để xem/xuất cả bộ prompt; khi tạo ảnh AI thật, hãy chọn từng cảnh để tránh tạo nhầm."
+    )
+
+
+def task3d_prompt_image_scene_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = task3d_prompt_number_rows(len(task3d_video_prompt_entries(session, "image")), "prompt_image_select")
+    rows.append([
+        InlineKeyboardButton("📦 Tất cả cảnh", callback_data="vproduct|prompt_image_select|all"),
+        InlineKeyboardButton("⭐ Cảnh chính", callback_data="vproduct|prompt_image_select|main"),
+    ])
+    rows.append([
+        InlineKeyboardButton("⬅️ Bộ prompt", callback_data="vproduct|result"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def task3d_prompt_detail_text(session: dict, kind: str, copy_hint: bool = False) -> str:
+    selected = task3d_video_prompt_selected_entries(session, kind)
+    noun = "Cảnh" if kind == "image" else "Shot"
+    icon = "🖼" if kind == "image" else "🎥"
+    title_tail = str(selected[0][0]) if len(selected) == 1 else f"{len(selected)} {noun.lower()}"
+    blocks = [f"{noun} {index}\n{prompt}" for index, prompt in selected]
+    prompt_text = "\n\n".join(blocks) or "Prompt chưa sẵn sàng."
+    hint = "\n\n📋 Prompt đang ở dạng dễ sao chép; bạn có thể nhấn giữ phần mã." if copy_hint else ""
+    return (
+        f"{icon} <b>Prompt {'ảnh' if kind == 'image' else 'video'} — {html.escape(title_tail)}</b>\n\n"
+        f"<code>{html.escape(prompt_text[:3500])}</code>{hint}\n\n"
+        "Bạn muốn làm gì tiếp?"
+    )
+
+
+def task3d_prompt_image_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Copy prompt", callback_data="vproduct|prompt_image_copy"), InlineKeyboardButton("🎨 Tạo ảnh từ prompt", callback_data="vproduct|prompt_image_packages")],
+        [InlineKeyboardButton("🔁 Viết lại prompt", callback_data="vproduct|prompt_image_rewrite"), InlineKeyboardButton("⬅️ Chọn cảnh", callback_data="vproduct|prompt_image")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def task3d_prompt_image_package_text(session: dict, lang: str = "vi") -> str:
+    count = len(task3d_video_prompt_selection(session, "image"))
+    return (
+        "🎨 <b>Chọn gói tạo ảnh</b>\n\n"
+        f"Số prompt/cảnh đang chọn: <b>{count}</b>.\n"
+        "Bạn muốn tạo ảnh từ prompt này theo gói nào? Giá bên dưới tính cho mỗi ảnh; màn kế tiếp sẽ báo tổng trước khi xử lý.\n\n"
+        "Bước này chưa gọi hệ tạo ảnh và chưa trừ Xu."
+    )
+
+
+def task3d_prompt_image_package_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    labels = {
+        "50": "50 Xu Tiết kiệm", "150": "150 Xu Phổ thông",
+        "200": "200 Xu Có bảo hành", "300": "300 Xu Cao cấp",
+        "400": "400 Xu Có bảo hành", "500": "500 Xu Cao cấp+",
+        "600": "600 Xu Có bảo hành",
+    }
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels["50"], callback_data="vproduct|prompt_image_package|50"), InlineKeyboardButton(labels["150"], callback_data="vproduct|prompt_image_package|150")],
+        [InlineKeyboardButton(labels["200"], callback_data="vproduct|prompt_image_package|200"), InlineKeyboardButton(labels["300"], callback_data="vproduct|prompt_image_package|300")],
+        [InlineKeyboardButton(labels["400"], callback_data="vproduct|prompt_image_package|400"), InlineKeyboardButton(labels["500"], callback_data="vproduct|prompt_image_package|500")],
+        [InlineKeyboardButton(labels["600"], callback_data="vproduct|prompt_image_package|600"), InlineKeyboardButton("⬅️ Prompt ảnh", callback_data="vproduct|prompt_image_detail")],
+    ])
+
+
+def task3d_prompt_image_confirm_text(session: dict, lang: str = "vi") -> str:
+    draft = dict((session or {}).get("draft") or {})
+    code = str(draft.get("prompt_image_package_code") or "")
+    package = dict(TASK3D_VIDEO_IMAGE_PACKAGES.get(code) or {})
+    selected = task3d_video_prompt_selection(session, "image")
+    count = len(selected)
+    unit_cost = int(package.get("unit_cost_xu") or 0)
+    selected_label = str(selected[0]) if count == 1 else ", ".join(map(str, selected))
+    warranty = "Có bảo hành tạo lại" if int(package.get("warranty_retries") or 0) > 0 else "Không kèm bảo hành tạo lại"
+    return (
+        "🎨 <b>Xác nhận tạo ảnh</b>\n\n"
+        f"Cảnh: <b>{html.escape(selected_label)}</b>\n"
+        f"Số ảnh: <b>{count}</b>\n"
+        f"Gói: <b>{html.escape(str(package.get('label') or 'Chưa chọn'))}</b>\n"
+        f"Chi phí: <b>{xu_number(unit_cost * count)} Xu</b> ({xu_number(unit_cost)} Xu/ảnh)\n"
+        f"Bảo hành: <b>{warranty}</b>\n\n"
+        "TOAN AAS chưa tạo ảnh và chưa trừ Xu. Chỉ khi bạn bấm “Tạo ảnh” hệ thống mới kiểm tra provider/số dư và xử lý."
+    )
+
+
+def task3d_prompt_image_confirm_keyboard(token: str, session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    selected_count = len(task3d_video_prompt_selection(session, "image"))
+    execute_callback = f"vproduct|prompt_image_execute|{token}" if selected_count == 1 else "vproduct|prompt_image_batch_guard"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Tạo ảnh", callback_data=execute_callback), InlineKeyboardButton("🔢 Đổi số lượng", callback_data="vproduct|prompt_image")],
+        [InlineKeyboardButton("⬅️ Prompt ảnh", callback_data="vproduct|prompt_image_packages"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def task3d_prompt_video_selector_text(session: dict, lang: str = "vi") -> str:
+    count = len(task3d_video_prompt_entries(session, "video"))
+    return (
+        "🎥 <b>Tạo prompt video</b>\n\n"
+        f"TOAN AAS đã có prompt video cho <b>{count}</b> cảnh/shot.\n"
+        "Bạn muốn dùng cảnh nào?"
+    )
+
+
+def task3d_prompt_video_selector_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = task3d_prompt_number_rows(len(task3d_video_prompt_entries(session, "video")), "prompt_video_select", "Shot ")
+    rows.append([
+        InlineKeyboardButton("📦 Tất cả shot", callback_data="vproduct|prompt_video_select|all"),
+        InlineKeyboardButton("🎞 Theo batch 2 cảnh", callback_data="vproduct|prompt_video_batches"),
+    ])
+    rows.append([
+        InlineKeyboardButton("⬅️ Bộ prompt", callback_data="vproduct|result"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def task3d_prompt_video_batch_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
+    count = len(task3d_video_prompt_entries(session, "video"))
+    rows = []
+    buttons = []
+    for start in range(1, count + 1, 2):
+        end = min(count, start + 1)
+        buttons.append(InlineKeyboardButton(f"B{(start + 1) // 2}: {start}–{end}", callback_data=f"vproduct|prompt_video_select|batch_{start}"))
+    rows.extend(buttons[index:index + 2] for index in range(0, len(buttons), 2))
+    rows.append([InlineKeyboardButton("⬅️ Chọn shot", callback_data="vproduct|prompt_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+
+def task3d_prompt_video_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Copy prompt", callback_data="vproduct|prompt_video_copy"), InlineKeyboardButton("🎬 Tạo video từ prompt", callback_data="vproduct|prompt_video_create")],
+        [InlineKeyboardButton("🔁 Viết lại prompt", callback_data="vproduct|prompt_video_rewrite"), InlineKeyboardButton("⬅️ Chọn shot", callback_data="vproduct|prompt_video")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def task3d_rewrite_selected_prompts(session: dict, kind: str) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    overrides = dict(draft.get(f"prompt_{kind}_overrides") or {})
+    entries = task3d_video_prompt_entries(session, kind)
+    style = str((session or {}).get("style") or draft.get("style") or "phong cách đã chọn")
+    color = str(draft.get("color_mood") or "màu sắc nhất quán")
+    version = safe_int(draft.get(f"prompt_{kind}_rewrite_version"), 0) + 1
+    suffix = (
+        f" Refined version {version}: preserve subject identity and continuity; style {style}; mood/color {color}; "
+        "clear composition, physically plausible details, no watermark, no duplicated subject."
+    )
+    for index in task3d_video_prompt_selection(session, kind):
+        base = overrides.get(str(index)) or (entries[index - 1] if index <= len(entries) else "")
+        overrides[str(index)] = f"{base.rstrip()} {suffix}".strip()
+    return {f"prompt_{kind}_overrides": overrides, f"prompt_{kind}_rewrite_version": version}
+
+
+def task3d_prompt_export_markdown(bundle: dict) -> str:
+    lines = [
+        f"# {bundle.get('title') or 'TOAN AAS Video Prompt Pack'}", "",
+        str(bundle.get("short_summary") or ""), "",
+        "## Hook", str(bundle.get("hook") or ""), "",
+        "## Script", str(bundle.get("script") or ""), "",
+        "## Caption", str(bundle.get("caption") or ""), "",
+        "## Storyboard",
+    ]
+    for shot in bundle.get("shot_table") or []:
+        lines.extend([
+            "", f"### Shot {shot.get('shot_number')}",
+            f"- Purpose: {shot.get('scene_purpose')}",
+            f"- Image prompt: {shot.get('image_prompt')}",
+            f"- Video prompt: {shot.get('video_prompt')}",
+            f"- Negative prompt: {shot.get('negative_prompt') or bundle.get('negative_prompt')}",
+        ])
+    lines.extend(["", "## Batch grouping", json.dumps((bundle.get("render_plan") or {}).get("batches") or [], ensure_ascii=False, indent=2)])
+    return "\n".join(lines).strip() + "\n"
+
+
+def task3d_prompt_export_done_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("🖼 Tạo prompt ảnh", callback_data="vproduct|prompt_image"), InlineKeyboardButton("🎥 Tạo prompt video", callback_data="vproduct|prompt_video")],
+    ]
+    if VIDEO_PRODUCT_REGISTRY.get(product_id, {}).get("allowed_packages") or product_id in TASK3D_VIDEO_PROMPT_OUTPUT_PRODUCTS:
+        rows.append([InlineKeyboardButton("🎬 Dùng để tạo video", callback_data="vproduct|render"), InlineKeyboardButton("⬅️ Bộ prompt", callback_data="vproduct|result")])
+    else:
+        rows.append([InlineKeyboardButton("⬅️ Bộ prompt", callback_data="vproduct|result")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
 
 
 def task3d_trend_ideas_text(session: dict, lang: str = "vi") -> str:
@@ -46027,7 +46280,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     value = parts[2] if len(parts) > 2 else ""
     # Delegated legacy handlers answer their own callback. Answering here as
     # well can produce a Telegram "query is too old/already answered" error.
-    if action != "legacy":
+    if action not in {"legacy", "prompt_image_execute"}:
         await query.answer()
     if action == "open":
         if value not in VIDEO_PRODUCT_REGISTRY:
@@ -46244,11 +46497,168 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "style")
         return await task3d_render_step(query, uid, session, lang)
     if action == "view":
-        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
-        prompts = bundle.get("image_prompts") if value == "image" else bundle.get("video_prompts")
-        lines = [f"{idx}. {item}" for idx, item in enumerate(list(prompts or [])[:8], start=1)]
-        text = ("🖼 <b>Prompt ảnh</b>" if value == "image" else "🎥 <b>Prompt video</b>") + "\n\n<code>" + html.escape("\n\n".join(lines)[:3600]) + "</code>"
-        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=task3d_result_parent_keyboard(lang))
+        # Compatibility for buttons already sent before Task 3D.6.
+        action = "prompt_image" if value == "image" else "prompt_video"
+    if action == "prompt_image":
+        if not task3d_video_prompt_entries(session, "image"):
+            return await safe_edit_or_send(query, "⚠️ Bộ prompt ảnh chưa sẵn sàng. Bot chưa trừ Xu.", reply_markup=task3d_result_parent_keyboard(lang))
+        session = task3d_session_step(uid, "prompt_image_scene")
+        return await safe_edit_or_send(query, task3d_prompt_image_scene_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_scene_keyboard(session, lang))
+    if action == "prompt_image_select":
+        prompts = task3d_video_prompt_entries(session, "image")
+        if not prompts:
+            return await safe_edit_or_send(query, "⚠️ Bộ prompt ảnh chưa sẵn sàng. Bot chưa trừ Xu.", reply_markup=task3d_result_parent_keyboard(lang))
+        if value == "all":
+            selected = list(range(1, len(prompts) + 1))
+        elif value == "main":
+            selected = [1]
+        else:
+            selected = [max(1, min(len(prompts), safe_int(value, 1)))]
+        session = task3d_session_step(uid, "prompt_image_detail", prompt_image_selection=selected)
+        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image"), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+    if action == "prompt_image_detail":
+        session = task3d_session_step(uid, "prompt_image_detail")
+        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image"), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+    if action == "prompt_image_copy":
+        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image", copy_hint=True), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+    if action == "prompt_image_rewrite":
+        session = task3d_session_step(uid, "prompt_image_detail", **task3d_rewrite_selected_prompts(session, "image"))
+        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image"), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+    if action == "prompt_image_packages":
+        session = task3d_session_step(uid, "prompt_image_package")
+        return await safe_edit_or_send(query, task3d_prompt_image_package_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_package_keyboard(lang))
+    if action == "prompt_image_package":
+        package = dict(TASK3D_VIDEO_IMAGE_PACKAGES.get(value) or {})
+        if not package:
+            return await safe_edit_or_send(query, "⚠️ Gói ảnh không hợp lệ. Bot chưa trừ Xu.", reply_markup=task3d_prompt_image_package_keyboard(lang))
+        selected = task3d_video_prompt_selected_entries(session, "image")
+        if not selected:
+            return await safe_edit_or_send(query, "⚠️ Hãy chọn lại cảnh cần tạo ảnh. Bot chưa trừ Xu.", reply_markup=task3d_prompt_image_scene_keyboard(session, lang))
+        old_token = str((session.get("draft") or {}).get("prompt_image_confirm_token") or "")
+        if old_token:
+            pop_shopaikey_pending_confirmation(old_token, uid)
+        token = ""
+        if len(selected) == 1:
+            provider_tier = str(package.get("provider_tier") or "low")
+            tier_payload = image_tier_payload(provider_tier)
+            prompt = selected[0][1]
+            aspect = normalize_media_aspect_ratio(str(session.get("aspect_ratio") or "1:1"), "1:1", "image")
+            token = set_shopaikey_pending_confirmation(uid, {
+                "job_type": "image",
+                "prompt": image_tier_prompt_for_generation(prompt, provider_tier, aspect),
+                "original_prompt": prompt,
+                "base_cost": int(package.get("unit_cost_xu") or 0),
+                "from_image": False,
+                "image_tier": provider_tier,
+                "tier_label": package.get("label") or provider_tier,
+                "model": tier_payload.get("model") or SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+                "retry_warranty_count": int(package.get("warranty_retries") or 0),
+                "aspect_ratio": aspect,
+                "package_item_type": package_item_type_for_image_tier(provider_tier),
+                "source": "task3d_video_prompt_image",
+                "task3d_product_id": product_id,
+                "task3d_scene_index": selected[0][0],
+            })
+        session = task3d_session_step(
+            uid,
+            "prompt_image_confirm",
+            prompt_image_package_code=value,
+            prompt_image_confirm_token=token,
+            prompt_image_count=len(selected),
+            prompt_image_total_xu=int(package.get("unit_cost_xu") or 0) * len(selected),
+        )
+        return await safe_edit_or_send(query, task3d_prompt_image_confirm_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_confirm_keyboard(token, session, lang))
+    if action == "prompt_image_confirm":
+        token = str((session.get("draft") or {}).get("prompt_image_confirm_token") or "")
+        return await safe_edit_or_send(query, task3d_prompt_image_confirm_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_confirm_keyboard(token, session, lang))
+    if action == "prompt_image_batch_guard":
+        return await safe_edit_or_send(
+            query,
+            "🖼 Tạo ảnh nhiều cảnh đang được nâng cấp để tránh tạo thiếu hoặc tính sai Xu. Bạn hãy chọn từng cảnh; TOAN AAS vẫn giữ nguyên toàn bộ prompt và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Chọn từng cảnh", callback_data="vproduct|prompt_image"),
+                InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+            ]]),
+        )
+    if action == "prompt_image_execute":
+        token = value or str((session.get("draft") or {}).get("prompt_image_confirm_token") or "")
+        pending = dict(SHOPAIKEY_PENDING_CONFIRMATIONS.get(token) or {})
+        if not token or safe_int(pending.get("user_id"), 0) != safe_int(uid, 0):
+            await query.answer()
+            return await safe_edit_or_send(query, "⌛ Xác nhận tạo ảnh đã hết hạn. Bot chưa trừ Xu.", reply_markup=task3d_prompt_image_package_keyboard(lang))
+        enabled, _message = shopaikey_public_generation_guard("image")
+        if not enabled:
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                "🛠 Hệ thống tạo ảnh đang bảo trì/nâng cấp nhẹ nên chưa tạo được lúc này. TOAN AAS đã giữ nguyên prompt, cảnh và gói bạn chọn; bot chưa trừ Xu.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ Xác nhận", callback_data="vproduct|prompt_image_confirm"),
+                    InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+                ]]),
+            )
+        if shopaikey_active_job_for_user(uid, "image"):
+            await query.answer()
+            return await safe_edit_or_send(query, ui_text(lang, "media.job_lock"), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Xác nhận", callback_data="vproduct|prompt_image_confirm")]]))
+        return await handle_shopaikey_public_callback(update, context, f"shopai|confirm|{token}")
+    if action == "prompt_video":
+        if not task3d_video_prompt_entries(session, "video"):
+            return await safe_edit_or_send(query, "⚠️ Bộ prompt video chưa sẵn sàng. Bot chưa trừ Xu.", reply_markup=task3d_result_parent_keyboard(lang))
+        session = task3d_session_step(uid, "prompt_video_shot")
+        return await safe_edit_or_send(query, task3d_prompt_video_selector_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_video_selector_keyboard(session, lang))
+    if action == "prompt_video_batches":
+        session = task3d_session_step(uid, "prompt_video_batch")
+        return await safe_edit_or_send(query, "🎞 <b>Chọn batch 2 cảnh</b>\n\nMỗi batch ghép tối đa 2 prompt video liên tiếp. Bước này chưa gọi provider và chưa trừ Xu.", parse_mode="HTML", reply_markup=task3d_prompt_video_batch_keyboard(session, lang))
+    if action == "prompt_video_select":
+        prompts = task3d_video_prompt_entries(session, "video")
+        if not prompts:
+            return await safe_edit_or_send(query, "⚠️ Bộ prompt video chưa sẵn sàng. Bot chưa trừ Xu.", reply_markup=task3d_result_parent_keyboard(lang))
+        if value == "all":
+            selected = list(range(1, len(prompts) + 1))
+        elif value.startswith("batch_"):
+            start = max(1, min(len(prompts), safe_int(value.replace("batch_", "", 1), 1)))
+            selected = list(range(start, min(len(prompts), start + 1) + 1))
+        else:
+            selected = [max(1, min(len(prompts), safe_int(value, 1)))]
+        session = task3d_session_step(uid, "prompt_video_detail", prompt_video_selection=selected)
+        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+    if action == "prompt_video_detail":
+        session = task3d_session_step(uid, "prompt_video_detail")
+        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+    if action == "prompt_video_copy":
+        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video", copy_hint=True), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+    if action == "prompt_video_rewrite":
+        session = task3d_session_step(uid, "prompt_video_detail", **task3d_rewrite_selected_prompts(session, "video"))
+        return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+    if action == "prompt_video_create":
+        selected = task3d_video_prompt_selected_entries(session, "video")
+        if not selected:
+            return await safe_edit_or_send(query, "⚠️ Hãy chọn lại shot cần tạo video. Bot chưa trừ Xu.", reply_markup=task3d_prompt_video_selector_keyboard(session, lang))
+        bundle = task3d_video_prompt_bundle(session)
+        selected_prompt = "\n\n".join(f"Shot {index}: {prompt}" for index, prompt in selected)
+        source_state = {
+            "product_id": product_id,
+            "selected_topic": session.get("topic"),
+            "selected_style": session.get("style"),
+            "preferred_aspect_ratio": session.get("aspect_ratio"),
+            "source_media_ref": session.get("source_media_ref"),
+            "video_prompt": selected_prompt,
+            "script": bundle.get("script"),
+            "prompt_bundle": bundle,
+            "selected_shots": [index for index, _prompt in selected],
+            "scene_count": len(selected),
+        }
+        package = {
+            "source": product_id,
+            "product_id": product_id,
+            "concept_text": bundle.get("short_summary"),
+            "video_prompt": selected_prompt,
+            "prompt_bundle_id": bundle.get("bundle_id"),
+            "source_media_ref": session.get("source_media_ref"),
+            "scene_count": len(selected),
+            "selected_shots": [index for index, _prompt in selected],
+        }
+        return await open_video_finalization(query, uid, product_id, source_state, lang, "vproduct|prompt_video_detail", package)
     if action == "export_menu":
         return await safe_edit_or_send(query, "📦 <b>Xuất prompt pack</b>\n\nChọn định dạng:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("JSON", callback_data="vproduct|export|json"), InlineKeyboardButton("Markdown", callback_data="vproduct|export|markdown"), InlineKeyboardButton("TXT", callback_data="vproduct|export|txt")],
@@ -46261,13 +46671,17 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value == "json":
             content, suffix = json.dumps(bundle, ensure_ascii=False, indent=2), "json"
         elif value == "markdown":
-            content, suffix = bundle_to_markdown(bundle), "md"
+            content, suffix = task3d_prompt_export_markdown(bundle), "md"
         else:
-            content, suffix = bundle_to_markdown(bundle), "txt"
+            content, suffix = task3d_prompt_export_markdown(bundle), "txt"
         output = io.BytesIO(content.encode("utf-8"))
         output.name = f"toan_aas_{product_id}_{str(bundle.get('bundle_id') or 'bo_prompt')[:12]}.{suffix}"
         await context.bot.send_document(chat_id=query.message.chat_id, document=output, filename=output.name, caption="✅ Bộ prompt miễn phí. Bot chưa xử lý video AI và chưa trừ Xu.")
-        return None
+        return await safe_edit_or_send(
+            query,
+            "✅ Bộ prompt đã được xuất miễn phí. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+            reply_markup=task3d_prompt_export_done_keyboard(product_id, lang),
+        )
     if action == "render":
         bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
         if not bundle:

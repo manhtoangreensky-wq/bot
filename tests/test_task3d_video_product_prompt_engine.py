@@ -1437,6 +1437,300 @@ def test_prompt_pack_exports_json_markdown_and_plain_text_content():
     assert "no watermark" in markdown.lower()
 
 
+def test_video_output_menu_has_prompt_image_video_buttons():
+    markup = bot.task3d_result_keyboard("storyboard_prompt", "vi")
+    assert [[button.text for button in row] for row in markup.inline_keyboard] == [
+        ["🖼 Tạo prompt ảnh", "🎥 Tạo prompt video"],
+        ["📦 Xuất bộ prompt", "🔁 Đổi phong cách"],
+        ["🎬 Dùng để tạo video"],
+        ["⬅️ Quay lại", "🏠 Menu chính"],
+    ]
+    assert _callbacks(markup)[:2] == ["vproduct|prompt_image", "vproduct|prompt_video"]
+
+
+def test_all_video_products_output_use_same_action_menu():
+    products = (
+        "video_trend", "video_idea", "storyboard_prompt", "motion_prompt", "video_ai_real",
+        "script_image_video", "image_to_video", "multi_scene_film", "self_shot_scene_change", "video_reference",
+    )
+    required = {
+        "vproduct|prompt_image", "vproduct|prompt_video", "vproduct|export_menu",
+        "vproduct|restyle", "vproduct|render", "vproduct|back", "menu|main",
+    }
+    for product_id in products:
+        assert required <= set(_callbacks(bot.task3d_result_keyboard(product_id, "vi"))), product_id
+
+
+def test_prompt_image_button_stays_in_video_flow():
+    callbacks = _callbacks(bot.task3d_result_keyboard("storyboard_prompt", "vi"))
+    assert "vproduct|prompt_image" in callbacks
+    assert not any(value.startswith(("create_media|", "imgtool|")) for value in callbacks)
+
+
+def test_prompt_video_button_stays_in_video_flow():
+    callbacks = _callbacks(bot.task3d_result_keyboard("storyboard_prompt", "vi"))
+    assert "vproduct|prompt_video" in callbacks
+    assert not any(value.startswith("create_media|video") for value in callbacks)
+
+
+def test_prompt_image_does_not_open_standalone_image_menu():
+    source = inspect.getsource(bot.handle_video_product_callback)
+    prompt_image_source = source[source.index('if action == "prompt_image"'):source.index('if action == "prompt_video"')]
+    assert "localized_menu_content" not in prompt_image_source
+    assert '"menu|image"' not in prompt_image_source
+    assert "handle_image_tools_callback" not in prompt_image_source
+
+
+def test_prompt_image_scene_selector():
+    session = {"draft": {"prompt_bundle": _bundle(shots=6).to_dict()}}
+    markup = bot.task3d_prompt_image_scene_keyboard(session, "vi")
+    labels = _labels(markup)
+    callbacks = _callbacks(markup)
+    for index in range(1, 7):
+        assert str(index) in labels
+        assert f"vproduct|prompt_image_select|{index}" in callbacks
+    assert "📦 Tất cả cảnh" in labels
+    assert "⭐ Cảnh chính" in labels
+    assert callbacks[-2:] == ["vproduct|result", "menu|main"]
+
+
+def test_prompt_image_detail_shows_scene_prompt():
+    bundle = _bundle(shots=3).to_dict()
+    session = {"draft": {"prompt_bundle": bundle, "prompt_image_selection": [2]}}
+    text = bot.task3d_prompt_detail_text(session, "image")
+    assert "Prompt ảnh — 2" in text
+    assert bundle["image_prompts"][1][:80] in text
+
+
+def test_prompt_image_copy_prompt():
+    user_id = 993301
+    bot.clear_video_session(user_id)
+    bundle = _bundle(shots=2).to_dict()
+    bot.task3d_session_step(user_id, "prompt_image_detail", product_id="storyboard_prompt", prompt_bundle=bundle, prompt_image_selection=[1])
+    query = _FakeQuery(user_id, "vproduct|prompt_image_copy")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert "dễ sao chép" in query.edits[-1][0]
+    assert bundle["image_prompts"][0][:80] in query.edits[-1][0]
+    bot.clear_video_session(user_id)
+
+
+def test_prompt_image_create_image_shows_image_package_selector():
+    session = {"draft": {"prompt_bundle": _bundle(shots=2).to_dict(), "prompt_image_selection": [1]}}
+    labels = _labels(bot.task3d_prompt_image_package_keyboard("vi"))
+    assert labels == [
+        "50 Xu Tiết kiệm", "150 Xu Phổ thông", "200 Xu Có bảo hành", "300 Xu Cao cấp",
+        "400 Xu Có bảo hành", "500 Xu Cao cấp+", "600 Xu Có bảo hành", "⬅️ Prompt ảnh",
+    ]
+    assert "chưa gọi hệ tạo ảnh và chưa trừ Xu" in bot.task3d_prompt_image_package_text(session, "vi")
+
+
+def test_prompt_image_uses_existing_image_pricing():
+    assert tuple(bot.TASK3D_VIDEO_IMAGE_PACKAGES) == bot.TASK3D_VIDEO_IMAGE_PACKAGE_ORDER
+    assert [bot.TASK3D_VIDEO_IMAGE_PACKAGES[code]["unit_cost_xu"] for code in bot.TASK3D_VIDEO_IMAGE_PACKAGE_ORDER] == [50, 150, 200, 300, 400, 500, 600]
+    assert all(
+        bot.TASK3D_VIDEO_IMAGE_PACKAGES[code]["provider_tier"] in bot.IMAGE_TIER_ORDER
+        for code in bot.TASK3D_VIDEO_IMAGE_PACKAGE_ORDER
+    )
+    assert all(
+        value.startswith("create_media|image_tier_") or value in {"menu|main_image", "menu|main", "create_media|cancel"}
+        for value in _callbacks(bot.public_image_tier_keyboard("vi"))
+    )
+
+
+def test_prompt_image_confirm_no_xu_before_confirm():
+    user_id = 993302
+    bot.clear_video_session(user_id)
+    bundle = _bundle(shots=2).to_dict()
+    bot.task3d_session_step(user_id, "prompt_image_detail", product_id="storyboard_prompt", prompt_bundle=bundle, prompt_image_selection=[1])
+    query = _FakeQuery(user_id, "vproduct|prompt_image_package|200")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    token = session["draft"]["prompt_image_confirm_token"]
+    assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
+    assert session["draft"].get("xu_charged", 0) == 0
+    assert "Chi phí: <b>200 Xu</b>" in query.edits[-1][0]
+    assert "chưa tạo ảnh và chưa trừ Xu" in query.edits[-1][0]
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_session(user_id)
+
+
+def test_prompt_image_provider_guard_no_charge(monkeypatch):
+    user_id = 993303
+    bot.clear_video_session(user_id)
+    bundle = _bundle(shots=2).to_dict()
+    bot.task3d_session_step(user_id, "prompt_image_detail", product_id="storyboard_prompt", prompt_bundle=bundle, prompt_image_selection=[1])
+    select_query = _FakeQuery(user_id, "vproduct|prompt_image_package|50")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=select_query), SimpleNamespace()))
+    token = bot.get_video_session(user_id)["draft"]["prompt_image_confirm_token"]
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (False, "maintenance"))
+    execute_query = _FakeQuery(user_id, f"vproduct|prompt_image_execute|{token}")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=execute_query), SimpleNamespace()))
+    assert "bảo trì/nâng cấp" in execute_query.edits[-1][0]
+    assert "chưa trừ Xu" in execute_query.edits[-1][0]
+    assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_session(user_id)
+
+
+def test_prompt_video_shot_selector():
+    session = {"draft": {"prompt_bundle": _bundle(shots=4).to_dict()}}
+    callbacks = _callbacks(bot.task3d_prompt_video_selector_keyboard(session, "vi"))
+    for index in range(1, 5):
+        assert f"vproduct|prompt_video_select|{index}" in callbacks
+    assert "vproduct|prompt_video_select|all" in callbacks
+    assert "vproduct|prompt_video_batches" in callbacks
+    assert callbacks[-2:] == ["vproduct|result", "menu|main"]
+
+
+def test_prompt_video_detail_shows_video_prompt():
+    bundle = _bundle(shots=3).to_dict()
+    session = {"draft": {"prompt_bundle": bundle, "prompt_video_selection": [3]}}
+    text = bot.task3d_prompt_detail_text(session, "video")
+    assert "Prompt video — 3" in text
+    assert bundle["video_prompts"][2][:80] in text
+
+
+def test_prompt_video_create_routes_to_video_package_selector(monkeypatch):
+    user_id = 993304
+    bot.clear_video_session(user_id)
+    bundle = _bundle(shots=3).to_dict()
+    bot.task3d_session_step(user_id, "prompt_video_detail", product_id="storyboard_prompt", prompt_bundle=bundle, prompt_video_selection=[2])
+    captured = {}
+
+    async def fake_open(query, uid, product_id, source_state, lang, return_to, package):
+        captured.update({"uid": uid, "product_id": product_id, "source_state": source_state, "return_to": return_to, "package": package})
+
+    monkeypatch.setattr(bot, "open_video_finalization", fake_open)
+    query = _FakeQuery(user_id, "vproduct|prompt_video_create")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert captured["return_to"] == "vproduct|prompt_video_detail"
+    assert captured["package"]["selected_shots"] == [2]
+    assert bundle["video_prompts"][1] in captured["package"]["video_prompt"]
+    bot.clear_video_session(user_id)
+
+
+def test_prompt_video_package_then_export_core():
+    source = inspect.getsource(bot.handle_shopaikey_public_callback)
+    assert "callback_data_override" in inspect.signature(bot.handle_shopaikey_public_callback).parameters
+    assert "submit_public_video_with_key4u_fallback" in source
+    assert "prompt_image" not in source
+    assert "prompt_video_create" not in source
+
+
+def test_export_prompt_pack_includes_image_and_video_prompts():
+    bundle = _bundle(shots=2).to_dict()
+    bundle["caption"] = "Caption thử"
+    content = bot.task3d_prompt_export_markdown(bundle)
+    assert "## Hook" in content
+    assert "## Script" in content
+    assert "## Caption" in content
+    assert bundle["image_prompts"][0] in content
+    assert bundle["video_prompts"][0] in content
+    assert bundle["negative_prompt"] in content
+    assert "## Batch grouping" in content
+    export_source = inspect.getsource(bot.task3d_prompt_export_markdown)
+    assert "spend_fixed_credit_info" not in export_source
+    assert "shopaikey" not in export_source.lower()
+
+
+def test_export_prompt_pack_no_xu(monkeypatch):
+    user_id = 993307
+    bot.clear_video_session(user_id)
+    bundle = _bundle(shots=2).to_dict()
+    bot.task3d_session_step(user_id, "result", product_id="storyboard_prompt", prompt_bundle=bundle)
+    sent = []
+
+    class ExportBot:
+        async def send_document(self, **kwargs):
+            sent.append(kwargs)
+
+    def forbidden_charge(*args, **kwargs):
+        raise AssertionError("prompt pack export must not charge Xu")
+
+    monkeypatch.setattr(bot, "spend_fixed_credit_info", forbidden_charge)
+    query = _FakeQuery(user_id, "vproduct|export|markdown")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace(bot=ExportBot())))
+    assert sent and sent[0]["filename"].endswith(".md")
+    assert "chưa gọi provider và chưa trừ Xu" in query.edits[-1][0]
+    callbacks = _callbacks(query.edits[-1][1]["reply_markup"])
+    assert callbacks == ["vproduct|prompt_image", "vproduct|prompt_video", "vproduct|render", "vproduct|result", "menu|main"]
+    bot.clear_video_session(user_id)
+
+
+def test_change_style_preserves_session():
+    user_id = 993305
+    bot.clear_video_session(user_id)
+    bundle = _bundle(shots=2).to_dict()
+    bot.task3d_session_step(user_id, "result", product_id="storyboard_prompt", prompt_bundle=bundle, source_media_ref="telegram-file-1", topic="chủ đề giữ lại")
+    query = _FakeQuery(user_id, "vproduct|restyle")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] == "style"
+    assert session["source_media_ref"] == "telegram-file-1"
+    assert session["topic"] == "chủ đề giữ lại"
+    assert session["draft"]["prompt_bundle"] == bundle
+    bot.clear_video_session(user_id)
+
+
+def test_prompt_image_back_to_scene_selector():
+    assert "vproduct|prompt_image" in _callbacks(bot.task3d_prompt_image_detail_keyboard("vi"))
+
+
+def test_scene_selector_back_to_prompt_pack():
+    image_session = {"draft": {"prompt_bundle": _bundle(shots=2).to_dict(), "prompt_image_selection": [1]}}
+    assert _callbacks(bot.task3d_prompt_image_scene_keyboard(image_session, "vi"))[-2] == "vproduct|result"
+    assert "vproduct|prompt_image_detail" in _callbacks(bot.task3d_prompt_image_package_keyboard("vi"))
+
+
+def test_prompt_video_back_to_shot_selector():
+    assert "vproduct|prompt_video" in _callbacks(bot.task3d_prompt_video_detail_keyboard("vi"))
+
+
+def test_shot_selector_back_to_prompt_pack():
+    video_session = {"draft": {"prompt_bundle": _bundle(shots=2).to_dict(), "prompt_video_selection": [1]}}
+    assert _callbacks(bot.task3d_prompt_video_selector_keyboard(video_session, "vi"))[-2] == "vproduct|result"
+    assert "vproduct|prompt_video_detail" in inspect.getsource(bot.handle_video_product_callback)
+
+
+def test_no_reinput_reupload():
+    user_id = 993306
+    bot.clear_video_session(user_id)
+    bundle = _bundle(shots=2).to_dict()
+    bot.task3d_session_step(user_id, "result", product_id="image_to_video", prompt_bundle=bundle, source_media_ref="photo-file-id")
+    for callback in ("vproduct|prompt_image", "vproduct|prompt_image_select|1", "vproduct|prompt_image_packages"):
+        query = _FakeQuery(user_id, callback)
+        asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["source_media_ref"] == "photo-file-id"
+    assert session["draft"]["prompt_bundle"] == bundle
+    assert session["current_step"] == "prompt_image_package"
+    bot.clear_video_session(user_id)
+
+
+def test_standalone_image_menu_not_changed():
+    callbacks = _callbacks(bot.public_image_tier_keyboard("vi"))
+    assert callbacks == [
+        "create_media|image_tier_low", "create_media|image_tier_standard",
+        "create_media|image_tier_standard_warranty", "create_media|image_tier_high",
+        "create_media|image_tier_high_warranty", "menu|main_image", "menu|main", "create_media|cancel",
+    ]
+    assert "vproduct" not in inspect.getsource(bot.public_image_tier_keyboard)
+
+
+def test_video_export_core_not_changed():
+    source = inspect.getsource(bot.handle_shopaikey_public_callback)
+    assert "submit_public_video_with_key4u_fallback" in source
+    assert "shopai|confirm" not in source
+    assert "vproduct|prompt_image" not in source
+    assert "vproduct|prompt_video" not in source
+
+
+def test_all_packages_still_visible():
+    labels = _labels(bot.video_finalization_tier_keyboard("vi"))
+    for price in (200, 300, 400, 500, 600, 800, 1000, 1200, 1500):
+        assert any(f"{price} Xu" in label for label in labels)
+
+
 def test_multiscene_200_can_export_one_experience_shot():
     assert validate_package_selection("multi_scene_film", "package_200", ["none"])["ok"] is True
     assert validate_package_selection("script_image_video", "package_200", ["none"])["ok"] is True
