@@ -166,7 +166,7 @@ def test_video_status_check_does_not_resend_completed():
     assert "send_result.get(\"duplicate_prevented\")" in source
 
 
-def test_status_check_completed_offers_explicit_resend():
+def test_status_check_completed_offers_locked_result_actions():
     markup = bot.public_video_status_keyboard(
         "task_complete",
         {"id": 12, "status": "SUCCESS", "result_sent": 1, "package_item_type": "video_low"},
@@ -175,8 +175,49 @@ def test_status_check_completed_offers_explicit_resend():
         output_sent=True,
     )
     callbacks = _callbacks(markup)
-    assert "shopai_video_job|resend|task_complete" in callbacks
-    assert any(item.startswith("create_media|video_tier_") for item in callbacks)
+    assert callbacks == [
+        "shopai_video_job|av|task_complete",
+        "shopai_video_job|am|task_complete",
+        "shopai_video_job|as|task_complete",
+        "shopai_video_job|fb|task_complete",
+        "shopai_video_job|main",
+    ]
+    assert _labels(markup) == [
+        ["🎙 Thêm giọng/lồng tiếng", "🎵 Thêm nhạc"],
+        ["📝 Thêm phụ đề", "💬 Góp ý kết quả"],
+        ["🏠 Menu chính"],
+    ]
+
+
+def test_completed_video_result_menu_has_no_old_actions():
+    callbacks = _callbacks(bot.public_video_success_keyboard("low", "vi", "task_complete"))
+    joined = "\n".join(callbacks)
+    for old in ("resend", "create_media|", "quick_image", "trendg|", "feedback|start", "menu|main_music"):
+        assert old not in joined
+
+
+def test_completed_video_addon_guards_are_clear():
+    for kind in ("voice", "music", "subtitle"):
+        text = bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS[kind]
+        assert "bảo trì/nâng cấp" in text
+        assert "chưa xử lý" in text
+        assert "chưa trừ Xu" in text
+
+
+def test_video_addon_status_hides_secrets(monkeypatch):
+    monkeypatch.setattr(bot, "is_voice_mux_ready", lambda: False)
+    monkeypatch.setattr(bot, "is_music_mux_ready", lambda: False)
+    monkeypatch.setattr(bot, "is_subtitle_burn_ready", lambda: False)
+    monkeypatch.setattr(bot, "is_asr_ready", lambda: False)
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": False, "ffmpeg_path_configured": True})
+    monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {"full_result_ok": False})
+    monkeypatch.setattr(bot, "get_system_setting", lambda key, default="": default)
+    payload = bot.video_completed_addon_status_payload()
+    assert payload["completed_buttons_visible"] is True
+    assert payload["voice_mux_ready"] is False
+    assert payload["ai_music_full_result_ready"] is False
+    assert "token" not in payload
+    assert "key" not in payload
 
 
 def test_no_generic_error_after_successful_output():

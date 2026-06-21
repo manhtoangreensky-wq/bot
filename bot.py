@@ -33912,7 +33912,10 @@ def video_final_duration_model(payload: dict | None = None, state: dict | None =
         _safe_int(
             state.get("scene_duration_seconds")
             or payload.get("scene_duration_seconds")
+            or state.get("estimated_scene_seconds")
+            or payload.get("estimated_scene_seconds")
             or project.get("scene_duration_seconds")
+            or project.get("estimated_scene_seconds")
             or VIDEO_FINAL_DEFAULT_SCENE_SECONDS,
             VIDEO_FINAL_DEFAULT_SCENE_SECONDS,
         ),
@@ -33934,7 +33937,17 @@ def video_final_duration_model(payload: dict | None = None, state: dict | None =
         or len(project.get("scenes") or []),
         0,
     )
-    if explicit_scene_count > 0:
+    selected_scene_count = _safe_int(
+        state.get("selected_scene_count")
+        or payload.get("selected_scene_count")
+        or project.get("selected_scene_count")
+        or 0,
+        0,
+    )
+    if selected_scene_count > 0:
+        scene_count = selected_scene_count
+        final_seconds = scene_count * scene_duration
+    elif explicit_scene_count > 0:
         scene_count = max(VIDEO_FINAL_DEFAULT_SCENES, explicit_scene_count)
         final_seconds = scene_count * scene_duration
     elif requested_seconds > 0:
@@ -34910,6 +34923,43 @@ async def cmd_video_job_dedupe_status(update: Update, context: ContextTypes.DEFA
         f"• Last duplicate task: <code>{html.escape(str(item['last_duplicate_task_id'] or '-'))}</code>\n"
         f"• Last sent source: <code>{html.escape(str(item['last_output_sent_source'] or '-'))}</code>\n"
         f"• Last Telegram error: <code>{html.escape(str(item['last_telegram_send_error'] or '-'))}</code>",
+        parse_mode="HTML",
+    )
+
+def video_completed_addon_status_payload() -> dict:
+    worker = local_worker_status_payload()
+    music = get_suno_music_readiness()
+    ffmpeg_ready = bool(worker.get("connected") and worker.get("ffmpeg_path_configured"))
+    return {
+        "completed_buttons_visible": True,
+        "voice_mux_ready": bool(is_voice_mux_ready()),
+        "music_mux_ready": bool(is_music_mux_ready()),
+        "subtitle_mux_ready": bool(is_subtitle_burn_ready()),
+        "asr_ready": bool(is_asr_ready()),
+        "ai_music_full_result_ready": bool(music.get("full_result_ok")),
+        "ffmpeg_local_worker_ready": ffmpeg_ready,
+        "worker_connected": bool(worker.get("connected")),
+        "last_addon_job": get_system_setting("video_completed_addon_last_job", ""),
+        "last_addon_error": get_system_setting("video_completed_addon_last_error", ""),
+    }
+
+async def cmd_video_addon_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    item = video_completed_addon_status_payload()
+    return await update.message.reply_text(
+        "🎞 <b>VIDEO ADD-ON STATUS</b>\n\n"
+        f"• Completed video add-on buttons visible: <code>{'yes' if item['completed_buttons_visible'] else 'no'}</code>\n"
+        f"• Voice mux ready: <code>{'yes' if item['voice_mux_ready'] else 'no'}</code>\n"
+        f"• Music mux ready: <code>{'yes' if item['music_mux_ready'] else 'no'}</code>\n"
+        f"• Subtitle mux ready: <code>{'yes' if item['subtitle_mux_ready'] else 'no'}</code>\n"
+        f"• ASR ready: <code>{'yes' if item['asr_ready'] else 'no'}</code>\n"
+        f"• AI music full result ready: <code>{'yes' if item['ai_music_full_result_ready'] else 'no'}</code>\n"
+        f"• ffmpeg/local worker ready: <code>{'yes' if item['ffmpeg_local_worker_ready'] else 'no'}</code>\n"
+        f"• Local worker connected: <code>{'yes' if item['worker_connected'] else 'no'}</code>\n"
+        f"• Last addon job: <code>{html.escape(str(item['last_addon_job'] or '-'))}</code>\n"
+        f"• Last addon error: <code>{html.escape(str(item['last_addon_error'] or '-'))}</code>\n\n"
+        "• Key/token: <code>hidden</code>",
         parse_mode="HTML",
     )
 
@@ -36851,13 +36901,14 @@ def feedback_category_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(rows)
 
-def set_feedback_pending(user_id, category: str) -> None:
+def set_feedback_pending(user_id, category: str, context_note: str = "") -> None:
     slug = str(category or "").strip()
     if slug not in FEEDBACK_CATEGORY_LABELS:
         slug = "other"
     USER_PENDING[feedback_pending_key(user_id)] = {
         "pending_action": "feedback",
         "category": slug,
+        "context_note": sanitize_log_text(str(context_note or "").strip())[:500],
         "created_at_ts": time.time(),
     }
 
@@ -46118,7 +46169,7 @@ def task3d_session_step(user_id, step: str, **fields) -> dict:
     session["step_history"] = history[-12:]
     draft = dict(session.get("draft") or {})
     for key, value in fields.items():
-        if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to"}:
+        if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to", "selected_scene_count", "estimated_scene_seconds", "estimated_duration_seconds", "duration_mode", "duration_note"}:
             session[key] = value
         draft[key] = value
     session["draft"] = draft
@@ -46230,6 +46281,182 @@ def task3d_result_parent_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
     ])
 
+TASK3D_SCENE_SECONDS = 6
+TASK3D_SCENE_COUNT_OPTIONS = (1, 3, 5, 10, 20)
+
+def task3d_scene_count_fields(scene_count) -> dict:
+    count = max(1, min(20, safe_int(scene_count, 3)))
+    duration = count * TASK3D_SCENE_SECONDS
+    return {
+        "selected_scene_count": count,
+        "estimated_scene_seconds": TASK3D_SCENE_SECONDS,
+        "estimated_duration_seconds": duration,
+        "duration_mode": "scene_based",
+        "duration_note": f"{count} cảnh, khoảng {duration} giây",
+    }
+
+def task3d_scene_count_text(session: dict | None = None, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎞 <b>Choose video scene count</b>\n\n"
+            "TOAN AAS currently estimates video by scene/clip.\n"
+            "1 scene is about 6 seconds.\n\n"
+            "Suggestions:\n"
+            "• 1 scene ≈ 6 seconds - quick test\n"
+            "• 3 scenes ≈ 18 seconds - standard video\n"
+            "• 5 scenes ≈ 30 seconds - short polished video\n"
+            "• 10 scenes ≈ 60 seconds - 1-minute video\n"
+            "• 20 scenes ≈ 120 seconds - 2-minute video\n\n"
+            "You need to choose a scene count before selecting a package."
+        )
+    return (
+        "🎞 <b>Chọn số cảnh video</b>\n\n"
+        "TOAN AAS hiện tính video theo cảnh/clip.\n"
+        "1 cảnh khoảng 6 giây.\n\n"
+        "Gợi ý:\n"
+        "• 1 cảnh ≈ 6 giây - test nhanh\n"
+        "• 3 cảnh ≈ 18 giây - video chuẩn\n"
+        "• 5 cảnh ≈ 30 giây - video ngắn đẹp\n"
+        "• 10 cảnh ≈ 60 giây - video 1 phút\n"
+        "• 20 cảnh ≈ 120 giây - video 2 phút\n\n"
+        "Bạn cần chọn số cảnh trước khi chọn gói."
+    )
+
+def task3d_scene_count_back_callback(session: dict | None = None) -> str:
+    callback = str(((session or {}).get("draft") or {}).get("scene_count_back_callback") or "vproduct|result").strip()
+    return callback if callback.startswith("vproduct|") else "vproduct|result"
+
+def task3d_scene_count_keyboard(lang: str = "vi", back_callback: str = "vproduct|result") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("1 cảnh", callback_data="vproduct|scene_count_select|1"),
+            InlineKeyboardButton("3 cảnh", callback_data="vproduct|scene_count_select|3"),
+        ],
+        [
+            InlineKeyboardButton("5 cảnh", callback_data="vproduct|scene_count_select|5"),
+            InlineKeyboardButton("10 cảnh", callback_data="vproduct|scene_count_select|10"),
+        ],
+        [
+            InlineKeyboardButton("20 cảnh", callback_data="vproduct|scene_count_select|20"),
+            InlineKeyboardButton("✍️ Tự chọn", callback_data="vproduct|scene_count_custom"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", callback_data=back_callback),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def task3d_scene_count_custom_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "How many scenes do you want to create? Enter a number from 1 to 20."
+    return "Bạn muốn tạo bao nhiêu cảnh? Nhập số từ 1 đến 20."
+
+def task3d_scene_count_custom_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Chọn số cảnh" if normalize_user_language(lang) == "vi" else "⬅️ Scene count", callback_data="vproduct|select_scene_count"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+def task3d_prompt_scene_count(session: dict | None = None) -> int:
+    bundle = task3d_video_prompt_bundle(session or {})
+    return max(len(bundle.get("shot_table") or []), len(bundle.get("video_prompts") or []), 0)
+
+def task3d_scene_count_video_prompt(session: dict, scene_count: int) -> tuple[str, str]:
+    bundle = task3d_video_prompt_bundle(session)
+    draft = dict((session or {}).get("draft") or {})
+    render_prompt = str(draft.get("scene_count_render_video_prompt") or "").strip()
+    render_prompt_count = safe_int(draft.get("scene_count_render_prompt_count") or 0, 0)
+    if render_prompt:
+        note = ""
+        if render_prompt_count and scene_count > render_prompt_count:
+            note = f"Prompt hiện có {render_prompt_count} cảnh. Bạn đã chọn {scene_count} cảnh. TOAN AAS sẽ mở rộng storyboard/prompt lên {scene_count} cảnh."
+            render_prompt = f"{render_prompt}\n\n{note}"
+        elif render_prompt_count and scene_count < render_prompt_count:
+            note = f"Prompt hiện có {render_prompt_count} cảnh. Bạn đã chọn {scene_count} cảnh nên TOAN AAS sẽ dùng {scene_count} cảnh đầu tiên."
+        return render_prompt, note
+    prompts = [
+        str(item or "").strip()
+        for item in (bundle.get("video_prompts") or [])
+        if str(item or "").strip()
+    ]
+    if not prompts:
+        prompts = [
+            str(shot.get("video_prompt") or "").strip()
+            for shot in (bundle.get("shot_table") or [])
+            if str(shot.get("video_prompt") or "").strip()
+        ]
+    existing_count = len(prompts)
+    selected = prompts[:max(1, int(scene_count or 1))]
+    if not selected:
+        selected = [str(bundle.get("short_summary") or bundle.get("script") or "Tạo video ngắn rõ chủ thể, nhất quán phong cách.")[:1200]]
+    prompt = "\n\n".join(f"Cảnh {index}: {text}" for index, text in enumerate(selected, start=1))
+    note = ""
+    if existing_count and scene_count > existing_count:
+        note = f"Prompt hiện có {existing_count} cảnh. Bạn đã chọn {scene_count} cảnh. TOAN AAS sẽ mở rộng storyboard/prompt lên {scene_count} cảnh."
+        prompt = f"{prompt}\n\n{note}"
+    elif existing_count and scene_count < existing_count:
+        note = f"Prompt hiện có {existing_count} cảnh. Bạn đã chọn {scene_count} cảnh nên TOAN AAS sẽ dùng {scene_count} cảnh đầu tiên."
+    return prompt, note
+
+def task3d_video_scene_payloads(session: dict, scene_count: int) -> tuple[dict, dict]:
+    product_id = str((session or {}).get("product_id") or "")
+    bundle = task3d_video_prompt_bundle(session)
+    fields = task3d_scene_count_fields(scene_count)
+    video_prompt, scene_note = task3d_scene_count_video_prompt(session, fields["selected_scene_count"])
+    shared = {
+        **fields,
+        "scene_count": fields["selected_scene_count"],
+        "scene_duration_seconds": fields["estimated_scene_seconds"],
+        "duration_seconds": fields["estimated_duration_seconds"],
+        "requested_seconds": fields["estimated_duration_seconds"],
+        "final_duration_seconds": fields["estimated_duration_seconds"],
+        "scene_expansion_note": scene_note,
+    }
+    source_state = {
+        **shared,
+        "product_id": product_id,
+        "selected_topic": session.get("topic"),
+        "selected_style": session.get("style"),
+        "preferred_aspect_ratio": session.get("aspect_ratio"),
+        "source_media_ref": session.get("source_media_ref"),
+        "video_prompt": video_prompt,
+        "script": bundle.get("script"),
+        "prompt_bundle": bundle,
+    }
+    package = {
+        **shared,
+        "source": product_id,
+        "product_id": product_id,
+        "concept_text": bundle.get("short_summary"),
+        "video_prompt": video_prompt,
+        "prompt_bundle_id": bundle.get("bundle_id"),
+        "source_media_ref": session.get("source_media_ref"),
+        "selected_shots": list(((session.get("draft") or {}).get("scene_count_render_selected_shots") or [])),
+    }
+    return source_state, package
+
+async def task3d_open_video_finalization_from_scene_count(target, user_id, session: dict, lang: str = "vi"):
+    count = safe_int((session.get("draft") or {}).get("selected_scene_count") or session.get("selected_scene_count"), 0)
+    if count <= 0:
+        session = task3d_session_step(user_id, "select_scene_count")
+        return await safe_edit_or_send(
+            target,
+            task3d_scene_count_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
+        )
+    source_state, package = task3d_video_scene_payloads(session, count)
+    return await open_video_finalization(
+        target,
+        user_id,
+        str(session.get("product_id") or package.get("source") or "video_plan"),
+        source_state,
+        lang,
+        "vproduct|select_scene_count",
+        package,
+        initial_step="tier",
+    )
+
 
 def task3d_video_prompt_bundle(session: dict) -> dict:
     draft = dict((session or {}).get("draft") or {})
@@ -46316,8 +46543,8 @@ def task3d_prompt_detail_text(session: dict, kind: str, copy_hint: bool = False)
 def task3d_prompt_image_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 Copy prompt", callback_data="vproduct|prompt_image_copy"), InlineKeyboardButton("🎨 Tạo ảnh từ prompt", callback_data="vproduct|prompt_image_packages")],
-        [InlineKeyboardButton("🔁 Viết lại prompt", callback_data="vproduct|prompt_image_rewrite"), InlineKeyboardButton("⬅️ Chọn cảnh", callback_data="vproduct|prompt_image")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("🔁 Viết sát ý hơn", callback_data="vproduct|prompt_image_rewrite"), InlineKeyboardButton("✍️ Sửa yêu cầu", callback_data="vproduct|prompt_image_edit")],
+        [InlineKeyboardButton("⬅️ Chọn cảnh", callback_data="vproduct|prompt_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -46412,8 +46639,8 @@ def task3d_prompt_video_batch_keyboard(session: dict, lang: str = "vi") -> Inlin
 def task3d_prompt_video_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 Copy prompt", callback_data="vproduct|prompt_video_copy"), InlineKeyboardButton("🎬 Tạo video từ prompt", callback_data="vproduct|prompt_video_create")],
-        [InlineKeyboardButton("🔁 Viết lại prompt", callback_data="vproduct|prompt_video_rewrite"), InlineKeyboardButton("⬅️ Chọn shot", callback_data="vproduct|prompt_video")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("🔁 Viết sát ý hơn", callback_data="vproduct|prompt_video_rewrite"), InlineKeyboardButton("✍️ Sửa yêu cầu", callback_data="vproduct|prompt_video_edit")],
+        [InlineKeyboardButton("⬅️ Chọn shot", callback_data="vproduct|prompt_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -46592,6 +46819,15 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
         return await safe_edit_or_send(target, task3d_trend_ideas_text(session, lang), parse_mode="HTML", reply_markup=task3d_trend_ideas_keyboard(session, lang))
     if step == "result":
         return await safe_edit_or_send(target, task3d_result_text(session, lang), parse_mode="HTML", reply_markup=task3d_result_keyboard(product_id, lang))
+    if step == "select_scene_count":
+        return await safe_edit_or_send(
+            target,
+            task3d_scene_count_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
+        )
+    if step == "scene_count_custom":
+        return await safe_edit_or_send(target, task3d_scene_count_custom_text(lang), reply_markup=task3d_scene_count_custom_keyboard(lang))
     return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
 
 
@@ -46820,6 +47056,33 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "restyle":
         session = task3d_session_step(uid, "style")
         return await task3d_render_step(query, uid, session, lang)
+    if action == "select_scene_count":
+        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
+        if not bundle:
+            return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
+        session = task3d_session_step(uid, "select_scene_count")
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "scene_count_custom":
+        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
+        if not bundle:
+            return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
+        session = task3d_session_step(uid, "scene_count_custom")
+        return await task3d_render_step(query, uid, session, lang)
+    if action == "scene_count_select":
+        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
+        if not bundle:
+            return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
+        count = safe_int(value, 0)
+        if count < 1:
+            return await safe_edit_or_send(query, task3d_scene_count_custom_text(lang), reply_markup=task3d_scene_count_custom_keyboard(lang))
+        if count > 20:
+            return await safe_edit_or_send(
+                query,
+                "Hiện video ngắn chỉ hỗ trợ tối đa 20 cảnh/khoảng 2 phút. Phim dài sẽ xử lý ở giai đoạn sau.",
+                reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
+            )
+        session = task3d_session_step(uid, "select_scene_count", **task3d_scene_count_fields(count))
+        return await task3d_open_video_finalization_from_scene_count(query, uid, session, lang)
     if action == "view":
         # Compatibility for buttons already sent before Task 3D.6.
         action = "prompt_image" if value == "image" else "prompt_video"
@@ -46848,6 +47111,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "prompt_image_rewrite":
         session = task3d_session_step(uid, "prompt_image_detail", **task3d_rewrite_selected_prompts(session, "image"))
         return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "image"), parse_mode="HTML", reply_markup=task3d_prompt_image_detail_keyboard(lang))
+    if action == "prompt_image_edit":
+        session = task3d_session_step(uid, "detail", prompt_edit_kind="image")
+        return await task3d_render_step(query, uid, session, lang)
     if action == "prompt_image_packages":
         session = task3d_session_step(uid, "prompt_image_package")
         return await safe_edit_or_send(query, task3d_prompt_image_package_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_package_keyboard(lang))
@@ -46954,35 +47220,23 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "prompt_video_rewrite":
         session = task3d_session_step(uid, "prompt_video_detail", **task3d_rewrite_selected_prompts(session, "video"))
         return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+    if action == "prompt_video_edit":
+        session = task3d_session_step(uid, "detail", prompt_edit_kind="video")
+        return await task3d_render_step(query, uid, session, lang)
     if action == "prompt_video_create":
         selected = task3d_video_prompt_selected_entries(session, "video")
         if not selected:
             return await safe_edit_or_send(query, "⚠️ Hãy chọn lại shot cần tạo video. Bot chưa trừ Xu.", reply_markup=task3d_prompt_video_selector_keyboard(session, lang))
-        bundle = task3d_video_prompt_bundle(session)
         selected_prompt = "\n\n".join(f"Shot {index}: {prompt}" for index, prompt in selected)
-        source_state = {
-            "product_id": product_id,
-            "selected_topic": session.get("topic"),
-            "selected_style": session.get("style"),
-            "preferred_aspect_ratio": session.get("aspect_ratio"),
-            "source_media_ref": session.get("source_media_ref"),
-            "video_prompt": selected_prompt,
-            "script": bundle.get("script"),
-            "prompt_bundle": bundle,
-            "selected_shots": [index for index, _prompt in selected],
-            "scene_count": len(selected),
-        }
-        package = {
-            "source": product_id,
-            "product_id": product_id,
-            "concept_text": bundle.get("short_summary"),
-            "video_prompt": selected_prompt,
-            "prompt_bundle_id": bundle.get("bundle_id"),
-            "source_media_ref": session.get("source_media_ref"),
-            "scene_count": len(selected),
-            "selected_shots": [index for index, _prompt in selected],
-        }
-        return await open_video_finalization(query, uid, product_id, source_state, lang, "vproduct|prompt_video_detail", package)
+        session = task3d_session_step(
+            uid,
+            "select_scene_count",
+            scene_count_back_callback="vproduct|prompt_video_detail",
+            scene_count_render_video_prompt=selected_prompt,
+            scene_count_render_prompt_count=len(selected),
+            scene_count_render_selected_shots=[index for index, _prompt in selected],
+        )
+        return await task3d_render_step(query, uid, session, lang)
     if action == "export_menu":
         return await safe_edit_or_send(query, "📦 <b>Xuất prompt pack</b>\n\nChọn định dạng:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("JSON", callback_data="vproduct|export|json"), InlineKeyboardButton("Markdown", callback_data="vproduct|export|markdown"), InlineKeyboardButton("TXT", callback_data="vproduct|export|txt")],
@@ -47010,28 +47264,15 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
         if not bundle:
             return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
-        first_shot = dict((bundle.get("shot_table") or [{}])[0])
-        source_state = {
-            "product_id": product_id,
-            "selected_topic": session.get("topic"),
-            "selected_style": session.get("style"),
-            "preferred_aspect_ratio": session.get("aspect_ratio"),
-            "source_media_ref": session.get("source_media_ref"),
-            "video_prompt": first_shot.get("video_prompt") or (bundle.get("video_prompts") or [""])[0],
-            "script": bundle.get("script"),
-            "prompt_bundle": bundle,
-            "scene_count": len(bundle.get("shot_table") or []),
-        }
-        package = {
-            "source": product_id,
-            "product_id": product_id,
-            "concept_text": bundle.get("short_summary"),
-            "video_prompt": source_state["video_prompt"],
-            "prompt_bundle_id": bundle.get("bundle_id"),
-            "source_media_ref": session.get("source_media_ref"),
-            "scene_count": 1 if product_id in {"storyboard_prompt", "script_image_video"} else len(bundle.get("shot_table") or []),
-        }
-        return await open_video_finalization(query, uid, product_id, source_state, lang, "vproduct|result", package)
+        session = task3d_session_step(
+            uid,
+            "select_scene_count",
+            scene_count_back_callback="vproduct|result",
+            scene_count_render_video_prompt="",
+            scene_count_render_prompt_count=0,
+            scene_count_render_selected_shots=[],
+        )
+        return await task3d_render_step(query, uid, session, lang)
     if action == "back":
         target_step, session = task3d_back_step(uid)
         return await task3d_render_step(query, uid, session, lang)
@@ -47059,6 +47300,25 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         return False
     uid = update.effective_user.id
     session = get_video_session(uid)
+    if str(session.get("current_step") or "") == "scene_count_custom":
+        lang = get_user_language(uid) or "vi"
+        raw_text = re.sub(r"\s+", " ", update.message.text.strip())[:80]
+        if not re.fullmatch(r"\d+", raw_text or ""):
+            await update.message.reply_text(task3d_scene_count_custom_text(lang), reply_markup=task3d_scene_count_custom_keyboard(lang))
+            return True
+        count = safe_int(raw_text, 0)
+        if count < 1:
+            await update.message.reply_text(task3d_scene_count_custom_text(lang), reply_markup=task3d_scene_count_custom_keyboard(lang))
+            return True
+        if count > 20:
+            await update.message.reply_text(
+                "Hiện video ngắn chỉ hỗ trợ tối đa 20 cảnh/khoảng 2 phút. Phim dài sẽ xử lý ở giai đoạn sau.",
+                reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
+            )
+            return True
+        session = task3d_session_step(uid, "select_scene_count", **task3d_scene_count_fields(count))
+        await task3d_open_video_finalization_from_scene_count(update.message, uid, session, lang)
+        return True
     if str(session.get("current_step") or "") != "collect_input" or str((session.get("draft") or {}).get("input_mode") or "") != "text":
         return False
     text = re.sub(r"\s+", " ", update.message.text.strip())[:1200]
@@ -56109,6 +56369,8 @@ async def safe_edit_or_send(query, text: str, reply_markup=None, parse_mode: str
     if not query:
         return None
     message = getattr(query, "message", None)
+    if not hasattr(query, "edit_message_text") and hasattr(query, "reply_text"):
+        return await query.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     try:
         return await query.edit_message_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
     except Exception as e:
@@ -64578,6 +64840,53 @@ async def handle_shopaikey_video_job_callback(update: Update, context: ContextTy
         )
     if len(raw_parts) >= 3 and raw_parts[1] == "retry":
         return await handle_public_video_retry_callback(query, uid, raw_parts[2], lang)
+    completed_addon_kind = {
+        "av": "voice",
+        "am": "music",
+        "as": "subtitle",
+        "fb": "feedback",
+        "addon_voice": "voice",
+        "addon_music": "music",
+        "addon_subtitle": "subtitle",
+        "feedback": "feedback",
+    }.get(raw_parts[1] if len(raw_parts) >= 2 else "")
+    if len(raw_parts) >= 3 and completed_addon_kind:
+        task_id = str(raw_parts[2] or "").strip()
+        db_job = shopaikey_job_by_task_id(task_id)
+        if (
+            not db_job
+            or str(db_job.get("user_id") or "") != str(uid)
+            or bool(int(db_job.get("admin_only") or 0))
+        ):
+            return await safe_edit_or_send(
+                query,
+                "⚠️ Không tìm thấy kết quả video của bạn. TOAN AAS chưa gọi API mới và chưa trừ thêm Xu.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")]]),
+            )
+        job_id = int(db_job.get("id") or 0)
+        video_session_id = str((get_video_finalization_state(uid) or {}).get("session_id") or "")[:80]
+        if completed_addon_kind == "feedback":
+            context_note = f"task_id={task_id}; job_id={job_id}; video_session_id={video_session_id or '-'}"
+            set_feedback_pending(uid, "video_error", context_note=context_note)
+            _safe_set_video_system_setting("video_completed_addon_last_job", f"feedback:{context_note}", "completed video feedback")
+            _safe_set_video_system_setting("video_completed_addon_last_error", "", "completed video feedback")
+            return await safe_edit_or_send(
+                query,
+                "💬 Bạn hãy gửi góp ý hoặc chấm điểm kết quả video này. TOAN AAS chỉ lưu phản hồi để admin kiểm tra, chưa gọi provider và chưa trừ Xu.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu chính", callback_data="shopai_video_job|main")]]),
+            )
+        guard_text = VIDEO_COMPLETED_ADDON_GUARD_TEXTS.get(completed_addon_kind) or VIDEO_COMPLETED_ADDON_GUARD_TEXTS["subtitle"]
+        _safe_set_video_system_setting(
+            "video_completed_addon_last_job",
+            f"{completed_addon_kind}:task_id={task_id};job_id={job_id};video_session_id={video_session_id or '-'}",
+            "completed video addon guard",
+        )
+        _safe_set_video_system_setting("video_completed_addon_last_error", "maintenance_guard", "completed video addon guard")
+        return await safe_edit_or_send(
+            query,
+            guard_text,
+            reply_markup=public_video_success_keyboard(public_video_job_tier(db_job), lang, task_id=task_id),
+        )
     if len(raw_parts) >= 3 and raw_parts[1] == "resend":
         task_id = str(raw_parts[2] or "").strip()
         db_job = shopaikey_job_by_task_id(task_id)
@@ -88617,6 +88926,69 @@ def video_finalization_package_from_state(state: dict | None = None) -> dict:
             package[key] = state.get(key)
     return package
 
+def video_scene_selection_info(state: dict | None = None) -> dict:
+    state = dict(state or {})
+    sources = [
+        state,
+        dict(state.get("source_payload") or {}),
+        dict(state.get("pending_payload") or {}),
+        dict(state.get("video_project") or {}),
+        dict((state.get("pending_payload") or {}).get("video_project") or {}),
+        dict((state.get("source_payload") or {}).get("video_project") or {}),
+    ]
+    selected = 0
+    for source in sources:
+        selected = safe_int(source.get("selected_scene_count") or 0, 0)
+        if selected > 0:
+            break
+    if selected <= 0:
+        return {}
+    scene_seconds = 0
+    duration = 0
+    duration_mode = ""
+    note = ""
+    for source in sources:
+        scene_seconds = scene_seconds or safe_int(source.get("estimated_scene_seconds") or source.get("scene_duration_seconds") or 0, 0)
+        duration = duration or safe_int(source.get("estimated_duration_seconds") or 0, 0)
+        duration_mode = duration_mode or str(source.get("duration_mode") or "").strip()
+        note = note or str(source.get("duration_note") or "").strip()
+    scene_seconds = max(1, scene_seconds or TASK3D_SCENE_SECONDS)
+    duration = duration or selected * scene_seconds
+    return {
+        "selected_scene_count": selected,
+        "estimated_scene_seconds": scene_seconds,
+        "estimated_duration_seconds": duration,
+        "duration_mode": duration_mode or "scene_based",
+        "duration_note": note or f"{selected} cảnh, khoảng {duration} giây",
+    }
+
+def video_scene_selection_summary_lines(state: dict | None = None, lang: str = "vi", invoice: bool = False) -> list[str]:
+    info = video_scene_selection_info(state)
+    if not info:
+        return []
+    count = int(info["selected_scene_count"])
+    duration = int(info["estimated_duration_seconds"])
+    scene_seconds = int(info["estimated_scene_seconds"])
+    if normalize_user_language(lang) != "vi":
+        calc = f"each scene/clip is about {scene_seconds} seconds" if invoice else f"1 scene ≈ {scene_seconds} seconds"
+        lines = [
+            f"Scene count: <b>{count} scene{'s' if count != 1 else ''}</b>",
+            f"Estimated duration: <b>about {duration} seconds</b>",
+            f"Calculation: <b>{html.escape(calc)}</b>",
+        ]
+        if count >= 10 and not invoice:
+            lines.append("Longer multi-scene videos may take more time. TOAN AAS will confirm before processing or charging Xu.")
+        return lines
+    calc = f"mỗi cảnh/clip khoảng {scene_seconds} giây" if invoice else f"1 cảnh ≈ {scene_seconds} giây"
+    lines = [
+        f"Số cảnh: <b>{count} cảnh</b>",
+        f"Thời lượng ước tính: <b>khoảng {duration} giây</b>",
+        f"Cách tính: <b>{html.escape(calc)}</b>",
+    ]
+    if count >= 10 and not invoice:
+        lines.append("Video nhiều cảnh có thể mất lâu hơn và có thể cần ghép nhiều clip. TOAN AAS sẽ báo lại trước khi xử lý/trừ Xu.")
+    return lines
+
 def video_finalization_invoice_active(user_id, state: dict | None = None) -> bool:
     state = dict(state or {})
     if str(state.get("addon_return_target") or "").strip().lower() == "invoice":
@@ -88796,6 +89168,8 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
     has_prompt = video_finalization_has_prompt(state)
     yes = "Có" if normalize_user_language(lang) == "vi" else "Yes"
     no = "Không" if normalize_user_language(lang) == "vi" else "No"
+    scene_lines = video_scene_selection_summary_lines(state, lang)
+    scene_block = ("\n".join(scene_lines) + "\n\n") if scene_lines else ""
     if normalize_user_language(lang) != "vi":
         return (
             "🎬 <b>Choose AI video export package</b>\n\n"
@@ -88806,6 +89180,7 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
             f"Music: <b>{yes if finalization['music_enabled'] else no}</b>\n"
             f"Voice/dubbing: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
             f"Subtitles: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
+            f"{scene_block}"
             "Choose the right package:\n"
             + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
             + "\n\n"
@@ -88821,6 +89196,7 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         f"Nhạc: <b>{yes if finalization['music_enabled'] else no}</b>\n"
         f"Voice/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
         f"Phụ đề: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
+        f"{scene_block}"
         "Chọn gói phù hợp:\n"
         + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
         + "\n\n"
@@ -89604,8 +89980,29 @@ async def open_video_finalization(query, user_id, source: str, source_state: dic
     photos = developing_video_frame_photos(source_state)
     initial_payload = dict(source_payload or {})
     initial_project = build_video_project(user_id, source, {**source_state, **initial_payload})
+    selected_scene_count = safe_int(
+        initial_payload.get("selected_scene_count")
+        or source_state.get("selected_scene_count")
+        or initial_project.get("selected_scene_count")
+        or 0,
+        0,
+    )
+    estimated_scene_seconds = safe_int(
+        initial_payload.get("estimated_scene_seconds")
+        or source_state.get("estimated_scene_seconds")
+        or initial_project.get("estimated_scene_seconds")
+        or TASK3D_SCENE_SECONDS,
+        TASK3D_SCENE_SECONDS,
+    )
+    estimated_duration_seconds = safe_int(
+        initial_payload.get("estimated_duration_seconds")
+        or source_state.get("estimated_duration_seconds")
+        or initial_project.get("estimated_duration_seconds")
+        or (selected_scene_count * estimated_scene_seconds if selected_scene_count else 0),
+        0,
+    )
     step = "tier" if str(initial_step or "").strip().lower() in {"tier", "price", "pricing"} else "menu"
-    state = set_video_finalization_state(user_id, {
+    initial_state = {
         "step": step,
         "user_id": str(user_id),
         "source": source,
@@ -89621,7 +90018,16 @@ async def open_video_finalization(query, user_id, source: str, source_state: dic
             "script": str(source_state.get("selected_script") or source_state.get("script") or source_state.get("caption") or "")[:3000],
             "video_prompt": str(source_state.get("video_prompt") or source_state.get("selected_prompt") or source_state.get("custom_video_prompt") or "")[:3000],
         },
-    })
+    }
+    if selected_scene_count > 0:
+        initial_state.update({
+            "selected_scene_count": selected_scene_count,
+            "estimated_scene_seconds": estimated_scene_seconds,
+            "estimated_duration_seconds": estimated_duration_seconds,
+            "duration_mode": str(initial_payload.get("duration_mode") or source_state.get("duration_mode") or "scene_based")[:80],
+            "duration_note": str(initial_payload.get("duration_note") or source_state.get("duration_note") or f"{selected_scene_count} cảnh, khoảng {estimated_duration_seconds} giây")[:160],
+        })
+    state = set_video_finalization_state(user_id, initial_state)
     if step == "tier":
         return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
     return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
@@ -89831,6 +90237,14 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
         if current_step == "tier":
+            if str(state.get("back_callback") or "") == "vproduct|select_scene_count":
+                session = task3d_session_step(uid, "select_scene_count")
+                return await safe_edit_or_send(
+                    query,
+                    task3d_scene_count_text(session, lang),
+                    parse_mode="HTML",
+                    reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
+                )
             state["step"] = "menu"
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
@@ -90640,6 +91054,10 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
         "\nGiọng đọc mặc định đã được lưu nhưng chưa ghép vào video ở bản hiện tại.\n"
         if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
     )
+    scene_invoice_lines_en = video_scene_selection_summary_lines(state, "en", invoice=True)
+    scene_invoice_lines_vi = video_scene_selection_summary_lines(state, "vi", invoice=True)
+    duration_line_en = "\n".join(scene_invoice_lines_en) if scene_invoice_lines_en else f"Duration: <b>{duration} seconds</b>"
+    duration_line_vi = "\n".join(scene_invoice_lines_vi) if scene_invoice_lines_vi else f"Thời lượng: <b>{duration} giây</b>"
 
     if normalize_user_language(lang) != "vi":
         starter_note = (
@@ -90657,7 +91075,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
             "TOAN AAS has not processed anything and no Xu was charged.\n\n"
             "🧾 <b>Final video invoice</b>\n\n"
             f"Package: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
-            f"Duration: <b>{duration} seconds</b>\n\n"
+            f"{duration_line_en}\n\n"
             "Main service:\n"
             f"• Video: <b>{xu_number(order.get('base_price_xu'))} Xu</b>\n\n"
             f"Free items:\n{free_lines_en}\n\n"
@@ -90683,7 +91101,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
         "TOAN AAS chưa xử lý và chưa trừ Xu.\n\n"
         "🧾 <b>Hóa đơn xác nhận video</b>\n\n"
         f"Gói chính: <b>{html.escape(str(order.get('tier_name')))}</b>\n"
-        f"Thời lượng: <b>{duration} giây</b>\n\n"
+        f"{duration_line_vi}\n\n"
         "Dịch vụ chính:\n"
         f"• Video: <b>{xu_number(order.get('base_price_xu'))} Xu</b>\n\n"
         f"Mục miễn phí:\n{free_lines_vi}\n\n"
@@ -91166,6 +91584,16 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         "video_finalization": dict((package or {}).get("video_finalization") or {}),
         "video_finalization_confirmed": bool((package or {}).get("video_finalization_confirmed")),
         "video_project": dict((package or {}).get("video_project") or {}),
+        "selected_scene_count": int((package or {}).get("selected_scene_count") or 0),
+        "estimated_scene_seconds": int((package or {}).get("estimated_scene_seconds") or 0),
+        "estimated_duration_seconds": int((package or {}).get("estimated_duration_seconds") or 0),
+        "duration_mode": str((package or {}).get("duration_mode") or "")[:80],
+        "duration_note": str((package or {}).get("duration_note") or "")[:160],
+        "scene_count": int((package or {}).get("scene_count") or 0),
+        "scene_duration_seconds": int((package or {}).get("scene_duration_seconds") or 0),
+        "duration_seconds": int((package or {}).get("duration_seconds") or 0),
+        "requested_seconds": int((package or {}).get("requested_seconds") or 0),
+        "final_duration_seconds": int((package or {}).get("final_duration_seconds") or 0),
         "aspect_ratio": aspect,
     }
 
@@ -92414,25 +92842,37 @@ async def handle_public_video_retry_callback(query, user_id, job_id_text: str, l
     record_shopaikey_billing_event(user_id, 0, "video_retry_addon_shown", 0, int(credits or 0), int(credits or 0), f"retry_from_job={job_id}; tier={tier}")
     return await start_video_addon_step(query, user_id, pending_payload, tier, lang, source="ai")
 
+VIDEO_COMPLETED_ADDON_CALLBACKS = {
+    "voice": "av",
+    "music": "am",
+    "subtitle": "as",
+    "feedback": "fb",
+}
+VIDEO_COMPLETED_ADDON_GUARD_TEXTS = {
+    "voice": "Ghép giọng/lồng tiếng vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu.",
+    "music": "Tạo/ghép nhạc AI vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu.",
+    "subtitle": "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu.",
+}
+
+def public_video_completed_callback(kind: str, task_id: str = "") -> str:
+    short = VIDEO_COMPLETED_ADDON_CALLBACKS.get(str(kind or "").strip().lower(), "")
+    safe_task_id = str(task_id or "").strip()
+    callback = f"shopai_video_job|{short}|{safe_task_id}" if short and safe_task_id else "shopai_video_job|main"
+    return callback if len(callback.encode("utf-8")) <= 64 else "shopai_video_job|main"
+
 def public_video_success_keyboard(tier: str = "", lang: str = "vi", task_id: str = "") -> InlineKeyboardMarkup:
-    tier_norm = normalize_video_tier(tier)
-    rows = []
-    resend_callback = f"shopai_video_job|resend|{str(task_id or '').strip()}"
-    if task_id and len(resend_callback.encode("utf-8")) <= 64:
-        rows.append([
-            InlineKeyboardButton("🔁 Gửi lại kết quả" if normalize_user_language(lang) == "vi" else "🔁 Resend result", callback_data=resend_callback),
-            InlineKeyboardButton(ui_text(lang, "video.create_another"), callback_data=f"create_media|video_tier_{tier_norm}"),
-        ])
-    rows.extend([
-        [InlineKeyboardButton("🎵 Thêm nhạc nếu chưa có" if normalize_user_language(lang) == "vi" else "🎵 Add music if needed", callback_data="menu|main_music")],
-        *([] if task_id and len(resend_callback.encode("utf-8")) <= 64 else [[InlineKeyboardButton(ui_text(lang, "video.create_another"), callback_data=f"create_media|video_tier_{tier_norm}")]]),
-        [InlineKeyboardButton(ui_text(lang, "video.edit_prompt"), callback_data=f"create_media|video_tier_{tier_norm}")],
-        [InlineKeyboardButton(ui_text(lang, "video.create_image"), callback_data="create_media|quick_image")],
-        [InlineKeyboardButton("🔥 Tạo video theo trend" if normalize_user_language(lang) == "vi" else "🔥 Trend video", callback_data="trendg|start")],
-        [InlineKeyboardButton("💬 Góp ý kết quả" if normalize_user_language(lang) == "vi" else "💬 Give feedback", callback_data="feedback|start")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎙 Thêm giọng/lồng tiếng" if is_vi else "🎙 Add voice/dubbing", callback_data=public_video_completed_callback("voice", task_id)),
+            InlineKeyboardButton("🎵 Thêm nhạc" if is_vi else "🎵 Add music", callback_data=public_video_completed_callback("music", task_id)),
+        ],
+        [
+            InlineKeyboardButton("📝 Thêm phụ đề" if is_vi else "📝 Add subtitles", callback_data=public_video_completed_callback("subtitle", task_id)),
+            InlineKeyboardButton("💬 Góp ý kết quả" if is_vi else "💬 Give feedback", callback_data=public_video_completed_callback("feedback", task_id)),
+        ],
+        [InlineKeyboardButton("🏠 Menu chính" if is_vi else ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")],
     ])
-    return InlineKeyboardMarkup(rows)
 
 def quick_media_pending_key(user_id) -> str:
     return f"quick_media:{user_id}"
@@ -121115,7 +121555,9 @@ async def handle_feedback_pending_text(update: Update, context: ContextTypes.DEF
         "allowed_auto_send": True,
         "classifier_source": "structured_feedback",
     })
-    ticket, is_new = create_or_append_support_ticket(update.effective_user, category, text, classification)
+    context_note = str(pending.get("context_note") or "").strip()
+    ticket_text = text if not context_note else f"{text}\n\n[Video result context] {context_note}"
+    ticket, is_new = create_or_append_support_ticket(update.effective_user, category, ticket_text, classification)
     clear_feedback_pending(uid)
     lang = user_ui_lang(uid)
     if normalize_user_language(lang) != "vi":
@@ -121992,6 +122434,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_last_export_error", cmd_video_last_export_error))
     tg_app.add_handler(CommandHandler("video_job_dedupe_status", cmd_video_job_dedupe_status))
     tg_app.add_handler(CommandHandler("video_last_result_status", cmd_video_last_result_status))
+    tg_app.add_handler(CommandHandler("video_addon_status", cmd_video_addon_status))
     tg_app.add_handler(CommandHandler("test_all_safe", cmd_test_all_safe))
     tg_app.add_handler(CommandHandler("test_all_video", cmd_test_all_video))
     tg_app.add_handler(CommandHandler("test_all_provider", cmd_test_all_provider))
