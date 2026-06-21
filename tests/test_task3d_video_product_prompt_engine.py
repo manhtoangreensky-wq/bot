@@ -531,18 +531,17 @@ def test_trend_back_from_output_to_ideas():
     bot.clear_video_session(user_id)
 
 
-def test_package_back_to_scene_count():
-    source = inspect.getsource(bot.handle_video_product_callback)
-    assert 'task3d_session_step(uid, "select_scene_count")' in source
+def test_scene_count_back_to_package():
     finalization_source = inspect.getsource(bot.handle_video_finalization_callback)
-    assert 'state.get("back_callback") or "") == "vproduct|select_scene_count"' in finalization_source
-    assert "task3d_scene_count_back_callback(session)" in finalization_source
+    assert 'current_step == "scene_count"' in finalization_source
+    assert 'state["step"] = "tier"' in finalization_source
+    assert "video_finalization_tier_text" in finalization_source
 
 
-def test_confirmation_back_to_package():
+def test_confirmation_back_to_scene_count():
     source = inspect.getsource(bot.handle_video_finalization_callback)
     assert 'current_step == "confirm"' in source
-    assert 'state["step"] = "tier"' in source
+    assert "video_finalization_render_scene_count" in source
 
 
 def test_no_reinput_after_back():
@@ -724,10 +723,15 @@ def test_select_200_always_shows_final_confirmation(monkeypatch):
 
     upgrade_query = _FakeQuery(user_id, "videoaddon|upgrade_300")
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=upgrade_query), SimpleNamespace()))
-    upgraded = bot.get_video_addon_state(user_id)
-    assert upgraded["video_tier"] == "basic"
+    upgraded = bot.get_video_finalization_state(user_id)
+    assert upgraded["selected_video_tier"] == "basic"
+    assert upgraded["step"] == "scene_count"
+    assert not bot.get_video_addon_state(user_id)
     assert "300 Xu" in upgrade_query.edits[-1][0]
-    assert "videoaddon|export|token-select-200" in _callbacks(upgrade_query.edits[-1][1]["reply_markup"])
+    upgrade_callbacks = _callbacks(upgrade_query.edits[-1][1]["reply_markup"])
+    assert "vfinal|scene_count|1" in upgrade_callbacks
+    assert "vfinal|scene_count|3" in upgrade_callbacks
+    assert not any(value.startswith("videoaddon|export|") for value in upgrade_callbacks)
     bot.clear_video_addon_state(user_id)
 
 
@@ -1464,30 +1468,33 @@ def test_all_video_products_output_use_same_action_menu():
         assert required <= set(_callbacks(bot.task3d_result_keyboard(product_id, "vi"))), product_id
 
 
-def test_use_to_create_video_opens_scene_count_before_package(monkeypatch):
+def test_use_to_create_video_opens_package_before_scene_count(monkeypatch):
     user_id = 993290
     bot.clear_video_session(user_id)
     bundle = _bundle(shots=3).to_dict()
     bot.task3d_session_step(user_id, "result", product_id="storyboard_prompt", prompt_bundle=bundle)
+    captured = {}
 
-    async def forbidden_open(*args, **kwargs):
-        raise AssertionError("package selector must not open before scene count")
+    async def fake_open(*args, **kwargs):
+        captured.update({"args": args, "kwargs": kwargs})
 
-    monkeypatch.setattr(bot, "open_video_finalization", forbidden_open)
+    monkeypatch.setattr(bot, "open_video_finalization", fake_open)
     query = _FakeQuery(user_id, "vproduct|render")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "select_scene_count"
-    assert "Chọn số cảnh video" in query.edits[-1][0]
-    assert "Chọn gói xuất video AI" not in query.edits[-1][0]
+    assert session["current_step"] == "result"
+    assert captured["kwargs"]["initial_step"] == "tier"
+    assert captured["args"][5] == "vproduct|result"
+    assert "selected_scene_count" not in captured["args"][6]
     bot.clear_video_session(user_id)
 
 
 def test_scene_count_screen_has_required_buttons_and_no_skip():
-    labels = _labels(bot.task3d_scene_count_keyboard("vi"))
+    state = {"selected_video_tier": "basic"}
+    labels = _labels(bot.video_finalization_scene_count_keyboard(state, "vi"))
     assert labels == ["1 cảnh", "3 cảnh", "5 cảnh", "10 cảnh", "20 cảnh", "✍️ Tự chọn", "⬅️ Quay lại", "🏠 Menu chính"]
     assert not any("Bỏ qua" in label for label in labels)
-    assert _callbacks(bot.task3d_scene_count_keyboard("vi"))[-2:] == ["vproduct|result", "menu|main"]
+    assert _callbacks(bot.video_finalization_scene_count_keyboard(state, "vi"))[-2:] == ["vfinal|back", "vfinal|main"]
 
 
 @pytest.mark.parametrize(
@@ -1503,99 +1510,189 @@ def test_scene_count_maps_to_estimated_duration(scene_count, duration):
     assert "khoảng" in fields["duration_note"]
 
 
-def test_scene_count_required_before_package(monkeypatch):
+def test_package_selection_opens_scene_count(monkeypatch):
     user_id = 993291
-    bot.clear_video_session(user_id)
-    bot.task3d_session_step(user_id, "select_scene_count", product_id="storyboard_prompt", prompt_bundle=_bundle(shots=3).to_dict())
-    opened = []
+    bot.clear_video_finalization_state(user_id)
+    bot.set_video_finalization_state(user_id, {
+        "step": "tier",
+        "source": "storyboard_prompt",
+        "source_payload": {"video_prompt": "Prompt video ready"},
+        "has_video_prompt": True,
+        "session_context": {"video_prompt": "Prompt video ready"},
+    })
 
-    async def fake_open(*args, **kwargs):
-        opened.append((args, kwargs))
+    async def forbidden_start(*args, **kwargs):
+        raise AssertionError("invoice must not open before scene count")
 
-    monkeypatch.setattr(bot, "open_video_finalization", fake_open)
-    session = bot.get_video_session(user_id)
-    query = _FakeQuery(user_id, "unused")
-    asyncio.run(bot.task3d_open_video_finalization_from_scene_count(query, user_id, session, "vi"))
-    assert opened == []
+    monkeypatch.setattr(bot, "start_video_addon_step", forbidden_start)
+    monkeypatch.setattr(bot, "get_public_video_tier_ui_status", lambda tier, _admin=False: {"enabled": True, "label": tier, "price_xu": bot.video_tier_cost_xu(tier)})
+    query = _FakeQuery(user_id, "vfinal|tier|basic")
+    asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    state = bot.get_video_finalization_state(user_id)
+    assert state["selected_video_tier"] == "basic"
+    assert state["step"] == "scene_count"
     assert "Chọn số cảnh video" in query.edits[-1][0]
-    bot.clear_video_session(user_id)
+    bot.clear_video_finalization_state(user_id)
 
 
-def test_selected_scene_count_saved_and_opens_package(monkeypatch):
+def test_scene_count_then_final_quote(monkeypatch):
     user_id = 993292
+    bot.clear_video_finalization_state(user_id)
     bot.clear_video_session(user_id)
     bundle = _bundle(shots=5).to_dict()
-    bot.task3d_session_step(user_id, "select_scene_count", product_id="storyboard_prompt", prompt_bundle=bundle)
+    bot.task3d_session_step(user_id, "result", product_id="storyboard_prompt", prompt_bundle=bundle)
+    bot.set_video_finalization_state(user_id, {
+        "step": "scene_count",
+        "selected_video_tier": "basic",
+        "source": "storyboard_prompt",
+        "source_payload": {"video_prompt": "Prompt video ready"},
+        "has_video_prompt": True,
+        "session_context": {"video_prompt": "Prompt video ready"},
+    })
     captured = {}
 
-    async def fake_open(*args, **kwargs):
+    async def fake_start(*args, **kwargs):
         captured.update({"args": args, "kwargs": kwargs})
 
-    monkeypatch.setattr(bot, "open_video_finalization", fake_open)
-    query = _FakeQuery(user_id, "vproduct|scene_count_select|3")
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    session = bot.get_video_session(user_id)
-    assert session["selected_scene_count"] == 3
-    assert session["estimated_duration_seconds"] == 18
-    assert session["duration_mode"] == "scene_based"
-    assert captured["args"][6]["selected_scene_count"] == 3
-    assert captured["kwargs"]["initial_step"] == "tier"
+    monkeypatch.setattr(bot, "start_video_addon_step", fake_start)
+    monkeypatch.setattr(bot, "get_public_video_tier_ui_status", lambda tier, _admin=False: {"enabled": True, "label": tier, "price_xu": bot.video_tier_cost_xu(tier)})
+    query = _FakeQuery(user_id, "vfinal|scene_count|3")
+    asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    state = bot.get_video_finalization_state(user_id)
+    assert state["selected_scene_count"] == 3
+    assert state["estimated_duration_seconds"] == 18
+    pending_payload = captured["args"][2]
+    assert pending_payload["selected_scene_count"] == 3
+    assert pending_payload["duration_seconds"] == 18
+    quote = bot.calculate_video_quote({"video_tier": "basic", "selected_scene_count": 3})
+    assert quote["total_xu"] == 810
+    bot.clear_video_finalization_state(user_id)
     bot.clear_video_session(user_id)
+
+
+@pytest.mark.parametrize(
+    "scene_count,discount_percent,total_xu",
+    [(1, 100, 300), (3, 90, 810), (10, 85, 2550), (20, 80, 4800)],
+)
+def test_scene_pricing_formula_has_no_double_base(scene_count, discount_percent, total_xu):
+    quote = bot.calculate_video_quote({"video_tier": "basic", "selected_scene_count": scene_count})
+    assert quote["package_base_xu"] == 300
+    assert quote["scene_count"] == scene_count
+    assert quote["scene_discount_percent"] == discount_percent
+    assert quote["scene_video_xu"] == total_xu
+    assert quote["addon_fee_xu"] == 0
+    assert quote["total_xu"] == total_xu
+
+
+def test_package_200_is_one_scene_only_and_has_no_multi_scene_buttons():
+    state = {"selected_video_tier": "low"}
+    labels = _labels(bot.video_finalization_scene_count_keyboard(state, "vi"))
+    callbacks = _callbacks(bot.video_finalization_scene_count_keyboard(state, "vi"))
+    assert labels == ["1 cảnh ≈ 6 giây", "🔷 Nâng lên 300 Xu", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert callbacks == ["vfinal|scene_count|1", "vfinal|upgrade_300", "vfinal|back", "vfinal|main"]
+    assert "vfinal|scene_custom" not in callbacks
+
+
+def test_package_200_quote_requires_exactly_one_scene_and_200_xu():
+    valid = bot.calculate_video_quote({"video_tier": "low", "selected_scene_count": 1})
+    invalid = bot.calculate_video_quote({"video_tier": "low", "selected_scene_count": 3})
+    assert valid["is_package_200_valid"] is True
+    assert valid["total_xu"] == 200
+    assert invalid["is_package_200_valid"] is False
+    assert invalid["total_xu"] == 540
+
+
+def test_legacy_quote_without_scene_selection_preserves_one_clip():
+    quote = bot.calculate_video_quote({"video_tier": "basic", "pending_payload": {"base_cost": 300}})
+    assert quote["scene_count"] == 1
+    assert quote["estimated_seconds"] == 6
+    assert quote["total_xu"] == 300
+
+
+def test_multiscene_admin_tool_never_runs_paid_job_automatically(monkeypatch):
+    message = _FakeMessage()
+    update = SimpleNamespace(effective_user=SimpleNamespace(id=993299), message=message)
+    context = SimpleNamespace(args=["300", "3", "--confirm-paid"])
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(bot, "save_tool_test_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "_safe_set_video_system_setting", lambda *args, **kwargs: None)
+    asyncio.run(bot.cmd_tool_test_video_multiscene(update, context))
+    text = message.replies[-1][0]
+    assert "Paid provider job: <code>NO</code>" in text
+    assert "Public enabled: <code>NO</code>" in text
+    assert "không đánh dấu PASS" in text
 
 
 def test_custom_scene_count_accepts_1_to_20(monkeypatch):
     user_id = 993293
-    bot.clear_video_session(user_id)
-    bot.task3d_session_step(user_id, "scene_count_custom", product_id="storyboard_prompt", prompt_bundle=_bundle(shots=3).to_dict())
-    opened = []
+    bot.clear_video_finalization_state(user_id)
+    bot.set_video_finalization_state(user_id, {
+        "step": "scene_count_custom",
+        "selected_video_tier": "basic",
+        "source": "storyboard_prompt",
+        "source_payload": {"video_prompt": "Prompt video ready"},
+        "has_video_prompt": True,
+        "session_context": {"video_prompt": "Prompt video ready"},
+    })
+    captured = []
 
-    async def fake_open(*args, **kwargs):
-        opened.append((args, kwargs))
+    async def fake_start(*args, **kwargs):
+        captured.append((args, kwargs))
 
-    monkeypatch.setattr(bot, "open_video_finalization", fake_open)
+    monkeypatch.setattr(bot, "start_video_addon_step", fake_start)
+    monkeypatch.setattr(bot, "get_public_video_tier_ui_status", lambda tier, _admin=False: {"enabled": True, "label": tier, "price_xu": bot.video_tier_cost_xu(tier)})
     message = _FakeMessage()
     message.text = "7"
     update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=user_id))
-    handled = asyncio.run(bot.handle_video_product_pending_text(update, SimpleNamespace()))
-    session = bot.get_video_session(user_id)
+    handled = asyncio.run(bot.handle_video_finalization_pending_text(update, SimpleNamespace()))
+    state = bot.get_video_finalization_state(user_id)
     assert handled is True
-    assert session["selected_scene_count"] == 7
-    assert session["estimated_duration_seconds"] == 42
-    assert opened and opened[0][0][6]["selected_scene_count"] == 7
-    bot.clear_video_session(user_id)
+    assert state["selected_scene_count"] == 7
+    assert state["estimated_duration_seconds"] == 42
+    assert captured and captured[0][0][2]["selected_scene_count"] == 7
+    bot.clear_video_finalization_state(user_id)
 
 
 def test_custom_scene_count_rejects_over_20(monkeypatch):
     user_id = 993294
-    bot.clear_video_session(user_id)
-    bot.task3d_session_step(user_id, "scene_count_custom", product_id="storyboard_prompt", prompt_bundle=_bundle(shots=3).to_dict())
+    bot.clear_video_finalization_state(user_id)
+    bot.set_video_finalization_state(user_id, {
+        "step": "scene_count_custom",
+        "selected_video_tier": "basic",
+        "source": "storyboard_prompt",
+        "source_payload": {"video_prompt": "Prompt video ready"},
+        "has_video_prompt": True,
+    })
 
-    async def forbidden_open(*args, **kwargs):
-        raise AssertionError("over-limit scene count must not open package selector")
+    async def forbidden_start(*args, **kwargs):
+        raise AssertionError("over-limit scene count must not open invoice")
 
-    monkeypatch.setattr(bot, "open_video_finalization", forbidden_open)
+    monkeypatch.setattr(bot, "start_video_addon_step", forbidden_start)
     message = _FakeMessage()
     message.text = "25"
     update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=user_id))
-    handled = asyncio.run(bot.handle_video_product_pending_text(update, SimpleNamespace()))
+    handled = asyncio.run(bot.handle_video_finalization_pending_text(update, SimpleNamespace()))
     assert handled is True
     assert "tối đa 20 cảnh/khoảng 2 phút" in message.replies[-1][0]
-    assert bot.get_video_session(user_id)["current_step"] == "scene_count_custom"
-    bot.clear_video_session(user_id)
+    assert bot.get_video_finalization_state(user_id)["step"] == "scene_count_custom"
+    bot.clear_video_finalization_state(user_id)
 
 
 def test_package_and_confirmation_show_estimated_scene_count():
     state = {
         "source": "storyboard_prompt",
         "source_label": "Storyboard + Prompt",
+        "video_tier": "basic",
+        "selected_video_tier": "basic",
         "selected_scene_count": 3,
         "estimated_scene_seconds": 6,
         "estimated_duration_seconds": 18,
         "duration_mode": "scene_based",
         "has_video_prompt": True,
+        "source_payload": {"video_prompt": "Prompt video ready", "selected_scene_count": 3, "estimated_scene_seconds": 6, "estimated_duration_seconds": 18},
         "pending_payload": {
-            "video_tier": "low",
-            "base_cost": 200,
+            "video_tier": "basic",
+            "base_cost": 810,
             "selected_scene_count": 3,
             "estimated_scene_seconds": 6,
             "estimated_duration_seconds": 18,
@@ -1604,12 +1701,16 @@ def test_package_and_confirmation_show_estimated_scene_count():
         },
     }
     package_text = bot.video_finalization_tier_text(state, "vi")
+    scene_text = bot.video_finalization_scene_count_text(state, "vi")
     invoice_text = bot.video_price_invoice_text(state, "vi")
-    for text in (package_text, invoice_text):
-        assert "Số cảnh: <b>3 cảnh</b>" in text
-        assert "Thời lượng ước tính: <b>khoảng 18 giây</b>" in text
-    assert "Cách tính: <b>1 cảnh ≈ 6 giây</b>" in package_text
-    assert "Cách tính: <b>mỗi cảnh/clip khoảng 6 giây</b>" in invoice_text
+    assert "Sau khi chọn gói" in package_text
+    assert "Số cảnh: <b>3 cảnh</b>" not in package_text
+    assert "Giá sẽ được tính theo gói đã chọn và số cảnh." in scene_text
+    assert "Số cảnh: <b>3 cảnh</b>" in invoice_text
+    assert "Thời lượng ước tính: <b>khoảng 18 giây</b>" in invoice_text
+    assert "Chiết khấu cảnh: <b>10%</b>" in invoice_text
+    assert "3 cảnh × 300 Xu × 90% = <b>810 Xu</b>" in invoice_text
+    assert "Tổng: <b>810 Xu</b>" in invoice_text
     assert "Thời lượng: <b>18 giây</b>" not in invoice_text
 
 
@@ -1742,24 +1843,29 @@ def test_prompt_video_detail_shows_video_prompt():
     assert bundle["video_prompts"][2][:80] in text
 
 
-def test_prompt_video_create_routes_to_scene_count_before_package(monkeypatch):
+def test_prompt_video_create_routes_to_package_before_scene_count(monkeypatch):
     user_id = 993304
     bot.clear_video_session(user_id)
     bundle = _bundle(shots=3).to_dict()
     bot.task3d_session_step(user_id, "prompt_video_detail", product_id="storyboard_prompt", prompt_bundle=bundle, prompt_video_selection=[2])
+    captured = {}
 
-    async def forbidden_open(*args, **kwargs):
-        raise AssertionError("prompt video must choose scene count before package")
+    async def fake_open(*args, **kwargs):
+        captured.update({"args": args, "kwargs": kwargs})
 
-    monkeypatch.setattr(bot, "open_video_finalization", forbidden_open)
+    monkeypatch.setattr(bot, "open_video_finalization", fake_open)
     query = _FakeQuery(user_id, "vproduct|prompt_video_create")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "select_scene_count"
+    assert session["current_step"] == "prompt_video_detail"
     assert session["draft"]["scene_count_back_callback"] == "vproduct|prompt_video_detail"
     assert session["draft"]["scene_count_render_selected_shots"] == [2]
     assert bundle["video_prompts"][1] in session["draft"]["scene_count_render_video_prompt"]
-    assert _callbacks(query.edits[-1][1]["reply_markup"])[-2] == "vproduct|prompt_video_detail"
+    package = captured["args"][6]
+    assert package["selected_shots"] == [2]
+    assert bundle["video_prompts"][1] in package["video_prompt"]
+    assert captured["kwargs"]["initial_step"] == "tier"
+    assert captured["args"][5] == "vproduct|prompt_video_detail"
     bot.clear_video_session(user_id)
 
 
@@ -1769,7 +1875,7 @@ def test_prompt_video_scene_count_preserves_selected_prompt(monkeypatch):
     bundle = _bundle(shots=3).to_dict()
     bot.task3d_session_step(
         user_id,
-        "select_scene_count",
+        "prompt_video_detail",
         product_id="storyboard_prompt",
         prompt_bundle=bundle,
         scene_count_back_callback="vproduct|prompt_video_detail",
@@ -1777,18 +1883,10 @@ def test_prompt_video_scene_count_preserves_selected_prompt(monkeypatch):
         scene_count_render_prompt_count=1,
         scene_count_render_selected_shots=[2],
     )
-    captured = {}
-
-    async def fake_open(*args, **kwargs):
-        captured.update({"args": args, "kwargs": kwargs})
-
-    monkeypatch.setattr(bot, "open_video_finalization", fake_open)
-    query = _FakeQuery(user_id, "vproduct|scene_count_select|3")
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    package = captured["args"][6]
-    assert package["selected_shots"] == [2]
-    assert bundle["video_prompts"][1] in package["video_prompt"]
-    assert "mở rộng storyboard/prompt lên 3 cảnh" in package["scene_expansion_note"]
+    state = bot.video_finalization_apply_scene_count_fields({"source_payload": {}, "session_context": {}, "video_project": {}}, 3, user_id)
+    assert state["source_payload"]["selected_shots"] == [2]
+    assert bundle["video_prompts"][1] in state["source_payload"]["video_prompt"]
+    assert "mở rộng storyboard/prompt lên 3 cảnh" in state["source_payload"]["scene_expansion_note"]
     bot.clear_video_session(user_id)
 
 

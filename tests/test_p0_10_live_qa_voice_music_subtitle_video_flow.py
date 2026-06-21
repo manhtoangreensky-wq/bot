@@ -229,8 +229,8 @@ def test_video_backstack_labels_match_business_steps():
     assert "vfinal|back" in _callbacks(package)
     assert "vfinal|back" in _callbacks(addons)
     handler = _source_between("async def handle_video_addon_callback", "async def cmd_video_price_test")
-    assert 'finalization_state["step"] = "tier"' in handler
-    assert 'finalization_state["origin_screen"] = "invoice_back_to_package"' in handler
+    assert 'finalization_state["step"] = "scene_count"' in handler
+    assert 'finalization_state["origin_screen"] = "invoice_back_to_scene_count"' in handler
 
 
 def test_200_no_paid_addons_can_full_export():
