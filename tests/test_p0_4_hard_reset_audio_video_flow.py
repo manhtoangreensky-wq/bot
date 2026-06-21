@@ -328,7 +328,7 @@ def test_invoice_change_music_returns_invoice(monkeypatch):
     assert captured["pending_payload"]["video_finalization"]["music_mode"] == "none"
 
 
-def test_invoice_back_returns_package_selection(monkeypatch):
+def test_invoice_back_returns_tools_then_scene_count(monkeypatch):
     user_id = 940410
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
@@ -346,6 +346,14 @@ def test_invoice_back_returns_package_selection(monkeypatch):
     })
 
     query = CaptureQuery("videoaddon|back", user_id)
+    asyncio.run(bot.handle_video_addon_callback(_callback_update(query, user_id), SimpleNamespace()))
+
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "videoaddon|voice_menu" in _callbacks(query.outputs[-1]["reply_markup"])
+    assert "videoaddon|music_menu" in _callbacks(query.outputs[-1]["reply_markup"])
+    assert "videoaddon|subtitle_menu" in _callbacks(query.outputs[-1]["reply_markup"])
+
+    query.data = "videoaddon|back"
     asyncio.run(bot.handle_video_addon_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     assert "Chọn số cảnh video" in query.outputs[-1]["text"]

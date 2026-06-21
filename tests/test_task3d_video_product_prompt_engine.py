@@ -598,7 +598,13 @@ def test_result_child_buttons_return_to_the_result_menu_that_contains_them():
     source = inspect.getsource(bot.handle_video_product_callback)
     assert 'if action == "result"' in source
     assert 'callback_data="vproduct|result"' in source
-    assert _callbacks(bot.task3d_scene_count_keyboard("vi"))[-2] == "vproduct|result"
+
+
+def test_video_product_legacy_scene_count_routes_are_removed():
+    app_source = Path(bot.__file__).read_text(encoding="utf-8")
+    assert "vproduct|select_scene_count" not in app_source
+    assert "vproduct|scene_count_select" not in app_source
+    assert "vproduct|scene_count_custom" not in app_source
 
 
 def test_video_product_registry_complete():
@@ -1489,10 +1495,26 @@ def test_use_to_create_video_opens_package_before_scene_count(monkeypatch):
     bot.clear_video_session(user_id)
 
 
+def test_task3d_aspect_keyboard_includes_4x5():
+    labels = _labels(bot.task3d_aspect_keyboard("vi"))
+    callbacks = _callbacks(bot.task3d_aspect_keyboard("vi"))
+    assert "🖼 4:5" in labels
+    assert "vproduct|aspect|4:5" in callbacks
+
+
 def test_scene_count_screen_has_required_buttons_and_no_skip():
     state = {"selected_video_tier": "basic"}
     labels = _labels(bot.video_finalization_scene_count_keyboard(state, "vi"))
-    assert labels == ["1 cảnh", "3 cảnh", "5 cảnh", "10 cảnh", "20 cảnh", "✍️ Tự chọn", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == [
+        "1 cảnh ≈ 6s = 300 Xu",
+        "3 cảnh ≈ 18s = 810 Xu",
+        "5 cảnh ≈ 30s = 1.350 Xu",
+        "10 cảnh ≈ 60s = 2.550 Xu",
+        "20 cảnh ≈ 120s = 4.800 Xu",
+        "✍️ Tự chọn",
+        "⬅️ Quay lại",
+        "🏠 Menu chính",
+    ]
     assert not any("Bỏ qua" in label for label in labels)
     assert _callbacks(bot.video_finalization_scene_count_keyboard(state, "vi"))[-2:] == ["vfinal|back", "vfinal|main"]
 
@@ -1570,6 +1592,37 @@ def test_scene_count_then_final_quote(monkeypatch):
     bot.clear_video_session(user_id)
 
 
+def test_scene_count_opens_tools_before_final_invoice(monkeypatch):
+    user_id = 993295
+    bot.clear_video_finalization_state(user_id)
+    bot.clear_video_addon_state(user_id)
+    bot.clear_video_session(user_id)
+    bot.task3d_session_step(user_id, "result", product_id="storyboard_prompt", prompt_bundle=_bundle(shots=5).to_dict())
+    bot.set_video_finalization_state(user_id, {
+        "step": "scene_count",
+        "selected_video_tier": "basic",
+        "source": "storyboard_prompt",
+        "source_payload": {"video_prompt": "Prompt video ready"},
+        "has_video_prompt": True,
+        "session_context": {"video_prompt": "Prompt video ready"},
+    })
+    monkeypatch.setattr(bot, "get_public_video_tier_ui_status", lambda tier, _admin=False: {"enabled": True, "label": tier, "price_xu": bot.video_tier_cost_xu(tier)})
+    query = _FakeQuery(user_id, "vfinal|scene_count|3")
+
+    asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert "Công cụ hoàn thiện video" in query.edits[-1][0]
+    assert "Tạm tính video: <b>300 × 90% = 270 Xu/cảnh; 270 × 3 = 810 Xu</b>" in query.edits[-1][0]
+    callbacks = _callbacks(query.edits[-1][1]["reply_markup"])
+    assert {"videoaddon|voice_menu", "videoaddon|music_menu", "videoaddon|subtitle_menu", "videoaddon|none"} <= set(callbacks)
+    assert "videoaddon|export" not in "\n".join(callbacks)
+    addon_state = bot.get_video_addon_state(user_id)
+    assert addon_state["video_order"]["current_screen"] == "video_addon_menu"
+    bot.clear_video_finalization_state(user_id)
+    bot.clear_video_addon_state(user_id)
+    bot.clear_video_session(user_id)
+
+
 @pytest.mark.parametrize(
     "scene_count,discount_percent,total_xu",
     [(1, 100, 300), (3, 90, 810), (10, 85, 2550), (20, 80, 4800)],
@@ -1588,7 +1641,7 @@ def test_package_200_is_one_scene_only_and_has_no_multi_scene_buttons():
     state = {"selected_video_tier": "low"}
     labels = _labels(bot.video_finalization_scene_count_keyboard(state, "vi"))
     callbacks = _callbacks(bot.video_finalization_scene_count_keyboard(state, "vi"))
-    assert labels == ["1 cảnh ≈ 6 giây", "🔷 Nâng lên 300 Xu", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["1 cảnh ≈ 6s = 200 Xu", "🔷 Nâng lên 300 Xu", "⬅️ Quay lại", "🏠 Menu chính"]
     assert callbacks == ["vfinal|scene_count|1", "vfinal|upgrade_300", "vfinal|back", "vfinal|main"]
     assert "vfinal|scene_custom" not in callbacks
 
@@ -1705,7 +1758,7 @@ def test_package_and_confirmation_show_estimated_scene_count():
     invoice_text = bot.video_price_invoice_text(state, "vi")
     assert "Sau khi chọn gói" in package_text
     assert "Số cảnh: <b>3 cảnh</b>" not in package_text
-    assert "Giá sẽ được tính theo gói đã chọn và số cảnh." in scene_text
+    assert "300 × 90% = 270 Xu/cảnh; 270 × 3 = <b>810 Xu</b>" in scene_text
     assert "Số cảnh: <b>3 cảnh</b>" in invoice_text
     assert "Thời lượng ước tính: <b>khoảng 18 giây</b>" in invoice_text
     assert "Chiết khấu cảnh: <b>10%</b>" in invoice_text

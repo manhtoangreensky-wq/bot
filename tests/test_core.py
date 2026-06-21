@@ -1503,6 +1503,8 @@ def test_shopaikey_video_model_fallback_payload_and_reason(monkeypatch):
     veo_payload = bot.shopaikey_video_request_payload("veo3.1")
     assert veo_payload["model"] == "veo3.1"
     assert veo_payload["metadata"]["aspect_ratio"] == "16:9"
+    vertical_payload = bot.shopaikey_video_request_payload("veo3.1", "Product demo, aspect ratio 4:5, no watermark.")
+    assert vertical_payload["metadata"]["aspect_ratio"] == "4:5"
 
     grok_payload = bot.shopaikey_video_request_payload("grok-video-3")
     assert grok_payload["model"] == "grok-video-3"
@@ -2277,6 +2279,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pending_payload["aspect_ratio"] == "4:5"
     assert "piano cinematic" in pending_payload["prompt"]
     assert "aspect ratio 4:5" in pending_payload["prompt"]
+    multi_scene_payload = bot.public_video_pending_payload_from_package(
+        "basic",
+        {**package, "selected_scene_count": 3, "estimated_scene_seconds": 6, "estimated_duration_seconds": 18},
+        "9:16",
+    )
+    assert "exactly 3 connected scenes/clips" in multi_scene_payload["prompt"]
+    assert "total about 18 seconds" in multi_scene_payload["prompt"]
+    assert "Do not collapse this into one 6-second scene" in multi_scene_payload["prompt"]
     assert bot.clear_public_video_package_context("u_video") is True
     assert "321 Xu" not in bot.create_media_pricing_text()
     assert "654 Xu" not in bot.create_media_pricing_text()
@@ -9669,10 +9679,9 @@ def test_video_addon_menu_and_shared_flow_hooks():
     callbacks = [button.callback_data for row in bot.video_addon_menu_keyboard("vi").inline_keyboard for button in row]
     for callback in [
         "videoaddon|none",
-        "videoaddon|subtitle",
-        "videoaddon|dub",
-        "videoaddon|combo",
-        "videoaddon|translate_sub",
+        "videoaddon|voice_menu",
+        "videoaddon|music_menu",
+        "videoaddon|subtitle_menu",
         "videoaddon|back",
     ]:
         assert callback in callbacks
@@ -9949,7 +9958,7 @@ def test_default_voice_free():
 def test_subtitle_menu_has_4_named_modes():
     labels = [button.text for row in bot.video_addon_menu_keyboard("vi", {"video_tier": "basic"}).inline_keyboard for button in row]
     joined = "\n".join(labels)
-    for label in ["Tạo phụ đề", "Dịch phụ đề", "Lồng tiếng", "Dịch + lồng tiếng tự động"]:
+    for label in ["Giọng/lồng tiếng", "Nhạc", "Phụ đề", "Không thêm"]:
         assert label in joined
     assert "Dịch phụ đề + lồng tiếng" not in joined
 
@@ -10072,10 +10081,10 @@ def test_video_200_hides_paid_addons():
 def test_video_300_shows_paid_addons():
     markup = bot.video_addon_menu_keyboard("vi", {"video_tier": "basic"})
     callbacks = _button_callbacks(markup)
-    assert "videoaddon|subtitle" in callbacks
-    assert "videoaddon|dub" in callbacks
-    assert "videoaddon|combo" in callbacks
-    assert "videoaddon|translate_sub" in callbacks
+    assert "videoaddon|voice_menu" in callbacks
+    assert "videoaddon|music_menu" in callbacks
+    assert "videoaddon|subtitle_menu" in callbacks
+    assert "videoaddon|none" in callbacks
     assert "videoaddon|translate_combo" not in callbacks
 
 

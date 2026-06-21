@@ -132,7 +132,9 @@ def test_translation_menu_still_visible():
 
 
 def test_completed_add_voice_guard_if_mux_unready():
-    assert "bảo trì/nâng cấp" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    assert "đang hoàn thiện" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    assert "chưa xử lý" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    assert "chưa trừ Xu" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
 
 
 def test_completed_add_music_guard_if_mux_unready():
@@ -174,7 +176,7 @@ def test_preview_6_seconds_not_changed():
 
 def test_scene_6_seconds_not_changed():
     assert bot.TASK3D_SCENE_SECONDS == 6
-    assert "1 cảnh ≈ 6 giây" in bot.task3d_scene_count_text({}, "vi")
+    assert "1 cảnh ≈ 6 giây" in bot.video_finalization_scene_count_text({"selected_video_tier": "basic"}, "vi")
 
 
 def test_no_public_15_second_product_default_remaining():
