@@ -46684,68 +46684,6 @@ def task3d_scene_count_fields(scene_count) -> dict:
         "duration_note": f"{count} cảnh, khoảng {duration} giây",
     }
 
-def task3d_scene_count_text(session: dict | None = None, lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
-        return (
-            "🎞 <b>Choose video scene count</b>\n\n"
-            "TOAN AAS currently estimates video by scene/clip.\n"
-            "1 scene is about 6 seconds.\n\n"
-            "Suggestions:\n"
-            "• 1 scene ≈ 6 seconds - quick test\n"
-            "• 3 scenes ≈ 18 seconds - standard video\n"
-            "• 5 scenes ≈ 30 seconds - short polished video\n"
-            "• 10 scenes ≈ 60 seconds - 1-minute video\n"
-            "• 20 scenes ≈ 120 seconds - 2-minute video\n\n"
-            "You need to choose a scene count before selecting a package."
-        )
-    return (
-        "🎞 <b>Chọn số cảnh video</b>\n\n"
-        "TOAN AAS hiện tính video theo cảnh/clip.\n"
-        "1 cảnh khoảng 6 giây.\n\n"
-        "Gợi ý:\n"
-        "• 1 cảnh ≈ 6 giây - test nhanh\n"
-        "• 3 cảnh ≈ 18 giây - video chuẩn\n"
-        "• 5 cảnh ≈ 30 giây - video ngắn đẹp\n"
-        "• 10 cảnh ≈ 60 giây - video 1 phút\n"
-        "• 20 cảnh ≈ 120 giây - video 2 phút\n\n"
-        "Bạn cần chọn số cảnh trước khi chọn gói."
-    )
-
-def task3d_scene_count_back_callback(session: dict | None = None) -> str:
-    callback = str(((session or {}).get("draft") or {}).get("scene_count_back_callback") or "vproduct|result").strip()
-    return callback if callback.startswith("vproduct|") else "vproduct|result"
-
-def task3d_scene_count_keyboard(lang: str = "vi", back_callback: str = "vproduct|result") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("1 cảnh", callback_data="vproduct|scene_count_select|1"),
-            InlineKeyboardButton("3 cảnh", callback_data="vproduct|scene_count_select|3"),
-        ],
-        [
-            InlineKeyboardButton("5 cảnh", callback_data="vproduct|scene_count_select|5"),
-            InlineKeyboardButton("10 cảnh", callback_data="vproduct|scene_count_select|10"),
-        ],
-        [
-            InlineKeyboardButton("20 cảnh", callback_data="vproduct|scene_count_select|20"),
-            InlineKeyboardButton("✍️ Tự chọn", callback_data="vproduct|scene_count_custom"),
-        ],
-        [
-            InlineKeyboardButton("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", callback_data=back_callback),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-        ],
-    ])
-
-def task3d_scene_count_custom_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
-        return "How many scenes do you want to create? Enter a number from 1 to 20."
-    return "Bạn muốn tạo bao nhiêu cảnh? Nhập số từ 1 đến 20."
-
-def task3d_scene_count_custom_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Chọn số cảnh" if normalize_user_language(lang) == "vi" else "⬅️ Scene count", callback_data="vproduct|select_scene_count"),
-        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-    ]])
-
 def task3d_prompt_scene_count(session: dict | None = None) -> int:
     bundle = task3d_video_prompt_bundle(session or {})
     return max(len(bundle.get("shot_table") or []), len(bundle.get("video_prompts") or []), 0)
@@ -46880,16 +46818,6 @@ async def task3d_open_video_package_finalization(target, user_id, session: dict,
         package,
         initial_step="tier",
     )
-
-async def task3d_open_video_finalization_from_scene_count(target, user_id, session: dict, lang: str = "vi"):
-    return await task3d_open_video_package_finalization(
-        target,
-        user_id,
-        session,
-        lang,
-        task3d_scene_count_back_callback(session),
-    )
-
 
 def task3d_video_prompt_bundle(session: dict) -> dict:
     draft = dict((session or {}).get("draft") or {})
@@ -47252,15 +47180,6 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
         return await safe_edit_or_send(target, task3d_trend_ideas_text(session, lang), parse_mode="HTML", reply_markup=task3d_trend_ideas_keyboard(session, lang))
     if step == "result":
         return await safe_edit_or_send(target, task3d_result_text(session, lang), parse_mode="HTML", reply_markup=task3d_result_keyboard(product_id, lang))
-    if step == "select_scene_count":
-        return await safe_edit_or_send(
-            target,
-            task3d_scene_count_text(session, lang),
-            parse_mode="HTML",
-            reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
-        )
-    if step == "scene_count_custom":
-        return await safe_edit_or_send(target, task3d_scene_count_custom_text(lang), reply_markup=task3d_scene_count_custom_keyboard(lang))
     return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
 
 
@@ -47489,33 +47408,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "restyle":
         session = task3d_session_step(uid, "style")
         return await task3d_render_step(query, uid, session, lang)
-    if action == "select_scene_count":
-        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
-        if not bundle:
-            return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
-        session = task3d_session_step(uid, "result")
-        return await task3d_open_video_package_finalization(query, uid, session, lang, "vproduct|result")
-    if action == "scene_count_custom":
-        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
-        if not bundle:
-            return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
-        session = task3d_session_step(uid, "result")
-        return await task3d_open_video_package_finalization(query, uid, session, lang, "vproduct|result")
-    if action == "scene_count_select":
-        bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
-        if not bundle:
-            return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
-        count = safe_int(value, 0)
-        if count < 1:
-            return await safe_edit_or_send(query, task3d_scene_count_custom_text(lang), reply_markup=task3d_scene_count_custom_keyboard(lang))
-        if count > 20:
-            return await safe_edit_or_send(
-                query,
-                "Hiện video ngắn chỉ hỗ trợ tối đa 20 cảnh/khoảng 2 phút. Phim dài sẽ xử lý ở giai đoạn sau.",
-                reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
-            )
-        session = task3d_session_step(uid, "result")
-        return await task3d_open_video_package_finalization(query, uid, session, lang, "vproduct|result")
     if action == "view":
         # Compatibility for buttons already sent before Task 3D.6.
         action = "prompt_image" if value == "image" else "prompt_video"
@@ -47733,25 +47625,6 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         return False
     uid = update.effective_user.id
     session = get_video_session(uid)
-    if str(session.get("current_step") or "") == "scene_count_custom":
-        lang = get_user_language(uid) or "vi"
-        raw_text = re.sub(r"\s+", " ", update.message.text.strip())[:80]
-        if not re.fullmatch(r"\d+", raw_text or ""):
-            await update.message.reply_text(task3d_scene_count_custom_text(lang), reply_markup=task3d_scene_count_custom_keyboard(lang))
-            return True
-        count = safe_int(raw_text, 0)
-        if count < 1:
-            await update.message.reply_text(task3d_scene_count_custom_text(lang), reply_markup=task3d_scene_count_custom_keyboard(lang))
-            return True
-        if count > 20:
-            await update.message.reply_text(
-                "Hiện video ngắn chỉ hỗ trợ tối đa 20 cảnh/khoảng 2 phút. Phim dài sẽ xử lý ở giai đoạn sau.",
-                reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
-            )
-            return True
-        session = task3d_session_step(uid, "result")
-        await task3d_open_video_package_finalization(update.message, uid, session, lang, "vproduct|result")
-        return True
     if str(session.get("current_step") or "") != "collect_input" or str((session.get("draft") or {}).get("input_mode") or "") != "text":
         return False
     text = re.sub(r"\s+", " ", update.message.text.strip())[:1200]

@@ -598,7 +598,13 @@ def test_result_child_buttons_return_to_the_result_menu_that_contains_them():
     source = inspect.getsource(bot.handle_video_product_callback)
     assert 'if action == "result"' in source
     assert 'callback_data="vproduct|result"' in source
-    assert _callbacks(bot.task3d_scene_count_keyboard("vi"))[-2] == "vproduct|result"
+
+
+def test_video_product_legacy_scene_count_routes_are_removed():
+    app_source = Path(bot.__file__).read_text(encoding="utf-8")
+    assert "vproduct|select_scene_count" not in app_source
+    assert "vproduct|scene_count_select" not in app_source
+    assert "vproduct|scene_count_custom" not in app_source
 
 
 def test_video_product_registry_complete():
