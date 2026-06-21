@@ -752,6 +752,199 @@ def test_200_free_default_export_path_allowed(monkeypatch):
     bot.clear_video_addon_state(user_id)
 
 
+def test_video_export_button_routes_to_export_dispatcher():
+    source = inspect.getsource(bot.handle_video_addon_callback)
+    assert 'if action == "export"' in source
+    assert "handle_video_export_confirm(update, context, token)" in source
+
+
+def test_200_default_male_voice_is_free():
+    state = {
+        "source": "ai",
+        "video_tier": "low",
+        "current_video_dubbing_option": "dub_original",
+        "current_video_voice_choice": "default_male",
+        "pending_payload": {
+            "job_type": "video",
+            "video_tier": "low",
+            "base_cost": 200,
+            "dubbing_option": "dub_original",
+            "voice_choice": "default_male",
+        },
+    }
+    classified = bot.classify_video_addons_for_package(state)
+    assert classified["allowed_for_200"] is True
+    assert classified["paid_addons"] == []
+    assert classified["default_voice_free"] is True
+    assert bot.validate_video_tier_selection(state, "low")["ok"] is True
+
+
+def test_200_default_female_voice_is_free():
+    state = {
+        "source": "ai",
+        "video_tier": "low",
+        "current_video_dubbing_option": "dub_original",
+        "current_video_voice_choice": "default_female",
+        "pending_payload": {
+            "job_type": "video",
+            "video_tier": "low",
+            "base_cost": 200,
+            "dubbing_option": "dub_original",
+            "voice_choice": "default_female",
+        },
+    }
+    classified = bot.classify_video_addons_for_package(state)
+    assert classified["allowed_for_200"] is True
+    assert classified["paid_addons"] == []
+    normalized = bot.normalize_video_export_payload_for_classifier(state, classified)
+    assert normalized["pending_payload"]["dubbing_option"] == "none"
+    assert normalized["pending_payload"]["voice_is_free"] is True
+
+
+def test_200_invoice_total_200_passes_and_total_above_200_blocks():
+    base_state = {
+        "source": "ai",
+        "video_tier": "low",
+        "pending_payload": {"job_type": "video", "video_tier": "low", "base_cost": 200, "music_option": "none"},
+        "current_video_price_preview": {"total_xu": 200, "raw_total_xu": 200, "addon_xu": 0},
+    }
+    assert bot.classify_video_addons_for_package(base_state)["allowed_for_200"] is True
+
+    paid_state = {
+        **base_state,
+        "current_video_price_preview": {"total_xu": 210, "raw_total_xu": 210, "addon_xu": 10},
+        "pending_payload": {**base_state["pending_payload"], "base_cost": 210},
+    }
+    classified = bot.classify_video_addons_for_package(paid_state)
+    assert classified["allowed_for_200"] is False
+    assert classified["paid_total_xu"] == 10
+    assert bot.validate_video_tier_selection(paid_state, "low")["blocked"] is True
+
+
+def test_200_custom_voice_is_paid_addon():
+    state = {
+        "source": "ai",
+        "video_tier": "low",
+        "current_video_dubbing_option": "dub_original",
+        "current_video_voice_choice": "advanced_dubbing",
+        "pending_payload": {
+            "job_type": "video",
+            "video_tier": "low",
+            "base_cost": 200,
+            "dubbing_option": "dub_original",
+            "voice_choice": "advanced_dubbing",
+        },
+    }
+    classified = bot.classify_video_addons_for_package(state)
+    assert classified["allowed_for_200"] is False
+    assert any(item["key"] in {"paid_voice", "dubbing"} for item in classified["paid_addons"])
+
+
+def test_200_export_with_free_default_voice_reaches_old_video_core(monkeypatch):
+    user_id = 993224
+    pending = {
+        "job_type": "video",
+        "video_tier": "low",
+        "prompt": "Prompt sẵn sàng",
+        "original_prompt": "Prompt sẵn sàng",
+        "base_cost": 200,
+        "preview_required": False,
+        "dubbing_option": "dub_original",
+        "voice_choice": "default_male",
+    }
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai",
+        "video_tier": "low",
+        "current_video_dubbing_option": "dub_original",
+        "current_video_voice_choice": "default_male",
+        "pending_confirm_token": token,
+        "pending_payload": pending,
+    })
+    delegated = {}
+
+    async def fake_confirm(update, context):
+        delegated["callback"] = update.callback_query.data
+        delegated["pending"] = dict(bot.SHOPAIKEY_PENDING_CONFIRMATIONS[token])
+        await update.callback_query.answer()
+        return None
+
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (True, "ready"))
+    monkeypatch.setattr(bot, "handle_shopaikey_public_callback", fake_confirm)
+    query = _FakeQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert delegated["callback"] == f"shopai|confirm|{token}"
+    assert delegated["pending"]["dubbing_option"] == "none"
+    assert delegated["pending"]["voice_is_free"] is True
+    assert query.answered is True
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
+def test_200_paid_addon_block_only_after_export_with_total_above_200(monkeypatch):
+    user_id = 993225
+    pending = {
+        "job_type": "video",
+        "video_tier": "low",
+        "prompt": "Prompt sẵn sàng",
+        "base_cost": 210,
+        "music_option": "none",
+        "video_price_preview": {"total_xu": 210, "raw_total_xu": 210, "addon_xu": 10},
+    }
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai",
+        "video_tier": "low",
+        "current_video_price_preview": {"total_xu": 210, "raw_total_xu": 210, "addon_xu": 10},
+        "pending_confirm_token": token,
+        "pending_payload": pending,
+    })
+    query = _FakeQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    text, kwargs = query.edits[-1]
+    assert "Gói trải nghiệm 200 Xu không dùng được tính năng có phí" in text
+    assert _callbacks(kwargs["reply_markup"]) == ["videoaddon|upgrade_300", "videoaddon|export_back"]
+    assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
+def test_300_export_stays_in_video_flow_and_uses_same_dispatcher(monkeypatch):
+    user_id = 993226
+    pending = {
+        "job_type": "video",
+        "video_tier": "basic",
+        "prompt": "Prompt sẵn sàng",
+        "base_cost": 300,
+        "dubbing_option": "dub_original",
+        "voice_choice": "default_female",
+    }
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai",
+        "video_tier": "basic",
+        "current_video_dubbing_option": "dub_original",
+        "current_video_voice_choice": "default_female",
+        "pending_confirm_token": token,
+        "pending_payload": pending,
+    })
+    delegated = {}
+
+    async def fake_confirm(update, context):
+        delegated["callback"] = update.callback_query.data
+        await update.callback_query.answer()
+        return None
+
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (True, "ready"))
+    monkeypatch.setattr(bot, "handle_shopaikey_public_callback", fake_confirm)
+    query = _FakeQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert delegated["callback"] == f"shopai|confirm|{token}"
+    assert not query.edits
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
 def test_200_paid_addon_block_back_and_upgrade_routes():
     callbacks = _callbacks(bot.video_experience_tier_lock_keyboard("vi"))
     assert callbacks == ["videoaddon|upgrade_300", "videoaddon|export_back"]

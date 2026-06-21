@@ -10154,9 +10154,12 @@ def test_high_public_tiers_are_billable():
 def test_200_addon_callback_guard_runs_only_on_export():
     source = source_between(bot_source_text(), "async def handle_video_addon_callback", "async def cmd_video_price_test")
     assert 'if action == "export"' in source
-    assert 'tier == "low"' in source
-    assert "video_experience_tier_lock_text" in source
-    assert source.index("validate_video_tier_selection(state, tier)") < source.index('query.data = f"shopai|confirm|{token}"')
+    assert "handle_video_export_confirm(update, context, token)" in source
+    dispatcher = source_between(bot_source_text(), "async def handle_video_export_confirm", "def image_tool_pricing_matrix")
+    assert 'tier == "low"' in dispatcher
+    assert "classify_video_addons_for_package(state)" in dispatcher
+    assert "video_experience_tier_lock_text" in dispatcher
+    assert dispatcher.index("classify_video_addons_for_package(state)") < dispatcher.index('query.data = f"shopai|confirm|{token}"')
     assert 'tier == "low" and str(state.get("source")' not in source
 
 

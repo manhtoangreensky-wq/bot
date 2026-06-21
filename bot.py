@@ -34150,6 +34150,15 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
     dubbing = str(state.get("current_video_dubbing_option") or existing_addons.get("dub") or "none").strip().lower()
     translated = bool(state.get("translation_enabled") or "translated" in subtitle or "translated" in dubbing)
     duration_seconds = max(1, int(order.get("requested_seconds") or VIDEO_ORDER_DEFAULT_BASE_SECONDS))
+    voice_addon_key = str((order.get("addons") or {}).get("voice") or "").strip().lower()
+    if (
+        dubbing not in {"", "none"}
+        and subtitle in {"", "none"}
+        and not translated
+        and voice_addon_key in {"voice_default_female", "voice_default_male", "voice_default_neutral"}
+    ):
+        dubbing = "none"
+        order["addons"]["dub"] = None
     if tier == "low":
         subtitle = "none"
         dubbing = "none"
@@ -34346,38 +34355,233 @@ def get_addon_price_for_tier(tier: str = "", addon_key: str = "") -> int:
         return 0
     return int((video_addon_pricing_matrix().get(str(addon_key or "").strip().lower()) or {}).get("price_xu") or 0)
 
+VIDEO_ADDON_NONE_VALUES = {"", "none", "off", "no", "false", "0", "skip", "default_no_audio"}
+VIDEO_FREE_MUSIC_VALUES = {
+    "none", "off", "no", "suggested", "library", "stock", "stock_music", "music_library",
+    "sfx", "stock_sfx", "sfx_library", "uploaded", "upload", "user_media", "media", "my_media",
+    "music_none", "stock_music_library", "stock_sfx_library", "user_audio_media", "music_planning",
+}
+VIDEO_PAID_MUSIC_VALUES = {"ai", "ai_music", "music_ai", "suno", "suno_music", "sfx_ai", "paid_music"}
+VIDEO_FREE_VOICE_VALUES = {
+    "none", "off", "no", "default", "default_free",
+    "default_female", "default_female_free", "female", "female_free", "voice_default_female",
+    "default_male", "default_male_free", "male", "male_free", "voice_default_male",
+    "default_neutral", "default_neutral_free", "neutral", "neutral_free", "voice_default_neutral",
+    "saved_voice_free", "voice_none",
+}
+VIDEO_PAID_VOICE_VALUES = {
+    "paid_clone", "voice_clone", "voice_clone_create", "voice_clone_reuse",
+    "advanced_dubbing", "advanced_voice", "custom_voice_pending", "paid_voice",
+    "voice_advanced", "voice_transform", "voice_premium_preset",
+}
+
+def _video_addon_int(value, default: int = 0) -> int:
+    try:
+        return int(float(value or 0))
+    except Exception:
+        return int(default or 0)
+
+def _video_addon_paid_marker(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "paid", "y"}
+
+def _video_classifier_source_dicts(session: dict | None = None) -> list[dict]:
+    state = dict(session or {})
+    pending = dict(state.get("pending_payload") or {})
+    preview = dict(state.get("current_video_price_preview") or pending.get("video_price_preview") or {})
+    order = dict(state.get("video_order") or pending.get("video_order") or {})
+    project = dict(state.get("video_project") or pending.get("video_project") or {})
+    finalization = dict(state.get("video_finalization") or pending.get("video_finalization") or project.get("video_finalization") or {})
+    return [state, pending, preview, order, project, finalization]
+
+def _video_classifier_value(keys: tuple[str, ...], sources: list[dict], default=""):
+    for source in sources:
+        for key in keys:
+            value = source.get(key) if isinstance(source, dict) else None
+            if value is not None and str(value).strip() != "":
+                return value
+    return default
+
+def _video_classifier_add_item(items: list[dict], key: str, label: str, price_xu: int = 0):
+    key = str(key or label or "").strip()
+    if not key:
+        return
+    price_xu = max(0, _video_addon_int(price_xu, 0))
+    if any(str(item.get("key") or "") == key for item in items):
+        return
+    items.append({"key": key, "label": str(label or key).strip(), "price_xu": price_xu})
+
+def _video_classifier_collect_items(items, paid_addons: list[dict], free_addons: list[dict]):
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or item.get("id") or item.get("type") or item.get("label") or "").strip()
+        label = str(item.get("label") or key).strip()
+        price = _video_addon_int(item.get("price_xu") or item.get("cost_xu") or item.get("xu") or 0, 0)
+        if price > 0 or _video_addon_paid_marker(item.get("paid")):
+            _video_classifier_add_item(paid_addons, key or label, label or key, price)
+        elif key or label:
+            _video_classifier_add_item(free_addons, key or label, label or key, 0)
+
+def classify_video_addons_for_package(session: dict | None = None) -> dict:
+    """Classify video options by real add-on cost, not by public labels alone.
+
+    Package 200 is allowed when the invoice remains the base 200 Xu and all selected
+    add-ons are default/free. A default male/female voice may set a generic
+    ``dubbing_option`` in the finalization payload; that must not become a paid
+    "lồng tiếng" block unless the voice/add-on is explicitly paid or adds Xu.
+    """
+    state = dict(session or {})
+    pending = dict(state.get("pending_payload") or {})
+    sources = _video_classifier_source_dicts(state)
+    tier = normalize_video_tier(
+        state.get("video_tier")
+        or pending.get("video_tier")
+        or _video_classifier_value(("tier", "selected_tier"), sources, "low")
+        or "low"
+    )
+    base_price = int(video_tier_cost_xu(tier) or (video_tier_payload(tier).get("cost") or 0) or 0)
+    paid_addons: list[dict] = []
+    free_addons: list[dict] = []
+    guarded_addons: list[dict] = []
+
+    # Existing itemized invoice/order data has priority when it contains prices.
+    for source in sources:
+        _video_classifier_collect_items(source.get("paid_items") or source.get("selected_paid_addons") or source.get("paid_addons"), paid_addons, free_addons)
+        _video_classifier_collect_items(source.get("free_items") or source.get("free_addons"), paid_addons, free_addons)
+
+    pricing = dict(state.get("current_video_price_preview") or pending.get("video_price_preview") or {})
+    order = dict(state.get("video_order") or pending.get("video_order") or {})
+    for priced_key, label, reason in (
+        ("music_xu", "Nhạc/SFX trả phí", "paid_music"),
+        ("subtitle_xu", "Phụ đề trả phí", "subtitle"),
+        ("dubbing_xu", "Lồng tiếng trả phí", "dubbing"),
+        ("addon_xu", "Add-on trả phí", "paid_addon"),
+        ("duration_extra_price_xu", "Tăng thời lượng", "extra_duration"),
+        ("scene_extra_price_xu", "Tăng số cảnh", "extra_scene"),
+        ("extra_duration_price_xu", "Tăng thời lượng", "extra_duration"),
+        ("extra_scene_price_xu", "Tăng số cảnh", "extra_scene"),
+    ):
+        price = max(_video_addon_int(pricing.get(priced_key), 0), _video_addon_int(state.get(priced_key), 0), _video_addon_int(pending.get(priced_key), 0))
+        if price > 0:
+            _video_classifier_add_item(paid_addons, reason, label, price)
+
+    total_candidates = [
+        _video_addon_int(pricing.get("total_xu"), 0),
+        _video_addon_int(pricing.get("raw_total_xu"), 0),
+        _video_addon_int(order.get("total_xu"), 0),
+        _video_addon_int(pending.get("base_cost"), 0),
+    ]
+    invoice_total = max([value for value in total_candidates if value >= 0] or [0])
+    invoice_extra = max(0, invoice_total - base_price) if base_price > 0 else 0
+    if invoice_extra > 0:
+        _video_classifier_add_item(paid_addons, "invoice_total_over_base", "Tổng hóa đơn vượt gói chính", invoice_extra)
+
+    music = str(_video_classifier_value((
+        "current_video_music_choice", "current_video_music_option", "music_choice_key",
+        "music_option", "music_mode", "music_choice",
+    ), sources, "none")).strip().lower()
+    if music in VIDEO_PAID_MUSIC_VALUES:
+        price = int((video_addon_pricing_matrix().get("suno_music") or {}).get("price_xu") or 0) if "suno" in music or "music" in music or music == "ai" else int((video_addon_pricing_matrix().get("sfx_ai") or {}).get("price_xu") or 0)
+        _video_classifier_add_item(paid_addons, "paid_music", "Nhạc/SFX AI trả phí", price)
+    elif music and music in VIDEO_FREE_MUSIC_VALUES:
+        _video_classifier_add_item(free_addons, music, "Nhạc/SFX miễn phí", 0)
+    elif music and music not in VIDEO_ADDON_NONE_VALUES:
+        _video_classifier_add_item(guarded_addons, f"unknown_music:{music}", "Nhạc/SFX cần kiểm tra", 0)
+
+    voice_choice = str(_video_classifier_value((
+        "current_video_voice_choice", "voice_choice", "selected_voice_kind", "voice_kind",
+    ), sources, "none")).strip().lower()
+    voice_mode = str(_video_classifier_value(("voice_mode",), sources, "")).strip().lower()
+    voice_style = str(_video_classifier_value(("current_video_voice_style", "voice_style", "selected_voice_style"), sources, "")).strip().lower()
+    voice_profile_id = str(_video_classifier_value(("current_video_voice_profile_id", "voice_profile_id", "selected_voice_profile_id"), sources, "")).strip()
+    voice_is_explicit_free = any(value in VIDEO_FREE_VOICE_VALUES for value in (voice_choice, voice_mode, voice_style))
+    voice_is_explicit_paid = any(value in VIDEO_PAID_VOICE_VALUES for value in (voice_choice, voice_mode, voice_style))
+    voice_cost = max(
+        _video_addon_int(_video_classifier_value(("voice_cost_xu", "voice_price_xu", "voice_addon_xu"), sources, 0), 0),
+        _video_addon_int(_video_classifier_value(("selected_voice_cost_xu",), sources, 0), 0),
+    )
+    if voice_cost > 0 or voice_is_explicit_paid:
+        _video_classifier_add_item(paid_addons, "paid_voice", "Voice trả phí/voice riêng", voice_cost)
+    elif voice_is_explicit_free:
+        label = "Giọng nam mặc định" if "male" in " ".join([voice_choice, voice_mode, voice_style]) else ("Giọng nữ mặc định" if "female" in " ".join([voice_choice, voice_mode, voice_style]) else "Giọng mặc định miễn phí")
+        _video_classifier_add_item(free_addons, "default_voice", label, 0)
+    elif voice_profile_id and _video_addon_paid_marker(_video_classifier_value(("voice_profile_paid", "selected_voice_paid"), sources, False)):
+        _video_classifier_add_item(paid_addons, "paid_voice", "Voice profile trả phí", voice_cost)
+
+    subtitle = str(_video_classifier_value(("current_video_subtitle_option", "subtitle_option"), sources, "none")).strip().lower()
+    dubbing = str(_video_classifier_value(("current_video_dubbing_option", "dubbing_option"), sources, "none")).strip().lower()
+    translated = bool(_video_classifier_value(("translation_enabled",), sources, False)) or "translated" in subtitle or "translated" in dubbing
+    subtitle_dub_choice = str(_video_classifier_value(("current_video_subtitle_dub_choice", "subtitle_dub_choice"), sources, "none")).strip().lower()
+    default_voice_dub_only = (
+        dubbing not in VIDEO_ADDON_NONE_VALUES
+        and voice_is_explicit_free
+        and subtitle in VIDEO_ADDON_NONE_VALUES
+        and not translated
+        and subtitle_dub_choice in VIDEO_ADDON_NONE_VALUES.union({"dubbing", "dub", "voice", "voice_default"})
+        and not voice_is_explicit_paid
+        and voice_cost <= 0
+    )
+    if subtitle not in VIDEO_ADDON_NONE_VALUES:
+        _video_classifier_add_item(paid_addons, "subtitle", "Phụ đề trả phí", _video_addon_int(pricing.get("subtitle_xu"), 0))
+    if dubbing not in VIDEO_ADDON_NONE_VALUES:
+        if default_voice_dub_only:
+            _video_classifier_add_item(free_addons, "default_voice", "Giọng mặc định miễn phí", 0)
+        else:
+            _video_classifier_add_item(paid_addons, "dubbing", "Lồng tiếng trả phí", _video_addon_int(pricing.get("dubbing_xu"), 0))
+    if translated:
+        _video_classifier_add_item(paid_addons, "subtitle_translation", "Dịch phụ đề/lồng tiếng trả phí", _video_addon_int(pricing.get("subtitle_xu"), 0) + _video_addon_int(pricing.get("dubbing_xu"), 0))
+
+    if _video_addon_int(_video_classifier_value(("current_video_extra_duration_seconds", "extra_duration_seconds"), sources, 0), 0) > 0 or _video_addon_paid_marker(_video_classifier_value(("paid_extra_duration",), sources, False)):
+        _video_classifier_add_item(paid_addons, "extra_duration", "Tăng thời lượng", _video_addon_int(_video_classifier_value(("duration_extra_price_xu", "extra_duration_price_xu"), sources, 0), 0))
+    if _video_addon_int(_video_classifier_value(("current_video_extra_scene_count", "extra_scene_count"), sources, 0), 0) > 0 or _video_addon_paid_marker(_video_classifier_value(("paid_extra_scene",), sources, False)):
+        _video_classifier_add_item(paid_addons, "extra_scene", "Tăng số cảnh", _video_addon_int(_video_classifier_value(("scene_extra_price_xu", "extra_scene_price_xu"), sources, 0), 0))
+
+    itemized_paid_total = sum(
+        max(0, _video_addon_int(item.get("price_xu"), 0))
+        for item in paid_addons
+        if str(item.get("key") or "") != "invoice_total_over_base"
+    )
+    paid_total = max(invoice_extra, itemized_paid_total)
+    labels = {
+        "free": [str(item.get("label") or item.get("key") or "") for item in free_addons],
+        "paid": [str(item.get("label") or item.get("key") or "") for item in paid_addons],
+        "guarded": [str(item.get("label") or item.get("key") or "") for item in guarded_addons],
+    }
+    return {
+        "tier": tier,
+        "base_price_xu": base_price,
+        "invoice_total_xu": invoice_total or base_price,
+        "free_addons": video_order_dedupe_items(free_addons),
+        "paid_addons": video_order_dedupe_items(paid_addons),
+        "guarded_addons": video_order_dedupe_items(guarded_addons),
+        "paid_total_xu": int(paid_total or 0),
+        "labels": labels,
+        "allowed_for_200": not paid_addons and int(paid_total or 0) <= 0,
+        "default_voice_free": any(str(item.get("key") or "") == "default_voice" for item in free_addons),
+    }
+
 def video_state_has_paid_addon_or_extension(state: dict | None = None, tier: str = "") -> dict:
     state = state or {}
     tier_norm = normalize_video_tier(tier or state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier"))
     duration = int(state.get("current_video_duration_seconds") or (state.get("pending_payload") or {}).get("duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS)
     project = state.get("video_project") or {}
     scene_count = int(project.get("scene_count") or len(project.get("scenes") or []) or (state.get("pending_payload") or {}).get("scene_count") or 1)
-    subtitle = str(state.get("current_video_subtitle_option") or (state.get("pending_payload") or {}).get("subtitle_option") or "none").strip().lower()
-    dubbing = str(state.get("current_video_dubbing_option") or (state.get("pending_payload") or {}).get("dubbing_option") or "none").strip().lower()
-    music = str(state.get("current_video_music_choice") or state.get("current_video_music_option") or (state.get("pending_payload") or {}).get("music_choice_key") or (state.get("pending_payload") or {}).get("music_option") or "none").strip().lower()
-    voice = str(state.get("current_video_voice_choice") or (state.get("pending_payload") or {}).get("voice_choice") or "none").strip().lower()
     reasons = []
     if tier_norm == "low":
-        explicit_duration_extra = any(
-            _safe_int(state.get(key) or (state.get("pending_payload") or {}).get(key), 0) > 0
-            for key in ("duration_extra_price_xu", "extra_duration_price_xu", "current_video_extra_duration_seconds", "extra_duration_seconds")
-        ) or bool(state.get("paid_extra_duration") or (state.get("pending_payload") or {}).get("paid_extra_duration"))
-        explicit_scene_extra = any(
-            _safe_int(state.get(key) or (state.get("pending_payload") or {}).get(key), 0) > 0
-            for key in ("scene_extra_price_xu", "extra_scene_price_xu", "current_video_extra_scene_count", "extra_scene_count")
-        ) or bool(state.get("paid_extra_scene") or (state.get("pending_payload") or {}).get("paid_extra_scene"))
-        if explicit_duration_extra:
-            reasons.append("extra_duration")
-        if explicit_scene_extra:
-            reasons.append("extra_scene")
-        if subtitle not in {"", "none", "off", "no"}:
-            reasons.append("subtitle")
-        if dubbing not in {"", "none", "off", "no"}:
-            reasons.append("dubbing")
-        if music in {"ai", "ai_music", "music_ai", "suno", "sfx_ai"}:
-            reasons.append("paid_music")
-        if voice in {"paid_clone", "voice_clone", "voice_clone_create", "advanced_dubbing", "advanced_voice", "custom_voice_pending"}:
-            reasons.append("paid_voice")
+        classification = classify_video_addons_for_package({**state, "video_tier": tier_norm})
+        for item in classification.get("paid_addons") or []:
+            key = str(item.get("key") or "").strip()
+            if key in {"suno_music", "sfx_ai"}:
+                key = "paid_music"
+            elif key in {"voice_clone_create", "voice_advanced", "voice_clone_reuse"}:
+                key = "paid_voice"
+            elif key == "subtitle_translation":
+                key = "subtitle"
+            elif key == "invoice_total_over_base":
+                key = "invoice_total_over_base"
+            reasons.append(key or "paid_addon")
     return {
         "tier": tier_norm,
         "blocked": bool(reasons),
@@ -34449,6 +34653,8 @@ def video_experience_tier_lock_text(lang: str = "vi", reasons: list[str] | tuple
         "dubbing": "paid dubbing",
         "paid_music": "AI music/SFX",
         "paid_voice": "paid/custom voice",
+        "paid_addon": "paid add-ons",
+        "invoice_total_over_base": "invoice total above the selected package",
     }
     reason_labels_vi = {
         "extra_duration": "tăng thời lượng",
@@ -34457,6 +34663,8 @@ def video_experience_tier_lock_text(lang: str = "vi", reasons: list[str] | tuple
         "dubbing": "lồng tiếng trả phí",
         "paid_music": "nhạc/SFX AI trả phí",
         "paid_voice": "voice trả phí/voice riêng",
+        "paid_addon": "add-on trả phí",
+        "invoice_total_over_base": "tổng hóa đơn vượt gói đang chọn",
     }
     if normalize_user_language(lang) != "vi":
         readable = [reason_labels_en.get(item, item.replace("_", " ")) for item in reasons]
@@ -34490,6 +34698,91 @@ def video_export_maintenance_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         InlineKeyboardButton("⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back", callback_data="videoaddon|export_back"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
     ]])
+
+def normalize_video_export_payload_for_classifier(state: dict, classification: dict | None = None) -> dict:
+    """Keep free/default video options from tripping paid subtitle/dub guards."""
+    clean = dict(state or {})
+    pending = dict(clean.get("pending_payload") or {})
+    classification = classification or classify_video_addons_for_package(clean)
+    sources = _video_classifier_source_dicts(clean)
+    voice_choice = str(_video_classifier_value(("current_video_voice_choice", "voice_choice", "selected_voice_kind"), sources, "none")).strip().lower()
+    voice_mode = str(_video_classifier_value(("voice_mode",), sources, "")).strip().lower()
+    voice_style = str(_video_classifier_value(("current_video_voice_style", "voice_style", "selected_voice_style"), sources, "")).strip().lower()
+    free_voice = bool(classification.get("default_voice_free")) or any(value in VIDEO_FREE_VOICE_VALUES for value in (voice_choice, voice_mode, voice_style))
+    paid_voice = any(value in VIDEO_PAID_VOICE_VALUES for value in (voice_choice, voice_mode, voice_style))
+    subtitle = str(clean.get("current_video_subtitle_option") or pending.get("subtitle_option") or "none").strip().lower()
+    dubbing = str(clean.get("current_video_dubbing_option") or pending.get("dubbing_option") or "none").strip().lower()
+    translated = bool(clean.get("translation_enabled") or pending.get("translation_enabled")) or "translated" in subtitle or "translated" in dubbing
+    if free_voice and not paid_voice and subtitle in VIDEO_ADDON_NONE_VALUES and not translated:
+        if dubbing not in VIDEO_ADDON_NONE_VALUES:
+            clean["current_video_dubbing_option"] = "none"
+            clean["current_video_subtitle_dub_choice"] = "none"
+            pending["dubbing_option"] = "none"
+            pending["subtitle_dub_choice"] = "none"
+        pending["voice_is_free"] = True
+        pending["free_default_voice"] = True
+        clean["voice_is_free"] = True
+    clean["pending_payload"] = pending
+    return clean
+
+async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE, session_id: str = ""):
+    """Bridge Task 3D final export to the old stable ShopAIKey video core."""
+    query = update.callback_query
+    uid = query.from_user.id
+    lang = user_ui_lang(uid)
+    token = str(session_id or "").strip()
+    state = get_video_addon_state(uid)
+    if not state:
+        await query.answer()
+        return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+    pending_payload = dict(state.get("pending_payload") or {})
+    if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
+        pending_payload.update(dict(SHOPAIKEY_PENDING_CONFIRMATIONS[token] or {}))
+        state["pending_payload"] = pending_payload
+        set_video_addon_state(uid, state)
+    token = token or str(state.get("pending_confirm_token") or "")
+    tier = normalize_video_tier(state.get("video_tier") or pending_payload.get("video_tier"))
+    classification = classify_video_addons_for_package(state)
+    if state.get("source") != "frame" and tier == "low" and not classification.get("allowed_for_200"):
+        await query.answer()
+        reasons = []
+        for item in classification.get("paid_addons") or []:
+            key = str(item.get("key") or "").strip()
+            if key in {"suno_music", "sfx_ai"}:
+                key = "paid_music"
+            elif key in {"voice_clone_create", "voice_advanced", "voice_clone_reuse"}:
+                key = "paid_voice"
+            elif key == "subtitle_translation":
+                key = "subtitle"
+            reasons.append(key or "paid_addon")
+        return await safe_edit_or_send(
+            query,
+            video_experience_tier_lock_text(lang, list(dict.fromkeys(reasons)) or ["paid_addon"]),
+            parse_mode="HTML",
+            reply_markup=video_experience_tier_lock_keyboard(lang),
+        )
+
+    # Public readiness is checked here so a missing/closed provider gives a clean
+    # no-charge guard while preserving the invoice token and video session.
+    export_enabled, _export_message = shopaikey_public_generation_guard("video")
+    if not export_enabled:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "🛠 Hệ thống tạo video đang bảo trì hoặc chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu.\n\n"
+            "Nội dung, tùy chọn và file trong phiên của bạn vẫn được giữ nguyên.",
+            parse_mode=None,
+            reply_markup=video_export_maintenance_keyboard(lang),
+        )
+
+    state = normalize_video_export_payload_for_classifier(state, classification)
+    pending_payload = dict(state.get("pending_payload") or {})
+    if token:
+        restore_shopaikey_pending_confirmation(token, uid, pending_payload)
+        state["pending_confirm_token"] = token
+    set_video_addon_state(uid, state)
+    query.data = f"shopai|confirm|{token}"
+    return await handle_shopaikey_public_callback(update, context)
 
 def image_tool_pricing_matrix() -> dict:
     return {
@@ -90184,34 +90477,7 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     if action == "export":
         token = parts[2] if len(parts) > 2 else str(state.get("pending_confirm_token") or "")
-        pending_payload = dict(state.get("pending_payload") or {})
-        if token and token in SHOPAIKEY_PENDING_CONFIRMATIONS:
-            pending_payload.update(dict(SHOPAIKEY_PENDING_CONFIRMATIONS[token] or {}))
-            state["pending_payload"] = pending_payload
-            set_video_addon_state(uid, state)
-        tier = normalize_video_tier(state.get("video_tier") or pending_payload.get("video_tier"))
-        starter_block = validate_video_tier_selection(state, tier)
-        if state.get("source") != "frame" and tier == "low" and starter_block.get("blocked"):
-            await query.answer()
-            return await safe_edit_or_send(
-                query,
-                video_experience_tier_lock_text(lang, starter_block.get("reasons") or []),
-                parse_mode="HTML",
-                reply_markup=video_experience_tier_lock_keyboard(lang),
-            )
-        export_enabled, _export_message = shopaikey_public_generation_guard("video")
-        addon_guard = video_addon_runtime_guard(pending_payload)
-        if not export_enabled or not addon_guard.get("ok"):
-            await query.answer()
-            return await safe_edit_or_send(
-                query,
-                "🛠 Hệ thống tạo video đang bảo trì hoặc chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu.\n\n"
-                "Nội dung, tùy chọn và file trong phiên của bạn vẫn được giữ nguyên.",
-                parse_mode=None,
-                reply_markup=video_export_maintenance_keyboard(lang),
-            )
-        query.data = f"shopai|confirm|{token}"
-        return await handle_shopaikey_public_callback(update, context)
+        return await handle_video_export_confirm(update, context, token)
     if action == "export_back":
         return await render_video_addon_screen(query, uid, state, "invoice", lang)
     if action == "upgrade_300":
