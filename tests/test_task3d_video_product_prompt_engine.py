@@ -1103,6 +1103,116 @@ def test_video_last_export_error_command_registered():
     assert 'CommandHandler("video_last_export_error", cmd_video_last_export_error)' in source
 
 
+def test_shopaikey_success_does_not_call_key4u_fallback(monkeypatch):
+    calls = {"key4u": 0}
+
+    async def primary_ok(model, prompt):
+        return {"status": "PASS_SUBMITTED", "task_id": "shop-task", "model": model, "attempts": []}
+
+    def forbidden_key4u():
+        calls["key4u"] += 1
+        raise AssertionError("Key4U must stay untouched while ShopAIKey works")
+
+    monkeypatch.setattr(bot, "shopaikey_video_create_smoke_test", primary_ok)
+    monkeypatch.setattr(bot, "key4u_provider_instance", forbidden_key4u)
+    result = asyncio.run(bot.submit_public_video_with_key4u_fallback("veo3.1-fast", "prompt", 123))
+    assert result["provider_route"] == "shopaikey"
+    assert result["task_id"] == "shop-task"
+    assert calls["key4u"] == 0
+
+
+def test_clear_shopaikey_rejection_uses_key4u_fallback(monkeypatch):
+    class FakeKey4U:
+        def is_configured(self):
+            return True
+
+        async def video_generation(self, prompt="", model="", timeout_seconds=0):
+            assert prompt == "prompt Task 3D"
+            return {"ok": True, "status": "PASS_SUBMITTED", "task_id": "key4u-task", "model": model, "capability": "video_generate"}
+
+    async def primary_rejected(model, prompt):
+        return {"status": "FAIL_QUOTA_OR_BALANCE", "error_class": "FAIL_QUOTA_OR_BALANCE", "task_id": "", "attempts": []}
+
+    monkeypatch.setattr(bot, "KEY4U_VIDEO_FALLBACK_ENABLED", True)
+    monkeypatch.setattr(bot, "key4u_public_video_fallback_ready", lambda: True)
+    monkeypatch.setattr(bot, "shopaikey_video_create_smoke_test", primary_rejected)
+    monkeypatch.setattr(bot, "key4u_provider_instance", lambda: FakeKey4U())
+    monkeypatch.setattr(bot, "record_provider_usage_event", lambda **kwargs: None)
+    result = asyncio.run(bot.submit_public_video_with_key4u_fallback("veo3.1-fast", "prompt Task 3D", 123))
+    assert result["provider_route"] == "key4u"
+    assert result["task_id"] == "key4u-task"
+    assert result["status"] == "PASS_SUBMITTED"
+
+
+def test_ambiguous_shopaikey_timeout_does_not_fallback(monkeypatch):
+    async def primary_timeout(model, prompt):
+        return {"status": "FAIL_TIMEOUT", "error_class": "FAIL_TIMEOUT", "task_id": "", "attempts": []}
+
+    monkeypatch.setattr(bot, "KEY4U_VIDEO_FALLBACK_ENABLED", True)
+    monkeypatch.setattr(bot, "shopaikey_video_create_smoke_test", primary_timeout)
+    monkeypatch.setattr(bot, "key4u_provider_instance", lambda: (_ for _ in ()).throw(AssertionError("unsafe duplicate fallback")))
+    result = asyncio.run(bot.submit_public_video_with_key4u_fallback("veo3.1-fast", "prompt", 123))
+    assert result["provider_route"] == "shopaikey"
+    assert result["status"] == "FAIL_TIMEOUT"
+
+
+def test_public_video_core_uses_safe_provider_fallback_wrapper():
+    source = inspect.getsource(bot.handle_shopaikey_public_callback)
+    assert "submit_public_video_with_key4u_fallback(model, prompt, uid, video_tier)" in source
+    assert "shopaikey_video_create_smoke_test(model, prompt)" not in source
+    callbacks = _callbacks(bot.public_video_submitted_keyboard("key4u-task", "vi", {"provider_route": "key4u"}))
+    assert callbacks == ["menu|main"]
+
+
+@pytest.mark.parametrize("tier", ["future_1000", "future_1200", "future_1500"])
+def test_1000_1200_1500_use_key4u_kling_without_shopaikey(monkeypatch, tier):
+    seen = {}
+
+    class FakeKey4U:
+        def is_configured(self):
+            return True
+
+        async def video_generation(self, prompt="", model="", timeout_seconds=0):
+            seen["model"] = model
+            return {"ok": True, "status": "PASS_SUBMITTED", "task_id": f"{tier}-task", "model": model}
+
+    async def forbidden_shopaikey(model, prompt):
+        raise AssertionError("High packages must not submit through ShopAIKey")
+
+    monkeypatch.setattr(bot, "key4u_provider_instance", lambda: FakeKey4U())
+    monkeypatch.setattr(bot, "shopaikey_video_create_smoke_test", forbidden_shopaikey)
+    monkeypatch.setattr(bot, "record_provider_usage_event", lambda **kwargs: None)
+    result = asyncio.run(bot.submit_public_video_with_key4u_fallback("veo3.1-fast", "prompt Kling", 123, tier))
+    assert seen["model"] == "kling-video"
+    assert result["provider_route"] == "key4u"
+    assert result["selected_model"] == "kling-video"
+    assert result["status"] == "PASS_SUBMITTED"
+
+
+def test_export_bridge_allows_ready_key4u_when_shopaikey_guard_is_down(monkeypatch):
+    user_id = 993229
+    pending = {"job_type": "video", "video_tier": "basic", "prompt": "Prompt fallback", "base_cost": 300}
+    token = bot.set_shopaikey_pending_confirmation(user_id, pending)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai", "video_tier": "basic", "pending_confirm_token": token, "pending_payload": pending,
+        "current_video_price_preview": {"total_xu": 300, "addon_xu": 0},
+    })
+    delegated = {}
+
+    async def fake_old_core(update, context, callback_data_override=""):
+        delegated["callback"] = callback_data_override
+
+    monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (False, "shopaikey unavailable"))
+    monkeypatch.setattr(bot, "key4u_public_video_fallback_ready", lambda: True)
+    monkeypatch.setattr(bot, "handle_shopaikey_public_callback", fake_old_core)
+    query = _ImmutableDataQuery(user_id, f"videoaddon|export|{token}")
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert delegated["callback"] == f"shopai|confirm|{token}"
+    assert not query.edits
+    bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+    bot.clear_video_addon_state(user_id)
+
+
 def test_200_paid_addon_block_back_and_upgrade_routes():
     callbacks = _callbacks(bot.video_experience_tier_lock_keyboard("vi"))
     assert callbacks == ["videoaddon|upgrade_300", "videoaddon|export_back"]
@@ -1131,6 +1241,7 @@ def test_export_action_guards_if_provider_unavailable(monkeypatch):
     token = bot.set_shopaikey_pending_confirmation(user_id, pending)
     bot.set_video_addon_state(user_id, {"source": "ai", "video_tier": "low", "pending_confirm_token": token, "pending_payload": pending})
     monkeypatch.setattr(bot, "shopaikey_public_generation_guard", lambda _kind: (False, "maintenance"))
+    monkeypatch.setattr(bot, "key4u_public_video_fallback_ready", lambda: False)
     query = _FakeQuery(user_id, f"videoaddon|export|{token}")
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     text, kwargs = query.edits[-1]
@@ -1151,7 +1262,7 @@ def test_video_200_creates_provider_job_after_confirm():
     source = inspect.getsource(bot.handle_shopaikey_public_callback)
     confirm_index = source.index('if action not in {"confirm", "package"}')
     create_index = source.index("create_shopaikey_job", confirm_index)
-    provider_index = source.index("shopaikey_video_create_smoke_test", create_index)
+    provider_index = source.index("submit_public_video_with_key4u_fallback", create_index)
     deferred_charge_index = source.index("ShopAIKey video accepted", provider_index)
     assert confirm_index < create_index < provider_index < deferred_charge_index
 

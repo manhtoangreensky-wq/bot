@@ -508,6 +508,7 @@ KEY4U_STT_MODEL = _env("KEY4U_STT_MODEL", "whisper-1")
 KEY4U_SUNO_MODEL = _env("KEY4U_DEFAULT_MUSIC_MODEL", _env("KEY4U_SUNO_MODEL", "chirp-v4"))
 KEY4U_RERANK_MODEL = _env("KEY4U_RERANK_MODEL", "")
 KEY4U_PUBLIC_ENABLED = env_flag("KEY4U_PUBLIC_ENABLED", "false")
+KEY4U_VIDEO_FALLBACK_ENABLED = env_flag("KEY4U_VIDEO_FALLBACK_ENABLED", "true")
 KEY4U_ADMIN_SMOKE_ENABLED = env_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true")
 KEY4U_DASHBOARD_BALANCE_USD = _env("KEY4U_DASHBOARD_BALANCE_USD", "")
 KEY4U_LOW_BALANCE_WARN_USD = env_float("KEY4U_LOW_BALANCE_WARN_USD", 5.0)
@@ -34851,7 +34852,8 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
     # Public readiness is checked here so a missing/closed provider gives a clean
     # no-charge guard while preserving the invoice token and video session.
     export_enabled, _export_message = shopaikey_public_generation_guard("video")
-    if not export_enabled:
+    key4u_ready = key4u_public_video_route_ready() if tier in {"future_1000", "future_1200", "future_1500"} else key4u_public_video_fallback_ready()
+    if not export_enabled and not key4u_ready:
         await query.answer()
         return await safe_edit_or_send(
             query,
@@ -41946,6 +41948,72 @@ async def shopaikey_video_create_smoke_test(model_override: str = "", prompt: st
         final_status = "FAIL_NO_AVAILABLE_CHANNEL"
     return {**last, "status": final_status, "error_class": final_status, "attempts": attempts, "selected_model": ""}
 
+def shopaikey_video_result_allows_key4u_fallback(result: dict | None = None) -> bool:
+    result = dict(result or {})
+    if result.get("task_id"):
+        return False
+    status = str(result.get("error_class") or result.get("status") or "").upper()
+    return status in {
+        "MISSING", "MISSING_API_KEY", "FAIL_NO_AVAILABLE_CHANNEL",
+        "FAIL_QUOTA_OR_BALANCE", "FAIL_RATE_LIMIT", "FAIL_AUTH",
+    }
+
+def key4u_public_video_route_ready() -> bool:
+    system_on, _ = is_system_maintenance()
+    if system_on or not (video_public_beta_enabled_runtime() and shopaikey_public_video_enabled_runtime() and video_ai_public_enabled_runtime()):
+        return False
+    try:
+        return bool(key4u_provider_instance().is_configured())
+    except Exception:
+        return False
+
+def key4u_public_video_fallback_ready() -> bool:
+    return bool(KEY4U_VIDEO_FALLBACK_ENABLED and key4u_public_video_route_ready())
+
+async def _submit_key4u_public_video(prompt: str, user_id="", models: list[str] | None = None) -> dict:
+    try:
+        provider = key4u_provider_instance()
+        if not provider.is_configured():
+            return {"status": "MISSING", "error_class": "KEY4U_NOT_CONFIGURED", "task_id": "", "provider_route": "key4u"}
+        candidates = list(models or key4u_model_candidates(KEY4U_VIDEO_MODEL, KEY4U_VIDEO_FALLBACK_MODELS, max_fallbacks=1))
+        result = await key4u_run_with_model_fallback(
+            candidates,
+            lambda selected: provider.video_generation(prompt=prompt, model=selected, timeout_seconds=60.0),
+        )
+    except Exception as exc:
+        return {"status": f"FAIL_{type(exc).__name__}", "error_class": type(exc).__name__, "task_id": "", "provider_route": "key4u"}
+    record_provider_usage_event(
+        provider="key4u", capability="video_generate", model=str(result.get("model") or ""),
+        user_id=str(user_id or ""), is_admin_smoke=False, provider_task_id=str(result.get("task_id") or ""),
+        status=str(result.get("status") or "FAIL"), media_units=1 if result.get("task_id") else 0,
+        note="public_video_key4u_route",
+    )
+    return {
+        **result,
+        "provider_route": "key4u",
+        "selected_model": result.get("model") or (candidates[0] if candidates else KEY4U_VIDEO_MODEL),
+        "attempts": [{
+            "provider": "key4u", "model": result.get("model") or (candidates[0] if candidates else KEY4U_VIDEO_MODEL),
+            "status": result.get("status") or "FAIL", "http_status": result.get("http_status") or 0,
+        }],
+    }
+
+async def submit_public_video_with_key4u_fallback(model: str, prompt: str, user_id="", video_tier: str = "") -> dict:
+    """Route 1000/1200/1500 to Key4U Kling; keep ShopAIKey primary below them."""
+    tier = normalize_video_tier(video_tier)
+    if tier in {"future_1000", "future_1200", "future_1500"}:
+        return await _submit_key4u_public_video(prompt, user_id, ["kling-video"])
+    primary = {**(await shopaikey_video_create_smoke_test(model, prompt)), "provider_route": "shopaikey"}
+    if primary.get("status") == "PASS_SUBMITTED" and primary.get("task_id"):
+        return primary
+    if not key4u_public_video_fallback_ready() or not shopaikey_video_result_allows_key4u_fallback(primary):
+        return primary
+    fallback = await _submit_key4u_public_video(prompt, user_id)
+    if fallback.get("status") == "PASS_SUBMITTED" and fallback.get("task_id"):
+        fallback["attempts"] = [*(primary.get("attempts") or []), *(fallback.get("attempts") or [])]
+        return fallback
+    return {**primary, "key4u_fallback_status": fallback.get("status") or "FAIL"}
+
 async def shopaikey_video_job_status(task_id: str) -> dict:
     task_id = str(task_id or "").strip()
     if not SHOPAIKEY_API_KEY:
@@ -42077,8 +42145,9 @@ def mark_shopaikey_video_output_confirmed(task_id: str = "", model: str = "", up
     set_system_setting("shopaikey_video_last_completed_at", now_text(), detail, updated_by)
     record_api_debug("shopaikey", str(source or "video_output")[:80], "SUCCESS", 200, detail)
 
-async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_id, task_id: str) -> None:
+async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_id, task_id: str, provider_route: str = "shopaikey") -> None:
     lang = user_ui_lang(user_id)
+    provider_route = "key4u" if str(provider_route or "").lower() == "key4u" else "shopaikey"
     max_attempts = max(1, int(SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS or 24))
     interval = max(5, int(SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS or 25))
     initial_job = shopaikey_job_by_id(job_id) or {}
@@ -42089,9 +42158,9 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
         )
     for attempt in range(1, max_attempts + 1):
         await asyncio.sleep(interval)
-        result = await shopaikey_video_job_status(task_id)
+        result = await (key4u_provider_instance().poll_video_task(task_id) if provider_route == "key4u" else shopaikey_video_job_status(task_id))
         status = str(result.get("status") or "UNKNOWN").upper()
-        result_url = str(result.get("result_url") or "")
+        result_url = str(result.get("result_url") or result.get("output_url") or "")
         update_shopaikey_job(
             job_id=job_id,
             task_id=task_id,
@@ -42115,8 +42184,10 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
                 output_file_id=file_id,
                 finished_at=now_text(),
             )
-            if output_sent:
+            if output_sent and provider_route == "shopaikey":
                 mark_shopaikey_video_output_confirmed(task_id, (initial_job or {}).get("model") or SHOPAIKEY_VIDEO_MODEL, user_id, "auto_poll_shopaikey_video_job")
+            elif output_sent:
+                save_tool_test_result("key4u_video_job", "SUCCESS", f"public fallback task_id={task_id}; output_sent=yes", user_id)
             credits_now, _, _ = get_user(user_id)
             record_shopaikey_billing_event(user_id, job_id, "video_success", 0, int(credits_now or 0), int(credits_now or 0), f"task_id={task_id}; result_url={'yes' if result_url else 'no'}")
             try:
@@ -42131,7 +42202,7 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
         if status in {"FAILED", "FAILURE"} or str(result.get("error_class") or "").upper().startswith("FAIL_"):
             provider_error_text = result.get("fail_reason") or result.get("detail") or "video_provider_failed"
             record_provider_error(
-                "shopaikey",
+                provider_route,
                 "video",
                 classify_provider_error(result.get("http_status") or 0, result.get("error_class") or status, provider_error_text),
                 provider_error_text,
@@ -42168,7 +42239,7 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
                 finished_at=now_text(),
             )
             return
-    record_provider_error("shopaikey", "video", "TIMEOUT_STALE", "video_poll_timeout")
+    record_provider_error(provider_route, "video", "TIMEOUT_STALE", "video_poll_timeout")
     job_snapshot = shopaikey_job_by_id(job_id) or {}
     deducted_amount = int(job_snapshot.get("xu_deducted") or 0)
     package_used = bool(int(job_snapshot.get("package_item_id") or 0) and int(job_snapshot.get("package_units_used") or 0))
@@ -42201,6 +42272,18 @@ async def auto_poll_shopaikey_video_job(bot_client, job_id: int, chat_id, user_i
         )
     except Exception:
         return
+
+def start_public_video_auto_poll(context, job_id: int, chat_id, user_id, task_id: str, result: dict) -> bool:
+    route = "key4u" if str((result or {}).get("provider_route") or "").lower() == "key4u" else "shopaikey"
+    enabled = route == "key4u" or bool(SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED)
+    if enabled:
+        asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, chat_id, user_id, task_id, route))
+    return enabled
+
+def public_video_submitted_keyboard(task_id: str, lang: str, result: dict, public_user: bool = True) -> InlineKeyboardMarkup:
+    if str((result or {}).get("provider_route") or "").lower() == "key4u":
+        return InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]])
+    return shopaikey_video_job_check_keyboard(task_id, lang, public_user=public_user)
 
 def provider_matrix_lines() -> list[str]:
     registry = provider_registry()
@@ -65121,7 +65204,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             reply_markup=video_paid_preview_entry_keyboard(token, lang),
         )
     enabled, message = shopaikey_public_generation_guard(job_type)
-    if not enabled:
+    key4u_ready = key4u_public_video_route_ready() if video_tier in {"future_1000", "future_1200", "future_1500"} else key4u_public_video_fallback_ready()
+    if not enabled and not (job_type == "video" and key4u_ready):
         if job_type == "video":
             return await safe_edit_or_send(
                 query,
@@ -65459,7 +65543,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
         return await context.bot.send_message(chat_id=query.message.chat_id, text=ui_text(lang, "account.balance_left", credits=int(credits_after or 0)))
     if job_type == "video":
         await safe_edit_or_send(query, ui_text(lang, "video.waiting"))
-        result = await shopaikey_video_create_smoke_test(model, prompt)
+        result = await submit_public_video_with_key4u_fallback(model, prompt, uid, video_tier)
         status = str(result.get("status") or "FAIL")
         task_id = str(result.get("task_id") or "")
         attempts = result.get("attempts") or []
@@ -65480,9 +65564,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                         attempts=len(attempts),
                     )
                     record_shopaikey_billing_event(uid, job_id, "video_billing_failed_after_provider_accept", 0, int(balance_before or 0), int(balance_before or 0), f"task_id={task_id}; package_item={package_item_type}")
-                    if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
-                        asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
-                    return await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ Provider đã nhận job nhưng lượt gói không còn khả dụng. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra job này.", reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=True))
+                    start_public_video_auto_poll(context, job_id, query.message.chat_id, uid, task_id, result)
+                    return await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ Provider đã nhận job nhưng lượt gói không còn khả dụng. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra job này.", reply_markup=public_video_submitted_keyboard(task_id, lang, result))
                 deducted = 0
                 balance_after = balance_before
                 update_shopaikey_job(
@@ -65512,9 +65595,8 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                         attempts=len(attempts),
                     )
                     record_shopaikey_billing_event(uid, job_id, "video_billing_failed_after_provider_accept", 0, int(credits_now or 0), int(credits_now or 0), f"task_id={task_id}; tier={video_tier}")
-                    if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
-                        asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
-                    return await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ Provider đã nhận job nhưng số dư vừa thay đổi. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra job này.", reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=True))
+                    start_public_video_auto_poll(context, job_id, query.message.chat_id, uid, task_id, result)
+                    return await context.bot.send_message(chat_id=query.message.chat_id, text="⚠️ Provider đã nhận job nhưng số dư vừa thay đổi. TOAN AAS chưa trừ Xu; admin sẽ kiểm tra job này.", reply_markup=public_video_submitted_keyboard(task_id, lang, result))
                 deducted = int(charge.get("final_cost") or 0)
                 balance_after, _, _ = get_user(uid)
                 update_shopaikey_job(job_id=job_id, xu_deducted=deducted, billing_status="deducted_after_provider_accept")
@@ -65541,13 +65623,12 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                     )
                 except Exception:
                     pass
+            auto_poll_started = start_public_video_auto_poll(context, job_id, query.message.chat_id, uid, task_id, result)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text=ui_text(lang, "video.queue_submitted", task_id=html.escape(task_id), auto_poll="ON" if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED else "OFF"),
-                reply_markup=shopaikey_video_job_check_keyboard(task_id, lang, public_user=not is_admin_user(uid)),
+                text=ui_text(lang, "video.queue_submitted", task_id=html.escape(task_id), auto_poll="ON" if auto_poll_started else "OFF"),
+                reply_markup=public_video_submitted_keyboard(task_id, lang, result, public_user=not is_admin_user(uid)),
             )
-            if SHOPAIKEY_VIDEO_AUTO_POLL_ENABLED:
-                asyncio.create_task(auto_poll_shopaikey_video_job(context.bot, job_id, query.message.chat_id, uid, task_id))
             return
         provider_error_text = result.get("message") or result.get("detail") or result.get("provider_error_code") or status
         record_provider_error(
