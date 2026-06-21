@@ -69,8 +69,8 @@ def test_subtitle_plus_stage_a_hides_export_until_subtitle_result_exists():
 def test_guard_public_buttons_are_clean_and_back_preserves_source():
     labels = _labels(bot.video_dubbing_guard_keyboard("vi", admin=False))
     callbacks = _callbacks(bot.video_dubbing_guard_keyboard("vi", admin=False))
-    assert labels == ["✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
-    assert callbacks == ["videodub|final", "videodub|guard_back", "menu|main"]
+    assert labels == ["⬅️ Quay lại", "🏠 Menu chính"]
+    assert callbacks == ["videodub|guard_back", "menu|main"]
 
     uid = "task25-back"
     bot.clear_video_dubbing_pending(uid)

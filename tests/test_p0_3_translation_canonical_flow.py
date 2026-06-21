@@ -153,6 +153,7 @@ def test_standalone_subtitle_asks_upload(monkeypatch):
     user_id = 990302
     _reset_user(user_id)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
 
     query = asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_CREATE}", user_id))
 
@@ -274,7 +275,7 @@ def test_translation_public_guard_no_api_provider_words():
         bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     ]:
         text = bot.video_dubbing_guard_text(mode, {}, "vi")
-        assert "chưa sẵn sàng xử lý" in text
+        assert "bảo trì/nâng cấp" in text
         assert "chưa trừ Xu" in text
         _assert_public_clean(text)
 

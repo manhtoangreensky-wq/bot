@@ -230,7 +230,7 @@ def test_song_seconds_asks_topic_genre_mood_vocal():
     genre_labels = _labels(bot.music_song_options_keyboard("genre", "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     mood_labels = _labels(bot.music_song_options_keyboard("mood", "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     vocal_labels = _labels(bot.music_song_options_keyboard("vocal", "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert "music_quick|showroom|song_duration_15" in duration_callbacks
+    assert "music_quick|showroom|song_duration_18" in duration_callbacks
     assert "Bạn muốn bài hát nói về điều gì" in bot.music_song_step_text("topic", {"song_product": "seconds"}, "vi")
     assert {"Pop", "Ballad", "Rap", "EDM", "Acoustic", "Bolero", "Tự nhập thể loại"}.issubset(set(genre_labels))
     assert {"Vui", "Buồn", "Truyền cảm hứng", "Sang trọng", "Hài hước", "Tự nhập cảm xúc"}.issubset(set(mood_labels))
@@ -239,7 +239,7 @@ def test_song_seconds_asks_topic_genre_mood_vocal():
 
 def test_song_seconds_generates_three_options_before_invoice():
     result = {"song_product": "seconds", "music_ai_kind": "lyrics"}
-    suggestions = bot.music_prompt_suggestions("Tạo đoạn có lời 15 giây về thương hiệu", 0, "vi", "lyrics")
+    suggestions = bot.music_prompt_suggestions("Tạo đoạn có lời 18 giây về thương hiệu", 0, "vi", "lyrics")
     labels = _labels(bot.music_prompt_result_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM, result))
     assert len(suggestions) == 3
     assert "1️⃣ Chọn PA1" in labels
@@ -254,11 +254,11 @@ def test_music_song_options_include_lyric_direction():
 
 
 def test_song_option_selected_then_invoice():
-    result = {"song_product": "seconds", "guided_duration_seconds": 15, "selected_prompt": "bài hát có lời"}
+    result = {"song_product": "seconds", "guided_duration_seconds": 18, "selected_prompt": "bài hát có lời"}
     labels = _labels(bot.music_ai_preview_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM, result=result))
     text = bot.music_ai_preview_text(result, "vi")
-    assert "Thời lượng bản đầy đủ: <b>15 giây</b>" in text
-    assert f"Preview: <b>tối đa {bot.paid_preview_seconds(15)} giây</b>" in text
+    assert "Thời lượng bản đầy đủ: <b>18 giây</b>" in text
+    assert f"Preview: <b>tối đa {bot.paid_preview_seconds(18)} giây</b>" in text
     assert "✅ Tạo bài hát" in labels
 
 
@@ -304,6 +304,8 @@ def test_song_preview_calls_provider_when_ready(monkeypatch):
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
         "ready": True,
         "public_enabled": True,
+        "full_result_ok": True,
+        "cost_gate_ok": True,
         "preferred_provider": "key4u_suno",
         "providers": {"key4u_suno": {"configured": True, "smoke": "PASS"}},
     })
@@ -327,6 +329,8 @@ def test_song_full_create_calls_provider_when_ready(monkeypatch):
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
         "ready": True,
         "public_enabled": True,
+        "full_result_ok": True,
+        "cost_gate_ok": True,
         "preferred_provider": "key4u_suno",
         "providers": {"key4u_suno": {"configured": True, "smoke": "PASS"}},
     })

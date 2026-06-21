@@ -124,7 +124,7 @@ def test_background_music_guided_flow_purpose_style_mood_duration_options():
         assert label in style
     for label in ("Vui", "Sang trọng", "Cảm xúc", "Bí ẩn", "Năng lượng", "Thư giãn", "Nhập mood khác"):
         assert label in mood
-    for label in ("15 giây", "30 giây", "60 giây", "Nhập thời lượng khác"):
+    for label in ("18 giây", "30 giây", "60 giây", "Nhập thời lượng khác"):
         assert label in duration
 
 

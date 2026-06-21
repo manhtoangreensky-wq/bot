@@ -162,9 +162,9 @@ def test_preview_duration_one_third_capped_6():
     assert bot.calculate_preview_seconds(120) == 6
 
 
-def test_music_duration_choices_15_30_60_custom():
+def test_music_duration_choices_18_30_60_custom():
     labels = _labels(bot.music_guided_step_keyboard("duration", "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert all(label in labels for label in ("15 giây", "30 giây", "60 giây", "Nhập thời lượng khác"))
+    assert all(label in labels for label in ("18 giây", "30 giây", "60 giây", "Nhập thời lượng khác"))
     assert not any("6 giây" in label for label in labels)
 
 
@@ -178,9 +178,9 @@ def test_song_menu_has_seconds_half_full():
     assert labels[:3] == ["⏱ Theo số giây", "1️⃣ Nửa bài", "2️⃣ Full bài"]
 
 
-def test_song_seconds_has_15_30_60_custom():
+def test_song_seconds_has_18_30_60_custom():
     labels = _labels(bot.music_song_duration_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert labels[:4] == ["15 giây", "30 giây", "60 giây", "Nhập thời lượng khác"]
+    assert labels[:4] == ["18 giây", "30 giây", "60 giây", "Nhập thời lượng khác"]
 
 
 def test_half_song_price_and_full_song_multiplier():
@@ -191,7 +191,7 @@ def test_half_song_price_and_full_song_multiplier():
 
 
 def test_song_seconds_pricing_uses_duration_product():
-    assert bot.music_ai_output_price_xu(15, "song_seconds") == bot.LYRIC_SONG_15S_PRICE_XU
+    assert bot.music_ai_output_price_xu(18, "song_seconds") == bot.LYRIC_SONG_15S_PRICE_XU
     assert bot.music_ai_output_price_xu(30, "song_seconds") == bot.LYRIC_SONG_30S_PRICE_XU
     assert bot.music_ai_output_price_xu(60, "song_seconds") == bot.LYRIC_SONG_60S_PRICE_XU
     assert bot.music_ai_output_price_xu(90, "song_seconds") > bot.music_ai_output_price_xu(60, "song_seconds")
@@ -206,7 +206,12 @@ def test_create_music_reaches_real_preview_job(monkeypatch):
         "music_ai_kind": "guided",
     })
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
-    monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {"public_enabled": True, "ready": True})
+    monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
+        "public_enabled": True,
+        "ready": True,
+        "full_result_ok": True,
+        "cost_gate_ok": True,
+    })
     calls = []
 
     async def submit(result, preview=False):
@@ -265,7 +270,7 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
         "source_file_id": "video-file",
         "target_language": "vi",
     }
-    monkeypatch.setattr(bot, "video_dubbing_capability", lambda mode, state=None, public=True: {"ok": True})
+    monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda mode, state=None: True)
 
     async def download(context, state):
         return b"video", "video/mp4"

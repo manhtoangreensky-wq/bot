@@ -221,7 +221,7 @@ def test_key4u_asr_adapter_or_guard():
     assert bot.KEY4U_STT_ENDPOINT == "/audio/transcriptions"
     assert bot.KEY4U_STT_MODEL == "whisper-1"
     assert hasattr(bot.key4u_provider_instance(), "stt")
-    assert "Tạo phụ đề tự động chưa sẵn sàng xử lý" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
+    assert "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
 
 
 def test_key4u_translation_adapter_or_guard():
@@ -237,7 +237,7 @@ def test_key4u_minimax_tts_for_dubbing_or_guard():
     assert "key4u_minimax_tts_public_ready" in source
     assert "key4u_minimax_tts_bytes" in source
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi")
-    assert "Lồng tiếng tự động chưa sẵn sàng xử lý" in guard
+    assert "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp" in guard
 
 
 def test_shopaikey_base_url_no_double_v1():

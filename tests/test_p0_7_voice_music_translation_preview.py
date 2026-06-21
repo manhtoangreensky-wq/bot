@@ -179,11 +179,11 @@ def test_voice_profile_pricing_and_fixed_confirmation_sentence(monkeypatch):
     assert "600 Xu" not in bot.voice_clone_quote_text({"id": 11, "user_id": "1"}, "vi", bot.PRODUCT_CONTEXT_SHOWROOM)
 
 
-def test_music_duration_menu_uses_15_30_60_and_custom_not_preview_length():
+def test_music_duration_menu_uses_18_30_60_and_custom_not_preview_length():
     labels = _labels(bot.music_guided_step_keyboard("duration", "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     joined = "\n".join(labels)
 
-    assert all(label in labels for label in ["15 giây", "30 giây", "60 giây", "Nhập thời lượng khác"])
+    assert all(label in labels for label in ["18 giây", "30 giây", "60 giây", "Nhập thời lượng khác"])
     assert "6 giây" not in joined
     assert bot.paid_preview_seconds(120) == 6
 
@@ -236,7 +236,12 @@ def test_music_preview_submits_preview_job_and_confirm_submits_full_job(monkeypa
         "music_ai_kind": "guided",
     })
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
-    monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {"public_enabled": True, "ready": True})
+    monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
+        "public_enabled": True,
+        "ready": True,
+        "full_result_ok": True,
+        "cost_gate_ok": True,
+    })
     submitted = []
 
     async def fake_submit(result, preview=False):

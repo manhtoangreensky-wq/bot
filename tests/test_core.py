@@ -7565,6 +7565,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
         translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
@@ -7689,22 +7690,21 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_TRANSLATE_SUBTITLE_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_DUB_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PLUS_DUB_ENABLED", False)
-    for mode, label in [
-        (bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề tự động"),
-        (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch phụ đề"),
-        (bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng tự động"),
-        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Dịch phụ đề"),
+    for mode, maintenance_text in [
+        (bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp"),
+        (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp"),
+        (bot.VIDEO_SUBTITLE_MODE_DUB, "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp"),
+        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp"),
     ]:
         capability = bot.video_dubbing_capability(mode, {})
         assert capability["reason"] == "mode_disabled"
         guard = bot.video_dubbing_guard_text(mode, {}, "vi")
-        assert label in guard
-        assert "chưa sẵn sàng xử lý" in guard
+        assert maintenance_text in guard
         assert "chưa trừ Xu" in guard
         assert "API" not in guard
         assert "provider" not in guard.lower()
 
-    monkeypatch.setattr(bot, "video_dubbing_capability", lambda _mode, _state=None: {"ok": True, "reason": "ready"})
+    monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "apply_member_service_discount", lambda _uid, amount, _event: {"final_cost": amount})
     monkeypatch.setattr(bot, "get_user", lambda _uid: (99999, 0, 0))
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
@@ -10234,7 +10234,7 @@ def test_provider_pipeline_v32_public_subtitle_guards_are_separate(monkeypatch):
     assert capability["ok"] is False
     assert capability["reason"] == "public_disabled"
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
-    assert "chưa sẵn sàng xử lý" in guard
+    assert "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp" in guard
     assert "chưa trừ Xu" in guard
     assert "API" not in guard
     assert "provider" not in guard.lower()
