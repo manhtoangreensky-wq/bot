@@ -35407,7 +35407,7 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         await query.answer()
         return await safe_edit_or_send(
             query,
-            "Render nhiều cảnh đang được kiểm thử để tránh lỗi chi phí/provider. TOAN AAS chưa xử lý và chưa trừ Xu.",
+            "Ghép video nhiều cảnh đang được kiểm thử. TOAN AAS giữ nguyên số cảnh bạn chọn và chưa xử lý/chưa trừ Xu để tránh tạo nhầm 1 cảnh 6 giây.",
             parse_mode=None,
             reply_markup=video_export_maintenance_keyboard(lang),
         )
@@ -35418,9 +35418,9 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         await query.answer()
         return await safe_edit_or_send(
             query,
-            "Ghép giọng vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu."
+            "Ghép giọng trực tiếp vào video đang hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
             if normalize_user_language(lang) == "vi" else
-            "Voice mux is under maintenance/upgrading. Please try again later. TOAN AAS has not processed the request or charged Xu.",
+            "Direct voice mux into video is still being finalized. TOAN AAS has not processed the request or charged Xu.",
             parse_mode=None,
             reply_markup=video_export_maintenance_keyboard(lang),
         )
@@ -41301,6 +41301,13 @@ def shopaikey_video_result_url(payload: dict) -> str:
 def shopaikey_video_smoke_prompt() -> str:
     return "A short clean futuristic turquoise AI automation logo animation, white background, minimal, no extra text except TOAN AAS"
 
+def infer_video_aspect_ratio_from_prompt(prompt: str = "", default: str = "16:9") -> str:
+    text = str(prompt or "").lower()
+    for ratio in media_aspect_ratio_options("video"):
+        if ratio.lower() in text:
+            return normalize_media_aspect_ratio(ratio, default, "video")
+    return normalize_media_aspect_ratio(default, "16:9", "video")
+
 def shopaikey_video_request_payload(model: str, prompt: str = "") -> dict:
     model = str(model or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast").strip()
     safe_prompt = str(prompt or "").strip()[:1200] or shopaikey_video_smoke_prompt()
@@ -41314,7 +41321,7 @@ def shopaikey_video_request_payload(model: str, prompt: str = "") -> dict:
         payload["metadata"] = {"quality": "720p"}
         return payload
     payload["metadata"] = {
-        "aspect_ratio": "16:9",
+        "aspect_ratio": infer_video_aspect_ratio_from_prompt(safe_prompt, "16:9"),
         "enhance_prompt": False,
         "enable_upsample": False,
     }
@@ -46497,8 +46504,8 @@ def task3d_platform_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def task3d_aspect_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("9:16", callback_data="vproduct|aspect|9:16"), InlineKeyboardButton("16:9", callback_data="vproduct|aspect|16:9")],
-        [InlineKeyboardButton("1:1", callback_data="vproduct|aspect|1:1")],
+        [InlineKeyboardButton("📱 9:16", callback_data="vproduct|aspect|9:16"), InlineKeyboardButton("🖥 16:9", callback_data="vproduct|aspect|16:9")],
+        [InlineKeyboardButton("⬛ 1:1", callback_data="vproduct|aspect|1:1"), InlineKeyboardButton("🖼 4:5", callback_data="vproduct|aspect|4:5")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -46875,25 +46882,12 @@ async def task3d_open_video_package_finalization(target, user_id, session: dict,
     )
 
 async def task3d_open_video_finalization_from_scene_count(target, user_id, session: dict, lang: str = "vi"):
-    count = safe_int((session.get("draft") or {}).get("selected_scene_count") or session.get("selected_scene_count"), 0)
-    if count <= 0:
-        session = task3d_session_step(user_id, "select_scene_count")
-        return await safe_edit_or_send(
-            target,
-            task3d_scene_count_text(session, lang),
-            parse_mode="HTML",
-            reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
-        )
-    source_state, package = task3d_video_scene_payloads(session, count)
-    return await open_video_finalization(
+    return await task3d_open_video_package_finalization(
         target,
         user_id,
-        str(session.get("product_id") or package.get("source") or "video_plan"),
-        source_state,
+        session,
         lang,
-        "vproduct|select_scene_count",
-        package,
-        initial_step="tier",
+        task3d_scene_count_back_callback(session),
     )
 
 
@@ -47499,14 +47493,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
         if not bundle:
             return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
-        session = task3d_session_step(uid, "select_scene_count")
-        return await task3d_render_step(query, uid, session, lang)
+        session = task3d_session_step(uid, "result")
+        return await task3d_open_video_package_finalization(query, uid, session, lang, "vproduct|result")
     if action == "scene_count_custom":
         bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
         if not bundle:
             return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
-        session = task3d_session_step(uid, "scene_count_custom")
-        return await task3d_render_step(query, uid, session, lang)
+        session = task3d_session_step(uid, "result")
+        return await task3d_open_video_package_finalization(query, uid, session, lang, "vproduct|result")
     if action == "scene_count_select":
         bundle = dict((session.get("draft") or {}).get("prompt_bundle") or {})
         if not bundle:
@@ -47520,8 +47514,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 "Hiện video ngắn chỉ hỗ trợ tối đa 20 cảnh/khoảng 2 phút. Phim dài sẽ xử lý ở giai đoạn sau.",
                 reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
             )
-        session = task3d_session_step(uid, "select_scene_count", **task3d_scene_count_fields(count))
-        return await task3d_open_video_finalization_from_scene_count(query, uid, session, lang)
+        session = task3d_session_step(uid, "result")
+        return await task3d_open_video_package_finalization(query, uid, session, lang, "vproduct|result")
     if action == "view":
         # Compatibility for buttons already sent before Task 3D.6.
         action = "prompt_image" if value == "image" else "prompt_video"
@@ -47755,8 +47749,8 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                 reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
             )
             return True
-        session = task3d_session_step(uid, "select_scene_count", **task3d_scene_count_fields(count))
-        await task3d_open_video_finalization_from_scene_count(update.message, uid, session, lang)
+        session = task3d_session_step(uid, "result")
+        await task3d_open_video_package_finalization(update.message, uid, session, lang, "vproduct|result")
         return True
     if str(session.get("current_step") or "") != "collect_input" or str((session.get("draft") or {}).get("input_mode") or "") != "text":
         return False
@@ -89554,6 +89548,7 @@ async def video_finalization_return_after_addon(query, user_id, state: dict | No
             pending_payload.update({
                 "video_finalization": dict(package.get("video_finalization") or {}),
                 "video_finalization_confirmed": True,
+                "video_addon_ready_for_invoice": True,
                 "source": str(current.get("source") or package.get("source") or (addon_state.get("pending_payload") or {}).get("source") or "promptvideo")[:80],
                 "source_flow": str(current.get("source") or package.get("source_flow") or (addon_state.get("pending_payload") or {}).get("source_flow") or "promptvideo")[:80],
             })
@@ -89706,6 +89701,36 @@ def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
     return InlineKeyboardMarkup(rows)
 
+def video_scene_count_price_line(tier: str, scene_count, lang: str = "vi", html_bold_total: bool = True) -> str:
+    tier = normalize_video_tier(tier or "basic")
+    count = max(1, min(20, safe_int(scene_count, 1)))
+    base = video_tier_cost_xu(tier)
+    seconds = count * TASK3D_SCENE_SECONDS
+    percent = video_scene_discount_percent(count)
+    effective_each = int(round(base * percent / 100.0))
+    total = calculate_scene_video_price(base, count)
+    total_text = f"<b>{xu_number(total)} Xu</b>" if html_bold_total else f"{xu_number(total)} Xu"
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"• {count} scene{'s' if count != 1 else ''} ≈ {seconds}s - "
+            f"{xu_number(base)} × {percent}% = {xu_number(effective_each)} Xu/scene; "
+            f"{xu_number(effective_each)} × {count} = {total_text}"
+        )
+    return (
+        f"• {count} cảnh ≈ {seconds} giây - "
+        f"{xu_number(base)} × {percent}% = {xu_number(effective_each)} Xu/cảnh; "
+        f"{xu_number(effective_each)} × {count} = {total_text}"
+    )
+
+def video_scene_count_option_label(tier: str, scene_count, lang: str = "vi") -> str:
+    tier = normalize_video_tier(tier or "basic")
+    count = max(1, min(20, safe_int(scene_count, 1)))
+    seconds = count * TASK3D_SCENE_SECONDS
+    total = calculate_scene_video_price(video_tier_cost_xu(tier), count)
+    if normalize_user_language(lang) != "vi":
+        return f"{count} scene{'s' if count != 1 else ''} ≈ {seconds}s = {xu_number(total)} Xu"
+    return f"{count} cảnh ≈ {seconds}s = {xu_number(total)} Xu"
+
 def video_finalization_scene_count_text(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
     tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
@@ -89730,32 +89755,25 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
             "Nếu muốn 3 cảnh/18 giây, nhạc, voice, phụ đề hoặc tính năng nâng cao, vui lòng chọn gói 300 Xu trở lên."
         )
     package_base_xu = video_tier_cost_xu(tier)
+    price_lines = "\n".join(video_scene_count_price_line(tier, count, lang) for count in TASK3D_SCENE_COUNT_OPTIONS)
     if normalize_user_language(lang) != "vi":
         return (
             "🎞 <b>Choose video scene count</b>\n\n"
             f"Selected package: <b>{xu_number(package_base_xu)} Xu per scene</b>\n\n"
             "TOAN AAS currently estimates video by scene/clip.\n"
             "1 scene is about 6 seconds.\n\n"
-            "Suggestions:\n"
-            "• 1 scene ≈ 6 seconds - quick test\n"
-            "• 3 scenes ≈ 18 seconds - standard video\n"
-            "• 5 scenes ≈ 30 seconds - short polished video\n"
-            "• 10 scenes ≈ 60 seconds - 1-minute video\n"
-            "• 20 scenes ≈ 120 seconds - 2-minute video\n\n"
-            "The price is calculated from the selected package and scene count."
+            "<b>Price by scene count</b>\n"
+            f"{price_lines}\n\n"
+            "Choose the scene count that matches the video you want. The next step opens tools/add-ons, then the final invoice."
         )
     return (
         "🎞 <b>Chọn số cảnh video</b>\n\n"
         f"Gói đã chọn: <b>{xu_number(package_base_xu)} Xu/cảnh</b>\n\n"
         "TOAN AAS hiện tính video theo cảnh/clip.\n"
         "1 cảnh khoảng 6 giây.\n\n"
-        "Gợi ý:\n"
-        "• 1 cảnh ≈ 6 giây - test nhanh\n"
-        "• 3 cảnh ≈ 18 giây - video chuẩn\n"
-        "• 5 cảnh ≈ 30 giây - video ngắn đẹp\n"
-        "• 10 cảnh ≈ 60 giây - video 1 phút\n"
-        "• 20 cảnh ≈ 120 giây - video 2 phút\n\n"
-        "Giá sẽ được tính theo gói đã chọn và số cảnh."
+        "<b>Bảng giá theo số cảnh</b>\n"
+        f"{price_lines}\n\n"
+        "Chọn số cảnh đúng nhu cầu. Bước kế tiếp là công cụ/add-on, sau đó mới tới hóa đơn cuối."
     )
 
 def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -89764,7 +89782,7 @@ def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str
     tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
     if tier == "low":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("1 cảnh ≈ 6 giây" if is_vi else "1 scene ≈ 6 seconds", callback_data="vfinal|scene_count|1")],
+            [InlineKeyboardButton(video_scene_count_option_label(tier, 1, lang), callback_data="vfinal|scene_count|1")],
             [
                 InlineKeyboardButton("🔷 Nâng lên 300 Xu" if is_vi else "🔷 Upgrade to 300 Xu", callback_data="vfinal|upgrade_300"),
                 InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
@@ -89773,15 +89791,15 @@ def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str
         ])
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("1 cảnh" if is_vi else "1 scene", callback_data="vfinal|scene_count|1"),
-            InlineKeyboardButton("3 cảnh" if is_vi else "3 scenes", callback_data="vfinal|scene_count|3"),
+            InlineKeyboardButton(video_scene_count_option_label(tier, 1, lang), callback_data="vfinal|scene_count|1"),
+            InlineKeyboardButton(video_scene_count_option_label(tier, 3, lang), callback_data="vfinal|scene_count|3"),
         ],
         [
-            InlineKeyboardButton("5 cảnh" if is_vi else "5 scenes", callback_data="vfinal|scene_count|5"),
-            InlineKeyboardButton("10 cảnh" if is_vi else "10 scenes", callback_data="vfinal|scene_count|10"),
+            InlineKeyboardButton(video_scene_count_option_label(tier, 5, lang), callback_data="vfinal|scene_count|5"),
+            InlineKeyboardButton(video_scene_count_option_label(tier, 10, lang), callback_data="vfinal|scene_count|10"),
         ],
         [
-            InlineKeyboardButton("20 cảnh" if is_vi else "20 scenes", callback_data="vfinal|scene_count|20"),
+            InlineKeyboardButton(video_scene_count_option_label(tier, 20, lang), callback_data="vfinal|scene_count|20"),
             InlineKeyboardButton("✍️ Tự chọn" if is_vi else "✍️ Custom", callback_data="vfinal|scene_custom"),
         ],
         [
@@ -90926,6 +90944,11 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
                 return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
             return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
         if current_step in {"music", "voice", "subtitle", "translation_language", "combo_language", "combo_source", "voice_language"}:
+            addon_state = get_video_addon_state(uid)
+            if addon_state:
+                current = ensure_video_finalization_from_addon_state(uid, addon_state)
+                if video_scene_selection_info(current):
+                    return await render_video_addon_screen(query, uid, addon_state, "video_addon_menu", lang)
             state["step"] = "menu"
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
@@ -90947,6 +90970,11 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             return await safe_edit_or_send(query, "🎬 <b>Dịch + lồng tiếng tự động</b>\n\nBạn muốn dùng ngôn ngữ nào?", parse_mode="HTML", reply_markup=video_finalization_combo_language_keyboard(lang))
         return await video_finalization_back_to_source(query, uid, state, lang)
     if action == "menu":
+        addon_state = get_video_addon_state(uid)
+        if addon_state:
+            current = ensure_video_finalization_from_addon_state(uid, addon_state)
+            if video_scene_selection_info(current):
+                return await render_video_addon_screen(query, uid, addon_state, "video_addon_menu", lang)
         state["step"] = "menu"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
@@ -91549,8 +91577,6 @@ def video_addon_selection_label(subtitle_option: str = "none", dubbing_option: s
 
 def video_addon_menu_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
-    order = video_order_from_state(state)
-    duration = int(state.get("current_video_duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS)
     tier_raw = state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier")
     tier = normalize_video_tier(tier_raw) if str(tier_raw or "").strip() else ""
     if tier == "low" and str(state.get("source") or "") != "frame":
@@ -91579,43 +91605,31 @@ def video_addon_menu_text(state: dict | None = None, lang: str = "vi") -> str:
             f"Giới hạn: <b>{policy['limits']['per_day']}/ngày, {policy['limits']['per_week']}/tuần, {policy['limits']['per_month']}/tháng</b>.\n\n"
             "TOAN AAS chỉ lưu lựa chọn ở bước này, chưa xử lý video và chưa trừ Xu."
         )
+    quote = calculate_video_quote(state)
+    duration = int(
+        quote.get("estimated_seconds")
+        or state.get("current_video_duration_seconds")
+        or VIDEO_AI_DEFAULT_SEGMENT_SECONDS
+    )
+    count = int(quote.get("scene_count") or 1)
+    base = int(quote.get("package_base_xu") or video_tier_cost_xu(tier) or 0)
+    total = int(quote.get("scene_video_xu") or calculate_scene_video_price(base, count))
+    percent = int(quote.get("scene_discount_percent") or video_scene_discount_percent(count))
+    effective_each = int(round(base * percent / 100.0))
     if normalize_user_language(lang) != "vi":
-        paid_lines = "\n".join(
-            f"• {html.escape(str(item.get('label')))}: <b>+{int(item.get('price_xu') or 0)} Xu</b>"
-            for item in (order.get("paid_items") or [])
-        ) or "• No paid add-on selected yet."
         return (
-            "🎞 <b>Subtitles, translation and dubbing for this video</b>\n\n"
-            "Current video:\n"
-            f"• Estimated duration: <b>{duration} seconds</b>\n"
-            "• Up to 60 seconds uses the short-package price.\n"
-            "• Over 60 seconds adds each started 60-second block.\n\n"
-            "1. 📝 Auto subtitles: TOAN AAS listens to the video and creates subtitles in the source language.\n"
-            "2. 🌐 Translate subtitles: TOAN AAS creates source subtitles, then translates them.\n"
-            "3. 🎙 Dubbing: TOAN AAS creates AI narration from the video content or script.\n"
-            "4. Translate and dub: TOAN AAS creates translated subtitles and matching dubbing.\n\n"
-            f"Current paid items:\n{paid_lines}"
+            "🎛 <b>Video finishing tools</b>\n\n"
+            f"Selected package: <b>{xu_number(base)} Xu/scene</b>\n"
+            f"Scene count: <b>{count} scene{'s' if count != 1 else ''}</b> - about <b>{duration}s</b>\n"
+            f"Video subtotal: <b>{xu_number(base)} × {percent}% = {xu_number(effective_each)} Xu/scene; {xu_number(effective_each)} × {count} = {xu_number(total)} Xu</b>\n\n"
+            "Choose a tool, or choose None to open the final invoice. No processing starts and no Xu is charged here."
         )
-    paid_lines = "\n".join(
-        f"• {html.escape(str(item.get('label')))}: <b>+{int(item.get('price_xu') or 0)} Xu</b>"
-        for item in (order.get("paid_items") or [])
-    ) or "• Chưa chọn add-on trả phí."
     return (
-        "🎞 <b>Phụ đề / Dịch / Lồng tiếng cho video</b>\n\n"
-        "Video hiện tại:\n"
-        f"• Thời lượng dự kiến: <b>{duration} giây</b>\n"
-        "• Dưới hoặc bằng 60 giây dùng giá gói ngắn.\n"
-        "• Trên 60 giây cộng thêm theo từng block 60 giây phát sinh.\n\n"
-        "1. 📝 <b>Tạo phụ đề tự động</b>\n"
-        "TOAN AAS nghe nội dung video và tạo phụ đề theo ngôn ngữ gốc.\n\n"
-        "2. 🌐 <b>Dịch phụ đề</b>\n"
-        "TOAN AAS tạo phụ đề gốc, sau đó dịch sang ngôn ngữ quý khách chọn.\n\n"
-        "3. 🎙 <b>Lồng tiếng</b>\n"
-        "TOAN AAS tạo giọng đọc AI theo nội dung video hoặc kịch bản.\n\n"
-        "4. 🎬 <b>Dịch + lồng tiếng tự động</b>\n"
-        "TOAN AAS tạo phụ đề đúng ngôn ngữ cần dịch và tạo bản lồng tiếng tương ứng.\n\n"
-        f"Đang chọn:\n{paid_lines}\n\n"
-        "TOAN AAS sẽ hiện hóa đơn tách riêng Video / Phụ đề / Lồng tiếng trước khi xử lý và trừ Xu."
+        "🎛 <b>Công cụ hoàn thiện video</b>\n\n"
+        f"Gói đã chọn: <b>{xu_number(base)} Xu/cảnh</b>\n"
+        f"Số cảnh: <b>{count} cảnh</b> - khoảng <b>{duration} giây</b>\n"
+        f"Tạm tính video: <b>{xu_number(base)} × {percent}% = {xu_number(effective_each)} Xu/cảnh; {xu_number(effective_each)} × {count} = {xu_number(total)} Xu</b>\n\n"
+        "Chọn công cụ cần thêm, hoặc chọn Không thêm để xem hóa đơn cuối. Màn này chưa xử lý video và chưa trừ Xu."
     )
 
 def video_addon_menu_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
@@ -91635,25 +91649,17 @@ def video_addon_menu_keyboard(lang: str = "vi", state: dict | None = None) -> In
                 InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
             ],
         ])
-    duration = int(state.get("current_video_duration_seconds") or VIDEO_AI_DEFAULT_SEGMENT_SECONDS)
-    subtitle_price = calculate_subtitle_dub_price("subtitle", duration)
-    translate_price = calculate_subtitle_dub_price("translate_subtitle", duration)
-    dubbing_price = calculate_subtitle_dub_price("dubbing", duration)
-    combo_price = calculate_subtitle_dub_price("subtitle_plus_dubbing", duration)
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("🎙 Giọng/lồng tiếng" if is_vi else "🎙 Voice/dubbing", callback_data="videoaddon|voice_menu"),
+            InlineKeyboardButton("🎵 Nhạc" if is_vi else "🎵 Music", callback_data="videoaddon|music_menu"),
+        ],
+        [
+            InlineKeyboardButton("📝 Phụ đề" if is_vi else "📝 Subtitles", callback_data="videoaddon|subtitle_menu"),
             InlineKeyboardButton("🚫 Không thêm" if is_vi else "🚫 None", callback_data="videoaddon|none"),
-            InlineKeyboardButton(f"📝 Tạo phụ đề +{subtitle_price} Xu" if is_vi else f"📝 Auto subtitles +{subtitle_price} Xu", callback_data="videoaddon|subtitle"),
         ],
         [
-            InlineKeyboardButton(f"🌐 Dịch phụ đề +{translate_price} Xu" if is_vi else f"🌐 Translate subtitles +{translate_price} Xu", callback_data="videoaddon|translate_sub"),
-            InlineKeyboardButton(f"🎙 Lồng tiếng +{dubbing_price} Xu" if is_vi else f"🎙 Dubbing +{dubbing_price} Xu", callback_data="videoaddon|dub"),
-        ],
-        [
-            InlineKeyboardButton(f"🎬 Dịch + lồng tiếng tự động +{combo_price} Xu" if is_vi else f"🎬 Translate and dub +{combo_price} Xu", callback_data="videoaddon|combo"),
-            InlineKeyboardButton("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", callback_data="videoaddon|back"),
-        ],
-        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videoaddon|back"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="videoaddon|main"),
         ],
     ])
@@ -92354,6 +92360,29 @@ def public_video_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         text = text.replace(marker, extra + marker, 1) if marker else text + extra
     return with_aspect_line(text, aspect_ratio, lang, "video")
 
+def video_scene_generation_instruction(package: dict | None = None, aspect_ratio: str = "") -> str:
+    package = dict(package or {})
+    count = safe_int(package.get("selected_scene_count") or package.get("scene_count") or 0, 0)
+    scene_seconds = safe_int(package.get("estimated_scene_seconds") or package.get("scene_duration_seconds") or TASK3D_SCENE_SECONDS, TASK3D_SCENE_SECONDS)
+    duration = safe_int(
+        package.get("estimated_duration_seconds")
+        or package.get("final_duration_seconds")
+        or package.get("duration_seconds")
+        or package.get("requested_seconds")
+        or (count * scene_seconds if count else 0),
+        0,
+    )
+    aspect = normalize_media_aspect_ratio(aspect_ratio or package.get("aspect_ratio") or package.get("preferred_aspect_ratio") or "9:16", "9:16", "video")
+    if count <= 0:
+        return f"Use aspect ratio {aspect}."
+    duration = duration or count * scene_seconds
+    if count == 1:
+        return f"Create exactly 1 scene/clip, about {duration} seconds. Use aspect ratio {aspect}."
+    return (
+        f"Create exactly {count} connected scenes/clips, about {scene_seconds} seconds per scene, total about {duration} seconds. "
+        f"Do not collapse this into one 6-second scene. Use aspect ratio {aspect}."
+    )
+
 def public_video_pending_payload_from_package(tier: str, package: dict, aspect_ratio: str = "") -> dict:
     tier_norm = normalize_video_tier(tier)
     payload = video_tier_payload(tier_norm)
@@ -92361,8 +92390,13 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
     music_label = video_package_music_label(package)
     aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", "video") if aspect_ratio else ""
     generation_prompt = raw_prompt
+    scene_instruction = video_scene_generation_instruction(package, aspect or (package or {}).get("preferred_aspect_ratio") or "9:16")
+    if scene_instruction:
+        generation_prompt = f"{generation_prompt}. {scene_instruction}".strip() if generation_prompt else scene_instruction
     if music_label and music_label not in {"không", "no", "无"}:
         generation_prompt = f"{raw_prompt}. Visual pacing should fit this music/mood: {music_label}. Do not generate audio; soundtrack/captions are handled separately."
+        if scene_instruction:
+            generation_prompt = f"{generation_prompt} {scene_instruction}"
     source = str((package or {}).get("source") or (package or {}).get("source_flow") or "").strip().lower()
     flow = "promptvideo"
     if "image_to_video" in source:
@@ -92545,6 +92579,17 @@ async def start_video_addon_step(query, user_id, pending_payload: dict, tier: st
         "video_project": project,
     })
     if pending_payload.get("video_finalization_confirmed"):
+        tier_norm = normalize_video_tier(tier)
+        if source == "frame" or tier_norm == "low" or pending_payload.get("video_addon_ready_for_invoice"):
+            return await finalize_video_addon_confirmation(query, user_id, state, lang)
+        state = set_video_addon_screen(user_id, state, "video_addon_menu", push=False)
+        return await safe_edit_or_send(
+            query,
+            video_addon_menu_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_addon_menu_keyboard(lang, state),
+        )
+    if pending_payload.get("video_addon_ready_for_invoice"):
         return await finalize_video_addon_confirmation(query, user_id, state, lang)
     return await safe_edit_or_send(query, video_addon_menu_text(state, lang), parse_mode="HTML", reply_markup=video_addon_menu_keyboard(lang, state))
 
@@ -92705,12 +92750,12 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
 async def render_video_addon_screen(query, user_id, state: dict, target_screen: str, lang: str = "vi"):
     target = str(target_screen or "video_addon_menu")
     if target == "video_addon_menu":
-        finalization_state = ensure_video_finalization_from_addon_state(user_id, state)
+        state = set_video_addon_screen(user_id, state, "video_addon_menu", push=False)
         return await safe_edit_or_send(
             query,
-            video_finalization_menu_text(finalization_state, lang),
+            video_addon_menu_text(state, lang),
             parse_mode="HTML",
-            reply_markup=video_finalization_menu_keyboard(lang),
+            reply_markup=video_addon_menu_keyboard(lang, state),
         )
     if target == "addon_voice":
         return await safe_edit_or_send(
@@ -92855,12 +92900,39 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         return await video_finalization_render_scene_count(query, uid, finalization_state, lang)
     enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen=f"videoaddon|{action}", product_area="subtitle")
     if action == "menu":
+        return await render_video_addon_screen(query, uid, state, "video_addon_menu", lang)
+    if action in {"voice_menu", "music_menu", "subtitle_menu"}:
+        area = "voice" if action == "voice_menu" else ("music" if action == "music_menu" else "subtitle")
+        enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen=f"videoaddon|{action}", product_area=area)
+        state = set_video_addon_screen(uid, state, f"addon_{area}", push=True)
         finalization_state = ensure_video_finalization_from_addon_state(uid, state)
+        finalization_state["return_to_invoice"] = True
+        finalization_state["addon_return_target"] = "invoice"
+        if action == "voice_menu":
+            finalization_state["step"] = "voice"
+            set_video_finalization_state(uid, finalization_state)
+            return await safe_edit_or_send(
+                query,
+                video_finalization_voice_text(finalization_state, lang),
+                parse_mode="HTML",
+                reply_markup=video_finalization_voice_keyboard(lang),
+            )
+        if action == "music_menu":
+            finalization_state["step"] = "music"
+            set_video_finalization_state(uid, finalization_state)
+            return await safe_edit_or_send(
+                query,
+                video_finalization_music_text(finalization_state, lang),
+                parse_mode="HTML",
+                reply_markup=video_finalization_music_keyboard(lang),
+            )
+        finalization_state["step"] = "addon"
+        set_video_finalization_state(uid, finalization_state)
         return await safe_edit_or_send(
             query,
-            video_finalization_menu_text(finalization_state, lang),
+            video_finalization_addon_text(lang),
             parse_mode="HTML",
-            reply_markup=video_finalization_menu_keyboard(lang),
+            reply_markup=video_finalization_addon_keyboard(lang),
         )
     if action == "invoice":
         return await render_video_addon_screen(query, uid, state, "invoice", lang)
@@ -93030,7 +93102,18 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
             str(selected_tier_value or "").strip()
             and video_finalization_has_prompt(existing_finalization)
         )
-        if state.get("pending_confirm_token") or str((state.get("video_order") or {}).get("current_screen") or "") == "invoice" or package_selected:
+        current_screen = str((state.get("video_order") or {}).get("current_screen") or "")
+        tier = normalize_video_tier(state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier") or selected_tier_value or "low")
+        invoice_back = current_screen == "invoice" or (state.get("pending_confirm_token") and current_screen not in {"video_addon_menu", "addon_voice", "addon_music", "addon_subtitle"})
+        if invoice_back and tier != "low":
+            state = set_video_addon_screen(uid, state, "video_addon_menu", push=False)
+            return await safe_edit_or_send(
+                query,
+                video_addon_menu_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_addon_menu_keyboard(lang, state),
+            )
+        if state.get("pending_confirm_token") or current_screen == "invoice" or current_screen == "video_addon_menu" or package_selected:
             finalization_state = ensure_video_finalization_from_addon_state(uid, state)
             pending = dict(state.get("pending_payload") or {})
             finalization_state["step"] = "scene_count"
@@ -93488,9 +93571,50 @@ def public_video_terminal_failure_text(lang: str = "vi", package_refunded: bool 
         "Bạn có thể thử lại sau vài phút hoặc chọn gói khác."
     )
 
+def public_video_safe_status_label(status: str, lang: str = "vi") -> str:
+    db_status = shopaikey_db_video_status(status)
+    lang_norm = normalize_user_language(lang)
+    labels = {
+        "vi": {
+            "QUEUED": "Đang chờ xử lý",
+            "IN_PROGRESS": "Đang tạo video",
+            "SUCCESS": "Hoàn tất",
+            "FAILED": "Chưa xuất được",
+            "TIMEOUT": "Quá thời gian xử lý",
+        },
+        "zh": {
+            "QUEUED": "等待处理",
+            "IN_PROGRESS": "正在生成视频",
+            "SUCCESS": "已完成",
+            "FAILED": "暂时无法生成",
+            "TIMEOUT": "处理超时",
+        },
+        "en": {
+            "QUEUED": "Queued",
+            "IN_PROGRESS": "Processing",
+            "SUCCESS": "Completed",
+            "FAILED": "Not completed",
+            "TIMEOUT": "Timed out",
+        },
+    }
+    return labels.get(lang_norm, labels["en"]).get(db_status, labels.get(lang_norm, labels["en"])["IN_PROGRESS"])
+
+def public_video_safe_progress_label(progress: str = "-", lang: str = "vi") -> str:
+    raw = str(progress or "").strip()
+    if not raw or raw == "-":
+        return "đang xử lý" if normalize_user_language(lang) == "vi" else ("处理中" if normalize_user_language(lang) == "zh" else "processing")
+    lowered = raw.lower()
+    if any(term in lowered for term in ("shopaikey", "key4u", "provider", "api", "token", "model", "http", "curl", "status", "route")):
+        return "đang xử lý" if normalize_user_language(lang) == "vi" else ("处理中" if normalize_user_language(lang) == "zh" else "processing")
+    if re.fullmatch(r"\d{1,3}%?", raw):
+        return raw if raw.endswith("%") else f"{raw}%"
+    return "đang xử lý" if normalize_user_language(lang) == "vi" else ("处理中" if normalize_user_language(lang) == "zh" else "processing")
+
 def public_video_status_message(status: str, progress: str = "-", output_sent: bool = False, job: dict | None = None, fail_summary: dict | None = None, lang: str = "vi") -> str:
     db_status = shopaikey_db_video_status(status)
     lang_norm = normalize_user_language(lang)
+    safe_status = public_video_safe_status_label(status, lang)
+    safe_progress = public_video_safe_progress_label(progress, lang)
     if db_status in {"FAILED", "TIMEOUT"}:
         summary = fail_summary or {}
         return public_video_terminal_failure_text(
@@ -93504,7 +93628,7 @@ def public_video_status_message(status: str, progress: str = "-", output_sent: b
             sent_note = "已发送" if output_sent else "尚未发送"
             return (
                 "✅ <b>视频已完成</b>\n\n"
-                f"• 状态: <code>{html.escape(str(status or 'SUCCESS'))}</code>\n"
+                f"• 状态: <code>{html.escape(safe_status)}</code>\n"
                 f"• 视频已发送: <code>{html.escape(sent_note)}</code>\n\n"
                 "如果还没有看到视频，请点击检查状态，或联系 admin。"
             )
@@ -93512,14 +93636,14 @@ def public_video_status_message(status: str, progress: str = "-", output_sent: b
             sent_note = "sent" if output_sent else "not sent yet"
             return (
                 "✅ <b>Video completed</b>\n\n"
-                f"• Status: <code>{html.escape(str(status or 'SUCCESS'))}</code>\n"
+                f"• Status: <code>{html.escape(safe_status)}</code>\n"
                 f"• Video sent: <code>{html.escape(sent_note)}</code>\n\n"
                 "If you do not see the video, check the status again or contact admin."
             )
         sent_note = "đã gửi" if output_sent else "chưa gửi"
         return (
             "✅ <b>Video đã hoàn tất</b>\n\n"
-            f"• Trạng thái: <code>{html.escape(str(status or 'SUCCESS'))}</code>\n"
+            f"• Trạng thái: <code>{html.escape(safe_status)}</code>\n"
             f"• Video đã gửi: <code>{html.escape(sent_note)}</code>\n\n"
             "Nếu bạn chưa thấy video, hãy bấm kiểm tra trạng thái hoặc liên hệ admin."
         )
@@ -93527,8 +93651,8 @@ def public_video_status_message(status: str, progress: str = "-", output_sent: b
         sent_note = "已发送" if output_sent else "尚未"
         return (
             "🎞 <b>TOAN AAS 视频状态</b>\n\n"
-            f"• 状态: <code>{html.escape(str(status or '-'))}</code>\n"
-            f"• 进度: <code>{html.escape(str(progress or '-'))}</code>\n"
+            f"• 状态: <code>{html.escape(safe_status)}</code>\n"
+            f"• 进度: <code>{html.escape(safe_progress)}</code>\n"
             f"• 视频已发送: <code>{html.escape(sent_note)}</code>\n\n"
             "视频完成后将在几分钟内自动发送。\n"
             "请不要重复发送命令或连续创建多个任务。"
@@ -93537,8 +93661,8 @@ def public_video_status_message(status: str, progress: str = "-", output_sent: b
         sent_note = "sent" if output_sent else "not yet"
         return (
             "🎞 <b>TOAN AAS Video Status</b>\n\n"
-            f"• Status: <code>{html.escape(str(status or '-'))}</code>\n"
-            f"• Progress: <code>{html.escape(str(progress or '-'))}</code>\n"
+            f"• Status: <code>{html.escape(safe_status)}</code>\n"
+            f"• Progress: <code>{html.escape(safe_progress)}</code>\n"
             f"• Video sent: <code>{html.escape(sent_note)}</code>\n\n"
             "The video will be sent automatically in a few minutes when it is ready.\n"
             "Please do not send the command again or create multiple jobs."
@@ -93546,8 +93670,8 @@ def public_video_status_message(status: str, progress: str = "-", output_sent: b
     sent_note = "đã gửi" if output_sent else "chưa"
     return (
         "🎞 <b>Trạng thái video TOAN AAS</b>\n\n"
-        f"• Trạng thái: <code>{html.escape(str(status or '-'))}</code>\n"
-        f"• Tiến độ: <code>{html.escape(str(progress or '-'))}</code>\n"
+        f"• Trạng thái: <code>{html.escape(safe_status)}</code>\n"
+        f"• Tiến độ: <code>{html.escape(safe_progress)}</code>\n"
         f"• Video đã gửi: <code>{html.escape(sent_note)}</code>\n\n"
         "Video sẽ được gửi tự động trong vài phút khi hoàn tất.\n"
         "Vui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần."
@@ -93689,7 +93813,7 @@ VIDEO_COMPLETED_ADDON_CALLBACKS = {
     "feedback": "fb",
 }
 VIDEO_COMPLETED_ADDON_GUARD_TEXTS = {
-    "voice": "Ghép giọng/lồng tiếng vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu.",
+    "voice": "Ghép giọng trực tiếp vào video đang hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu.",
     "music": "Tạo/ghép nhạc AI vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu.",
     "subtitle": "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu.",
 }

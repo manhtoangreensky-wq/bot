@@ -132,7 +132,9 @@ def test_translation_menu_still_visible():
 
 
 def test_completed_add_voice_guard_if_mux_unready():
-    assert "bảo trì/nâng cấp" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    assert "đang hoàn thiện" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    assert "chưa xử lý" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    assert "chưa trừ Xu" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
 
 
 def test_completed_add_music_guard_if_mux_unready():

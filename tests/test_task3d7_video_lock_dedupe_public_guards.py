@@ -197,7 +197,10 @@ def test_completed_video_result_menu_has_no_old_actions():
 
 
 def test_completed_video_addon_guards_are_clear():
-    for kind in ("voice", "music", "subtitle"):
+    assert "đang hoàn thiện" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    assert "chưa xử lý" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    assert "chưa trừ Xu" in bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS["voice"]
+    for kind in ("music", "subtitle"):
         text = bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS[kind]
         assert "bảo trì/nâng cấp" in text
         assert "chưa xử lý" in text
@@ -218,6 +221,19 @@ def test_video_addon_status_hides_secrets(monkeypatch):
     assert payload["ai_music_full_result_ready"] is False
     assert "token" not in payload
     assert "key" not in payload
+
+
+def test_public_video_status_message_sanitizes_provider_state():
+    text = bot.public_video_status_message(
+        "Provider accepted",
+        "model=veo3.1-fast; http=200; task_id=task_1; provider_status=queued; ShopAIKey",
+        output_sent=False,
+        lang="vi",
+    )
+    lowered = text.lower()
+    for term in ("shopaikey", "provider", "model=", "http=", "task_id", "provider_status"):
+        assert term not in lowered
+    assert "Đang tạo video" in text
 
 
 def test_no_generic_error_after_successful_output():
@@ -260,7 +276,7 @@ def test_paid_voice_mux_unready_blocks_cleanly(monkeypatch):
     assert guard["ok"] is False
     assert guard["reason"] == "paid_voice_mux_maintenance"
     export_source = inspect.getsource(bot.handle_video_export_confirm)
-    assert "Ghép giọng vào video đang bảo trì/nâng cấp" in export_source
+    assert "Ghép giọng trực tiếp vào video đang hoàn thiện" in export_source
     assert export_source.index("video_voice_mux_export_guard") < export_source.index("shopaikey_public_generation_guard")
 
 

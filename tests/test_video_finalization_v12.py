@@ -433,7 +433,7 @@ def test_video_addon_language_and_voice_back_use_screen_stack():
     assert "videoaddon|menu" not in voice_callbacks
 
 
-def test_video_addon_invoice_back_returns_scene_count(monkeypatch):
+def test_video_addon_invoice_back_returns_tools_then_scene_count(monkeypatch):
     user_id = 991213
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
@@ -475,6 +475,17 @@ def test_video_addon_invoice_back_returns_scene_count(monkeypatch):
     assert saved["video_order"]["current_screen"] == "invoice"
     assert saved["video_order"]["screen_stack"][-2:] == ["addon_voice", "invoice"]
 
+    asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    assert "Công cụ hoàn thiện video" in query.edited["text"]
+    saved_addon = bot.get_video_addon_state(user_id)
+    assert saved_addon["video_order"]["current_screen"] == "video_addon_menu"
+    callbacks = _callbacks(query.edited["reply_markup"])
+    assert "videoaddon|voice_menu" in callbacks
+    assert "videoaddon|music_menu" in callbacks
+    assert "videoaddon|subtitle_menu" in callbacks
+    assert "videoaddon|back" in callbacks
+
+    query.data = "videoaddon|back"
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     assert "Chọn số cảnh video" in query.edited["text"]
     saved_finalization = bot.get_video_finalization_state(user_id)
