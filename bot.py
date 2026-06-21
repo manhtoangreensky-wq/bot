@@ -35407,7 +35407,7 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         await query.answer()
         return await safe_edit_or_send(
             query,
-            "Ghép video nhiều cảnh đang được kiểm thử. TOAN AAS giữ nguyên số cảnh bạn chọn và chưa xử lý/chưa trừ Xu để tránh tạo nhầm 1 cảnh 6 giây.",
+            "Render nhiều cảnh đang được kiểm thử để tránh lỗi chi phí/provider. TOAN AAS chưa xử lý và chưa trừ Xu.",
             parse_mode=None,
             reply_markup=video_export_maintenance_keyboard(lang),
         )
@@ -46807,7 +46807,7 @@ async def task3d_open_video_package_finalization(target, user_id, session: dict,
         lang,
         back_callback,
         package,
-        initial_step="tier",
+        initial_step="aspect",
     )
 
 def task3d_video_prompt_bundle(session: dict) -> dict:
@@ -89179,20 +89179,23 @@ def video_finalization_readiness() -> dict:
 def video_finalization_menu_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     source = state.get("source_label") or video_finalization_source_label(state.get("source"), lang)
+    aspect = video_finalization_aspect_display(state, lang)
     if normalize_user_language(lang) != "vi":
         return (
-            "🎛 <b>Video finishing options</b>\n\n"
+            "🎛 <b>Video finishing tools</b>\n\n"
             f"Source: <b>{html.escape(str(source))}</b>\n\n"
-            "Configure voice, music, subtitles, translation or dubbing for this video draft first. "
-            "Then choose the package, review the invoice and confirm.\n\n"
+            f"Aspect ratio: <b>{html.escape(str(aspect))}</b>\n\n"
+            "Choose voice/dubbing, music or subtitles for this video draft, or choose None. "
+            "The next step is package selection, then priced scene count and the final invoice.\n\n"
             "The current source file, duration, package draft and video direction stay in the same video order. "
             "No processing starts and no Xu is charged here."
         )
     return (
-        "🎛 <b>Tùy chọn hoàn thiện video</b>\n\n"
+        "🎛 <b>Công cụ hoàn thiện video</b>\n\n"
         f"Nguồn: <b>{html.escape(str(source))}</b>\n\n"
-        "Chọn giọng đọc, nhạc, phụ đề, dịch hoặc lồng tiếng cho draft video hiện tại trước. "
-        "Sau đó mới chọn gói, xem hóa đơn và xác nhận cuối.\n\n"
+        f"Tỉ lệ khung hình: <b>{html.escape(str(aspect))}</b>\n\n"
+        "Chọn giọng/lồng tiếng, nhạc, phụ đề cho draft video hiện tại, hoặc chọn Không thêm. "
+        "Bước kế tiếp là chọn gói, chọn số cảnh có giá, rồi xem hóa đơn cuối.\n\n"
         "TOAN AAS giữ nguyên file nguồn, thời lượng, hướng dựng và các lựa chọn add-on trong cùng đơn video. "
         "Màn này chưa xử lý video và chưa trừ Xu."
     )
@@ -89201,15 +89204,12 @@ def video_finalization_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎙 Giọng đọc" if is_vi else "🎙 Voice", callback_data="vfinal|voice"),
+            InlineKeyboardButton("🎙 Giọng/lồng tiếng" if is_vi else "🎙 Voice/dubbing", callback_data="vfinal|voice"),
             InlineKeyboardButton("🎵 Nhạc" if is_vi else "🎵 Music", callback_data="vfinal|music"),
         ],
         [
-            InlineKeyboardButton("🌐 Phụ đề / Dịch / Lồng tiếng" if is_vi else "🌐 Subtitles, translation and dubbing", callback_data="vfinal|addon"),
-        ],
-        [
-            InlineKeyboardButton("✅ Tiếp tục chọn gói" if is_vi else "✅ Continue to package", callback_data="vfinal|tier"),
-            InlineKeyboardButton("🚫 Bỏ qua add-on" if is_vi else "🚫 Skip add-ons", callback_data="vfinal|skip"),
+            InlineKeyboardButton("📝 Phụ đề" if is_vi else "📝 Subtitles", callback_data="vfinal|addon"),
+            InlineKeyboardButton("🚫 Không thêm" if is_vi else "🚫 None", callback_data="vfinal|skip"),
         ],
         [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
@@ -89232,6 +89232,202 @@ def video_finalization_selected_aspect(state: dict | None = None) -> str:
         if text:
             return normalize_media_aspect_ratio(text, "9:16", "video")
     return "9:16"
+
+VIDEO_FINALIZATION_ASPECT_CHOICES = ("9:16", "16:9", "1:1", "4:5")
+
+def _video_finalization_valid_aspect(value) -> str:
+    raw = str(value or "").strip().lower().replace("x", ":").replace(" ", "")
+    if raw in set(media_aspect_ratio_options("video")):
+        return raw
+    return ""
+
+def _video_finalization_aspect_sources(state: dict | None = None) -> list[dict]:
+    state = dict(state or {})
+    source_payload = dict(state.get("source_payload") or {})
+    pending_payload = dict(state.get("pending_payload") or {})
+    # build_video_project may inject a default aspect ratio. For the aspect gate
+    # we only treat values carried by the flow state/payload as an actual choice.
+    return [
+        state,
+        source_payload,
+        pending_payload,
+        dict(state.get("session_context") or {}),
+    ]
+
+def video_finalization_explicit_aspect(state: dict | None = None) -> str:
+    state = dict(state or {})
+    skip_selected = bool(state.get("source_media_aspect_defaulted"))
+    for source in _video_finalization_aspect_sources(state):
+        for key in (
+            "selected_video_aspect_ratio",
+            "aspect_ratio",
+            "ratio",
+            "preferred_aspect_ratio",
+            "source_aspect_ratio",
+            "media_aspect_ratio",
+            "original_aspect_ratio",
+        ):
+            if skip_selected and key == "selected_video_aspect_ratio" and source is state:
+                continue
+            aspect = _video_finalization_valid_aspect(source.get(key))
+            if aspect:
+                return normalize_media_aspect_ratio(aspect, "9:16", "video")
+    return ""
+
+def video_finalization_has_source_media(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    payload = dict(state.get("source_payload") or {})
+    project = dict(state.get("video_project") or {})
+    source_tokens = {
+        str(state.get("source") or "").strip().lower(),
+        str(payload.get("source") or "").strip().lower(),
+        str(payload.get("source_flow") or "").strip().lower(),
+        str(payload.get("product_id") or "").strip().lower(),
+        str(project.get("source") or "").strip().lower(),
+    }
+    media_sources = {
+        "imagevideo",
+        "videoref",
+        "image_to_video",
+        "reference_video_plan",
+        "video_reference",
+        "video_ref",
+        "selfscene",
+        "self_shot_scene_change",
+        "image_upload",
+        "video_upload",
+        "upload_image",
+        "upload_video",
+    }
+    media_keys = (
+        "source_media_ref",
+        "source_file_id",
+        "source_video_file_id",
+        "input_video_file_id",
+        "telegram_file_id",
+        "video_file_id",
+        "image_file_id",
+        "source_image_file_id",
+        "source_image_url",
+        "source_video_url",
+    )
+    sources = [state, payload, project]
+    has_media_marker = any(
+        bool(source.get(key))
+        for source in sources
+        for key in media_keys
+    )
+    has_media_marker = has_media_marker or any(bool(source.get("photos")) for source in sources if any(token in media_sources for token in source_tokens))
+    if any(token in media_sources for token in source_tokens) and has_media_marker:
+        return True
+    return any(bool(source.get("source_media_ref")) for source in sources)
+
+def video_finalization_needs_aspect_choice(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    if video_finalization_explicit_aspect(state):
+        return False
+    return not video_finalization_has_source_media(state)
+
+def video_finalization_aspect_display(state: dict | None = None, lang: str = "vi") -> str:
+    state = dict(state or {})
+    if state.get("source_media_aspect_defaulted") and str(state.get("aspect_source") or "") == "source_media":
+        return "Theo tỉ lệ nguồn" if normalize_user_language(lang) == "vi" else "Source aspect"
+    return video_finalization_selected_aspect(state)
+
+def video_finalization_apply_aspect(state: dict | None = None, aspect_ratio: str = "", source: str = "user_selected") -> dict:
+    current = dict(state or {})
+    aspect = normalize_media_aspect_ratio(aspect_ratio, "9:16", "video")
+    current["selected_video_aspect_ratio"] = aspect
+    current["aspect_ratio"] = aspect
+    current["aspect_source"] = str(source or "user_selected")[:40]
+    current["source_media_aspect_defaulted"] = False
+    for key in ("source_payload", "pending_payload", "video_project"):
+        payload = dict(current.get(key) or {})
+        payload["aspect_ratio"] = aspect
+        current[key] = payload
+    session_context = dict(current.get("session_context") or {})
+    session_context["aspect_ratio"] = aspect
+    current["session_context"] = session_context
+    return current
+
+def video_finalization_prepare_aspect_state(state: dict | None = None) -> dict:
+    current = dict(state or {})
+    explicit = video_finalization_explicit_aspect(current)
+    if explicit:
+        return video_finalization_apply_aspect(current, explicit, str(current.get("aspect_source") or "provided"))
+    if video_finalization_has_source_media(current):
+        aspect = video_finalization_selected_aspect(current)
+        current = video_finalization_apply_aspect(current, aspect, "source_media")
+        current["source_media_aspect_defaulted"] = True
+        return current
+    return current
+
+def video_finalization_aspect_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = dict(state or {})
+    source = state.get("source_label") or video_finalization_source_label(state.get("source"), lang)
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📐 <b>Choose video aspect ratio</b>\n\n"
+            f"Source: <b>{html.escape(str(source))}</b>\n\n"
+            "Choose the frame ratio before tools, package, scene count and the final invoice. "
+            "No video processing starts and no Xu is charged here."
+        )
+    return (
+        "📐 <b>Chọn tỉ lệ khung hình video</b>\n\n"
+        f"Nguồn: <b>{html.escape(str(source))}</b>\n\n"
+        "Chọn tỉ lệ khung hình trước khi chọn công cụ, gói, số cảnh và hóa đơn cuối. "
+        "Màn này chưa xử lý video và chưa trừ Xu."
+    )
+
+def video_finalization_aspect_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    labels = {
+        "9:16": "📱 9:16",
+        "16:9": "📺 16:9",
+        "1:1": "⬛ 1:1",
+        "4:5": "🖼 4:5",
+    }
+    rows = [
+        [
+            InlineKeyboardButton(labels["9:16"], callback_data="vfinal|aspect|9x16"),
+            InlineKeyboardButton(labels["16:9"], callback_data="vfinal|aspect|16x9"),
+        ],
+        [
+            InlineKeyboardButton(labels["1:1"], callback_data="vfinal|aspect|1x1"),
+            InlineKeyboardButton(labels["4:5"], callback_data="vfinal|aspect|4x5"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+async def video_finalization_render_aspect(query, user_id, state: dict | None = None, lang: str = "vi"):
+    current = dict(state or get_video_finalization_state(user_id) or {})
+    current["step"] = "aspect"
+    set_video_finalization_state(user_id, current)
+    return await safe_edit_or_send(
+        query,
+        video_finalization_aspect_text(current, lang),
+        parse_mode="HTML",
+        reply_markup=video_finalization_aspect_keyboard(lang),
+    )
+
+async def video_finalization_render_menu(query, user_id, state: dict | None = None, lang: str = "vi"):
+    current = video_finalization_prepare_aspect_state(state or get_video_finalization_state(user_id) or {})
+    if video_finalization_needs_aspect_choice(current):
+        return await video_finalization_render_aspect(query, user_id, current, lang)
+    current["step"] = "menu"
+    current["return_to_invoice"] = False
+    current["addon_return_target"] = "package"
+    set_video_finalization_state(user_id, current)
+    return await safe_edit_or_send(
+        query,
+        video_finalization_menu_text(current, lang),
+        parse_mode="HTML",
+        reply_markup=video_finalization_menu_keyboard(lang),
+    )
 
 def video_finalization_package_from_state(state: dict | None = None) -> dict:
     state = dict(state or {})
@@ -89394,39 +89590,17 @@ async def video_finalization_return_after_addon(query, user_id, state: dict | No
     current = dict(state or get_video_finalization_state(user_id) or {})
     if not current:
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
-    target = "invoice" if current.get("return_to_invoice") else video_finalization_addon_return_target(user_id, current)
-    if target == "invoice":
-        addon_state = get_video_addon_state(user_id) or {}
-        tier = normalize_video_tier(current.get("selected_video_tier") or addon_state.get("video_tier") or (addon_state.get("pending_payload") or {}).get("video_tier") or "")
-        if tier and video_finalization_has_prompt(current):
-            current["selected_video_tier"] = tier
-            current["selected_video_aspect_ratio"] = video_finalization_selected_aspect(current)
-            if not video_scene_selection_info(current):
-                current = video_finalization_apply_scene_count_fields(current, 1, user_id)
-            current["step"] = "confirm"
-            current["addon_return_target"] = "invoice"
-            set_video_finalization_state(user_id, current)
-            package = video_finalization_package_from_state(current)
-            aspect = video_finalization_selected_aspect(current)
-            pending_payload = public_video_pending_payload_from_package(tier, package, aspect)
-            pending_payload.update({
-                "video_finalization": dict(package.get("video_finalization") or {}),
-                "video_finalization_confirmed": True,
-                "video_addon_ready_for_invoice": True,
-                "source": str(current.get("source") or package.get("source") or (addon_state.get("pending_payload") or {}).get("source") or "promptvideo")[:80],
-                "source_flow": str(current.get("source") or package.get("source_flow") or (addon_state.get("pending_payload") or {}).get("source_flow") or "promptvideo")[:80],
-            })
-            pending_payload = video_finalization_merge_pending_payload(addon_state.get("pending_payload") or {}, pending_payload)
-            set_public_video_package_context(user_id, pending_payload)
-            return await start_video_addon_step(query, user_id, pending_payload, tier, lang, source=str(addon_state.get("source") or "ai"))
-    current["step"] = "menu"
-    current["addon_return_target"] = "hub"
+    clear_video_addon_state(user_id)
+    current = video_finalization_prepare_aspect_state(current)
+    current["step"] = "tier"
+    current["return_to_invoice"] = False
+    current["addon_return_target"] = "package"
     set_video_finalization_state(user_id, current)
     return await safe_edit_or_send(
         query,
-        video_finalization_menu_text(current, lang),
+        video_finalization_tier_text(current, lang),
         parse_mode="HTML",
-        reply_markup=video_finalization_menu_keyboard(lang),
+        reply_markup=video_finalization_tier_keyboard(lang),
     )
 
 async def video_finalization_continue_to_invoice_or_tier(query, user_id, state: dict | None = None, lang: str = "vi"):
@@ -89459,6 +89633,7 @@ async def video_finalization_continue_to_invoice_or_tier(query, user_id, state: 
         pending_payload.update({
             "video_finalization": dict(package.get("video_finalization") or {}),
             "video_finalization_confirmed": True,
+            "video_addon_ready_for_invoice": True,
             "source": str(current.get("source") or package.get("source") or "promptvideo")[:80],
             "source_flow": str(current.get("source") or package.get("source_flow") or "promptvideo")[:80],
         })
@@ -89628,7 +89803,7 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
             "1 scene is about 6 seconds.\n\n"
             "<b>Price by scene count</b>\n"
             f"{price_lines}\n\n"
-            "Choose the scene count that matches the video you want. The next step opens tools/add-ons, then the final invoice."
+            "Choose the scene count that matches the video you want. The next step is the final invoice."
         )
     return (
         "🎞 <b>Chọn số cảnh video</b>\n\n"
@@ -89637,7 +89812,7 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
         "1 cảnh khoảng 6 giây.\n\n"
         "<b>Bảng giá theo số cảnh</b>\n"
         f"{price_lines}\n\n"
-        "Chọn số cảnh đúng nhu cầu. Bước kế tiếp là công cụ/add-on, sau đó mới tới hóa đơn cuối."
+        "Chọn số cảnh đúng nhu cầu. Bước kế tiếp là hóa đơn cuối."
     )
 
 def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -89735,6 +89910,7 @@ async def video_finalization_continue_after_scene_count(query, user_id, state: d
         return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
     tier = normalize_video_tier(current.get("selected_video_tier") or current.get("video_tier") or "low")
     current["selected_video_tier"] = tier
+    current["video_tier"] = tier
     current["selected_video_aspect_ratio"] = video_finalization_selected_aspect(current)
     current["step"] = "confirm"
     set_video_finalization_state(user_id, current)
@@ -89753,12 +89929,26 @@ async def video_finalization_continue_after_scene_count(query, user_id, state: d
             parse_mode="HTML",
             reply_markup=video_finalization_confirm_not_ready_keyboard(current, lang),
         )
+    quote = calculate_video_quote(current)
+    if tier == "low" and not quote.get("is_package_200_valid"):
+        reasons = ["extra_scene"] if int(quote.get("scene_count") or 1) > 1 else ["paid_addon"]
+        return await safe_edit_or_send(
+            query,
+            video_experience_tier_lock_text(lang, reasons)
+            + "\n\n"
+            "Gói 200 chỉ dùng để trải nghiệm 1 cảnh, không add-on.\n\n"
+            f"Tổng hiện tại: {xu_number(quote.get('total_xu'))} Xu\n"
+            "Vui lòng nâng lên gói 300 Xu trở lên để tiếp tục.",
+            parse_mode=None,
+            reply_markup=video_experience_tier_lock_keyboard(lang),
+        )
     package = video_finalization_package_from_state(current)
     aspect = video_finalization_selected_aspect(current)
     pending_payload = public_video_pending_payload_from_package(tier, package, aspect)
     pending_payload.update({
         "video_finalization": dict(package.get("video_finalization") or {}),
         "video_finalization_confirmed": True,
+        "video_addon_ready_for_invoice": True,
         "source": str(current.get("source") or package.get("source") or "promptvideo")[:80],
         "source_flow": str(current.get("source") or package.get("source_flow") or "promptvideo")[:80],
     })
@@ -90546,7 +90736,8 @@ async def open_video_finalization(query, user_id, source: str, source_state: dic
         or (selected_scene_count * estimated_scene_seconds if selected_scene_count else 0),
         0,
     )
-    step = "tier" if str(initial_step or "").strip().lower() in {"tier", "price", "pricing"} else "menu"
+    requested_step = str(initial_step or "").strip().lower()
+    step = "aspect" if requested_step in {"aspect", "ratio", "aspect_ratio"} else "menu"
     initial_state = {
         "step": step,
         "user_id": str(user_id),
@@ -90572,10 +90763,11 @@ async def open_video_finalization(query, user_id, source: str, source_state: dic
             "duration_mode": str(initial_payload.get("duration_mode") or source_state.get("duration_mode") or "scene_based")[:80],
             "duration_note": str(initial_payload.get("duration_note") or source_state.get("duration_note") or f"{selected_scene_count} cảnh, khoảng {estimated_duration_seconds} giây")[:160],
         })
+    initial_state = video_finalization_prepare_aspect_state(initial_state)
     state = set_video_finalization_state(user_id, initial_state)
-    if step == "tier":
-        return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
-    return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
+    if video_finalization_needs_aspect_choice(state):
+        return await video_finalization_render_aspect(query, user_id, state, lang)
+    return await video_finalization_render_menu(query, user_id, state, lang)
 
 async def handle_legacy_frame_video_export(query, user_id, source: str, lang: str = "vi", state: dict | None = None):
     state = dict(state or get_video_finalization_state(user_id) or {})
@@ -90686,7 +90878,9 @@ async def render_video_finalization_stack_target(query, user_id, state: dict, ta
     state["step"] = step
     set_video_finalization_state(user_id, state)
     if step == "menu":
-        return True, await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
+        return True, await video_finalization_render_menu(query, user_id, state, lang)
+    if step == "aspect":
+        return True, await video_finalization_render_aspect(query, user_id, state, lang)
     if step == "tier":
         return True, await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
     if step == "scene_count":
@@ -90784,23 +90978,18 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             state["step"] = "tier"
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
-        if current_step == "tier" and state.get("return_to_invoice"):
-            return await video_finalization_render_invoice(query, uid, state, lang)
+        if current_step == "tier":
+            return await video_finalization_render_menu(query, uid, state, lang)
+        if current_step == "menu":
+            if str(state.get("aspect_source") or "") == "user_selected":
+                return await video_finalization_render_aspect(query, uid, state, lang)
+            return await video_finalization_back_to_source(query, uid, state, lang)
+        if current_step == "aspect":
+            return await video_finalization_back_to_source(query, uid, state, lang)
         target_screen = pop_video_screen(uid, "")
         handled, rendered = await render_video_finalization_stack_target(query, uid, state, target_screen, lang)
         if handled:
             return rendered
-        if current_step == "tier":
-            back_callback = str(state.get("back_callback") or "")
-            if back_callback.startswith("vproduct|"):
-                if back_callback == "vproduct|prompt_video_detail":
-                    session = task3d_session_step(uid, "prompt_video_detail")
-                    return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
-                session = task3d_session_step(uid, "result")
-                return await task3d_render_step(query, uid, session, lang)
-            state["step"] = "menu"
-            set_video_finalization_state(uid, state)
-            return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
         if current_step in {"review", "saved"}:
             state["step"] = "tier" if state.get("selected_video_tier") else "menu"
             set_video_finalization_state(uid, state)
@@ -90836,12 +91025,16 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if action == "menu":
         addon_state = get_video_addon_state(uid)
         if addon_state:
-            current = ensure_video_finalization_from_addon_state(uid, addon_state)
-            if video_scene_selection_info(current):
-                return await render_video_addon_screen(query, uid, addon_state, "video_addon_menu", lang)
-        state["step"] = "menu"
+            state = ensure_video_finalization_from_addon_state(uid, addon_state)
+            clear_video_addon_state(uid)
+        return await video_finalization_render_menu(query, uid, state, lang)
+    if action == "aspect":
+        aspect = media_aspect_ratio_from_token(value, "video")
+        if aspect not in VIDEO_FINALIZATION_ASPECT_CHOICES:
+            return await video_finalization_render_aspect(query, uid, state, lang)
+        state = video_finalization_apply_aspect(state, aspect, "user_selected")
         set_video_finalization_state(uid, state)
-        return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
+        return await video_finalization_render_menu(query, uid, state, lang)
     if action == "my_media":
         state["step"] = "music"
         set_video_finalization_state(uid, state)
@@ -90882,7 +91075,11 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
                             [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")],
                         ]),
                     )
+            state = video_finalization_prepare_aspect_state(state)
+            if video_finalization_needs_aspect_choice(state):
+                return await video_finalization_render_aspect(query, uid, state, lang)
             state["selected_video_tier"] = tier
+            state["video_tier"] = tier
             state["selected_video_aspect_ratio"] = video_finalization_selected_aspect(state)
             status = get_public_video_tier_ui_status(tier, is_admin_user(uid))
             if not status.get("enabled"):
@@ -90892,7 +91089,12 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             state["step"] = "scene_count"
             set_video_finalization_state(uid, state)
             return await video_finalization_render_scene_count(query, uid, state, lang)
+        state = video_finalization_prepare_aspect_state(state)
+        if video_finalization_needs_aspect_choice(state):
+            return await video_finalization_render_aspect(query, uid, state, lang)
         state["step"] = "tier"
+        state["return_to_invoice"] = False
+        state["addon_return_target"] = "package"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
     if action == "scene_count_screen":
@@ -91153,7 +91355,12 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
     if action == "skip":
         state["video_finalization"] = video_finalization_defaults()
         state["video_finalization"]["finalization_confirmed"] = False
+        state = video_finalization_prepare_aspect_state(state)
+        if video_finalization_needs_aspect_choice(state):
+            return await video_finalization_render_aspect(query, uid, state, lang)
         state["step"] = "tier"
+        state["return_to_invoice"] = False
+        state["addon_return_target"] = "package"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
     if action == "review":
@@ -91188,12 +91395,7 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             state["source_payload"] = payload
             state["video_finalization"]["finalization_confirmed"] = False
             set_video_finalization_state(uid, state)
-            return await safe_edit_or_send(
-                query,
-                video_finalization_menu_text(state, lang),
-                parse_mode="HTML",
-                reply_markup=video_finalization_menu_keyboard(lang),
-            )
+            return await video_finalization_render_menu(query, uid, state, lang)
         if action == "export_local":
             local_ready = bool(video_finalization_readiness().get("local_frame"))
             if not local_ready or len(developing_video_frame_photos(state)) < 2:
@@ -91276,21 +91478,21 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         update_video_finalization(uid, voice_enabled=True, voice_text=text, voice_script=text, dub_enabled=False)
         lang = get_user_language(uid) or "vi"
         current = get_video_finalization_state(uid)
-        current["step"] = "menu"
+        current["step"] = "tier"
+        current["return_to_invoice"] = False
+        current["addon_return_target"] = "package"
         set_video_finalization_state(uid, current)
-        await update.message.reply_text(
-            "✅ Đã lưu nội dung giọng đọc vào draft video hiện tại. Gói, thời lượng, file nguồn và các add-on khác vẫn được giữ nguyên.",
-            reply_markup=video_finalization_menu_keyboard(lang),
-        )
+        await update.message.reply_text(video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
         return True
     if step == "await_subtitle_text":
         update_video_finalization(uid, subtitle_enabled=True, subtitle_mode="manual", subtitle_text=text, subtitle_burn_in=True)
         lang = get_user_language(uid) or "vi"
         current = get_video_finalization_state(uid)
-        current["step"] = "review"
+        current["step"] = "tier"
+        current["return_to_invoice"] = False
+        current["addon_return_target"] = "package"
         set_video_finalization_state(uid, current)
-        current = get_video_finalization_state(uid)
-        await update.message.reply_text(video_finalization_summary_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(current, lang))
+        await update.message.reply_text(video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
         return True
     if step == "await_combo_language":
         update_video_finalization(uid, subtitle_language=text[:80], voice_language=text[:80], dub_language=text[:80])
@@ -91305,11 +91507,13 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         current = get_video_finalization_state(uid)
         return_target = video_finalization_addon_return_target(uid, current)
         if return_target == "invoice":
-            current["addon_return_target"] = "invoice"
+            current["addon_return_target"] = "package"
+        current["step"] = "tier"
+        current["return_to_invoice"] = False
         set_video_finalization_state(uid, current)
         await update.message.reply_text(
             "🌐 Đã lưu ngôn ngữ đích. Lựa chọn dịch phụ đề vẫn gắn với video hiện tại và chưa trừ Xu.",
-            reply_markup=video_finalization_menu_keyboard(lang),
+            reply_markup=video_finalization_tier_keyboard(lang),
         )
         return True
     if step == "await_combo_text":
@@ -91328,10 +91532,11 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         )
         lang = get_user_language(uid) or "vi"
         current = get_video_finalization_state(uid)
-        current["step"] = "review"
+        current["step"] = "tier"
+        current["return_to_invoice"] = False
+        current["addon_return_target"] = "package"
         set_video_finalization_state(uid, current)
-        current = get_video_finalization_state(uid)
-        await update.message.reply_text(video_finalization_summary_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(current, lang))
+        await update.message.reply_text(video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
         return True
     return False
 
@@ -91579,6 +91784,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
     addon_fee_xu = int(quote.get("addon_fee_xu") or 0)
     total_xu = int(quote.get("total_xu") or 0)
     equivalent = int(quote.get("estimated_vnd") or total_xu * int(XU_TO_VND or 100))
+    aspect_display = video_finalization_aspect_display(state, lang)
     paid_items = video_order_dedupe_items(quote.get("paid_items") or [])
     voice_guard = video_voice_mux_export_guard(state)
     voice_note_en = (
@@ -91606,6 +91812,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             return (
                 "🎬 <b>Final video invoice - Confirm video export</b>\n\n"
                 f"Package: <b>Starter video 200 Xu</b>\n"
+                f"Aspect ratio: <b>{html.escape(str(aspect_display))}</b>\n"
                 f"Scene count: <b>{count} scene</b>\n"
                 f"Estimated duration: <b>about {seconds} seconds</b>\n"
                 "Add-on: <b>not supported</b>\n"
@@ -91618,6 +91825,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
         return (
             "🎬 <b>Final video invoice - Confirm video export</b>\n\n"
             f"Package: <b>{html.escape(video_tier_short_label(tier, 'en'))} - {xu_number(base)} Xu/standard scene</b>\n"
+            f"Aspect ratio: <b>{html.escape(str(aspect_display))}</b>\n"
             f"Scene count: <b>{count} scenes</b>\n"
             f"Estimated duration: <b>about {seconds} seconds</b>\n"
             f"Scene discount: <b>{discount}%</b>\n\n"
@@ -91643,6 +91851,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
         return (
             "🎬 <b>Hóa đơn xác nhận video - Xác nhận xuất video</b>\n\n"
             "Gói: <b>Video trải nghiệm 200 Xu</b>\n"
+            f"Tỉ lệ khung hình: <b>{html.escape(str(aspect_display))}</b>\n"
             f"Số cảnh: <b>{count} cảnh</b>\n"
             f"Thời lượng ước tính: <b>khoảng {seconds} giây</b>\n"
             "Add-on: <b>không hỗ trợ</b>\n"
@@ -91655,6 +91864,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
     return (
         "🎬 <b>Hóa đơn xác nhận video - Xác nhận xuất video</b>\n\n"
         f"Gói: <b>Video {html.escape(video_tier_short_label(tier, 'vi'))} — {xu_number(base)} Xu/cảnh chuẩn</b>\n"
+        f"Tỉ lệ khung hình: <b>{html.escape(str(aspect_display))}</b>\n"
         f"Số cảnh: <b>{count} cảnh</b>\n"
         f"Thời lượng ước tính: <b>khoảng {seconds} giây</b>\n"
         f"Chiết khấu cảnh: <b>{discount}%</b>\n\n"
@@ -92969,14 +93179,6 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
         current_screen = str((state.get("video_order") or {}).get("current_screen") or "")
         tier = normalize_video_tier(state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier") or selected_tier_value or "low")
         invoice_back = current_screen == "invoice" or (state.get("pending_confirm_token") and current_screen not in {"video_addon_menu", "addon_voice", "addon_music", "addon_subtitle"})
-        if invoice_back and tier != "low":
-            state = set_video_addon_screen(uid, state, "video_addon_menu", push=False)
-            return await safe_edit_or_send(
-                query,
-                video_addon_menu_text(state, lang),
-                parse_mode="HTML",
-                reply_markup=video_addon_menu_keyboard(lang, state),
-            )
         if state.get("pending_confirm_token") or current_screen == "invoice" or current_screen == "video_addon_menu" or package_selected:
             finalization_state = ensure_video_finalization_from_addon_state(uid, state)
             pending = dict(state.get("pending_payload") or {})
@@ -96134,7 +96336,7 @@ async def handle_trend_guided_callback(update: Update, context: ContextTypes.DEF
         generated_url = str(state.get("generated_image_url") or "")
         if generated_url:
             source_state["photos"] = [{"image_url": generated_url}]
-        return await open_video_finalization(query, uid, "trend", source_state, lang, "trendg|video_review", package, initial_step="tier")
+        return await open_video_finalization(query, uid, "trend", source_state, lang, "trendg|video_review", package, initial_step="aspect")
     if action == "admin_video_smoke":
         if not is_admin_user(uid):
             return await safe_edit_or_send(query, ui_text(lang, "media.public_off"))

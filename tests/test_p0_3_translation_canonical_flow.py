@@ -350,8 +350,8 @@ def test_video_subdub_returns_addon_before_invoice(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(_callback_update(query), SimpleNamespace()))
 
     state = bot.get_video_finalization_state(user_id)
-    assert state["step"] == "menu"
-    assert state["addon_return_target"] == "hub"
+    assert state["step"] == "tier"
+    assert state["addon_return_target"] == "package"
     assert query.outputs
     assert "Hóa đơn xác nhận video" not in query.outputs[-1]["text"]
 
@@ -359,14 +359,8 @@ def test_video_subdub_returns_addon_before_invoice(monkeypatch):
 def test_video_subdub_returns_invoice_from_invoice(monkeypatch):
     user_id = 990308
     _reset_user(user_id)
-    captured = {}
-
-    async def fake_start(query, uid, pending_payload, tier, lang="vi", source="ai"):
-        captured.update(uid=uid, pending_payload=dict(pending_payload), tier=tier, source=source)
-        return "invoice"
 
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    monkeypatch.setattr(bot, "start_video_addon_step", fake_start)
     bot.set_video_finalization_state(user_id, {
         "source": "promptvideo",
         "selected_prompt": "Video nước hoa nam.",
@@ -380,23 +374,20 @@ def test_video_subdub_returns_invoice_from_invoice(monkeypatch):
     query = CaptureQuery("vfinal|subtitle", user_id)
     result = asyncio.run(bot.handle_video_finalization_callback(_callback_update(query), SimpleNamespace()))
 
-    assert result == "invoice"
-    assert captured["tier"] == "basic"
-    assert captured["pending_payload"]["subtitle_option"] == "subtitle_original"
-    assert captured["pending_payload"]["video_finalization"]["subtitle_enabled"] is True
+    assert result is not None
+    state = bot.get_video_finalization_state(user_id)
+    assert state["step"] == "tier"
+    assert state["addon_return_target"] == "package"
+    assert state["selected_video_tier"] == "basic"
+    assert state["video_finalization"]["subtitle_enabled"] is True
+    assert state["video_finalization"]["subtitle_dub_choice"] == "subtitle"
 
 
 def test_video_subdub_preserves_source_package_duration_direction(monkeypatch):
     user_id = 990309
     _reset_user(user_id)
-    captured = {}
-
-    async def fake_start(query, uid, pending_payload, tier, lang="vi", source="ai"):
-        captured.update(pending_payload=dict(pending_payload), tier=tier, source=source)
-        return "invoice"
 
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    monkeypatch.setattr(bot, "start_video_addon_step", fake_start)
     bot.set_video_finalization_state(user_id, {
         "source": "selfscene",
         "selected_prompt": "Video đổi cảnh sản phẩm.",
@@ -419,15 +410,18 @@ def test_video_subdub_preserves_source_package_duration_direction(monkeypatch):
 
     query = CaptureQuery("vfinal|combo", user_id)
     asyncio.run(bot.handle_video_finalization_callback(_callback_update(query), SimpleNamespace()))
-    payload = captured["pending_payload"]
+    state = bot.get_video_finalization_state(user_id)
+    payload = state["source_payload"]
 
-    assert captured["tier"] == "standard"
+    assert state["step"] == "tier"
+    assert state["selected_video_tier"] == "standard"
     assert payload["source_file_id"] == "source-file-id"
     assert payload["source_video_file_id"] == "source-video-file"
     assert payload["object_prompt"] == "chai nước hoa"
     assert payload["direction_prompt"] == "slow push in"
-    assert payload["subtitle_option"] == "subtitle_original"
-    assert payload["dubbing_option"] == "dub_original"
+    assert state["video_finalization"]["subtitle_enabled"] is True
+    assert state["video_finalization"]["dub_enabled"] is True
+    assert state["video_finalization"]["subtitle_dub_choice"] == "subtitle_plus_dubbing"
 
 
 def test_subtitle_preview_max_6_seconds():

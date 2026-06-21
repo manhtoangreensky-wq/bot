@@ -59,7 +59,7 @@ def test_translation_removed_from_video_main_menu():
 def test_translation_addon_present_in_video_addon_step():
     labels = _labels(bot.video_finalization_menu_keyboard("vi"))
     addon_labels = _labels(bot.video_finalization_addon_keyboard("vi"))
-    assert "🌐 Phụ đề / Dịch / Lồng tiếng" in labels
+    assert "📝 Phụ đề" in labels
     assert "🌐 Phụ đề / Dịch / Lồng tiếng" in addon_labels
     assert "videodub|start|video_addon" in _callbacks(bot.video_finalization_addon_keyboard("vi"))
 

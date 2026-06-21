@@ -344,17 +344,11 @@ def test_video_addon_return_from_hub_stays_on_video_options(monkeypatch):
     assert bot.get_video_finalization_state(user_id)["source_file_id"] == "source-file-id"
 
 
-def test_video_addon_invoice_origin_returns_invoice_after_explicit_selection(monkeypatch):
+def test_video_addon_invoice_origin_returns_package_after_explicit_selection(monkeypatch):
     user_id = 950512
     _reset_user(user_id)
-    captured = {}
-
-    async def fake_invoice(query, uid, pending_payload, tier, lang="vi", source="ai"):
-        captured.update(uid=uid, pending_payload=dict(pending_payload or {}), tier=tier, source=source)
-        return "invoice"
 
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
-    monkeypatch.setattr(bot, "start_video_addon_step", fake_invoice)
     _seed_video_state(user_id, addon_return_target="invoice")
     bot.set_video_addon_state(user_id, {
         "source": "ai",
@@ -369,9 +363,12 @@ def test_video_addon_invoice_origin_returns_invoice_after_explicit_selection(mon
     query = CaptureQuery("music_quick|video_addon|prompt_choose_1", user_id)
     result = asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert result == "invoice"
-    assert captured["pending_payload"]["video_finalization"]["music_mode"] == "ai_music"
-    assert captured["pending_payload"]["source_file_id"] == "source-file-id"
+    assert result is not None
+    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
+    state = bot.get_video_finalization_state(user_id)
+    assert state["step"] == "tier"
+    assert state["video_finalization"]["music_mode"] == "ai_music"
+    assert state["source_payload"]["source_file_id"] == "source-file-id"
 
 
 def test_selfshot_state_preserved_after_voice_choice(monkeypatch):
