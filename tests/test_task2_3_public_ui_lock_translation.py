@@ -45,13 +45,13 @@ def _prepare_upload(monkeypatch, uid, mode, step="source"):
 
 def test_public_translation_guard_hides_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi", admin=False)
-    assert text == "Lồng tiếng tự động chưa sẵn sàng xử lý. TOAN AAS chưa trừ Xu."
+    assert text == "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu."
     assert "Admin blocker" not in text
 
 
 def test_public_translation_guard_hides_factory_status_buttons():
     callbacks = _callbacks(bot.video_dubbing_guard_keyboard("vi", admin=False))
-    assert callbacks == ["videodub|final", "videodub|guard_back", "menu|main"]
+    assert callbacks == ["videodub|guard_back", "menu|main"]
     assert "videodub|admin_smoke" not in callbacks
     assert "videodub|admin_status" not in callbacks
 

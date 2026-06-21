@@ -71,7 +71,8 @@ def test_voice_clone_sample_sentence():
 
 def test_voice_clone_provider_guard_clean():
     text = bot.voice_clone_public_guard_text("vi")
-    assert "TOAN AAS chưa trừ Xu" in text
+    assert "TOAN AAS chưa xử lý" in text
+    assert "chưa trừ Xu" in text
     for forbidden in ("MiniMax", "ShopAIKey", "API", "env", "provider"):
         assert forbidden not in text
 
@@ -132,7 +133,7 @@ def test_music_background_guided_purpose_style_mood_duration():
     assert len(bot.MUSIC_GUIDED_PURPOSES) == 6
     assert len(bot.MUSIC_GUIDED_STYLES) == 7
     assert len(bot.MUSIC_GUIDED_MOODS) == 7
-    assert [item[0] for item in bot.MUSIC_GUIDED_DURATIONS] == ["15s", "30s", "60s", "custom"]
+    assert [item[0] for item in bot.MUSIC_GUIDED_DURATIONS] == ["18s", "30s", "60s", "custom"]
     assert "music_quick|showroom|music_ai_back_purpose" in _callbacks(bot.music_guided_step_keyboard("style", "vi"))
     assert "music_quick|showroom|music_ai_back_style" in _callbacks(bot.music_guided_step_keyboard("mood", "vi"))
     assert "music_quick|showroom|music_ai_back_mood" in _callbacks(bot.music_guided_step_keyboard("duration", "vi"))

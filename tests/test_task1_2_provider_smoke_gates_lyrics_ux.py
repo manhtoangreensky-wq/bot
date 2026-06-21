@@ -180,7 +180,7 @@ def test_voice_clone_off_does_not_leave_pending_confirm(monkeypatch):
     update, query = _callback_update("music_quick|showroom|voice_clone", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
     assert bot.get_music_guided_pending(user_id) is None
-    assert "khóa thử nghiệm" in query.message.outputs[-1]["text"]
+    assert "bảo trì/nâng cấp" in query.message.outputs[-1]["text"]
 
 
 def test_admin_voice_clone_bypasses_public_gate_when_configured(monkeypatch):
@@ -476,7 +476,7 @@ def test_music_gate_off_admin_shows_smoke_buttons():
     assert "⚙️ Trạng thái nhạc" in labels
 
 
-def test_admin_music_gate_shows_output_buttons_when_provider_configured(monkeypatch):
+def test_admin_music_gate_keeps_public_processing_guarded(monkeypatch):
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
         "ready": True,
         "public_enabled": False,
@@ -487,11 +487,13 @@ def test_admin_music_gate_shows_output_buttons_when_provider_configured(monkeypa
         "vi",
         result={"song_product": "seconds"},
     ))
-    assert "▶️ Nghe thử" in labels
-    assert "✅ Tạo bài hát" in labels
+    assert "▶️ Nghe thử" not in labels
+    assert "✅ Tạo bài hát" not in labels
+    assert "🧪 Kiểm tra nhạc AI" not in labels
+    assert "⚙️ Trạng thái nhạc" not in labels
 
 
-def test_admin_music_preview_bypasses_public_gate(monkeypatch):
+def test_admin_music_preview_uses_clean_public_guard(monkeypatch):
     user_id = 12015
     _reset_music(user_id)
     bot.save_music_guided_result(user_id, {
@@ -512,13 +514,15 @@ def test_admin_music_preview_bypasses_public_gate(monkeypatch):
         return {"ok": True, "status": "PASS_SUBMITTED", "provider": "test", "task_id": "admin-preview"}
 
     monkeypatch.setattr(bot, "submit_music_generation_job", submit)
-    update, _query = _callback_update("music_quick|showroom|music_ai_preview", user_id)
+    update, query = _callback_update("music_quick|showroom|music_ai_preview", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
-    assert calls == [{"preview": True, "admin_smoke": True, "updated_by": user_id}]
-    assert bot.get_music_guided_result(user_id)["music_preview_task_id"] == "admin-preview"
+    assert calls == []
+    assert "bảo trì/nâng cấp" in query.message.outputs[-1]["text"]
+    assert "chưa trừ Xu" in query.message.outputs[-1]["text"]
+    assert "admin" not in query.message.outputs[-1]["text"].lower()
 
 
-def test_admin_music_full_create_is_zero_xu_and_bypasses_public_gate(monkeypatch):
+def test_admin_music_full_create_uses_clean_public_guard(monkeypatch):
     user_id = 12016
     _reset_music(user_id)
     bot.save_music_guided_result(user_id, {
@@ -542,10 +546,10 @@ def test_admin_music_full_create_is_zero_xu_and_bypasses_public_gate(monkeypatch
     monkeypatch.setattr(bot, "submit_music_generation_job", submit)
     update, query = _callback_update("music_quick|showroom|music_ai_confirm", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
-    assert calls == [{"preview": False, "admin_smoke": True, "updated_by": user_id}]
-    result = bot.get_music_guided_result(user_id)
-    assert result["music_charged_xu"] == 0
-    assert "Đã trừ: 0 Xu" in query.message.outputs[-1]["text"]
+    assert calls == []
+    assert "bảo trì/nâng cấp" in query.message.outputs[-1]["text"]
+    assert "chưa trừ Xu" in query.message.outputs[-1]["text"]
+    assert "admin" not in query.message.outputs[-1]["text"].lower()
 
 
 def test_admin_music_test_button_runs_real_smoke_command(monkeypatch):
@@ -567,7 +571,10 @@ def test_admin_music_test_button_runs_real_smoke_command(monkeypatch):
 
 def test_music_gate_on_preview_creates_job(monkeypatch):
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
+        "ready": True,
         "public_enabled": True,
+        "full_result_ok": True,
+        "cost_gate_ok": True,
         "preferred_provider": "key4u_suno",
         "providers": {"key4u_suno": {"configured": True, "smoke": "PASS"}},
     })
@@ -588,7 +595,10 @@ def test_music_gate_on_preview_creates_job(monkeypatch):
 
 def test_music_gate_on_full_create_creates_job(monkeypatch):
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
+        "ready": True,
         "public_enabled": True,
+        "full_result_ok": True,
+        "cost_gate_ok": True,
         "preferred_provider": "key4u_suno",
         "providers": {"key4u_suno": {"configured": True, "smoke": "PASS"}},
     })

@@ -214,7 +214,7 @@ def test_subtitle_dubbing_translate_subtitle_first():
 
 
 def test_subtitle_dubbing_export_before_voice(monkeypatch):
-    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     uid = "task21-combo-export"
     bot.clear_video_dubbing_pending(uid)
     state = {
@@ -261,7 +261,7 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
         captured.update({"text": text, "voice_style": voice_style, "voice_id": voice_id, "voice_speed": voice_speed})
         return "TTS", b"audio", "ok"
 
-    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
@@ -302,7 +302,7 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
 def test_public_guard_no_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi", admin=False)
     assert "Admin blocker" not in text
-    assert "Tạo phụ đề tự động chưa sẵn sàng xử lý" in text
+    assert "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp" in text
 
 
 def test_admin_guard_can_show_blocker():

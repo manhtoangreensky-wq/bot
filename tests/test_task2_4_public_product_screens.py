@@ -129,8 +129,8 @@ def test_auto_subtitle_provider_off_clean_buttons(monkeypatch):
 
     text = query.edits[-1]["text"]
     markup = query.edits[-1]["reply_markup"]
-    assert text == "Tạo phụ đề tự động chưa sẵn sàng xử lý. TOAN AAS chưa trừ Xu."
-    assert _callbacks(markup) == ["videodub|final", "videodub|guard_back", "menu|main"]
+    assert text == "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu."
+    assert _callbacks(markup) == ["videodub|guard_back", "menu|main"]
     assert "Admin blocker" not in text
 
 
@@ -176,7 +176,7 @@ def test_auto_dubbing_provider_off_no_debug_buttons(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "lồng tiếng tự động chưa sẵn sàng xử lý" in ui
+    assert "dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp" in ui
     for term in ("admin blocker", "kiểm tra factory", "trạng thái dịch", "curl provider", "provider", "api", "key4u", "shopaikey"):
         assert term not in ui
 
@@ -239,7 +239,7 @@ def test_subtitle_plus_provider_off_no_debug_buttons(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "phụ đề dịch chưa sẵn sàng xử lý" in ui
+    assert "dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp" in ui
     assert "admin blocker" not in ui
     assert "curl provider" not in ui
 
@@ -277,7 +277,7 @@ def test_link_import_top_level_usable_or_guarded():
     assert "videodub|link_start" in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
     guard = bot.social_link_import_guard_text("vi")
     labels = _labels(bot.social_link_import_guard_keyboard("vi"))
-    assert guard == "Tải video từ link chưa sẵn sàng xử lý. TOAN AAS chưa trừ Xu. Bạn có thể gửi file trực tiếp."
+    assert guard == "Tải video từ link đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu. Bạn có thể gửi video/audio trực tiếp."
     assert labels == ["📎 Gửi video/audio", "⬅️ Dịch video", "🏠 Menu chính"]
 
 
