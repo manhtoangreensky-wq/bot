@@ -34023,7 +34023,14 @@ def video_order_create(
     duration_model = video_final_duration_model(source_payload, state, tier_norm)
     duration = int(duration_model.get("final_duration_seconds") or VIDEO_FINAL_DEFAULT_SECONDS)
     project = dict(state.get("video_project") or source_payload.get("video_project") or {})
-    scene_count = int(duration_model.get("scene_count") or VIDEO_ORDER_DEFAULT_BASE_SCENES)
+    scene_count = next(
+        (
+            safe_int(source.get("selected_scene_count") or source.get("scene_count"), 0)
+            for source in (state, source_payload, project)
+            if safe_int(source.get("selected_scene_count") or source.get("scene_count"), 0) > 0
+        ),
+        1,
+    )
     order = {
         "user_id": str(user_id or state.get("user_id") or source_payload.get("user_id") or ""),
         "tier": tier_norm,
@@ -34148,6 +34155,25 @@ def video_order_voice_item(state: dict, order: dict) -> tuple[dict | None, dict 
         return None, {"key": "voice_advanced", "label": item["label"], "price_xu": int(item.get("price_xu") or 0)}
     return None, None
 
+def video_scene_discount_percent(scene_count) -> int:
+    count = max(1, min(20, safe_int(scene_count, 1)))
+    if count == 1:
+        return 100
+    if count <= 9:
+        return 90
+    if count <= 19:
+        return 85
+    return 80
+
+def video_scene_discount_multiplier(scene_count) -> float:
+    return video_scene_discount_percent(scene_count) / 100.0
+
+def calculate_scene_video_price(package_base_xu, scene_count) -> int:
+    base = max(0, safe_int(package_base_xu, 0))
+    count = max(1, min(20, safe_int(scene_count, 1)))
+    percent = video_scene_discount_percent(count)
+    return int(round(base * count * (percent / 100.0)))
+
 def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
     order = dict(order or {})
     state = dict(state or {})
@@ -34231,8 +34257,23 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
         paid_items = []
         order["addons"].update({"voice": None, "subtitle": None, "dub": None, "subtitle_translate": None, "subtitle_plus_dub": None})
 
+    scene_count = max(1, min(20, safe_int(
+        order.get("scene_count")
+        or state.get("selected_scene_count")
+        or state.get("scene_count")
+        or (state.get("pending_payload") or {}).get("selected_scene_count")
+        or (state.get("pending_payload") or {}).get("scene_count")
+        or (state.get("source_payload") or {}).get("selected_scene_count")
+        or (state.get("video_project") or {}).get("selected_scene_count")
+        or VIDEO_ORDER_DEFAULT_BASE_SCENES,
+        VIDEO_ORDER_DEFAULT_BASE_SCENES,
+    )))
+    scene_discount_percent = video_scene_discount_percent(scene_count)
+    scene_discount_multiplier = video_scene_discount_multiplier(scene_count)
+    scene_video_xu = calculate_scene_video_price(base_price, scene_count)
+    addon_fee_xu = sum(int(item.get("price_xu") or 0) for item in paid_items)
     discount_items = [item for item in video_order_normalize_items(order.get("discounts")) if int(item.get("price_xu") or 0) > 0 and item.get("valid")]
-    subtotal = max(0, base_price + sum(int(item.get("price_xu") or 0) for item in paid_items))
+    subtotal = max(0, scene_video_xu + addon_fee_xu)
     discount_total = min(subtotal, sum(int(item.get("price_xu") or 0) for item in discount_items))
     total = max(0, subtotal - discount_total)
     if subtotal > 0 and total <= 0 and not discount_items:
@@ -34241,6 +34282,11 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
         "tier": tier,
         "tier_name": str(payload.get("label") or video_tier_short_label(tier, "vi")),
         "base_price_xu": base_price,
+        "scene_count": scene_count,
+        "scene_discount": scene_discount_multiplier,
+        "scene_discount_percent": scene_discount_percent,
+        "scene_video_xu": scene_video_xu,
+        "addon_fee_xu": addon_fee_xu,
         "free_items": video_order_dedupe_items(free_items),
         "paid_items": video_order_dedupe_items(paid_items),
         "discounts": discount_items,
@@ -34293,7 +34339,11 @@ def video_order_to_price_preview(order: dict, state: dict | None = None) -> dict
         "preview_enabled": bool(order.get("preview_enabled")),
         "preview_locked_reason": str(order.get("preview_locked_reason") or ""),
         "music_option": (state or {}).get("current_video_music_option") or "none",
-        "base_video_xu": int(order.get("base_price_xu") or 0),
+        "base_video_xu": int(order.get("scene_video_xu") or order.get("base_price_xu") or 0),
+        "package_base_xu": int(order.get("base_price_xu") or 0),
+        "scene_discount": float(order.get("scene_discount") or video_scene_discount_multiplier(order.get("scene_count") or 1)),
+        "scene_discount_percent": int(order.get("scene_discount_percent") or video_scene_discount_percent(order.get("scene_count") or 1)),
+        "scene_video_xu": int(order.get("scene_video_xu") or 0),
         "music_xu": music_xu,
         "subtitle_xu": subtitle_xu,
         "dubbing_xu": dubbing_xu,
@@ -34304,6 +34354,169 @@ def video_order_to_price_preview(order: dict, state: dict | None = None) -> dict
         "estimated_vnd": int(order.get("estimated_vnd") or 0),
         "video_order": order,
         "notes": ["Video price is calculated from the shared video_order."],
+    }
+
+def video_quote_selected_addon_keys(state: dict | None = None, order: dict | None = None) -> list[str]:
+    state = dict(state or {})
+    order = dict(order or {})
+    pending = dict(state.get("pending_payload") or {})
+    finalization = video_finalization_defaults()
+    finalization.update(dict(pending.get("video_finalization") or {}))
+    finalization.update(dict(state.get("video_finalization") or {}))
+    keys = []
+    music_choice = str(
+        state.get("current_video_music_choice")
+        or state.get("current_video_music_option")
+        or pending.get("music_choice_key")
+        or pending.get("music_option")
+        or finalization.get("music_choice")
+        or finalization.get("music_mode")
+        or "none"
+    ).strip().lower()
+    voice_choice = str(
+        state.get("current_video_voice_choice")
+        or pending.get("voice_choice")
+        or finalization.get("voice_choice")
+        or finalization.get("voice_mode")
+        or "none"
+    ).strip().lower()
+    subtitle_choice = str(
+        state.get("current_video_subtitle_option")
+        or pending.get("subtitle_option")
+        or finalization.get("subtitle_mode")
+        or "none"
+    ).strip().lower()
+    dub_choice = str(
+        state.get("current_video_dubbing_option")
+        or pending.get("dubbing_option")
+        or finalization.get("subtitle_dub_choice")
+        or "none"
+    ).strip().lower()
+    if music_choice not in VIDEO_ADDON_NONE_VALUES:
+        keys.append("music")
+    voice_is_free_default = voice_choice in VIDEO_FREE_VOICE_VALUES
+    if voice_choice not in VIDEO_ADDON_NONE_VALUES and not voice_is_free_default:
+        keys.append("voice")
+    if subtitle_choice not in VIDEO_ADDON_NONE_VALUES:
+        keys.append("subtitle")
+    free_default_dub = voice_is_free_default and dub_choice in {"dub_original", "dubbing", "dub", "voice", "voice_default"}
+    if dub_choice not in VIDEO_ADDON_NONE_VALUES and not free_default_dub:
+        keys.append("dubbing")
+    for field, key in (
+        ("music_enabled", "music"),
+        ("voice_enabled", "voice"),
+        ("subtitle_enabled", "subtitle"),
+        ("dub_enabled", "dubbing"),
+        ("subtitle_dub_enabled", "subtitle_dub"),
+        ("translation_enabled", "translation"),
+    ):
+        if finalization.get(field):
+            keys.append(key)
+    for item in list(order.get("paid_items") or []):
+        item_key = str(item.get("key") or "").strip().lower()
+        if item_key and item_key not in {"prompt_script_templates", "save_to_media_vault", "music_none", "voice_none"}:
+            keys.append(item_key)
+    return list(dict.fromkeys(keys))
+
+def calculate_video_quote(session: dict | None = None) -> dict:
+    state = dict(session or {})
+    order = video_order_from_state(state, state.get("user_id") or state.get("owner_user_id"))
+    scene_sources = (
+        state,
+        dict(state.get("pending_payload") or {}),
+        dict(state.get("source_payload") or {}),
+        dict(state.get("video_project") or {}),
+    )
+    explicit_scene_count = next(
+        (
+            safe_int(source.get("selected_scene_count") or source.get("scene_count"), 0)
+            for source in scene_sources
+            if safe_int(source.get("selected_scene_count") or source.get("scene_count"), 0) > 0
+        ),
+        0,
+    )
+    # Old confirmations created before the package-first flow have no scene
+    # selection. Preserve those as one clip instead of pricing/guarding them as
+    # the former three-scene display default.
+    if explicit_scene_count <= 0:
+        order["scene_count"] = 1
+        order["requested_seconds"] = TASK3D_SCENE_SECONDS
+        order = video_order_recalculate(order, state)
+    pricing = video_order_to_price_preview(order, state)
+    order = dict(pricing.get("video_order") or order)
+    tier = normalize_video_tier(order.get("tier") or state.get("video_tier") or (state.get("pending_payload") or {}).get("video_tier") or "low")
+    package_base_xu = int(order.get("base_price_xu") or video_tier_cost_xu(tier) or 0)
+    scene_count = max(1, min(20, safe_int(order.get("scene_count") or pricing.get("scene_count") or 1, 1)))
+    estimated_seconds = max(1, safe_int(
+        order.get("requested_seconds")
+        or pricing.get("duration_seconds")
+        or scene_count * safe_int(order.get("scene_duration_seconds") or TASK3D_SCENE_SECONDS, TASK3D_SCENE_SECONDS),
+        scene_count * TASK3D_SCENE_SECONDS,
+    ))
+    scene_discount = float(order.get("scene_discount") or video_scene_discount_multiplier(scene_count))
+    scene_discount_percent = int(order.get("scene_discount_percent") or video_scene_discount_percent(scene_count))
+    scene_video_xu = int(order.get("scene_video_xu") or calculate_scene_video_price(package_base_xu, scene_count))
+    addon_fee_xu = int(order.get("addon_fee_xu") or sum(int(item.get("price_xu") or 0) for item in order.get("paid_items") or []))
+    legacy_preview = dict(state.get("current_video_price_preview") or (state.get("pending_payload") or {}).get("video_price_preview") or {})
+    addon_fee_xu = max(addon_fee_xu, safe_int(legacy_preview.get("addon_xu"), 0))
+    total_xu = max(int(order.get("total_xu") or 0), scene_video_xu + addon_fee_xu)
+    package_id = {
+        "low": "package_200",
+        "basic": "package_300",
+        "common": "package_400",
+        "advanced": "package_500",
+        "standard": "package_600",
+        "high": "package_800",
+        "future_1000": "package_1000",
+        "future_1200": "package_1200",
+        "future_1500": "package_1500",
+    }.get(tier, f"package_{package_base_xu}")
+    package_label = str(order.get("tier_name") or video_tier_short_label(tier, "vi"))
+    paid_items = video_order_dedupe_items(order.get("paid_items") or [])
+    free_items = video_order_dedupe_items(order.get("free_items") or [])
+    line_items = [
+        {
+            "key": "scene_video",
+            "label": "Video theo cảnh",
+            "price_xu": scene_video_xu,
+            "scene_count": scene_count,
+            "package_base_xu": package_base_xu,
+            "discount_percent": scene_discount_percent,
+        },
+        *paid_items,
+    ]
+    package_200 = tier == "low" or package_base_xu == int(VIDEO_LOW_COST_XU or 200)
+    selected_addons = video_quote_selected_addon_keys(state, order)
+    is_package_200_valid = bool(
+        not package_200
+        or (scene_count == 1 and addon_fee_xu == 0 and total_xu == int(VIDEO_LOW_COST_XU or 200) and not selected_addons)
+    )
+    warnings = []
+    if package_200 and not is_package_200_valid:
+        warnings.append("package_200_invalid")
+    if scene_count > 1 and not video_multiscene_public_ready(scene_count):
+        warnings.append("multiscene_not_public_ready")
+    return {
+        "package_id": package_id,
+        "package_label": package_label,
+        "package_base_xu": package_base_xu,
+        "tier": tier,
+        "scene_count": scene_count,
+        "estimated_seconds": estimated_seconds,
+        "scene_discount": scene_discount,
+        "scene_discount_percent": scene_discount_percent,
+        "scene_video_xu": scene_video_xu,
+        "addon_fee_xu": addon_fee_xu,
+        "total_xu": total_xu,
+        "estimated_vnd": int(order.get("estimated_vnd") or total_xu * int(XU_TO_VND or 100)),
+        "free_items": free_items,
+        "paid_items": paid_items,
+        "selected_addons": selected_addons,
+        "line_items": line_items,
+        "is_package_200_valid": is_package_200_valid,
+        "warnings": warnings,
+        "video_order": order,
+        "pricing": pricing,
     }
 
 def video_order_screen_text(screen: str, state: dict | None = None, lang: str = "vi") -> str:
@@ -34946,6 +35159,103 @@ def video_completed_addon_status_payload() -> dict:
         "last_addon_error": get_system_setting("video_completed_addon_last_error", ""),
     }
 
+VIDEO_MULTISCENE_TEST_COUNTS = (3, 5, 10, 20)
+
+def video_multiscene_setting_bool(key: str, default: bool = False) -> bool:
+    value = str(os.getenv(key) or get_system_setting(key, "1" if default else "") or "").strip().lower()
+    return value in {"1", "true", "yes", "on", "pass", "ready", "enabled"}
+
+def video_multiscene_public_enabled() -> bool:
+    return video_multiscene_setting_bool("MULTISCENE_PUBLIC_ENABLED", False)
+
+def video_multiscene_stitching_ready() -> bool:
+    return video_multiscene_setting_bool("VIDEO_MULTISCENE_STITCHING_READY", False)
+
+def video_multiscene_scene_tested(scene_count) -> bool:
+    count = max(1, min(20, safe_int(scene_count, 1)))
+    if count <= 1:
+        return True
+    result = get_tool_test_result(f"video_multiscene_{count}")
+    status = str(result.get("status") or "").upper()
+    setting = get_system_setting(f"video_multiscene_{count}_tested", "")
+    return status in PROVIDER_SMOKE_PASS_STATUSES or str(setting or "").strip().lower() in {"1", "true", "yes", "on", "pass", "success"}
+
+def video_multiscene_public_ready(scene_count) -> bool:
+    count = max(1, min(20, safe_int(scene_count, 1)))
+    if count <= 1:
+        return True
+    return bool(video_multiscene_public_enabled() and video_multiscene_stitching_ready() and video_multiscene_scene_tested(count))
+
+def video_multiscene_status_payload() -> dict:
+    return {
+        "public_enabled": video_multiscene_public_enabled(),
+        "stitching_ready": video_multiscene_stitching_ready(),
+        "tested": {count: video_multiscene_scene_tested(count) for count in VIDEO_MULTISCENE_TEST_COUNTS},
+        "last_result": get_system_setting("video_multiscene_last_result", ""),
+    }
+
+async def cmd_video_multiscene_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    item = video_multiscene_status_payload()
+    tested = dict(item.get("tested") or {})
+    return await update.message.reply_text(
+        "🎞 <b>VIDEO MULTI-SCENE STATUS</b>\n\n"
+        f"• 3-scene tested: <code>{'yes' if tested.get(3) else 'no'}</code>\n"
+        f"• 5-scene tested: <code>{'yes' if tested.get(5) else 'no'}</code>\n"
+        f"• 10-scene tested: <code>{'yes' if tested.get(10) else 'no'}</code>\n"
+        f"• 20-scene tested: <code>{'yes' if tested.get(20) else 'no'}</code>\n"
+        f"• stitching ready: <code>{'yes' if item.get('stitching_ready') else 'no'}</code>\n"
+        f"• public enabled: <code>{'yes' if item.get('public_enabled') else 'no'}</code>\n"
+        f"• last test result: <code>{html.escape(str(item.get('last_result') or '-'))}</code>\n\n"
+        "• Key/token: <code>hidden</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_tool_test_video_multiscene(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = list(getattr(context, "args", []) or [])
+    if len(args) < 2:
+        return await update.message.reply_text("Cú pháp: /tool_test_video_multiscene <package> <scene_count> --confirm-paid")
+    package_base = safe_int(args[0], 0)
+    scene_count = safe_int(args[1], 0)
+    confirm_paid = "--confirm-paid" in {str(item).strip().lower() for item in args[2:]}
+    if package_base < 300 or scene_count < 2 or scene_count > 20:
+        detail = f"invalid package={package_base}; scene_count={scene_count}; no paid job submitted"
+        save_tool_test_result("video_multiscene", "INVALID", detail, uid)
+        _safe_set_video_system_setting("video_multiscene_last_result", detail, detail)
+        return await update.message.reply_text("⚠️ package phải từ 300 trở lên và scene_count từ 2 đến 20. Chưa tạo paid job.")
+    quote_xu = calculate_scene_video_price(package_base, scene_count)
+    if not confirm_paid:
+        detail = f"package={package_base}; scene_count={scene_count}; quote={quote_xu}; missing --confirm-paid; no paid job submitted"
+        save_tool_test_result("video_multiscene", "NO_CONFIRM", detail, uid)
+        _safe_set_video_system_setting("video_multiscene_last_result", detail, detail)
+        return await update.message.reply_text(
+            "🧪 <b>Multi-scene video test</b>\n\n"
+            f"• Package: <code>{package_base}</code>\n"
+            f"• Scene count: <code>{scene_count}</code>\n"
+            f"• Quote: <code>{quote_xu} Xu</code>\n"
+            "• Paid provider job: <code>NO</code>\n\n"
+            "Thêm <code>--confirm-paid</code> nếu admin muốn chạy test có phí.",
+            parse_mode="HTML",
+        )
+    detail = f"package={package_base}; scene_count={scene_count}; quote={quote_xu}; runner guarded; no public opening; no paid job submitted"
+    save_tool_test_result(f"video_multiscene_{scene_count}", "NOT_RUN", detail, uid)
+    save_tool_test_result("video_multiscene", "NOT_RUN", detail, uid)
+    _safe_set_video_system_setting("video_multiscene_last_result", detail, detail)
+    return await update.message.reply_text(
+        "🧪 <b>Multi-scene video test guard</b>\n\n"
+        f"• Package: <code>{package_base}</code>\n"
+        f"• Scene count: <code>{scene_count}</code>\n"
+        f"• Quote: <code>{quote_xu} Xu</code>\n"
+        "• Paid provider job: <code>NO</code>\n"
+        "• Public enabled: <code>NO</code>\n\n"
+        "Runner multi-scene/stitching chưa được xác nhận trong code path này, nên TOAN AAS không đánh dấu PASS và không mở public.",
+        parse_mode="HTML",
+    )
+
 async def cmd_video_addon_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
@@ -35073,25 +35383,35 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         set_video_addon_state(uid, state)
     token = token or str(state.get("pending_confirm_token") or "")
     tier = normalize_video_tier(state.get("video_tier") or pending_payload.get("video_tier"))
-    classification = classify_video_addons_for_package(state)
-    if state.get("source") != "frame" and tier == "low" and not classification.get("allowed_for_200"):
+    quote = calculate_video_quote(state)
+    if state.get("source") != "frame" and tier == "low" and not quote.get("is_package_200_valid"):
         await query.answer()
         reasons = []
-        for item in classification.get("paid_addons") or []:
-            key = str(item.get("key") or "").strip()
-            if key in {"suno_music", "sfx_ai"}:
-                key = "paid_music"
-            elif key in {"voice_clone_create", "voice_advanced", "voice_clone_reuse"}:
-                key = "paid_voice"
-            elif key == "subtitle_translation":
-                key = "subtitle"
-            reasons.append(key or "paid_addon")
+        if int(quote.get("scene_count") or 1) > 1:
+            reasons.append("extra_scene")
+        if quote.get("selected_addons"):
+            reasons.append("paid_addon")
+        if int(quote.get("total_xu") or 0) != int(VIDEO_LOW_COST_XU or 200):
+            reasons.append("invoice_total_over_base")
         return await safe_edit_or_send(
             query,
-            video_experience_tier_lock_text(lang, list(dict.fromkeys(reasons)) or ["paid_addon"]),
-            parse_mode="HTML",
+            video_experience_tier_lock_text(lang, reasons or ["paid_addon"])
+            + "\n\n"
+            "Gói 200 chỉ dùng để trải nghiệm 1 cảnh, không add-on.\n\n"
+            f"Tổng hiện tại: {xu_number(quote.get('total_xu'))} Xu\n"
+            "Vui lòng nâng lên gói 300 Xu trở lên để tiếp tục.",
+            parse_mode=None,
             reply_markup=video_experience_tier_lock_keyboard(lang),
         )
+    if state.get("source") != "frame" and int(quote.get("scene_count") or 1) > 1 and not video_multiscene_public_ready(quote.get("scene_count")):
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Render nhiều cảnh đang được kiểm thử để tránh lỗi chi phí/provider. TOAN AAS chưa xử lý và chưa trừ Xu.",
+            parse_mode=None,
+            reply_markup=video_export_maintenance_keyboard(lang),
+        )
+    classification = classify_video_addons_for_package(state)
 
     voice_mux_guard = video_voice_mux_export_guard(state)
     if not voice_mux_guard.get("ok"):
@@ -46497,6 +46817,63 @@ def task3d_video_scene_payloads(session: dict, scene_count: int) -> tuple[dict, 
     }
     return source_state, package
 
+def task3d_video_package_payloads(session: dict) -> tuple[dict, dict]:
+    product_id = str((session or {}).get("product_id") or "")
+    bundle = task3d_video_prompt_bundle(session)
+    draft = dict((session or {}).get("draft") or {})
+    render_prompt = str(draft.get("scene_count_render_video_prompt") or "").strip()
+    if render_prompt:
+        video_prompt = render_prompt
+    else:
+        prompts = [
+            str(item or "").strip()
+            for item in (bundle.get("video_prompts") or [])
+            if str(item or "").strip()
+        ]
+        if not prompts:
+            prompts = [
+                str(shot.get("video_prompt") or "").strip()
+                for shot in (bundle.get("shot_table") or [])
+                if str(shot.get("video_prompt") or "").strip()
+            ]
+        if prompts:
+            video_prompt = "\n\n".join(f"Cảnh {index}: {text}" for index, text in enumerate(prompts, start=1))
+        else:
+            video_prompt = str(bundle.get("short_summary") or bundle.get("script") or "Tạo video ngắn rõ chủ thể, nhất quán phong cách.")[:1200]
+    source_state = {
+        "product_id": product_id,
+        "selected_topic": session.get("topic"),
+        "selected_style": session.get("style"),
+        "preferred_aspect_ratio": session.get("aspect_ratio"),
+        "source_media_ref": session.get("source_media_ref"),
+        "video_prompt": video_prompt,
+        "script": bundle.get("script"),
+        "prompt_bundle": bundle,
+    }
+    package = {
+        "source": product_id,
+        "product_id": product_id,
+        "concept_text": bundle.get("short_summary"),
+        "video_prompt": video_prompt,
+        "prompt_bundle_id": bundle.get("bundle_id"),
+        "source_media_ref": session.get("source_media_ref"),
+        "selected_shots": list(draft.get("scene_count_render_selected_shots") or []),
+    }
+    return source_state, package
+
+async def task3d_open_video_package_finalization(target, user_id, session: dict, lang: str = "vi", back_callback: str = "vproduct|result"):
+    source_state, package = task3d_video_package_payloads(session)
+    return await open_video_finalization(
+        target,
+        user_id,
+        str(session.get("product_id") or package.get("source") or "video_plan"),
+        source_state,
+        lang,
+        back_callback,
+        package,
+        initial_step="tier",
+    )
+
 async def task3d_open_video_finalization_from_scene_count(target, user_id, session: dict, lang: str = "vi"):
     count = safe_int((session.get("draft") or {}).get("selected_scene_count") or session.get("selected_scene_count"), 0)
     if count <= 0:
@@ -47292,13 +47669,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         selected_prompt = "\n\n".join(f"Shot {index}: {prompt}" for index, prompt in selected)
         session = task3d_session_step(
             uid,
-            "select_scene_count",
+            "prompt_video_detail",
             scene_count_back_callback="vproduct|prompt_video_detail",
             scene_count_render_video_prompt=selected_prompt,
             scene_count_render_prompt_count=len(selected),
             scene_count_render_selected_shots=[index for index, _prompt in selected],
         )
-        return await task3d_render_step(query, uid, session, lang)
+        return await task3d_open_video_package_finalization(query, uid, session, lang, "vproduct|prompt_video_detail")
     if action == "export_menu":
         return await safe_edit_or_send(query, "📦 <b>Xuất prompt pack</b>\n\nChọn định dạng:", parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("JSON", callback_data="vproduct|export|json"), InlineKeyboardButton("Markdown", callback_data="vproduct|export|markdown"), InlineKeyboardButton("TXT", callback_data="vproduct|export|txt")],
@@ -47328,13 +47705,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, "⚠️ Hãy tạo prompt pack trước. Bot chưa trừ Xu.")
         session = task3d_session_step(
             uid,
-            "select_scene_count",
+            "result",
             scene_count_back_callback="vproduct|result",
             scene_count_render_video_prompt="",
             scene_count_render_prompt_count=0,
             scene_count_render_selected_shots=[],
         )
-        return await task3d_render_step(query, uid, session, lang)
+        return await task3d_open_video_package_finalization(query, uid, session, lang, "vproduct|result")
     if action == "back":
         target_step, session = task3d_back_step(uid)
         return await task3d_render_step(query, uid, session, lang)
@@ -89166,6 +89543,8 @@ async def video_finalization_return_after_addon(query, user_id, state: dict | No
         if tier and video_finalization_has_prompt(current):
             current["selected_video_tier"] = tier
             current["selected_video_aspect_ratio"] = video_finalization_selected_aspect(current)
+            if not video_scene_selection_info(current):
+                current = video_finalization_apply_scene_count_fields(current, 1, user_id)
             current["step"] = "confirm"
             current["addon_return_target"] = "invoice"
             set_video_finalization_state(user_id, current)
@@ -89200,6 +89579,11 @@ async def video_finalization_continue_to_invoice_or_tier(query, user_id, state: 
     if has_selected_tier and video_finalization_has_prompt(current):
         current["selected_video_tier"] = tier
         current["selected_video_aspect_ratio"] = video_finalization_selected_aspect(current)
+        if not video_scene_selection_info(current):
+            if current.get("addon_return_target") == "invoice" or current.get("return_to_invoice"):
+                current = video_finalization_apply_scene_count_fields(current, 1, user_id)
+            else:
+                return await video_finalization_render_scene_count(query, user_id, current, lang)
         current["step"] = "confirm"
         set_video_finalization_state(user_id, current)
         status = get_public_video_tier_ui_status(tier, is_admin_user(user_id))
@@ -89272,8 +89656,6 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
     has_prompt = video_finalization_has_prompt(state)
     yes = "Có" if normalize_user_language(lang) == "vi" else "Yes"
     no = "Không" if normalize_user_language(lang) == "vi" else "No"
-    scene_lines = video_scene_selection_summary_lines(state, lang)
-    scene_block = ("\n".join(scene_lines) + "\n\n") if scene_lines else ""
     if normalize_user_language(lang) != "vi":
         return (
             "🎬 <b>Choose AI video export package</b>\n\n"
@@ -89284,10 +89666,10 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
             f"Music: <b>{yes if finalization['music_enabled'] else no}</b>\n"
             f"Voice/dubbing: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
             f"Subtitles: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
-            f"{scene_block}"
             "Choose the right package:\n"
             + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
             + "\n\n"
+            "After choosing a package, you will choose the scene count so TOAN AAS can calculate the total Xu.\n\n"
             "All current business packages are available. TOAN AAS always shows the final confirmation before processing or charging Xu.\n\n"
             "TOAN AAS will show the final invoice before any processing or Xu charge."
         )
@@ -89300,10 +89682,10 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         f"Nhạc: <b>{yes if finalization['music_enabled'] else no}</b>\n"
         f"Voice/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
         f"Phụ đề: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
-        f"{scene_block}"
         "Chọn gói phù hợp:\n"
         + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
         + "\n\n"
+        "Sau khi chọn gói, bạn sẽ chọn số cảnh để TOAN AAS tính tổng Xu.\n\n"
         "Các gói video hiện tại đã được mở lại đầy đủ. TOAN AAS luôn báo lại lần cuối trước khi xử lý và trừ Xu.\n\n"
         "TOAN AAS sẽ báo lại lần cuối trước khi tạo video."
     )
@@ -89323,6 +89705,183 @@ def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
     ])
     return InlineKeyboardMarkup(rows)
+
+def video_finalization_scene_count_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = dict(state or {})
+    tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
+    if tier == "low":
+        if normalize_user_language(lang) != "vi":
+            return (
+                "🎞 <b>200 Xu package - starter video</b>\n\n"
+                "The 200 Xu package is only for a quick experience:\n"
+                "• 1 scene\n"
+                "• about 6 seconds\n"
+                "• no add-ons\n"
+                "• total remains exactly 200 Xu\n\n"
+                "For 3 scenes/18 seconds, music, voice, subtitles or advanced options, please choose 300 Xu or above."
+            )
+        return (
+            "🎞 <b>Gói 200 — Video trải nghiệm</b>\n\n"
+            "Gói 200 chỉ dùng để test nhanh:\n"
+            "• 1 cảnh\n"
+            "• khoảng 6 giây\n"
+            "• không add-on\n"
+            "• tổng giữ nguyên 200 Xu\n\n"
+            "Nếu muốn 3 cảnh/18 giây, nhạc, voice, phụ đề hoặc tính năng nâng cao, vui lòng chọn gói 300 Xu trở lên."
+        )
+    package_base_xu = video_tier_cost_xu(tier)
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎞 <b>Choose video scene count</b>\n\n"
+            f"Selected package: <b>{xu_number(package_base_xu)} Xu per scene</b>\n\n"
+            "TOAN AAS currently estimates video by scene/clip.\n"
+            "1 scene is about 6 seconds.\n\n"
+            "Suggestions:\n"
+            "• 1 scene ≈ 6 seconds - quick test\n"
+            "• 3 scenes ≈ 18 seconds - standard video\n"
+            "• 5 scenes ≈ 30 seconds - short polished video\n"
+            "• 10 scenes ≈ 60 seconds - 1-minute video\n"
+            "• 20 scenes ≈ 120 seconds - 2-minute video\n\n"
+            "The price is calculated from the selected package and scene count."
+        )
+    return (
+        "🎞 <b>Chọn số cảnh video</b>\n\n"
+        f"Gói đã chọn: <b>{xu_number(package_base_xu)} Xu/cảnh</b>\n\n"
+        "TOAN AAS hiện tính video theo cảnh/clip.\n"
+        "1 cảnh khoảng 6 giây.\n\n"
+        "Gợi ý:\n"
+        "• 1 cảnh ≈ 6 giây - test nhanh\n"
+        "• 3 cảnh ≈ 18 giây - video chuẩn\n"
+        "• 5 cảnh ≈ 30 giây - video ngắn đẹp\n"
+        "• 10 cảnh ≈ 60 giây - video 1 phút\n"
+        "• 20 cảnh ≈ 120 giây - video 2 phút\n\n"
+        "Giá sẽ được tính theo gói đã chọn và số cảnh."
+    )
+
+def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
+    state = dict(state or {})
+    is_vi = normalize_user_language(lang) == "vi"
+    tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
+    if tier == "low":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("1 cảnh ≈ 6 giây" if is_vi else "1 scene ≈ 6 seconds", callback_data="vfinal|scene_count|1")],
+            [
+                InlineKeyboardButton("🔷 Nâng lên 300 Xu" if is_vi else "🔷 Upgrade to 300 Xu", callback_data="vfinal|upgrade_300"),
+                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
+            ],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")],
+        ])
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("1 cảnh" if is_vi else "1 scene", callback_data="vfinal|scene_count|1"),
+            InlineKeyboardButton("3 cảnh" if is_vi else "3 scenes", callback_data="vfinal|scene_count|3"),
+        ],
+        [
+            InlineKeyboardButton("5 cảnh" if is_vi else "5 scenes", callback_data="vfinal|scene_count|5"),
+            InlineKeyboardButton("10 cảnh" if is_vi else "10 scenes", callback_data="vfinal|scene_count|10"),
+        ],
+        [
+            InlineKeyboardButton("20 cảnh" if is_vi else "20 scenes", callback_data="vfinal|scene_count|20"),
+            InlineKeyboardButton("✍️ Tự chọn" if is_vi else "✍️ Custom", callback_data="vfinal|scene_custom"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+        ],
+    ])
+
+def video_finalization_scene_count_custom_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "How many scenes do you want to create? Enter a number from 1 to 20."
+    return "Bạn muốn tạo bao nhiêu cảnh? Nhập số từ 1 đến 20."
+
+def video_finalization_scene_count_custom_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Chọn số cảnh" if normalize_user_language(lang) == "vi" else "⬅️ Scene count", callback_data="vfinal|scene_count_screen"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+    ]])
+
+def video_finalization_apply_scene_count_fields(state: dict | None = None, scene_count=1, user_id=None) -> dict:
+    current = dict(state or {})
+    fields = task3d_scene_count_fields(scene_count)
+    shared = {
+        **fields,
+        "scene_count": fields["selected_scene_count"],
+        "scene_duration_seconds": fields["estimated_scene_seconds"],
+        "duration_seconds": fields["estimated_duration_seconds"],
+        "requested_seconds": fields["estimated_duration_seconds"],
+        "final_duration_seconds": fields["estimated_duration_seconds"],
+    }
+    source_payload = dict(current.get("source_payload") or {})
+    video_prompt = ""
+    if user_id is not None:
+        session = get_video_session(user_id)
+        if task3d_video_prompt_bundle(session):
+            source_state, package = task3d_video_scene_payloads(session, fields["selected_scene_count"])
+            source_payload = video_finalization_merge_pending_payload(source_payload, {**source_state, **package})
+            video_prompt = str(package.get("video_prompt") or source_state.get("video_prompt") or "").strip()
+    source_payload.update(shared)
+    current.update(fields)
+    current["source_payload"] = source_payload
+    session_context = dict(current.get("session_context") or {})
+    if video_prompt or source_payload.get("video_prompt"):
+        session_context["video_prompt"] = str(video_prompt or source_payload.get("video_prompt") or "")[:3000]
+        current["has_video_prompt"] = True
+    current["session_context"] = session_context
+    project = dict(current.get("video_project") or {})
+    project.update(shared)
+    if source_payload.get("video_prompt"):
+        project["video_prompt"] = str(source_payload.get("video_prompt") or "")[:3000]
+        project["script_text"] = str(source_payload.get("video_prompt") or "")[:4000]
+    current["video_project"] = project
+    return current
+
+async def video_finalization_render_scene_count(query, user_id, state: dict | None = None, lang: str = "vi"):
+    current = dict(state or get_video_finalization_state(user_id) or {})
+    current["step"] = "scene_count"
+    set_video_finalization_state(user_id, current)
+    return await safe_edit_or_send(
+        query,
+        video_finalization_scene_count_text(current, lang),
+        parse_mode="HTML",
+        reply_markup=video_finalization_scene_count_keyboard(current, lang),
+    )
+
+async def video_finalization_continue_after_scene_count(query, user_id, state: dict | None = None, lang: str = "vi"):
+    current = dict(state or get_video_finalization_state(user_id) or {})
+    if not current:
+        return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+    tier = normalize_video_tier(current.get("selected_video_tier") or current.get("video_tier") or "low")
+    current["selected_video_tier"] = tier
+    current["selected_video_aspect_ratio"] = video_finalization_selected_aspect(current)
+    current["step"] = "confirm"
+    set_video_finalization_state(user_id, current)
+    status = get_public_video_tier_ui_status(tier, is_admin_user(user_id))
+    if not status.get("enabled"):
+        return await safe_edit_or_send(
+            query,
+            video_finalization_tier_guard_text(tier, lang),
+            parse_mode="HTML",
+            reply_markup=video_finalization_tier_guard_keyboard(lang),
+        )
+    if not video_finalization_has_prompt(current):
+        return await safe_edit_or_send(
+            query,
+            video_finalization_confirm_not_ready_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_finalization_confirm_not_ready_keyboard(current, lang),
+        )
+    package = video_finalization_package_from_state(current)
+    aspect = video_finalization_selected_aspect(current)
+    pending_payload = public_video_pending_payload_from_package(tier, package, aspect)
+    pending_payload.update({
+        "video_finalization": dict(package.get("video_finalization") or {}),
+        "video_finalization_confirmed": True,
+        "source": str(current.get("source") or package.get("source") or "promptvideo")[:80],
+        "source_flow": str(current.get("source") or package.get("source_flow") or "promptvideo")[:80],
+    })
+    set_public_video_package_context(user_id, pending_payload)
+    return await start_video_addon_step(query, user_id, pending_payload, tier, lang, source="ai")
 
 def video_finalization_tier_guard_text(tier: str, lang: str = "vi") -> str:
     status = get_public_video_tier_ui_status(tier)
@@ -90248,6 +90807,10 @@ async def render_video_finalization_stack_target(query, user_id, state: dict, ta
         return True, await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
     if step == "tier":
         return True, await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+    if step == "scene_count":
+        return True, await safe_edit_or_send(query, video_finalization_scene_count_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_scene_count_keyboard(state, lang))
+    if step == "scene_count_custom":
+        return True, await safe_edit_or_send(query, video_finalization_scene_count_custom_text(lang), reply_markup=video_finalization_scene_count_custom_keyboard(lang))
     if step in {"confirm", "review", "saved"}:
         return True, await safe_edit_or_send(query, video_finalization_summary_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
     if step == "music":
@@ -90330,25 +90893,29 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
         state["addon_return_target"] = video_finalization_addon_return_target(uid, state)
     if action == "back":
         current_step = str(state.get("step") or "")
+        if current_step == "confirm":
+            clear_video_addon_state(uid)
+            return await video_finalization_render_scene_count(query, uid, state, lang)
+        if current_step == "scene_count_custom":
+            return await video_finalization_render_scene_count(query, uid, state, lang)
+        if current_step == "scene_count":
+            state["step"] = "tier"
+            set_video_finalization_state(uid, state)
+            return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
         if current_step == "tier" and state.get("return_to_invoice"):
             return await video_finalization_render_invoice(query, uid, state, lang)
         target_screen = pop_video_screen(uid, "")
         handled, rendered = await render_video_finalization_stack_target(query, uid, state, target_screen, lang)
         if handled:
             return rendered
-        if current_step == "confirm":
-            state["step"] = "tier"
-            set_video_finalization_state(uid, state)
-            return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
         if current_step == "tier":
-            if str(state.get("back_callback") or "") == "vproduct|select_scene_count":
-                session = task3d_session_step(uid, "select_scene_count")
-                return await safe_edit_or_send(
-                    query,
-                    task3d_scene_count_text(session, lang),
-                    parse_mode="HTML",
-                    reply_markup=task3d_scene_count_keyboard(lang, task3d_scene_count_back_callback(session)),
-                )
+            back_callback = str(state.get("back_callback") or "")
+            if back_callback.startswith("vproduct|"):
+                if back_callback == "vproduct|prompt_video_detail":
+                    session = task3d_session_step(uid, "prompt_video_detail")
+                    return await safe_edit_or_send(query, task3d_prompt_detail_text(session, "video"), parse_mode="HTML", reply_markup=task3d_prompt_video_detail_keyboard(lang))
+                session = task3d_session_step(uid, "result")
+                return await task3d_render_step(query, uid, session, lang)
             state["step"] = "menu"
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_menu_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_menu_keyboard(lang))
@@ -90425,27 +90992,57 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
                     )
             state["selected_video_tier"] = tier
             state["selected_video_aspect_ratio"] = video_finalization_selected_aspect(state)
-            state["step"] = "confirm"
-            set_video_finalization_state(uid, state)
             status = get_public_video_tier_ui_status(tier, is_admin_user(uid))
             if not status.get("enabled"):
                 return await safe_edit_or_send(query, video_finalization_tier_guard_text(tier, lang), parse_mode="HTML", reply_markup=video_finalization_tier_guard_keyboard(lang))
             if not video_finalization_has_prompt(state):
                 return await safe_edit_or_send(query, video_finalization_confirm_not_ready_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_confirm_not_ready_keyboard(state, lang))
-            package = video_finalization_package_from_state(state)
-            aspect = video_finalization_selected_aspect(state)
-            pending_payload = public_video_pending_payload_from_package(tier, package, aspect)
-            pending_payload.update({
-                "video_finalization": dict(package.get("video_finalization") or {}),
-                "video_finalization_confirmed": True,
-                "source": str(state.get("source") or package.get("source") or "promptvideo")[:80],
-                "source_flow": str(state.get("source") or package.get("source_flow") or "promptvideo")[:80],
-            })
-            set_public_video_package_context(uid, pending_payload)
-            return await start_video_addon_step(query, uid, pending_payload, tier, lang, source="ai")
+            state["step"] = "scene_count"
+            set_video_finalization_state(uid, state)
+            return await video_finalization_render_scene_count(query, uid, state, lang)
         state["step"] = "tier"
         set_video_finalization_state(uid, state)
         return await safe_edit_or_send(query, video_finalization_tier_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
+    if action == "scene_count_screen":
+        return await video_finalization_render_scene_count(query, uid, state, lang)
+    if action == "upgrade_300":
+        state["selected_video_tier"] = "basic"
+        state["selected_video_aspect_ratio"] = video_finalization_selected_aspect(state)
+        state["step"] = "scene_count"
+        set_video_finalization_state(uid, state)
+        return await video_finalization_render_scene_count(query, uid, state, lang)
+    if action == "scene_custom":
+        tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
+        if tier == "low":
+            return await video_finalization_render_scene_count(query, uid, state, lang)
+        state["step"] = "scene_count_custom"
+        set_video_finalization_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            video_finalization_scene_count_custom_text(lang),
+            reply_markup=video_finalization_scene_count_custom_keyboard(lang),
+        )
+    if action == "scene_count":
+        tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
+        count = safe_int(value, 0)
+        if tier == "low":
+            count = 1
+        if count < 1:
+            return await safe_edit_or_send(
+                query,
+                video_finalization_scene_count_custom_text(lang),
+                reply_markup=video_finalization_scene_count_custom_keyboard(lang),
+            )
+        if count > 20:
+            return await safe_edit_or_send(
+                query,
+                "Hiện video ngắn chỉ hỗ trợ tối đa 20 cảnh/khoảng 2 phút. Phim dài sẽ xử lý ở giai đoạn sau.",
+                reply_markup=video_finalization_scene_count_keyboard(state, lang),
+            )
+        state = video_finalization_apply_scene_count_fields(state, count, uid)
+        state["selected_video_tier"] = tier
+        set_video_finalization_state(uid, state)
+        return await video_finalization_continue_after_scene_count(query, uid, state, lang)
     if action == "music":
         state["step"] = "music"
         set_video_finalization_state(uid, state)
@@ -90750,6 +91347,32 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         return False
     step = str(state.get("step") or "")
     text = re.sub(r"\s+", " ", update.message.text.strip())[:3000]
+    if step == "scene_count_custom":
+        lang = get_user_language(uid) or "vi"
+        raw_text = re.sub(r"\s+", " ", update.message.text.strip())[:80]
+        if not re.fullmatch(r"\d+", raw_text or ""):
+            await update.message.reply_text(
+                video_finalization_scene_count_custom_text(lang),
+                reply_markup=video_finalization_scene_count_custom_keyboard(lang),
+            )
+            return True
+        count = safe_int(raw_text, 0)
+        if count < 1:
+            await update.message.reply_text(
+                video_finalization_scene_count_custom_text(lang),
+                reply_markup=video_finalization_scene_count_custom_keyboard(lang),
+            )
+            return True
+        if count > 20:
+            await update.message.reply_text(
+                "Hiện video ngắn chỉ hỗ trợ tối đa 20 cảnh/khoảng 2 phút. Phim dài sẽ xử lý ở giai đoạn sau.",
+                reply_markup=video_finalization_scene_count_keyboard(state, lang),
+            )
+            return True
+        state = video_finalization_apply_scene_count_fields(state, count, uid)
+        set_video_finalization_state(uid, state)
+        await video_finalization_continue_after_scene_count(update.message, uid, state, lang)
+        return True
     if step == "await_voice_text":
         update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_text=text, voice_script=text, dub_enabled=True)
         state = get_video_finalization_state(uid)
@@ -91073,6 +91696,113 @@ def video_addon_runtime_guard(state: dict | None = None) -> dict:
 def video_addon_guard_text(lang: str = "vi") -> str:
     return public_product_maintenance_text(lang, "Phụ đề/lồng tiếng" if normalize_user_language(lang) == "vi" else "Subtitle/dubbing")
 
+def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str = "vi") -> str:
+    quote = dict(quote or {})
+    state = dict(state or {})
+    tier = normalize_video_tier(quote.get("tier") or state.get("video_tier") or "low")
+    base = int(quote.get("package_base_xu") or 0)
+    count = int(quote.get("scene_count") or 1)
+    seconds = int(quote.get("estimated_seconds") or count * TASK3D_SCENE_SECONDS)
+    percent = int(quote.get("scene_discount_percent") or video_scene_discount_percent(count))
+    discount = max(0, 100 - percent)
+    scene_video_xu = int(quote.get("scene_video_xu") or 0)
+    addon_fee_xu = int(quote.get("addon_fee_xu") or 0)
+    total_xu = int(quote.get("total_xu") or 0)
+    equivalent = int(quote.get("estimated_vnd") or total_xu * int(XU_TO_VND or 100))
+    paid_items = video_order_dedupe_items(quote.get("paid_items") or [])
+    voice_guard = video_voice_mux_export_guard(state)
+    voice_note_en = (
+        "\nVoice: <b>default narration saved, not muxed into this video version</b>.\n"
+        if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
+    )
+    voice_note_vi = (
+        "\nGiọng đọc mặc định đã được lưu nhưng chưa ghép vào video ở bản hiện tại.\n"
+        if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
+    )
+
+    def paid_lines(default_lines: list[str]) -> str:
+        if paid_items:
+            return "\n".join(
+                f"• {html.escape(str(item.get('label') or item.get('key') or 'Add-on'))}: <b>+{xu_number(item.get('price_xu'))} Xu</b>"
+                for item in paid_items
+            )
+        return "\n".join(default_lines)
+
+    if normalize_user_language(lang) != "vi":
+        if tier == "low":
+            warning = ""
+            if not quote.get("is_package_200_valid", True):
+                warning = "\n⚠️ The 200 Xu package is only valid for 1 scene, no add-ons, total exactly 200 Xu.\n"
+            return (
+                "🎬 <b>Final video invoice - Confirm video export</b>\n\n"
+                f"Package: <b>Starter video 200 Xu</b>\n"
+                f"Scene count: <b>{count} scene</b>\n"
+                f"Estimated duration: <b>about {seconds} seconds</b>\n"
+                "Add-on: <b>not supported</b>\n"
+                f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
+                f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n"
+                f"{voice_note_en}"
+                f"{warning}\n"
+                "TOAN AAS starts processing and charges Xu only after you press the final confirmation: Create video."
+            )
+        return (
+            "🎬 <b>Final video invoice - Confirm video export</b>\n\n"
+            f"Package: <b>{html.escape(video_tier_short_label(tier, 'en'))} - {xu_number(base)} Xu/standard scene</b>\n"
+            f"Scene count: <b>{count} scenes</b>\n"
+            f"Estimated duration: <b>about {seconds} seconds</b>\n"
+            f"Scene discount: <b>{discount}%</b>\n\n"
+            "Video service:\n"
+            f"• {count} scenes × {xu_number(base)} Xu × {percent}% = <b>{xu_number(scene_video_xu)} Xu</b>\n\n"
+            "Add-ons:\n"
+            + paid_lines([
+                "• No voice: <b>0 Xu</b>",
+                "• No music: <b>0 Xu</b>",
+                "• No subtitles: <b>0 Xu</b>",
+            ])
+            + "\n\n"
+            f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
+            f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n\n"
+            f"{voice_note_en}"
+            "TOAN AAS starts processing and charges Xu only after you press the final confirmation: Create video."
+        )
+
+    if tier == "low":
+        warning = ""
+        if not quote.get("is_package_200_valid", True):
+            warning = "\n⚠️ Gói 200 chỉ hợp lệ khi 1 cảnh, không add-on, tổng đúng 200 Xu.\n"
+        return (
+            "🎬 <b>Hóa đơn xác nhận video - Xác nhận xuất video</b>\n\n"
+            "Gói: <b>Video trải nghiệm 200 Xu</b>\n"
+            f"Số cảnh: <b>{count} cảnh</b>\n"
+            f"Thời lượng ước tính: <b>khoảng {seconds} giây</b>\n"
+            "Add-on: <b>không hỗ trợ</b>\n"
+            f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
+            f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n"
+            f"{voice_note_vi}"
+            f"{warning}\n"
+            "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi bạn bấm xác nhận cuối: Xuất video."
+        )
+    return (
+        "🎬 <b>Hóa đơn xác nhận video - Xác nhận xuất video</b>\n\n"
+        f"Gói: <b>Video {html.escape(video_tier_short_label(tier, 'vi'))} — {xu_number(base)} Xu/cảnh chuẩn</b>\n"
+        f"Số cảnh: <b>{count} cảnh</b>\n"
+        f"Thời lượng ước tính: <b>khoảng {seconds} giây</b>\n"
+        f"Chiết khấu cảnh: <b>{discount}%</b>\n\n"
+        "Dịch vụ chính:\n"
+        f"• {count} cảnh × {xu_number(base)} Xu × {percent}% = <b>{xu_number(scene_video_xu)} Xu</b>\n\n"
+        "Add-on có phí:\n"
+        + paid_lines([
+            "• Không thêm giọng: <b>0 Xu</b>",
+            "• Không thêm nhạc: <b>0 Xu</b>",
+            "• Không phụ đề: <b>0 Xu</b>",
+        ])
+        + "\n\n"
+        f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
+        f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n\n"
+        f"{voice_note_vi}"
+        "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi bạn bấm xác nhận cuối: Xuất video."
+    )
+
 def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     state = dict(state or {})
     preview = dict(state.get("current_video_price_preview") or {})
@@ -91116,6 +91846,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     else:
         order = video_order_from_state(state)
         pricing = preview or video_order_to_price_preview(order, state)
+        return video_quote_invoice_text(calculate_video_quote(state), state, lang)
     order = dict(pricing.get("video_order") or order)
     duration = int(order.get("requested_seconds") or pricing.get("duration_seconds") or VIDEO_ORDER_DEFAULT_BASE_SECONDS)
     raw_tier = str(order.get("tier") or state.get("video_tier") or "").strip()
@@ -92112,12 +92843,16 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
             "task3d_package_id": "package_300",
         })
         state["pending_payload"] = pending_payload
-        finalization_state = get_video_finalization_state(uid)
-        if finalization_state:
-            finalization_state["selected_video_tier"] = "basic"
-            finalization_state["step"] = "confirm"
-            set_video_finalization_state(uid, finalization_state)
-        return await finalize_video_addon_confirmation(query, uid, state, lang)
+        state.pop("video_order", None)
+        state.pop("current_video_price_preview", None)
+        set_video_addon_state(uid, state)
+        finalization_state = ensure_video_finalization_from_addon_state(uid, state)
+        finalization_state["selected_video_tier"] = "basic"
+        finalization_state["video_tier"] = "basic"
+        finalization_state["step"] = "scene_count"
+        set_video_finalization_state(uid, finalization_state)
+        clear_video_addon_state(uid)
+        return await video_finalization_render_scene_count(query, uid, finalization_state, lang)
     enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON, origin_screen=f"videoaddon|{action}", product_area="subtitle")
     if action == "menu":
         finalization_state = ensure_video_finalization_from_addon_state(uid, state)
@@ -92289,11 +93024,17 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
             reply_markup=video_paid_preview_status_keyboard(token, local_job_id, lang),
         )
     if action == "back":
-        if state.get("pending_confirm_token") or str((state.get("video_order") or {}).get("current_screen") or "") == "invoice":
+        existing_finalization = get_video_finalization_state(uid) or {}
+        selected_tier_value = existing_finalization.get("selected_video_tier") or existing_finalization.get("video_tier")
+        package_selected = bool(
+            str(selected_tier_value or "").strip()
+            and video_finalization_has_prompt(existing_finalization)
+        )
+        if state.get("pending_confirm_token") or str((state.get("video_order") or {}).get("current_screen") or "") == "invoice" or package_selected:
             finalization_state = ensure_video_finalization_from_addon_state(uid, state)
             pending = dict(state.get("pending_payload") or {})
-            finalization_state["step"] = "tier"
-            finalization_state["origin_screen"] = "invoice_back_to_package"
+            finalization_state["step"] = "scene_count"
+            finalization_state["origin_screen"] = "invoice_back_to_scene_count"
             finalization_state["return_to_invoice"] = False
             finalization_state["addon_return_target"] = "hub"
             if pending:
@@ -92301,12 +93042,7 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
                 finalization_state["selected_video_tier"] = normalize_video_tier(pending.get("video_tier") or state.get("video_tier") or finalization_state.get("selected_video_tier"))
             set_video_finalization_state(uid, finalization_state)
             clear_video_addon_state(uid)
-            return await safe_edit_or_send(
-                query,
-                video_finalization_tier_text(finalization_state, lang),
-                parse_mode="HTML",
-                reply_markup=video_finalization_tier_keyboard(lang),
-            )
+            return await video_finalization_render_scene_count(query, uid, finalization_state, lang)
         order = video_order_back_screen(video_order_from_state(state, uid), "video_addon_menu")
         state["video_order"] = order
         target_screen = str(order.get("current_screen") or "video_addon_menu")
@@ -122521,6 +123257,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_job_dedupe_status", cmd_video_job_dedupe_status))
     tg_app.add_handler(CommandHandler("video_last_result_status", cmd_video_last_result_status))
     tg_app.add_handler(CommandHandler("video_addon_status", cmd_video_addon_status))
+    tg_app.add_handler(CommandHandler("video_multiscene_status", cmd_video_multiscene_status))
+    tg_app.add_handler(CommandHandler("tool_test_video_multiscene", cmd_tool_test_video_multiscene))
     tg_app.add_handler(CommandHandler("public_product_guard_status", cmd_public_product_guard_status))
     tg_app.add_handler(CommandHandler("test_all_safe", cmd_test_all_safe))
     tg_app.add_handler(CommandHandler("test_all_video", cmd_test_all_video))

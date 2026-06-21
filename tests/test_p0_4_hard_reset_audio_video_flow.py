@@ -348,8 +348,8 @@ def test_invoice_back_returns_package_selection(monkeypatch):
     query = CaptureQuery("videoaddon|back", user_id)
     asyncio.run(bot.handle_video_addon_callback(_callback_update(query, user_id), SimpleNamespace()))
 
-    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
-    assert "vfinal|tier|basic" in _callbacks(query.outputs[-1]["reply_markup"])
+    assert "Chọn số cảnh video" in query.outputs[-1]["text"]
+    assert "vfinal|scene_count|3" in _callbacks(query.outputs[-1]["reply_markup"])
     assert "vfinal|back" in _callbacks(query.outputs[-1]["reply_markup"])
 
 

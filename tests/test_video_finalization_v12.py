@@ -433,7 +433,7 @@ def test_video_addon_language_and_voice_back_use_screen_stack():
     assert "videoaddon|menu" not in voice_callbacks
 
 
-def test_video_addon_invoice_back_returns_package_selection(monkeypatch):
+def test_video_addon_invoice_back_returns_scene_count(monkeypatch):
     user_id = 991213
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
@@ -476,19 +476,19 @@ def test_video_addon_invoice_back_returns_package_selection(monkeypatch):
     assert saved["video_order"]["screen_stack"][-2:] == ["addon_voice", "invoice"]
 
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert "Chọn gói xuất video AI" in query.edited["text"]
+    assert "Chọn số cảnh video" in query.edited["text"]
     saved_finalization = bot.get_video_finalization_state(user_id)
-    assert saved_finalization["step"] == "tier"
+    assert saved_finalization["step"] == "scene_count"
     assert not bot.get_video_addon_state(user_id)
     callbacks = _callbacks(query.edited["reply_markup"])
-    assert "vfinal|tier|low" in callbacks
-    assert "vfinal|tier|basic" in callbacks
+    assert "vfinal|scene_count|1" in callbacks
+    assert "vfinal|scene_count|3" in callbacks
     assert "vfinal|back" in callbacks
     bot.clear_video_addon_state(user_id)
     bot.clear_video_session(user_id)
 
 
-def test_video_addon_back_returns_to_existing_finalization_tier(monkeypatch):
+def test_video_addon_back_returns_to_existing_finalization_scene_count(monkeypatch):
     user_id = 991212
     bot.clear_video_finalization_state(user_id)
     bot.clear_video_addon_state(user_id)
@@ -499,6 +499,8 @@ def test_video_addon_back_returns_to_existing_finalization_tier(monkeypatch):
         "source_payload": {"video_prompt": "Prompt video ready"},
         "has_script": False,
         "has_video_prompt": True,
+        "selected_video_tier": "low",
+        "video_tier": "low",
         "step": "confirm",
     })
     bot.set_video_addon_state(user_id, {
@@ -528,12 +530,13 @@ def test_video_addon_back_returns_to_existing_finalization_tier(monkeypatch):
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert query.edited is not None
-    assert "Chọn gói xuất video AI" in query.edited["text"]
+    assert "Gói 200" in query.edited["text"]
     callbacks = _callbacks(query.edited["reply_markup"])
-    assert "vfinal|tier|low" in callbacks
+    assert "vfinal|scene_count|1" in callbacks
+    assert "vfinal|upgrade_300" in callbacks
     assert "create_media|quick_video" not in callbacks
     current = bot.get_video_finalization_state(user_id)
-    assert current.get("step") == "tier"
+    assert current.get("step") == "scene_count"
 
 
 def test_local_export_without_prompt_or_images_keeps_image_slideshow_guard(monkeypatch):
