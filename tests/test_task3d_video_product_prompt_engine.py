@@ -1174,7 +1174,9 @@ def test_public_video_core_uses_safe_provider_fallback_wrapper():
     assert "submit_public_video_with_key4u_fallback(model, prompt, uid, video_tier)" in source
     assert "shopaikey_video_create_smoke_test(model, prompt)" not in source
     callbacks = _callbacks(bot.public_video_submitted_keyboard("key4u-task", "vi", {"provider_route": "key4u"}))
-    assert callbacks == ["menu|main"]
+    assert callbacks == ["shopai_video_job|key4u-task", "shopai_video_job|main"]
+    labels = _labels(bot.public_video_submitted_keyboard("key4u-task", "vi", {"provider_route": "key4u"}))
+    assert labels == ["🔄 Kiểm tra trạng thái video", "🏠 Menu chính"]
 
 
 @pytest.mark.parametrize("tier", ["future_1000", "future_1200", "future_1500"])
@@ -1712,18 +1714,17 @@ def test_legacy_quote_without_scene_selection_preserves_one_clip():
     assert quote["total_xu"] == 300
 
 
-def test_multiscene_admin_tool_never_runs_paid_job_automatically(monkeypatch):
+def test_multiscene_admin_tool_requires_explicit_paid_confirmation(monkeypatch):
     message = _FakeMessage()
     update = SimpleNamespace(effective_user=SimpleNamespace(id=993299), message=message)
-    context = SimpleNamespace(args=["300", "3", "--confirm-paid"])
+    context = SimpleNamespace(args=["300", "3"])
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
     monkeypatch.setattr(bot, "save_tool_test_result", lambda *args, **kwargs: None)
     monkeypatch.setattr(bot, "_safe_set_video_system_setting", lambda *args, **kwargs: None)
     asyncio.run(bot.cmd_tool_test_video_multiscene(update, context))
     text = message.replies[-1][0]
     assert "Paid provider job: <code>NO</code>" in text
-    assert "Public enabled: <code>NO</code>" in text
-    assert "không đánh dấu PASS" in text
+    assert "--confirm-paid" in text
 
 
 def test_custom_scene_count_accepts_1_to_20(monkeypatch):

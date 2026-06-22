@@ -256,7 +256,7 @@ def test_selfshot_full_path_no_music_returns_package_or_invoice_correctly(monkey
     assert captured["back_callback"] == "selfscene|back_style"
 
 
-def test_invoice_change_music_returns_package_without_legacy_step(monkeypatch):
+def test_invoice_change_music_returns_tools_without_legacy_step(monkeypatch):
     user_id = 930306
     _reset_user(user_id)
 
@@ -277,11 +277,13 @@ def test_invoice_change_music_returns_package_without_legacy_step(monkeypatch):
 
     assert result is not None
     saved = bot.get_video_finalization_state(user_id)
-    assert saved["step"] == "tier"
-    assert saved["addon_return_target"] == "package"
+    assert saved["step"] == "menu"
     assert saved["selected_video_tier"] == "basic"
     assert saved["source_video_file_id"] == "video-file-id"
     assert saved["source_file_id"] == "source-file-id"
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" not in query.outputs[-1]["text"]
+    assert "vfinal|tier" in _callbacks(query.outputs[-1]["reply_markup"])
     assert "music_suggest" not in "\n".join(str(output["text"]) for output in query.outputs)
     assert "Chọn nhạc" + "/voice" not in "\n".join(str(output["text"]) for output in query.outputs)
 

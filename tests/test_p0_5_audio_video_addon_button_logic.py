@@ -344,7 +344,7 @@ def test_video_addon_return_from_hub_stays_on_video_options(monkeypatch):
     assert bot.get_video_finalization_state(user_id)["source_file_id"] == "source-file-id"
 
 
-def test_video_addon_invoice_origin_returns_package_after_explicit_selection(monkeypatch):
+def test_video_addon_invoice_origin_returns_tools_after_explicit_selection(monkeypatch):
     user_id = 950512
     _reset_user(user_id)
 
@@ -364,9 +364,11 @@ def test_video_addon_invoice_origin_returns_package_after_explicit_selection(mon
     result = asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     assert result is not None
-    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" not in query.outputs[-1]["text"]
+    assert "vfinal|tier" in _callbacks(query.outputs[-1]["reply_markup"])
     state = bot.get_video_finalization_state(user_id)
-    assert state["step"] == "tier"
+    assert state["step"] == "menu"
     assert state["video_finalization"]["music_mode"] == "ai_music"
     assert state["source_payload"]["source_file_id"] == "source-file-id"
 
