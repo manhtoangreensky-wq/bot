@@ -334,7 +334,7 @@ def test_video_subdub_mode_updates_draft_only(monkeypatch):
     assert finalization["dub_enabled"] is False
 
 
-def test_video_subdub_returns_addon_before_invoice(monkeypatch):
+def test_video_subdub_returns_tools_before_invoice(monkeypatch):
     user_id = 990307
     _reset_user(user_id)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
@@ -350,13 +350,15 @@ def test_video_subdub_returns_addon_before_invoice(monkeypatch):
     asyncio.run(bot.handle_video_finalization_callback(_callback_update(query), SimpleNamespace()))
 
     state = bot.get_video_finalization_state(user_id)
-    assert state["step"] == "tier"
-    assert state["addon_return_target"] == "package"
+    assert state["step"] == "menu"
     assert query.outputs
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
     assert "Hóa đơn xác nhận video" not in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" not in query.outputs[-1]["text"]
+    assert "vfinal|tier" in _callbacks(query.outputs[-1]["reply_markup"])
 
 
-def test_video_subdub_returns_invoice_from_invoice(monkeypatch):
+def test_video_subdub_returns_tools_from_invoice(monkeypatch):
     user_id = 990308
     _reset_user(user_id)
 
@@ -376,11 +378,13 @@ def test_video_subdub_returns_invoice_from_invoice(monkeypatch):
 
     assert result is not None
     state = bot.get_video_finalization_state(user_id)
-    assert state["step"] == "tier"
-    assert state["addon_return_target"] == "package"
+    assert state["step"] == "menu"
     assert state["selected_video_tier"] == "basic"
     assert state["video_finalization"]["subtitle_enabled"] is True
     assert state["video_finalization"]["subtitle_dub_choice"] == "subtitle"
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" not in query.outputs[-1]["text"]
+    assert "vfinal|tier" in _callbacks(query.outputs[-1]["reply_markup"])
 
 
 def test_video_subdub_preserves_source_package_duration_direction(monkeypatch):
@@ -413,7 +417,7 @@ def test_video_subdub_preserves_source_package_duration_direction(monkeypatch):
     state = bot.get_video_finalization_state(user_id)
     payload = state["source_payload"]
 
-    assert state["step"] == "tier"
+    assert state["step"] == "menu"
     assert state["selected_video_tier"] == "standard"
     assert payload["source_file_id"] == "source-file-id"
     assert payload["source_video_file_id"] == "source-video-file"
@@ -422,6 +426,9 @@ def test_video_subdub_preserves_source_package_duration_direction(monkeypatch):
     assert state["video_finalization"]["subtitle_enabled"] is True
     assert state["video_finalization"]["dub_enabled"] is True
     assert state["video_finalization"]["subtitle_dub_choice"] == "subtitle_plus_dubbing"
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" not in query.outputs[-1]["text"]
+    assert "vfinal|tier" in _callbacks(query.outputs[-1]["reply_markup"])
 
 
 def test_subtitle_preview_max_6_seconds():

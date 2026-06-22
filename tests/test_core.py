@@ -1088,8 +1088,10 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
         assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is True
         assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
         queue_text = bot.ui_text("vi", "video.queue_submitted", task_id="task_123", auto_poll="ON")
-        assert "Video sẽ được gửi tự động trong vài phút khi hoàn tất" in queue_text
-        assert "Vui lòng không gửi lại lệnh hoặc bấm tạo nhiều lần" in queue_text
+        assert "Video sẽ được gửi tự động khi hoàn tất" in queue_text
+        assert "Vui lòng không bấm tạo nhiều lần" in queue_text
+        assert "task_123" not in queue_text
+        assert "Auto poll" not in queue_text
         public_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi", public_user=True).inline_keyboard for button in row]
         assert "🔄 Kiểm tra trạng thái video" in public_queue_buttons
         assert "🏠 Menu chính" in public_queue_buttons
