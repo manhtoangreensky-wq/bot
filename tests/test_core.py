@@ -1088,10 +1088,10 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
         assert bot.shopaikey_paid_image_source_available("u2", str(image_job_id)) is True
         assert bot.shopaikey_video_cost_for_flow(True, "u2") == 640
         queue_text = bot.ui_text("vi", "video.queue_submitted", task_id="task_123", auto_poll="ON")
-        assert "Video sẽ được gửi tự động khi hoàn tất" in queue_text
-        assert "Vui lòng không bấm tạo nhiều lần" in queue_text
+        assert queue_text == "TOAN AAS đang tạo video cho bạn. Vui lòng chờ, hệ thống sẽ gửi kết quả khi hoàn tất."
         assert "task_123" not in queue_text
         assert "Auto poll" not in queue_text
+        assert "job" not in queue_text.lower()
         public_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi", public_user=True).inline_keyboard for button in row]
         assert "🔄 Kiểm tra trạng thái video" in public_queue_buttons
         assert "🏠 Menu chính" in public_queue_buttons
@@ -7886,7 +7886,8 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     entry_text = bot.quick_image_entry_text("vi")
     assert "Tạo ảnh nhanh" in entry_text
     assert "chọn prompt trước" in entry_text
-    assert "chưa gọi API" in entry_text
+    assert "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu" in entry_text
+    assert "API" not in entry_text
     entry_rows = bot.quick_image_entry_keyboard("vi").inline_keyboard
     assert [button.callback_data for button in entry_rows[0]] == ["create_media|qi_suggest", "create_media|qi_refresh"]
     assert [button.callback_data for button in entry_rows[1]] == ["create_media|qi_custom", "menu|main_image"]
@@ -8074,7 +8075,9 @@ def test_image_system_v9_structured_prompt_quality_and_unavailable_tool_guards()
     assert "Negative prompt:" in preview
     assert "Tỉ lệ đề xuất:" in preview
     assert "AI tạo ảnh có thể sai chữ hoặc logo" in preview
-    assert "chưa gọi API và chưa trừ Xu" in preview
+    assert "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu" in preview
+    assert "API" not in preview
+    assert "provider" not in preview.lower()
 
     confirm = bot.public_image_confirm_text("high", logo["prompt"], 1000, "vi", "1:1")
     assert "Kiểm soát chất lượng" in confirm
@@ -8094,8 +8097,9 @@ def test_image_system_v9_structured_prompt_quality_and_unavailable_tool_guards()
         bot.image_upscale_ai_guard_text("vi"),
     ):
         assert "chưa xử lý ảnh" in guard_text
-        assert "chưa gọi provider" in guard_text
         assert "chưa trừ Xu" in guard_text
+        assert "provider" not in guard_text.lower()
+        assert "API" not in guard_text
     assert "shopaikey_image_generate(" not in callback_source
     assert "spend_fixed_credit_info(" not in callback_source
 
@@ -8152,7 +8156,9 @@ def test_image_ux_v8_manual_and_ai_edit_confirmation_guards():
     assert {"imgtool|edit_back_result", "imgtool|edit_ai_menu", "menu|main"}.issubset(set(ai_guard_callbacks))
     assert 'if action == "edit_back_suggestions":' in callback_source
     assert "image_edit_ai_guard_keyboard(lang)" in bot_source_text()
-    assert "chưa gọi API và chưa trừ Xu" in bot.image_edit_ai_guard_text("vi")
+    assert "chưa xử lý ảnh và chưa trừ Xu" in bot.image_edit_ai_guard_text("vi")
+    assert "API" not in bot.image_edit_ai_guard_text("vi")
+    assert "provider" not in bot.image_edit_ai_guard_text("vi").lower()
 
 
 def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
@@ -8602,7 +8608,9 @@ def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
     assert "imgtool|edit_prompt_output" not in edit_callbacks
     assert "imgtool|edit_create_new" not in edit_callbacks
     assert "imgtool|edit_save" not in edit_callbacks
-    assert "chưa gọi API và chưa trừ Xu" in bot.image_edit_ai_guard_text("vi")
+    assert "chưa xử lý ảnh và chưa trừ Xu" in bot.image_edit_ai_guard_text("vi")
+    assert "API" not in bot.image_edit_ai_guard_text("vi")
+    assert "provider" not in bot.image_edit_ai_guard_text("vi").lower()
     readiness = bot.get_image_ai_edit_readiness()
     assert {"ready", "provider", "model", "endpoint", "reason"}.issubset(set(readiness))
     run_edit_source = source_between(source, "async def run_image_ai_edit_from_state", "def image_edit_create_new_text")
@@ -8645,7 +8653,9 @@ def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
         for button in row
     ]
     assert method_labels[0] == "🌫 Nền mờ, không cắt chủ thể"
-    assert "chưa gọi API và chưa trừ Xu" in bot.image_aspect_ai_guard_text("vi")
+    assert "chưa xử lý ảnh và chưa trừ Xu" in bot.image_aspect_ai_guard_text("vi")
+    assert "API" not in bot.image_aspect_ai_guard_text("vi")
+    assert "provider" not in bot.image_aspect_ai_guard_text("vi").lower()
     assert "image_action_waiting_text" in resize_source
     assert "acquire_image_action_lock" in resize_source
     assert "release_image_action_lock" in resize_source

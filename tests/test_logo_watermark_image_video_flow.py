@@ -50,6 +50,11 @@ def _message_update(message, user_id):
 
 
 def test_image_flow_has_logo_watermark_step():
+    prepared_callbacks = _callbacks(bot.quick_image_prepared_prompt_keyboard("vi"))
+    prepared_labels = _labels(bot.quick_image_prepared_prompt_keyboard("vi"))
+    assert "create_media|qi_choose_ratio" in prepared_callbacks
+    assert "create_media|qi_logo_choice" in prepared_callbacks
+    assert "🎭 Logo / Watermark" in prepared_labels
     callbacks = _callbacks(bot.quick_image_logo_choice_keyboard("vi"))
     assert callbacks == [
         "create_media|qi_logo_add",
@@ -59,6 +64,38 @@ def test_image_flow_has_logo_watermark_step():
     ]
     assert "logo_choice" in bot.QUICK_IMAGE_FLOW_STEPS
     assert "logo_position" in bot.QUICK_IMAGE_FLOW_STEPS
+
+
+def test_quick_image_ratio_does_not_force_logo_choice():
+    user_id = 997706
+    bot.clear_quick_image_flow(user_id)
+    bot.set_quick_image_flow(
+        user_id,
+        "prepared_prompt",
+        prompt="Ảnh sản phẩm quảng cáo",
+        prompt_source="suggestion",
+        logo_watermark_decided=False,
+    )
+    query = CaptureQuery("create_media|qi_choose_ratio", user_id)
+    asyncio.run(bot.handle_create_media_callback(_callback_update(query, user_id), SimpleNamespace()))
+    state = bot.get_quick_image_flow(user_id)
+    assert state["step"] == "ratio"
+    assert state["ratio_back_target"] == "prepared_prompt"
+    assert "Chọn tỉ lệ khung hình" in query.outputs[-1]["text"]
+    assert "Logo / Watermark" not in query.outputs[-1]["text"]
+
+    back_query = CaptureQuery("create_media|qi_back_prompt", user_id)
+    asyncio.run(bot.handle_create_media_callback(_callback_update(back_query, user_id), SimpleNamespace()))
+    assert bot.get_quick_image_flow(user_id)["step"] == "prepared_prompt"
+    assert "Prompt ảnh đã được soạn" in back_query.outputs[-1]["text"]
+    bot.clear_quick_image_flow(user_id)
+
+
+def test_quick_image_public_prompt_copy_has_no_api_or_provider_terms():
+    text = bot.quick_image_prepared_prompt_text({"prompt": "Ảnh sản phẩm", "negative_prompt": "low quality"}, "vi")
+    assert "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu" in text
+    for forbidden in ("API", "provider", "ShopAIKey", "task_id", "user_id"):
+        assert forbidden not in text
 
 
 def test_image_logo_watermark_skip_works():
@@ -105,6 +142,94 @@ def test_image_logo_watermark_back_routing_correct():
         "create_media|ia_token",
         "imgtool|edit_create_new",
     ]
+
+
+def test_image_editor_text_requires_input_before_position():
+    user_id = 997707
+    bot.clear_image_menu_pending(user_id)
+    bot.set_image_menu_pending(user_id, "image_editor_menu", file_id="image-file", file_unique_id="uniq")
+    query = CaptureQuery("imgtool|editor_text_menu", user_id)
+    asyncio.run(bot.handle_image_tools_callback(_callback_update(query, user_id), SimpleNamespace()))
+    pending = bot.get_image_menu_pending(user_id)
+    assert pending["pending_action"] == "image_editor_text_input"
+    assert pending["back_to"] == "imgtool|edit_back_choice"
+    assert "Gửi nội dung chữ" in query.outputs[-1]["text"]
+    assert "Chọn vị trí" not in query.outputs[-1]["text"]
+    assert _callbacks(query.outputs[-1]["reply_markup"]) == ["imgtool|edit_back_choice", "menu|main"]
+    bot.clear_image_menu_pending(user_id)
+
+
+def test_image_editor_logo_requires_input_before_position():
+    user_id = 997708
+    bot.clear_image_menu_pending(user_id)
+    bot.set_image_menu_pending(user_id, "image_editor_menu", file_id="image-file", file_unique_id="uniq")
+    query = CaptureQuery("imgtool|editor_logo_menu", user_id)
+    asyncio.run(bot.handle_image_tools_callback(_callback_update(query, user_id), SimpleNamespace()))
+    pending = bot.get_image_menu_pending(user_id)
+    assert pending["pending_action"] == "image_editor_logo_input"
+    assert pending["back_to"] == "imgtool|edit_back_choice"
+    assert "Gửi nội dung Logo/Watermark" in query.outputs[-1]["text"]
+    assert "Chọn vị trí" not in query.outputs[-1]["text"]
+    assert _callbacks(query.outputs[-1]["reply_markup"]) == ["imgtool|edit_back_choice", "menu|main"]
+    bot.clear_image_menu_pending(user_id)
+
+
+def test_image_editor_text_input_then_position_then_confirm():
+    user_id = 997709
+    bot.clear_image_menu_pending(user_id)
+    bot.set_image_menu_pending(
+        user_id,
+        "image_editor_text_input",
+        file_id="image-file",
+        file_unique_id="uniq",
+        back_to="imgtool|edit_back_choice",
+        editor_source="editor_text_menu",
+    )
+    message = CaptureMessage("Sale 50%", user_id)
+    assert asyncio.run(bot.handle_image_menu_pending_text(_message_update(message, user_id), SimpleNamespace())) is True
+    pending = bot.get_image_menu_pending(user_id)
+    assert pending["pending_action"] == "image_editor_text_position"
+    assert pending["editor_overlay_text"] == "Sale 50%"
+    assert "Chọn vị trí đặt chữ" in message.outputs[-1]["text"]
+    assert "imgtool|editor_text_input_back" in _callbacks(message.outputs[-1]["reply_markup"])
+
+    query = CaptureQuery("imgtool|editor_text_pos|top_left", user_id)
+    asyncio.run(bot.handle_image_tools_callback(_callback_update(query, user_id), SimpleNamespace()))
+    pending = bot.get_image_menu_pending(user_id)
+    assert pending["pending_action"] == "image_editor_text_confirm"
+    assert pending["editor_overlay_position"] == "top_left"
+    assert "Xác nhận chữ" in query.outputs[-1]["text"]
+    assert _callbacks(query.outputs[-1]["reply_markup"]) == ["imgtool|editor_text_confirm", "imgtool|editor_text_position_back", "menu|main"]
+    bot.clear_image_menu_pending(user_id)
+
+
+def test_image_editor_logo_input_then_position_then_confirm():
+    user_id = 997710
+    bot.clear_image_menu_pending(user_id)
+    bot.set_image_menu_pending(
+        user_id,
+        "image_editor_logo_input",
+        file_id="image-file",
+        file_unique_id="uniq",
+        back_to="imgtool|edit_back_choice",
+        editor_source="editor_logo_menu",
+    )
+    message = CaptureMessage("TOAN AAS", user_id)
+    assert asyncio.run(bot.handle_image_menu_pending_text(_message_update(message, user_id), SimpleNamespace())) is True
+    pending = bot.get_image_menu_pending(user_id)
+    assert pending["pending_action"] == "image_editor_logo_position"
+    assert pending["editor_logo_text"] == "TOAN AAS"
+    assert "Chọn vị trí đặt Logo/Watermark" in message.outputs[-1]["text"]
+    assert "imgtool|editor_logo_input_back" in _callbacks(message.outputs[-1]["reply_markup"])
+
+    query = CaptureQuery("imgtool|editor_logo_pos|bottom_right", user_id)
+    asyncio.run(bot.handle_image_tools_callback(_callback_update(query, user_id), SimpleNamespace()))
+    pending = bot.get_image_menu_pending(user_id)
+    assert pending["pending_action"] == "image_editor_logo_confirm"
+    assert pending["editor_overlay_position"] == "bottom_right"
+    assert "Xác nhận Logo / Watermark" in query.outputs[-1]["text"]
+    assert _callbacks(query.outputs[-1]["reply_markup"]) == ["imgtool|editor_logo_confirm", "imgtool|editor_logo_position_back", "menu|main"]
+    bot.clear_image_menu_pending(user_id)
 
 
 def test_image_prompt_and_edit_routes_enter_logo_step_with_exact_back():
