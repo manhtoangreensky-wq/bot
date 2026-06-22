@@ -1674,6 +1674,45 @@ def test_scene_count_opens_final_invoice_after_tools(monkeypatch):
     bot.clear_video_session(user_id)
 
 
+def test_package_200_one_scene_opens_200_invoice_with_export(monkeypatch):
+    user_id = 993296
+    bot.clear_video_finalization_state(user_id)
+    bot.clear_video_addon_state(user_id)
+    bot.clear_video_session(user_id)
+    bot.set_video_finalization_state(user_id, {
+        "step": "scene_count",
+        "selected_video_tier": "low",
+        "source": "promptvideo",
+        "source_payload": {"video_prompt": "Prompt video ready"},
+        "has_video_prompt": True,
+        "session_context": {"video_prompt": "Prompt video ready"},
+    })
+    monkeypatch.setattr(
+        bot,
+        "get_public_video_tier_ui_status",
+        lambda tier, _admin=False: {"enabled": True, "label": tier, "price_xu": bot.video_tier_cost_xu(tier)},
+    )
+    monkeypatch.setattr(bot, "video_beta_200_marketing_loss_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "check_video_beta_200_limit", lambda _user_id=None: {"ok": True, "user_limit": 1})
+    monkeypatch.setattr(bot, "get_user", lambda _user_id: (1000, None, None))
+    monkeypatch.setattr(bot, "record_shopaikey_billing_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "active_package_item_for_user", lambda *args, **kwargs: None)
+    query = _FakeQuery(user_id, "vfinal|scene_count|1")
+
+    asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert query.edits
+    invoice, kwargs = query.edits[-1]
+    assert "Tổng: <b>200 Xu</b>" in invoice
+    assert "marketing loss" not in invoice.lower()
+    assert "provider" not in invoice.lower()
+    assert "🎬 Xuất video" in _labels(kwargs["reply_markup"])
+    assert any(callback.startswith("videoaddon|export|") for callback in _callbacks(kwargs["reply_markup"]))
+    bot.clear_video_finalization_state(user_id)
+    bot.clear_video_addon_state(user_id)
+    bot.clear_video_session(user_id)
+
+
 @pytest.mark.parametrize(
     "scene_count,discount_percent,total_xu",
     [(1, 100, 300), (3, 90, 810), (10, 85, 2550), (20, 80, 4800)],

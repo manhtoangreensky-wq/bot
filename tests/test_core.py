@@ -2270,10 +2270,13 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "shopaikey_image_generate(retry_prompt, model, aspect_ratio=retry_aspect_ratio)" in warranty_retry_source
     assert "send_generated_image_result" in warranty_retry_source
     success_buttons = [button for row in bot.public_image_success_keyboard(123, "low").inline_keyboard for button in row]
+    success_rows = bot.public_image_success_keyboard(123, "low").inline_keyboard
     assert any(button.callback_data == "tvflow|image_video_prompts_123" for button in success_buttons)
     assert any(button.callback_data == "create_media|image_tier_low" for button in success_buttons)
-    assert any(button.text == "💾 Lưu ảnh/package" for button in success_buttons)
-    assert len(success_buttons) == 7
+    assert any(button.text == "🖼 Tạo ảnh nữa" for button in success_buttons)
+    assert not any(button.text == "💾 Lưu ảnh/package" for button in success_buttons)
+    assert [len(row) for row in success_rows] == [2, 2, 2]
+    assert len(success_buttons) == 6
     assert not any(button.callback_data == "tvflow|music_image_123" for button in success_buttons)
     missing_source_buttons = [button.text for row in bot.video_missing_source_keyboard().inline_keyboard for button in row]
     assert "🖼 Tạo lại ảnh khung chính" in missing_source_buttons

@@ -154,6 +154,53 @@ def test_video_200_valid_export_path():
     assert bot.validate_video_tier_selection(state, "low")["ok"] is True
 
 
+def test_video_200_quota_counts_only_accepted_exports(monkeypatch, tmp_path):
+    db_path = tmp_path / "video_200_quota.sqlite3"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    bot.init_db()
+    bot.record_shopaikey_billing_event(
+        "quota_user",
+        101,
+        "video_confirmed",
+        0,
+        1000,
+        1000,
+        "confirmed_at=now; job_type=video; tier=low; marketing_loss=true",
+    )
+    assert bot.video_beta_200_today_counts("quota_user")["user_count"] == 0
+    bot.record_shopaikey_billing_event(
+        "quota_user",
+        101,
+        "video_deducted_after_provider_accept",
+        200,
+        1000,
+        800,
+        "tier=low",
+    )
+    assert bot.video_beta_200_today_counts("quota_user")["user_count"] == 1
+
+
+def test_video_200_quota_copy_is_public_safe():
+    text = bot.video_beta_200_limit_message("vi")
+    assert text == "Gói trải nghiệm 200 Xu đã hết lượt sử dụng trong hôm nay. Bạn có thể chọn gói 300 Xu hoặc 400 Xu để tiếp tục."
+    for forbidden in ("Provider", "provider", "ShopAIKey", "task", "job", "API"):
+        assert forbidden not in text
+
+
+def test_image_result_copy_and_actions_are_public_safe(monkeypatch):
+    text = bot.ui_text("vi", "image.success", label="Phổ thông", job_id=129, billing_note="Provider nội bộ")
+    assert "Job" not in text
+    assert "Provider" not in text
+    assert "nội bộ" not in text
+    monkeypatch.setattr(bot, "image_job_retry_warranty_remaining", lambda _job_id: 1)
+    rows = bot.public_image_success_keyboard(129, "standard_warranty", "vi").inline_keyboard
+    labels = [button.text for row in rows for button in row]
+    assert [len(row) for row in rows] == [2, 2, 2]
+    assert "🔁 Tạo lại ảnh bảo hành 1 lần" in labels
+    assert "🖼 Tạo ảnh nữa" in labels
+    assert "💾 Lưu ảnh/package" not in labels
+
+
 def test_video_200_blocks_only_confirmed_paid_addon():
     state = {
         "video_tier": "low",
