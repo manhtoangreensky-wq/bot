@@ -4899,7 +4899,7 @@ UI_TEXT = {
         "common.skip": "⏭ Bỏ qua",
         "common.try_again_later": "Vui lòng thử lại sau.",
         "common.not_charged": "Bot chưa trừ Xu.",
-        "common.no_api_no_charge": "Bot chưa gọi API và chưa trừ Xu.",
+        "common.no_api_no_charge": "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu.",
         "common.cancelled_not_charged": "❌ Đã huỷ. Bot chưa trừ Xu.",
         "common.expired_not_charged": "⏰ Yêu cầu đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.",
         "common.invalid_request": "⚠️ Yêu cầu không hợp lệ. TOAN AAS chưa bắt đầu xử lý.",
@@ -4936,11 +4936,11 @@ UI_TEXT = {
         "media.quick_image": "🖼 Tạo ảnh nhanh",
         "media.quick_video": "🎞 Tạo video nhanh",
         "media.back_main": "🔙 Quay lại menu chính",
-        "media.cancelled": "❌ Đã hủy Media Creator. Bot chưa gọi API và chưa trừ Xu.\n\nBấm /start để mở menu chính.",
+        "media.cancelled": "❌ Đã hủy Media Creator. TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu.\n\nBấm /start để mở menu chính.",
         "media.open_main": "🔙 Mở menu chính bên dưới.",
         "media.job_lock": "⏳ Bạn đang có tác vụ đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.",
         "media.public_off": "🧪 Tính năng đang thử nghiệm nội bộ, chưa mở công khai.\nBot chưa trừ Xu.",
-        "image.choose_tier.title": "🖼 <b>Bạn muốn tạo ảnh chất lượng nào?</b>\n\nChọn tier ảnh bên dưới. Giá lấy từ <b>💳 Bảng giá</b>.",
+        "image.choose_tier.title": "🖼 <b>Bạn muốn tạo ảnh chất lượng nào?</b>\n\nChọn gói ảnh bên dưới. Giá lấy từ <b>💳 Bảng giá</b>.",
         "image.tier_disabled": " — tạm tắt",
         "image.tier.low": "Ảnh tiết kiệm",
         "image.tier.standard": "Ảnh tiêu chuẩn",
@@ -4952,14 +4952,14 @@ UI_TEXT = {
         "image.edit_button": "🧩 Sửa ảnh / edit ảnh",
         "image.upscale_button": "📐 Nâng cấp / đổi kích thước ảnh",
         "image.waiting": "🖼 TOAN AAS đang tạo ảnh cho bạn.\nQuá trình này thường mất một lúc ngắn.\nVui lòng chờ, không cần gửi lại lệnh.",
-        "image.tier_disabled_message": "🧪 Tier ảnh này đang tạm tắt. Bot chưa gọi API và chưa trừ Xu.",
+        "image.tier_disabled_message": "🧪 Gói ảnh này đang tạm tắt. TOAN AAS chưa xử lý và chưa trừ Xu.",
         "image.success": "✅ Ảnh {label} đã tạo xong.\nJob #{job_id}\n{billing_note}\n\nBạn muốn làm gì tiếp?\n\n• Chốt ảnh này nếu đã hài lòng\n• Tạo prompt video từ ảnh\n• Sửa prompt hoặc tạo lại ảnh",
-        "image.success_link": "✅ Ảnh ShopAIKey đã tạo xong nhưng Telegram không gửi trực tiếp được.\n<a href=\"{url}\">Mở ảnh</a>",
+        "image.success_link": "✅ Ảnh đã tạo xong nhưng Telegram không gửi trực tiếp được.\n<a href=\"{url}\">Mở ảnh</a>",
         "image.fail.not_charged": "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau.",
         "image.fail.refunded": "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau.",
-        "image.fail.refund_failed": "⚠️ Tác vụ tạo ảnh lỗi sau khi đã trừ Xu. Bot chưa hoàn tự động được. Admin đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ.",
-        "image.prompt.ask": "🖼 <b>{label}</b>\n\nGửi mô tả ảnh bạn muốn tạo.\n\nVí dụ: logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản.\n\nTimeout: 10 phút. Gõ /cancel để hủy.\nBot chưa gọi API và chưa trừ Xu.",
-        "image.confirm.cost": "🖼 <b>Tạo ảnh {label} sẽ tốn {cost} Xu.</b>\n\n• Số dư hiện tại: <b>{credits} Xu</b>\n• Bảo hành: {warranty_note}\n• Prompt: <code>{prompt}</code>\n\nBạn có muốn tiếp tục không?\nBot chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu provider lỗi, bot sẽ hoàn Xu theo chính sách.",
+        "image.fail.refund_failed": "⚠️ Tác vụ tạo ảnh lỗi sau khi đã trừ Xu. Yêu cầu đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ.",
+        "image.prompt.ask": "🖼 <b>{label}</b>\n\nGửi mô tả ảnh bạn muốn tạo.\n\nVí dụ: logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản.\n\nThời hạn: 10 phút. Gõ /cancel để hủy.\nTOAN AAS chưa bắt đầu xử lý và chưa trừ Xu.",
+        "image.confirm.cost": "🖼 <b>Tạo ảnh {label} sẽ tốn {cost} Xu.</b>\n\n• Số dư hiện tại: <b>{credits} Xu</b>\n• Bảo hành: {warranty_note}\n• Prompt: <code>{prompt}</code>\n\nBạn có muốn tiếp tục không?\nTOAN AAS chỉ trừ Xu sau khi bạn bấm xác nhận. Nếu xử lý lỗi, TOAN AAS sẽ hoàn Xu theo chính sách.",
         "image.lock": "✅ Chốt ảnh này",
         "image.to_video": "🎬 Biến ảnh thành video",
         "image.regenerate": "🔁 Tạo lại ảnh",
@@ -4967,7 +4967,7 @@ UI_TEXT = {
         "image.warranty_retry": "🔁 Tạo lại ảnh bảo hành 1 lần",
         "image.edit_prompt": "✍️ Sửa prompt ảnh",
         "image.music_hint": "🎵 Gợi ý nhạc",
-        "video.choose_tier.title": "🎞 <b>Bạn muốn tạo video chất lượng nào?</b>\n\nChọn tier video bên dưới. Giá lấy từ <b>💳 Bảng giá</b>.",
+        "video.choose_tier.title": "🎞 <b>Bạn muốn tạo video chất lượng nào?</b>\n\nChọn gói video bên dưới. Giá lấy từ <b>💳 Bảng giá</b>.",
         "video.quick": "🎞 Tạo video nhanh",
         "video.trend": "🎬 Tạo video theo trend",
         "video.image_to_video": "🖼➡️🎞 Tạo video từ ảnh",
@@ -4978,7 +4978,7 @@ UI_TEXT = {
         "video.tier.common": "Video Phổ Thông",
         "video.tier.standard": "Video Tiêu Chuẩn",
         "video.tier.high": "Video Cao Cấp",
-        "video.tier.premium": "Video premium/admin-only",
+        "video.tier.premium": "Video Premium",
         "video.waiting": "🎞 TOAN AAS đang tạo video cho bạn. Quá trình này có thể mất vài phút. Không cần gửi lại lệnh.",
         "video.tier_disabled_message": "🛠 Gói video này đang bảo trì/nâng cấp nhẹ. TOAN AAS chưa xử lý video và chưa trừ Xu.",
         "video.premium_message": "🛠 Gói video cao cấp đang bảo trì/nâng cấp nhẹ. TOAN AAS chưa xử lý video và chưa trừ Xu.",
@@ -4988,10 +4988,10 @@ UI_TEXT = {
         "video.next_action": "Bạn muốn làm gì tiếp?",
         "video.fail.not_charged": "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS chưa trừ Xu của bạn. Vui lòng thử lại sau.",
         "video.fail.refunded": "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau.",
-        "video.fail.refund_failed": "⚠️ Tác vụ tạo video lỗi sau khi đã trừ Xu. Bot chưa hoàn tự động được. Admin đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ.",
-        "video.prompt.ask": "🎞 <b>{label}</b>\n\nGửi mô tả video bạn muốn tạo.\n\nVí dụ: logo TOAN AAS màu xanh ngọc chuyển động nhẹ, nền trắng sạch, phong cách công nghệ tối giản.\n\nTimeout: 10 phút. Gõ /cancel để hủy.\nBot chưa gọi API và chưa trừ Xu.",
+        "video.fail.refund_failed": "⚠️ Tác vụ tạo video lỗi sau khi đã trừ Xu. Yêu cầu đã được ghi nhận để kiểm tra và hoàn Xu thủ công nếu hợp lệ.",
+        "video.prompt.ask": "🎞 <b>{label}</b>\n\nGửi mô tả video bạn muốn tạo.\n\nVí dụ: logo TOAN AAS màu xanh ngọc chuyển động nhẹ, nền trắng sạch, phong cách công nghệ tối giản.\n\nThời hạn: 10 phút. Gõ /cancel để hủy.\nTOAN AAS chưa bắt đầu xử lý và chưa trừ Xu.",
         "video.confirm.cost": "🎞 <b>Tạo video {label} sẽ tốn {cost} Xu.</b>\n\n• Số dư hiện tại: <b>{credits} Xu</b>\n• Prompt: <code>{prompt}</code>\n\nVideo AI có thể mất vài phút xử lý.\nBot chỉ trừ Xu sau khi bạn xác nhận.\nKhông gửi lại lệnh trong lúc bot đang chạy.\n\nBạn có muốn tiếp tục không?",
-        "video.premium_admin": "👑 Video premium — liên hệ admin",
+        "video.premium_admin": "👑 Video Premium — dịch vụ nâng cao",
         "video.create_another": "🔁 Tạo video khác",
         "video.edit_prompt": "✍️ Sửa prompt",
         "video.create_image": "🖼 Tạo ảnh khác",
@@ -5001,7 +5001,7 @@ UI_TEXT = {
         "video.motion_short": "🎥 Gợi ý chuyển động / prompt video",
         "video.quick_admin_public": "🎞 Tạo video nhanh",
         "motion.menu": "🎥 Gợi ý chuyển động video",
-        "motion.ask_topic": "🎥 <b>Gợi ý chuyển động video TOAN AAS</b>\n\nBạn muốn làm video về vấn đề gì?\n\nChọn nhóm nhanh bên dưới hoặc nhập trực tiếp chủ đề/sản phẩm/ngành của bạn.\n{cost_line}\n\nBot chỉ tạo gợi ý/prompt, không gọi API ảnh/video thật và chưa trừ Xu.",
+        "motion.ask_topic": "🎥 <b>Gợi ý chuyển động video TOAN AAS</b>\n\nBạn muốn làm video về vấn đề gì?\n\nChọn nhóm nhanh bên dưới hoặc nhập trực tiếp chủ đề/sản phẩm/ngành của bạn.\n{cost_line}\n\nMàn này chỉ tạo gợi ý/prompt, chưa xử lý ảnh/video và chưa trừ Xu.",
         "motion.free": "Đang miễn phí giai đoạn thử nghiệm.",
         "motion.cost": "Chi phí dự kiến: {cost} Xu, bot sẽ hỏi xác nhận trước khi trừ.",
         "motion.product": "Sản phẩm / quảng cáo",
@@ -5021,7 +5021,7 @@ UI_TEXT = {
         "motion.style.reveal": "🧊 3D/product reveal",
         "motion.style.ugc": "😄 UGC đời thường",
         "motion.ask_style": "🎬 <b>Bạn muốn phong cách nào?</b>\n\nChủ đề: <b>{topic}</b>\n\nChọn một phong cách để TOAN AAS tạo bản đồ chuyển động/cảnh quay.",
-        "motion.cancelled": "❌ Đã hủy gợi ý chuyển động video. Bot chưa gọi API và chưa trừ Xu.",
+        "motion.cancelled": "❌ Đã hủy gợi ý chuyển động video. TOAN AAS chưa xử lý và chưa trừ Xu.",
         "motion.again": "🔁 Gợi ý chủ đề khác",
         "motion.from_concept_title": "🎥 Hướng chuyển động từ concept này",
         "motion.timeline": "Lộ trình từng giây",
@@ -5029,7 +5029,7 @@ UI_TEXT = {
         "motion.use_this": "✅ Lưu hướng chuyển động này",
         "motion.create_another": "🔁 Tạo hướng chuyển động khác",
         "concept_ad.menu": "🎬 Concept quảng cáo cinematic",
-        "concept_ad.ask_product": "🎬 <b>Concept quảng cáo cinematic TOAN AAS</b>\n\nBạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì?\n\nVí dụ: máy xay sinh tố mini màu xanh ngọc, app AI tạo nội dung, khóa học affiliate, quán cà phê mới mở.\n\nBot chỉ tạo ý tưởng, storyboard và prompt, không gọi API ảnh/video thật và không trừ Xu.",
+        "concept_ad.ask_product": "🎬 <b>Ý tưởng quảng cáo điện ảnh TOAN AAS</b>\n\nBạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì?\n\nVí dụ: máy xay sinh tố mini màu xanh ngọc, ứng dụng AI tạo nội dung, khóa học tiếp thị liên kết, quán cà phê mới mở.\n\nMàn này chỉ tạo ý tưởng, storyboard và prompt, chưa xử lý ảnh/video và chưa trừ Xu.",
         "concept_ad.ask_message": "💡 <b>Bạn muốn truyền tải thông điệp gì?</b>\n\nSản phẩm/dịch vụ: <b>{product}</b>\n\nChọn nhanh một thông điệp hoặc nhập thông điệp riêng.",
         "concept_ad.ask_style": "🎨 <b>Bạn muốn phong cách quảng cáo nào?</b>\n\nSản phẩm/dịch vụ: <b>{product}</b>\nThông điệp: <b>{message}</b>\n\nChọn phong cách để TOAN AAS dựng concept quảng cáo.",
         "concept_ad.continue": "✅ Chốt concept / Tạo tiếp từ concept này",
@@ -5067,9 +5067,9 @@ UI_TEXT = {
         "concept.save_music": "✅ Lưu gợi ý nhạc",
         "concept.admin_video_smoke": "🔐 Admin smoke video từ prompt này",
         "concept.video_not_public": "🎬 Tạo video thật chưa mở công khai",
-        "concept.motion_saved_next": "✅ Đã lưu hướng chuyển động.\n\nBot chưa gọi API video và chưa trừ Xu.\n\nBạn muốn làm gì tiếp?",
-        "concept.video_prompt_saved_next": "✅ Prompt video đã được lưu.\nBot chưa gọi API video và chưa trừ Xu.\n\nBạn muốn làm gì tiếp?",
-        "concept.music_none_saved": "✅ Đã chọn không cần nhạc.\nBot chưa gọi API nhạc/video và chưa trừ Xu.\n\nBot đã lưu lựa chọn này. Tạo nhạc AI/ghép nhạc sẽ mở sau.",
+        "concept.motion_saved_next": "✅ Đã lưu hướng chuyển động.\n\nTOAN AAS chưa xử lý video và chưa trừ Xu.\n\nBạn muốn làm gì tiếp?",
+        "concept.video_prompt_saved_next": "✅ Prompt video đã được lưu.\nTOAN AAS chưa xử lý video và chưa trừ Xu.\n\nBạn muốn làm gì tiếp?",
+        "concept.music_none_saved": "✅ Đã chọn không cần nhạc.\nTOAN AAS chưa xử lý nhạc/video và chưa trừ Xu.\n\nLựa chọn này đã được lưu.",
         "concept.music_searching": "🎵 Đang tìm nhạc phù hợp. Bot chưa trừ Xu.",
         "concept.choose_1": "1️⃣ Chọn gợi ý 1",
         "concept.choose_2": "2️⃣ Chọn gợi ý 2",
@@ -5081,17 +5081,17 @@ UI_TEXT = {
         "concept.finish": "✅ Hoàn tất",
         "concept.review_video_prompt": "🎞 Xem lại prompt video",
         "concept.review_image_prompt": "🖼 Xem lại prompt ảnh",
-        "concept.music_saved_next": "✅ Bot đã lưu gợi ý nhạc. Tạo nhạc AI/ghép nhạc sẽ mở sau.\nBot chưa gọi API nhạc/video và chưa trừ Xu.",
+        "concept.music_saved_next": "✅ Đã lưu gợi ý nhạc. Tạo nhạc AI/ghép nhạc sẽ mở sau.\nTOAN AAS chưa xử lý nhạc/video và chưa trừ Xu.",
         "concept_ad.trend_current": "🎬 Tạo video theo trend từ concept này",
         "concept_ad.video_current": "🖼➡️🎞 Tạo video từ concept này",
         "concept_ad.again": "🔁 Tạo concept khác",
         "concept.create_another": "🔁 Tạo concept khác",
         "concept.edit_current": "✍️ Sửa concept",
         "concept.current_missing": "⚠️ Concept hiện tại không còn trong phiên làm việc. Vui lòng tạo concept mới.",
-        "concept_ad.cancelled": "❌ Đã hủy concept quảng cáo cinematic. Bot chưa gọi API và chưa trừ Xu.",
-        "concept_ad.missing_latest": "⚠️ Chưa tìm thấy concept quảng cáo gần nhất hoặc concept đã hết hạn.\n\nVui lòng bấm 🎬 Concept quảng cáo cinematic để tạo lại concept.\nBot chưa gọi API và chưa trừ Xu.",
+        "concept_ad.cancelled": "❌ Đã hủy ý tưởng quảng cáo điện ảnh. TOAN AAS chưa xử lý và chưa trừ Xu.",
+        "concept_ad.missing_latest": "⚠️ Chưa tìm thấy ý tưởng quảng cáo gần nhất hoặc dữ liệu đã hết hạn.\n\nVui lòng mở lại mục ý tưởng quảng cáo để tạo mới.\nTOAN AAS chưa xử lý và chưa trừ Xu.",
         "concept_ad.new": "🎬 Tạo concept mới",
-        "concept_ad.custom_message_prompt": "✍️ Hãy gửi thông điệp bạn muốn truyền tải.\n\nVí dụ: tiết kiệm thời gian để tập trung vào điều quan trọng hơn.\n\nBot chưa gọi API và chưa trừ Xu.",
+        "concept_ad.custom_message_prompt": "✍️ Hãy gửi thông điệp bạn muốn truyền tải.\n\nVí dụ: tiết kiệm thời gian để tập trung vào điều quan trọng hơn.\n\nTOAN AAS chưa xử lý và chưa trừ Xu.",
         "concept_ad.message.memory": "Thời gian / ký ức",
         "concept_ad.message.success": "Thành công / cơ hội",
         "concept_ad.message.confidence": "Tự tin / thay đổi bản thân",
@@ -5115,10 +5115,10 @@ UI_TEXT = {
         "concept.motion_view": "🎥 Xem hướng chuyển động",
         "concept.back_locked": "🔙 Quay lại concept đã chốt",
         "concept.edit_prompt": "Bạn muốn sửa concept như thế nào?\n\nVí dụ: ngắn còn 15s, sang trọng hơn, vui hơn, thêm CTA bán hàng, đổi sang phong cách TikTok.\n\nBot sẽ dùng concept hiện tại, không bắt bạn nhập lại từ đầu.",
-        "concept.saved_motion": "✅ Hướng chuyển động đã được lưu cho concept này. Bot chưa gọi API và chưa trừ Xu.",
-        "concept.saved_image_prompt": "✅ Prompt ảnh đã được lưu cho concept này. Bot chưa gọi API và chưa trừ Xu.",
-        "concept.saved_video_prompt": "✅ Prompt video đã được lưu cho concept này. Bot chưa gọi API video và chưa trừ Xu.",
-        "concept.saved_music": "✅ Gợi ý nhạc đã được lưu cho concept này. Bot chưa gọi API và chưa trừ Xu.",
+        "concept.saved_motion": "✅ Hướng chuyển động đã được lưu. TOAN AAS chưa xử lý và chưa trừ Xu.",
+        "concept.saved_image_prompt": "✅ Prompt ảnh đã được lưu. TOAN AAS chưa xử lý và chưa trừ Xu.",
+        "concept.saved_video_prompt": "✅ Prompt video đã được lưu. TOAN AAS chưa xử lý video và chưa trừ Xu.",
+        "concept.saved_music": "✅ Gợi ý nhạc đã được lưu. TOAN AAS chưa xử lý và chưa trừ Xu.",
         "video.public_off_prompt_only": "Tạo video thật đang thử nghiệm nội bộ. TOAN AAS đã chuẩn bị prompt video để bạn dùng khi tính năng mở công khai.",
         "video.public_off_options": "🎬 <b>Hệ thống tạo video đang bảo trì/nâng cấp nhẹ.</b>\n\nHiện tại TOAN AAS vẫn có thể giúp bạn chuẩn bị:\n• Prompt video\n• Hướng chuyển động\n• Storyboard\n• Gợi ý nhạc\n\nKhi xuất video sẵn sàng, bạn sẽ chọn gói và xác nhận giá trước khi tạo.\nTOAN AAS chưa xử lý video và chưa trừ Xu.",
         "video.admin_smoke_warning": "🔐 Admin smoke test: không trừ Xu nội bộ, nhưng provider có thể tốn credit thật. Không cần gửi lại lệnh.",
@@ -5151,7 +5151,7 @@ UI_TEXT = {
         "common.skip": "⏭ Skip",
         "common.try_again_later": "Please try again later.",
         "common.not_charged": "The bot has not charged Xu.",
-        "common.no_api_no_charge": "The bot has not called any API and has not charged Xu.",
+        "common.no_api_no_charge": "TOAN AAS has not started processing and has not charged Xu.",
         "common.cancelled_not_charged": "❌ Cancelled. The bot has not charged Xu.",
         "common.expired_not_charged": "⏰ This request has expired or was already processed. The bot has not charged Xu.",
         "common.invalid_request": "⚠️ Invalid request. TOAN AAS has not started processing.",
@@ -5188,7 +5188,7 @@ UI_TEXT = {
         "media.quick_image": "🖼 Quick image",
         "media.quick_video": "🎞 Quick video",
         "media.back_main": "🔙 Back to main menu",
-        "media.cancelled": "❌ Media Creator cancelled. The bot has not called any API and has not charged Xu.\n\nPress /start to open the main menu.",
+        "media.cancelled": "❌ Media Creator cancelled. TOAN AAS has not started processing and has not charged Xu.\n\nPress /start to open the main menu.",
         "media.open_main": "🔙 Opening the main menu below.",
         "media.job_lock": "⏳ You already have a task in progress. Please wait for the result; no need to send the command again.",
         "media.public_off": "🧪 This feature is in internal testing and is not public yet.\nThe bot has not charged Xu.",
@@ -5204,14 +5204,14 @@ UI_TEXT = {
         "image.edit_button": "🧩 Edit image",
         "image.upscale_button": "📐 Upscale / resize image",
         "image.waiting": "🖼 TOAN AAS is creating your image.\nThis usually takes a short moment.\nPlease wait and do not resend the command.",
-        "image.tier_disabled_message": "🧪 This image tier is currently disabled. The bot has not called any API and has not charged Xu.",
+        "image.tier_disabled_message": "🧪 This image package is currently disabled. TOAN AAS has not processed the image or charged Xu.",
         "image.success": "✅ {label} image is ready.\nJob #{job_id}\n{billing_note}\n\nWhat would you like to do next?\n\n• Lock this image if you are happy with it\n• Create video prompts from this image\n• Edit the prompt or regenerate the image",
-        "image.success_link": "✅ The ShopAIKey image is ready, but Telegram could not send it directly.\n<a href=\"{url}\">Open image</a>",
+        "image.success_link": "✅ The image is ready, but Telegram could not send it directly.\n<a href=\"{url}\">Open image</a>",
         "image.fail.not_charged": "⚙️ The image model is busy or temporarily unavailable. The bot has not charged Xu. Please try again later.",
         "image.fail.refunded": "⚙️ The image model is busy or temporarily unavailable. TOAN AAS has refunded {amount} Xu. Please try again later.",
-        "image.fail.refund_failed": "⚠️ The image task failed after Xu was charged. The bot could not refund automatically. Admin has been notified to review and refund manually if valid.",
-        "image.prompt.ask": "🖼 <b>{label}</b>\n\nSend the image description you want to generate.\n\nExample: TOAN AAS turquoise logo, clean white background, minimalist tech style.\n\nTimeout: 10 minutes. Use /cancel to cancel.\nThe bot has not called any API and has not charged Xu.",
-        "image.confirm.cost": "🖼 <b>Creating {label} costs {cost} Xu.</b>\n\n• Current balance: <b>{credits} Xu</b>\n• Retry warranty: {warranty_note}\n• Prompt: <code>{prompt}</code>\n\nDo you want to continue?\nThe bot charges Xu only after you confirm. If the provider fails, the bot refunds Xu according to policy.",
+        "image.fail.refund_failed": "⚠️ The image task failed after Xu was charged. The request was recorded for review and a manual refund when eligible.",
+        "image.prompt.ask": "🖼 <b>{label}</b>\n\nSend the image description you want to generate.\n\nExample: TOAN AAS turquoise logo, clean white background, minimalist tech style.\n\nTimeout: 10 minutes. Use /cancel to cancel.\nTOAN AAS has not started processing and has not charged Xu.",
+        "image.confirm.cost": "🖼 <b>Creating {label} costs {cost} Xu.</b>\n\n• Current balance: <b>{credits} Xu</b>\n• Retry warranty: {warranty_note}\n• Prompt: <code>{prompt}</code>\n\nDo you want to continue?\nTOAN AAS charges Xu only after you confirm. If processing fails, Xu is refunded according to policy.",
         "image.lock": "✅ Lock this image",
         "image.to_video": "🎞 Create 3 video prompts from this image",
         "image.regenerate": "🔁 Regenerate image",
@@ -5230,7 +5230,7 @@ UI_TEXT = {
         "video.tier.common": "Regular video",
         "video.tier.standard": "Standard video",
         "video.tier.high": "Premium video",
-        "video.tier.premium": "Premium/admin-only video",
+        "video.tier.premium": "Premium video",
         "video.waiting": "🎞 TOAN AAS is creating your video. This may take a few minutes. No need to send the command again.",
         "video.tier_disabled_message": "🛠 This video package is temporarily under maintenance / upgrade. TOAN AAS has not processed the video or charged Xu.",
         "video.premium_message": "🛠 This premium video package is temporarily under maintenance / upgrade. TOAN AAS has not processed the video or charged Xu.",
@@ -5240,10 +5240,10 @@ UI_TEXT = {
         "video.next_action": "What would you like to do next?",
         "video.fail.not_charged": "🛠 Video export is temporarily under maintenance / upgrade. TOAN AAS has not charged Xu. Please try again later.",
         "video.fail.refunded": "🛠 Video export is temporarily under maintenance / upgrade. TOAN AAS has refunded {amount} Xu. Please try again later.",
-        "video.fail.refund_failed": "⚠️ The video task failed after Xu was charged. The bot could not refund automatically. Admin has been notified to review and refund manually if valid.",
-        "video.prompt.ask": "🎞 <b>{label}</b>\n\nSend the video description you want to generate.\n\nExample: TOAN AAS turquoise logo with gentle motion, clean white background, minimalist tech style.\n\nTimeout: 10 minutes. Use /cancel to cancel.\nThe bot has not called any API and has not charged Xu.",
+        "video.fail.refund_failed": "⚠️ The video task failed after Xu was charged. The request was recorded for review and a manual refund when eligible.",
+        "video.prompt.ask": "🎞 <b>{label}</b>\n\nSend the video description you want to generate.\n\nExample: TOAN AAS turquoise logo with gentle motion, clean white background, minimalist tech style.\n\nTimeout: 10 minutes. Use /cancel to cancel.\nTOAN AAS has not started processing and has not charged Xu.",
         "video.confirm.cost": "🎞 <b>Creating {label} costs {cost} Xu.</b>\n\n• Current balance: <b>{credits} Xu</b>\n• Prompt: <code>{prompt}</code>\n\nAI video can take a few minutes.\nThe bot charges Xu only after you confirm.\nDo not resend the command while the bot is working.\n\nDo you want to continue?",
-        "video.premium_admin": "👑 Premium video — contact admin",
+        "video.premium_admin": "👑 Premium video — advanced service",
         "video.create_another": "🔁 Create another video",
         "video.edit_prompt": "✍️ Edit prompt",
         "video.create_image": "🖼 Create another image",
@@ -5253,7 +5253,7 @@ UI_TEXT = {
         "video.motion_short": "🎥 Motion / video prompt guide",
         "video.quick_admin_public": "🎞 Quick video",
         "motion.menu": "🎥 Video motion guide",
-        "motion.ask_topic": "🎥 <b>TOAN AAS Video Motion Guide</b>\n\nWhat is your video about?\n\nChoose a quick group below or type your own topic/product/industry.\n{cost_line}\n\nThe bot only creates guidance/prompts. It does not call real image/video APIs and has not charged Xu.",
+        "motion.ask_topic": "🎥 <b>TOAN AAS Video Motion Guide</b>\n\nWhat is your video about?\n\nChoose a quick group below or type your own topic/product/industry.\n{cost_line}\n\nThis screen only creates guidance/prompts. It has not processed media or charged Xu.",
         "motion.free": "Free during the testing period.",
         "motion.cost": "Estimated cost: {cost} Xu. The bot will ask for confirmation before charging.",
         "motion.product": "Product / ad",
@@ -5273,7 +5273,7 @@ UI_TEXT = {
         "motion.style.reveal": "🧊 3D/product reveal",
         "motion.style.ugc": "😄 Everyday UGC",
         "motion.ask_style": "🎬 <b>Choose a style</b>\n\nTopic: <b>{topic}</b>\n\nChoose a style so TOAN AAS can build the motion/shot map.",
-        "motion.cancelled": "❌ Video motion guide cancelled. The bot has not called any API and has not charged Xu.",
+        "motion.cancelled": "❌ Video motion guide cancelled. TOAN AAS has not processed anything or charged Xu.",
         "motion.again": "🔁 Try another topic",
         "motion.from_concept_title": "🎥 Motion guide from this concept",
         "motion.timeline": "Second-by-second timeline",
@@ -5281,7 +5281,7 @@ UI_TEXT = {
         "motion.use_this": "✅ Use this motion guide",
         "motion.create_another": "🔁 Create another motion guide",
         "concept_ad.menu": "🎬 Cinematic ad concept",
-        "concept_ad.ask_product": "🎬 <b>TOAN AAS Cinematic Ad Concept</b>\n\nWhat product or service is this ad for?\n\nExample: turquoise mini blender, AI content app, affiliate course, new coffee shop.\n\nThe bot only creates ideas, storyboard and prompts. It does not call real image/video APIs and has not charged Xu.",
+        "concept_ad.ask_product": "🎬 <b>TOAN AAS Cinematic Ad Concept</b>\n\nWhat product or service is this ad for?\n\nExample: turquoise mini blender, AI content app, affiliate course, new coffee shop.\n\nThis screen only creates ideas, storyboard and prompts. It has not processed media or charged Xu.",
         "concept_ad.ask_message": "💡 <b>What message do you want to convey?</b>\n\nProduct/service: <b>{product}</b>\n\nChoose a quick message or type your own.",
         "concept_ad.ask_style": "🎨 <b>Choose an advertising style</b>\n\nProduct/service: <b>{product}</b>\nMessage: <b>{message}</b>\n\nChoose a style so TOAN AAS can build the ad concept.",
         "concept_ad.continue": "✅ Lock concept / Continue from this concept",
@@ -5319,9 +5319,9 @@ UI_TEXT = {
         "concept.save_music": "✅ Save music suggestion",
         "concept.admin_video_smoke": "🔐 Admin video smoke from this prompt",
         "concept.video_not_public": "🎬 Real video is not public yet",
-        "concept.motion_saved_next": "✅ Motion guide saved.\n\nThe bot has not called the video API and has not charged Xu.\n\nWhat would you like to do next?",
-        "concept.video_prompt_saved_next": "✅ Video prompt saved.\nThe bot has not called the video API and has not charged Xu.\n\nWhat would you like to do next?",
-        "concept.music_none_saved": "✅ No music selected.\nThe bot has not called music/video APIs and has not charged Xu.\n\nThe bot saved this choice. AI music generation and music mixing will open later.",
+        "concept.motion_saved_next": "✅ Motion guide saved.\n\nTOAN AAS has not processed the video or charged Xu.\n\nWhat would you like to do next?",
+        "concept.video_prompt_saved_next": "✅ Video prompt saved.\nTOAN AAS has not processed the video or charged Xu.\n\nWhat would you like to do next?",
+        "concept.music_none_saved": "✅ No music selected.\nTOAN AAS has not processed music/video or charged Xu.\n\nThis choice has been saved.",
         "concept.music_searching": "🎵 Searching music. The bot has not charged Xu.",
         "concept.choose_1": "1️⃣ Choose suggestion 1",
         "concept.choose_2": "2️⃣ Choose suggestion 2",
@@ -5333,17 +5333,17 @@ UI_TEXT = {
         "concept.finish": "✅ Finish",
         "concept.review_video_prompt": "🎞 Review video prompt",
         "concept.review_image_prompt": "🖼 Review image prompt",
-        "concept.music_saved_next": "✅ The bot saved the music suggestion. AI music generation and music mixing will open later.\nThe bot has not called music/video APIs and has not charged Xu.",
+        "concept.music_saved_next": "✅ Music suggestion saved. AI music generation and music mixing will open later.\nTOAN AAS has not processed music/video or charged Xu.",
         "concept_ad.trend_current": "🎬 Trend workflow from this concept",
         "concept_ad.video_current": "🖼➡️🎞 Video from this concept",
         "concept_ad.again": "🔁 Create another concept",
         "concept.create_another": "🔁 Create another concept",
         "concept.edit_current": "✍️ Edit concept",
         "concept.current_missing": "⚠️ The current concept is no longer in this session. Please create a new concept.",
-        "concept_ad.cancelled": "❌ Cinematic ad concept cancelled. The bot has not called any API and has not charged Xu.",
-        "concept_ad.missing_latest": "⚠️ No recent ad concept was found, or it has expired.\n\nPlease press 🎬 Cinematic ad concept to create a new one.\nThe bot has not called any API and has not charged Xu.",
+        "concept_ad.cancelled": "❌ Cinematic ad concept cancelled. TOAN AAS has not processed anything or charged Xu.",
+        "concept_ad.missing_latest": "⚠️ No recent ad concept was found, or it has expired.\n\nPlease open the ad concept screen to create a new one.\nTOAN AAS has not processed anything or charged Xu.",
         "concept_ad.new": "🎬 Create new concept",
-        "concept_ad.custom_message_prompt": "✍️ Send the message you want the ad to convey.\n\nExample: save time so users can focus on what matters more.\n\nThe bot has not called any API and has not charged Xu.",
+        "concept_ad.custom_message_prompt": "✍️ Send the message you want the ad to convey.\n\nExample: save time so users can focus on what matters more.\n\nTOAN AAS has not processed anything or charged Xu.",
         "concept_ad.message.memory": "Time / memories",
         "concept_ad.message.success": "Success / opportunity",
         "concept_ad.message.confidence": "Confidence / self-change",
@@ -5367,12 +5367,12 @@ UI_TEXT = {
         "concept.motion_view": "🎥 View motion guide",
         "concept.back_locked": "🔙 Back to locked concept",
         "concept.edit_prompt": "How would you like to edit this concept?\n\nExamples: make it 15 seconds, make it more premium, make it more playful, add a sales CTA, switch to TikTok style.\n\nThe bot will use the current concept; you do not need to enter everything again.",
-        "concept.saved_motion": "✅ This motion guide is selected for the concept. The bot has not called any API and has not charged Xu.",
-        "concept.saved_image_prompt": "✅ The image prompt is saved for this concept. The bot has not called any API and has not charged Xu.",
-        "concept.saved_video_prompt": "✅ The video prompt is saved for this concept. The bot has not called the video API and has not charged Xu.",
-        "concept.saved_music": "✅ The music suggestion is saved for this concept. The bot has not called any API and has not charged Xu.",
+        "concept.saved_motion": "✅ This motion guide is selected. TOAN AAS has not processed anything or charged Xu.",
+        "concept.saved_image_prompt": "✅ The image prompt is saved. TOAN AAS has not processed anything or charged Xu.",
+        "concept.saved_video_prompt": "✅ The video prompt is saved. TOAN AAS has not processed the video or charged Xu.",
+        "concept.saved_music": "✅ The music suggestion is saved. TOAN AAS has not processed anything or charged Xu.",
         "video.public_off_prompt_only": "Real video generation is still in internal testing. TOAN AAS has prepared the video prompt for you to use when the feature opens publicly.",
-        "video.public_off_options": "🎬 <b>Real video generation is not public yet.</b>\n\nThe bot can still prepare:\n• Video prompts\n• Motion guide\n• Storyboard\n• Music suggestions\n\nWhen public video is enabled, you will choose a tier and confirm pricing before generation.\nThe bot has not called the video API and has not charged Xu.",
+        "video.public_off_options": "🎬 <b>Video export is temporarily under maintenance.</b>\n\nTOAN AAS can still prepare:\n• Video prompts\n• Motion guide\n• Storyboard\n• Music suggestions\n\nWhen export is available, you will choose a package and confirm the price before creation.\nTOAN AAS has not processed the video or charged Xu.",
         "video.admin_smoke_warning": "🔐 Admin smoke test: no internal Xu deduction, but external processing may consume real credits. No need to resend the command.",
         "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\nSend a short video prompt to test the provider.\n\n{warning}",
         "video.check_job": "🔄 Check video status",
@@ -5383,7 +5383,7 @@ UI_TEXT = {
         "music.genre.viral": "🔥 TikTok / Reels upbeat",
         "music.genre.chill": "😌 Chill / soft",
         "music.genre.custom": "✍️ Custom keyword",
-        "video.from_image_public_off": "🎬 <b>Real video generation is not public yet.</b>\n\nTOAN AAS has prepared an image-to-video prompt from this image. When public video is enabled, this button will move to video tier selection and price confirmation.\n\n<b>Image-to-video prompt</b>\n<code>{prompt}</code>\n\nThe bot has not called the video API and has not charged Xu.",
+        "video.from_image_public_off": "🎬 <b>Video export is temporarily under maintenance.</b>\n\nTOAN AAS prepared an image-to-video prompt from this image. When export is available, this button will move to package selection and price confirmation.\n\n<b>Image-to-video prompt</b>\n<code>{prompt}</code>\n\nTOAN AAS has not processed the video or charged Xu.",
         "workflow.from_concept_confirm": "Creating a full workflow from this concept costs {cost} Xu. It includes hooks, scripts, storyboard, image prompts and video prompts. Do you want to continue?",
         "workflow.from_concept_title": "🎬 Full workflow from this concept",
         "workflow.image_scene_1": "🖼 Create image from Scene 1",
@@ -5403,7 +5403,7 @@ UI_TEXT = {
         "common.skip": "⏭ 跳过",
         "common.try_again_later": "请稍后再试。",
         "common.not_charged": "本次未扣除 Xu。",
-        "common.no_api_no_charge": "Bot 未调用 API，也未扣除 Xu。",
+        "common.no_api_no_charge": "TOAN AAS 尚未开始处理，也未扣除 Xu。",
         "common.cancelled_not_charged": "❌ 已取消。本次未扣除 Xu。",
         "common.expired_not_charged": "⏰ 此请求已过期或已处理。本次未扣除 Xu。",
         "common.invalid_request": "⚠️ 请求无效。TOAN AAS 尚未开始处理。",
@@ -5440,7 +5440,7 @@ UI_TEXT = {
         "media.quick_image": "🖼 快速生成图片",
         "media.quick_video": "🎞 快速生成视频",
         "media.back_main": "🔙 返回主菜单",
-        "media.cancelled": "❌ 已取消 Media Creator。Bot 未调用 API，也未扣除 Xu。\n\n使用 /start 打开主菜单。",
+        "media.cancelled": "❌ 已取消媒体创作。TOAN AAS 尚未开始处理，也未扣除 Xu。\n\n使用 /start 打开主菜单。",
         "media.open_main": "🔙 下方为主菜单。",
         "media.job_lock": "⏳ 你已有一个任务正在处理中。请等待结果，不需要重复发送命令。",
         "media.public_off": "🧪 此功能仍在内部测试，尚未公开。\n本次未扣除 Xu。",
@@ -5452,60 +5452,60 @@ UI_TEXT = {
         "image.tier.high": "高质量图片",
         "image.tier.high_warranty": "高质量图片 + 保障重试",
         "image.quick_button": "🖼 快速生成 AI 图片",
-        "image.prompt_button": "✍️ 图片 prompt",
+        "image.prompt_button": "✍️ 图片提示词",
         "image.edit_button": "🧩 编辑图片",
         "image.upscale_button": "📐 放大 / 调整图片尺寸",
         "image.waiting": "🖼 TOAN AAS 正在为你生成图片。\n通常只需要一小段时间。\n请等待，不要重复发送命令。",
-        "image.tier_disabled_message": "🧪 此图片档位当前已关闭。Bot 未调用 API，也未扣除 Xu。",
-        "image.success": "✅ {label} 已生成完成。\nJob #{job_id}\n{billing_note}\n\n你想下一步做什么？\n\n• 如果满意，请锁定此图片\n• 基于此图片生成 3 个视频 prompt\n• 修改 prompt 或重新生成图片",
-        "image.success_link": "✅ ShopAIKey 图片已生成，但 Telegram 无法直接发送。\n<a href=\"{url}\">打开图片</a>",
+        "image.tier_disabled_message": "🧪 此图片套餐当前已关闭。TOAN AAS 尚未处理图片，也未扣除 Xu。",
+        "image.success": "✅ {label} 已生成完成。\n任务 #{job_id}\n{billing_note}\n\n你想下一步做什么？\n\n• 如果满意，请锁定此图片\n• 基于此图片生成 3 个视频提示词\n• 修改提示词或重新生成图片",
+        "image.success_link": "✅ 图片已生成，但 Telegram 无法直接发送。\n<a href=\"{url}\">打开图片</a>",
         "image.fail.not_charged": "⚙️ 图片模型正忙或暂时不可用。本次未扣除 Xu。请稍后再试。",
         "image.fail.refunded": "⚙️ 图片模型正忙或暂时不可用。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
-        "image.fail.refund_failed": "⚠️ 图片任务在扣除 Xu 后失败。Bot 暂时无法自动退款，Admin 已收到记录，会在符合条件时人工处理退款。",
-        "image.prompt.ask": "🖼 <b>{label}</b>\n\n请发送你想生成的图片描述。\n\n示例：TOAN AAS 青绿色 logo，白色干净背景，极简科技风。\n\n超时：10 分钟。使用 /cancel 取消。\nBot 未调用 API，也未扣除 Xu。",
-        "image.confirm.cost": "🖼 <b>生成 {label} 需要 {cost} Xu。</b>\n\n• 当前余额：<b>{credits} Xu</b>\n• 重试保障：{warranty_note}\n• Prompt：<code>{prompt}</code>\n\n是否继续？\n只有确认后 Bot 才会扣除 Xu。如果 provider 失败，Bot 会按政策退款。",
+        "image.fail.refund_failed": "⚠️ 图片任务在扣除 Xu 后失败。请求已记录，符合条件时将进行人工退款审核。",
+        "image.prompt.ask": "🖼 <b>{label}</b>\n\n请发送你想生成的图片描述。\n\n示例：TOAN AAS 青绿色 logo，白色干净背景，极简科技风。\n\n超时：10 分钟。使用 /cancel 取消。\nTOAN AAS 尚未开始处理，也未扣除 Xu。",
+        "image.confirm.cost": "🖼 <b>生成 {label} 需要 {cost} Xu。</b>\n\n• 当前余额：<b>{credits} Xu</b>\n• 重试保障：{warranty_note}\n• 提示词：<code>{prompt}</code>\n\n是否继续？\n只有确认后 TOAN AAS 才会扣除 Xu。如果处理失败，将按政策退款。",
         "image.lock": "✅ 锁定这张图片",
-        "image.to_video": "🎞 基于此图片生成 3 个视频 prompt",
+        "image.to_video": "🎞 基于此图片生成 3 个视频提示词",
         "image.regenerate": "🔁 重新生成图片",
         "image.regenerate_paid": "🔁 按价格表重新生成",
         "image.warranty_retry": "🔁 使用 1 次保障重试",
-        "image.edit_prompt": "✍️ 修改 prompt",
+        "image.edit_prompt": "✍️ 修改提示词",
         "image.music_hint": "🎵 音乐建议",
         "video.choose_tier.title": "🎞 <b>选择视频质量</b>\n\n请选择视频档位。价格以 <b>💳 价格</b> 为准。",
         "video.quick": "🎞 快速生成视频",
-        "video.trend": "🎬 Trend 视频 workflow",
+        "video.trend": "🎬 热门趋势视频流程",
         "video.image_to_video": "🖼➡️🎞 图片生成视频",
-        "video.prompt_button": "✍️ 视频 prompt",
-        "video.hook_script": "📝 Hook/script/caption",
+        "video.prompt_button": "✍️ 视频提示词",
+        "video.hook_script": "📝 开场钩子/脚本/文案",
         "video.tier.low": "体验视频",
         "video.tier.basic": "基础视频",
         "video.tier.common": "常规视频",
         "video.tier.standard": "标准视频",
         "video.tier.high": "高级视频",
-        "video.tier.premium": "Premium/admin-only 视频",
+        "video.tier.premium": "尊享视频",
         "video.waiting": "🎞 TOAN AAS 正在为你生成视频，可能需要几分钟。请不要重复发送命令。",
-        "video.tier_disabled_message": "🧪 此视频档位当前已关闭。Bot 未调用 API，也未扣除 Xu。",
-        "video.premium_message": "👑 Premium 视频因 provider 成本较高，需要 admin 审核。如有需要请联系 admin。\nBot 未调用 API，也未扣除 Xu。",
+        "video.tier_disabled_message": "🧪 此视频套餐当前已关闭。TOAN AAS 尚未处理视频，也未扣除 Xu。",
+        "video.premium_message": "🛠 尊享视频套餐正在维护升级。TOAN AAS 尚未处理视频，也未扣除 Xu。",
         "video.active_job": "你已有一个视频正在处理中。请等待完成后再创建新视频。",
         "video.source_invalid": "⚠️ 源图片缺少数据或已不适用于生成视频。本次未扣除 Xu。\n你可以重新生成图片、用文字 prompt 生成视频，或返回主菜单。",
-        "video.queue_submitted": "✅ 视频已发送到生成队列。\n\nTOAN AAS 正在为你生成视频。\n视频完成后将在几分钟内自动发送。\n\n请不要重复发送命令或连续创建多个任务，以避免重复 job。\n\nTask: {task_id}\nAuto poll: {auto_poll}",
+        "video.queue_submitted": "✅ 视频已进入生成队列。\n\nTOAN AAS 正在为你生成视频。\n视频完成后将在几分钟内自动发送。\n\n请不要重复发送命令或连续创建多个任务，以免重复。\n\n任务：{task_id}\n自动检查：{auto_poll}",
         "video.next_action": "你想下一步做什么？",
         "video.fail.not_charged": "🛠 视频导出正在维护/升级，暂时无法完成。本次未扣除 Xu。请稍后再试。",
         "video.fail.refunded": "🛠 视频导出正在维护/升级，暂时无法完成。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
-        "video.fail.refund_failed": "⚠️ 视频任务在扣除 Xu 后失败。Bot 暂时无法自动退款，Admin 已收到记录，会在符合条件时人工处理退款。",
-        "video.prompt.ask": "🎞 <b>{label}</b>\n\n请发送你想生成的视频描述。\n\n示例：TOAN AAS 青绿色 logo 轻微运动，白色干净背景，极简科技风。\n\n超时：10 分钟。使用 /cancel 取消。\nBot 未调用 API，也未扣除 Xu。",
-        "video.confirm.cost": "🎞 <b>生成 {label} 需要 {cost} Xu。</b>\n\n• 当前余额：<b>{credits} Xu</b>\n• Prompt：<code>{prompt}</code>\n\nAI 视频可能需要几分钟。\n只有确认后 Bot 才会扣除 Xu。\n处理期间请不要重复发送命令。\n\n是否继续？",
-        "video.premium_admin": "👑 Premium 视频 — 联系 admin",
+        "video.fail.refund_failed": "⚠️ 视频任务在扣除 Xu 后失败。请求已记录，符合条件时将进行人工退款审核。",
+        "video.prompt.ask": "🎞 <b>{label}</b>\n\n请发送你想生成的视频描述。\n\n示例：TOAN AAS 青绿色 logo 轻微运动，白色干净背景，极简科技风。\n\n超时：10 分钟。使用 /cancel 取消。\nTOAN AAS 尚未开始处理，也未扣除 Xu。",
+        "video.confirm.cost": "🎞 <b>生成 {label} 需要 {cost} Xu。</b>\n\n• 当前余额：<b>{credits} Xu</b>\n• 提示词：<code>{prompt}</code>\n\nAI 视频可能需要几分钟。\n只有确认后 TOAN AAS 才会扣除 Xu。\n处理期间请不要重复发送命令。\n\n是否继续？",
+        "video.premium_admin": "👑 尊享视频 — 高级服务",
         "video.create_another": "🔁 再生成一个视频",
-        "video.edit_prompt": "✍️ 修改 prompt",
+        "video.edit_prompt": "✍️ 修改提示词",
         "video.create_image": "🖼 再生成一张图片",
         "video.guided_flow": "✨ 分步制作",
-        "video.concept_short": "🎬 广告 concept",
-        "video.trend_short": "🔥 Trend 视频",
-        "video.motion_short": "🎥 运动 / 视频 prompt 建议",
+        "video.concept_short": "🎬 广告创意",
+        "video.trend_short": "🔥 热门趋势视频",
+        "video.motion_short": "🎥 运动 / 视频提示词建议",
         "video.quick_admin_public": "🎞 快速视频",
         "motion.menu": "🎥 视频运动建议",
-        "motion.ask_topic": "🎥 <b>TOAN AAS 视频运动建议</b>\n\n你想做什么主题的视频？\n\n请选择下方分类，或直接输入你的主题/产品/行业。\n{cost_line}\n\nBot 只生成建议和 prompt，不调用真实图片/视频 API，也未扣除 Xu。",
+        "motion.ask_topic": "🎥 <b>TOAN AAS 视频运动建议</b>\n\n你想做什么主题的视频？\n\n请选择下方分类，或直接输入你的主题/产品/行业。\n{cost_line}\n\n此页面只生成建议和提示词，尚未处理图片/视频，也未扣除 Xu。",
         "motion.free": "测试阶段免费。",
         "motion.cost": "预计费用：{cost} Xu。扣费前 Bot 会先请求确认。",
         "motion.product": "产品 / 广告",
@@ -5517,63 +5517,63 @@ UI_TEXT = {
         "motion.education": "教育 / 教程",
         "motion.story": "电影感故事",
         "motion.custom": "✍️ 输入其他主题",
-        "motion.style.cinematic": "🎬 Cinematic",
+        "motion.style.cinematic": "🎬 电影感",
         "motion.style.tiktok": "📱 快节奏 TikTok/Reels",
         "motion.style.tutorial": "🧑‍🏫 教程",
         "motion.style.ads": "🛒 销售广告",
-        "motion.style.fpv": "🚁 FPV/drone motion",
-        "motion.style.reveal": "🧊 3D/product reveal",
+        "motion.style.fpv": "🚁 第一视角/无人机运动",
+        "motion.style.reveal": "🧊 3D 产品展示",
         "motion.style.ugc": "😄 日常 UGC",
         "motion.ask_style": "🎬 <b>选择风格</b>\n\n主题：<b>{topic}</b>\n\n请选择风格，TOAN AAS 会生成镜头运动方案。",
-        "motion.cancelled": "❌ 已取消视频运动建议。Bot 未调用 API，也未扣除 Xu。",
+        "motion.cancelled": "❌ 已取消视频运动建议。TOAN AAS 尚未处理，也未扣除 Xu。",
         "motion.again": "🔁 换一个主题",
-        "motion.from_concept_title": "🎥 基于此 concept 的 motion guide",
-        "motion.timeline": "逐秒 timeline",
+        "motion.from_concept_title": "🎥 基于此创意的运动建议",
+        "motion.timeline": "逐秒时间线",
         "motion.camera_motion": "镜头运动",
-        "motion.use_this": "✅ 使用此 motion guide",
-        "motion.create_another": "🔁 生成另一个 motion guide",
+        "motion.use_this": "✅ 使用此运动建议",
+        "motion.create_another": "🔁 生成另一份运动建议",
         "concept_ad.menu": "🎬 电影感广告概念",
-        "concept_ad.ask_product": "🎬 <b>TOAN AAS 电影感广告概念</b>\n\n你想为哪个产品或服务制作广告？\n\n示例：青绿色迷你搅拌机、AI 内容应用、affiliate 课程、新咖啡店。\n\nBot 只生成创意、分镜和 prompt，不调用真实图片/视频 API，也未扣除 Xu。",
+        "concept_ad.ask_product": "🎬 <b>TOAN AAS 电影感广告创意</b>\n\n你想为哪个产品或服务制作广告？\n\n示例：青绿色迷你搅拌机、AI 内容应用、推广课程、新咖啡店。\n\n此页面只生成创意、分镜和提示词，尚未处理图片/视频，也未扣除 Xu。",
         "concept_ad.ask_message": "💡 <b>你想传达什么信息？</b>\n\n产品/服务：<b>{product}</b>\n\n请选择一个信息方向，或输入自己的信息。",
-        "concept_ad.ask_style": "🎨 <b>选择广告风格</b>\n\n产品/服务：<b>{product}</b>\n信息：<b>{message}</b>\n\n请选择风格，TOAN AAS 会生成广告 concept。",
-        "concept_ad.continue": "✅ 确认 concept / 继续使用这个 concept",
-        "concept.lock": "✅ 完成 / 锁定此 concept",
-        "concept.locked_title": "✅ Concept 已保存。",
+        "concept_ad.ask_style": "🎨 <b>选择广告风格</b>\n\n产品/服务：<b>{product}</b>\n信息：<b>{message}</b>\n\n请选择风格，TOAN AAS 会生成广告创意。",
+        "concept_ad.continue": "✅ 确认创意 / 继续使用此创意",
+        "concept.lock": "✅ 完成 / 锁定此创意",
+        "concept.locked_title": "✅ 创意已保存。",
         "concept.next_question": "你想下一步做什么？",
-        "concept_ad.motion_current": "🎥 根据这个 concept 生成运动建议",
-        "concept.motion_from_current": "🎥 基于此 concept 创建 motion guide",
-        "concept.image_prompt_from_current": "🖼 基于此 concept 创建图片 prompt",
-        "concept.video_prompt_from_current": "🎞 基于此 concept 创建视频 prompt",
-        "concept.create_image_from_current": "🖼 基于此 concept 创建图片",
-        "concept.create_video_from_current": "🎬 基于此 concept 创建视频",
-        "concept.workflow_from_current": "🎬 基于此 concept 创建完整 workflow",
+        "concept_ad.motion_current": "🎥 根据此创意生成运动建议",
+        "concept.motion_from_current": "🎥 基于此创意创建运动建议",
+        "concept.image_prompt_from_current": "🖼 基于此创意创建图片提示词",
+        "concept.video_prompt_from_current": "🎞 基于此创意创建视频提示词",
+        "concept.create_image_from_current": "🖼 基于此创意创建图片",
+        "concept.create_video_from_current": "🎬 基于此创意创建视频",
+        "concept.workflow_from_current": "🎬 基于此创意创建完整流程",
         "concept.music_from_current": "🎵 适合的音乐建议",
-        "concept.next_image": "🖼 图片 / 图片 prompt",
-        "concept.next_video": "🎞 创建视频 prompt",
+        "concept.next_image": "🖼 图片 / 图片提示词",
+        "concept.next_video": "🎞 创建视频提示词",
         "concept.next_music": "🎵 音乐 / 声音",
-        "concept.image_view_prompt": "🖼 查看图片 prompt",
+        "concept.image_view_prompt": "🖼 查看图片提示词",
         "concept.create_image_low": "🟢 生成经济图片 — {cost} Xu",
         "concept.create_image_standard": "🔵 生成标准图片 — {cost} Xu",
         "concept.create_image_high": "🟣 生成高质量图片 — {cost} Xu",
-        "concept.edit_image_prompt": "✍️ 修改图片 prompt",
-        "concept.edit_video_prompt": "✍️ 修改视频 prompt",
+        "concept.edit_image_prompt": "✍️ 修改图片提示词",
+        "concept.edit_video_prompt": "✍️ 修改视频提示词",
         "concept.video_motion": "🎥 运动建议",
-        "concept.video_prompt": "🎞 查看视频 prompt",
-        "concept.video_real": "🎬 用此 prompt 生成真实视频",
+        "concept.video_prompt": "🎞 查看视频提示词",
+        "concept.video_real": "🎬 用此提示词生成视频",
         "concept.create_keyframe": "🖼 生成关键帧图片",
         "concept.save_motion": "✅ 保存运动建议",
-        "concept.save_image_prompt": "✅ 保存图片 prompt",
-        "concept.save_video_prompt": "✅ 保存视频 prompt",
+        "concept.save_image_prompt": "✅ 保存图片提示词",
+        "concept.save_video_prompt": "✅ 保存视频提示词",
         "concept.music_suggest_only": "💡 建议音乐风格",
         "concept.music_library": "🎵 搜索音乐库",
-        "concept.music_ai": "🤖 AI 音乐 prompt",
+        "concept.music_ai": "🤖 AI 音乐提示词",
         "concept.music_none": "🚫 不需要音乐",
         "concept.save_music": "✅ 保存音乐建议",
         "concept.admin_video_smoke": "🔐 Admin 用此 prompt 测试视频",
         "concept.video_not_public": "🎬 真实视频尚未公开",
-        "concept.motion_saved_next": "✅ 运动建议已保存。\n\nBot 未调用视频 API，也未扣除 Xu。\n\n你想下一步做什么？",
-        "concept.video_prompt_saved_next": "✅ 视频 prompt 已保存。\nBot 未调用视频 API，也未扣除 Xu。\n\n你想下一步做什么？",
-        "concept.music_none_saved": "✅ 已选择不使用音乐。\nBot 未调用音乐/视频 API，也未扣除 Xu。\n\nBot 已保存此选择。AI 音乐生成和配乐合成将后续开放。",
+        "concept.motion_saved_next": "✅ 运动建议已保存。\n\nTOAN AAS 尚未处理视频，也未扣除 Xu。\n\n你想下一步做什么？",
+        "concept.video_prompt_saved_next": "✅ 视频提示词已保存。\nTOAN AAS 尚未处理视频，也未扣除 Xu。\n\n你想下一步做什么？",
+        "concept.music_none_saved": "✅ 已选择不使用音乐。\nTOAN AAS 尚未处理音乐/视频，也未扣除 Xu。\n\n此选择已保存。",
         "concept.music_searching": "🎵 正在搜索音乐。Bot 未扣除 Xu。",
         "concept.choose_1": "1️⃣ 选择建议 1",
         "concept.choose_2": "2️⃣ 选择建议 2",
@@ -5581,21 +5581,21 @@ UI_TEXT = {
         "concept.regenerate_3": "🔁 重新生成 3 个建议",
         "concept.lock_selected": "✅ 锁定这个想法",
         "concept.next_motion": "➡️ 进入运动步骤",
-        "concept.next_video_prompt": "🎞 进入视频 prompt 步骤",
+        "concept.next_video_prompt": "🎞 进入视频提示词步骤",
         "concept.finish": "✅ 完成",
-        "concept.review_video_prompt": "🎞 查看视频 prompt",
-        "concept.review_image_prompt": "🖼 查看图片 prompt",
-        "concept.music_saved_next": "✅ Bot 已保存音乐建议。AI 音乐生成和配乐合成将后续开放。\nBot 未调用音乐/视频 API，也未扣除 Xu。",
-        "concept_ad.trend_current": "🎬 根据这个 concept 生成 trend workflow",
-        "concept_ad.video_current": "🖼➡️🎞 根据这个 concept 做视频",
-        "concept_ad.again": "🔁 创建另一个 concept",
-        "concept.create_another": "🔁 创建另一个 concept",
-        "concept.edit_current": "✍️ 修改 concept",
-        "concept.current_missing": "⚠️ 当前 concept 已不在本次会话中。请重新创建 concept。",
-        "concept_ad.cancelled": "❌ 已取消电影感广告 concept。Bot 未调用 API，也未扣除 Xu。",
-        "concept_ad.missing_latest": "⚠️ 未找到最近的广告 concept，或 concept 已过期。\n\n请点击 🎬 电影感广告概念 重新创建。\nBot 未调用 API，也未扣除 Xu。",
-        "concept_ad.new": "🎬 创建新 concept",
-        "concept_ad.custom_message_prompt": "✍️ 请发送你想传达的信息。\n\n示例：节省时间，让用户更专注于真正重要的事。\n\nBot 未调用 API，也未扣除 Xu。",
+        "concept.review_video_prompt": "🎞 查看视频提示词",
+        "concept.review_image_prompt": "🖼 查看图片提示词",
+        "concept.music_saved_next": "✅ 音乐建议已保存。AI 音乐生成和配乐合成将后续开放。\nTOAN AAS 尚未处理音乐/视频，也未扣除 Xu。",
+        "concept_ad.trend_current": "🎬 根据此创意生成热门趋势流程",
+        "concept_ad.video_current": "🖼➡️🎞 根据此创意制作视频",
+        "concept_ad.again": "🔁 创建另一个创意",
+        "concept.create_another": "🔁 创建另一个创意",
+        "concept.edit_current": "✍️ 修改创意",
+        "concept.current_missing": "⚠️ 当前创意已不在本次会话中。请重新创建。",
+        "concept_ad.cancelled": "❌ 已取消电影感广告创意。TOAN AAS 尚未处理，也未扣除 Xu。",
+        "concept_ad.missing_latest": "⚠️ 未找到最近的广告创意，或数据已过期。\n\n请重新打开广告创意页面创建。\nTOAN AAS 尚未处理，也未扣除 Xu。",
+        "concept_ad.new": "🎬 创建新创意",
+        "concept_ad.custom_message_prompt": "✍️ 请发送你想传达的信息。\n\n示例：节省时间，让用户更专注于真正重要的事。\n\nTOAN AAS 尚未处理，也未扣除 Xu。",
         "concept_ad.message.memory": "时间 / 记忆",
         "concept_ad.message.success": "成功 / 机会",
         "concept_ad.message.confidence": "自信 / 自我改变",
@@ -5603,28 +5603,28 @@ UI_TEXT = {
         "concept_ad.message.luxury": "奢华 / 高级感",
         "concept_ad.message.future": "科技 / 未来",
         "concept_ad.message.family": "家庭 / 情感",
-        "concept_ad.message.before_after": "Before / After",
+        "concept_ad.message.before_after": "前后对比",
         "concept_ad.message.custom": "✍️ 输入其他信息",
         "concept_ad.style.cinematic": "🎬 情感电影感",
         "concept_ad.style.bw_luxury": "🖤 黑白奢华",
-        "concept_ad.style.viral": "📱 Viral TikTok/Reels",
+        "concept_ad.style.viral": "📱 TikTok/Reels 热门风格",
         "concept_ad.style.direct_sales": "🛒 直接销售",
         "concept_ad.style.ugc": "👤 日常 UGC",
-        "concept_ad.style.fpv": "🚁 FPV/drone motion",
-        "concept_ad.style.product_reveal": "🧊 3D/product reveal",
-        "concept.image_prompt_1": "🖼 使用 prompt 1 创建 AI 图片",
-        "concept.image_prompt_2": "🖼 使用 prompt 2 创建 AI 图片",
-        "concept.video_from_prompt": "🎬 使用此 prompt 创建视频",
-        "concept.video_prompt_view": "🎞 查看视频 prompt",
-        "concept.motion_view": "🎥 查看 motion guide",
-        "concept.back_locked": "🔙 返回已锁定 concept",
-        "concept.edit_prompt": "你想如何修改这个 concept？\n\n例如：缩短为 15 秒、更高级、更轻松、加入销售 CTA、改成 TikTok 风格。\n\nBot 会使用当前 concept，不需要你重新输入。",
-        "concept.saved_motion": "✅ 此运动建议已用于当前 concept。Bot 未调用 API，也未扣除 Xu。",
-        "concept.saved_image_prompt": "✅ 图片 prompt 已保存到当前 concept。Bot 未调用 API，也未扣除 Xu。",
-        "concept.saved_video_prompt": "✅ 视频 prompt 已保存到当前 concept。Bot 未调用视频 API，也未扣除 Xu。",
-        "concept.saved_music": "✅ 音乐建议已保存到当前 concept。Bot 未调用 API，也未扣除 Xu。",
-        "video.public_off_prompt_only": "真实视频生成功能仍在内部测试。TOAN AAS 已为你准备视频 prompt，等功能公开后可继续使用。",
-        "video.public_off_options": "🎬 <b>真实视频生成尚未公开。</b>\n\nBot 目前可以先准备：\n• 视频 prompt\n• Motion guide\n• Storyboard\n• 音乐建议\n\nPublic video 开启后，你会先选择 tier 并确认价格，再生成视频。\nBot 未调用视频 API，也未扣除 Xu。",
+        "concept_ad.style.fpv": "🚁 第一视角/无人机运动",
+        "concept_ad.style.product_reveal": "🧊 3D 产品展示",
+        "concept.image_prompt_1": "🖼 使用提示词 1 创建 AI 图片",
+        "concept.image_prompt_2": "🖼 使用提示词 2 创建 AI 图片",
+        "concept.video_from_prompt": "🎬 使用此提示词创建视频",
+        "concept.video_prompt_view": "🎞 查看视频提示词",
+        "concept.motion_view": "🎥 查看运动建议",
+        "concept.back_locked": "🔙 返回已锁定创意",
+        "concept.edit_prompt": "你想如何修改这个创意？\n\n例如：缩短为 15 秒、更高级、更轻松、加入销售行动提示、改成 TikTok 风格。\n\nTOAN AAS 会使用当前创意，不需要你重新输入。",
+        "concept.saved_motion": "✅ 此运动建议已用于当前创意。TOAN AAS 尚未处理，也未扣除 Xu。",
+        "concept.saved_image_prompt": "✅ 图片提示词已保存。TOAN AAS 尚未处理，也未扣除 Xu。",
+        "concept.saved_video_prompt": "✅ 视频提示词已保存。TOAN AAS 尚未处理视频，也未扣除 Xu。",
+        "concept.saved_music": "✅ 音乐建议已保存。TOAN AAS 尚未处理，也未扣除 Xu。",
+        "video.public_off_prompt_only": "视频导出正在维护升级。TOAN AAS 已为你准备视频提示词，功能恢复后可继续使用。",
+        "video.public_off_options": "🎬 <b>视频导出正在维护升级。</b>\n\nTOAN AAS 目前可以先准备：\n• 视频提示词\n• 运动建议\n• 分镜\n• 音乐建议\n\n功能恢复后，你会先选择套餐并确认价格，再生成视频。\nTOAN AAS 尚未处理视频，也未扣除 Xu。",
         "video.admin_smoke_warning": "🔐 Admin smoke test：不扣除内部 Xu，但 provider 可能消耗真实 credit。不需要重复发送命令。",
         "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\n请发送一个简短视频 prompt 来测试 provider。\n\n{warning}",
         "video.check_job": "🔄 检查视频状态",
@@ -5635,14 +5635,14 @@ UI_TEXT = {
         "music.genre.viral": "🔥 TikTok / Reels 轻快",
         "music.genre.chill": "😌 Chill / 轻柔",
         "music.genre.custom": "✍️ 自定义关键词",
-        "video.from_image_public_off": "🎬 <b>真实视频生成尚未公开。</b>\n\nTOAN AAS 已基于此图片准备 image-to-video prompt。Public video 开启后，此按钮会进入视频 tier 选择和价格确认。\n\n<b>Image-to-video prompt</b>\n<code>{prompt}</code>\n\nBot 未调用视频 API，也未扣除 Xu。",
-        "workflow.from_concept_confirm": "基于此 concept 创建完整 workflow 将花费 {cost} Xu，包含 hook、script、storyboard、图片 prompt 和视频 prompt。你要继续吗？",
-        "workflow.from_concept_title": "🎬 基于此 concept 的完整 workflow",
-        "workflow.image_scene_1": "🖼 从 Scene 1 生成图片",
-        "workflow.image_scene_2": "🖼 从 Scene 2 生成图片",
-        "workflow.image_scene_3": "🖼 从 Scene 3 生成图片",
+        "video.from_image_public_off": "🎬 <b>视频导出正在维护升级。</b>\n\nTOAN AAS 已基于此图片准备图片转视频提示词。功能恢复后，此按钮会进入视频套餐选择和价格确认。\n\n<b>图片转视频提示词</b>\n<code>{prompt}</code>\n\nTOAN AAS 尚未处理视频，也未扣除 Xu。",
+        "workflow.from_concept_confirm": "基于此创意创建完整流程将花费 {cost} Xu，包含开场钩子、脚本、分镜、图片提示词和视频提示词。你要继续吗？",
+        "workflow.from_concept_title": "🎬 基于此创意的完整流程",
+        "workflow.image_scene_1": "🖼 从场景 1 生成图片",
+        "workflow.image_scene_2": "🖼 从场景 2 生成图片",
+        "workflow.image_scene_3": "🖼 从场景 3 生成图片",
         "workflow.video_separate": "🎞 生成视频 — 单独计费",
-        "workflow.edit_script": "✍️ 修改 script",
+        "workflow.edit_script": "✍️ 修改脚本",
         "workflow.variant": "🔁 生成另一个版本",
         "workflow.save_image": "💾 保存图片",
     },
@@ -33481,6 +33481,69 @@ def image_tier_prompt_for_generation(prompt: str, tier: str = "", aspect_ratio: 
         normalize_image_tier(tier),
     )
 
+def logo_watermark_clean_text(text: str = "") -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip())[:300]
+
+LOGO_WATERMARK_POSITION_LABELS = {
+    "top_left": ("góc trái trên", "top left", "左上角"),
+    "top_center": ("giữa phía trên", "top center", "顶部中央"),
+    "top_right": ("góc phải trên", "top right", "右上角"),
+    "center_left": ("giữa bên trái", "middle left", "左侧中央"),
+    "center": ("chính giữa", "center", "正中央"),
+    "center_right": ("giữa bên phải", "middle right", "右侧中央"),
+    "bottom_left": ("góc trái dưới", "bottom left", "左下角"),
+    "bottom_center": ("giữa phía dưới", "bottom center", "底部中央"),
+    "bottom_right": ("góc phải dưới", "bottom right", "右下角"),
+}
+
+def logo_watermark_normalize_position(position: str = "", default: str = "bottom_right") -> str:
+    code = str(position or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if code in LOGO_WATERMARK_POSITION_LABELS:
+        return code
+    return default if default in LOGO_WATERMARK_POSITION_LABELS else "bottom_right"
+
+def logo_watermark_position_label(position: str = "", lang: str = "vi") -> str:
+    code = logo_watermark_normalize_position(position)
+    labels = LOGO_WATERMARK_POSITION_LABELS.get(code) or LOGO_WATERMARK_POSITION_LABELS["bottom_right"]
+    lang = normalize_user_language(lang) or "vi"
+    return labels[0] if lang == "vi" else labels[2] if lang == "zh" else labels[1]
+
+def logo_watermark_position_instruction(position: str = "") -> str:
+    code = logo_watermark_normalize_position(position)
+    return (LOGO_WATERMARK_POSITION_LABELS.get(code) or LOGO_WATERMARK_POSITION_LABELS["bottom_right"])[1]
+
+def logo_watermark_session_fields(enabled: bool = False, text: str = "", position: str = "") -> dict:
+    clean_text = logo_watermark_clean_text(text) if enabled else ""
+    clean_position = logo_watermark_normalize_position(position) if clean_text else ""
+    return {
+        "logo_watermark_enabled": bool(enabled and clean_text),
+        "logo_watermark_text": clean_text,
+        "logo_watermark_position": clean_position,
+        "logo_watermark_source": "text" if enabled and clean_text else "",
+    }
+
+def logo_watermark_prompt_instruction(kind: str = "image", text: str = "", position: str = "") -> str:
+    clean_text = logo_watermark_clean_text(text)
+    if not clean_text:
+        return ""
+    position_text = logo_watermark_position_instruction(position)
+    if str(kind or "").lower() == "video":
+        return (
+            "Include the requested logo/watermark consistently in the final video output. "
+            f"Place it at the {position_text}. Logo/watermark request: {clean_text}."
+        )
+    return (
+        "Add the requested logo/watermark in a clean, professional way, matching the composition. "
+        f"Place it at the {position_text}. Logo/watermark request: {clean_text}."
+    )
+
+def apply_logo_watermark_to_prompt(prompt: str, text: str = "", kind: str = "image", position: str = "") -> str:
+    base = re.sub(r"\s+", " ", str(prompt or "").strip())[:2400]
+    instruction = logo_watermark_prompt_instruction(kind, text, position)
+    if not instruction:
+        return base
+    return f"{base} {instruction}".strip()
+
 def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool = True) -> str:
     tier_norm = normalize_image_tier(tier)
     payload = image_tier_payload(tier_norm)
@@ -33660,8 +33723,8 @@ def localized_video_tier_label(tier: str = "", lang: str = "vi") -> str:
 
 def video_tier_short_label(tier: str = "", lang: str = "vi") -> str:
     tier_norm = normalize_video_tier(tier)
-    is_vi = normalize_user_language(lang) == "vi"
-    if is_vi:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "vi":
         labels = {
             "low": "Trải nghiệm",
             "basic": "Cơ bản",
@@ -33696,32 +33759,47 @@ def video_tier_price_line(tier: str = "", lang: str = "vi") -> str:
     tier_norm = normalize_video_tier(tier)
     payload = video_tier_pricing_payload().get(tier_norm) or video_tier_pricing_payload()["low"]
     cost = int(payload.get("cost") or video_tier_cost_xu(tier_norm))
-    label = payload.get("label") or localized_video_tier_label(tier_norm, lang)
-    second_rate = video_tier_extra_second_xu(tier_norm)
-    scene_rate = video_tier_extra_scene_xu(tier_norm)
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    label = (
+        payload.get("label") or localized_video_tier_label(tier_norm, lang)
+        if lang == "vi"
+        else localized_video_tier_label(tier_norm, lang)
+    )
+    if lang == "zh":
         notes = {
-            "low": "1 scene / 8s starter trial, no extra duration",
-            "basic": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
-            "common": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
-            "advanced": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
-            "standard": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
-            "high": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
-            "future_1000": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
-            "future_1200": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
-            "future_1500": f"1 scene / 8s, +{second_rate} Xu/s, +{scene_rate} Xu/scene",
+            "low": "1 个场景，约 6 秒；体验套餐固定 200 Xu，不含附加工具",
+            **{
+                key: "每个标准场景约 6 秒；下一步按场景数量显示折扣、公式和总 Xu"
+                for key in ("basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
+            },
+        }
+    elif lang == "en":
+        notes = {
+            "low": "1 scene, about 6 seconds; fixed 200 Xu starter package with no add-ons",
+            **{
+                key: "each standard scene is about 6 seconds; the next step shows scene discount, formula and total Xu"
+                for key in ("basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
+            },
+        }
+    elif lang == "zh":
+        labels = {
+            "low": "体验",
+            "basic": "基础",
+            "common": "标准",
+            "advanced": "进阶",
+            "standard": "商业",
+            "high": "高级",
+            "future_1000": "专业",
+            "future_1200": "Pro Plus",
+            "future_1500": "Premium",
         }
     else:
         notes = {
-            "low": "1 cảnh / 8 giây, gói trải nghiệm, không bán thêm thời lượng",
-            "basic": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
-            "common": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
-            "advanced": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
-            "standard": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
-            "high": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
-            "future_1000": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
-            "future_1200": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
-            "future_1500": f"1 cảnh / 8 giây, +{second_rate} Xu/giây, +{scene_rate} Xu/cảnh",
+            "low": "1 cảnh, khoảng 6 giây; gói trải nghiệm cố định 200 Xu, không công cụ bổ sung",
+            **{
+                key: "mỗi cảnh chuẩn khoảng 6 giây; bước sau hiển thị chiết khấu cảnh, công thức và tổng Xu"
+                for key in ("basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
+            },
         }
     return f"• {VIDEO_TIER_ICONS.get(tier_norm, '🎬')} <b>{html.escape(str(label))}</b> — <b>{cost} Xu</b>: {html.escape(notes.get(tier_norm, ''))}"
 
@@ -35474,7 +35552,7 @@ def image_tool_pricing_matrix() -> dict:
         "image_ai_upscale": {"label": "Nâng chất lượng ảnh AI", "price_xu": int(IMAGE_UPSCALE_AI_XU or 0), "display": f"{int(IMAGE_UPSCALE_AI_XU or 0)} Xu/lần", "guard": "provider smoke required"},
         "image_prompt_from_image": {"label": "Tạo prompt từ ảnh", "price_xu": 0, "display": "Miễn phí nếu không gọi vision provider"},
         "image_crop_resize_local": {"label": "Cắt / resize local", "price_xu": 0, "display": "Miễn phí"},
-        "image_add_text_logo_local": {"label": "Thêm chữ/logo thủ công/local", "price_xu": 0, "display": "Miễn phí"},
+        "image_add_text_logo_local": {"label": "Thêm chữ hoặc Logo/Watermark thủ công/local", "price_xu": 0, "display": "Miễn phí"},
         "image_color_formula": {"label": "Công thức màu", "price_xu": 0, "display": "Miễn phí"},
     }
 
@@ -36343,11 +36421,19 @@ def package_offer_text(item: dict, fallback_confirm_text: str, lang: str = "vi")
         "Bạn muốn dùng lượt trong gói thay vì trừ Xu không?"
     )
 
-def package_use_choice_keyboard(job_type: str, token: str, tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
+def package_use_choice_keyboard(
+    job_type: str,
+    token: str,
+    tier: str = "",
+    lang: str = "vi",
+    back_callback: str = "",
+) -> InlineKeyboardMarkup:
     use_label = "✅ Use package slot" if normalize_user_language(lang) != "vi" else "✅ Dùng lượt trong gói"
     xu_label = "💰 Use Xu" if normalize_user_language(lang) != "vi" else "💰 Dùng Xu"
     back_label = ui_text(lang, "common.back")
-    callback_prefix = "create_media|quick_image" if str(job_type or "") == "image" else "create_media|quick_video"
+    callback_prefix = back_callback or (
+        "create_media|quick_image" if str(job_type or "") == "image" else "create_media|quick_video"
+    )
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(use_label, callback_data=f"shopai|package|{token}")],
         [InlineKeyboardButton(xu_label, callback_data=f"shopai|confirm|{token}")],
@@ -36420,14 +36506,23 @@ def user_package_summary_text(user_id, admin_view: bool = False) -> str:
             lines.append("  " + html.escape("; ".join(item_parts)))
     return "\n".join(lines)
 
-def user_package_account_short_text(user_id) -> str:
+def user_package_account_short_text(user_id, lang: str = "vi") -> str:
+    lang = normalize_user_language(lang) or "vi"
     rows = [row for row in user_package_rows(user_id) if str(row.get("status") or "") == "active" and row.get("item_type")]
     if not rows:
+        if lang == "zh":
+            return "🎁 套餐/组合：当前没有有效套餐。"
+        if lang == "en":
+            return "🎁 Packages/combos: no active package."
         return "🎁 Gói/combo: chưa có gói đang hoạt động."
     totals: dict[str, int] = {}
     for row in rows:
         item_type = normalize_package_item_type(row.get("item_type") or "")
         totals[item_type] = totals.get(item_type, 0) + int(row.get("remaining_quantity") or 0)
+    if lang == "zh":
+        return f"🎁 套餐/组合：{sum(totals.values())} 次剩余服务。"
+    if lang == "en":
+        return f"🎁 Packages/combos: {sum(totals.values())} service uses remaining."
     parts = [f"{package_item_display_name(k)}: {v}" for k, v in totals.items() if v > 0]
     return "🎁 Gói/combo còn lượt: " + (", ".join(parts) if parts else "0")
 
@@ -37336,7 +37431,9 @@ IMAGE_MENU_PENDING_ACTIONS = {
     "image_editor_wait_image",
     "image_editor_menu",
     "image_editor_custom_settings",
+    "image_editor_text_position",
     "image_editor_text_input",
+    "image_editor_logo_position",
     "image_editor_wait_logo",
 }
 
@@ -37363,7 +37460,7 @@ def set_image_menu_pending(user_id, action: str, **fields) -> None:
                 "pixel_size", "source_name", "prompt", "current_prompt", "short_prompt",
                 "detail_prompt", "negative_prompt", "selected_variant", "ratio_change",
                 "prompt_source", "back_to", "last_step", "editor_mode", "editor_preset",
-                "editor_text", "editor_source",
+                "editor_text", "editor_source", "editor_overlay_position",
                 "image_prompt_current_prompt", "image_prompt_short_prompt",
                 "image_prompt_detail_prompt", "image_prompt_negative_prompt",
                 "image_prompt_selected_ratio", "image_prompt_selected_purpose",
@@ -37445,13 +37542,13 @@ def image_edit_menu_start_text(lang: str = "vi") -> str:
         return (
             "🧩 <b>Edit image</b>\n\n"
             "Send or reply to the image you want to edit.\n\n"
-            "Local crop/resize, text/logo, color presets and AI upscale are grouped here. AI image edit is a separate button in the main Image menu.\n\n"
+            "Local crop/resize, text, logo/watermark, color presets and AI upscale are grouped here. AI image edit is a separate button in the main Image menu.\n\n"
             "No provider call and no Xu charged on this screen."
         )
     return (
         "🧩 <b>Chỉnh sửa ảnh</b>\n\n"
         "Bạn hãy gửi hoặc reply vào ảnh cần sửa.\n\n"
-        "Sau khi nhận ảnh, TOAN AAS sẽ mở các công cụ: cắt/resize, thêm chữ/logo, công thức màu và nâng chất lượng.\n"
+        "Sau khi nhận ảnh, TOAN AAS sẽ mở các công cụ: cắt/resize, thêm chữ, Logo/Watermark, công thức màu và nâng chất lượng.\n"
         "Chỉnh sửa AI là flow riêng ở menu Hình ảnh chính.\n\n"
         "Bot chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu ở màn này."
     )
@@ -37462,7 +37559,7 @@ def image_edit_instruction_text(lang: str = "vi") -> str:
             "✅ Image received.\n\n"
             "How do you want to edit it?\n\n"
             "1. Crop/ratio and pixel resize: local processing.\n"
-            "2. Text/logo and color presets: stable local editor.\n"
+            "2. Text, logo/watermark and color presets: stable local editor.\n"
             "3. AI upscale: sharpen/upscale if the provider is available.\n"
             "4. Custom request: describe what you need and TOAN AAS will guide or move to AI flow if needed.\n\n"
             "No provider call and no Xu charged until you confirm."
@@ -37471,7 +37568,7 @@ def image_edit_instruction_text(lang: str = "vi") -> str:
         "✅ Đã nhận ảnh.\n\n"
         "Bạn muốn chỉnh ảnh theo cách nào?\n\n"
         "1. Cắt / đổi tỉ lệ và resize pixel: xử lý local.\n"
-        "2. Thêm chữ/logo và công thức màu: dùng editor local đang chạy.\n"
+        "2. Thêm chữ, Logo/Watermark và công thức màu: dùng editor local đang chạy.\n"
         "3. Nâng chất lượng AI: làm nét/nâng cấp ảnh nếu provider sẵn sàng.\n"
         "4. Nhập yêu cầu riêng: mô tả yêu cầu để TOAN AAS hướng dẫn hoặc chuyển sang flow AI nếu cần.\n\n"
         "Bot chưa gọi provider và chưa trừ Xu nếu bạn chưa xác nhận."
@@ -37506,7 +37603,7 @@ def image_menu_v5_text(lang: str = "vi") -> str:
             "• Quick image: choose from suggestions or enter a prompt, then select ratio and tier.\n"
             "• Prompt from image: send an image so the bot writes a matching prompt.\n"
             "• AI edit: edit an image with AI request/confirmation guard.\n"
-            "• Edit image: crop/resize, text/logo, color presets and upscale.\n\n"
+            "• Edit image: crop/resize, text, logo/watermark, color presets and upscale.\n\n"
             "All real image create/edit steps ask for confirmation before charging Xu."
         )
     return (
@@ -37515,7 +37612,7 @@ def image_menu_v5_text(lang: str = "vi") -> str:
         "• Tạo ảnh nhanh: nhập prompt hoặc chọn gợi ý để tạo ảnh.\n"
         "• Tạo prompt từ ảnh: gửi ảnh để bot viết prompt phù hợp.\n"
         "• Chỉnh sửa AI: sửa ảnh bằng AI theo yêu cầu, có xác nhận trước khi xử lý.\n"
-        "• Chỉnh sửa ảnh: crop/resize, thêm chữ/logo, công thức màu và nâng chất lượng.\n\n"
+        "• Chỉnh sửa ảnh: crop/resize, thêm chữ, Logo/Watermark, công thức màu và nâng chất lượng.\n\n"
         "Các bước tạo/chỉnh ảnh thật đều có xác nhận trước khi trừ Xu."
     )
 
@@ -37993,17 +38090,28 @@ def image_edit_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     )
 
 def image_edit_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✂️ 裁剪/比例", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 调整像素", callback_data="imgtool|resize_task|pixels")],
+            [InlineKeyboardButton("🔤 添加文字", callback_data="imgtool|editor_text_menu"), InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu")],
+            [InlineKeyboardButton("🎨 色彩预设", callback_data="imgtool|editor_presets"), InlineKeyboardButton("✨ AI 画质增强", callback_data="imgtool|ai_upscale_start")],
+            [InlineKeyboardButton("✍️ 自定义要求", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("⬅️ 返回图片菜单", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    if lang == "en":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("✂️ Crop / ratio", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixels", callback_data="imgtool|resize_task|pixels")],
-            [InlineKeyboardButton("🔤 Text / logo", callback_data="imgtool|editor_overlays"), InlineKeyboardButton("🎨 Color presets", callback_data="imgtool|editor_presets")],
-            [InlineKeyboardButton("✨ AI upscale", callback_data="imgtool|ai_upscale_start"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("🔤 Add text", callback_data="imgtool|editor_text_menu"), InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu")],
+            [InlineKeyboardButton("🎨 Color presets", callback_data="imgtool|editor_presets"), InlineKeyboardButton("✨ AI upscale", callback_data="imgtool|ai_upscale_start")],
+            [InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
             [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✂️ Cắt / đổi tỉ lệ", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixel", callback_data="imgtool|resize_task|pixels")],
-        [InlineKeyboardButton("🔤 Thêm chữ / logo", callback_data="imgtool|editor_overlays"), InlineKeyboardButton("🎨 Công thức màu", callback_data="imgtool|editor_presets")],
-        [InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|ai_upscale_start"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
+        [InlineKeyboardButton("🔤 Thêm chữ", callback_data="imgtool|editor_text_menu"), InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu")],
+        [InlineKeyboardButton("🎨 Công thức màu", callback_data="imgtool|editor_presets"), InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|ai_upscale_start")],
+        [InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
         [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -38148,16 +38256,18 @@ def image_edit_ai_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ Add object", callback_data="imgtool|edit_type|add_object"), InlineKeyboardButton("🧹 Remove object", callback_data="imgtool|edit_type|remove_object")],
             [InlineKeyboardButton("🎨 Background/color", callback_data="imgtool|edit_type|background_color"), InlineKeyboardButton("🛍 Ad creative", callback_data="imgtool|edit_type|ad_creative")],
-            [InlineKeyboardButton("🖼 Product beauty", callback_data="imgtool|edit_type|product_beauty"), InlineKeyboardButton("🔤 Text/logo", callback_data="imgtool|editor_overlays")],
-            [InlineKeyboardButton("📐 AI ratio", callback_data="imgtool|edit_type|ai_ratio"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("🖼 Product beauty", callback_data="imgtool|edit_type|product_beauty"), InlineKeyboardButton("🔤 Add text", callback_data="imgtool|editor_text_menu")],
+            [InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu"), InlineKeyboardButton("📐 AI ratio", callback_data="imgtool|edit_type|ai_ratio")],
+            [InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
             [InlineKeyboardButton("🔁 More ideas", callback_data="imgtool|edit_type|ad_creative")],
             [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="imgtool|edit_back_choice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Thêm vật thể", callback_data="imgtool|edit_type|add_object"), InlineKeyboardButton("🧹 Xóa vật thể", callback_data="imgtool|edit_type|remove_object")],
         [InlineKeyboardButton("🎨 Đổi nền / đổi màu", callback_data="imgtool|edit_type|background_color"), InlineKeyboardButton("🛍 Làm ảnh quảng cáo", callback_data="imgtool|edit_type|ad_creative")],
-        [InlineKeyboardButton("🖼 Làm đẹp ảnh sản phẩm", callback_data="imgtool|edit_type|product_beauty"), InlineKeyboardButton("🔤 Thêm chữ/logo", callback_data="imgtool|editor_overlays")],
-        [InlineKeyboardButton("📐 Đổi tỉ lệ bằng AI", callback_data="imgtool|edit_type|ai_ratio"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
+        [InlineKeyboardButton("🖼 Làm đẹp ảnh sản phẩm", callback_data="imgtool|edit_type|product_beauty"), InlineKeyboardButton("🔤 Thêm chữ", callback_data="imgtool|editor_text_menu")],
+        [InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu"), InlineKeyboardButton("📐 Đổi tỉ lệ bằng AI", callback_data="imgtool|edit_type|ai_ratio")],
+        [InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
         [InlineKeyboardButton("🔁 Gợi ý khác", callback_data="imgtool|edit_type|ad_creative")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="imgtool|edit_back_choice"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -38637,12 +38747,12 @@ async def run_image_ai_edit_from_state(update: Update, context: ContextTypes.DEF
             guard_text = (
                 "✨ <b>Chỉnh sửa ảnh AI đang được kiểm soát an toàn.</b>\n\n"
                 f"Lý do kỹ thuật: <code>{html.escape(str(readiness.get('reason') or 'not ready'))}</code>\n\n"
-                "TOAN AAS chưa gọi provider và chưa trừ Xu. Bạn có thể dùng Cắt/Đổi tỉ lệ, Thêm chữ/logo hoặc Công thức màu trước."
+                "TOAN AAS chưa gọi provider và chưa trừ Xu. Bạn có thể dùng Cắt/Đổi tỉ lệ, Thêm chữ, Logo/Watermark hoặc Công thức màu trước."
             )
         else:
             guard_text = (
                 "✨ <b>Chỉnh sửa ảnh AI đang được bảo trì/nâng cấp để đảm bảo chất lượng.</b>\n\n"
-                "TOAN AAS chưa gọi provider và chưa trừ Xu. Bạn có thể dùng Cắt/Đổi tỉ lệ, Thêm chữ/logo hoặc Công thức màu trước."
+                "TOAN AAS chưa gọi provider và chưa trừ Xu. Bạn có thể dùng Cắt/Đổi tỉ lệ, Thêm chữ, Logo/Watermark hoặc Công thức màu trước."
             )
         await safe_edit_query_message(
             query,
@@ -38790,13 +38900,13 @@ def image_resize_choice_text(lang: str = "vi") -> str:
         return (
             "✅ <b>Image received.</b>\n\nHow do you want to process it?\n\n"
             "• Crop/ratio and pixel resize use local processing.\n"
-            "• Text/logo and color presets reuse the stable local editor.\n"
+            "• Text, logo/watermark, and color presets reuse the stable local editor.\n"
             "• AI upscale is guarded and asks for confirmation before provider calls."
         )
     return (
         "✅ <b>Đã nhận ảnh.</b>\n\nBạn muốn chỉnh ảnh theo cách nào?\n\n"
         "1. ✂️ Cắt/đổi tỉ lệ hoặc resize pixel — xử lý local.\n"
-        "2. 🔤 Thêm chữ/logo hoặc công thức màu — dùng editor local đang chạy.\n"
+        "2. 🔤 Thêm chữ, 🎭 Logo/Watermark hoặc công thức màu — dùng editor local đang chạy.\n"
         "3. ✨ Nâng chất lượng AI — làm nét/nâng cấp ảnh nếu provider sẵn sàng.\n"
         "4. ✍️ Nhập yêu cầu riêng — TOAN AAS hướng dẫn hoặc chuyển sang flow AI nếu cần."
     )
@@ -38805,14 +38915,16 @@ def image_resize_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("✂️ Crop / ratio", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixels", callback_data="imgtool|resize_task|pixels")],
-            [InlineKeyboardButton("🔤 Text / logo", callback_data="imgtool|editor_overlays"), InlineKeyboardButton("🎨 Color presets", callback_data="imgtool|editor_presets")],
-            [InlineKeyboardButton("✨ AI upscale", callback_data="imgtool|ai_upscale_start"), InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
+            [InlineKeyboardButton("🔤 Add text", callback_data="imgtool|editor_text_menu"), InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu")],
+            [InlineKeyboardButton("🎨 Color presets", callback_data="imgtool|editor_presets"), InlineKeyboardButton("✨ AI upscale", callback_data="imgtool|ai_upscale_start")],
+            [InlineKeyboardButton("✍️ Custom request", callback_data="imgtool|edit_type_custom")],
             [InlineKeyboardButton("⬅️ Back to image menu", callback_data="menu|main_image"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✂️ Cắt / đổi tỉ lệ", callback_data="imgtool|resize_task|ratio"), InlineKeyboardButton("📐 Resize pixel", callback_data="imgtool|resize_task|pixels")],
-        [InlineKeyboardButton("🔤 Thêm chữ / logo", callback_data="imgtool|editor_overlays"), InlineKeyboardButton("🎨 Công thức màu", callback_data="imgtool|editor_presets")],
-        [InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|ai_upscale_start"), InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
+        [InlineKeyboardButton("🔤 Thêm chữ", callback_data="imgtool|editor_text_menu"), InlineKeyboardButton("🎭 Logo / Watermark", callback_data="imgtool|editor_logo_menu")],
+        [InlineKeyboardButton("🎨 Công thức màu", callback_data="imgtool|editor_presets"), InlineKeyboardButton("✨ Nâng chất lượng AI", callback_data="imgtool|ai_upscale_start")],
+        [InlineKeyboardButton("✍️ Nhập yêu cầu riêng", callback_data="imgtool|edit_type_custom")],
         [InlineKeyboardButton("⬅️ Về menu ảnh", callback_data="menu|main_image"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -38981,8 +39093,8 @@ def image_editor_preset_label(preset: str = "", lang: str = "vi") -> str:
         "food_vivid": "Ẩm thực nổi bật",
         "custom": "Thông số tùy chỉnh",
         "upscale_basic": "Làm nét / nâng chất lượng cơ bản",
-        "text_overlay": "Thêm chữ / watermark",
-        "logo_overlay": "Thêm logo",
+        "text_overlay": "Thêm chữ",
+        "logo_overlay": "Logo / Watermark",
     }
     labels_en = {
         "photo_clear_detail": "Clear detail",
@@ -38992,8 +39104,8 @@ def image_editor_preset_label(preset: str = "", lang: str = "vi") -> str:
         "food_vivid": "Vivid food",
         "custom": "Custom settings",
         "upscale_basic": "Basic sharpen / upscale",
-        "text_overlay": "Text / watermark",
-        "logo_overlay": "Logo overlay",
+        "text_overlay": "Add text",
+        "logo_overlay": "Logo / Watermark",
     }
     return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(str(preset or ""), str(preset or "local"))
 
@@ -39045,12 +39157,115 @@ def _image_editor_wrapped_lines(draw, text: str, font, max_width: int, max_lines
     return lines
 
 
+IMAGE_EDITOR_OVERLAY_POSITIONS = {
+    "top_left": ("Trên trái", "Top left"),
+    "top_center": ("Trên giữa", "Top center"),
+    "top_right": ("Trên phải", "Top right"),
+    "center_left": ("Giữa trái", "Middle left"),
+    "center": ("Chính giữa", "Center"),
+    "center_right": ("Giữa phải", "Middle right"),
+    "bottom_left": ("Dưới trái", "Bottom left"),
+    "bottom_center": ("Dưới giữa", "Bottom center"),
+    "bottom_right": ("Dưới phải", "Bottom right"),
+}
+
+
+def normalize_image_editor_overlay_position(position: str = "", default: str = "bottom_center") -> str:
+    code = str(position or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if code in IMAGE_EDITOR_OVERLAY_POSITIONS:
+        return code
+    return default if default in IMAGE_EDITOR_OVERLAY_POSITIONS else "bottom_center"
+
+
+def image_editor_overlay_position_label(position: str = "", lang: str = "vi") -> str:
+    code = normalize_image_editor_overlay_position(position)
+    labels = IMAGE_EDITOR_OVERLAY_POSITIONS.get(code) or IMAGE_EDITOR_OVERLAY_POSITIONS["bottom_center"]
+    return labels[0] if normalize_user_language(lang) == "vi" else labels[1]
+
+
+def image_editor_overlay_xy(width: int, height: int, overlay_width: int, overlay_height: int, position: str = "", margin: int = 16) -> tuple[int, int]:
+    position = normalize_image_editor_overlay_position(position)
+    margin = max(0, int(margin or 0))
+    if position.endswith("_left"):
+        x = margin
+    elif position.endswith("_right"):
+        x = width - overlay_width - margin
+    else:
+        x = (width - overlay_width) // 2
+    if position.startswith("top"):
+        y = margin
+    elif position.startswith("bottom"):
+        y = height - overlay_height - margin
+    else:
+        y = (height - overlay_height) // 2
+    x = max(margin, min(max(margin, width - overlay_width - margin), x))
+    y = max(margin, min(max(margin, height - overlay_height - margin), y))
+    return int(x), int(y)
+
+
+def image_editor_position_prompt(kind: str = "text", lang: str = "vi") -> str:
+    is_vi = normalize_user_language(lang) == "vi"
+    if str(kind or "").lower() == "logo":
+        return "🎭 Chọn vị trí đặt Logo/Watermark. Bot chưa trừ Xu." if is_vi else "🎭 Choose where to place the logo/watermark. No Xu is charged here."
+    return "🔠 Chọn vị trí đặt chữ. Bot chưa trừ Xu." if is_vi else "🔠 Choose where to place the text. No Xu is charged here."
+
+
+def image_editor_position_keyboard(kind: str = "text", lang: str = "vi", prefix: str = "editor_text_pos", back_callback: str = "imgtool|editor_overlays") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("↖️ " + image_editor_overlay_position_label("top_left", lang), callback_data=f"imgtool|{prefix}|top_left"),
+            InlineKeyboardButton("⬆️ " + image_editor_overlay_position_label("top_center", lang), callback_data=f"imgtool|{prefix}|top_center"),
+        ],
+        [
+            InlineKeyboardButton("↗️ " + image_editor_overlay_position_label("top_right", lang), callback_data=f"imgtool|{prefix}|top_right"),
+            InlineKeyboardButton("⬅️ " + image_editor_overlay_position_label("center_left", lang), callback_data=f"imgtool|{prefix}|center_left"),
+        ],
+        [
+            InlineKeyboardButton("⏺ " + image_editor_overlay_position_label("center", lang), callback_data=f"imgtool|{prefix}|center"),
+            InlineKeyboardButton("➡️ " + image_editor_overlay_position_label("center_right", lang), callback_data=f"imgtool|{prefix}|center_right"),
+        ],
+        [
+            InlineKeyboardButton("↙️ " + image_editor_overlay_position_label("bottom_left", lang), callback_data=f"imgtool|{prefix}|bottom_left"),
+            InlineKeyboardButton("⬇️ " + image_editor_overlay_position_label("bottom_center", lang), callback_data=f"imgtool|{prefix}|bottom_center"),
+        ],
+        [InlineKeyboardButton("↘️ " + image_editor_overlay_position_label("bottom_right", lang), callback_data=f"imgtool|{prefix}|bottom_right")],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def image_editor_text_input_keyboard(lang: str = "vi", back_callback: str = "imgtool|editor_text") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+
+def image_editor_logo_upload_keyboard(lang: str = "vi", back_callback: str = "imgtool|editor_logo") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+
+def image_editor_origin_back_callback(origin_action: str = "", kind: str = "text") -> str:
+    origin = str(origin_action or "").strip()
+    if origin.endswith("_menu"):
+        return "imgtool|edit_back_choice"
+    if origin.endswith("_overlay"):
+        return "imgtool|editor_overlays"
+    return "imgtool|editor_continue"
+
+
 def process_image_local_editor_bytes(
     img_bytes: bytes,
     preset: str = "photo_clear_detail",
     settings: dict | None = None,
     overlay_text: str = "",
     logo_bytes: bytes = b"",
+    overlay_position: str = "",
     upscale: bool = False,
 ) -> tuple[bool, bytes, str, str]:
     if Image is None or ImageEnhance is None:
@@ -39089,13 +39304,21 @@ def process_image_local_editor_bytes(
                 font = load_operator_font(max(20, min(72, image.width // 18)), bold=True)
                 lines = _image_editor_wrapped_lines(draw, overlay_text[:260], font, int(image.width * 0.82))
                 line_height = max(28, int(font.size * 1.25) if hasattr(font, "size") else 34)
-                block_height = line_height * max(1, len(lines)) + 30
-                top = max(10, image.height - block_height - int(image.height * 0.04))
-                draw.rounded_rectangle((int(image.width * 0.06), top, int(image.width * 0.94), top + block_height), radius=18, fill=(0, 0, 0, 145))
-                y = top + 15
+                padding_x = max(18, int(image.width * 0.025))
+                padding_y = max(14, int(image.height * 0.018))
+                line_widths = []
                 for line in lines:
                     box = draw.textbbox((0, 0), line, font=font)
-                    x = max(12, (image.width - (box[2] - box[0])) // 2)
+                    line_widths.append(max(1, box[2] - box[0]))
+                block_width = min(image.width - 24, max(line_widths or [1]) + padding_x * 2)
+                block_height = line_height * max(1, len(lines)) + padding_y * 2
+                margin = max(16, int(min(image.size) * 0.035))
+                x0, top = image_editor_overlay_xy(image.width, image.height, block_width, block_height, overlay_position or "bottom_center", margin)
+                draw.rounded_rectangle((x0, top, x0 + block_width, top + block_height), radius=18, fill=(0, 0, 0, 145))
+                y = top + padding_y
+                for line in lines:
+                    box = draw.textbbox((0, 0), line, font=font)
+                    x = max(x0 + padding_x // 2, x0 + (block_width - (box[2] - box[0])) // 2)
                     draw.text((x, y), line, font=font, fill=(255, 255, 255, 245), stroke_width=1, stroke_fill=(0, 0, 0, 180))
                     y += line_height
             if logo_bytes:
@@ -39108,7 +39331,7 @@ def process_image_local_editor_bytes(
                         logo.putalpha(alpha)
                     base = image.convert("RGBA")
                     margin = max(16, int(min(image.size) * 0.025))
-                    base.alpha_composite(logo, (image.width - logo.width - margin, image.height - logo.height - margin))
+                    base.alpha_composite(logo, image_editor_overlay_xy(image.width, image.height, logo.width, logo.height, overlay_position or "bottom_right", margin))
                     image = base.convert("RGB")
             output = io.BytesIO()
             image.save(output, format="PNG", optimize=True)
@@ -39121,7 +39344,7 @@ def image_editor_start_text(mode: str = "auto", lang: str = "vi") -> str:
     mode_label = {
         "auto": "chỉnh ảnh tự động",
         "preset": "công thức màu",
-        "overlay": "thêm chữ/logo",
+        "overlay": "thêm chữ hoặc logo/watermark",
         "upscale": "làm nét/nâng chất lượng cơ bản",
     }.get(str(mode or "auto"), "chỉnh ảnh local")
     if normalize_user_language(lang) != "vi":
@@ -39144,7 +39367,8 @@ def image_editor_action_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("🪄 Chỉnh tự động" if is_vi else "🪄 Auto enhance", "imgtool|editor_preset|photo_clear_detail"),
         ("🎨 Công thức màu" if is_vi else "🎨 Color presets", "imgtool|editor_presets"),
         ("✂️ Cắt / Đổi tỉ lệ" if is_vi else "✂️ Crop / resize", "imgtool|editor_resize"),
-        ("🔠 Thêm chữ / logo" if is_vi else "🔠 Text / logo", "imgtool|editor_overlays"),
+        ("🔠 Thêm chữ" if is_vi else "🔠 Add text", "imgtool|editor_text"),
+        ("🎭 Logo / Watermark", "imgtool|editor_logo"),
         ("🖼 Làm nét cơ bản" if is_vi else "🖼 Basic sharpen", "imgtool|editor_upscale"),
         ("✍️ Nhập yêu cầu riêng" if is_vi else "✍️ Custom request", "imgtool|edit_type_custom"),
     ]
@@ -39168,8 +39392,8 @@ def image_editor_overlay_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return build_2col_keyboard(
         [
-            ("🔠 Thêm chữ / watermark" if is_vi else "🔠 Add text / watermark", "imgtool|editor_text"),
-            ("🖼 Thêm logo" if is_vi else "🖼 Add logo", "imgtool|editor_logo"),
+            ("🔠 Thêm chữ" if is_vi else "🔠 Add text", "imgtool|editor_text_overlay"),
+            ("🎭 Logo / Watermark", "imgtool|editor_logo_overlay"),
         ],
         nav_back=(ui_text(lang, "common.back"), "imgtool|edit_back_choice"),
         lang=lang,
@@ -39193,6 +39417,7 @@ async def send_local_edited_image(
     settings: dict | None = None,
     overlay_text: str = "",
     logo_file_id: str = "",
+    overlay_position: str = "",
     upscale: bool = False,
 ) -> bool:
     message = getattr(update_or_query, "message", None) or getattr(getattr(update_or_query, "callback_query", None), "message", None)
@@ -39205,7 +39430,11 @@ async def send_local_edited_image(
     if not file_id:
         await context.bot.send_message(chat_id=chat_id, text="⚠️ Chưa có ảnh để xử lý. TOAN AAS chưa trừ Xu.", reply_markup=image_editor_start_keyboard(lang))
         return True
-    source_id = f"{file_id}:{preset}:{overlay_text[:80]}:{logo_file_id}:{int(bool(upscale))}"
+    overlay_position = normalize_image_editor_overlay_position(
+        overlay_position,
+        "bottom_right" if logo_file_id else "bottom_center",
+    )
+    source_id = f"{file_id}:{preset}:{overlay_text[:80]}:{logo_file_id}:{overlay_position}:{int(bool(upscale))}"
     if not acquire_image_action_lock(uid, "local_image_editor", source_id, 180):
         await context.bot.send_message(chat_id=chat_id, text=image_action_locked_text(lang))
         return True
@@ -39223,6 +39452,7 @@ async def send_local_edited_image(
             settings,
             overlay_text,
             logo_bytes,
+            overlay_position,
             upscale,
         )
         if not ok:
@@ -39244,6 +39474,7 @@ async def send_local_edited_image(
             "preset": preset_used,
             "size": size_text,
             "overlay_text": overlay_text[:260],
+            "overlay_position": overlay_position,
         })
         set_image_menu_pending(uid, "image_editor_menu", file_id=output_file_id, source_name="edited_image.png", editor_mode="preset", editor_preset=preset_used)
         return True
@@ -44110,13 +44341,21 @@ def guide_index_text() -> str:
     return "\n".join(lines)
 
 def guide_index_text_i18n(lang: str = "vi") -> str:
-    if normalize_user_language(lang) == "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "vi":
         return guide_index_text()
+    if lang == "zh":
+        return (
+            "📘 <b>TOAN AAS 使用指南</b>\n\n"
+            "请从下方按钮选择主题。\n\n"
+            "可查看：快速开始、图片、视频、趋势视频、音乐、Xu 充值、退款与常见问题。\n\n"
+            "实际生成前会显示费用并要求确认；打开指南不会开始处理，也不会扣除 Xu。"
+        )
     return (
         "📘 <b>TOAN AAS GUIDE</b>\n\n"
         "Choose a topic from the buttons below.\n\n"
         "Available sections: quick start, image guide, video guide, trend video, music/no music, Xu/top-up, refund and FAQ.\n\n"
-        "Full Vietnamese guide: <code>/huongdan</code>. English/Chinese long-form guide translation is planned; this screen keeps the flow usable without mixing Vietnamese text into English/Chinese menus."
+        "Generation steps show the price and ask for confirmation first. Opening the guide does not start processing or charge Xu."
     )
 
 def guide_section_text(section_key_or_number: str) -> str:
@@ -44146,17 +44385,17 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
             "1. Create an AI image for a product, thumbnail or key frame.\n"
             "2. Create an AI video from a clear video description or key image.\n"
             "3. Use Trend Video if you need hooks, storyboard, prompts and music ideas first.\n\n"
-            "The bot asks for confirmation before charging Xu for real generation."
+            "The bot asks for confirmation before charging Xu for generation."
         ),
         "image_ai": (
             "🖼 <b>AI Image Guide</b>\n\n"
             "Describe the product, background, lighting, style and aspect ratio. Choose an image tier, confirm the Xu cost, then the bot creates the image.\n\n"
-            "Provider errors are handled by the refund guard when applicable."
+            "If generation cannot be completed, the no-charge or refund policy applies."
         ),
         "video_ai": (
             "🎬 <b>AI Video Guide</b>\n\n"
-            "Describe the scene, camera motion, product movement, style and duration. Choose a video tier and confirm before the bot submits a queue job.\n\n"
-            "Public video OFF means prompt-only; no video API call and no Xu deduction."
+            "Describe the scene, camera motion, product movement, style and duration. Choose a video package and confirm before processing starts.\n\n"
+            "If video generation is unavailable, TOAN AAS does not start processing or charge Xu."
         ),
         "guided_video": (
             "🔥 <b>Trend Video Guide</b>\n\n"
@@ -44172,13 +44411,52 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
         ),
         "refund": (
             "🔁 <b>Refund Guide</b>\n\n"
-            "If a provider fails after a confirmed paid step, TOAN AAS refunds the deducted Xu according to the refund guard. Do not create duplicate jobs while one is running."
+            "If processing fails after a confirmed paid step, TOAN AAS applies the refund policy. Do not create duplicate tasks while one is running."
         ),
         "faq": (
             "❓ <b>FAQ</b>\n\n"
-            "Video can be slow because providers queue jobs. Do not press create many times. If you are short on Xu, top up first. If a provider fails, the refund guard applies. Music is optional. You can create image first, then video."
+            "Video processing can take time. Do not press create many times. If you are short on Xu, top up first. The no-charge or refund policy applies when processing fails. Music is optional. You can create an image first, then a video."
         ),
     }
+    if lang == "zh":
+        chinese_sections = {
+            "quick_start": (
+                "🚀 <b>快速开始</b>\n\n"
+                "选择一种方式：创建 AI 图片、创建 AI 视频，或先用趋势视频生成创意、分镜和提示词。\n\n"
+                "实际生成前会显示费用并要求确认。"
+            ),
+            "image_ai": (
+                "🖼 <b>AI 图片指南</b>\n\n"
+                "描述主体、背景、光线、风格和画面比例，然后选择图片套餐并确认 Xu 费用。\n\n"
+                "若无法完成生成，将按未扣费或退款政策处理。"
+            ),
+            "video_ai": (
+                "🎬 <b>AI 视频指南</b>\n\n"
+                "描述场景、镜头运动、风格、时长和画面比例，然后选择套餐并确认。\n\n"
+                "系统不可用时不会开始处理，也不会扣除 Xu。"
+            ),
+            "guided_video": (
+                "🔥 <b>趋势视频指南</b>\n\n"
+                "输入产品或主题，选择趋势方向，再继续完成分镜、图片提示词、视频提示词和音乐选择。"
+            ),
+            "music_add": (
+                "🎵 <b>音乐指南</b>\n\n"
+                "音乐为可选项。你可以选择现有音乐、音效、音乐提示词，或不添加音乐。"
+            ),
+            "credits": (
+                "💰 <b>Xu 与充值</b>\n\n"
+                "使用 <code>/pricing</code> 查看价格，使用 <code>/naptien</code> 充值 Xu，使用 <code>/profile</code> 查看余额。"
+            ),
+            "refund": (
+                "🔁 <b>退款说明</b>\n\n"
+                "确认付费后若处理失败，TOAN AAS 将按退款政策处理。任务进行中请勿重复创建。"
+            ),
+            "faq": (
+                "❓ <b>常见问题</b>\n\n"
+                "视频处理可能需要几分钟，请勿重复点击。余额不足时请先充值。音乐可选，也可以先创建图片再创建视频。"
+            ),
+        }
+        return chinese_sections.get(section_key, guide_index_text_i18n(lang))
     return english_sections.get(section_key, guide_index_text_i18n(lang))
 
 async def reply_internal_customer_feature(update: Update):
@@ -45548,7 +45826,7 @@ def localized_start_menu_text(user_id, lang: str) -> str:
             "🧠 <b>记忆/提醒</b>\n"
             "保存笔记、查找信息和设置提醒。\n\n"
             "💳 <b>Xu 服务</b>\n"
-            "充值 Xu、查看价格、使用礼品/优惠码。\n\n"
+            "充值 Xu、查看价格、套餐和符合条件的会员权益。\n\n"
             "继续使用 TOAN AAS 即表示你同意 "
             "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
             "<code>/refund_policy</code> 和 TOAN AAS 知识产权政策。"
@@ -45571,7 +45849,8 @@ def localized_start_menu_text(user_id, lang: str) -> str:
             "🌐 <b>Dịch thuật:</b> Dịch văn bản, transcript, phụ đề và nội dung video.\n"
             "🧠 <b>Ghi nhớ:</b> Lưu ghi chú, tìm lại thông tin, đặt nhắc việc.\n"
             "💳 <b>Xu dịch vụ:</b> dùng để sử dụng các dịch vụ của toanaasbot.\n"
-            "Nạp Xu, xem bảng giá, dùng mã quà tặng hoặc khuyến mãi --> Trước khi nạp xu mọi người nhớ vào kiểm tra và gửi mã khuyến mãi theo hướng dẫn trước nhé!\n\n"
+            "Nạp Xu, xem bảng giá, dùng mã quà tặng hoặc khuyến mãi đủ điều kiện.\n"
+            "Khuyến mãi nạp tiền nội địa chỉ áp dụng cho kênh ngân hàng Việt Nam đủ điều kiện; không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.\n\n"
             "Bằng việc bấm Start, nạp Xu hoặc tiếp tục sử dụng TOAN AAS, bạn đồng ý "
             "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
             "<code>/refund_policy</code> và chính sách sở hữu trí tuệ của TOAN AAS."
@@ -45606,7 +45885,7 @@ def localized_start_menu_text(user_id, lang: str) -> str:
         "🧠 <b>Memory</b>\n"
         "Save notes, find information and set reminders.\n\n"
         "💳 <b>Xu services</b>\n"
-        "Top up Xu, view pricing, use gift/promo codes.\n\n"
+        "Top up Xu, view pricing, plans and eligible member benefits.\n\n"
         "By pressing Start, topping up Xu or continuing to use TOAN AAS, you agree to "
         "<code>/legal</code>, <code>/privacy</code>, <code>/dieukhoan_xu</code>, "
         "<code>/refund_policy</code> and TOAN AAS intellectual property policy."
@@ -45725,7 +46004,7 @@ def video_editor_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ("🪄 Chỉnh màu video" if is_vi else "🪄 Video color", "videoedit|color"),
         ("✂️ Cắt / Đổi tỉ lệ video" if is_vi else "✂️ Crop / ratio", "videoedit|crop"),
         ("📱 Làm video dọc 9:16" if is_vi else "📱 Make vertical 9:16", "videoedit|vertical"),
-        ("🔠 Thêm chữ / watermark" if is_vi else "🔠 Text / watermark", "videoedit|text"),
+        ("🔠 Thêm chữ" if is_vi else "🔠 Add text", "videoedit|text"),
         ("🎞 Tăng nét video cơ bản" if is_vi else "🎞 Basic sharpen", "videoedit|sharpen"),
     ]
     return video_v6_keyboard(buttons, lang, back=("🔙 Quay lại Video" if is_vi else "🔙 Back to Video", "menu|main_video"))
@@ -46900,17 +47179,98 @@ def task3d_prompt_image_detail_keyboard(lang: str = "vi") -> InlineKeyboardMarku
     ])
 
 
+def task3d_prompt_image_logo_choice_text(session: dict, lang: str = "vi") -> str:
+    selected = task3d_video_prompt_selected_entries(session, "image")
+    prompt_preview = selected[0][1] if selected else ""
+    return media_logo_watermark_choice_text("image", prompt_preview, lang)
+
+
+def task3d_prompt_image_logo_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎭 Gắn Logo/Watermark" if is_vi else "🎭 Add Logo/Watermark", callback_data="vproduct|prompt_image_logo_add"),
+            InlineKeyboardButton("⏭ Bỏ qua" if is_vi else "⏭ Skip", callback_data="vproduct|prompt_image_logo_skip"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Prompt ảnh" if is_vi else "⬅️ Image prompt", callback_data="vproduct|prompt_image_detail"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def task3d_prompt_image_logo_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|prompt_image_logo_choice"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+
+def task3d_prompt_image_logo_position_text(session: dict, lang: str = "vi") -> str:
+    draft = dict((session or {}).get("draft") or {})
+    return media_logo_watermark_position_text(draft.get("prompt_image_logo_watermark_text") or "", lang)
+
+
+def task3d_prompt_image_logo_position_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton("↖️ " + logo_watermark_position_label("top_left", lang), callback_data="vproduct|prompt_image_logo_pos|top_left"),
+            InlineKeyboardButton("⬆️ " + logo_watermark_position_label("top_center", lang), callback_data="vproduct|prompt_image_logo_pos|top_center"),
+        ],
+        [
+            InlineKeyboardButton("↗️ " + logo_watermark_position_label("top_right", lang), callback_data="vproduct|prompt_image_logo_pos|top_right"),
+            InlineKeyboardButton("⬅️ " + logo_watermark_position_label("center_left", lang), callback_data="vproduct|prompt_image_logo_pos|center_left"),
+        ],
+        [
+            InlineKeyboardButton("⏺ " + logo_watermark_position_label("center", lang), callback_data="vproduct|prompt_image_logo_pos|center"),
+            InlineKeyboardButton("➡️ " + logo_watermark_position_label("center_right", lang), callback_data="vproduct|prompt_image_logo_pos|center_right"),
+        ],
+        [
+            InlineKeyboardButton("↙️ " + logo_watermark_position_label("bottom_left", lang), callback_data="vproduct|prompt_image_logo_pos|bottom_left"),
+            InlineKeyboardButton("⬇️ " + logo_watermark_position_label("bottom_center", lang), callback_data="vproduct|prompt_image_logo_pos|bottom_center"),
+        ],
+        [InlineKeyboardButton("↘️ " + logo_watermark_position_label("bottom_right", lang), callback_data="vproduct|prompt_image_logo_pos|bottom_right")],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|prompt_image_logo_add"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def task3d_prompt_image_logo_confirm_text(session: dict, lang: str = "vi") -> str:
+    draft = dict((session or {}).get("draft") or {})
+    return media_logo_watermark_confirm_text(
+        draft.get("prompt_image_logo_watermark_text") or "",
+        lang,
+        draft.get("prompt_image_logo_watermark_position") or "",
+    )
+
+
+def task3d_prompt_image_logo_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data="vproduct|prompt_image_logo_confirm"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|prompt_image_logo_add"),
+    ]])
+
+
 def task3d_prompt_image_package_text(session: dict, lang: str = "vi") -> str:
     count = len(task3d_video_prompt_selection(session, "image"))
+    draft = dict((session or {}).get("draft") or {})
+    logo_text = logo_watermark_clean_text(draft.get("prompt_image_logo_watermark_text") if draft.get("prompt_image_logo_watermark_enabled") else "")
+    logo_line = ""
+    if logo_text:
+        logo_line = f"\nLogo / Watermark: <b>{html.escape(logo_text)}</b> ({html.escape(logo_watermark_position_label(draft.get('prompt_image_logo_watermark_position') or '', lang))})\n"
     return (
         "🎨 <b>Chọn gói tạo ảnh</b>\n\n"
         f"Số prompt/cảnh đang chọn: <b>{count}</b>.\n"
+        f"{logo_line}"
         "Bạn muốn tạo ảnh từ prompt này theo gói nào? Giá bên dưới tính cho mỗi ảnh; màn kế tiếp sẽ báo tổng trước khi xử lý.\n\n"
         "Bước này chưa gọi hệ tạo ảnh và chưa trừ Xu."
     )
 
 
-def task3d_prompt_image_package_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def task3d_prompt_image_package_keyboard(lang: str = "vi", back_callback: str = "vproduct|prompt_image_logo_choice") -> InlineKeyboardMarkup:
     labels = {
         "50": "50 Xu Tiết kiệm", "150": "150 Xu Phổ thông",
         "200": "200 Xu Có bảo hành", "300": "300 Xu Cao cấp",
@@ -46921,7 +47281,7 @@ def task3d_prompt_image_package_keyboard(lang: str = "vi") -> InlineKeyboardMark
         [InlineKeyboardButton(labels["50"], callback_data="vproduct|prompt_image_package|50"), InlineKeyboardButton(labels["150"], callback_data="vproduct|prompt_image_package|150")],
         [InlineKeyboardButton(labels["200"], callback_data="vproduct|prompt_image_package|200"), InlineKeyboardButton(labels["300"], callback_data="vproduct|prompt_image_package|300")],
         [InlineKeyboardButton(labels["400"], callback_data="vproduct|prompt_image_package|400"), InlineKeyboardButton(labels["500"], callback_data="vproduct|prompt_image_package|500")],
-        [InlineKeyboardButton(labels["600"], callback_data="vproduct|prompt_image_package|600"), InlineKeyboardButton("⬅️ Prompt ảnh", callback_data="vproduct|prompt_image_detail")],
+        [InlineKeyboardButton(labels["600"], callback_data="vproduct|prompt_image_package|600"), InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback)],
     ])
 
 
@@ -46934,11 +47294,16 @@ def task3d_prompt_image_confirm_text(session: dict, lang: str = "vi") -> str:
     unit_cost = int(package.get("unit_cost_xu") or 0)
     selected_label = str(selected[0]) if count == 1 else ", ".join(map(str, selected))
     warranty = "Có bảo hành tạo lại" if int(package.get("warranty_retries") or 0) > 0 else "Không kèm bảo hành tạo lại"
+    logo_text = logo_watermark_clean_text(draft.get("prompt_image_logo_watermark_text") if draft.get("prompt_image_logo_watermark_enabled") else "")
+    logo_line = ""
+    if logo_text:
+        logo_line = f"Logo / Watermark: <b>{html.escape(logo_text)}</b> ({html.escape(logo_watermark_position_label(draft.get('prompt_image_logo_watermark_position') or '', lang))})\n"
     return (
         "🎨 <b>Xác nhận tạo ảnh</b>\n\n"
         f"Cảnh: <b>{html.escape(selected_label)}</b>\n"
         f"Số ảnh: <b>{count}</b>\n"
         f"Gói: <b>{html.escape(str(package.get('label') or 'Chưa chọn'))}</b>\n"
+        f"{logo_line}"
         f"Chi phí: <b>{xu_number(unit_cost * count)} Xu</b> ({xu_number(unit_cost)} Xu/ảnh)\n"
         f"Bảo hành: <b>{warranty}</b>\n\n"
         "TOAN AAS chưa tạo ảnh và chưa trừ Xu. Chỉ khi bạn bấm “Tạo ảnh” hệ thống mới kiểm tra provider/số dư và xử lý."
@@ -46950,7 +47315,7 @@ def task3d_prompt_image_confirm_keyboard(token: str, session: dict, lang: str = 
     execute_callback = f"vproduct|prompt_image_execute|{token}" if selected_count == 1 else "vproduct|prompt_image_batch_guard"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Tạo ảnh", callback_data=execute_callback), InlineKeyboardButton("🔢 Đổi số lượng", callback_data="vproduct|prompt_image")],
-        [InlineKeyboardButton("⬅️ Prompt ảnh", callback_data="vproduct|prompt_image_packages"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("⬅️ Chọn gói", callback_data="vproduct|prompt_image_package_menu"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -47431,6 +47796,54 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "detail", prompt_edit_kind="image")
         return await task3d_render_step(query, uid, session, lang)
     if action == "prompt_image_packages":
+        session = task3d_session_step(uid, "prompt_image_logo_choice")
+        return await safe_edit_or_send(query, task3d_prompt_image_logo_choice_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_logo_choice_keyboard(lang))
+    if action == "prompt_image_logo_choice":
+        session = task3d_session_step(uid, "prompt_image_logo_choice")
+        return await safe_edit_or_send(query, task3d_prompt_image_logo_choice_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_logo_choice_keyboard(lang))
+    if action == "prompt_image_logo_add":
+        session = task3d_session_step(uid, "prompt_image_logo_input")
+        return await safe_edit_or_send(query, media_logo_watermark_input_text("image", lang), parse_mode="HTML", reply_markup=task3d_prompt_image_logo_input_keyboard(lang))
+    if action == "prompt_image_logo_skip":
+        session = task3d_session_step(
+            uid,
+            "prompt_image_package",
+            prompt_image_logo_watermark_enabled=False,
+            prompt_image_logo_watermark_text="",
+            prompt_image_logo_watermark_position="",
+            prompt_image_logo_watermark_source="",
+            prompt_image_logo_watermark_decided=True,
+        )
+        return await safe_edit_or_send(query, task3d_prompt_image_package_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_package_keyboard(lang))
+    if action == "prompt_image_logo_pos":
+        draft = dict((session or {}).get("draft") or {})
+        logo_text = logo_watermark_clean_text(draft.get("prompt_image_logo_watermark_text") or "")
+        if not logo_text:
+            session = task3d_session_step(uid, "prompt_image_logo_input")
+            return await safe_edit_or_send(query, media_logo_watermark_input_text("image", lang), parse_mode="HTML", reply_markup=task3d_prompt_image_logo_input_keyboard(lang))
+        session = task3d_session_step(
+            uid,
+            "prompt_image_logo_confirm",
+            prompt_image_logo_watermark_position=logo_watermark_normalize_position(value, "bottom_right"),
+        )
+        return await safe_edit_or_send(query, task3d_prompt_image_logo_confirm_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_logo_confirm_keyboard(lang))
+    if action == "prompt_image_logo_confirm":
+        draft = dict((session or {}).get("draft") or {})
+        logo_text = logo_watermark_clean_text(draft.get("prompt_image_logo_watermark_text") or "")
+        if not logo_text:
+            session = task3d_session_step(uid, "prompt_image_logo_input")
+            return await safe_edit_or_send(query, media_logo_watermark_input_text("image", lang), parse_mode="HTML", reply_markup=task3d_prompt_image_logo_input_keyboard(lang))
+        session = task3d_session_step(
+            uid,
+            "prompt_image_package",
+            prompt_image_logo_watermark_enabled=True,
+            prompt_image_logo_watermark_text=logo_text,
+            prompt_image_logo_watermark_position=logo_watermark_normalize_position(draft.get("prompt_image_logo_watermark_position") or "", "bottom_right"),
+            prompt_image_logo_watermark_source="text",
+            prompt_image_logo_watermark_decided=True,
+        )
+        return await safe_edit_or_send(query, task3d_prompt_image_package_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_package_keyboard(lang))
+    if action == "prompt_image_package_menu":
         session = task3d_session_step(uid, "prompt_image_package")
         return await safe_edit_or_send(query, task3d_prompt_image_package_text(session, lang), parse_mode="HTML", reply_markup=task3d_prompt_image_package_keyboard(lang))
     if action == "prompt_image_package":
@@ -47449,9 +47862,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             tier_payload = image_tier_payload(provider_tier)
             prompt = selected[0][1]
             aspect = normalize_media_aspect_ratio(str(session.get("aspect_ratio") or "1:1"), "1:1", "image")
+            draft = dict((session or {}).get("draft") or {})
+            logo_text = logo_watermark_clean_text(draft.get("prompt_image_logo_watermark_text") if draft.get("prompt_image_logo_watermark_enabled") else "")
+            logo_position = logo_watermark_normalize_position(draft.get("prompt_image_logo_watermark_position") or "", "bottom_right")
+            generation_prompt = image_tier_prompt_for_generation(prompt, provider_tier, aspect)
+            generation_prompt = apply_logo_watermark_to_prompt(generation_prompt, logo_text, "image", logo_position)
             token = set_shopaikey_pending_confirmation(uid, {
                 "job_type": "image",
-                "prompt": image_tier_prompt_for_generation(prompt, provider_tier, aspect),
+                "prompt": generation_prompt,
                 "original_prompt": prompt,
                 "base_cost": int(package.get("unit_cost_xu") or 0),
                 "from_image": False,
@@ -47464,6 +47882,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 "source": "task3d_video_prompt_image",
                 "task3d_product_id": product_id,
                 "task3d_scene_index": selected[0][0],
+                **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
             })
         session = task3d_session_step(
             uid,
@@ -47616,6 +48035,25 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         return False
     uid = update.effective_user.id
     session = get_video_session(uid)
+    if str(session.get("current_step") or "") == "prompt_image_logo_input":
+        logo_text = logo_watermark_clean_text(update.message.text)
+        if not logo_text:
+            return True
+        lang = get_user_language(uid) or "vi"
+        session = task3d_session_step(
+            uid,
+            "prompt_image_logo_position",
+            prompt_image_logo_watermark_enabled=True,
+            prompt_image_logo_watermark_text=logo_text,
+            prompt_image_logo_watermark_position="bottom_right",
+            prompt_image_logo_watermark_source="text",
+        )
+        await update.message.reply_text(
+            task3d_prompt_image_logo_position_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=task3d_prompt_image_logo_position_keyboard(lang),
+        )
+        return True
     if str(session.get("current_step") or "") != "collect_input" or str((session.get("draft") or {}).get("input_mode") or "") != "text":
         return False
     text = re.sub(r"\s+", " ", update.message.text.strip())[:1200]
@@ -55079,7 +55517,17 @@ def menu_text_main_profile(user_id) -> str:
     )
 
 def main_profile_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("💰 充值 Xu", callback_data="menu|main_topup"), InlineKeyboardButton("💳 价格", callback_data="pricing|main")],
+            [InlineKeyboardButton("🎁 我的套餐", callback_data="menu|profile_packages"), InlineKeyboardButton("👑 会员等级", callback_data="pricing|member")],
+            [InlineKeyboardButton("📚 Xu 指南", callback_data="menu|guide_credits"), InlineKeyboardButton("👨‍💼 支持", callback_data="menu|support")],
+            [InlineKeyboardButton("🎁 邀请链接", callback_data="menu|profile_ref_link"), InlineKeyboardButton("👥 邀请记录", callback_data="menu|profile_ref_stats")],
+            [InlineKeyboardButton("📋 奖励规则", callback_data="menu|profile_ref_policy"), InlineKeyboardButton("🌍 更改语言", callback_data="back_lang")],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        ])
+    is_vi = lang == "vi"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💰 Nạp Xu" if is_vi else "💰 Top up Xu", callback_data="menu|main_topup"), InlineKeyboardButton("💳 Bảng giá" if is_vi else "💳 Pricing", callback_data="pricing|main")],
         [InlineKeyboardButton("🎁 Combo của tôi" if is_vi else "🎁 My packages", callback_data="menu|profile_packages"), InlineKeyboardButton("👑 Thành viên" if is_vi else "👑 Membership", callback_data="pricing|member")],
@@ -55349,13 +55797,13 @@ def menu_text_main_topup_i18n(lang: str) -> str:
             "💳 <b>充值 XU</b>\n\n"
             "请选择充值金额。PayOS 可用时会打开自动 QR，其他方式需要人工核对。\n\n"
             f"{foreign_topup_policy_note('zh')}\n\n"
-            "请勿发送密码、OTP、API 密钥或银行卡安全信息。"
+            "请勿发送密码、OTP、私密验证码或银行卡安全信息。"
         )
     return (
         "💳 <b>TOP UP XU</b>\n\n"
         "Choose an amount below. The bot will open the current PayOS QR flow or manual transfer fallback when needed.\n\n"
         f"{foreign_topup_policy_note('en')}\n\n"
-        "Never send passwords, OTPs, API keys or card information."
+        "Never send passwords, OTPs, private security codes or card information."
     )
 
 def menu_text_main_profile_i18n(user_id, lang: str) -> str:
@@ -55375,7 +55823,7 @@ def menu_text_main_profile_i18n(user_id, lang: str) -> str:
             f"• ID: <code>{html.escape(str(user_id))}</code>\n"
             f"• 等级: <b>{html.escape(get_role_badge(user_id))}</b>\n"
             f"• 余额: <b>{html.escape(balance)}</b>\n"
-            f"• {user_package_account_short_text(user_id)}\n\n"
+            f"• {user_package_account_short_text(user_id, lang)}\n\n"
             f"{ui_text(lang, 'account.ref_hint')}\n"
             "使用 <code>/profile</code> 查看邀请、生日礼物和会员详情。"
         )
@@ -55384,19 +55832,25 @@ def menu_text_main_profile_i18n(user_id, lang: str) -> str:
         f"• ID: <code>{html.escape(str(user_id))}</code>\n"
         f"• Tier: <b>{html.escape(get_role_badge(user_id))}</b>\n"
         f"• Balance: <b>{html.escape(balance)}</b>\n"
-        f"• {user_package_account_short_text(user_id)}\n\n"
+        f"• {user_package_account_short_text(user_id, lang)}\n\n"
         f"{ui_text(lang, 'account.ref_hint')}\n"
         "Use <code>/profile</code> for referral, birthday and member details."
     )
 
 def menu_text_main_guide_i18n(lang: str) -> str:
-    if normalize_user_language(lang) == "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "vi":
         return menu_text_main_guide()
+    if lang == "zh":
+        return (
+            "📚 <b>使用指南</b>\n\n"
+            "请从下方选择主题。新用户建议先查看 <b>🚀 快速开始</b>。\n\n"
+            "实际生成前会显示费用并要求确认。打开指南不会开始处理，也不会扣除 Xu。"
+        )
     return (
         "📚 <b>GUIDE</b>\n\n"
         "Choose a topic below. New customers should start with <b>🚀 Quick start</b>.\n\n"
-        "Real image/video generation asks for confirmation before charging Xu. Opening guide screens does not call providers and does not charge Xu.\n\n"
-        "Long-form policy text is currently available in Vietnamese; product guide translation is being prepared."
+        "Image and video generation asks for confirmation before charging Xu. Opening guide screens does not start processing or charge Xu."
     )
 
 def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None) -> tuple[str, InlineKeyboardMarkup]:
@@ -65390,11 +65844,18 @@ async def cmd_shopaikey_image_public(update: Update, context: ContextTypes.DEFAU
         record_shopaikey_billing_event(uid, 0, "insufficient_balance", 0, int(credits or 0), int(credits or 0), f"shopaikey_image; tier={tier}; required={final_preview_cost}")
         return await reply_insufficient_credits(update, int(credits or 0), final_preview_cost)
     lang = user_ui_lang(uid)
-    set_media_aspect_pending(uid, "image", tier, prompt)
+    set_media_aspect_pending(
+        uid,
+        "image",
+        tier,
+        prompt,
+        logo_watermark_back_callback="create_media|quick_image",
+        confirmation_source="shopaikey_image_command",
+    )
     await update.message.reply_text(
-        public_media_aspect_ratio_text("image", tier, prompt, lang),
+        media_logo_watermark_choice_text("image", prompt, lang),
         parse_mode="HTML",
-        reply_markup=public_media_aspect_ratio_keyboard("image", lang),
+        reply_markup=media_logo_watermark_choice_keyboard("image", lang, "create_media|quick_image"),
     )
 
 async def start_public_image_prompt_from_tier_message(message, user_id, tier: str) -> None:
@@ -65433,20 +65894,71 @@ async def handle_public_image_prompt_pending_text(update: Update, context: Conte
     if shopaikey_active_job_for_user(uid, "image"):
         await update.message.reply_text(ui_text(lang, "media.job_lock"))
         return True
-    set_media_aspect_pending(uid, "image", tier, prompt)
+    prompt_back_callback = f"create_media|image_tier_{tier}"
+    set_media_aspect_pending(
+        uid,
+        "image",
+        tier,
+        prompt,
+        logo_watermark_back_callback=prompt_back_callback,
+        confirmation_source="public_image_prompt",
+    )
     await update.message.reply_text(
-        public_media_aspect_ratio_text("image", tier, prompt, lang),
+        media_logo_watermark_choice_text("image", prompt, lang),
         parse_mode="HTML",
-        reply_markup=public_media_aspect_ratio_keyboard("image", lang),
+        reply_markup=media_logo_watermark_choice_keyboard("image", lang, prompt_back_callback),
     )
     return True
 
-def image_prompt_confirm_keyboard(token: str, tier: str, lang: str = "vi") -> InlineKeyboardMarkup:
+async def handle_media_logo_watermark_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    pending = get_media_aspect_pending(uid) or {}
+    if str(pending.get("logo_watermark_step") or "") != "input":
+        return False
+    text = logo_watermark_clean_text(update.message.text)
+    if not text:
+        return True
+    lang = get_user_language(uid) or "vi"
+    kind = "image" if pending.get("job_type") == "image" else "video"
+    update_media_aspect_pending(
+        uid,
+        logo_watermark_enabled=True,
+        logo_watermark_text=text,
+        logo_watermark_position="bottom_right",
+        logo_watermark_source="text",
+        logo_watermark_step="position",
+    )
+    await update.message.reply_text(
+        media_logo_watermark_position_text(text, lang),
+        parse_mode="HTML",
+        reply_markup=media_logo_watermark_position_keyboard(kind, lang, f"{'image' if kind == 'image' else 'video'}_logo_pos", f"create_media|{'image' if kind == 'image' else 'video'}_logo_add"),
+    )
+    return True
+
+def image_prompt_confirm_keyboard(
+    token: str,
+    tier: str,
+    lang: str = "vi",
+    source: str = "image_prompt_tool",
+) -> InlineKeyboardMarkup:
     vi = normalize_user_language(lang) == "vi"
+    is_image_edit = str(source or "") == "image_edit_create_new"
+    change_ratio_callback = (
+        f"create_media|ia_{token}" if is_image_edit else f"imgtool|prompt_confirm_change|{token}"
+    )
+    back_callback = "imgtool|edit_create_new" if is_image_edit else "imgtool|prompt_back_result"
+    back_label = (
+        "⬅️ Về tạo ảnh mới" if vi and is_image_edit
+        else "⬅️ Quay lại prompt" if vi
+        else "⬅️ Back to create image" if is_image_edit
+        else "⬅️ Back to prompt"
+    )
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"shopai|confirm|{token}")],
-        [InlineKeyboardButton("📐 Đổi tỉ lệ" if vi else "📐 Change ratio", callback_data=f"imgtool|prompt_confirm_change|{token}")],
-        [InlineKeyboardButton("⬅️ Quay lại prompt" if vi else "⬅️ Back to prompt", callback_data="imgtool|prompt_back_result")],
+        [InlineKeyboardButton("📐 Đổi tỉ lệ" if vi else "📐 Change ratio", callback_data=change_ratio_callback)],
+        [InlineKeyboardButton(back_label, callback_data=back_callback)],
         [InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data=f"shopai|cancel|{token}")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
@@ -65469,9 +65981,24 @@ async def show_image_prompt_confirmation(query, uid, tier: str, prompt: str, asp
     package_item = active_package_item_for_user(uid, package_item_type)
     if int(credits or 0) < final_preview_cost and not is_admin_user(uid) and not package_item:
         return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+    logo_pending = get_media_aspect_pending(uid, "image") or {}
+    logo_text = logo_watermark_clean_text(
+        logo_pending.get("logo_watermark_text") if logo_pending.get("logo_watermark_enabled") else ""
+    )
+    logo_position = logo_watermark_normalize_position(
+        logo_pending.get("logo_watermark_position") or "",
+        "bottom_right",
+    )
+    generation_prompt = image_tier_prompt_for_generation(prompt, tier, aspect)
+    generation_prompt = apply_logo_watermark_to_prompt(
+        generation_prompt,
+        logo_text,
+        "image",
+        logo_position,
+    )
     token = set_shopaikey_pending_confirmation(uid, {
         "job_type": "image",
-        "prompt": image_tier_prompt_for_generation(prompt, tier, aspect),
+        "prompt": generation_prompt,
         "original_prompt": prompt,
         "base_cost": base_cost,
         "from_image": False,
@@ -65482,12 +66009,27 @@ async def show_image_prompt_confirmation(query, uid, tier: str, prompt: str, asp
         "aspect_ratio": aspect,
         "package_item_type": package_item_type,
         "source": source,
+        **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
     })
-    confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect)
-    confirm_markup = image_prompt_confirm_keyboard(token, tier, lang)
+    confirm_text = public_image_confirm_text(
+        tier,
+        prompt,
+        int(credits or 0),
+        lang,
+        aspect,
+        logo_text,
+        logo_position,
+    )
+    confirm_markup = image_prompt_confirm_keyboard(token, tier, lang, source)
     if package_item:
         confirm_text = package_offer_text(package_item, confirm_text, lang)
-        confirm_markup = package_use_choice_keyboard("image", token, tier, lang)
+        confirm_markup = package_use_choice_keyboard(
+            "image",
+            token,
+            tier,
+            lang,
+            "imgtool|edit_create_new" if source == "image_edit_create_new" else "imgtool|prompt_back_result",
+        )
     return await safe_edit_query_message(
         query,
         confirm_text,
@@ -65517,12 +66059,12 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         if mode == "upscale":
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
         if mode == "overlay":
-            return await safe_edit_query_message(query, "🔠 Chọn cách thêm chữ/logo. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_overlay_keyboard(lang))
+            return await safe_edit_query_message(query, "🔠 Chọn thêm chữ hoặc Logo/Watermark. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_overlay_keyboard(lang))
         return await safe_edit_query_message(query, "🎨 Chọn công thức màu local để xem preview.", parse_mode=None, reply_markup=image_editor_preset_keyboard(lang))
     if action == "editor_presets":
         return await safe_edit_query_message(query, "🎨 Chọn công thức màu local để xem preview.", parse_mode=None, reply_markup=image_editor_preset_keyboard(lang))
     if action == "editor_overlays":
-        return await safe_edit_query_message(query, "🔠 Chọn cách thêm chữ/logo. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_overlay_keyboard(lang))
+        return await safe_edit_query_message(query, "🔠 Chọn thêm chữ hoặc Logo/Watermark. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_overlay_keyboard(lang))
     if action == "editor_resize":
         state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
         if not state.get("file_id"):
@@ -65555,20 +66097,60 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
             parse_mode=None,
             reply_markup=image_editor_start_keyboard(lang),
         )
-    if action == "editor_text":
+    if action in {"editor_text", "editor_text_menu", "editor_text_overlay"}:
         state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="text", editor_source=action)
+            return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
+        back_callback = image_editor_origin_back_callback(action, "text")
+        set_image_menu_pending(uid, "image_editor_text_position", **state, back_to=back_callback, editor_source=action)
+        return await safe_edit_query_message(
+            query,
+            image_editor_position_prompt("text", lang),
+            parse_mode=None,
+            reply_markup=image_editor_position_keyboard("text", lang, "editor_text_pos", back_callback),
+        )
+    if action in {"editor_logo", "editor_logo_menu", "editor_logo_overlay"}:
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="logo", editor_source=action)
+            return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
+        back_callback = image_editor_origin_back_callback(action, "logo")
+        set_image_menu_pending(uid, "image_editor_logo_position", **state, back_to=back_callback, editor_source=action)
+        return await safe_edit_query_message(
+            query,
+            image_editor_position_prompt("logo", lang),
+            parse_mode=None,
+            reply_markup=image_editor_position_keyboard("logo", lang, "editor_logo_pos", back_callback),
+        )
+    if action == "editor_text_pos":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        position = normalize_image_editor_overlay_position(parts[2] if len(parts) > 2 else "", "bottom_center")
         if not state.get("file_id"):
             set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="overlay")
             return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
-        set_image_menu_pending(uid, "image_editor_text_input", **state)
-        return await safe_edit_query_message(query, "🔠 Gửi nội dung chữ/watermark muốn đặt ở cuối ảnh. Tối đa 260 ký tự. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_start_keyboard(lang))
-    if action == "editor_logo":
+        origin_action = str((pending or {}).get("editor_source") or "editor_text")
+        set_image_menu_pending(uid, "image_editor_text_input", **state, editor_overlay_position=position, editor_source=origin_action)
+        return await safe_edit_query_message(
+            query,
+            f"🔠 Gửi nội dung chữ muốn đặt ở vị trí <b>{html.escape(image_editor_overlay_position_label(position, lang))}</b>. Tối đa 260 ký tự. Bot chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=image_editor_text_input_keyboard(lang, f"imgtool|{origin_action}"),
+        )
+    if action == "editor_logo_pos":
         state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        position = normalize_image_editor_overlay_position(parts[2] if len(parts) > 2 else "", "bottom_right")
         if not state.get("file_id"):
             set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="overlay")
             return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
-        set_image_menu_pending(uid, "image_editor_wait_logo", **state)
-        return await safe_edit_query_message(query, "🖼 Gửi file logo PNG/JPG/WebP. Logo sẽ được đặt góc dưới bên phải với độ trong nhẹ. Bot chưa trừ Xu.", parse_mode=None, reply_markup=image_editor_start_keyboard(lang))
+        origin_action = str((pending or {}).get("editor_source") or "editor_logo")
+        set_image_menu_pending(uid, "image_editor_wait_logo", **state, editor_overlay_position=position, editor_source=origin_action)
+        return await safe_edit_query_message(
+            query,
+            f"🎭 Gửi file Logo/Watermark PNG/JPG/WebP để đặt ở vị trí <b>{html.escape(image_editor_overlay_position_label(position, lang))}</b>. Bot chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=image_editor_logo_upload_keyboard(lang, f"imgtool|{origin_action}"),
+        )
     if action == "editor_continue":
         result = get_image_tool_result(uid, "editor") or {}
         if not result.get("file_id"):
@@ -65690,12 +66272,23 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         if not prompt:
             return await safe_edit_query_message(query, image_prompt_menu_start_text(lang), reply_markup=image_prompt_goal_keyboard(lang))
         selected_ratio = str(result.get("ratio") or "").strip()
-        if selected_ratio:
-            result["last_tier"] = tier
-            save_image_tool_result(uid, "prompt", result)
-            return await show_image_prompt_confirmation(query, uid, tier, prompt, selected_ratio, lang)
-        set_media_aspect_pending(uid, "image", tier, prompt)
-        return await safe_edit_query_message(query, public_media_aspect_ratio_text("image", tier, prompt, lang), reply_markup=public_media_aspect_ratio_keyboard("image", lang))
+        result["last_tier"] = tier
+        save_image_tool_result(uid, "prompt", result)
+        set_media_aspect_pending(
+            uid,
+            "image",
+            tier,
+            prompt,
+            selected_aspect_ratio=selected_ratio,
+            logo_watermark_back_callback="imgtool|prompt_use",
+            confirmation_source="image_prompt_tool",
+        )
+        return await safe_edit_query_message(
+            query,
+            media_logo_watermark_choice_text("image", prompt, lang),
+            parse_mode="HTML",
+            reply_markup=media_logo_watermark_choice_keyboard("image", lang, "imgtool|prompt_use"),
+        )
     if action == "prompt_confirm_change":
         token = parts[2] if len(parts) > 2 else ""
         pending_confirm = pop_shopaikey_pending_confirmation(token, uid) or {}
@@ -66023,14 +66616,20 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
         tier = normalize_image_tier(parts[2] if len(parts) > 2 else SHOPAIKEY_IMAGE_DEFAULT_TIER)
         prompt = image_edit_prompt_value(state, lang)
         selected_ratio = str(state.get("ratio") or "").strip()
-        if selected_ratio:
-            return await show_image_prompt_confirmation(query, uid, tier, prompt, selected_ratio, lang, "image_edit_create_new")
-        set_media_aspect_pending(uid, "image", tier, prompt)
+        set_media_aspect_pending(
+            uid,
+            "image",
+            tier,
+            prompt,
+            selected_aspect_ratio=selected_ratio,
+            logo_watermark_back_callback="imgtool|edit_create_new",
+            confirmation_source="image_edit_create_new",
+        )
         return await safe_edit_query_message(
             query,
-            public_media_aspect_ratio_text("image", tier, prompt, lang),
+            media_logo_watermark_choice_text("image", prompt, lang),
             parse_mode="HTML",
-            reply_markup=public_media_aspect_ratio_keyboard("image", lang),
+            reply_markup=media_logo_watermark_choice_keyboard("image", lang, "imgtool|edit_create_new"),
         )
     if action == "edit_save":
         state = dict(pending or get_image_tool_result(uid, "edit") or {})
@@ -66152,7 +66751,14 @@ async def handle_image_menu_pending_text(update: Update, context: ContextTypes.D
             return True
         return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", settings=settings)
     if action == "image_editor_text_input":
-        return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", overlay_text=text[:260])
+        return await send_local_edited_image(
+            update,
+            context,
+            pending,
+            preset="photo_clear_detail",
+            overlay_text=text[:260],
+            overlay_position=str(pending.get("editor_overlay_position") or "bottom_center"),
+        )
     if action in {"image_prompt_only", "image_prompt_wait_image"}:
         set_image_menu_pending(uid, "image_prompt_subject", goal_code="custom", goal="mô tả thủ công")
         await update.message.reply_text(image_prompt_subject_text("mô tả thủ công", lang), parse_mode="HTML", reply_markup=image_menu_child_keyboard(lang))
@@ -66265,7 +66871,14 @@ async def handle_image_menu_pending_photo(update: Update, context: ContextTypes.
     action = str(pending.get("pending_action") or "")
     if action == "image_editor_wait_logo":
         logo_file_id = update.message.photo[-1].file_id if update.message.photo else ""
-        return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", logo_file_id=logo_file_id)
+        return await send_local_edited_image(
+            update,
+            context,
+            pending,
+            preset="photo_clear_detail",
+            logo_file_id=logo_file_id,
+            overlay_position=str(pending.get("editor_overlay_position") or "bottom_right"),
+        )
     if action == "image_editor_wait_image":
         remember_last_user_file(update)
         cache_recent_media_state(update)
@@ -66278,8 +66891,18 @@ async def handle_image_menu_pending_photo(update: Update, context: ContextTypes.
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail")
         if mode == "upscale":
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+        if mode in {"text", "logo"}:
+            origin_action = str(pending.get("editor_source") or ("editor_text_menu" if mode == "text" else "editor_logo_menu"))
+            back_callback = image_editor_origin_back_callback(origin_action, mode)
+            pending_action = "image_editor_text_position" if mode == "text" else "image_editor_logo_position"
+            set_image_menu_pending(uid, pending_action, **state, editor_source=origin_action, back_to=back_callback)
+            await update.message.reply_text(
+                image_editor_position_prompt(mode, lang),
+                reply_markup=image_editor_position_keyboard(mode, lang, f"editor_{mode}_pos", back_callback),
+            )
+            return True
         if mode == "overlay":
-            await update.message.reply_text("🔠 Chọn cách thêm chữ/logo. Bot chưa trừ Xu.", reply_markup=image_editor_overlay_keyboard(lang))
+            await update.message.reply_text("🔠 Chọn thêm chữ hoặc Logo/Watermark. Bot chưa trừ Xu.", reply_markup=image_editor_overlay_keyboard(lang))
             return True
         await update.message.reply_text("🎨 Chọn công thức màu local để xem preview.", reply_markup=image_editor_preset_keyboard(lang))
         return True
@@ -66362,7 +66985,14 @@ async def handle_image_menu_pending_document(update: Update, context: ContextTyp
     file_unique_id = str(getattr(document, "file_unique_id", "") or "")
     lang = get_user_language(uid) or "vi"
     if action == "image_editor_wait_logo":
-        return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", logo_file_id=file_id)
+        return await send_local_edited_image(
+            update,
+            context,
+            pending,
+            preset="photo_clear_detail",
+            logo_file_id=file_id,
+            overlay_position=str(pending.get("editor_overlay_position") or "bottom_right"),
+        )
     if action == "image_editor_wait_image":
         mode = str(pending.get("editor_mode") or "auto")
         state = {"file_id": file_id, "file_unique_id": file_unique_id, "source_name": file_name, "editor_mode": mode}
@@ -66371,8 +67001,18 @@ async def handle_image_menu_pending_document(update: Update, context: ContextTyp
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail")
         if mode == "upscale":
             return await send_local_edited_image(update, context, state, preset="photo_clear_detail", upscale=True)
+        if mode in {"text", "logo"}:
+            origin_action = str(pending.get("editor_source") or ("editor_text_menu" if mode == "text" else "editor_logo_menu"))
+            back_callback = image_editor_origin_back_callback(origin_action, mode)
+            pending_action = "image_editor_text_position" if mode == "text" else "image_editor_logo_position"
+            set_image_menu_pending(uid, pending_action, **state, editor_source=origin_action, back_to=back_callback)
+            await update.message.reply_text(
+                image_editor_position_prompt(mode, lang),
+                reply_markup=image_editor_position_keyboard(mode, lang, f"editor_{mode}_pos", back_callback),
+            )
+            return True
         if mode == "overlay":
-            await update.message.reply_text("🔠 Chọn cách thêm chữ/logo. Bot chưa trừ Xu.", reply_markup=image_editor_overlay_keyboard(lang))
+            await update.message.reply_text("🔠 Chọn thêm chữ hoặc Logo/Watermark. Bot chưa trừ Xu.", reply_markup=image_editor_overlay_keyboard(lang))
             return True
         await update.message.reply_text("🎨 Chọn công thức màu local để xem preview.", reply_markup=image_editor_preset_keyboard(lang))
         return True
@@ -88006,6 +88646,10 @@ QUICK_IMAGE_FLOW_STEPS = {
     "suggestions",
     "prepared_prompt",
     "custom_prompt",
+    "logo_choice",
+    "logo_input",
+    "logo_position",
+    "logo_confirm",
     "ratio",
     "tier",
     "confirm",
@@ -88033,12 +88677,20 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
         if key in {
             "prompt", "prompt_source", "selected_topic", "negative_prompt", "original_request",
             "image_purpose", "purpose_label", "style", "suggested_ratio", "text_logo_caution",
+            "logo_watermark_text",
         }:
-            payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:1400]
+            limit = 300 if key == "logo_watermark_text" else 1400
+            payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:limit]
         elif key in {"aspect_ratio", "tier", "confirm_token"}:
             payload[key] = str(value or "").strip()[:120]
+        elif key == "logo_watermark_position":
+            payload[key] = logo_watermark_normalize_position(value) if str(value or "").strip() else ""
         elif key in {"suggest_offset", "prompt_variant"}:
             payload[key] = max(0, _safe_int(value, 0))
+        elif key in {"logo_watermark_enabled", "logo_watermark_decided"}:
+            payload[key] = bool(value)
+        elif key == "logo_watermark_source":
+            payload[key] = str(value or "").strip()[:40]
     USER_PENDING[quick_image_flow_pending_key(user_id)] = payload
     return payload
 
@@ -88278,10 +88930,15 @@ def quick_image_custom_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
     ]])
 
 def quick_image_ratio_text(state: dict | None = None, lang: str = "vi") -> str:
-    prompt = shopaikey_safe_prompt_preview((state or {}).get("prompt") or "")
+    state = state or {}
+    prompt = shopaikey_safe_prompt_preview(state.get("prompt") or "")
+    logo = logo_watermark_clean_text(state.get("logo_watermark_text") if state.get("logo_watermark_enabled") else "")
+    logo_position = logo_watermark_position_label(state.get("logo_watermark_position") or "", lang)
+    logo_line_en = f"\nLogo / Watermark: <code>{html.escape(logo)}</code> ({html.escape(logo_position)})\n" if logo else ""
+    logo_line_vi = f"\nLogo / Watermark: <code>{html.escape(logo)}</code> ({html.escape(logo_position)})\n" if logo else ""
     if normalize_user_language(lang) != "vi":
-        return f"📐 <b>Choose aspect ratio</b>\n\nSelected prompt:\n<code>{html.escape(prompt)}</code>\n\nNo API call and no Xu charged."
-    return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nPrompt đã chọn:\n<code>{html.escape(prompt)}</code>\n\nBạn muốn tạo theo tỉ lệ nào?\nBot chưa gọi API và chưa trừ Xu."
+        return f"📐 <b>Choose aspect ratio</b>\n\nSelected prompt:\n<code>{html.escape(prompt)}</code>{logo_line_en}\nNo API call and no Xu charged."
+    return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nPrompt đã chọn:\n<code>{html.escape(prompt)}</code>{logo_line_vi}\nBạn muốn tạo theo tỉ lệ nào?\nBot chưa gọi API và chưa trừ Xu."
 
 def quick_image_ratio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     rows = []
@@ -88304,10 +88961,15 @@ def quick_image_tier_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     prompt = shopaikey_safe_prompt_preview(state.get("prompt") or "")
     aspect = normalize_media_aspect_ratio(state.get("aspect_ratio"), "1:1", "image")
+    logo = logo_watermark_clean_text(state.get("logo_watermark_text") if state.get("logo_watermark_enabled") else "")
+    logo_position = logo_watermark_position_label(state.get("logo_watermark_position") or "", lang)
+    logo_line_en = f"Logo / Watermark: <code>{html.escape(logo)}</code> ({html.escape(logo_position)})\n" if logo else ""
+    logo_line_vi = f"Logo / Watermark: <code>{html.escape(logo)}</code> ({html.escape(logo_position)})\n" if logo else ""
     if normalize_user_language(lang) != "vi":
         return (
             "🖼 <b>Choose image quality</b>\n\n"
             f"Prompt: <code>{html.escape(prompt)}</code>\n"
+            f"{logo_line_en}"
             f"Aspect ratio: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>\n\n"
             "Choose a tier below. Warranty tiers include one retry for the same request; other tiers do not include a free retry. "
             "Xu is charged only after final confirmation."
@@ -88315,6 +88977,7 @@ def quick_image_tier_text(state: dict | None = None, lang: str = "vi") -> str:
     return (
         "🖼 <b>Bạn muốn tạo ảnh chất lượng nào?</b>\n\n"
         f"Prompt: <code>{html.escape(prompt)}</code>\n"
+        f"{logo_line_vi}"
         f"Tỉ lệ: <b>{html.escape(media_aspect_ratio_label(aspect, 'image', lang))}</b>\n\n"
         "Chọn tier ảnh bên dưới. Gói có BH kèm 1 lần tạo lại trong cùng yêu cầu; gói thường không kèm tạo lại miễn phí.\n"
         "Xu chỉ được trừ sau bước xác nhận cuối."
@@ -88356,14 +89019,37 @@ def public_image_prompt_request_text(tier: str, lang: str = "vi") -> str:
 def media_aspect_pending_key(user_id) -> str:
     return f"media_aspect:{user_id}"
 
-def set_media_aspect_pending(user_id, job_type: str, tier: str, prompt: str, package: dict | None = None) -> None:
+def set_media_aspect_pending(
+    user_id,
+    job_type: str,
+    tier: str,
+    prompt: str,
+    package: dict | None = None,
+    logo_watermark_enabled: bool = False,
+    logo_watermark_text: str = "",
+    logo_watermark_position: str = "",
+    selected_aspect_ratio: str = "",
+    logo_watermark_back_callback: str = "",
+    confirmation_source: str = "",
+) -> None:
     normalized_job_type = "image" if str(job_type or "").lower() == "image" else "video"
+    logo_fields = logo_watermark_session_fields(logo_watermark_enabled, logo_watermark_text, logo_watermark_position)
     USER_PENDING[media_aspect_pending_key(user_id)] = {
         "pending_action": "media_aspect",
         "job_type": normalized_job_type,
         "tier": normalize_image_tier(tier) if normalized_job_type == "image" else normalize_video_tier(tier),
         "prompt": re.sub(r"\s+", " ", str(prompt or "").strip())[:1400],
         "package": package or {},
+        **logo_fields,
+        "logo_watermark_decided": bool(logo_fields["logo_watermark_enabled"]),
+        "logo_watermark_step": "",
+        "selected_aspect_ratio": (
+            normalize_media_aspect_ratio(selected_aspect_ratio, "", normalized_job_type)
+            if str(selected_aspect_ratio or "").strip()
+            else ""
+        ),
+        "logo_watermark_back_callback": str(logo_watermark_back_callback or "").strip()[:80],
+        "confirmation_source": str(confirmation_source or "").strip()[:80],
         "created_at_ts": time.time(),
     }
 
@@ -88384,16 +89070,263 @@ def get_media_aspect_pending(user_id, job_type: str = "") -> dict | None:
 def clear_media_aspect_pending(user_id) -> bool:
     return USER_PENDING.pop(media_aspect_pending_key(user_id), None) is not None
 
+def update_media_aspect_pending(user_id, **fields) -> dict:
+    key = media_aspect_pending_key(user_id)
+    pending = dict(USER_PENDING.get(key) or {})
+    if pending.get("pending_action") != "media_aspect":
+        return {}
+    for name, value in fields.items():
+        if name in {"logo_watermark_enabled", "logo_watermark_decided"}:
+            pending[name] = bool(value)
+        elif name in {"logo_watermark_text"}:
+            pending[name] = logo_watermark_clean_text(value)
+        elif name in {"logo_watermark_position"}:
+            pending[name] = logo_watermark_normalize_position(value) if str(value or "").strip() else ""
+        elif name in {"logo_watermark_source", "logo_watermark_step"}:
+            pending[name] = str(value or "").strip()[:40]
+        elif name in {"logo_watermark_back_callback", "confirmation_source"}:
+            pending[name] = str(value or "").strip()[:80]
+        elif name == "selected_aspect_ratio":
+            pending[name] = (
+                normalize_media_aspect_ratio(value, "", pending.get("job_type") or "image")
+                if str(value or "").strip()
+                else ""
+            )
+        else:
+            pending[name] = value
+    pending["created_at_ts"] = time.time()
+    USER_PENDING[key] = pending
+    return pending
+
+def media_logo_watermark_choice_text(kind: str = "image", prompt: str = "", lang: str = "vi") -> str:
+    is_video = str(kind or "").lower() == "video"
+    prompt_preview = shopaikey_safe_prompt_preview(prompt)
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        target = "视频" if is_video else "图片"
+        return (
+            "🎭 <b>Logo / Watermark</b>\n\n"
+            f"已选择的{target}提示词：\n<code>{html.escape(prompt_preview)}</code>\n\n"
+            "是否添加 Logo / Watermark？\n"
+            "此步骤只保存选择，尚未开始处理，也未扣除 Xu。"
+        )
+    if lang == "en":
+        target = "video" if is_video else "image"
+        return (
+            "🎭 <b>Logo / Watermark</b>\n\n"
+            f"Selected {target} prompt:\n<code>{html.escape(prompt_preview)}</code>\n\n"
+            "Do you want to add a Logo / Watermark?\n"
+            "This only saves your choice. Processing has not started and no Xu was charged."
+        )
+    target = "video" if is_video else "ảnh"
+    return (
+        "🎭 <b>Logo / Watermark</b>\n\n"
+        f"Prompt {target} đã chọn:\n<code>{html.escape(prompt_preview)}</code>\n\n"
+        "Bạn có muốn gắn Logo / Watermark không?\n"
+        "Bước này chỉ lưu lựa chọn, TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
+    )
+
+def media_logo_watermark_choice_keyboard(kind: str = "image", lang: str = "vi", back_callback: str = "") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    is_vi = lang == "vi"
+    add_label = "🎭 添加 Logo/Watermark" if lang == "zh" else "🎭 Gắn Logo/Watermark" if is_vi else "🎭 Add Logo/Watermark"
+    skip_label = "⏭ 跳过" if lang == "zh" else "⏭ Bỏ qua" if is_vi else "⏭ Skip"
+    kind_norm = "image" if str(kind or "").lower() == "image" else "video"
+    prefix = "image_logo" if kind_norm == "image" else "video_logo"
+    back = back_callback or ("create_media|quick_image" if kind_norm == "image" else "create_media|quick_video")
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(add_label, callback_data=f"create_media|{prefix}_add"),
+            InlineKeyboardButton(skip_label, callback_data=f"create_media|{prefix}_skip"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def quick_image_logo_choice_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    return media_logo_watermark_choice_text("image", state.get("prompt") or "", lang)
+
+def quick_image_logo_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    is_vi = lang == "vi"
+    add_label = "🎭 添加 Logo/Watermark" if lang == "zh" else "🎭 Gắn Logo/Watermark" if is_vi else "🎭 Add Logo/Watermark"
+    skip_label = "⏭ 跳过" if lang == "zh" else "⏭ Bỏ qua" if is_vi else "⏭ Skip"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(add_label, callback_data="create_media|qi_logo_add"),
+            InlineKeyboardButton(skip_label, callback_data="create_media|qi_logo_skip"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_prompt"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def quick_image_logo_input_text(lang: str = "vi") -> str:
+    return media_logo_watermark_input_text("image", lang)
+
+def quick_image_logo_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_logo_choice"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+def quick_image_logo_position_text(state: dict | None = None, lang: str = "vi") -> str:
+    return media_logo_watermark_position_text((state or {}).get("logo_watermark_text") or "", lang)
+
+def quick_image_logo_position_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return media_logo_watermark_position_keyboard("image", lang, "qi_logo_pos", "create_media|qi_logo_add")
+
+def quick_image_logo_confirm_text(state: dict | None = None, lang: str = "vi") -> str:
+    state = state or {}
+    return media_logo_watermark_confirm_text(state.get("logo_watermark_text") or "", lang, state.get("logo_watermark_position") or "")
+
+def quick_image_logo_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data="create_media|qi_logo_confirm"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_logo_add"),
+    ]])
+
+def media_logo_watermark_input_text(kind: str = "image", lang: str = "vi") -> str:
+    is_video = str(kind or "").lower() == "video"
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        target = "视频" if is_video else "图片"
+        return (
+            "🎭 <b>Logo / Watermark</b>\n\n"
+            f"请输入要添加到{target}的 Logo 或 Watermark 内容。\n\n"
+            "示例：\n"
+            "- TOAN AAS\n"
+            "- @toanaasbot\n"
+            "- 官方商店\n"
+            "- 品牌文字标识"
+        )
+    if lang == "en":
+        target = " for the video" if is_video else ""
+        return (
+            "🎭 <b>Logo / Watermark</b>\n\n"
+            f"Please enter the logo or watermark you want{target}.\n\n"
+            "Examples:\n"
+            "- TOAN AAS\n"
+            "- @toanaasbot\n"
+            "- Official store\n"
+            "- Brand logo text"
+        )
+    target = " cho video" if is_video else ""
+    return (
+        "🎭 <b>Logo / Watermark</b>\n\n"
+        f"Vui lòng nhập logo hoặc watermark mong muốn{target}.\n\n"
+        "Ví dụ:\n"
+        "- TOAN AAS\n"
+        "- TOAN AAS OFFICIAL\n"
+        "- @toanaasbot\n"
+        "- Logo chữ thương hiệu"
+    )
+
+def media_logo_watermark_input_keyboard(kind: str = "image", lang: str = "vi") -> InlineKeyboardMarkup:
+    kind_norm = "image" if str(kind or "").lower() == "image" else "video"
+    prefix = "image_logo" if kind_norm == "image" else "video_logo"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=f"create_media|{prefix}_choice"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+def media_logo_watermark_position_text(text: str = "", lang: str = "vi") -> str:
+    clean = logo_watermark_clean_text(text)
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return (
+            "🎭 <b>选择 Logo / Watermark 位置</b>\n\n"
+            f"内容：\n<code>{html.escape(clean)}</code>\n\n"
+            "请选择放置位置。TOAN AAS 尚未开始处理，也未扣除 Xu。"
+        )
+    if lang == "en":
+        return (
+            "🎭 <b>Logo / Watermark position</b>\n\n"
+            f"Content:\n<code>{html.escape(clean)}</code>\n\n"
+            "Choose where TOAN AAS should place it. Processing has not started and no Xu was charged."
+        )
+    return (
+        "🎭 <b>Chọn vị trí Logo / Watermark</b>\n\n"
+        f"Nội dung:\n<code>{html.escape(clean)}</code>\n\n"
+        "Bạn muốn đặt Logo / Watermark ở đâu? TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
+    )
+
+def media_logo_watermark_position_keyboard(kind: str = "image", lang: str = "vi", action_prefix: str = "image_logo_pos", back_callback: str = "") -> InlineKeyboardMarkup:
+    kind_norm = "image" if str(kind or "").lower() == "image" else "video"
+    default_back = f"create_media|{'image_logo_add' if kind_norm == 'image' else 'video_logo_add'}"
+    back = back_callback or default_back
+    rows = [
+        [
+            InlineKeyboardButton("↖️ " + logo_watermark_position_label("top_left", lang), callback_data=f"create_media|{action_prefix}|top_left"),
+            InlineKeyboardButton("⬆️ " + logo_watermark_position_label("top_center", lang), callback_data=f"create_media|{action_prefix}|top_center"),
+        ],
+        [
+            InlineKeyboardButton("↗️ " + logo_watermark_position_label("top_right", lang), callback_data=f"create_media|{action_prefix}|top_right"),
+            InlineKeyboardButton("⬅️ " + logo_watermark_position_label("center_left", lang), callback_data=f"create_media|{action_prefix}|center_left"),
+        ],
+        [
+            InlineKeyboardButton("⏺ " + logo_watermark_position_label("center", lang), callback_data=f"create_media|{action_prefix}|center"),
+            InlineKeyboardButton("➡️ " + logo_watermark_position_label("center_right", lang), callback_data=f"create_media|{action_prefix}|center_right"),
+        ],
+        [
+            InlineKeyboardButton("↙️ " + logo_watermark_position_label("bottom_left", lang), callback_data=f"create_media|{action_prefix}|bottom_left"),
+            InlineKeyboardButton("⬇️ " + logo_watermark_position_label("bottom_center", lang), callback_data=f"create_media|{action_prefix}|bottom_center"),
+        ],
+        [InlineKeyboardButton("↘️ " + logo_watermark_position_label("bottom_right", lang), callback_data=f"create_media|{action_prefix}|bottom_right")],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+def media_logo_watermark_confirm_text(text: str = "", lang: str = "vi", position: str = "") -> str:
+    clean = logo_watermark_clean_text(text)
+    position_label = logo_watermark_position_label(position, lang)
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return (
+            "🎭 <b>Logo / Watermark</b>\n\n"
+            f"内容：\n<code>{html.escape(clean)}</code>\n\n"
+            f"位置：<b>{html.escape(position_label)}</b>\n\n"
+            "确认使用此 Logo / Watermark？"
+        )
+    if lang == "en":
+        return (
+            "🎭 <b>Logo / Watermark</b>\n\n"
+            f"Content:\n<code>{html.escape(clean)}</code>\n\n"
+            f"Position: <b>{html.escape(position_label)}</b>\n\n"
+            "Confirm this Logo / Watermark choice?"
+        )
+    return (
+        "🎭 <b>Logo / Watermark</b>\n\n"
+        f"Nội dung:\n<code>{html.escape(clean)}</code>\n\n"
+        f"Vị trí: <b>{html.escape(position_label)}</b>\n\n"
+        "Xác nhận dùng Logo / Watermark này?"
+    )
+
+def media_logo_watermark_confirm_keyboard(kind: str = "image", lang: str = "vi") -> InlineKeyboardMarkup:
+    kind_norm = "image" if str(kind or "").lower() == "image" else "video"
+    prefix = "image_logo" if kind_norm == "image" else "video_logo"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=f"create_media|{prefix}_confirm"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=f"create_media|{prefix}_add"),
+    ]])
+
 def public_media_aspect_ratio_text(kind: str, tier: str, prompt: str = "", lang: str = "vi") -> str:
     kind_norm = "image" if str(kind or "").lower() == "image" else "video"
     label = localized_image_tier_label(tier, lang) if kind_norm == "image" else localized_video_tier_label(tier, lang)
     if normalize_user_language(lang) == "zh":
-        return f"📐 <b>选择画面比例</b>\n\n套餐：<b>{html.escape(label)}</b>\nPrompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\n请选择比例。Bot 尚未调用 API，也未扣除 Xu。"
+        return f"📐 <b>选择画面比例</b>\n\n套餐：<b>{html.escape(label)}</b>\n提示词：<code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n可选比例：<b>9:16 / 16:9 / 1:1 / 4:5</b>\n\n请选择比例。TOAN AAS 尚未开始处理，也未扣除 Xu。"
     if normalize_user_language(lang) != "vi":
-        return f"📐 <b>Choose aspect ratio</b>\n\nTier: <b>{html.escape(label)}</b>\nPrompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\nChoose an aspect ratio. The bot has not called any API and has not charged Xu."
-    return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nGói: <b>{html.escape(label)}</b>\nPrompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\n\nBạn muốn tạo theo tỉ lệ nào? Bot chưa gọi API và chưa trừ Xu."
+        return f"📐 <b>Choose aspect ratio</b>\n\nPackage: <b>{html.escape(label)}</b>\nPrompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\nAvailable ratios: <b>9:16 / 16:9 / 1:1 / 4:5</b>\n\nChoose an aspect ratio. Processing has not started and no Xu was charged."
+    return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nGói: <b>{html.escape(label)}</b>\nPrompt: <code>{html.escape(shopaikey_safe_prompt_preview(prompt))}</code>\nTỉ lệ có thể chọn: <b>9:16 / 16:9 / 1:1 / 4:5</b>\n\nBạn muốn tạo theo tỉ lệ nào? TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
 
-def public_media_aspect_ratio_keyboard(kind: str, lang: str = "vi") -> InlineKeyboardMarkup:
+def public_media_aspect_ratio_keyboard(kind: str, lang: str = "vi", back_callback: str = "") -> InlineKeyboardMarkup:
     kind_norm = "image" if str(kind or "").lower() == "image" else "video"
     rows = []
     options = media_aspect_ratio_options(kind_norm)
@@ -88403,7 +89336,8 @@ def public_media_aspect_ratio_keyboard(kind: str, lang: str = "vi") -> InlineKey
             label = media_aspect_ratio_label(aspect, kind_norm, lang)
             row.append(InlineKeyboardButton(label, callback_data=f"create_media|{kind_norm}_aspect_{media_aspect_ratio_token(aspect)}"))
         rows.append(row)
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|quick_image" if kind_norm == "image" else "create_media|quick_video")])
+    back = back_callback or ("create_media|quick_image" if kind_norm == "image" else "create_media|quick_video")
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back)])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -88434,7 +89368,7 @@ def shopaikey_confirm_keyboard(job_type: str, token: str, tier: str, lang: str =
     ]
     return InlineKeyboardMarkup(rows)
 
-def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi", aspect_ratio: str = "") -> str:
+def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, lang: str = "vi", aspect_ratio: str = "", logo_watermark_text: str = "", logo_watermark_position: str = "") -> str:
     payload = image_tier_payload(tier)
     cost = int(payload.get("cost") or 0)
     text = with_aspect_line(ui_text(
@@ -88446,6 +89380,11 @@ def public_image_confirm_text(tier: str, prompt: str, current_credits: int = 0, 
         warranty_note=html.escape(image_tier_warranty_note(tier, lang)),
         prompt=html.escape(shopaikey_safe_prompt_preview(prompt)),
     ), aspect_ratio, lang, "image")
+    logo = logo_watermark_clean_text(logo_watermark_text)
+    if logo:
+        position = logo_watermark_position_label(logo_watermark_position, lang)
+        line = f"• Logo / Watermark: <b>{html.escape(logo)}</b> ({html.escape(position)})"
+        text = text.replace("• Prompt:", f"{line}\n• Prompt:", 1) if "• Prompt:" in text else f"{text}\n{line}"
     quality_label = "Quality control" if normalize_user_language(lang) != "vi" else "Kiểm soát chất lượng"
     return f"{text}\n\n<b>{quality_label}:</b> {html.escape(image_tier_quality_note(tier, lang))}"
 
@@ -88815,6 +89754,10 @@ def video_finalization_defaults() -> dict:
         "translation_enabled": False,
         "music_item_count": 0,
         "subtitle_dub_enabled": False,
+        "logo_watermark_enabled": False,
+        "logo_watermark_text": "",
+        "logo_watermark_position": "",
+        "logo_watermark_source": "",
         "finalization_confirmed": False,
         "scene_voice_map": [],
         "narration_segments": [],
@@ -88949,6 +89892,11 @@ def video_finalization_payload(state: dict | None = None) -> dict:
         "voice_file_id": str(finalization.get("voice_file_id") or "")[:220],
         "subtitle_dub_choice": subtitle_dub_choice,
         "subtitle_text": str(finalization.get("subtitle_text") or "")[:3000],
+        **logo_watermark_session_fields(
+            bool(finalization.get("logo_watermark_enabled")),
+            str(finalization.get("logo_watermark_text") or ""),
+            str(finalization.get("logo_watermark_position") or ""),
+        ),
     })
     payload["video_project"] = build_video_project(
         state.get("user_id") or state.get("owner_user_id") or "",
@@ -89061,7 +90009,35 @@ def video_finalization_source_label(source: str, lang: str = "vi") -> str:
         "cinematic_ad": "Cinematic advertising concept",
         "frame": "Image slideshow video",
     }
-    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(key, key.replace("_", " ").title())
+    labels_zh = {
+        "video_trend": "趋势视频",
+        "video_idea": "视频创意",
+        "storyboard_prompt": "分镜与提示词",
+        "script_image_video": "脚本 → 图片 → 视频",
+        "video_ai_real": "AI 视频",
+        "image_to_video": "图片 → 视频",
+        "frame_video_local": "图片合成视频",
+        "self_shot_scene_change": "自拍与场景转换",
+        "multi_scene_film": "多场景影片",
+        "motion_prompt": "运动提示词",
+        "video_reference": "参考视频",
+        "audio_addons": "音乐、配音与音效",
+        "video_local_edit": "视频编辑",
+        "videoidea": "广告或电影创意",
+        "longvideo": "长视频方案",
+        "storypack": "电影分镜提示词包",
+        "trend": "趋势视频",
+        "storyboard": "分镜 → 图片 → 视频",
+        "promptvideo": "提示词 → AI 视频",
+        "imagevideo": "图片 → AI 视频",
+        "videoref": "参考视频 → AI 视频",
+        "selfscene": "自拍与场景转换",
+        "cinematic_ad": "电影感广告创意",
+        "frame": "图片合成视频",
+    }
+    lang = normalize_user_language(lang) or "vi"
+    labels = labels_vi if lang == "vi" else labels_zh if lang == "zh" else labels_en
+    return labels.get(key, key.replace("_", " ").title())
 
 def is_music_mux_ready() -> bool:
     return bool(VIDEO_MUSIC_MUX_ENABLED and frame_video_worker_connected())
@@ -89180,12 +90156,22 @@ def video_finalization_menu_text(state: dict | None = None, lang: str = "vi") ->
     state = state or {}
     source = state.get("source_label") or video_finalization_source_label(state.get("source"), lang)
     aspect = video_finalization_aspect_display(state, lang)
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return (
+            "🎛 <b>视频完善工具</b>\n\n"
+            f"来源：<b>{html.escape(str(source))}</b>\n\n"
+            f"画面比例：<b>{html.escape(str(aspect))}</b>\n\n"
+            "请选择配音、音乐、字幕、Logo/Watermark，或选择不添加。"
+            "下一步依次为套餐、带价格的场景数量和最终账单。\n\n"
+            "此页面只保存选择，尚未处理视频，也未扣除 Xu。"
+        )
+    if lang == "en":
         return (
             "🎛 <b>Video finishing tools</b>\n\n"
             f"Source: <b>{html.escape(str(source))}</b>\n\n"
             f"Aspect ratio: <b>{html.escape(str(aspect))}</b>\n\n"
-            "Choose voice/dubbing, music or subtitles for this video draft, or choose None. "
+            "Choose voice/dubbing, music, subtitles or Logo/Watermark for this video draft, or choose None. "
             "The next step is package selection, then priced scene count and the final invoice.\n\n"
             "The current source file, duration, package draft and video direction stay in the same video order. "
             "No processing starts and no Xu is charged here."
@@ -89194,28 +90180,88 @@ def video_finalization_menu_text(state: dict | None = None, lang: str = "vi") ->
         "🎛 <b>Công cụ hoàn thiện video</b>\n\n"
         f"Nguồn: <b>{html.escape(str(source))}</b>\n\n"
         f"Tỉ lệ khung hình: <b>{html.escape(str(aspect))}</b>\n\n"
-        "Chọn giọng/lồng tiếng, nhạc, phụ đề cho draft video hiện tại, hoặc chọn Không thêm. "
+        "Chọn giọng/lồng tiếng, nhạc, phụ đề hoặc Logo/Watermark cho draft video hiện tại, hoặc chọn Không thêm. "
         "Bước kế tiếp là chọn gói, chọn số cảnh có giá, rồi xem hóa đơn cuối.\n\n"
         "TOAN AAS giữ nguyên file nguồn, thời lượng, hướng dựng và các lựa chọn add-on trong cùng đơn video. "
         "Màn này chưa xử lý video và chưa trừ Xu."
     )
 
 def video_finalization_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    is_vi = lang == "vi"
+    voice_label = "🎙 配音" if lang == "zh" else "🎙 Giọng/lồng tiếng" if is_vi else "🎙 Voice/dubbing"
+    music_label = "🎵 音乐" if lang == "zh" else "🎵 Nhạc" if is_vi else "🎵 Music"
+    subtitle_label = "📝 字幕" if lang == "zh" else "📝 Phụ đề" if is_vi else "📝 Subtitles"
+    none_label = "🚫 不添加" if lang == "zh" else "🚫 Không thêm" if is_vi else "🚫 None"
+    back_label = "⬅️ 返回" if lang == "zh" else "⬅️ Quay lại" if is_vi else "⬅️ Back"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🎙 Giọng/lồng tiếng" if is_vi else "🎙 Voice/dubbing", callback_data="vfinal|voice"),
-            InlineKeyboardButton("🎵 Nhạc" if is_vi else "🎵 Music", callback_data="vfinal|music"),
+            InlineKeyboardButton(voice_label, callback_data="vfinal|voice"),
+            InlineKeyboardButton(music_label, callback_data="vfinal|music"),
         ],
         [
-            InlineKeyboardButton("📝 Phụ đề" if is_vi else "📝 Subtitles", callback_data="vfinal|addon"),
-            InlineKeyboardButton("🚫 Không thêm" if is_vi else "🚫 None", callback_data="vfinal|skip"),
+            InlineKeyboardButton(subtitle_label, callback_data="vfinal|addon"),
+            InlineKeyboardButton("🎭 Logo / Watermark", callback_data="vfinal|logo"),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
+            InlineKeyboardButton(none_label, callback_data="vfinal|skip"),
+        ],
+        [
+            InlineKeyboardButton(back_label, callback_data="vfinal|back"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
         ],
     ])
+
+def video_finalization_logo_input_text(lang: str = "vi") -> str:
+    return media_logo_watermark_input_text("video", lang)
+
+def video_finalization_logo_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|menu"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+    ]])
+
+def video_finalization_logo_position_text(state: dict | None = None, lang: str = "vi") -> str:
+    finalization = video_finalization_defaults()
+    finalization.update(dict((state or {}).get("video_finalization") or {}))
+    return media_logo_watermark_position_text(finalization.get("logo_watermark_text") or "", lang)
+
+def video_finalization_logo_position_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton("↖️ " + logo_watermark_position_label("top_left", lang), callback_data="vfinal|logo_pos|top_left"),
+            InlineKeyboardButton("⬆️ " + logo_watermark_position_label("top_center", lang), callback_data="vfinal|logo_pos|top_center"),
+        ],
+        [
+            InlineKeyboardButton("↗️ " + logo_watermark_position_label("top_right", lang), callback_data="vfinal|logo_pos|top_right"),
+            InlineKeyboardButton("⬅️ " + logo_watermark_position_label("center_left", lang), callback_data="vfinal|logo_pos|center_left"),
+        ],
+        [
+            InlineKeyboardButton("⏺ " + logo_watermark_position_label("center", lang), callback_data="vfinal|logo_pos|center"),
+            InlineKeyboardButton("➡️ " + logo_watermark_position_label("center_right", lang), callback_data="vfinal|logo_pos|center_right"),
+        ],
+        [
+            InlineKeyboardButton("↙️ " + logo_watermark_position_label("bottom_left", lang), callback_data="vfinal|logo_pos|bottom_left"),
+            InlineKeyboardButton("⬇️ " + logo_watermark_position_label("bottom_center", lang), callback_data="vfinal|logo_pos|bottom_center"),
+        ],
+        [InlineKeyboardButton("↘️ " + logo_watermark_position_label("bottom_right", lang), callback_data="vfinal|logo_pos|bottom_right")],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|logo"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+        ],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+def video_finalization_logo_confirm_text(state: dict | None = None, lang: str = "vi") -> str:
+    finalization = video_finalization_defaults()
+    finalization.update(dict((state or {}).get("video_finalization") or {}))
+    return media_logo_watermark_confirm_text(finalization.get("logo_watermark_text") or "", lang, finalization.get("logo_watermark_position") or "")
+
+def video_finalization_logo_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data="vfinal|logo_confirm"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|logo"),
+    ]])
 
 def video_finalization_selected_aspect(state: dict | None = None) -> str:
     state = dict(state or {})
@@ -89331,7 +90377,8 @@ def video_finalization_needs_aspect_choice(state: dict | None = None) -> bool:
 def video_finalization_aspect_display(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
     if state.get("source_media_aspect_defaulted") and str(state.get("aspect_source") or "") == "source_media":
-        return "Theo tỉ lệ nguồn" if normalize_user_language(lang) == "vi" else "Source aspect"
+        lang = normalize_user_language(lang) or "vi"
+        return "Theo tỉ lệ nguồn" if lang == "vi" else "使用原始比例" if lang == "zh" else "Source aspect"
     return video_finalization_selected_aspect(state)
 
 def video_finalization_apply_aspect(state: dict | None = None, aspect_ratio: str = "", source: str = "user_selected") -> dict:
@@ -89688,9 +90735,25 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
     finalization.update(dict(state.get("video_finalization") or {}))
     source = state.get("source_label") or video_finalization_source_label(state.get("source"), lang)
     has_prompt = video_finalization_has_prompt(state)
-    yes = "Có" if normalize_user_language(lang) == "vi" else "Yes"
-    no = "Không" if normalize_user_language(lang) == "vi" else "No"
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    yes = "Có" if lang == "vi" else "有" if lang == "zh" else "Yes"
+    no = "Không" if lang == "vi" else "无" if lang == "zh" else "No"
+    if lang == "zh":
+        return (
+            "🎬 <b>选择 AI 视频套餐</b>\n\n"
+            f"来源：<b>{html.escape(str(source))}</b>\n"
+            f"视频提示词：<b>{yes if has_prompt else no}</b>\n"
+            f"脚本：<b>{yes if state.get('has_script') else no}</b>\n"
+            f"图片/场景：<b>{yes if developing_video_frame_photos(state) else no}</b>\n"
+            f"音乐：<b>{yes if finalization['music_enabled'] else no}</b>\n"
+            f"配音：<b>{yes if finalization['voice_enabled'] else no}</b>\n"
+            f"字幕：<b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
+            "请选择套餐：\n"
+            + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
+            + "\n\n选择套餐后，请选择场景数量。TOAN AAS 会显示价格公式、总 Xu 和最终账单。\n\n"
+            "确认最终账单前不会开始处理，也不会扣除 Xu。"
+        )
+    if lang == "en":
         return (
             "🎬 <b>Choose AI video export package</b>\n\n"
             f"Source: <b>{html.escape(str(source))}</b>\n"
@@ -89714,7 +90777,7 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
         f"Kịch bản: <b>{yes if state.get('has_script') else no}</b>\n"
         f"Ảnh/cảnh: <b>{yes if developing_video_frame_photos(state) else no}</b>\n"
         f"Nhạc: <b>{yes if finalization['music_enabled'] else no}</b>\n"
-        f"Voice/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
+        f"Giọng/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>\n"
         f"Phụ đề: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n\n"
         "Chọn gói phù hợp:\n"
         + "\n".join(video_tier_price_line(tier, lang) for tier in VIDEO_PUBLIC_TIER_UI_ORDER)
@@ -89725,14 +90788,16 @@ def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") ->
     )
 
 def video_finalization_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    is_vi = lang == "vi"
     def label(tier: str) -> str:
         return video_tier_button_text(tier, lang)
     buttons = [
         InlineKeyboardButton(label(tier), callback_data=f"vfinal|tier|{tier}")
         for tier in VIDEO_PUBLIC_TIER_UI_ORDER
     ]
-    buttons.append(InlineKeyboardButton("⚙️ Tính năng khác" if is_vi else "⚙️ Options", callback_data="vfinal|menu"))
+    options_label = "⚙️ Tính năng khác" if is_vi else "⚙️ 其他选项" if lang == "zh" else "⚙️ Options"
+    buttons.append(InlineKeyboardButton(options_label, callback_data="vfinal|menu"))
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([
         InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|back"),
@@ -89749,7 +90814,14 @@ def video_scene_count_price_line(tier: str, scene_count, lang: str = "vi", html_
     effective_each = int(round(base * percent / 100.0))
     total = calculate_scene_video_price(base, count)
     total_text = f"<b>{xu_number(total)} Xu</b>" if html_bold_total else f"{xu_number(total)} Xu"
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return (
+            f"• {count} 个场景 ≈ {seconds} 秒 - "
+            f"{xu_number(base)} × {percent}% = 每个场景 {xu_number(effective_each)} Xu；"
+            f"{xu_number(effective_each)} × {count} = {total_text}"
+        )
+    if lang == "en":
         return (
             f"• {count} scene{'s' if count != 1 else ''} ≈ {seconds}s - "
             f"{xu_number(base)} × {percent}% = {xu_number(effective_each)} Xu/scene; "
@@ -89766,15 +90838,29 @@ def video_scene_count_option_label(tier: str, scene_count, lang: str = "vi") -> 
     count = max(1, min(20, safe_int(scene_count, 1)))
     seconds = count * TASK3D_SCENE_SECONDS
     total = calculate_scene_video_price(video_tier_cost_xu(tier), count)
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return f"{count} 个场景 ≈ {seconds} 秒 = {xu_number(total)} Xu"
+    if lang == "en":
         return f"{count} scene{'s' if count != 1 else ''} ≈ {seconds}s = {xu_number(total)} Xu"
     return f"{count} cảnh ≈ {seconds}s = {xu_number(total)} Xu"
 
 def video_finalization_scene_count_text(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
+    lang = normalize_user_language(lang) or "vi"
     tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
     if tier == "low":
-        if normalize_user_language(lang) != "vi":
+        if lang == "zh":
+            return (
+                "🎞 <b>200 Xu 套餐 - 体验视频</b>\n\n"
+                "200 Xu 套餐仅用于快速体验：\n"
+                "• 1 个场景\n"
+                "• 约 6 秒\n"
+                "• 不含附加工具\n"
+                "• 总价固定为 200 Xu\n\n"
+                "如需 3 个场景/18 秒、音乐、配音、字幕或高级选项，请选择 300 Xu 或以上套餐。"
+            )
+        if lang == "en":
             return (
                 "🎞 <b>200 Xu package - starter video</b>\n\n"
                 "The 200 Xu package is only for a quick experience:\n"
@@ -89786,16 +90872,27 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
             )
         return (
             "🎞 <b>Gói 200 — Video trải nghiệm</b>\n\n"
-            "Gói 200 chỉ dùng để test nhanh:\n"
+            "Gói 200 chỉ dùng để trải nghiệm nhanh:\n"
             "• 1 cảnh\n"
             "• khoảng 6 giây\n"
-            "• không add-on\n"
+            "• không công cụ bổ sung\n"
             "• tổng giữ nguyên 200 Xu\n\n"
             "Nếu muốn 3 cảnh/18 giây, nhạc, voice, phụ đề hoặc tính năng nâng cao, vui lòng chọn gói 300 Xu trở lên."
         )
     package_base_xu = video_tier_cost_xu(tier)
     price_lines = "\n".join(video_scene_count_price_line(tier, count, lang) for count in TASK3D_SCENE_COUNT_OPTIONS)
-    if normalize_user_language(lang) != "vi":
+    if lang == "zh":
+        return (
+            "🎞 <b>选择视频场景数量</b>\n\n"
+            f"已选套餐：<b>每个场景 {xu_number(package_base_xu)} Xu</b>\n\n"
+            "TOAN AAS 当前按场景/片段估算视频。\n"
+            "每个场景约 6 秒。\n\n"
+            "<b>按场景数量计价</b>\n"
+            f"{price_lines}\n\n"
+            "请选择符合需求的场景数量。下一步是最终账单。\n"
+            "确认账单前不会处理视频，也不会扣除 Xu。"
+        )
+    if lang == "en":
         return (
             "🎞 <b>Choose video scene count</b>\n\n"
             f"Selected package: <b>{xu_number(package_base_xu)} Xu per scene</b>\n\n"
@@ -89812,19 +90909,21 @@ def video_finalization_scene_count_text(state: dict | None = None, lang: str = "
         "1 cảnh khoảng 6 giây.\n\n"
         "<b>Bảng giá theo số cảnh</b>\n"
         f"{price_lines}\n\n"
-        "Chọn số cảnh đúng nhu cầu. Bước kế tiếp là hóa đơn cuối."
+        "Chọn số cảnh đúng nhu cầu. Bước kế tiếp là hóa đơn cuối.\n"
+        "TOAN AAS chưa xử lý video và chưa trừ Xu trước khi bạn xác nhận hóa đơn."
     )
 
 def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
     state = dict(state or {})
-    is_vi = normalize_user_language(lang) == "vi"
+    lang = normalize_user_language(lang) or "vi"
+    is_vi = lang == "vi"
     tier = normalize_video_tier(state.get("selected_video_tier") or state.get("video_tier") or "low")
     if tier == "low":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(video_scene_count_option_label(tier, 1, lang), callback_data="vfinal|scene_count|1")],
             [
-                InlineKeyboardButton("🔷 Nâng lên 300 Xu" if is_vi else "🔷 Upgrade to 300 Xu", callback_data="vfinal|upgrade_300"),
-                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
+                InlineKeyboardButton("🔷 Nâng lên 300 Xu" if is_vi else "🔷 升级到 300 Xu" if lang == "zh" else "🔷 Upgrade to 300 Xu", callback_data="vfinal|upgrade_300"),
+                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ 返回" if lang == "zh" else "⬅️ Back", callback_data="vfinal|back"),
             ],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main")],
         ])
@@ -89839,22 +90938,27 @@ def video_finalization_scene_count_keyboard(state: dict | None = None, lang: str
         ],
         [
             InlineKeyboardButton(video_scene_count_option_label(tier, 20, lang), callback_data="vfinal|scene_count|20"),
-            InlineKeyboardButton("✍️ Tự chọn" if is_vi else "✍️ Custom", callback_data="vfinal|scene_custom"),
+            InlineKeyboardButton("✍️ Tự chọn" if is_vi else "✍️ 自定义" if lang == "zh" else "✍️ Custom", callback_data="vfinal|scene_custom"),
         ],
         [
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="vfinal|back"),
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ 返回" if lang == "zh" else "⬅️ Back", callback_data="vfinal|back"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
         ],
     ])
 
 def video_finalization_scene_count_custom_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return "您想创建多少个场景？请输入 1 到 20。"
+    if lang == "en":
         return "How many scenes do you want to create? Enter a number from 1 to 20."
     return "Bạn muốn tạo bao nhiêu cảnh? Nhập số từ 1 đến 20."
 
 def video_finalization_scene_count_custom_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    lang = normalize_user_language(lang) or "vi"
+    scene_label = "⬅️ Chọn số cảnh" if lang == "vi" else "⬅️ 场景数量" if lang == "zh" else "⬅️ Scene count"
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Chọn số cảnh" if normalize_user_language(lang) == "vi" else "⬅️ Scene count", callback_data="vfinal|scene_count_screen"),
+        InlineKeyboardButton(scene_label, callback_data="vfinal|scene_count_screen"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
     ]])
 
@@ -90415,10 +91519,24 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
         "\n• Giọng đọc: <b>đã lưu nội dung nhưng chưa ghép vào video ở bản hiện tại</b>"
         if voice_guard.get("selected") and voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
     )
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        calc = f"每个场景/片段约 {scene_seconds} 秒" if invoice else f"1 个场景约 {scene_seconds} 秒"
+        lines = [
+            f"场景数量：<b>{count} 个</b>",
+            f"预计时长：<b>约 {duration} 秒</b>",
+            f"计算方式：<b>{html.escape(calc)}</b>",
+        ]
+        if count >= 10 and not invoice:
+            lines.append("较长的多场景视频可能需要更多时间。TOAN AAS 会在处理或扣除 Xu 前再次确认。")
+        return lines
+    if lang == "en":
         local_frame_status = status(readiness["local_frame"]) if len(photos) >= 2 else (
             "not required for prompt export" if has_prompt else "missing images"
         )
+        logo_value = yes if finalization["logo_watermark_enabled"] else no
+        if finalization["logo_watermark_enabled"]:
+            logo_value = f"{yes} ({html.escape(logo_watermark_position_label(finalization.get('logo_watermark_position') or '', lang))})"
         return (
             "🎬 <b>Confirm video export</b>\n\n"
             f"Source: <b>{html.escape(str(source))}</b>\n"
@@ -90428,7 +91546,8 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
             f"• Music: <b>{yes if finalization['music_enabled'] else no}</b>\n"
             f"• Voice/dubbing: <b>{yes if finalization['voice_enabled'] else no}</b>{voice_notice_en}\n"
             f"• Subtitles: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n"
-            f"• Subtitles + dubbing: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n\n"
+            f"• Subtitles + dubbing: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n"
+            f"• Logo / Watermark: <b>{logo_value}</b>\n\n"
             "<b>Readiness</b>\n"
             f"• Local frame video: <code>{local_frame_status}</code>\n"
             f"• AI video: <code>{status(readiness['ai_video'])}</code>\n"
@@ -90439,6 +91558,9 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
     local_frame_status = status(readiness["local_frame"]) if len(photos) >= 2 else (
         "không bắt buộc nếu xuất từ prompt" if has_prompt else "chưa có đủ ảnh"
     )
+    logo_value = yes if finalization["logo_watermark_enabled"] else no
+    if finalization["logo_watermark_enabled"]:
+        logo_value = f"{yes} ({html.escape(logo_watermark_position_label(finalization.get('logo_watermark_position') or '', lang))})"
     return (
         "🎬 <b>Xác nhận xuất video</b>\n\n"
         f"Nguồn video: <b>{html.escape(str(source))}</b>\n"
@@ -90448,7 +91570,8 @@ def video_finalization_summary_text(state: dict | None = None, lang: str = "vi")
         f"• Nhạc: <b>{yes if finalization['music_enabled'] else no}</b>\n"
         f"• Voice/lồng tiếng: <b>{yes if finalization['voice_enabled'] else no}</b>{voice_notice_vi}\n"
         f"• Phụ đề: <b>{yes if finalization['subtitle_enabled'] else no}</b>\n"
-        f"• Phụ đề và lồng tiếng: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n\n"
+        f"• Phụ đề và lồng tiếng: <b>{yes if finalization['subtitle_dub_enabled'] else no}</b>\n"
+        f"• Logo / Watermark: <b>{logo_value}</b>\n\n"
         "<b>Trạng thái xử lý</b>\n"
         f"• Ghép ảnh local: <code>{local_frame_status}</code>\n"
         f"• Video AI chân thật: <code>{status(readiness['ai_video'])}</code>\n"
@@ -90903,6 +92026,12 @@ async def render_video_finalization_stack_target(query, user_id, state: dict, ta
         return True, await safe_edit_or_send(query, video_order_screen_text("subtitle_dub", state, lang), parse_mode="HTML", reply_markup=video_finalization_subtitle_keyboard(lang))
     if step == "addon":
         return True, await safe_edit_or_send(query, video_finalization_addon_text(lang), parse_mode="HTML", reply_markup=video_finalization_addon_keyboard(lang))
+    if step == "await_logo_watermark":
+        return True, await safe_edit_or_send(query, video_finalization_logo_input_text(lang), parse_mode="HTML", reply_markup=video_finalization_logo_input_keyboard(lang))
+    if step == "logo_watermark_position":
+        return True, await safe_edit_or_send(query, video_finalization_logo_position_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_logo_position_keyboard(lang))
+    if step == "logo_watermark_confirm":
+        return True, await safe_edit_or_send(query, video_finalization_logo_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_logo_confirm_keyboard(lang))
     if step == "copy_prompt":
         return True, await safe_edit_or_send(query, video_finalization_copy_prompt_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_summary_keyboard(state, lang))
     if step == "ai_guard":
@@ -91047,6 +92176,43 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             parse_mode="HTML",
             reply_markup=media_library_quick_keyboard(lang, PRODUCT_CONTEXT_VIDEO_ADDON),
         )
+    if action == "logo":
+        state["step"] = "await_logo_watermark"
+        set_video_finalization_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            video_finalization_logo_input_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_finalization_logo_input_keyboard(lang),
+        )
+    if action == "logo_pos":
+        finalization = video_finalization_defaults()
+        finalization.update(dict(state.get("video_finalization") or {}))
+        logo_text = logo_watermark_clean_text(finalization.get("logo_watermark_text") or "")
+        if not logo_text:
+            state["step"] = "await_logo_watermark"
+            set_video_finalization_state(uid, state)
+            return await safe_edit_or_send(query, video_finalization_logo_input_text(lang), parse_mode="HTML", reply_markup=video_finalization_logo_input_keyboard(lang))
+        position = logo_watermark_normalize_position(value, "bottom_right")
+        finalization.update(logo_watermark_session_fields(True, logo_text, position))
+        state["video_finalization"] = finalization
+        state["step"] = "logo_watermark_confirm"
+        set_video_finalization_state(uid, state)
+        return await safe_edit_or_send(query, video_finalization_logo_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_logo_confirm_keyboard(lang))
+    if action == "logo_confirm":
+        finalization = video_finalization_defaults()
+        finalization.update(dict(state.get("video_finalization") or {}))
+        logo_text = logo_watermark_clean_text(finalization.get("logo_watermark_text") or "")
+        logo_position = logo_watermark_normalize_position(finalization.get("logo_watermark_position") or "", "bottom_right")
+        if not logo_text:
+            state["step"] = "await_logo_watermark"
+            set_video_finalization_state(uid, state)
+            return await safe_edit_or_send(query, video_finalization_logo_input_text(lang), parse_mode="HTML", reply_markup=video_finalization_logo_input_keyboard(lang))
+        finalization.update(logo_watermark_session_fields(True, logo_text, logo_position))
+        state["video_finalization"] = finalization
+        state["step"] = "menu"
+        set_video_finalization_state(uid, state)
+        return await video_finalization_render_menu(query, uid, state, lang)
     if action == "voice_defaults":
         state["step"] = "voice"
         set_video_finalization_state(uid, state)
@@ -91494,6 +92660,25 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         set_video_finalization_state(uid, current)
         await update.message.reply_text(video_finalization_tier_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_tier_keyboard(lang))
         return True
+    if step == "await_logo_watermark":
+        lang = get_user_language(uid) or "vi"
+        logo_text = logo_watermark_clean_text(text)
+        if not logo_text:
+            await update.message.reply_text(video_finalization_logo_input_text(lang), parse_mode="HTML", reply_markup=video_finalization_logo_input_keyboard(lang))
+            return True
+        current = get_video_finalization_state(uid)
+        finalization = video_finalization_defaults()
+        finalization.update(dict(current.get("video_finalization") or {}))
+        finalization.update(logo_watermark_session_fields(True, logo_text, "bottom_right"))
+        current["video_finalization"] = finalization
+        current["step"] = "logo_watermark_position"
+        set_video_finalization_state(uid, current)
+        await update.message.reply_text(
+            video_finalization_logo_position_text(current, lang),
+            parse_mode="HTML",
+            reply_markup=video_finalization_logo_position_keyboard(lang),
+        )
+        return True
     if step == "await_combo_language":
         update_video_finalization(uid, subtitle_language=text[:80], voice_language=text[:80], dub_language=text[:80])
         state = get_video_finalization_state(uid)
@@ -91787,12 +92972,23 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
     aspect_display = video_finalization_aspect_display(state, lang)
     paid_items = video_order_dedupe_items(quote.get("paid_items") or [])
     voice_guard = video_voice_mux_export_guard(state)
+    finalization = video_finalization_defaults()
+    finalization.update(dict(state.get("video_finalization") or {}))
+    logo_text = logo_watermark_clean_text(finalization.get("logo_watermark_text") if finalization.get("logo_watermark_enabled") else "")
+    logo_position = logo_watermark_position_label(finalization.get("logo_watermark_position") or "", lang)
+    logo_line_en = f"Logo / Watermark: <b>Yes ({html.escape(logo_position)})</b>\n" if logo_text else ""
+    logo_line_vi = f"Logo / Watermark: <b>Có ({html.escape(logo_position)})</b>\n" if logo_text else ""
+    logo_line_zh = f"Logo / Watermark：<b>有（{html.escape(logo_position)}）</b>\n" if logo_text else ""
     voice_note_en = (
         "\nVoice: <b>default narration saved, not muxed into this video version</b>.\n"
         if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
     )
     voice_note_vi = (
         "\nGiọng đọc mặc định đã được lưu nhưng chưa ghép vào video ở bản hiện tại.\n"
+        if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
+    )
+    voice_note_zh = (
+        "\n默认配音已保存，但当前版本尚未合成到视频中。\n"
         if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
     )
 
@@ -91804,7 +93000,49 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             )
         return "\n".join(default_lines)
 
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        if tier == "low":
+            warning = ""
+            if not quote.get("is_package_200_valid", True):
+                warning = "\n⚠️ 200 Xu 套餐仅适用于 1 个场景、无附加工具且总价固定为 200 Xu。\n"
+            return (
+                "🎬 <b>最终视频账单 - 确认导出视频</b>\n\n"
+                "套餐：<b>体验视频 200 Xu</b>\n"
+                f"画面比例：<b>{html.escape(str(aspect_display))}</b>\n"
+                f"{logo_line_zh}"
+                f"场景数量：<b>{count} 个</b>\n"
+                f"预计时长：<b>约 {seconds} 秒</b>\n"
+                "附加工具：<b>不支持</b>\n"
+                f"总计：<b>{xu_number(total_xu)} Xu</b>\n"
+                f"折合：<b>{xu_number(equivalent)} VND</b>\n"
+                f"{voice_note_zh}"
+                f"{warning}\n"
+                "只有在您点击最终确认“导出视频”后，TOAN AAS 才会开始处理并扣除 Xu。"
+            )
+        return (
+            "🎬 <b>最终视频账单 - 确认导出视频</b>\n\n"
+            f"套餐：<b>{html.escape(video_tier_short_label(tier, 'zh'))} - 每个标准场景 {xu_number(base)} Xu</b>\n"
+            f"画面比例：<b>{html.escape(str(aspect_display))}</b>\n"
+            f"{logo_line_zh}"
+            f"场景数量：<b>{count} 个</b>\n"
+            f"预计时长：<b>约 {seconds} 秒</b>\n"
+            f"场景折扣：<b>{discount}%</b>\n\n"
+            "视频服务：\n"
+            f"• {count} 个场景 × {xu_number(base)} Xu × {percent}% = <b>{xu_number(scene_video_xu)} Xu</b>\n\n"
+            "附加工具：\n"
+            + paid_lines([
+                "• 不添加配音：<b>0 Xu</b>",
+                "• 不添加音乐：<b>0 Xu</b>",
+                "• 不添加字幕：<b>0 Xu</b>",
+            ])
+            + "\n\n"
+            f"总计：<b>{xu_number(total_xu)} Xu</b>\n"
+            f"折合：<b>{xu_number(equivalent)} VND</b>\n\n"
+            f"{voice_note_zh}"
+            "只有在您点击最终确认“导出视频”后，TOAN AAS 才会开始处理并扣除 Xu。"
+        )
+    if lang == "en":
         if tier == "low":
             warning = ""
             if not quote.get("is_package_200_valid", True):
@@ -91813,6 +93051,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
                 "🎬 <b>Final video invoice - Confirm video export</b>\n\n"
                 f"Package: <b>Starter video 200 Xu</b>\n"
                 f"Aspect ratio: <b>{html.escape(str(aspect_display))}</b>\n"
+                f"{logo_line_en}"
                 f"Scene count: <b>{count} scene</b>\n"
                 f"Estimated duration: <b>about {seconds} seconds</b>\n"
                 "Add-on: <b>not supported</b>\n"
@@ -91826,6 +93065,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             "🎬 <b>Final video invoice - Confirm video export</b>\n\n"
             f"Package: <b>{html.escape(video_tier_short_label(tier, 'en'))} - {xu_number(base)} Xu/standard scene</b>\n"
             f"Aspect ratio: <b>{html.escape(str(aspect_display))}</b>\n"
+            f"{logo_line_en}"
             f"Scene count: <b>{count} scenes</b>\n"
             f"Estimated duration: <b>about {seconds} seconds</b>\n"
             f"Scene discount: <b>{discount}%</b>\n\n"
@@ -91852,9 +93092,10 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             "🎬 <b>Hóa đơn xác nhận video - Xác nhận xuất video</b>\n\n"
             "Gói: <b>Video trải nghiệm 200 Xu</b>\n"
             f"Tỉ lệ khung hình: <b>{html.escape(str(aspect_display))}</b>\n"
+            f"{logo_line_vi}"
             f"Số cảnh: <b>{count} cảnh</b>\n"
             f"Thời lượng ước tính: <b>khoảng {seconds} giây</b>\n"
-            "Add-on: <b>không hỗ trợ</b>\n"
+            "Công cụ bổ sung: <b>không hỗ trợ</b>\n"
             f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
             f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n"
             f"{voice_note_vi}"
@@ -91865,12 +93106,13 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
         "🎬 <b>Hóa đơn xác nhận video - Xác nhận xuất video</b>\n\n"
         f"Gói: <b>Video {html.escape(video_tier_short_label(tier, 'vi'))} — {xu_number(base)} Xu/cảnh chuẩn</b>\n"
         f"Tỉ lệ khung hình: <b>{html.escape(str(aspect_display))}</b>\n"
+        f"{logo_line_vi}"
         f"Số cảnh: <b>{count} cảnh</b>\n"
         f"Thời lượng ước tính: <b>khoảng {seconds} giây</b>\n"
         f"Chiết khấu cảnh: <b>{discount}%</b>\n\n"
         "Dịch vụ chính:\n"
         f"• {count} cảnh × {xu_number(base)} Xu × {percent}% = <b>{xu_number(scene_video_xu)} Xu</b>\n\n"
-        "Add-on có phí:\n"
+        "Công cụ bổ sung có phí:\n"
         + paid_lines([
             "• Không thêm giọng: <b>0 Xu</b>",
             "• Không thêm nhạc: <b>0 Xu</b>",
@@ -92020,7 +93262,7 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
         "Dịch vụ chính:\n"
         f"• Video: <b>{xu_number(order.get('base_price_xu'))} Xu</b>\n\n"
         f"Mục miễn phí:\n{free_lines_vi}\n\n"
-        f"Add-on có phí:\n{paid_lines_vi}\n"
+        f"Công cụ bổ sung có phí:\n{paid_lines_vi}\n"
         f"{discount_block}"
         f"{starter_note}\n"
         f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
@@ -92471,6 +93713,19 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         generation_prompt = f"{raw_prompt}. Visual pacing should fit this music/mood: {music_label}. Do not generate audio; soundtrack/captions are handled separately."
         if scene_instruction:
             generation_prompt = f"{generation_prompt} {scene_instruction}"
+    finalization = dict((package or {}).get("video_finalization") or {})
+    logo_text = logo_watermark_clean_text(
+        (package or {}).get("logo_watermark_text")
+        or finalization.get("logo_watermark_text")
+        or ""
+    )
+    logo_position = logo_watermark_normalize_position(
+        (package or {}).get("logo_watermark_position")
+        or finalization.get("logo_watermark_position")
+        or "",
+        "bottom_right",
+    )
+    generation_prompt = apply_logo_watermark_to_prompt(generation_prompt, logo_text, "video", logo_position)
     source = str((package or {}).get("source") or (package or {}).get("source_flow") or "").strip().lower()
     flow = "promptvideo"
     if "image_to_video" in source:
@@ -92538,6 +93793,7 @@ def public_video_pending_payload_from_package(tier: str, package: dict, aspect_r
         "requested_seconds": int((package or {}).get("requested_seconds") or 0),
         "final_duration_seconds": int((package or {}).get("final_duration_seconds") or 0),
         "aspect_ratio": aspect,
+        **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
     }
 
 def video_processing_type_for_payload(payload: dict | None = None) -> str:
@@ -98022,7 +99278,28 @@ async def handle_quick_image_flow_pending_text(update: Update, context: ContextT
         return False
     uid = update.effective_user.id
     pending = get_quick_image_flow(uid)
-    if not pending or pending.get("step") != "custom_prompt":
+    if not pending:
+        return False
+    if pending.get("step") == "logo_input":
+        text = logo_watermark_clean_text(update.message.text)
+        if not text:
+            return True
+        lang = get_user_language(uid) or "vi"
+        state = set_quick_image_flow(
+            uid,
+            "logo_position",
+            logo_watermark_text=text,
+            logo_watermark_enabled=True,
+            logo_watermark_source="text",
+            logo_watermark_position="bottom_right",
+        )
+        await update.message.reply_text(
+            quick_image_logo_position_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_logo_position_keyboard(lang),
+        )
+        return True
+    if pending.get("step") != "custom_prompt":
         return False
     prompt = re.sub(r"\s+", " ", update.message.text.strip())[:1400]
     if not prompt:
@@ -98069,7 +99346,9 @@ async def handle_quick_media_pending_text(update: Update, context: ContextTypes.
 async def handle_create_media_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    action = (query.data or "").split("|", 1)[1] if "|" in (query.data or "") else ""
+    callback_parts = str(query.data or "").split("|")
+    action = callback_parts[1] if len(callback_parts) > 1 else ""
+    value = callback_parts[2] if len(callback_parts) > 2 else ""
     uid = query.from_user.id if query.from_user else 0
     lang = get_user_language(uid) or "vi"
     if action == "cancel":
@@ -98217,7 +99496,87 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         if not state.get("prompt"):
             state = set_quick_image_flow(uid, "suggestions")
             return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang))
+        if not state.get("logo_watermark_decided"):
+            state = set_quick_image_flow(uid, "logo_choice")
+            return await safe_edit_or_send(
+                query,
+                quick_image_logo_choice_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_logo_choice_keyboard(lang),
+            )
         state = set_quick_image_flow(uid, "ratio")
+        return await safe_edit_or_send(
+            query,
+            quick_image_ratio_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_ratio_keyboard(lang),
+        )
+    if action == "qi_logo_choice":
+        state = get_quick_image_flow(uid) or {}
+        if not state.get("prompt"):
+            state = set_quick_image_flow(uid, "suggestions")
+            return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang))
+        state = set_quick_image_flow(uid, "logo_choice")
+        return await safe_edit_or_send(
+            query,
+            quick_image_logo_choice_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_logo_choice_keyboard(lang),
+        )
+    if action == "qi_logo_add":
+        state = set_quick_image_flow(uid, "logo_input")
+        return await safe_edit_or_send(
+            query,
+            quick_image_logo_input_text(lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_logo_input_keyboard(lang),
+        )
+    if action == "qi_logo_skip":
+        state = set_quick_image_flow(
+            uid,
+            "ratio",
+            logo_watermark_enabled=False,
+            logo_watermark_text="",
+            logo_watermark_position="",
+            logo_watermark_source="",
+            logo_watermark_decided=True,
+        )
+        return await safe_edit_or_send(
+            query,
+            quick_image_ratio_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_ratio_keyboard(lang),
+        )
+    if action == "qi_logo_pos":
+        state = get_quick_image_flow(uid) or {}
+        text = logo_watermark_clean_text(state.get("logo_watermark_text") or "")
+        if not text:
+            state = set_quick_image_flow(uid, "logo_input")
+            return await safe_edit_or_send(query, quick_image_logo_input_text(lang), parse_mode="HTML", reply_markup=quick_image_logo_input_keyboard(lang))
+        position = logo_watermark_normalize_position(value, "bottom_right")
+        state = set_quick_image_flow(uid, "logo_confirm", logo_watermark_position=position)
+        return await safe_edit_or_send(
+            query,
+            quick_image_logo_confirm_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=quick_image_logo_confirm_keyboard(lang),
+        )
+    if action == "qi_logo_confirm":
+        state = get_quick_image_flow(uid) or {}
+        text = logo_watermark_clean_text(state.get("logo_watermark_text") or "")
+        position = logo_watermark_normalize_position(state.get("logo_watermark_position") or "", "bottom_right")
+        if not text:
+            state = set_quick_image_flow(uid, "logo_input")
+            return await safe_edit_or_send(query, quick_image_logo_input_text(lang), parse_mode="HTML", reply_markup=quick_image_logo_input_keyboard(lang))
+        state = set_quick_image_flow(
+            uid,
+            "ratio",
+            logo_watermark_enabled=True,
+            logo_watermark_text=text,
+            logo_watermark_position=position,
+            logo_watermark_source="text",
+            logo_watermark_decided=True,
+        )
         return await safe_edit_or_send(
             query,
             quick_image_ratio_text(state, lang),
@@ -98226,6 +99585,14 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         )
     if action == "qi_back_prompt":
         state = get_quick_image_flow(uid) or {}
+        if state.get("step") == "ratio" and state.get("prompt"):
+            state = set_quick_image_flow(uid, "logo_choice")
+            return await safe_edit_or_send(
+                query,
+                quick_image_logo_choice_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=quick_image_logo_choice_keyboard(lang),
+            )
         if state.get("prompt_source") == "suggestion":
             state = set_quick_image_flow(uid, "prepared_prompt")
             return await safe_edit_or_send(
@@ -98306,9 +99673,13 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         package_item = active_package_item_for_user(uid, package_item_type)
         if int(credits or 0) < final_preview_cost and not is_admin_user(uid) and not package_item:
             return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+        logo_text = logo_watermark_clean_text(state.get("logo_watermark_text") if state.get("logo_watermark_enabled") else "")
+        logo_position = logo_watermark_normalize_position(state.get("logo_watermark_position") or "", "bottom_right")
+        generation_prompt = image_tier_prompt_for_generation(original_request, tier, aspect)
+        generation_prompt = apply_logo_watermark_to_prompt(generation_prompt, logo_text, "image", logo_position)
         token = set_shopaikey_pending_confirmation(uid, {
             "job_type": "image",
-            "prompt": image_tier_prompt_for_generation(original_request, tier, aspect),
+            "prompt": generation_prompt,
             "original_prompt": original_request,
             "base_cost": base_cost,
             "from_image": False,
@@ -98319,9 +99690,10 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             "aspect_ratio": aspect,
             "package_item_type": package_item_type,
             "source": "quick_image_v6",
+            **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
         })
         set_quick_image_flow(uid, "confirm", tier=tier, confirm_token=token)
-        confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect)
+        confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect, logo_text, logo_position)
         confirm_markup = quick_image_confirm_keyboard(token, lang)
         if package_item:
             confirm_text = package_offer_text(package_item, confirm_text, lang)
@@ -98352,11 +99724,118 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
                 "package_id": str(pending_confirm.get("package_id") or "")[:80],
             }
         set_media_aspect_pending(uid, job_type, tier, prompt, package)
+        update_media_aspect_pending(
+            uid,
+            **logo_watermark_session_fields(
+                bool(pending_confirm.get("logo_watermark_enabled")),
+                str(pending_confirm.get("logo_watermark_text") or ""),
+                str(pending_confirm.get("logo_watermark_position") or ""),
+            ),
+            logo_watermark_decided=True,
+        )
         return await safe_edit_or_send(
             query,
             public_media_aspect_ratio_text(job_type, tier, prompt, lang),
             parse_mode="HTML",
             reply_markup=public_media_aspect_ratio_keyboard(job_type, lang),
+        )
+    if action in {"image_logo_choice", "image_logo_add", "image_logo_skip", "image_logo_pos", "image_logo_confirm"}:
+        pending_aspect = get_media_aspect_pending(uid, "image") or {}
+        if not pending_aspect:
+            return await safe_edit_or_send(query, ui_text(lang, "common.expired_not_charged"))
+        prompt = str(pending_aspect.get("prompt") or "").strip()
+        tier = normalize_image_tier(pending_aspect.get("tier") or SHOPAIKEY_IMAGE_DEFAULT_TIER)
+        logo_back_callback = str(
+            pending_aspect.get("logo_watermark_back_callback") or "create_media|quick_image"
+        )
+        selected_aspect = str(pending_aspect.get("selected_aspect_ratio") or "").strip()
+        confirmation_source = str(
+            pending_aspect.get("confirmation_source") or "image_prompt_tool"
+        )
+        if action == "image_logo_choice":
+            update_media_aspect_pending(uid, logo_watermark_step="")
+            return await safe_edit_or_send(
+                query,
+                media_logo_watermark_choice_text("image", prompt, lang),
+                parse_mode="HTML",
+                reply_markup=media_logo_watermark_choice_keyboard("image", lang, logo_back_callback),
+            )
+        if action == "image_logo_add":
+            update_media_aspect_pending(uid, logo_watermark_step="input")
+            return await safe_edit_or_send(
+                query,
+                media_logo_watermark_input_text("image", lang),
+                parse_mode="HTML",
+                reply_markup=media_logo_watermark_input_keyboard("image", lang),
+            )
+        if action == "image_logo_skip":
+            update_media_aspect_pending(
+                uid,
+                logo_watermark_enabled=False,
+                logo_watermark_text="",
+                logo_watermark_position="",
+                logo_watermark_source="",
+                logo_watermark_step="",
+                logo_watermark_decided=True,
+            )
+            if selected_aspect:
+                return await show_image_prompt_confirmation(
+                    query,
+                    uid,
+                    tier,
+                    prompt,
+                    selected_aspect,
+                    lang,
+                    confirmation_source,
+                )
+            return await safe_edit_or_send(
+                query,
+                public_media_aspect_ratio_text("image", tier, prompt, lang),
+                parse_mode="HTML",
+                reply_markup=public_media_aspect_ratio_keyboard("image", lang, "create_media|image_logo_choice"),
+            )
+        if action == "image_logo_pos":
+            logo_text = logo_watermark_clean_text(pending_aspect.get("logo_watermark_text") or "")
+            if not logo_text:
+                update_media_aspect_pending(uid, logo_watermark_step="input")
+                return await safe_edit_or_send(query, media_logo_watermark_input_text("image", lang), parse_mode="HTML", reply_markup=media_logo_watermark_input_keyboard("image", lang))
+            position = logo_watermark_normalize_position(value, "bottom_right")
+            update_media_aspect_pending(uid, logo_watermark_position=position, logo_watermark_step="confirm")
+            return await safe_edit_or_send(
+                query,
+                media_logo_watermark_confirm_text(logo_text, lang, position),
+                parse_mode="HTML",
+                reply_markup=media_logo_watermark_confirm_keyboard("image", lang),
+            )
+        logo_text = logo_watermark_clean_text(pending_aspect.get("logo_watermark_text") or "")
+        logo_position = logo_watermark_normalize_position(pending_aspect.get("logo_watermark_position") or "", "bottom_right")
+        if not logo_text:
+            update_media_aspect_pending(uid, logo_watermark_step="input")
+            return await safe_edit_or_send(query, media_logo_watermark_input_text("image", lang), parse_mode="HTML", reply_markup=media_logo_watermark_input_keyboard("image", lang))
+        update_media_aspect_pending(
+            uid,
+            logo_watermark_enabled=True,
+            logo_watermark_text=logo_text,
+            logo_watermark_position=logo_position,
+            logo_watermark_source="text",
+            logo_watermark_step="",
+            logo_watermark_decided=True,
+        )
+        if selected_aspect:
+            return await show_image_prompt_confirmation(
+                query,
+                uid,
+                tier,
+                prompt,
+                selected_aspect,
+                lang,
+                confirmation_source,
+            )
+        return await safe_edit_or_send(
+            query,
+            public_media_aspect_ratio_text("image", tier, prompt, lang),
+            parse_mode="HTML",
+            reply_markup=public_media_aspect_ratio_keyboard("image", lang, "create_media|image_logo_choice"),
         )
     if action.startswith("image_aspect_"):
         aspect = media_aspect_ratio_from_token(action.replace("image_aspect_", "", 1), "image")
@@ -98381,9 +99860,13 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         package_item = active_package_item_for_user(uid, package_item_type)
         if int(credits or 0) < final_preview_cost and not is_admin_user(uid) and not package_item:
             return await edit_insufficient_credits(query, int(credits or 0), final_preview_cost, uid)
+        logo_text = logo_watermark_clean_text(pending_aspect.get("logo_watermark_text") if pending_aspect.get("logo_watermark_enabled") else "")
+        logo_position = logo_watermark_normalize_position(pending_aspect.get("logo_watermark_position") or "", "bottom_right")
+        generation_prompt = image_tier_prompt_for_generation(prompt, tier, aspect)
+        generation_prompt = apply_logo_watermark_to_prompt(generation_prompt, logo_text, "image", logo_position)
         token = set_shopaikey_pending_confirmation(uid, {
             "job_type": "image",
-            "prompt": image_tier_prompt_for_generation(prompt, tier, aspect),
+            "prompt": generation_prompt,
             "original_prompt": prompt,
             "base_cost": base_cost,
             "from_image": False,
@@ -98393,8 +99876,9 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             "retry_warranty_count": int(payload.get("retry_warranty_count") or 0),
             "aspect_ratio": aspect,
             "package_item_type": package_item_type,
+            **logo_watermark_session_fields(bool(logo_text), logo_text, logo_position),
         })
-        confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect)
+        confirm_text = public_image_confirm_text(tier, prompt, int(credits or 0), lang, aspect, logo_text, logo_position)
         confirm_markup = shopaikey_confirm_keyboard("image", token, tier, lang)
         if package_item:
             confirm_text = package_offer_text(package_item, confirm_text, lang)
@@ -100299,7 +101783,7 @@ def pricing_hub_lines(lang: str = "vi") -> list[str]:
             "• 充值 Xu：为账户充值服务额度。",
             "• 月度套餐 / 组合：按需求购买服务权益。",
             "",
-            "Vietnam local top-up promotions are not available for international payments.",
+            "越南 PayOS/银行转账充值活动仅适用于越南本地付款。国际用户仅享受会员等级折扣和符合条件的非充值权益。",
         ]
     if lang == "en":
         return [
@@ -100309,7 +101793,7 @@ def pricing_hub_lines(lang: str = "vi") -> list[str]:
             "• Top up Xu: add service credits to your account.",
             "• Plans / Combos: buy service allowances for a specific need.",
             "",
-            "Vietnam local top-up promotions are not available for international payments.",
+            "Deposit promotions are available only for Vietnam PayOS/bank-transfer campaigns. International users receive member-tier discounts and eligible non-deposit benefits only.",
         ]
     return [
         "💳 <b>Nạp Xu / Bảng giá TOAN AAS</b>", "",
@@ -100322,12 +101806,21 @@ def pricing_hub_lines(lang: str = "vi") -> list[str]:
 
 def billing_promotions_lines(lang: str = "vi") -> list[str]:
     lang = normalize_user_language(lang) or "vi"
-    if lang != "vi":
+    if lang == "zh":
         return [
-            "🎁 <b>TOAN AAS Promotions</b>",
+            "🎁 <b>国际用户权益</b>",
             "",
-            "Vietnam local top-up promotions are not available for international payments.",
-            "Please use Pricing / Top up Xu for standard international billing.",
+            "越南 PayOS/银行转账充值活动不适用于国际付款。",
+            "国际用户可享受符合条件的会员等级服务折扣、生日或忠诚度权益。",
+            "此页面不提供越南本地充值奖励或首次活动奖励。",
+        ]
+    if lang == "en":
+        return [
+            "🎁 <b>International Benefits</b>",
+            "",
+            "Deposit promotions are available only for Vietnam PayOS/bank-transfer campaigns.",
+            "International users receive member-tier service discounts and eligible birthday or loyalty benefits only.",
+            "Vietnam domestic deposit bonuses and launch bonuses are not offered on international payments.",
         ]
     return [
         "🎁 <b>ƯU ĐÃI TOAN AAS</b>",
@@ -100368,13 +101861,19 @@ def billing_promotions_lines(lang: str = "vi") -> list[str]:
         "• Mã có thể hết lượt/hết hạn/không đủ điều kiện",
         "",
         "🌏 <b>Lưu ý thanh toán:</b>",
-        "Ưu đãi nạp tiền chỉ áp dụng cho thanh toán nội địa Việt Nam: PayOS, QR ngân hàng/VietQR.",
-        "ZaloPay/MoMo, USDT và thanh toán quốc tế không áp dụng mã ưu đãi/Launch Bonus.",
+        "Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam.",
+        "Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.",
+        "ZaloPay/MoMo, USDT và thanh toán quốc tế không áp dụng mã ưu đãi hoặc Launch Bonus.",
     ]
 
 def billing_promotions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
-    if lang != "vi":
+    if lang == "zh":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 价格表", callback_data="pricing|catalog"), InlineKeyboardButton("💳 充值 Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("⬅️ 返回", callback_data="pricing|main"), InlineKeyboardButton("🏠 主菜单", callback_data="menu|main")],
+        ])
+    if lang == "en":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📋 Pricing", callback_data="pricing|catalog"), InlineKeyboardButton("💳 Top up Xu", callback_data="menu|main_topup")],
             [InlineKeyboardButton("⬅️ Back", callback_data="pricing|main"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
@@ -100386,7 +101885,10 @@ def billing_promotions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def billing_promo_apply_lines(lang: str = "vi") -> list[str]:
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return ["🎁 <b>充值优惠码</b>", "", "越南本地充值活动不适用于国际付款。"]
+    if lang == "en":
         return ["🎁 <b>Promotion code</b>", "", "Vietnam local top-up promotions are not available for international payments."]
     return [
         "🎁 <b>Nhập mã ưu đãi</b>",
@@ -100402,7 +101904,10 @@ def billing_promo_apply_lines(lang: str = "vi") -> list[str]:
     ]
 
 def billing_gift_code_lines(lang: str = "vi") -> list[str]:
-    if normalize_user_language(lang) != "vi":
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return ["🎟 <b>礼品码</b>", "", "如 TOAN AAS 向您发送有效礼品码，请使用 <code>/gift CODE</code>。"]
+    if lang == "en":
         return ["🎟 <b>Gift code</b>", "", "Use <code>/gift CODE</code> if TOAN AAS admin sends you a valid gift code."]
     return [
         "🎟 <b>Mã quà tặng</b>",
@@ -100433,7 +101938,7 @@ def pricing_catalog_lines(lang: str = "vi") -> list[str]:
     if lang == "zh":
         return [
             "📋 <b>TOAN AAS 价格表</b>", "", "请选择服务分类。", "",
-            "• 未调用付费 provider 的提示词、规划和建议通常免费。",
+            "• 在开始付费处理前，提示词、规划和建议步骤通常免费。",
             "• 本地文档/PDF 工具当前免费。",
             "• 所有收费操作都会在扣除 Xu 前确认。",
             "• 工具维护时不会扣除 Xu。",
@@ -100441,17 +101946,17 @@ def pricing_catalog_lines(lang: str = "vi") -> list[str]:
     if lang == "en":
         return [
             "📋 <b>TOAN AAS Pricing</b>", "", "Choose a service group.", "",
-            "• Prompt, planning and suggestion steps are normally free before a paid provider is called.",
+            "• Prompt, planning and suggestion steps are normally free before paid processing starts.",
             "• Local document/PDF tools are currently free.",
             "• Paid actions require confirmation before Xu is deducted.",
             "• Maintenance or unavailable tools do not charge Xu.",
         ]
     return [
         "📋 <b>Bảng giá TOAN AAS</b>", "", "Chọn nhóm dịch vụ bạn muốn xem giá.", "",
-        "• Các bước tạo prompt/kế hoạch/gợi ý thường miễn phí nếu chưa gọi provider.",
+        "• Các bước tạo prompt/kế hoạch/gợi ý thường miễn phí trước khi bắt đầu xử lý có phí.",
         "• Công cụ tài liệu/PDF local đang miễn phí trong giai đoạn hiện tại.",
         "• Các tác vụ có phí đều phải có màn xác nhận trước khi trừ Xu.",
-        "• Nếu provider/tool đang bảo trì, TOAN AAS sẽ báo trước và không trừ Xu.",
+        "• Nếu công cụ đang bảo trì, TOAN AAS sẽ báo trước và không trừ Xu.",
     ]
 
 def pricing_packages_lines(lang: str = "vi") -> list[str]:
@@ -100504,12 +102009,9 @@ def pricing_main_lines() -> list[str]:
         for _tier, payload in image_tiers.items()
     ]
     video_items = [
-        (
-            f"• {payload['label']}: <b>{payload['cost']} Xu</b> — {html.escape(payload['note'])}"
-            if tier != "premium" else
-            f"• {payload['label']}: <b>admin-only / liên hệ admin</b> — {html.escape(payload['note'])}"
-        )
+        f"• {payload['label']}: <b>{payload['cost']} Xu</b> — {html.escape(payload['note'])}"
         for tier, payload in video_tiers.items()
+        if tier != "premium"
     ]
     combo_items = []
     for item in video_combo_pricing_payload():
@@ -100546,7 +102048,7 @@ def pricing_main_lines() -> list[str]:
         "<b>1. 🆓 Miễn phí / 0 Xu</b>",
         "• Mở menu, bảng giá, hướng dẫn, đổi ngôn ngữ.",
         "• Tạo prompt ảnh, prompt video, ý tưởng video, storyboard text, concept quảng cáo, gợi ý âm thanh dạng text.",
-        "• Các bước chuẩn bị chưa gọi provider: <b>0 Xu</b>. Bot sẽ nói rõ “chưa gọi API và chưa trừ Xu”.",
+        "• Các bước chuẩn bị nội dung: <b>0 Xu</b>. TOAN AAS sẽ nói rõ khi chưa xử lý và chưa trừ Xu.",
         "",
         "<b>AI Chat</b>",
         f"• Chat thường: <b>{CHAT_COST_NORMAL} Xu</b> / lượt thành công.",
@@ -100556,17 +102058,15 @@ def pricing_main_lines() -> list[str]:
         "<b>2. 🖼 Hình ảnh</b>",
         *image_items,
         "• Tạo prompt từ ảnh / tạo prompt thủ công / biến thể prompt: <b>0 Xu</b> nếu chỉ tạo text.",
-        f"• Trạng thái public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
         "",
         "<b>3. 🎬 Video AI</b>",
         *video_items,
         "• Prompt/kế hoạch video: <b>0 Xu</b> nếu chưa tạo video thật.",
         "• Ảnh → Video AI dùng cùng tier Video AI chân thật.",
-        f"• Trạng thái public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
         "<b>4. 🎞 Ghép ảnh thành video</b>",
         *frame_examples,
-        "• Dùng Local Worker/FFmpeg, không gọi VEO. Nếu worker offline: không render, không trừ Xu.",
+        "• Nếu công cụ ghép video tạm thời chưa sẵn sàng: không xử lý và không trừ Xu.",
         "• Giá tăng theo số ảnh, thời lượng và hiệu ứng.",
         "",
         "<b>5. 🗣 Voice / TTS / Audio</b>",
@@ -100576,7 +102076,7 @@ def pricing_main_lines() -> list[str]:
         f"• STT/bóc băng audio ngắn: từ <b>{AUDIO_MIN_COST} Xu</b>.",
         "• Thêm voice vào video: từ <b>150 Xu</b>.",
         "• Tìm nhạc/SFX library: miễn phí hoặc không trừ Xu khi chỉ tìm/nghe thử.",
-        "• Tạo nhạc AI thật: từ <b>300–1.000 Xu</b>, chỉ mở khi provider/giá đã xác nhận.",
+        "• Tạo nhạc AI: từ <b>300–1.000 Xu</b>, chỉ mở khi giá và khả năng xử lý đã được xác nhận.",
         "",
         "<b>6. 📄 Tài liệu / PDF</b>",
         *doc_items,
@@ -100589,15 +102089,14 @@ def pricing_main_lines() -> list[str]:
         "• Gói tháng Starter/Creator/Shop/Pro là hạn mức dịch vụ theo tháng, tách riêng với hạng thành viên và nạp Xu.",
         "• Combo/gói tháng sau thanh toán PayOS thành công nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt khi dùng.",
         "",
-        "<b>9. 👑 Cao cấp / Liên hệ admin</b>",
-        "• Video premium, tạo nhạc AI thật, video dài nhiều cảnh, workflow doanh nghiệp hoặc tác vụ provider quá đắt.",
-        "• Admin báo giá trước. TOAN AAS không trừ Xu nếu chưa có xác nhận rõ.",
+        "<b>9. 👑 Dịch vụ nâng cao</b>",
+        "• Video dài, tạo nhạc AI, quy trình doanh nghiệp hoặc yêu cầu tùy chỉnh được báo giá riêng.",
+        "• TOAN AAS chỉ xử lý và trừ Xu sau khi người dùng xác nhận rõ.",
         "",
-        "<b>Xác nhận / Refund / Guard</b>",
-        "• Tất cả action có phí phải có màn xác nhận trước khi trừ Xu/lượt.",
-        "• Tool freeze/maintenance/provider lỗi: không gọi API và không trừ Xu, hoặc hoàn Xu/lượt nếu đã trừ.",
+        "<b>Xác nhận và hoàn Xu</b>",
+        "• Tất cả thao tác có phí phải có màn xác nhận trước khi trừ Xu/lượt.",
+        "• Khi công cụ bảo trì hoặc xử lý thất bại: không trừ Xu, hoặc hoàn Xu/lượt nếu đã trừ.",
         "• Xu là đơn vị nội bộ trong TOAN AAS, không phải tiền/tiền điện tử, không rút tiền, không chuyển nhượng.",
-        f"• Pricing mode: <code>{html.escape(pricing['billing_mode'])}</code>",
     ]
 
 def pricing_image_lines() -> list[str]:
@@ -100615,7 +102114,7 @@ def pricing_image_lines() -> list[str]:
         rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(warranty_text)}")
     rows.extend([
         "",
-        "Nếu provider lỗi/quota/timeout: bot hoàn Xu nếu đã trừ theo chính sách hiện có.",
+        "Nếu xử lý thất bại: bot hoàn Xu nếu đã trừ theo chính sách hiện có.",
     ])
     return rows
 
@@ -100624,21 +102123,19 @@ def pricing_video_lines() -> list[str]:
     rows = [
         "🎬 <b>GIÁ VIDEO AI</b>",
         "",
-        "Giá gói là giá nền. Mặc định mỗi gói gồm <b>1 cảnh / 8 giây</b>, prompt/motion/camera cơ bản theo cấp gói.",
+        "Giá gói là giá cho <b>1 cảnh chuẩn, khoảng 6 giây</b>. Màn chọn số cảnh sẽ hiển thị công thức và tổng Xu.",
         "Bot luôn hiển thị hóa đơn cuối cùng và hỏi xác nhận trước khi trừ Xu.",
         "",
     ]
     for tier in VIDEO_TIER_ORDER:
         payload = pricing.get(tier) or {}
         if tier == "premium":
-            rows.append(f"• {payload.get('label') or 'Video premium'}: <b>admin-only / liên hệ admin</b> — {html.escape(payload.get('note') or '')}")
+            continue
         else:
-            second_rate = video_tier_extra_second_xu(tier)
-            scene_rate = video_tier_extra_scene_xu(tier)
             if tier == "low":
-                extra = "1 cảnh / 8 giây; không bán thêm thời lượng"
+                extra = "1 cảnh / khoảng 6 giây; tổng đúng 200 Xu; không công cụ bổ sung"
             else:
-                extra = f"1 cảnh / 8 giây; +{second_rate} Xu/giây; +{scene_rate} Xu/cảnh"
+                extra = "giá mỗi cảnh chuẩn; chọn nhiều cảnh để xem chiết khấu và tổng Xu"
             rows.append(f"• {payload.get('label') or tier}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(extra)}")
     rows.extend([
         "",
@@ -100652,12 +102149,12 @@ def pricing_video_lines() -> list[str]:
         "",
         "<b>Miễn phí trong giới hạn</b>",
         "• Nhạc từ kho có sẵn, giữ âm thanh gốc, chỉnh âm lượng cơ bản.",
-        "• Prompt/kịch bản mẫu, motion/camera cơ bản, phụ đề từ script có sẵn nếu không gọi provider nặng.",
+        "• Prompt/kịch bản mẫu, hướng chuyển động/camera cơ bản và phụ đề từ kịch bản có sẵn khi không cần xử lý nâng cao.",
         "",
         html.escape(VIDEO_SHORT_TIER_PRICING_NOTE_VI),
         "",
         "Tỉ lệ hỗ trợ: 9:16, 16:9, 1:1, 4:5, 3:4.",
-        "Video sẽ vào queue và tự gửi kết quả khi hoàn tất.",
+        "Sau khi xác nhận, video được đưa vào hàng chờ và tự gửi kết quả khi hoàn tất.",
     ])
     return rows
 
@@ -100784,7 +102281,7 @@ def pricing_plans_lines() -> list[str]:
         "• Gói tháng không cộng Xu tự do, không chạy launch bonus/top-up bonus.",
         "• Hạn mức trong gói không rút tiền, không chuyển nhượng và có thể hết hạn theo kỳ.",
         "• Vượt hạn mức thì dùng Xu hoặc mua gói/combo khác.",
-        "• Nếu PayOS/webhook lỗi, admin có thể cấp lại gói thủ công sau khi đối soát.",
+        "• Nếu thanh toán gặp sự cố, gói có thể được cấp lại sau khi đối soát hợp lệ.",
         "",
         "Bấm nút gói tháng bên dưới để mua. Bot không yêu cầu khách gõ lệnh mua gói.",
     ]
@@ -100793,7 +102290,7 @@ def vip_services_lines() -> list[str]:
     return [
         "⭐ <b>DỊCH VỤ VIP TOAN AAS</b>",
         "",
-        "Dịch vụ VIP là các tác vụ tốn nhiều AI/API/server hơn.",
+        "Dịch vụ VIP là các tác vụ xử lý nâng cao hoặc cần nhiều tài nguyên hơn.",
         "",
         "<b>Bao gồm:</b>",
         "• Chat nâng cao / chat dài / deep nếu mở",
@@ -100816,10 +102313,55 @@ def vip_services_lines() -> list[str]:
         "<b>Cách tính:</b>",
         "• Gói tháng có một lượng hạn mức VIP tương ứng.",
         "• Vượt hạn mức thì dùng Xu xử lý.",
-        "• Nếu provider lỗi/quota/timeout: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
+        "• Nếu tác vụ không thể hoàn tất: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
     ]
 
-def member_policy_lines() -> list[str]:
+def member_policy_lines(lang: str = "vi") -> list[str]:
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return [
+            "👑 <b>TOAN AAS 会员等级</b>",
+            "",
+            "会员等级与月度套餐、组合包分开计算。",
+            "等级依据符合条件的成功充值累计，不包含月度套餐或组合包购买。",
+            "",
+            "<b>服务折扣</b>",
+            f"• Newbie：{MEMBER_TOOL_DISCOUNT_POLICY.get('newbie', 0)}%",
+            f"• Silver：{MEMBER_TOOL_DISCOUNT_POLICY.get('silver', 0)}%",
+            f"• Gold：{MEMBER_TOOL_DISCOUNT_POLICY.get('gold', 0)}%",
+            f"• Platinum：{MEMBER_TOOL_DISCOUNT_POLICY.get('platinum', 0)}%",
+            f"• Diamond：{MEMBER_TOOL_DISCOUNT_POLICY.get('diamond', 0)}%",
+            f"• VIP：{MEMBER_TOOL_DISCOUNT_POLICY.get('vip', 0)}%",
+            "",
+            "<b>生日与忠诚度权益</b>",
+            "• 符合政策条件时，可按等级获得生日或忠诚度权益。",
+            "",
+            "<b>充值活动</b>",
+            "• 越南本地充值活动仅适用于越南 PayOS/银行转账。",
+            "• 国际付款不适用越南本地充值奖励或首次活动奖励。",
+        ]
+    if lang == "en":
+        return [
+            "👑 <b>TOAN AAS MEMBER TIERS</b>",
+            "",
+            "Member tier is separate from monthly plans and combos.",
+            "Tier progress uses eligible successful top-ups; monthly plan and combo purchases do not count.",
+            "",
+            "<b>Service discounts</b>",
+            f"• Newbie: {MEMBER_TOOL_DISCOUNT_POLICY.get('newbie', 0)}%",
+            f"• Silver: {MEMBER_TOOL_DISCOUNT_POLICY.get('silver', 0)}%",
+            f"• Gold: {MEMBER_TOOL_DISCOUNT_POLICY.get('gold', 0)}%",
+            f"• Platinum: {MEMBER_TOOL_DISCOUNT_POLICY.get('platinum', 0)}%",
+            f"• Diamond: {MEMBER_TOOL_DISCOUNT_POLICY.get('diamond', 0)}%",
+            f"• VIP: {MEMBER_TOOL_DISCOUNT_POLICY.get('vip', 0)}%",
+            "",
+            "<b>Birthday and loyalty benefits</b>",
+            "• Eligible benefits may apply according to the current member policy.",
+            "",
+            "<b>Domestic deposit campaigns</b>",
+            "• Vietnam domestic campaigns apply only to Vietnam PayOS/bank transfers.",
+            "• International payments do not receive Vietnam domestic deposit or launch bonuses.",
+        ]
     return [
         "👑 <b>THÀNH VIÊN TOAN AAS</b>",
         "",
@@ -100832,9 +102374,9 @@ def member_policy_lines() -> list[str]:
         f"• 🥇 Gold: từ {MEMBER_TIER_THRESHOLDS.get('gold', 0):,}đ tổng nạp.".replace(",", "."),
         f"• 💠 Platinum: từ {MEMBER_TIER_THRESHOLDS.get('platinum', 0):,}đ tổng nạp.".replace(",", "."),
         f"• 💎 Diamond: từ {MEMBER_TIER_THRESHOLDS.get('diamond', 0):,}đ tổng nạp.".replace(",", "."),
-        f"• 👑 VIP: từ {MEMBER_TIER_THRESHOLDS.get('vip', 0):,}đ tổng nạp hoặc admin duyệt.".replace(",", "."),
+        f"• 👑 VIP: từ {MEMBER_TIER_THRESHOLDS.get('vip', 0):,}đ tổng nạp hoặc được xét duyệt riêng.".replace(",", "."),
         "",
-        "<b>Ưu đãi khi dùng dịch vụ</b>",
+        "<b>Chiết khấu khi dùng dịch vụ</b>",
         f"• Newbie: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('newbie', 0)}% Xu.",
         f"• Silver: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('silver', 0)}% Xu.",
         f"• Gold: giảm {MEMBER_TOOL_DISCOUNT_POLICY.get('gold', 0)}% Xu.",
@@ -100848,11 +102390,16 @@ def member_policy_lines() -> list[str]:
         f"• Platinum: {MEMBER_BIRTHDAY_GIFT_XU.get('platinum', 0)} Xu.",
         f"• Diamond: {MEMBER_BIRTHDAY_GIFT_XU.get('diamond', 0)} Xu.",
         f"• VIP: {MEMBER_BIRTHDAY_GIFT_XU.get('vip', 0)} Xu.",
-        "• Cần cập nhật ngày sinh và admin có thể review để chống lạm dụng.",
+        "• Cần cập nhật ngày sinh; một số trường hợp cần được xác minh để chống lạm dụng.",
         "",
-        "<b>Referral</b>",
+        "<b>Giới thiệu bạn bè</b>",
         "• Thưởng giới thiệu theo hạng và chỉ khi người được mời là tài khoản mới, nạp lần đầu thành công, không spam/fake.",
-        "• Admin có quyền khóa referral nếu phát hiện gian lận.",
+        "• Quyền lợi có thể bị khóa nếu phát hiện gian lận.",
+        "",
+        "<b>Khuyến mãi nạp tiền nội địa</b>",
+        "• Tách biệt với chiết khấu hạng thành viên.",
+        "• Chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam theo điều kiện từng chiến dịch.",
+        "• Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.",
         "",
         "<b>Không trộn chính sách</b>",
         "• Mua combo/gói tháng không phải nạp Xu và không cộng điểm nâng hạng.",
@@ -100872,7 +102419,7 @@ def pricing_terms_lines() -> list[str]:
         "• Nạp Xu thủ công có tính vào tổng nạp để xét hạng thành viên.",
         "• Tiền mua gói tháng không tính vào tổng nạp để nâng hạng thành viên.",
         "• Hạn mức gói tháng dùng trong kỳ gói, không rút tiền, không chuyển nhượng.",
-        "• Nếu provider lỗi/quota/timeout hoặc xử lý thất bại: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
+        "• Nếu xử lý thất bại: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
         "",
         "Xem chi tiết đầy đủ: <code>/dieukhoan_xu</code>, <code>/legal</code>, <code>/refund_policy</code>.",
     ]
@@ -100889,45 +102436,39 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
         for tier, payload in image.items()
     ]
     video_items = [
-        (
-            f"• {localized_video_tier_label(tier, lang)}: <b>{payload['cost']} Xu</b>"
-            if tier != "premium" else
-            "• Premium: admin-only / contact admin"
-        )
+        f"• {localized_video_tier_label(tier, lang)}: <b>{payload['cost']} Xu</b>"
         for tier, payload in video.items()
+        if tier != "premium"
     ]
     if lang == "zh":
         return [
             "💳 <b>TOAN AAS 价格</b>",
             "",
-            "<b>A. Xu / 充值</b>",
+            "<b>A. Xu 充值</b>",
             "• 请打开 /naptien 选择充值套餐。",
             "• Xu 是 TOAN AAS 内部服务额度，不能提现、不可转让。",
             "",
-            "<b>B. AI Chat</b>",
-            "• 普通 Chat：从 5 Xu 起。",
-            "• Pro/Deep Chat：从 10–20 Xu 起，按任务复杂度计算。",
+            "<b>B. AI 对话</b>",
+            "• 普通对话：从 5 Xu 起。",
+            "• 高级对话：从 10–20 Xu 起，按任务复杂度计算。",
             "",
             "<b>C. AI 图片</b>",
             *image_items,
-            f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
-            "",
             "<b>D. AI 视频</b>",
             *video_items,
-            "• Aspect ratios: 9:16, 16:9, 1:1, 4:5, 3:4.",
-            f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
+            "• 画面比例：9:16、16:9、1:1、4:5、3:4。",
             "",
-            "<b>E. Video combos</b>",
-            "• Combo TikTok 99k: 3 regular videos, recommended 9:16.",
-            "• Combos do not count membership rank/top-up points.",
+            "<b>E. 视频组合包</b>",
+            "• TikTok 99k 组合包：3 个常规视频，建议使用 9:16。",
+            "• 组合包购买不计入会员等级充值累计。",
             "",
-            "<b>F. Trend workflow / Prompt</b>",
-            f"• Content-only workflow: <b>{pricing['workflow_content_total_cost']} Xu</b>",
-            f"• Video motion guide: <b>{int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu</b>",
+            "<b>F. 趋势内容与提示词</b>",
+            f"• 内容方案：<b>{pricing['workflow_content_total_cost']} Xu</b>",
+            f"• 视频运动指导：<b>{int(CREATIVE_MOTION_GUIDE_COST_XU or 0)} Xu</b>",
             "• 真实图片/视频生成另按 AI 图片 / AI 视频价格计算。",
             "",
-            "<b>Refund</b>",
-            "• 如果 provider 错误、quota、timeout 或处理失败，Bot 不扣 Xu，或在已扣时按政策退款。",
+            "<b>退款</b>",
+            "• 若任务无法完成，TOAN AAS 不扣 Xu，或在已扣除时按退款政策处理。",
         ]
     return [
         "💳 <b>TOAN AAS PRICING</b>",
@@ -100942,12 +102483,9 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
         "",
         "<b>C. AI Images</b>",
         *image_items,
-        f"• Public image: <code>{'ON' if SHOPAIKEY_PUBLIC_IMAGE_ENABLED else 'OFF'}</code>",
-        "",
         "<b>D. AI Video</b>",
         *video_items,
         "• Aspect ratios: 9:16, 16:9, 1:1, 4:5, 3:4.",
-        f"• Public video: <code>{'ON' if SHOPAIKEY_PUBLIC_VIDEO_ENABLED else 'OFF'}</code>",
         "",
         "<b>E. Video combos</b>",
         "• Combo TikTok 99k: 3 regular videos, recommended 9:16.",
@@ -100959,7 +102497,7 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
         "• Real image/video generation is charged separately by the AI Image / AI Video tables.",
         "",
         "<b>Refund</b>",
-        "• If a provider fails, hits quota, times out or cannot process the task, the bot does not charge Xu or refunds according to policy.",
+        "• If a task cannot be completed, TOAN AAS does not charge Xu or applies the refund policy when a charge was already made.",
     ]
 
 def pricing_xu_lines_i18n(lang: str = "vi") -> list[str]:
@@ -101044,7 +102582,8 @@ async def cmd_vip_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_pricing_lines(update.message, vip_services_lines(), vip_services_keyboard())
 
 async def cmd_member_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_pricing_lines(update.message, member_policy_lines(), member_policy_keyboard())
+    lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
+    await send_pricing_lines(update.message, member_policy_lines(lang), member_policy_keyboard(lang))
 
 async def cmd_pricing_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_pricing_lines(update.message, pricing_terms_lines(), pricing_terms_keyboard())
@@ -101553,7 +103092,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "vip":
         return await edit_or_send_pricing_lines(query, vip_services_lines(), vip_services_keyboard(lang))
     if action == "member":
-        return await edit_or_send_pricing_lines(query, member_policy_lines(), member_policy_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, member_policy_lines(lang), member_policy_keyboard(lang))
     if action == "birthday":
         text = (
             "🎂 <b>Cập nhật ngày sinh</b>\n\n"
@@ -102217,6 +103756,7 @@ async def cmd_telegram_takeover(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
+    lang = get_user_language(user_id) or "vi"
     await maybe_auto_grant_birthday_gift(update, context)
     credits, total_spent, is_vip = get_user(user_id, update.effective_user.first_name)
     member = get_member_profile(user_id)
@@ -102241,7 +103781,38 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         service_privilege = "Miễn phí công cụ nội bộ admin khi vận hành/test"
     else:
         service_privilege = f"Giảm {int(get_member_service_discount_rate(user_id) or 0)}% khi tiêu Xu cho dịch vụ đủ điều kiện"
-    msg = (
+    if lang == "en":
+        msg = (
+            "👤 <b>ACCOUNT PROFILE</b>\n\n"
+            f"• ID: <code>{user_id}</code>\n"
+            f"• Member tier: <b>{html.escape(tier)}</b>\n"
+            f"• Balance: <b>{html.escape(credit_display.replace('Vô Hạn', 'Unlimited').replace('dịch vụ', 'service'))}</b>\n"
+            f"• Eligible successful top-ups: <b>{vnd_text(member['total_paid_vnd'])}</b>\n"
+            f"• Service Xu used: <b>{total_spent} Xu</b>\n"
+            f"• Referral pending/rewarded: <b>{ref_stats['pending']}/{ref_stats['rewarded']}</b>\n"
+            f"• Referral rewards received: <b>{ref_stats['reward_xu']} Xu</b>\n\n"
+            f"• Service-spending discount: <b>{int(get_member_service_discount_rate(user_id) or 0)}%</b>\n"
+            "• Vietnam domestic deposit promotions are separate from member-tier discounts.\n"
+            "• International payments receive eligible member benefits only.\n\n"
+            "Use <code>/member</code> for member benefits and <code>/naptien</code> for top-up options."
+        )
+    elif lang == "zh":
+        zh_balance = "无限" if admin_badge else f"{credits} Xu"
+        msg = (
+            "👤 <b>账户资料</b>\n\n"
+            f"• ID: <code>{user_id}</code>\n"
+            f"• 会员等级: <b>{html.escape(tier)}</b>\n"
+            f"• 余额: <b>{html.escape(zh_balance)}</b>\n"
+            f"• 符合条件的成功充值: <b>{vnd_text(member['total_paid_vnd'])}</b>\n"
+            f"• 已使用服务 Xu: <b>{total_spent} Xu</b>\n"
+            f"• 邀请待确认/已奖励: <b>{ref_stats['pending']}/{ref_stats['rewarded']}</b>\n\n"
+            f"• 服务消费折扣: <b>{int(get_member_service_discount_rate(user_id) or 0)}%</b>\n"
+            "• 越南本地充值活动与会员等级折扣分开计算。\n"
+            "• 国际付款仅享受符合条件的会员权益。\n\n"
+            "使用 <code>/member</code> 查看会员权益，使用 <code>/naptien</code> 查看充值方式。"
+        )
+    else:
+        msg = (
         f"👤 <b>HỒ SƠ TÀI KHOẢN</b>\n\n"
         f"• ID: <code>{user_id}</code>\n"
         f"• 🪪 Thành viên: <b>{tier}</b>\n"
@@ -102258,7 +103829,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👉 /member để xem quyền lợi đầy đủ.\n"
         f"👉 /birthday để thêm/xem ngày sinh.\n"
         f"👉 /naptien để mua/nạp thêm Xu dịch vụ."
-    )
+        )
     await update.message.reply_text(msg, parse_mode="HTML")
 
 async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -114694,6 +116265,7 @@ async def cmd_ref_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
     profile = get_member_profile(uid)
     admin_badge = admin_display_badge(uid)
     current_badge = get_role_badge(uid)
@@ -114739,7 +116311,48 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Hạng thành viên không cộng thêm Xu định kỳ khi nạp tiền\n"
             "• Mệnh giá nạp 10k/20k/50k/100k/200k/500k nhận Xu gốc như nhau cho mọi khách"
         )
-    text = (
+    if lang == "en":
+        next_text = (
+            "You are at the highest member tier."
+            if not profile["next_tier"]
+            else f"Next tier: <b>{html.escape(get_member_badge(profile['next_tier']))}</b>; remaining eligible top-ups: <b>{vnd_text(profile['amount_to_next'])}</b>."
+        )
+        text = (
+            "🪪 <b>TOAN AAS MEMBERSHIP</b>\n\n"
+            f"• Current tier: <b>{html.escape(current_badge)}</b>\n"
+            f"• Eligible successful top-ups: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
+            f"• {next_text}\n\n"
+            "<b>Member service discount</b>\n"
+            f"• Save <b>{int(get_member_service_discount_rate(uid) or 0)}%</b> Xu on eligible services.\n\n"
+            "<b>Birthday and loyalty</b>\n"
+            "• Eligible benefits follow the current member policy.\n\n"
+            "<b>Deposit promotion policy</b>\n"
+            "• Vietnam domestic PayOS/bank-transfer campaigns are separate from member-tier discounts.\n"
+            "• International payments do not receive Vietnam domestic deposit or launch bonuses.\n\n"
+            "Policy details: <code>/vip_policy</code>"
+        )
+    elif lang == "zh":
+        next_text = (
+            "你已达到最高会员等级。"
+            if not profile["next_tier"]
+            else f"下一等级：<b>{html.escape(get_member_badge(profile['next_tier']))}</b>；还需符合条件的充值 <b>{vnd_text(profile['amount_to_next'])}</b>。"
+        )
+        text = (
+            "🪪 <b>TOAN AAS 会员</b>\n\n"
+            f"• 当前等级: <b>{html.escape(current_badge)}</b>\n"
+            f"• 符合条件的成功充值: <b>{vnd_text(profile['total_paid_vnd'])}</b>\n"
+            f"• {next_text}\n\n"
+            "<b>会员服务折扣</b>\n"
+            f"• 符合条件的服务可节省 <b>{int(get_member_service_discount_rate(uid) or 0)}%</b> Xu。\n\n"
+            "<b>生日与忠诚度权益</b>\n"
+            "• 符合条件的权益按当前会员政策执行。\n\n"
+            "<b>充值活动政策</b>\n"
+            "• 越南 PayOS/银行转账活动与会员等级折扣分开计算。\n"
+            "• 国际付款不适用越南本地充值奖励或首次活动奖励。\n\n"
+            "政策详情：<code>/vip_policy</code>"
+        )
+    else:
+        text = (
         "🪪 <b>THÀNH VIÊN TOAN AAS</b>\n\n"
         f"• 🪪 Cấp hiện tại: <b>{html.escape(current_badge)}</b>\n"
         + (f"• {admin_note}\n" if admin_note else "")
@@ -114760,10 +116373,13 @@ async def cmd_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Xem thống kê: <code>/ref_stats</code>\n"
         "Bảng quyền lợi: <code>/vip_policy</code>\n"
         "Mã cá nhân: <code>/my_promos</code>"
-    )
+        )
     await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_vip_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = get_user_language(update.effective_user.id) if update.effective_user else "vi"
+    if normalize_user_language(lang) in {"en", "zh"}:
+        return await update.message.reply_text("\n".join(member_policy_lines(lang)), parse_mode="HTML")
     lines = [
         "🪪 <b>CHÍNH SÁCH THÀNH VIÊN TOAN AAS</b>",
         "",
@@ -123014,6 +124630,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if await handle_quick_image_flow_pending_text(update, context):
+        return
+
+    if await handle_media_logo_watermark_pending_text(update, context):
         return
 
     if await handle_public_image_prompt_pending_text(update, context):

@@ -302,7 +302,7 @@ def test_start_text_contains_all_product_categories(monkeypatch):
     ]
     for line in expected_lines:
         assert line in text
-    assert "Trước khi nạp xu mọi người nhớ vào kiểm tra và gửi mã khuyến mãi theo hướng dẫn trước nhé!" in text
+    assert "Khuyến mãi nạp tiền nội địa chỉ áp dụng cho kênh ngân hàng Việt Nam đủ điều kiện" in text
 
 
 def test_start_text_contains_legal_links(monkeypatch):
@@ -947,10 +947,10 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
     assert "Image: <code>admin-only custom Google image endpoint; public OFF" not in source
     assert bot.public_image_provider_fail_message(0, False) == "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau."
     assert bot.public_image_provider_fail_message(50, True) == "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau."
-    assert "Admin đã được ghi nhận" in bot.public_image_provider_fail_message(50, False)
+    assert "Yêu cầu đã được ghi nhận" in bot.public_image_provider_fail_message(50, False)
     assert bot.public_video_provider_fail_message(0, False) == "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS chưa trừ Xu của bạn. Vui lòng thử lại sau."
     assert bot.public_video_provider_fail_message(300, True) == "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS đã hoàn lại 300 Xu cho bạn. Vui lòng thử lại sau."
-    assert "Admin đã được ghi nhận" in bot.public_video_provider_fail_message(300, False)
+    assert "Yêu cầu đã được ghi nhận" in bot.public_video_provider_fail_message(300, False)
 
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", False)
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
@@ -2395,7 +2395,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     en_pricing_labels = [button.text for row in bot.pricing_main_keyboard("en").inline_keyboard for button in row]
     assert "🎁 Xem ưu đãi" not in en_pricing_labels
     assert en_pricing_labels == ["📋 Pricing", "💳 Top up Xu", "🎁 Plans / Combos", "🏠 Main menu"]
-    assert "Vietnam local top-up promotions are not available for international payments" in "\n".join(bot.pricing_hub_lines("en"))
+    assert "Deposit promotions are available only for Vietnam PayOS/bank-transfer campaigns" in "\n".join(bot.pricing_hub_lines("en"))
     promo_text = "\n".join(bot.billing_promotions_lines("vi"))
     assert "ƯU ĐÃI TOAN AAS" in promo_text
     assert "FIRST30" in promo_text
@@ -2404,7 +2404,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "WEEKLY10" in promo_text
     assert "DAILY5" in promo_text
     assert "Launch Bonus theo mệnh giá" in promo_text
-    assert "PayOS, QR ngân hàng/VietQR" in promo_text
+    assert "Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam" in promo_text
     assert "ZaloPay/MoMo, USDT và thanh toán quốc tế không áp dụng" in promo_text
     promo_callbacks = [button.callback_data for row in bot.billing_promotions_keyboard("vi").inline_keyboard for button in row]
     assert promo_callbacks == ["pricing|promo_apply", "pricing|gift_code", "menu|main_topup", "pricing|catalog", "pricing|main", "menu|main"]
@@ -2562,7 +2562,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     edit_choice_labels = [button.text for row in bot.image_edit_choice_keyboard("vi").inline_keyboard for button in row]
     assert "✂️ Cắt / đổi tỉ lệ" in edit_choice_labels
     assert "📐 Resize pixel" in edit_choice_labels
-    assert "🔤 Thêm chữ / logo" in edit_choice_labels
+    assert "🔤 Thêm chữ" in edit_choice_labels
+    assert "🎭 Logo / Watermark" in edit_choice_labels
+    assert "🔤 Thêm chữ / logo" not in edit_choice_labels
     assert "🎨 Công thức màu" in edit_choice_labels
     assert "✨ Chỉnh sửa AI" not in edit_choice_labels
     assert "✨ Nâng chất lượng AI" in edit_choice_labels
@@ -2578,7 +2580,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     resize_choice_labels = [button.text for row in bot.image_resize_choice_keyboard("vi").inline_keyboard for button in row]
     assert "✂️ Cắt / đổi tỉ lệ" in resize_choice_labels
     assert "📐 Resize pixel" in resize_choice_labels
-    assert "🔤 Thêm chữ / logo" in resize_choice_labels
+    assert "🔤 Thêm chữ" in resize_choice_labels
+    assert "🎭 Logo / Watermark" in resize_choice_labels
+    assert "🔤 Thêm chữ / logo" not in resize_choice_labels
     assert "🎨 Công thức màu" in resize_choice_labels
     assert "✨ Chỉnh sửa AI" not in resize_choice_labels
     assert "✨ Nâng chất lượng AI" in resize_choice_labels
@@ -2588,6 +2592,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert resize_method_labels[0] == "🌫 Nền mờ, không cắt chủ thể"
     assert "✂️ Cắt vừa khung" in resize_method_labels
     assert "⬜ Thêm nền/viền" in resize_method_labels
+    text_position_callbacks = [button.callback_data for row in bot.image_editor_position_keyboard("text", "vi", "editor_text_pos", "imgtool|edit_back_choice").inline_keyboard for button in row]
+    logo_position_callbacks = [button.callback_data for row in bot.image_editor_position_keyboard("logo", "vi", "editor_logo_pos", "imgtool|edit_back_choice").inline_keyboard for button in row]
+    assert "imgtool|editor_text_pos|top_left" in text_position_callbacks
+    assert "imgtool|editor_text_pos|bottom_right" in text_position_callbacks
+    assert "imgtool|editor_logo_pos|top_left" in logo_position_callbacks
+    assert "imgtool|editor_logo_pos|bottom_right" in logo_position_callbacks
     assert bot.parse_image_pixel_size("1920x1080") == (1920, 1080)
     assert bot.normalize_image_tool_ratio("9x16") == "9:16"
     if bot.Image is not None:
@@ -2700,8 +2710,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "TOAN AAS chưa xử lý video" in vi_video_off
     assert "chưa trừ Xu" in vi_video_off
     en_video_off = bot.public_video_off_options_text("en")
-    assert "Real video generation is not public yet" in en_video_off
-    assert "has not called the video API" in en_video_off
+    assert "Video export is temporarily under maintenance" in en_video_off
+    assert "has not processed the video or charged Xu" in en_video_off
     from_image_off = bot.image_to_video_public_off_prompt(0, "u_video_off", "vi")
     assert "Prompt ảnh thành video" in from_image_off
     assert "TOAN AAS chưa xử lý video" in from_image_off
@@ -4043,7 +4053,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
 
     topic_text = bot.creative_motion_topic_text()
     assert "Bạn muốn làm video về vấn đề gì" in topic_text
-    assert "không gọi API ảnh/video thật" in topic_text
+    assert "chưa xử lý ảnh/video và chưa trừ Xu" in topic_text
     motion_buttons = [button.text for row in bot.creative_motion_topic_keyboard().inline_keyboard for button in row]
     assert "Sản phẩm / quảng cáo" in motion_buttons
     assert "Affiliate / TikTok Shop" in motion_buttons
@@ -4159,7 +4169,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
 
     product_text = bot.cinematic_ad_product_text()
     assert "Bạn muốn làm quảng cáo cho sản phẩm/dịch vụ gì" in product_text
-    assert "không gọi API ảnh/video thật" in product_text
+    assert "chưa xử lý ảnh/video và chưa trừ Xu" in product_text
     ad_buttons = [button.text for row in bot.cinematic_ad_message_keyboard().inline_keyboard for button in row]
     assert "Thời gian / ký ức" in ad_buttons
     assert "Before / After" in ad_buttons
@@ -7931,6 +7941,25 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         "create_media|qi_back_suggestions",
     }.issubset(set(prepared_callbacks))
 
+    logo_choice_callbacks = [
+        button.callback_data
+        for row in bot.quick_image_logo_choice_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert {"create_media|qi_logo_add", "create_media|qi_logo_skip", "create_media|qi_back_prompt"}.issubset(set(logo_choice_callbacks))
+    logo_position_callbacks = [
+        button.callback_data
+        for row in bot.quick_image_logo_position_keyboard("vi").inline_keyboard
+        for button in row
+    ]
+    assert "create_media|qi_logo_pos|top_left" in logo_position_callbacks
+    assert "create_media|qi_logo_pos|bottom_right" in logo_position_callbacks
+    logo_confirm_text = bot.quick_image_logo_confirm_text(
+        {"logo_watermark_text": "TOAN AAS", "logo_watermark_position": "top_left"},
+        "vi",
+    )
+    assert "TOAN AAS" in logo_confirm_text and "góc trái trên" in logo_confirm_text
+
     state = bot.set_quick_image_flow("quick-image-test", "ratio")
     state = bot.set_quick_image_flow("quick-image-test", "tier", aspect_ratio="16:9")
     assert state["prompt"] == prepared_prompt
@@ -7939,6 +7968,15 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     ratio_text = bot.quick_image_ratio_text(state, "vi")
     assert "Chọn tỉ lệ khung hình" in ratio_text
     assert first[0] in ratio_text
+    state_with_logo = bot.set_quick_image_flow(
+        "quick-image-test",
+        "ratio",
+        logo_watermark_enabled=True,
+        logo_watermark_decided=True,
+        logo_watermark_text="TOAN AAS",
+        logo_watermark_position="top_left",
+    )
+    assert "góc trái trên" in bot.quick_image_ratio_text(state_with_logo, "vi")
     ratio_rows = bot.quick_image_ratio_keyboard("vi").inline_keyboard
     ratio_callbacks = [button.callback_data for row in ratio_rows for button in row]
     assert "create_media|qi_ratio_16x9" in ratio_callbacks
@@ -8533,8 +8571,9 @@ def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
         "imgtool|prompt_variant_select|3",
     ]
     assert "selected_ratio" in callback_source
-    assert "show_image_prompt_confirmation(query, uid, tier, prompt, selected_ratio" in callback_source
-    assert "set_media_aspect_pending(uid, \"image\", tier, prompt)" in callback_source
+    assert 'logo_watermark_back_callback="imgtool|prompt_use"' in callback_source
+    assert 'confirmation_source="image_prompt_tool"' in callback_source
+    assert 'media_logo_watermark_choice_text("image", prompt, lang)' in callback_source
     assert "prompt_save_variant" in callback_source
 
     edit_ready = bot.image_edit_ready_text({
@@ -8589,7 +8628,9 @@ def test_image_tools_v5_unified_hotfix_state_resize_and_guards():
     ]
     assert "✂️ Cắt / đổi tỉ lệ" in resize_labels
     assert "📐 Resize pixel" in resize_labels
-    assert "🔤 Thêm chữ / logo" in resize_labels
+    assert "🔤 Thêm chữ" in resize_labels
+    assert "🎭 Logo / Watermark" in resize_labels
+    assert "🔤 Thêm chữ / logo" not in resize_labels
     assert "🎨 Công thức màu" in resize_labels
     assert "✨ Chỉnh sửa AI" not in resize_labels
     assert "✨ Nâng chất lượng AI" in resize_labels
@@ -10211,7 +10252,7 @@ def test_confirm_screen_professional_copy():
     text = bot.video_price_invoice_text(state, "vi")
     assert "Hóa đơn xác nhận video" in text
     assert "Dịch vụ chính" in text
-    assert "Add-on có phí" in text
+    assert "Công cụ bổ sung có phí" in text
     assert "TOAN AAS chỉ bắt đầu xử lý" in text
     assert "provider" not in text.lower()
     assert "api" not in text.lower()
@@ -10387,8 +10428,9 @@ def test_image_menu_structure_v2_exact_groups():
     edit_rows = [[button.text for button in row] for row in bot.image_edit_choice_keyboard("vi").inline_keyboard]
     assert edit_rows == [
         ["✂️ Cắt / đổi tỉ lệ", "📐 Resize pixel"],
-        ["🔤 Thêm chữ / logo", "🎨 Công thức màu"],
-        ["✨ Nâng chất lượng AI", "✍️ Nhập yêu cầu riêng"],
+        ["🔤 Thêm chữ", "🎭 Logo / Watermark"],
+        ["🎨 Công thức màu", "✨ Nâng chất lượng AI"],
+        ["✍️ Nhập yêu cầu riêng"],
         ["⬅️ Về menu ảnh", "🏠 Menu chính"],
     ]
     assert "✨ Chỉnh sửa AI" not in [label for row in edit_rows for label in row]
@@ -10432,7 +10474,8 @@ def test_video_enhance_menu():
     assert "🪄 Chỉnh màu video" in labels
     assert "✂️ Cắt / Đổi tỉ lệ video" in labels
     assert "📱 Làm video dọc 9:16" in labels
-    assert "🔠 Thêm chữ / watermark" in labels
+    assert "🔠 Thêm chữ" in labels
+    assert "🔠 Thêm chữ / watermark" not in labels
     assert "🎞 Tăng nét video cơ bản" in labels
 
 

@@ -1539,6 +1539,40 @@ def test_scene_count_maps_to_estimated_duration(scene_count, duration):
     assert "khoảng" in fields["duration_note"]
 
 
+def test_video_logo_watermark_position_is_free_and_in_payload():
+    finalization = {
+        "logo_watermark_enabled": True,
+        "logo_watermark_text": "TOAN AAS",
+        "logo_watermark_position": "top_left",
+        "logo_watermark_source": "text",
+    }
+    state = {
+        "video_tier": "basic",
+        "selected_video_tier": "basic",
+        "selected_scene_count": 3,
+        "video_finalization": finalization,
+    }
+    quote = bot.calculate_video_quote(state)
+    assert quote["addon_fee_xu"] == 0
+    assert quote["total_xu"] == 810
+    invoice = bot.video_quote_invoice_text(quote, state, "vi")
+    assert "Logo / Watermark" in invoice
+    assert "Có" in invoice
+    assert "góc trái trên" in invoice
+    payload = bot.public_video_pending_payload_from_package(
+        "basic",
+        {
+            "video_prompt": "Video demo sản phẩm",
+            "selected_scene_count": 3,
+            "video_finalization": finalization,
+        },
+        "9:16",
+    )
+    assert payload["logo_watermark_enabled"] is True
+    assert payload["logo_watermark_position"] == "top_left"
+    assert "top left" in payload["prompt"]
+
+
 def test_package_selection_opens_scene_count(monkeypatch):
     user_id = 993291
     bot.clear_video_finalization_state(user_id)
@@ -1841,9 +1875,43 @@ def test_prompt_image_create_image_shows_image_package_selector():
     labels = _labels(bot.task3d_prompt_image_package_keyboard("vi"))
     assert labels == [
         "50 Xu Tiết kiệm", "150 Xu Phổ thông", "200 Xu Có bảo hành", "300 Xu Cao cấp",
-        "400 Xu Có bảo hành", "500 Xu Cao cấp+", "600 Xu Có bảo hành", "⬅️ Prompt ảnh",
+        "400 Xu Có bảo hành", "500 Xu Cao cấp+", "600 Xu Có bảo hành", "⬅️ Quay lại",
     ]
+    assert "vproduct|prompt_image_logo_choice" in _callbacks(bot.task3d_prompt_image_package_keyboard("vi"))
     assert "chưa gọi hệ tạo ảnh và chưa trừ Xu" in bot.task3d_prompt_image_package_text(session, "vi")
+
+
+def test_prompt_image_logo_watermark_step_before_package():
+    session = {"draft": {"prompt_bundle": _bundle(shots=2).to_dict(), "prompt_image_selection": [1]}}
+    choice_callbacks = _callbacks(bot.task3d_prompt_image_logo_choice_keyboard("vi"))
+    assert "vproduct|prompt_image_logo_add" in choice_callbacks
+    assert "vproduct|prompt_image_logo_skip" in choice_callbacks
+    position_callbacks = _callbacks(bot.task3d_prompt_image_logo_position_keyboard("vi"))
+    assert "vproduct|prompt_image_logo_pos|top_left" in position_callbacks
+    assert "vproduct|prompt_image_logo_pos|bottom_right" in position_callbacks
+    confirm_text = bot.task3d_prompt_image_logo_confirm_text(
+        {
+            "draft": {
+                "prompt_image_logo_watermark_text": "TOAN AAS",
+                "prompt_image_logo_watermark_position": "bottom_right",
+            }
+        },
+        "vi",
+    )
+    assert "TOAN AAS" in confirm_text and "góc phải dưới" in confirm_text
+    package_text = bot.task3d_prompt_image_package_text(
+        {
+            "draft": {
+                **session["draft"],
+                "prompt_image_logo_watermark_enabled": True,
+                "prompt_image_logo_watermark_text": "TOAN AAS",
+                "prompt_image_logo_watermark_position": "bottom_right",
+            }
+        },
+        "vi",
+    )
+    assert "Logo / Watermark" in package_text
+    assert "góc phải dưới" in package_text
 
 
 def test_prompt_image_uses_existing_image_pricing():
@@ -2029,7 +2097,8 @@ def test_prompt_image_back_to_scene_selector():
 def test_scene_selector_back_to_prompt_pack():
     image_session = {"draft": {"prompt_bundle": _bundle(shots=2).to_dict(), "prompt_image_selection": [1]}}
     assert _callbacks(bot.task3d_prompt_image_scene_keyboard(image_session, "vi"))[-2] == "vproduct|result"
-    assert "vproduct|prompt_image_detail" in _callbacks(bot.task3d_prompt_image_package_keyboard("vi"))
+    assert "vproduct|prompt_image_logo_choice" in _callbacks(bot.task3d_prompt_image_package_keyboard("vi"))
+    assert "vproduct|prompt_image_package_menu" in _callbacks(bot.task3d_prompt_image_confirm_keyboard("token", image_session, "vi"))
 
 
 def test_prompt_video_back_to_shot_selector():
@@ -2053,7 +2122,7 @@ def test_no_reinput_reupload():
     session = bot.get_video_session(user_id)
     assert session["source_media_ref"] == "photo-file-id"
     assert session["draft"]["prompt_bundle"] == bundle
-    assert session["current_step"] == "prompt_image_package"
+    assert session["current_step"] == "prompt_image_logo_choice"
     bot.clear_video_session(user_id)
 
 
