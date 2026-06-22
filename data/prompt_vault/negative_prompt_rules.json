@@ -1,0 +1,6 @@
+{
+  "items": [
+    {"id":"negative_default_quality","label_vi":"Chất lượng và continuity mặc định","label_en":"Default quality and continuity","tags":["default","product","social_short","cinematic","animation","documentary"],"use_cases":["all_video"],"prompt_template":"Loại bỏ lỗi hình thể, chữ sai, vật thể méo, nhấp nháy và thay đổi nhận diện giữa cảnh.","scene_guidance":"Áp dụng cùng một negative prompt cho mọi scene, bổ sung giới hạn riêng của từng cảnh khi cần.","negative_prompt":"low quality, flicker, duplicate subject, extra limbs, warped hands, identity drift, product deformation, unreadable text, random logo, abrupt lighting change","platform_hint":"Mọi nền tảng","safety_note":"Không dùng negative prompt để né chính sách an toàn."},
+    {"id":"negative_brand_integrity","label_vi":"Toàn vẹn thương hiệu/logo","label_en":"Brand and logo integrity","tags":["logo","watermark","product"],"use_cases":["branded_video"],"prompt_template":"Giữ logo, nhãn và chữ thương hiệu đúng dữ liệu người dùng cung cấp.","scene_guidance":"Không tự tạo logo, slogan hoặc bao bì thay thế.","negative_prompt":"misspelled brand, altered logo, extra watermark, counterfeit packaging, random slogan","platform_hint":"Mọi nền tảng","safety_note":"Chỉ dùng tài sản thương hiệu mà người dùng có quyền sử dụng."}
+  ]
+}

@@ -87,6 +87,14 @@ from video_product_system import (
     validate_package_selection,
     validate_video_prompt_bundle,
 )
+from video_multiscene_engine import (
+    build_detailed_multiscene_prompt_plan,
+    context_bundle_debug_summary,
+    load_prompt_vault,
+    prompt_vault_status,
+    select_video_context_bundle,
+    stitch_scene_videos,
+)
 from operations_v1a import (
     EXPENSE_CATEGORIES as OPERATIONS_EXPENSE_CATEGORIES,
     INTERNAL_DOC_DEPARTMENT_DESCRIPTIONS,
@@ -35238,6 +35246,10 @@ def video_completed_addon_status_payload() -> dict:
     }
 
 VIDEO_MULTISCENE_TEST_COUNTS = (3, 5, 10, 20)
+VIDEO_MULTISCENE_FINAL_PASS_STATUSES = {"PASS", "SUCCESS", "OK"}
+VIDEO_MULTISCENE_BACKGROUND_TASKS: set[asyncio.Task] = set()
+VIDEO_MULTISCENE_JOB_SETTING_PREFIX = "video_multiscene_job:"
+VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Render nhiều cảnh đang được kiểm thử để tránh lỗi chi phí/provider. TOAN AAS chưa xử lý và chưa trừ Xu."
 
 def video_multiscene_setting_bool(key: str, default: bool = False) -> bool:
     value = str(os.getenv(key) or get_system_setting(key, "1" if default else "") or "").strip().lower()
@@ -35246,8 +35258,17 @@ def video_multiscene_setting_bool(key: str, default: bool = False) -> bool:
 def video_multiscene_public_enabled() -> bool:
     return video_multiscene_setting_bool("MULTISCENE_PUBLIC_ENABLED", False)
 
+def video_multiscene_ffmpeg_path() -> str:
+    configured = str(os.getenv("FFMPEG_PATH") or LOCAL_FFMPEG_PATH or "").strip()
+    if configured and os.path.isfile(configured):
+        return configured
+    return str(shutil.which("ffmpeg") or "")
+
+def video_multiscene_stitching_available() -> bool:
+    return bool(video_multiscene_ffmpeg_path())
+
 def video_multiscene_stitching_ready() -> bool:
-    return video_multiscene_setting_bool("VIDEO_MULTISCENE_STITCHING_READY", False)
+    return bool(video_multiscene_setting_bool("VIDEO_MULTISCENE_STITCHING_READY", False) and video_multiscene_stitching_available())
 
 def video_multiscene_scene_tested(scene_count) -> bool:
     count = max(1, min(20, safe_int(scene_count, 1)))
@@ -35256,7 +35277,7 @@ def video_multiscene_scene_tested(scene_count) -> bool:
     result = get_tool_test_result(f"video_multiscene_{count}")
     status = str(result.get("status") or "").upper()
     setting = get_system_setting(f"video_multiscene_{count}_tested", "")
-    return status in PROVIDER_SMOKE_PASS_STATUSES or str(setting or "").strip().lower() in {"1", "true", "yes", "on", "pass", "success"}
+    return status in VIDEO_MULTISCENE_FINAL_PASS_STATUSES or str(setting or "").strip().lower() in {"1", "true", "yes", "on", "pass", "success"}
 
 def video_multiscene_public_ready(scene_count) -> bool:
     count = max(1, min(20, safe_int(scene_count, 1)))
@@ -35264,11 +35285,487 @@ def video_multiscene_public_ready(scene_count) -> bool:
         return True
     return bool(video_multiscene_public_enabled() and video_multiscene_stitching_ready() and video_multiscene_scene_tested(count))
 
+def video_multiscene_session_snapshot(user_id, extra: dict | None = None) -> dict:
+    snapshot = dict(get_video_session(user_id) or {})
+    addon = dict(get_video_addon_state(user_id) or {})
+    finalization = dict(get_video_finalization_state(user_id) or {})
+    for source in (finalization, addon, dict(extra or {})):
+        for key, value in source.items():
+            if value not in (None, "", [], {}):
+                snapshot[key] = value
+    snapshot["pending_payload"] = {
+        **dict((get_video_session(user_id) or {}).get("pending_payload") or {}),
+        **dict(finalization.get("pending_payload") or {}),
+        **dict(addon.get("pending_payload") or {}),
+        **dict((extra or {}).get("pending_payload") or {}),
+    }
+    snapshot["video_order"] = {
+        **dict(finalization.get("video_order") or {}),
+        **dict(addon.get("video_order") or {}),
+        **dict((extra or {}).get("video_order") or {}),
+    }
+    snapshot.setdefault("language", user_ui_lang(user_id))
+    return snapshot
+
+def multiscene_job_setting_key(parent_task_id: str) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(parent_task_id or ""))[:120]
+    return VIDEO_MULTISCENE_JOB_SETTING_PREFIX + safe_id
+
+def save_multiscene_job_record(job: dict) -> dict:
+    current = dict(job or {})
+    parent_task_id = str(current.get("parent_task_id") or "").strip()
+    if not parent_task_id:
+        raise ValueError("parent_task_id is required")
+    current["updated_at"] = now_text()
+    set_system_setting(
+        multiscene_job_setting_key(parent_task_id),
+        json.dumps(current, ensure_ascii=False, separators=(",", ":")),
+        f"multi-scene parent status={str(current.get('status') or '')[:40]}",
+        str(current.get("user_id") or ""),
+    )
+    set_system_setting("video_multiscene_last_parent_task_id", parent_task_id, "latest multi-scene parent", str(current.get("user_id") or ""))
+    if current.get("user_id"):
+        set_system_setting(f"video_multiscene_last_user:{current['user_id']}", parent_task_id, "latest user multi-scene parent", str(current.get("user_id") or ""))
+    return current
+
+def get_multiscene_job_record(parent_task_id: str) -> dict:
+    raw = get_system_setting(multiscene_job_setting_key(parent_task_id), "")
+    try:
+        value = json.loads(raw or "{}")
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+def _multiscene_parent_task_id(parent_job_id: int, user_id) -> str:
+    nonce = hashlib.sha256(f"{parent_job_id}:{user_id}:{time.time_ns()}".encode("utf-8")).hexdigest()[:12]
+    return f"msv-{int(parent_job_id)}-{nonce}"
+
+def _multiscene_update_child(job: dict, scene_index: int, **fields) -> dict:
+    for child in job.get("scene_jobs") or []:
+        if int(child.get("scene_index") or 0) != int(scene_index):
+            continue
+        child.update(fields)
+        child["updated_at"] = now_text()
+        child_job_id = int(child.get("job_id") or 0)
+        update_fields = {
+            key: value for key, value in fields.items()
+            if key in {
+                "task_id", "status", "result_url", "error_class", "provider_message",
+                "fail_reason", "poll_count", "attempts", "finished_at", "model",
+            }
+        }
+        if "provider_task_id" in fields:
+            update_fields["task_id"] = fields["provider_task_id"]
+        if "output_url" in fields:
+            update_fields["result_url"] = fields["output_url"]
+        if "error" in fields:
+            update_fields["provider_message"] = fields["error"]
+        update_shopaikey_job(job_id=child_job_id, **update_fields)
+        break
+    save_multiscene_job_record(job)
+    return job
+
+def _multiscene_public_failure_text(job: dict) -> str:
+    refunded = bool(job.get("refund_done"))
+    if refunded:
+        return "TOAN AAS chưa tạo được video nhiều cảnh hoàn chỉnh nên không gửi kết quả thiếu cảnh. Xu đã được hoàn lại; nội dung và thông tin retry được giữ để admin kiểm tra."
+    if int(job.get("xu_deducted") or 0) <= 0:
+        return "TOAN AAS chưa tạo được video nhiều cảnh hoàn chỉnh nên không gửi kết quả thiếu cảnh. Bot chưa trừ Xu; nội dung của bạn vẫn được giữ nguyên."
+    return "TOAN AAS chưa tạo được video nhiều cảnh hoàn chỉnh nên không gửi kết quả thiếu cảnh. Admin đã nhận thông tin để kiểm tra trạng thái hoàn Xu."
+
+def _multiscene_refund_if_needed(job: dict, reason: str) -> bool:
+    amount = int(job.get("xu_deducted") or 0)
+    if amount <= 0 or job.get("refund_done"):
+        return False
+    refunded = refund_charged_credit(
+        job.get("user_id"),
+        amount,
+        "shopaikey_multiscene_refund",
+        str(job.get("parent_task_id") or ""),
+        f"Hoàn Xu video nhiều cảnh: {shopaikey_sanitize_error(reason)}",
+        True,
+    )
+    job["refund_done"] = bool(refunded)
+    job["refund_status"] = "refunded" if refunded else "refund_failed"
+    update_shopaikey_job(
+        job_id=int(job.get("parent_job_id") or 0),
+        refund_status=job["refund_status"],
+        refund_amount=amount if refunded else 0,
+        refund_reason=reason,
+        billing_status="refunded" if refunded else "refund_failed",
+    )
+    save_multiscene_job_record(job)
+    return bool(refunded)
+
+def _multiscene_provider_status(result: dict) -> str:
+    raw = str(result.get("status") or result.get("provider_status") or "").strip().upper()
+    if raw in {"SUCCESS", "COMPLETED", "COMPLETE", "SUCCEEDED", "DONE"}:
+        return "COMPLETED"
+    normalized = normalize_shopaikey_video_status(raw)
+    if normalized == "SUCCESS":
+        return "COMPLETED"
+    if raw in {"FAILED", "FAILURE", "CANCELLED", "CANCELED", "ERROR"} or normalized == "FAILED" or str(result.get("error_class") or "").upper().startswith("FAIL_"):
+        return "FAILED"
+    return "IN_PROGRESS"
+
+async def _poll_multiscene_scene(job: dict, child: dict, poller=None) -> dict:
+    route = "key4u" if str(child.get("provider") or "").lower() == "key4u" else "shopaikey"
+    task_id = str(child.get("provider_task_id") or "")
+    max_attempts = max(1, safe_int(job.get("poll_max_attempts"), int(SHOPAIKEY_VIDEO_POLL_MAX_ATTEMPTS or 24)))
+    interval = max(0.0, float(job.get("poll_interval_seconds") if job.get("poll_interval_seconds") is not None else (SHOPAIKEY_VIDEO_POLL_INTERVAL_SECONDS or 25)))
+    last = {"status": "SUBMITTED", "task_id": task_id}
+    for attempt in range(1, max_attempts + 1):
+        if attempt > 1 and interval:
+            await asyncio.sleep(interval)
+        try:
+            if poller:
+                last = await poller(child)
+            elif route == "key4u":
+                last = await key4u_provider_instance().poll_video_task(task_id)
+            else:
+                last = await shopaikey_video_job_status(task_id)
+        except Exception as exc:
+            last = {"status": "IN_PROGRESS", "error_class": type(exc).__name__, "detail": "poll temporarily unavailable"}
+        status = _multiscene_provider_status(last)
+        output_url = str(last.get("result_url") or last.get("output_url") or "").strip()
+        if status == "COMPLETED" and output_url:
+            _multiscene_update_child(
+                job, child["scene_index"], status="COMPLETED", output_url=output_url,
+                poll_count=attempt, completed_at=now_text(), error="",
+            )
+            return {**last, "status": "COMPLETED", "output_url": output_url}
+        if status == "FAILED":
+            error = shopaikey_sanitize_error(str(last.get("fail_reason") or last.get("detail") or last.get("error_class") or "scene failed"))
+            _multiscene_update_child(
+                job, child["scene_index"], status="FAILED", poll_count=attempt,
+                error=error, completed_at=now_text(),
+            )
+            return {**last, "status": "FAILED", "error": error}
+        _multiscene_update_child(job, child["scene_index"], status="IN_PROGRESS", poll_count=attempt)
+    _multiscene_update_child(
+        job, child["scene_index"], status="IN_PROGRESS",
+        error="AMBIGUOUS_POLL_TIMEOUT_NO_RESUBMIT", poll_count=max_attempts,
+    )
+    return {**last, "status": "IN_PROGRESS", "error": "AMBIGUOUS_POLL_TIMEOUT_NO_RESUBMIT"}
+
+async def _download_multiscene_scene(output_url: str, destination: str) -> str:
+    source = str(output_url or "").strip()
+    target = Path(destination)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if os.path.isfile(source):
+        await asyncio.to_thread(shutil.copyfile, source, target)
+        return str(target)
+    if not source.startswith(("http://", "https://")):
+        raise ValueError("scene output is not a downloadable URL")
+    downloaded = 0
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0), follow_redirects=True) as client:
+        async with client.stream("GET", source) as response:
+            response.raise_for_status()
+            with target.open("wb") as handle:
+                async for chunk in response.aiter_bytes(1024 * 256):
+                    downloaded += len(chunk)
+                    if downloaded > 250 * 1024 * 1024:
+                        raise ValueError("scene output exceeds download limit")
+                    handle.write(chunk)
+    if downloaded <= 0:
+        raise ValueError("scene output download is empty")
+    return str(target)
+
+async def send_multiscene_video_result_once(bot_client, chat_id, job: dict, output_path: str) -> dict:
+    parent_task_id = str(job.get("parent_task_id") or "")
+    parent_job_id = int(job.get("parent_job_id") or 0)
+    claim = claim_shopaikey_video_output(
+        task_id=parent_task_id,
+        job_id=parent_job_id,
+        result_url=f"multiscene://{parent_task_id}",
+        source="multiscene_stitched",
+    )
+    if not claim.get("claimed"):
+        return {**claim, "sent": False}
+    file_id = ""
+    try:
+        if os.path.getsize(output_path) > 49 * 1024 * 1024:
+            with open(output_path, "rb") as handle:
+                message = await bot_client.send_document(
+                    chat_id=chat_id,
+                    document=handle,
+                    filename=f"TOAN_AAS_{parent_task_id}.mp4",
+                    caption="Video TOAN AAS đã tạo xong",
+                )
+            if getattr(message, "document", None):
+                file_id = str(getattr(message.document, "file_id", "") or "")
+        else:
+            with open(output_path, "rb") as handle:
+                message = await bot_client.send_video(
+                    chat_id=chat_id,
+                    video=handle,
+                    caption="Video TOAN AAS đã tạo xong",
+                    supports_streaming=True,
+                )
+            if getattr(message, "video", None):
+                file_id = str(getattr(message.video, "file_id", "") or "")
+    except Exception as exc:
+        release_shopaikey_video_output_claim(parent_job_id, parent_task_id, type(exc).__name__)
+        return {**claim, "sent": False, "reason": "telegram_send_failed_no_ambiguous_retry"}
+    complete_shopaikey_video_output_claim(
+        parent_job_id,
+        parent_task_id,
+        f"multiscene://{parent_task_id}",
+        "multiscene_stitched",
+        file_id,
+    )
+    return {**claim, "sent": True, "output_file_id": file_id}
+
+async def _finish_multiscene_failure(job: dict, bot_client, chat_id, reason: str) -> dict:
+    completed = sum(1 for child in job.get("scene_jobs") or [] if child.get("status") == "COMPLETED")
+    submitted = sum(1 for child in job.get("scene_jobs") or [] if child.get("provider_task_id"))
+    job["status"] = "PARTIAL_FAILED" if completed or submitted else "FAILED"
+    job["error"] = shopaikey_sanitize_error(reason)
+    job["completed_at"] = now_text()
+    _multiscene_refund_if_needed(job, reason)
+    update_shopaikey_job(
+        job_id=int(job.get("parent_job_id") or 0), status="FAILED",
+        provider_message=reason, finished_at=now_text(),
+        billing_status=str(job.get("refund_status") or ("failed_not_charged" if not job.get("xu_deducted") else "refund_pending")),
+    )
+    save_multiscene_job_record(job)
+    if bot_client and chat_id:
+        try:
+            await bot_client.send_message(chat_id=chat_id, text=_multiscene_public_failure_text(job))
+        except Exception:
+            pass
+    return job
+
+async def _execute_multiscene_video_job(job: dict, *, bot_client=None, submitter=None, poller=None, downloader=None, stitcher=None, sender=None) -> dict:
+    user_id = job.get("user_id")
+    chat_id = job.get("chat_id")
+    tier = str(job.get("video_tier") or "basic")
+    model = str(job.get("model") or SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast")
+    job["status"] = "SUBMITTED"
+    save_multiscene_job_record(job)
+
+    accepted_count = 0
+    for child in job.get("scene_jobs") or []:
+        try:
+            result = await (submitter(child) if submitter else submit_public_video_with_key4u_fallback(model, child["prompt"], user_id, tier))
+        except Exception as exc:
+            result = {"status": "FAIL_PROVIDER_ERROR", "task_id": "", "error_class": type(exc).__name__}
+        task_id = str(result.get("task_id") or "").strip()
+        if not task_id:
+            error = shopaikey_sanitize_error(str(result.get("detail") or result.get("message") or result.get("error_class") or "provider rejected scene"))
+            _multiscene_update_child(job, child["scene_index"], status="FAILED", error=error, completed_at=now_text())
+            return await _finish_multiscene_failure(job, bot_client, chat_id, error)
+        accepted_count += 1
+        route = "key4u" if str(result.get("provider_route") or "").lower() == "key4u" else "shopaikey"
+        _multiscene_update_child(
+            job, child["scene_index"], provider=route, provider_task_id=task_id,
+            status="SUBMITTED", attempts=max(1, len(result.get("attempts") or [])),
+        )
+        if accepted_count == 1 and job.get("charge_xu") and not job.get("admin_test"):
+            charge = spend_fixed_credit_info(
+                user_id,
+                int(job.get("total_xu") or 0),
+                "shopaikey_video_multiscene",
+                f"Multi-scene video accepted: {job.get('parent_task_id')}",
+                True,
+            )
+            if not charge.get("ok"):
+                job["billing_status"] = "billing_failed_after_first_provider_accept"
+                save_multiscene_job_record(job)
+                await _poll_multiscene_scene(job, child, poller=poller)
+                return await _finish_multiscene_failure(job, bot_client, chat_id, "billing failed after first provider accept; no more scenes submitted")
+            job["xu_deducted"] = int(charge.get("final_cost") or 0)
+            job["billing_status"] = "deducted_after_first_provider_accept"
+            update_shopaikey_job(
+                job_id=int(job.get("parent_job_id") or 0),
+                xu_deducted=job["xu_deducted"], billing_status=job["billing_status"],
+            )
+            save_multiscene_job_record(job)
+
+    job["status"] = "IN_PROGRESS"
+    update_shopaikey_job(job_id=int(job.get("parent_job_id") or 0), status="IN_PROGRESS")
+    save_multiscene_job_record(job)
+    poll_results = await asyncio.gather(*[
+        _poll_multiscene_scene(job, child, poller=poller) for child in list(job.get("scene_jobs") or [])
+    ])
+    if any(result.get("status") != "COMPLETED" for result in poll_results):
+        reason = "AMBIGUOUS_POLL_TIMEOUT_NO_RESUBMIT" if any(result.get("status") == "IN_PROGRESS" for result in poll_results) else "one or more scene jobs failed"
+        return await _finish_multiscene_failure(job, bot_client, chat_id, reason)
+
+    job["status"] = "STITCHING"
+    update_shopaikey_job(job_id=int(job.get("parent_job_id") or 0), status="STITCHING")
+    save_multiscene_job_record(job)
+    work_dir = Path(tempfile.gettempdir()) / "toanaas_multiscene" / str(job.get("parent_task_id"))
+    work_dir.mkdir(parents=True, exist_ok=True)
+    scene_files: list[str] = []
+    download_func = downloader or _download_multiscene_scene
+    try:
+        for child in sorted(job.get("scene_jobs") or [], key=lambda item: int(item.get("scene_index") or 0)):
+            destination = work_dir / f"scene_{int(child['scene_index']):02d}.mp4"
+            local_file = await download_func(str(child.get("output_url") or ""), str(destination))
+            scene_files.append(str(local_file))
+            _multiscene_update_child(job, child["scene_index"], local_file=str(local_file))
+    except Exception as exc:
+        return await _finish_multiscene_failure(job, bot_client, chat_id, f"scene download failed: {type(exc).__name__}")
+
+    final_path = work_dir / "final_multiscene.mp4"
+    stitch_func = stitcher or stitch_scene_videos
+    try:
+        stitch_args = (
+            scene_files,
+            str(final_path),
+            str((job.get("prompt_plan") or {}).get("project", {}).get("aspect_ratio") or "9:16"),
+            {"ffmpeg_path": video_multiscene_ffmpeg_path(), "timeout_seconds": max(900, len(scene_files) * 120)},
+        )
+        stitch_result = stitch_func(*stitch_args) if stitcher else await asyncio.to_thread(stitch_func, *stitch_args)
+        if asyncio.iscoroutine(stitch_result):
+            stitch_result = await stitch_result
+    except Exception as exc:
+        stitch_result = {"status": "FAILED", "error": type(exc).__name__}
+    if str(stitch_result.get("status") or "") != "COMPLETED" or not str(stitch_result.get("output_path") or ""):
+        reason = str(stitch_result.get("error") or "STITCHING_UNAVAILABLE")
+        job["stitching_error"] = reason
+        return await _finish_multiscene_failure(job, bot_client, chat_id, reason)
+
+    job["status"] = "COMPLETED"
+    job["final_output"] = str(stitch_result.get("output_path") or final_path)
+    update_shopaikey_job(
+        job_id=int(job.get("parent_job_id") or 0), status="SUCCESS",
+        result_url=f"multiscene://{job.get('parent_task_id')}", finished_at=now_text(),
+    )
+    save_multiscene_job_record(job)
+    send_func = sender or send_multiscene_video_result_once
+    send_result = await send_func(bot_client, chat_id, job, job["final_output"])
+    if not (send_result.get("sent") or send_result.get("already_sent") or send_result.get("duplicate_prevented")):
+        return await _finish_multiscene_failure(job, bot_client, chat_id, "final Telegram result send failed")
+
+    job["status"] = "SENT"
+    job["result_sent"] = True
+    job["completed_at"] = now_text()
+    save_multiscene_job_record(job)
+    update_shopaikey_job(
+        job_id=int(job.get("parent_job_id") or 0), status="SUCCESS", result_sent=1,
+        finished_at=now_text(),
+    )
+    if job.get("admin_test"):
+        count = int((job.get("prompt_plan") or {}).get("project", {}).get("scene_count") or 0)
+        detail = f"parent={job.get('parent_task_id')}; scenes={count}; child_outputs={len(scene_files)}; stitching=pass; final_sent_once=yes"
+        save_tool_test_result(f"video_multiscene_{count}", "PASS", detail, user_id)
+        save_tool_test_result("video_multiscene", "PASS", detail, user_id)
+        set_system_setting(f"video_multiscene_{count}_tested", "pass", detail, user_id)
+        set_system_setting("VIDEO_MULTISCENE_STITCHING_READY", "true", detail, user_id)
+        set_system_setting("video_multiscene_last_result", detail, detail, user_id)
+    elif bot_client and chat_id:
+        try:
+            await bot_client.send_message(
+                chat_id=chat_id,
+                text=ui_text(user_ui_lang(user_id), "video.next_action"),
+                reply_markup=public_video_success_keyboard(lang=user_ui_lang(user_id), task_id=str(job.get("parent_task_id") or "")),
+            )
+        except Exception:
+            pass
+    return job
+
+async def run_multiscene_video_job(order_or_session: dict, *, wait_for_completion: bool = True, submitter=None, poller=None, downloader=None, stitcher=None, sender=None) -> dict:
+    order = dict(order_or_session or {})
+    session = dict(order.get("session") or order)
+    context_bundle = select_video_context_bundle(session)
+    prompt_plan = build_detailed_multiscene_prompt_plan(session, context_bundle)
+    scene_count = int(prompt_plan.get("project", {}).get("scene_count") or 1)
+    admin_test = bool(order.get("admin_test"))
+    confirm_paid = bool(order.get("confirm_paid"))
+    if scene_count <= 1:
+        return {"status": "SINGLE_SCENE_UNCHANGED", "scene_count": 1}
+    if admin_test and not confirm_paid:
+        return {"status": "CONFIRM_PAID_REQUIRED", "scene_count": scene_count}
+    if not admin_test and not bool(order.get("final_invoice_confirmed")):
+        return {"status": "FINAL_INVOICE_REQUIRED", "scene_count": scene_count}
+    if not admin_test and not video_multiscene_public_ready(scene_count):
+        return {"status": "PUBLIC_GUARDED", "scene_count": scene_count, "message": VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT}
+
+    user_id = order.get("user_id") or session.get("user_id")
+    chat_id = order.get("chat_id") or session.get("chat_id")
+    tier = normalize_video_tier(order.get("video_tier") or session.get("video_tier") or session.get("selected_video_tier") or "basic")
+    total_xu = max(0, safe_int(order.get("total_xu") or (session.get("current_video_price_preview") or {}).get("total_xu"), 0))
+    parent_job_id = create_shopaikey_job(
+        user_id, chat_id, "video", model=SHOPAIKEY_VIDEO_MODEL,
+        prompt=" | ".join(prompt_plan.get("final_prompt_pack", {}).get("provider_prompt_per_scene") or [])[:4000],
+        status="SUBMITTED", admin_only=admin_test, xu_cost_planned=total_xu,
+    )
+    parent_task_id = _multiscene_parent_task_id(parent_job_id, user_id)
+    update_shopaikey_job(
+        job_id=parent_job_id, task_id=parent_task_id, status="SUBMITTED",
+        confirmed_at=now_text(), billing_status="admin_paid_confirmed" if admin_test else "awaiting_first_provider_accept",
+    )
+    scene_jobs = []
+    for scene in prompt_plan.get("scenes") or []:
+        child_job_id = create_shopaikey_job(
+            user_id, chat_id, "video_scene", model=SHOPAIKEY_VIDEO_MODEL,
+            prompt=str(scene.get("provider_prompt") or ""), status="QUEUED",
+            admin_only=True, xu_cost_planned=0, source_job_id=parent_task_id,
+        )
+        scene_jobs.append({
+            "job_id": child_job_id,
+            "scene_index": int(scene.get("scene_index") or 0),
+            "prompt": str(scene.get("provider_prompt") or ""),
+            "provider": "",
+            "provider_task_id": "",
+            "status": "QUEUED",
+            "output_url": "",
+            "local_file": "",
+            "error": "",
+            "created_at": now_text(),
+            "completed_at": "",
+        })
+    job = {
+        "parent_task_id": parent_task_id,
+        "parent_job_id": parent_job_id,
+        "user_id": str(user_id or ""),
+        "chat_id": chat_id,
+        "video_tier": tier,
+        "model": SHOPAIKEY_VIDEO_MODEL,
+        "status": "SUBMITTED",
+        "scene_jobs": scene_jobs,
+        "prompt_plan": prompt_plan,
+        "context_bundle_debug": context_bundle_debug_summary(context_bundle),
+        "total_xu": total_xu,
+        "xu_deducted": 0,
+        "charge_xu": bool(order.get("charge_xu", not admin_test)),
+        "admin_test": admin_test,
+        "confirm_paid": confirm_paid,
+        "result_sent": False,
+        "created_at": now_text(),
+        "completed_at": "",
+        "poll_max_attempts": order.get("poll_max_attempts"),
+        "poll_interval_seconds": order.get("poll_interval_seconds"),
+    }
+    save_multiscene_job_record(job)
+    runner = _execute_multiscene_video_job(
+        job,
+        bot_client=order.get("bot_client"),
+        submitter=submitter,
+        poller=poller,
+        downloader=downloader,
+        stitcher=stitcher,
+        sender=sender,
+    )
+    if wait_for_completion:
+        return await runner
+    task = asyncio.create_task(runner)
+    VIDEO_MULTISCENE_BACKGROUND_TASKS.add(task)
+    task.add_done_callback(VIDEO_MULTISCENE_BACKGROUND_TASKS.discard)
+    return {**job, "background_started": True}
+
 def video_multiscene_status_payload() -> dict:
+    enabled, _ = shopaikey_public_generation_guard("video")
     return {
         "public_enabled": video_multiscene_public_enabled(),
         "stitching_ready": video_multiscene_stitching_ready(),
+        "stitching_available": video_multiscene_stitching_available(),
+        "provider_ready": bool(enabled or key4u_public_video_fallback_ready()),
+        "supported_scene_counts": list(VIDEO_MULTISCENE_TEST_COUNTS),
         "tested": {count: video_multiscene_scene_tested(count) for count in VIDEO_MULTISCENE_TEST_COUNTS},
+        "last_tests": {count: str((get_tool_test_result(f"video_multiscene_{count}") or {}).get("status") or "NOT_RUN") for count in VIDEO_MULTISCENE_TEST_COUNTS},
         "last_result": get_system_setting("video_multiscene_last_result", ""),
     }
 
@@ -35283,7 +35780,9 @@ async def cmd_video_multiscene_status(update: Update, context: ContextTypes.DEFA
         f"• 5-scene tested: <code>{'yes' if tested.get(5) else 'no'}</code>\n"
         f"• 10-scene tested: <code>{'yes' if tested.get(10) else 'no'}</code>\n"
         f"• 20-scene tested: <code>{'yes' if tested.get(20) else 'no'}</code>\n"
-        f"• stitching ready: <code>{'yes' if item.get('stitching_ready') else 'no'}</code>\n"
+        f"• stitching available: <code>{'yes' if item.get('stitching_available') else 'no'}</code>\n"
+        f"• stitching verified: <code>{'yes' if item.get('stitching_ready') else 'no'}</code>\n"
+        f"• provider readiness: <code>{'yes' if item.get('provider_ready') else 'no'}</code>\n"
         f"• public enabled: <code>{'yes' if item.get('public_enabled') else 'no'}</code>\n"
         f"• last test result: <code>{html.escape(str(item.get('last_result') or '-'))}</code>\n\n"
         "• Key/token: <code>hidden</code>",
@@ -35319,18 +35818,103 @@ async def cmd_tool_test_video_multiscene(update: Update, context: ContextTypes.D
             "Thêm <code>--confirm-paid</code> nếu admin muốn chạy test có phí.",
             parse_mode="HTML",
         )
-    detail = f"package={package_base}; scene_count={scene_count}; quote={quote_xu}; runner guarded; no public opening; no paid job submitted"
-    save_tool_test_result(f"video_multiscene_{scene_count}", "NOT_RUN", detail, uid)
-    save_tool_test_result("video_multiscene", "NOT_RUN", detail, uid)
+    package_to_tier = {300: "basic", 400: "common", 500: "advanced", 600: "standard", 800: "high", 1000: "future_1000", 1200: "future_1200", 1500: "future_1500"}
+    session = video_multiscene_session_snapshot(uid, {
+        "prompt": "Quảng cáo ngắn về một quán cà phê Việt Nam: từ buổi sáng yên tĩnh đến khoảnh khắc khách thưởng thức ly cà phê, hình ảnh chân thật và nhất quán.",
+        "original_prompt": "Admin paid multi-scene smoke test for a Vietnamese coffee shop",
+        "selected_scene_count": scene_count,
+        "scene_count": scene_count,
+        "estimated_scene_seconds": 6,
+        "aspect_ratio": "9:16",
+        "language": "vi",
+        "platform": "TikTok/Reels/Shorts",
+        "selected_video_tier": package_to_tier.get(package_base, "basic"),
+        "video_tier": package_to_tier.get(package_base, "basic"),
+        "current_video_price_preview": {"total_xu": quote_xu, "scene_count": scene_count},
+    })
+    detail = f"package={package_base}; scene_count={scene_count}; quote={quote_xu}; explicit paid confirmation received; runner starting; public remains guarded"
+    save_tool_test_result(f"video_multiscene_{scene_count}", "SUBMITTED", detail, uid)
+    save_tool_test_result("video_multiscene", "SUBMITTED", detail, uid)
     _safe_set_video_system_setting("video_multiscene_last_result", detail, detail)
+    started = await run_multiscene_video_job({
+        "session": session,
+        "user_id": uid,
+        "chat_id": update.message.chat_id,
+        "video_tier": package_to_tier.get(package_base, "basic"),
+        "total_xu": quote_xu,
+        "admin_test": True,
+        "confirm_paid": True,
+        "charge_xu": False,
+        "bot_client": context.bot,
+    }, wait_for_completion=False)
     return await update.message.reply_text(
-        "🧪 <b>Multi-scene video test guard</b>\n\n"
+        "🧪 <b>Multi-scene video paid test started</b>\n\n"
         f"• Package: <code>{package_base}</code>\n"
         f"• Scene count: <code>{scene_count}</code>\n"
         f"• Quote: <code>{quote_xu} Xu</code>\n"
-        "• Paid provider job: <code>NO</code>\n"
-        "• Public enabled: <code>NO</code>\n\n"
-        "Runner multi-scene/stitching chưa được xác nhận trong code path này, nên TOAN AAS không đánh dấu PASS và không mở public.",
+        f"• Parent: <code>{html.escape(str(started.get('parent_task_id') or '-'))}</code>\n"
+        "• Paid provider job: <code>YES — explicitly confirmed</code>\n"
+        f"• Public enabled: <code>{'YES' if video_multiscene_public_enabled() else 'NO'}</code>\n\n"
+        "Bot sẽ poll đủ child output, stitch và chỉ đánh dấu PASS sau khi final result được gửi đúng một lần. Lệnh test không tự mở public.",
+        parse_mode="HTML",
+    )
+
+async def cmd_video_prompt_context_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    bundle = select_video_context_bundle(video_multiscene_session_snapshot(uid))
+    summary = context_bundle_debug_summary(bundle)
+    lines = ["🧠 <b>VIDEO PROMPT CONTEXT DEBUG</b>", ""]
+    for key, value in summary.get("selected_ids", {}).items():
+        lines.append(f"• {html.escape(key)}: <code>{html.escape(str(value or '-'))}</code>")
+    lines.extend([
+        f"• tags: <code>{html.escape(', '.join(summary.get('tags') or []) or '-')}</code>",
+        f"• language: <code>{html.escape(str(summary.get('language') or '-'))}</code>",
+        f"• platform: <code>{html.escape(str(summary.get('platform') or '-'))}</code>",
+        "• Secrets: <code>none / hidden</code>",
+    ])
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_video_prompt_vault_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    item = prompt_vault_status()
+    counts = item.get("counts") or {}
+    return await update.message.reply_text(
+        "🗄 <b>VIDEO PROMPT VAULT STATUS</b>\n\n"
+        f"• Style packs: <code>{int(counts.get('video_styles') or 0)}</code>\n"
+        f"• Scene templates: <code>{int(counts.get('scene_templates') or 0)}</code>\n"
+        f"• Camera moves: <code>{int(counts.get('camera_moves') or 0)}</code>\n"
+        f"• Product contexts: <code>{int(counts.get('product_contexts') or 0)}</code>\n"
+        f"• Default fallback: <code>{'yes' if item.get('default_fallback_available') else 'no'}</code>\n"
+        f"• Secret scan: <code>{'clean' if item.get('no_secrets') else 'blocked'}</code>",
+        parse_mode="HTML",
+    )
+
+async def cmd_video_prompt_plan_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    session = video_multiscene_session_snapshot(uid)
+    if not any(str(session.get(key) or "").strip() for key in ("prompt", "video_prompt", "original_prompt", "topic", "story")):
+        session.update({"prompt": "Video giới thiệu sản phẩm theo cấu trúc vấn đề và giải pháp", "selected_scene_count": 3, "aspect_ratio": "9:16", "language": "vi"})
+    bundle = select_video_context_bundle(session)
+    plan = build_detailed_multiscene_prompt_plan(session, bundle)
+    project = plan.get("project") or {}
+    scene_lines = [
+        f"• Cảnh {int(scene.get('scene_index') or 0)}: {html.escape(str(scene.get('purpose') or '-'))} — {int(scene.get('duration_seconds') or 0)}s"
+        for scene in (plan.get("scenes") or [])[:20]
+    ]
+    return await update.message.reply_text(
+        "🎬 <b>VIDEO PROMPT PLAN PREVIEW</b>\n\n"
+        f"• Language: <code>{html.escape(str(project.get('language') or '-'))}</code>\n"
+        f"• Platform: <code>{html.escape(str(project.get('platform') or '-'))}</code>\n"
+        f"• Aspect: <code>{html.escape(str(project.get('aspect_ratio') or '-'))}</code>\n"
+        f"• Scenes: <code>{int(project.get('scene_count') or 0)}</code>\n"
+        f"• Estimated duration: <code>khoảng {int(project.get('estimated_total_seconds') or 0)}s</code>\n\n"
+        + "\n".join(scene_lines)
+        + "\n\n• Provider call: <code>NO</code>\n• Xu charge: <code>NO</code>",
         parse_mode="HTML",
     )
 
@@ -35518,6 +36102,48 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         )
 
     state = normalize_video_export_payload_for_classifier(state, classification)
+    if state.get("source") != "frame" and int(quote.get("scene_count") or 1) > 1:
+        active_multiscene = shopaikey_active_job_for_user(uid, "video")
+        if active_multiscene:
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                "Video nhiều cảnh của bạn đang được xử lý. TOAN AAS sẽ chỉ gửi một video hoàn chỉnh sau khi đủ cảnh và ghép xong.",
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+            )
+        multiscene_session = video_multiscene_session_snapshot(uid, state)
+        multiscene_session.update({
+            "selected_scene_count": int(quote.get("scene_count") or 1),
+            "scene_count": int(quote.get("scene_count") or 1),
+            "estimated_scene_seconds": int(state.get("estimated_scene_seconds") or TASK3D_SCENE_SECONDS or 6),
+            "estimated_total_seconds": int(quote.get("estimated_seconds") or int(quote.get("scene_count") or 1) * 6),
+            "current_video_price_preview": dict(quote),
+            "video_tier": tier,
+            "selected_video_tier": tier,
+            "language": lang,
+        })
+        await query.answer()
+        await safe_edit_or_send(
+            query,
+            f"TOAN AAS đang tạo {int(quote.get('scene_count') or 1)} cảnh, kiểm tra đủ đầu ra rồi ghép thành một video hoàn chỉnh. Thời lượng ước tính khoảng {int(quote.get('estimated_seconds') or 0)} giây.",
+            parse_mode=None,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
+        started = await run_multiscene_video_job({
+            "session": multiscene_session,
+            "user_id": uid,
+            "chat_id": query.message.chat_id,
+            "video_tier": tier,
+            "total_xu": int(quote.get("total_xu") or 0),
+            "final_invoice_confirmed": True,
+            "charge_xu": True,
+            "bot_client": context.bot,
+        }, wait_for_completion=False)
+        state["multiscene_parent_task_id"] = str(started.get("parent_task_id") or "")
+        state["multiscene_started_at"] = now_text()
+        set_video_addon_state(uid, state)
+        return started
     legacy_order = build_legacy_shopaikey_video_order_from_task3d_session(get_video_session(uid), uid, state)
     token = token or shopaikey_confirmation_token()
     restore_shopaikey_pending_confirmation(token, uid, legacy_order)
@@ -125066,6 +125692,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_job_dedupe_status", cmd_video_job_dedupe_status))
     tg_app.add_handler(CommandHandler("video_last_result_status", cmd_video_last_result_status))
     tg_app.add_handler(CommandHandler("video_addon_status", cmd_video_addon_status))
+    tg_app.add_handler(CommandHandler("video_prompt_context_debug", cmd_video_prompt_context_debug))
+    tg_app.add_handler(CommandHandler("video_prompt_vault_status", cmd_video_prompt_vault_status))
+    tg_app.add_handler(CommandHandler("video_prompt_plan_preview", cmd_video_prompt_plan_preview))
     tg_app.add_handler(CommandHandler("video_multiscene_status", cmd_video_multiscene_status))
     tg_app.add_handler(CommandHandler("tool_test_video_multiscene", cmd_tool_test_video_multiscene))
     tg_app.add_handler(CommandHandler("public_product_guard_status", cmd_public_product_guard_status))

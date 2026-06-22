@@ -1,0 +1,6 @@
+{
+  "items": [
+    {"id":"pain_default_attention","label_vi":"Thiếu thời gian và sự chú ý","label_en":"Limited time and attention","tags":["default","social_short","product","service"],"use_cases":["product_ad","service_intro","education"],"prompt_template":"Mở bằng khoảnh khắc người xem nhận ra vấn đề trong 1–2 giây.","scene_guidance":"Cho thấy chi phí thời gian hoặc sự bất tiện bằng hành động cụ thể.","negative_prompt":"fearmongering, humiliation, exaggerated pain, manipulative urgency","platform_hint":"TikTok/Reels/Shorts","safety_note":"Không khai thác nỗi sợ quá mức."},
+    {"id":"pain_trust_proof","label_vi":"Thiếu niềm tin và bằng chứng","label_en":"Trust and proof gap","tags":["testimonial","affiliate","service"],"use_cases":["testimonial","affiliate","business_intro"],"prompt_template":"Đưa chi tiết quan sát được, quy trình hoặc kết quả có điều kiện thay cho lời hứa chung.","scene_guidance":"Dành ít nhất một cảnh cho demo hoặc bằng chứng đáng tin.","negative_prompt":"fake review, fake metric, guaranteed result, anonymous authority claim","platform_hint":"TikTok/Reels/YouTube","safety_note":"Không bịa bằng chứng hoặc danh tính khách hàng."}
+  ]
+}
