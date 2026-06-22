@@ -678,6 +678,7 @@ SHOPAIKEY_PUBLIC_IMAGE_ENABLED = env_flag("SHOPAIKEY_PUBLIC_IMAGE_ENABLED", "tru
 SHOPAIKEY_PUBLIC_VIDEO_ENABLED = env_flag("SHOPAIKEY_PUBLIC_VIDEO_ENABLED", _env("PUBLIC_VIDEO_GENERATION_ENABLED", "true"))
 IMAGE_TIER_LOW_ENABLED = env_flag("IMAGE_TIER_LOW_ENABLED", "true")
 IMAGE_TIER_STANDARD_ENABLED = env_flag("IMAGE_TIER_STANDARD_ENABLED", "true")
+IMAGE_TIER_COMMON_ENABLED = env_flag("IMAGE_TIER_COMMON_ENABLED", "true")
 IMAGE_TIER_HIGH_ENABLED = env_flag("IMAGE_TIER_HIGH_ENABLED", "true")
 SHOPAIKEY_IMAGE_DEFAULT_TIER = _env("SHOPAIKEY_IMAGE_DEFAULT_TIER", "low")
 VIDEO_TIER_LOW_ENABLED = env_flag("VIDEO_TIER_LOW_ENABLED", "true")
@@ -1334,6 +1335,7 @@ VIDEO_BASE_COST_XU = env_int("VIDEO_BASE_COST_XU", 300)
 MEDIA_PRICE_MULTIPLIER = env_int("MEDIA_PRICE_MULTIPLIER", 2)
 IMAGE_LOW_PROVIDER_COST_XU = env_int("IMAGE_LOW_PROVIDER_COST_XU", 25)
 IMAGE_STANDARD_PROVIDER_COST_XU = env_int("IMAGE_STANDARD_PROVIDER_COST_XU", 150)
+IMAGE_COMMON_PROVIDER_COST_XU = env_int("IMAGE_COMMON_PROVIDER_COST_XU", 200)
 IMAGE_HIGH_PROVIDER_COST_XU = env_int("IMAGE_HIGH_PROVIDER_COST_XU", 250)
 VIDEO_LOW_PROVIDER_COST_XU = env_int("VIDEO_LOW_PROVIDER_COST_XU", 150)
 VIDEO_BASIC_PROVIDER_COST_XU = env_int("VIDEO_BASIC_PROVIDER_COST_XU", 150)
@@ -1343,9 +1345,11 @@ VIDEO_STANDARD_PROVIDER_COST_XU = env_int("VIDEO_STANDARD_PROVIDER_COST_XU", 300
 VIDEO_HIGH_PROVIDER_COST_XU = env_int("VIDEO_HIGH_PROVIDER_COST_XU", 400)
 VIDEO_PREMIUM_PROVIDER_COST_XU = env_int("VIDEO_PREMIUM_PROVIDER_COST_XU", 1000)
 IMAGE_LOW_COST_XU = env_int("IMAGE_LOW_COST_XU", IMAGE_LOW_PROVIDER_COST_XU * MEDIA_PRICE_MULTIPLIER)
-IMAGE_STANDARD_COST_XU = env_int("IMAGE_STANDARD_COST_XU", 200)
-IMAGE_STANDARD_WARRANTY_COST_XU = env_int("IMAGE_STANDARD_WARRANTY_COST_XU", 300)
-IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", 400)
+IMAGE_STANDARD_COST_XU = env_int("IMAGE_STANDARD_COST_XU", 150)
+IMAGE_STANDARD_WARRANTY_COST_XU = env_int("IMAGE_STANDARD_WARRANTY_COST_XU", 200)
+IMAGE_COMMON_COST_XU = env_int("IMAGE_COMMON_COST_XU", 300)
+IMAGE_COMMON_WARRANTY_COST_XU = env_int("IMAGE_COMMON_WARRANTY_COST_XU", 400)
+IMAGE_HIGH_COST_XU = env_int("IMAGE_HIGH_COST_XU", 500)
 IMAGE_HIGH_WARRANTY_COST_XU = env_int("IMAGE_HIGH_WARRANTY_COST_XU", 600)
 VIDEO_LOW_COST_XU = env_int("VIDEO_LOW_COST_XU", 200)
 VIDEO_BASIC_COST_XU = env_int("VIDEO_BASIC_COST_XU", 300)
@@ -4951,10 +4955,12 @@ UI_TEXT = {
         "image.choose_tier.title": "🖼 <b>Bạn muốn tạo ảnh chất lượng nào?</b>\n\nChọn gói ảnh bên dưới. Giá lấy từ <b>💳 Bảng giá</b>.",
         "image.tier_disabled": " — tạm tắt",
         "image.tier.low": "Ảnh tiết kiệm",
-        "image.tier.standard": "Ảnh tiêu chuẩn",
-        "image.tier.standard_warranty": "Ảnh tiêu chuẩn + bảo hành",
-        "image.tier.high": "Ảnh chất lượng cao",
-        "image.tier.high_warranty": "Ảnh chất lượng cao + bảo hành",
+        "image.tier.standard": "Ảnh chuẩn",
+        "image.tier.standard_warranty": "Ảnh chuẩn + bảo hành",
+        "image.tier.common": "Ảnh phổ thông",
+        "image.tier.common_warranty": "Ảnh phổ thông + bảo hành",
+        "image.tier.high": "Ảnh cao",
+        "image.tier.high_warranty": "Ảnh cao + bảo hành",
         "image.quick_button": "🖼 Tạo ảnh AI nhanh",
         "image.prompt_button": "✍️ Tạo prompt ảnh",
         "image.edit_button": "🧩 Sửa ảnh / edit ảnh",
@@ -5205,6 +5211,8 @@ UI_TEXT = {
         "image.tier.low": "Budget image",
         "image.tier.standard": "Standard image",
         "image.tier.standard_warranty": "Standard image + warranty",
+        "image.tier.common": "Common image",
+        "image.tier.common_warranty": "Common image + warranty",
         "image.tier.high": "High-quality image",
         "image.tier.high_warranty": "High-quality image + warranty",
         "image.quick_button": "🖼 Quick AI image",
@@ -5457,6 +5465,8 @@ UI_TEXT = {
         "image.tier.low": "经济图片",
         "image.tier.standard": "标准图片",
         "image.tier.standard_warranty": "标准图片 + 保障重试",
+        "image.tier.common": "普通图片",
+        "image.tier.common_warranty": "普通图片 + 保障重试",
         "image.tier.high": "高质量图片",
         "image.tier.high_warranty": "高质量图片 + 保障重试",
         "image.quick_button": "🖼 快速生成 AI 图片",
@@ -33120,12 +33130,14 @@ def media_tier_price(cost_xu: int, provider_cost_xu: int, fallback_xu: int = 0) 
         return max(0, provider_cost * media_price_multiplier())
     return max(0, int(fallback_xu or 0))
 
-IMAGE_TIER_ORDER = ("low", "standard", "standard_warranty", "high", "high_warranty")
+IMAGE_TIER_ORDER = ("low", "standard", "standard_warranty", "common", "common_warranty", "high", "high_warranty")
 IMAGE_TIER_ICONS = {
     "low": "🟢",
     "standard": "🔵",
     "standard_warranty": "🛡",
-    "high": "🟣",
+    "common": "🟣",
+    "common_warranty": "🛡",
+    "high": "🔴",
     "high_warranty": "🛡",
 }
 
@@ -33140,31 +33152,47 @@ def image_tier_pricing_payload() -> dict:
             "retry_warranty_count": 0,
         },
         "standard": {
-            "label": "Ảnh tiêu chuẩn",
-            "cost": media_tier_price(IMAGE_STANDARD_COST_XU, IMAGE_STANDARD_PROVIDER_COST_XU, 200),
+            "label": "Ảnh chuẩn",
+            "cost": media_tier_price(IMAGE_STANDARD_COST_XU, IMAGE_STANDARD_PROVIDER_COST_XU, 150),
             "provider_cost": int(IMAGE_STANDARD_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
             "note": "Gói này không kèm tạo lại miễn phí.",
             "retry_warranty_count": 0,
         },
         "standard_warranty": {
-            "label": "Ảnh tiêu chuẩn + bảo hành",
-            "cost": max(0, int(IMAGE_STANDARD_WARRANTY_COST_XU or 300)),
+            "label": "Ảnh chuẩn + bảo hành",
+            "cost": max(0, int(IMAGE_STANDARD_WARRANTY_COST_XU or 200)),
             "provider_cost": int(IMAGE_STANDARD_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
             "note": "Gói này kèm 1 lần tạo lại trong cùng yêu cầu.",
             "retry_warranty_count": 1,
         },
+        "common": {
+            "label": "Ảnh phổ thông",
+            "cost": media_tier_price(IMAGE_COMMON_COST_XU, IMAGE_COMMON_PROVIDER_COST_XU, 300),
+            "provider_cost": int(IMAGE_COMMON_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "note": "Gói này không kèm tạo lại miễn phí.",
+            "retry_warranty_count": 0,
+        },
+        "common_warranty": {
+            "label": "Ảnh phổ thông + bảo hành",
+            "cost": max(0, int(IMAGE_COMMON_WARRANTY_COST_XU or 400)),
+            "provider_cost": int(IMAGE_COMMON_PROVIDER_COST_XU or 0),
+            "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
+            "note": "Gói này kèm 1 lần tạo lại trong cùng yêu cầu.",
+            "retry_warranty_count": 1,
+        },
         "high": {
-            "label": "Ảnh chất lượng cao",
-            "cost": media_tier_price(IMAGE_HIGH_COST_XU, IMAGE_HIGH_PROVIDER_COST_XU, 400),
+            "label": "Ảnh cao",
+            "cost": media_tier_price(IMAGE_HIGH_COST_XU, IMAGE_HIGH_PROVIDER_COST_XU, 500),
             "provider_cost": int(IMAGE_HIGH_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
             "note": "Gói này không kèm tạo lại miễn phí.",
             "retry_warranty_count": 0,
         },
         "high_warranty": {
-            "label": "Ảnh chất lượng cao + bảo hành",
+            "label": "Ảnh cao + bảo hành",
             "cost": max(0, int(IMAGE_HIGH_WARRANTY_COST_XU or 600)),
             "provider_cost": int(IMAGE_HIGH_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_IMAGE_MODEL or "nano-banana",
@@ -33178,6 +33206,8 @@ def image_tier_enabled_map() -> dict:
         "low": bool(IMAGE_TIER_LOW_ENABLED),
         "standard": bool(IMAGE_TIER_STANDARD_ENABLED),
         "standard_warranty": bool(IMAGE_TIER_STANDARD_ENABLED),
+        "common": bool(IMAGE_TIER_COMMON_ENABLED),
+        "common_warranty": bool(IMAGE_TIER_COMMON_ENABLED),
         "high": bool(IMAGE_TIER_HIGH_ENABLED),
         "high_warranty": bool(IMAGE_TIER_HIGH_ENABLED),
     }
@@ -33185,12 +33215,16 @@ def image_tier_enabled_map() -> dict:
 def normalize_image_tier(value: str = "") -> str:
     tier = str(value or "").strip().lower()
     tier = tier.replace("-", "_").replace(" ", "_")
-    if tier in {"standard_warranty", "standard_plus", "standard_retry", "std_warranty", "normal_warranty", "medium_warranty"}:
+    if tier in {"standard_warranty", "standard_plus", "standard_retry", "std_warranty", "normal_warranty"}:
         return "standard_warranty"
+    if tier in {"common_warranty", "common_plus", "common_retry", "medium_warranty", "regular_warranty", "popular_warranty"}:
+        return "common_warranty"
     if tier in {"high_warranty", "high_plus", "high_retry", "pro_warranty", "premium_warranty"}:
         return "high_warranty"
-    if tier in {"standard", "std", "normal", "medium"}:
+    if tier in {"standard", "std", "normal"}:
         return "standard"
+    if tier in {"common", "regular", "medium", "popular"}:
+        return "common"
     if tier in {"high", "pro", "premium"}:
         return "high"
     if tier in {"low", "basic", "cheap", "eco", "economy"}:
@@ -33232,6 +33266,8 @@ def image_tier_quality_note(tier: str = "", lang: str = "vi") -> str:
             "low": "Best for quick tests, simple ideas, and low-cost drafts.",
             "standard": "Best for product images, basic advertising, and social posts.",
             "standard_warranty": "Professional quality with one retry for the same request.",
+            "common": "Best for polished social visuals and common marketing images.",
+            "common_warranty": "Polished common-quality image with one retry for the same request.",
             "high": "Best for advertising, key visuals, cinematic work, and controlled detail.",
             "high_warranty": "Premium controlled quality with one retry for the same request.",
         }
@@ -33240,6 +33276,8 @@ def image_tier_quality_note(tier: str = "", lang: str = "vi") -> str:
             "low": "Phù hợp test nhanh, ý tưởng đơn giản, chi phí thấp.",
             "standard": "Phù hợp ảnh sản phẩm, quảng cáo cơ bản và social post.",
             "standard_warranty": "Chất lượng chuyên nghiệp, kèm 1 lần tạo lại trong cùng yêu cầu.",
+            "common": "Phù hợp ảnh social, marketing phổ thông và nhu cầu dùng thường xuyên.",
+            "common_warranty": "Chất lượng phổ thông ổn định, kèm 1 lần tạo lại trong cùng yêu cầu.",
             "high": "Phù hợp ảnh quảng cáo, key visual, cinematic và yêu cầu chi tiết cao.",
             "high_warranty": "Chất lượng cao được kiểm soát, kèm 1 lần tạo lại trong cùng yêu cầu.",
         }
@@ -33561,6 +33599,8 @@ def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool
             "low": "Tiết kiệm",
             "standard": "Chuẩn",
             "standard_warranty": "Chuẩn + BH",
+            "common": "Phổ thông",
+            "common_warranty": "Phổ thông + BH",
             "high": "Cao",
             "high_warranty": "Cao + BH",
         }
@@ -33569,6 +33609,8 @@ def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool
             "low": "Economy",
             "standard": "Standard",
             "standard_warranty": "Standard + warranty",
+            "common": "Common",
+            "common_warranty": "Common + warranty",
             "high": "High",
             "high_warranty": "High + warranty",
         }
@@ -33576,10 +33618,11 @@ def image_tier_button_text(tier: str = "", lang: str = "vi", include_state: bool
     return f"{IMAGE_TIER_ICONS.get(tier_norm, '🖼')} {label} — {int(payload.get('cost') or 0)} Xu{state}"
 
 def image_tier_choice_rows(callback_builder, lang: str = "vi") -> list[list[InlineKeyboardButton]]:
-    return [
-        [InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=callback_builder(tier))]
+    buttons = [
+        InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=callback_builder(tier))
         for tier in IMAGE_TIER_ORDER
     ]
+    return [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
 
 VIDEO_TIER_ORDER = ("low", "basic", "common", "advanced", "standard", "high", "future_1000", "future_1200", "future_1500")
 VIDEO_TIER_ICONS = {
@@ -35273,7 +35316,7 @@ VIDEO_MULTISCENE_TEST_COUNTS = (3, 5, 10, 20)
 VIDEO_MULTISCENE_FINAL_PASS_STATUSES = {"PASS", "SUCCESS", "OK"}
 VIDEO_MULTISCENE_BACKGROUND_TASKS: set[asyncio.Task] = set()
 VIDEO_MULTISCENE_JOB_SETTING_PREFIX = "video_multiscene_job:"
-VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Tính năng tạo video nhiều cảnh đang được kiểm thử. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 
 def video_multiscene_setting_bool(key: str, default: bool = False) -> bool:
     value = str(os.getenv(key) or get_system_setting(key, "1" if default else "") or "").strip().lower()
@@ -36097,9 +36140,9 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         await query.answer()
         return await safe_edit_or_send(
             query,
-            "Ghép giọng trực tiếp vào video đang hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
+            PUBLIC_PRODUCT_MAINTENANCE_VI
             if normalize_user_language(lang) == "vi" else
-            "Direct voice mux into video is still being finalized. TOAN AAS has not processed the request or charged Xu.",
+            PUBLIC_PRODUCT_MAINTENANCE_EN,
             parse_mode=None,
             reply_markup=video_export_maintenance_keyboard(lang),
         )
@@ -36112,8 +36155,9 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         await query.answer()
         return await safe_edit_or_send(
             query,
-            "🛠 Hệ thống tạo video đang bảo trì hoặc chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu.\n\n"
-            "Nội dung, tùy chọn và file trong phiên của bạn vẫn được giữ nguyên.",
+            PUBLIC_PRODUCT_MAINTENANCE_VI
+            if normalize_user_language(lang) == "vi" else
+            PUBLIC_PRODUCT_MAINTENANCE_EN,
             parse_mode=None,
             reply_markup=video_export_maintenance_keyboard(lang),
         )
@@ -36179,7 +36223,9 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         logger.exception("Task3D video export bridge failed | package=%s | product=%s", legacy_order.get("task3d_package_id"), legacy_order.get("product_id"))
         return await safe_edit_or_send(
             query,
-            "TOAN AAS chưa tạo được video ở bước này. Bot chưa trừ Xu. Nội dung và tùy chọn của bạn vẫn được giữ nguyên.",
+            PUBLIC_PRODUCT_MAINTENANCE_VI
+            if normalize_user_language(lang) == "vi" else
+            PUBLIC_PRODUCT_MAINTENANCE_EN,
             parse_mode=None,
             reply_markup=video_export_maintenance_keyboard(lang),
         )
@@ -36187,9 +36233,11 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
 def image_tool_pricing_matrix() -> dict:
     return {
         "image_generate_low": {"label": "Tạo ảnh AI tiết kiệm", "price_xu": int(IMAGE_LOW_COST_XU or 0), "display": f"{int(IMAGE_LOW_COST_XU or 0)} Xu/lần"},
-        "image_generate_standard": {"label": "Tạo ảnh AI tiêu chuẩn", "price_xu": int(IMAGE_STANDARD_COST_XU or 0), "display": f"{int(IMAGE_STANDARD_COST_XU or 0)} Xu/lần"},
-        "image_generate_standard_warranty": {"label": "Tạo ảnh tiêu chuẩn + bảo hành", "price_xu": int(IMAGE_STANDARD_WARRANTY_COST_XU or 0), "display": f"{int(IMAGE_STANDARD_WARRANTY_COST_XU or 0)} Xu/lần"},
-        "image_generate_high": {"label": "Tạo ảnh AI chất lượng cao", "price_xu": int(IMAGE_HIGH_COST_XU or 0), "display": f"{int(IMAGE_HIGH_COST_XU or 0)} Xu/lần"},
+        "image_generate_standard": {"label": "Tạo ảnh AI chuẩn", "price_xu": int(IMAGE_STANDARD_COST_XU or 0), "display": f"{int(IMAGE_STANDARD_COST_XU or 0)} Xu/lần"},
+        "image_generate_standard_warranty": {"label": "Tạo ảnh chuẩn + bảo hành", "price_xu": int(IMAGE_STANDARD_WARRANTY_COST_XU or 0), "display": f"{int(IMAGE_STANDARD_WARRANTY_COST_XU or 0)} Xu/lần"},
+        "image_generate_common": {"label": "Tạo ảnh AI phổ thông", "price_xu": int(IMAGE_COMMON_COST_XU or 0), "display": f"{int(IMAGE_COMMON_COST_XU or 0)} Xu/lần"},
+        "image_generate_common_warranty": {"label": "Tạo ảnh phổ thông + bảo hành", "price_xu": int(IMAGE_COMMON_WARRANTY_COST_XU or 0), "display": f"{int(IMAGE_COMMON_WARRANTY_COST_XU or 0)} Xu/lần"},
+        "image_generate_high": {"label": "Tạo ảnh AI cao", "price_xu": int(IMAGE_HIGH_COST_XU or 0), "display": f"{int(IMAGE_HIGH_COST_XU or 0)} Xu/lần"},
         "image_generate_high_warranty": {"label": "Tạo ảnh cao + bảo hành", "price_xu": int(IMAGE_HIGH_WARRANTY_COST_XU or 0), "display": f"{int(IMAGE_HIGH_WARRANTY_COST_XU or 0)} Xu/lần"},
         "image_ai_edit": {"label": "Chỉnh sửa ảnh AI", "price_xu": int(AI_IMAGE_EDIT_COST or 0), "display": f"{int(AI_IMAGE_EDIT_COST or 0)} Xu/lần", "guard": "provider smoke required"},
         "image_ai_upscale": {"label": "Nâng chất lượng ảnh AI", "price_xu": int(IMAGE_UPSCALE_AI_XU or 0), "display": f"{int(IMAGE_UPSCALE_AI_XU or 0)} Xu/lần", "guard": "provider smoke required"},
@@ -46942,12 +46990,12 @@ TASK3D_SCENE_IDEA_SUGGESTIONS = [
 TASK3D_VIDEO_IMAGE_PACKAGE_ORDER = ("50", "150", "200", "300", "400", "500", "600")
 TASK3D_VIDEO_IMAGE_PACKAGES = {
     "50": {"label": "Tiết kiệm", "unit_cost_xu": 50, "provider_tier": "low", "warranty_retries": 0},
-    "150": {"label": "Phổ thông", "unit_cost_xu": 150, "provider_tier": "standard", "warranty_retries": 0},
-    "200": {"label": "Phổ thông có bảo hành", "unit_cost_xu": 200, "provider_tier": "standard_warranty", "warranty_retries": 1},
-    "300": {"label": "Cao cấp", "unit_cost_xu": 300, "provider_tier": "high", "warranty_retries": 0},
-    "400": {"label": "Cao cấp có bảo hành", "unit_cost_xu": 400, "provider_tier": "high_warranty", "warranty_retries": 1},
-    "500": {"label": "Cao cấp+", "unit_cost_xu": 500, "provider_tier": "high", "warranty_retries": 0},
-    "600": {"label": "Cao cấp+ có bảo hành", "unit_cost_xu": 600, "provider_tier": "high_warranty", "warranty_retries": 1},
+    "150": {"label": "Chuẩn", "unit_cost_xu": 150, "provider_tier": "standard", "warranty_retries": 0},
+    "200": {"label": "Chuẩn có bảo hành", "unit_cost_xu": 200, "provider_tier": "standard_warranty", "warranty_retries": 1},
+    "300": {"label": "Phổ thông", "unit_cost_xu": 300, "provider_tier": "common", "warranty_retries": 0},
+    "400": {"label": "Phổ thông có bảo hành", "unit_cost_xu": 400, "provider_tier": "common_warranty", "warranty_retries": 1},
+    "500": {"label": "Cao", "unit_cost_xu": 500, "provider_tier": "high", "warranty_retries": 0},
+    "600": {"label": "Cao có bảo hành", "unit_cost_xu": 600, "provider_tier": "high_warranty", "warranty_retries": 1},
 }
 TASK3D_VIDEO_PROMPT_OUTPUT_PRODUCTS = {
     "video_trend", "video_idea", "storyboard_prompt", "motion_prompt", "video_ai_real",
@@ -47983,10 +48031,10 @@ def task3d_prompt_image_package_text(session: dict, lang: str = "vi") -> str:
 
 def task3d_prompt_image_package_keyboard(lang: str = "vi", back_callback: str = "vproduct|prompt_image_logo_choice") -> InlineKeyboardMarkup:
     labels = {
-        "50": "50 Xu Tiết kiệm", "150": "150 Xu Phổ thông",
-        "200": "200 Xu Có bảo hành", "300": "300 Xu Cao cấp",
-        "400": "400 Xu Có bảo hành", "500": "500 Xu Cao cấp+",
-        "600": "600 Xu Có bảo hành",
+        "50": "50 Xu Tiết kiệm", "150": "150 Xu Chuẩn",
+        "200": "200 Xu Chuẩn + BH", "300": "300 Xu Phổ thông",
+        "400": "400 Xu Phổ thông + BH", "500": "500 Xu Cao",
+        "600": "600 Xu Cao + BH",
     }
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(labels["50"], callback_data="vproduct|prompt_image_package|50"), InlineKeyboardButton(labels["150"], callback_data="vproduct|prompt_image_package|150")],
@@ -89807,16 +89855,19 @@ def quick_image_tier_text(state: dict | None = None, lang: str = "vi") -> str:
     )
 
 def quick_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    tiers = list(IMAGE_TIER_ORDER)
     tier_buttons = [
         InlineKeyboardButton(image_tier_button_text(tier, lang), callback_data=f"create_media|qi_tier_{tier}")
-        for tier in tiers
+        for tier in IMAGE_TIER_ORDER
     ]
-    rows = [tier_buttons[0:2], tier_buttons[2:4]]
-    last_row = tier_buttons[4:5]
-    last_row.append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_ratio"))
-    rows.append(last_row)
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    rows = [tier_buttons[index:index + 2] for index in range(0, len(tier_buttons), 2)]
+    if len(rows[-1]) == 1:
+        rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_ratio"))
+    else:
+        rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_ratio")])
+    rows.append([
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 def quick_image_confirm_keyboard(token: str, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -89831,9 +89882,14 @@ def quick_image_confirm_keyboard(token: str, lang: str = "vi") -> InlineKeyboard
 
 def public_image_tier_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     rows = image_tier_choice_rows(lambda tier: f"create_media|image_tier_{tier}", lang)
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_image")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel")])
+    if rows and len(rows[-1]) == 1:
+        rows[-1].append(InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_image"))
+    else:
+        rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_image")])
+    rows.append([
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        InlineKeyboardButton(ui_text(lang, "common.cancel"), callback_data="create_media|cancel"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 def public_image_prompt_request_text(tier: str, lang: str = "vi") -> str:
@@ -90551,7 +90607,7 @@ VIDEO_FINALIZATION_LOCK_SECONDS = 12
 # Product lock requested after Task 3D.7: no menu/package/prompt/export redesign.
 # Only narrow bug fixes for result dedupe, back routes, provider output and mux/public guards are allowed.
 VIDEO_FLOW_LOCKED_AFTER_TASK3D7 = True  # specification spelling: VIDEO_FLOW_LOCKED_AFTER_TASK3D7 = true
-PUBLIC_PRODUCT_MAINTENANCE_VI = "Tính năng này đang được bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+PUBLIC_PRODUCT_MAINTENANCE_VI = "Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 PUBLIC_PRODUCT_MAINTENANCE_EN = "This product is under maintenance/upgrading. Please try again later. TOAN AAS has not processed the request or charged Xu."
 
 def video_finalization_pending_key(user_id) -> str:
@@ -91036,8 +91092,6 @@ def video_finalization_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(none_label, callback_data="vfinal|skip"),
-        ],
-        [
             InlineKeyboardButton(continue_label, callback_data="vfinal|tier"),
         ],
         [
@@ -96040,9 +96094,9 @@ VIDEO_COMPLETED_ADDON_CALLBACKS = {
     "feedback": "fb",
 }
 VIDEO_COMPLETED_ADDON_GUARD_TEXTS = {
-    "voice": "Ghép giọng trực tiếp vào video đang hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu.",
-    "music": "Tạo/ghép nhạc AI vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu.",
-    "subtitle": "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu.",
+    "voice": PUBLIC_PRODUCT_MAINTENANCE_VI,
+    "music": PUBLIC_PRODUCT_MAINTENANCE_VI,
+    "subtitle": PUBLIC_PRODUCT_MAINTENANCE_VI,
 }
 
 def public_video_completed_callback(kind: str, task_id: str = "") -> str:
