@@ -39,9 +39,8 @@ def test_public_video_submit_forces_public_keyboard_even_for_admin_flow():
 
 def test_multiscene_guard_copy_is_clean_and_no_provider_terms():
     text = bot.VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT
-    assert "bảo trì" not in text.lower() or "provider" not in text.lower()
-    assert "đang được kiểm thử" in text
-    for forbidden in ("provider", "chi phí", "ShopAIKey", "Job", "Task", "User", "task_id", "user_id"):
+    assert text == "Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+    for forbidden in ("kiểm thử", "provider", "chi phí", "ShopAIKey", "Job", "Task", "User", "task_id", "user_id", "API"):
         assert forbidden not in text
 
 
@@ -109,5 +108,5 @@ def test_video_tools_continue_button_and_two_column_layout():
     callbacks = _callbacks(bot.video_finalization_menu_keyboard("vi"))
     assert "🎚 Chọn chất lượng video" in labels
     assert "vfinal|tier" in callbacks
-    first_rows = bot.video_finalization_menu_keyboard("vi").inline_keyboard[:2]
+    first_rows = bot.video_finalization_menu_keyboard("vi").inline_keyboard[:4]
     assert all(len(row) == 2 for row in first_rows)

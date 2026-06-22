@@ -534,6 +534,7 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "PUBLIC_VIDEO_GENERATION_ENABLED=true" in env_example
     assert "IMAGE_TIER_LOW_ENABLED=true" in env_example
     assert "IMAGE_TIER_STANDARD_ENABLED=true" in env_example
+    assert "IMAGE_TIER_COMMON_ENABLED=true" in env_example
     assert "IMAGE_TIER_HIGH_ENABLED=true" in env_example
     assert "SHOPAIKEY_IMAGE_DEFAULT_TIER=low" in env_example
     assert "VIDEO_TIER_LOW_ENABLED=true" in env_example
@@ -549,9 +550,11 @@ def test_shopaikey_smoke_test_is_admin_only_and_experimental():
     assert "VIDEO_BASE_COST_XU=300" in env_example
     assert "MEDIA_PRICE_MULTIPLIER=2" in env_example
     assert "IMAGE_LOW_COST_XU=50" in env_example
-    assert "IMAGE_STANDARD_COST_XU=200" in env_example
-    assert "IMAGE_STANDARD_WARRANTY_COST_XU=300" in env_example
-    assert "IMAGE_HIGH_COST_XU=400" in env_example
+    assert "IMAGE_STANDARD_COST_XU=150" in env_example
+    assert "IMAGE_STANDARD_WARRANTY_COST_XU=200" in env_example
+    assert "IMAGE_COMMON_COST_XU=300" in env_example
+    assert "IMAGE_COMMON_WARRANTY_COST_XU=400" in env_example
+    assert "IMAGE_HIGH_COST_XU=500" in env_example
     assert "IMAGE_HIGH_WARRANTY_COST_XU=600" in env_example
     assert "VIDEO_LOW_COST_XU=200" in env_example
     assert "VIDEO_BASIC_COST_XU=300" in env_example
@@ -2091,10 +2094,13 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_LOW_COST_XU", 654)
     monkeypatch.setattr(bot, "IMAGE_STANDARD_COST_XU", 777)
     monkeypatch.setattr(bot, "IMAGE_STANDARD_WARRANTY_COST_XU", 799)
+    monkeypatch.setattr(bot, "IMAGE_COMMON_COST_XU", 811)
+    monkeypatch.setattr(bot, "IMAGE_COMMON_WARRANTY_COST_XU", 822)
     monkeypatch.setattr(bot, "IMAGE_HIGH_COST_XU", 888)
     monkeypatch.setattr(bot, "IMAGE_HIGH_WARRANTY_COST_XU", 999)
     monkeypatch.setattr(bot, "IMAGE_TIER_LOW_ENABLED", True)
     monkeypatch.setattr(bot, "IMAGE_TIER_STANDARD_ENABLED", True)
+    monkeypatch.setattr(bot, "IMAGE_TIER_COMMON_ENABLED", True)
     monkeypatch.setattr(bot, "IMAGE_TIER_HIGH_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_IMAGE_DEFAULT_TIER", "low")
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_IMAGE_ENABLED", True)
@@ -2126,6 +2132,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert pricing["image_tiers"]["standard"]["cost"] == 777
     assert pricing["image_tiers"]["standard_warranty"]["cost"] == 799
     assert pricing["image_tiers"]["standard_warranty"]["retry_warranty_count"] == 1
+    assert pricing["image_tiers"]["common"]["cost"] == 811
+    assert pricing["image_tiers"]["common_warranty"]["cost"] == 822
+    assert pricing["image_tiers"]["common_warranty"]["retry_warranty_count"] == 1
     assert pricing["image_tiers"]["high"]["cost"] == 888
     assert pricing["image_tiers"]["high_warranty"]["cost"] == 999
     assert pricing["image_tiers"]["high_warranty"]["retry_warranty_count"] == 1
@@ -2142,12 +2151,15 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert bot.image_tier_cost_xu("low") == 321
     assert bot.image_tier_cost_xu("standard") == 777
     assert bot.image_tier_cost_xu("standard_warranty") == 799
+    assert bot.image_tier_cost_xu("common") == 811
+    assert bot.image_tier_cost_xu("common_warranty") == 822
     assert bot.image_tier_cost_xu("high") == 888
     assert bot.image_tier_cost_xu("high_warranty") == 999
     assert bot.image_tier_retry_warranty_count("standard_warranty") == 1
+    assert bot.image_tier_retry_warranty_count("common_warranty") == 1
     assert bot.image_tier_retry_warranty_count("high") == 0
     assert bot.image_tier_payload("pro")["tier"] == "high"
-    assert bot.image_tier_public_status_text() == "low:ON / standard:ON / standard_warranty:ON / high:ON / high_warranty:ON"
+    assert bot.image_tier_public_status_text() == "low:ON / standard:ON / standard_warranty:ON / common:ON / common_warranty:ON / high:ON / high_warranty:ON"
     assert bot.video_tier_cost_xu("low") == 654
     assert bot.video_tier_cost_xu("basic") == 765
     assert bot.video_tier_cost_xu("common") == 876
@@ -2169,6 +2181,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert any(button.callback_data == "create_media|image_tier_low" for button in tier_buttons)
     assert any(button.callback_data == "create_media|image_tier_standard" for button in tier_buttons)
     assert any(button.callback_data == "create_media|image_tier_standard_warranty" for button in tier_buttons)
+    assert any(button.callback_data == "create_media|image_tier_common" for button in tier_buttons)
+    assert any(button.callback_data == "create_media|image_tier_common_warranty" for button in tier_buttons)
     assert any(button.callback_data == "create_media|image_tier_high" for button in tier_buttons)
     assert any(button.callback_data == "create_media|image_tier_high_warranty" for button in tier_buttons)
     assert any("Tiết kiệm" in button.text and "321 Xu" in button.text for button in tier_buttons)
@@ -2428,7 +2442,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     storage_price_text = "\n".join(bot.pricing_storage_lines())
     audit_price_text = "\n".join(bot.pricing_audit_lines())
     assert "Ảnh tiết kiệm: <b>321 Xu</b>" in image_price_text
-    assert "Ảnh tiêu chuẩn: <b>777 Xu</b>" in image_price_text
+    assert "Ảnh chuẩn: <b>777 Xu</b>" in image_price_text
     assert "Video Trải Nghiệm: <b>654 Xu</b>" in video_price_text
     assert "Video Cơ Bản: <b>765 Xu</b>" in video_price_text
     assert "Video Phổ Thông: <b>876 Xu</b>" in video_price_text
@@ -4232,7 +4246,7 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     selected_image_buttons = [button.text for row in bot.cinematic_ad_image_prompt_selected_keyboard(1).inline_keyboard for button in row]
     assert "✅ Lưu prompt ảnh" in selected_image_buttons
     assert any("Tiết kiệm" in label for label in selected_image_buttons)
-    assert any("Chuẩn + BH" in label and "300 Xu" in label for label in selected_image_buttons)
+    assert any("Chuẩn + BH" in label and "200 Xu" in label for label in selected_image_buttons)
     assert any("Cao + BH" in label and "600 Xu" in label for label in selected_image_buttons)
     video_choice_buttons = [button.text for row in bot.cinematic_ad_video_prompt_choices_keyboard().inline_keyboard for button in row]
     assert "1️⃣ Chọn gợi ý 1" in video_choice_buttons
@@ -4783,8 +4797,8 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     tier_text_7 = bot.storyboard_image_tier_selection_text(7)
     assert "Bạn đang tạo 7 ảnh storyboard" in tier_text_7
     assert "Tiết kiệm: 40 Xu/ảnh" in tier_text_7
-    assert "Tiêu chuẩn: 190 Xu/ảnh" in tier_text_7
-    assert "Chất lượng cao: 380 Xu/ảnh" in tier_text_7
+    assert "Tiêu chuẩn: 140 Xu/ảnh" in tier_text_7
+    assert "Chất lượng cao: 480 Xu/ảnh" in tier_text_7
     assert "flow kịch bản/storyboard" in tier_text_7
     tier_labels = [button.text for row in bot.storyboard_image_tier_keyboard(7).inline_keyboard for button in row]
     assert "🟢 Tiết kiệm" in tier_labels
@@ -4799,11 +4813,11 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     state = {"scenes": scenes5, "image_tier": "standard"}
     confirm_text = bot.storyboard_image_confirm_text(state, "not_admin_user")
     assert "5" in confirm_text
-    assert "195 Xu/ảnh" in confirm_text
-    assert "975 Xu" in confirm_text
+    assert "145 Xu/ảnh" in confirm_text
+    assert "725 Xu" in confirm_text
     assert "Giá storyboard bulk" in confirm_text
     warranty_buttons = [button.text for row in bot.storyboard_image_confirm_keyboard("standard").inline_keyboard for button in row]
-    assert any("Thêm bảo hành" in label and "300 Xu/ảnh" in label for label in warranty_buttons)
+    assert any("Thêm bảo hành" in label and "200 Xu/ảnh" in label for label in warranty_buttons)
 
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "none"}) == 20
     assert bot.frame_video_price_for_state({"photos": [{"file_id": str(i)} for i in range(5)], "duration": "fast", "effect": "fade"}) == 20
@@ -7994,6 +8008,8 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
         "create_media|qi_tier_low",
         "create_media|qi_tier_standard",
         "create_media|qi_tier_standard_warranty",
+        "create_media|qi_tier_common",
+        "create_media|qi_tier_common_warranty",
         "create_media|qi_tier_high",
         "create_media|qi_tier_high_warranty",
     }.issubset(set(tier_callbacks))
@@ -8014,7 +8030,6 @@ def test_quick_image_flow_prompt_before_ratio_and_pricing():
     ]
     for keyboard in planning_keyboards:
         assert all(len(row) <= 2 for row in keyboard.inline_keyboard)
-        assert all("Hủy" not in button.text for row in keyboard.inline_keyboard for button in row)
 
     assert '"source": "quick_image_v6"' in callback_source
     assert 'set_quick_image_flow(\n            uid,\n            "prepared_prompt"' in callback_source
@@ -8264,9 +8279,11 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
     message_source = source_between(source, "async def handle_message", "TELEGRAM_STARTUP_ERROR =")
     menu_source = source_between(source, "async def handle_menu_callback", "async def handle_free_hub_callback")
 
-    assert bot.IMAGE_STANDARD_WARRANTY_COST_XU == 300
+    assert bot.IMAGE_STANDARD_WARRANTY_COST_XU == 200
+    assert bot.IMAGE_COMMON_WARRANTY_COST_XU == 400
     assert bot.IMAGE_HIGH_WARRANTY_COST_XU == 600
-    assert bot.image_tier_cost_xu("standard_warranty") == 300
+    assert bot.image_tier_cost_xu("standard_warranty") == 200
+    assert bot.image_tier_cost_xu("common_warranty") == 400
     assert bot.image_tier_cost_xu("high_warranty") == 600
 
     memory_callbacks = [button.callback_data for row in bot.main_memory_keyboard("vi").inline_keyboard for button in row]

@@ -1093,7 +1093,7 @@ def test_export_exception_has_clean_public_message_and_admin_diagnostic(monkeypa
     query = _ImmutableDataQuery(user_id, f"videoaddon|export|{token}")
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     text, kwargs = query.edits[-1]
-    assert text == "TOAN AAS chưa tạo được video ở bước này. Bot chưa trừ Xu. Nội dung và tùy chọn của bạn vẫn được giữ nguyên."
+    assert text == bot.PUBLIC_PRODUCT_MAINTENANCE_VI
     assert "Có lỗi khi xử lý lệnh" not in text
     assert _callbacks(kwargs["reply_markup"]) == ["videoaddon|export_back", "videoaddon|main"]
     assert bot.VIDEO_LAST_EXPORT_ERROR["function_path"].endswith("handle_shopaikey_public_callback")
@@ -1260,8 +1260,7 @@ def test_export_action_guards_if_provider_unavailable(monkeypatch):
     query = _FakeQuery(user_id, f"videoaddon|export|{token}")
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     text, kwargs = query.edits[-1]
-    assert "Hệ thống tạo video đang bảo trì hoặc chưa sẵn sàng" in text
-    assert "chưa xử lý và chưa trừ Xu" in text
+    assert text == bot.PUBLIC_PRODUCT_MAINTENANCE_VI
     assert _callbacks(kwargs["reply_markup"]) == ["videoaddon|export_back", "videoaddon|main"]
     assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
     bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
@@ -1875,8 +1874,8 @@ def test_prompt_image_create_image_shows_image_package_selector():
     session = {"draft": {"prompt_bundle": _bundle(shots=2).to_dict(), "prompt_image_selection": [1]}}
     labels = _labels(bot.task3d_prompt_image_package_keyboard("vi"))
     assert labels == [
-        "50 Xu Tiết kiệm", "150 Xu Phổ thông", "200 Xu Có bảo hành", "300 Xu Cao cấp",
-        "400 Xu Có bảo hành", "500 Xu Cao cấp+", "600 Xu Có bảo hành", "⬅️ Quay lại",
+        "50 Xu Tiết kiệm", "150 Xu Chuẩn", "200 Xu Chuẩn + BH", "300 Xu Phổ thông",
+        "400 Xu Phổ thông + BH", "500 Xu Cao", "600 Xu Cao + BH", "⬅️ Quay lại",
     ]
     assert "vproduct|prompt_image_logo_choice" in _callbacks(bot.task3d_prompt_image_package_keyboard("vi"))
     assert "chưa gọi hệ tạo ảnh và chưa trừ Xu" in bot.task3d_prompt_image_package_text(session, "vi")
@@ -2131,7 +2130,8 @@ def test_standalone_image_menu_not_changed():
     callbacks = _callbacks(bot.public_image_tier_keyboard("vi"))
     assert callbacks == [
         "create_media|image_tier_low", "create_media|image_tier_standard",
-        "create_media|image_tier_standard_warranty", "create_media|image_tier_high",
+        "create_media|image_tier_standard_warranty", "create_media|image_tier_common",
+        "create_media|image_tier_common_warranty", "create_media|image_tier_high",
         "create_media|image_tier_high_warranty", "menu|main_image", "menu|main", "create_media|cancel",
     ]
     assert "vproduct" not in inspect.getsource(bot.public_image_tier_keyboard)
