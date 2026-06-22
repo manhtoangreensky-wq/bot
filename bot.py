@@ -60970,6 +60970,202 @@ def subtitle_dub_status_text() -> str:
         "No key/token is shown. Missing provider modes stay guarded and do not charge Xu.",
     ])
 
+def _engine_yes_no(value) -> str:
+    return "YES" if bool(value) else "NO"
+
+def _engine_safe(value, limit: int = 220) -> str:
+    return html.escape(sanitize_log_text(str(value or "-"))[:limit])
+
+def voice_engine_status_lines() -> list[str]:
+    tts = get_minimax_voice_readiness()
+    clone = get_minimax_voice_clone_readiness()
+    tts_smoke = preferred_tool_test_status_text(
+        "minimax_tts",
+        "minimax_tts_key4u",
+        "minimax_tts_shopaikey",
+        "minimax_voice_job",
+    )
+    clone_smoke = preferred_tool_test_status_text("minimax_voice_clone")
+    tts_smoke_pass = provider_status_is_pass(tts_smoke)
+    clone_smoke_pass = provider_status_is_pass(clone_smoke)
+    tts_public_ready = bool(tts.get("public_enabled") and tts_smoke_pass)
+    clone_public_ready = bool(clone.get("public_enabled") and tts_smoke_pass and clone_smoke_pass)
+    admin_smoke_needed = bool((tts.get("ready") or clone.get("ready")) and not (tts_public_ready and clone_public_ready))
+    routes = ", ".join(clone.get("routes") or []) or str(tts.get("provider") or "-")
+    return [
+        "VOICE ENGINE STATUS",
+        "",
+        "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"MiniMax TTS configured: <code>{_engine_yes_no(tts.get('ready'))}</code>",
+        f"MiniMax clone configured: <code>{_engine_yes_no(clone.get('ready'))}</code>",
+        f"Current route: <code>{_engine_safe(routes)}</code>",
+        f"TTS smoke: <code>{_engine_safe(tts_smoke)}</code>",
+        f"Clone smoke: <code>{_engine_safe(clone_smoke)}</code>",
+        f"TTS public ready: <code>{_engine_yes_no(tts_public_ready)}</code>",
+        f"Clone public ready: <code>{_engine_yes_no(clone_public_ready)}</code>",
+        f"Admin paid smoke needed before public-ready claim: <code>{_engine_yes_no(admin_smoke_needed)}</code>",
+        f"Guarded: <code>{_engine_yes_no(not (tts_public_ready and clone_public_ready))}</code>",
+        f"Reason: <code>{_engine_safe(clone.get('reason') or tts.get('reason'))}</code>",
+        "Secret handling: configured/missing only; no key, token or secret value is shown.",
+    ]
+
+def music_engine_status_lines() -> list[str]:
+    readiness = get_suno_music_readiness()
+    submit_smoke = preferred_tool_test_result("key4u_suno", "shopaikey_music")
+    fetch_smoke = preferred_tool_test_result("key4u_suno_job", "shopaikey_music_job")
+    download_smoke = preferred_tool_test_result("music_ai_download", "music_ai_preview_download")
+    submit_status = str(submit_smoke.get("status") or "NOT_TESTED")
+    fetch_status = str(fetch_smoke.get("status") or "NOT_TESTED")
+    download_status = str(download_smoke.get("status") or "NOT_TESTED")
+    submit_pass = provider_status_is_pass(submit_status)
+    full_result_ok = bool(readiness.get("full_result_ok") and provider_status_is_pass(download_status))
+    public_ready = bool(music_ai_public_processing_ready(readiness) and submit_pass and full_result_ok)
+    admin_smoke_needed = bool(readiness.get("ready") and not public_ready)
+    providers = dict(readiness.get("providers") or {})
+    key4u = dict(providers.get("key4u_suno") or {})
+    shopaikey = dict(providers.get("shopaikey_music") or {})
+    return [
+        "MUSIC ENGINE STATUS",
+        "",
+        "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"Preferred Suno route: <code>{_engine_safe(readiness.get('preferred_provider') or readiness.get('provider'))}</code>",
+        f"Key4U Suno configured: <code>{_engine_yes_no(key4u.get('configured'))}</code>",
+        f"ShopAIKey Suno configured: <code>{_engine_yes_no(shopaikey.get('configured'))}</code>",
+        f"Submit smoke: <code>{_engine_safe(submit_status)}</code>",
+        f"Fetch smoke: <code>{_engine_safe(fetch_status)}</code>",
+        f"Download smoke: <code>{_engine_safe(download_status)}</code>",
+        f"Full result smoke pass: <code>{_engine_yes_no(full_result_ok)}</code>",
+        f"Cost gate configured: <code>{_engine_yes_no(readiness.get('cost_gate_ok'))}</code>",
+        f"Public ready: <code>{_engine_yes_no(public_ready)}</code>",
+        f"Admin paid smoke needed before public-ready claim: <code>{_engine_yes_no(admin_smoke_needed)}</code>",
+        f"Guarded: <code>{_engine_yes_no(not public_ready)}</code>",
+        f"Reason: <code>{_engine_safe(readiness.get('reason') or readiness.get('admin_debug_reason'))}</code>",
+        "Secret handling: configured/missing only; no key, token or secret value is shown.",
+    ]
+
+def subtitle_engine_status_lines() -> list[str]:
+    readiness = get_subtitle_dub_readiness()
+    pipeline = dict(readiness.get("pipeline") or video_pipeline_status_payload())
+    modes = dict(readiness.get("modes") or {})
+    mode_rows = []
+    for mode in (
+        VIDEO_SUBTITLE_MODE_CREATE,
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_DUB,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    ):
+        item = dict(modes.get(mode) or {})
+        public_ready = bool(item.get("public_enabled") and item.get("ready"))
+        mode_rows.append(
+            f"{video_dubbing_process_label(mode, 'vi')}: "
+            f"<code>{'PUBLIC_READY' if public_ready else 'GUARDED'}</code> "
+            f"| smoke <code>{_engine_safe(item.get('smoke_status'))}</code> "
+            f"| reason <code>{_engine_safe(item.get('reason'))}</code>"
+        )
+    any_public_ready = any("PUBLIC_READY" in row for row in mode_rows)
+    return [
+        "SUBTITLE ENGINE STATUS",
+        "",
+        "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
+        f"Translation route: <code>{_engine_safe(pipeline.get('translation_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('translation_test'))}</code>",
+        f"TTS/dub route: <code>{_engine_safe(pipeline.get('tts_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('tts_test'))}</code>",
+        f"FFmpeg/local worker: <code>{_engine_safe(pipeline.get('ffmpeg_mux'))}</code>",
+        f"Subtitle burn: <code>{_engine_safe(pipeline.get('subtitle_burn_in'))}</code>",
+        f"Any public mode ready: <code>{_engine_yes_no(any_public_ready)}</code>",
+        f"Admin paid smoke needed before public-ready claim: <code>{_engine_yes_no(not any_public_ready)}</code>",
+        f"Guarded: <code>{_engine_yes_no(not any_public_ready)}</code>",
+        "",
+        *mode_rows,
+        "Secret handling: configured/missing only; no key, token or secret value is shown.",
+    ]
+
+def video_engine_tier_status_rows() -> list[dict]:
+    shopaikey_smoke = preferred_tool_test_status_text("shopaikey_video", "shopaikey_video_job")
+    key4u_smoke = preferred_tool_test_status_text("key4u_video", "key4u_video_model")
+    rows = []
+    for tier in VIDEO_TIER_ORDER:
+        state = video_tier_admin_public_state(tier)
+        tier_norm = normalize_video_tier(tier)
+        high_route = tier_norm in {"future_1000", "future_1200", "future_1500"}
+        route = "key4u_kling" if high_route else "shopaikey_primary_key4u_fallback"
+        smoke = key4u_smoke if high_route else shopaikey_smoke
+        smoke_pass = provider_status_is_pass(smoke)
+        public_ready = bool(state.get("public_enabled") and state.get("provider_ready") and smoke_pass)
+        if public_ready:
+            stage = "PUBLIC_READY"
+        elif state.get("public_enabled") or video_tier_public_flag(tier_norm):
+            stage = "CONFIGURED_SMOKE_REQUIRED_GUARDED"
+        else:
+            stage = "GUARDED"
+        rows.append({
+            **state,
+            "route": route,
+            "smoke": smoke,
+            "smoke_pass": smoke_pass,
+            "public_ready": public_ready,
+            "stage": stage,
+        })
+    return rows
+
+def video_engine_status_lines() -> list[str]:
+    rows = video_engine_tier_status_rows()
+    multiscene = video_multiscene_status_payload()
+    long_ready = bool("CREATE TABLE IF NOT EXISTS long_video_projects" in Path(__file__).read_text(encoding="utf-8"))
+    any_public_ready = any(item.get("public_ready") for item in rows)
+    lines = [
+        "VIDEO ENGINE STATUS",
+        "",
+        "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        "Public route rule: every video tier must reach final invoice/export confirmation or a clean no-charge guard.",
+        f"ShopAIKey video smoke: <code>{_engine_safe(preferred_tool_test_status_text('shopaikey_video', 'shopaikey_video_job'))}</code>",
+        f"Key4U video smoke: <code>{_engine_safe(preferred_tool_test_status_text('key4u_video', 'key4u_video_model'))}</code>",
+        f"Any tier public ready: <code>{_engine_yes_no(any_public_ready)}</code>",
+        "",
+        "Tier audit:",
+    ]
+    for item in rows:
+        lines.append(
+            f"{int(item.get('price_xu') or 0)} Xu: <code>{_engine_safe(item.get('stage'))}</code> "
+            f"| route <code>{_engine_safe(item.get('route'))}</code> "
+            f"| smoke <code>{_engine_safe(item.get('smoke'))}</code> "
+            f"| invoice/export or guard <code>YES</code>"
+        )
+    lines.extend([
+        "",
+        "Multi-scene 120s:",
+        f"20-scene tested: <code>{_engine_yes_no((multiscene.get('tested') or {}).get(20))}</code>",
+        f"Stitching ready: <code>{_engine_yes_no(multiscene.get('stitching_ready'))}</code>",
+        f"Public ready: <code>{_engine_yes_no(video_multiscene_public_ready(20))}</code>",
+        "",
+        "Long video 2h:",
+        f"Project tables present: <code>{_engine_yes_no(long_ready)}</code>",
+        "Public ready: <code>NO</code> | guarded until chunk render, stitch, quota and Telegram delivery smoke pass.",
+        "",
+        "Secret handling: configured/missing only; no key, token or secret value is shown.",
+    ])
+    return lines
+
+async def cmd_voice_engine_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, voice_engine_status_lines())
+
+async def cmd_music_engine_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, music_engine_status_lines())
+
+async def cmd_subtitle_engine_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, subtitle_engine_status_lines())
+
+async def cmd_video_engine_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, video_engine_status_lines())
+
 def translation_provider_status_text() -> str:
     pipeline = video_pipeline_status_payload()
     worker = local_worker_status_payload()
