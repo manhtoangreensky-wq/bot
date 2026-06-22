@@ -154,13 +154,156 @@ def test_video_200_valid_export_path():
     assert bot.validate_video_tier_selection(state, "low")["ok"] is True
 
 
-def test_video_200_quota_counts_only_accepted_exports(monkeypatch, tmp_path):
+def test_video_200_tier_selection_discards_stale_multiscene_state(monkeypatch):
+    user_id = 990102
+    bot.clear_video_finalization_state(user_id)
+    bot.clear_video_addon_state(user_id)
+    bot.set_video_finalization_state(user_id, {
+        "step": "tier",
+        "selected_video_tier": "basic",
+        "selected_scene_count": 3,
+        "scene_count": 3,
+        "selected_video_aspect_ratio": "9:16",
+        "source": "promptvideo",
+        "source_payload": {
+            "video_prompt": "Prompt video ready",
+            "aspect_ratio": "9:16",
+            "selected_scene_count": 3,
+            "scene_count": 3,
+        },
+        "video_project": {"selected_scene_count": 3, "scene_count": 3},
+        "has_video_prompt": True,
+        "session_context": {"video_prompt": "Prompt video ready", "aspect_ratio": "9:16"},
+    })
+    monkeypatch.setattr(
+        bot,
+        "get_public_video_tier_ui_status",
+        lambda tier, _admin=False: {"enabled": True, "label": tier, "price_xu": bot.video_tier_cost_xu(tier)},
+    )
+    query = CaptureQuery("vfinal|tier|low", user_id)
+
+    asyncio.run(bot.handle_video_finalization_callback(_callback_update(query, user_id), SimpleNamespace()))
+
+    current = bot.get_video_finalization_state(user_id)
+    assert current["step"] == "scene_count"
+    assert current["selected_video_tier"] == "low"
+    assert current["selected_scene_count"] == 1
+    assert current["source_payload"]["selected_scene_count"] == 1
+    assert current["video_project"]["selected_scene_count"] == 1
+    assert "1 cảnh ≈ 6s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
+    assert "đã hết lượt" not in query.outputs[-1]["text"]
+    bot.clear_video_finalization_state(user_id)
+
+
+def test_video_200_detail_back_to_package_list():
+    user_id = 990103
+    bot.clear_video_finalization_state(user_id)
+    bot.set_video_finalization_state(user_id, {
+        "step": "scene_count",
+        "selected_video_tier": "low",
+        "selected_scene_count": 1,
+        "source": "promptvideo",
+        "source_payload": {"video_prompt": "Prompt video ready", "aspect_ratio": "9:16"},
+        "has_video_prompt": True,
+    })
+    query = CaptureQuery("vfinal|back", user_id)
+
+    asyncio.run(bot.handle_video_finalization_callback(_callback_update(query, user_id), SimpleNamespace()))
+
+    assert bot.get_video_finalization_state(user_id)["step"] == "tier"
+    assert "vfinal|tier|low" in _callbacks(query.outputs[-1]["reply_markup"])
+    bot.clear_video_finalization_state(user_id)
+
+
+def test_video_200_invoice_back_to_package_200_detail():
+    user_id = 990104
+    bot.clear_video_finalization_state(user_id)
+    bot.clear_video_addon_state(user_id)
+    finalization = {
+        "step": "confirm",
+        "selected_video_tier": "low",
+        "selected_scene_count": 1,
+        "source": "promptvideo",
+        "source_payload": {"video_prompt": "Prompt video ready", "aspect_ratio": "9:16"},
+        "has_video_prompt": True,
+    }
+    bot.set_video_finalization_state(user_id, finalization)
+    bot.set_video_addon_state(user_id, {
+        "source": "ai",
+        "video_tier": "low",
+        "pending_confirm_token": "invoice-token",
+        "pending_payload": {
+            "video_tier": "low",
+            "video_prompt": "Prompt video ready",
+            "selected_scene_count": 1,
+            "scene_count": 1,
+            "aspect_ratio": "9:16",
+        },
+        "video_order": {"current_screen": "invoice"},
+    })
+    query = CaptureQuery("videoaddon|back", user_id)
+
+    asyncio.run(bot.handle_video_addon_callback(_callback_update(query, user_id), SimpleNamespace()))
+
+    current = bot.get_video_finalization_state(user_id)
+    assert current["step"] == "scene_count"
+    assert current["selected_video_tier"] == "low"
+    assert "1 cảnh ≈ 6s = 200 Xu" in _labels(query.outputs[-1]["reply_markup"])
+    assert not bot.get_video_addon_state(user_id)
+    bot.clear_video_finalization_state(user_id)
+
+
+def test_video_200_quota_back_to_package_200_detail():
+    callbacks = _callbacks(bot.video_beta_200_limit_keyboard("vi"))
+    assert callbacks == ["vfinal|tier|basic", "vfinal|tier|common", "vfinal|scene_count_screen", "vfinal|main"]
+
+
+def test_video_200_real_quota_block_creates_no_pending_confirmation(monkeypatch):
+    user_id = 990105
+    created_tokens = []
+    recorded_events = []
+    bot.clear_video_addon_state(user_id)
+    state = bot.set_video_addon_state(user_id, {
+        "source": "ai",
+        "video_tier": "low",
+        "selected_scene_count": 1,
+        "pending_payload": {
+            "job_type": "video",
+            "video_tier": "low",
+            "video_prompt": "Prompt video ready",
+            "selected_scene_count": 1,
+            "scene_count": 1,
+        },
+    })
+    monkeypatch.setattr(bot, "video_beta_200_marketing_loss_enabled_runtime", lambda: True)
+    monkeypatch.setattr(bot, "check_video_beta_200_limit", lambda _user_id=None: {"ok": False})
+    monkeypatch.setattr(bot, "set_shopaikey_pending_confirmation", lambda *_args, **_kwargs: created_tokens.append("called"))
+    monkeypatch.setattr(bot, "record_shopaikey_billing_event", lambda *args, **kwargs: recorded_events.append(args))
+    query = CaptureQuery("videoaddon|none", user_id)
+
+    asyncio.run(bot.finalize_video_addon_confirmation(query, user_id, state, "vi"))
+
+    assert query.outputs[-1]["text"] == bot.video_beta_200_limit_message("vi")
+    assert not created_tokens
+    assert not recorded_events
+    assert not bot.get_video_addon_state(user_id)
+
+
+def test_video_200_quota_counts_only_real_accepted_jobs(monkeypatch, tmp_path):
     db_path = tmp_path / "video_200_quota.sqlite3"
     monkeypatch.setattr(bot, "DB_FILE", str(db_path))
     bot.init_db()
+    accepted_job_id = bot.create_shopaikey_job(
+        "quota_user",
+        "quota_user",
+        "video",
+        status="IN_PROGRESS",
+        admin_only=False,
+        xu_cost_planned=200,
+    )
     bot.record_shopaikey_billing_event(
         "quota_user",
-        101,
+        accepted_job_id,
         "video_confirmed",
         0,
         1000,
@@ -170,7 +313,7 @@ def test_video_200_quota_counts_only_accepted_exports(monkeypatch, tmp_path):
     assert bot.video_beta_200_today_counts("quota_user")["user_count"] == 0
     bot.record_shopaikey_billing_event(
         "quota_user",
-        101,
+        accepted_job_id,
         "video_deducted_after_provider_accept",
         200,
         1000,
@@ -178,6 +321,39 @@ def test_video_200_quota_counts_only_accepted_exports(monkeypatch, tmp_path):
         "tier=low",
     )
     assert bot.video_beta_200_today_counts("quota_user")["user_count"] == 1
+
+
+def test_video_200_failed_or_guarded_jobs_not_counted(monkeypatch, tmp_path):
+    db_path = tmp_path / "video_200_failed_quota.sqlite3"
+    monkeypatch.setattr(bot, "DB_FILE", str(db_path))
+    bot.init_db()
+    failed_job_id = bot.create_shopaikey_job(
+        "quota_user",
+        "quota_user",
+        "video",
+        status="FAILED",
+        admin_only=False,
+        xu_cost_planned=200,
+    )
+    bot.record_shopaikey_billing_event(
+        "quota_user",
+        failed_job_id,
+        "video_deducted_after_provider_accept",
+        200,
+        1000,
+        800,
+        "tier=low",
+    )
+    bot.record_shopaikey_billing_event(
+        "quota_user",
+        999999,
+        "video_deducted_after_provider_accept",
+        200,
+        1000,
+        800,
+        "tier=low",
+    )
+    assert bot.video_beta_200_today_counts("quota_user")["user_count"] == 0
 
 
 def test_video_200_quota_copy_is_public_safe():

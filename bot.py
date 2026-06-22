@@ -35025,7 +35025,6 @@ def clear_video_paid_addons_from_state(state: dict | None = None) -> dict:
     return state
 
 def video_experience_tier_lock_text(lang: str = "vi", reasons: list[str] | tuple[str, ...] | None = None) -> str:
-    policy = video_experience_tier_policy()
     reasons = [str(item) for item in (reasons or []) if str(item or "").strip()]
     reason_labels_en = {
         "extra_duration": "extra duration",
@@ -35048,22 +35047,14 @@ def video_experience_tier_lock_text(lang: str = "vi", reasons: list[str] | tuple
         "invoice_total_over_base": "tổng hóa đơn vượt gói đang chọn",
     }
     if normalize_user_language(lang) != "vi":
+        if "extra_scene" in reasons:
+            return "The 200 Xu package supports 1 scene only. Please choose 1 scene or upgrade to the 300 Xu package or above."
         readable = [reason_labels_en.get(item, item.replace("_", " ")) for item in reasons]
-        reason_line = f"\nSelected: {', '.join(readable)}\n" if readable else "\n"
-        return (
-            "⚠️ The 200 Xu starter package cannot use paid features.\n"
-            f"{reason_line}\n"
-            "Please remove paid add-ons or upgrade to the 300 Xu package to continue.\n\n"
-            "TOAN AAS has not processed anything and no Xu was charged."
-        )
-    readable = [reason_labels_vi.get(item, item.replace("_", " ")) for item in reasons]
-    reason_line = f"\nBạn đang chọn: {', '.join(readable)}\n" if readable else "\n"
-    return (
-        "⚠️ Gói trải nghiệm 200 Xu không dùng được tính năng có phí.\n"
-        f"{reason_line}\n"
-        "Vui lòng bỏ add-on trả phí hoặc nâng lên gói 300 Xu để tiếp tục.\n\n"
-        "TOAN AAS chưa xử lý video và chưa trừ Xu."
-    )
+        selected = f" Selected: {', '.join(readable)}." if readable else ""
+        return "The 200 Xu package supports one scene without paid add-ons. Remove paid add-ons or choose the 300 Xu package or above." + selected
+    if "extra_scene" in reasons:
+        return "Gói 200 Xu chỉ hỗ trợ 1 cảnh. Vui lòng chọn 1 cảnh hoặc nâng lên gói 300 Xu trở lên."
+    return "Gói 200 Xu chỉ hỗ trợ video 1 cảnh không add-on trả phí. Vui lòng bỏ add-on trả phí hoặc chọn gói 300 Xu trở lên."
 
 def video_experience_tier_lock_keyboard(lang: str = "vi", upgrade_callback: str = "videoaddon|upgrade_300", back_callback: str = "videoaddon|export_back") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -36117,11 +36108,7 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         await query.answer()
         return await safe_edit_or_send(
             query,
-            video_experience_tier_lock_text(lang, video_package_200_lock_reasons(quote))
-            + "\n\n"
-            "Gói 200 chỉ dùng để trải nghiệm 1 cảnh, không add-on.\n\n"
-            f"Tổng hiện tại: {xu_number(quote.get('total_xu'))} Xu\n"
-            "Vui lòng nâng lên gói 300 Xu trở lên để tiếp tục.",
+            video_experience_tier_lock_text(lang, video_package_200_lock_reasons(quote)),
             parse_mode=None,
             reply_markup=video_experience_tier_lock_keyboard(lang),
         )
@@ -60038,18 +60025,21 @@ def video_beta_200_today_counts(user_id=None) -> dict:
     params: list = [today + "%"]
     user_clause = ""
     if user_id is not None:
-        user_clause = "AND user_id=?"
+        user_clause = "AND e.user_id=?"
         params.append(str(user_id or ""))
     conn = db_connect()
     try:
         row = conn.execute(
             f"""
-            SELECT COUNT(DISTINCT job_id)
-            FROM shopaikey_billing_events
-            WHERE created_at LIKE ?
+            SELECT COUNT(DISTINCT e.job_id)
+            FROM shopaikey_billing_events e
+            JOIN shopaikey_jobs j ON j.id=e.job_id
+            WHERE e.created_at LIKE ?
               {user_clause}
-              AND event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
-              AND reason LIKE '%tier=low%'
+              AND e.event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
+              AND e.reason LIKE '%tier=low%'
+              AND LOWER(j.job_type)='video'
+              AND UPPER(j.status) IN ('IN_PROGRESS','SUCCESS','SUCCEEDED','COMPLETED','DONE')
             """,
             tuple(params),
         ).fetchone()
@@ -60059,35 +60049,44 @@ def video_beta_200_today_counts(user_id=None) -> dict:
         if user_id is not None:
             week_row = conn.execute(
                 """
-                SELECT COUNT(DISTINCT job_id)
-                FROM shopaikey_billing_events
-                WHERE created_at >= ?
-                  AND user_id=?
-                  AND event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
-                  AND reason LIKE '%tier=low%'
+                SELECT COUNT(DISTINCT e.job_id)
+                FROM shopaikey_billing_events e
+                JOIN shopaikey_jobs j ON j.id=e.job_id
+                WHERE e.created_at >= ?
+                  AND e.user_id=?
+                  AND e.event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
+                  AND e.reason LIKE '%tier=low%'
+                  AND LOWER(j.job_type)='video'
+                  AND UPPER(j.status) IN ('IN_PROGRESS','SUCCESS','SUCCEEDED','COMPLETED','DONE')
                 """,
                 (week_start, str(user_id or "")),
             ).fetchone()
             scoped_week = int((week_row or [0])[0] or 0)
             month_row = conn.execute(
                 """
-                SELECT COUNT(DISTINCT job_id)
-                FROM shopaikey_billing_events
-                WHERE created_at >= ?
-                  AND user_id=?
-                  AND event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
-                  AND reason LIKE '%tier=low%'
+                SELECT COUNT(DISTINCT e.job_id)
+                FROM shopaikey_billing_events e
+                JOIN shopaikey_jobs j ON j.id=e.job_id
+                WHERE e.created_at >= ?
+                  AND e.user_id=?
+                  AND e.event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
+                  AND e.reason LIKE '%tier=low%'
+                  AND LOWER(j.job_type)='video'
+                  AND UPPER(j.status) IN ('IN_PROGRESS','SUCCESS','SUCCEEDED','COMPLETED','DONE')
                 """,
                 (month_start, str(user_id or "")),
             ).fetchone()
             scoped_month = int((month_row or [0])[0] or 0)
         global_row = conn.execute(
             """
-            SELECT COUNT(DISTINCT job_id)
-            FROM shopaikey_billing_events
-            WHERE created_at LIKE ?
-              AND event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
-              AND reason LIKE '%tier=low%'
+            SELECT COUNT(DISTINCT e.job_id)
+            FROM shopaikey_billing_events e
+            JOIN shopaikey_jobs j ON j.id=e.job_id
+            WHERE e.created_at LIKE ?
+              AND e.event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
+              AND e.reason LIKE '%tier=low%'
+              AND LOWER(j.job_type)='video'
+              AND UPPER(j.status) IN ('IN_PROGRESS','SUCCESS','SUCCEEDED','COMPLETED','DONE')
             """,
             (today + "%",),
         ).fetchone()
@@ -60206,7 +60205,7 @@ def video_beta_200_limit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("400 Xu", callback_data="vfinal|tier|common"),
         ],
         [
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|tier"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vfinal|scene_count_screen"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
         ],
     ])
@@ -91931,11 +91930,7 @@ async def video_finalization_continue_after_scene_count(query, user_id, state: d
     if tier == "low" and not quote.get("is_package_200_valid"):
         return await safe_edit_or_send(
             query,
-            video_experience_tier_lock_text(lang, video_package_200_lock_reasons(quote))
-            + "\n\n"
-            "Gói 200 chỉ dùng để trải nghiệm 1 cảnh, không add-on.\n\n"
-            f"Tổng hiện tại: {xu_number(quote.get('total_xu'))} Xu\n"
-            "Vui lòng nâng lên gói 300 Xu trở lên để tiếp tục.",
+            video_experience_tier_lock_text(lang, video_package_200_lock_reasons(quote)),
             parse_mode=None,
             reply_markup=video_experience_tier_lock_keyboard(lang, upgrade_callback="vfinal|upgrade_300", back_callback="vfinal|scene_count_screen"),
         )
@@ -93165,11 +93160,10 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             if task3d_product_id in VIDEO_PRODUCT_REGISTRY and task3d_package_id:
                 task3d_fit = validate_package_selection(task3d_product_id, task3d_package_id, ["none"])
                 if not task3d_fit.get("ok"):
-                    reason = str(task3d_fit.get("reason") or "package_not_allowed_for_product")
                     guard = VIDEO_PRODUCT_REGISTRY[task3d_product_id].get("public_guard_message") or "Gói này không phù hợp với sản phẩm đã chọn."
                     return await safe_edit_or_send(
                         query,
-                        f"🛡 <b>Gói chưa phù hợp</b>\n\n{html.escape(str(guard))}\n\nMã kiểm tra: <code>{html.escape(reason)}</code>\nBot chưa gọi provider và chưa trừ Xu.",
+                        f"🛡 <b>Gói chưa phù hợp</b>\n\n{html.escape(str(guard))}\n\nTOAN AAS chưa xử lý và chưa trừ Xu.",
                         parse_mode="HTML",
                         reply_markup=InlineKeyboardMarkup([
                             [InlineKeyboardButton("300 Xu", callback_data="vfinal|tier|basic"), InlineKeyboardButton("400 Xu", callback_data="vfinal|tier|common")],
@@ -93183,6 +93177,8 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             state["video_tier"] = tier
             state["selected_video_aspect_ratio"] = video_finalization_selected_aspect(state)
             state.pop("video_order", None)
+            if tier == "low":
+                state = video_finalization_apply_scene_count_fields(state, 1, uid)
             status = get_public_video_tier_ui_status(tier, is_admin_user(uid))
             if not status.get("enabled"):
                 return await safe_edit_or_send(query, video_finalization_tier_guard_text(tier, lang), parse_mode="HTML", reply_markup=video_finalization_tier_guard_keyboard(lang))
@@ -95000,6 +94996,16 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
             "marketing_loss_reason": "starter_product",
             "cost_ratio": check_video_margin(tier).get("cost_ratio"),
         })
+    if tier == "low" and pending_payload.get("marketing_loss"):
+        limit = check_video_beta_200_limit(user_id)
+        if not limit.get("ok"):
+            clear_video_addon_state(user_id)
+            return await safe_edit_or_send(
+                query,
+                video_beta_200_limit_message(lang),
+                parse_mode=None,
+                reply_markup=video_beta_200_limit_keyboard(lang),
+            )
     token = set_shopaikey_pending_confirmation(user_id, pending_payload)
     state["pending_confirm_token"] = token
     state["pending_payload"] = pending_payload
@@ -95015,11 +95021,6 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
         f"shopaikey_video; tier={tier}; duration={int(pricing.get('duration_seconds') or 0)}; addon={video_addon_selection_label(state.get('current_video_subtitle_option'), state.get('current_video_dubbing_option'), bool(state.get('translation_enabled')))}",
     )
     invoice = video_price_invoice_text(state, lang)
-    if tier == "low" and pending_payload.get("marketing_loss"):
-        limit = check_video_beta_200_limit(user_id)
-        if not limit.get("ok"):
-            clear_video_addon_state(user_id)
-            return await safe_edit_or_send(query, video_beta_200_limit_message(lang), parse_mode=None, reply_markup=video_beta_200_limit_keyboard(lang))
     package_item = active_package_item_for_user(user_id, pending_payload.get("package_item_type") or package_item_type_for_video_tier(tier))
     markup = video_addon_confirm_keyboard(token, tier, lang, state)
     if package_item and int(pricing.get("addon_xu") or 0) <= 0:

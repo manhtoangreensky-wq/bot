@@ -686,8 +686,7 @@ def test_video_200_paid_addon_requires_upgrade_or_back():
     callbacks = _callbacks(bot.video_experience_tier_lock_keyboard("vi"))
     assert callbacks == ["videoaddon|upgrade_300", "videoaddon|export_back"]
     text = bot.video_experience_tier_lock_text("vi", ["paid_music"])
-    assert "Gói trải nghiệm 200 Xu không dùng được tính năng có phí" in text
-    assert "TOAN AAS chưa xử lý video và chưa trừ Xu" in text
+    assert text == "Gói 200 Xu chỉ hỗ trợ video 1 cảnh không add-on trả phí. Vui lòng bỏ add-on trả phí hoặc chọn gói 300 Xu trở lên."
 
 
 def test_select_200_always_shows_final_confirmation(monkeypatch):
@@ -716,12 +715,12 @@ def test_select_200_always_shows_final_confirmation(monkeypatch):
     asyncio.run(bot.finalize_video_addon_confirmation(query, user_id, state, "vi"))
     text, kwargs = query.edits[-1]
     assert "Xác nhận xuất video" in text
-    assert "không dùng được tính năng có phí" not in text
+    assert "không add-on trả phí" not in text
     assert "videoaddon|export|token-select-200" in _callbacks(kwargs["reply_markup"])
 
     block_query = _FakeQuery(user_id, "videoaddon|export|token-select-200")
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=block_query), SimpleNamespace()))
-    assert "không dùng được tính năng có phí" in block_query.edits[-1][0]
+    assert "không add-on trả phí" in block_query.edits[-1][0]
 
     back_query = _FakeQuery(user_id, "videoaddon|export_back")
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=back_query), SimpleNamespace()))
@@ -757,7 +756,7 @@ def test_200_paid_addon_blocks_only_on_export_action(monkeypatch):
     query = _FakeQuery(user_id, f"videoaddon|export|{token}")
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     text, kwargs = query.edits[-1]
-    assert "Gói trải nghiệm 200 Xu không dùng được tính năng có phí" in text
+    assert "Gói 200 Xu chỉ hỗ trợ video 1 cảnh không add-on trả phí" in text
     assert _callbacks(kwargs["reply_markup"]) == ["videoaddon|upgrade_300", "videoaddon|export_back"]
     assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
     bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
@@ -937,7 +936,7 @@ def test_200_paid_addon_block_only_after_export_with_total_above_200(monkeypatch
     query = _FakeQuery(user_id, f"videoaddon|export|{token}")
     asyncio.run(bot.handle_video_addon_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     text, kwargs = query.edits[-1]
-    assert "Gói trải nghiệm 200 Xu không dùng được tính năng có phí" in text
+    assert "Gói 200 Xu chỉ hỗ trợ video 1 cảnh không add-on trả phí" in text
     assert _callbacks(kwargs["reply_markup"]) == ["videoaddon|upgrade_300", "videoaddon|export_back"]
     assert token in bot.SHOPAIKEY_PENDING_CONFIRMATIONS
     bot.SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
