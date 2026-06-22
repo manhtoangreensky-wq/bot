@@ -2,180 +2,212 @@
 
 **Phiên bản:** V2
 
-**Cập nhật:** 13/06/2026
+**Cập nhật:** 23/06/2026
 
-**Bot Telegram:** [@toanaasbot](https://t.me/toanaasbot)
+**Bot Telegram:** @toanaasbot
 
-**Website:** [www.toanaas.vn](https://www.toanaas.vn/)
+**Website:** www.toanaas.vn
 
 **Định hướng:** AI Automation System / Content Factory / Bot hỗ trợ công việc
 
 ## 1. TOAN AAS là gì?
 
-TOAN AAS là hệ thống AI Automation System vận hành chủ yếu qua Telegram. Hệ thống hỗ trợ tạo nội dung, ảnh, video, voice, phụ đề, xử lý tài liệu, hỗ trợ khách hàng/ticket và các dịch vụ Premium hoặc bot riêng.
+TOAN AAS là hệ thống AI vận hành chủ yếu qua Telegram. Hệ thống hỗ trợ tạo ảnh, video, âm thanh, phụ đề, dịch, lồng tiếng, xử lý tài liệu, nội dung AI và hỗ trợ khách hàng theo từng bước rõ ràng.
 
-TOAN AAS không chỉ là bot tạo video pack. Mục tiêu của hệ thống là kết nối nhiều công cụ thành quy trình rõ ràng, giúp cá nhân, shop, affiliate và doanh nghiệp hoàn thành công việc với ít thao tác hơn.
+Bạn không cần tự nhớ nhiều lệnh phức tạp. Hãy mở menu, chọn tính năng, gửi mô tả, xem chi phí nếu có và xác nhận trước khi hệ thống xử lý.
 
-Một số tính năng phụ thuộc nhà cung cấp AI hoặc Local Worker và có thể được mở dần. Nếu công cụ chưa sẵn sàng, bot sẽ báo rõ và không trừ Xu.
+TOAN AAS không yêu cầu người dùng gửi mật khẩu mạng xã hội, thông tin thẻ thanh toán, mã OTP hoặc dữ liệu bảo mật cá nhân qua bot.
 
-## 2. Bắt đầu sử dụng
+## 2. Bắt đầu nhanh
 
-1. Mở Telegram và tìm [@toanaasbot](https://t.me/toanaasbot).
-2. Bấm **Start** hoặc gửi `/start`.
-3. Chọn ngôn ngữ nếu bot yêu cầu.
-4. Xem menu chính và chọn nhóm công cụ phù hợp.
-5. Mở mục tài khoản để kiểm tra số dư Xu.
-6. Đọc màn xác nhận chi phí trước khi chạy tác vụ có tính phí.
+1. Mở Telegram và tìm @toanaasbot.
+2. Bấm Start hoặc gửi `/start`.
+3. Chọn tính năng muốn dùng: Tạo ảnh, Tạo video, Âm thanh, Tài liệu hoặc Dịch thuật.
+4. Gửi mô tả rõ mục tiêu, sản phẩm, phong cách, nền tảng đăng và yêu cầu riêng.
+5. Chọn gói phù hợp nếu tính năng có nhiều mức giá.
+6. Kiểm tra bản xem trước, bảng giá và thông tin xác nhận.
+7. Chỉ khi bạn xác nhận, hệ thống mới xử lý và mới trừ Xu nếu bước đó có phí.
+8. Nhận kết quả trong bot, tải về hoặc tiếp tục bước kế tiếp.
 
-## 3. Xu là gì?
+Lệnh hữu ích:
 
-- Xu là đơn vị nội bộ dùng để sử dụng công cụ và dịch vụ trong TOAN AAS.
-- **1 Xu = 100đ.**
-- **1.000 Xu = 100.000đ.**
+- `/help` - xem hướng dẫn nhanh.
+- `/huongdan` hoặc `/guide` - mở hướng dẫn chi tiết.
+- `/profile` - xem số dư Xu.
+- `/pricing` hoặc `/banggia` - xem bảng giá.
+- `/naptien` - nạp Xu.
+
+## 3. Tạo ảnh AI
+
+Quy trình tạo ảnh:
+
+1. Mở mục Tạo ảnh.
+2. Gửi mô tả ảnh: sản phẩm, bối cảnh, ánh sáng, màu sắc, bố cục, tỉ lệ và phong cách.
+3. Chọn gói ảnh theo nhu cầu.
+4. Xem giá Xu và xác nhận.
+5. Hệ thống xử lý ảnh sau khi bạn xác nhận.
+6. Nhận ảnh trong bot, tải về hoặc dùng tiếp để tạo video.
+
+Ví dụ mô tả tốt:
+
+`Ảnh sản phẩm máy xay sinh tố mini màu xanh ngọc trên bàn bếp sáng, ánh sáng tự nhiên, phong cách quảng cáo thương mại, không thêm chữ, không watermark.`
+
+Bảng giá tạo ảnh:
+
+- Tiết kiệm: 50 Xu.
+- Chuẩn: 150 Xu.
+- Chuẩn + bảo hành: 200 Xu.
+- Phổ thông: 300 Xu.
+- Phổ thông + bảo hành: 400 Xu.
+- Cao: 500 Xu.
+- Cao + bảo hành: 600 Xu.
+
+Gói có bảo hành phù hợp khi bạn cần ảnh ổn định hơn. Nếu kết quả chưa sát yêu cầu trong cùng mô tả, bạn có thể yêu cầu hỗ trợ tạo lại theo chính sách của gói.
+
+Lưu ý: hãy kiểm tra kỹ chữ, logo, khuôn mặt, bàn tay, chi tiết sản phẩm và thông tin thương mại trước khi dùng ảnh để đăng bán hàng.
+
+## 4. Tạo video AI
+
+Quy trình tạo video:
+
+1. Mở mục Tạo video.
+2. Chọn tạo video từ mô tả hoặc tạo video từ ảnh đã có.
+3. Gửi mô tả video: chủ thể, chuyển động, bối cảnh, ánh sáng, tỉ lệ, thời lượng và cảm xúc.
+4. Chọn gói video.
+5. Chọn số cảnh nếu muốn làm video dài hơn.
+6. Xem tổng chi phí, kiểm tra nội dung và xác nhận.
+7. Hệ thống xử lý và gửi video về bot khi hoàn tất.
+8. Sau khi có video, bạn có thể dùng thêm Âm thanh hoặc Phụ đề / Dịch / Lồng tiếng nếu cần.
+
+Bảng giá video theo gói:
+
+- Trải nghiệm: 200 Xu.
+- Cơ bản: 300 Xu.
+- Phổ thông: 400 Xu.
+- Nâng cao: 500 Xu.
+- Bán hàng: 600 Xu.
+- Cao cấp: 800 Xu.
+- Chuyên nghiệp: 1000 Xu.
+- Pro Plus: 1200 Xu.
+- Premium: 1500 Xu.
+
+Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.
+
+Cách tính theo cảnh:
+
+- 1 cảnh khoảng 6 giây.
+- 3 cảnh khoảng 18 giây.
+- 5 cảnh khoảng 30 giây.
+- 10 cảnh khoảng 60 giây.
+- 20 cảnh khoảng 120 giây.
+
+Ưu đãi theo số cảnh:
+
+- 1 cảnh: giá gốc.
+- 2-9 cảnh: giảm 10%.
+- 10-19 cảnh: giảm 15%.
+- 20 cảnh: giảm 20%.
+
+Ví dụ: gói Cơ bản 300 Xu, làm 3 cảnh: 300 x 90% = 270 Xu/cảnh, tổng 270 x 3 = 810 Xu.
+
+Nếu hệ thống đang bảo trì/nâng cấp, TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.
+
+## 5. Âm thanh
+
+Âm thanh giúp video dễ nghe, dễ bán hàng và chuyên nghiệp hơn.
+
+Bạn có thể dùng:
+
+- Tạo giọng đọc từ nội dung đã viết.
+- Tạo nhạc nền theo phong cách mong muốn.
+- Tạo bài hát ngắn cho thương hiệu, sản phẩm hoặc chiến dịch.
+- Tìm ý tưởng nhạc, hiệu ứng âm thanh hoặc đoạn mở đầu phù hợp video.
+
+Quy trình:
+
+1. Mở mục Âm thanh.
+2. Chọn giọng đọc, nhạc nền hoặc bài hát.
+3. Gửi nội dung hoặc mô tả phong cách.
+4. Kiểm tra chi phí nếu bước đó có phí.
+5. Xác nhận rồi nhận kết quả trong bot.
+
+Mẹo: nội dung đọc nên ngắn, câu rõ, ít từ khó và có nhịp nghỉ tự nhiên.
+
+Nếu hệ thống đang bảo trì/nâng cấp, TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.
+
+## 6. Phụ đề / Dịch / Lồng tiếng
+
+Bạn có thể dùng:
+
+- Tạo phụ đề từ video hoặc audio.
+- Dịch nội dung sang ngôn ngữ khác.
+- Lồng tiếng lại video bằng giọng phù hợp.
+- Chuẩn bị bản phụ đề để đăng TikTok, Reels, Shorts hoặc YouTube.
+
+Quy trình:
+
+1. Mở mục Phụ đề / Dịch / Lồng tiếng.
+2. Gửi video, audio hoặc nội dung cần xử lý.
+3. Chọn tạo phụ đề, dịch hoặc lồng tiếng.
+4. Chọn ngôn ngữ đích nếu cần.
+5. Kiểm tra nội dung, chi phí và xác nhận.
+6. Nhận kết quả, xem lại tên riêng, thuật ngữ sản phẩm và câu bán hàng trước khi đăng.
+
+Mẹo: video có âm thanh rõ, ít tạp âm và ít người nói cùng lúc sẽ cho kết quả tốt hơn.
+
+Nếu hệ thống đang bảo trì/nâng cấp, TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau.
+
+## 7. Xu & bảng giá
+
+Xu là đơn vị nội bộ dùng để sử dụng công cụ và dịch vụ trong TOAN AAS.
+
+- 1 Xu = 100đ.
+- 1.000 Xu = 100.000đ giá trị sử dụng nội bộ.
 - Xu không phải tiền điện tử, token, coin, ví điện tử, chứng khoán hoặc phương tiện thanh toán bên ngoài TOAN AAS.
 - Xu không dùng để rút tiền, chuyển nhượng hoặc mua bán giữa người dùng.
 
-## 4. Nạp Xu nội địa Việt Nam
+Nạp Xu:
 
-TOAN AAS hỗ trợ các phương thức VND sau:
+1. Gõ `/naptien`.
+2. Chọn mệnh giá.
+3. Thanh toán theo hướng dẫn trong bot.
+4. Gõ `/profile` để kiểm tra số dư.
 
-- PayOS QR tự động.
-- QR ngân hàng ACB/VietQR thủ công.
-- ZaloPay cá nhân hoặc cửa hàng theo cấu hình hiện hành.
-- MoMo/Túi Thần Tài theo cấu hình hiện hành.
+Khuyến mãi nạp:
 
-PayOS có thể cộng Xu tự động khi webhook hợp lệ. Với nạp thủ công, ảnh bill hoặc nội dung người dùng gửi không tự động xác nhận giao dịch. Admin chỉ cộng Xu sau khi đối soát tiền thật.
+- Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.
+- Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.
+- Người dùng quốc tế vẫn có thể nhận quyền lợi hạng thành viên, chiết khấu theo hạng hoặc ưu đãi không gắn với nạp nội địa nếu đủ điều kiện.
 
-Giao dịch VND nội địa có thể được hưởng ưu đãi nếu đáp ứng đúng điều kiện của chương trình đang áp dụng.
+## 8. FAQ / Hoàn Xu
 
-## 5. Nạp Xu quốc tế
+**1. Tôi chỉ mở menu có bị trừ Xu không?**
 
-TOAN AAS hỗ trợ nạp thủ công bằng USD, CNY hoặc USDT theo cấu hình đang mở.
+Không. Xem menu, hướng dẫn, bảng giá hoặc thử nhập mô tả chưa làm mất Xu nếu chưa đến bước xác nhận có phí.
 
-- Tỉ giá nội bộ USD: **1 USD = 25.000đ**.
-- Tỉ giá nội bộ CNY: **1 CNY = 3.800đ**.
-- Ví dụ: **10 USD = 250.000đ = 2.500 Xu**.
-- Ví dụ: **10 CNY = 38.000đ = 380 Xu**.
-- USDT TRC20 là phương thức dự phòng cuối cùng khi không dùng được phương thức khác.
+**2. Khi nào TOAN AAS trừ Xu?**
 
-Người dùng phải kiểm tra đúng địa chỉ ví và đúng mạng TRC20 trước khi chuyển. Gửi sai mạng có thể làm mất tiền và TOAN AAS không thể tự khôi phục giao dịch. TXID hoặc ảnh bill chỉ là dữ liệu để admin đối soát, không phải xác nhận tự động.
+TOAN AAS chỉ trừ Xu khi bạn chọn bước có phí, xem giá và xác nhận xử lý.
 
-## 6. Chính sách ưu đãi
+**3. Khi nào được hoàn Xu?**
 
-- Ưu đãi nạp lần đầu, Launch Bonus mệnh giá 50k/100k/200k/500k và các ưu đãi cộng thêm Xu chỉ áp dụng cho khách nội địa Việt Nam nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.
-- ZaloPay, MoMo và nạp quốc tế USD/CNY/USDT không áp dụng bonus cộng Xu.
-- Khách quốc tế vẫn có thể hưởng chiết khấu phần trăm theo hạng thành viên khi đủ điều kiện.
-- Nếu admin tặng thêm Xu cho khách quốc tế, khoản tặng phải được thực hiện bằng admin grant riêng và có lý do.
+Nếu đã trừ Xu nhưng hệ thống lỗi trước khi có kết quả hợp lệ theo chính sách, phần Xu của bước lỗi sẽ được hoàn lại.
 
-## 7. Menu chính TOAN AAS
+**4. Thiếu Xu thì sao?**
 
-Các nhóm chức năng chính có thể gồm:
+Bot sẽ báo thiếu Xu và hướng dẫn nạp thêm. Bạn có thể dùng `/naptien` hoặc xem số dư bằng `/profile`.
 
-- **Hỏi AI / Viết nội dung:** hỏi đáp, phân tích, viết nội dung và hỗ trợ ý tưởng.
-- **Ảnh / Media Studio:** tạo ảnh, prompt ảnh và công cụ xử lý ảnh.
-- **Video / Content Factory:** ý tưởng, kịch bản, storyboard, prompt và tạo video theo công cụ đang mở.
-- **Voice / Phụ đề / Lồng tiếng:** TTS, ASR, phụ đề, dịch và ghép giọng.
-- **PDF / Word / Tài liệu:** chuyển đổi, nén, tách, gộp hoặc lưu tài liệu theo tính năng đang bật.
-- **Hỗ trợ / Ticket / Đối soát:** hỏi đáp, tạo ticket và bổ sung dữ liệu cho admin kiểm tra.
-- **Premium / Bot riêng / Dịch vụ:** tư vấn triển khai theo nhu cầu.
-- **Bảng giá / Nạp Xu / Thanh toán:** xem giá, số dư và phương thức thanh toán.
+**5. Có nên bấm tạo nhiều lần khi đang chờ không?**
 
-## 8. Ảnh / Media Studio
+Không nên. Hãy chờ kết quả hoặc dùng nút kiểm tra trạng thái nếu bot hiển thị, để tránh tạo trùng yêu cầu.
 
-TOAN AAS có thể hỗ trợ:
+**6. Cần hỗ trợ thì gửi gì?**
 
-- Tạo ảnh AI theo prompt hoặc gợi ý.
-- Viết prompt ảnh theo sản phẩm, thương hiệu hoặc nền tảng.
-- Tạo ảnh sản phẩm, banner và nội dung truyền thông.
-- Chỉnh màu, nâng nét, crop, resize, thêm chữ/logo khi công cụ tương ứng được mở.
+Hãy gửi ID Telegram, ảnh chụp màn hình, thời gian giao dịch hoặc nội dung yêu cầu gần nhất để TOAN AAS kiểm tra nhanh hơn.
 
-Ảnh có chữ, logo, bàn tay hoặc khuôn mặt có thể cần kiểm tra và tạo lại. Tính năng chưa mở sẽ có guard; bot không gọi provider và không trừ Xu.
+## 9. Liên hệ
 
-## 9. Video / Content Factory
-
-Các quy trình video có thể gồm:
-
-- Ý tưởng video và video theo trend.
-- Ý tưởng quảng cáo hoặc concept cinematic.
-- Kịch bản -> ảnh -> video.
-- Ghép ảnh thành video bằng Local Worker/FFmpeg.
-- Video AI chân thật khi provider sẵn sàng.
-- Video dài chia đoạn để giảm lỗi và kiểm soát chi phí.
-- Prompt video, camera motion và hành động theo từng cảnh.
-
-## 10. Giá video
-
-Video không dùng một mức giá chung cho mọi trường hợp. Chi phí có thể phụ thuộc:
-
-- Số giây và số đoạn.
-- Loại xử lý hoặc model/provider.
-- Chất lượng đầu ra.
-- Số cảnh hoặc số ảnh đầu vào.
-- Phụ đề, dịch và lồng tiếng add-on.
-
-Ghép ảnh thành video bằng công cụ local thường rẻ hơn Video AI chân thật. Bot chỉ chạy tác vụ thật sau khi người dùng xem và xác nhận chi phí. Nếu provider chưa sẵn sàng, bot báo rõ và không trừ Xu.
-
-## 11. Voice / Phụ đề / Lồng tiếng
-
-TOAN AAS có thể hỗ trợ:
-
-- Tạo giọng đọc TTS.
-- Tạo phụ đề từ audio/video.
-- Dịch phụ đề.
-- Lồng tiếng.
-- Pipeline phụ đề + dịch + lồng tiếng + ghép audio/video.
-
-Kết quả có thể cần kiểm tra lại nếu âm thanh khó nghe, video dài hoặc có nhiều người nói. Nếu provider hoặc worker chưa sẵn sàng, hệ thống không gọi API và không trừ Xu.
-
-## 12. PDF / Word / Tài liệu
-
-Các công cụ tài liệu có thể gồm xử lý PDF, Word, chuyển đổi, nén, tách, gộp và lưu tài liệu. Công cụ local miễn phí sẽ hiển thị 0 Xu khi chính sách đó đang áp dụng. Người dùng nên gửi từng file một để giảm lỗi; nếu gửi nhiều file, bot sẽ xử lý theo khả năng của công cụ đang mở.
-
-## 13. Hỗ trợ / Ticket / Đối soát
-
-Người dùng có thể:
-
-- Hỏi cách sử dụng hoặc cách nạp Xu và nhận trả lời ngay.
-- Tạo ticket khi cần admin kiểm tra sâu hơn.
-- Xem ticket của mình và gửi thêm nội dung.
-- Đối soát nạp thủ công.
-- Báo lỗi ảnh, video, voice hoặc tài liệu.
-- Yêu cầu kiểm tra hoàn Xu/refund.
-
-Khi cần kiểm tra thanh toán hoặc job, hãy tạo ticket trong bot và cung cấp mã giao dịch/job liên quan. Admin chính thức: [@toanaas](https://t.me/toanaas).
-
-## 14. Premium / Bot riêng / Dịch vụ
-
-TOAN AAS có thể tư vấn và triển khai:
-
-- Premium theo chính sách đang mở.
-- Bot CSKH/ticket.
-- Bot bán hàng hoặc shop online.
-- Bot content/marketing.
-- Bot nội bộ doanh nghiệp.
-- Workflow tự động hóa riêng.
-
-Giá và phạm vi triển khai phụ thuộc nhu cầu, quy mô, tích hợp và ngân sách thực tế.
-
-## 15. Mẹo sử dụng hiệu quả
-
-- Mô tả rõ sản phẩm, ngách, nền tảng, mục tiêu và thời lượng.
-- Gửi ảnh/video mẫu nếu bạn có quyền sử dụng.
-- Kiểm tra prompt trước khi render tác vụ tốn phí.
-- Với video dài, nên chia đoạn.
-- Không bấm tạo nhiều lần khi bot đang xử lý.
-- Nếu bot báo “chưa trừ Xu”, tác vụ đó chưa được tính phí.
-
-## 16. Những gì TOAN AAS chưa cam kết
-
-- Không cam kết nội dung sẽ viral hoặc tạo doanh thu.
-- Không cam kết provider bên thứ ba luôn hoạt động liên tục.
-- Không tự đăng bài hoặc chạy quảng cáo công khai nếu chưa có quy trình riêng được xác nhận.
-- Không yêu cầu người dùng gửi mật khẩu mạng xã hội hoặc thông tin thẻ thanh toán qua bot.
-
-## 17. Liên hệ
-
-- **Admin:** [@toanaas](https://t.me/toanaas)
-- **Bot:** [@toanaasbot](https://t.me/toanaasbot)
-- **Website:** [www.toanaas.vn](https://www.toanaas.vn/)
-- Khi cần hỗ trợ thanh toán hoặc lỗi job, nên tạo ticket trong bot để có dữ liệu đối soát.
+- Admin: @toanaas
+- Bot: @toanaasbot
+- Website: www.toanaas.vn
+- Khi cần hỗ trợ thanh toán hoặc lỗi xử lý, hãy gửi thông tin rõ ràng để TOAN AAS kiểm tra nhanh hơn.

@@ -502,7 +502,7 @@ def build_guide():
         title="TOAN AAS",
         subtitle="Hướng dẫn sử dụng cho khách hàng",
         metadata=[
-            ("Phiên bản", "V2 - cập nhật 13/06/2026"),
+            ("Phiên bản", "V2 - cập nhật 23/06/2026"),
             ("Bot Telegram", "@toanaasbot"),
             ("Website", "www.toanaas.vn"),
             ("Định hướng", "AI Automation System / Content Factory / Bot hỗ trợ công việc"),
@@ -551,7 +551,7 @@ def main():
         title="TOAN AAS",
         subtitle="Hướng dẫn sử dụng cho khách hàng",
         metadata=[
-            ("Phiên bản", "V2 - cập nhật 13/06/2026"),
+            ("Phiên bản", "V2 - cập nhật 23/06/2026"),
             ("Bot Telegram", "@toanaasbot"),
             ("Website", "www.toanaas.vn"),
             ("Định hướng", "AI Automation System / Content Factory / Bot hỗ trợ công việc"),
