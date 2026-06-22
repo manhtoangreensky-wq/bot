@@ -4967,7 +4967,7 @@ UI_TEXT = {
         "image.upscale_button": "📐 Nâng cấp / đổi kích thước ảnh",
         "image.waiting": "🖼 TOAN AAS đang tạo ảnh cho bạn.\nQuá trình này thường mất một lúc ngắn.\nVui lòng chờ, không cần gửi lại lệnh.",
         "image.tier_disabled_message": "🧪 Gói ảnh này đang tạm tắt. TOAN AAS chưa xử lý và chưa trừ Xu.",
-        "image.success": "✅ Ảnh {label} đã tạo xong.\nJob #{job_id}\n{billing_note}\n\nBạn muốn làm gì tiếp?\n\n• Chốt ảnh này nếu đã hài lòng\n• Tạo prompt video từ ảnh\n• Sửa prompt hoặc tạo lại ảnh",
+        "image.success": "✅ Ảnh {label} đã tạo xong.\n\nBạn muốn làm gì tiếp?\n\n• Chốt ảnh này nếu đã hài lòng\n• Biến ảnh thành video\n• Tạo lại hoặc tạo ảnh nữa",
         "image.success_link": "✅ Ảnh đã tạo xong nhưng Telegram không gửi trực tiếp được.\n<a href=\"{url}\">Mở ảnh</a>",
         "image.fail.not_charged": "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau.",
         "image.fail.refunded": "⚙️ Model tạo ảnh đang bận hoặc cần bảo trì. TOAN AAS chưa trừ Xu hoặc đã hoàn Xu nếu có trừ. Vui lòng thử lại sau.",
@@ -5221,7 +5221,7 @@ UI_TEXT = {
         "image.upscale_button": "📐 Upscale / resize image",
         "image.waiting": "🖼 TOAN AAS is creating your image.\nThis usually takes a short moment.\nPlease wait and do not resend the command.",
         "image.tier_disabled_message": "🧪 This image package is currently disabled. TOAN AAS has not processed the image or charged Xu.",
-        "image.success": "✅ {label} image is ready.\nJob #{job_id}\n{billing_note}\n\nWhat would you like to do next?\n\n• Lock this image if you are happy with it\n• Create video prompts from this image\n• Edit the prompt or regenerate the image",
+        "image.success": "✅ Your {label} image is ready.\n\nWhat would you like to do next?\n\n• Keep this image if you are happy with it\n• Turn this image into a video\n• Regenerate it or create another image",
         "image.success_link": "✅ The image is ready, but Telegram could not send it directly.\n<a href=\"{url}\">Open image</a>",
         "image.fail.not_charged": "⚙️ The image model is busy or temporarily unavailable. The bot has not charged Xu. Please try again later.",
         "image.fail.refunded": "⚙️ The image model is busy or temporarily unavailable. TOAN AAS has refunded {amount} Xu. Please try again later.",
@@ -5475,7 +5475,7 @@ UI_TEXT = {
         "image.upscale_button": "📐 放大 / 调整图片尺寸",
         "image.waiting": "🖼 TOAN AAS 正在为你生成图片。\n通常只需要一小段时间。\n请等待，不要重复发送命令。",
         "image.tier_disabled_message": "🧪 此图片套餐当前已关闭。TOAN AAS 尚未处理图片，也未扣除 Xu。",
-        "image.success": "✅ {label} 已生成完成。\n任务 #{job_id}\n{billing_note}\n\n你想下一步做什么？\n\n• 如果满意，请锁定此图片\n• 基于此图片生成 3 个视频提示词\n• 修改提示词或重新生成图片",
+        "image.success": "✅ {label} 已生成完成。\n\n你想下一步做什么？\n\n• 如果满意，请保留此图片\n• 将此图片制作成视频\n• 重新生成或再创建一张图片",
         "image.success_link": "✅ 图片已生成，但 Telegram 无法直接发送。\n<a href=\"{url}\">打开图片</a>",
         "image.fail.not_charged": "⚙️ 图片模型正忙或暂时不可用。本次未扣除 Xu。请稍后再试。",
         "image.fail.refunded": "⚙️ 图片模型正忙或暂时不可用。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
@@ -60048,9 +60048,8 @@ def video_beta_200_today_counts(user_id=None) -> dict:
             FROM shopaikey_billing_events
             WHERE created_at LIKE ?
               {user_clause}
-              AND event_type IN ('video_confirmed','video_deducted','video_package_use')
+              AND event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
               AND reason LIKE '%tier=low%'
-              AND reason LIKE '%marketing_loss=true%'
             """,
             tuple(params),
         ).fetchone()
@@ -60064,9 +60063,8 @@ def video_beta_200_today_counts(user_id=None) -> dict:
                 FROM shopaikey_billing_events
                 WHERE created_at >= ?
                   AND user_id=?
-                  AND event_type IN ('video_confirmed','video_deducted','video_package_use')
+                  AND event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
                   AND reason LIKE '%tier=low%'
-                  AND reason LIKE '%marketing_loss=true%'
                 """,
                 (week_start, str(user_id or "")),
             ).fetchone()
@@ -60077,9 +60075,8 @@ def video_beta_200_today_counts(user_id=None) -> dict:
                 FROM shopaikey_billing_events
                 WHERE created_at >= ?
                   AND user_id=?
-                  AND event_type IN ('video_confirmed','video_deducted','video_package_use')
+                  AND event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
                   AND reason LIKE '%tier=low%'
-                  AND reason LIKE '%marketing_loss=true%'
                 """,
                 (month_start, str(user_id or "")),
             ).fetchone()
@@ -60089,9 +60086,8 @@ def video_beta_200_today_counts(user_id=None) -> dict:
             SELECT COUNT(DISTINCT job_id)
             FROM shopaikey_billing_events
             WHERE created_at LIKE ?
-              AND event_type IN ('video_confirmed','video_deducted','video_package_use')
+              AND event_type IN ('video_deducted_after_provider_accept','video_package_use_after_provider_accept')
               AND reason LIKE '%tier=low%'
-              AND reason LIKE '%marketing_loss=true%'
             """,
             (today + "%",),
         ).fetchone()
@@ -60198,15 +60194,10 @@ def video_high_tier_limit_message(tier: str = "", lang: str = "vi") -> str:
 def video_beta_200_limit_message(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "🎬 The 200 Xu starter video tier has reached its daily/weekly/monthly trial limit.\n\n"
-            "You can continue with the 300 Xu package for the same base quality line, or choose a higher tier.\n\n"
-            "No provider was called and no Xu was charged."
+            "The 200 Xu starter package has reached today's usage limit. "
+            "You can choose the 300 Xu or 400 Xu package to continue."
         )
-    return (
-        "🎬 Gói trải nghiệm 200 Xu đã hết lượt trong giới hạn ngày/tuần/tháng.\n\n"
-        "Bạn có thể tiếp tục với gói 300 Xu để tạo video cùng dòng chất lượng cơ bản, hoặc chọn gói cao hơn.\n\n"
-        "Bot chưa gọi provider và chưa trừ Xu."
-    )
+    return "Gói trải nghiệm 200 Xu đã hết lượt sử dụng trong hôm nay. Bạn có thể chọn gói 300 Xu hoặc 400 Xu để tiếp tục."
 
 def video_beta_200_limit_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -90278,10 +90269,10 @@ def public_image_success_billing_note(deducted: int = 0, lang: str = "vi", admin
     amount = int(deducted or 0)
     if admin_internal_free and amount <= 0:
         if normalize_user_language(lang) == "zh":
-            return "已扣除：0 Xu（admin 内部测试）。Provider 仍可能消耗真实 credit。"
+            return "本次生成未扣除 Xu。"
         if normalize_user_language(lang) != "vi":
-            return "Charged: 0 Xu internally because this is an admin account. The provider may still consume real credit."
-        return "Đã trừ: 0 Xu nội bộ do tài khoản admin. Provider có thể vẫn tốn credit thật."
+            return "No Xu was charged for this generation."
+        return "Không trừ Xu cho lần tạo này."
     if normalize_user_language(lang) == "zh":
         return f"已扣除：{amount} Xu。"
     if normalize_user_language(lang) != "vi":
@@ -90513,21 +90504,33 @@ def image_job_retry_warranty_remaining(job_id: int = 0) -> int:
 
 def public_image_success_keyboard(job_id: int, tier: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     tier_norm = normalize_image_tier(tier)
-    # Locked UX: tests guard these post-image actions for warranty and image-to-video continuity.
-    rows = [
-        [InlineKeyboardButton(ui_text(lang, "image.lock"), callback_data="tvflow|save_image")],
-        [InlineKeyboardButton(ui_text(lang, "image.to_video"), callback_data=f"tvflow|image_video_prompts_{int(job_id or 0)}")],
-    ]
+    retry_button = InlineKeyboardButton(
+        ui_text(lang, "image.regenerate_paid"),
+        callback_data=f"create_media|image_tier_{tier_norm}",
+    )
     if image_job_retry_warranty_remaining(job_id) > 0:
-        rows.append([InlineKeyboardButton(ui_text(lang, "image.warranty_retry"), callback_data=f"tvflow|image_warranty_retry_{int(job_id or 0)}")])
-    else:
-        rows.append([InlineKeyboardButton(ui_text(lang, "image.regenerate_paid"), callback_data=f"create_media|image_tier_{tier_norm}")])
-    rows.extend([
-        [InlineKeyboardButton("🖼 Tạo ảnh mới" if normalize_user_language(lang) == "vi" else "🖼 Create new image", callback_data="create_media|quick_image")],
-        [InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data=f"create_media|image_tier_{tier_norm}")],
-        [InlineKeyboardButton("💾 Lưu ảnh/package" if normalize_user_language(lang) == "vi" else "💾 Save image/package", callback_data="tvflow|save_image")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main")],
-    ])
+        retry_button = InlineKeyboardButton(
+            ui_text(lang, "image.warranty_retry"),
+            callback_data=f"tvflow|image_warranty_retry_{int(job_id or 0)}",
+        )
+    create_another_label = {
+        "vi": "🖼 Tạo ảnh nữa",
+        "zh": "🖼 再创建一张图片",
+    }.get(normalize_user_language(lang), "🖼 Create another image")
+    rows = [
+        [
+            InlineKeyboardButton(ui_text(lang, "image.lock"), callback_data="tvflow|save_image"),
+            retry_button,
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "image.to_video"), callback_data=f"tvflow|image_video_prompts_{int(job_id or 0)}"),
+            InlineKeyboardButton(create_another_label, callback_data="create_media|quick_image"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "image.edit_prompt"), callback_data=f"create_media|image_tier_{tier_norm}"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu_back"), callback_data="menu|main"),
+        ],
+    ]
     return InlineKeyboardMarkup(rows)
 
 def public_video_pending_key(user_id) -> str:
@@ -95017,18 +95020,6 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
         if not limit.get("ok"):
             clear_video_addon_state(user_id)
             return await safe_edit_or_send(query, video_beta_200_limit_message(lang), parse_mode=None, reply_markup=video_beta_200_limit_keyboard(lang))
-        if normalize_user_language(lang) == "vi":
-            invoice += (
-                "\n\n🎯 <b>Gói 200 Xu — Video trải nghiệm</b>\n"
-                "Đây là gói mồi/marketing loss để khách test Video AI ngắn.\n"
-                f"Giới hạn: <b>{int(limit.get('user_limit') or 1)} video/người/ngày</b>."
-            )
-        else:
-            invoice += (
-                "\n\n🎯 <b>200 Xu starter video</b>\n"
-                "This is a controlled marketing-loss tier for short AI video trials.\n"
-                f"Limit: <b>{int(limit.get('user_limit') or 1)} video/user/day</b>."
-            )
     package_item = active_package_item_for_user(user_id, pending_payload.get("package_item_type") or package_item_type_for_video_tier(tier))
     markup = video_addon_confirm_keyboard(token, tier, lang, state)
     if package_item and int(pricing.get("addon_xu") or 0) <= 0:
