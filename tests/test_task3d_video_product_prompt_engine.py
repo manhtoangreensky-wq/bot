@@ -1174,7 +1174,9 @@ def test_public_video_core_uses_safe_provider_fallback_wrapper():
     assert "submit_public_video_with_key4u_fallback(model, prompt, uid, video_tier)" in source
     assert "shopaikey_video_create_smoke_test(model, prompt)" not in source
     callbacks = _callbacks(bot.public_video_submitted_keyboard("key4u-task", "vi", {"provider_route": "key4u"}))
-    assert callbacks == ["menu|main"]
+    assert callbacks == ["shopai_video_job|key4u-task", "shopai_video_job|main"]
+    labels = _labels(bot.public_video_submitted_keyboard("key4u-task", "vi", {"provider_route": "key4u"}))
+    assert labels == ["🔄 Kiểm tra trạng thái video", "🏠 Menu chính"]
 
 
 @pytest.mark.parametrize("tier", ["future_1000", "future_1200", "future_1500"])

@@ -275,7 +275,10 @@ def test_video_music_free_selection_returns_origin(monkeypatch):
 
     assert finalization["music_mode"] == "none"
     assert finalization["music_enabled"] is False
-    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
+    assert bot.get_video_finalization_state(user_id)["step"] == "menu"
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" not in query.outputs[-1]["text"]
+    assert "vfinal|tier" in _callbacks(query.outputs[-1]["reply_markup"])
 
 
 def test_video_subdub_selection_returns_origin(monkeypatch):
@@ -290,10 +293,13 @@ def test_video_subdub_selection_returns_origin(monkeypatch):
 
     assert finalization["translation_enabled"] is True
     assert finalization["subtitle_dub_choice"] == "translate_subtitle"
-    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
+    assert bot.get_video_finalization_state(user_id)["step"] == "menu"
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" not in query.outputs[-1]["text"]
+    assert "vfinal|tier" in _callbacks(query.outputs[-1]["reply_markup"])
 
 
-def test_invoice_change_music_returns_package(monkeypatch):
+def test_invoice_change_music_returns_tools(monkeypatch):
     user_id = 940409
     _reset_user(user_id)
     monkeypatch.setattr(bot, "get_user_language", lambda uid: "vi")
@@ -315,8 +321,10 @@ def test_invoice_change_music_returns_package(monkeypatch):
     result = asyncio.run(bot.handle_video_finalization_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
     assert result is not None
-    assert "Chọn gói xuất video AI" in query.outputs[-1]["text"]
-    assert bot.get_video_finalization_state(user_id)["step"] == "tier"
+    assert "Công cụ hoàn thiện video" in query.outputs[-1]["text"]
+    assert "Chọn gói xuất video AI" not in query.outputs[-1]["text"]
+    assert "vfinal|tier" in _callbacks(query.outputs[-1]["reply_markup"])
+    assert bot.get_video_finalization_state(user_id)["step"] == "menu"
     assert bot.get_video_finalization_state(user_id)["video_finalization"]["music_mode"] == "none"
 
 
