@@ -1,0 +1,6 @@
+{
+  "items": [
+    {"id":"platform_short_vertical","label_vi":"TikTok/Reels/Shorts dọc","label_en":"Vertical short-form","tags":["default","social_short","trend","product","affiliate"],"use_cases":["tiktok","reels","shorts"],"prompt_template":"Hook trong cảnh đầu, chủ thể nằm vùng an toàn dọc, nhịp rõ và hero frame cuối dễ đọc.","scene_guidance":"Ưu tiên 9:16, cận/trung cảnh, tránh chữ sát mép và không che chủ thể bằng UI nền tảng.","negative_prompt":"horizontal-only composition, tiny subject, edge-clipped text, slow empty opening","platform_hint":"TikTok/Reels/Shorts","safety_note":"Tuân thủ chính sách nội dung và quảng cáo của nền tảng."},
+    {"id":"platform_youtube","label_vi":"YouTube kể chuyện rõ","label_en":"YouTube story clarity","tags":["youtube","education","documentary","storytelling"],"use_cases":["youtube","youtube_shorts"],"prompt_template":"Thiết lập câu hỏi hoặc xung đột sớm, phát triển logic và kết thúc có recap/CTA.","scene_guidance":"Dùng 16:9 cho video ngang hoặc 9:16 cho Shorts theo session; giữ continuity giữa các chương.","negative_prompt":"unclear premise, repetitive middle, abrupt ending, ratio mismatch","platform_hint":"YouTube/YouTube Shorts","safety_note":"Tôn trọng bản quyền và chính sách nền tảng."}
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "items": [
+    {"id":"cta_soft_action","label_vi":"CTA mềm theo hành động","label_en":"Soft action CTA","tags":["default","product","service","education","social_short"],"use_cases":["product_ad","service_intro","explainer"],"prompt_template":"Nếu nội dung này phù hợp với bạn, hãy xem thêm thông tin hoặc thử bước tiếp theo được thương hiệu cung cấp.","scene_guidance":"Đặt CTA ở hero frame cuối, ngắn, dễ đọc và không gây áp lực.","negative_prompt":"fake countdown, guaranteed result, aggressive pressure, hidden condition","platform_hint":"TikTok/Reels/Shorts/YouTube","safety_note":"Không tự thêm giá, link hoặc ưu đãi."},
+    {"id":"cta_affiliate_transparent","label_vi":"CTA affiliate minh bạch","label_en":"Transparent affiliate CTA","tags":["affiliate","testimonial"],"use_cases":["affiliate","product_review"],"prompt_template":"Bạn có thể xem thông tin sản phẩm ở phần mô tả; hãy cân nhắc theo nhu cầu thực tế của mình.","scene_guidance":"CTA nhẹ, không thúc ép và chừa vị trí cho disclosure nếu cần.","negative_prompt":"guaranteed commission, fake scarcity, concealed affiliate relationship","platform_hint":"TikTok Shop/Reels/Shorts","safety_note":"Khuyến nghị disclosure affiliate theo quy định nền tảng."}
+  ]
+}

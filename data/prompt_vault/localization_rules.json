@@ -1,0 +1,7 @@
+{
+  "items": [
+    {"id":"locale_vi","label_vi":"Bản địa hóa tiếng Việt","label_en":"Vietnamese localization","tags":["default","vi"],"use_cases":["all_vi"],"prompt_template":"Dùng tiếng Việt tự nhiên; cho phép các danh từ video, AI, TikTok, YouTube, prompt.","scene_guidance":"Mọi visual copy, caption và voice hint dùng tiếng Việt nhất quán.","negative_prompt":"random language mixing, literal machine translation, unnatural pronoun","platform_hint":"Mọi nền tảng","safety_note":"Không dịch sai tên riêng hoặc thương hiệu."},
+    {"id":"locale_en","label_vi":"Bản địa hóa tiếng Anh","label_en":"English localization","tags":["en"],"use_cases":["all_en"],"prompt_template":"Use concise natural English and preserve brand names.","scene_guidance":"Keep all generated copy and voice hints consistently in English.","negative_prompt":"random language mixing, literal translation, inconsistent terminology","platform_hint":"All platforms","safety_note":"Do not alter proper nouns or brands."},
+    {"id":"locale_zh","label_vi":"Bản địa hóa tiếng Trung","label_en":"Chinese localization","tags":["zh"],"use_cases":["all_zh"],"prompt_template":"使用自然中文并保留品牌名称及常用 AI/平台专有名词。","scene_guidance":"所有字幕、画面文字和旁白提示保持中文一致。","negative_prompt":"随机语言混用, 直译腔, 术语不一致","platform_hint":"所有平台","safety_note":"不要改写品牌名或专有名词。"}
+  ]
+}

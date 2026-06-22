@@ -1,0 +1,7 @@
+{
+  "items": [
+    {"id":"voice_vi_clear_warm","label_vi":"Tiếng Việt rõ ràng, ấm áp","label_en":"Clear warm Vietnamese","tags":["default","vi"],"use_cases":["all_vi"],"prompt_template":"Viết tiếng Việt tự nhiên, câu ngắn, chủ động; giữ các danh từ quen thuộc như video, AI, TikTok, YouTube, prompt.","scene_guidance":"Không trộn ngôn ngữ ngẫu nhiên; caption và voice hint cùng một giọng điệu.","negative_prompt":"machine translation tone, random English sentence, slang overload","platform_hint":"Mọi nền tảng","safety_note":"Tôn trọng cách xưng hô và không đưa tuyên bố chưa kiểm chứng."},
+    {"id":"voice_en_clear_natural","label_vi":"Tiếng Anh rõ ràng, tự nhiên","label_en":"Clear natural English","tags":["en"],"use_cases":["all_en"],"prompt_template":"Use natural English, concise active sentences, and consistent terminology.","scene_guidance":"Keep captions and voice hints in English unless a brand noun requires otherwise.","negative_prompt":"random language switching, stiff translation, jargon overload","platform_hint":"All platforms","safety_note":"Avoid unsupported claims."},
+    {"id":"voice_zh_clear_natural","label_vi":"Tiếng Trung rõ ràng, tự nhiên","label_en":"Clear natural Chinese","tags":["zh"],"use_cases":["all_zh"],"prompt_template":"使用自然简洁的中文，保留 AI、TikTok、YouTube、prompt 等常用专有名词。","scene_guidance":"字幕和旁白提示保持中文一致，不随机混合语言。","negative_prompt":"随机语言混用, 生硬翻译, 术语堆砌","platform_hint":"所有平台","safety_note":"避免未经证实的承诺。"}
+  ]
+}

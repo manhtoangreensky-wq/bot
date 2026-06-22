@@ -27,6 +27,17 @@ Every task must go through:
 6. Review
 7. Ship Report
 
+## Branch, PR, And Release Discipline
+
+- Use one main branch for each large work cluster. Do not create small branches or PRs for related buttons, copy changes, back routes, or regressions in the same flow.
+- Fix small issues discovered in a flow on that flow's existing branch.
+- Push only after the whole work cluster is complete and the full relevant test suite passes.
+- Create a PR only when the user explicitly requests it or the task is genuinely complete and ready for review.
+- Do not merge or deploy piecemeal.
+- If `main` changes, rebase or merge `main` into the current branch when safe; do not create another branch without a real isolation need.
+- Use a separate branch when isolating dangerous work in PayOS, wallet/Xu, payment webhooks, DB migrations, provider internals, or a large export-core rewrite.
+- Keep current video-flow regressions together on one P0 branch. Start multi-scene work only on its dedicated branch after the video-flow regression cluster is complete.
+
 ## Before Editing Code
 
 - Read `bot.py`.
