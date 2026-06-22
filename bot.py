@@ -41222,376 +41222,217 @@ INTERNAL_CUSTOMER_FEATURE_TEXT = (
     "để tạo kịch bản, caption, prompt cảnh, hashtag và CTA."
 )
 
-CUSTOMER_GUIDE_SECTIONS = [
-    (
-        "start",
-        "Đọc trước",
-        (
-            "📘 <b>TOAN AAS dùng để làm gì?</b>\n\n"
-            "TOAN AAS là bot Telegram gom các công cụ AI vào một quy trình dễ dùng. "
-            "Bạn không cần mở nhiều web, tự nghĩ prompt, tự sửa caption và tự chia cảnh từ đầu.\n\n"
-            "<b>Luồng chính:</b>\n"
-            "1. Bạn nói mục tiêu, chủ đề hoặc sản phẩm.\n"
-            "2. Bot tạo ý tưởng, kịch bản, storyboard, scene prompt, caption, hashtag và CTA.\n"
-            "3. Bạn kiểm tra, sửa lại theo thương hiệu/sản phẩm thật.\n"
-            "4. Bạn tự dùng nội dung đó để tạo video/voice/ảnh hoặc đăng lên kênh của mình.\n"
-            "5. Sau khi đăng, bạn có thể đưa số liệu thủ công để bot gợi ý cải thiện.\n\n"
-            "<b>Phạm vi hiện tại:</b>\n"
-            "TOAN AAS tạo nội dung/video pack để bạn tự đăng. Bot chưa tự đăng bài, chưa kết nối tài khoản mạng xã hội, "
-            "chưa chạy quảng cáo hộ khách và không nhận mật khẩu/thẻ thanh toán của khách."
-        ),
-    ),
-    (
-        "quick",
-        "Dùng nhanh",
-        (
-            "⚡ <b>Luồng dùng nhanh cho người mới</b>\n\n"
-            "1. Mở Telegram và tìm <b>@toanaasbot</b>.\n"
-            "2. Bấm START hoặc gõ <code>/start</code>.\n"
-            "3. Gõ <code>/profile</code> để xem số Xu dịch vụ.\n"
-            "4. Gõ <code>/khuyenmai</code> để xem ưu đãi.\n"
-            "5. Nếu muốn mua/nạp Xu dịch vụ, gõ <code>/naptien</code> và chọn gói.\n"
-            "6. Nếu muốn tạo nội dung video, gõ <code>/film chủ đề của bạn</code>.\n\n"
-            "<b>Ví dụ:</b>\n"
-            "<code>/film review máy xay sinh tố mini cho mẹ bỉm, đăng TikTok, giọng gần gũi, mục tiêu bán hàng</code>\n\n"
-            "Nếu không nhớ lệnh, gõ <code>/help</code> hoặc <code>/huongdan</code>."
-        ),
-    ),
-    (
-        "commands",
-        "Bảng lệnh",
-        (
-            "🧭 <b>Muốn làm gì thì dùng lệnh nào?</b>\n\n"
-            "• Xem menu: <code>/start</code>, <code>/menu</code>, <code>/help</code>\n"
-            "• Xem số Xu dịch vụ: <code>/profile</code>\n"
-            "• Xem bảng giá: <code>/pricing</code> hoặc <code>/banggia</code>\n"
-            "• Xem ưu đãi: <code>/khuyenmai</code>, <code>/uudai</code>, <code>/promos</code>\n"
-            "• Nhập mã ưu đãi nạp: <code>/promo FIRST30</code>\n"
-            "• Nhận mã quà tặng admin gửi: <code>/gift MÃ_ADMIN_GỬI</code> hoặc <code>/nhanqua MÃ_ADMIN_GỬI</code>\n"
-            "• Mua/nạp Xu dịch vụ: <code>/naptien</code>\n"
-            "• Tạo script/prompt/caption video: <code>/film &lt;chủ đề&gt;</code>\n"
-            "• Phân tích hook/caption/CTA: <code>/growth_ai</code>\n"
-            "• Báo cáo thủ công: <code>/campaign_report</code>\n"
-            "• Góp ý/báo lỗi: <code>/gopy nội dung</code>\n\n"
-            "Bạn cũng có thể hỏi AI trực tiếp bằng cách nhắn câu hỏi vào bot."
-        ),
-    ),
-    (
-        "credits",
-        "Xu, nạp tiền, ưu đãi",
-        (
-            "💳 <b>Xu dịch vụ, mệnh giá nạp và ưu đãi</b>\n\n"
-            "Xu dịch vụ là đơn vị nội bộ để dùng công cụ trong TOAN AAS. User mới nhận <b>200 Xu dịch vụ trải nghiệm</b>.\n"
-            "Mỗi ID Telegram chỉ nhận 200 Xu trải nghiệm một lần. Xóa chat, block bot rồi start lại hoặc đổi username không làm nhận lại 200 Xu.\n"
-            "Bạn có thể dùng <code>/trial_status</code> để kiểm tra trạng thái trial của mình.\n\n"
-            "<b>Mệnh giá nạp:</b>\n"
-            "• 10.000đ: 100 Xu dịch vụ, dùng thử\n"
-            "• 20.000đ: 200 Xu dịch vụ, dùng thử thêm\n"
-            "• 50.000đ → 500 Xu + 30 Xu Launch Bonus nếu lần đầu mua mệnh giá 50k (tổng 530 Xu dịch vụ)\n"
-            "• 100.000đ → 1.000 Xu + 50 Xu Launch Bonus nếu lần đầu mua mệnh giá 100k (tổng 1.050 Xu dịch vụ)\n"
-            "• 200.000đ → 2.000 Xu + 150 Xu Launch Bonus nếu lần đầu mua mệnh giá 200k (tổng 2.150 Xu dịch vụ)\n"
-            "• 500.000đ → 5.000 Xu + 500 Xu Launch Bonus nếu lần đầu mua mệnh giá 500k (tổng 5.500 Xu dịch vụ)\n\n"
-            "<b>Promo code nạp tiền:</b>\n"
-            "Nhập <code>/promo FIRST30</code> trước khi nạp. Promo áp dụng từ mệnh giá 50k, mỗi đơn chỉ dùng 1 mã, "
-            "không cộng dồn và chỉ cộng Xu dịch vụ sau khi thanh toán thành công.\n\n"
-            "<b>Gift code:</b>\n"
-            "Gift public hợp lệ sẽ cộng Xu dịch vụ trực tiếp. Riêng mã <code>BETA*</code> là mã sự kiện/test, cần admin cấp theo ID Telegram trước.\n\n"
-            f"{service_credit_legal_note()}"
-        ),
-    ),
-    (
-        "trial",
-        "Xóa chat và trial",
-        (
-            "❓ <b>Nếu tôi xóa chat với bot thì sao?</b>\n\n"
-            "TOAN AAS quản lý Xu theo <b>ID Telegram</b>, không theo nội dung đoạn chat.\n"
-            "Mỗi ID chỉ nhận <b>200 Xu trải nghiệm</b> một lần.\n\n"
-            "Nếu bạn xóa chat rồi bấm Start lại, hệ thống vẫn nhận diện ID cũ và không cấp lại 200 Xu.\n"
-            "Số dư được lưu theo ID Telegram khi hệ thống DB còn dữ liệu.\n\n"
-            "Khi cần hỗ trợ, dùng <code>/myid</code> hoặc <code>/trial_status</code> rồi gửi ID Telegram cho admin."
-        ),
-    ),
-    (
-        "topup",
-        "Cách nạp Xu dịch vụ",
-        (
-            "🏦 <b>Cách mua/nạp Xu dịch vụ từng bước</b>\n\n"
-            "<b>PayOS QR động:</b>\n"
-            "1. Gõ <code>/naptien</code>.\n"
-            "2. Nếu có mã ưu đãi, nhập mã trước, ví dụ <code>/promo FIRST30</code>.\n"
-            "3. Chọn mệnh giá muốn nạp.\n"
-            "4. Bot tạo link/QR thanh toán.\n"
-            "5. Mở app ngân hàng, quét QR hoặc bấm link thanh toán.\n"
-            "6. Thanh toán đúng số tiền và chờ hệ thống cộng Xu dịch vụ.\n"
-            "7. Gõ <code>/profile</code> để kiểm tra số dư.\n\n"
-            "<b>Khi cổng tự động bận:</b>\n"
-            "Bot sẽ gửi QR thủ công. Bạn chuyển đúng số tiền với nội dung:\n"
-            "<code>AAS &lt;ID Telegram&gt; &lt;Mã đơn&gt;</code>\n\n"
-            "Sau đó chụp bill và gửi lại trong chat để admin kiểm tra."
-        ),
-    ),
-    (
-        "film",
-        "Làm video review",
-        (
-            "🎬 <b>Quy trình tạo video review để tự đăng</b>\n\n"
-            "<b>Chuẩn bị 5 thông tin:</b>\n"
-            "1. Sản phẩm/chủ đề là gì?\n"
-            "2. Khách hàng mục tiêu là ai?\n"
-            "3. Đăng ở đâu: TikTok, Facebook Reels hay YouTube Shorts?\n"
-            "4. Giọng văn: gần gũi, chuyên gia, hài hước, sang trọng?\n"
-            "5. Có link sản phẩm không? Nếu có, dán trực tiếp vào prompt.\n\n"
-            "<b>Lệnh mẫu:</b>\n"
-            "<code>/film topic=\"review máy xay sinh tố mini cho mẹ bỉm\" platform=\"tiktok\" tone=\"gần gũi\" goal=\"bán hàng\" link=\"https://...\"</code>\n\n"
-            "<b>Bot thường trả về:</b>\n"
-            "ý tưởng video, hook 3 giây đầu, kịch bản nói, storyboard, scene prompt, caption, hashtag và CTA.\n\n"
-            "<b>Sau khi nhận kết quả:</b>\n"
-            "đọc lại, sửa tên sản phẩm/giá/ưu đãi nếu cần, copy script/prompt/caption để tự quay, dựng hoặc đăng."
-        ),
-    ),
-    (
-        "daily",
-        "Làm đều mỗi ngày",
-        (
-            "📅 <b>Quy trình 3 video/ngày cho một sản phẩm</b>\n\n"
-            "<b>Buổi sáng:</b>\n"
-            "<code>/film cho tôi 3 ý tưởng video ngắn về [sản phẩm], mỗi video 30 giây, đăng TikTok, mục tiêu kéo tương tác và inbox</code>\n\n"
-            "<b>Buổi trưa:</b>\n"
-            "Chọn 1 ý tưởng dễ làm nhất, dùng script để quay/tạo video, tạo voice nếu cần, ghép subtitle.\n\n"
-            "<b>Buổi tối:</b>\n"
-            "Đăng video, lưu link bài đăng, hôm sau ghi lại view/like/comment/click/inbox/doanh thu nếu có.\n\n"
-            "Sau đó dùng <code>/growth_ai</code> hoặc hỏi tự nhiên để bot gợi ý hook, caption, CTA và ý tưởng tiếp theo."
-        ),
-    ),
-    (
-        "media",
-        "Audio, voice, ảnh",
-        (
-            "🎙️ <b>Audio, voice, ảnh và prompt hình ảnh</b>\n\n"
-            "<b>Bóc băng audio/video:</b>\n"
-            "Gửi voice/mp3/m4a hoặc file phù hợp vào bot. Sau khi có transcript, bạn có thể yêu cầu:\n"
-            "<code>Tóm tắt đoạn này thành 5 ý chính, rồi viết lại thành script TikTok 30 giây</code>\n\n"
-            "<b>Tạo voice-off:</b>\n"
-            "Tạo script bằng <code>/film</code>, kiểm tra câu ngắn dễ nghe, rồi dùng công cụ voice/TTS trong bot nếu menu hỗ trợ.\n\n"
-            "<b>Ảnh/tách nền/prompt thumbnail:</b>\n"
-            "Gửi ảnh nếu cần tách nền. Nếu cần prompt ảnh, hỏi:\n"
-            "<code>Viết prompt tạo ảnh thumbnail TikTok cho sản phẩm [tên sản phẩm], nền sáng, bố cục rõ, có khoảng trống để thêm chữ</code>"
-        ),
-    ),
-    (
-        "image_ai",
-        "Hướng dẫn tạo ảnh AI",
-        (
-            "🖼 <b>Hướng dẫn tạo ảnh AI</b>\n\n"
-            "1. Mở <b>Hình ảnh</b> rồi chọn <b>Tạo ảnh AI nhanh</b>, hoặc đi từ Concept/Trend workflow.\n"
-            "2. Gửi mô tả ảnh càng rõ càng tốt: sản phẩm, nền, ánh sáng, phong cách, tỉ lệ, chữ cần tránh.\n"
-            "3. Chọn gói ảnh: tiết kiệm, tiêu chuẩn, tiêu chuẩn + bảo hành, chất lượng cao hoặc chất lượng cao + bảo hành.\n"
-            "4. Bot hiển thị giá Xu và hỏi xác nhận trước khi tạo.\n"
-            "5. Chỉ sau khi bạn xác nhận, bot mới trừ Xu và gọi provider tạo ảnh.\n"
-            "6. Nếu provider lỗi/quota/timeout theo chính sách hoàn Xu, bot sẽ hoàn Xu cho bước đó.\n\n"
-            "<b>Ví dụ mô tả tốt:</b>\n"
-            "<code>Máy xay sinh tố mini màu xanh ngọc trên bàn bếp sáng, ánh sáng tự nhiên, sạch, quảng cáo thương mại, không thêm chữ, không watermark.</code>\n\n"
-            "<b>Gói ảnh:</b>\n"
-            "• Ảnh tiết kiệm: test nhanh, không kèm tạo lại miễn phí.\n"
-            "• Ảnh tiêu chuẩn: cân bằng chất lượng/chi phí.\n"
-            "• Gói có bảo hành: kèm 1 lần tạo lại trong cùng yêu cầu nếu ảnh chưa đúng ý.\n\n"
-            "<b>Sau khi có ảnh:</b>\n"
-            "Bạn có thể lưu ảnh, sửa prompt, tạo lại theo quy tắc gói đã chọn, hoặc dùng ảnh để chuẩn bị prompt video.\n\n"
-            "Lưu ý: tạo ảnh thật đang đi qua billing guard; không có xác nhận thì không trừ Xu."
-        ),
-    ),
-    (
-        "video_ai",
-        "Hướng dẫn tạo video AI",
-        (
-            "🎬 <b>Hướng dẫn tạo video AI</b>\n\n"
-            "1. Mở <b>Tạo nội dung / Video</b> rồi chọn <b>🎬 Video AI chân thật</b>.\n"
-            "2. Gửi mô tả video: sản phẩm, cảnh quay, chuyển động, tỉ lệ, thời lượng, phong cách.\n"
-            "3. Nếu cần, tạo ảnh khung chính trước rồi dùng ảnh đó để làm video.\n"
-            "4. Chọn chất lượng video và xác nhận giá.\n"
-            "5. Bot trừ Xu sau khi xác nhận, gửi job vào queue và tự gửi video khi hoàn tất.\n"
-            "6. Trong lúc chờ, không gửi lại nhiều lần để tránh job trùng.\n"
-            "7. Sau video, bạn có thể chọn thêm nhạc hoặc hoàn tất không nhạc.\n\n"
-            "<b>Gói video:</b>\n"
-            "• Video Trải Nghiệm: 200 Xu.\n"
-            "• Video Cơ Bản: 300 Xu.\n"
-            "• Video Phổ Thông: 400 Xu.\n"
-            "• Video Tiêu Chuẩn: 600 Xu.\n"
-            "• Video Cao Cấp: 1200 Xu.\n"
-            "• Video premium: admin-only / liên hệ admin.\n\n"
-            "Nếu Public video OFF, bot chỉ tạo prompt/hướng dẫn, không gọi API video và không trừ Xu."
-        ),
-    ),
-    (
-        "guided_video",
-        "Làm video theo trend từng bước",
-        (
-            "🔥 <b>Hướng dẫn làm video theo trend từng bước</b>\n\n"
-            "1. Mở <b>Tạo nội dung / Video</b> → <b>Video theo trend</b>.\n"
-            "2. Gửi sản phẩm/dịch vụ/chủ đề bạn muốn làm video.\n"
-            "3. Chọn cách lấy trend: gợi ý 3 trend phổ biến, trend theo ngành, tự nhập trend hoặc bỏ qua trend.\n"
-            "4. Chọn/chốt trend rồi bot mới tạo hướng video phù hợp.\n"
-            "5. Đi tiếp từng bước: 3 hướng chuyển động, 3 prompt ảnh, prompt video, nhạc hoặc không nhạc.\n"
-            "6. Ở các bước sau, bot vẫn ưu tiên đưa <b>3 gợi ý</b> để bạn dễ chọn.\n"
-            "7. Bạn có thể dừng ở bước prompt hoặc xác nhận tạo ảnh/video thật nếu public đã mở.\n\n"
-            "<b>Nguyên tắc dùng:</b>\n"
-            "• Bạn có thể dừng ở bất kỳ bước nào để tiết kiệm chi phí.\n"
-            "• Bot chỉ trừ Xu khi bạn xác nhận tạo ảnh/video/nhạc thật.\n"
-            "• Gợi ý trend public hiện là content-only nếu trend live chưa mở.\n"
-            "• Nếu chỉ lưu prompt/kịch bản/gợi ý nhạc thì bot chưa gọi API tạo thật.\n"
-            "• Video thật chỉ gọi provider khi Public video ON và bạn đã xác nhận."
-        ),
-    ),
-    (
-        "music_add",
-        "Hướng dẫn thêm nhạc",
-        (
-            "🎵 <b>Hướng dẫn thêm nhạc / bỏ nhạc</b>\n\n"
-            "Nhạc là tùy chọn, không bắt buộc.\n\n"
-            "Bạn có thể:\n"
-            "• Chọn không cần nhạc và hoàn tất.\n"
-            "• Chọn một trong 3 gợi ý nhạc theo concept.\n"
-            "• Tìm nhạc trong kho để nghe thử.\n"
-            "• Tạo prompt nhạc AI để dùng sau.\n\n"
-            "<b>Khi nào nên bỏ nhạc?</b>\n"
-            "• Video cần giọng nói rõ.\n"
-            "• Bạn sẽ tự ghép nhạc bằng CapCut/TikTok sau.\n"
-            "• Bạn chưa chắc license nhạc có dùng thương mại được không.\n\n"
-            "Tạo nhạc AI hoặc ghép nhạc nếu được mở sau này sẽ tính phí riêng và có xác nhận trước khi trừ Xu."
-        ),
-    ),
-    (
-        "music",
-        "Nhạc AI / Kho nhạc",
-        (
-            "🎵 <b>Nhạc AI / Kho nhạc</b>\n\n"
-            "TOAN AAS hỗ trợ tìm nhạc nền, hiệu ứng âm thanh, media public và tạo prompt nhạc cho video.\n\n"
-            "<b>Lệnh chính:</b>\n"
-            "• <code>/music</code> hoặc <code>/music_tools</code> — mở trung tâm nhạc\n"
-            "• <code>/music_prompt &lt;mô tả&gt;</code> — tạo prompt nhạc nền\n"
-            "• <code>/music_library &lt;từ khóa&gt;</code> — tìm nhạc nền\n"
-            "• <code>/sfx_library &lt;từ khóa&gt;</code> — tìm hiệu ứng âm thanh\n"
-            "• <code>/media_library &lt;từ khóa&gt;</code> — tìm ảnh/video public\n"
-            "• <code>/play_music 1</code> hoặc <code>/play_sfx 1</code> — nghe thử\n"
-            "• <code>/select_music 1</code> hoặc <code>/select_sfx 1</code> — chọn nhạc/SFX\n"
-            "• <code>/music_policy</code> — chính sách nhạc/media\n\n"
-            "<b>Quy trình:</b> tìm → nghe thử → chọn → gửi video/ảnh → ghép nhạc khi công cụ được mở.\n\n"
-            "Nhạc/kho public có license riêng. Kiểm tra quyền thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền."
-        ),
-    ),
-    (
-        "optimize",
-        "Tối ưu sau khi đăng",
-        (
-            "📈 <b>Tối ưu bài đã đăng</b>\n\n"
-            "Sau khi tự đăng video, hãy ghi lại:\n"
-            "• link bài đăng\n"
-            "• nền tảng\n"
-            "• view, like, comment, share\n"
-            "• click link hoặc inbox nếu có\n"
-            "• doanh thu nếu có\n\n"
-            "<b>Ví dụ hỏi bot:</b>\n"
-            "<code>Video của tôi có 3000 view, 120 like, 8 comment, 5 share, 15 click nhưng chưa có đơn. Hãy phân tích lý do và gợi ý 5 video tiếp theo</code>\n\n"
-            "Bot có thể giúp sửa hook, đổi góc nội dung, viết CTA mạnh hơn, chọn ý tưởng tiếp theo và gợi ý caption/hashtag mới."
-        ),
-    ),
-    (
-        "rules",
-        "Checklist & giới hạn",
-        (
-            "✅ <b>Checklist trước khi đăng</b>\n\n"
-            "• Video có hook trong 3 giây đầu chưa?\n"
-            "• Người xem có hiểu sản phẩm giải quyết vấn đề gì không?\n"
-            "• Có nói quá đà hoặc cam kết tuyệt đối không?\n"
-            "• Có CTA chưa?\n"
-            "• Caption có rõ lợi ích không?\n"
-            "• Hashtag có liên quan không?\n"
-            "• Âm thanh/subtitle có dễ nghe, dễ đọc không?\n"
-            "• Có dùng hình/giọng/người thật khi chưa có quyền không?\n\n"
-            "<b>TOAN AAS hiện chưa làm cho khách:</b>\n"
-            "• chưa tự đăng bài\n"
-            "• chưa kết nối tài khoản Facebook/TikTok/YouTube\n"
-            "• chưa chạy quảng cáo hộ khách\n"
-            "• chưa cam kết doanh thu\n"
-            "• các module lưu link/publish nội bộ là phần admin/internal/backlog, chưa public cho khách\n\n"
-            "Khách hiện nhận được: script, prompt, caption, hashtag, CTA và hướng tối ưu để tự đăng."
-        ),
-    ),
-]
+PUBLIC_MAINTENANCE_COPY = (
+    "Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+)
 
-CUSTOMER_GUIDE_SECTIONS.extend([
+CUSTOMER_GUIDE_SECTIONS = [
     (
         "quick_start",
         "Bắt đầu nhanh",
         (
-            "🚀 <b>Bắt đầu nhanh với TOAN AAS</b>\n\n"
-            "Nếu bạn mới dùng bot, hãy chọn một trong 3 cách đơn giản:\n\n"
-            "<b>1. Tạo ảnh AI</b>\n"
-            "Phù hợp khi bạn cần ảnh sản phẩm, thumbnail, key visual hoặc ảnh khung chính cho video.\n"
-            "Mẹo: mô tả rõ sản phẩm, nền, ánh sáng, tỉ lệ và ghi <code>không thêm chữ, không watermark</code> nếu cần.\n\n"
-            "<b>2. Tạo video AI</b>\n"
-            "Phù hợp khi bạn đã có ý tưởng hoặc ảnh khung chính và muốn tạo video ngắn.\n"
-            "Mẹo: ghi rõ chuyển động camera, motion của sản phẩm, thời lượng và phong cách.\n\n"
-            "<b>3. Video theo trend</b>\n"
-            "Phù hợp khi bạn chưa có ý tưởng. Bot sẽ giúp chọn trend, hook, storyboard, prompt ảnh, prompt video và nhạc.\n\n"
-            "TOAN AAS luôn hỏi xác nhận trước khi trừ Xu ở các bước tạo thật. Nếu chỉ xem hướng dẫn/prompt, bot chưa gọi API tạo ảnh/video."
+            "🚀 <b>BẮT ĐẦU NHANH</b>\n\n"
+            "1. Chọn tính năng bạn muốn dùng: Tạo ảnh, Tạo video, Âm thanh, Tài liệu hoặc Dịch thuật.\n"
+            "2. Gửi mô tả rõ mục tiêu, sản phẩm, phong cách, nền tảng đăng và yêu cầu riêng.\n"
+            "3. Chọn gói phù hợp nếu tính năng có nhiều mức giá.\n"
+            "4. Kiểm tra bản xem trước, bảng giá và thông tin xác nhận.\n"
+            "5. Chỉ khi bạn xác nhận, hệ thống mới xử lý và mới trừ Xu nếu bước đó có phí.\n"
+            "6. Nhận kết quả ngay trong bot, lưu lại hoặc tiếp tục bước kế tiếp.\n\n"
+            "<b>Lệnh hữu ích:</b>\n"
+            "• <code>/help</code> — xem hướng dẫn nhanh\n"
+            "• <code>/huongdan</code> hoặc <code>/guide</code> — mở hướng dẫn chi tiết\n"
+            "• <code>/profile</code> — xem số dư Xu\n"
+            "• <code>/pricing</code> hoặc <code>/banggia</code> — xem bảng giá\n"
+            "• <code>/naptien</code> — nạp Xu\n\n"
+            "Mẹo: nếu chưa chắc nên chọn mục nào, hãy mở <b>Tạo ảnh</b> trước để có ảnh khung chính, rồi dùng ảnh đó làm video."
         ),
     ),
     (
-        "refund",
-        "Hoàn Xu khi lỗi",
+        "image_ai",
+        "Tạo ảnh",
         (
-            "🔁 <b>Hoàn Xu khi lỗi</b>\n\n"
-            "TOAN AAS có guard để tránh mất Xu sai khi provider lỗi.\n\n"
-            "<b>Bot chưa trừ Xu khi:</b>\n"
-            "• Bạn chỉ mở menu/hướng dẫn/bảng giá.\n"
-            "• Bạn chưa bấm xác nhận tạo ảnh/video.\n"
-            "• Tính năng public đang OFF.\n\n"
-            "<b>Bot hoàn Xu khi đã trừ nhưng bước tạo thất bại do:</b>\n"
-            "• provider hết quota/no channel/maintenance.\n"
-            "• Timeout hoặc lỗi xử lý được phân loại là provider fail.\n"
-            "• Job bị lỗi trước khi có kết quả hợp lệ.\n\n"
-            "<b>Bạn nên làm gì?</b>\n"
-            "• Không bấm tạo nhiều lần khi job đang chạy.\n"
-            "• Chờ bot tự gửi kết quả hoặc dùng nút kiểm tra trạng thái trong tin nhắn job.\n"
-            "• Nếu cần hỗ trợ, gửi admin ID Telegram + job/task gần nhất."
+            "🖼 <b>HƯỚNG DẪN TẠO ẢNH AI</b>\n\n"
+            "<b>Quy trình tạo ảnh:</b>\n"
+            "1. Mở mục <b>Tạo ảnh</b>.\n"
+            "2. Gửi mô tả ảnh: sản phẩm, bối cảnh, ánh sáng, màu sắc, bố cục, tỉ lệ và phong cách.\n"
+            "3. Chọn gói ảnh theo nhu cầu.\n"
+            "4. Xem giá Xu và xác nhận.\n"
+            "5. Hệ thống xử lý ảnh sau khi bạn xác nhận.\n"
+            "6. Nhận ảnh trong bot, tải về hoặc dùng tiếp để tạo video.\n\n"
+            "<b>Ví dụ mô tả tốt:</b>\n"
+            "<code>Ảnh sản phẩm máy xay sinh tố mini màu xanh ngọc trên bàn bếp sáng, ánh sáng tự nhiên, phong cách quảng cáo thương mại, không thêm chữ, không watermark.</code>\n\n"
+            "<b>Bảng giá tạo ảnh:</b>\n"
+            "• 🟢 Tiết kiệm — 50 Xu\n"
+            "• 🔵 Chuẩn — 150 Xu\n"
+            "• 🔵 Chuẩn + bảo hành — 200 Xu\n"
+            "• 🟣 Phổ thông — 300 Xu\n"
+            "• 🟣 Phổ thông + bảo hành — 400 Xu\n"
+            "• 🔴 Cao — 500 Xu\n"
+            "• 🔴 Cao + bảo hành — 600 Xu\n\n"
+            "<b>Gói có bảo hành là gì?</b>\n"
+            "Gói bảo hành phù hợp khi bạn cần ảnh ổn định hơn. Nếu kết quả chưa sát yêu cầu trong cùng mô tả, bạn có thể yêu cầu hỗ trợ tạo lại theo chính sách của gói.\n\n"
+            "Lưu ý: hãy kiểm tra kỹ chữ, logo, khuôn mặt, bàn tay, chi tiết sản phẩm và thông tin thương mại trước khi dùng ảnh để đăng bán hàng."
+        ),
+    ),
+    (
+        "video_ai",
+        "Tạo video",
+        (
+            "🎬 <b>HƯỚNG DẪN TẠO VIDEO AI</b>\n\n"
+            "<b>Quy trình tạo video:</b>\n"
+            "1. Mở mục <b>Tạo video</b>.\n"
+            "2. Chọn tạo video từ mô tả hoặc tạo video từ ảnh đã có.\n"
+            "3. Gửi mô tả video: chủ thể, chuyển động, bối cảnh, ánh sáng, tỉ lệ, thời lượng và cảm xúc.\n"
+            "4. Chọn gói video.\n"
+            "5. Chọn số cảnh nếu muốn làm video dài hơn.\n"
+            "6. Xem tổng chi phí, kiểm tra nội dung và xác nhận.\n"
+            "7. Hệ thống xử lý và gửi video về bot khi hoàn tất.\n"
+            "8. Sau khi có video, bạn có thể dùng thêm Âm thanh hoặc Phụ đề / Dịch / Lồng tiếng nếu cần.\n\n"
+            "<b>Bảng giá video theo gói:</b>\n"
+            "• 🟢 Trải nghiệm — 200 Xu\n"
+            "• 🔷 Cơ bản — 300 Xu\n"
+            "• 🔵 Phổ thông — 400 Xu\n"
+            "• 🟣 Nâng cao — 500 Xu\n"
+            "• 🟠 Bán hàng — 600 Xu\n"
+            "• 🔴 Cao cấp — 800 Xu\n"
+            "• ⭐ Chuyên nghiệp — 1000 Xu\n"
+            "• 💎 Pro Plus — 1200 Xu\n"
+            "• 👑 Premium — 1500 Xu\n\n"
+            "<b>Gói 200 Xu dùng khi nào?</b>\n"
+            "Gói Trải nghiệm 200 Xu phù hợp để test ý tưởng nhanh, xem hướng chuyển động, kiểm tra concept hoặc tạo bản nháp ngắn trước khi dùng gói cao hơn.\n\n"
+            "<b>Cách tính theo cảnh:</b>\n"
+            "• 1 cảnh khoảng 6 giây\n"
+            "• 3 cảnh khoảng 18 giây\n"
+            "• 5 cảnh khoảng 30 giây\n"
+            "• 10 cảnh khoảng 60 giây\n"
+            "• 20 cảnh khoảng 120 giây\n\n"
+            "<b>Ưu đãi theo số cảnh:</b>\n"
+            "• 1 cảnh: giá gốc\n"
+            "• 2-9 cảnh: giảm 10%\n"
+            "• 10-19 cảnh: giảm 15%\n"
+            "• 20 cảnh: giảm 20%\n\n"
+            "<b>Ví dụ:</b> Gói Cơ bản 300 Xu, làm 3 cảnh: 300 × 90% = 270 Xu/cảnh, tổng 270 × 3 = 810 Xu.\n\n"
+            f"{PUBLIC_MAINTENANCE_COPY}"
+        ),
+    ),
+    (
+        "audio",
+        "Âm thanh",
+        (
+            "🎧 <b>HƯỚNG DẪN ÂM THANH</b>\n\n"
+            "Âm thanh giúp video dễ nghe, dễ bán hàng và chuyên nghiệp hơn.\n\n"
+            "<b>Bạn có thể dùng:</b>\n"
+            "• Tạo giọng đọc từ nội dung đã viết.\n"
+            "• Tạo nhạc nền theo phong cách mong muốn.\n"
+            "• Tạo bài hát ngắn cho thương hiệu, sản phẩm hoặc chiến dịch.\n"
+            "• Tìm ý tưởng nhạc, hiệu ứng âm thanh hoặc đoạn mở đầu phù hợp video.\n\n"
+            "<b>Quy trình:</b>\n"
+            "1. Mở mục Âm thanh.\n"
+            "2. Chọn giọng đọc, nhạc nền hoặc bài hát.\n"
+            "3. Gửi nội dung hoặc mô tả phong cách.\n"
+            "4. Kiểm tra chi phí nếu bước đó có phí.\n"
+            "5. Xác nhận rồi nhận kết quả trong bot.\n\n"
+            "Mẹo: nội dung đọc nên ngắn, câu rõ, ít từ khó và có nhịp nghỉ tự nhiên.\n\n"
+            f"{PUBLIC_MAINTENANCE_COPY}"
+        ),
+    ),
+    (
+        "subtitle_dub",
+        "Phụ đề / Dịch / Lồng tiếng",
+        (
+            "📝 <b>HƯỚNG DẪN PHỤ ĐỀ / DỊCH / LỒNG TIẾNG</b>\n\n"
+            "<b>Bạn có thể dùng:</b>\n"
+            "• Tạo phụ đề từ video hoặc audio.\n"
+            "• Dịch nội dung sang ngôn ngữ khác.\n"
+            "• Lồng tiếng lại video bằng giọng phù hợp.\n"
+            "• Chuẩn bị bản phụ đề để đăng TikTok, Reels, Shorts hoặc YouTube.\n\n"
+            "<b>Quy trình:</b>\n"
+            "1. Mở mục Phụ đề / Dịch / Lồng tiếng.\n"
+            "2. Gửi video, audio hoặc nội dung cần xử lý.\n"
+            "3. Chọn tạo phụ đề, dịch hoặc lồng tiếng.\n"
+            "4. Chọn ngôn ngữ đích nếu cần.\n"
+            "5. Kiểm tra nội dung, chi phí và xác nhận.\n"
+            "6. Nhận kết quả, xem lại tên riêng, thuật ngữ sản phẩm và câu bán hàng trước khi đăng.\n\n"
+            "Mẹo: video có âm thanh rõ, ít tạp âm và ít người nói cùng lúc sẽ cho kết quả tốt hơn.\n\n"
+            f"{PUBLIC_MAINTENANCE_COPY}"
+        ),
+    ),
+    (
+        "credits",
+        "Xu & bảng giá",
+        (
+            "💰 <b>HƯỚNG DẪN XU & BẢNG GIÁ</b>\n\n"
+            "<b>Quy đổi:</b>\n"
+            "1 Xu = 100đ. Ví dụ 1.000 Xu tương đương 100.000đ giá trị sử dụng nội bộ trong TOAN AAS.\n\n"
+            "<b>Nạp Xu:</b>\n"
+            "1. Gõ <code>/naptien</code>.\n"
+            "2. Chọn mệnh giá.\n"
+            "3. Thanh toán theo hướng dẫn trong bot.\n"
+            "4. Gõ <code>/profile</code> để kiểm tra số dư.\n\n"
+            "<b>Bảng giá ảnh:</b>\n"
+            "• Tiết kiệm 50 Xu; Chuẩn 150 Xu; Chuẩn + bảo hành 200 Xu\n"
+            "• Phổ thông 300 Xu; Phổ thông + bảo hành 400 Xu\n"
+            "• Cao 500 Xu; Cao + bảo hành 600 Xu\n\n"
+            "<b>Bảng giá video:</b>\n"
+            "• Trải nghiệm 200 Xu; Cơ bản 300 Xu; Phổ thông 400 Xu\n"
+            "• Nâng cao 500 Xu; Bán hàng 600 Xu; Cao cấp 800 Xu\n"
+            "• Chuyên nghiệp 1000 Xu; Pro Plus 1200 Xu; Premium 1500 Xu\n\n"
+            "<b>Khuyến mãi nạp:</b>\n"
+            "• Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở.\n"
+            "• Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.\n"
+            "• Người dùng quốc tế vẫn có thể nhận quyền lợi hạng thành viên, chiết khấu theo hạng hoặc ưu đãi không gắn với nạp nội địa nếu đủ điều kiện.\n\n"
+            "<b>Hoàn Xu:</b>\n"
+            "Nếu hệ thống đã trừ Xu nhưng lỗi trước khi có kết quả hợp lệ theo chính sách, TOAN AAS sẽ hoàn Xu cho phần bị lỗi. Nếu bạn chỉ mở menu, xem hướng dẫn, xem bảng giá hoặc chưa xác nhận, hệ thống chưa trừ Xu."
         ),
     ),
     (
         "faq",
-        "Câu hỏi thường gặp",
+        "FAQ / Hoàn Xu",
         (
-            "❓ <b>Câu hỏi thường gặp</b>\n\n"
-            "<b>1. Vì sao video lâu?</b>\n"
-            "Tạo video cần queue/provider xử lý, thường lâu hơn tạo text/ảnh.\n\n"
-            "<b>2. Có nên bấm tạo nhiều lần?</b>\n"
-            "Không. Job lock sẽ chặn hoặc làm bạn rối trạng thái. Hãy chờ kết quả.\n\n"
-            "<b>3. Thiếu Xu thì sao?</b>\n"
-            "Bot sẽ báo thiếu Xu và không gọi API. Bạn có thể nạp Xu bằng <code>/naptien</code>.\n\n"
-            "<b>4. Video lỗi thì sao?</b>\n"
-            "Nếu lỗi thuộc provider/timeout theo chính sách, bot hoàn Xu phần đã trừ cho job đó.\n\n"
-            "<b>5. Có tạo video không nhạc được không?</b>\n"
-            "Có. Nhạc là tùy chọn; bạn có thể hoàn tất không nhạc hoặc tự ghép sau.\n\n"
-            "<b>6. Có thể tạo ảnh rồi làm video không?</b>\n"
-            "Có. Hãy tạo ảnh khung chính trước, sau đó dùng ảnh/prompt để tạo video.\n\n"
-            "<b>7. Vì sao text AI đôi khi chưa đúng?</b>\n"
-            "AI cần bạn kiểm tra lại thông tin thật: giá, ưu đãi, công dụng, cam kết và chính sách sản phẩm.\n\n"
-            "<b>8. Cần hỗ trợ thì làm gì?</b>\n"
-            "Bấm <b>Liên hệ admin</b> hoặc gửi ID/job/task để TOAN AAS kiểm tra."
+            "❓ <b>FAQ / HOÀN XU</b>\n\n"
+            "<b>1. Tôi chỉ mở menu có bị trừ Xu không?</b>\n"
+            "Không. Xem menu, hướng dẫn, bảng giá hoặc thử nhập mô tả chưa làm mất Xu nếu chưa đến bước xác nhận có phí.\n\n"
+            "<b>2. Khi nào TOAN AAS trừ Xu?</b>\n"
+            "TOAN AAS chỉ trừ Xu khi bạn chọn bước có phí, xem giá và xác nhận xử lý.\n\n"
+            "<b>3. Khi nào được hoàn Xu?</b>\n"
+            "Nếu đã trừ Xu nhưng hệ thống lỗi trước khi có kết quả hợp lệ theo chính sách, phần Xu của bước lỗi sẽ được hoàn lại.\n\n"
+            "<b>4. Thiếu Xu thì sao?</b>\n"
+            "Bot sẽ báo thiếu Xu và hướng dẫn nạp thêm. Bạn có thể dùng <code>/naptien</code> hoặc xem số dư bằng <code>/profile</code>.\n\n"
+            "<b>5. Có nên bấm tạo nhiều lần khi đang chờ không?</b>\n"
+            "Không nên. Hãy chờ kết quả hoặc dùng nút kiểm tra trạng thái nếu bot hiển thị, để tránh tạo trùng yêu cầu.\n\n"
+            "<b>6. Cần hỗ trợ thì gửi gì?</b>\n"
+            "Hãy gửi ID Telegram, ảnh chụp màn hình, thời gian giao dịch hoặc nội dung yêu cầu gần nhất để TOAN AAS kiểm tra nhanh hơn.\n\n"
+            f"{PUBLIC_MAINTENANCE_COPY}"
         ),
     ),
-])
+]
 
 CUSTOMER_GUIDE_LOOKUP = {key: (idx + 1, title, body) for idx, (key, title, body) in enumerate(CUSTOMER_GUIDE_SECTIONS)}
 
 GUIDE_SECTION_ALIASES = {
+    "start": "quick_start",
+    "quick": "quick_start",
     "quickstart": "quick_start",
+    "anh": "image_ai",
     "image": "image_ai",
+    "taoanh": "image_ai",
     "video": "video_ai",
-    "trend": "guided_video",
-    "music": "music_add",
+    "guided_video": "video_ai",
+    "trend": "video_ai",
+    "amthanh": "audio",
+    "music": "audio",
+    "music_add": "audio",
+    "voice": "audio",
+    "phude": "subtitle_dub",
+    "subtitle": "subtitle_dub",
+    "dub": "subtitle_dub",
+    "dubbing": "subtitle_dub",
+    "translate": "subtitle_dub",
     "xu": "credits",
+    "banggia": "credits",
+    "pricing": "credits",
     "topup": "credits",
+    "refund": "faq",
 }
 
 def normalize_guide_section_key(section_key_or_number: str) -> str:
@@ -41605,7 +41446,8 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
         action_rows = {
             "quick_start": [
                 [InlineKeyboardButton("🖼 Tạo ảnh AI", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Tạo video AI", callback_data="create_media|quick_video")],
-                [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
+                [InlineKeyboardButton("🔥 Video theo trend", callback_data="trendg|start"), InlineKeyboardButton("🎧 Âm thanh", callback_data="menu|main_music")],
+                [InlineKeyboardButton("💰 Nạp Xu", callback_data="menu|main_topup")],
                 [InlineKeyboardButton("📚 Xem hướng dẫn", callback_data="menu|main_guide")],
             ],
             "image_ai": [
@@ -41617,22 +41459,18 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
                 [InlineKeyboardButton("🖼 Tạo ảnh trước rồi làm video", callback_data="menu|main_image")],
                 [InlineKeyboardButton("💰 Xem bảng giá", callback_data="pricing|main")],
             ],
-            "guided_video": [
-                [InlineKeyboardButton("🔥 Tạo video theo trend", callback_data="trendg|start")],
-                [InlineKeyboardButton("🎬 Tạo video thường", callback_data="create_media|quick_video")],
+            "audio": [
+                [InlineKeyboardButton("🎧 Mở Âm thanh", callback_data="menu|main_music")],
+                [InlineKeyboardButton("🎬 Tạo video trước", callback_data="create_media|quick_video")],
             ],
-            "music_add": [
-                [InlineKeyboardButton("🎵 Xem gợi ý nhạc", callback_data="menu|main_music")],
-                [InlineKeyboardButton("🚫 Tạo video không nhạc", callback_data="create_media|quick_video")],
+            "subtitle_dub": [
+                [InlineKeyboardButton("🌐 Mở Dịch thuật", callback_data="menu|translate")],
+                [InlineKeyboardButton("🎧 Mở Âm thanh", callback_data="menu|main_music")],
             ],
             "credits": [
                 [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup")],
                 [InlineKeyboardButton("💰 Xem bảng giá", callback_data="pricing|main")],
                 [InlineKeyboardButton("📊 Xem số dư", callback_data="menu|main_profile")],
-            ],
-            "refund": [
-                [InlineKeyboardButton("🔄 Kiểm tra trạng thái video", callback_data="menu|hint_video_status")],
-                [InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
             ],
             "faq": [
                 [InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
@@ -41653,7 +41491,8 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
     if section_key == "quick_start":
         rows.extend([
             [InlineKeyboardButton("🖼 Create image", callback_data="create_media|quick_image"), InlineKeyboardButton("🎬 Create video", callback_data="create_media|quick_video")],
-            [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start"), InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
+            [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start"), InlineKeyboardButton("🎧 Audio", callback_data="menu|main_music")],
+            [InlineKeyboardButton("💰 Top up Xu", callback_data="menu|main_topup")],
         ])
     elif section_key == "image_ai":
         rows.extend([
@@ -41666,10 +41505,15 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🖼 Create image first", callback_data="menu|main_image")],
             [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
         ])
-    elif section_key == "guided_video":
+    elif section_key == "audio":
         rows.extend([
-            [InlineKeyboardButton("🔥 Trend video", callback_data="trendg|start")],
-            [InlineKeyboardButton("🎬 Normal video", callback_data="create_media|quick_video")],
+            [InlineKeyboardButton("🎧 Audio", callback_data="menu|main_music")],
+            [InlineKeyboardButton("🎬 Create video first", callback_data="create_media|quick_video")],
+        ])
+    elif section_key == "subtitle_dub":
+        rows.extend([
+            [InlineKeyboardButton("🌐 Translate", callback_data="menu|translate")],
+            [InlineKeyboardButton("🎧 Audio", callback_data="menu|main_music")],
         ])
     elif section_key == "credits":
         rows.extend([
@@ -41677,7 +41521,7 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("💰 Pricing", callback_data="pricing|main")],
             [InlineKeyboardButton("📊 Balance", callback_data="menu|main_profile")],
         ])
-    elif section_key in {"refund", "faq"}:
+    elif section_key == "faq":
         rows.append([InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")])
     rows.append([InlineKeyboardButton("🔙 Back to guide", callback_data="menu|main_guide"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
@@ -41835,20 +41679,17 @@ def log_command_received(command: str, update: Update):
 
 def guide_index_text() -> str:
     lines = [
-        "📘 <b>HƯỚNG DẪN SỬ DỤNG TOAN AAS</b>",
+        "📚 <b>HƯỚNG DẪN TOAN AAS</b>",
         "",
-        "Bot tạo nội dung, script, prompt, caption, hashtag, CTA, voice/media pack để bạn tự đăng lên Facebook, TikTok, YouTube.",
+        "Chọn mục bạn muốn xem:",
         "",
-        "Bạn có thể bấm nút bên dưới để tải bản Word, hoặc mở từng phần bằng lệnh trong Telegram.",
-        "",
-        "<b>Mục lục:</b>",
     ]
     for idx, (_key, title, _body) in enumerate(CUSTOMER_GUIDE_SECTIONS, start=1):
         lines.append(f"{idx}. {html.escape(title)} — <code>/huongdan {idx}</code>")
     lines.extend([
         "",
-        "Nên bắt đầu: <code>/huongdan 2</code> rồi dùng <code>/film chủ đề</code>.",
-        "Lưu ý: hiện chưa tự đăng bài, chưa kết nối tài khoản MXH và chưa chạy quảng cáo hộ khách.",
+        "Người mới nên bắt đầu với <code>/huongdan 1</code>.",
+        "Hệ thống chỉ xử lý bước có phí sau khi bạn xem giá và xác nhận.",
     ])
     return "\n".join(lines)
 
@@ -41858,7 +41699,7 @@ def guide_index_text_i18n(lang: str = "vi") -> str:
     return (
         "📘 <b>TOAN AAS GUIDE</b>\n\n"
         "Choose a topic from the buttons below.\n\n"
-        "Available sections: quick start, image guide, video guide, trend video, music/no music, Xu/top-up, refund and FAQ.\n\n"
+        "Available sections: quick start, image, video, audio, subtitle/translate/dubbing, Xu/pricing, FAQ/refund.\n\n"
         "Full Vietnamese guide: <code>/huongdan</code>. English/Chinese long-form guide translation is planned; this screen keeps the flow usable without mixing Vietnamese text into English/Chinese menus."
     )
 
@@ -41888,38 +41729,34 @@ def guide_section_text_i18n(section_key_or_number: str, lang: str = "vi") -> str
             "Pick one simple path:\n"
             "1. Create an AI image for a product, thumbnail or key frame.\n"
             "2. Create an AI video from a clear video description or key image.\n"
-            "3. Use Trend Video if you need hooks, storyboard, prompts and music ideas first.\n\n"
+            "3. Add audio, subtitle, translation or dubbing when the video is ready.\n\n"
             "The bot asks for confirmation before charging Xu for real generation."
         ),
         "image_ai": (
             "🖼 <b>AI Image Guide</b>\n\n"
             "Describe the product, background, lighting, style and aspect ratio. Choose an image tier, confirm the Xu cost, then the bot creates the image.\n\n"
-            "Provider errors are handled by the refund guard when applicable."
+            "Image tiers: 50, 150, 200, 300, 400, 500 and 600 Xu."
         ),
         "video_ai": (
             "🎬 <b>AI Video Guide</b>\n\n"
-            "Describe the scene, camera motion, product movement, style and duration. Choose a video tier and confirm before the bot submits a queue job.\n\n"
-            "Public video OFF means prompt-only; no video API call and no Xu deduction."
+            "Describe the scene, camera motion, product movement, style and duration. Choose a video tier and confirm before processing.\n\n"
+            "Video tiers: 200, 300, 400, 500, 600, 800, 1000, 1200 and 1500 Xu."
         ),
-        "guided_video": (
-            "🔥 <b>Trend Video Guide</b>\n\n"
-            "Enter your product/topic, choose how the bot suggests trends, pick a trend, then continue through motion, image prompts, video prompts and music/no-music."
+        "audio": (
+            "🎧 <b>Audio Guide</b>\n\n"
+            "Create voice, background music or a short song for your content. Keep voice scripts clear and concise."
         ),
-        "music_add": (
-            "🎵 <b>Music / No Music Guide</b>\n\n"
-            "Music is optional. You can use suggested music, search the music/SFX library, create a music prompt, or finish the video without music."
+        "subtitle_dub": (
+            "📝 <b>Subtitle / Translate / Dubbing Guide</b>\n\n"
+            "Create subtitles, translate content or dub a video into another language. Review product names and sales claims before posting."
         ),
         "credits": (
-            "💰 <b>Xu and Top-up Guide</b>\n\n"
-            "Use <code>/pricing</code> for the central price table, <code>/naptien</code> to top up Xu, and <code>/profile</code> to check your balance."
-        ),
-        "refund": (
-            "🔁 <b>Refund Guide</b>\n\n"
-            "If a provider fails after a confirmed paid step, TOAN AAS refunds the deducted Xu according to the refund guard. Do not create duplicate jobs while one is running."
+            "💰 <b>Xu and Pricing Guide</b>\n\n"
+            "1 Xu = 100 VND in TOAN AAS. Use <code>/pricing</code> for prices, <code>/naptien</code> to top up and <code>/profile</code> to check your balance."
         ),
         "faq": (
-            "❓ <b>FAQ</b>\n\n"
-            "Video can be slow because providers queue jobs. Do not press create many times. If you are short on Xu, top up first. If a provider fails, the refund guard applies. Music is optional. You can create image first, then video."
+            "❓ <b>FAQ / Refund</b>\n\n"
+            "Opening menus or guides does not deduct Xu. Paid steps charge only after you confirm. If a paid step fails before a valid result, the applicable Xu is refunded."
         ),
     }
     return english_sections.get(section_key, guide_index_text_i18n(lang))
@@ -43900,20 +43737,16 @@ def main_topup_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
 def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     if normalize_user_language(lang) != "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚀 Quick start", callback_data="menu|guide_quick_start")],
-            [InlineKeyboardButton("🖼 Create image", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Create video", callback_data="menu|guide_video_ai")],
-            [InlineKeyboardButton("🔥 Trend video", callback_data="menu|guide_guided_video"), InlineKeyboardButton("🎵 Video music", callback_data="menu|guide_music_add")],
-            [InlineKeyboardButton("💰 Xu & top-up", callback_data="menu|guide_credits"), InlineKeyboardButton("❓ FAQ & refunds", callback_data="menu|guide_faq")],
-            [InlineKeyboardButton("👨‍💼 Admin", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-            [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
+            [InlineKeyboardButton("🚀 Quick start", callback_data="menu|guide_quick_start"), InlineKeyboardButton("🖼 Create image", callback_data="menu|guide_image_ai")],
+            [InlineKeyboardButton("🎬 Create video", callback_data="menu|guide_video_ai"), InlineKeyboardButton("🎧 Audio", callback_data="menu|guide_audio")],
+            [InlineKeyboardButton("📝 Subtitle / Translate / Dubbing", callback_data="menu|guide_subtitle_dub"), InlineKeyboardButton("💰 Xu & pricing", callback_data="menu|guide_credits")],
+            [InlineKeyboardButton("❓ FAQ / Refund", callback_data="menu|guide_faq"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Bắt đầu nhanh", callback_data="menu|guide_quick_start")],
-        [InlineKeyboardButton("🖼 Tạo ảnh", callback_data="menu|guide_image_ai"), InlineKeyboardButton("🎬 Tạo video", callback_data="menu|guide_video_ai")],
-        [InlineKeyboardButton("🔥 Video trend", callback_data="menu|guide_guided_video"), InlineKeyboardButton("🎵 Nhạc video", callback_data="menu|guide_music_add")],
-        [InlineKeyboardButton("💰 Xu & nạp", callback_data="menu|guide_credits"), InlineKeyboardButton("❓ FAQ & hoàn Xu", callback_data="menu|guide_faq")],
-        [InlineKeyboardButton("👨‍💼 Admin", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🚀 Bắt đầu nhanh", callback_data="menu|guide_quick_start"), InlineKeyboardButton("🖼 Tạo ảnh", callback_data="menu|guide_image_ai")],
+        [InlineKeyboardButton("🎬 Tạo video", callback_data="menu|guide_video_ai"), InlineKeyboardButton("🎧 Âm thanh", callback_data="menu|guide_audio")],
+        [InlineKeyboardButton("📝 Phụ đề / Dịch / Lồng tiếng", callback_data="menu|guide_subtitle_dub"), InlineKeyboardButton("💰 Xu & bảng giá", callback_data="menu|guide_credits")],
+        [InlineKeyboardButton("❓ FAQ / Hoàn Xu", callback_data="menu|guide_faq"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -51009,8 +50842,8 @@ def referral_account_stats_text(user_id) -> str:
 
 def menu_text_main_guide() -> str:
     return (
-        "📚 <b>HƯỚNG DẪN</b>\n\n"
-        "Chọn mục bạn muốn xem. Người mới nên bấm 🚀 <b>Bắt đầu nhanh</b> trước."
+        "📚 <b>HƯỚNG DẪN TOAN AAS</b>\n\n"
+        "Chọn mục bạn muốn xem:"
     )
 
 def menu_hint_text(action: str) -> tuple[str, str]:
@@ -51505,71 +51338,35 @@ async def cmd_quick(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def help_text_for_user(user_id) -> str:
     is_admin = is_admin_user(user_id)
-    readiness = customer_tool_readiness_payload()
     text = (
-        "📘 <b>Hướng dẫn TOAN AAS</b>\n\n"
-        "🎁 Tài khoản mới nhận <b>200 Xu trải nghiệm</b>, đủ để thử 1 lượt <code>/film</code> Basic.\n"
-        "Mỗi ID Telegram chỉ nhận 200 Xu trải nghiệm một lần. Xóa chat/start lại không cấp lại 200 Xu.\n\n"
-        "<b>1. Tài khoản & Xu dịch vụ</b>\n"
-        "• <code>/profile</code> — xem số dư, hạng thành viên, referral\n"
-        "• <code>/member</code>, <code>/vip_policy</code> — xem quyền lợi thành viên\n"
-        "• <code>/trial_status</code> — kiểm tra trạng thái 200 Xu trải nghiệm\n"
-        "• <code>/huongdan</code> hoặc <code>/guide</code> — xem hướng dẫn sử dụng chi tiết\n"
-        "• <code>/legal</code> — xem điều khoản/pháp lý đầy đủ\n"
-        "• <code>/naptien</code> — tạo QR mua/nạp Xu dịch vụ\n"
-        "• <code>/khuyenmai</code> hoặc <code>/uudai</code> — xem ưu đãi nên dùng\n"
-        "• <code>/promo &lt;mã&gt;</code> hoặc <code>/magiamgia &lt;mã&gt;</code> — lưu mã ưu đãi cho lần nạp tiếp theo\n"
-        "• <code>/thucong</code> — gửi bill thủ công khi QR lỗi\n"
-        "• <code>/referral</code> hoặc <code>/invite</code> — lấy link giới thiệu\n\n"
-        "<b>2. Công cụ AI</b>\n"
-        "• Chat AI: gửi text trực tiếp\n"
-        "• Đọc voice: nhập <code>Đọc voice: nội dung</code>\n"
-        f"• Bóc băng audio: gửi voice/mp3/m4a — <code>{html.escape(readiness['stt']['label'])}</code>\n"
-        f"• Tách nền ảnh: gửi ảnh vào bot — <code>{html.escape(readiness['image_remove_bg']['label'])}</code>\n"
-        f"• Tải video qua link: <code>{html.escape(readiness['downloader']['label'])}</code>; nếu link lỗi, hãy gửi file video trực tiếp\n\n"
-        "<b>3. TOAN AAS Memory</b>\n"
-        "• <code>/memory</code> — mở kho ghi nhớ AI\n"
-        "• <code>/note &lt;nội dung&gt;</code> — lưu ghi chú nhanh\n"
-        "• <code>/note_ai &lt;nội dung&gt;</code> — lưu + AI tóm tắt/phân loại\n"
-        "• <code>/remind 30m &lt;nội dung&gt;</code> — đặt nhắc việc\n"
-        "• Basic memory dùng được nếu hệ thống đã bật. AI memory nâng cao theo cấu hình/admin test.\n\n"
-        "<b>4. Video & Media Factory</b>\n"
-        "• <code>/film &lt;chủ đề&gt;</code> — tạo Script/Prompt Pack\n"
-        "• <code>/image_prompt &lt;chủ đề&gt;</code> — tạo prompt ảnh chân thật\n"
-        "• <code>/image_to_video_pack &lt;chủ đề hoặc reply ảnh&gt;</code> — tạo video prompt pack\n"
-        "• <code>/ai_image &lt;mô tả&gt;</code> — tạo ảnh AI nếu admin bật\n"
-        "• <code>/ai_image_edit &lt;yêu cầu&gt;</code> — reply ảnh để sửa ảnh AI nếu admin bật\n"
-        "• <code>/media_factory</code> — xem trung tâm Video & Media\n"
-        "• <code>/video_factory_flow</code> — xem quy trình trend → ảnh → dịch → video → duyệt\n"
-        "• Kết quả gồm outline, storyboard, scene prompt, prompt ảnh, caption, hashtag và CTA để bạn tự đăng.\n"
-        "• Có thể dán link trực tiếp trong prompt để bot viết caption/CTA tham khảo.\n"
-        "• Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n\n"
-        "<b>4A. Nhạc AI / Kho nhạc</b>\n"
-        "• <code>/music</code> hoặc <code>/music_tools</code> — mở trung tâm nhạc\n"
-        "• <code>/music_prompt &lt;mô tả&gt;</code> — tạo prompt nhạc nền\n"
-        "• <code>/music_library &lt;từ khóa&gt;</code> — tìm nhạc nền\n"
-        "• <code>/sfx_library &lt;từ khóa&gt;</code> — tìm hiệu ứng âm thanh\n"
-        "• <code>/media_library &lt;từ khóa&gt;</code> — tìm ảnh/video public\n"
-        "• <code>/play_music 1</code> — nghe thử nhạc\n"
-        "• <code>/play_sfx 1</code> — nghe thử hiệu ứng\n"
-        "• <code>/select_music 1</code> — chọn nhạc\n"
-        "• <code>/select_sfx 1</code> — chọn hiệu ứng\n"
-        "• <code>/music_policy</code> — chính sách nhạc/media\n"
-        "• Quy trình: tìm → nghe thử → chọn → gửi video/ảnh → ghép nhạc khi công cụ được mở.\n"
-        "• Nhạc/kho public có license riêng. Kiểm tra quyền thương mại trước khi đăng quảng cáo/kiếm tiền.\n\n"
-        "<b>5. Báo cáo/tối ưu thủ công</b>\n"
-        "• <code>/growth_ai</code> — AI phân tích sâu hook/caption/CTA\n"
-        "• <code>/campaign_report</code> — xuất báo cáo nội dung thủ công\n"
-        "• Xem giá tại <code>/pricing</code> hoặc <code>/banggia</code>.\n"
-        f"• {CURRENT_PRODUCT_SCOPE_TEXT}\n\n"
-        "<b>6. Hỗ trợ</b>\n"
-        "• <code>/gopy nội dung</code> — góp ý/báo lỗi\n\n"
-        "<b>7. Bán thử/Beta</b>\n"
-        "• <code>/beta_offer</code> hoặc <code>/goi_beta</code> — xem gói dùng thử\n"
-        "• <code>/pricing</code> hoặc <code>/banggia</code> — xem bảng giá\n"
-        "• <code>/naptien</code> — mua/nạp Xu dịch vụ\n"
-        "• <code>/film &lt;chủ đề&gt;</code> — tạo nội dung\n"
-        "• <code>/growth_ai</code> — AI gợi ý tối ưu\n\n"
+        "📚 <b>HƯỚNG DẪN TOAN AAS</b>\n\n"
+        "TOAN AAS giúp bạn tạo ảnh, video, âm thanh, phụ đề, dịch, lồng tiếng, nội dung AI và tài liệu theo từng bước rõ ràng.\n\n"
+        "<b>Bắt đầu nhanh</b>\n"
+        "1. Chọn tính năng muốn dùng.\n"
+        "2. Gửi mô tả rõ mục tiêu, sản phẩm, phong cách và nền tảng đăng.\n"
+        "3. Chọn gói nếu có bảng giá.\n"
+        "4. Xem chi phí, xác nhận rồi nhận kết quả trong bot.\n\n"
+        "<b>Lệnh chính</b>\n"
+        "• <code>/huongdan</code> hoặc <code>/guide</code> — hướng dẫn chi tiết\n"
+        "• <code>/profile</code> — xem số dư Xu\n"
+        "• <code>/pricing</code> hoặc <code>/banggia</code> — bảng giá\n"
+        "• <code>/naptien</code> — nạp Xu\n"
+        "• <code>/gopy nội dung</code> — góp ý hoặc báo lỗi\n\n"
+        "<b>Tạo ảnh</b>\n"
+        "Gửi mô tả ảnh, chọn gói, xem giá và xác nhận.\n"
+        "Giá ảnh: Tiết kiệm 50 Xu; Chuẩn 150 Xu; Chuẩn + bảo hành 200 Xu; Phổ thông 300 Xu; Phổ thông + bảo hành 400 Xu; Cao 500 Xu; Cao + bảo hành 600 Xu.\n\n"
+        "<b>Tạo video</b>\n"
+        "Gửi mô tả hoặc ảnh khung chính, chọn gói, chọn số cảnh nếu cần, xem tổng chi phí và xác nhận.\n"
+        "Giá video: Trải nghiệm 200 Xu; Cơ bản 300 Xu; Phổ thông 400 Xu; Nâng cao 500 Xu; Bán hàng 600 Xu; Cao cấp 800 Xu; Chuyên nghiệp 1000 Xu; Pro Plus 1200 Xu; Premium 1500 Xu.\n"
+        "Một cảnh khoảng 6 giây. Từ 2 cảnh trở lên có ưu đãi theo số cảnh nếu chương trình đang áp dụng.\n\n"
+        "<b>Âm thanh</b>\n"
+        "Dùng để tạo giọng đọc, nhạc nền, bài hát ngắn hoặc ý tưởng âm thanh cho video.\n\n"
+        "<b>Phụ đề / Dịch / Lồng tiếng</b>\n"
+        "Dùng để tạo phụ đề, dịch nội dung hoặc lồng tiếng lại video. Hãy kiểm tra tên riêng, thuật ngữ sản phẩm và câu bán hàng trước khi đăng.\n\n"
+        "<b>Xu & khuyến mãi</b>\n"
+        "1 Xu = 100đ. Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam nếu chương trình đang mở. Không áp dụng cho Zalo/MoMo hoặc kênh nạp quốc tế.\n\n"
+        "<b>Hoàn Xu</b>\n"
+        "Xem menu, hướng dẫn hoặc bảng giá không bị trừ Xu. TOAN AAS chỉ trừ Xu sau khi bạn xác nhận bước có phí. Nếu đã trừ Xu nhưng lỗi trước khi có kết quả hợp lệ theo chính sách, phần Xu của bước lỗi sẽ được hoàn lại.\n\n"
         f"{legal_commands_short_text()}"
     )
     if is_admin:
