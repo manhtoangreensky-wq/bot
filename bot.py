@@ -4992,7 +4992,7 @@ UI_TEXT = {
         "video.premium_message": "🛠 Gói video cao cấp đang bảo trì/nâng cấp nhẹ. TOAN AAS chưa xử lý video và chưa trừ Xu.",
         "video.active_job": "Bạn đang có một video đang xử lý. Vui lòng chờ hoàn tất trước khi tạo video mới.",
         "video.source_invalid": "⚠️ Ảnh nguồn không còn hợp lệ hoặc thiếu dữ liệu để tạo video. Bot chưa trừ Xu.\nBạn có thể tạo lại ảnh, tạo video từ prompt text hoặc quay lại menu chính.",
-        "video.queue_submitted": "TOAN AAS đang tạo video cho bạn. Video sẽ được gửi tự động khi hoàn tất. Vui lòng không bấm tạo nhiều lần để tránh trùng job.",
+        "video.queue_submitted": "TOAN AAS đang tạo video cho bạn. Vui lòng chờ, hệ thống sẽ gửi kết quả khi hoàn tất.",
         "video.next_action": "Bạn muốn làm gì tiếp?",
         "video.fail.not_charged": "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS chưa trừ Xu của bạn. Vui lòng thử lại sau.",
         "video.fail.refunded": "🛠 Hệ thống tạo video đang bảo trì/nâng cấp nhẹ nên chưa xuất được lúc này. TOAN AAS đã hoàn lại {amount} Xu cho bạn. Vui lòng thử lại sau.",
@@ -5244,7 +5244,7 @@ UI_TEXT = {
         "video.premium_message": "🛠 This premium video package is temporarily under maintenance / upgrade. TOAN AAS has not processed the video or charged Xu.",
         "video.active_job": "You already have a video being processed. Please wait until it finishes before creating another one.",
         "video.source_invalid": "⚠️ The source image is no longer valid or is missing data for video generation. The bot has not charged Xu.\nYou can recreate the image, create a video from a text prompt, or return to the main menu.",
-        "video.queue_submitted": "TOAN AAS is creating your video. The video will be sent automatically when it is ready. Please do not create multiple jobs.",
+        "video.queue_submitted": "TOAN AAS is creating your video. Please wait; the system will send the result when it is ready.",
         "video.next_action": "What would you like to do next?",
         "video.fail.not_charged": "🛠 Video export is temporarily under maintenance / upgrade. TOAN AAS has not charged Xu. Please try again later.",
         "video.fail.refunded": "🛠 Video export is temporarily under maintenance / upgrade. TOAN AAS has refunded {amount} Xu. Please try again later.",
@@ -5496,7 +5496,7 @@ UI_TEXT = {
         "video.premium_message": "🛠 尊享视频套餐正在维护升级。TOAN AAS 尚未处理视频，也未扣除 Xu。",
         "video.active_job": "你已有一个视频正在处理中。请等待完成后再创建新视频。",
         "video.source_invalid": "⚠️ 源图片缺少数据或已不适用于生成视频。本次未扣除 Xu。\n你可以重新生成图片、用文字 prompt 生成视频，或返回主菜单。",
-        "video.queue_submitted": "TOAN AAS 正在为你生成视频。视频完成后会自动发送。请不要重复创建任务。",
+        "video.queue_submitted": "TOAN AAS 正在为你生成视频。请稍候，系统会在完成后发送结果。",
         "video.next_action": "你想下一步做什么？",
         "video.fail.not_charged": "🛠 视频导出正在维护/升级，暂时无法完成。本次未扣除 Xu。请稍后再试。",
         "video.fail.refunded": "🛠 视频导出正在维护/升级，暂时无法完成。TOAN AAS 已退回 {amount} Xu。请稍后再试。",
@@ -35273,7 +35273,7 @@ VIDEO_MULTISCENE_TEST_COUNTS = (3, 5, 10, 20)
 VIDEO_MULTISCENE_FINAL_PASS_STATUSES = {"PASS", "SUCCESS", "OK"}
 VIDEO_MULTISCENE_BACKGROUND_TASKS: set[asyncio.Task] = set()
 VIDEO_MULTISCENE_JOB_SETTING_PREFIX = "video_multiscene_job:"
-VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Render nhiều cảnh đang được kiểm thử để tránh lỗi chi phí/provider. TOAN AAS chưa xử lý và chưa trừ Xu."
+VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Tính năng tạo video nhiều cảnh đang được kiểm thử. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 
 def video_multiscene_setting_bool(key: str, default: bool = False) -> bool:
     value = str(os.getenv(key) or get_system_setting(key, "1" if default else "") or "").strip().lower()
@@ -36086,7 +36086,7 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         await query.answer()
         return await safe_edit_or_send(
             query,
-            "Render nhiều cảnh đang được kiểm thử để tránh lỗi chi phí/provider. TOAN AAS chưa xử lý và chưa trừ Xu.",
+            VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT,
             parse_mode=None,
             reply_markup=video_export_maintenance_keyboard(lang),
         )
@@ -38076,7 +38076,10 @@ IMAGE_MENU_PENDING_ACTIONS = {
     "image_editor_custom_settings",
     "image_editor_text_position",
     "image_editor_text_input",
+    "image_editor_text_confirm",
     "image_editor_logo_position",
+    "image_editor_logo_input",
+    "image_editor_logo_confirm",
     "image_editor_wait_logo",
 }
 
@@ -38104,6 +38107,7 @@ def set_image_menu_pending(user_id, action: str, **fields) -> None:
                 "detail_prompt", "negative_prompt", "selected_variant", "ratio_change",
                 "prompt_source", "back_to", "last_step", "editor_mode", "editor_preset",
                 "editor_text", "editor_source", "editor_overlay_position",
+                "editor_overlay_text", "editor_logo_text",
                 "image_prompt_current_prompt", "image_prompt_short_prompt",
                 "image_prompt_detail_prompt", "image_prompt_negative_prompt",
                 "image_prompt_selected_ratio", "image_prompt_selected_purpose",
@@ -38185,15 +38189,15 @@ def image_edit_menu_start_text(lang: str = "vi") -> str:
         return (
             "🧩 <b>Edit image</b>\n\n"
             "Send or reply to the image you want to edit.\n\n"
-            "Local crop/resize, text, logo/watermark, color presets and AI upscale are grouped here. AI image edit is a separate button in the main Image menu.\n\n"
-            "No provider call and no Xu charged on this screen."
+            "Local crop/resize, text, logo/watermark, color presets and image enhancement are grouped here. AI image edit is a separate button in the main Image menu.\n\n"
+            "TOAN AAS has not started processing and has not charged Xu on this screen."
         )
     return (
         "🧩 <b>Chỉnh sửa ảnh</b>\n\n"
         "Bạn hãy gửi hoặc reply vào ảnh cần sửa.\n\n"
         "Sau khi nhận ảnh, TOAN AAS sẽ mở các công cụ: cắt/resize, thêm chữ, Logo/Watermark, công thức màu và nâng chất lượng.\n"
         "Chỉnh sửa AI là flow riêng ở menu Hình ảnh chính.\n\n"
-        "Bot chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu ở màn này."
+        "TOAN AAS chưa xử lý ảnh và chưa trừ Xu ở màn này."
     )
 
 def image_edit_instruction_text(lang: str = "vi") -> str:
@@ -38203,18 +38207,18 @@ def image_edit_instruction_text(lang: str = "vi") -> str:
             "How do you want to edit it?\n\n"
             "1. Crop/ratio and pixel resize: local processing.\n"
             "2. Text, logo/watermark and color presets: stable local editor.\n"
-            "3. AI upscale: sharpen/upscale if the provider is available.\n"
+            "3. AI upscale: sharpen/upscale when this feature is available.\n"
             "4. Custom request: describe what you need and TOAN AAS will guide or move to AI flow if needed.\n\n"
-            "No provider call and no Xu charged until you confirm."
+            "TOAN AAS has not started processing and has not charged Xu until you confirm."
         )
     return (
         "✅ Đã nhận ảnh.\n\n"
         "Bạn muốn chỉnh ảnh theo cách nào?\n\n"
         "1. Cắt / đổi tỉ lệ và resize pixel: xử lý local.\n"
         "2. Thêm chữ, Logo/Watermark và công thức màu: dùng editor local đang chạy.\n"
-        "3. Nâng chất lượng AI: làm nét/nâng cấp ảnh nếu provider sẵn sàng.\n"
+        "3. Nâng chất lượng AI: làm nét/nâng cấp ảnh khi tính năng sẵn sàng.\n"
         "4. Nhập yêu cầu riêng: mô tả yêu cầu để TOAN AAS hướng dẫn hoặc chuyển sang flow AI nếu cần.\n\n"
-        "Bot chưa gọi provider và chưa trừ Xu nếu bạn chưa xác nhận."
+        "TOAN AAS chưa xử lý ảnh và chưa trừ Xu nếu bạn chưa xác nhận."
     )
 
 def image_upscale_menu_start_text(lang: str = "vi") -> str:
@@ -38226,17 +38230,17 @@ def image_upscale_menu_start_text(lang: str = "vi") -> str:
     return (
         "📐 <b>Nâng cấp / đổi kích thước ảnh</b>\n\n"
         "Bạn hãy gửi hoặc reply ảnh cần xử lý.\n\n"
-        "Đổi tỷ lệ/resize local đã mở ổn định. Nâng chất lượng AI đang được hoàn thiện, chưa xử lý ảnh thật, chưa gọi provider và chưa trừ Xu."
+        "Đổi tỷ lệ/resize local đã mở ổn định. Nâng chất lượng AI đang được hoàn thiện, chưa xử lý ảnh thật và chưa trừ Xu."
     )
 
 def image_menu_guarded_result_text(action: str, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         if action == "image_edit_instruction":
-            return "🧩 Image editing is still admin-tested/not public. TOAN AAS has not called the provider and has not charged Xu."
-        return "📐 Image upscale/resize is still admin-tested/not public. TOAN AAS has not called the provider and has not charged Xu."
+            return "🧩 Image editing is under maintenance/upgrading. TOAN AAS has not processed the image or charged Xu."
+        return "📐 Image upscale/resize is under maintenance/upgrading. TOAN AAS has not processed the image or charged Xu."
     if action == "image_edit_instruction":
-        return "🧩 Sửa ảnh AI đang admin test/chưa mở public. TOAN AAS chưa gọi provider và chưa trừ Xu."
-    return "📐 Nâng cấp/đổi kích thước ảnh đang admin test/chưa mở public. TOAN AAS chưa gọi provider và chưa trừ Xu."
+        return "🧩 Sửa ảnh AI đang bảo trì/nâng cấp. TOAN AAS chưa xử lý ảnh và chưa trừ Xu."
+    return "📐 Nâng cấp/đổi kích thước ảnh đang bảo trì/nâng cấp. TOAN AAS chưa xử lý ảnh và chưa trừ Xu."
 
 def image_menu_v5_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -38325,10 +38329,10 @@ def image_action_waiting_text(lang: str = "vi") -> str:
 
 def image_action_locked_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "⏳ Your previous request is still processing. TOAN AAS did not create another job or charge Xu again."
+        return "⏳ Your previous request is still processing. TOAN AAS did not start another request or charge Xu again."
     return (
         "⏳ Yêu cầu trước của bạn vẫn đang được xử lý.\n"
-        "TOAN AAS chưa tạo thêm job mới để tránh trừ Xu/lặp kết quả."
+        "TOAN AAS chưa tạo thêm lượt xử lý để tránh trừ Xu/lặp kết quả."
     )
 
 def image_prompt_goal_label(goal_code: str = "", custom: str = "", lang: str = "vi") -> str:
@@ -38795,11 +38799,11 @@ def image_manual_edit_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🧩 TOAN AAS recorded your request, but this tool is not open for real image processing yet.\n\n"
-            "The system did not process the image, call a provider, or charge Xu."
+            "The system did not process the image or charge Xu."
         )
     return (
         "🧩 TOAN AAS đã ghi nhận yêu cầu của bạn, nhưng công cụ này chưa mở xử lý ảnh thật.\n\n"
-        "Hệ thống chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu."
+        "Hệ thống chưa xử lý ảnh và chưa trừ Xu."
     )
 
 def image_manual_edit_action_label(action: str = "", lang: str = "vi") -> str:
@@ -39283,12 +39287,12 @@ def image_edit_ai_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🧩 This feature is still being completed.\n"
-            "TOAN AAS has not processed the image, called a provider, or charged Xu.\n\n"
+            "TOAN AAS has not processed the image or charged Xu.\n\n"
             "You can return to the stable image tools instead."
         )
     return (
         "✨ <b>Tính năng này đang được hoàn thiện.</b>\n"
-        "TOAN AAS chưa xử lý ảnh, chưa gọi provider. Hệ thống chưa gọi API và chưa trừ Xu.\n\n"
+        "TOAN AAS chưa xử lý ảnh và chưa trừ Xu.\n\n"
         "Bạn có thể quay lại dùng các công cụ ảnh đã mở ổn định trước."
     )
 
@@ -39853,6 +39857,35 @@ def image_editor_position_prompt(kind: str = "text", lang: str = "vi") -> str:
     return "🔠 Chọn vị trí đặt chữ. Bot chưa trừ Xu." if is_vi else "🔠 Choose where to place the text. No Xu is charged here."
 
 
+def image_editor_overlay_input_prompt(kind: str = "text", lang: str = "vi", current_text: str = "") -> str:
+    is_logo = str(kind or "").lower() == "logo"
+    current = _short_pending_text(current_text, 260)
+    current_line = ""
+    if current:
+        current_line = (
+            f"\n\nCurrent content:\n<code>{html.escape(current)}</code>"
+            if normalize_user_language(lang) != "vi"
+            else f"\n\nNội dung hiện tại:\n<code>{html.escape(current)}</code>"
+        )
+    if normalize_user_language(lang) != "vi":
+        title = "🎭 Logo / Watermark" if is_logo else "🔠 Add text"
+        hint = "Send the logo/watermark text you want to place on this image." if is_logo else "Send the text you want to place on this image."
+        return (
+            f"{title}\n\n"
+            f"{hint}\n"
+            "After this, choose the position. TOAN AAS has not processed the image or charged Xu."
+            f"{current_line}"
+        )
+    title = "🎭 Logo / Watermark" if is_logo else "🔠 Thêm chữ"
+    hint = "Gửi nội dung Logo/Watermark muốn đặt lên ảnh này." if is_logo else "Gửi nội dung chữ muốn đặt lên ảnh này."
+    return (
+        f"{title}\n\n"
+        f"{hint}\n"
+        "Sau bước này mới chọn vị trí. TOAN AAS chưa xử lý ảnh và chưa trừ Xu."
+        f"{current_line}"
+    )
+
+
 def image_editor_position_keyboard(kind: str = "text", lang: str = "vi", prefix: str = "editor_text_pos", back_callback: str = "imgtool|editor_overlays") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
@@ -39891,6 +39924,42 @@ def image_editor_logo_upload_keyboard(lang: str = "vi", back_callback: str = "im
         InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_callback),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ]])
+
+
+def image_editor_overlay_confirm_text(kind: str = "text", text: str = "", position: str = "", lang: str = "vi") -> str:
+    clean = _short_pending_text(text, 260)
+    label = image_editor_overlay_position_label(position, lang)
+    is_logo = str(kind or "").lower() == "logo"
+    if normalize_user_language(lang) != "vi":
+        title = "🎭 Confirm Logo / Watermark" if is_logo else "🔠 Confirm text"
+        field = "Logo / Watermark" if is_logo else "Text"
+        return (
+            f"{title}\n\n"
+            f"{field}: <code>{html.escape(clean)}</code>\n"
+            f"Position: <b>{html.escape(label)}</b>\n\n"
+            "Confirm to create the local preview. TOAN AAS has not charged Xu."
+        )
+    title = "🎭 Xác nhận Logo / Watermark" if is_logo else "🔠 Xác nhận chữ"
+    field = "Logo / Watermark" if is_logo else "Nội dung chữ"
+    return (
+        f"{title}\n\n"
+        f"{field}: <code>{html.escape(clean)}</code>\n"
+        f"Vị trí: <b>{html.escape(label)}</b>\n\n"
+        "Bấm xác nhận để tạo preview. TOAN AAS chưa trừ Xu."
+    )
+
+
+def image_editor_overlay_confirm_keyboard(kind: str = "text", lang: str = "vi") -> InlineKeyboardMarkup:
+    is_logo = str(kind or "").lower() == "logo"
+    confirm_action = "imgtool|editor_logo_confirm" if is_logo else "imgtool|editor_text_confirm"
+    back_action = "imgtool|editor_logo_position_back" if is_logo else "imgtool|editor_text_position_back"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(ui_text(lang, "common.confirm"), callback_data=confirm_action),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=back_action),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
 
 
 def image_editor_origin_back_callback(origin_action: str = "", kind: str = "text") -> str:
@@ -39989,13 +40058,13 @@ def image_editor_start_text(mode: str = "auto", lang: str = "vi") -> str:
         "preset": "công thức màu",
         "overlay": "thêm chữ hoặc logo/watermark",
         "upscale": "làm nét/nâng chất lượng cơ bản",
-    }.get(str(mode or "auto"), "chỉnh ảnh local")
+    }.get(str(mode or "auto"), "chỉnh ảnh")
     if normalize_user_language(lang) != "vi":
-        return "🪄 <b>Local image editor</b>\n\nSend or reply to an image. V1 uses local Pillow processing only; no AI provider and no Xu charge."
+        return "🪄 <b>Image editor</b>\n\nSend or reply to an image. This screen prepares the edit and does not charge Xu."
     return (
         f"🪄 <b>{html.escape(mode_label.title())}</b>\n\n"
         "Bạn hãy gửi hoặc reply ảnh cần xử lý.\n"
-        "V1 xử lý local bằng Pillow, không gọi provider AI và chưa trừ Xu."
+        "Màn này chuẩn bị chỉnh ảnh và chưa trừ Xu."
     )
 
 
@@ -40061,6 +40130,7 @@ async def send_local_edited_image(
     overlay_text: str = "",
     logo_file_id: str = "",
     overlay_position: str = "",
+    overlay_kind: str = "",
     upscale: bool = False,
 ) -> bool:
     message = getattr(update_or_query, "message", None) or getattr(getattr(update_or_query, "callback_query", None), "message", None)
@@ -40104,10 +40174,10 @@ async def send_local_edited_image(
         photo.name = f"toan_aas_editor_{uid}_{int(time.time())}.png"
         caption = (
             "✅ <b>Ảnh preview đã xử lý xong.</b>\n\n"
-            f"Công thức: <b>{html.escape(image_editor_preset_label('upscale_basic' if upscale else ('logo_overlay' if logo_file_id else ('text_overlay' if overlay_text else preset_used)), lang))}</b>\n"
+            f"Công thức: <b>{html.escape(image_editor_preset_label('upscale_basic' if upscale else ('logo_overlay' if logo_file_id or str(overlay_kind or '').lower() == 'logo' else ('text_overlay' if overlay_text else preset_used)), lang))}</b>\n"
             f"Kích thước: <code>{html.escape(size_text)}</code>\n"
             "Phí V1: <b>0 Xu</b>\n\n"
-            "Đây là xử lý local, không gọi provider AI."
+            "TOAN AAS chưa trừ Xu."
         )
         sent = await context.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, parse_mode="HTML", reply_markup=image_editor_result_keyboard(lang))
         output_file_id = sent.photo[-1].file_id if getattr(sent, "photo", None) else file_id
@@ -40125,7 +40195,7 @@ async def send_local_edited_image(
         logger.warning("local image editor failed | %s", sanitize_log_text(str(exc))[:220])
         await context.bot.send_message(
             chat_id=chat_id,
-            text="⚠️ TOAN AAS chưa xử lý được ảnh này bằng editor local. Bot chưa trừ Xu. Vui lòng thử ảnh JPG/PNG/WebP nhỏ hơn.",
+            text="⚠️ TOAN AAS chưa xử lý được ảnh này. TOAN AAS chưa trừ Xu. Vui lòng thử ảnh JPG/PNG/WebP nhỏ hơn.",
             reply_markup=image_editor_start_keyboard(lang),
         )
         return True
@@ -40163,12 +40233,12 @@ def image_upload_outside_flow_text(lang: str = "vi") -> str:
         return (
             "✅ <b>TOAN AAS received your image.</b>\n\n"
             "What would you like to do with it?\n\n"
-            "Opening this menu does not call a provider and does not charge Xu."
+            "Opening this menu does not start processing and does not charge Xu."
         )
     return (
         "✅ <b>TOAN AAS đã nhận ảnh.</b>\n\n"
         "Bạn muốn làm gì với ảnh này?\n\n"
-        "Bot chưa gọi API và chưa trừ Xu."
+        "TOAN AAS chưa xử lý ảnh và chưa trừ Xu."
     )
 
 def image_upload_outside_flow_keyboard(lang: str = "vi", admin: bool = False) -> InlineKeyboardMarkup:
@@ -40282,27 +40352,27 @@ def image_upscale_ai_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "✨ This feature is still being completed.\n\n"
-            "TOAN AAS has not processed the image, called a provider, or charged Xu. "
+            "TOAN AAS has not processed the image or charged Xu. "
             "You can return to the stable local image tools instead."
         )
     return (
         "✨ <b>Tính năng này đang được hoàn thiện.</b>\n\n"
-        "TOAN AAS chưa xử lý ảnh, chưa gọi provider và chưa trừ Xu.\n"
+        "TOAN AAS chưa xử lý ảnh và chưa trừ Xu.\n"
         "Bạn có thể quay lại dùng các công cụ ảnh đã mở ổn định trước."
     )
 
 def image_aspect_ai_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "✨ AI aspect transform is still being verified with providers.\n\n"
+            "✨ AI aspect transform is still being completed.\n\n"
             "This tool will outpaint missing areas for a more natural ratio change. "
-            "TOAN AAS has not called an API and has not charged Xu.\n\n"
+            "TOAN AAS has not processed the image or charged Xu.\n\n"
             "You can use free local ratio change first."
         )
     return (
-        "✨ <b>Biến đổi tỉ lệ bằng AI đang được kiểm tra nhà cung cấp.</b>\n\n"
+        "✨ <b>Biến đổi tỉ lệ bằng AI đang được hoàn thiện.</b>\n\n"
         "Tính năng này sẽ tạo lại phần thiếu của ảnh để đổi tỉ lệ tự nhiên hơn.\n"
-        "TOAN AAS chưa gọi API và chưa trừ Xu.\n\n"
+        "TOAN AAS chưa xử lý ảnh và chưa trừ Xu.\n\n"
         "Bạn có thể dùng “Đổi tỉ lệ local” miễn phí trước."
     )
 
@@ -66744,12 +66814,12 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
             set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="text", editor_source=action)
             return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
         back_callback = image_editor_origin_back_callback(action, "text")
-        set_image_menu_pending(uid, "image_editor_text_position", **state, back_to=back_callback, editor_source=action)
+        set_image_menu_pending(uid, "image_editor_text_input", **{**state, "back_to": back_callback, "editor_source": action, "editor_overlay_text": ""})
         return await safe_edit_query_message(
             query,
-            image_editor_position_prompt("text", lang),
-            parse_mode=None,
-            reply_markup=image_editor_position_keyboard("text", lang, "editor_text_pos", back_callback),
+            image_editor_overlay_input_prompt("text", lang),
+            parse_mode="HTML",
+            reply_markup=image_editor_text_input_keyboard(lang, back_callback),
         )
     if action in {"editor_logo", "editor_logo_menu", "editor_logo_overlay"}:
         state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
@@ -66757,12 +66827,52 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
             set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="logo", editor_source=action)
             return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
         back_callback = image_editor_origin_back_callback(action, "logo")
-        set_image_menu_pending(uid, "image_editor_logo_position", **state, back_to=back_callback, editor_source=action)
+        set_image_menu_pending(uid, "image_editor_logo_input", **{**state, "back_to": back_callback, "editor_source": action, "editor_logo_text": ""})
         return await safe_edit_query_message(
             query,
-            image_editor_position_prompt("logo", lang),
+            image_editor_overlay_input_prompt("logo", lang),
+            parse_mode="HTML",
+            reply_markup=image_editor_text_input_keyboard(lang, back_callback),
+        )
+    if action in {"editor_text_input_back", "editor_logo_input_back"}:
+        kind = "logo" if action == "editor_logo_input_back" else "text"
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode=kind)
+            return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
+        origin_action = str(state.get("editor_source") or ("editor_logo" if kind == "logo" else "editor_text"))
+        back_callback = str(state.get("back_to") or image_editor_origin_back_callback(origin_action, kind))
+        current_text = state.get("editor_logo_text") if kind == "logo" else state.get("editor_overlay_text")
+        set_image_menu_pending(uid, f"image_editor_{kind}_input", **{**state, "back_to": back_callback, "editor_source": origin_action})
+        return await safe_edit_query_message(
+            query,
+            image_editor_overlay_input_prompt(kind, lang, str(current_text or "")),
+            parse_mode="HTML",
+            reply_markup=image_editor_text_input_keyboard(lang, back_callback),
+        )
+    if action in {"editor_text_position_back", "editor_logo_position_back"}:
+        kind = "logo" if action == "editor_logo_position_back" else "text"
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        if not state.get("file_id"):
+            set_image_menu_pending(uid, "image_editor_wait_image", editor_mode=kind)
+            return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
+        text_value = _short_pending_text(state.get("editor_logo_text") if kind == "logo" else state.get("editor_overlay_text"), 260)
+        if not text_value:
+            origin_action = str(state.get("editor_source") or ("editor_logo" if kind == "logo" else "editor_text"))
+            back_callback = str(state.get("back_to") or image_editor_origin_back_callback(origin_action, kind))
+            set_image_menu_pending(uid, f"image_editor_{kind}_input", **{**state, "back_to": back_callback, "editor_source": origin_action})
+            return await safe_edit_query_message(
+                query,
+                image_editor_overlay_input_prompt(kind, lang),
+                parse_mode="HTML",
+                reply_markup=image_editor_text_input_keyboard(lang, back_callback),
+            )
+        set_image_menu_pending(uid, f"image_editor_{kind}_position", **state)
+        return await safe_edit_query_message(
+            query,
+            image_editor_position_prompt(kind, lang),
             parse_mode=None,
-            reply_markup=image_editor_position_keyboard("logo", lang, "editor_logo_pos", back_callback),
+            reply_markup=image_editor_position_keyboard(kind, lang, f"editor_{kind}_pos", f"imgtool|editor_{kind}_input_back"),
         )
     if action == "editor_text_pos":
         state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
@@ -66771,12 +66881,22 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
             set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="overlay")
             return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
         origin_action = str((pending or {}).get("editor_source") or "editor_text")
-        set_image_menu_pending(uid, "image_editor_text_input", **state, editor_overlay_position=position, editor_source=origin_action)
+        text_value = _short_pending_text(state.get("editor_overlay_text"), 260)
+        if not text_value:
+            back_callback = str((pending or {}).get("back_to") or image_editor_origin_back_callback(origin_action, "text"))
+            set_image_menu_pending(uid, "image_editor_text_input", **{**state, "back_to": back_callback, "editor_source": origin_action})
+            return await safe_edit_query_message(
+                query,
+                image_editor_overlay_input_prompt("text", lang),
+                parse_mode="HTML",
+                reply_markup=image_editor_text_input_keyboard(lang, back_callback),
+            )
+        set_image_menu_pending(uid, "image_editor_text_confirm", **{**state, "editor_overlay_position": position, "editor_source": origin_action})
         return await safe_edit_query_message(
             query,
-            f"🔠 Gửi nội dung chữ muốn đặt ở vị trí <b>{html.escape(image_editor_overlay_position_label(position, lang))}</b>. Tối đa 260 ký tự. Bot chưa trừ Xu.",
+            image_editor_overlay_confirm_text("text", text_value, position, lang),
             parse_mode="HTML",
-            reply_markup=image_editor_text_input_keyboard(lang, f"imgtool|{origin_action}"),
+            reply_markup=image_editor_overlay_confirm_keyboard("text", lang),
         )
     if action == "editor_logo_pos":
         state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
@@ -66785,12 +66905,51 @@ async def handle_image_tools_callback(update: Update, context: ContextTypes.DEFA
             set_image_menu_pending(uid, "image_editor_wait_image", editor_mode="overlay")
             return await safe_edit_query_message(query, image_editor_start_text("overlay", lang), reply_markup=image_editor_start_keyboard(lang))
         origin_action = str((pending or {}).get("editor_source") or "editor_logo")
-        set_image_menu_pending(uid, "image_editor_wait_logo", **state, editor_overlay_position=position, editor_source=origin_action)
+        text_value = _short_pending_text(state.get("editor_logo_text"), 260)
+        if not text_value:
+            back_callback = str((pending or {}).get("back_to") or image_editor_origin_back_callback(origin_action, "logo"))
+            set_image_menu_pending(uid, "image_editor_logo_input", **{**state, "back_to": back_callback, "editor_source": origin_action})
+            return await safe_edit_query_message(
+                query,
+                image_editor_overlay_input_prompt("logo", lang),
+                parse_mode="HTML",
+                reply_markup=image_editor_text_input_keyboard(lang, back_callback),
+            )
+        set_image_menu_pending(uid, "image_editor_logo_confirm", **{**state, "editor_overlay_position": position, "editor_source": origin_action})
         return await safe_edit_query_message(
             query,
-            f"🎭 Gửi file Logo/Watermark PNG/JPG/WebP để đặt ở vị trí <b>{html.escape(image_editor_overlay_position_label(position, lang))}</b>. Bot chưa trừ Xu.",
+            image_editor_overlay_confirm_text("logo", text_value, position, lang),
             parse_mode="HTML",
-            reply_markup=image_editor_logo_upload_keyboard(lang, f"imgtool|{origin_action}"),
+            reply_markup=image_editor_overlay_confirm_keyboard("logo", lang),
+        )
+    if action == "editor_text_confirm":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        text_value = _short_pending_text(state.get("editor_overlay_text"), 260)
+        if not state.get("file_id") or not text_value:
+            set_image_menu_pending(uid, "image_editor_text_input", **state)
+            return await safe_edit_query_message(query, image_editor_overlay_input_prompt("text", lang), parse_mode="HTML", reply_markup=image_editor_text_input_keyboard(lang, "imgtool|editor_text_input_back"))
+        return await send_local_edited_image(
+            update,
+            context,
+            state,
+            preset="photo_clear_detail",
+            overlay_text=text_value,
+            overlay_position=str(state.get("editor_overlay_position") or "bottom_center"),
+        )
+    if action == "editor_logo_confirm":
+        state = dict(pending or get_image_tool_result(uid, "editor") or recent_image_file_state(uid) or {})
+        text_value = _short_pending_text(state.get("editor_logo_text"), 260)
+        if not state.get("file_id") or not text_value:
+            set_image_menu_pending(uid, "image_editor_logo_input", **state)
+            return await safe_edit_query_message(query, image_editor_overlay_input_prompt("logo", lang), parse_mode="HTML", reply_markup=image_editor_text_input_keyboard(lang, "imgtool|editor_logo_input_back"))
+        return await send_local_edited_image(
+            update,
+            context,
+            state,
+            preset="photo_clear_detail",
+            overlay_text=text_value,
+            overlay_position=str(state.get("editor_overlay_position") or "bottom_right"),
+            overlay_kind="logo",
         )
     if action == "editor_continue":
         result = get_image_tool_result(uid, "editor") or {}
@@ -67392,14 +67551,31 @@ async def handle_image_menu_pending_text(update: Update, context: ContextTypes.D
             return True
         return await send_local_edited_image(update, context, pending, preset="photo_clear_detail", settings=settings)
     if action == "image_editor_text_input":
-        return await send_local_edited_image(
-            update,
-            context,
-            pending,
-            preset="photo_clear_detail",
-            overlay_text=text[:260],
-            overlay_position=str(pending.get("editor_overlay_position") or "bottom_center"),
+        origin_action = str(pending.get("editor_source") or "editor_text")
+        back_callback = str(pending.get("back_to") or image_editor_origin_back_callback(origin_action, "text"))
+        set_image_menu_pending(uid, "image_editor_text_position", **{**pending, "editor_overlay_text": text[:260], "editor_source": origin_action, "back_to": back_callback})
+        await update.message.reply_text(
+            image_editor_position_prompt("text", lang),
+            reply_markup=image_editor_position_keyboard("text", lang, "editor_text_pos", "imgtool|editor_text_input_back"),
         )
+        return True
+    if action == "image_editor_logo_input":
+        logo_text = logo_watermark_clean_text(text)
+        if not logo_text:
+            await update.message.reply_text(
+                image_editor_overlay_input_prompt("logo", lang),
+                parse_mode="HTML",
+                reply_markup=image_editor_text_input_keyboard(lang, str(pending.get("back_to") or "imgtool|editor_logo")),
+            )
+            return True
+        origin_action = str(pending.get("editor_source") or "editor_logo")
+        back_callback = str(pending.get("back_to") or image_editor_origin_back_callback(origin_action, "logo"))
+        set_image_menu_pending(uid, "image_editor_logo_position", **{**pending, "editor_logo_text": logo_text[:260], "editor_source": origin_action, "back_to": back_callback})
+        await update.message.reply_text(
+            image_editor_position_prompt("logo", lang),
+            reply_markup=image_editor_position_keyboard("logo", lang, "editor_logo_pos", "imgtool|editor_logo_input_back"),
+        )
+        return True
     if action in {"image_prompt_only", "image_prompt_wait_image"}:
         set_image_menu_pending(uid, "image_prompt_subject", goal_code="custom", goal="mô tả thủ công")
         await update.message.reply_text(image_prompt_subject_text("mô tả thủ công", lang), parse_mode="HTML", reply_markup=image_menu_child_keyboard(lang))
@@ -67535,11 +67711,12 @@ async def handle_image_menu_pending_photo(update: Update, context: ContextTypes.
         if mode in {"text", "logo"}:
             origin_action = str(pending.get("editor_source") or ("editor_text_menu" if mode == "text" else "editor_logo_menu"))
             back_callback = image_editor_origin_back_callback(origin_action, mode)
-            pending_action = "image_editor_text_position" if mode == "text" else "image_editor_logo_position"
-            set_image_menu_pending(uid, pending_action, **state, editor_source=origin_action, back_to=back_callback)
+            pending_action = "image_editor_text_input" if mode == "text" else "image_editor_logo_input"
+            set_image_menu_pending(uid, pending_action, **{**state, "editor_source": origin_action, "back_to": back_callback})
             await update.message.reply_text(
-                image_editor_position_prompt(mode, lang),
-                reply_markup=image_editor_position_keyboard(mode, lang, f"editor_{mode}_pos", back_callback),
+                image_editor_overlay_input_prompt(mode, lang),
+                parse_mode="HTML",
+                reply_markup=image_editor_text_input_keyboard(lang, back_callback),
             )
             return True
         if mode == "overlay":
@@ -67645,11 +67822,12 @@ async def handle_image_menu_pending_document(update: Update, context: ContextTyp
         if mode in {"text", "logo"}:
             origin_action = str(pending.get("editor_source") or ("editor_text_menu" if mode == "text" else "editor_logo_menu"))
             back_callback = image_editor_origin_back_callback(origin_action, mode)
-            pending_action = "image_editor_text_position" if mode == "text" else "image_editor_logo_position"
-            set_image_menu_pending(uid, pending_action, **state, editor_source=origin_action, back_to=back_callback)
+            pending_action = "image_editor_text_input" if mode == "text" else "image_editor_logo_input"
+            set_image_menu_pending(uid, pending_action, **{**state, "editor_source": origin_action, "back_to": back_callback})
             await update.message.reply_text(
-                image_editor_position_prompt(mode, lang),
-                reply_markup=image_editor_position_keyboard(mode, lang, f"editor_{mode}_pos", back_callback),
+                image_editor_overlay_input_prompt(mode, lang),
+                parse_mode="HTML",
+                reply_markup=image_editor_text_input_keyboard(lang, back_callback),
             )
             return True
         if mode == "overlay":
@@ -68326,12 +68504,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
                 try:
                     await context.bot.send_message(
                         chat_id=int(ADMIN_ID),
-                        text=(
-                            "🎯 Provider đã nhận gói Video 200 Xu.\n"
-                            f"• User: <code>{html.escape(str(uid))}</code>\n"
-                            f"• Job: <code>{int(job_id or 0)}</code>\n"
-                            f"• Task: <code>{html.escape(task_id)}</code>"
-                        ),
+                        text="🎯 Gói Video 200 Xu đã được đưa vào hàng chờ tạo. TOAN AAS sẽ gửi kết quả khi hoàn tất.",
                         parse_mode="HTML",
                     )
                 except Exception:
@@ -68340,7 +68513,7 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=ui_text(lang, "video.queue_submitted", task_id=html.escape(task_id), auto_poll="ON" if auto_poll_started else "OFF"),
-                reply_markup=public_video_submitted_keyboard(task_id, lang, result, public_user=not is_admin_user(uid)),
+                reply_markup=public_video_submitted_keyboard(task_id, lang, result, public_user=True),
             )
             return
         provider_error_text = result.get("message") or result.get("detail") or result.get("provider_error_code") or status
@@ -89326,7 +89499,7 @@ def set_quick_image_flow(user_id, step: str = "entry", **fields) -> dict:
         if key in {
             "prompt", "prompt_source", "selected_topic", "negative_prompt", "original_request",
             "image_purpose", "purpose_label", "style", "suggested_ratio", "text_logo_caution",
-            "logo_watermark_text",
+            "logo_watermark_text", "ratio_back_target",
         }:
             limit = 300 if key == "logo_watermark_text" else 1400
             payload[key] = re.sub(r"\s+", " ", str(value or "").strip())[:limit]
@@ -89435,13 +89608,13 @@ def quick_image_entry_text(lang: str = "vi") -> str:
             "🖼 <b>Quick image</b>\n\n"
             "How would you like to start?\n\n"
             "TOAN AAS helps you choose the prompt first, then the aspect ratio and image tier before real generation. "
-            "No API has been called and no Xu has been charged."
+            "TOAN AAS has not started processing and has not charged Xu."
         )
     return (
         "🖼 <b>Tạo ảnh nhanh</b>\n\n"
         "Bạn muốn bắt đầu tạo ảnh theo cách nào?\n\n"
         "TOAN AAS sẽ giúp bạn chọn prompt trước, sau đó mới chọn tỉ lệ và gói giá để tạo ảnh thật.\n"
-        "Bot chưa gọi API và chưa trừ Xu."
+        "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
 def quick_image_entry_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -89519,7 +89692,7 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
             f"Main prompt:\n<code>{html.escape(prompt)}</code>\n\n"
             f"Negative prompt:\n<code>{html.escape(negative)}</code>\n"
             f"{html.escape(caution)}{vague_note}\n"
-            "Choose the aspect ratio when this prompt is ready, or rewrite it first. No API call and no Xu charged."
+            "Choose the aspect ratio when this prompt is ready, or rewrite it first. TOAN AAS has not started processing and has not charged Xu."
         )
     return (
         "✨ <b>Prompt ảnh đã được soạn và tối ưu</b>\n\n"
@@ -89531,7 +89704,7 @@ def quick_image_prepared_prompt_text(state: dict | None = None, lang: str = "vi"
         + (f"Lưu ý: {html.escape(caution)}\n\n" if caution else "")
         + vague_note
         + "Nếu prompt đã phù hợp, hãy chọn tỉ lệ. Bạn cũng có thể viết lại hoặc chọn chủ đề khác.\n"
-        "Bot chưa gọi API và chưa trừ Xu."
+        "TOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
 def quick_image_prepared_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -89539,16 +89712,17 @@ def quick_image_prepared_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMark
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📐 Chọn tỉ lệ" if vi else "📐 Choose ratio", callback_data="create_media|qi_choose_ratio"),
-            InlineKeyboardButton("🔄 Tối ưu lại prompt" if vi else "🔄 Re-optimize prompt", callback_data="create_media|qi_rewrite"),
+            InlineKeyboardButton("🎭 Logo / Watermark", callback_data="create_media|qi_logo_choice"),
         ],
         [
-            InlineKeyboardButton("✨ Chọn chủ đề khác" if vi else "✨ Another topic", callback_data="create_media|qi_topics"),
+            InlineKeyboardButton("🔄 Tối ưu lại prompt" if vi else "🔄 Re-optimize prompt", callback_data="create_media|qi_rewrite"),
             InlineKeyboardButton("✍️ Sửa prompt" if vi else "✍️ Edit prompt", callback_data="create_media|qi_custom"),
         ],
         [
+            InlineKeyboardButton("✨ Chọn chủ đề khác" if vi else "✨ Another topic", callback_data="create_media|qi_topics"),
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="create_media|qi_back_suggestions"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def quick_image_custom_prompt_text(lang: str = "vi", prompt: str = "") -> str:
@@ -89563,12 +89737,12 @@ def quick_image_custom_prompt_text(lang: str = "vi", prompt: str = "") -> str:
         return (
             "✍️ <b>Enter the image description</b>\n\n"
             "Example: turquoise TOAN AAS logo, clean white background, minimal modern technology style."
-            f"{current}\n\nNo API call and no Xu charged."
+            f"{current}\n\nTOAN AAS has not started processing and has not charged Xu."
         )
     return (
         "✍️ <b>Hãy nhập mô tả ảnh bạn muốn tạo</b>\n\n"
         "Ví dụ: logo TOAN AAS màu xanh ngọc, nền trắng sạch, phong cách công nghệ tối giản."
-        f"{current}\n\nBot chưa gọi API và chưa trừ Xu."
+        f"{current}\n\nTOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
     )
 
 def quick_image_custom_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -89586,8 +89760,8 @@ def quick_image_ratio_text(state: dict | None = None, lang: str = "vi") -> str:
     logo_line_en = f"\nLogo / Watermark: <code>{html.escape(logo)}</code> ({html.escape(logo_position)})\n" if logo else ""
     logo_line_vi = f"\nLogo / Watermark: <code>{html.escape(logo)}</code> ({html.escape(logo_position)})\n" if logo else ""
     if normalize_user_language(lang) != "vi":
-        return f"📐 <b>Choose aspect ratio</b>\n\nSelected prompt:\n<code>{html.escape(prompt)}</code>{logo_line_en}\nNo API call and no Xu charged."
-    return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nPrompt đã chọn:\n<code>{html.escape(prompt)}</code>{logo_line_vi}\nBạn muốn tạo theo tỉ lệ nào?\nBot chưa gọi API và chưa trừ Xu."
+        return f"📐 <b>Choose aspect ratio</b>\n\nSelected prompt:\n<code>{html.escape(prompt)}</code>{logo_line_en}\nTOAN AAS has not started processing and has not charged Xu."
+    return f"📐 <b>Chọn tỉ lệ khung hình</b>\n\nPrompt đã chọn:\n<code>{html.escape(prompt)}</code>{logo_line_vi}\nBạn muốn tạo theo tỉ lệ nào?\nTOAN AAS chưa bắt đầu xử lý và chưa trừ Xu."
 
 def quick_image_ratio_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     rows = []
@@ -90377,7 +90551,7 @@ VIDEO_FINALIZATION_LOCK_SECONDS = 12
 # Product lock requested after Task 3D.7: no menu/package/prompt/export redesign.
 # Only narrow bug fixes for result dedupe, back routes, provider output and mux/public guards are allowed.
 VIDEO_FLOW_LOCKED_AFTER_TASK3D7 = True  # specification spelling: VIDEO_FLOW_LOCKED_AFTER_TASK3D7 = true
-PUBLIC_PRODUCT_MAINTENANCE_VI = "Sản phẩm đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu."
+PUBLIC_PRODUCT_MAINTENANCE_VI = "Tính năng này đang được bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 PUBLIC_PRODUCT_MAINTENANCE_EN = "This product is under maintenance/upgrading. Please try again later. TOAN AAS has not processed the request or charged Xu."
 
 def video_finalization_pending_key(user_id) -> str:
@@ -100227,15 +100401,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         if not state.get("prompt"):
             state = set_quick_image_flow(uid, "suggestions")
             return await safe_edit_or_send(query, quick_image_suggestions_text(state, lang), parse_mode="HTML", reply_markup=quick_image_suggestions_keyboard(lang))
-        if not state.get("logo_watermark_decided"):
-            state = set_quick_image_flow(uid, "logo_choice")
-            return await safe_edit_or_send(
-                query,
-                quick_image_logo_choice_text(state, lang),
-                parse_mode="HTML",
-                reply_markup=quick_image_logo_choice_keyboard(lang),
-            )
-        state = set_quick_image_flow(uid, "ratio")
+        state = set_quick_image_flow(uid, "ratio", ratio_back_target="prepared_prompt")
         return await safe_edit_or_send(
             query,
             quick_image_ratio_text(state, lang),
@@ -100271,6 +100437,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             logo_watermark_position="",
             logo_watermark_source="",
             logo_watermark_decided=True,
+            ratio_back_target="logo_choice",
         )
         return await safe_edit_or_send(
             query,
@@ -100307,6 +100474,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
             logo_watermark_position=position,
             logo_watermark_source="text",
             logo_watermark_decided=True,
+            ratio_back_target="logo_choice",
         )
         return await safe_edit_or_send(
             query,
@@ -100316,7 +100484,7 @@ async def handle_create_media_callback(update: Update, context: ContextTypes.DEF
         )
     if action == "qi_back_prompt":
         state = get_quick_image_flow(uid) or {}
-        if state.get("step") == "ratio" and state.get("prompt"):
+        if state.get("step") == "ratio" and state.get("prompt") and state.get("ratio_back_target") == "logo_choice":
             state = set_quick_image_flow(uid, "logo_choice")
             return await safe_edit_or_send(
                 query,
