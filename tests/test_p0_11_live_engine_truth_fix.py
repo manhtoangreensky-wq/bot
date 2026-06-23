@@ -318,7 +318,7 @@ def test_multiscene_admin_test_can_verify_unverified_stitcher(monkeypatch, tmp_p
 
 def test_video_multiscene_public_guard_copy():
     assert bot.VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT == (
-        "Tạo video nhiều cảnh đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+        "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
     )
 
 

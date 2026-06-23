@@ -4420,6 +4420,251 @@ def set_system_setting(key, value, note="", updated_by=""):
         if conn:
             conn.close()
 
+ENGINE_ASYNC_JOB_PREFIX = "engine_async_job:"
+ENGINE_ASYNC_JOB_INDEX_KEY = "engine_async_job:index"
+ENGINE_ASYNC_JOB_MAX_INDEX = 120
+ENGINE_ASYNC_MEMORY_JOBS: dict[str, dict] = {}
+ENGINE_ASYNC_MEMORY_INDEX: dict[str, list[str]] = {}
+ENGINE_ASYNC_ACTIVE_STATUSES = {"submitted", "queued", "processing", "downloading"}
+ENGINE_ASYNC_PUBLIC_CHECKING_VI = "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+ENGINE_ASYNC_JOB_FEATURE_PREFIX = {
+    "music_suno": "MUS",
+    "music_song": "MUS",
+    "video_single": "VID",
+    "video": "VID",
+    "video_multiscene": "VID",
+    "subtitle_dub": "DUB",
+    "video_dub": "DUB",
+    "subtitle_asr": "SUB",
+}
+
+def _engine_async_job_key(internal_job_id: str) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(internal_job_id or ""))[:80]
+    return ENGINE_ASYNC_JOB_PREFIX + safe_id
+
+def _engine_async_feature_key(feature: str) -> str:
+    safe_feature = re.sub(r"[^A-Za-z0-9_.:-]", "", str(feature or ""))[:80]
+    return f"{ENGINE_ASYNC_JOB_PREFIX}feature:{safe_feature}"
+
+def _engine_async_user_key(user_id, feature: str = "") -> str:
+    safe_user = re.sub(r"[^A-Za-z0-9_.:-]", "", str(user_id or ""))[:80]
+    safe_feature = re.sub(r"[^A-Za-z0-9_.:-]", "", str(feature or ""))[:80]
+    return f"{ENGINE_ASYNC_JOB_PREFIX}user:{safe_user}:{safe_feature}" if safe_feature else f"{ENGINE_ASYNC_JOB_PREFIX}user:{safe_user}"
+
+def _engine_async_id_list_from_setting(key: str) -> list[str]:
+    raw = get_system_setting(key, "")
+    if not raw and key in ENGINE_ASYNC_MEMORY_INDEX:
+        return list(ENGINE_ASYNC_MEMORY_INDEX.get(key) or [])
+    try:
+        value = json.loads(raw or "[]")
+        ids = value if isinstance(value, list) else []
+    except Exception:
+        ids = []
+    clean: list[str] = []
+    seen = set()
+    for item in ids:
+        safe = re.sub(r"[^A-Za-z0-9_.:-]", "", str(item or ""))[:80]
+        if safe and safe not in seen:
+            clean.append(safe)
+            seen.add(safe)
+    return clean
+
+def _engine_async_memory_save_id_list(key: str, internal_job_id: str) -> None:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(internal_job_id or ""))[:80]
+    if not safe_id:
+        return
+    ids = [safe_id]
+    for item in ENGINE_ASYNC_MEMORY_INDEX.get(key, []):
+        if item != safe_id:
+            ids.append(item)
+        if len(ids) >= ENGINE_ASYNC_JOB_MAX_INDEX:
+            break
+    ENGINE_ASYNC_MEMORY_INDEX[key] = ids
+
+def _engine_async_save_id_list(key: str, internal_job_id: str, updated_by="") -> None:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(internal_job_id or ""))[:80]
+    if not safe_id:
+        return
+    ids = [safe_id]
+    for item in _engine_async_id_list_from_setting(key):
+        if item != safe_id:
+            ids.append(item)
+        if len(ids) >= ENGINE_ASYNC_JOB_MAX_INDEX:
+            break
+    set_system_setting(key, json.dumps(ids, separators=(",", ":")), "engine async job index", updated_by)
+
+def mask_provider_task_id(value: str, visible: int = 4) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    keep = max(2, int(visible or 4))
+    if len(text) <= keep * 2:
+        return text[:2] + "***" if len(text) > 2 else "***"
+    return f"{text[:keep]}***{text[-keep:]}"
+
+def sanitize_provider_status_text(value, provider_task_id: str = "", limit: int = 260) -> str:
+    text = sanitize_log_text(str(value or ""))
+    raw_task = str(provider_task_id or "").strip()
+    if raw_task:
+        text = text.replace(raw_task, mask_provider_task_id(raw_task))
+    text = re.sub(r"https?://\S+", "[url]", text)
+    text = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._:-]+", r"\1***", text)
+    text = re.sub(r"(?i)(api[_-]?key|token|secret)=?[A-Za-z0-9._:-]+", r"\1=***", text)
+    return text[: max(20, int(limit or 260))]
+
+def engine_async_job_id(feature: str, user_id="") -> str:
+    feature_key = str(feature or "").strip().lower()
+    prefix = ENGINE_ASYNC_JOB_FEATURE_PREFIX.get(feature_key, "JOB")
+    nonce = hashlib.sha256(f"{feature_key}:{user_id}:{time.time_ns()}:{random.random()}".encode("utf-8")).hexdigest()[:8].upper()
+    return f"{prefix}-{nonce}"
+
+def normalize_engine_async_job(job: dict) -> dict:
+    current = dict(job or {})
+    feature = str(current.get("feature") or "").strip().lower()
+    current["feature"] = feature
+    current["internal_job_id"] = str(current.get("internal_job_id") or engine_async_job_id(feature, current.get("user_id"))).strip()
+    provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or "").strip()
+    output_bytes = int(current.get("output_bytes") or 0)
+    if not provider_task_id and output_bytes <= 0:
+        raise ValueError("engine async job requires provider_task_id or output_bytes")
+    now = now_text()
+    current.setdefault("created_at", now)
+    current["updated_at"] = now
+    current["provider_task_id"] = provider_task_id
+    current["status"] = str(current.get("status") or ("completed" if output_bytes > 0 else "submitted")).strip().lower()
+    current["provider"] = str(current.get("provider") or "").strip()
+    current["progress_text"] = sanitize_provider_status_text(current.get("progress_text") or "", provider_task_id, 360)
+    current["last_provider_status"] = sanitize_provider_status_text(current.get("last_provider_status") or "", provider_task_id, 360)
+    current["error_category"] = sanitize_provider_status_text(current.get("error_category") or "", provider_task_id, 120)
+    current["output_path"] = str(current.get("output_path") or "")[:600]
+    current["output_bytes"] = output_bytes
+    current["poll_count"] = int(current.get("poll_count") or 0)
+    current.setdefault("last_poll_at", "")
+    current.setdefault("next_poll_after", "")
+    current.setdefault("expire_at", "")
+    return current
+
+def save_engine_async_job(job: dict) -> dict:
+    current = normalize_engine_async_job(job)
+    internal_id = str(current.get("internal_job_id") or "")
+    updated_by = str(current.get("user_id") or "")
+    try:
+        set_system_setting(
+            _engine_async_job_key(internal_id),
+            json.dumps(current, ensure_ascii=False, separators=(",", ":")),
+            f"engine async job {current.get('feature')} status={current.get('status')}",
+            updated_by,
+        )
+        _engine_async_save_id_list(ENGINE_ASYNC_JOB_INDEX_KEY, internal_id, updated_by)
+        _engine_async_save_id_list(_engine_async_feature_key(current.get("feature")), internal_id, updated_by)
+        if current.get("user_id"):
+            _engine_async_save_id_list(_engine_async_user_key(current.get("user_id")), internal_id, updated_by)
+            _engine_async_save_id_list(_engine_async_user_key(current.get("user_id"), current.get("feature")), internal_id, updated_by)
+    except sqlite3.OperationalError as exc:
+        if "no such table: system_settings" not in str(exc).lower():
+            raise
+        ENGINE_ASYNC_MEMORY_JOBS[internal_id] = dict(current)
+        _engine_async_memory_save_id_list(ENGINE_ASYNC_JOB_INDEX_KEY, internal_id)
+        _engine_async_memory_save_id_list(_engine_async_feature_key(current.get("feature")), internal_id)
+        if current.get("user_id"):
+            _engine_async_memory_save_id_list(_engine_async_user_key(current.get("user_id")), internal_id)
+            _engine_async_memory_save_id_list(_engine_async_user_key(current.get("user_id"), current.get("feature")), internal_id)
+    return current
+
+def get_engine_async_job(internal_job_id: str) -> dict:
+    raw = get_system_setting(_engine_async_job_key(internal_job_id), "")
+    if not raw:
+        memory = ENGINE_ASYNC_MEMORY_JOBS.get(str(internal_job_id or "").strip())
+        return dict(memory or {})
+    try:
+        value = json.loads(raw or "{}")
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+def list_engine_async_jobs(feature: str = "", user_id="", limit: int = 5, active_only: bool = False) -> list[dict]:
+    if user_id and feature:
+        ids = _engine_async_id_list_from_setting(_engine_async_user_key(user_id, feature))
+    elif user_id:
+        ids = _engine_async_id_list_from_setting(_engine_async_user_key(user_id))
+    elif feature:
+        ids = _engine_async_id_list_from_setting(_engine_async_feature_key(feature))
+    else:
+        ids = _engine_async_id_list_from_setting(ENGINE_ASYNC_JOB_INDEX_KEY)
+    jobs: list[dict] = []
+    for internal_id in ids:
+        job = get_engine_async_job(internal_id)
+        if not job:
+            continue
+        if active_only and str(job.get("status") or "").lower() not in ENGINE_ASYNC_ACTIVE_STATUSES:
+            continue
+        jobs.append(job)
+        if len(jobs) >= max(1, int(limit or 5)):
+            break
+    return jobs
+
+def engine_async_waiting_text(job: dict, *, admin: bool = False) -> str:
+    internal_id = str((job or {}).get("internal_job_id") or "-")
+    lines = [
+        "✅ Provider đã nhận job thật. TOAN AAS đang xử lý, chưa trừ Xu của khách.",
+        "Trạng thái hiện tại: đang chờ provider.",
+        "Bạn có thể bấm 🔄 Kiểm tra trạng thái.",
+    ]
+    if admin:
+        lines.append(f"Admin job: <code>{html.escape(internal_id)}</code>")
+    return "\n".join(lines)
+
+def engine_async_status_text(job: dict, *, admin: bool = False) -> str:
+    current = dict(job or {})
+    if not current:
+        return "⚠️ Không tìm thấy job nội bộ. TOAN AAS chưa gọi provider mới."
+    provider_task_id = str(current.get("provider_task_id") or "")
+    status = str(current.get("status") or "unknown")
+    progress = str(current.get("progress_text") or "")
+    if not progress:
+        if status == "submitted":
+            progress = "Đã gửi yêu cầu tạo nhạc/video tới provider."
+        elif status == "processing":
+            progress = "Provider đang xử lý. Thường mất vài phút."
+        elif status == "downloading":
+            progress = "Đã có kết quả, TOAN AAS đang tải file."
+        elif status == "completed":
+            progress = "Output đã được xác thực bytes > 0."
+        elif status == "timeout":
+            progress = "Provider xử lý quá lâu, chưa có file tải về."
+        elif status == "failed":
+            progress = "Provider/job thất bại; không fake success."
+        else:
+            progress = "Đang chờ trạng thái provider."
+    lines = [
+        f"🧾 <b>Engine job {html.escape(str(current.get('internal_job_id') or '-'))}</b>",
+        "",
+        f"• Feature: <code>{html.escape(str(current.get('feature') or '-'))}</code>",
+        f"• Provider: <code>{html.escape(str(current.get('provider') or '-'))}</code>",
+        f"• Status: <code>{html.escape(status)}</code>",
+        f"• Progress: <code>{html.escape(sanitize_provider_status_text(progress, provider_task_id, 260))}</code>",
+        f"• Poll count: <code>{int(current.get('poll_count') or 0)}</code>",
+        f"• Output bytes: <code>{int(current.get('output_bytes') or 0)}</code>",
+        f"• Error: <code>{html.escape(str(current.get('error_category') or '-')[:160])}</code>",
+        f"• Updated: <code>{html.escape(str(current.get('updated_at') or '-'))}</code>",
+    ]
+    if admin:
+        lines.extend([
+            f"• Provider task: <code>{html.escape(mask_provider_task_id(provider_task_id))}</code>",
+            f"• Last provider status: <code>{html.escape(sanitize_provider_status_text(current.get('last_provider_status') or '-', provider_task_id, 260))}</code>",
+        ])
+    return "\n".join(lines)
+
+def engine_async_status_keyboard(internal_job_id: str, kind: str = "music") -> InlineKeyboardMarkup:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(internal_job_id or ""))[:40]
+    safe_kind = re.sub(r"[^A-Za-z0-9_.:-]", "", str(kind or "music"))[:20]
+    callback_data = f"enginejob|{safe_kind}|{safe_id}"
+    rows = []
+    if safe_id and len(callback_data.encode("utf-8")) <= 64:
+        rows.append([InlineKeyboardButton("🔄 Kiểm tra trạng thái", callback_data=callback_data)])
+    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
 def record_api_debug(provider: str, action: str, status: str, http_status: int = 0, detail: str = ""):
     conn = None
     try:
@@ -35407,7 +35652,7 @@ VIDEO_MULTISCENE_TEST_COUNTS = (3, 5, 10, 20)
 VIDEO_MULTISCENE_FINAL_PASS_STATUSES = {"PASS", "SUCCESS", "OK"}
 VIDEO_MULTISCENE_BACKGROUND_TASKS: set[asyncio.Task] = set()
 VIDEO_MULTISCENE_JOB_SETTING_PREFIX = "video_multiscene_job:"
-VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Tạo video nhiều cảnh đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 
 def video_multiscene_setting_bool(key: str, default: bool = False) -> bool:
     value = str(os.getenv(key) or get_system_setting(key, "1" if default else "") or "").strip().lower()
@@ -36042,7 +36287,17 @@ async def cmd_tool_test_video_multiscene(update: Update, context: ContextTypes.D
     args = list(getattr(context, "args", []) or [])
     if len(args) < 2:
         return await update.message.reply_text("Cú pháp: /tool_test_video_multiscene <package> <scene_count> --confirm-paid")
-    package_base = safe_int(args[0], 0)
+    package_aliases = {
+        "basic": 300,
+        "common": 400,
+        "advanced": 500,
+        "standard": 600,
+        "high": 800,
+        "future_1000": 1000,
+        "future_1200": 1200,
+        "future_1500": 1500,
+    }
+    package_base = safe_int(args[0], 0) or package_aliases.get(str(args[0] or "").strip().lower(), 0)
     scene_count = safe_int(args[1], 0)
     confirm_paid = "--confirm-paid" in {str(item).strip().lower() for item in args[2:]}
     if package_base < 300 or scene_count < 2 or scene_count > 20:
@@ -36103,6 +36358,362 @@ async def cmd_tool_test_video_multiscene(update: Update, context: ContextTypes.D
         f"• Public enabled: <code>{'YES' if video_multiscene_public_enabled() else 'NO'}</code>\n\n"
         "Bot sẽ poll đủ child output, stitch và chỉ đánh dấu PASS sau khi final result được gửi đúng một lần. Lệnh test không tự mở public.",
         parse_mode="HTML",
+        reply_markup=engine_async_status_keyboard(str(started.get("parent_task_id") or ""), "multiscene"),
+    )
+
+def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
+    if not job:
+        return "⚠️ Không tìm thấy video multiscene job. TOAN AAS chưa gọi provider mới."
+    parent_id = str(job.get("parent_task_id") or "-")
+    scene_jobs = list(job.get("scene_jobs") or [])
+    completed = sum(1 for child in scene_jobs if str(child.get("status") or "").upper() == "COMPLETED")
+    submitted = sum(1 for child in scene_jobs if str(child.get("provider_task_id") or "").strip())
+    lines = [
+        f"🎞 <b>VIDEO MULTISCENE JOB {html.escape(parent_id)}</b>",
+        "",
+        f"• Status: <code>{html.escape(str(job.get('status') or '-'))}</code>",
+        f"• Scenes: <code>{completed}/{len(scene_jobs)} completed</code>",
+        f"• Provider accepted scenes: <code>{submitted}/{len(scene_jobs)}</code>",
+        f"• Stitching: <code>{'completed' if job.get('final_output') else ('failed' if job.get('stitching_error') else ('waiting_all_scenes' if completed < len(scene_jobs) else 'ready_or_running'))}</code>",
+        f"• Final bytes: <code>{os.path.getsize(job.get('final_output')) if job.get('final_output') and os.path.exists(str(job.get('final_output'))) else 0}</code>",
+        f"• Error: <code>{html.escape(str(job.get('error') or job.get('stitching_error') or '-')[:180])}</code>",
+        f"• Updated: <code>{html.escape(str(job.get('updated_at') or '-'))}</code>",
+        "",
+        "Scene progress:",
+    ]
+    for child in sorted(scene_jobs, key=lambda item: int(item.get("scene_index") or 0)):
+        scene_idx = int(child.get("scene_index") or 0)
+        provider_task = str(child.get("provider_task_id") or "")
+        provider_note = f" task=<code>{html.escape(mask_provider_task_id(provider_task))}</code>" if admin and provider_task else ""
+        lines.append(
+            f"• Scene {scene_idx}: <code>{html.escape(str(child.get('status') or 'QUEUED'))}</code>"
+            f" provider=<code>{html.escape(str(child.get('provider') or '-'))}</code>"
+            f" polls=<code>{int(child.get('poll_count') or 0)}</code>"
+            f" output=<code>{'yes' if child.get('output_url') or child.get('local_file') else 'no'}</code>"
+            f"{provider_note}"
+            f" error=<code>{html.escape(str(child.get('error') or '-')[:120])}</code>"
+        )
+    lines.append("")
+    lines.append("Provider task id thô không hiển thị; chỉ dùng masked diagnostics cho admin.")
+    return "\n".join(lines)
+
+async def poll_multiscene_job_once(parent_task_id: str, *, poller=None, updated_by="") -> dict:
+    job = get_multiscene_job_record(parent_task_id)
+    if not job:
+        return {"ok": False, "status": "JOB_NOT_FOUND", "job": {}}
+    changed = False
+    for child in list(job.get("scene_jobs") or []):
+        status = str(child.get("status") or "").upper()
+        task_id = str(child.get("provider_task_id") or "").strip()
+        if status in {"COMPLETED", "FAILED"} or not task_id:
+            continue
+        try:
+            if poller:
+                last = await poller(child)
+            elif str(child.get("provider") or "").lower() == "key4u":
+                last = await key4u_provider_instance().poll_video_task(task_id)
+            else:
+                last = await shopaikey_video_job_status(task_id)
+        except Exception as exc:
+            last = {"status": "IN_PROGRESS", "error_class": type(exc).__name__, "detail": "poll temporarily unavailable"}
+        provider_status = _multiscene_provider_status(last)
+        output_url = str(last.get("result_url") or last.get("output_url") or "").strip()
+        poll_count = int(child.get("poll_count") or 0) + 1
+        if provider_status == "COMPLETED" and output_url:
+            _multiscene_update_child(
+                job,
+                int(child.get("scene_index") or 0),
+                status="COMPLETED",
+                output_url=output_url,
+                poll_count=poll_count,
+                completed_at=now_text(),
+                error="",
+            )
+        elif provider_status == "FAILED":
+            reason = shopaikey_sanitize_error(str(last.get("fail_reason") or last.get("detail") or last.get("error_class") or "scene failed"))
+            _multiscene_update_child(
+                job,
+                int(child.get("scene_index") or 0),
+                status="FAILED",
+                poll_count=poll_count,
+                error=reason,
+                completed_at=now_text(),
+            )
+        else:
+            _multiscene_update_child(
+                job,
+                int(child.get("scene_index") or 0),
+                status="IN_PROGRESS",
+                poll_count=poll_count,
+                error="",
+            )
+        changed = True
+        job = get_multiscene_job_record(parent_task_id) or job
+    if changed:
+        job["last_poll_at"] = now_text()
+        save_multiscene_job_record(job)
+    return {"ok": True, "status": str(job.get("status") or "UNKNOWN"), "job": job}
+
+def list_recent_shopaikey_video_jobs(limit: int = 8) -> list[dict]:
+    conn = None
+    try:
+        conn = db_connect()
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT * FROM shopaikey_jobs
+               WHERE job_type IN ('video','video_scene')
+               ORDER BY id DESC LIMIT ?""",
+            (max(1, int(limit or 8)),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    except Exception:
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def shopaikey_video_job_admin_text(job: dict) -> str:
+    if not job:
+        return "⚠️ Không tìm thấy video job."
+    task_id = str(job.get("task_id") or "")
+    return (
+        "🎞 <b>VIDEO JOB</b>\n\n"
+        f"• DB job id: <code>{int(job.get('id') or 0)}</code>\n"
+        f"• Type: <code>{html.escape(str(job.get('job_type') or '-'))}</code>\n"
+        f"• Provider task: <code>{html.escape(mask_provider_task_id(task_id))}</code>\n"
+        f"• Status: <code>{html.escape(str(job.get('status') or '-'))}</code>\n"
+        f"• Poll count: <code>{int(job.get('poll_count') or 0)}</code>\n"
+        f"• Result URL: <code>{'yes' if str(job.get('result_url') or '').strip() else 'no'}</code>\n"
+        f"• Result sent: <code>{'yes' if int(job.get('result_sent') or 0) else 'no'}</code>\n"
+        f"• Error: <code>{html.escape(str(job.get('fail_reason') or job.get('error_class') or '-')[:180])}</code>\n"
+        "• Provider secret: <code>hidden</code>"
+    )
+
+async def cmd_video_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    rows = list_recent_shopaikey_video_jobs(8)
+    latest_parent = get_system_setting("video_multiscene_last_parent_task_id", "")
+    lines = ["🎞 <b>VIDEO JOBS</b>", ""]
+    if latest_parent:
+        job = get_multiscene_job_record(latest_parent)
+        lines.append(f"• Multiscene latest: <code>{html.escape(latest_parent)}</code> status=<code>{html.escape(str(job.get('status') or '-'))}</code>")
+    for row in rows:
+        lines.append(
+            f"• DB <code>{int(row.get('id') or 0)}</code> "
+            f"type=<code>{html.escape(str(row.get('job_type') or '-'))}</code> "
+            f"status=<code>{html.escape(str(row.get('status') or '-'))}</code> "
+            f"task=<code>{html.escape(mask_provider_task_id(str(row.get('task_id') or '')))}</code>"
+        )
+    if len(lines) == 2:
+        lines.append("Chưa có video job nội bộ.")
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_video_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    if not arg:
+        return await cmd_video_jobs(update, context)
+    if arg.startswith("msv-"):
+        job = get_multiscene_job_record(arg)
+        return await update.message.reply_text(
+            multiscene_job_status_text(job, admin=True),
+            parse_mode="HTML",
+            reply_markup=engine_async_status_keyboard(arg, "multiscene") if job else None,
+        )
+    db_job = shopaikey_job_by_id(int(arg)) if arg.isdigit() else shopaikey_job_by_task_id(arg)
+    return await update.message.reply_text(shopaikey_video_job_admin_text(db_job or {}), parse_mode="HTML")
+
+async def cmd_video_multiscene_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    arg = str((getattr(context, "args", []) or [""])[0] or get_system_setting("video_multiscene_last_parent_task_id", "") or "").strip()
+    if not arg:
+        return await update.message.reply_text("Cú pháp: /video_multiscene_job <parent_job_id>. Chưa có parent job gần nhất.")
+    job = get_multiscene_job_record(arg)
+    return await update.message.reply_text(
+        multiscene_job_status_text(job, admin=True),
+        parse_mode="HTML",
+        reply_markup=engine_async_status_keyboard(arg, "multiscene") if job else None,
+    )
+
+async def cmd_video_multiscene_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    arg = str((getattr(context, "args", []) or [""])[0] or get_system_setting("video_multiscene_last_parent_task_id", "") or "").strip()
+    if not arg:
+        return await update.message.reply_text("Cú pháp: /video_multiscene_poll <parent_job_id>")
+    polled = await poll_multiscene_job_once(arg, updated_by=update.effective_user.id)
+    job = dict(polled.get("job") or get_multiscene_job_record(arg) or {})
+    return await update.message.reply_text(
+        multiscene_job_status_text(job, admin=True),
+        parse_mode="HTML",
+        reply_markup=engine_async_status_keyboard(arg, "multiscene") if job else None,
+    )
+
+def shopaikey_video_status_variant_urls(task_id: str) -> list[tuple[str, str]]:
+    safe_task = str(task_id or "").strip()
+    if not re.match(r"^[A-Za-z0-9_.:-]{3,180}$", safe_task):
+        return []
+    variants = [
+        ("generation", f"/video/generations/{safe_task}"),
+        ("generation_status_suffix", f"/video/generations/{safe_task}/status"),
+        ("generation_status_prefix", f"/video/generations/status/{safe_task}"),
+        ("videos", f"/videos/{safe_task}"),
+        ("videos_content", f"/videos/{safe_task}/content"),
+    ]
+    urls: list[tuple[str, str]] = []
+    for name, endpoint in variants:
+        final_url = join_shopaikey_url(SHOPAIKEY_BASE_URL, endpoint)
+        if "/v1/v1/" not in final_url:
+            urls.append((name, final_url))
+    return urls
+
+async def probe_shopaikey_video_status_variant(task_id: str, *, content_only: bool = False) -> list[dict]:
+    if not SHOPAIKEY_API_KEY:
+        return [{"variant": "configured", "ok": False, "status": "MISSING_API_KEY"}]
+    results: list[dict] = []
+    variants = shopaikey_video_status_variant_urls(task_id)
+    if content_only:
+        variants = [(name, url) for name, url in variants if name.endswith("content")]
+    async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        for name, url in variants:
+            started = time.perf_counter()
+            try:
+                res = await client.get(url, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}", "Accept": "application/json,video/mp4,*/*"})
+                latency_ms = int((time.perf_counter() - started) * 1000)
+                content_type = str(res.headers.get("content-type") or "")
+                is_mp4 = bool(res.status_code < 400 and res.content and ("video" in content_type.lower() or len(res.content) > 1024))
+                payload = {}
+                if "json" in content_type.lower():
+                    try:
+                        payload = res.json()
+                    except Exception:
+                        payload = {}
+                result_url = shopaikey_video_result_url(payload) if payload else ""
+                status = normalize_shopaikey_video_status(str((shopaikey_video_payload_data(payload) or {}).get("status") or payload.get("status") or "")) if payload else ("SUCCESS" if is_mp4 else "UNKNOWN")
+                results.append({
+                    "variant": name,
+                    "http_status": int(res.status_code),
+                    "latency_ms": latency_ms,
+                    "ok": bool((payload and (result_url or status in {"SUCCESS", "IN_PROGRESS", "QUEUED"})) or is_mp4),
+                    "json": bool(payload),
+                    "mp4_bytes": len(res.content or b"") if is_mp4 else 0,
+                    "result_url": "yes" if result_url else "no",
+                    "provider_status": status,
+                })
+            except Exception as exc:
+                results.append({"variant": name, "ok": False, "http_status": 0, "error": type(exc).__name__})
+    return results
+
+def shopaikey_video_route_status_lines() -> list[str]:
+    variants = shopaikey_video_status_variant_urls("TASK_ID")
+    return [
+        "🎞 <b>SHOPAIKEY VIDEO ROUTE STATUS</b>",
+        "",
+        f"• Submit configured: <code>{'yes' if SHOPAIKEY_VIDEO_URL else 'no'}</code>",
+        f"• Production status route: <code>{'env' if SHOPAIKEY_VIDEO_STATUS_ENDPOINT else 'submit_url_plus_task_id'}</code>",
+        f"• Base avoids /v1/v1: <code>{'yes' if all('/v1/v1/' not in url for _name, url in variants) else 'no'}</code>",
+        "• Diagnostic variants require existing task id:",
+        *[f"  - <code>{html.escape(name)}</code>: <code>{html.escape(url.replace('TASK_ID', '{task_id}'))}</code>" for name, url in variants],
+        "• Provider secret: <code>hidden</code>",
+    ]
+
+async def cmd_shopaikey_video_route_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    return await update.message.reply_text("\n".join(shopaikey_video_route_status_lines()), parse_mode="HTML", disable_web_page_preview=True)
+
+async def cmd_shopaikey_video_status_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    if not arg:
+        return await update.message.reply_text("Cú pháp: /shopaikey_video_job_status <task_id_or_db_job_id>")
+    db_job = shopaikey_job_by_id(int(arg)) if arg.isdigit() else shopaikey_job_by_task_id(arg)
+    task_id = str((db_job or {}).get("task_id") or ("" if arg.isdigit() else arg)).strip()
+    if not task_id:
+        return await update.message.reply_text("Không tìm thấy provider task id thật cho job này. Không gọi provider.")
+    result = await shopaikey_video_job_status(task_id)
+    return await update.message.reply_text(
+        "🎞 <b>SHOPAIKEY VIDEO JOB STATUS</b>\n\n"
+        f"• Provider task: <code>{html.escape(mask_provider_task_id(task_id))}</code>\n"
+        f"• Status: <code>{html.escape(str(result.get('status') or '-'))}</code>\n"
+        f"• HTTP: <code>{int(result.get('http_status') or 0)}</code>\n"
+        f"• Provider status: <code>{html.escape(sanitize_provider_status_text(result.get('provider_status') or '-', task_id, 160))}</code>\n"
+        f"• Result URL: <code>{'yes' if str(result.get('result_url') or '').strip() else 'no'}</code>\n"
+        f"• Error: <code>{html.escape(sanitize_provider_status_text(result.get('fail_reason') or result.get('detail') or '-', task_id, 220))}</code>\n"
+        "• Provider secret: <code>hidden</code>",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+
+async def cmd_shopaikey_video_content_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    if not has_admin_paid_confirmation(context):
+        return await update.message.reply_text(admin_paid_confirm_required_text("/shopaikey_video_content_probe <db_job_id>"), parse_mode="HTML")
+    args = args_without_admin_paid_confirmation(context.args or [])
+    arg = str((args or [""])[0] or "").strip()
+    if not arg:
+        return await update.message.reply_text("Cú pháp: /shopaikey_video_content_probe <db_job_id_or_task_id> --confirm-paid")
+    db_job = shopaikey_job_by_id(int(arg)) if arg.isdigit() else shopaikey_job_by_task_id(arg)
+    task_id = str((db_job or {}).get("task_id") or ("" if arg.isdigit() else arg)).strip()
+    if not task_id:
+        return await update.message.reply_text("Không có task id thật để probe content. Không gọi provider.")
+    probes = await probe_shopaikey_video_status_variant(task_id, content_only=True)
+    lines = [
+        "🎞 <b>SHOPAIKEY VIDEO CONTENT PROBE</b>",
+        "",
+        f"• Provider task: <code>{html.escape(mask_provider_task_id(task_id))}</code>",
+    ]
+    for item in probes:
+        lines.append(
+            f"• {html.escape(str(item.get('variant') or '-'))}: "
+            f"http=<code>{int(item.get('http_status') or 0)}</code> "
+            f"ok=<code>{'yes' if item.get('ok') else 'no'}</code> "
+            f"mp4_bytes=<code>{int(item.get('mp4_bytes') or 0)}</code>"
+        )
+    lines.append("• Provider secret: <code>hidden</code>")
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_key4u_video_route_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    status = key4u_provider_instance().get_status()
+    lines = [
+        "🎞 <b>KEY4U VIDEO ROUTE STATUS</b>",
+        "",
+        f"• Provider configured: <code>{'yes' if key4u_provider_instance().is_configured() else 'no'}</code>",
+        f"• Submit route: <code>{html.escape(str(status.get('video_submit_final_url') or 'missing'))}</code>",
+        f"• Fetch route: <code>{html.escape(str(status.get('video_fetch_final_url') or 'missing'))}</code>",
+        f"• No /v1/v1: <code>{'yes' if '/v1/v1/' not in str(status.get('video_submit_final_url') or '') + str(status.get('video_fetch_final_url') or '') else 'no'}</code>",
+        "• Provider secret: <code>hidden</code>",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+
+async def cmd_key4u_video_status_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    if not arg:
+        return await update.message.reply_text("Cú pháp: /key4u_video_job_status <task_id_or_db_job_id>")
+    db_job = shopaikey_job_by_id(int(arg)) if arg.isdigit() else shopaikey_job_by_task_id(arg)
+    task_id = str((db_job or {}).get("task_id") or ("" if arg.isdigit() else arg)).strip()
+    if not task_id:
+        return await update.message.reply_text("Không tìm thấy provider task id thật cho job này. Không gọi provider.")
+    result = await key4u_provider_instance().poll_video_task(task_id)
+    return await update.message.reply_text(
+        "🎞 <b>KEY4U VIDEO JOB STATUS</b>\n\n"
+        f"• Provider task: <code>{html.escape(mask_provider_task_id(task_id))}</code>\n"
+        f"• Status: <code>{html.escape(str(result.get('status') or '-'))}</code>\n"
+        f"• HTTP: <code>{int(result.get('http_status') or 0)}</code>\n"
+        f"• Result URL: <code>{'yes' if str(result.get('result_url') or result.get('output_url') or '').strip() else 'no'}</code>\n"
+        f"• Error: <code>{html.escape(sanitize_provider_status_text(result.get('error_message_safe') or result.get('detail') or '-', task_id, 220))}</code>\n"
+        "• Provider secret: <code>hidden</code>",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
     )
 
 async def cmd_video_prompt_context_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -62859,6 +63470,47 @@ async def cmd_subtitle_dub_status(update: Update, context: ContextTypes.DEFAULT_
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await update.message.reply_text(subtitle_dub_status_text(), parse_mode="HTML")
 
+def subtitle_dub_job_status_text(job: dict) -> str:
+    if not job:
+        return "⚠️ Chưa có subtitle/dub internal job. Pipeline hiện xử lý immediate khi có media thật."
+    return (
+        engine_async_status_text(job, admin=True)
+        + "\n"
+        + f"• SRT blocks: <code>{int(job.get('srt_blocks') or 0)}</code>\n"
+        + f"• Audio bytes: <code>{int(job.get('audio_bytes') or 0)}</code>\n"
+        + f"• Video bytes: <code>{int(job.get('video_bytes') or 0)}</code>\n"
+        + f"• Mux: <code>{html.escape(str(job.get('mux_status') or ('disabled' if not VIDEO_DUB_MUX_ENABLED else '-')))}</code>"
+    )
+
+async def cmd_subtitle_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    jobs = list_engine_async_jobs("subtitle_dub", limit=8)
+    if not jobs:
+        return await update.message.reply_text("Chưa có subtitle/dub job. Pipeline immediate: có output thì trả ngay SRT/audio/video; không có bytes thì fail sạch.")
+    lines = ["🎬 <b>SUBTITLE/DUB JOBS</b>", ""]
+    for job in jobs:
+        lines.append(
+            f"• <code>{html.escape(str(job.get('internal_job_id') or '-'))}</code> "
+            f"mode=<code>{html.escape(str(job.get('mode') or '-'))}</code> "
+            f"status=<code>{html.escape(str(job.get('status') or '-'))}</code> "
+            f"srt=<code>{int(job.get('srt_blocks') or 0)}</code> "
+            f"audio=<code>{int(job.get('audio_bytes') or 0)}</code> "
+            f"mux=<code>{html.escape(str(job.get('mux_status') or '-'))}</code>"
+        )
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_subtitle_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    if not arg:
+        return await cmd_subtitle_jobs(update, context)
+    return await update.message.reply_text(subtitle_dub_job_status_text(get_engine_async_job(arg)), parse_mode="HTML")
+
+async def cmd_dub_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_subtitle_job(update, context)
+
 async def cmd_translation_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_translation_admin(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
@@ -65676,11 +66328,24 @@ async def cmd_music_suno_admin_test(update: Update, context: ContextTypes.DEFAUL
         )
         save_tool_test_result("music_suno_admin_test", "PASS", f"bytes={len(audio_bytes)}; product_path={ENGINE_PRODUCT_PATH_EXECUTOR}", uid)
         return
-    save_tool_test_result("music_suno_admin_test", str(provider_result.get("status") or "PASS_SUBMITTED"), f"provider={provider_result.get('provider')}; task_id_present=yes; product_path={ENGINE_PRODUCT_PATH_EXECUTOR}", uid)
+    job = create_music_suno_async_job(
+        user_id=uid,
+        chat_id=update.effective_chat.id,
+        provider=str(provider_result.get("provider") or ""),
+        task_id=task_id,
+        result=result_payload,
+        status="submitted",
+        charged_xu=0,
+        admin_test=True,
+    )
+    save_tool_test_result("music_suno_admin_test", str(provider_result.get("status") or "PASS_SUBMITTED"), f"provider={provider_result.get('provider')}; task_id_present=yes; internal_job={job.get('internal_job_id')}; product_path={ENGINE_PRODUCT_PATH_EXECUTOR}", uid)
     await update.message.reply_text(
-        "✅ Provider đã nhận job Suno thật. TOAN AAS không trừ Xu.\n"
-        "Kiểm tra kết quả bằng lệnh admin job/status hiện có, hoặc nút kiểm tra trong product flow nếu job được lưu trong phiên.",
+        engine_async_waiting_text(job, admin=True)
+        + "\nKiểm tra lệnh: <code>/music_suno_poll "
+        + html.escape(str(job.get("internal_job_id") or ""))
+        + "</code>",
         parse_mode="HTML",
+        reply_markup=engine_async_status_keyboard(str(job.get("internal_job_id") or ""), "music"),
     )
 
 async def cmd_key4u_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -65701,6 +66366,184 @@ async def cmd_key4u_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE)
     record_api_debug("key4u", "key4u_suno_job", smoke_status, int(result.get("http_status") or 0), detail)
     record_key4u_smoke_usage(update.effective_user.id, result, "key4u_suno_poll")
     await reply_html_lines(update, key4u_result_lines("Key4U Suno Job", result))
+
+def _admin_music_suno_job_arg(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return str((getattr(context, "args", []) or [""])[0] or "").strip()
+
+def _music_suno_job_lines(job: dict, *, admin: bool = True) -> list[str]:
+    if not job:
+        return ["⚠️ Không tìm thấy Suno job nội bộ."]
+    return engine_async_status_text(job, admin=admin).splitlines()
+
+async def cmd_music_suno_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    jobs = list_engine_async_jobs("music_suno", limit=8)
+    if not jobs:
+        return await update.message.reply_text("Chưa có music_suno internal jobs. Không có provider call mới.")
+    lines = ["🎵 <b>MUSIC SUNO JOBS</b>", ""]
+    for job in jobs:
+        lines.append(
+            f"• <code>{html.escape(str(job.get('internal_job_id') or '-'))}</code> "
+            f"{html.escape(str(job.get('status') or '-'))} "
+            f"provider=<code>{html.escape(str(job.get('provider') or '-'))}</code> "
+            f"bytes=<code>{int(job.get('output_bytes') or 0)}</code> "
+            f"updated=<code>{html.escape(str(job.get('updated_at') or '-'))}</code>"
+        )
+    lines.append("")
+    lines.append("Poll: <code>/music_suno_poll MUS-xxxx</code>")
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_music_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    job_id = _admin_music_suno_job_arg(context)
+    if not job_id:
+        return await cmd_music_suno_jobs(update, context)
+    job = get_engine_async_job(job_id)
+    return await update.message.reply_text(
+        "\n".join(_music_suno_job_lines(job, admin=True)),
+        parse_mode="HTML",
+        reply_markup=engine_async_status_keyboard(job_id, "music") if job else None,
+    )
+
+async def cmd_music_suno_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    job_id = _admin_music_suno_job_arg(context)
+    if not job_id:
+        return await update.message.reply_text("Cú pháp: /music_suno_poll <MUS-job-id>")
+    polled = await poll_music_suno_async_job(job_id, updated_by=update.effective_user.id, download=True)
+    job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
+    if polled.get("ok") and polled.get("audio_bytes"):
+        audio = video_dubbing_output_file(bytes(polled.get("audio_bytes") or b""), "toan_aas_suno_poll.mp3")
+        await context.bot.send_audio(
+            chat_id=update.effective_chat.id,
+            audio=audio,
+            filename="toan_aas_suno_poll.mp3",
+            caption=f"✅ Suno job {job_id} trả audio bytes > 0. Không trừ Xu khách.",
+        )
+    return await update.message.reply_text(
+        engine_async_status_text(job, admin=True),
+        parse_mode="HTML",
+        reply_markup=engine_async_status_keyboard(job_id, "music"),
+    )
+
+async def cmd_key4u_suno_route_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    readiness = get_suno_music_readiness()
+    key4u = dict((readiness.get("providers") or {}).get("key4u_suno") or {})
+    lines = [
+        "🎵 <b>KEY4U SUNO ROUTE STATUS</b>",
+        "",
+        f"• Key4U configured: <code>{'yes' if key4u.get('configured') else 'no'}</code>",
+        f"• Submit ready: <code>{'yes' if readiness.get('submit_ready') or key4u.get('configured') else 'no'}</code>",
+        f"• Fetch ready: <code>{'yes' if KEY4U_SUNO_QUERY_ENDPOINT else 'no'}</code>",
+        f"• Download ready: <code>{'yes' if readiness.get('download_ready') else 'no'}</code>",
+        f"• Full result ready: <code>{'yes' if readiness.get('full_result_ok') else 'no'}</code>",
+        f"• Submit endpoint: <code>{html.escape(key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT) if KEY4U_SUNO_CREATE_ENDPOINT else 'missing')}</code>",
+        f"• Fetch endpoint: <code>{html.escape(key4u_suno_fetch_final_url('{taskId}') if KEY4U_SUNO_QUERY_ENDPOINT else 'missing')}</code>",
+        "• Result fields inspected: <code>task_id, job_id, id, status, state, data, result, output, audio_url, url, file_url, download_url, stream_url</code>",
+        "• Provider secret: <code>hidden</code>",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+
+async def cmd_key4u_suno_job_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    arg = _admin_music_suno_job_arg(context)
+    if not arg:
+        return await update.message.reply_text("Cú pháp: /key4u_suno_job_status <task_id_or_MUS-job-id>")
+    internal = get_engine_async_job(arg)
+    if internal:
+        polled = await poll_music_suno_async_job(arg, updated_by=update.effective_user.id, download=False)
+        job = dict(polled.get("job") or get_engine_async_job(arg) or {})
+        return await update.message.reply_text(
+            engine_async_status_text(job, admin=True),
+            parse_mode="HTML",
+            reply_markup=engine_async_status_keyboard(arg, "music"),
+        )
+    result = await key4u_provider_instance().suno_query(arg)
+    task_id = str(result.get("task_id") or arg)
+    lines = [
+        "🎵 <b>KEY4U SUNO JOB STATUS</b>",
+        "",
+        f"• Provider task: <code>{html.escape(mask_provider_task_id(task_id))}</code>",
+        f"• Status: <code>{html.escape(str(result.get('status') or '-'))}</code>",
+        f"• HTTP: <code>{int(result.get('http_status') or 0)}</code>",
+        f"• Audio URL: <code>{'yes' if str(result.get('output_url') or '').strip() else 'no'}</code>",
+        f"• Error: <code>{html.escape(sanitize_provider_status_text(result.get('error_message_safe') or '-', task_id, 220))}</code>",
+        "• Provider secret: <code>hidden</code>",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_key4u_suno_download_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not has_admin_paid_confirmation(context):
+        return await update.message.reply_text(admin_paid_confirm_required_text("/key4u_suno_download_probe <MUS-job-id>"), parse_mode="HTML")
+    args = args_without_admin_paid_confirmation(context.args or [])
+    job_id = str((args or [""])[0] or "").strip()
+    if not job_id:
+        return await update.message.reply_text("Cú pháp: /key4u_suno_download_probe <MUS-job-id> --confirm-paid")
+    polled = await poll_music_suno_async_job(job_id, updated_by=update.effective_user.id, download=True)
+    job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
+    if polled.get("ok") and polled.get("audio_bytes"):
+        audio = video_dubbing_output_file(bytes(polled.get("audio_bytes") or b""), "toan_aas_suno_download_probe.mp3")
+        await context.bot.send_audio(
+            chat_id=update.effective_chat.id,
+            audio=audio,
+            filename="toan_aas_suno_download_probe.mp3",
+            caption=f"✅ Download probe PASS: bytes={len(polled.get('audio_bytes') or b'')}.",
+        )
+    return await update.message.reply_text(engine_async_status_text(job, admin=True), parse_mode="HTML")
+
+async def handle_engine_async_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    uid = query.from_user.id if query.from_user else 0
+    parts = str(query.data or "").split("|")
+    kind = parts[1] if len(parts) > 1 else ""
+    job_id = parts[2] if len(parts) > 2 else ""
+    if not job_id:
+        return await safe_edit_or_send(query, "⚠️ Thiếu internal job id. TOAN AAS chưa gọi provider mới.")
+    if kind == "music":
+        job = get_engine_async_job(job_id)
+        if not job:
+            return await safe_edit_or_send(query, "⚠️ Không tìm thấy job nhạc nội bộ.")
+        if not is_admin_user(uid) and str(job.get("user_id") or "") != str(uid):
+            return await safe_edit_or_send(query, "⚠️ Không tìm thấy job của bạn. TOAN AAS chưa gọi provider mới.")
+        polled = await poll_music_suno_async_job(job_id, updated_by=uid, download=True)
+        job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
+        if polled.get("ok") and polled.get("audio_bytes") and query.message:
+            audio = video_dubbing_output_file(bytes(polled.get("audio_bytes") or b""), "toan_aas_suno_status.mp3")
+            await context.bot.send_audio(
+                chat_id=query.message.chat_id,
+                audio=audio,
+                filename="toan_aas_suno_status.mp3",
+                caption=f"✅ Suno job {html.escape(job_id)} trả audio bytes > 0.",
+            )
+        return await safe_edit_or_send(
+            query,
+            engine_async_status_text(job, admin=bool(is_admin_user(uid))),
+            reply_markup=engine_async_status_keyboard(job_id, "music"),
+            parse_mode="HTML",
+        )
+    if kind == "multiscene":
+        if not is_admin_user(uid):
+            return await safe_edit_or_send(query, ENGINE_ASYNC_PUBLIC_CHECKING_VI)
+        polled = await poll_multiscene_job_once(job_id, updated_by=uid)
+        job = dict(polled.get("job") or get_multiscene_job_record(job_id) or {})
+        return await safe_edit_or_send(
+            query,
+            multiscene_job_status_text(job, admin=True),
+            reply_markup=engine_async_status_keyboard(job_id, "multiscene") if job else None,
+            parse_mode="HTML",
+        )
+    return await safe_edit_or_send(query, "⚠️ Loại job chưa được hỗ trợ. TOAN AAS chưa gọi provider mới.")
 
 async def cmd_tool_test_key4u_rerank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -72760,7 +73603,7 @@ def music_ai_admin_blockers() -> list[str]:
 def music_ai_public_guard_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
         return "Song creation is being verified. TOAN AAS has not processed the request or charged Xu. Please try again later."
-    return "Tạo bài hát đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+    return ENGINE_ASYNC_PUBLIC_CHECKING_VI
 
 def music_ai_guarded_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, admin: bool = False) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
@@ -72937,6 +73780,144 @@ async def poll_music_generation_job(result: dict, updated_by="") -> dict:
         safe_error = sanitize_provider_error(exc)[:240]
         record_music_provider_attempt(provider=provider, task_id=task_id, fetch_status="FAILED", error=safe_error, updated_by=updated_by)
         return {"ok": False, "status": "FAILED", "output_url": "", "detail": safe_error}
+
+def create_music_suno_async_job(
+    *,
+    user_id,
+    chat_id,
+    provider: str,
+    task_id: str,
+    result: dict | None = None,
+    status: str = "submitted",
+    charged_xu: int = 0,
+    admin_test: bool = False,
+) -> dict:
+    task = str(task_id or "").strip()
+    if not task:
+        raise ValueError("music suno async job requires provider task_id")
+    payload = dict(result or {})
+    job = save_engine_async_job({
+        "feature": "music_suno",
+        "user_id": str(user_id or ""),
+        "chat_id": str(chat_id or ""),
+        "provider": str(provider or ""),
+        "provider_task_id": task,
+        "status": status,
+        "progress_text": "Đã gửi yêu cầu tạo nhạc tới provider.",
+        "last_provider_status": status,
+        "output_bytes": 0,
+        "charged_xu": int(charged_xu or 0),
+        "admin_test": bool(admin_test),
+        "product_kind": music_result_product_kind(payload),
+        "duration_seconds": music_result_duration_seconds(payload) if payload else 0,
+    })
+    return job
+
+def music_suno_poll_state_from_job(job: dict) -> dict:
+    return {
+        "music_provider": str((job or {}).get("provider") or ""),
+        "music_task_id": str((job or {}).get("provider_task_id") or ""),
+    }
+
+def music_poll_status_is_processing(status: str) -> bool:
+    normalized = str(status or "").strip().lower()
+    return normalized in {
+        "submitted", "queued", "queue", "pending", "processing", "running",
+        "in_progress", "generating", "process", "pass_submitted",
+    }
+
+def music_poll_status_is_success_without_url(status: str) -> bool:
+    normalized = str(status or "").strip().upper()
+    return normalized in {"SUCCESS", "SUCCEEDED", "COMPLETED", "COMPLETE", "DONE", "FINISHED", "PASS", "PASS_FULL_RESULT", "COMPLETED_NO_AUDIO"}
+
+async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", download: bool = True) -> dict:
+    job = get_engine_async_job(internal_job_id)
+    if not job:
+        return {"ok": False, "status": "JOB_NOT_FOUND", "job": {}, "audio_bytes": b""}
+    if not str(job.get("provider_task_id") or "").strip():
+        job.update({
+            "status": "failed",
+            "error_category": "missing_provider_task_id",
+            "progress_text": "Không có provider task id thật; không tạo fake processing.",
+        })
+        save_engine_async_job(job)
+        return {"ok": False, "status": "MISSING_TASK", "job": job, "audio_bytes": b""}
+    polled = await poll_music_generation_job(music_suno_poll_state_from_job(job), updated_by=updated_by)
+    provider_task_id = str(job.get("provider_task_id") or "")
+    provider_status = str(polled.get("status") or "")
+    output_url = str(polled.get("output_url") or "").strip()
+    job["poll_count"] = int(job.get("poll_count") or 0) + 1
+    job["last_poll_at"] = now_text()
+    job["last_provider_status"] = sanitize_provider_status_text(provider_status or polled.get("detail") or "-", provider_task_id)
+    if polled.get("ok") and output_url:
+        if not download:
+            job["status"] = "downloading"
+            job["progress_text"] = "Đã có kết quả, TOAN AAS đang tải file nhạc."
+            save_engine_async_job(job)
+            return {"ok": True, "status": "OUTPUT_URL_READY", "job": job, "output_url": output_url, "audio_bytes": b""}
+        job["status"] = "downloading"
+        job["progress_text"] = "Đã có kết quả, TOAN AAS đang tải file nhạc."
+        save_engine_async_job(job)
+        audio_bytes, detail, http_status = await _download_audio_url_bytes(output_url, timeout_seconds=60.0)
+        record_music_provider_attempt(
+            provider=str(job.get("provider") or ""),
+            task_id=provider_task_id,
+            fetch_status=provider_status,
+            download_status="PASS" if audio_bytes else "FAIL_DOWNLOAD",
+            error=detail,
+            updated_by=updated_by,
+        )
+        if audio_bytes:
+            job.update({
+                "status": "completed",
+                "progress_text": "Output nhạc đã tải thành công và bytes > 0.",
+                "output_bytes": len(audio_bytes),
+                "output_path": "",
+                "error_category": "",
+                "completed_at": now_text(),
+            })
+            save_engine_async_job(job)
+            return {"ok": True, "status": "COMPLETED", "job": job, "output_url": output_url, "audio_bytes": audio_bytes}
+        job.update({
+            "status": "failed",
+            "progress_text": "Có URL kết quả nhưng tải audio thất bại; không fake success.",
+            "error_category": "audio_download_failed",
+            "last_provider_status": sanitize_provider_status_text(f"http={http_status}; {detail}", provider_task_id),
+        })
+        save_engine_async_job(job)
+        return {"ok": False, "status": "AUDIO_DOWNLOAD_FAILED", "job": job, "output_url": output_url, "audio_bytes": b""}
+    if music_poll_status_is_processing(provider_status):
+        job.update({
+            "status": "processing",
+            "progress_text": "Provider đang tạo nhạc. Thường mất vài phút.",
+            "error_category": "",
+        })
+        save_engine_async_job(job)
+        return {"ok": False, "status": "PROCESSING", "job": job, "audio_bytes": b""}
+    if music_poll_status_is_success_without_url(provider_status):
+        job.update({
+            "status": "failed",
+            "progress_text": "Provider báo xong nhưng không có audio_url/download_url/file_url hợp lệ.",
+            "error_category": "result_url_missing",
+        })
+        save_engine_async_job(job)
+        return {"ok": False, "status": "RESULT_URL_MISSING", "job": job, "audio_bytes": b""}
+    if str(provider_status or "").upper() in {"FAIL", "FAILED", "ERROR", "CANCELLED", "CANCELED"} or str(polled.get("status") or "").upper().startswith("FAIL"):
+        job.update({
+            "status": "failed",
+            "progress_text": "Provider trả lỗi khi xử lý nhạc.",
+            "error_category": "provider_failed",
+            "last_provider_status": sanitize_provider_status_text(polled.get("detail") or provider_status, provider_task_id),
+        })
+        save_engine_async_job(job)
+        return {"ok": False, "status": "PROVIDER_FAILED", "job": job, "audio_bytes": b""}
+    job.update({
+        "status": "processing",
+        "progress_text": "Provider chưa trả file tải về; tiếp tục chờ/poll.",
+        "last_provider_status": sanitize_provider_status_text(provider_status or polled.get("detail") or "unknown", provider_task_id),
+    })
+    save_engine_async_job(job)
+    return {"ok": False, "status": "PROCESSING", "job": job, "audio_bytes": b""}
 
 async def poll_music_preview_job(result: dict, updated_by="") -> dict:
     preview_state = dict(result or {})
@@ -76199,19 +77180,39 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 f"✅ Đã gửi {music_confirm_product_label(result, lang)} phía trên. Đã trừ: {charged} Xu.",
                 reply_markup=music_hub_keyboard(lang, ctx),
             )
+        music_job = create_music_suno_async_job(
+            user_id=user_id,
+            chat_id=query.message.chat_id,
+            provider=str(submitted.get("provider") or ""),
+            task_id=music_task_id,
+            result=result,
+            status="submitted",
+            charged_xu=charged,
+            admin_test=bool(is_admin_user(user_id)),
+        )
         result.update({
             "music_task_id": music_task_id,
             "music_provider": str(submitted.get("provider") or ""),
+            "music_internal_job_id": str(music_job.get("internal_job_id") or ""),
             "music_status": "submitted",
             "music_charged_xu": charged,
             "music_refunded": False,
             "music_submitted_at": now_text(),
         })
         save_music_guided_result(user_id, result)
-        charge_line = f"Đã trừ: {charged} Xu. " if charged > 0 else "Admin test: chưa trừ Xu. "
+        charge_line = f"Đã trừ: {charged} Xu. " if charged > 0 else "Admin test: chưa trừ Xu khách. "
+        waiting_text = engine_async_waiting_text(music_job, admin=bool(is_admin_user(user_id)))
+        if charged > 0:
+            waiting_text = (
+                "✅ Provider đã nhận job thật. TOAN AAS đang xử lý.\n"
+                f"{charge_line}\n"
+                "Trạng thái hiện tại: đang chờ provider.\n"
+                "Bạn có thể bấm 🔄 Kiểm tra trạng thái."
+            )
         return await query.message.reply_text(
             f"✅ Đã xác nhận tạo {music_confirm_product_label(result, lang)}.\n"
-            f"{charge_line}Provider đã nhận task thật; bạn có thể kiểm tra kết quả sau một chút.",
+            f"{waiting_text}",
+            parse_mode="HTML",
             reply_markup=music_ai_status_keyboard(lang, ctx),
         )
     if action == "music_ai_status":
@@ -76219,6 +77220,62 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         if not result.get("music_task_id"):
             return await query.message.reply_text("⚠️ Chưa có job nhạc đang xử lý.", reply_markup=music_hub_keyboard(lang, ctx))
+        internal_job_id = str(result.get("music_internal_job_id") or "").strip()
+        if not internal_job_id and result.get("music_task_id"):
+            try:
+                recovered = create_music_suno_async_job(
+                    user_id=user_id,
+                    chat_id=query.message.chat_id,
+                    provider=str(result.get("music_provider") or ""),
+                    task_id=str(result.get("music_task_id") or ""),
+                    result=result,
+                    status=str(result.get("music_status") or "submitted"),
+                    charged_xu=int(result.get("music_charged_xu") or 0),
+                    admin_test=bool(is_admin_user(user_id)),
+                )
+                internal_job_id = str(recovered.get("internal_job_id") or "")
+                result["music_internal_job_id"] = internal_job_id
+                save_music_guided_result(user_id, result)
+            except Exception:
+                internal_job_id = ""
+        if internal_job_id:
+            polled_job = await poll_music_suno_async_job(internal_job_id, updated_by=user_id, download=True)
+            job_snapshot = dict(polled_job.get("job") or get_engine_async_job(internal_job_id) or {})
+            audio_bytes = bytes(polled_job.get("audio_bytes") or b"")
+            if polled_job.get("ok") and audio_bytes:
+                result.update({"music_status": "completed", "music_completed_at": now_text()})
+                save_music_guided_result(user_id, result)
+                try:
+                    audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_music.mp3")
+                    await context.bot.send_audio(
+                        chat_id=query.message.chat_id,
+                        audio=audio_file,
+                        filename="toan_aas_music.mp3",
+                        caption=f"✅ Bản nhạc đầy đủ {music_result_duration_seconds(result)} giây của TOAN AAS.",
+                    )
+                except Exception as exc:
+                    logger.warning("music output send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
+                    return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
+                return await query.message.reply_text("✅ Đã gửi bản nhạc đầy đủ phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
+            job_status = str((job_snapshot or {}).get("status") or "").lower()
+            if job_status == "failed":
+                charged = int(result.get("music_charged_xu") or 0)
+                if charged > 0 and not result.get("music_refunded"):
+                    refund_charged_credit(user_id, charged, event_type="music_ai_job_refund", note=f"music job failed:{job_snapshot.get('error_category')}", was_charged=True)
+                    result["music_refunded"] = True
+                result["music_status"] = "failed"
+                save_music_guided_result(user_id, result)
+                return await query.message.reply_text(
+                    "⚠️ Tạo nhạc chưa thành công. TOAN AAS đã hoàn Xu nếu có phát sinh.\n\n"
+                    + engine_async_status_text(job_snapshot, admin=bool(is_admin_user(user_id))),
+                    parse_mode="HTML",
+                    reply_markup=music_hub_keyboard(lang, ctx),
+                )
+            return await query.message.reply_text(
+                engine_async_status_text(job_snapshot, admin=bool(is_admin_user(user_id))),
+                parse_mode="HTML",
+                reply_markup=music_ai_status_keyboard(lang, ctx),
+            )
         polled = await poll_music_generation_job(result, updated_by=user_id)
         output_url = str(polled.get("output_url") or "")
         if polled.get("ok") and output_url:
@@ -125887,6 +126944,30 @@ async def execute_video_dubbing_pipeline(
             was_charged=charged > 0,
         )
         raise
+    internal_job_id = ""
+    try:
+        output_size = len(srt_bytes or b"") + len(audio_bytes or b"") + len(video_output or b"")
+        mux_state = "completed" if video_output else ("disabled" if not VIDEO_DUB_MUX_ENABLED else "skipped_or_not_requested")
+        job = save_engine_async_job({
+            "feature": "subtitle_dub",
+            "user_id": str(uid or ""),
+            "chat_id": str(getattr(query.message, "chat_id", "") or ""),
+            "provider": ",".join(item for item in (asr_provider, tts_provider) if item) or "subtitle_pipeline",
+            "provider_task_id": "",
+            "status": "completed",
+            "progress_text": f"ASR completed; SRT blocks={srt_bytes.decode('utf-8', errors='ignore').count('-->') if srt_bytes else 0}; audio bytes={len(audio_bytes or b'')}; mux={mux_state}",
+            "last_provider_status": f"asr={asr_provider or '-'}; tts={tts_provider or '-'}; mux={mux_state}",
+            "output_bytes": output_size,
+            "mode": mode,
+            "srt_blocks": srt_bytes.decode("utf-8", errors="ignore").count("-->") if srt_bytes else 0,
+            "audio_bytes": len(audio_bytes or b""),
+            "video_bytes": len(video_output or b""),
+            "mux_status": mux_state,
+            "charged_xu": charged,
+        })
+        internal_job_id = str(job.get("internal_job_id") or "")
+    except Exception as exc:
+        logger.warning("subtitle/dub internal job save failed | %s", sanitize_log_text(str(exc))[:180])
     return {
         "ok": True,
         "mode": mode,
@@ -125896,6 +126977,7 @@ async def execute_video_dubbing_pipeline(
         "has_subtitle": bool(srt_bytes),
         "has_audio": bool(audio_bytes),
         "has_video": bool(video_output),
+        "internal_job_id": internal_job_id,
     }
 
 async def handle_video_dubbing_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -128578,6 +129660,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_multiscene_status", cmd_video_multiscene_status))
     tg_app.add_handler(CommandHandler("video_multiscene_engine_status", cmd_video_multiscene_status))
     tg_app.add_handler(CommandHandler("tool_test_video_multiscene", cmd_tool_test_video_multiscene))
+    tg_app.add_handler(CommandHandler("video_jobs", cmd_video_jobs))
+    tg_app.add_handler(CommandHandler("video_job", cmd_video_job))
+    tg_app.add_handler(CommandHandler("video_multiscene_job", cmd_video_multiscene_job))
+    tg_app.add_handler(CommandHandler("video_multiscene_poll", cmd_video_multiscene_poll))
     tg_app.add_handler(CommandHandler("public_product_guard_status", cmd_public_product_guard_status))
     tg_app.add_handler(CommandHandler("test_all_safe", cmd_test_all_safe))
     tg_app.add_handler(CommandHandler("test_all_video", cmd_test_all_video))
@@ -128615,6 +129701,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_wf_i2v", cmd_tool_test_workflow_image_to_video))
     tg_app.add_handler(CommandHandler("tool_test_shopaikey_video", cmd_tool_test_shopaikey_video))
     tg_app.add_handler(CommandHandler("shopaikey_video_job", cmd_shopaikey_video_job))
+    tg_app.add_handler(CommandHandler("shopaikey_video_route_status", cmd_shopaikey_video_route_status))
+    tg_app.add_handler(CommandHandler("shopaikey_video_job_status", cmd_shopaikey_video_status_job))
+    tg_app.add_handler(CommandHandler("shopaikey_video_content_probe", cmd_shopaikey_video_content_probe))
     tg_app.add_handler(CommandHandler("tool_test_video_submit", cmd_tool_test_shopaikey_video))
     tg_app.add_handler(CommandHandler("tool_test_video_fetch", cmd_shopaikey_video_job))
     tg_app.add_handler(CommandHandler("tool_test_video_200", cmd_tool_test_video_200))
@@ -128626,6 +129715,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_key4u_video_model", cmd_tool_test_key4u_video_model))
     tg_app.add_handler(CommandHandler("tool_test_key4u_video_all", cmd_tool_test_key4u_video_all))
     tg_app.add_handler(CommandHandler("key4u_video_job", cmd_key4u_video_job))
+    tg_app.add_handler(CommandHandler("key4u_video_route_status", cmd_key4u_video_route_status))
+    tg_app.add_handler(CommandHandler("key4u_video_job_status", cmd_key4u_video_status_job))
     tg_app.add_handler(CommandHandler("tool_test_key4u_tts", cmd_tool_test_key4u_tts))
     tg_app.add_handler(CommandHandler("tool_test_key4u_stt", cmd_tool_test_key4u_stt))
     tg_app.add_handler(CommandHandler("tool_test_key4u_suno", cmd_tool_test_key4u_suno))
@@ -128633,6 +129724,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_suno_song", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("tool_test_music_suno", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("music_suno_admin_test", cmd_music_suno_admin_test))
+    tg_app.add_handler(CommandHandler("music_suno_jobs", cmd_music_suno_jobs))
+    tg_app.add_handler(CommandHandler("music_suno_job", cmd_music_suno_job))
+    tg_app.add_handler(CommandHandler("music_suno_poll", cmd_music_suno_poll))
+    tg_app.add_handler(CommandHandler("key4u_suno_route_status", cmd_key4u_suno_route_status))
+    tg_app.add_handler(CommandHandler("key4u_suno_job_status", cmd_key4u_suno_job_status))
+    tg_app.add_handler(CommandHandler("key4u_suno_download_probe", cmd_key4u_suno_download_probe))
     tg_app.add_handler(CommandHandler("key4u_suno_job", cmd_key4u_suno_job))
     tg_app.add_handler(CommandHandler("suno_job", cmd_key4u_suno_job))
     tg_app.add_handler(CommandHandler("tool_test_key4u_rerank", cmd_tool_test_key4u_rerank))
@@ -128651,6 +129748,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_subtitle_plus_dub", cmd_tool_test_subtitle_plus_dub))
     tg_app.add_handler(CommandHandler("subtitle_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("dub_status", cmd_subtitle_dub_status))
+    tg_app.add_handler(CommandHandler("subtitle_jobs", cmd_subtitle_jobs))
+    tg_app.add_handler(CommandHandler("subtitle_job", cmd_subtitle_job))
+    tg_app.add_handler(CommandHandler("dub_job", cmd_dub_job))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_provider_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_engine_status", cmd_voice_engine_status))
@@ -129261,6 +130361,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_create_media_callback, pattern=r"^create_media\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_frame_video_callback, pattern=r"^framevideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_engine_async_job_callback, pattern=r"^enginejob\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_video_job_callback, pattern=r"^shopai_video_job\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_human_support_callback, pattern=r"^support\|"))

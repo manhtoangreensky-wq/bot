@@ -39,7 +39,7 @@ def test_public_video_submit_forces_public_keyboard_even_for_admin_flow():
 
 def test_multiscene_guard_copy_is_clean_and_no_provider_terms():
     text = bot.VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT
-    assert text == "Tạo video nhiều cảnh đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+    assert text == "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
     for forbidden in ("kiểm thử", "provider", "chi phí", "ShopAIKey", "Job", "Task", "User", "task_id", "user_id", "API"):
         assert forbidden not in text
 
