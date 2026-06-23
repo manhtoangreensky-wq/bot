@@ -35,7 +35,7 @@ def test_execute_engine_blocks_missing_adapter_without_fake_success(monkeypatch)
     assert result["status"] == "GATE_BLOCKED"
     assert result.get("job_created") is not True
     assert "music_song" in result["message"]
-    assert "component kỹ thuật" in result["message"]
+    assert "adapter chưa sẵn sàng hoặc thiếu cấu hình thật" in result["message"]
     assert bot.ADMIN_PAID_CONFIRM_FLAG not in result["message"]
 
 
