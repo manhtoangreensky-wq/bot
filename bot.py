@@ -40535,6 +40535,17 @@ def store_customer_feedback(user, category: str, content: str, context: str = ""
     finally:
         conn.close()
 
+def clear_shopaikey_pending_confirmations_for_user(user_id) -> bool:
+    uid = str(user_id or "")
+    if not uid:
+        return False
+    cleared = False
+    for token, payload in list(SHOPAIKEY_PENDING_CONFIRMATIONS.items()):
+        if str((payload or {}).get("user_id") or "") == uid:
+            SHOPAIKEY_PENDING_CONFIRMATIONS.pop(token, None)
+            cleared = True
+    return cleared
+
 def clear_media_creator_pending_states(user_id) -> bool:
     free_hub_cleared = clear_free_hub_pending(user_id)
     support_cleared = clear_support_ticket_pending(user_id)
@@ -40561,7 +40572,8 @@ def clear_media_creator_pending_states(user_id) -> bool:
     video_finalization_cleared = clear_video_finalization_state(user_id)
     video_addon_cleared = clear_video_addon_state(user_id)
     marketing_cleared = clear_marketing_pending(user_id)
-    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or product_context_cleared or music_guided_cleared or translation_menu_cleared or video_editor_cleared or video_dubbing_cleared or video_finalization_cleared or video_addon_cleared or marketing_cleared)
+    shopaikey_confirm_cleared = clear_shopaikey_pending_confirmations_for_user(user_id)
+    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or product_context_cleared or music_guided_cleared or translation_menu_cleared or video_editor_cleared or video_dubbing_cleared or video_finalization_cleared or video_addon_cleared or marketing_cleared or shopaikey_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -71938,12 +71950,18 @@ def music_ai_output_price_xu(duration_seconds, product_kind: str = "background")
         MUSIC_AI_PRICE_ROUND_TO_XU,
     )
 
+def music_song_length_mode(result: dict | None = None) -> str:
+    result = dict(result or {})
+    mode = str(result.get("song_length_mode") or result.get("song_product") or "").strip().lower()
+    return mode if mode in {"half", "full"} else ""
+
 def music_result_duration_seconds(result: dict | None = None) -> int:
     result = dict(result or {})
-    if result.get("song_product") == "half":
-        return normalize_music_duration_seconds(result.get("guided_duration") or 60, 60)
-    if result.get("song_product") == "full":
-        return normalize_music_duration_seconds(result.get("guided_duration") or 120, 120)
+    package_mode = music_song_length_mode(result)
+    if package_mode == "half":
+        return 60
+    if package_mode == "full":
+        return 120
     return normalize_music_duration_seconds(
         result.get("guided_duration_seconds") or result.get("guided_duration") or MUSIC_AI_SHORT_DURATION_SECONDS,
         MUSIC_AI_SHORT_DURATION_SECONDS,
@@ -71951,9 +71969,10 @@ def music_result_duration_seconds(result: dict | None = None) -> int:
 
 def music_result_product_kind(result: dict | None = None) -> str:
     result = dict(result or {})
-    if result.get("song_product") == "half":
+    package_mode = music_song_length_mode(result)
+    if package_mode == "half":
         return "song_half"
-    if result.get("song_product") == "full":
+    if package_mode == "full":
         return "song_full"
     if result.get("song_product") == "seconds":
         return "song_seconds"
@@ -71962,6 +71981,30 @@ def music_result_product_kind(result: dict | None = None) -> str:
 def music_result_price_xu(result: dict | None = None) -> int:
     result = dict(result or {})
     return music_ai_output_price_xu(music_result_duration_seconds(result), music_result_product_kind(result))
+
+def music_song_length_selection_text(result: dict | None = None, lang: str = "vi") -> str:
+    result = dict(result or {})
+    mode = music_song_length_mode(result)
+    price = music_result_price_xu(result)
+    if music_ui_lang(lang=lang) != "vi":
+        if mode == "half":
+            return f"Selected: Half song.\nTOAN AAS will create a short complete song segment and will not cut mid-sentence.\nEstimated price: {price} Xu."
+        if mode == "full":
+            return f"Selected: Full song.\nTOAN AAS will create a complete song with clear structure.\nEstimated price: {price} Xu."
+        return f"Estimated price: {price} Xu."
+    if mode == "half":
+        return (
+            "Đã chọn: Nửa bài.\n"
+            "TOAN AAS sẽ tạo một đoạn/bài ngắn hoàn chỉnh, không cắt giữa câu.\n"
+            f"Giá dự kiến: {price} Xu."
+        )
+    if mode == "full":
+        return (
+            "Đã chọn: Full bài.\n"
+            "TOAN AAS sẽ tạo một bài hoàn chỉnh có cấu trúc rõ ràng.\n"
+            f"Giá dự kiến: {price} Xu."
+        )
+    return f"Giá dự kiến: {price} Xu."
 
 def music_song_product_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
@@ -72076,11 +72119,12 @@ def music_song_step_text(step: str, result: dict | None = None, lang: str = "vi"
         "mood": "🎭 <b>Chọn cảm xúc</b>",
         "vocal": "🎤 <b>Chọn giọng hát</b>",
     }
+    package_mode = music_song_length_mode(result)
     product = {
         "seconds": f"Có lời theo {music_result_duration_seconds(result)} giây",
         "half": "Nửa bài đủ lời",
         "full": "Hoàn chỉnh một bài",
-    }.get(str(result.get("song_product") or ""), "Bài hát có lời")
+    }.get(package_mode or str(result.get("song_product") or ""), "Bài hát có lời")
     return f"{titles.get(step, '🎤 <b>Tạo bài hát có lời</b>')}\n\nSản phẩm: <b>{product}</b>\n\n{labels.get(step, 'Chọn một lựa chọn bên dưới.')}"
 
 def music_guided_label(options: list[tuple[str, str, str]], key: str, lang: str = "vi") -> str:
@@ -72155,18 +72199,23 @@ def music_guided_description_from_result(result: dict, lang: str = "vi") -> str:
     purpose = music_guided_label(MUSIC_GUIDED_PURPOSES, str(result.get("guided_purpose") or "sales_video"), lang)
     style = music_guided_label(MUSIC_GUIDED_STYLES, str(result.get("guided_style") or "cinematic"), lang)
     mood = music_guided_label(MUSIC_GUIDED_MOODS, str(result.get("guided_mood") or "cheerful"), lang)
-    duration = music_guided_label(MUSIC_GUIDED_DURATIONS, str(result.get("guided_duration") or "18s"), lang)
+    package_mode = music_song_length_mode(result)
+    duration = (
+        "nửa bài" if package_mode == "half"
+        else "full bài" if package_mode == "full"
+        else music_guided_label(MUSIC_GUIDED_DURATIONS, str(result.get("guided_duration") or "18s"), lang)
+    )
     song_requirement = ""
-    if result.get("song_product") == "half":
+    if package_mode == "half":
         song_requirement = " Half-song product with coherent complete lyrics, full sentences, clear opening/verse/chorus, never cut mid-sentence."
-    elif result.get("song_product") == "full":
+    elif package_mode == "full":
         song_requirement = " Full-song product with complete original lyrics and a finished verse/chorus/bridge structure."
     if music_ui_lang(lang=lang) != "vi":
         return f"Guided AI music: purpose={purpose}; style={style}; mood={mood}; duration={duration}; original safe melody; no famous artist imitation.{song_requirement}"
     song_requirement_vi = ""
-    if result.get("song_product") == "half":
+    if package_mode == "half":
         song_requirement_vi = " Nửa bài phải đủ câu, có mở/verse/điệp khúc rõ ràng và không cắt giữa câu."
-    elif result.get("song_product") == "full":
+    elif package_mode == "full":
         song_requirement_vi = " Bài hoàn chỉnh phải có lời nguyên bản và cấu trúc verse/điệp khúc/bridge kết thúc trọn vẹn."
     return f"Tạo nhạc theo hướng dẫn: mục đích {purpose}; phong cách {style}; cảm xúc {mood}; thời lượng {duration}; giai điệu nguyên bản, an toàn để dùng cho nội dung TOAN AAS.{song_requirement_vi}"
 
@@ -72230,7 +72279,15 @@ def music_ai_preview_text(result: dict | None = None, lang: str = "vi") -> str:
     price = music_result_price_xu(result)
     prompt = str(result.get("selected_prompt") or result.get("description") or "").strip()
     product = "bài hát có lời" if result.get("song_product") else "nhạc nền"
+    package_mode = music_song_length_mode(result)
     if music_ui_lang(lang=lang) != "vi":
+        if package_mode:
+            return (
+                "▶️ <b>Song preview</b>\n\n"
+                f"{html.escape(music_song_length_selection_text(result, lang))}\n\n"
+                f"Selected direction: <code>{html.escape(prompt[:700])}</code>\n\n"
+                "TOAN AAS does not create or send the complete song before final confirmation."
+            )
         return (
             f"▶️ <b>Short {product} preview</b>\n\n"
             f"Output duration: <b>{duration}s</b>\n"
@@ -72241,6 +72298,13 @@ def music_ai_preview_text(result: dict | None = None, lang: str = "vi") -> str:
             "If a cost-safe short preview route is unavailable, you can preview stock samples and confirm the full job only when ready."
         )
     preview_title = "Nghe thử bài hát" if result.get("song_product") else "Nghe thử nhạc"
+    if package_mode:
+        return (
+            f"▶️ <b>{preview_title}</b>\n\n"
+            f"{html.escape(music_song_length_selection_text(result, lang))}\n\n"
+            f"Hướng đã chọn: <code>{html.escape(prompt[:700])}</code>\n\n"
+            "TOAN AAS không tạo hoặc gửi toàn bộ bài trước khi xác nhận cuối."
+        )
     return (
         f"▶️ <b>{preview_title}</b>\n\n"
         f"Thời lượng bản đầy đủ: <b>{duration} giây</b>\n"
@@ -73843,6 +73907,48 @@ def voice_clone_admin_blocker(readiness: dict | None = None) -> str:
         blockers.append(f"configured_routes={routes}")
     return sanitize_log_text("; ".join(str(item) for item in blockers if str(item or "").strip()))[:700] or "voice clone provider not ready"
 
+def voice_clone_preview_fail_category(error: Exception | str = "", readiness: dict | None = None, output_bytes: int = 0, route_errors: list[str] | None = None) -> str:
+    readiness = dict(readiness or {})
+    detail = str(error or "").lower()
+    if not readiness.get("ready"):
+        return "ADAPTER_MISSING"
+    if "voice_routes_not_ready" in detail:
+        return "NO_ROUTE_READY"
+    if "voice_routes_failed" in detail or route_errors:
+        return "PROVIDER_ROUTE_FAILED"
+    if "voice_preview_cap" in detail or "preview_cap_failed" in detail:
+        return "PREVIEW_CAP_FAILED"
+    if "missing_file_id" in detail:
+        return "TELEGRAM_SEND_FAILED"
+    if int(output_bytes or 0) <= 0:
+        return "NO_OUTPUT_BYTES"
+    return "PREVIEW_FAILED"
+
+def voice_clone_admin_preview_failure_text(
+    readiness: dict | None = None,
+    *,
+    provider_name: str = "",
+    output_bytes: int = 0,
+    route_errors: list[str] | None = None,
+    error: Exception | str = "",
+) -> str:
+    readiness = dict(readiness or {})
+    routes = _engine_missing_values(readiness.get("routes"))
+    selected_adapter = provider_name or ",".join(routes) or "none"
+    fail_category = voice_clone_preview_fail_category(error, readiness, output_bytes, route_errors)
+    route_detail = " | ".join(_engine_safe(item, 80) for item in (route_errors or [])[:3]) or "-"
+    return (
+        "⚙️ <b>Bản nghe thử giọng chưa tạo được.</b>\n"
+        "TOAN AAS chưa trừ Xu. Admin diagnostic:\n\n"
+        f"• selected_adapter: <code>{_engine_safe(selected_adapter, 160)}</code>\n"
+        f"• configured: <code>{_engine_yes_no(readiness.get('ready'))}</code>\n"
+        f"• tts_smoke: <code>{_engine_safe(readiness.get('tts_smoke') or 'NOT_TESTED', 80)}</code>\n"
+        f"• clone_smoke: <code>{_engine_safe(readiness.get('clone_smoke') or 'NOT_TESTED', 80)}</code>\n"
+        f"• output_bytes: <code>{int(output_bytes or 0)}</code>\n"
+        f"• fail_category: <code>{_engine_safe(fail_category, 80)}</code>\n"
+        f"• route_errors: <code>{route_detail}</code>"
+    )
+
 def voice_clone_access_allowed(user_id, readiness: dict | None = None) -> bool:
     decision = can_user_access_product_engine(
         user_id,
@@ -73971,15 +74077,15 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         if full_generation
         else "🎙 TOAN AAS đang tạo bản nghe thử. Vui lòng chờ và không bấm lại nhiều lần."
     )
+    provider_name = ""
+    preview_bytes = b""
+    route_errors = []
     try:
         telegram_file = await context.bot.get_file(str(profile.get("source_file_id") or profile.get("source_file_ref") or ""))
         audio_bytes = bytes(await telegram_file.download_as_bytearray())
         provider_voice_id = make_minimax_voice_id(user_id, profile_id=profile_id)
         preview_text = str(guard.get("preview_text") or capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT))
         provider_file_id = ""
-        provider_name = ""
-        preview_bytes = b""
-        route_errors = []
         route_attempts = []
         async def key4u_clone_tts(text: str, voice_id: str = "", voice_style: str = ""):
             return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=admin_access)
@@ -74126,6 +74232,18 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
     except Exception as exc:
         logger.warning("voice profile preview failed | profile=%s | %s", profile_id, sanitize_log_text(str(exc))[:220])
         failed_profile = mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed", str(exc))
+        if admin_access:
+            return await query.message.reply_text(
+                voice_clone_admin_preview_failure_text(
+                    readiness,
+                    provider_name=provider_name,
+                    output_bytes=len(preview_bytes or b""),
+                    route_errors=route_errors,
+                    error=exc,
+                ),
+                parse_mode="HTML",
+                reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
+            )
         return await query.message.reply_text(
             "⚙️ Bản nghe thử giọng chưa tạo được. TOAN AAS chưa trừ Xu. Bạn có thể dùng giọng mặc định miễn phí hoặc thử lại sau.",
             reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
@@ -74336,8 +74454,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "guided_purpose": "song",
             "music_ai_kind": "lyrics",
             "song_product": product,
-            "guided_duration": "60s" if product == "half" else "120s",
-            "guided_duration_seconds": 60 if product == "half" else 120,
+            "song_length_mode": product,
             "guided_step": "song_topic",
             "lyrics_state": "lyrics_wait_topic",
             "song_topic_offset": 0,
@@ -75092,6 +75209,14 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 updated_state["step"] = "music"
                 set_video_finalization_state(user_id, updated_state)
                 return await video_finalization_return_after_addon(query, user_id, updated_state, lang)
+        if music_song_length_mode(result):
+            return await query.message.reply_text(
+                f"✅ Đã chọn gợi ý {idx}.\n\n<code>{html.escape(prompt_text)}</code>\n\n"
+                f"{html.escape(music_song_length_selection_text(result, lang))}\n\n"
+                "Bước tiếp theo là nghe thử hoặc xác nhận tạo bài hát.",
+                parse_mode="HTML",
+                reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
+            )
         return await query.message.reply_text(
             f"✅ Đã chọn gợi ý {idx}.\n\n<code>{html.escape(prompt_text)}</code>\n\n"
             f"Thời lượng bản đầy đủ: <b>{music_result_duration_seconds(result)} giây</b>. "
@@ -91405,11 +91530,84 @@ def engine_adapter_label(feature: str) -> str:
     }
     return labels.get(feature_key, feature_key or "engine")
 
+ENGINE_PUBLIC_BLOCKER_TOKENS = {
+    "feature_flag",
+    "public_flag",
+    "public_disabled",
+    "mode_disabled",
+    "public_ready",
+    "public_gate",
+    "public gate closed",
+    "public flag",
+}
+
+def _engine_missing_values(values) -> list[str]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        raw_values = [values]
+    else:
+        raw_values = list(values or [])
+    result = []
+    seen = set()
+    for item in raw_values:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        marker = text.lower()
+        if marker in seen:
+            continue
+        seen.add(marker)
+        result.append(text)
+    return result
+
+def _engine_is_public_blocker(value: str) -> bool:
+    marker = str(value or "").strip().lower()
+    if not marker:
+        return False
+    if marker in ENGINE_PUBLIC_BLOCKER_TOKENS:
+        return True
+    return marker.endswith("_public_enabled") or marker.startswith("public_")
+
+def engine_public_blockers(readiness: dict | None = None) -> list[str]:
+    readiness = dict(readiness or {})
+    blockers = _engine_missing_values(readiness.get("public_blockers"))
+    blockers.extend(item for item in _engine_missing_values(readiness.get("missing")) if _engine_is_public_blocker(item))
+    return _engine_missing_values(blockers)
+
+def engine_technical_missing(readiness: dict | None = None) -> list[str]:
+    readiness = dict(readiness or {})
+    if "technical_missing" in readiness:
+        return _engine_missing_values(readiness.get("technical_missing"))
+    return [item for item in _engine_missing_values(readiness.get("missing")) if not _engine_is_public_blocker(item)]
+
+def engine_readiness_payload(
+    *,
+    configured: bool,
+    public_ready: bool,
+    technical_missing: list[str] | None = None,
+    public_blockers: list[str] | None = None,
+    reason: str = "",
+    **extra,
+) -> dict:
+    technical = _engine_missing_values(technical_missing)
+    blockers = _engine_missing_values(public_blockers)
+    payload = {
+        **extra,
+        "configured": bool(configured),
+        "public_ready": bool(public_ready),
+        "missing": technical,
+        "technical_missing": technical,
+        "public_blockers": blockers,
+        "reason": reason or ",".join(technical or blockers) or "ready",
+    }
+    return payload
+
 def admin_product_engine_missing_text(feature: str, readiness: dict | None = None) -> str:
     label = html.escape(engine_adapter_label(feature))
-    missing = ", ".join(str(item) for item in ((readiness or {}).get("missing") or []) if str(item or "").strip())
+    missing = ", ".join(engine_technical_missing(readiness))
     detail = f" Thiếu: <code>{html.escape(missing[:220])}</code>." if missing else ""
-    return f"⚙️ Admin test chưa chạy được: {label} adapter chưa sẵn sàng hoặc thiếu cấu hình.{detail} Không gọi provider và không trừ Xu."
+    return f"⚙️ Admin test chưa chạy được: {label} thiếu component kỹ thuật hoặc cấu hình thật.{detail} Không gọi provider và không trừ Xu."
 
 def _product_engine_readiness(product_area: str, action: str = "", state: dict | None = None) -> dict:
     area = str(product_area or "").strip().lower().replace("-", "_")
@@ -91431,28 +91629,35 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             or (callable(globals().get("shopaikey_minimax_tts_configured")) and shopaikey_minimax_tts_configured())
             or (callable(globals().get("direct_minimax_tts_configured")) and direct_minimax_tts_configured())
         )
-        return {
-            "configured": configured,
-            "public_ready": bool(item.get("public_enabled") or fallback_public_ready),
-            "missing": list(item.get("missing_env") or []),
-            "reason": item.get("reason") or item.get("admin_debug_reason") or "",
-        }
+        public_ready = bool(item.get("public_enabled") or fallback_public_ready)
+        return engine_readiness_payload(
+            configured=configured,
+            public_ready=public_ready,
+            technical_missing=list(item.get("missing_env") or []),
+            public_blockers=[] if public_ready else ["public_flag"],
+            reason=item.get("reason") or item.get("admin_debug_reason") or "",
+        )
     if area in {"voice_clone", "minimax_clone", "minimax_voice_clone"}:
         item = get_minimax_voice_clone_readiness()
-        return {
-            "configured": bool(item.get("ready")),
-            "public_ready": bool(item.get("public_enabled")),
-            "missing": list(item.get("missing_env") or []),
-            "reason": item.get("reason") or "",
-        }
+        configured = bool(item.get("ready"))
+        public_ready = bool(item.get("public_enabled"))
+        return engine_readiness_payload(
+            configured=configured,
+            public_ready=public_ready,
+            technical_missing=list(item.get("missing_env") or []),
+            public_blockers=[] if public_ready else ["public_flag"],
+            reason=item.get("reason") or "",
+        )
     if area in {"music", "music_ai", "music_background", "music_song", "suno", "suno_music", "suno_song"}:
         item = get_suno_music_readiness()
-        return {
-            "configured": bool(item.get("ready")),
-            "public_ready": bool(music_ai_public_processing_ready(item)),
-            "missing": list(item.get("missing_env") or []),
-            "reason": item.get("reason") or item.get("admin_debug_reason") or "",
-        }
+        public_ready = bool(music_ai_public_processing_ready(item))
+        return engine_readiness_payload(
+            configured=bool(item.get("ready")),
+            public_ready=public_ready,
+            technical_missing=list(item.get("missing_env") or []),
+            public_blockers=[] if public_ready else ["public_flag"],
+            reason=item.get("reason") or item.get("admin_debug_reason") or "",
+        )
     subtitle_modes = {
         "subtitle": VIDEO_SUBTITLE_MODE_CREATE,
         "subtitle_auto": VIDEO_SUBTITLE_MODE_CREATE,
@@ -91469,46 +91674,78 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
         mode = normalize_video_translate_mode(action) or subtitle_modes[area]
         admin_cap = video_dubbing_capability(mode, state, public=False)
         public_cap = video_dubbing_capability(mode, state, public=True)
-        return {
-            "configured": bool(admin_cap.get("ok")),
-            "public_ready": bool(public_cap.get("ok")),
-            "missing": list(admin_cap.get("missing") or []),
-            "reason": admin_cap.get("reason") or public_cap.get("reason") or "",
-        }
+        technical_missing = [
+            item for item in _engine_missing_values(admin_cap.get("missing"))
+            if not _engine_is_public_blocker(item)
+        ]
+        if not admin_cap.get("ok") and not technical_missing:
+            if not mode:
+                technical_missing.append("mode_missing")
+            else:
+                needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
+                    mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+                    and bool(state.get("target_language") or str(state.get("translate_requested") or "") == "1")
+                )
+                if not VIDEO_ASR_ENABLED or not video_asr_provider_available():
+                    technical_missing.append("asr_adapter_missing")
+                if needs_translation and not video_translation_provider_available():
+                    technical_missing.append("subtitle_translate_adapter_missing")
+                if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and (not VIDEO_DUB_TTS_ENABLED or not video_tts_provider_available()):
+                    technical_missing.append("video_dub_tts_adapter_missing")
+        public_blockers = [
+            item for item in _engine_missing_values(public_cap.get("missing"))
+            if _engine_is_public_blocker(item)
+        ]
+        if public_cap.get("reason") in {"mode_disabled", "public_disabled"}:
+            public_blockers.append("feature_flag" if public_cap.get("reason") == "mode_disabled" else "public_flag")
+        return engine_readiness_payload(
+            configured=not bool(technical_missing),
+            public_ready=bool(public_cap.get("ok")) and not bool(technical_missing),
+            technical_missing=technical_missing,
+            public_blockers=public_blockers,
+            reason=admin_cap.get("reason") or public_cap.get("reason") or "",
+        )
     if area in {"video", "video_export", "video_ai"}:
         admin_item = get_video_prompt_export_readiness(user_is_admin=True)
         public_item = get_video_prompt_export_readiness(user_is_admin=False)
-        return {
-            "configured": bool(admin_item.get("admin_ready")),
-            "public_ready": bool(public_item.get("public_ready")),
-            "missing": list(admin_item.get("missing_admin") or []),
-            "reason": admin_item.get("reason") or "",
-        }
+        return engine_readiness_payload(
+            configured=bool(admin_item.get("admin_ready")),
+            public_ready=bool(public_item.get("public_ready")),
+            technical_missing=list(admin_item.get("missing_admin") or []),
+            public_blockers=[] if public_item.get("public_ready") else ["public_flag"],
+            reason=admin_item.get("reason") or "",
+        )
     if area in {"multiscene", "multi_scene", "video_multiscene"}:
         provider_configured = bool(
             (SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_VIDEO_URL and SHOPAIKEY_VIDEO_MODEL)
             or (KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_VIDEO_CREATE_ENDPOINT and KEY4U_VIDEO_MODEL)
         )
         scene_count = safe_int(action, safe_int(state.get("scene_count"), 3))
-        missing = []
+        technical_missing = []
         if not provider_configured:
-            missing.append("video provider config")
+            technical_missing.append("video_provider_missing")
         if not video_multiscene_stitching_available():
-            missing.append("ffmpeg/stitching wrapper")
-        return {
-            "configured": bool(provider_configured and video_multiscene_stitching_available()),
-            "public_ready": bool(video_multiscene_public_ready(scene_count)),
-            "missing": missing,
-            "reason": "ready" if not missing else ",".join(missing),
-        }
+            technical_missing.append("ffmpeg_missing")
+        if not callable(globals().get("run_multiscene_video_job")):
+            technical_missing.append("multiscene_runner_missing")
+        public_ready = bool(video_multiscene_public_ready(scene_count))
+        return engine_readiness_payload(
+            configured=not bool(technical_missing),
+            public_ready=public_ready and not bool(technical_missing),
+            technical_missing=technical_missing,
+            public_blockers=[] if public_ready else ["public_flag"],
+            reason="ready" if not technical_missing else ",".join(technical_missing),
+        )
     if area in {"long_video", "longvideo", "video_long"}:
-        return {
-            "configured": True,
-            "public_ready": bool(VIDEO_LONG_RENDER_ENABLED and VIDEO_LONG_AI_PUBLIC_ENABLED),
-            "missing": [] if VIDEO_LONG_RENDER_ENABLED else ["VIDEO_LONG_RENDER_ENABLED=false"],
-            "reason": "ready" if VIDEO_LONG_RENDER_ENABLED else "long video render guarded; planning remains open",
-        }
-    return {"configured": True, "public_ready": True, "missing": [], "reason": "unknown_area_allowed"}
+        public_ready = bool(VIDEO_LONG_RENDER_ENABLED and VIDEO_LONG_AI_PUBLIC_ENABLED)
+        return engine_readiness_payload(
+            configured=True,
+            public_ready=public_ready,
+            technical_missing=[],
+            public_blockers=[] if public_ready else ["public_flag"],
+            reason="ready" if VIDEO_LONG_RENDER_ENABLED else "long video render guarded; planning remains open",
+        )
+    return engine_readiness_payload(configured=True, public_ready=True, technical_missing=[], public_blockers=[], reason="unknown_area_allowed")
 
 def can_user_access_product_engine(
     user_id,
@@ -91523,6 +91760,7 @@ def can_user_access_product_engine(
 ) -> dict:
     admin = is_admin_user(user_id)
     readiness = _product_engine_readiness(product_area, action, state)
+    technical_missing = engine_technical_missing(readiness)
     effective_confirm_paid = bool(confirm_paid or (admin and admin_interactive_confirm and is_provider_call))
     if admin:
         if is_paid_job and not effective_confirm_paid:
@@ -91533,11 +91771,11 @@ def can_user_access_product_engine(
                 "message": admin_paid_confirm_required_text(),
                 "readiness": readiness,
             }
-        if is_provider_call and not readiness.get("configured"):
+        if is_provider_call and (not readiness.get("configured") or technical_missing):
             return {
                 "allowed": False,
                 "status": "blocked_admin_missing_provider_config",
-                "reason": readiness.get("reason") or ",".join(readiness.get("missing") or []),
+                "reason": readiness.get("reason") or ",".join(technical_missing),
                 "message": admin_product_engine_missing_text(product_area, readiness),
                 "readiness": readiness,
             }
@@ -91567,8 +91805,8 @@ def can_user_access_product_engine(
             "status": "blocked_public_maintenance",
             "reason": readiness.get("reason") or ",".join(readiness.get("missing") or []),
             "message": PUBLIC_PRODUCT_MAINTENANCE_VI,
-        "readiness": readiness,
-    }
+            "readiness": readiness,
+        }
     return {"allowed": True, "status": "allowed_public", "reason": "public ready", "message": "", "readiness": readiness}
 
 def engine_action_for_feature(feature: str, params: dict | None = None) -> str:
@@ -126904,11 +127142,37 @@ async def handle_translation_session_media(update: Update, context: ContextTypes
         )
         return True
 
+async def handle_state_reset_slash_command(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
+    command = str(text or "").strip().split(maxsplit=1)[0].split("@", 1)[0].lower()
+    if command not in {"/start", "/menu", "/help", "/commands", "/huongdan", "/guide", "/hdsd", "/status", "/runtime"}:
+        return False
+    args = str(text or "").strip().split()[1:]
+    try:
+        context.args = args
+    except Exception:
+        pass
+    if command == "/start":
+        await cmd_start(update, context)
+    elif command == "/menu":
+        await cmd_menu(update, context)
+    elif command in {"/help", "/commands"}:
+        await cmd_help(update, context)
+    elif command in {"/huongdan", "/guide", "/hdsd"}:
+        await cmd_huongdan(update, context)
+    elif command == "/status":
+        await cmd_status(update, context)
+    elif command == "/runtime":
+        await cmd_runtime(update, context)
+    return True
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     text = update.message.text.strip()
     uid  = update.effective_user.id
+
+    if await handle_state_reset_slash_command(update, context, text):
+        return
 
     if await handle_manual_approval_pending_text(update, context):
         return
