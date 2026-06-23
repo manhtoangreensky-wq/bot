@@ -175,7 +175,8 @@ def test_music_provider_guard_clean():
 
 
 def test_song_seconds_full_guided_flow():
-    assert _rows(bot.music_song_product_keyboard("vi"))[0] == ["⏱ Theo số giây", "1️⃣ Nửa bài"]
+    assert _rows(bot.music_song_product_keyboard("vi"))[0] == ["1️⃣ Nửa bài", "2️⃣ Full bài"]
+    assert "⏱ Theo số giây" not in _labels(bot.music_song_product_keyboard("vi"))
     assert "2️⃣ Full bài" in _labels(bot.music_song_product_keyboard("vi"))
     assert [item[0] for item in bot.MUSIC_SONG_GENRES] == ["pop", "ballad", "rap", "edm", "acoustic", "bolero", "custom"]
     assert "music_quick|showroom|song_back_topic" in _callbacks(bot.music_song_options_keyboard("genre", "vi"))

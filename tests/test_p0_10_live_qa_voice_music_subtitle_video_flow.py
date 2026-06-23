@@ -130,7 +130,8 @@ def test_background_music_guided_flow_purpose_style_mood_duration_options():
 
 def test_song_seconds_half_full_guided_flow_complete():
     mode_labels = _labels(bot.music_song_product_keyboard("vi"))
-    assert {"⏱ Theo số giây", "1️⃣ Nửa bài", "2️⃣ Full bài"}.issubset(set(mode_labels))
+    assert "⏱ Theo số giây" not in mode_labels
+    assert {"1️⃣ Nửa bài", "2️⃣ Full bài"}.issubset(set(mode_labels))
     genre_labels = _labels(bot.music_song_options_keyboard("genre", "vi"))
     mood_labels = _labels(bot.music_song_options_keyboard("mood", "vi"))
     vocal_labels = _labels(bot.music_song_options_keyboard("vocal", "vi"))

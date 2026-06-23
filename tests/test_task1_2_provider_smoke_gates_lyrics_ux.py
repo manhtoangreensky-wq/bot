@@ -516,9 +516,10 @@ def test_admin_music_preview_uses_clean_public_guard(monkeypatch):
     monkeypatch.setattr(bot, "submit_music_generation_job", submit)
     update, query = _callback_update("music_quick|showroom|music_ai_preview", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
-    assert calls == []
-    assert "--confirm-paid" in query.message.outputs[-1]["text"]
-    assert "Paid provider job: <code>NO</code>" in query.message.outputs[-1]["text"]
+    assert calls == [{"preview": True, "admin_smoke": True, "updated_by": user_id}]
+    assert "--confirm-paid" not in query.message.outputs[-1]["text"]
+    assert "Paid provider job: <code>NO</code>" not in query.message.outputs[-1]["text"]
+    assert "music_preview_task_id" in bot.get_music_guided_result(user_id)
 
 
 def test_admin_music_full_create_uses_clean_public_guard(monkeypatch):
@@ -543,11 +544,15 @@ def test_admin_music_full_create_uses_clean_public_guard(monkeypatch):
         return {"ok": True, "status": "PASS_SUBMITTED", "provider": "test", "task_id": "admin-full"}
 
     monkeypatch.setattr(bot, "submit_music_generation_job", submit)
+    monkeypatch.setattr(bot, "spend_fixed_credit_info", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("admin product flow must not spend Xu")))
     update, query = _callback_update("music_quick|showroom|music_ai_confirm", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
-    assert calls == []
-    assert "--confirm-paid" in query.message.outputs[-1]["text"]
-    assert "Paid provider job: <code>NO</code>" in query.message.outputs[-1]["text"]
+    assert calls == [{"preview": False, "admin_smoke": True, "updated_by": user_id}]
+    assert "--confirm-paid" not in query.message.outputs[-1]["text"]
+    assert "Paid provider job: <code>NO</code>" not in query.message.outputs[-1]["text"]
+    saved = bot.get_music_guided_result(user_id)
+    assert saved["music_task_id"] == "admin-full"
+    assert saved["music_charged_xu"] == 0
 
 
 def test_admin_music_test_button_runs_real_smoke_command(monkeypatch):

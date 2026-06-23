@@ -165,7 +165,7 @@ def test_preview_duration_one_third_capped_6():
     assert bot.calculate_preview_seconds(120) == 6
 
 
-def test_music_duration_choices_18_30_60_custom():
+def test_background_music_duration_menu_unchanged():
     labels = _labels(bot.music_guided_step_keyboard("duration", "vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     assert all(label in labels for label in ("18 giây", "30 giây", "60 giây", "Nhập thời lượng khác"))
     assert not any("6 giây" in label for label in labels)
@@ -176,9 +176,16 @@ def test_music_price_increases_with_duration():
     assert bot.music_ai_output_price_xu(60) > bot.music_ai_output_price_xu(30)
 
 
-def test_song_menu_has_seconds_half_full():
+def test_song_with_lyrics_menu_has_no_by_seconds_button():
     labels = _labels(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert labels[:3] == ["⏱ Theo số giây", "1️⃣ Nửa bài", "2️⃣ Full bài"]
+    callbacks = _callbacks(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
+    assert "⏱ Theo số giây" not in labels
+    assert not any(value.endswith("song_start_seconds") for value in callbacks)
+
+
+def test_song_with_lyrics_menu_has_half_and_full_only():
+    labels = _labels(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
+    assert labels == ["1️⃣ Nửa bài", "2️⃣ Full bài", "⬅️ Nhạc", "🏠 Menu chính"]
 
 
 def test_song_seconds_has_18_30_60_custom():
@@ -239,7 +246,8 @@ def test_music_no_public_admin_blocker(monkeypatch):
     monkeypatch.setattr(bot, "is_admin_user", lambda uid: True)
     query = CaptureQuery("music_quick|showroom|music_ai_preview", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
-    assert "--confirm-paid" in query.outputs[-1]["text"]
+    assert "--confirm-paid" not in query.outputs[-1]["text"]
+    assert "Admin test chưa chạy" in query.outputs[-1]["text"]
     assert "bảo trì/nâng cấp" not in query.outputs[-1]["text"]
 
 

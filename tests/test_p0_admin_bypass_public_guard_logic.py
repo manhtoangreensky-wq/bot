@@ -129,6 +129,21 @@ def test_suno_admin_paid_test_allowed_with_confirm_paid(monkeypatch):
     assert decision["status"] == "allowed_admin"
 
 
+def test_admin_interactive_product_confirm_counts_as_confirm_paid(monkeypatch):
+    _admin_only(monkeypatch)
+    _closed_music(monkeypatch)
+    decision = bot.can_user_access_product_engine(
+        1,
+        "music",
+        "submit",
+        is_provider_call=True,
+        is_paid_job=True,
+        admin_interactive_confirm=True,
+    )
+    assert decision["status"] == "allowed_admin"
+    assert decision["reason"] == "admin interactive product confirmation"
+
+
 def test_subtitle_public_can_open_flow():
     source = inspect.getsource(bot.handle_video_dubbing_callback)
     block = source_between(source, 'if action in {"type", "studio", "showroom"}:', 'mode = normalize_video_translate_mode(')
@@ -168,6 +183,19 @@ def test_dub_admin_paid_test_allowed_with_confirm_paid(monkeypatch):
     _admin_only(monkeypatch)
     _closed_subtitle(monkeypatch)
     decision = bot.can_user_access_product_engine(1, "video_dub", bot.VIDEO_SUBTITLE_MODE_DUB, is_provider_call=True, is_paid_job=True, confirm_paid=True)
+    assert decision["status"] == "allowed_admin"
+
+
+def test_dub_admin_interactive_confirm_counts_as_confirm_paid(monkeypatch):
+    _admin_only(monkeypatch)
+    _closed_subtitle(monkeypatch)
+    decision = bot.video_dubbing_engine_access_decision(
+        1,
+        bot.VIDEO_SUBTITLE_MODE_DUB,
+        {},
+        is_paid_job=True,
+        admin_interactive_confirm=True,
+    )
     assert decision["status"] == "allowed_admin"
 
 
@@ -226,6 +254,20 @@ def test_video_admin_paid_test_allowed_with_confirm_paid(monkeypatch):
     assert decision["status"] == "allowed_admin"
 
 
+def test_video_admin_interactive_confirm_counts_as_confirm_paid(monkeypatch):
+    _admin_only(monkeypatch)
+    _closed_video(monkeypatch)
+    decision = bot.can_user_access_product_engine(
+        1,
+        "video",
+        "export",
+        is_provider_call=True,
+        is_paid_job=True,
+        admin_interactive_confirm=True,
+    )
+    assert decision["status"] == "allowed_admin"
+
+
 def test_public_provider_step_guarded(monkeypatch):
     _admin_only(monkeypatch)
     _closed_music(monkeypatch)
@@ -248,6 +290,18 @@ def test_admin_paid_tests_require_confirm():
         block = source_between(source, f"async def {name}", "\nasync def ")
         assert "has_admin_paid_confirmation" in block
         assert "no provider call" in block
+
+
+def test_product_callbacks_do_not_render_admin_paid_smoke_warning():
+    music_source = inspect.getsource(bot.handle_music_quick_callback)
+    music_product_block = source_between(music_source, 'if action in {"music_ai_guard", "music_ai_preview"}:', 'if action == "music_ai_status":')
+    assert "admin_paid_confirm_required_text" not in music_product_block
+    assert "admin_interactive_confirm=True" in music_product_block
+
+    dub_source = inspect.getsource(bot.handle_video_dubbing_callback)
+    dub_product_block = source_between(dub_source, "confirm_modes = {", "return await safe_edit_or_send(query, video_dubbing_menu_text")
+    assert "admin_paid_confirm_required_text" not in dub_product_block
+    assert "admin_interactive_confirm=True" in dub_product_block
 
 
 def test_no_fake_success_public_progress_copy():
