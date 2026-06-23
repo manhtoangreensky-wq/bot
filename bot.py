@@ -41370,8 +41370,19 @@ def _minimax_audio_candidates(payload) -> list[str]:
             deduped.append(value)
     return deduped
 
+def shopaikey_tts_base_url_for_endpoint(endpoint: str = "") -> str:
+    endpoint_path = str(endpoint or SHOPAIKEY_TTS_ENDPOINT or "").strip()
+    if endpoint_path.startswith(("http://", "https://")):
+        return ""
+    if shopaikey_tts_uses_official_minimax(endpoint_path):
+        return SHOPAIKEY_TTS_BASE_URL
+    return SHOPAIKEY_BASE_URL
+
 def shopaikey_tts_final_url(endpoint: str = "") -> str:
-    return join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, endpoint or SHOPAIKEY_TTS_ENDPOINT)
+    endpoint_path = endpoint or SHOPAIKEY_TTS_ENDPOINT
+    if str(endpoint_path or "").strip().startswith(("http://", "https://")):
+        return str(endpoint_path or "").strip().rstrip("/")
+    return join_shopaikey_url(shopaikey_tts_base_url_for_endpoint(endpoint_path), endpoint_path)
 
 def shopaikey_suno_final_url(endpoint: str = "") -> str:
     return join_shopaikey_url(SHOPAIKEY_SUNO_BASE_URL, endpoint or "")
@@ -41744,6 +41755,42 @@ async def shopaikey_audio_transcribe_bytes(audio_bytes: bytes, content_type: str
     except Exception as exc:
         return "FAIL_PROVIDER_ERROR", "", shopaikey_sanitize_error(str(exc)), 0
 
+def make_minimax_voice_id(user_id, profile_id: int | str = "", timestamp_text: str = "") -> str:
+    uid = re.sub(r"[^0-9A-Za-z]+", "", str(user_id or ""))[-18:] or "user"
+    stamp = re.sub(r"[^0-9A-Za-z]+", "", str(timestamp_text or datetime.now().strftime("%Y%m%d%H%M%S")))[:18]
+    profile = re.sub(r"[^0-9A-Za-z-]+", "-", str(profile_id or "").strip()).strip("-")
+    parts = ["toanaas", "voice", uid, stamp]
+    if profile:
+        parts.append(profile)
+    voice_id = "-".join(part for part in parts if part)
+    voice_id = re.sub(r"[^A-Za-z0-9-]+", "-", voice_id).strip("-")[:128].rstrip("-")
+    if not re.match(r"^[A-Za-z]", voice_id or ""):
+        voice_id = f"v{voice_id}"[:128].rstrip("-")
+    if len(voice_id) < 8:
+        voice_id = (voice_id + "-toanaas")[:8].rstrip("-")
+    return voice_id
+
+def extract_minimax_returned_voice_id(payload, fallback: str = "") -> str:
+    fallback_text = str(fallback or "").strip()
+    candidates: list[str] = []
+
+    def visit(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                lowered = str(key or "").lower()
+                if lowered in {"voice_id", "voiceid", "voice"} and isinstance(child, (str, int)) and str(child).strip():
+                    candidates.append(str(child).strip())
+                elif lowered in {"data", "result", "voice", "output", "clone"}:
+                    visit(child)
+                elif isinstance(child, (dict, list)):
+                    visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return candidates[0] if candidates else fallback_text
+
 async def shopaikey_minimax_upload_voice_sample(audio_bytes: bytes, filename: str = "voice_sample.mp3", content_type: str = "audio/mpeg") -> tuple[str, str, str, int]:
     if not SHOPAIKEY_API_KEY or not MINIMAX_VOICE_UPLOAD_ENDPOINT:
         return "MISSING", "", "SHOPAIKEY_API_KEY/MINIMAX_VOICE_UPLOAD_ENDPOINT missing", 0
@@ -41811,7 +41858,8 @@ async def shopaikey_minimax_voice_clone(file_id: str, voice_id: str) -> tuple[st
         base_resp = data.get("base_resp") if isinstance(data, dict) else {}
         provider_ok = str((base_resp or {}).get("status_code") or "").strip() in {"", "0", "1"}
         if res.status_code < 400 and provider_ok:
-            return "PASS", {"voice_id": voice_id_text, "demo_audio": str((data or {}).get("demo_audio") or "")}, f"http={res.status_code}; voice_id={voice_id_text}", int(res.status_code)
+            returned_voice_id = extract_minimax_returned_voice_id(data, voice_id_text)
+            return "PASS", {"voice_id": returned_voice_id, "demo_audio": str((data or {}).get("demo_audio") or "")}, f"http={res.status_code}; voice_id={returned_voice_id}", int(res.status_code)
         detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}")
         return shopaikey_classify_error(res.status_code, detail), {}, detail, int(res.status_code)
     except httpx.TimeoutException as exc:
@@ -60804,6 +60852,8 @@ def _engine_safe(value, limit: int = 220) -> str:
 def voice_engine_status_lines() -> list[str]:
     tts = get_minimax_voice_readiness()
     clone = get_minimax_voice_clone_readiness()
+    deps = voice_provider_dependency_status()
+    plan = voice_curl_audit_route_plan()
     tts_smoke = preferred_tool_test_status_text(
         "minimax_tts",
         "minimax_tts_key4u",
@@ -60823,9 +60873,19 @@ def voice_engine_status_lines() -> list[str]:
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
         f"MiniMax TTS configured: <code>{_engine_yes_no(tts.get('ready'))}</code>",
         f"MiniMax clone configured: <code>{_engine_yes_no(clone.get('ready'))}</code>",
+        f"ShopAIKey /audio/speech configured: <code>{_engine_yes_no(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED)}</code>",
+        f"ShopAIKey /audio/speech route: <code>{_engine_safe(plan.get('shopaikey_audio_speech'))}</code>",
+        f"ShopAIKey MiniMax route: <code>{_engine_safe(plan.get('shopaikey_minimax_tts'))}</code>",
+        f"Key4U MiniMax route: <code>{_engine_safe(plan.get('key4u_minimax_tts'))}</code>",
         f"Current route: <code>{_engine_safe(routes)}</code>",
         f"TTS smoke: <code>{_engine_safe(tts_smoke)}</code>",
         f"Clone smoke: <code>{_engine_safe(clone_smoke)}</code>",
+        f"Fish Audio: <code>{_engine_safe(deps.get('fish_audio', {}).get('status'))}</code>",
+        f"ElevenLabs: <code>{_engine_safe(deps.get('elevenlabs', {}).get('status'))}</code>",
+        f"Edge TTS: <code>{_engine_safe(deps.get('edge_tts', {}).get('status'))}</code>",
+        f"Deepgram: <code>{_engine_safe(deps.get('deepgram', {}).get('status'))}</code> | DeepL <code>{_engine_safe(deps.get('deepl', {}).get('status'))}</code> | Auphonic <code>{_engine_safe(deps.get('auphonic', {}).get('status'))}</code>",
+        f"Gemini: <code>{_engine_safe(deps.get('gemini', {}).get('status'))}</code> | HeyGen <code>{_engine_safe(deps.get('heygen', {}).get('status'))}</code> | Cutout <code>{_engine_safe(deps.get('cutout', {}).get('status'))}</code>",
+        f"Freesound: <code>{_engine_safe(deps.get('freesound', {}).get('status'))}</code> | Jamendo <code>{_engine_safe(deps.get('jamendo', {}).get('status'))}</code>",
         f"TTS public ready: <code>{_engine_yes_no(tts_public_ready)}</code>",
         f"Clone public ready: <code>{_engine_yes_no(clone_public_ready)}</code>",
         f"Admin paid smoke needed before public-ready claim: <code>{_engine_yes_no(admin_smoke_needed)}</code>",
@@ -61068,8 +61128,11 @@ def voice_status_text() -> str:
         "🎙 <b>VOICE / TTS STATUS</b>",
         "",
         f"• ShopAIKey TTS: <code>{'READY_CONFIGURED' if (SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY) else 'GUARDED/MISSING'}</code> | smoke <code>{html.escape(preferred_tool_test_status_text('shopaikey_tts', 'tts'))}</code>",
+        f"• ShopAIKey /audio/speech URL: <code>{html.escape(shopaikey_tts_final_url(SHOPAIKEY_DUBBING_TTS_ENDPOINT or '/audio/speech') or '-')}</code>",
         f"• ShopAIKey MiniMax TTS final URL: <code>{html.escape(shopaikey_tts_final_url(SHOPAIKEY_TTS_ENDPOINT) or '-')}</code>",
         f"• ElevenLabs: <code>{'CONFIGURED' if ELEVENLABS_API_KEY else 'MISSING'}</code> | smoke <code>{html.escape(tool_test_status_text('elevenlabs_status'))}</code>",
+        f"• Fish Audio: <code>{'CONFIGURED' if FISH_AUDIO_KEY else 'MISSING'}</code> | smoke <code>{html.escape(tool_test_status_text('tts:fish'))}</code>",
+        f"• Edge TTS: <code>{'CONFIGURED' if edge_tts else 'MISSING'}</code> | smoke <code>{html.escape(tool_test_status_text('tts:edge'))}</code>",
         f"• Key4U TTS: <code>{'CONFIGURED' if (key4u_payload.get('configured') and KEY4U_TTS_ENDPOINT and KEY4U_TTS_MODEL) else 'NEED_DOCS'}</code> | smoke <code>{html.escape(tool_test_status_text('key4u_tts'))}</code>",
         f"• Key4U MiniMax base: <code>{html.escape(str(key4u_payload.get('minimax_base_url') or KEY4U_MINIMAX_BASE_URL or '-'))}</code>",
         f"• Key4U MiniMax TTS final URL: <code>{html.escape(str(key4u_payload.get('minimax_tts_final_url') or key4u_minimax_final_url(KEY4U_TTS_ENDPOINT) or '-'))}</code>",
@@ -62751,6 +62814,379 @@ def audio_provider_curl_text() -> str:
         """--data '{"prompt":"Write a short TOAN AAS brand song","title":"TOAN AAS Lyrics","tags":"pop, vietnamese"}'""",
     ])
 
+VOICE_CURL_AUDIT_SAMPLE_TEXT = "Xin chào, đây là kiểm tra giọng đọc TOAN AAS."
+
+def voice_route_has_duplicate_v1(url: str) -> bool:
+    try:
+        path = urlparse(str(url or "")).path.lower()
+    except Exception:
+        path = str(url or "").lower()
+    return bool(re.search(r"(^|/)v1/v1(/|$)", path))
+
+def voice_safe_route_label(url: str) -> str:
+    target = str(url or "").strip()
+    if not target:
+        return "-"
+    try:
+        parsed = urlparse(target)
+        if not parsed.scheme:
+            return sanitize_log_text(target)[:240]
+        query = ""
+        if parsed.query:
+            safe_pairs = []
+            for pair in parsed.query.split("&"):
+                key = pair.split("=", 1)[0]
+                lowered = key.lower()
+                if any(token in lowered for token in ("key", "token", "secret", "auth", "group")):
+                    safe_pairs.append(f"{key}=<configured>")
+                else:
+                    safe_pairs.append(pair[:80])
+            query = "?" + "&".join(safe_pairs)
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}{query}"[:240]
+    except Exception:
+        return sanitize_log_text(target)[:240]
+
+def voice_provider_dependency_status() -> dict:
+    def item(configured: bool, adapter_ok: bool = True) -> dict:
+        if configured and not adapter_ok:
+            status = "adapter_missing"
+        elif configured:
+            status = "configured"
+        else:
+            status = "missing"
+        return {"configured": bool(configured), "adapter_ok": bool(adapter_ok), "status": status}
+
+    return {
+        "fish_audio": item(bool(FISH_AUDIO_KEY), callable(globals().get("tts_fish_audio_bytes"))),
+        "elevenlabs": item(bool(ELEVENLABS_API_KEY), callable(globals().get("tts_elevenlabs_bytes"))),
+        "deepgram": item(bool(DEEPGRAM_API_KEY), bool(globals().get("AgentDeepgram"))),
+        "auphonic": item(bool(AUPHONIC_API_KEY), False),
+        "deepl": item(bool(DEEPL_API_KEY), bool(DEEPL_API_URL)),
+        "gemini": item(bool(GEMINI_API_KEY), bool(gemini_client)),
+        "heygen": item(bool(HEYGEN_API_KEY), callable(globals().get("cmd_tool_test_heygen_avatar"))),
+        "cutout": item(bool(CUTOUT_API_KEY), True),
+        "freesound": item(bool(FREESOUND_API_KEY or FREESOUND_CLIENT_ID), callable(globals().get("cmd_tool_test_sfx_library"))),
+        "jamendo": item(bool(JAMENDO_CLIENT_ID), callable(globals().get("cmd_tool_test_music_library"))),
+        "edge_tts": item(bool(edge_tts), bool(edge_tts)),
+    }
+
+def voice_route_result(
+    provider: str,
+    route: str,
+    *,
+    status: str = "",
+    url: str = "",
+    http_status: int = 0,
+    output_bytes: int = 0,
+    reason: str = "",
+    configured: bool = True,
+    called: bool = False,
+    requires_audio: bool = False,
+) -> dict:
+    status_base = provider_status_base(status or "UNKNOWN")
+    duplicate_v1 = voice_route_has_duplicate_v1(url)
+    passed = bool(
+        not duplicate_v1
+        and configured
+        and status_base in PROVIDER_SMOKE_PASS_STATUSES
+        and (int(output_bytes or 0) > 0 if requires_audio else int(http_status or 0) < 400)
+    )
+    if duplicate_v1:
+        status_base = "FAIL_BAD_URL"
+        reason = "duplicate_v1_in_route"
+    elif not configured and status_base in {"UNKNOWN", "MISSING"}:
+        status_base = "MISSING"
+        reason = reason or "missing_config"
+    elif requires_audio and status_base in PROVIDER_SMOKE_PASS_STATUSES and int(output_bytes or 0) <= 0:
+        status_base = "FAIL_EMPTY_AUDIO"
+        reason = reason or "audio_bytes_zero"
+    elif passed:
+        status_base = "PASS"
+        reason = reason or "ok"
+    return {
+        "provider": sanitize_log_text(provider)[:80],
+        "route": sanitize_log_text(route)[:120],
+        "status": status_base,
+        "url": voice_safe_route_label(url),
+        "http_status": int(http_status or 0),
+        "output_bytes": int(output_bytes or 0),
+        "reason": sanitize_provider_error(reason or status_base)[:260],
+        "configured": bool(configured),
+        "called": bool(called),
+        "requires_audio": bool(requires_audio),
+        "pass": bool(passed),
+        "timestamp": now_text(),
+    }
+
+def voice_curl_audit_route_plan() -> dict:
+    return {
+        "shopaikey_models": join_shopaikey_url(SHOPAIKEY_BASE_URL, "/models"),
+        "shopaikey_audio_speech": shopaikey_tts_final_url(SHOPAIKEY_DUBBING_TTS_ENDPOINT or "/audio/speech"),
+        "shopaikey_minimax_voices": join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, MINIMAX_VOICE_LIST_ENDPOINT),
+        "shopaikey_minimax_tts": shopaikey_tts_final_url(MINIMAX_TTS_ENDPOINT),
+        "shopaikey_minimax_upload": join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, MINIMAX_VOICE_UPLOAD_ENDPOINT),
+        "shopaikey_minimax_clone": join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, MINIMAX_VOICE_CLONE_ENDPOINT),
+        "key4u_minimax_tts": key4u_minimax_final_url(KEY4U_TTS_ENDPOINT),
+        "key4u_minimax_upload": key4u_minimax_final_url(KEY4U_MINIMAX_UPLOAD_ENDPOINT),
+        "key4u_minimax_clone": key4u_minimax_final_url(KEY4U_MINIMAX_CLONE_ENDPOINT),
+        "direct_minimax_tts": direct_minimax_tts_url(),
+        "fish_audio_tts": "https://api.fish.audio/v1/tts",
+        "elevenlabs_tts": "https://api.elevenlabs.io/v1/text-to-speech/<voice_id>",
+        "edge_tts": "edge-tts/local-package",
+    }
+
+async def voice_curl_audit_get_json(provider: str, route: str, url: str, headers: dict | None = None, configured: bool = True) -> dict:
+    if not configured:
+        return voice_route_result(provider, route, url=url, status="MISSING", reason="missing_config", configured=False)
+    if voice_route_has_duplicate_v1(url):
+        return voice_route_result(provider, route, url=url, status="FAIL_BAD_URL", reason="duplicate_v1_in_route", configured=True)
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            res = await client.get(url, headers=headers or {})
+        status = "PASS" if res.status_code < 400 else shopaikey_classify_error(res.status_code, getattr(res, "text", "")[:260])
+        return voice_route_result(provider, route, url=url, status=status, http_status=int(res.status_code), reason=f"http={res.status_code}", called=True)
+    except httpx.TimeoutException as exc:
+        return voice_route_result(provider, route, url=url, status="FAIL_TIMEOUT", reason=str(exc), called=True)
+    except Exception as exc:
+        return voice_route_result(provider, route, url=url, status="FAIL_PROVIDER_ERROR", reason=provider_error_summary(exc), called=True)
+
+async def voice_curl_audit_tts_call(provider: str, route: str, url: str, configured: bool, make_call) -> dict:
+    if not configured:
+        return voice_route_result(provider, route, url=url, status="MISSING", reason="missing_config", configured=False, requires_audio=True)
+    if voice_route_has_duplicate_v1(url):
+        return voice_route_result(provider, route, url=url, status="FAIL_BAD_URL", reason="duplicate_v1_in_route", configured=True, requires_audio=True)
+    try:
+        status, audio_bytes, detail, http_status = await make_call()
+        return voice_route_result(
+            provider,
+            route,
+            url=url,
+            status=status,
+            http_status=int(http_status or 0),
+            output_bytes=len(audio_bytes or b""),
+            reason=detail,
+            configured=True,
+            called=True,
+            requires_audio=True,
+        )
+    except Exception as exc:
+        return voice_route_result(provider, route, url=url, status="FAIL_PROVIDER_ERROR", reason=provider_error_summary(exc), configured=True, called=True, requires_audio=True)
+
+async def voice_curl_audit_clone_route(
+    provider: str,
+    route_prefix: str,
+    upload_url: str,
+    clone_url: str,
+    configured: bool,
+    sample_audio_bytes: bytes,
+    user_id,
+    upload_call,
+    clone_call,
+    tts_call,
+) -> list[dict]:
+    if not configured:
+        return [
+            voice_route_result(provider, f"{route_prefix}/upload", url=upload_url, status="MISSING", reason="missing_config", configured=False),
+            voice_route_result(provider, f"{route_prefix}/voice_clone", url=clone_url, status="MISSING", reason="missing_config", configured=False),
+        ]
+    if not sample_audio_bytes:
+        return [
+            voice_route_result(provider, f"{route_prefix}/upload", url=upload_url, status="NEED_AUDIO_INPUT", reason="reply_audio_sample_required", configured=True),
+            voice_route_result(provider, f"{route_prefix}/voice_clone", url=clone_url, status="NEED_AUDIO_INPUT", reason="upload_not_run", configured=True),
+        ]
+    voice_id = make_minimax_voice_id(user_id or "admin")
+    upload_status, file_id, upload_detail, upload_http = await upload_call(sample_audio_bytes, "voice-audit-sample.mp3", "audio/mpeg")
+    results = [
+        voice_route_result(provider, f"{route_prefix}/upload", url=upload_url, status=upload_status, http_status=upload_http, reason=upload_detail, configured=True, called=True)
+    ]
+    if upload_status != "PASS" or not file_id:
+        results.append(voice_route_result(provider, f"{route_prefix}/voice_clone", url=clone_url, status=upload_status, reason=upload_detail, configured=True, called=False))
+        return results
+    clone_status, clone_payload, clone_detail, clone_http = await clone_call(file_id, voice_id)
+    returned_voice_id = str((clone_payload or {}).get("voice_id") or voice_id).strip()
+    results.append(voice_route_result(provider, f"{route_prefix}/voice_clone", url=clone_url, status=clone_status, http_status=clone_http, reason=clone_detail, configured=True, called=True))
+    if clone_status == "PASS" and returned_voice_id:
+        tts_status, tts_bytes, tts_detail, tts_http = await tts_call(VOICE_CURL_AUDIT_SAMPLE_TEXT, voice_id=returned_voice_id)
+        results.append(
+            voice_route_result(
+                provider,
+                f"{route_prefix}/cloned_voice_tts",
+                url=clone_url,
+                status=tts_status,
+                http_status=tts_http,
+                output_bytes=len(tts_bytes or b""),
+                reason=tts_detail,
+                configured=True,
+                called=True,
+                requires_audio=True,
+            )
+        )
+    return results
+
+def voice_curl_audit_skip_results() -> list[dict]:
+    plan = voice_curl_audit_route_plan()
+    deps = voice_provider_dependency_status()
+    routes = [
+        ("ShopAIKey", "base /models", plan["shopaikey_models"], bool(SHOPAIKEY_API_KEY and SHOPAIKEY_BASE_URL), False, ""),
+        ("ShopAIKey", "/audio/speech", plan["shopaikey_audio_speech"], bool(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED), True, ""),
+        ("ShopAIKey MiniMax", "/tts/minimax/voices", plan["shopaikey_minimax_voices"], bool(SHOPAIKEY_API_KEY and MINIMAX_VOICE_LIST_ENDPOINT), False, ""),
+        ("ShopAIKey MiniMax", "/tts/minimax/t2a_v2", plan["shopaikey_minimax_tts"], shopaikey_minimax_tts_configured(), True, ""),
+        ("Key4U MiniMax", "/v1/t2a_v2", plan["key4u_minimax_tts"], key4u_minimax_tts_configured(require_public=False), True, ""),
+        ("MiniMax direct", "/v1/t2a_v2", plan["direct_minimax_tts"], direct_minimax_tts_configured(), True, ""),
+        ("Fish Audio", "/v1/tts", plan["fish_audio_tts"], bool(deps["fish_audio"]["configured"] and deps["fish_audio"]["adapter_ok"]), True, "ADAPTER_MISSING" if deps["fish_audio"]["configured"] and not deps["fish_audio"]["adapter_ok"] else ""),
+        ("ElevenLabs", "/v1/text-to-speech", plan["elevenlabs_tts"], bool(deps["elevenlabs"]["configured"] and deps["elevenlabs"]["adapter_ok"]), True, "ADAPTER_MISSING" if deps["elevenlabs"]["configured"] and not deps["elevenlabs"]["adapter_ok"] else ""),
+        ("Edge TTS", "edge fallback", plan["edge_tts"], bool(deps["edge_tts"]["configured"]), True, ""),
+        ("ShopAIKey MiniMax", "upload/voice_clone", plan["shopaikey_minimax_clone"], bool(SHOPAIKEY_API_KEY and MINIMAX_VOICE_UPLOAD_ENDPOINT and MINIMAX_VOICE_CLONE_ENDPOINT), False, ""),
+        ("Key4U MiniMax", "upload/voice_clone", plan["key4u_minimax_clone"], bool(KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_MINIMAX_UPLOAD_ENDPOINT and KEY4U_MINIMAX_CLONE_ENDPOINT), False, ""),
+    ]
+    results = []
+    for provider, route, url, configured, requires_audio, status_override in routes:
+        status = status_override or ("NO_CONFIRM" if configured else "MISSING")
+        reason = "adapter_missing" if status_override else (f"add {ADMIN_PAID_CONFIRM_FLAG} for live provider probe" if configured else "missing_config_or_adapter")
+        results.append(voice_route_result(provider, route, url=url, status=status, reason=reason, configured=configured, requires_audio=requires_audio))
+    return results
+
+async def run_voice_curl_audit(confirm_paid: bool = False, sample_audio_bytes: bytes = b"", user_id="") -> list[dict]:
+    if not confirm_paid:
+        return voice_curl_audit_skip_results()
+    plan = voice_curl_audit_route_plan()
+    deps = voice_provider_dependency_status()
+    results: list[dict] = []
+    shop_headers = {"Authorization": f"Bearer {SHOPAIKEY_API_KEY}"} if SHOPAIKEY_API_KEY else {}
+    results.append(await voice_curl_audit_get_json("ShopAIKey", "base /models", plan["shopaikey_models"], shop_headers, bool(SHOPAIKEY_API_KEY and SHOPAIKEY_BASE_URL)))
+    results.append(await voice_curl_audit_tts_call("ShopAIKey", "/audio/speech", plan["shopaikey_audio_speech"], bool(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED), lambda: shopaikey_tts_bytes(VOICE_CURL_AUDIT_SAMPLE_TEXT, endpoint_override=SHOPAIKEY_DUBBING_TTS_ENDPOINT or "/audio/speech")))
+    results.append(await voice_curl_audit_get_json("ShopAIKey MiniMax", "/tts/minimax/voices", plan["shopaikey_minimax_voices"], shop_headers, bool(SHOPAIKEY_API_KEY and MINIMAX_VOICE_LIST_ENDPOINT)))
+    results.append(await voice_curl_audit_tts_call("ShopAIKey MiniMax", "/tts/minimax/t2a_v2", plan["shopaikey_minimax_tts"], shopaikey_minimax_tts_configured(), lambda: shopaikey_minimax_tts_bytes(VOICE_CURL_AUDIT_SAMPLE_TEXT)))
+    results.append(await voice_curl_audit_tts_call("Key4U MiniMax", "/v1/t2a_v2", plan["key4u_minimax_tts"], key4u_minimax_tts_configured(require_public=False), lambda: key4u_minimax_tts_bytes(VOICE_CURL_AUDIT_SAMPLE_TEXT, allow_admin=True)))
+    results.append(await voice_curl_audit_tts_call("MiniMax direct", "/v1/t2a_v2", plan["direct_minimax_tts"], direct_minimax_tts_configured(), lambda: direct_minimax_tts_bytes(VOICE_CURL_AUDIT_SAMPLE_TEXT)))
+    if deps["fish_audio"]["configured"] and not deps["fish_audio"]["adapter_ok"]:
+        results.append(voice_route_result("Fish Audio", "/v1/tts", url=plan["fish_audio_tts"], status="ADAPTER_MISSING", reason="adapter_missing", configured=True, requires_audio=True))
+    else:
+        results.append(await voice_curl_audit_tts_call("Fish Audio", "/v1/tts", plan["fish_audio_tts"], bool(deps["fish_audio"]["configured"] and deps["fish_audio"]["adapter_ok"]), lambda: tts_fish_audio_bytes(VOICE_CURL_AUDIT_SAMPLE_TEXT)))
+    if deps["elevenlabs"]["configured"] and not deps["elevenlabs"]["adapter_ok"]:
+        results.append(voice_route_result("ElevenLabs", "/v1/text-to-speech", url=plan["elevenlabs_tts"], status="ADAPTER_MISSING", reason="adapter_missing", configured=True, requires_audio=True))
+    else:
+        results.append(await voice_curl_audit_tts_call("ElevenLabs", "/v1/text-to-speech", plan["elevenlabs_tts"], bool(deps["elevenlabs"]["configured"] and deps["elevenlabs"]["adapter_ok"]), lambda: tts_elevenlabs_bytes(VOICE_CURL_AUDIT_SAMPLE_TEXT)))
+    results.append(await voice_curl_audit_tts_call("Edge TTS", "edge fallback", plan["edge_tts"], bool(edge_tts), lambda: tts_edge_bytes(VOICE_CURL_AUDIT_SAMPLE_TEXT)))
+    async def key4u_clone_tts_admin(text: str, voice_id: str = "", voice_style: str = ""):
+        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=True)
+    results.extend(await voice_curl_audit_clone_route(
+        "ShopAIKey MiniMax",
+        "shopaikey_minimax",
+        plan["shopaikey_minimax_upload"],
+        plan["shopaikey_minimax_clone"],
+        bool(SHOPAIKEY_API_KEY and MINIMAX_VOICE_UPLOAD_ENDPOINT and MINIMAX_VOICE_CLONE_ENDPOINT),
+        sample_audio_bytes,
+        user_id,
+        shopaikey_minimax_upload_voice_sample,
+        shopaikey_minimax_voice_clone,
+        shopaikey_minimax_tts_bytes,
+    ))
+    results.extend(await voice_curl_audit_clone_route(
+        "Key4U MiniMax",
+        "key4u_minimax",
+        plan["key4u_minimax_upload"],
+        plan["key4u_minimax_clone"],
+        bool(KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_MINIMAX_UPLOAD_ENDPOINT and KEY4U_MINIMAX_CLONE_ENDPOINT),
+        sample_audio_bytes,
+        user_id,
+        key4u_minimax_upload_voice_sample,
+        key4u_minimax_voice_clone,
+        key4u_clone_tts_admin,
+    ))
+    return results
+
+def voice_curl_audit_summary(results: list[dict]) -> dict:
+    audio_pass = any(item.get("requires_audio") and item.get("pass") and int(item.get("output_bytes") or 0) > 0 for item in results)
+    duplicate_bad_url = any(item.get("status") == "FAIL_BAD_URL" for item in results)
+    any_called = any(item.get("called") for item in results)
+    overall = "PASS" if audio_pass and not duplicate_bad_url else ("NO_CONFIRM" if not any_called else "FAIL")
+    return {"status": overall, "audio_pass": audio_pass, "called": any_called}
+
+def save_voice_curl_audit_results(results: list[dict], updated_by="") -> dict:
+    summary_result = voice_curl_audit_summary(results)
+    overall = str(summary_result.get("status") or "UNKNOWN")
+    any_called = bool(summary_result.get("called"))
+    summary = [
+        {
+            "provider": item.get("provider"),
+            "route": item.get("route"),
+            "status": item.get("status"),
+            "http_status": item.get("http_status"),
+            "output_bytes": item.get("output_bytes"),
+            "reason": item.get("reason"),
+            "timestamp": item.get("timestamp"),
+        }
+        for item in results
+    ]
+    save_provider_attempt(
+        "voice_curl_audit",
+        {
+            "called": bool(any_called),
+            "provider": "voice_forensic",
+            "route": "voice_curl_audit",
+            "status": overall,
+            "error": "-" if overall == "PASS" else next((str(item.get("reason") or "") for item in results if item.get("status") not in {"PASS", "NO_CONFIRM", "MISSING"}), overall),
+        },
+        updated_by,
+    )
+    _safe_set_provider_setting("voice_curl_audit:last_results", json.dumps(summary, ensure_ascii=False)[:3500], "sanitized voice curl audit", updated_by)
+    save_tool_test_result("voice_curl_audit", overall, json.dumps(summary, ensure_ascii=False)[:1000], updated_by)
+    return summary_result
+
+def voice_curl_audit_text(results: list[dict], confirm_paid: bool = False) -> list[str]:
+    summary = voice_curl_audit_summary(results)
+    overall = str(summary.get("status") or "UNKNOWN")
+    any_called = bool(summary.get("called"))
+    lines = [
+        "VOICE CURL AUDIT",
+        "",
+        f"Scope: admin-only forensic. Paid provider jobs run: <code>{_engine_yes_no(confirm_paid and any_called)}</code>",
+        f"Overall: <code>{_engine_safe(overall)}</code>",
+        f"Confirm flag: <code>{_engine_safe(ADMIN_PAID_CONFIRM_FLAG if confirm_paid else 'missing')}</code>",
+        "",
+        "Routes:",
+    ]
+    for item in results:
+        lines.append(
+            f"• {html.escape(str(item.get('provider') or '-'))} / {html.escape(str(item.get('route') or '-'))}: "
+            f"<code>{html.escape(str(item.get('status') or '-'))}</code> | "
+            f"http <code>{int(item.get('http_status') or 0)}</code> | "
+            f"bytes <code>{int(item.get('output_bytes') or 0)}</code> | "
+            f"route <code>{html.escape(str(item.get('url') or '-'))}</code> | "
+            f"reason <code>{html.escape(str(item.get('reason') or '-')[:180])}</code>"
+        )
+    deps = voice_provider_dependency_status()
+    lines.extend([
+        "",
+        "Dependency keys/adapters:",
+        *[
+            f"• {name}: <code>{html.escape(str(data.get('status') or '-'))}</code>"
+            for name, data in deps.items()
+        ],
+        "",
+        "No key, token or secret value is shown. Audio routes only PASS when output bytes are greater than 0.",
+    ])
+    if not confirm_paid:
+        lines.append(f"Live probes skipped. Add <code>{ADMIN_PAID_CONFIRM_FLAG}</code> to run admin paid smoke.")
+    return lines
+
+async def cmd_voice_curl_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    uid = update.effective_user.id
+    confirm_paid = has_admin_paid_confirmation(context)
+    sample_audio = b""
+    if confirm_paid:
+        media_info = await resolve_stt_test_media(update, context)
+        if media_info and media_info.get("bytes"):
+            sample_audio = bytes(media_info.get("bytes") or b"")
+    results = await run_voice_curl_audit(confirm_paid=confirm_paid, sample_audio_bytes=sample_audio, user_id=uid)
+    summary = save_voice_curl_audit_results(results, updated_by=uid)
+    lines = voice_curl_audit_text(results, confirm_paid=confirm_paid)
+    lines[3] = f"Overall: <code>{_engine_safe(summary.get('status'))}</code>"
+    await reply_html_lines(update, lines, limit=3600)
+
 async def cmd_audio_provider_curl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
@@ -62939,7 +63375,7 @@ async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextType
             "• Bot chưa gọi provider và chưa trừ Xu.",
             parse_mode="HTML",
         )
-    voice_id = "toanaas-voice-" + re.sub(r"[^0-9A-Za-z]+", "", str(uid))[-10:] + f"-{int(time.time())}"
+    voice_id = make_minimax_voice_id(uid, timestamp_text=str(int(time.time())))
     route_results = []
     final_status = "FAIL"
     final_voice_id = ""
@@ -73382,7 +73818,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
     try:
         telegram_file = await context.bot.get_file(str(profile.get("source_file_id") or profile.get("source_file_ref") or ""))
         audio_bytes = bytes(await telegram_file.download_as_bytearray())
-        provider_voice_id = f"toanaas-{int(user_id)}-{profile_id}"[:128].rstrip("-")
+        provider_voice_id = make_minimax_voice_id(user_id, profile_id=profile_id)
         preview_text = str(guard.get("preview_text") or capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT))
         provider_file_id = ""
         provider_name = ""
@@ -126384,6 +126820,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("audio_public_open_safe", cmd_audio_public_open_safe))
     tg_app.add_handler(CommandHandler("audio_provider_status", cmd_provider_status))
     tg_app.add_handler(CommandHandler("audio_provider_curl", cmd_audio_provider_curl))
+    tg_app.add_handler(CommandHandler("voice_curl_audit", cmd_voice_curl_audit))
     tg_app.add_handler(CommandHandler("suno_status", cmd_suno_status))
     tg_app.add_handler(CommandHandler("suno_public_open", cmd_suno_public_open))
     tg_app.add_handler(CommandHandler("suno_public_close", cmd_suno_public_close))
