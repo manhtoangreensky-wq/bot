@@ -35445,7 +35445,7 @@ def video_multiscene_route_state() -> dict:
         "key4u_status_ready": key4u_status,
     }
 
-def video_multiscene_missing_components(scene_count=20, *, include_smoke: bool = True) -> list[str]:
+def video_multiscene_missing_components(scene_count=20, *, include_smoke: bool = True, require_stitch_verified: bool = True) -> list[str]:
     count = max(2, min(20, safe_int(scene_count, 20)))
     routes = video_multiscene_route_state()
     worker = local_worker_status_payload()
@@ -35462,7 +35462,9 @@ def video_multiscene_missing_components(scene_count=20, *, include_smoke: bool =
         missing.append("local_worker_missing")
     if not video_multiscene_stitching_available():
         missing.append("ffmpeg_missing")
-    if not callable(globals().get("stitch_scene_videos")) or not video_multiscene_stitching_ready():
+    if not callable(globals().get("stitch_scene_videos")) or not video_multiscene_stitching_available():
+        missing.append("stitcher_missing")
+    elif require_stitch_verified and not video_multiscene_stitching_ready():
         missing.append("stitcher_missing")
     if not callable(globals().get("run_multiscene_video_job")):
         missing.append("multiscene_runner_missing")
@@ -35806,6 +35808,8 @@ async def _execute_multiscene_video_job(job: dict, *, bot_client=None, submitter
         for child in sorted(job.get("scene_jobs") or [], key=lambda item: int(item.get("scene_index") or 0)):
             destination = work_dir / f"scene_{int(child['scene_index']):02d}.mp4"
             local_file = await download_func(str(child.get("output_url") or ""), str(destination))
+            if not local_file or not os.path.exists(local_file) or os.path.getsize(local_file) <= 0:
+                return await _finish_multiscene_failure(job, bot_client, chat_id, "scene_output_empty")
             scene_files.append(str(local_file))
             _multiscene_update_child(job, child["scene_index"], local_file=str(local_file))
     except Exception as exc:
@@ -35825,13 +35829,18 @@ async def _execute_multiscene_video_job(job: dict, *, bot_client=None, submitter
             stitch_result = await stitch_result
     except Exception as exc:
         stitch_result = {"status": "FAILED", "error": type(exc).__name__}
-    if str(stitch_result.get("status") or "") != "COMPLETED" or not str(stitch_result.get("output_path") or ""):
-        reason = str(stitch_result.get("error") or "STITCHING_UNAVAILABLE")
+    stitch_output = str(stitch_result.get("output_path") or "")
+    if str(stitch_result.get("status") or "") != "COMPLETED" or not stitch_output:
+        reason = str(stitch_result.get("error") or "stitcher_failed")
+        job["stitching_error"] = reason
+        return await _finish_multiscene_failure(job, bot_client, chat_id, reason)
+    if not os.path.exists(stitch_output) or os.path.getsize(stitch_output) <= 0:
+        reason = "stitch_output_empty"
         job["stitching_error"] = reason
         return await _finish_multiscene_failure(job, bot_client, chat_id, reason)
 
     job["status"] = "COMPLETED"
-    job["final_output"] = str(stitch_result.get("output_path") or final_path)
+    job["final_output"] = stitch_output
     update_shopaikey_job(
         job_id=int(job.get("parent_job_id") or 0), status="SUCCESS",
         result_url=f"multiscene://{job.get('parent_task_id')}", finished_at=now_text(),
@@ -35885,7 +35894,11 @@ async def run_multiscene_video_job(order_or_session: dict, *, wait_for_completio
         return {"status": "FINAL_INVOICE_REQUIRED", "scene_count": scene_count}
     if not admin_test and not video_multiscene_public_ready(scene_count):
         return {"status": "PUBLIC_GUARDED", "scene_count": scene_count, "message": VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT}
-    missing = video_multiscene_missing_components(scene_count, include_smoke=not admin_test)
+    missing = video_multiscene_missing_components(
+        scene_count,
+        include_smoke=not admin_test,
+        require_stitch_verified=not admin_test,
+    )
     if missing:
         return {
             "status": "MULTISCENE_NOT_READY",
@@ -35973,6 +35986,7 @@ def video_multiscene_status_payload() -> dict:
     routes = video_multiscene_route_state()
     worker = local_worker_status_payload()
     exact_missing = video_multiscene_missing_components(20, include_smoke=True)
+    admin_missing = video_multiscene_missing_components(3, include_smoke=False, require_stitch_verified=False)
     return {
         "public_enabled": video_multiscene_public_enabled(),
         "stitching_ready": video_multiscene_stitching_ready(),
@@ -35983,6 +35997,8 @@ def video_multiscene_status_payload() -> dict:
         "queue_ready": bool(video_multiscene_queue_available()),
         "local_worker_ready": bool(worker.get("connected")),
         "exact_missing_components": exact_missing,
+        "admin_missing_components": admin_missing,
+        "admin_multiscene_smoke_ready": not bool(admin_missing),
         "supported_scene_counts": list(VIDEO_MULTISCENE_TEST_COUNTS),
         "tested": {count: video_multiscene_scene_tested(count) for count in VIDEO_MULTISCENE_TEST_COUNTS},
         "last_tests": {count: str((get_tool_test_result(f"video_multiscene_{count}") or {}).get("status") or "NOT_RUN") for count in VIDEO_MULTISCENE_TEST_COUNTS},
@@ -36007,9 +36023,14 @@ async def cmd_video_multiscene_status(update: Update, context: ContextTypes.DEFA
         f"• status route: <code>{'yes' if item.get('status_route_ready') else 'no'}</code>\n"
         f"• queue: <code>{'yes' if item.get('queue_ready') else 'no'}</code>\n"
         f"• local worker: <code>{'yes' if item.get('local_worker_ready') else 'no'}</code>\n"
+        f"• admin multiscene smoke ready: <code>{'yes' if item.get('admin_multiscene_smoke_ready') else 'no'}</code>\n"
+        f"• admin missing: <code>{html.escape(', '.join(item.get('admin_missing_components') or []) or '-')}</code>\n"
         f"• exact missing: <code>{html.escape(', '.join(item.get('exact_missing_components') or []) or '-')}</code>\n"
         f"• public enabled: <code>{'yes' if item.get('public_enabled') else 'no'}</code>\n"
         f"• last test result: <code>{html.escape(str(item.get('last_result') or '-'))}</code>\n\n"
+        "Admin test có thể chạy 3 cảnh để xác minh stitcher.\n"
+        "Chạy: <code>/tool_test_video_multiscene basic 3 --confirm-paid</code>\n"
+        "Test stitcher local: cần file mẫu có sẵn; nếu chưa có file mẫu, bot sẽ báo rõ.\n\n"
         "• Key/token: <code>hidden</code>",
         parse_mode="HTML",
     )
@@ -61136,6 +61157,9 @@ def voice_engine_status_lines() -> list[str]:
     clone_smoke_pass = provider_status_is_pass(clone_smoke)
     tts_public_ready = bool((tts.get("public_enabled") or tts.get("ready")) and tts_smoke_pass)
     clone_public_ready = bool(clone.get("public_enabled") and tts_smoke_pass and clone_smoke_pass)
+    tts_admin_test_ready = bool(tts.get("ready") and tts_smoke_pass)
+    clone_blocker = str(clone.get("provider_permission_blocker") or ("clone_permission_forbidden" if clone.get("provider_permission_blocked") else ""))
+    clone_admin_test_ready = bool(clone.get("ready") and not clone.get("provider_permission_blocked") and (clone_smoke_pass or clone.get("alternate_clone_ready")))
     admin_smoke_needed = bool((tts.get("ready") or clone.get("ready")) and not (tts_public_ready and clone_public_ready))
     routes = ", ".join(clone.get("routes") or []) or str(tts.get("provider") or "-")
     return [
@@ -61160,6 +61184,9 @@ def voice_engine_status_lines() -> list[str]:
         f"Freesound: <code>{_engine_safe(deps.get('freesound', {}).get('status'))}</code> | Jamendo <code>{_engine_safe(deps.get('jamendo', {}).get('status'))}</code>",
         f"TTS public ready: <code>{_engine_yes_no(tts_public_ready)}</code>",
         f"Clone public ready: <code>{_engine_yes_no(clone_public_ready)}</code>",
+        f"TTS admin_test_ready: <code>{_engine_yes_no(tts_admin_test_ready)}</code>",
+        f"Clone admin_test_ready: <code>{_engine_yes_no(clone_admin_test_ready)}</code>",
+        f"Clone blocker: <code>{_engine_safe(clone_blocker or clone.get('reason'))}</code>",
         f"Admin paid smoke needed before public-ready claim: <code>{_engine_yes_no(admin_smoke_needed)}</code>",
         f"Guarded: <code>{_engine_yes_no(not (tts_public_ready and clone_public_ready))}</code>",
         f"Reason: <code>{_engine_safe(clone.get('reason') or tts.get('reason'))}</code>",
@@ -61177,6 +61204,7 @@ def music_engine_status_lines() -> list[str]:
     submit_pass = provider_status_is_pass(submit_status)
     full_result_ok = bool(readiness.get("full_result_ok") and provider_status_is_pass(download_status))
     public_ready = bool(music_ai_public_processing_ready(readiness) and submit_pass and full_result_ok)
+    partial_lifecycle_possible = bool(readiness.get("ready") and readiness.get("fetch_ready"))
     admin_smoke_needed = bool(readiness.get("ready") and not public_ready)
     providers = dict(readiness.get("providers") or {})
     key4u = dict(providers.get("key4u_suno") or {})
@@ -61196,6 +61224,10 @@ def music_engine_status_lines() -> list[str]:
         f"fetch_ready: <code>{_engine_yes_no(readiness.get('fetch_ready'))}</code>",
         f"download_ready: <code>{_engine_yes_no(readiness.get('download_ready'))}</code>",
         f"full_result_ready: <code>{_engine_yes_no(readiness.get('full_result_ready'))}</code>",
+        f"admin_submit_ready: <code>{_engine_yes_no(readiness.get('ready'))}</code>",
+        f"admin_fetch_ready: <code>{_engine_yes_no(readiness.get('fetch_ready'))}</code>",
+        f"admin_download_ready: <code>{_engine_yes_no(readiness.get('download_ready'))}</code>",
+        f"partial lifecycle possible: <code>{_engine_yes_no(partial_lifecycle_possible)}</code>",
         f"Full result smoke pass: <code>{_engine_yes_no(full_result_ok)}</code>",
         f"Cost gate configured: <code>{_engine_yes_no(readiness.get('cost_gate_ok'))}</code>",
         f"Public ready: <code>{_engine_yes_no(public_ready)}</code>",
@@ -61225,6 +61257,15 @@ def subtitle_engine_status_lines() -> list[str]:
             f"| reason <code>{_engine_safe(item.get('reason'))}</code>"
         )
     any_public_ready = any("PUBLIC_READY" in row for row in mode_rows)
+    admin_asr_test_ready = bool(video_asr_provider_available_for(public=False))
+    admin_dub_audio_test_ready = bool(video_tts_provider_available_for(public=False))
+    public_mode_enabled = any(video_dubbing_public_flag(mode) for mode in (
+        VIDEO_SUBTITLE_MODE_CREATE,
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_DUB,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    ))
+    partial_result_possible = bool(admin_asr_test_ready or admin_dub_audio_test_ready)
     return [
         "SUBTITLE ENGINE STATUS",
         "",
@@ -61236,6 +61277,10 @@ def subtitle_engine_status_lines() -> list[str]:
         f"FFmpeg/local worker: <code>{_engine_safe(pipeline.get('ffmpeg_mux'))}</code>",
         f"Subtitle burn: <code>{_engine_safe(pipeline.get('subtitle_burn_in'))}</code>",
         f"Any public mode ready: <code>{_engine_yes_no(any_public_ready)}</code>",
+        f"admin_asr_test_ready: <code>{_engine_yes_no(admin_asr_test_ready)}</code>",
+        f"admin_dub_audio_test_ready: <code>{_engine_yes_no(admin_dub_audio_test_ready)}</code>",
+        f"public_mode_enabled: <code>{_engine_yes_no(public_mode_enabled)}</code>",
+        f"partial_result_possible: <code>{_engine_yes_no(partial_result_possible)}</code>",
         f"Admin paid smoke needed before public-ready claim: <code>{_engine_yes_no(not any_public_ready)}</code>",
         f"Guarded: <code>{_engine_yes_no(not any_public_ready)}</code>",
         "",
@@ -61300,6 +61345,8 @@ def video_engine_status_lines() -> list[str]:
         "Multi-scene 120s:",
         f"20-scene tested: <code>{_engine_yes_no((multiscene.get('tested') or {}).get(20))}</code>",
         f"Stitching ready: <code>{_engine_yes_no(multiscene.get('stitching_ready'))}</code>",
+        f"admin_multiscene_smoke_ready: <code>{_engine_yes_no(multiscene.get('admin_multiscene_smoke_ready'))}</code>",
+        f"stitch_verified: <code>{_engine_yes_no(multiscene.get('stitching_ready'))}</code>",
         f"Exact missing: <code>{_engine_safe(', '.join(multiscene.get('exact_missing_components') or []) or '-')}</code>",
         f"Public ready: <code>{_engine_yes_no(video_multiscene_public_ready(20))}</code>",
         "",
@@ -61764,6 +61811,9 @@ def get_minimax_voice_readiness() -> dict:
     })
     return payload
 
+def voice_clone_optional_adapter_available(names: list[str]) -> bool:
+    return any(callable(globals().get(name)) for name in names)
+
 def get_minimax_voice_clone_readiness() -> dict:
     shopaikey_configured = bool(
         SHOPAIKEY_API_KEY
@@ -61780,11 +61830,28 @@ def get_minimax_voice_clone_readiness() -> dict:
         and KEY4U_TTS_ENDPOINT
         and KEY4U_TTS_MODEL
     )
-    fish_configured = bool(FISH_AUDIO_KEY)
-    elevenlabs_configured = bool(ELEVENLABS_API_KEY)
+    fish_upload_ready = voice_clone_optional_adapter_available(["fish_audio_upload_voice_sample", "upload_fish_audio_voice_sample", "fish_audio_upload_sample"])
+    fish_clone_ready = voice_clone_optional_adapter_available(["fish_audio_clone_voice", "clone_fish_audio_voice", "fish_audio_voice_clone"])
+    elevenlabs_upload_ready = voice_clone_optional_adapter_available(["elevenlabs_upload_voice_sample", "upload_elevenlabs_voice_sample"])
+    elevenlabs_clone_ready = voice_clone_optional_adapter_available(["elevenlabs_clone_voice", "clone_elevenlabs_voice", "elevenlabs_voice_clone"])
+    fish_key_configured = bool(FISH_AUDIO_KEY)
+    elevenlabs_key_configured = bool(ELEVENLABS_API_KEY)
+    fish_configured = bool(fish_key_configured and fish_upload_ready and fish_clone_ready)
+    elevenlabs_configured = bool(elevenlabs_key_configured and elevenlabs_upload_ready and elevenlabs_clone_ready)
+    optional_missing = []
+    if fish_key_configured and not fish_upload_ready:
+        optional_missing.append("fish_audio_upload_adapter_missing")
+    if fish_key_configured and not fish_clone_ready:
+        optional_missing.append("fish_audio_clone_adapter_missing")
+    if elevenlabs_key_configured and not elevenlabs_upload_ready:
+        optional_missing.append("elevenlabs_upload_adapter_missing")
+    if elevenlabs_key_configured and not elevenlabs_clone_ready:
+        optional_missing.append("elevenlabs_clone_adapter_missing")
     missing = [] if (shopaikey_configured or key4u_configured or fish_configured or elevenlabs_configured) else [
         "ShopAIKey MiniMax, Key4U MiniMax, Fish Audio, or ElevenLabs clone+TTS"
     ]
+    if not (shopaikey_configured or key4u_configured or fish_configured or elevenlabs_configured):
+        missing.extend(optional_missing)
     tts_smoke = preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job")
     clone_smoke = preferred_tool_test_status_text("minimax_voice_clone")
     smoke_ok = provider_status_is_pass(tts_smoke) and provider_status_is_pass(clone_smoke)
@@ -61800,8 +61867,12 @@ def get_minimax_voice_clone_readiness() -> dict:
         and MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
         and (smoke_ok or not MINIMAX_REQUIRE_SMOKE_PASS)
     )
+    alternate_clone_ready = bool(fish_configured or elevenlabs_configured)
+    permission_blocked = bool(voice_clone_last_forbidden_attempt() and not provider_status_is_pass(clone_smoke) and not alternate_clone_ready)
     if not configured:
         reason = "Missing " + ", ".join(missing)
+    elif permission_blocked:
+        reason = "clone_permission_forbidden"
     elif not public_ready:
         reason = "configured_for_admin_smoke; clone public gate remains closed until smoke/cost pass"
     else:
@@ -61817,6 +61888,16 @@ def get_minimax_voice_clone_readiness() -> dict:
         "key4u_configured": key4u_configured,
         "fish_audio_configured": fish_configured,
         "elevenlabs_configured": elevenlabs_configured,
+        "fish_audio_key_configured": fish_key_configured,
+        "elevenlabs_key_configured": elevenlabs_key_configured,
+        "fish_audio_upload_adapter_ready": fish_upload_ready,
+        "fish_audio_clone_adapter_ready": fish_clone_ready,
+        "elevenlabs_upload_adapter_ready": elevenlabs_upload_ready,
+        "elevenlabs_clone_adapter_ready": elevenlabs_clone_ready,
+        "alternate_clone_ready": alternate_clone_ready,
+        "provider_permission_blocked": permission_blocked,
+        "provider_permission_blocker": "clone_permission_forbidden" if permission_blocked else "",
+        "upload_adapter_missing": optional_missing,
         "routes": [
             name
             for name, enabled in (
@@ -63673,6 +63754,43 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
         parse_mode="HTML",
     )
 
+async def cmd_tool_test_voice_tts_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("voice_tts_product", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_voice_tts_product"), parse_mode="HTML")
+    text = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip() or "Xin chào, đây là test thật giọng mặc định TOAN AAS."
+    result = await execute_engine(
+        "voice_tts",
+        {"text": text, "voice_id": default_tts_voice_id("neutral"), "voice_style": "default"},
+        {
+            "user_id": uid,
+            "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+            "confirm_paid": True,
+            "admin_interactive_confirm": True,
+            "is_paid_job": True,
+            "allow_admin": True,
+        },
+    )
+    audio_bytes = bytes(result.get("output_bytes") or b"")
+    if not result.get("ok") or not audio_bytes:
+        save_tool_test_result("voice_tts_product", str(result.get("status") or "FAIL"), str(result.get("detail") or "no output bytes"), uid)
+        return await update.message.reply_text(
+            "⚙️ Test giọng mặc định chưa tạo được audio thật. TOAN AAS không trừ Xu.\n"
+            f"Lỗi: <code>{html.escape(str(result.get('status') or result.get('detail') or '-'))}</code>",
+            parse_mode="HTML",
+        )
+    audio = io.BytesIO(audio_bytes)
+    audio.name = "toan_aas_voice_tts_product.mp3"
+    await context.bot.send_audio(
+        chat_id=update.effective_chat.id,
+        audio=audio,
+        caption="✅ Test giọng mặc định thật đã trả audio > 0 bytes. Admin test: không trừ Xu.",
+    )
+    save_tool_test_result("voice_tts_product", "PASS", f"bytes={len(audio_bytes)}; product_path={ENGINE_PRODUCT_PATH_EXECUTOR}", uid)
+
 async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -65510,6 +65628,60 @@ async def cmd_tool_test_key4u_suno(update: Update, context: ContextTypes.DEFAULT
     if result.get("task_id"):
         lines.append(f"Kiểm tra tiếp: <code>/key4u_suno_job {html.escape(str(result.get('task_id')))}</code>")
     await reply_html_lines(update, lines)
+
+async def cmd_music_suno_admin_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("music_suno_admin_test", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/music_suno_admin_test"), parse_mode="HTML")
+    prompt = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip() or "Bài hát ngắn vui tươi về TOAN AAS, phong cách pop quảng cáo."
+    result_payload = {
+        "selected_prompt": prompt,
+        "song_product": "half",
+        "song_length_mode": "half",
+        "music_ai_kind": "lyrics",
+        "duration_seconds": 90,
+    }
+    engine_result = await execute_engine(
+        "music_song",
+        {"result": result_payload, "preview": False},
+        {
+            "user_id": uid,
+            "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+            "confirm_paid": True,
+            "admin_interactive_confirm": True,
+            "is_paid_job": True,
+            "admin_smoke": True,
+            "updated_by": uid,
+        },
+    )
+    provider_result = dict(engine_result.get("provider_result") or {})
+    task_id = music_provider_result_task_id(provider_result)
+    audio_bytes = engine_output_bytes(provider_result) or engine_output_bytes(engine_result)
+    if not engine_result.get("ok") or (not task_id and not audio_bytes):
+        save_tool_test_result("music_suno_admin_test", str(engine_result.get("status") or "FAIL"), str(engine_result.get("detail") or "no provider task/output"), uid)
+        return await update.message.reply_text(
+            engine_result.get("message") or admin_product_engine_missing_text("music_song", (engine_result.get("gate") or {}).get("readiness")),
+            parse_mode="HTML",
+        )
+    if audio_bytes:
+        audio = video_dubbing_output_file(bytes(audio_bytes), "toan_aas_suno_admin_test.mp3")
+        await context.bot.send_audio(
+            chat_id=update.effective_chat.id,
+            audio=audio,
+            filename="toan_aas_suno_admin_test.mp3",
+            caption="✅ Suno admin test trả audio > 0 bytes. TOAN AAS không trừ Xu.",
+        )
+        save_tool_test_result("music_suno_admin_test", "PASS", f"bytes={len(audio_bytes)}; product_path={ENGINE_PRODUCT_PATH_EXECUTOR}", uid)
+        return
+    save_tool_test_result("music_suno_admin_test", str(provider_result.get("status") or "PASS_SUBMITTED"), f"provider={provider_result.get('provider')}; task_id_present=yes; product_path={ENGINE_PRODUCT_PATH_EXECUTOR}", uid)
+    await update.message.reply_text(
+        "✅ Provider đã nhận job Suno thật. TOAN AAS không trừ Xu.\n"
+        "Kiểm tra kết quả bằng lệnh admin job/status hiện có, hoặc nút kiểm tra trong product flow nếu job được lưu trong phiên.",
+        parse_mode="HTML",
+    )
 
 async def cmd_key4u_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -72918,6 +73090,10 @@ VOICE_CLONE_PROVIDER_NOT_READY_ADMIN_VI = (
     "TOAN AAS chưa trừ Xu."
 )
 VOICE_PROFILE_FAILED_DETAIL_VI = "Giọng này chưa sẵn sàng để tạo file đọc. Bạn có thể đổi tên, xóa hoặc tạo giọng mới."
+VOICE_CLONE_PERMISSION_FORBIDDEN_PROFILE_STATUSES = {
+    "failed_clone_permission_forbidden",
+    "clone_permission_forbidden",
+}
 
 def voice_clone_public_guard_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) == "vi":
@@ -73242,9 +73418,31 @@ def voice_profile_can_preview(profile: dict | None) -> bool:
     status = str(profile.get("status") or "").strip().lower()
     return bool(status in VOICE_PROFILE_PREVIEW_STATUSES and (profile.get("preview_audio_ref") or profile.get("provider_voice_id")))
 
+def voice_profile_clone_permission_forbidden(profile: dict | None) -> bool:
+    profile = dict(profile or {})
+    status = str(profile.get("status") or "").strip().lower()
+    metadata = voice_profile_metadata(profile)
+    marker = " ".join([
+        status,
+        str(metadata.get("activation_status") or ""),
+        str(metadata.get("activation_admin_error") or ""),
+    ]).lower()
+    return bool(status in VOICE_CLONE_PERMISSION_FORBIDDEN_PROFILE_STATUSES or "clone_permission_forbidden" in marker)
+
 def voice_profile_not_ready_text(profile: dict | None = None, lang: str = "vi") -> str:
     name = str((profile or {}).get("display_name") or "giọng này")
     status = str((profile or {}).get("status") or "-")
+    if voice_profile_clone_permission_forbidden(profile):
+        if music_ui_lang(lang=lang) != "vi":
+            return (
+                "⚠️ Custom voice cannot run because the provider account has not enabled voice cloning. "
+                "TOAN AAS has not charged Xu. Use a default voice first."
+            )
+        return (
+            "⚠️ Tạo giọng riêng chưa chạy được vì tài khoản provider chưa mở quyền clone voice. "
+            "TOAN AAS chưa trừ Xu.\n\n"
+            f"Tên giọng: <b>{html.escape(name)}</b>\nTrạng thái: <b>{html.escape(status)}</b>"
+        )
     if music_ui_lang(lang=lang) != "vi":
         return f"⚠️ Voice “{html.escape(name)}” is not ready for audio generation yet. Status: {html.escape(status)}. You can rename, delete, or create a new voice."
     return f"⚠️ {VOICE_PROFILE_FAILED_DETAIL_VI}\n\nTên giọng: <b>{html.escape(name)}</b>\nTrạng thái: <b>{html.escape(status)}</b>"
@@ -73414,6 +73612,17 @@ def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_co
         final_ready = False
         preview_ready = False
     if not final_ready:
+        if voice_profile_clone_permission_forbidden(profile):
+            buttons = [
+                ("🎙 Dùng giọng mặc định" if is_vi else "🎙 Use default voice", cb("voice_default_neutral")),
+                ("🗑 Xóa" if is_vi else "🗑 Delete", cb(f"voice_profile_delete:{pid}")),
+            ]
+            return build_2col_keyboard(
+                buttons,
+                nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")),
+                nav_main=True,
+                lang=lang,
+            )
         clone_gate = get_minimax_voice_clone_readiness()
         buttons = []
         profile_user_id = (profile or {}).get("user_id")
@@ -74395,7 +74604,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
     readiness = get_minimax_voice_clone_readiness()
     admin_access = is_admin_user(user_id)
-    if voice_clone_last_forbidden_attempt() and not provider_status_is_pass(str(readiness.get("clone_smoke") or "")):
+    if readiness.get("provider_permission_blocked"):
         failed_profile = mark_voice_profile_activation_failed(
             user_id,
             profile_id,
@@ -76048,6 +76257,16 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
             return await query.message.reply_text("✅ Đã gửi bản nhạc đầy đủ phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
         status = str(polled.get("status") or "").lower()
+        if is_admin_user(user_id) and (
+            str(polled.get("status") or "").upper() in {"PASS", "SUCCESS", "COMPLETED", "COMPLETE", "DONE", "PASS_FULL_RESULT", "MISSING_STATUS_ROUTE"}
+            or "missing" in status
+        ):
+            result["music_status"] = "missing_download_result"
+            save_music_guided_result(user_id, result)
+            return await query.message.reply_text(
+                "Provider đã nhận job nhưng chưa có kết quả tải file nhạc. Không trừ Xu.",
+                reply_markup=music_ai_status_keyboard(lang, ctx),
+            )
         if any(token in status for token in ("fail", "error", "cancel")):
             charged = int(result.get("music_charged_xu") or 0)
             if charged > 0 and not result.get("music_refunded"):
@@ -92031,6 +92250,59 @@ ENGINE_ENTRY_SOURCE_SLASH_SMOKE = "slash_smoke"
 ENGINE_ENTRY_SOURCE_PRODUCT = "interactive_product"
 ENGINE_PRODUCT_PATH_EXECUTOR = "SAME_AS_SMOKE"
 ENGINE_NO_FAKE_SUCCESS_STATUSES = {"NO_OUTPUT_BYTES", "NO_PROVIDER_JOB", "ADAPTER_MISSING", "GATE_BLOCKED"}
+ADMIN_REAL_TEST_CONFIRM_VI = (
+    "Đây là test thật dành cho admin, có thể tốn credit provider. "
+    "TOAN AAS sẽ không trừ Xu của khách. Bấm xác nhận để chạy."
+)
+
+def admin_real_test_confirm_text() -> str:
+    return ADMIN_REAL_TEST_CONFIRM_VI
+
+def _state_requests_admin_real_test(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    return bool(
+        state.get("admin_real_test")
+        or state.get("admin_test")
+        or state.get("admin_interactive_confirm")
+        or state.get("admin_smoke")
+    )
+
+def can_admin_run_real_test(
+    feature: str,
+    entry_source: str = ENGINE_ENTRY_SOURCE_PRODUCT,
+    confirm_pressed: bool = False,
+    *,
+    user_id=None,
+    readiness: dict | None = None,
+) -> dict:
+    if user_id is not None and not is_admin_user(user_id):
+        return {
+            "allowed": False,
+            "status": "blocked_public_maintenance",
+            "message": PUBLIC_PRODUCT_MAINTENANCE_VI,
+            "readiness": readiness or {},
+        }
+    if not confirm_pressed:
+        return {
+            "allowed": False,
+            "status": "blocked_admin_requires_confirm",
+            "message": admin_real_test_confirm_text() if entry_source == ENGINE_ENTRY_SOURCE_PRODUCT else admin_paid_confirm_required_text(),
+            "readiness": readiness or {},
+        }
+    missing = engine_technical_missing(readiness)
+    if missing:
+        return {
+            "allowed": False,
+            "status": "blocked_admin_missing_provider_config",
+            "message": admin_product_engine_missing_text(feature, readiness),
+            "readiness": readiness or {},
+        }
+    return {
+        "allowed": True,
+        "status": "allowed_admin_real_test",
+        "message": "",
+        "readiness": readiness or {},
+    }
 
 def normalize_engine_feature(feature: str) -> str:
     return str(feature or "").strip().lower().replace("-", "_").replace(" ", "_")
@@ -92154,7 +92426,9 @@ def engine_readiness_payload(
 def admin_product_engine_missing_text(feature: str, readiness: dict | None = None) -> str:
     label = html.escape(engine_adapter_label(feature))
     if normalize_engine_feature(feature) == "music_song":
-        return "⚙️ Admin test chưa chạy được: music_song chưa có kết quả đầy đủ từ provider hoặc chưa có endpoint tải file nhạc. Không gọi provider mới và không trừ Xu."
+        missing = ", ".join(engine_technical_missing(readiness))
+        detail = f" Thiếu: <code>{html.escape(missing[:220])}</code>." if missing else ""
+        return f"⚙️ Admin test chưa chạy được: music_song thiếu component thật.{detail} Không gọi provider mới và không trừ Xu."
     missing = ", ".join(engine_technical_missing(readiness))
     detail = f" Thiếu: <code>{html.escape(missing[:220])}</code>." if missing else ""
     return f"⚙️ Admin test chưa chạy được: {label} thiếu component kỹ thuật hoặc cấu hình thật.{detail} Không gọi provider và không trừ Xu."
@@ -92192,30 +92466,42 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
         item = get_minimax_voice_clone_readiness()
         configured = bool(item.get("ready"))
         public_ready = bool(item.get("public_enabled"))
+        technical_missing = list(item.get("missing_env") or [])
+        if item.get("provider_permission_blocked"):
+            technical_missing.append("clone_permission_forbidden")
         return engine_readiness_payload(
             configured=configured,
             public_ready=public_ready,
-            technical_missing=list(item.get("missing_env") or []),
+            technical_missing=technical_missing,
             public_blockers=[] if public_ready else ["public_flag"],
             reason=item.get("reason") or "",
+            admin_test_ready=bool(configured and not technical_missing),
+            provider_permission_blocked=bool(item.get("provider_permission_blocked")),
+            upload_adapter_missing=list(item.get("upload_adapter_missing") or []),
         )
     if area in {"music", "music_ai", "music_background", "music_song", "suno", "suno_music", "suno_song"}:
         item = get_suno_music_readiness()
         public_ready = bool(music_ai_public_processing_ready(item))
+        admin_real_test = _state_requests_admin_real_test(state)
         technical_missing = list(item.get("missing_env") or [])
         if area in {"music_song", "suno_song"}:
             if not item.get("fetch_ready"):
                 technical_missing.append("music_status_route_missing")
-            if not item.get("download_ready"):
+            if not admin_real_test and not item.get("download_ready"):
                 technical_missing.append("music_download_not_ready")
-            if not item.get("full_result_ok"):
+            if not admin_real_test and not item.get("full_result_ok"):
                 technical_missing.append("music_full_result_not_ready")
         return engine_readiness_payload(
             configured=bool(item.get("ready")),
             public_ready=public_ready,
             technical_missing=technical_missing,
-            public_blockers=[] if public_ready else ["public_flag"],
+            public_blockers=[] if public_ready else ["public_flag", *([] if item.get("download_ready") else ["music_download_not_ready"]), *([] if item.get("full_result_ok") else ["music_full_result_not_ready"])],
             reason=item.get("reason") or item.get("admin_debug_reason") or "",
+            admin_test_ready=bool(item.get("ready") and not technical_missing),
+            admin_submit_ready=bool(item.get("ready")),
+            admin_fetch_ready=bool(item.get("fetch_ready")),
+            admin_download_ready=bool(item.get("download_ready")),
+            partial_result_possible=bool(item.get("ready") and item.get("fetch_ready")),
         )
     subtitle_modes = {
         "subtitle": VIDEO_SUBTITLE_MODE_CREATE,
@@ -92233,11 +92519,17 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
         mode = normalize_video_translate_mode(action) or subtitle_modes[area]
         admin_cap = video_dubbing_capability(mode, state, public=False)
         public_cap = video_dubbing_capability(mode, state, public=True)
+        admin_real_test = _state_requests_admin_real_test(state)
         technical_missing = [
-            item for item in _engine_missing_values(admin_cap.get("missing"))
+            {
+                "asr": "asr_adapter_missing",
+                "translation": "subtitle_translate_adapter_missing",
+                "tts": "video_dub_tts_adapter_missing",
+            }.get(item, item)
+            for item in _engine_missing_values(admin_cap.get("missing"))
             if not _engine_is_public_blocker(item)
         ]
-        if admin_cap.get("reason") == "mode_disabled":
+        if admin_cap.get("reason") == "mode_disabled" and not admin_real_test:
             technical_missing = ["mode_disabled"]
         elif not admin_cap.get("ok") and not technical_missing:
             if not mode:
@@ -92265,6 +92557,10 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             technical_missing=technical_missing,
             public_blockers=public_blockers,
             reason=admin_cap.get("reason") or public_cap.get("reason") or "",
+            admin_test_ready=bool(not technical_missing),
+            partial_result_possible=bool(mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} or video_tts_provider_available_for(public=False)),
+            mode_enabled=bool(video_dubbing_mode_flag(mode)),
+            public_mode_enabled=bool(video_dubbing_public_flag(mode)),
         )
     if area in {"video", "video_export", "video_ai"}:
         admin_item = get_video_prompt_export_readiness(user_is_admin=True)
@@ -92278,7 +92574,12 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
         )
     if area in {"multiscene", "multi_scene", "video_multiscene"}:
         scene_count = safe_int(action, safe_int(state.get("scene_count"), 3))
-        technical_missing = video_multiscene_missing_components(scene_count, include_smoke=True)
+        admin_real_test = _state_requests_admin_real_test(state)
+        technical_missing = video_multiscene_missing_components(
+            scene_count,
+            include_smoke=not admin_real_test,
+            require_stitch_verified=not admin_real_test,
+        )
         public_ready = bool(video_multiscene_public_ready(scene_count))
         return engine_readiness_payload(
             configured=not bool(technical_missing),
@@ -92286,6 +92587,8 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             technical_missing=technical_missing,
             public_blockers=[] if public_ready else ["public_flag"],
             reason="ready" if not technical_missing else ",".join(technical_missing),
+            admin_test_ready=bool(not technical_missing),
+            stitch_verified=bool(video_multiscene_stitching_ready()),
         )
     if area in {"long_video", "longvideo", "video_long"}:
         public_ready = bool(VIDEO_LONG_RENDER_ENABLED and VIDEO_LONG_AI_PUBLIC_ENABLED)
@@ -92310,9 +92613,15 @@ def can_user_access_product_engine(
     state: dict | None = None,
 ) -> dict:
     admin = is_admin_user(user_id)
-    readiness = _product_engine_readiness(product_area, action, state)
-    technical_missing = engine_technical_missing(readiness)
     effective_confirm_paid = bool(confirm_paid or (admin and admin_interactive_confirm and is_provider_call))
+    state_for_readiness = dict(state or {})
+    if admin and is_provider_call and effective_confirm_paid:
+        state_for_readiness.update({
+            "admin_real_test": True,
+            "admin_interactive_confirm": bool(admin_interactive_confirm),
+        })
+    readiness = _product_engine_readiness(product_area, action, state_for_readiness)
+    technical_missing = engine_technical_missing(readiness)
     if admin:
         if is_paid_job and not effective_confirm_paid:
             return {
@@ -92618,6 +92927,9 @@ async def execute_engine(feature: str, params: dict | None = None, context: dict
 
     if feature_key in {"video_multiscene", "multiscene"}:
         order = dict(params.get("order") or params.get("order_or_session") or {})
+        if is_admin_user(uid) and bool(context.get("admin_interactive_confirm") or context.get("confirm_paid")):
+            order["admin_test"] = True
+            order["confirm_paid"] = True
         started = await run_multiscene_video_job(order, wait_for_completion=bool(params.get("wait_for_completion", True)))
         task_id = str(started.get("parent_task_id") or "").strip() if isinstance(started, dict) else ""
         final_output = str((started or {}).get("final_output") or "") if isinstance(started, dict) else ""
@@ -124835,7 +125147,8 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
     state = state or {}
     if not mode:
         return {"ok": False, "reason": "invalid_mode", "missing": ["mode"]}
-    if not video_dubbing_mode_flag(mode):
+    admin_real_test = bool(not public and _state_requests_admin_real_test(state))
+    if not video_dubbing_mode_flag(mode) and not admin_real_test:
         return {"ok": False, "reason": "mode_disabled", "missing": ["mode_disabled"]}
     if public and not video_dubbing_public_flag(mode):
         return {"ok": False, "reason": "public_disabled", "missing": ["public_flag"]}
@@ -125301,12 +125614,21 @@ async def execute_video_dubbing_preview(
             parse_mode="HTML",
         )
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-        _tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(
-            preview_text[:1200],
-            state.get("voice_style") or "",
-            state.get("voice_id") or "",
-            state.get("voice_speed") or "1.0",
-        )
+        try:
+            _tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(
+                preview_text[:1200],
+                state.get("voice_style") or "",
+                state.get("voice_id") or "",
+                state.get("voice_speed") or "1.0",
+                allow_admin=is_admin_user(query.from_user.id),
+            )
+        except TypeError:
+            _tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(
+                preview_text[:1200],
+                state.get("voice_style") or "",
+                state.get("voice_id") or "",
+                state.get("voice_speed") or "1.0",
+            )
         capped_audio, _tts_cap_detail = await cap_voice_preview_audio_bytes(audio_bytes, preview_seconds)
         if not capped_audio:
             return {"ok": False, "guard": True, "text": video_dubbing_guard_text(mode, state, lang, admin=False)}
@@ -125491,12 +125813,21 @@ async def execute_video_dubbing_pipeline(
     tts_provider = ""
     audio_bytes = b""
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-        tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(
-            output_text,
-            state.get("voice_style") or "",
-            state.get("voice_id") or "",
-            state.get("voice_speed") or "1.0",
-        )
+        try:
+            tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(
+                output_text,
+                state.get("voice_style") or "",
+                state.get("voice_id") or "",
+                state.get("voice_speed") or "1.0",
+                allow_admin=is_admin_user(uid),
+            )
+        except TypeError:
+            tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(
+                output_text,
+                state.get("voice_style") or "",
+                state.get("voice_id") or "",
+                state.get("voice_speed") or "1.0",
+            )
     output_type = str(state.get("output_type") or "").strip()
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
     video_output = b""
@@ -128301,6 +128632,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_suno_music", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("tool_test_suno_song", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("tool_test_music_suno", cmd_tool_test_key4u_suno))
+    tg_app.add_handler(CommandHandler("music_suno_admin_test", cmd_music_suno_admin_test))
     tg_app.add_handler(CommandHandler("key4u_suno_job", cmd_key4u_suno_job))
     tg_app.add_handler(CommandHandler("suno_job", cmd_key4u_suno_job))
     tg_app.add_handler(CommandHandler("tool_test_key4u_rerank", cmd_tool_test_key4u_rerank))
@@ -128339,6 +128671,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("minimax_status", cmd_minimax_status))
     tg_app.add_handler(CommandHandler("tool_test_minimax_tts", cmd_tool_test_minimax_tts))
     tg_app.add_handler(CommandHandler("tool_test_voice_tts", cmd_tool_test_minimax_tts))
+    tg_app.add_handler(CommandHandler("tool_test_voice_tts_product", cmd_tool_test_voice_tts_product))
     tg_app.add_handler(CommandHandler("tool_test_minimax_voice_clone", cmd_tool_test_minimax_voice_clone))
     tg_app.add_handler(CommandHandler("tool_test_voice_clone", cmd_tool_test_minimax_voice_clone))
     tg_app.add_handler(CommandHandler("minimax_voice_job", cmd_minimax_voice_job))
