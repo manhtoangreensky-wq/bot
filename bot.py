@@ -3126,6 +3126,7 @@ def init_db():
         source TEXT,
         created_at DATETIME
     )""")
+    ensure_customer_leads_table(conn)
     c.execute("""CREATE TABLE IF NOT EXISTS referrals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         referrer_user_id TEXT,
@@ -27950,6 +27951,419 @@ class LeadRequest(BaseModel):
     services: list[str] = Field(default_factory=list)
     note: str = Field(default="", max_length=1000)
     source: str = Field(default="landing", max_length=80)
+
+class CustomerLeadRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    contact: str = Field(min_length=3, max_length=120)
+    telegram_username: str = Field(default="", max_length=80)
+    telegram_user_id: str = Field(default="", max_length=40)
+    need_type: str = Field(default="", max_length=120)
+    industry: str = Field(default="", max_length=120)
+    note: str = Field(default="", max_length=1000)
+    ref_code: str = Field(default="", max_length=80)
+    source_url: str = Field(default="", max_length=500)
+    terms_accepted: bool = False
+    privacy_accepted: bool = False
+    terms_accepted_at: str = Field(default="", max_length=80)
+    privacy_accepted_at: str = Field(default="", max_length=80)
+    notification_permission: str = Field(default="", max_length=40)
+    user_agent: str = Field(default="", max_length=300)
+
+CUSTOMER_ONBOARDING_NEED_OPTIONS = [
+    "Tạo video bán hàng",
+    "Tạo video TikTok/Reels",
+    "Affiliate",
+    "Tạo ảnh sản phẩm",
+    "Tạo voice/lồng tiếng",
+    "Phụ đề/dịch video",
+    "Tài liệu/PDF",
+    "Khác",
+]
+
+CUSTOMER_ONBOARDING_PRICING = {
+    "unit": "1 Xu = 100đ",
+    "topups": [
+        {"xu": 200, "vnd": 20000},
+        {"xu": 300, "vnd": 30000},
+        {"xu": 400, "vnd": 40000},
+        {"xu": 600, "vnd": 60000},
+        {"xu": 1000, "vnd": 100000},
+        {"xu": 2000, "vnd": 200000},
+        {"xu": 5000, "vnd": 500000},
+    ],
+    "tabs": ["Nạp Xu", "Gói ảnh", "Gói video", "Combo ảnh + video", "Doanh nghiệp / CSKH"],
+    "combos": [
+        {"name": "Combo Starter", "detail": "ảnh + video ngắn"},
+        {"name": "Combo Creator", "detail": "ảnh, video, caption, voice"},
+        {"name": "Combo Business", "detail": "video bán hàng, voice, phụ đề, watermark"},
+    ],
+}
+
+CUSTOMER_LEAD_COLUMNS = [
+    "id", "created_at", "name", "contact", "telegram_username", "telegram_user_id",
+    "need_type", "industry", "note", "ref_code", "source_url", "status",
+    "assigned_admin_id", "promo_code", "terms_accepted_at", "privacy_accepted_at",
+    "user_agent", "notification_permission", "promo_requested",
+]
+
+CUSTOMER_LEAD_STATUS_VALUES = {"new", "contacted", "promo_sent", "converted", "rejected"}
+
+def sanitize_customer_ref_code(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "", str(value or "").strip())[:64]
+
+def normalize_customer_lead_status(status: str) -> str:
+    value = str(status or "").strip().lower()
+    return value if value in CUSTOMER_LEAD_STATUS_VALUES else "new"
+
+def clean_customer_text(value: str, max_len: int = 300) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())[:max_len]
+
+def customer_onboarding_pricing_payload() -> dict:
+    return CUSTOMER_ONBOARDING_PRICING
+
+def customer_onboarding_telegram_link(ref_code: str = "", lead_id: int = 0) -> str:
+    ref = sanitize_customer_ref_code(ref_code)
+    if not ref and int(lead_id or 0) > 0:
+        ref = f"lead_{int(lead_id)}"
+    start_param = f"ref_{ref}" if ref else "onboarding"
+    return f"https://t.me/{BOT_USERNAME}?start={quote(start_param)}"
+
+def ensure_customer_leads_table(conn) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS customer_leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT,
+            name TEXT,
+            contact TEXT,
+            telegram_username TEXT,
+            telegram_user_id TEXT,
+            need_type TEXT,
+            industry TEXT,
+            note TEXT,
+            ref_code TEXT,
+            source_url TEXT,
+            status TEXT DEFAULT 'new',
+            assigned_admin_id TEXT,
+            promo_code TEXT,
+            terms_accepted_at TEXT,
+            privacy_accepted_at TEXT,
+            user_agent TEXT,
+            notification_permission TEXT,
+            promo_requested INTEGER DEFAULT 1
+        )"""
+    )
+    for col, col_type in [
+        ("telegram_user_id", "TEXT"),
+        ("assigned_admin_id", "TEXT"),
+        ("promo_code", "TEXT"),
+        ("terms_accepted_at", "TEXT"),
+        ("privacy_accepted_at", "TEXT"),
+        ("user_agent", "TEXT"),
+        ("notification_permission", "TEXT"),
+        ("promo_requested", "INTEGER DEFAULT 1"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE customer_leads ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_customer_leads_status ON customer_leads(status, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_customer_leads_ref ON customer_leads(ref_code)")
+
+def row_to_customer_lead(row) -> dict:
+    if not row:
+        return {}
+    return dict(zip(CUSTOMER_LEAD_COLUMNS, row))
+
+def get_customer_lead(lead_id: int, conn=None) -> dict:
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    try:
+        ensure_customer_leads_table(conn)
+        row = conn.execute(
+            """SELECT id, created_at, name, contact, telegram_username, telegram_user_id,
+                      need_type, industry, note, ref_code, source_url, status,
+                      assigned_admin_id, promo_code, terms_accepted_at, privacy_accepted_at,
+                      user_agent, notification_permission, promo_requested
+               FROM customer_leads WHERE id=?""",
+            (int(lead_id),),
+        ).fetchone()
+        return row_to_customer_lead(row)
+    finally:
+        if own_conn:
+            conn.close()
+
+def list_customer_leads(status: str = "", limit: int = 10, conn=None) -> list[dict]:
+    own_conn = conn is None
+    if own_conn:
+        conn = db_connect()
+    try:
+        ensure_customer_leads_table(conn)
+        limit = max(1, min(int(limit or 10), 50))
+        normalized = normalize_customer_lead_status(status) if status else ""
+        if normalized:
+            rows = conn.execute(
+                """SELECT id, created_at, name, contact, telegram_username, telegram_user_id,
+                          need_type, industry, note, ref_code, source_url, status,
+                          assigned_admin_id, promo_code, terms_accepted_at, privacy_accepted_at,
+                          user_agent, notification_permission, promo_requested
+                   FROM customer_leads WHERE status=? ORDER BY id DESC LIMIT ?""",
+                (normalized, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT id, created_at, name, contact, telegram_username, telegram_user_id,
+                          need_type, industry, note, ref_code, source_url, status,
+                          assigned_admin_id, promo_code, terms_accepted_at, privacy_accepted_at,
+                          user_agent, notification_permission, promo_requested
+                   FROM customer_leads ORDER BY id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [row_to_customer_lead(row) for row in rows]
+    finally:
+        if own_conn:
+            conn.close()
+
+def create_customer_lead_record(payload: CustomerLeadRequest, request: Request | None = None) -> dict:
+    now = now_text()
+    source_url = clean_customer_text(payload.source_url, 500)
+    if request and not source_url:
+        source_url = clean_customer_text(request.headers.get("referer") or str(request.url), 500)
+    user_agent = clean_customer_text(payload.user_agent or (request.headers.get("user-agent") if request else ""), 300)
+    ref_code = sanitize_customer_ref_code(payload.ref_code)
+    telegram_username = clean_customer_text(payload.telegram_username.replace("@", ""), 80)
+    terms_at = clean_customer_text(payload.terms_accepted_at, 80) or now
+    privacy_at = clean_customer_text(payload.privacy_accepted_at, 80) or now
+    conn = db_connect()
+    try:
+        ensure_customer_leads_table(conn)
+        cur = conn.execute(
+            """INSERT INTO customer_leads
+            (created_at, name, contact, telegram_username, telegram_user_id, need_type, industry,
+             note, ref_code, source_url, status, assigned_admin_id, promo_code,
+             terms_accepted_at, privacy_accepted_at, user_agent, notification_permission, promo_requested)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                now,
+                clean_customer_text(payload.name, 120),
+                clean_customer_text(payload.contact, 120),
+                telegram_username,
+                clean_customer_text(payload.telegram_user_id, 40),
+                clean_customer_text(payload.need_type, 120),
+                clean_customer_text(payload.industry, 120),
+                clean_customer_text(payload.note, 1000),
+                ref_code,
+                source_url,
+                "new",
+                "",
+                "",
+                terms_at,
+                privacy_at,
+                user_agent,
+                clean_customer_text(payload.notification_permission, 40),
+                1,
+            ),
+        )
+        lead_id = int(cur.lastrowid)
+        conn.commit()
+        return get_customer_lead(lead_id, conn=conn)
+    finally:
+        conn.close()
+
+def customer_lead_detail_text(lead: dict) -> str:
+    if not lead:
+        return "Không tìm thấy lead."
+    username = str(lead.get("telegram_username") or "").strip()
+    telegram_line = f"@{html.escape(username)}" if username else "Không có"
+    promo = str(lead.get("promo_code") or "").strip()
+    promo_line = f"<code>{html.escape(promo)}</code>" if promo else "Chưa có"
+    return (
+        f"📥 <b>Lead mới TOAN AAS #{int(lead.get('id') or 0)}</b>\n\n"
+        f"<b>Họ tên:</b> {html.escape(str(lead.get('name') or '-'))}\n"
+        f"<b>Liên hệ:</b> <code>{html.escape(str(lead.get('contact') or '-'))}</code>\n"
+        f"<b>Telegram:</b> {telegram_line}\n"
+        f"<b>Nhu cầu:</b> {html.escape(str(lead.get('need_type') or '-'))}\n"
+        f"<b>Ngành:</b> {html.escape(str(lead.get('industry') or '-'))}\n"
+        f"<b>Ghi chú:</b> {html.escape(str(lead.get('note') or '-'))}\n"
+        f"<b>Ref:</b> <code>{html.escape(str(lead.get('ref_code') or '-'))}</code>\n"
+        f"<b>Nguồn:</b> <code>{html.escape(str(lead.get('source_url') or '-'))}</code>\n"
+        f"<b>Trạng thái:</b> <code>{html.escape(str(lead.get('status') or 'new'))}</code>\n"
+        f"<b>Mã dùng thử:</b> {promo_line}"
+    )
+
+def customer_lead_admin_keyboard(lead_id: int) -> InlineKeyboardMarkup:
+    safe_id = int(lead_id or 0)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎁 Tạo mã 200 Xu", callback_data=f"lead|promo|{safe_id}|200")],
+        [InlineKeyboardButton("✅ Đã liên hệ", callback_data=f"lead|contacted|{safe_id}"), InlineKeyboardButton("❌ Từ chối", callback_data=f"lead|reject|{safe_id}")],
+        [InlineKeyboardButton("📋 Xem lead", callback_data=f"lead|view|{safe_id}")],
+    ])
+
+async def notify_admin_customer_lead(lead: dict) -> bool:
+    if not tg_app or not ADMIN_ID or not lead:
+        return False
+    try:
+        await tg_app.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=customer_lead_detail_text(lead),
+            parse_mode="HTML",
+            reply_markup=customer_lead_admin_keyboard(int(lead.get("id") or 0)),
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Customer lead notify error: {e}")
+        return False
+
+def update_customer_lead_status(lead_id: int, status: str, admin_id: str = "") -> dict:
+    normalized = normalize_customer_lead_status(status)
+    conn = db_connect()
+    try:
+        ensure_customer_leads_table(conn)
+        conn.execute(
+            "UPDATE customer_leads SET status=?, assigned_admin_id=COALESCE(NULLIF(?, ''), assigned_admin_id) WHERE id=?",
+            (normalized, str(admin_id or ""), int(lead_id)),
+        )
+        conn.commit()
+        return get_customer_lead(lead_id, conn=conn)
+    finally:
+        conn.close()
+
+def customer_lead_promo_code(lead_id: int, xu: int = 200) -> str:
+    suffix = f"{random.randint(1000, 9999)}"
+    return normalize_promo_code(f"LEAD{int(lead_id)}_{int(xu)}_{suffix}")
+
+def create_customer_lead_promo_code(lead_id: int, xu: int = 200, admin_id: str = "") -> tuple[bool, str, dict]:
+    xu = max(1, min(int(xu or 200), 5000))
+    conn = db_connect()
+    try:
+        ensure_customer_leads_table(conn)
+        lead = get_customer_lead(lead_id, conn=conn)
+        if not lead:
+            return False, "not_found", {}
+        existing = str(lead.get("promo_code") or "").strip()
+        if existing:
+            return True, "exists", {**lead, "promo_code": existing}
+        expires_at = datetime_text(datetime.now() + timedelta(days=7))
+        code = ""
+        status = "exists"
+        for _ in range(8):
+            code = customer_lead_promo_code(lead_id, xu)
+            ok, status = create_gift_code_record(
+                conn,
+                code,
+                xu,
+                usage_limit=1,
+                per_user_limit=1,
+                note=f"Customer onboarding lead_id={lead_id}; ref={lead.get('ref_code') or '-'}; expires={expires_at}",
+                created_by=admin_id or ADMIN_ID,
+                requires_assignment=False,
+            )
+            if ok:
+                break
+        if status != "created":
+            conn.rollback()
+            return False, status, lead
+        conn.execute(
+            "UPDATE promotion_codes SET starts_at=?, ends_at=?, updated_at=? WHERE code=?",
+            (now_text(), expires_at, now_text(), code),
+        )
+        conn.execute(
+            "UPDATE customer_leads SET status='promo_sent', promo_code=?, assigned_admin_id=? WHERE id=?",
+            (code, str(admin_id or ""), int(lead_id)),
+        )
+        conn.commit()
+        updated = get_customer_lead(lead_id, conn=conn)
+        return True, "created", updated
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def format_customer_leads_list(leads: list[dict]) -> str:
+    if not leads:
+        return "📥 <b>Lead TOAN AAS</b>\n\nChưa có lead customer onboarding."
+    lines = ["📥 <b>Lead TOAN AAS</b>", ""]
+    for lead in leads:
+        lines.append(
+            f"#{int(lead.get('id') or 0)} | <b>{html.escape(str(lead.get('name') or '-'))}</b> | "
+            f"{html.escape(str(lead.get('need_type') or '-'))} | <code>{html.escape(str(lead.get('status') or 'new'))}</code>"
+        )
+    lines.extend(["", "Xem chi tiết: <code>/lead &lt;id&gt;</code>"])
+    return "\n".join(lines)
+
+async def cmd_customer_leads(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status = context.args[0] if getattr(context, "args", None) else ""
+    await update.message.reply_text(
+        format_customer_leads_list(list_customer_leads(status=status, limit=10)),
+        parse_mode="HTML",
+    )
+
+async def cmd_customer_lead_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not getattr(context, "args", None):
+        return await update.message.reply_text("Dùng: <code>/lead &lt;id&gt;</code>", parse_mode="HTML")
+    lead = get_customer_lead(int(context.args[0]))
+    await update.message.reply_text(
+        customer_lead_detail_text(lead),
+        parse_mode="HTML",
+        reply_markup=customer_lead_admin_keyboard(int(lead.get("id") or 0)) if lead else None,
+    )
+
+async def cmd_customer_lead_contacted(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not getattr(context, "args", None):
+        return await update.message.reply_text("Dùng: <code>/lead_contacted &lt;id&gt;</code>", parse_mode="HTML")
+    lead = update_customer_lead_status(int(context.args[0]), "contacted", str(update.effective_user.id))
+    await update.message.reply_text(customer_lead_detail_text(lead), parse_mode="HTML")
+
+async def cmd_customer_lead_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not getattr(context, "args", None):
+        return await update.message.reply_text("Dùng: <code>/lead_reject &lt;id&gt;</code>", parse_mode="HTML")
+    lead = update_customer_lead_status(int(context.args[0]), "rejected", str(update.effective_user.id))
+    await update.message.reply_text(customer_lead_detail_text(lead), parse_mode="HTML")
+
+async def cmd_customer_lead_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not getattr(context, "args", None):
+        return await update.message.reply_text("Dùng: <code>/lead_promo &lt;id&gt; 200</code>", parse_mode="HTML")
+    lead_id = int(context.args[0])
+    xu = int(context.args[1]) if len(context.args) > 1 and str(context.args[1]).isdigit() else 200
+    ok, status, lead = create_customer_lead_promo_code(lead_id, xu, str(update.effective_user.id))
+    if not ok:
+        return await update.message.reply_text(f"Không tạo được mã: <code>{html.escape(status)}</code>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"🎁 Mã dùng thử cho lead #{lead_id}: <code>{html.escape(str(lead.get('promo_code') or ''))}</code>\n\n"
+        "Mã chỉ có hiệu lực sau khi admin/CSKH gửi cho khách. Hệ thống chưa tự cộng Xu.",
+        parse_mode="HTML",
+    )
+
+async def handle_customer_lead_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    if not is_admin_user(query.from_user.id):
+        return await query.answer("Chỉ admin/CSKH được xử lý lead.", show_alert=True)
+    await query.answer()
+    parts = (query.data or "").split("|")
+    if len(parts) < 3:
+        return
+    action = parts[1]
+    lead_id = int(parts[2] or 0)
+    lead = get_customer_lead(lead_id)
+    if not lead:
+        return await query.edit_message_text("Không tìm thấy lead.")
+    if action == "contacted":
+        lead = update_customer_lead_status(lead_id, "contacted", str(query.from_user.id))
+    elif action == "reject":
+        lead = update_customer_lead_status(lead_id, "rejected", str(query.from_user.id))
+    elif action == "promo":
+        xu = int(parts[3]) if len(parts) > 3 and str(parts[3]).isdigit() else 200
+        ok, _status, lead = create_customer_lead_promo_code(lead_id, xu, str(query.from_user.id))
+        if not ok:
+            return await query.edit_message_text("Không tạo được mã dùng thử cho lead này.")
+    await query.edit_message_text(
+        customer_lead_detail_text(lead),
+        parse_mode="HTML",
+        reply_markup=customer_lead_admin_keyboard(lead_id),
+    )
 
 class OperatorTaskCompleteRequest(BaseModel):
     status: str = Field(default="ready", max_length=30)
@@ -128313,6 +128727,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("birthday_gift_check", cmd_birthday_gift_check))
     tg_app.add_handler(CommandHandler("birthday_gift_grant", cmd_birthday_gift_grant))
     tg_app.add_handler(CommandHandler("ref_admin",   cmd_ref_admin))
+    tg_app.add_handler(CommandHandler("leads", admin_internal_command(cmd_customer_leads)))
+    tg_app.add_handler(CommandHandler("lead", admin_internal_command(cmd_customer_lead_detail)))
+    tg_app.add_handler(CommandHandler("lead_contacted", admin_internal_command(cmd_customer_lead_contacted)))
+    tg_app.add_handler(CommandHandler("lead_promo", admin_internal_command(cmd_customer_lead_promo)))
+    tg_app.add_handler(CommandHandler("lead_reject", admin_internal_command(cmd_customer_lead_reject)))
     tg_app.add_handler(MessageHandler(filters.COMMAND, handle_unknown_or_unmatched_command))
     tg_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     tg_app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_media))
@@ -128350,6 +128769,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_human_support_callback, pattern=r"^support\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_ticket_callback, pattern=r"^ticket\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_feedback_callback, pattern=r"^feedback\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_customer_lead_callback, pattern=r"^lead\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_tools_callback, pattern=r"^imgtool\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storage_addon_callback, pattern=r"^storage\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_memory_callback, pattern=r"^memory\|"))
@@ -128964,6 +129384,32 @@ async def landing_page():
         raise HTTPException(status_code=404, detail="Landing page not found")
     return FileResponse(index_path)
 
+def public_static_path(filename: str) -> str:
+    return os.path.join(os.path.dirname(__file__), os.path.basename(filename))
+
+@fastapi_app.get("/onboarding")
+@fastapi_app.get("/app")
+@fastapi_app.get("/welcome")
+async def customer_onboarding_page():
+    path = public_static_path("onboarding.html")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Onboarding page not found")
+    return FileResponse(path)
+
+@fastapi_app.get("/manifest.webmanifest")
+async def pwa_manifest():
+    path = public_static_path("manifest.webmanifest")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Manifest not found")
+    return FileResponse(path, media_type="application/manifest+json")
+
+@fastapi_app.get("/sw.js")
+async def pwa_service_worker():
+    path = public_static_path("sw.js")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Service worker not found")
+    return FileResponse(path, media_type="application/javascript")
+
 @fastapi_app.get("/LOGO.png")
 @fastapi_app.get("/logo.png")
 async def logo_image():
@@ -129101,6 +129547,28 @@ async def create_lead(payload: LeadRequest, request: Request):
             logger.error(f"Lead notify error: {e}")
 
     return {"ok": True, "lead_id": lead_id}
+
+@fastapi_app.get("/api/customer-onboarding/pricing")
+async def api_customer_onboarding_pricing():
+    return {"ok": True, **customer_onboarding_pricing_payload()}
+
+@fastapi_app.post("/api/customer-leads")
+async def create_customer_onboarding_lead(payload: CustomerLeadRequest, request: Request):
+    if not payload.terms_accepted or not payload.privacy_accepted:
+        raise HTTPException(status_code=400, detail="terms_required")
+    lead = create_customer_lead_record(payload, request)
+    notified = await notify_admin_customer_lead(lead)
+    return {
+        "ok": True,
+        "lead_id": int(lead.get("id") or 0),
+        "ref_code": lead.get("ref_code") or "",
+        "status": lead.get("status") or "new",
+        "promo_requested": True,
+        "promo_code": None,
+        "admin_notified": bool(notified),
+        "telegram_handoff_url": customer_onboarding_telegram_link(lead.get("ref_code") or "", int(lead.get("id") or 0)),
+        "message": "TOAN AAS đã ghi nhận yêu cầu mã dùng thử. Mã chỉ được cấp sau khi admin/CSKH xác nhận.",
+    }
 
 # ─── OPERATOR API BRIDGE ─────────────────────────────────────────────────────
 def verify_operator_api_token(request: Request):

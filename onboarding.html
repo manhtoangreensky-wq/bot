@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TOAN AAS — Customer Onboarding</title>
+  <meta name="description" content="Onboarding khách hàng TOAN AAS: thêm PWA, bật thông báo, chấp nhận điều khoản, gửi nhu cầu và nhận mã dùng thử sau khi CSKH xác nhận.">
+  <meta name="theme-color" content="#052e24">
+  <link rel="canonical" href="https://www.toanaas.vn/onboarding">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" href="/logo.png?v=20260619">
+  <link rel="apple-touch-icon" href="/logo.png?v=20260619">
+  <style>
+    :root {
+      --ink: #10271f;
+      --muted: #5b6f66;
+      --jade-950: #031f18;
+      --jade-900: #052e24;
+      --jade-700: #087b55;
+      --jade-500: #14c784;
+      --jade-50: #f1faf6;
+      --line: #d8e7df;
+      --paper: #f7faf8;
+      --white: #fff;
+      --amber: #f5b94c;
+      --danger: #c2410c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: linear-gradient(180deg, #eaf8f1 0%, #f7faf8 42%, #fff 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }
+    a { color: inherit; }
+    button, input, select, textarea { font: inherit; }
+    .shell { max-width: 1120px; margin: 0 auto; padding: 28px 18px 56px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 28px; }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 900; color: var(--jade-950); text-decoration: none; }
+    .brand img { width: 42px; height: 42px; border-radius: 10px; }
+    .topbar a:not(.brand) { color: var(--jade-700); font-weight: 800; text-decoration: none; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr); gap: 24px; align-items: start; }
+    .panel {
+      background: rgba(255,255,255,.88);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: 0 20px 58px rgba(3,31,24,.1);
+      padding: 28px;
+    }
+    .hero-card {
+      color: #e8fff4;
+      background: radial-gradient(circle at 15% 10%, rgba(20,199,132,.26), transparent 32%), var(--jade-950);
+      border-color: rgba(255,255,255,.16);
+    }
+    .eyebrow { color: var(--jade-700); font-weight: 900; text-transform: uppercase; letter-spacing: .08em; font-size: 13px; }
+    .hero-card .eyebrow { color: #7cf0bd; }
+    h1 { margin: 10px 0 16px; font-size: clamp(34px, 5vw, 58px); line-height: 1.03; letter-spacing: 0; }
+    h2 { margin: 0 0 14px; font-size: clamp(25px, 4vw, 36px); line-height: 1.12; }
+    h3 { margin: 0 0 8px; font-size: 18px; }
+    p { margin: 0 0 16px; color: var(--muted); }
+    .hero-card p { color: #cde7dc; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+    .button {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-weight: 900;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .primary { color: var(--jade-950); background: var(--jade-500); }
+    .secondary { color: var(--jade-950); background: var(--amber); }
+    .ghost { color: var(--jade-700); background: var(--jade-50); border: 1px solid var(--line); }
+    .danger { color: #fff; background: var(--danger); }
+    .steps { display: grid; gap: 12px; }
+    .step-tab {
+      border: 1px solid var(--line);
+      background: var(--white);
+      border-radius: 14px;
+      padding: 13px 14px;
+      text-align: left;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    .step-tab[aria-current="true"] { border-color: var(--jade-500); background: var(--jade-50); }
+    .step-panel { display: none; }
+    .step-panel.active { display: block; }
+    .guide-grid, .price-grid, .combo-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mini-card { border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: var(--white); }
+    ol, ul { margin: 8px 0 0; padding-left: 22px; color: var(--muted); }
+    .notice { border-radius: 14px; padding: 14px; background: var(--jade-50); border: 1px solid var(--line); color: var(--jade-950); margin: 12px 0; }
+    form { display: grid; gap: 14px; }
+    label { font-weight: 900; display: block; margin-bottom: 6px; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      background: var(--white);
+      color: var(--ink);
+    }
+    textarea { min-height: 108px; resize: vertical; }
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .terms-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .terms-list a { text-decoration: none; color: var(--jade-700); font-weight: 900; }
+    .status { font-weight: 800; color: var(--jade-700); min-height: 24px; }
+    .status.error { color: var(--danger); }
+    .price-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+    .price-tabs button[aria-pressed="true"] { background: var(--jade-500); color: var(--jade-950); }
+    footer { margin-top: 28px; color: var(--muted); text-align: center; }
+    @media (max-width: 860px) {
+      .hero, .field-grid, .guide-grid, .price-grid, .combo-grid, .terms-list { grid-template-columns: 1fr; }
+      .panel { padding: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/">
+        <img src="/logo.png?v=20260619" alt="TOAN AAS">
+        <span>TOAN AAS</span>
+      </a>
+      <a href="https://t.me/toanaasbot" target="_blank" rel="noopener">🤖 Mở Telegram Bot</a>
+    </header>
+
+    <main class="hero">
+      <section class="panel hero-card" id="welcome">
+        <div class="eyebrow">Customer onboarding V1</div>
+        <h1>TOAN AAS — AI Automation System</h1>
+        <p>Tạo ảnh, video, voice, phụ đề, nhạc nền và nội dung bán hàng bằng AI trên Telegram.</p>
+        <p>Quy trình này giúp bạn thêm app ra màn hình chính, bật thông báo nếu trình duyệt hỗ trợ, chấp nhận điều khoản, gửi nhu cầu và nhận mã dùng thử sau khi admin/CSKH xác nhận.</p>
+        <div class="actions">
+          <button class="button primary" type="button" data-next="install">🚀 Bắt đầu</button>
+          <a class="button secondary" id="hero-bot-link" href="https://t.me/toanaasbot" target="_blank" rel="noopener">🤖 Mở Telegram Bot</a>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="eyebrow">Tiến trình</div>
+        <div class="steps" aria-label="Các bước onboarding">
+          <button class="step-tab" type="button" data-step="welcome" aria-current="true">1. Welcome</button>
+          <button class="step-tab" type="button" data-step="install">2. Add to Home Screen</button>
+          <button class="step-tab" type="button" data-step="notify">3. Notification Opt-in</button>
+          <button class="step-tab" type="button" data-step="terms">4. Terms Acceptance</button>
+          <button class="step-tab" type="button" data-step="lead">5. Lead Form</button>
+          <button class="step-tab" type="button" data-step="done">6. Lead Submitted</button>
+        </div>
+      </aside>
+
+      <section class="panel step-panel active" data-panel="welcome">
+        <div class="eyebrow">Bước 1</div>
+        <h2>Chào mừng đến TOAN AAS</h2>
+        <p>TOAN AAS kết hợp web app, Telegram bot, Xu dịch vụ và CSKH để bạn bắt đầu nhanh mà vẫn biết rõ giá trước khi xử lý.</p>
+        <div class="actions">
+          <button class="button primary" type="button" data-next="install">🚀 Bắt đầu</button>
+          <a class="button ghost" href="#pricing">💳 Xem bảng giá</a>
+        </div>
+      </section>
+
+      <section class="panel step-panel" data-panel="install">
+        <div class="eyebrow">Bước 2</div>
+        <h2>Thêm app ra màn hình chính</h2>
+        <div class="guide-grid">
+          <article class="mini-card">
+            <h3>iPhone Safari</h3>
+            <ol>
+              <li>Mở Safari vào app.toanaas.vn</li>
+              <li>Bấm nút chia sẻ</li>
+              <li>Chọn “Thêm vào Màn hình chính”</li>
+              <li>Bấm “Thêm”</li>
+            </ol>
+          </article>
+          <article class="mini-card">
+            <h3>Android Chrome</h3>
+            <ol>
+              <li>Mở Chrome vào app.toanaas.vn</li>
+              <li>Bấm menu ba chấm</li>
+              <li>Chọn “Thêm vào màn hình chính”</li>
+              <li>Bấm “Cài đặt/Thêm”</li>
+            </ol>
+          </article>
+        </div>
+        <div class="actions">
+          <button class="button primary" type="button" data-next="notify" data-store="app_installed">✅ Tôi đã thêm app</button>
+          <button class="button ghost" type="button" data-next="notify">⏭ Bỏ qua</button>
+        </div>
+      </section>
+
+      <section class="panel step-panel" data-panel="notify">
+        <div class="eyebrow">Bước 3</div>
+        <h2>Bật thông báo</h2>
+        <p>Bật thông báo để nhận kết quả khi ảnh/video/voice tạo xong, nhận cập nhật trạng thái và ưu đãi.</p>
+        <p class="notice" id="notify-fallback" hidden>Bạn vẫn có thể nhận kết quả qua Telegram bot.</p>
+        <div class="actions">
+          <button class="button primary" type="button" id="request-notification">🔔 Bật thông báo</button>
+          <button class="button ghost" type="button" data-next="terms">Để sau</button>
+        </div>
+        <p class="status" id="notification-status" role="status"></p>
+      </section>
+
+      <section class="panel step-panel" data-panel="terms">
+        <div class="eyebrow">Bước 4</div>
+        <h2>Chấp nhận điều khoản</h2>
+        <p>Bạn cần đồng ý điều khoản để sử dụng dịch vụ TOAN AAS.</p>
+        <div class="terms-list">
+          <a class="mini-card" href="/privacy" target="_blank" rel="noopener">Chính sách bảo mật</a>
+          <a class="mini-card" href="/legal" target="_blank" rel="noopener">Điều khoản dịch vụ</a>
+          <a class="mini-card" href="/dieukhoan_xu" target="_blank" rel="noopener">Điều khoản Xu</a>
+          <a class="mini-card" href="/refund_policy" target="_blank" rel="noopener">Chính sách hoàn tiền</a>
+          <a class="mini-card" href="/legal#intellectual-property" target="_blank" rel="noopener">Sở hữu trí tuệ</a>
+        </div>
+        <label class="notice"><input id="terms-checkbox" type="checkbox"> Tôi đã đọc và đồng ý điều khoản TOAN AAS.</label>
+        <div class="actions">
+          <button class="button danger" type="button" id="reject-terms">❌ Từ chối</button>
+          <button class="button primary" type="button" id="accept-terms" disabled>✅ Chấp nhận</button>
+        </div>
+        <p class="status error" id="terms-error" role="status"></p>
+      </section>
+
+      <section class="panel step-panel" data-panel="lead">
+        <div class="eyebrow">Bước 5</div>
+        <h2>Nhận mã dùng thử</h2>
+        <p>Điền thông tin để CSKH/admin kiểm tra và gửi mã dùng thử nếu đủ điều kiện.</p>
+        <form id="lead-form">
+          <div class="field-grid">
+            <div>
+              <label for="lead-name">Họ tên</label>
+              <input id="lead-name" name="name" autocomplete="name" required minlength="2" maxlength="120">
+            </div>
+            <div>
+              <label for="lead-contact">Số điện thoại hoặc email</label>
+              <input id="lead-contact" name="contact" autocomplete="email tel" required minlength="3" maxlength="120">
+            </div>
+          </div>
+          <div class="field-grid">
+            <div>
+              <label for="lead-telegram">Telegram username</label>
+              <input id="lead-telegram" name="telegram_username" placeholder="@username" maxlength="80">
+            </div>
+            <div>
+              <label for="lead-need">Bạn muốn dùng TOAN AAS để làm gì?</label>
+              <select id="lead-need" name="need_type" required>
+                <option value="" selected disabled>Chọn nhu cầu</option>
+                <option>Tạo video bán hàng</option>
+                <option>Tạo video TikTok/Reels</option>
+                <option>Affiliate</option>
+                <option>Tạo ảnh sản phẩm</option>
+                <option>Tạo voice/lồng tiếng</option>
+                <option>Phụ đề/dịch video</option>
+                <option>Tài liệu/PDF</option>
+                <option>Khác</option>
+              </select>
+            </div>
+          </div>
+          <div class="field-grid">
+            <div>
+              <label for="lead-industry">Ngành nghề</label>
+              <input id="lead-industry" name="industry" maxlength="120" placeholder="Ví dụ: mỹ phẩm, nhà hàng, affiliate...">
+            </div>
+            <div>
+              <label for="lead-ref">Ref code</label>
+              <input id="lead-ref" name="ref_code" maxlength="64">
+            </div>
+          </div>
+          <div>
+            <label for="lead-note">Ghi chú nhu cầu</label>
+            <textarea id="lead-note" name="note" maxlength="1000" placeholder="Mô tả ngắn mục tiêu, sản phẩm, nền tảng đăng hoặc vấn đề cần CSKH hỗ trợ."></textarea>
+          </div>
+          <button class="button primary" type="submit">🎁 Nhận mã dùng thử</button>
+          <p class="status" id="lead-status" role="status"></p>
+        </form>
+      </section>
+
+      <section class="panel step-panel" data-panel="done">
+        <div class="eyebrow">Bước 6</div>
+        <h2>TOAN AAS đã nhận thông tin</h2>
+        <p>TOAN AAS đã nhận thông tin. CSKH/admin sẽ kiểm tra và gửi mã dùng thử nếu đủ điều kiện.</p>
+        <div class="actions">
+          <a class="button primary" id="done-bot-link" href="https://t.me/toanaasbot" target="_blank" rel="noopener">🤖 Mở bot Telegram</a>
+          <a class="button ghost" href="#pricing">💳 Xem bảng giá</a>
+          <a class="button secondary" href="https://t.me/toanaas" target="_blank" rel="noopener">📞 Liên hệ hỗ trợ</a>
+        </div>
+      </section>
+    </main>
+
+    <section class="panel" id="pricing" style="margin-top:24px;">
+      <div class="eyebrow">Pricing display</div>
+      <h2>Bảng giá/gói TOAN AAS</h2>
+      <p><strong>1 Xu = 100đ.</strong> Phần này chỉ hiển thị thông tin, không thay đổi logic thanh toán.</p>
+      <div class="price-tabs" role="tablist" aria-label="Bảng giá">
+        <button class="button ghost" type="button" aria-pressed="true" data-price-tab="topup">Nạp Xu</button>
+        <button class="button ghost" type="button" aria-pressed="false" data-price-tab="image">Gói ảnh</button>
+        <button class="button ghost" type="button" aria-pressed="false" data-price-tab="video">Gói video</button>
+        <button class="button ghost" type="button" aria-pressed="false" data-price-tab="combo">Combo ảnh + video</button>
+        <button class="button ghost" type="button" aria-pressed="false" data-price-tab="business">Doanh nghiệp / CSKH</button>
+      </div>
+      <div class="price-panel" data-price-panel="topup">
+        <div class="price-grid">
+          <div class="mini-card">200 Xu — 20.000đ</div>
+          <div class="mini-card">300 Xu — 30.000đ</div>
+          <div class="mini-card">400 Xu — 40.000đ</div>
+          <div class="mini-card">600 Xu — 60.000đ</div>
+          <div class="mini-card">1000 Xu — 100.000đ</div>
+          <div class="mini-card">2000 Xu — 200.000đ</div>
+          <div class="mini-card">5000 Xu — 500.000đ</div>
+        </div>
+      </div>
+      <div class="price-panel" data-price-panel="image" hidden>
+        <div class="price-grid">
+          <div class="mini-card">Tiết kiệm: 50 Xu</div>
+          <div class="mini-card">Chuẩn: 150 Xu</div>
+          <div class="mini-card">Chuẩn + bảo hành: 200 Xu</div>
+          <div class="mini-card">Phổ thông: 300 Xu</div>
+          <div class="mini-card">Phổ thông + bảo hành: 400 Xu</div>
+          <div class="mini-card">Cao: 500 Xu</div>
+          <div class="mini-card">Cao + bảo hành: 600 Xu</div>
+        </div>
+      </div>
+      <div class="price-panel" data-price-panel="video" hidden>
+        <div class="price-grid">
+          <div class="mini-card">Trải nghiệm: 200 Xu</div>
+          <div class="mini-card">Cơ bản: 300 Xu</div>
+          <div class="mini-card">Phổ thông: 400 Xu</div>
+          <div class="mini-card">Nâng cao: 500 Xu</div>
+          <div class="mini-card">Bán hàng: 600 Xu</div>
+          <div class="mini-card">Cao cấp: 800 Xu</div>
+          <div class="mini-card">Chuyên nghiệp: 1000 Xu</div>
+          <div class="mini-card">Pro Plus: 1200 Xu</div>
+          <div class="mini-card">Premium: 1500 Xu</div>
+        </div>
+      </div>
+      <div class="price-panel" data-price-panel="combo" hidden>
+        <div class="combo-grid">
+          <div class="mini-card"><h3>Combo Starter</h3><p>Ảnh + video ngắn để thử ý tưởng nhanh.</p></div>
+          <div class="mini-card"><h3>Combo Creator</h3><p>Ảnh, video, caption và voice cho creator.</p></div>
+          <div class="mini-card"><h3>Combo Business</h3><p>Video bán hàng, voice, phụ đề và watermark.</p></div>
+        </div>
+      </div>
+      <div class="price-panel" data-price-panel="business" hidden>
+        <div class="mini-card">
+          <h3>Doanh nghiệp / CSKH</h3>
+          <p>CSKH tư vấn theo mục tiêu, ngành nghề, ngân sách Xu và nhu cầu vận hành. Các gói này là thông tin tham khảo, không tự thay đổi thanh toán.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>TOAN AAS — Telegram bot là kênh thông báo chính trong V1.</footer>
+  </div>
+
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const ref = (params.get("ref") || localStorage.getItem("toanaas_ref") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+      if (ref) localStorage.setItem("toanaas_ref", ref);
+
+      const botUrl = function (leadId) {
+        const token = ref || (leadId ? "lead_" + leadId : "");
+        return token ? "https://t.me/toanaasbot?start=ref_" + encodeURIComponent(token) : "https://t.me/toanaasbot";
+      };
+      document.getElementById("hero-bot-link").href = botUrl("");
+      document.getElementById("done-bot-link").href = botUrl("");
+      document.getElementById("lead-ref").value = ref;
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js").catch(function () {});
+      }
+
+      const showStep = function (step) {
+        document.querySelectorAll(".step-panel").forEach(function (panel) {
+          panel.classList.toggle("active", panel.dataset.panel === step);
+        });
+        document.querySelectorAll(".step-tab").forEach(function (tab) {
+          tab.setAttribute("aria-current", tab.dataset.step === step ? "true" : "false");
+        });
+        localStorage.setItem("toanaas_onboarding_step", step);
+      };
+
+      document.querySelectorAll("[data-next]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const store = button.getAttribute("data-store");
+          if (store) localStorage.setItem("toanaas_" + store, new Date().toISOString());
+          showStep(button.getAttribute("data-next"));
+        });
+      });
+      document.querySelectorAll(".step-tab").forEach(function (tab) {
+        tab.addEventListener("click", function () { showStep(tab.dataset.step); });
+      });
+
+      const fallback = document.getElementById("notify-fallback");
+      const notifyStatus = document.getElementById("notification-status");
+      if (!("Notification" in window)) {
+        fallback.hidden = false;
+        notifyStatus.textContent = "Trình duyệt chưa hỗ trợ web notification. Bạn vẫn nhận kết quả qua Telegram bot.";
+      }
+      document.getElementById("request-notification").addEventListener("click", async function () {
+        if (!("Notification" in window)) {
+          localStorage.setItem("toanaas_notification_permission", "unsupported");
+          showStep("terms");
+          return;
+        }
+        try {
+          const permission = await Notification.requestPermission();
+          localStorage.setItem("toanaas_notification_permission", permission);
+          notifyStatus.textContent = permission === "granted" ? "Đã bật thông báo trên trình duyệt." : "Bạn có thể bật lại sau. Telegram vẫn là kênh chính.";
+        } catch (err) {
+          localStorage.setItem("toanaas_notification_permission", "error");
+          notifyStatus.textContent = "Không bật được thông báo. Bạn vẫn có thể nhận kết quả qua Telegram bot.";
+        }
+        window.setTimeout(function () { showStep("terms"); }, 500);
+      });
+
+      const termsCheckbox = document.getElementById("terms-checkbox");
+      const acceptButton = document.getElementById("accept-terms");
+      const termsError = document.getElementById("terms-error");
+      termsCheckbox.addEventListener("change", function () {
+        acceptButton.disabled = !termsCheckbox.checked;
+        termsError.textContent = "";
+      });
+      document.getElementById("reject-terms").addEventListener("click", function () {
+        termsError.textContent = "Bạn cần đồng ý điều khoản để sử dụng dịch vụ TOAN AAS.";
+      });
+      acceptButton.addEventListener("click", function () {
+        const now = new Date().toISOString();
+        localStorage.setItem("toanaas_terms_accepted_at", now);
+        localStorage.setItem("toanaas_privacy_accepted_at", now);
+        showStep("lead");
+      });
+
+      document.querySelectorAll("[data-price-tab]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          const tab = button.dataset.priceTab;
+          document.querySelectorAll("[data-price-tab]").forEach(function (btn) {
+            btn.setAttribute("aria-pressed", btn.dataset.priceTab === tab ? "true" : "false");
+          });
+          document.querySelectorAll("[data-price-panel]").forEach(function (panel) {
+            panel.hidden = panel.dataset.pricePanel !== tab;
+          });
+        });
+      });
+
+      document.getElementById("lead-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        const status = document.getElementById("lead-status");
+        const termsAt = localStorage.getItem("toanaas_terms_accepted_at") || "";
+        const privacyAt = localStorage.getItem("toanaas_privacy_accepted_at") || "";
+        if (!termsAt || !privacyAt) {
+          status.classList.add("error");
+          status.textContent = "Bạn cần đồng ý điều khoản trước khi gửi thông tin.";
+          showStep("terms");
+          return;
+        }
+        status.classList.remove("error");
+        status.textContent = "Đang gửi thông tin...";
+        const form = new FormData(event.currentTarget);
+        const payload = {
+          name: form.get("name") || "",
+          contact: form.get("contact") || "",
+          telegram_username: form.get("telegram_username") || "",
+          need_type: form.get("need_type") || "",
+          industry: form.get("industry") || "",
+          note: form.get("note") || "",
+          ref_code: form.get("ref_code") || ref,
+          source_url: window.location.href,
+          terms_accepted: true,
+          privacy_accepted: true,
+          terms_accepted_at: termsAt,
+          privacy_accepted_at: privacyAt,
+          notification_permission: localStorage.getItem("toanaas_notification_permission") || "unknown",
+          user_agent: navigator.userAgent || ""
+        };
+        try {
+          const response = await fetch("/api/customer-leads", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.detail || data.message || "submit_failed");
+          localStorage.setItem("toanaas_lead_id", String(data.lead_id || ""));
+          const handoff = data.telegram_handoff_url || botUrl(data.lead_id);
+          document.getElementById("done-bot-link").href = handoff;
+          status.textContent = "Đã gửi thông tin. CSKH/admin sẽ kiểm tra và gửi mã nếu đủ điều kiện.";
+          showStep("done");
+        } catch (err) {
+          status.classList.add("error");
+          status.textContent = "Chưa gửi được thông tin. Vui lòng thử lại hoặc nhắn Telegram hỗ trợ.";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
