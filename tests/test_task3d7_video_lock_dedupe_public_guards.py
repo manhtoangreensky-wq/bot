@@ -311,7 +311,7 @@ def test_voice_clone_public_guard_verified_copy():
 
 
 def test_ai_music_public_guard_verified_copy():
-    assert bot.music_ai_public_guard_text("vi") == "Tạo bài hát đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+    assert bot.music_ai_public_guard_text("vi") == "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 
 
 def test_video_dub_public_guard_maintenance():
