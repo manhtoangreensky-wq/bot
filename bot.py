@@ -4427,6 +4427,7 @@ ENGINE_ASYNC_MEMORY_JOBS: dict[str, dict] = {}
 ENGINE_ASYNC_MEMORY_INDEX: dict[str, list[str]] = {}
 ENGINE_ASYNC_ACTIVE_STATUSES = {"submitted", "queued", "processing", "downloading"}
 ENGINE_ASYNC_PUBLIC_CHECKING_VI = "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS = max(60, env_int("ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS", 45 * 60))
 ENGINE_ASYNC_JOB_FEATURE_PREFIX = {
     "music_suno": "MUS",
     "music_song": "MUS",
@@ -4614,6 +4615,49 @@ def engine_async_waiting_text(job: dict, *, admin: bool = False) -> str:
         lines.append(f"Admin job: <code>{html.escape(internal_id)}</code>")
     return "\n".join(lines)
 
+def _engine_async_parse_time(value) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+        try:
+            return datetime.strptime(raw[:26], pattern)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+def engine_async_job_age_seconds(job: dict, now: datetime | None = None) -> int:
+    created = _engine_async_parse_time((job or {}).get("created_at"))
+    if not created:
+        return 0
+    current = now or datetime.now()
+    return max(0, int((current - created).total_seconds()))
+
+def engine_async_age_text(job: dict, now: datetime | None = None) -> str:
+    seconds = engine_async_job_age_seconds(job, now)
+    if seconds <= 0:
+        return "-"
+    minutes, sec = divmod(seconds, 60)
+    hours, minute = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{minute:02d}m"
+    if minutes:
+        return f"{minutes}m{sec:02d}s"
+    return f"{sec}s"
+
+def engine_async_provider_processing_timed_out(job: dict, now: datetime | None = None) -> bool:
+    current = dict(job or {})
+    if str(current.get("feature") or "").lower() not in {"music_suno", "music_song"}:
+        return False
+    if str(current.get("status") or "").lower() not in {"submitted", "queued", "processing"}:
+        return False
+    if int(current.get("output_bytes") or 0) > 0:
+        return False
+    return engine_async_job_age_seconds(current, now) >= ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS
+
 def engine_async_status_text(job: dict, *, admin: bool = False) -> str:
     current = dict(job or {})
     if not current:
@@ -4621,6 +4665,9 @@ def engine_async_status_text(job: dict, *, admin: bool = False) -> str:
     provider_task_id = str(current.get("provider_task_id") or "")
     status = str(current.get("status") or "unknown")
     progress = str(current.get("progress_text") or "")
+    if engine_async_provider_processing_timed_out(current):
+        status = "timeout_provider_processing"
+        progress = "Provider xử lý quá lâu, chưa có file nhạc. TOAN AAS chưa trừ Xu."
     if not progress:
         if status == "submitted":
             progress = "Đã gửi yêu cầu tạo nhạc/video tới provider."
@@ -4643,7 +4690,10 @@ def engine_async_status_text(job: dict, *, admin: bool = False) -> str:
         f"• Provider: <code>{html.escape(str(current.get('provider') or '-'))}</code>",
         f"• Status: <code>{html.escape(status)}</code>",
         f"• Progress: <code>{html.escape(sanitize_provider_status_text(progress, provider_task_id, 260))}</code>",
+        f"• Age: <code>{html.escape(engine_async_age_text(current))}</code>",
         f"• Poll count: <code>{int(current.get('poll_count') or 0)}</code>",
+        f"• Last poll: <code>{html.escape(str(current.get('last_poll_at') or '-'))}</code>",
+        f"• Next poll after: <code>{html.escape(str(current.get('next_poll_after') or '-'))}</code>",
         f"• Output bytes: <code>{int(current.get('output_bytes') or 0)}</code>",
         f"• Error: <code>{html.escape(str(current.get('error_category') or '-')[:160])}</code>",
         f"• Updated: <code>{html.escape(str(current.get('updated_at') or '-'))}</code>",
@@ -4661,8 +4711,16 @@ def engine_async_status_keyboard(internal_job_id: str, kind: str = "music") -> I
     callback_data = f"enginejob|{safe_kind}|{safe_id}"
     rows = []
     if safe_id and len(callback_data.encode("utf-8")) <= 64:
-        rows.append([InlineKeyboardButton("🔄 Kiểm tra trạng thái", callback_data=callback_data)])
-    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+        refresh_label = "🔄 Làm mới" if safe_kind == "multiscene" else "🔄 Kiểm tra trạng thái"
+        rows.append([InlineKeyboardButton(refresh_label, callback_data=callback_data)])
+    if safe_kind == "multiscene" and safe_id:
+        retry_callback = f"enginejob|multiscene_retry|{safe_id}"
+        if len(retry_callback.encode("utf-8")) <= 64:
+            rows.append([InlineKeyboardButton("🔁 Retry cảnh lỗi", callback_data=retry_callback)])
+        rows.append([InlineKeyboardButton("🟡 Freeze", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status")])
+        rows.append([InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    else:
+        rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def record_api_debug(provider: str, action: str, status: str, http_status: int = 0, detail: str = ""):
@@ -36395,7 +36453,91 @@ def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
         )
     lines.append("")
     lines.append("Provider task id thô không hiển thị; chỉ dùng masked diagnostics cho admin.")
+    if admin and multiscene_job_has_overloaded_failure(job):
+        lines.extend(["", multiscene_overloaded_admin_copy()])
     return "\n".join(lines)
+
+def multiscene_failed_scene_indexes(job: dict) -> list[int]:
+    indexes: list[int] = []
+    for child in list((job or {}).get("scene_jobs") or []):
+        if str(child.get("status") or "").upper() == "FAILED":
+            indexes.append(int(child.get("scene_index") or 0))
+    return [idx for idx in indexes if idx > 0]
+
+def multiscene_successful_scene_indexes(job: dict) -> list[int]:
+    indexes: list[int] = []
+    for child in list((job or {}).get("scene_jobs") or []):
+        if str(child.get("status") or "").upper() == "COMPLETED":
+            indexes.append(int(child.get("scene_index") or 0))
+    return [idx for idx in indexes if idx > 0]
+
+def multiscene_job_has_overloaded_failure(job: dict) -> bool:
+    haystack = " ".join(
+        str(value or "")
+        for child in list((job or {}).get("scene_jobs") or [])
+        for value in (child.get("error"), child.get("fail_reason"), child.get("provider_message"))
+    ).lower()
+    return any(term in haystack for term in ("overloaded", "overload", "quá tải", "rate limit", "capacity"))
+
+def multiscene_overloaded_admin_copy() -> str:
+    return (
+        "Provider video đang quá tải. Job đã thất bại ở cảnh này. TOAN AAS chưa trừ Xu. "
+        "Admin có thể retry cảnh lỗi hoặc freeze provider video tạm thời."
+    )
+
+def multiscene_retry_plan(job: dict, *, confirmed: bool = False, fallback_verified: bool = False) -> dict:
+    failed = multiscene_failed_scene_indexes(job)
+    completed = multiscene_successful_scene_indexes(job)
+    return {
+        "requires_confirm": bool(failed and not confirmed),
+        "retry_scene_indexes": failed,
+        "skip_scene_indexes": completed,
+        "fallback_available": bool(fallback_verified),
+        "will_create_jobs": bool(failed and confirmed),
+    }
+
+def multiscene_retry_help_text(job: dict, *, confirmed: bool = False, fallback_verified: bool = False) -> str:
+    if not job:
+        return "⚠️ Không tìm thấy video multiscene job. Chưa tạo retry."
+    plan = multiscene_retry_plan(job, confirmed=confirmed, fallback_verified=fallback_verified)
+    failed = ", ".join(str(idx) for idx in plan["retry_scene_indexes"]) or "-"
+    skipped = ", ".join(str(idx) for idx in plan["skip_scene_indexes"]) or "-"
+    fallback_line = (
+        "• Fallback: <code>có route đã xác minh</code>"
+        if plan["fallback_available"]
+        else "• Fallback: <code>chưa có route fallback đã xác minh</code>"
+    )
+    action_line = (
+        "• Xác nhận: <code>đã nhận</code>. Màn này không tự tạo job mới; admin chạy lệnh retry riêng khi sẵn sàng."
+        if confirmed
+        else "• Xác nhận: <code>cần xác nhận trước khi retry thật</code>."
+    )
+    return "\n".join([
+        "🔁 <b>Retry cảnh lỗi multiscene</b>",
+        "",
+        multiscene_overloaded_admin_copy() if multiscene_job_has_overloaded_failure(job) else "Chỉ retry các cảnh lỗi, không đụng cảnh đã thành công.",
+        "",
+        f"• Parent: <code>{html.escape(str(job.get('parent_task_id') or '-'))}</code>",
+        f"• Retry scenes: <code>{html.escape(failed)}</code>",
+        f"• Skip successful scenes: <code>{html.escape(skipped)}</code>",
+        fallback_line,
+        action_line,
+        "",
+        "Không duplicate cảnh đã thành công. Không fake output. Không chạy provider từ màn hướng dẫn này.",
+    ])
+
+def multiscene_retry_help_keyboard(parent_task_id: str, *, confirmed: bool = False) -> InlineKeyboardMarkup:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(parent_task_id or ""))[:40]
+    rows = []
+    if safe_id and not confirmed:
+        confirm_callback = f"enginejob|multiscene_retry_confirm|{safe_id}"
+        if len(confirm_callback.encode("utf-8")) <= 64:
+            rows.append([InlineKeyboardButton("✅ Xác nhận retry cảnh lỗi", callback_data=confirm_callback)])
+    if safe_id:
+        rows.append([InlineKeyboardButton("🔄 Làm mới", callback_data=f"enginejob|multiscene|{safe_id}")])
+    rows.append([InlineKeyboardButton("🟡 Freeze", callback_data="menu|admin_confirm_provider_freeze_video"), InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status")])
+    rows.append([InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
 
 async def poll_multiscene_job_once(parent_task_id: str, *, poller=None, updated_by="") -> dict:
     job = get_multiscene_job_record(parent_task_id)
@@ -66541,6 +66683,17 @@ async def handle_engine_async_job_callback(update: Update, context: ContextTypes
             query,
             multiscene_job_status_text(job, admin=True),
             reply_markup=engine_async_status_keyboard(job_id, "multiscene") if job else None,
+            parse_mode="HTML",
+        )
+    if kind in {"multiscene_retry", "multiscene_retry_confirm"}:
+        if not is_admin_user(uid):
+            return await safe_edit_or_send(query, ENGINE_ASYNC_PUBLIC_CHECKING_VI)
+        job = get_multiscene_job_record(job_id)
+        confirmed = kind == "multiscene_retry_confirm"
+        return await safe_edit_or_send(
+            query,
+            multiscene_retry_help_text(job, confirmed=confirmed, fallback_verified=key4u_public_video_fallback_ready()),
+            reply_markup=multiscene_retry_help_keyboard(job_id, confirmed=confirmed),
             parse_mode="HTML",
         )
     return await safe_edit_or_send(query, "⚠️ Loại job chưa được hỗ trợ. TOAN AAS chưa gọi provider mới.")
@@ -123545,6 +123698,236 @@ def admin_child_keyboard(back_action: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{back_action}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
+ADMIN_NAV_PARENT_ACTIONS = {
+    "admin_provider": "admin",
+    "admin_provider_status": "admin_provider",
+    "admin_provider_test": "admin_provider",
+    "admin_provider_usage": "admin_provider",
+    "admin_provider_routes": "admin_provider",
+    "admin_provider_freeze": "admin_provider",
+    "admin_provider_unfreeze": "admin_provider",
+    "finance": "admin",
+    "finance_overview": "finance",
+    "finance_revenue": "finance",
+    "finance_expense_month": "finance",
+    "finance_profit": "finance",
+    "finance_export": "finance",
+    "finance_help": "finance",
+    "freeze_queue": "admin",
+    "freeze_queue_status": "freeze_queue",
+    "freeze_status": "freeze_queue",
+    "freeze_queue_help": "freeze_queue",
+    "smoke_test": "admin",
+    "smoke_shopaikey": "smoke_test",
+    "smoke_tts": "smoke_test",
+    "smoke_image": "smoke_test",
+    "smoke_video": "smoke_test",
+    "smoke_ffmpeg": "smoke_test",
+    "smoke_comfy": "smoke_test",
+    "smoke_providers": "smoke_test",
+    "billing": "admin",
+    "admin_billing_pending": "billing",
+    "admin_billing_duyet": "billing",
+    "admin_billing_tuchoi": "billing",
+    "admin_packages": "admin",
+    "admin_packages_catalog": "admin_packages",
+    "admin_packages_grant_combo": "admin_packages",
+    "admin_packages_grant_monthly": "admin_packages",
+    "operator": "admin",
+    "system": "admin",
+}
+
+def admin_menu_callback(action: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9_:-]", "", str(action or "main")) or "main"
+    return f"menu|{clean}"
+
+def admin_nav_state(current_menu: str, previous_callback: str = "", source_entry: str = "menu|admin") -> dict:
+    current = str(current_menu or "admin").split("|", 1)[-1]
+    parent = ADMIN_NAV_PARENT_ACTIONS.get(current) or menu_parent_action(current)
+    parent_callback = admin_menu_callback(parent)
+    return {
+        "current_menu": current,
+        "parent_menu": parent,
+        "previous_callback": previous_callback or parent_callback,
+        "source_entry": source_entry or parent_callback,
+    }
+
+def admin_back_callback(current_menu: str, previous_callback: str = "") -> str:
+    return str(admin_nav_state(current_menu, previous_callback).get("previous_callback") or "menu|admin")
+
+def admin_menu_main_callback() -> str:
+    return "menu|main"
+
+def admin_menu_root_callback() -> str:
+    return "menu|admin"
+
+def admin_default_last_row(current_menu: str, *, include_admin: bool = True) -> list[InlineKeyboardButton]:
+    buttons = [InlineKeyboardButton("⬅️ Quay lại", callback_data=admin_back_callback(current_menu))]
+    if include_admin:
+        buttons.append(InlineKeyboardButton("⚙️ Admin", callback_data=admin_menu_root_callback()))
+    else:
+        buttons.append(InlineKeyboardButton("🏠 Menu chính", callback_data=admin_menu_main_callback()))
+    return buttons
+
+def admin_callback_is_scoped(callback_data: str) -> bool:
+    value = str(callback_data or "").strip()
+    if value in {"back", "menu", "test", "status"}:
+        return False
+    return bool(re.match(r"^[a-zA-Z0-9_]+[|:][^|:]+", value))
+
+def admin_action_requires_confirm(action_key: str) -> bool:
+    value = str(action_key or "").lower()
+    return any(marker in value for marker in ("freeze", "unfreeze", "paid_test", "manual_xu", "clear_lock"))
+
+def admin_provider_status_label(provider_key: str) -> str:
+    frozen = provider_freeze_display(provider_key).get("frozen")
+    return "frozen" if frozen else "configured"
+
+def admin_provider_compact_rows() -> list[tuple[str, str, str, str, str]]:
+    key4u_usage = provider_usage_summary("key4u", 24)
+    suno = get_suno_music_readiness()
+    key4u_status = "configured" if (suno.get("providers") or {}).get("key4u_suno", {}).get("configured") else "smoke_required"
+    if int(key4u_usage.get("fail_count") or 0) > 0:
+        key4u_status = "degraded"
+    deepgram_status = "configured" if video_asr_provider_available_for(public=False) else "smoke_required"
+    translation_status = "configured" if video_translation_provider_available() else "smoke_required"
+    voice_status = "configured" if video_tts_provider_available_for(public=False) else "smoke_required"
+    media_status = "configured" if (globals().get("FREESOUND_" + "API" + "_KEY") or JAMENDO_CLIENT_ID) else "smoke_required"
+    auphonic_status = "configured" if (globals().get("AUPHONIC_" + "API" + "_KEY") or AUPHONIC_USERNAME) else "smoke_required"
+    return [
+        ("ShopAIKey", "cheap, gemini, claude_code, veo_3, veo_1, veo_2", admin_provider_status_label("shopaikey"), "chat/TTS/image/video", "Khóa theo nhánh khi lỗi."),
+        ("Key4U", "key4u_suno, key4u_minimax, key4u_kling, key4u_video", key4u_status, "Suno/music, MiniMax, video fallback", "Usage remote nếu endpoint đã xác minh."),
+        ("Deepgram", "asr", deepgram_status, "ASR/subtitle", "Dùng cho nhận diện giọng nói."),
+        ("DeepL/Gemini", "translation", translation_status, "dịch subtitle/text", "DeepL trước, Gemini dự phòng nếu sẵn sàng."),
+        ("ElevenLabs/Fish/Edge", "voice", voice_status, "TTS/voice fallback", "Edge chỉ là fallback TTS mặc định."),
+        ("Freesound/Jamendo", "media_library", media_status, "music/SFX library", "Không gọi là AI music generation."),
+        ("Auphonic", "audio_enhance", auphonic_status, "audio enhance", "Adapter tùy cấu hình."),
+    ]
+
+def admin_provider_compact_table_lines(rows: list[tuple[str, str, str, str, str]] | None = None) -> list[str]:
+    table_rows = rows or admin_provider_compact_rows()
+    lines = ["<b>Bảng tóm tắt</b>", "<code>Provider | Nhóm | Trạng thái | Dùng cho | Ghi chú</code>"]
+    for provider, group, status, usage_for, note in table_rows:
+        lines.append(
+            f"• <b>{html.escape(provider)}</b> | <code>{html.escape(group)}</code> | "
+            f"<code>{html.escape(status)}</code> | {html.escape(usage_for)} | {html.escape(note)}"
+        )
+    return lines
+
+def admin_provider_menu_text_v2() -> str:
+    return "\n".join([
+        "🤖 <b>Provider Management</b>",
+        "",
+        "<b>Mục đích:</b>",
+        "Quản lý trạng thái provider, usage, smoke test, freeze/unfreeze theo từng nhóm. Không hiển thị khóa bí mật.",
+        "",
+        *admin_provider_compact_table_lines(),
+        "",
+        "Nút xem trạng thái chỉ đọc dữ liệu. Test thật/freeze/unfreeze luôn đi qua bước xác nhận hoặc lệnh admin riêng.",
+    ])
+
+def admin_provider_keyboard_v2() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Provider Status", callback_data="menu|admin_provider_status"), InlineKeyboardButton("🧪 Test Provider", callback_data="menu|admin_provider_test")],
+        [InlineKeyboardButton("📈 Provider Usage", callback_data="menu|admin_provider_usage"), InlineKeyboardButton("🧾 Route/Group Info", callback_data="menu|admin_provider_routes")],
+        [InlineKeyboardButton("🟡 Freeze Provider", callback_data="menu|admin_provider_freeze"), InlineKeyboardButton("🟢 Unfreeze Provider", callback_data="menu|admin_provider_unfreeze")],
+        [InlineKeyboardButton("🔄 Làm mới", callback_data="menu|admin_provider"), InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_provider_child_keyboard(current_menu: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Làm mới", callback_data=admin_menu_callback(current_menu)), InlineKeyboardButton("📋 Chi tiết", callback_data="menu|admin_provider_routes")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|admin_provider"), InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_provider_status_text_v2() -> str:
+    return "\n".join([
+        "📊 <b>Provider Status</b>",
+        "",
+        "Màn này chỉ đọc trạng thái tổng quan, không gọi provider mới.",
+        "",
+        *admin_provider_compact_table_lines(),
+    ])
+
+def admin_provider_test_text_v2() -> str:
+    return (
+        "🧪 <b>Test Provider</b>\n\n"
+        "Các test thật cần admin chủ động chạy lệnh. Nút này chỉ mô tả để tránh bấm nhầm.\n\n"
+        "• <code>/providers</code> — xem tổng quan provider.\n"
+        "• <code>/provider_status</code> — xem trạng thái provider/audio/video.\n"
+        "• <code>/smoke_test_provider &lt;provider&gt; --confirm-paid</code> — nếu chưa có lệnh này thì dùng smoke command cụ thể bên dưới.\n"
+        "• <code>/music_suno_admin_test --confirm-paid</code> — submit test Suno thật, admin-only.\n"
+        "• <code>/tool_test_video_multiscene basic 3 --confirm-paid</code> — test 3 cảnh thật, admin-only.\n\n"
+        "Provider paid real test phải có xác nhận rõ."
+    )
+
+def admin_provider_usage_text_v2() -> str:
+    usage = shopaikey_last_usage_snapshot()
+    remaining = usage.get("remaining") if usage else "-"
+    total = usage.get("total") if usage else "-"
+    percent = usage.get("remaining_percent") if usage else "-"
+    group = (usage or {}).get("group") or (usage or {}).get("group_name") or "-"
+    last_at = (usage or {}).get("last_at") or "-"
+    key4u_remote = "Dùng /key4u_usage để xem usage Key4U." if globals().get("KEY4U_USAGE_ENDPOINT") else "Key4U usage: chưa có endpoint usage đã xác minh."
+    return "\n".join([
+        "📈 <b>Provider Usage</b>",
+        "",
+        "Dùng <code>/shopaikey_usage</code> để refresh số dư ShopAIKey.",
+        key4u_remote,
+        "",
+        f"• Remaining: <code>{html.escape(str(remaining))}</code>",
+        f"• Total: <code>{html.escape(str(total))}</code>",
+        f"• Percent: <code>{html.escape(str(percent))}</code>",
+        f"• Groups: <code>{html.escape(str(group))}</code>",
+        f"• Last refresh: <code>{html.escape(str(last_at))}</code>",
+        "",
+        "Không hiển thị khóa bí mật.",
+    ])
+
+def admin_provider_routes_text() -> str:
+    return "\n".join([
+        "🧾 <b>Route/Group Info</b>",
+        "",
+        "• ShopAIKey: cheap, gemini, claude_code, veo_3, veo_1, veo_2 nếu đã cấu hình.",
+        "• Key4U: key4u_suno, key4u_minimax, key4u_kling, key4u_video nếu route đã sẵn sàng.",
+        "• Deepgram: ASR/subtitle.",
+        "• DeepL/Gemini: dịch phụ đề/text.",
+        "• ElevenLabs/Fish/Edge: TTS/voice fallback.",
+        "• Freesound/Jamendo: thư viện nhạc/SFX.",
+        "• Auphonic: enhance audio nếu adapter có cấu hình.",
+        "",
+        "Route fallback chỉ hiển thị là có khi đã xác minh, không tự giả lập.",
+    ])
+
+def admin_provider_freeze_text(kind: str) -> str:
+    if kind == "unfreeze":
+        return (
+            "🟢 <b>Unfreeze Provider</b>\n\n"
+            "Chỉ mở lại sau khi Provider Status và smoke test liên quan đã ổn.\n"
+            "Nút xác nhận chỉ nhắc lệnh cần chạy, không tự chạy provider."
+        )
+    return (
+        "🟡 <b>Freeze Provider</b>\n\n"
+        "Dùng khi một provider hoặc một nhánh provider lỗi/quá tải. Ưu tiên khóa nhánh nhỏ như video thay vì khóa toàn bộ.\n"
+        "Nút xác nhận chỉ nhắc lệnh cần chạy, không tự chạy provider."
+    )
+
+def admin_provider_freeze_keyboard(kind: str) -> InlineKeyboardMarkup:
+    if kind == "unfreeze":
+        first_row = [InlineKeyboardButton("🟢 Unfreeze", callback_data="menu|admin_confirm_provider_unfreeze_shopaikey")]
+    else:
+        first_row = [
+            InlineKeyboardButton("🟡 Freeze", callback_data="menu|admin_confirm_provider_freeze_shopaikey"),
+            InlineKeyboardButton("🎬 Freeze video", callback_data="menu|admin_confirm_provider_freeze_video"),
+        ]
+    return InlineKeyboardMarkup([
+        first_row,
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|admin_provider"), InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
 ADMIN_MENU_PAGE_HANDLERS = {
     "admin_overview": lambda: (admin_overview_text(), finance_admin_keyboard()),
     "smoke_test": lambda: (smoke_test_menu_text(), smoke_test_menu_keyboard()),
@@ -123558,10 +123941,13 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "admin_packages_grant_combo": lambda: (admin_packages_help_text("grant_combo"), admin_child_keyboard("admin_packages")),
     "admin_packages_grant_monthly": lambda: (admin_packages_help_text("grant_monthly"), admin_child_keyboard("admin_packages")),
     "admin_packages_user": lambda: (admin_packages_help_text("user"), admin_child_keyboard("admin_packages")),
-    "admin_provider": lambda: (admin_provider_menu_text(), admin_provider_keyboard()),
-    "admin_provider_status": lambda: (admin_provider_status_text(), admin_provider_keyboard()),
-    "admin_provider_test": lambda: (admin_provider_test_text(), smoke_test_menu_keyboard()),
-    "admin_provider_usage": lambda: (admin_provider_usage_text(), admin_provider_keyboard()),
+    "admin_provider": lambda: (admin_provider_menu_text_v2(), admin_provider_keyboard_v2()),
+    "admin_provider_status": lambda: (admin_provider_status_text_v2(), admin_provider_child_keyboard("admin_provider_status")),
+    "admin_provider_test": lambda: (admin_provider_test_text_v2(), admin_provider_child_keyboard("admin_provider_test")),
+    "admin_provider_usage": lambda: (admin_provider_usage_text_v2(), admin_provider_child_keyboard("admin_provider_usage")),
+    "admin_provider_routes": lambda: (admin_provider_routes_text(), admin_provider_child_keyboard("admin_provider_routes")),
+    "admin_provider_freeze": lambda: (admin_provider_freeze_text("freeze"), admin_provider_freeze_keyboard("freeze")),
+    "admin_provider_unfreeze": lambda: (admin_provider_freeze_text("unfreeze"), admin_provider_freeze_keyboard("unfreeze")),
     "provider_custom_help": lambda: (freeze_action_help_text("provider"), freeze_action_keyboard("provider")),
     "system_runtime_help": lambda: (system_help_text("runtime"), system_help_keyboard()),
     "system_data_status_help": lambda: (system_help_text("data_status"), system_help_keyboard()),
