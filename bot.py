@@ -36115,18 +36115,29 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
     if state.get("source") != "frame" and int(quote.get("scene_count") or 1) > 1 and not video_multiscene_public_ready(quote.get("scene_count")):
         await query.answer()
         if is_admin_user(uid):
+            decision = can_user_access_product_engine(
+                uid,
+                "video_multiscene",
+                str(int(quote.get("scene_count") or 1)),
+                is_provider_call=True,
+                is_paid_job=True,
+                admin_interactive_confirm=True,
+                state={"scene_count": int(quote.get("scene_count") or 1)},
+            )
+            if not decision.get("allowed"):
+                return await safe_edit_or_send(
+                    query,
+                    decision.get("message") or admin_product_engine_missing_text("video_multiscene", decision.get("readiness")),
+                    parse_mode="HTML",
+                    reply_markup=video_export_maintenance_keyboard(lang),
+                )
+        else:
             return await safe_edit_or_send(
                 query,
-                admin_paid_confirm_required_text("/tool_test_video_multiscene 300 3"),
-                parse_mode="HTML",
+                VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT,
+                parse_mode=None,
                 reply_markup=video_export_maintenance_keyboard(lang),
             )
-        return await safe_edit_or_send(
-            query,
-            VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT,
-            parse_mode=None,
-            reply_markup=video_export_maintenance_keyboard(lang),
-        )
     classification = classify_video_addons_for_package(state)
 
     voice_mux_guard = video_voice_mux_export_guard(state)
@@ -36148,20 +36159,30 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
     if not export_enabled and not key4u_ready:
         await query.answer()
         if is_admin_user(uid):
+            decision = can_user_access_product_engine(
+                uid,
+                "video",
+                "export",
+                is_provider_call=True,
+                is_paid_job=True,
+                admin_interactive_confirm=True,
+            )
+            if not decision.get("allowed"):
+                return await safe_edit_or_send(
+                    query,
+                    decision.get("message") or admin_product_engine_missing_text("video_single", decision.get("readiness")),
+                    parse_mode="HTML",
+                    reply_markup=video_export_maintenance_keyboard(lang),
+                )
+        else:
             return await safe_edit_or_send(
                 query,
-                admin_paid_confirm_required_text("/tool_test_shopaikey_video"),
-                parse_mode="HTML",
+                PUBLIC_PRODUCT_MAINTENANCE_VI
+                if normalize_user_language(lang) == "vi" else
+                PUBLIC_PRODUCT_MAINTENANCE_EN,
+                parse_mode=None,
                 reply_markup=video_export_maintenance_keyboard(lang),
             )
-        return await safe_edit_or_send(
-            query,
-            PUBLIC_PRODUCT_MAINTENANCE_VI
-            if normalize_user_language(lang) == "vi" else
-            PUBLIC_PRODUCT_MAINTENANCE_EN,
-            parse_mode=None,
-            reply_markup=video_export_maintenance_keyboard(lang),
-        )
 
     state = normalize_video_export_payload_for_classifier(state, classification)
     if state.get("source") != "frame" and int(quote.get("scene_count") or 1) > 1:
@@ -36192,16 +36213,39 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
             parse_mode=None,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
-        started = await run_multiscene_video_job({
-            "session": multiscene_session,
-            "user_id": uid,
-            "chat_id": query.message.chat_id,
-            "video_tier": tier,
-            "total_xu": int(quote.get("total_xu") or 0),
-            "final_invoice_confirmed": True,
-            "charge_xu": True,
-            "bot_client": context.bot,
-        }, wait_for_completion=False)
+        engine_result = await execute_engine(
+            "video_multiscene",
+            {
+                "wait_for_completion": False,
+                "scene_count": int(quote.get("scene_count") or 1),
+                "order": {
+                    "session": multiscene_session,
+                    "user_id": uid,
+                    "chat_id": query.message.chat_id,
+                    "video_tier": tier,
+                    "total_xu": int(quote.get("total_xu") or 0),
+                    "final_invoice_confirmed": True,
+                    "charge_xu": True,
+                    "bot_client": context.bot,
+                },
+            },
+            {
+                "user_id": uid,
+                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                "confirm_paid": True,
+                "admin_interactive_confirm": True,
+                "is_paid_job": True,
+            },
+        )
+        started = dict(engine_result.get("provider_result") or {})
+        if not engine_result.get("ok"):
+            return await safe_edit_or_send(
+                query,
+                engine_result.get("message")
+                or (admin_product_engine_missing_text("video_multiscene", (engine_result.get("gate") or {}).get("readiness")) if is_admin_user(uid) else VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT),
+                parse_mode="HTML" if is_admin_user(uid) else None,
+                reply_markup=video_export_maintenance_keyboard(lang),
+            )
         state["multiscene_parent_task_id"] = str(started.get("parent_task_id") or "")
         state["multiscene_started_at"] = now_text()
         set_video_addon_state(uid, state)
@@ -36214,7 +36258,29 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
     set_video_addon_state(uid, state)
     canonical_callback = f"shopai|confirm|{token}"
     try:
-        return await handle_shopaikey_public_callback(update, context, canonical_callback)
+        async def _run_single_video_export():
+            return await handle_shopaikey_public_callback(update, context, canonical_callback)
+        engine_result = await execute_engine(
+            "video_single",
+            {"runner": _run_single_video_export, "action": "export", "state": state},
+            {
+                "user_id": uid,
+                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                "confirm_paid": True,
+                "admin_interactive_confirm": True,
+                "is_paid_job": True,
+                "gate_prechecked": True,
+            },
+        )
+        if not engine_result.get("ok") and not engine_result.get("runner_result"):
+            return await safe_edit_or_send(
+                query,
+                engine_result.get("message")
+                or (admin_product_engine_missing_text("video_single", (engine_result.get("gate") or {}).get("readiness")) if is_admin_user(uid) else PUBLIC_PRODUCT_MAINTENANCE_VI),
+                parse_mode="HTML" if is_admin_user(uid) else None,
+                reply_markup=video_export_maintenance_keyboard(lang),
+            )
+        return engine_result.get("runner_result")
     except Exception as exc:
         restore_shopaikey_pending_confirmation(token, uid, legacy_order)
         state["pending_confirm_token"] = token
@@ -40487,10 +40553,15 @@ def clear_media_creator_pending_states(user_id) -> bool:
     frame_video_cleared = clear_frame_video_state(user_id)
     storyboard_cleared = clear_storyboard_state(user_id)
     developing_video_cleared = clear_developing_video_pending(user_id)
+    product_context_cleared = clear_product_context(user_id)
+    music_guided_cleared = clear_music_guided_pending(user_id)
+    translation_menu_cleared = clear_translation_menu_pending(user_id)
+    video_editor_cleared = clear_video_editor_pending(user_id)
     video_dubbing_cleared = clear_video_dubbing_pending(user_id)
+    video_finalization_cleared = clear_video_finalization_state(user_id)
     video_addon_cleared = clear_video_addon_state(user_id)
     marketing_cleared = clear_marketing_pending(user_id)
-    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or video_dubbing_cleared or video_addon_cleared or marketing_cleared)
+    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or product_context_cleared or music_guided_cleared or translation_menu_cleared or video_editor_cleared or video_dubbing_cleared or video_finalization_cleared or video_addon_cleared or marketing_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -56844,6 +56915,7 @@ def help_text_for_user_i18n(user_id) -> str:
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
+    clear_media_creator_pending_states(uid)
     lang = get_user_language(uid) or "vi"
     await update.message.reply_text(
         help_text_for_user_i18n(uid),
@@ -56853,6 +56925,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_huongdan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
+    clear_media_creator_pending_states(uid)
     lang = get_user_language(uid) or "vi"
     section = context.args[0] if context.args else ""
     await update.message.reply_text(
@@ -60871,6 +60944,7 @@ def voice_engine_status_lines() -> list[str]:
         "VOICE ENGINE STATUS",
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
         f"MiniMax TTS configured: <code>{_engine_yes_no(tts.get('ready'))}</code>",
         f"MiniMax clone configured: <code>{_engine_yes_no(clone.get('ready'))}</code>",
         f"ShopAIKey /audio/speech configured: <code>{_engine_yes_no(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED)}</code>",
@@ -60913,6 +60987,7 @@ def music_engine_status_lines() -> list[str]:
         "MUSIC ENGINE STATUS",
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
         f"Preferred Suno route: <code>{_engine_safe(readiness.get('preferred_provider') or readiness.get('provider'))}</code>",
         f"Key4U Suno configured: <code>{_engine_yes_no(key4u.get('configured'))}</code>",
         f"ShopAIKey Suno configured: <code>{_engine_yes_no(shopaikey.get('configured'))}</code>",
@@ -60952,6 +61027,7 @@ def subtitle_engine_status_lines() -> list[str]:
         "SUBTITLE ENGINE STATUS",
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
         f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
         f"Translation route: <code>{_engine_safe(pipeline.get('translation_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('translation_test'))}</code>",
         f"TTS/dub route: <code>{_engine_safe(pipeline.get('tts_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('tts_test'))}</code>",
@@ -61002,6 +61078,7 @@ def video_engine_status_lines() -> list[str]:
         "VIDEO ENGINE STATUS",
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
         "Public route rule: every video tier must reach final invoice/export confirmation or a clean no-charge guard.",
         f"ShopAIKey video smoke: <code>{_engine_safe(preferred_tool_test_status_text('shopaikey_video', 'shopaikey_video_job'))}</code>",
         f"Key4U video smoke: <code>{_engine_safe(preferred_tool_test_status_text('key4u_video', 'key4u_video_model'))}</code>",
@@ -63276,7 +63353,31 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
         if key4u_minimax_tts_configured(require_public=False):
             route_calls.append(("key4u", lambda: key4u_minimax_tts_bytes(text, voice_id=voice_id, allow_admin=True)))
         for route, make_call in route_calls:
-            status, audio_bytes, detail, http_status = await make_call()
+            async def _run_voice_tts_route(make_call=make_call):
+                status, audio_bytes, detail, http_status = await make_call()
+                return {
+                    "ok": bool(status == "PASS" and audio_bytes),
+                    "status": status,
+                    "audio_bytes": audio_bytes,
+                    "detail": detail,
+                    "http_status": http_status,
+                }
+            engine_result = await execute_engine(
+                "voice_tts",
+                {"runner": _run_voice_tts_route, "voice_id": voice_id, "text": text},
+                {
+                    "user_id": uid,
+                    "entry_source": ENGINE_ENTRY_SOURCE_SLASH_SMOKE,
+                    "confirm_paid": True,
+                    "is_paid_job": True,
+                    "allow_admin": True,
+                },
+            )
+            route_result = dict(engine_result.get("runner_result") or {})
+            status = str(route_result.get("status") or engine_result.get("status") or "FAIL")
+            audio_bytes = bytes(route_result.get("audio_bytes") or engine_result.get("output_bytes") or b"")
+            detail = str(route_result.get("detail") or engine_result.get("detail") or "")
+            http_status = int(route_result.get("http_status") or 0)
             output_sent = False
             if status == "PASS" and audio_bytes:
                 audio = io.BytesIO(audio_bytes)
@@ -70147,7 +70248,7 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_tool_test_asr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_tool_test_stt(update, context)
 
-async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
+async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
@@ -70270,6 +70371,32 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
             "Không trừ Xu và không hiển thị raw provider response.",
             parse_mode="HTML",
         )
+
+async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
+    uid = update.effective_user.id if update.effective_user else 0
+    smoke_no_charge_note = "No Xu deducted"
+    if not has_admin_paid_confirmation(context):
+        # no provider call: keep the core guard so smoke still records NO_CONFIRM.
+        return await _run_admin_video_pipeline_smoke_core(update, context, mode)
+    feature = video_dubbing_product_area_for_mode(mode)
+    async def _run_smoke_pipeline():
+        return await _run_admin_video_pipeline_smoke_core(update, context, mode)
+    engine_result = await execute_engine(
+        feature,
+        {"runner": _run_smoke_pipeline, "mode": normalize_video_translate_mode(mode), "state": {}},
+        {
+            "user_id": uid,
+            "entry_source": ENGINE_ENTRY_SOURCE_SLASH_SMOKE,
+            "confirm_paid": True,
+            "is_paid_job": True,
+        },
+    )
+    if not engine_result.get("ok") and not engine_result.get("runner_result"):
+        return await update.message.reply_text(
+            engine_result.get("message") or admin_product_engine_missing_text(feature, (engine_result.get("gate") or {}).get("readiness")),
+            parse_mode="HTML",
+        )
+    return engine_result.get("runner_result")
 
 async def cmd_tool_test_video_subtitle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_CREATE)
@@ -71143,10 +71270,26 @@ async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_s
     return False, b"", last_detail or "not_ready"
 
 async def send_standalone_tts_result(message, user_id, text: str, voice_label: str, voice_id: str = "", voice_style: str = "", speed: str = "normal", lang: str = "vi") -> bool:
-    if is_admin_user(user_id):
-        ok, audio_bytes, detail = await synthesize_standalone_tts_audio(text, voice_id=voice_id, voice_style=voice_style, speed=speed, allow_admin=True)
-    else:
-        ok, audio_bytes, detail = await synthesize_standalone_tts_audio(text, voice_id=voice_id, voice_style=voice_style, speed=speed)
+    engine_result = await execute_engine(
+        "voice_tts",
+        {
+            "text": text,
+            "voice_id": voice_id,
+            "voice_style": voice_style,
+            "speed": speed,
+        },
+        {
+            "user_id": user_id,
+            "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+            "confirm_paid": True,
+            "admin_interactive_confirm": True,
+            "is_paid_job": bool(is_admin_user(user_id)),
+            "allow_admin": bool(is_admin_user(user_id)),
+        },
+    )
+    ok = bool(engine_result.get("ok"))
+    audio_bytes = bytes(engine_result.get("output_bytes") or b"")
+    detail = str(engine_result.get("detail") or engine_result.get("status") or "")
     if not ok or not audio_bytes:
         logger.info("standalone tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
         await message.reply_text(standalone_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM))
@@ -71203,9 +71346,21 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
         "speed": speed,
         "provider_hint": str(profile.get("provider") or ""),
     }
-    if is_admin_user(user_id):
-        tts_kwargs["allow_admin"] = True
-    ok, audio_bytes, detail = await synthesize_standalone_tts_audio(text, **tts_kwargs)
+    engine_result = await execute_engine(
+        "voice_saved_tts",
+        {"text": text, **tts_kwargs},
+        {
+            "user_id": user_id,
+            "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+            "confirm_paid": True,
+            "admin_interactive_confirm": True,
+            "is_paid_job": True,
+            "allow_admin": bool(is_admin_user(user_id)),
+        },
+    )
+    ok = bool(engine_result.get("ok"))
+    audio_bytes = bytes(engine_result.get("output_bytes") or b"")
+    detail = str(engine_result.get("detail") or engine_result.get("status") or "")
     if not ok or not audio_bytes:
         refund_charged_credit(
             user_id,
@@ -73835,6 +73990,21 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             route_attempts.append(("shopaikey_minimax", shopaikey_minimax_upload_voice_sample, shopaikey_minimax_voice_clone, shopaikey_minimax_tts_bytes))
         if not route_attempts:
             raise RuntimeError("voice_routes_not_ready:" + voice_clone_admin_blocker(readiness))
+        async def _voice_clone_executor_gate():
+            return {"ok": True, "status": "GATE_ONLY"}
+        engine_gate = await execute_engine(
+            "voice_clone",
+            {"runner": _voice_clone_executor_gate, "state": {"profile_id": profile_id}},
+            {
+                "user_id": user_id,
+                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                "confirm_paid": True,
+                "admin_interactive_confirm": True,
+                "is_paid_job": bool(admin_access),
+            },
+        )
+        if not engine_gate.get("ok"):
+            raise RuntimeError(engine_gate.get("detail") or engine_gate.get("status") or "voice_clone_engine_blocked")
         for route_name, upload_call, clone_call, tts_call in route_attempts:
             status, candidate_file_id, detail, _http = await upload_call(audio_bytes)
             if status != "PASS" or not candidate_file_id:
@@ -75032,10 +75202,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 )
             result.pop("music_preview_task_id", None)
             result.pop("music_preview_provider", None)
+        feature = music_engine_feature_for_result(result)
         if is_admin_user(user_id):
             decision = can_user_access_product_engine(
                 user_id,
-                "music",
+                feature,
                 "preview",
                 is_provider_call=True,
                 is_paid_job=True,
@@ -75047,17 +75218,34 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                     parse_mode="HTML",
                     reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
                 )
-            submitted = await submit_music_generation_job(result, preview=True, admin_smoke=True, updated_by=user_id)
-        else:
-            submitted = await submit_music_generation_job(result, preview=True)
-        if not submitted.get("ok"):
-            logger.warning("music preview submit failed | user=%s | %s", user_id, sanitize_log_text(str(submitted.get("detail") or submitted.get("status")))[:220])
+        engine_result = await execute_engine(
+            feature,
+            {"result": result, "preview": True},
+            {
+                "user_id": user_id,
+                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                "confirm_paid": True,
+                "admin_interactive_confirm": True,
+                "is_paid_job": bool(is_admin_user(user_id)),
+                "admin_smoke": bool(is_admin_user(user_id)),
+                "updated_by": user_id,
+            },
+        )
+        submitted = dict(engine_result.get("provider_result") or {})
+        if not engine_result.get("ok"):
+            logger.warning("music preview submit failed | user=%s | %s", user_id, sanitize_log_text(str(engine_result.get("detail") or engine_result.get("status")))[:220])
             result.update({
                 "music_preview_seen": False,
                 "music_preview_guard_acknowledged": True,
                 "music_status": "preview_guard_ready",
             })
             save_music_guided_result(user_id, result)
+            if is_admin_user(user_id):
+                return await query.message.reply_text(
+                    engine_result.get("message") or admin_product_engine_missing_text(feature, (engine_result.get("gate") or {}).get("readiness")),
+                    parse_mode="HTML",
+                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
+                )
             return await query.message.reply_text(
                 music_ai_public_guard_text(lang),
                 parse_mode="HTML",
@@ -75089,12 +75277,14 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 "⏳ Bản nhạc đã được gửi xử lý. Bạn bấm kiểm tra kết quả, không cần tạo lại job.",
                 reply_markup=music_ai_status_keyboard(lang, ctx),
             )
+        feature = music_engine_feature_for_result(result)
         decision = can_user_access_product_engine(
             user_id,
-            "music",
+            feature,
             "confirm",
             is_provider_call=True,
-            is_paid_job=bool(is_admin_user(user_id)),
+            is_paid_job=True,
+            confirm_paid=True,
             admin_interactive_confirm=True,
         )
         if not decision.get("allowed"):
@@ -75123,13 +75313,29 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             if not charge.get("ok"):
                 return await query.message.reply_text("⚠️ Chưa thể xác nhận số dư. TOAN AAS chưa tạo job nhạc.", reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result))
             charged = int(charge.get("final_cost") if charge.get("final_cost") is not None else price)
-        if is_admin_user(user_id):
-            submitted = await submit_music_generation_job(result, admin_smoke=True, updated_by=user_id)
-        else:
-            submitted = await submit_music_generation_job(result)
-        if not submitted.get("ok"):
+        engine_result = await execute_engine(
+            feature,
+            {"result": result, "preview": False},
+            {
+                "user_id": user_id,
+                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                "confirm_paid": True,
+                "admin_interactive_confirm": True,
+                "is_paid_job": True,
+                "admin_smoke": bool(is_admin_user(user_id)),
+                "updated_by": user_id,
+            },
+        )
+        submitted = dict(engine_result.get("provider_result") or {})
+        if not engine_result.get("ok"):
             refund_charged_credit(user_id, charged, event_type="music_ai_submit_refund", note="music provider submit failed", was_charged=charged > 0)
-            logger.warning("music submit failed | user=%s | %s", user_id, sanitize_log_text(str(submitted.get("detail") or submitted.get("status")))[:220])
+            logger.warning("music submit failed | user=%s | %s", user_id, sanitize_log_text(str(engine_result.get("detail") or engine_result.get("status")))[:220])
+            if is_admin_user(user_id):
+                return await query.message.reply_text(
+                    engine_result.get("message") or admin_product_engine_missing_text(feature, (engine_result.get("gate") or {}).get("readiness")),
+                    parse_mode="HTML",
+                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
+                )
             return await query.message.reply_text(
                 "⚙️ Chưa gửi được yêu cầu tạo nhạc. TOAN AAS đã hoàn Xu nếu có phát sinh và bạn có thể thử lại sau.",
                 reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
@@ -75144,7 +75350,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         })
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(
-            f"✅ Đã xác nhận tạo bản đầy đủ {music_result_duration_seconds(result)} giây.\n"
+            f"✅ Đã xác nhận tạo {music_confirm_product_label(result, lang)}.\n"
             f"Đã trừ: {charged} Xu. TOAN AAS đang xử lý; bấm kiểm tra kết quả sau một chút.",
             reply_markup=music_ai_status_keyboard(lang, ctx),
         )
@@ -79941,10 +80147,22 @@ async def cmd_tool_test_music_ai(update: Update, context: ContextTypes.DEFAULT_T
         "guided_duration_seconds": MUSIC_AI_SHORT_DURATION_SECONDS,
         "music_ai_kind": "guided",
     }
-    submitted = await submit_music_generation_job(smoke_result, preview=True, admin_smoke=True, updated_by=uid)
+    engine_result = await execute_engine(
+        "music_background",
+        {"result": smoke_result, "preview": True},
+        {
+            "user_id": uid,
+            "entry_source": ENGINE_ENTRY_SOURCE_SLASH_SMOKE,
+            "confirm_paid": True,
+            "is_paid_job": True,
+            "admin_smoke": True,
+            "updated_by": uid,
+        },
+    )
+    submitted = dict(engine_result.get("provider_result") or {})
     provider = str(submitted.get("provider") or str(readiness.get("provider") or ""))
     submit_tool = "key4u_suno" if provider == "key4u_suno" else ("shopaikey_music" if provider == "shopaikey_music" else "music_ai")
-    submit_status = str(submitted.get("status") or ("PASS_SUBMITTED" if submitted.get("ok") else "FAIL"))
+    submit_status = str(submitted.get("status") or engine_result.get("status") or ("PASS_SUBMITTED" if engine_result.get("ok") else "FAIL"))
     submit_detail = f"provider={provider}; task_id={sanitize_log_text(str(submitted.get('task_id') or ''))[:100]}; {sanitize_log_text(str(submitted.get('detail') or ''))[:300]}"
     save_tool_test_result(submit_tool, submit_status, submit_detail, uid)
     save_tool_test_result("music_ai", submit_status, submit_detail, uid)
@@ -82147,6 +82365,8 @@ async def cmd_ops_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    clear_media_creator_pending_states(uid)
     state = current_system_mode()
     db_status = db_status_payload()
     text = (
@@ -91134,14 +91354,86 @@ def admin_paid_confirm_required_text(command_name: str = "") -> str:
         f"• Thêm <code>{ADMIN_PAID_CONFIRM_FLAG}</code> nếu admin muốn chạy test thật có thể tốn credit provider.{suffix}"
     )
 
+ENGINE_ENTRY_SOURCE_SLASH_SMOKE = "slash_smoke"
+ENGINE_ENTRY_SOURCE_PRODUCT = "interactive_product"
+ENGINE_PRODUCT_PATH_EXECUTOR = "SAME_AS_SMOKE"
+ENGINE_NO_FAKE_SUCCESS_STATUSES = {"NO_OUTPUT_BYTES", "NO_PROVIDER_JOB", "ADAPTER_MISSING", "GATE_BLOCKED"}
+
+def normalize_engine_feature(feature: str) -> str:
+    return str(feature or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+def engine_feature_product_area(feature: str) -> str:
+    feature_key = normalize_engine_feature(feature)
+    mapping = {
+        "voice": "voice",
+        "voice_tts": "voice_tts",
+        "voice_saved_tts": "voice_tts",
+        "voice_clone": "voice_clone",
+        "music": "music",
+        "music_background": "music_background",
+        "music_song": "music_song",
+        "subtitle_asr": "subtitle_auto",
+        "subtitle_auto": "subtitle_auto",
+        "subtitle_translate": "subtitle_translate",
+        "video_dub": "video_dub",
+        "subtitle_plus_dub": "subtitle_plus_dub",
+        "video_single": "video",
+        "video": "video",
+        "video_multiscene": "video_multiscene",
+        "multiscene": "video_multiscene",
+    }
+    return mapping.get(feature_key, feature_key)
+
+def engine_adapter_label(feature: str) -> str:
+    feature_key = normalize_engine_feature(feature)
+    labels = {
+        "voice_tts": "voice_tts",
+        "voice_saved_tts": "voice_tts",
+        "voice_clone": "voice_clone",
+        "music": "music",
+        "music_background": "music_background",
+        "music_song": "music_song",
+        "subtitle_asr": "subtitle_asr",
+        "subtitle_auto": "subtitle_asr",
+        "subtitle_translate": "subtitle_translate",
+        "video_dub": "video_dub",
+        "subtitle_plus_dub": "subtitle_plus_dub",
+        "video_single": "video_single",
+        "video": "video_single",
+        "video_multiscene": "video_multiscene",
+        "multiscene": "video_multiscene",
+    }
+    return labels.get(feature_key, feature_key or "engine")
+
+def admin_product_engine_missing_text(feature: str, readiness: dict | None = None) -> str:
+    label = html.escape(engine_adapter_label(feature))
+    missing = ", ".join(str(item) for item in ((readiness or {}).get("missing") or []) if str(item or "").strip())
+    detail = f" Thiếu: <code>{html.escape(missing[:220])}</code>." if missing else ""
+    return f"⚙️ Admin test chưa chạy được: {label} adapter chưa sẵn sàng hoặc thiếu cấu hình.{detail} Không gọi provider và không trừ Xu."
+
 def _product_engine_readiness(product_area: str, action: str = "", state: dict | None = None) -> dict:
     area = str(product_area or "").strip().lower().replace("-", "_")
     state = dict(state or {})
     if area in {"voice", "voice_tts", "minimax", "minimax_tts"}:
         item = get_minimax_voice_readiness()
+        synth_adapter = globals().get("synthesize_standalone_tts_audio")
+        adapter_overridden = callable(synth_adapter) and getattr(synth_adapter, "__name__", "") != "synthesize_standalone_tts_audio"
+        shopaikey_public_smoke = globals().get("shopaikey_tts_public_smoke_ready")
+        fallback_public_ready = bool(
+            adapter_overridden
+            or (callable(shopaikey_public_smoke) and shopaikey_public_smoke())
+            or globals().get("edge_tts")
+        )
+        configured = bool(
+            item.get("ready")
+            or fallback_public_ready
+            or (callable(globals().get("key4u_minimax_tts_configured")) and key4u_minimax_tts_configured(require_public=False))
+            or (callable(globals().get("shopaikey_minimax_tts_configured")) and shopaikey_minimax_tts_configured())
+            or (callable(globals().get("direct_minimax_tts_configured")) and direct_minimax_tts_configured())
+        )
         return {
-            "configured": bool(item.get("ready")),
-            "public_ready": bool(item.get("public_enabled")),
+            "configured": configured,
+            "public_ready": bool(item.get("public_enabled") or fallback_public_ready),
             "missing": list(item.get("missing_env") or []),
             "reason": item.get("reason") or item.get("admin_debug_reason") or "",
         }
@@ -91153,7 +91445,7 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             "missing": list(item.get("missing_env") or []),
             "reason": item.get("reason") or "",
         }
-    if area in {"music", "music_ai", "suno", "suno_music", "suno_song"}:
+    if area in {"music", "music_ai", "music_background", "music_song", "suno", "suno_music", "suno_song"}:
         item = get_suno_music_readiness()
         return {
             "configured": bool(item.get("ready")),
@@ -91246,7 +91538,7 @@ def can_user_access_product_engine(
                 "allowed": False,
                 "status": "blocked_admin_missing_provider_config",
                 "reason": readiness.get("reason") or ",".join(readiness.get("missing") or []),
-                "message": "⚙️ Admin test chưa chạy vì thiếu cấu hình/wrapper provider thật. Không gọi provider và không trừ Xu.",
+                "message": admin_product_engine_missing_text(product_area, readiness),
                 "readiness": readiness,
             }
         reason = "admin interactive product confirmation" if admin_interactive_confirm else "admin bypasses public gate"
@@ -91275,9 +91567,294 @@ def can_user_access_product_engine(
             "status": "blocked_public_maintenance",
             "reason": readiness.get("reason") or ",".join(readiness.get("missing") or []),
             "message": PUBLIC_PRODUCT_MAINTENANCE_VI,
-            "readiness": readiness,
-        }
+        "readiness": readiness,
+    }
     return {"allowed": True, "status": "allowed_public", "reason": "public ready", "message": "", "readiness": readiness}
+
+def engine_action_for_feature(feature: str, params: dict | None = None) -> str:
+    feature_key = normalize_engine_feature(feature)
+    params = dict(params or {})
+    if feature_key in {"subtitle_asr", "subtitle_auto", "subtitle_translate", "video_dub", "subtitle_plus_dub"}:
+        state = dict(params.get("state") or {})
+        return normalize_video_translate_mode(
+            params.get("mode") or state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
+        )
+    if feature_key in {"video_multiscene", "multiscene"}:
+        order = dict(params.get("order") or params.get("order_or_session") or params.get("session") or {})
+        session = dict(order.get("session") or order)
+        scene_count = params.get("scene_count") or order.get("scene_count") or session.get("scene_count") or session.get("selected_scene_count")
+        return str(safe_int(scene_count, 3))
+    if feature_key in {"music", "music_background", "music_song"}:
+        return "preview" if params.get("preview") else "confirm"
+    if feature_key in {"voice_tts", "voice_saved_tts"}:
+        return "tts"
+    return str(params.get("action") or feature_key)
+
+def evaluate_engine_gate(feature: str, params: dict | None = None, context: dict | None = None) -> dict:
+    params = dict(params or {})
+    context = dict(context or {})
+    uid = context.get("user_id", params.get("user_id", 0))
+    entry_source = str(context.get("entry_source") or ENGINE_ENTRY_SOURCE_PRODUCT)
+    admin_interactive_confirm = bool(
+        context.get("admin_interactive_confirm")
+        or (entry_source == ENGINE_ENTRY_SOURCE_PRODUCT and context.get("confirm_paid"))
+    )
+    is_paid_job = bool(context.get("is_paid_job", is_admin_user(uid)))
+    decision = can_user_access_product_engine(
+        uid,
+        engine_feature_product_area(feature),
+        engine_action_for_feature(feature, params),
+        is_provider_call=True,
+        is_paid_job=is_paid_job,
+        confirm_paid=bool(context.get("confirm_paid")),
+        admin_interactive_confirm=admin_interactive_confirm,
+        state=dict(params.get("state") or context.get("state") or {}),
+    )
+    decision["engine_feature"] = normalize_engine_feature(feature)
+    decision["entry_source"] = entry_source
+    decision["product_path_executor"] = ENGINE_PRODUCT_PATH_EXECUTOR
+    if decision.get("status") == "blocked_admin_missing_provider_config":
+        decision["message"] = admin_product_engine_missing_text(feature, decision.get("readiness"))
+    return decision
+
+def engine_output_bytes(payload) -> bytes:
+    if isinstance(payload, (bytes, bytearray)):
+        return bytes(payload)
+    if isinstance(payload, io.BytesIO):
+        return payload.getvalue()
+    if isinstance(payload, dict):
+        for key in ("output_bytes", "audio_bytes", "video_bytes", "subtitle_bytes", "bytes"):
+            data = payload.get(key)
+            if isinstance(data, (bytes, bytearray)):
+                return bytes(data)
+    return b""
+
+def engine_provider_task_id(payload) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("task_id", "provider_task_id", "parent_task_id", "job_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+def engine_result_base(feature: str, status: str, *, ok: bool, detail: str = "", **extra) -> dict:
+    return {
+        "ok": bool(ok),
+        "status": str(status or ("PASS" if ok else "FAIL")),
+        "detail": sanitize_log_text(str(detail or ""))[:300],
+        "engine_feature": normalize_engine_feature(feature),
+        "adapter": engine_adapter_label(feature),
+        "product_path_executor": ENGINE_PRODUCT_PATH_EXECUTOR,
+        **extra,
+    }
+
+def engine_fail(feature: str, status: str, detail: str = "", **extra) -> dict:
+    return engine_result_base(feature, status, ok=False, detail=detail, **extra)
+
+def engine_success(feature: str, status: str = "PASS", detail: str = "", **extra) -> dict:
+    return engine_result_base(feature, status, ok=True, detail=detail, **extra)
+
+def music_engine_feature_for_result(result: dict | None = None) -> str:
+    product_kind = music_result_product_kind(result)
+    return "music_song" if product_kind in {"song_half", "song_full", "song_seconds"} else "music_background"
+
+def music_confirm_product_label(result: dict | None = None, lang: str = "vi") -> str:
+    result = dict(result or {})
+    kind = music_result_product_kind(result)
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    if kind == "song_half":
+        return "nửa bài đủ lời" if is_vi else "a coherent half song"
+    if kind == "song_full":
+        return "một bài hát hoàn chỉnh" if is_vi else "a complete song"
+    if kind == "song_seconds":
+        seconds = music_result_duration_seconds(result)
+        return f"bài hát có lời {seconds} giây" if is_vi else f"a {seconds}s song with lyrics"
+    seconds = music_result_duration_seconds(result)
+    return f"bản đầy đủ {seconds} giây" if is_vi else f"a full {seconds}s background track"
+
+def engine_readiness_registry() -> dict:
+    features = [
+        "voice_tts",
+        "voice_clone",
+        "music_background",
+        "music_song",
+        "subtitle_asr",
+        "subtitle_translate",
+        "video_dub",
+        "subtitle_plus_dub",
+        "video_single",
+        "video_multiscene",
+    ]
+    payload = {}
+    for feature in features:
+        payload[feature] = {
+            **_product_engine_readiness(engine_feature_product_area(feature), engine_action_for_feature(feature)),
+            "adapter": engine_adapter_label(feature),
+            "product_path_executor": ENGINE_PRODUCT_PATH_EXECUTOR,
+        }
+    return payload
+
+async def execute_engine(feature: str, params: dict | None = None, context: dict | None = None) -> dict:
+    feature_key = normalize_engine_feature(feature)
+    params = dict(params or {})
+    context = dict(context or {})
+    uid = context.get("user_id", params.get("user_id", 0))
+    if context.get("gate_prechecked"):
+        gate = {
+            "allowed": True,
+            "status": "allowed_prechecked",
+            "reason": "caller already passed product export guard",
+            "message": "",
+            "readiness": _product_engine_readiness(engine_feature_product_area(feature_key), engine_action_for_feature(feature_key, params), dict(params.get("state") or {})),
+            "engine_feature": feature_key,
+            "entry_source": str(context.get("entry_source") or ENGINE_ENTRY_SOURCE_PRODUCT),
+            "product_path_executor": ENGINE_PRODUCT_PATH_EXECUTOR,
+        }
+    else:
+        gate = evaluate_engine_gate(feature_key, params, context)
+    if not gate.get("allowed"):
+        return engine_fail(
+            feature_key,
+            "GATE_BLOCKED",
+            gate.get("reason") or gate.get("status") or "",
+            gate=gate,
+            message=gate.get("message") or "",
+        )
+
+    runner = params.get("runner")
+    if callable(runner):
+        runner_result = runner()
+        if asyncio.iscoroutine(runner_result) or hasattr(runner_result, "__await__"):
+            runner_result = await runner_result
+        if isinstance(runner_result, dict) and runner_result.get("ok") is False:
+            return engine_fail(
+                feature_key,
+                str(runner_result.get("status") or "RUNNER_FAILED"),
+                runner_result.get("detail") or runner_result.get("text") or "",
+                gate=gate,
+                runner_result=runner_result,
+                message=str(runner_result.get("text") or ""),
+            )
+        output_bytes = engine_output_bytes(runner_result)
+        task_id = engine_provider_task_id(runner_result)
+        runner_output_ready = bool(
+            output_bytes
+            or (
+                isinstance(runner_result, dict)
+                and (
+                    runner_result.get("has_subtitle")
+                    or runner_result.get("has_audio")
+                    or runner_result.get("has_video")
+                    or runner_result.get("preview_text")
+                )
+            )
+        )
+        runner_has_output = bool(runner_output_ready or task_id)
+        status = "PASS" if runner_output_ready else ("PASS_SUBMITTED" if task_id else "RUNNER_DISPATCHED")
+        return engine_success(
+            feature_key,
+            status,
+            "runner completed",
+            gate=gate,
+            runner_result=runner_result,
+            output_bytes=output_bytes,
+            provider_task_id=task_id,
+            job_created=bool(task_id),
+            has_output_bytes=bool(output_bytes),
+            runner_has_output=runner_has_output,
+        )
+
+    if feature_key in {"voice_tts", "voice_saved_tts", "voice"}:
+        try:
+            ok, audio_bytes, detail = await synthesize_standalone_tts_audio(
+                str(params.get("text") or ""),
+                voice_id=str(params.get("voice_id") or ""),
+                voice_style=str(params.get("voice_style") or ""),
+                speed=str(params.get("speed") or "normal"),
+                provider_hint=str(params.get("provider_hint") or ""),
+                allow_admin=bool(context.get("allow_admin") or is_admin_user(uid)),
+            )
+        except TypeError:
+            ok, audio_bytes, detail = await synthesize_standalone_tts_audio(
+                str(params.get("text") or ""),
+                voice_id=str(params.get("voice_id") or ""),
+                voice_style=str(params.get("voice_style") or ""),
+                speed=str(params.get("speed") or "normal"),
+            )
+        if not ok or not audio_bytes:
+            return engine_fail(feature_key, "NO_OUTPUT_BYTES", detail or "tts_empty", gate=gate)
+        return engine_success(
+            feature_key,
+            "PASS",
+            detail,
+            gate=gate,
+            output_bytes=bytes(audio_bytes),
+            has_output_bytes=True,
+            output_size=len(audio_bytes or b""),
+        )
+
+    if feature_key in {"music", "music_background", "music_song"}:
+        result = dict(params.get("result") or {})
+        try:
+            submitted = await submit_music_generation_job(
+                result,
+                preview=bool(params.get("preview")),
+                admin_smoke=bool(context.get("admin_smoke", is_admin_user(uid))),
+                updated_by=context.get("updated_by", uid),
+            )
+        except TypeError:
+            submitted = await submit_music_generation_job(result, preview=bool(params.get("preview")))
+        task_id = str(submitted.get("task_id") or "").strip()
+        if not submitted.get("ok") or not task_id:
+            return engine_fail(
+                feature_key,
+                "NO_PROVIDER_JOB",
+                submitted.get("detail") or submitted.get("status") or "music_provider_no_task",
+                gate=gate,
+                provider_result=submitted,
+            )
+        return engine_success(
+            feature_key,
+            str(submitted.get("status") or "PASS_SUBMITTED"),
+            submitted.get("detail") or "",
+            gate=gate,
+            provider_result=submitted,
+            provider_task_id=task_id,
+            job_created=True,
+        )
+
+    if feature_key in {"video_multiscene", "multiscene"}:
+        order = dict(params.get("order") or params.get("order_or_session") or {})
+        started = await run_multiscene_video_job(order, wait_for_completion=bool(params.get("wait_for_completion", True)))
+        task_id = str(started.get("parent_task_id") or "").strip() if isinstance(started, dict) else ""
+        final_output = str((started or {}).get("final_output") or "") if isinstance(started, dict) else ""
+        final_output_ok = bool(final_output and os.path.exists(final_output) and os.path.getsize(final_output) > 0)
+        async_submission = bool(not params.get("wait_for_completion", True) and task_id)
+        if not final_output_ok and not async_submission:
+            return engine_fail(
+                feature_key,
+                "NO_OUTPUT_BYTES",
+                str((started or {}).get("status") if isinstance(started, dict) else "multiscene_no_output"),
+                gate=gate,
+                provider_result=started,
+            )
+        return engine_success(
+            feature_key,
+            "PASS" if final_output_ok else "PASS_SUBMITTED",
+            "multiscene output ready" if final_output_ok else "multiscene provider job submitted",
+            gate=gate,
+            provider_result=started,
+            provider_task_id=task_id,
+            job_created=bool(task_id),
+            final_output=final_output,
+            has_output_bytes=final_output_ok,
+        )
+
+    if feature_key in {"subtitle_asr", "subtitle_auto", "subtitle_translate", "video_dub", "subtitle_plus_dub", "video_single", "video"}:
+        return engine_fail(feature_key, "ADAPTER_MISSING", "runner adapter required", gate=gate)
+
+    return engine_fail(feature_key, "ADAPTER_MISSING", "unknown engine feature", gate=gate)
 
 def video_finalization_pending_key(user_id) -> str:
     return f"video_finalization:{user_id}"
@@ -105294,8 +105871,10 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin_user(update.effective_user.id):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
         return
+    clear_media_creator_pending_states(uid)
     bot_info = {}
     expected_webhook = expected_telegram_webhook_url()
     token_summary = telegram_token_runtime_summary()
@@ -125136,6 +125715,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not state.get("voice_speed"):
             state = set_video_dubbing_pending(uid, "voice_speed")
             return await safe_edit_or_send(query, video_dubbing_voice_speed_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_speed_keyboard(lang))
+        feature = video_dubbing_product_area_for_mode(mode)
         access = video_dubbing_engine_access_decision(
             uid,
             mode,
@@ -125166,13 +125746,28 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
         if is_preview_action:
             try:
-                preview_result = await execute_video_dubbing_preview(
-                    query,
-                    context,
-                    state,
-                    lang,
-                    admin_interactive_confirm=True,
+                async def _run_video_dubbing_preview():
+                    return await execute_video_dubbing_preview(
+                        query,
+                        context,
+                        state,
+                        lang,
+                        admin_interactive_confirm=True,
+                    )
+                engine_result = await execute_engine(
+                    feature,
+                    {"runner": _run_video_dubbing_preview, "state": state, "mode": mode},
+                    {
+                        "user_id": uid,
+                        "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                        "confirm_paid": True,
+                        "admin_interactive_confirm": True,
+                        "is_paid_job": bool(is_admin_user(uid)),
+                    },
                 )
+                preview_result = dict(engine_result.get("runner_result") or {})
+                if not engine_result.get("ok") and not preview_result:
+                    preview_result = {"ok": False, "guard": True, "text": engine_result.get("message") or video_dubbing_guard_text(mode, state, lang, admin=False)}
             except Exception as exc:
                 logger.warning("video subtitle/dub preview failed | mode=%s | error=%s", mode, type(exc).__name__)
                 preview_result = {"ok": False, "guard": True, "text": video_dubbing_guard_text(mode, state, lang, admin=False)}
@@ -125204,13 +125799,28 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             f"⏳ TOAN AAS đang xử lý: {video_dubbing_process_label(mode, lang)}.\nVui lòng chờ và không bấm lại nhiều lần.",
         )
         try:
-            result = await execute_video_dubbing_pipeline(
-                query,
-                context,
-                state,
-                lang,
-                admin_interactive_confirm=True,
+            async def _run_video_dubbing_pipeline():
+                return await execute_video_dubbing_pipeline(
+                    query,
+                    context,
+                    state,
+                    lang,
+                    admin_interactive_confirm=True,
+                )
+            engine_result = await execute_engine(
+                feature,
+                {"runner": _run_video_dubbing_pipeline, "state": state, "mode": mode},
+                {
+                    "user_id": uid,
+                    "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                    "confirm_paid": True,
+                    "admin_interactive_confirm": True,
+                    "is_paid_job": True,
+                },
             )
+            result = dict(engine_result.get("runner_result") or {})
+            if not engine_result.get("ok") and not result:
+                result = {"ok": False, "guard": True, "text": engine_result.get("message") or video_dubbing_guard_text(mode, state, lang, admin=False)}
         except Exception as exc:
             logger.warning("video subtitle/dub pipeline failed | mode=%s | error=%s", mode, type(exc).__name__)
             set_video_dubbing_pending(uid, "confirm", processing="0")
