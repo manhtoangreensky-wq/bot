@@ -71818,7 +71818,6 @@ def music_song_product_text(lang: str = "vi") -> str:
     return (
         "🎤 <b>Tạo bài hát có lời</b>\n\n"
         "TOAN AAS sẽ hỏi chủ đề, thể loại, cảm xúc, giọng hát và độ dài sản phẩm.\n\n"
-        f"• Có lời theo số giây: <b>{LYRIC_SONG_15S_PRICE_XU}/{LYRIC_SONG_30S_PRICE_XU}/{LYRIC_SONG_60S_PRICE_XU} Xu</b> cho 18/30/60 giây\n"
         f"• Nửa bài đủ lời: <b>{music_ai_output_price_xu(60, 'song_half')} Xu</b>\n"
         f"• Hoàn chỉnh một bài: <b>{music_ai_output_price_xu(120, 'song_full')} Xu</b>\n\n"
         "Nửa bài vẫn phải đủ câu, có mở/verse/điệp khúc rõ ràng và không cắt giữa câu. Full bài là bản hoàn chỉnh nối tiếp cấu trúc đó."
@@ -71830,7 +71829,6 @@ def music_song_product_keyboard(lang: str = "vi", product_context: str = PRODUCT
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     return build_2col_keyboard(
         [
-            ("⏱ Theo số giây" if is_vi else "⏱ By duration", cb("song_start_seconds")),
             ("1️⃣ Nửa bài" if is_vi else "1️⃣ Half song", cb("song_start_half")),
             ("2️⃣ Full bài" if is_vi else "2️⃣ Full song", cb("song_start_full")),
         ],
