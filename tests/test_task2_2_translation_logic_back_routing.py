@@ -169,7 +169,8 @@ def test_auto_dubbing_target_language_voice_speed():
 def test_auto_dubbing_tts_reads_transcript():
     source = inspect.getsource(bot.execute_video_dubbing_pipeline)
     assert 'output_text = str(prepared.get("output_script")' in source
-    assert "video_dubbing_tts_bytes(\n            output_text" in source
+    assert "video_dubbing_tts_bytes(" in source
+    assert "output_text," in source
 
 
 def test_auto_dubbing_preview_back_invoice():

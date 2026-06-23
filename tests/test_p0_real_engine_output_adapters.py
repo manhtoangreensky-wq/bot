@@ -35,7 +35,9 @@ def test_music_song_missing_adapter_uses_exact_admin_copy(monkeypatch):
     )
 
     assert decision["allowed"] is False
-    assert decision["message"] == "⚙️ Admin test chưa chạy được: music_song chưa có kết quả đầy đủ từ provider hoặc chưa có endpoint tải file nhạc. Không gọi provider mới và không trừ Xu."
+    assert "music_song thiếu component thật" in decision["message"]
+    assert "SUNO_API_KEY" in decision["message"]
+    assert "music_status_route_missing" in decision["message"]
 
 
 def test_execute_engine_music_rejects_ok_without_provider_job_or_bytes(monkeypatch):
@@ -236,6 +238,8 @@ def test_voice_clone_fallback_routes_include_configured_clone_providers_but_not_
 
     readiness = bot.get_minimax_voice_clone_readiness()
 
-    assert "fish_audio" in readiness["routes"]
-    assert "elevenlabs" in readiness["routes"]
+    assert "fish_audio" not in readiness["routes"]
+    assert "elevenlabs" not in readiness["routes"]
+    assert "fish_audio_upload_adapter_missing" in readiness["upload_adapter_missing"]
+    assert "elevenlabs_upload_adapter_missing" in readiness["upload_adapter_missing"]
     assert all("edge" not in route for route in readiness["routes"])

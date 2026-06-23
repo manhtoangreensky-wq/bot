@@ -118,7 +118,7 @@ def test_voice_public_clone_guard_clean_exact():
         assert term not in text.lower()
 
 
-def test_music_song_incomplete_full_result_blocks_admin_product(monkeypatch):
+def test_music_song_incomplete_full_result_allows_admin_real_lifecycle(monkeypatch):
     _admin_only(monkeypatch)
     monkeypatch.setattr(
         bot,
@@ -145,10 +145,11 @@ def test_music_song_incomplete_full_result_blocks_admin_product(monkeypatch):
         admin_interactive_confirm=True,
     )
 
-    assert decision["status"] == "blocked_admin_missing_provider_config"
-    assert "music_download_not_ready" in bot.engine_technical_missing(decision["readiness"])
-    assert "music_full_result_not_ready" in bot.engine_technical_missing(decision["readiness"])
-    assert "chưa có kết quả đầy đủ từ provider hoặc chưa có endpoint tải file nhạc" in decision["message"]
+    assert decision["status"] == "allowed_admin"
+    assert "music_download_not_ready" not in bot.engine_technical_missing(decision["readiness"])
+    assert "music_full_result_not_ready" not in bot.engine_technical_missing(decision["readiness"])
+    assert "music_download_not_ready" in decision["readiness"]["public_blockers"]
+    assert "music_full_result_not_ready" in decision["readiness"]["public_blockers"]
     assert "Đã trừ: 0 Xu" not in decision["message"]
 
 
@@ -266,7 +267,7 @@ def test_multiscene_status_exact_missing_components(monkeypatch):
         assert component in missing
 
 
-def test_multiscene_no_fake_job_when_stitching_not_ready(monkeypatch):
+def test_multiscene_admin_test_can_verify_unverified_stitcher(monkeypatch, tmp_path):
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "configured")
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_URL", "https://example.test/video")
@@ -277,23 +278,42 @@ def test_multiscene_no_fake_job_when_stitching_not_ready(monkeypatch):
     monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": True})
     monkeypatch.setattr(bot, "video_multiscene_stitching_available", lambda: True)
     monkeypatch.setattr(bot, "video_multiscene_stitching_ready", lambda: False)
+    ids = iter([9001, 9002, 9003, 9004])
+    monkeypatch.setattr(bot, "create_shopaikey_job", lambda *_args, **_kwargs: next(ids))
+    monkeypatch.setattr(bot, "update_shopaikey_job", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(bot, "save_multiscene_job_record", lambda job: job)
+    monkeypatch.setattr(bot, "save_tool_test_result", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(bot, "set_system_setting", lambda *_args, **_kwargs: True)
 
-    calls = []
+    async def submit_scene(child):
+        return {"status": "PASS_SUBMITTED", "task_id": f"scene-{child['scene_index']}", "provider_route": "shopaikey"}
 
-    async def forbidden_submit(_child):
-        calls.append(_child)
-        raise AssertionError("provider must not be called when stitcher is not ready")
+    async def poll_scene(child):
+        output = tmp_path / f"scene_{child['scene_index']}.mp4"
+        output.write_bytes(b"scene-video")
+        return {"status": "COMPLETED", "output_url": str(output)}
+
+    def stitch_scene(scene_files, output_path, _aspect, _settings):
+        assert len(scene_files) == 3
+        with open(output_path, "wb") as handle:
+            handle.write(b"stitched-video")
+        return {"status": "COMPLETED", "output_path": output_path}
+
+    async def fake_sender(*_args, **_kwargs):
+        return {"sent": True}
 
     result = asyncio.run(
         bot.run_multiscene_video_job(
             {"session": _session(3), "admin_test": True, "confirm_paid": True},
-            submitter=forbidden_submit,
+            submitter=submit_scene,
+            poller=poll_scene,
+            stitcher=stitch_scene,
+            sender=fake_sender,
         )
     )
 
-    assert result["status"] == "MULTISCENE_NOT_READY"
-    assert "stitcher_missing" in result["missing"]
-    assert calls == []
+    assert result["status"] in {"SENT", "COMPLETED"}
+    assert result["final_output"]
 
 
 def test_video_multiscene_public_guard_copy():

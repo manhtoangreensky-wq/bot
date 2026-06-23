@@ -43,7 +43,8 @@ def test_execute_engine_blocks_missing_adapter_without_fake_success(monkeypatch)
     assert result["status"] == "GATE_BLOCKED"
     assert result.get("job_created") is not True
     assert "music_song" in result["message"]
-    assert "chưa có kết quả đầy đủ từ provider hoặc chưa có endpoint tải file nhạc" in result["message"]
+    assert "music_song thiếu component thật" in result["message"]
+    assert "music_status_route_missing" in result["message"]
     assert bot.ADMIN_PAID_CONFIRM_FLAG not in result["message"]
 
 
