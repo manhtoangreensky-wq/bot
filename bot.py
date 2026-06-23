@@ -36114,6 +36114,13 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
         )
     if state.get("source") != "frame" and int(quote.get("scene_count") or 1) > 1 and not video_multiscene_public_ready(quote.get("scene_count")):
         await query.answer()
+        if is_admin_user(uid):
+            return await safe_edit_or_send(
+                query,
+                admin_paid_confirm_required_text("/tool_test_video_multiscene 300 3"),
+                parse_mode="HTML",
+                reply_markup=video_export_maintenance_keyboard(lang),
+            )
         return await safe_edit_or_send(
             query,
             VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT,
@@ -36140,6 +36147,13 @@ async def handle_video_export_confirm(update: Update, context: ContextTypes.DEFA
     key4u_ready = key4u_public_video_route_ready() if tier in {"future_1000", "future_1200", "future_1500"} else key4u_public_video_fallback_ready()
     if not export_enabled and not key4u_ready:
         await query.answer()
+        if is_admin_user(uid):
+            return await safe_edit_or_send(
+                query,
+                admin_paid_confirm_required_text("/tool_test_shopaikey_video"),
+                parse_mode="HTML",
+                reply_markup=video_export_maintenance_keyboard(lang),
+            )
         return await safe_edit_or_send(
             query,
             PUBLIC_PRODUCT_MAINTENANCE_VI
@@ -62787,6 +62801,9 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("minimax_tts", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_minimax_tts"), parse_mode="HTML")
     readiness = get_minimax_voice_readiness()
     if not readiness.get("ready"):
         detail = f"missing={','.join(readiness.get('missing_env') or [])}; reason={readiness.get('admin_debug_reason')}"
@@ -62809,7 +62826,7 @@ async def cmd_tool_test_minimax_tts(update: Update, context: ContextTypes.DEFAUL
             "• Không gọi provider, không tạo audio giả, không trừ Xu.",
             parse_mode="HTML",
         )
-    text = " ".join(context.args or []).strip() or "Xin chào, đây là bài kiểm tra giọng đọc của TOAN AAS."
+    text = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip() or "Xin chào, đây là bài kiểm tra giọng đọc của TOAN AAS."
     tests = [
         ("default_female", default_tts_voice_id("female")),
         ("default_male", default_tts_voice_id("male")),
@@ -62889,6 +62906,9 @@ async def cmd_tool_test_minimax_voice_clone(update: Update, context: ContextType
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("minimax_voice_clone", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_minimax_voice_clone"), parse_mode="HTML")
     readiness = get_minimax_voice_readiness()
     clone_routes = []
     async def key4u_clone_tts_admin(text: str, voice_id: str = "", voice_style: str = ""):
@@ -64585,8 +64605,11 @@ async def cmd_tool_test_key4u_image_edit(update: Update, context: ContextTypes.D
 async def cmd_tool_test_key4u_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("key4u_video", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", update.effective_user.id)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_key4u_video"), parse_mode="HTML")
     provider = key4u_provider_instance()
-    requested_model = " ".join(context.args or []).strip()
+    requested_model = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip()
     candidates = [requested_model] if requested_model else key4u_model_candidates(KEY4U_VIDEO_MODEL, KEY4U_VIDEO_FALLBACK_MODELS, max_fallbacks=1)
     result = await key4u_run_with_model_fallback(candidates, lambda model: provider.video_generation(model=model, timeout_seconds=60.0))
     detail = key4u_smoke_detail(result)
@@ -64601,12 +64624,16 @@ async def cmd_tool_test_key4u_video(update: Update, context: ContextTypes.DEFAUL
 async def cmd_tool_test_key4u_video_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
-    if not context.args:
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("key4u_video_model", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", update.effective_user.id)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_key4u_video_model <model>"), parse_mode="HTML")
+    args = args_without_admin_paid_confirmation(context.args or [])
+    if not args:
         return await update.message.reply_text(
             "Cú pháp: /tool_test_key4u_video_model <model>\n"
             "Ví dụ: /tool_test_key4u_video_model pixverse-video"
         )
-    model = str(context.args[0] or "").strip()
+    model = str(args[0] or "").strip()
     if not model or model.lower() in {"model", "<model>", "your_model"}:
         return await update.message.reply_text("Model không hợp lệ. Ví dụ: /tool_test_key4u_video_model veo3.1-fast")
     provider = key4u_provider_instance()
@@ -64698,8 +64725,11 @@ async def cmd_tool_test_key4u_stt(update: Update, context: ContextTypes.DEFAULT_
 async def cmd_tool_test_key4u_suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("key4u_suno", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", update.effective_user.id)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_suno_music"), parse_mode="HTML")
     provider = key4u_provider_instance()
-    prompt = " ".join(context.args or []).strip() or "Short upbeat TOAN AAS intro music, clean tech brand mood."
+    prompt = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip() or "Short upbeat TOAN AAS intro music, clean tech brand mood."
     result = await provider.suno_create(prompt=prompt)
     detail = key4u_smoke_detail(result)
     save_tool_test_result("key4u_suno", result.get("status") or "FAIL", detail, update.effective_user.id)
@@ -65758,6 +65788,9 @@ async def cmd_shopaikey_music_test(update: Update, context: ContextTypes.DEFAULT
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("shopaikey_music", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/shopaikey_music_test"), parse_mode="HTML")
     missing = []
     for name, ok in [
         ("MUSIC_AI_ENABLED", MUSIC_AI_ENABLED),
@@ -65780,7 +65813,7 @@ async def cmd_shopaikey_music_test(update: Update, context: ContextTypes.DEFAULT
             "Không gọi provider và không trừ Xu.",
             parse_mode="HTML",
         )
-    prompt_text = " ".join(str(arg) for arg in (context.args or [])).strip()
+    prompt_text = " ".join(str(arg) for arg in args_without_admin_paid_confirmation(context.args or [])).strip()
     if not prompt_text:
         prompt_text = "Nhạc nền công nghệ xanh ngọc cho video TOAN AAS, hiện đại, sạch, tích cực, không lời"
     prompt_text = prompt_text[:500]
@@ -66069,6 +66102,9 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
     lang = user_ui_lang(uid)
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("shopaikey_video", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_shopaikey_video"), parse_mode="HTML")
     if not SHOPAIKEY_ENABLED:
         save_tool_test_result("shopaikey_video", "DISABLED", "SHOPAIKEY_ENABLED=false; no call", uid)
         return await update.message.reply_text(
@@ -66087,7 +66123,8 @@ async def cmd_tool_test_shopaikey_video(update: Update, context: ContextTypes.DE
             "Không gọi API và không trừ Xu.",
             parse_mode="HTML",
         )
-    model_override = str(context.args[0] or "").strip() if context.args else ""
+    args = args_without_admin_paid_confirmation(context.args or [])
+    model_override = str(args[0] or "").strip() if args else ""
     if model_override and not re.match(r"^[A-Za-z0-9_.:-]{2,120}$", model_override):
         return await update.message.reply_text("⚠️ Model không hợp lệ. Ví dụ: /tool_test_shopaikey_video veo3.1")
     test_models = shopaikey_video_model_sequence(model_override)
@@ -69678,9 +69715,18 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
+    if not has_admin_paid_confirmation(context):
+        tool_name = {
+            VIDEO_SUBTITLE_MODE_CREATE: "video_subtitle",
+            VIDEO_SUBTITLE_MODE_TRANSLATE: "video_subtitle",
+            VIDEO_SUBTITLE_MODE_DUB: "video_dub",
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
+        }.get(normalize_video_translate_mode(mode), "video_pipeline")
+        save_tool_test_result(tool_name, "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_video_dub"), parse_mode="HTML")
     mode = normalize_video_translate_mode(mode)
     media_info = await resolve_stt_test_media(update, context)
-    text_input = " ".join(context.args or []).strip()
+    text_input = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip()
     if mode != VIDEO_SUBTITLE_MODE_DUB and not media_info:
         return await update.message.reply_text(
             "⚠️ Reply một video/audio ngắn rồi chạy lại lệnh. Smoke test chưa gọi API và không trừ Xu."
@@ -69695,7 +69741,7 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
     asr_provider = "TEXT_INPUT" if transcript else ""
     try:
         if not transcript:
-            if not video_asr_provider_available():
+            if not (key4u_asr_configured() or DEEPGRAM_API_KEY or (SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)):
                 save_tool_test_result("asr", "MISSING", "DEEPGRAM_API_KEY/SHOPAIKEY_API_KEY missing", uid)
                 return await update.message.reply_text("⚙️ ASR chưa cấu hình Deepgram hoặc ShopAIKey transcription. Không gọi API và không trừ Xu.")
             file_size = int(media_info.get("file_size") or 0)
@@ -69707,6 +69753,8 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
                 media_info.get("bytes") or b"",
                 context,
                 content_type=media_info.get("content_type") or "application/octet-stream",
+                allow_admin=True,
+                updated_by=uid,
             )
             if not transcript or transcript.startswith("❌"):
                 raise RuntimeError("asr_empty_or_failed")
@@ -69716,7 +69764,7 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
         output_text = transcript
         translation_status = "NOT_USED"
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-            translated = await translate_to_language(transcript[:3500], "vi")
+            translated = await translate_subtitle_text(transcript[:3500], "vi", allow_admin=True, updated_by=uid)
             output_text = str(translated.get("text") or "").strip()
             if not output_text:
                 raise RuntimeError("translation_empty")
@@ -69738,7 +69786,7 @@ async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.D
         tts_provider = ""
         audio_bytes = b""
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-            tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(output_text, "")
+            tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(output_text, "", allow_admin=True)
             await update.message.reply_audio(
                 audio=video_dubbing_output_file(audio_bytes, f"toan_aas_{mode}_smoke.mp3"),
                 filename=f"toan_aas_{mode}_smoke.mp3",
@@ -71693,10 +71741,7 @@ def music_ai_gate_keyboard(
     product_context: str = PRODUCT_CONTEXT_SHOWROOM,
     result: dict | None = None,
 ) -> InlineKeyboardMarkup:
-    readiness = get_suno_music_readiness()
-    if music_ai_access_allowed(user_id, readiness):
-        return music_ai_preview_keyboard(lang, product_context, preview_seen=bool((result or {}).get("music_preview_seen")), result=result)
-    return music_ai_guarded_keyboard(lang, product_context, admin=False)
+    return music_ai_preview_keyboard(lang, product_context, preview_seen=bool((result or {}).get("music_preview_seen")), result=result)
 
 async def submit_music_generation_job(result: dict, preview: bool = False, admin_smoke: bool = False, updated_by="") -> dict:
     readiness = get_suno_music_readiness()
@@ -73207,10 +73252,14 @@ def voice_clone_admin_blocker(readiness: dict | None = None) -> str:
     return sanitize_log_text("; ".join(str(item) for item in blockers if str(item or "").strip()))[:700] or "voice clone provider not ready"
 
 def voice_clone_access_allowed(user_id, readiness: dict | None = None) -> bool:
-    readiness = dict(readiness or get_minimax_voice_clone_readiness())
-    if not readiness.get("ready"):
-        return False
-    return bool(readiness.get("public_enabled") or is_admin_user(user_id))
+    decision = can_user_access_product_engine(
+        user_id,
+        "voice_clone",
+        "clone",
+        is_provider_call=True,
+        is_paid_job=False,
+    )
+    return bool(decision.get("allowed"))
 
 def mark_voice_profile_activation_failed(user_id, profile_id: int, profile: dict | None, status: str, admin_error: str) -> dict:
     metadata = voice_profile_metadata(profile or {})
@@ -73924,18 +73973,6 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "voice_clone":
         await query.answer()
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        clone_readiness = get_minimax_voice_clone_readiness()
-        if not voice_clone_access_allowed(user_id, clone_readiness):
-            clear_music_guided_pending(user_id)
-            return await query.message.reply_text(
-                voice_clone_provider_not_ready_public_text(lang),
-                parse_mode="HTML",
-                reply_markup=(
-                    voice_clone_admin_guard_keyboard(0, lang, ctx)
-                    if is_admin_user(user_id)
-                    else voice_hub_keyboard(lang, ctx)
-                ),
-            )
         set_music_guided_pending(user_id, "voice_clone_intro", product_context=ctx, previous_screen="voice_hub", return_to="voice_hub")
         return await query.message.reply_text(voice_clone_intro_text(lang), parse_mode="HTML", reply_markup=voice_clone_keyboard(lang, ctx))
     if action.startswith("voice_clone_back_upload:"):
@@ -74377,13 +74414,6 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         if not str(result.get("selected_prompt") or "").strip():
             return await query.message.reply_text("⚠️ Hãy chọn một phương án trước.", reply_markup=music_prompt_result_keyboard(lang, ctx, result))
-        readiness = get_suno_music_readiness()
-        if not music_ai_access_allowed(user_id, readiness):
-            return await query.message.reply_text(
-                music_ai_public_guard_text(lang),
-                parse_mode="HTML",
-                reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False),
-            )
         return await query.message.reply_text(
             music_ai_preview_text(result, lang),
             parse_mode="HTML",
@@ -74455,13 +74485,6 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 updated_state["step"] = "music"
                 set_video_finalization_state(user_id, updated_state)
                 return await video_finalization_return_after_addon(query, user_id, updated_state, lang)
-        readiness = get_suno_music_readiness()
-        if not music_ai_access_allowed(user_id, readiness):
-            return await query.message.reply_text(
-                f"✅ Đã chọn phương án {idx}.\n\n" + music_ai_public_guard_text(lang),
-                parse_mode="HTML",
-                reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False),
-            )
         return await query.message.reply_text(
             f"✅ Đã chọn gợi ý {idx}.\n\n<code>{html.escape(prompt_text)}</code>\n\n"
             f"Thời lượng bản đầy đủ: <b>{music_result_duration_seconds(result)} giây</b>. "
@@ -74535,7 +74558,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=music_prompt_result_keyboard(lang, ctx, result),
             )
         readiness = get_suno_music_readiness()
-        if not music_ai_access_allowed(user_id, readiness):
+        if not is_admin_user(user_id) and not music_ai_access_allowed(user_id, readiness):
             result.update({
                 "music_preview_seen": False,
                 "music_preview_guard_acknowledged": True,
@@ -74573,6 +74596,20 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             result.pop("music_preview_task_id", None)
             result.pop("music_preview_provider", None)
         if is_admin_user(user_id):
+            decision = can_user_access_product_engine(
+                user_id,
+                "music",
+                "preview",
+                is_provider_call=True,
+                is_paid_job=True,
+                confirm_paid=False,
+            )
+            if not decision.get("allowed"):
+                return await query.message.reply_text(
+                    admin_paid_confirm_required_text("/tool_test_music_ai"),
+                    parse_mode="HTML",
+                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
+                )
             submitted = await submit_music_generation_job(result, preview=True, admin_smoke=True, updated_by=user_id)
         else:
             submitted = await submit_music_generation_job(result, preview=True)
@@ -74615,8 +74652,21 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 "⏳ Bản nhạc đã được gửi xử lý. Bạn bấm kiểm tra kết quả, không cần tạo lại job.",
                 reply_markup=music_ai_status_keyboard(lang, ctx),
             )
-        readiness = get_suno_music_readiness()
-        if not music_ai_access_allowed(user_id, readiness):
+        decision = can_user_access_product_engine(
+            user_id,
+            "music",
+            "confirm",
+            is_provider_call=True,
+            is_paid_job=bool(is_admin_user(user_id)),
+            confirm_paid=False,
+        )
+        if not decision.get("allowed"):
+            if is_admin_user(user_id):
+                return await query.message.reply_text(
+                    admin_paid_confirm_required_text("/tool_test_music_ai"),
+                    parse_mode="HTML",
+                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
+                )
             return await query.message.reply_text(
                 music_ai_public_guard_text(lang),
                 parse_mode="HTML",
@@ -79428,6 +79478,9 @@ async def cmd_tool_test_music_ai(update: Update, context: ContextTypes.DEFAULT_T
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("music_ai", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_music_ai"), parse_mode="HTML")
     provider_summary = music_ai_provider_summary()
     readiness = get_suno_music_readiness()
     if not readiness.get("ready"):
@@ -90618,6 +90671,170 @@ VIDEO_FINALIZATION_LOCK_SECONDS = 12
 VIDEO_FLOW_LOCKED_AFTER_TASK3D7 = True  # specification spelling: VIDEO_FLOW_LOCKED_AFTER_TASK3D7 = true
 PUBLIC_PRODUCT_MAINTENANCE_VI = "Hệ thống đang bảo trì/nâng cấp. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 PUBLIC_PRODUCT_MAINTENANCE_EN = "This product is under maintenance/upgrading. Please try again later. TOAN AAS has not processed the request or charged Xu."
+ADMIN_PAID_CONFIRM_FLAG = "--confirm-paid"
+
+def has_admin_paid_confirmation(context_or_args) -> bool:
+    args = getattr(context_or_args, "args", context_or_args) or []
+    return any(str(item or "").strip().lower() in {ADMIN_PAID_CONFIRM_FLAG, "confirm_paid=1", "confirm-paid=1"} for item in args)
+
+def args_without_admin_paid_confirmation(args) -> list[str]:
+    return [
+        str(item)
+        for item in (args or [])
+        if str(item or "").strip().lower() not in {ADMIN_PAID_CONFIRM_FLAG, "confirm_paid=1", "confirm-paid=1"}
+    ]
+
+def admin_paid_confirm_required_text(command_name: str = "") -> str:
+    command = str(command_name or "").strip()
+    suffix = f" Ví dụ: <code>{html.escape(command)} {ADMIN_PAID_CONFIRM_FLAG}</code>" if command else ""
+    return (
+        "⚠️ <b>Admin paid smoke cần xác nhận rõ.</b>\n\n"
+        "• Paid provider job: <code>NO</code>\n"
+        "• Xu trừ từ user: <code>NO</code>\n"
+        f"• Thêm <code>{ADMIN_PAID_CONFIRM_FLAG}</code> nếu admin muốn chạy test thật có thể tốn credit provider.{suffix}"
+    )
+
+def _product_engine_readiness(product_area: str, action: str = "", state: dict | None = None) -> dict:
+    area = str(product_area or "").strip().lower().replace("-", "_")
+    state = dict(state or {})
+    if area in {"voice", "voice_tts", "minimax", "minimax_tts"}:
+        item = get_minimax_voice_readiness()
+        return {
+            "configured": bool(item.get("ready")),
+            "public_ready": bool(item.get("public_enabled")),
+            "missing": list(item.get("missing_env") or []),
+            "reason": item.get("reason") or item.get("admin_debug_reason") or "",
+        }
+    if area in {"voice_clone", "minimax_clone", "minimax_voice_clone"}:
+        item = get_minimax_voice_clone_readiness()
+        return {
+            "configured": bool(item.get("ready")),
+            "public_ready": bool(item.get("public_enabled")),
+            "missing": list(item.get("missing_env") or []),
+            "reason": item.get("reason") or "",
+        }
+    if area in {"music", "music_ai", "suno", "suno_music", "suno_song"}:
+        item = get_suno_music_readiness()
+        return {
+            "configured": bool(item.get("ready")),
+            "public_ready": bool(music_ai_public_processing_ready(item)),
+            "missing": list(item.get("missing_env") or []),
+            "reason": item.get("reason") or item.get("admin_debug_reason") or "",
+        }
+    subtitle_modes = {
+        "subtitle": VIDEO_SUBTITLE_MODE_CREATE,
+        "subtitle_auto": VIDEO_SUBTITLE_MODE_CREATE,
+        "subtitle_create": VIDEO_SUBTITLE_MODE_CREATE,
+        "translate": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "translation": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "subtitle_translate": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "dub": VIDEO_SUBTITLE_MODE_DUB,
+        "dubbing": VIDEO_SUBTITLE_MODE_DUB,
+        "video_dub": VIDEO_SUBTITLE_MODE_DUB,
+        "subtitle_plus_dub": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    }
+    if area in subtitle_modes:
+        mode = normalize_video_translate_mode(action) or subtitle_modes[area]
+        admin_cap = video_dubbing_capability(mode, state, public=False)
+        public_cap = video_dubbing_capability(mode, state, public=True)
+        return {
+            "configured": bool(admin_cap.get("ok")),
+            "public_ready": bool(public_cap.get("ok")),
+            "missing": list(admin_cap.get("missing") or []),
+            "reason": admin_cap.get("reason") or public_cap.get("reason") or "",
+        }
+    if area in {"video", "video_export", "video_ai"}:
+        admin_item = get_video_prompt_export_readiness(user_is_admin=True)
+        public_item = get_video_prompt_export_readiness(user_is_admin=False)
+        return {
+            "configured": bool(admin_item.get("admin_ready")),
+            "public_ready": bool(public_item.get("public_ready")),
+            "missing": list(admin_item.get("missing_admin") or []),
+            "reason": admin_item.get("reason") or "",
+        }
+    if area in {"multiscene", "multi_scene", "video_multiscene"}:
+        provider_configured = bool(
+            (SHOPAIKEY_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_VIDEO_URL and SHOPAIKEY_VIDEO_MODEL)
+            or (KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_VIDEO_CREATE_ENDPOINT and KEY4U_VIDEO_MODEL)
+        )
+        scene_count = safe_int(action, safe_int(state.get("scene_count"), 3))
+        missing = []
+        if not provider_configured:
+            missing.append("video provider config")
+        if not video_multiscene_stitching_available():
+            missing.append("ffmpeg/stitching wrapper")
+        return {
+            "configured": bool(provider_configured and video_multiscene_stitching_available()),
+            "public_ready": bool(video_multiscene_public_ready(scene_count)),
+            "missing": missing,
+            "reason": "ready" if not missing else ",".join(missing),
+        }
+    if area in {"long_video", "longvideo", "video_long"}:
+        return {
+            "configured": True,
+            "public_ready": bool(VIDEO_LONG_RENDER_ENABLED and VIDEO_LONG_AI_PUBLIC_ENABLED),
+            "missing": [] if VIDEO_LONG_RENDER_ENABLED else ["VIDEO_LONG_RENDER_ENABLED=false"],
+            "reason": "ready" if VIDEO_LONG_RENDER_ENABLED else "long video render guarded; planning remains open",
+        }
+    return {"configured": True, "public_ready": True, "missing": [], "reason": "unknown_area_allowed"}
+
+def can_user_access_product_engine(
+    user_id,
+    product_area,
+    action,
+    *,
+    is_provider_call: bool = False,
+    is_paid_job: bool = False,
+    confirm_paid: bool = False,
+    state: dict | None = None,
+) -> dict:
+    admin = is_admin_user(user_id)
+    readiness = _product_engine_readiness(product_area, action, state)
+    if admin:
+        if is_paid_job and not confirm_paid:
+            return {
+                "allowed": False,
+                "status": "blocked_admin_requires_confirm",
+                "reason": f"missing {ADMIN_PAID_CONFIRM_FLAG}",
+                "message": admin_paid_confirm_required_text(),
+                "readiness": readiness,
+            }
+        if is_provider_call and not readiness.get("configured"):
+            return {
+                "allowed": False,
+                "status": "blocked_admin_missing_provider_config",
+                "reason": readiness.get("reason") or ",".join(readiness.get("missing") or []),
+                "message": "⚙️ Admin test chưa chạy vì thiếu cấu hình/wrapper provider thật. Không gọi provider và không trừ Xu.",
+                "readiness": readiness,
+            }
+        return {"allowed": True, "status": "allowed_admin", "reason": "admin bypasses public gate", "message": "", "readiness": readiness}
+    if not is_provider_call:
+        return {"allowed": True, "status": "allowed_public_draft", "reason": "draft/menu flow stays open", "message": "", "readiness": readiness}
+    if not readiness.get("public_ready"):
+        return {
+            "allowed": False,
+            "status": "blocked_public_maintenance",
+            "reason": readiness.get("reason") or ",".join(readiness.get("missing") or []),
+            "message": PUBLIC_PRODUCT_MAINTENANCE_VI,
+            "readiness": readiness,
+        }
+    if is_paid_job and not confirm_paid:
+        return {
+            "allowed": False,
+            "status": "blocked_public_requires_final_confirm",
+            "reason": "missing final confirmation",
+            "message": PUBLIC_PRODUCT_MAINTENANCE_VI,
+            "readiness": readiness,
+        }
+    if not readiness.get("configured"):
+        return {
+            "allowed": False,
+            "status": "blocked_public_maintenance",
+            "reason": readiness.get("reason") or ",".join(readiness.get("missing") or []),
+            "message": PUBLIC_PRODUCT_MAINTENANCE_VI,
+            "readiness": readiness,
+        }
+    return {"allowed": True, "status": "allowed_public", "reason": "public ready", "message": "", "readiness": readiness}
 
 def video_finalization_pending_key(user_id) -> str:
     return f"video_finalization:{user_id}"
@@ -90983,6 +91200,54 @@ def video_dubbing_public_processing_ready(mode: str, state: dict | None = None) 
     if mode == VIDEO_SUBTITLE_MODE_DUB:
         return bool(is_voice_mux_ready())
     return bool(is_subtitle_burn_ready() and is_voice_mux_ready())
+
+def video_dubbing_product_area_for_mode(mode: str) -> str:
+    mode = normalize_video_translate_mode(mode)
+    if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
+        return "subtitle_translate"
+    if mode == VIDEO_SUBTITLE_MODE_DUB:
+        return "video_dub"
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return "subtitle_plus_dub"
+    return "subtitle_auto"
+
+def video_dubbing_engine_access_decision(user_id, mode: str, state: dict | None = None, *, is_paid_job: bool = False, confirm_paid: bool = False) -> dict:
+    mode = normalize_video_translate_mode(mode)
+    admin = is_admin_user(user_id)
+    if not admin:
+        readiness = {
+            "configured": True,
+            "public_ready": bool(video_dubbing_public_processing_ready(mode, state)),
+            "missing": [],
+            "reason": "public ready",
+        }
+        if not readiness["public_ready"]:
+            readiness["reason"] = "public processing guarded"
+            return {
+                "allowed": False,
+                "status": "blocked_public_maintenance",
+                "reason": readiness["reason"],
+                "message": PUBLIC_PRODUCT_MAINTENANCE_VI,
+                "readiness": readiness,
+            }
+        if is_paid_job and not confirm_paid:
+            return {
+                "allowed": False,
+                "status": "blocked_public_requires_final_confirm",
+                "reason": "missing final confirmation",
+                "message": PUBLIC_PRODUCT_MAINTENANCE_VI,
+                "readiness": readiness,
+            }
+        return {"allowed": True, "status": "allowed_public", "reason": "public ready", "message": "", "readiness": readiness}
+    return can_user_access_product_engine(
+        user_id,
+        video_dubbing_product_area_for_mode(mode),
+        mode,
+        is_provider_call=True,
+        is_paid_job=is_paid_job,
+        confirm_paid=confirm_paid,
+        state=state,
+    )
 
 def is_ai_video_ready() -> bool:
     return bool(
@@ -122857,17 +123122,13 @@ def video_dubbing_job_progress_text(task_label: str, job_id, lang: str = "vi") -
     if normalize_user_language(lang) != "vi":
         return (
             "✅ <b>TOAN AAS received your processing request.</b>\n\n"
-            f"Task: <b>{html.escape(str(task_label or '-'))}</b>\n"
-            f"Job ID: <code>{html.escape(str(job_id or '-'))}</code>\n"
-            "Status: processing\n"
-            "TOAN AAS will update when results are ready. You can check again later."
+            "TOAN AAS is processing your request. The result will be sent when ready. "
+            "You can check again later."
         )
     return (
         "✅ <b>TOAN AAS đã nhận yêu cầu xử lý.</b>\n\n"
-        f"Tác vụ: <b>{html.escape(str(task_label or '-'))}</b>\n"
-        f"Mã job: <code>{html.escape(str(job_id or '-'))}</code>\n"
-        "Trạng thái: <b>đang xử lý</b>\n"
-        "TOAN AAS sẽ cập nhật khi có kết quả. Bạn có thể bấm kiểm tra sau."
+        "TOAN AAS đang xử lý yêu cầu của bạn. Hệ thống sẽ gửi kết quả khi hoàn tất. "
+        "Bạn có thể bấm kiểm tra lại sau."
     )
 
 def video_dubbing_job_progress_keyboard(job_id, lang: str = "vi") -> InlineKeyboardMarkup:
@@ -123123,8 +123384,17 @@ async def execute_video_dubbing_preview(query, context: ContextTypes.DEFAULT_TYP
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
-    if not video_dubbing_public_processing_ready(mode, state):
-        return {"ok": False, "guard": True, "text": video_dubbing_guard_text(mode, state, lang, admin=False)}
+    uid = getattr(getattr(query, "from_user", None), "id", 0)
+    access = video_dubbing_engine_access_decision(
+        uid,
+        mode,
+        state,
+        is_paid_job=bool(is_admin_user(uid)),
+        confirm_paid=False,
+    )
+    if not access.get("allowed"):
+        text = admin_paid_confirm_required_text("/tool_test_video_dub") if is_admin_user(uid) and access.get("status") == "blocked_admin_requires_confirm" else video_dubbing_guard_text(mode, state, lang, admin=False)
+        return {"ok": False, "guard": True, "text": text}
     source_bytes, content_type = await video_dubbing_download_source(context, state)
     preview_seconds = calculate_preview_seconds(
         state.get("video_duration") or state.get("source_duration") or 6
@@ -123188,16 +123458,20 @@ async def execute_video_dubbing_preview(query, context: ContextTypes.DEFAULT_TYP
         )
     return {"ok": True, "preview_seconds": preview_seconds, "preview_text": preview_text[:700]}
 
-async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: str = "", voice_speed: str = "1.0") -> tuple[str, bytes, str]:
+async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: str = "", voice_speed: str = "1.0", allow_admin: bool = False) -> tuple[str, bytes, str]:
     provider = str(TTS_PROVIDER or "auto").lower()
     candidates = []
-    if provider in {"auto", "minimax", "key4u_minimax", "minimax_voice"} and key4u_minimax_tts_public_ready():
-        candidates.append(("Key4U MiniMax", lambda value: key4u_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)))
-    if provider in {"auto", "minimax", "shopaikey_minimax", "minimax_voice"} and shopaikey_minimax_tts_public_ready():
+    key4u_ready = key4u_minimax_tts_configured(require_public=not allow_admin) if allow_admin else key4u_minimax_tts_public_ready()
+    shopaikey_ready = shopaikey_minimax_tts_configured() if allow_admin else shopaikey_minimax_tts_public_ready()
+    direct_ready = direct_minimax_tts_configured() if allow_admin else direct_minimax_tts_public_ready()
+    shopaikey_fallback_ready = bool(SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_DUBBING_TTS_ENDPOINT) if allow_admin else shopaikey_tts_fallback_public_ready()
+    if provider in {"auto", "minimax", "key4u_minimax", "minimax_voice"} and key4u_ready:
+        candidates.append(("Key4U MiniMax", lambda value: key4u_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin)))
+    if provider in {"auto", "minimax", "shopaikey_minimax", "minimax_voice"} and shopaikey_ready:
         candidates.append(("ShopAIKey MiniMax", lambda value: shopaikey_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style)))
-    if provider in {"auto", "minimax", "direct_minimax", "minimax_voice"} and direct_minimax_tts_public_ready():
+    if provider in {"auto", "minimax", "direct_minimax", "minimax_voice"} and direct_ready:
         candidates.append(("MiniMax", lambda value: direct_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style)))
-    if provider in {"auto", "shopaikey", "shopai"} and shopaikey_tts_fallback_public_ready():
+    if provider in {"auto", "shopaikey", "shopai"} and shopaikey_fallback_ready:
         candidates.append(("ShopAIKey", lambda value: shopaikey_tts_bytes(value, endpoint_override=SHOPAIKEY_DUBBING_TTS_ENDPOINT)))
     if provider in {"auto", "elevenlabs"}:
         candidates.append(("ElevenLabs", tts_elevenlabs_bytes))
@@ -123286,11 +123560,18 @@ async def execute_video_dubbing_pipeline(query, context: ContextTypes.DEFAULT_TY
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
-    if not video_dubbing_public_processing_ready(mode, state):
+    access = video_dubbing_engine_access_decision(
+        uid,
+        mode,
+        state,
+        is_paid_job=bool(is_admin_user(uid)),
+        confirm_paid=False,
+    )
+    if not access.get("allowed"):
         return {
             "ok": False,
             "guard": True,
-            "text": video_dubbing_guard_text(mode, state, lang, admin=False),
+            "text": admin_paid_confirm_required_text("/tool_test_video_dub") if is_admin_user(uid) and access.get("status") == "blocked_admin_requires_confirm" else video_dubbing_guard_text(mode, state, lang, admin=False),
         }
     pricing = calculate_video_translate_price(
         mode,
@@ -123905,14 +124186,6 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             "requested_mode": mode,
         }
         state = set_video_dubbing_pending(uid, "source", **base_fields)
-        if not video_dubbing_public_processing_ready(mode, state):
-            state = set_video_dubbing_pending(uid, "guarded", processing="0", preview_seen=False, preview_guard_acknowledged=True)
-            return await safe_edit_or_send(
-                query,
-                video_dubbing_guard_text(mode, state, lang, admin=False),
-                parse_mode="HTML",
-                reply_markup=video_dubbing_guard_keyboard(lang, admin=False),
-            )
         if has_imported_source:
             state, text, markup = video_dubbing_next_screen_after_source(uid, state, lang)
             return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=markup)
@@ -124082,14 +124355,6 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             "video_subtitle": "Video lồng tiếng kèm phụ đề",
         }.get(output_type, "File SRT")
         action_mode = VIDEO_SUBTITLE_MODE_TRANSLATE if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and output_type in {"srt", "burn", "both"} else mode
-        if not video_dubbing_public_processing_ready(action_mode, state):
-            state = set_video_dubbing_pending(uid, "preview_guarded", processing="0")
-            return await safe_edit_or_send(
-                query,
-                video_dubbing_guard_text(action_mode, state, lang, admin=False),
-                parse_mode="HTML",
-                reply_markup=video_dubbing_guard_keyboard(lang, admin=False),
-            )
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and output_type in {"srt", "burn", "both"}:
             state = set_video_dubbing_pending(uid, "confirm", mode=VIDEO_SUBTITLE_MODE_TRANSLATE, process_type=VIDEO_SUBTITLE_MODE_TRANSLATE, video_processing_mode=VIDEO_SUBTITLE_MODE_TRANSLATE, output_type=output_type, output_label=output_label)
         else:
@@ -124394,8 +124659,14 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not state.get("voice_speed"):
             state = set_video_dubbing_pending(uid, "voice_speed")
             return await safe_edit_or_send(query, video_dubbing_voice_speed_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_speed_keyboard(lang))
-        capability = {"ok": video_dubbing_public_processing_ready(mode, state)}
-        if not capability.get("ok"):
+        access = video_dubbing_engine_access_decision(
+            uid,
+            mode,
+            state,
+            is_paid_job=bool(is_admin_user(uid)),
+            confirm_paid=False,
+        )
+        if not access.get("allowed"):
             set_video_dubbing_pending(
                 uid,
                 "preview_guarded",
@@ -124403,6 +124674,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 preview_seen=False,
                 preview_guard_acknowledged=True,
             )
+            if is_admin_user(uid) and access.get("status") == "blocked_admin_requires_confirm":
+                return await safe_edit_or_send(
+                    query,
+                    admin_paid_confirm_required_text("/tool_test_video_dub"),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_confirm_keyboard(lang, state),
+                )
             return await safe_edit_or_send(
                 query,
                 video_dubbing_guard_text(mode, state, lang, admin=False),
@@ -126075,6 +126353,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_key4u_stt", cmd_tool_test_key4u_stt))
     tg_app.add_handler(CommandHandler("tool_test_key4u_suno", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("tool_test_suno_music", cmd_tool_test_key4u_suno))
+    tg_app.add_handler(CommandHandler("tool_test_suno_song", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("tool_test_music_suno", cmd_tool_test_key4u_suno))
     tg_app.add_handler(CommandHandler("key4u_suno_job", cmd_key4u_suno_job))
     tg_app.add_handler(CommandHandler("suno_job", cmd_key4u_suno_job))
@@ -126086,6 +126365,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_asr", cmd_tool_test_asr))
     tg_app.add_handler(CommandHandler("tool_test_tts_for_dub", cmd_tool_test_tts))
     tg_app.add_handler(CommandHandler("tool_test_video_subtitle", cmd_tool_test_video_subtitle))
+    tg_app.add_handler(CommandHandler("tool_test_subtitle_auto", cmd_tool_test_subtitle_generate))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_generate", cmd_tool_test_subtitle_generate))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_translate", cmd_tool_test_subtitle_translate))
     tg_app.add_handler(CommandHandler("tool_test_video_dub", cmd_tool_test_video_dub))

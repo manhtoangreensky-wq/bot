@@ -239,7 +239,8 @@ def test_subtitle_plus_provider_off_no_debug_buttons(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp" in ui
+    assert "video đã sẵn sàng tạo phụ đề dịch" in ui
+    assert "xác nhận tạo đầy đủ" in ui
     assert "admin blocker" not in ui
     assert "curl provider" not in ui
 
@@ -379,7 +380,9 @@ def test_task2_link_wait_upload_preserves_task2_session(monkeypatch):
 def test_task2_job_progress_screen():
     text = bot.video_dubbing_job_progress_text("Tạo phụ đề tự động", 2468, "vi")
     labels = _labels(bot.video_dubbing_job_progress_keyboard(2468, "vi"))
-    assert "Mã job: <code>2468</code>" in text
+    assert "TOAN AAS đang xử lý yêu cầu của bạn" in text
+    assert "Mã job" not in text
+    assert "Tác vụ:" not in text
     assert labels == ["🔄 Kiểm tra kết quả", "⬅️ Quay lại", "🏠 Menu chính"]
 
 
