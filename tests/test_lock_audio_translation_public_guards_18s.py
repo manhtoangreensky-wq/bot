@@ -51,7 +51,7 @@ def test_music_public_guard_no_admin_blocker():
 def test_music_public_guard_no_xu_charge():
     source = inspect.getsource(bot.handle_music_quick_callback)
     confirm = source[source.index('if action == "music_ai_confirm":'):source.index('if action == "music_ai_status":')]
-    assert confirm.index("if not music_ai_access_allowed") < confirm.index("spend_fixed_credit_info")
+    assert confirm.index("can_user_access_product_engine") < confirm.index("spend_fixed_credit_info")
 
 
 def test_music_menu_still_visible():
@@ -122,7 +122,7 @@ def test_translation_public_guard_no_provider_text():
 
 def test_translation_public_guard_no_xu_charge():
     source = inspect.getsource(bot.handle_video_dubbing_callback)
-    assert source.index("video_dubbing_public_processing_ready(mode, state)") < source.index("execute_video_dubbing_pipeline")
+    assert source.index("video_dubbing_engine_access_decision") < source.index("execute_video_dubbing_pipeline")
 
 
 def test_translation_menu_still_visible():
