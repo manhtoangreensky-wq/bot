@@ -31,6 +31,7 @@ import shutil
 import traceback
 import zipfile
 import xml.etree.ElementTree as ET
+from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urlencode, urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -46204,7 +46205,8 @@ TOOL_FREEZE_COMMANDS = {
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_chat", "tool_test_shopaikey_tts",
     "tool_test_shopaikey_image", "tool_test_wf_i2v",
     "tool_test_shopaikey_video", "shopaikey_video_job", "tool_test_asr",
-    "key4u_status", "key4u_usage", "key4u_set_manual_balance", "tool_test_key4u_chat", "tool_test_key4u_vision",
+    "key4u_status", "key4u_usage", "key4u_set_manual_balance", "key4u_usage_set_manual", "key4u_usage_manual",
+    "key4u_usage_status", "key4u_usage_clear_manual", "key4u_usage_refresh", "tool_test_key4u_chat", "tool_test_key4u_vision",
     "tool_test_key4u_image", "tool_test_key4u_image_edit", "tool_test_key4u_video", "tool_test_key4u_video_model",
     "tool_test_key4u_video_all", "key4u_video_job",
     "tool_test_key4u_tts", "tool_test_key4u_stt", "tool_test_key4u_suno", "key4u_suno_job", "tool_test_key4u_rerank",
@@ -65933,13 +65935,128 @@ def key4u_manual_balance_usd() -> float | None:
     except Exception:
         return None
 
+def key4u_format_usd_amount(amount) -> str:
+    try:
+        dec = amount if isinstance(amount, Decimal) else Decimal(str(amount))
+    except (InvalidOperation, ValueError, TypeError):
+        return "0"
+    if dec == 0:
+        return "0"
+    text = format(dec.normalize(), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+def key4u_parse_usage_amount(raw) -> Decimal:
+    text = str(raw or "").strip().replace(",", ".")
+    if not re.fullmatch(r"\d+(?:\.\d+)?", text):
+        raise ValueError("invalid_amount")
+    try:
+        amount = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValueError("invalid_amount") from exc
+    if amount < 0 or amount > Decimal("100000"):
+        raise ValueError("amount_out_of_range")
+    return amount
+
 def set_key4u_manual_balance_usd(amount: float, updated_by="") -> None:
+    amount_text = key4u_format_usd_amount(amount)
     set_system_setting(
         "key4u_manual_balance_usd",
-        f"{float(amount):.4f}",
+        amount_text,
         "Key4U dashboard/manual observed balance in USD; not remote provider balance",
         updated_by,
     )
+    set_system_setting("key4u_manual_balance_source", "manual_admin", "Key4U manual dashboard balance source", updated_by)
+    set_system_setting("key4u_manual_balance_updated_at", now_text(), "Key4U manual dashboard balance updated", updated_by)
+
+def clear_key4u_manual_balance_usd(updated_by="") -> None:
+    set_system_setting("key4u_manual_balance_usd", "", "Key4U dashboard/manual balance cleared", updated_by)
+    set_system_setting("key4u_manual_balance_source", "", "Key4U dashboard/manual balance source cleared", updated_by)
+    set_system_setting("key4u_manual_balance_updated_at", now_text(), "Key4U dashboard/manual balance cleared at", updated_by)
+
+def key4u_manual_usage_snapshot() -> dict:
+    amount = key4u_manual_balance_usd()
+    source = get_system_setting("key4u_manual_balance_source", "")
+    updated_at = get_system_setting("key4u_manual_balance_updated_at", "")
+    if amount is not None and not source:
+        source = "env_dashboard"
+    return {
+        "balance_usd": amount,
+        "balance_display": f"{key4u_format_usd_amount(amount)} USD" if amount is not None else "not_set",
+        "source": source or "not_set",
+        "updated_at": updated_at or "-",
+    }
+
+def key4u_usage_endpoint_verified() -> bool:
+    return bool(str(globals().get("KEY4U_USAGE_ENDPOINT") or "").strip())
+
+def key4u_usage_snapshot(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> dict:
+    local = provider_usage_summary("key4u", 24)
+    manual = key4u_manual_usage_snapshot()
+    remote_balance = key4u_extract_balance_usd(remote_balance_result or {})
+    estimated_used = float(local.get("estimated_cost_usd") or 0)
+    estimated_remaining = None
+    if remote_balance is not None:
+        estimated_remaining = remote_balance
+    elif manual.get("balance_usd") is not None:
+        estimated_remaining = max(0.0, float(manual["balance_usd"]) - estimated_used)
+    remote_status = str((remote_usage or {}).get("status") or "")
+    if not key4u_usage_endpoint_verified():
+        remote_text = "chưa xác minh endpoint (Key4U usage: chưa có endpoint usage đã xác minh)"
+    elif remote_status:
+        remote_text = remote_status
+    else:
+        remote_text = "có endpoint, chưa refresh trong lệnh này"
+    return {
+        "provider": "Key4U",
+        "source": "remote_api" if remote_balance is not None else manual.get("source", "not_set"),
+        "remote_usage": remote_text,
+        "remote_balance": f"{key4u_format_usd_amount(remote_balance)} USD" if remote_balance is not None else "unknown",
+        "manual_balance": manual.get("balance_display") or "not_set",
+        "manual_source": manual.get("source") or "not_set",
+        "manual_updated_at": manual.get("updated_at") or "-",
+        "local_estimated_used": f"{estimated_used:.4f} USD",
+        "estimated_remaining": f"{estimated_remaining:.4f} USD" if estimated_remaining is not None else "unknown",
+        "total_calls": int(local.get("total_calls") or 0),
+        "success_count": int(local.get("success_count") or 0),
+        "fail_count": int(local.get("fail_count") or 0),
+        "last_event_at": str(local.get("last_event_at") or "-"),
+        "groups_routes": "key4u_suno, key4u_minimax, key4u_kling, key4u_video",
+    }
+
+def key4u_usage_status_lines(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> list[str]:
+    snapshot = key4u_usage_snapshot(remote_usage, remote_balance_result)
+    return [
+        "📊 <b>Key4U Usage Snapshot</b>",
+        "",
+        f"• Remote usage: <code>{html.escape(str(snapshot['remote_usage']))}</code>",
+        f"• Remote balance: <code>{html.escape(str(snapshot['remote_balance']))}</code>",
+        f"• Dashboard balance thủ công: <code>{html.escape(str(snapshot['manual_balance']))}</code>",
+        f"• Nguồn manual: <code>{html.escape(str(snapshot['manual_source']))}</code>",
+        f"• Local estimated used: <code>{html.escape(str(snapshot['local_estimated_used']))}</code>",
+        f"• Estimated remaining: <code>{html.escape(str(snapshot['estimated_remaining']))}</code>",
+        f"• Last manual update: <code>{html.escape(str(snapshot['manual_updated_at']))}</code>",
+        f"• Last local event: <code>{html.escape(str(snapshot['last_event_at']))}</code>",
+        f"• Groups/routes: <code>{html.escape(str(snapshot['groups_routes']))}</code>",
+        f"• Local calls 24h: <code>{snapshot['total_calls']}</code> | success <code>{snapshot['success_count']}</code> | fail <code>{snapshot['fail_count']}</code>",
+        "",
+        "Không hiển thị khóa bí mật, prompt, hoặc raw response.",
+        "Gợi ý: <code>/key4u_usage_set_manual 14.101</code> — cập nhật số dư Key4U theo dashboard.",
+    ]
+
+def key4u_provider_usage_lines_for_admin() -> list[str]:
+    snapshot = key4u_usage_snapshot()
+    return [
+        "<b>Key4U</b>",
+        f"• Remote usage: <code>{html.escape(str(snapshot['remote_usage']))}</code>",
+        f"• Dashboard balance thủ công: <code>{html.escape(str(snapshot['manual_balance']))}</code>",
+        f"• Local estimated used: <code>{html.escape(str(snapshot['local_estimated_used']))}</code>",
+        f"• Estimated remaining: <code>{html.escape(str(snapshot['estimated_remaining']))}</code>",
+        f"• Last manual update: <code>{html.escape(str(snapshot['manual_updated_at']))}</code>",
+        f"• Groups/routes: <code>{html.escape(str(snapshot['groups_routes']))}</code>",
+        "• Hành động: <code>/key4u_usage_set_manual 14.101</code> — cập nhật số dư Key4U theo dashboard.",
+    ]
 
 def key4u_extract_balance_usd(result: dict) -> float | None:
     if not result or not result.get("ok"):
@@ -66228,6 +66345,43 @@ async def cmd_key4u_set_manual_balance(update: Update, context: ContextTypes.DEF
         "Đây không phải remote balance thật. Dùng /key4u_usage để xem tổng hợp.",
         parse_mode="HTML",
     )
+
+async def cmd_key4u_usage_set_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /key4u_usage_set_manual <amount>")
+    try:
+        amount = key4u_parse_usage_amount(context.args[0])
+    except ValueError:
+        return await update.message.reply_text("Số dư không hợp lệ. Dùng số USD >= 0, ví dụ: /key4u_usage_set_manual 14.101")
+    set_key4u_manual_balance_usd(amount, update.effective_user.id)
+    amount_text = key4u_format_usd_amount(amount)
+    await update.message.reply_text(
+        f"Đã cập nhật số dư Key4U theo dashboard: {amount_text} USD. "
+        "Nguồn: manual_admin. Không gọi provider, không hiện API key."
+    )
+
+async def cmd_key4u_usage_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await reply_html_lines(update, key4u_usage_status_lines())
+
+async def cmd_key4u_usage_clear_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    clear_key4u_manual_balance_usd(update.effective_user.id)
+    await update.message.reply_text("Đã xóa số dư dashboard thủ công Key4U. Không gọi provider.")
+
+async def cmd_key4u_usage_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not key4u_usage_endpoint_verified():
+        return await update.message.reply_text(
+            "Key4U chưa có endpoint usage đã xác minh. "
+            "Dùng /key4u_usage_set_manual <amount> để cập nhật số dư theo dashboard."
+        )
+    await cmd_key4u_usage(update, context)
 
 async def cmd_tool_test_key4u_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -123870,21 +124024,22 @@ def admin_provider_usage_text_v2() -> str:
     percent = usage.get("remaining_percent") if usage else "-"
     group = (usage or {}).get("group") or (usage or {}).get("group_name") or "-"
     last_at = (usage or {}).get("last_at") or "-"
-    key4u_remote = "Dùng /key4u_usage để xem usage Key4U." if globals().get("KEY4U_USAGE_ENDPOINT") else "Key4U usage: chưa có endpoint usage đã xác minh."
-    return "\n".join([
+    lines = [
         "📈 <b>Provider Usage</b>",
         "",
+        "<b>ShopAIKey</b>",
         "Dùng <code>/shopaikey_usage</code> để refresh số dư ShopAIKey.",
-        key4u_remote,
-        "",
         f"• Remaining: <code>{html.escape(str(remaining))}</code>",
         f"• Total: <code>{html.escape(str(total))}</code>",
         f"• Percent: <code>{html.escape(str(percent))}</code>",
         f"• Groups: <code>{html.escape(str(group))}</code>",
         f"• Last refresh: <code>{html.escape(str(last_at))}</code>",
         "",
+        *key4u_provider_usage_lines_for_admin(),
+        "",
         "Không hiển thị khóa bí mật.",
-    ])
+    ]
+    return "\n".join(lines)
 
 def admin_provider_routes_text() -> str:
     return "\n".join([
@@ -130059,6 +130214,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("shopaikey_usage", cmd_shopaikey_usage))
     tg_app.add_handler(CommandHandler("key4u_usage", cmd_key4u_usage))
     tg_app.add_handler(CommandHandler("key4u_set_manual_balance", cmd_key4u_set_manual_balance))
+    tg_app.add_handler(CommandHandler("key4u_usage_set_manual", cmd_key4u_usage_set_manual))
+    tg_app.add_handler(CommandHandler("key4u_usage_manual", cmd_key4u_usage_set_manual))
+    tg_app.add_handler(CommandHandler("key4u_usage_status", cmd_key4u_usage_status))
+    tg_app.add_handler(CommandHandler("key4u_usage_clear_manual", cmd_key4u_usage_clear_manual))
+    tg_app.add_handler(CommandHandler("key4u_usage_refresh", cmd_key4u_usage_refresh))
     tg_app.add_handler(CommandHandler("maintenance_status", cmd_maintenance_status))
     tg_app.add_handler(CommandHandler("provider_freeze", cmd_provider_freeze))
     tg_app.add_handler(CommandHandler("provider_unfreeze", cmd_provider_unfreeze))
