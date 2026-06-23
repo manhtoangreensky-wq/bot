@@ -71180,20 +71180,23 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
     price = tts_full_price_xu(text, speed)
     charged = 0
     if price > 0:
-        charge = spend_fixed_credit_info(
-            user_id,
-            price,
-            "saved_voice_tts",
-            f"voice_profile={profile_id}; chars={voice_tts_billable_chars(text)}",
-            apply_member_discount_flag=False,
-        )
-        if not charge.get("ok"):
-            await message.reply_text(
-                f"⚠️ Số dư chưa đủ để tạo giọng đọc này. Cần {price} Xu. TOAN AAS chưa gọi xử lý và chưa trừ Xu.",
-                reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang),
+        if is_admin_user(user_id):
+            charge = {"ok": True, "final_cost": 0}
+        else:
+            charge = spend_fixed_credit_info(
+                user_id,
+                price,
+                "saved_voice_tts",
+                f"voice_profile={profile_id}; chars={voice_tts_billable_chars(text)}",
+                apply_member_discount_flag=False,
             )
-            return False
-        charged = int(charge.get("final_cost") or price)
+            if not charge.get("ok"):
+                await message.reply_text(
+                    f"⚠️ Số dư chưa đủ để tạo giọng đọc này. Cần {price} Xu. TOAN AAS chưa gọi xử lý và chưa trừ Xu.",
+                    reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang),
+                )
+                return False
+        charged = int(charge.get("final_cost") or 0) if is_admin_user(user_id) else int(charge.get("final_cost") or price)
     tts_kwargs = {
         "voice_id": str(profile.get("provider_voice_id") or ""),
         "voice_style": str(profile.get("display_name") or ""),
@@ -75038,11 +75041,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 "preview",
                 is_provider_call=True,
                 is_paid_job=True,
-                confirm_paid=False,
+                admin_interactive_confirm=True,
             )
             if not decision.get("allowed"):
                 return await query.message.reply_text(
-                    admin_paid_confirm_required_text("/tool_test_music_ai"),
+                    decision.get("message") or "⚙️ Admin test chưa chạy được: thiếu cấu hình hoặc adapter chưa sẵn sàng. Không có Xu bị trừ.",
                     parse_mode="HTML",
                     reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
                 )
@@ -75094,12 +75097,12 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "confirm",
             is_provider_call=True,
             is_paid_job=bool(is_admin_user(user_id)),
-            confirm_paid=False,
+            admin_interactive_confirm=True,
         )
         if not decision.get("allowed"):
             if is_admin_user(user_id):
                 return await query.message.reply_text(
-                    admin_paid_confirm_required_text("/tool_test_music_ai"),
+                    decision.get("message") or "⚙️ Admin test chưa chạy được: thiếu cấu hình hoặc adapter chưa sẵn sàng. Không có Xu bị trừ.",
                     parse_mode="HTML",
                     reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
                 )
@@ -75115,10 +75118,13 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 f"⚠️ Số dư chưa đủ để tạo bản đầy đủ.\n• Cần: {price} Xu\n• Hiện có: {int(credits or 0)} Xu\n\nTOAN AAS chưa tạo job và chưa trừ Xu.",
                 reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
             )
-        charge = spend_fixed_credit_info(user_id, price, "music_ai_full", f"music duration={music_result_duration_seconds(result)}s")
-        if not charge.get("ok"):
-            return await query.message.reply_text("⚠️ Chưa thể xác nhận số dư. TOAN AAS chưa tạo job nhạc.", reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result))
-        charged = 0 if is_admin_user(user_id) else int(charge.get("final_cost") if charge.get("final_cost") is not None else price)
+        if is_admin_user(user_id):
+            charged = 0
+        else:
+            charge = spend_fixed_credit_info(user_id, price, "music_ai_full", f"music duration={music_result_duration_seconds(result)}s")
+            if not charge.get("ok"):
+                return await query.message.reply_text("⚠️ Chưa thể xác nhận số dư. TOAN AAS chưa tạo job nhạc.", reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result))
+            charged = int(charge.get("final_cost") if charge.get("final_cost") is not None else price)
         if is_admin_user(user_id):
             submitted = await submit_music_generation_job(result, admin_smoke=True, updated_by=user_id)
         else:
@@ -91222,12 +91228,14 @@ def can_user_access_product_engine(
     is_provider_call: bool = False,
     is_paid_job: bool = False,
     confirm_paid: bool = False,
+    admin_interactive_confirm: bool = False,
     state: dict | None = None,
 ) -> dict:
     admin = is_admin_user(user_id)
     readiness = _product_engine_readiness(product_area, action, state)
+    effective_confirm_paid = bool(confirm_paid or (admin and admin_interactive_confirm and is_provider_call))
     if admin:
-        if is_paid_job and not confirm_paid:
+        if is_paid_job and not effective_confirm_paid:
             return {
                 "allowed": False,
                 "status": "blocked_admin_requires_confirm",
@@ -91243,7 +91251,8 @@ def can_user_access_product_engine(
                 "message": "⚙️ Admin test chưa chạy vì thiếu cấu hình/wrapper provider thật. Không gọi provider và không trừ Xu.",
                 "readiness": readiness,
             }
-        return {"allowed": True, "status": "allowed_admin", "reason": "admin bypasses public gate", "message": "", "readiness": readiness}
+        reason = "admin interactive product confirmation" if admin_interactive_confirm else "admin bypasses public gate"
+        return {"allowed": True, "status": "allowed_admin", "reason": reason, "message": "", "readiness": readiness}
     if not is_provider_call:
         return {"allowed": True, "status": "allowed_public_draft", "reason": "draft/menu flow stays open", "message": "", "readiness": readiness}
     if not readiness.get("public_ready"):
@@ -91647,7 +91656,15 @@ def video_dubbing_product_area_for_mode(mode: str) -> str:
         return "subtitle_plus_dub"
     return "subtitle_auto"
 
-def video_dubbing_engine_access_decision(user_id, mode: str, state: dict | None = None, *, is_paid_job: bool = False, confirm_paid: bool = False) -> dict:
+def video_dubbing_engine_access_decision(
+    user_id,
+    mode: str,
+    state: dict | None = None,
+    *,
+    is_paid_job: bool = False,
+    confirm_paid: bool = False,
+    admin_interactive_confirm: bool = False,
+) -> dict:
     mode = normalize_video_translate_mode(mode)
     admin = is_admin_user(user_id)
     if not admin:
@@ -91682,6 +91699,7 @@ def video_dubbing_engine_access_decision(user_id, mode: str, state: dict | None 
         is_provider_call=True,
         is_paid_job=is_paid_job,
         confirm_paid=confirm_paid,
+        admin_interactive_confirm=admin_interactive_confirm,
         state=state,
     )
 
@@ -123816,7 +123834,14 @@ async def video_dubbing_render_video(source_bytes: bytes, dubbed_audio: bytes = 
         with open(output_path, "rb") as handle:
             return handle.read(), "ffmpeg_video_render"
 
-async def execute_video_dubbing_preview(query, context: ContextTypes.DEFAULT_TYPE, state: dict, lang: str = "vi") -> dict:
+async def execute_video_dubbing_preview(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    lang: str = "vi",
+    *,
+    admin_interactive_confirm: bool = False,
+) -> dict:
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
@@ -123826,10 +123851,14 @@ async def execute_video_dubbing_preview(query, context: ContextTypes.DEFAULT_TYP
         mode,
         state,
         is_paid_job=bool(is_admin_user(uid)),
-        confirm_paid=False,
+        admin_interactive_confirm=admin_interactive_confirm,
     )
     if not access.get("allowed"):
-        text = admin_paid_confirm_required_text("/tool_test_video_dub") if is_admin_user(uid) and access.get("status") == "blocked_admin_requires_confirm" else video_dubbing_guard_text(mode, state, lang, admin=False)
+        text = (
+            access.get("message")
+            if is_admin_user(uid) and access.get("status") != "blocked_admin_requires_confirm"
+            else video_dubbing_guard_text(mode, state, lang, admin=False)
+        )
         return {"ok": False, "guard": True, "text": text}
     source_bytes, content_type = await video_dubbing_download_source(context, state)
     preview_seconds = calculate_preview_seconds(
@@ -123991,7 +124020,14 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         "asr_provider": str(source_info.get("asr_provider") or ("cached_subtitle" if source_subtitle else "")),
     }
 
-async def execute_video_dubbing_pipeline(query, context: ContextTypes.DEFAULT_TYPE, state: dict, lang: str = "vi") -> dict:
+async def execute_video_dubbing_pipeline(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    lang: str = "vi",
+    *,
+    admin_interactive_confirm: bool = False,
+) -> dict:
     uid = query.from_user.id
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
@@ -124001,13 +124037,17 @@ async def execute_video_dubbing_pipeline(query, context: ContextTypes.DEFAULT_TY
         mode,
         state,
         is_paid_job=bool(is_admin_user(uid)),
-        confirm_paid=False,
+        admin_interactive_confirm=admin_interactive_confirm,
     )
     if not access.get("allowed"):
         return {
             "ok": False,
             "guard": True,
-            "text": admin_paid_confirm_required_text("/tool_test_video_dub") if is_admin_user(uid) and access.get("status") == "blocked_admin_requires_confirm" else video_dubbing_guard_text(mode, state, lang, admin=False),
+            "text": (
+                access.get("message")
+                if is_admin_user(uid) and access.get("status") != "blocked_admin_requires_confirm"
+                else video_dubbing_guard_text(mode, state, lang, admin=False)
+            ),
         }
     pricing = calculate_video_translate_price(
         mode,
@@ -124079,15 +124119,18 @@ async def execute_video_dubbing_pipeline(query, context: ContextTypes.DEFAULT_TY
             )
     tts_price = int(video_dubbing_tts_price_estimate(mode, output_text=output_text).get("price_xu") or 0)
     final_price_xu = int(pricing.get("total_price_xu") or 0) + tts_price
-    charge = spend_fixed_credit_info(
-        uid,
-        final_price_xu,
-        f"video_{mode}",
-        f"confirmed video processing mode={mode}; tts_chars={voice_tts_billable_chars(output_text) if video_dubbing_requires_tts_price(mode) else 0}",
-    )
-    if not charge.get("ok"):
-        return {"ok": False, "insufficient": True, "text": "⚠️ Số dư đã thay đổi. TOAN AAS chưa gửi output và chưa trừ Xu."}
-    charged = int(charge.get("final_cost") or 0)
+    if is_admin_user(uid):
+        charged = 0
+    else:
+        charge = spend_fixed_credit_info(
+            uid,
+            final_price_xu,
+            f"video_{mode}",
+            f"confirmed video processing mode={mode}; tts_chars={voice_tts_billable_chars(output_text) if video_dubbing_requires_tts_price(mode) else 0}",
+        )
+        if not charge.get("ok"):
+            return {"ok": False, "insufficient": True, "text": "⚠️ Số dư đã thay đổi. TOAN AAS chưa gửi output và chưa trừ Xu."}
+        charged = int(charge.get("final_cost") or 0)
     try:
         if srt_bytes and output_type not in {"burn", "video", "audio"}:
             await query.message.reply_document(
@@ -125100,7 +125143,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             mode,
             state,
             is_paid_job=bool(is_admin_user(uid)),
-            confirm_paid=False,
+            admin_interactive_confirm=True,
         )
         if not access.get("allowed"):
             set_video_dubbing_pending(
@@ -125110,10 +125153,10 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 preview_seen=False,
                 preview_guard_acknowledged=True,
             )
-            if is_admin_user(uid) and access.get("status") == "blocked_admin_requires_confirm":
+            if is_admin_user(uid) and access.get("status") != "blocked_public_maintenance":
                 return await safe_edit_or_send(
                     query,
-                    admin_paid_confirm_required_text("/tool_test_video_dub"),
+                    access.get("message") or "⚙️ Admin test chưa chạy được: thiếu cấu hình hoặc adapter chưa sẵn sàng. Không có Xu bị trừ.",
                     parse_mode="HTML",
                     reply_markup=video_dubbing_confirm_keyboard(lang, state),
                 )
@@ -125125,7 +125168,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
         if is_preview_action:
             try:
-                preview_result = await execute_video_dubbing_preview(query, context, state, lang)
+                preview_result = await execute_video_dubbing_preview(
+                    query,
+                    context,
+                    state,
+                    lang,
+                    admin_interactive_confirm=True,
+                )
             except Exception as exc:
                 logger.warning("video subtitle/dub preview failed | mode=%s | error=%s", mode, type(exc).__name__)
                 preview_result = {"ok": False, "guard": True, "text": video_dubbing_guard_text(mode, state, lang, admin=False)}
@@ -125157,7 +125206,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             f"⏳ TOAN AAS đang xử lý: {video_dubbing_process_label(mode, lang)}.\nVui lòng chờ và không bấm lại nhiều lần.",
         )
         try:
-            result = await execute_video_dubbing_pipeline(query, context, state, lang)
+            result = await execute_video_dubbing_pipeline(
+                query,
+                context,
+                state,
+                lang,
+                admin_interactive_confirm=True,
+            )
         except Exception as exc:
             logger.warning("video subtitle/dub pipeline failed | mode=%s | error=%s", mode, type(exc).__name__)
             set_video_dubbing_pending(uid, "confirm", processing="0")

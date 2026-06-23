@@ -239,7 +239,8 @@ def test_music_no_public_admin_blocker(monkeypatch):
     monkeypatch.setattr(bot, "is_admin_user", lambda uid: True)
     query = CaptureQuery("music_quick|showroom|music_ai_preview", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
-    assert "--confirm-paid" in query.outputs[-1]["text"]
+    assert "--confirm-paid" not in query.outputs[-1]["text"]
+    assert "Admin test chưa chạy" in query.outputs[-1]["text"]
     assert "bảo trì/nâng cấp" not in query.outputs[-1]["text"]
 
 
