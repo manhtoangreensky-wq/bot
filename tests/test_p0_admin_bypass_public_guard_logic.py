@@ -223,6 +223,10 @@ def test_video_admin_bypasses_public_video_gate(monkeypatch):
 def test_multiscene_admin_bypasses_public_gate(monkeypatch):
     _admin_only(monkeypatch)
     monkeypatch.setattr(bot, "video_multiscene_stitching_available", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_stitching_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_queue_available", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_scene_tested", lambda _scene_count: True)
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": True})
     monkeypatch.setattr(bot, "video_multiscene_public_ready", lambda _scene_count: False)
     monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
     monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "configured")

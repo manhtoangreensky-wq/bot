@@ -7997,7 +7997,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     for mode, expect_subtitle, expect_audio in [
         (bot.VIDEO_SUBTITLE_MODE_CREATE, True, False),
         (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, True, False),
-        (bot.VIDEO_SUBTITLE_MODE_DUB, False, True),
+        (bot.VIDEO_SUBTITLE_MODE_DUB, True, True),
         (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, True, True),
     ]:
         message = OutputMessage()

@@ -49,6 +49,14 @@ def _prepare_orchestrator(monkeypatch):
     monkeypatch.setattr(bot, "set_system_setting", lambda *args, **kwargs: None)
     monkeypatch.setattr(bot, "spend_fixed_credit_info", lambda *args, **kwargs: {"ok": True, "final_cost": int(args[1])})
     monkeypatch.setattr(bot, "refund_charged_credit", lambda *args, **kwargs: True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_ENABLED", True)
+    monkeypatch.setattr(bot, "SHOPAIKEY_API_KEY", "configured")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_URL", "https://example.test/video")
+    monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "model")
+    monkeypatch.setattr(bot, "KEY4U_ENABLED", False)
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": True})
+    monkeypatch.setattr(bot, "video_multiscene_stitching_available", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_stitching_ready", lambda: True)
     return created, updates, snapshots
 
 

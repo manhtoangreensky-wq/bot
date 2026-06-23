@@ -300,18 +300,18 @@ def test_public_unready_guards_are_clean_and_have_no_admin_blocker():
         bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {"origin": "video_addon"}, "vi", admin=False),
     ]
     for text in texts:
-        assert "bảo trì/nâng cấp" in text
         assert "chưa xử lý" in text and "chưa trừ Xu" in text
         assert "Admin blocker" not in text
         assert "API" not in text and "ENV" not in text
 
 
-def test_voice_clone_public_guard_maintenance():
-    assert "bảo trì/nâng cấp" in bot.voice_clone_provider_not_ready_public_text("vi")
+def test_voice_clone_public_guard_verified_copy():
+    assert bot.voice_clone_provider_not_ready_public_text("vi") == bot.VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
+    assert "đang được kiểm tra" in bot.voice_clone_provider_not_ready_public_text("vi")
 
 
-def test_ai_music_public_guard_maintenance():
-    assert "bảo trì/nâng cấp" in bot.music_ai_public_guard_text("vi")
+def test_ai_music_public_guard_verified_copy():
+    assert bot.music_ai_public_guard_text("vi") == "Tạo bài hát đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 
 
 def test_video_dub_public_guard_maintenance():

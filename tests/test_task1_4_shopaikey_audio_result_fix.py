@@ -172,8 +172,9 @@ def test_audio_public_status_names_locked_states_clearly():
 
 def test_runtime_multiline_env_warning_is_explicit():
     source = inspect.getsource(bot.cmd_runtime)
-    assert "TELEGRAM_UPDATE_MODE=webhook" in source
-    assert "BOT_USERNAME=toanaasbot" in source
+    assert "TELEGRAM_UPDATE_MODE_ENV_WARNING_TEXT" in source
+    assert "TELEGRAM_UPDATE_MODE=webhook" in bot.TELEGRAM_UPDATE_MODE_ENV_WARNING_TEXT
+    assert "BOT_USERNAME=toanaasbot" in bot.TELEGRAM_UPDATE_MODE_ENV_WARNING_TEXT
 
 
 def test_zero_xu_discount_copy_does_not_claim_deduction():

@@ -12,7 +12,15 @@ def test_music_song_missing_adapter_uses_exact_admin_copy(monkeypatch):
     monkeypatch.setattr(
         bot,
         "get_suno_music_readiness",
-        lambda: {"ready": False, "public_enabled": False, "missing_env": ["SUNO_API_KEY"], "reason": "missing"},
+        lambda: {
+            "ready": False,
+            "public_enabled": False,
+            "missing_env": ["SUNO_API_KEY"],
+            "fetch_ready": False,
+            "download_ready": False,
+            "full_result_ok": False,
+            "reason": "missing",
+        },
     )
     monkeypatch.setattr(bot, "music_ai_public_processing_ready", lambda _readiness=None: False)
 
@@ -27,7 +35,7 @@ def test_music_song_missing_adapter_uses_exact_admin_copy(monkeypatch):
     )
 
     assert decision["allowed"] is False
-    assert decision["message"] == "⚙️ Admin test chưa chạy được: music_song adapter chưa sẵn sàng hoặc thiếu cấu hình thật. Không gọi provider và không trừ Xu."
+    assert decision["message"] == "⚙️ Admin test chưa chạy được: music_song chưa có kết quả đầy đủ từ provider hoặc chưa có endpoint tải file nhạc. Không gọi provider mới và không trừ Xu."
 
 
 def test_execute_engine_music_rejects_ok_without_provider_job_or_bytes(monkeypatch):
@@ -35,7 +43,15 @@ def test_execute_engine_music_rejects_ok_without_provider_job_or_bytes(monkeypat
     monkeypatch.setattr(
         bot,
         "get_suno_music_readiness",
-        lambda: {"ready": True, "public_enabled": False, "missing_env": [], "reason": "configured"},
+        lambda: {
+            "ready": True,
+            "public_enabled": False,
+            "missing_env": [],
+            "fetch_ready": True,
+            "download_ready": True,
+            "full_result_ok": True,
+            "reason": "configured",
+        },
     )
     monkeypatch.setattr(bot, "music_ai_public_processing_ready", lambda _readiness=None: False)
 
@@ -68,7 +84,15 @@ def test_execute_engine_music_accepts_real_output_bytes_without_fake_pending(mon
     monkeypatch.setattr(
         bot,
         "get_suno_music_readiness",
-        lambda: {"ready": True, "public_enabled": False, "missing_env": [], "reason": "configured"},
+        lambda: {
+            "ready": True,
+            "public_enabled": False,
+            "missing_env": [],
+            "fetch_ready": True,
+            "download_ready": True,
+            "full_result_ok": True,
+            "reason": "configured",
+        },
     )
     monkeypatch.setattr(bot, "music_ai_public_processing_ready", lambda _readiness=None: False)
 
