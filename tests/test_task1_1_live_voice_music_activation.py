@@ -266,7 +266,9 @@ def test_music_song_select_option_shows_confirmation_price():
     result = {"song_product": "half", "guided_duration_seconds": 60, "selected_prompt": "bài hát có lời"}
     text = bot.music_ai_preview_text(result, "vi")
     labels = _labels(bot.music_ai_preview_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM, result=result))
-    assert "Giá dự kiến bản đầy đủ" in text
+    assert "Đã chọn: Nửa bài." in text
+    assert "Giá dự kiến:" in text
+    assert "Thời lượng bản đầy đủ" not in text
     assert "▶️ Nghe thử" in labels
     assert "✅ Tạo bài hát" in labels
 
