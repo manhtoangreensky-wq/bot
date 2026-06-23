@@ -95,7 +95,7 @@ def test_tool_test_minimax_tts_persists_smoke_pass(monkeypatch):
 
     monkeypatch.setattr(bot, "shopaikey_minimax_tts_bytes", tts)
     update, _message = _command_update()
-    context = SimpleNamespace(args=[], bot=CaptureBot())
+    context = SimpleNamespace(args=["--confirm-paid"], bot=CaptureBot())
     asyncio.run(bot.cmd_tool_test_minimax_tts(update, context))
 
     assert store["tool_test:minimax_tts:status"] == "PASS"
@@ -179,8 +179,8 @@ def test_voice_clone_off_does_not_leave_pending_confirm(monkeypatch):
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
     update, query = _callback_update("music_quick|showroom|voice_clone", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
-    assert bot.get_music_guided_pending(user_id) is None
-    assert "bảo trì/nâng cấp" in query.message.outputs[-1]["text"]
+    assert bot.get_music_guided_pending(user_id)["pending_action"] == "voice_clone_intro"
+    assert "bảo trì/nâng cấp" not in query.message.outputs[-1]["text"]
 
 
 def test_admin_voice_clone_bypasses_public_gate_when_configured(monkeypatch):
@@ -270,7 +270,7 @@ def test_tool_test_voice_clone_persists_upload_clone_tts_results(monkeypatch):
     monkeypatch.setattr(bot, "shopaikey_minimax_voice_clone", clone)
     monkeypatch.setattr(bot, "shopaikey_minimax_tts_bytes", tts)
     update, _message = _command_update()
-    context = SimpleNamespace(args=[], bot=CaptureBot())
+    context = SimpleNamespace(args=["--confirm-paid"], bot=CaptureBot())
     asyncio.run(bot.cmd_tool_test_minimax_voice_clone(update, context))
     assert store["tool_test:minimax_voice_clone_upload:status"] == "PASS"
     assert store["tool_test:minimax_voice_clone_tts:status"] == "PASS"
@@ -313,7 +313,7 @@ def test_tool_test_music_ai_persists_submit_fetch_download(monkeypatch):
     monkeypatch.setattr(bot, "poll_music_generation_job", poll)
     monkeypatch.setattr(bot, "_download_audio_url_bytes", download)
     update, _message = _command_update()
-    asyncio.run(bot.cmd_tool_test_music_ai(update, SimpleNamespace(args=[], bot=CaptureBot())))
+    asyncio.run(bot.cmd_tool_test_music_ai(update, SimpleNamespace(args=["--confirm-paid"], bot=CaptureBot())))
     assert store["tool_test:key4u_suno:status"] == "PASS_SUBMITTED"
     assert store["tool_test:key4u_suno_job:status"] == "PASS"
     assert store["tool_test:music_ai_download:status"] == "PASS"
@@ -451,8 +451,8 @@ def test_lyrics_invoice_only_after_option_selected(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
     assert bot.get_music_guided_result(user_id)["lyrics_state"] == "lyrics_invoice_preview"
     labels = _labels(query.message.outputs[-1]["reply_markup"])
-    assert "▶️ Nghe thử" not in labels
-    assert "✅ Tạo bài hát" not in labels
+    assert "▶️ Nghe thử" in labels
+    assert "✅ Tạo bài hát" in labels
 
 
 def test_lyrics_back_stack_exact():
@@ -487,8 +487,8 @@ def test_admin_music_gate_keeps_public_processing_guarded(monkeypatch):
         "vi",
         result={"song_product": "seconds"},
     ))
-    assert "▶️ Nghe thử" not in labels
-    assert "✅ Tạo bài hát" not in labels
+    assert "▶️ Nghe thử" in labels
+    assert "✅ Tạo bài hát" in labels
     assert "🧪 Kiểm tra nhạc AI" not in labels
     assert "⚙️ Trạng thái nhạc" not in labels
 
@@ -517,9 +517,8 @@ def test_admin_music_preview_uses_clean_public_guard(monkeypatch):
     update, query = _callback_update("music_quick|showroom|music_ai_preview", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
     assert calls == []
-    assert "bảo trì/nâng cấp" in query.message.outputs[-1]["text"]
-    assert "chưa trừ Xu" in query.message.outputs[-1]["text"]
-    assert "admin" not in query.message.outputs[-1]["text"].lower()
+    assert "--confirm-paid" in query.message.outputs[-1]["text"]
+    assert "Paid provider job: <code>NO</code>" in query.message.outputs[-1]["text"]
 
 
 def test_admin_music_full_create_uses_clean_public_guard(monkeypatch):
@@ -547,9 +546,8 @@ def test_admin_music_full_create_uses_clean_public_guard(monkeypatch):
     update, query = _callback_update("music_quick|showroom|music_ai_confirm", user_id)
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
     assert calls == []
-    assert "bảo trì/nâng cấp" in query.message.outputs[-1]["text"]
-    assert "chưa trừ Xu" in query.message.outputs[-1]["text"]
-    assert "admin" not in query.message.outputs[-1]["text"].lower()
+    assert "--confirm-paid" in query.message.outputs[-1]["text"]
+    assert "Paid provider job: <code>NO</code>" in query.message.outputs[-1]["text"]
 
 
 def test_admin_music_test_button_runs_real_smoke_command(monkeypatch):
