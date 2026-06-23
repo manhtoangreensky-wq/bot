@@ -45,7 +45,7 @@ def test_suno_pass_submitted_not_public_ready():
 def test_music_public_guard_no_admin_blocker():
     text = bot.music_ai_public_guard_text("vi")
     assert "Admin blocker" not in text
-    assert "bảo trì/nâng cấp" in text
+    assert text == "Tạo bài hát đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 
 
 def test_music_public_guard_no_xu_charge():

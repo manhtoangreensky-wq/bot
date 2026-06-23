@@ -392,7 +392,7 @@ def test_video_200_blocks_only_confirmed_paid_addon():
 
 
 def test_public_maintenance_copy_standard():
-    assert bot.VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT == bot.PUBLIC_PRODUCT_MAINTENANCE_VI
+    assert bot.VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT == "Tạo video nhiều cảnh đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
     assert set(bot.VIDEO_COMPLETED_ADDON_GUARD_TEXTS.values()) == {bot.PUBLIC_PRODUCT_MAINTENANCE_VI}
 
 

@@ -37,11 +37,11 @@ def test_song_half_full_new_state_uses_song_length_mode():
     assert '"guided_duration":' not in block
 
 
-def test_admin_subtitle_feature_flag_is_public_blocker_not_missing(monkeypatch):
+def test_admin_subtitle_mode_disabled_is_exact_blocker_not_adapter_missing(monkeypatch):
     _admin_only(monkeypatch)
 
     def feature_flag_capability(_mode, _state=None, public=True):
-        return {"ok": False, "reason": "mode_disabled", "missing": ["feature_flag"]}
+        return {"ok": False, "reason": "mode_disabled", "missing": ["mode_disabled"]}
 
     monkeypatch.setattr(bot, "video_dubbing_capability", feature_flag_capability)
     monkeypatch.setattr(bot, "VIDEO_ASR_ENABLED", True)
@@ -56,10 +56,12 @@ def test_admin_subtitle_feature_flag_is_public_blocker_not_missing(monkeypatch):
         is_provider_call=True,
     )
 
-    assert decision["status"] == "allowed_admin"
-    assert bot.engine_technical_missing(decision["readiness"]) == []
-    assert "feature_flag" in bot.engine_public_blockers(decision["readiness"])
+    assert decision["status"] == "blocked_admin_missing_provider_config"
+    assert bot.engine_technical_missing(decision["readiness"]) == ["mode_disabled"]
     admin_text = bot.admin_product_engine_missing_text("subtitle_translate", decision["readiness"])
+    assert "mode_disabled" in admin_text
+    assert "asr_adapter_missing" not in admin_text
+    assert "video_dub_tts_adapter_missing" not in admin_text
     assert "feature_flag" not in admin_text
 
 
@@ -71,6 +73,10 @@ def test_video_multiscene_public_flag_does_not_render_generic_adapter_blocker(mo
     monkeypatch.setattr(bot, "SHOPAIKEY_VIDEO_MODEL", "model")
     monkeypatch.setattr(bot, "KEY4U_ENABLED", False)
     monkeypatch.setattr(bot, "video_multiscene_stitching_available", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_stitching_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_queue_available", lambda: True)
+    monkeypatch.setattr(bot, "video_multiscene_scene_tested", lambda _scene_count: True)
+    monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": True})
     monkeypatch.setattr(bot, "video_multiscene_public_ready", lambda _scene_count: False)
 
     admin_decision = bot.can_user_access_product_engine(1, "video_multiscene", "3", is_provider_call=True)
