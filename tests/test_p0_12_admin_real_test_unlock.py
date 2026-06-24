@@ -224,7 +224,7 @@ def test_clone_forbidden_hides_retry_button_and_suggests_default_tts(monkeypatch
 
     assert "🔁 Tạo/nghe thử lại" not in labels
     assert "🎙 Dùng giọng mặc định" in labels
-    assert "chưa mở quyền clone voice" in text
+    assert "tạm giới hạn bởi nhà cung cấp" in text
 
 
 def test_status_reports_admin_test_ready_separate_from_public_ready(monkeypatch):
