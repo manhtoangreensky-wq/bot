@@ -16,12 +16,12 @@ def test_song_legacy_half_normalizes_to_full_without_short_mode(monkeypatch):
     half_text = bot.music_ai_preview_text(half, "vi")
     full_text = bot.music_ai_preview_text(full, "vi")
 
-    assert "Đã chọn: Bài hát có lời AI." in half_text
+    assert "Nghe thử bài hát có lời AI" in half_text
     assert "Nửa bài." not in half_text
-    assert f"Giá dự kiến: {bot.music_result_price_xu(half)} Xu." in half_text
-    assert "Đã chọn: Bài hát có lời AI." in full_text
+    assert f"Bản đầy đủ bài hát có lời AI: <b>{bot.music_result_price_xu(half)} Xu</b>" in half_text
+    assert "Nghe thử bài hát có lời AI" in full_text
     assert "Bản đầy đủ được lưu trong kho" in full_text
-    assert f"Giá dự kiến: {bot.music_result_price_xu(full)} Xu." in full_text
+    assert f"Bản đầy đủ bài hát có lời AI: <b>{bot.music_result_price_xu(full)} Xu</b>" in full_text
     assert "Thời lượng bản đầy đủ" not in half_text
     assert "Thời lượng bản đầy đủ" not in full_text
     assert "60 giây" not in half_text

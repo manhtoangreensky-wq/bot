@@ -204,7 +204,8 @@ def test_song_product_removes_half_until_verified():
 
     assert "🎤 Bài hát có lời AI" in labels
     assert "1️⃣ Nửa bài" not in labels
-    assert "Không bán nửa bài" in text
+    assert "Không bán nửa bài" not in text
+    assert "Nửa bài" not in text
 
 
 def test_change_music_suggestion_preserves_duration_and_song_product(monkeypatch):
