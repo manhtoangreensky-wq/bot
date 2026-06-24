@@ -4447,6 +4447,9 @@ MUSIC_VAULT_INDEX_KEY = "music_vault:index"
 MUSIC_VAULT_MEMORY: dict[str, dict] = {}
 MUSIC_VAULT_MEMORY_INDEX: list[str] = []
 MUSIC_VAULT_STATUSES = {"generated_unused", "preview_sent", "reserved", "used", "archived", "expired", "blocked"}
+PREVIEW_QUOTA_WINDOW_DAYS = 15
+PREVIEW_QUOTA_PRODUCT_TYPES = ("music_ai", "voice_ai", "video_ai", "subtitle_dub_ai")
+PREVIEW_QUOTA_MIN_TIER = "silver"
 ENGINE_ASYNC_PUBLIC_CHECKING_VI = "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS = max(30, env_int("ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS", 60))
 ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS = max(60, env_int("ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS", 5 * 60))
@@ -4870,6 +4873,95 @@ def upsert_music_vault_from_output(
     if status == "preview_sent":
         entry["sent_preview_at"] = now_text()
     return save_music_vault_entry(entry, updated_by=updated_by)
+
+def find_music_vault_entry_for_job(job: dict | None = None) -> dict:
+    current = dict(job or {})
+    direct_id = str(current.get("vault_id") or current.get("music_vault_id") or "").strip()
+    if direct_id:
+        entry = get_music_vault_entry(direct_id)
+        if entry:
+            return entry
+    internal_id = str(current.get("internal_job_id") or "").strip()
+    output_sha = str(current.get("output_sha256") or "").strip()
+    for vault_id in _music_vault_index():
+        entry = get_music_vault_entry(vault_id)
+        if not entry:
+            continue
+        if internal_id and str(entry.get("internal_job_id") or "") == internal_id:
+            return entry
+        if output_sha and str(entry.get("output_sha256") or "") == output_sha:
+            return entry
+    return {}
+
+def music_vault_status_for_completed_job(job: dict | None = None) -> str:
+    current = dict(job or {})
+    if current.get("sent_full_at") or current.get("delivered_at") or current.get("claimed_at"):
+        return "used"
+    if current.get("sent_preview_at") or current.get("music_preview_seen"):
+        return "preview_sent"
+    return "generated_unused"
+
+def upsert_music_vault_from_completed_job(job: dict | None = None, updated_by="") -> dict:
+    current = dict(job or {})
+    if str(current.get("status") or "").lower() != "completed":
+        return {}
+    if int(current.get("output_bytes") or 0) <= 0:
+        return {}
+    existing = find_music_vault_entry_for_job(current)
+    output_sha = str(current.get("output_sha256") or "").strip()
+    vault_id = str(existing.get("vault_id") or current.get("vault_id") or "").strip()
+    if not vault_id:
+        vault_id = music_vault_id_for_output(
+            output_sha,
+            current.get("internal_job_id") or "",
+            current.get("provider") or "",
+            current.get("provider_task_id") or "",
+        )
+    storage_ref = str(existing.get("storage_ref") or current.get("output_path") or "").strip()
+    output_file_id = str(current.get("output_file_id") or "").strip()
+    if not storage_ref and output_file_id:
+        storage_ref = f"telegram_file_id:{output_file_id}"
+    status = music_vault_status_for_completed_job(current)
+    entry = {
+        **existing,
+        "vault_id": vault_id,
+        "category": music_vault_category_for_result(current),
+        "status": status,
+        "user_id": str(current.get("user_id") or ""),
+        "chat_id": str(current.get("chat_id") or ""),
+        "internal_job_id": str(current.get("internal_job_id") or ""),
+        "provider": str(current.get("provider") or ""),
+        "provider_task_id_present": bool(current.get("provider_task_id")),
+        "product_kind": music_result_product_kind(current),
+        "duration_seconds": music_result_duration_seconds(current),
+        "preview_seconds": int(current.get("preview_seconds") or music_preview_seconds()),
+        "preview_start_seconds": int(current.get("preview_start_seconds") or music_preview_start_seconds()),
+        "output_bytes": int(current.get("output_bytes") or 0),
+        "output_sha256": output_sha,
+        "storage_ref": storage_ref[:600],
+        "prompt_summary": music_prompt_selection_summary(current),
+        "safe_prompt": music_vault_safe_prompt(current),
+        "reuse_policy": str(existing.get("reuse_policy") or "reusable_internal_stock"),
+        "source": str(existing.get("source") or "backfill"),
+    }
+    if status == "preview_sent" and not entry.get("sent_preview_at"):
+        entry["sent_preview_at"] = str(current.get("sent_preview_at") or current.get("completed_at") or now_text())
+    if status == "used" and not entry.get("used_at"):
+        entry["used_at"] = str(current.get("sent_full_at") or current.get("completed_at") or now_text())
+    saved = save_music_vault_entry(entry, updated_by=updated_by)
+    if str(current.get("internal_job_id") or "") and str(current.get("vault_id") or "") != str(saved.get("vault_id") or ""):
+        current["vault_id"] = str(saved.get("vault_id") or "")
+        save_engine_async_job(current)
+    return saved
+
+def backfill_completed_music_vault_entries(limit: int = 80, updated_by="") -> dict:
+    created_or_updated = 0
+    for job in list_engine_async_jobs("music_suno", limit=max(1, int(limit or 80))):
+        before = find_music_vault_entry_for_job(job)
+        entry = upsert_music_vault_from_completed_job(job, updated_by=updated_by)
+        if entry and (not before or before != entry):
+            created_or_updated += 1
+    return {"checked": max(1, int(limit or 80)), "upserted": created_or_updated}
 
 def mark_music_vault_status(vault_id: str, status: str, updated_by="") -> dict:
     entry = get_music_vault_entry(vault_id)
@@ -67608,7 +67700,17 @@ def _admin_music_suno_job_arg(context: ContextTypes.DEFAULT_TYPE) -> str:
 def _music_suno_job_lines(job: dict, *, admin: bool = True) -> list[str]:
     if not job:
         return ["⚠️ Không tìm thấy Suno job nội bộ."]
-    return engine_async_status_text(job, admin=admin).splitlines()
+    lines = engine_async_status_text(job, admin=admin).splitlines()
+    entry = find_music_vault_entry_for_job(job)
+    if str(job.get("status") or "").lower() == "completed" and int(job.get("output_bytes") or 0) > 0:
+        lines.extend([
+            "",
+            "✅ Job nhạc đã hoàn tất và file đầy đủ đã được lưu trong kho.",
+            f"• Vault: <code>{html.escape(str(entry.get('vault_id') or job.get('vault_id') or '-'))}</code>",
+            "• Dùng <code>/music_vault_detail &lt;vault_id&gt;</code> để xem thông tin kho.",
+            "• Dùng <code>/music_suno_send &lt;job_id&gt;</code> nếu admin cần gửi lại file.",
+        ])
+    return lines
 
 async def cmd_music_suno_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -67636,6 +67738,10 @@ async def cmd_music_suno_job(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not job_id:
         return await cmd_music_suno_jobs(update, context)
     job = get_engine_async_job(job_id)
+    if job:
+        entry = upsert_music_vault_from_completed_job(job, updated_by=update.effective_user.id)
+        if entry:
+            job = get_engine_async_job(job_id) or job
     return await update.message.reply_text(
         "\n".join(_music_suno_job_lines(job, admin=True)),
         parse_mode="HTML",
@@ -67651,25 +67757,71 @@ async def cmd_music_suno_poll(update: Update, context: ContextTypes.DEFAULT_TYPE
     polled = await poll_music_suno_async_job(job_id, updated_by=update.effective_user.id, download=True)
     job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
     if polled.get("ok") and polled.get("audio_bytes"):
-        if music_job_full_already_sent(job, polled.get("audio_bytes")):
-            return await update.message.reply_text(
-                "✅ Đã gửi bản nhạc phía trên.\n\n" + engine_async_status_text(job, admin=True),
-                parse_mode="HTML",
-                reply_markup=engine_async_status_keyboard(job_id, "music"),
-            )
-        audio = video_dubbing_output_file(bytes(polled.get("audio_bytes") or b""), "toan_aas_suno_poll.mp3")
-        sent_message = await context.bot.send_audio(
-            chat_id=update.effective_chat.id,
-            audio=audio,
-            filename="toan_aas_suno_poll.mp3",
-            caption=f"✅ Suno job {job_id} trả audio bytes > 0. Không trừ Xu khách.",
+        vault_entry = upsert_music_vault_from_output(
+            audio_bytes=bytes(polled.get("audio_bytes") or b""),
+            result=job,
+            job=job,
+            status=music_vault_status_for_completed_job(job),
+            updated_by=update.effective_user.id,
         )
-        job = record_music_job_full_send(job, sent_message, bytes(polled.get("audio_bytes") or b""), result=job, updated_by=update.effective_user.id)
+        job["vault_id"] = str(vault_entry.get("vault_id") or job.get("vault_id") or "")
+        save_engine_async_job(job)
+    else:
+        upsert_music_vault_from_completed_job(job, updated_by=update.effective_user.id)
+        job = get_engine_async_job(job_id) or job
     return await update.message.reply_text(
-        engine_async_status_text(job, admin=True),
+        "\n".join(_music_suno_job_lines(job, admin=True)),
         parse_mode="HTML",
         reply_markup=engine_async_status_keyboard(job_id, "music"),
     )
+
+async def cmd_music_suno_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    job_id = _admin_music_suno_job_arg(context)
+    if not job_id:
+        return await update.message.reply_text("Cú pháp: /music_suno_send <MUS-job-id>")
+    job = get_engine_async_job(job_id)
+    if not job:
+        return await update.message.reply_text("Không tìm thấy MUS-id nội bộ. Không gọi provider.")
+    entry = upsert_music_vault_from_completed_job(job, updated_by=update.effective_user.id)
+    job = get_engine_async_job(job_id) or job
+    if str(job.get("status") or "").lower() != "completed" or int(job.get("output_bytes") or 0) <= 0:
+        return await update.message.reply_text("⚠️ Job chưa có output nhạc hoàn tất bytes > 0. Không gọi provider và không gửi fake file.")
+    if job.get("sent_full_at") and job.get("output_file_id"):
+        return await update.message.reply_text(
+            "✅ File đầy đủ của job này đã từng được gửi. Lệnh status/poll sẽ không gửi trùng.\n"
+            f"• File id: <code>{html.escape(mask_provider_task_id(str(job.get('output_file_id') or '')))}</code>\n"
+            f"• Vault: <code>{html.escape(str((entry or {}).get('vault_id') or job.get('vault_id') or '-'))}</code>",
+            parse_mode="HTML",
+        )
+    storage_ref = str((entry or {}).get("storage_ref") or job.get("output_path") or "").strip()
+    try:
+        if storage_ref.startswith("telegram_file_id:"):
+            sent_message = await context.bot.send_audio(
+                chat_id=update.effective_chat.id,
+                audio=storage_ref.replace("telegram_file_id:", "", 1),
+                caption=f"📤 Gửi lại file nhạc đầy đủ từ kho cho job {html.escape(job_id)}. Không gọi provider.",
+            )
+            job["sent_full_at"] = now_text()
+            job["output_file_id"] = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or job.get("output_file_id") or "")
+            job["send_attempt_count"] = int(job.get("send_attempt_count") or 0) + 1
+            save_engine_async_job(job)
+            return await update.message.reply_text("✅ Đã gửi lại file nhạc từ Telegram file_id trong kho. Không gọi provider.")
+        if storage_ref and os.path.exists(storage_ref):
+            with open(storage_ref, "rb") as handle:
+                sent_message = await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=handle,
+                    filename=os.path.basename(storage_ref) or "toan_aas_music_full.mp3",
+                    caption=f"📤 Gửi lại file nhạc đầy đủ từ kho cho job {html.escape(job_id)}. Không gọi provider.",
+                )
+            job = record_music_job_full_send(job, sent_message, None, result=job, updated_by=update.effective_user.id)
+            return await update.message.reply_text("✅ Đã gửi lại file nhạc từ kho local. Không gọi provider.")
+        return await update.message.reply_text("⚠️ Job có metadata output nhưng chưa có file_ref local/Telegram để gửi lại. Không gọi provider.")
+    except Exception as exc:
+        record_music_job_full_send_error(job, str(exc), updated_by=update.effective_user.id)
+        return await update.message.reply_text("⚠️ Gửi lại file nhạc thất bại. Đã ghi lỗi an toàn, không gọi provider.")
 
 async def cmd_music_prompt_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -67698,6 +67850,7 @@ async def cmd_music_prompt_debug(update: Update, context: ContextTypes.DEFAULT_T
 async def cmd_music_vault_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    backfill = backfill_completed_music_vault_entries(updated_by=update.effective_user.id)
     entries = list_music_vault_entries(limit=40)
     counts = {status: 0 for status in sorted(MUSIC_VAULT_STATUSES)}
     for entry in entries:
@@ -67705,12 +67858,14 @@ async def cmd_music_vault_status(update: Update, context: ContextTypes.DEFAULT_T
         counts[status] = counts.get(status, 0) + 1
     lines = ["🗂 <b>MUSIC VAULT STATUS</b>", "", "No provider call. Metadata/file refs only.", ""]
     lines.extend([f"• {status}: <code>{count}</code>" for status, count in counts.items()])
+    lines.append(f"• Backfill checked/upserted: <code>{int(backfill.get('checked') or 0)}/{int(backfill.get('upserted') or 0)}</code>")
     lines.extend(["", "Commands: /music_vault_unused, /music_vault_used, /music_vault_detail &lt;vault_id&gt;"])
     return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_music_vault_unused(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    backfill_completed_music_vault_entries(updated_by=update.effective_user.id)
     lines = ["🗂 <b>MUSIC VAULT UNUSED</b>", "", *music_vault_status_lines({"generated_unused", "preview_sent", "reserved"}, limit=12)]
     return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -67811,10 +67966,70 @@ async def cmd_vip_music_quota(update: Update, context: ContextTypes.DEFAULT_TYPE
         return await update.message.reply_text("⛔ Kho nhạc VIP dành cho Gold+ hoặc admin. Không gọi provider và không trừ Xu.")
     quota = vip_music_quota_counts(uid)
     return await update.message.reply_text(
-        "🎖 <b>VIP MUSIC QUOTA</b>\n\n"
-        f"• Hôm nay: <code>{quota['day']}/{quota['daily_limit']}</code>\n"
-        f"• Tháng này: <code>{quota['month']}/{quota['monthly_limit']}</code>\n"
-        "• Nguồn: kho nhạc generated_unused nội bộ, không gọi provider.",
+        "🎖 <b>LƯỢT NHẬN NHẠC VIP TỪ KHO</b>\n\n"
+        f"• Hôm nay: <code>{quota['day']}/{quota['daily_limit']}</code> lượt\n"
+        f"• Tháng này: <code>{quota['month']}/{quota['monthly_limit']}</code> lượt\n"
+        "• Nguồn: kho nhạc AI có sẵn, không gọi provider.\n"
+        "• Ghi chú: Đây là giới hạn nhận nhạc VIP từ kho, không phải thời hạn lưu nhạc.",
+        parse_mode="HTML",
+    )
+
+async def cmd_preview_quota_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    lines = [
+        preview_quota_policy_text("vi"),
+        "",
+        "Product types:",
+        *[f"• <code>{html.escape(product)}</code>: {preview_duration_seconds(product)}s" for product in PREVIEW_QUOTA_PRODUCT_TYPES],
+        "",
+        "Admin commands:",
+        "• <code>/preview_quota_status &lt;user_id&gt;</code>",
+        "• <code>/preview_quota_reset &lt;user_id&gt; &lt;product_type&gt;</code>",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_preview_quota_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = getattr(context, "args", []) or []
+    if not args:
+        return await update.message.reply_text("Cú pháp: /preview_quota_status <user_id>")
+    target_id = str(args[0] or "").strip()
+    tier = preview_quota_user_tier(target_id)
+    lines = [
+        "🎧 <b>PREVIEW QUOTA STATUS</b>",
+        "",
+        f"• User: <code>{html.escape(target_id)}</code>",
+        f"• Tier: <code>{html.escape(tier)}</code>",
+        f"• Silver gate: <code>{'PASS' if preview_quota_tier_allowed(target_id) else 'BLOCK'}</code>",
+        "• Provider call: <code>NO</code>",
+        "",
+    ]
+    for product in PREVIEW_QUOTA_PRODUCT_TYPES:
+        snap = preview_quota_snapshot(target_id, product)
+        used = "1" if snap.get("used_in_window") else "0"
+        lines.append(
+            f"• <code>{product}</code>: used_in_15d=<code>{used}</code>; "
+            f"last=<code>{html.escape(str(snap.get('last_used_at') or '-'))}</code>; "
+            f"next=<code>{html.escape(str(snap.get('next_available_at') or '-'))}</code>; "
+            f"duration=<code>{preview_duration_seconds(product)}s</code>"
+        )
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_preview_quota_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    args = getattr(context, "args", []) or []
+    if len(args) < 2:
+        return await update.message.reply_text("Cú pháp: /preview_quota_reset <user_id> <product_type>")
+    target_id = str(args[0] or "").strip()
+    product = preview_quota_product_type(str(args[1] or ""))
+    if not product:
+        return await update.message.reply_text("Product type hợp lệ: music_ai, voice_ai, video_ai, subtitle_dub_ai")
+    set_system_setting(preview_quota_setting_key(target_id, product), "", "preview quota reset", update.effective_user.id)
+    return await update.message.reply_text(
+        f"✅ Đã reset preview quota cho <code>{html.escape(target_id)}</code> / <code>{html.escape(product)}</code>. Không gọi provider.",
         parse_mode="HTML",
     )
 
@@ -71419,6 +71634,15 @@ async def handle_shopaikey_public_callback(update: Update, context: ContextTypes
     scene_index = int(pending.get("scene_index") or 0)
     retry_warranty_count = max(0, int(pending.get("retry_warranty_count") or 0)) if job_type == "image" else 0
     if video_paid_preview_required(pending) and not pending.get("paid_preview_seen"):
+        preview_gate = video_preview_gate_decision(uid, pending)
+        if not preview_gate.get("allowed"):
+            restore_shopaikey_pending_confirmation(token, uid, pending)
+            return await safe_edit_or_send(
+                query,
+                video_preview_gate_text(preview_gate, lang),
+                parse_mode="HTML",
+                reply_markup=video_addon_confirm_keyboard(token, video_tier, lang, {"pending_payload": pending, "video_tier": video_tier}),
+            )
         restore_shopaikey_pending_confirmation(token, uid, pending)
         addon_state = get_video_addon_state(uid) or {"pending_payload": pending, "video_tier": video_tier}
         addon_state["pending_confirm_token"] = token
@@ -74650,6 +74874,287 @@ def voice_preview_seconds() -> int:
 def video_preview_seconds() -> int:
     return int(VIDEO_PREVIEW_SECONDS or 6)
 
+def subtitle_dub_preview_seconds() -> int:
+    return 6
+
+def preview_quota_product_type(value: str = "") -> str:
+    normalized = str(value or "").strip().lower()
+    aliases = {
+        "music": "music_ai",
+        "music_preview": "music_ai",
+        "suno": "music_ai",
+        "voice": "voice_ai",
+        "voice_preview": "voice_ai",
+        "tts": "voice_ai",
+        "voice_clone": "voice_ai",
+        "video": "video_ai",
+        "video_preview": "video_ai",
+        "subtitle": "subtitle_dub_ai",
+        "dub": "subtitle_dub_ai",
+        "dubbing": "subtitle_dub_ai",
+        "subtitle_dub": "subtitle_dub_ai",
+        "subtitle_dub_preview": "subtitle_dub_ai",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in PREVIEW_QUOTA_PRODUCT_TYPES else ""
+
+def preview_quota_product_label(product_type: str = "", lang: str = "vi") -> str:
+    product = preview_quota_product_type(product_type) or "music_ai"
+    labels_vi = {
+        "music_ai": "nhạc AI",
+        "voice_ai": "voice AI",
+        "video_ai": "video AI",
+        "subtitle_dub_ai": "phụ đề/lồng tiếng",
+    }
+    labels_en = {
+        "music_ai": "AI music",
+        "voice_ai": "AI voice",
+        "video_ai": "AI video",
+        "subtitle_dub_ai": "subtitle/dubbing",
+    }
+    return (labels_vi if normalize_user_language(lang) == "vi" else labels_en).get(product, product)
+
+def preview_duration_seconds(product_type: str = "") -> int:
+    product = preview_quota_product_type(product_type)
+    if product == "music_ai":
+        return music_preview_seconds()
+    if product == "voice_ai":
+        return voice_preview_seconds()
+    if product == "video_ai":
+        return video_preview_seconds()
+    if product == "subtitle_dub_ai":
+        return subtitle_dub_preview_seconds()
+    return 0
+
+def preview_quota_setting_key(user_id, product_type: str) -> str:
+    product = preview_quota_product_type(product_type) or "unknown"
+    return f"preview_quota:{user_id}:{product}"
+
+def preview_quota_record(user_id, product_type: str) -> dict:
+    raw = get_system_setting(preview_quota_setting_key(user_id, product_type), "")
+    try:
+        data = json.loads(str(raw or "{}"))
+    except Exception:
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+def preview_quota_user_tier(user_id) -> str:
+    if is_admin_user(user_id):
+        return "admin"
+    try:
+        return normalize_member_tier((get_member_profile(user_id) or {}).get("tier") or "newbie") or "newbie"
+    except Exception:
+        return "newbie"
+
+def preview_quota_tier_allowed(user_id, required_tier: str = PREVIEW_QUOTA_MIN_TIER) -> bool:
+    if is_admin_user(user_id):
+        return True
+    tier = preview_quota_user_tier(user_id)
+    return member_tier_rank(tier) >= member_tier_rank(required_tier)
+
+def preview_quota_snapshot(user_id, product_type: str, now: datetime | None = None) -> dict:
+    product = preview_quota_product_type(product_type)
+    current = now or datetime.now()
+    record = preview_quota_record(user_id, product)
+    last_used_at = _engine_async_parse_time(record.get("last_used_at"))
+    next_available_at = None
+    seconds_remaining = 0
+    if last_used_at:
+        next_available_at = last_used_at + timedelta(days=PREVIEW_QUOTA_WINDOW_DAYS)
+        seconds_remaining = max(0, int((next_available_at - current).total_seconds()))
+    return {
+        "product_type": product,
+        "last_used_at": datetime_text(last_used_at) if last_used_at else "",
+        "next_available_at": datetime_text(next_available_at) if next_available_at else "",
+        "seconds_remaining": seconds_remaining,
+        "window_days": PREVIEW_QUOTA_WINDOW_DAYS,
+        "used_in_window": bool(seconds_remaining > 0),
+        "record": record,
+    }
+
+def preview_quota_guard(user_id, product_type: str, now: datetime | None = None, required_tier: str = PREVIEW_QUOTA_MIN_TIER) -> dict:
+    product = preview_quota_product_type(product_type)
+    if not product:
+        return {"allowed": False, "reason": "invalid_product_type", "product_type": ""}
+    tier = preview_quota_user_tier(user_id)
+    if not preview_quota_tier_allowed(user_id, required_tier):
+        return {
+            "allowed": False,
+            "reason": "tier",
+            "product_type": product,
+            "tier": tier,
+            "required_tier": normalize_member_tier(required_tier) or required_tier,
+            "quota": preview_quota_snapshot(user_id, product, now),
+        }
+    quota = preview_quota_snapshot(user_id, product, now)
+    if quota.get("used_in_window") and not is_admin_user(user_id):
+        return {"allowed": False, "reason": "quota", "product_type": product, "tier": tier, "quota": quota}
+    return {"allowed": True, "reason": "ok", "product_type": product, "tier": tier, "quota": quota}
+
+def consume_preview_quota(user_id, product_type: str, now: datetime | None = None, updated_by="") -> dict:
+    product = preview_quota_product_type(product_type)
+    if not product:
+        return {}
+    current = now or datetime.now()
+    record = {
+        **preview_quota_record(user_id, product),
+        "product_type": product,
+        "last_used_at": datetime_text(current),
+        "window_days": PREVIEW_QUOTA_WINDOW_DAYS,
+        "updated_at": now_text(),
+    }
+    try:
+        set_system_setting(
+            preview_quota_setting_key(user_id, product),
+            json.dumps(record, ensure_ascii=False, separators=(",", ":")),
+            "preview quota consumed",
+            updated_by or user_id,
+        )
+    except Exception as exc:
+        logger.warning("preview quota consume failed | %s", sanitize_log_text(str(exc))[:180])
+    return preview_quota_snapshot(user_id, product, current)
+
+def preview_quota_check_and_consume(user_id, product_type: str, now: datetime | None = None, updated_by="") -> dict:
+    decision = preview_quota_guard(user_id, product_type, now)
+    if not decision.get("allowed"):
+        decision["consumed"] = False
+        return decision
+    decision["quota"] = consume_preview_quota(user_id, decision.get("product_type") or product_type, now, updated_by or user_id)
+    decision["consumed"] = True
+    return decision
+
+def preview_quota_policy_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎧 <b>Preview benefit</b>\n\n"
+            "Silver or above is required. Each product type can be previewed once every 15 days. "
+            "This is roughly up to two times per month for each product type."
+        )
+    return (
+        "🎧 <b>Chính sách nghe/xem thử</b>\n\n"
+        "Nghe/Xem thử là phúc lợi của TOAN AAS.\n\n"
+        "Hệ thống vẫn phải xử lý sản phẩm thật rồi cắt một đoạn ngắn gửi quý khách xem/nghe thử. "
+        "Vì vậy tính năng này áp dụng từ hạng Silver trở lên.\n\n"
+        "Mỗi loại sản phẩm được nghe/xem thử 1 lần trong 15 ngày. "
+        "Tương đương tối đa khoảng 2 lần/tháng cho mỗi loại sản phẩm.\n\n"
+        "Rất mong quý khách sử dụng hợp lý để hệ thống hoạt động ổn định và phục vụ mọi người tốt hơn."
+    )
+
+def preview_quota_notice_text(product_type: str, lang: str = "vi") -> str:
+    product = preview_quota_product_type(product_type)
+    seconds = preview_duration_seconds(product)
+    if normalize_user_language(lang) != "vi":
+        return preview_quota_policy_text(lang)
+    product_line = (
+        f"Bản nghe thử nhạc dài {seconds} giây. Bản đầy đủ được lưu trong kho và chỉ giao khi quý khách xác nhận dùng bản đầy đủ."
+        if product == "music_ai"
+        else f"Bản thử dài {seconds} giây. Bản đầy đủ chỉ giao sau khi quý khách xác nhận."
+    )
+    return preview_quota_policy_text(lang) + "\n\n" + product_line
+
+def preview_quota_block_text(decision: dict, product_type: str = "", lang: str = "vi") -> str:
+    product = preview_quota_product_type(product_type or (decision or {}).get("product_type"))
+    if normalize_user_language(lang) != "vi":
+        if (decision or {}).get("reason") == "tier":
+            return "Preview is available from Silver tier and above."
+        return "This product type can be previewed once every 15 days. Please try again after the reset time."
+    if (decision or {}).get("reason") == "tier":
+        return (
+            "🎧 Nghe/Xem thử là phúc lợi từ hạng Silver trở lên.\n\n"
+            "TOAN AAS chưa gọi provider và chưa trừ Xu."
+        )
+    quota = dict((decision or {}).get("quota") or {})
+    next_time = str(quota.get("next_available_at") or "").strip()
+    suffix = f"\n• Có thể thử lại sau: <code>{html.escape(next_time)}</code>" if next_time else ""
+    return (
+        "🎧 Mỗi loại sản phẩm được nghe/xem thử 1 lần trong 15 ngày.\n"
+        "Tương đương tối đa khoảng 2 lần/tháng cho mỗi loại sản phẩm.\n"
+        f"• Loại sản phẩm: <b>{html.escape(preview_quota_product_label(product, lang))}</b>{suffix}\n\n"
+        "TOAN AAS chưa gọi provider và chưa trừ Xu."
+    )
+
+def preview_quota_notice_keyboard(confirm_callback: str, back_callback: str = "menu|main", lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Đồng ý nghe/xem thử" if is_vi else "✅ Preview", callback_data=confirm_callback)],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=back_callback),
+            InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="menu|main"),
+        ],
+    ])
+
+def video_preview_scene_count(payload: dict | None = None) -> int:
+    data = dict(payload or {})
+    scenes = data.get("scenes")
+    if isinstance(scenes, (list, tuple)):
+        return len(scenes)
+    for key in ("scene_count", "selected_scene_count", "final_scene_count", "num_scenes", "video_scene_count"):
+        try:
+            value = int(data.get(key) or 0)
+        except Exception:
+            value = 0
+        if value > 0:
+            return value
+    return 0
+
+def video_preview_scene_count_known(payload: dict | None = None) -> bool:
+    data = dict(payload or {})
+    if isinstance(data.get("scenes"), (list, tuple)):
+        return True
+    return any(key in data for key in ("scene_count", "selected_scene_count", "final_scene_count", "num_scenes", "video_scene_count"))
+
+def video_preview_price_xu(payload: dict | None = None) -> int:
+    data = dict(payload or {})
+    for key in ("final_cost", "price_xu", "cost_xu", "base_cost", "video_price_xu"):
+        try:
+            value = int(data.get(key) or 0)
+        except Exception:
+            value = 0
+        if value > 0:
+            return value
+    tier = normalize_video_tier(data.get("video_tier") or data.get("tier") or "")
+    return int(video_tier_cost_xu(tier) or 0) if tier else 0
+
+def video_preview_required_tier(payload: dict | None = None) -> str:
+    scene_count = video_preview_scene_count(payload)
+    price = video_preview_price_xu(payload)
+    if scene_count >= 10 or price >= 1000:
+        return "platinum"
+    if scene_count >= 5 or price > 500:
+        return "gold"
+    return PREVIEW_QUOTA_MIN_TIER
+
+def video_preview_gate_decision(user_id, payload: dict | None = None, now: datetime | None = None) -> dict:
+    data = dict(payload or {})
+    scene_count = video_preview_scene_count(data)
+    if scene_count <= 3:
+        return {
+            "allowed": False,
+            "reason": "scene_count",
+            "product_type": "video_ai",
+            "scene_count": scene_count,
+            "required_scene_count": 4,
+        }
+    required_tier = video_preview_required_tier(data)
+    decision = preview_quota_guard(user_id, "video_ai", now, required_tier=required_tier)
+    decision.update({
+        "scene_count": scene_count,
+        "price_xu": video_preview_price_xu(data),
+        "required_tier": required_tier,
+    })
+    return decision
+
+def video_preview_gate_text(decision: dict, lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "Video preview is available only when the preview gate is satisfied."
+    reason = str((decision or {}).get("reason") or "")
+    if reason == "scene_count":
+        return "🎬 Video test thử chỉ áp dụng cho video trên 3 cảnh. TOAN AAS chưa gọi provider và chưa trừ Xu."
+    if reason == "tier":
+        required = member_tier_label((decision or {}).get("required_tier") or PREVIEW_QUOTA_MIN_TIER)
+        return f"🎬 Video preview này cần hạng {required}+ trở lên. TOAN AAS chưa gọi provider và chưa trừ Xu."
+    return preview_quota_block_text(decision, "video_ai", lang)
+
 def music_product_quote_price_xu(product_kind: str = "background") -> int:
     kind = str(product_kind or "background").strip().lower()
     if kind in {"song", "song_full", "lyrics", "vocal_ai"}:
@@ -77265,6 +77770,14 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
                 else voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile)
             ),
         )
+    if not full_generation:
+        quota_decision = preview_quota_guard(user_id, "voice_ai")
+        if not quota_decision.get("allowed"):
+            return await query.message.reply_text(
+                preview_quota_block_text(quota_decision, "voice_ai", lang),
+                parse_mode="HTML",
+                reply_markup=voice_clone_preview_entry_keyboard(profile_id, lang, ctx),
+            )
     guard = voice_preview_guard(
         user_id,
         profile_id,
@@ -77299,6 +77812,8 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             voice_preview_guard_message("inflight"),
             reply_markup=voice_clone_preview_entry_keyboard(profile_id, lang, ctx),
         )
+    if not full_generation:
+        consume_preview_quota(user_id, "voice_ai", updated_by=user_id)
     profile = locked_profile or profile
     metadata = voice_profile_metadata(profile)
     cost = voice_profile_storage_price_xu(user_id, ctx, profile_id)
@@ -78567,6 +79082,16 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 "⚠️ Hãy chọn một trong 3 gợi ý nhạc trước khi mở bước nghe thử.",
                 reply_markup=music_prompt_result_keyboard(lang, ctx, result),
             )
+        if action == "music_ai_guard":
+            return await query.message.reply_text(
+                preview_quota_notice_text("music_ai", lang),
+                parse_mode="HTML",
+                reply_markup=preview_quota_notice_keyboard(
+                    product_context_callback("music_quick", ctx, "music_ai_preview"),
+                    product_context_callback("music_quick", ctx, "music_ai_back_suggestions"),
+                    lang,
+                ),
+            )
         readiness = get_suno_music_readiness()
         if not is_admin_user(user_id) and not music_ai_access_allowed(user_id, readiness):
             result.update({
@@ -78622,6 +79147,13 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                     parse_mode="HTML",
                     reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
                 )
+        quota_decision = preview_quota_guard(user_id, "music_ai")
+        if not quota_decision.get("allowed"):
+            return await query.message.reply_text(
+                preview_quota_block_text(quota_decision, "music_ai", lang),
+                parse_mode="HTML",
+                reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
+            )
         engine_result = await execute_engine(
             feature,
             {"result": result, "preview": True},
@@ -78675,6 +79207,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 parse_mode="HTML",
                 reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False),
             )
+        consume_preview_quota(user_id, "music_ai", updated_by=user_id)
         if preview_audio:
             vault_entry = upsert_music_vault_from_output(
                 audio_bytes=bytes(preview_audio),
@@ -99491,6 +100024,8 @@ def video_paid_preview_required(payload: dict | None = None) -> bool:
         str(payload.get("job_type") or "").lower() == "video"
         and payload.get("preview_required")
         and int(payload.get("base_cost") or 0) > 0
+        and video_preview_scene_count_known(payload)
+        and video_preview_scene_count(payload) > 3
     )
 
 PAID_PREVIEW_REQUIRED_TASKS = {
@@ -100546,6 +101081,18 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
                 parse_mode=None,
                 reply_markup=video_paid_preview_retry_keyboard(token, lang),
             )
+        preview_payload_for_gate = {**pending_payload, **state}
+        preview_gate = video_preview_gate_decision(uid, preview_payload_for_gate)
+        if not preview_gate.get("allowed"):
+            state.update({"paid_preview_seen": False, "pending_payload": {**pending_payload, "paid_preview_seen": False}})
+            state = set_video_addon_screen(uid, state, "preview")
+            tier = normalize_video_tier(state.get("video_tier") or pending_payload.get("video_tier"))
+            return await safe_edit_or_send(
+                query,
+                video_preview_gate_text(preview_gate, lang),
+                parse_mode="HTML",
+                reply_markup=video_addon_confirm_keyboard(token, tier, lang, state),
+            )
         if not video_paid_preview_worker_available():
             state.update({"paid_preview_seen": False, "pending_payload": {**pending_payload, "paid_preview_seen": False}})
             state = set_video_addon_screen(uid, state, "preview")
@@ -100574,6 +101121,7 @@ async def handle_video_addon_callback(update: Update, context: ContextTypes.DEFA
                 parse_mode=None,
                 reply_markup=video_paid_preview_retry_keyboard(token, lang),
             )
+        consume_preview_quota(uid, "video_ai", updated_by=uid)
         pending_payload.update({
             "paid_preview_seen": False,
             "paid_preview_seconds": int(worker_payload.get("preview_seconds") or 0),
@@ -131802,7 +132350,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("vip_music_vault", cmd_vip_music_vault))
     tg_app.add_handler(CommandHandler("vip_music_claim", cmd_vip_music_claim))
     tg_app.add_handler(CommandHandler("vip_music_quota", cmd_vip_music_quota))
+    tg_app.add_handler(CommandHandler("preview_quota_policy", cmd_preview_quota_policy))
+    tg_app.add_handler(CommandHandler("preview_quota_status", cmd_preview_quota_status))
+    tg_app.add_handler(CommandHandler("preview_quota_reset", cmd_preview_quota_reset))
     tg_app.add_handler(CommandHandler("music_suno_timeout", cmd_music_suno_timeout))
+    tg_app.add_handler(CommandHandler("music_suno_send", cmd_music_suno_send))
     tg_app.add_handler(CommandHandler("key4u_suno_route_status", cmd_key4u_suno_route_status))
     tg_app.add_handler(CommandHandler("key4u_suno_job_status", cmd_key4u_suno_job_status))
     tg_app.add_handler(CommandHandler("key4u_suno_download_probe", cmd_key4u_suno_download_probe))

@@ -96,7 +96,9 @@ def test_paid_subtitle_translation_preview_before_final_confirm():
 
 def test_paid_video_preview_max_6_seconds():
     assert not bot.video_paid_preview_required({"job_type": "video", "base_cost": 300})
-    assert bot.video_paid_preview_required({"job_type": "video", "base_cost": 300, "preview_required": True})
+    assert not bot.video_paid_preview_required({"job_type": "video", "base_cost": 300, "preview_required": True})
+    assert not bot.video_paid_preview_required({"job_type": "video", "base_cost": 300, "preview_required": True, "scene_count": 3})
+    assert bot.video_paid_preview_required({"job_type": "video", "base_cost": 300, "preview_required": True, "scene_count": 4})
     text = bot.video_paid_preview_text({"pending_payload": {"job_type": "video", "base_cost": 300, "duration_seconds": 120}}, "vi")
     assert "tối đa 6 giây" in text
     assert not bot.video_paid_preview_artifact({"pending_payload": {"paid_preview_video_file_id": "full-file", "paid_preview_seconds": 7}})
