@@ -451,8 +451,8 @@ def test_lyrics_invoice_only_after_option_selected(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
     assert bot.get_music_guided_result(user_id)["lyrics_state"] == "lyrics_invoice_preview"
     labels = _labels(query.message.outputs[-1]["reply_markup"])
-    assert "▶️ Nghe thử" in labels
-    assert "✅ Tạo bài hát" in labels
+    assert "▶️ Nghe thử 12 giây" in labels
+    assert "✅ Dùng bản đầy đủ" in labels
 
 
 def test_lyrics_back_stack_exact():
@@ -465,8 +465,8 @@ def test_lyrics_back_stack_exact():
 
 def test_music_gate_off_hides_preview_create_for_public():
     labels = _labels(bot.music_ai_guarded_keyboard("vi", admin=False))
-    assert "▶️ Nghe thử" not in labels
-    assert "✅ Tạo bài hát" not in labels
+    assert "▶️ Nghe thử 12 giây" not in labels
+    assert "✅ Dùng bản đầy đủ" not in labels
     assert "✅ Tạo nhạc" not in labels
 
 
@@ -487,8 +487,8 @@ def test_admin_music_gate_keeps_public_processing_guarded(monkeypatch):
         "vi",
         result={"song_product": "seconds"},
     ))
-    assert "▶️ Nghe thử" in labels
-    assert "✅ Tạo bài hát" in labels
+    assert "▶️ Nghe thử 12 giây" in labels
+    assert "✅ Dùng bản đầy đủ" in labels
     assert "🧪 Kiểm tra nhạc AI" not in labels
     assert "⚙️ Trạng thái nhạc" not in labels
 

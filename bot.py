@@ -584,6 +584,17 @@ VOICE_PROFILE_MAX_FREE_PER_USER = max(0, env_int("VOICE_PROFILE_MAX_FREE_PER_USE
 PUBLIC_PRODUCT_DEFAULT_SECONDS = 18
 VOICE_DEFAULT_DURATION_SECONDS = PUBLIC_PRODUCT_DEFAULT_SECONDS
 MUSIC_AI_SHORT_DURATION_SECONDS = PUBLIC_PRODUCT_DEFAULT_SECONDS
+MUSIC_PREVIEW_SECONDS = max(1, env_int("MUSIC_PREVIEW_SECONDS", 12))
+MUSIC_PREVIEW_START_SECONDS = max(0, env_int("MUSIC_PREVIEW_START_SECONDS", 0))
+VOICE_PREVIEW_SECONDS = max(1, env_int("VOICE_PREVIEW_SECONDS", 6))
+VOICE_PREVIEW_START_SECONDS = max(0, env_int("VOICE_PREVIEW_START_SECONDS", 0))
+VIDEO_PREVIEW_SECONDS = max(1, env_int("VIDEO_PREVIEW_SECONDS", 6))
+VIDEO_PREVIEW_START_SECONDS = max(0, env_int("VIDEO_PREVIEW_START_SECONDS", 0))
+MUSIC_SHORT_MODE_VERIFIED = env_flag("MUSIC_SHORT_MODE_VERIFIED", "false")
+MUSIC_VOCAL_FULL_PRICE_XU = max(0, env_int("MUSIC_VOCAL_FULL_PRICE_XU", 500))
+MUSIC_BACKGROUND_FULL_PRICE_XU = max(0, env_int("MUSIC_BACKGROUND_FULL_PRICE_XU", 250))
+VIP_MUSIC_VAULT_DAILY_LIMIT = max(0, env_int("VIP_MUSIC_VAULT_DAILY_LIMIT", 1))
+VIP_MUSIC_VAULT_MONTHLY_LIMIT = max(0, env_int("VIP_MUSIC_VAULT_MONTHLY_LIMIT", 10))
 TTS_BASE_SECONDS = max(1, env_int("TTS_BASE_SECONDS", 30))
 TTS_BASE_PRICE_XU = max(0, env_int("TTS_BASE_PRICE_XU", 30))
 TTS_EXTRA_30S_PRICE_XU = max(0, env_int("TTS_EXTRA_30S_PRICE_XU", 20))
@@ -4431,6 +4442,11 @@ ENGINE_ASYNC_JOB_MAX_INDEX = 120
 ENGINE_ASYNC_MEMORY_JOBS: dict[str, dict] = {}
 ENGINE_ASYNC_MEMORY_INDEX: dict[str, list[str]] = {}
 ENGINE_ASYNC_ACTIVE_STATUSES = {"submitted", "queued", "processing", "downloading"}
+MUSIC_VAULT_PREFIX = "music_vault:"
+MUSIC_VAULT_INDEX_KEY = "music_vault:index"
+MUSIC_VAULT_MEMORY: dict[str, dict] = {}
+MUSIC_VAULT_MEMORY_INDEX: list[str] = []
+MUSIC_VAULT_STATUSES = {"generated_unused", "preview_sent", "reserved", "used", "archived", "expired", "blocked"}
 ENGINE_ASYNC_PUBLIC_CHECKING_VI = "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
 ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS = max(30, env_int("ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS", 60))
 ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS = max(60, env_int("ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS", 5 * 60))
@@ -4614,6 +4630,281 @@ def list_engine_async_jobs(feature: str = "", user_id="", limit: int = 5, active
         if len(jobs) >= max(1, int(limit or 5)):
             break
     return jobs
+
+def music_vault_entry_key(vault_id: str) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(vault_id or ""))[:80]
+    return MUSIC_VAULT_PREFIX + safe_id
+
+def music_vault_id_for_output(output_sha256: str = "", internal_job_id: str = "", provider: str = "", task_id: str = "") -> str:
+    seed = output_sha256 or f"{internal_job_id}:{provider}:{task_id}:{time.time_ns()}"
+    digest = hashlib.sha256(str(seed or "").encode("utf-8")).hexdigest()[:10].upper()
+    return f"MV-{digest}"
+
+def music_audio_sha256(audio_bytes: bytes | bytearray | None = None) -> str:
+    data = bytes(audio_bytes or b"")
+    return hashlib.sha256(data).hexdigest() if data else ""
+
+def music_vault_category_for_result(result: dict | None = None) -> str:
+    result = dict(result or {})
+    kind = str(result.get("product_kind") or music_result_product_kind(result)).strip().lower()
+    if kind in {"song_half", "song_full", "song_seconds"} or str(result.get("music_ai_kind") or "").lower() in {"lyrics", "song"}:
+        return "vocal_ai"
+    return "instrumental_ai"
+
+def music_vault_status(value: str = "") -> str:
+    status = str(value or "generated_unused").strip().lower()
+    return status if status in MUSIC_VAULT_STATUSES else "generated_unused"
+
+def music_vault_safe_prompt(result: dict | None = None) -> str:
+    result = dict(result or {})
+    prompt = str(result.get("selected_prompt") or result.get("description") or "").strip()
+    return sanitize_provider_status_text(prompt, "", 900)
+
+def music_vault_store_audio_bytes(vault_id: str, audio_bytes: bytes | bytearray | None = None) -> str:
+    data = bytes(audio_bytes or b"")
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(vault_id or ""))[:80]
+    if not data or not safe_id:
+        return ""
+    try:
+        root = os.path.abspath(os.path.join(OPERATOR_UPLOAD_DIR or "operator_uploads", "music_vault"))
+        os.makedirs(root, exist_ok=True)
+        path = os.path.join(root, f"{safe_id}.mp3")
+        if not os.path.exists(path) or os.path.getsize(path) <= 0:
+            with open(path, "wb") as handle:
+                handle.write(data)
+        return path if os.path.exists(path) and os.path.getsize(path) > 0 else ""
+    except Exception as exc:
+        logger.warning("music vault file store failed | %s", sanitize_log_text(str(exc))[:180])
+        return ""
+
+def music_prompt_selection_summary(result: dict | None = None) -> str:
+    result = dict(result or {})
+    parts = []
+    if result.get("song_product") or str(result.get("music_ai_kind") or "").lower() in {"lyrics", "song"}:
+        parts.append("product=Bài hát có lời AI")
+        parts.append(f"mode={music_result_product_kind(result)}")
+        for key, label in [
+            ("song_topic", "topic"),
+            ("song_genre", "genre"),
+            ("song_mood", "mood"),
+            ("song_vocal", "vocal"),
+        ]:
+            value = str(result.get(key) or "").strip()
+            if value:
+                parts.append(f"{label}={value[:120]}")
+    else:
+        parts.append("product=Nhạc nền AI")
+        for key, label in [
+            ("guided_purpose", "purpose"),
+            ("guided_style", "style"),
+            ("guided_mood", "mood"),
+            ("guided_duration", "duration"),
+        ]:
+            value = str(result.get(key) or "").strip()
+            if value:
+                parts.append(f"{label}={value[:120]}")
+    parts.append(f"preview={music_preview_seconds()}s_from_{music_preview_start_seconds()}s")
+    return sanitize_provider_status_text("; ".join(parts), "", 700)
+
+def music_provider_prompt_for_result(result: dict | None = None, preview: bool = False) -> str:
+    result = dict(result or {})
+    prompt = str(result.get("selected_prompt") or result.get("description") or "").strip()[:1200]
+    full_duration = music_result_duration_seconds(result)
+    product_kind = music_result_product_kind(result)
+    selection = music_prompt_selection_summary(result)
+    prompt = (
+        f"{prompt}. Telegram selections: {selection}. "
+        f"Target output duration: {full_duration} seconds."
+    )
+    if preview:
+        prompt += (
+            f" Create the full requested track; TOAN AAS will clip only the first {music_preview_seconds()} seconds "
+            "locally for preview and keep the full file in the vault until confirmation."
+        )
+    if product_kind == "song_half" and music_short_mode_verified():
+        prompt += " Create a verified short song/clip with complete original lyrics, clear hook/chorus, and no sentence cut off."
+    elif product_kind == "song_full":
+        prompt += " Create a complete original song with intro, verse, chorus, bridge and outro structure."
+    else:
+        prompt += " Create original instrumental background music, no famous melody, no artist imitation."
+    return prompt
+
+def _music_vault_index() -> list[str]:
+    raw = get_system_setting(MUSIC_VAULT_INDEX_KEY, "")
+    ids = []
+    try:
+        loaded = json.loads(raw or "[]")
+        ids = loaded if isinstance(loaded, list) else []
+    except Exception:
+        ids = []
+    if not ids:
+        ids = list(MUSIC_VAULT_MEMORY_INDEX)
+    clean = []
+    seen = set()
+    for item in ids:
+        safe = re.sub(r"[^A-Za-z0-9_.:-]", "", str(item or ""))[:80]
+        if safe and safe not in seen:
+            clean.append(safe)
+            seen.add(safe)
+    return clean
+
+def _music_vault_save_index(vault_id: str, updated_by="") -> None:
+    safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", str(vault_id or ""))[:80]
+    if not safe_id:
+        return
+    ids = [safe_id]
+    for item in _music_vault_index():
+        if item != safe_id:
+            ids.append(item)
+        if len(ids) >= ENGINE_ASYNC_JOB_MAX_INDEX:
+            break
+    try:
+        set_system_setting(MUSIC_VAULT_INDEX_KEY, json.dumps(ids, separators=(",", ":")), "music vault index", updated_by)
+    except Exception:
+        pass
+    MUSIC_VAULT_MEMORY_INDEX[:] = ids
+
+def save_music_vault_entry(entry: dict, updated_by="") -> dict:
+    current = dict(entry or {})
+    output_sha = str(current.get("output_sha256") or "").strip()
+    vault_id = str(current.get("vault_id") or music_vault_id_for_output(
+        output_sha,
+        current.get("internal_job_id") or "",
+        current.get("provider") or "",
+        current.get("provider_task_id") or "",
+    )).strip()
+    now = now_text()
+    current.update({
+        "vault_id": vault_id,
+        "status": music_vault_status(current.get("status")),
+        "category": "vocal_ai" if str(current.get("category") or "") == "vocal_ai" else "instrumental_ai",
+        "output_sha256": output_sha,
+        "output_bytes": int(current.get("output_bytes") or 0),
+        "updated_at": now,
+    })
+    current.setdefault("created_at", now)
+    current.setdefault("reserved_at", "")
+    current.setdefault("used_at", "")
+    current.setdefault("archived_at", "")
+    current.setdefault("reuse_policy", "reusable_internal_stock")
+    current.setdefault("prompt_summary", "")
+    current.setdefault("last_send_error", "")
+    try:
+        set_system_setting(
+            music_vault_entry_key(vault_id),
+            json.dumps(current, ensure_ascii=False, separators=(",", ":")),
+            f"music vault status={current.get('status')}",
+            updated_by,
+        )
+        _music_vault_save_index(vault_id, updated_by)
+    except Exception:
+        MUSIC_VAULT_MEMORY[vault_id] = dict(current)
+        _music_vault_save_index(vault_id, updated_by)
+    return current
+
+def get_music_vault_entry(vault_id: str) -> dict:
+    raw = get_system_setting(music_vault_entry_key(vault_id), "")
+    if not raw:
+        return dict(MUSIC_VAULT_MEMORY.get(str(vault_id or "").strip()) or {})
+    try:
+        loaded = json.loads(raw or "{}")
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+def list_music_vault_entries(statuses: set[str] | list[str] | tuple[str, ...] | None = None, limit: int = 10) -> list[dict]:
+    wanted = {music_vault_status(item) for item in (statuses or []) if str(item or "").strip()}
+    entries = []
+    for vault_id in _music_vault_index():
+        entry = get_music_vault_entry(vault_id)
+        if not entry:
+            continue
+        if wanted and str(entry.get("status") or "") not in wanted:
+            continue
+        entries.append(entry)
+        if len(entries) >= max(1, int(limit or 10)):
+            break
+    return entries
+
+def upsert_music_vault_from_output(
+    *,
+    audio_bytes: bytes | bytearray,
+    result: dict | None = None,
+    job: dict | None = None,
+    status: str = "generated_unused",
+    updated_by="",
+) -> dict:
+    data = bytes(audio_bytes or b"")
+    if not data:
+        return {}
+    result = dict(result or {})
+    job = dict(job or {})
+    output_sha = music_audio_sha256(data)
+    existing_id = str(job.get("vault_id") or result.get("music_vault_id") or "").strip()
+    current = get_music_vault_entry(existing_id) if existing_id else {}
+    vault_id = existing_id or current.get("vault_id") or music_vault_id_for_output(output_sha, job.get("internal_job_id") or "", job.get("provider") or "", job.get("provider_task_id") or "")
+    storage_ref = str(current.get("storage_ref") or job.get("output_path") or "")[:600]
+    if not storage_ref:
+        storage_ref = music_vault_store_audio_bytes(vault_id, data)
+    entry = {
+        **current,
+        "vault_id": vault_id,
+        "category": music_vault_category_for_result(result or job),
+        "status": status,
+        "user_id": str(job.get("user_id") or result.get("user_id") or ""),
+        "chat_id": str(job.get("chat_id") or result.get("chat_id") or ""),
+        "internal_job_id": str(job.get("internal_job_id") or result.get("music_internal_job_id") or ""),
+        "provider": str(job.get("provider") or result.get("music_provider") or ""),
+        "provider_task_id_present": bool(job.get("provider_task_id") or result.get("music_task_id")),
+        "product_kind": music_result_product_kind(result or job),
+        "duration_seconds": music_result_duration_seconds(result or job),
+        "preview_seconds": music_preview_seconds(),
+        "preview_start_seconds": music_preview_start_seconds(),
+        "output_bytes": len(data),
+        "output_sha256": output_sha,
+        "storage_ref": storage_ref,
+        "prompt_summary": music_prompt_selection_summary(result or job),
+        "safe_prompt": music_vault_safe_prompt(result or job),
+        "reuse_policy": "reusable_internal_stock",
+    }
+    if status == "preview_sent":
+        entry["sent_preview_at"] = now_text()
+    return save_music_vault_entry(entry, updated_by=updated_by)
+
+def mark_music_vault_status(vault_id: str, status: str, updated_by="") -> dict:
+    entry = get_music_vault_entry(vault_id)
+    if not entry:
+        return {}
+    next_status = music_vault_status(status)
+    entry["status"] = next_status
+    if next_status == "used":
+        entry["used_at"] = now_text()
+    elif next_status == "archived":
+        entry["archived_at"] = now_text()
+    elif next_status == "reserved":
+        entry["reserved_at"] = now_text()
+    return save_music_vault_entry(entry, updated_by=updated_by)
+
+def latest_completed_music_suno_job_with_output() -> dict:
+    for job in list_engine_async_jobs("music_suno", limit=20):
+        if str(job.get("status") or "").lower() == "completed" and int(job.get("output_bytes") or 0) > 0:
+            return job
+    return {}
+
+def music_vault_status_lines(statuses: set[str] | None = None, limit: int = 8) -> list[str]:
+    entries = list_music_vault_entries(statuses, limit=limit)
+    if not entries:
+        return ["Chưa có bản nhạc trong kho theo trạng thái này."]
+    lines = []
+    for entry in entries:
+        lines.append(
+            f"• <code>{html.escape(str(entry.get('vault_id') or '-'))}</code> "
+            f"{html.escape(str(entry.get('status') or '-'))} "
+            f"{html.escape(str(entry.get('category') or '-'))} "
+            f"bytes=<code>{int(entry.get('output_bytes') or 0)}</code> "
+            f"updated=<code>{html.escape(str(entry.get('updated_at') or '-'))}</code>"
+        )
+    return lines
 
 def engine_async_waiting_text(job: dict, *, admin: bool = False) -> str:
     internal_id = str((job or {}).get("internal_job_id") or "-")
@@ -62065,7 +62356,7 @@ def music_engine_status_lines() -> list[str]:
     submit_pass = provider_status_is_pass(submit_status)
     latest_jobs = list_engine_async_jobs("music_suno", limit=1)
     latest_job = dict(latest_jobs[0]) if latest_jobs else {}
-    full_result_ok = bool(readiness.get("full_result_ok") and provider_status_is_pass(download_status) and tool_test_result_audio_bytes_positive(download_smoke))
+    full_result_ok = bool(readiness.get("full_result_ok"))
     public_ready = bool(music_ai_public_processing_ready(readiness) and submit_pass and full_result_ok)
     partial_lifecycle_possible = bool(readiness.get("ready") and readiness.get("fetch_ready"))
     admin_smoke_needed = bool(readiness.get("ready") and not public_ready)
@@ -62085,8 +62376,9 @@ def music_engine_status_lines() -> list[str]:
         f"Download smoke: <code>{_engine_safe(download_status)}</code>",
         f"Latest Suno job: <code>{_engine_safe(core_4_latest_job_summary('music_suno', 'music_song'))}</code>",
         f"Latest poll: <code>{_engine_safe(latest_job.get('last_poll_at') or '-')}</code>",
+        f"Latest completed output job: <code>{_engine_safe(readiness.get('latest_completed_job_id') or '-')}</code>",
         f"Timeout policy: <code>soft={ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS // 60}m; hard={ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS // 60}m; poll={ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS}s</code>",
-        f"Latest download bytes: <code>{int(latest_job.get('output_bytes') or 0)}</code>",
+        f"Latest download bytes: <code>{int(readiness.get('latest_completed_output_bytes') or latest_job.get('output_bytes') or 0)}</code>",
         f"Fallback provider: <code>{_engine_safe(suno_fallback_status_text(str(latest_job.get('provider') or 'key4u_suno')))}</code>",
         f"submit_ready: <code>{_engine_yes_no(readiness.get('submit_ready'))}</code>",
         f"fetch_ready: <code>{_engine_yes_no(readiness.get('fetch_ready'))}</code>",
@@ -62509,8 +62801,13 @@ def get_suno_music_readiness() -> dict:
     fetch_status = str(fetch_smoke.get("status") or "").upper()
     submit_ready = provider_status_is_pass(str(submit_smoke.get("status") or ""))
     fetch_ready = bool((KEY4U_SUNO_QUERY_ENDPOINT if key4u_configured else SHOPAIKEY_MUSIC_STATUS_ENDPOINT) and fetch_status not in {"", "NOT_TESTED", "MISSING", "NEED_DOCS"})
-    download_ready = bool(provider_status_is_pass(str(download_smoke.get("status") or "")) and tool_test_result_audio_bytes_positive(download_smoke))
-    full_result_ok = bool(fetch_status == "PASS_FULL_RESULT" and download_ready)
+    latest_completed_job = latest_completed_music_suno_job_with_output()
+    latest_completed_ready = bool(latest_completed_job)
+    download_ready = bool(
+        (provider_status_is_pass(str(download_smoke.get("status") or "")) and tool_test_result_audio_bytes_positive(download_smoke))
+        or latest_completed_ready
+    )
+    full_result_ok = bool((fetch_status == "PASS_FULL_RESULT" and download_ready) or latest_completed_ready)
     smoke_ok = bool(provider_status_is_pass(str(submit_smoke.get("status") or "")) and full_result_ok)
     preferred_provider = "key4u_suno" if key4u_configured else ("shopaikey_music" if shopaikey_configured else "none")
     preferred_model = KEY4U_SUNO_MODEL if key4u_configured else (SHOPAIKEY_MUSIC_MODEL or "auto")
@@ -62566,6 +62863,8 @@ def get_suno_music_readiness() -> dict:
         "full_result_ready": full_result_ok,
         "full_result_smoke": fetch_status,
         "full_result_ok": full_result_ok,
+        "latest_completed_job_id": str(latest_completed_job.get("internal_job_id") or ""),
+        "latest_completed_output_bytes": int(latest_completed_job.get("output_bytes") or 0),
         "processing_gate_allowed": False,
         "processing_gate_requested": bool(SUNO_ALLOW_PROCESSING_GATE),
         "cost_gate_ok": music_pricing_configured(),
@@ -67227,10 +67526,10 @@ async def cmd_music_suno_admin_test(update: Update, context: ContextTypes.DEFAUL
     prompt = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip() or "Bài hát ngắn vui tươi về TOAN AAS, phong cách pop quảng cáo."
     result_payload = {
         "selected_prompt": prompt,
-        "song_product": "half",
-        "song_length_mode": "half",
+        "song_product": "full",
+        "song_length_mode": "full",
         "music_ai_kind": "lyrics",
-        "duration_seconds": 90,
+        "duration_seconds": 120,
     }
     engine_result = await execute_engine(
         "music_song",
@@ -67352,18 +67651,223 @@ async def cmd_music_suno_poll(update: Update, context: ContextTypes.DEFAULT_TYPE
     polled = await poll_music_suno_async_job(job_id, updated_by=update.effective_user.id, download=True)
     job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
     if polled.get("ok") and polled.get("audio_bytes"):
+        if music_job_full_already_sent(job, polled.get("audio_bytes")):
+            return await update.message.reply_text(
+                "✅ Đã gửi bản nhạc phía trên.\n\n" + engine_async_status_text(job, admin=True),
+                parse_mode="HTML",
+                reply_markup=engine_async_status_keyboard(job_id, "music"),
+            )
         audio = video_dubbing_output_file(bytes(polled.get("audio_bytes") or b""), "toan_aas_suno_poll.mp3")
-        await context.bot.send_audio(
+        sent_message = await context.bot.send_audio(
             chat_id=update.effective_chat.id,
             audio=audio,
             filename="toan_aas_suno_poll.mp3",
             caption=f"✅ Suno job {job_id} trả audio bytes > 0. Không trừ Xu khách.",
         )
+        job = record_music_job_full_send(job, sent_message, bytes(polled.get("audio_bytes") or b""), result=job, updated_by=update.effective_user.id)
     return await update.message.reply_text(
         engine_async_status_text(job, admin=True),
         parse_mode="HTML",
         reply_markup=engine_async_status_keyboard(job_id, "music"),
     )
+
+async def cmd_music_prompt_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    job_id = _admin_music_suno_job_arg(context)
+    if not job_id:
+        return await update.message.reply_text("Cú pháp: /music_prompt_debug <MUS-job-id>")
+    job = get_engine_async_job(job_id)
+    if not job:
+        return await update.message.reply_text("Không tìm thấy MUS-id nội bộ.")
+    lines = [
+        "🎼 <b>MUSIC PROMPT DEBUG</b>",
+        "",
+        f"• Job: <code>{html.escape(str(job.get('internal_job_id') or job_id))}</code>",
+        f"• Product: <code>{html.escape(str(job.get('product_kind') or '-'))}</code>",
+        f"• Category: <code>{html.escape(str(job.get('category') or '-'))}</code>",
+        f"• Duration: <code>{int(job.get('duration_seconds') or 0)}s</code>",
+        f"• Preview: <code>{int(job.get('preview_seconds') or music_preview_seconds())}s from {int(job.get('preview_start_seconds') or 0)}s</code>",
+        f"• Telegram selections: <code>{html.escape(str(job.get('prompt_summary') or '-'))}</code>",
+        f"• Safe prompt: <code>{html.escape(str(job.get('safe_prompt') or '-'))}</code>",
+        f"• Provider prompt hash: <code>{html.escape(str(job.get('provider_prompt_sha256') or '-'))}</code>",
+        "• Provider secret/task id: <code>hidden</code>",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_music_vault_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    entries = list_music_vault_entries(limit=40)
+    counts = {status: 0 for status in sorted(MUSIC_VAULT_STATUSES)}
+    for entry in entries:
+        status = music_vault_status(entry.get("status"))
+        counts[status] = counts.get(status, 0) + 1
+    lines = ["🗂 <b>MUSIC VAULT STATUS</b>", "", "No provider call. Metadata/file refs only.", ""]
+    lines.extend([f"• {status}: <code>{count}</code>" for status, count in counts.items()])
+    lines.extend(["", "Commands: /music_vault_unused, /music_vault_used, /music_vault_detail &lt;vault_id&gt;"])
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_music_vault_unused(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    lines = ["🗂 <b>MUSIC VAULT UNUSED</b>", "", *music_vault_status_lines({"generated_unused", "preview_sent", "reserved"}, limit=12)]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_music_vault_used(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    lines = ["🗂 <b>MUSIC VAULT USED</b>", "", *music_vault_status_lines({"used"}, limit=12)]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+def _music_vault_arg(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return str((getattr(context, "args", []) or [""])[0] or "").strip()
+
+async def cmd_music_vault_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    vault_id = _music_vault_arg(context)
+    if not vault_id:
+        return await update.message.reply_text("Cú pháp: /music_vault_detail <vault_id>")
+    entry = get_music_vault_entry(vault_id)
+    if not entry:
+        return await update.message.reply_text("Không tìm thấy vault_id.")
+    lines = [
+        "🗂 <b>MUSIC VAULT DETAIL</b>",
+        "",
+        f"• Vault: <code>{html.escape(str(entry.get('vault_id') or vault_id))}</code>",
+        f"• Status: <code>{html.escape(str(entry.get('status') or '-'))}</code>",
+        f"• Category: <code>{html.escape(str(entry.get('category') or '-'))}</code>",
+        f"• Product: <code>{html.escape(str(entry.get('product_kind') or '-'))}</code>",
+        f"• Duration: <code>{int(entry.get('duration_seconds') or 0)}s</code>",
+        f"• Preview rule: <code>{int(entry.get('preview_seconds') or music_preview_seconds())}s from {int(entry.get('preview_start_seconds') or 0)}s</code>",
+        f"• Bytes: <code>{int(entry.get('output_bytes') or 0)}</code>",
+        f"• Storage ref: <code>{'present' if str(entry.get('storage_ref') or '').strip() else 'missing'}</code>",
+        f"• Prompt summary: <code>{html.escape(str(entry.get('prompt_summary') or '-'))}</code>",
+        f"• Created: <code>{html.escape(str(entry.get('created_at') or '-'))}</code>",
+        f"• Updated: <code>{html.escape(str(entry.get('updated_at') or '-'))}</code>",
+        "• Provider task id: <code>hidden</code>",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def _cmd_music_vault_mark(update: Update, context: ContextTypes.DEFAULT_TYPE, status: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    vault_id = _music_vault_arg(context)
+    if not vault_id:
+        return await update.message.reply_text(f"Cú pháp: /music_vault_mark_{status} <vault_id>" if status != "archived" else "Cú pháp: /music_vault_archive <vault_id>")
+    entry = mark_music_vault_status(vault_id, status, updated_by=update.effective_user.id)
+    if not entry:
+        return await update.message.reply_text("Không tìm thấy vault_id.")
+    return await update.message.reply_text(
+        f"✅ Vault <code>{html.escape(str(entry.get('vault_id') or vault_id))}</code> -> <code>{html.escape(str(entry.get('status') or status))}</code>.",
+        parse_mode="HTML",
+    )
+
+async def cmd_music_vault_mark_used(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_music_vault_mark(update, context, "used")
+
+async def cmd_music_vault_mark_unused(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_music_vault_mark(update, context, "generated_unused")
+
+async def cmd_music_vault_archive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _cmd_music_vault_mark(update, context, "archived")
+
+def vip_music_vault_allowed(user_id) -> bool:
+    if is_admin_user(user_id):
+        return True
+    try:
+        tier = normalize_member_tier((get_member_profile(user_id) or {}).get("tier") or "newbie") or "newbie"
+        return member_tier_rank(tier) >= member_tier_rank("gold")
+    except Exception:
+        return False
+
+def _vip_music_quota_key(user_id, period: str) -> str:
+    now = datetime.now()
+    suffix = now.strftime("%Y-%m-%d") if period == "day" else now.strftime("%Y-%m")
+    return f"vip_music_vault_quota:{user_id}:{period}:{suffix}"
+
+def vip_music_quota_counts(user_id) -> dict:
+    return {
+        "day": _safe_int(get_system_setting(_vip_music_quota_key(user_id, "day"), "0"), 0),
+        "month": _safe_int(get_system_setting(_vip_music_quota_key(user_id, "month"), "0"), 0),
+        "daily_limit": int(VIP_MUSIC_VAULT_DAILY_LIMIT or 1),
+        "monthly_limit": int(VIP_MUSIC_VAULT_MONTHLY_LIMIT or 10),
+    }
+
+def vip_music_quota_available(user_id) -> tuple[bool, dict]:
+    quota = vip_music_quota_counts(user_id)
+    ok = bool(quota["day"] < quota["daily_limit"] and quota["month"] < quota["monthly_limit"])
+    return ok, quota
+
+def vip_music_record_claim(user_id, vault_id: str) -> None:
+    quota = vip_music_quota_counts(user_id)
+    set_system_setting(_vip_music_quota_key(user_id, "day"), str(quota["day"] + 1), f"vip music claim {vault_id}", user_id)
+    set_system_setting(_vip_music_quota_key(user_id, "month"), str(quota["month"] + 1), f"vip music claim {vault_id}", user_id)
+
+async def cmd_vip_music_quota(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not vip_music_vault_allowed(uid):
+        return await update.message.reply_text("⛔ Kho nhạc VIP dành cho Gold+ hoặc admin. Không gọi provider và không trừ Xu.")
+    quota = vip_music_quota_counts(uid)
+    return await update.message.reply_text(
+        "🎖 <b>VIP MUSIC QUOTA</b>\n\n"
+        f"• Hôm nay: <code>{quota['day']}/{quota['daily_limit']}</code>\n"
+        f"• Tháng này: <code>{quota['month']}/{quota['monthly_limit']}</code>\n"
+        "• Nguồn: kho nhạc generated_unused nội bộ, không gọi provider.",
+        parse_mode="HTML",
+    )
+
+async def cmd_vip_music_vault(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not vip_music_vault_allowed(uid):
+        return await update.message.reply_text("⛔ Kho nhạc VIP dành cho Gold+ hoặc admin. Không gọi provider và không trừ Xu.")
+    entries = [
+        entry for entry in list_music_vault_entries({"generated_unused"}, limit=12)
+        if str(entry.get("reuse_policy") or "") == "reusable_internal_stock"
+    ]
+    lines = ["🎖 <b>VIP MUSIC VAULT</b>", "", "Nguồn: bản nhạc đã tạo sẵn trong kho. Không gọi provider, không trừ Xu.", ""]
+    if entries:
+        lines.extend([
+            f"• <code>{html.escape(str(entry.get('vault_id') or '-'))}</code> {html.escape(str(entry.get('category') or '-'))} bytes=<code>{int(entry.get('output_bytes') or 0)}</code>"
+            for entry in entries
+        ])
+        lines.append("")
+        lines.append("Nhận: <code>/vip_music_claim &lt;vault_id&gt;</code>")
+    else:
+        lines.append("Chưa có bản generated_unused có thể tái dùng.")
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_vip_music_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not vip_music_vault_allowed(uid):
+        return await update.message.reply_text("⛔ Kho nhạc VIP dành cho Gold+ hoặc admin. Không gọi provider và không trừ Xu.")
+    ok, quota = vip_music_quota_available(uid)
+    if not ok:
+        return await update.message.reply_text(
+            f"⚠️ Hết quota kho nhạc VIP. Hôm nay {quota['day']}/{quota['daily_limit']}, tháng {quota['month']}/{quota['monthly_limit']}."
+        )
+    vault_id = _music_vault_arg(context)
+    if not vault_id:
+        return await update.message.reply_text("Cú pháp: /vip_music_claim <vault_id>")
+    entry = get_music_vault_entry(vault_id)
+    if not entry or str(entry.get("status") or "") != "generated_unused" or str(entry.get("reuse_policy") or "") != "reusable_internal_stock":
+        return await update.message.reply_text("⚠️ Vault này không khả dụng cho VIP claim. Không gọi provider và không trừ Xu.")
+    storage_ref = str(entry.get("storage_ref") or "").strip()
+    if not storage_ref or not os.path.exists(storage_ref) or os.path.getsize(storage_ref) <= 0:
+        return await update.message.reply_text("⚠️ Vault có metadata nhưng thiếu file full nội bộ. Không fake delivery, không gọi provider.")
+    vip_music_record_claim(uid, vault_id)
+    mark_music_vault_status(vault_id, "used", updated_by=uid)
+    with open(storage_ref, "rb") as handle:
+        audio = io.BytesIO(handle.read())
+    audio.name = f"{vault_id}.mp3"
+    await context.bot.send_audio(
+        chat_id=update.effective_chat.id,
+        audio=audio,
+        filename=f"{vault_id}.mp3",
+        caption="🎖 Nhạc VIP từ kho nội bộ. Không gọi provider, không trừ Xu.",
+    )
+    return await update.message.reply_text("✅ Đã gửi nhạc VIP từ kho nội bộ.")
 
 async def cmd_music_suno_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -67441,13 +67945,16 @@ async def cmd_key4u_suno_download_probe(update: Update, context: ContextTypes.DE
     polled = await poll_music_suno_async_job(job_id, updated_by=update.effective_user.id, download=True)
     job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
     if polled.get("ok") and polled.get("audio_bytes"):
+        if music_job_full_already_sent(job, polled.get("audio_bytes")):
+            return await update.message.reply_text("✅ Đã gửi bản nhạc phía trên.\n\n" + engine_async_status_text(job, admin=True), parse_mode="HTML")
         audio = video_dubbing_output_file(bytes(polled.get("audio_bytes") or b""), "toan_aas_suno_download_probe.mp3")
-        await context.bot.send_audio(
+        sent_message = await context.bot.send_audio(
             chat_id=update.effective_chat.id,
             audio=audio,
             filename="toan_aas_suno_download_probe.mp3",
             caption=f"✅ Download probe PASS: bytes={len(polled.get('audio_bytes') or b'')}.",
         )
+        job = record_music_job_full_send(job, sent_message, bytes(polled.get("audio_bytes") or b""), result=job, updated_by=update.effective_user.id)
     return await update.message.reply_text(engine_async_status_text(job, admin=True), parse_mode="HTML")
 
 async def handle_engine_async_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67470,13 +67977,21 @@ async def handle_engine_async_job_callback(update: Update, context: ContextTypes
         polled = await poll_music_suno_async_job(job_id, updated_by=uid, download=True)
         job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
         if polled.get("ok") and polled.get("audio_bytes") and query.message:
+            if music_job_full_already_sent(job, polled.get("audio_bytes")):
+                return await safe_edit_or_send(
+                    query,
+                    "✅ Đã gửi bản nhạc phía trên.\n\n" + engine_async_status_text(job, admin=bool(is_admin_user(uid))),
+                    reply_markup=engine_async_status_keyboard(job_id, "music"),
+                    parse_mode="HTML",
+                )
             audio = video_dubbing_output_file(bytes(polled.get("audio_bytes") or b""), "toan_aas_suno_status.mp3")
-            await context.bot.send_audio(
+            sent_message = await context.bot.send_audio(
                 chat_id=query.message.chat_id,
                 audio=audio,
                 filename="toan_aas_suno_status.mp3",
                 caption=f"✅ Suno job {html.escape(job_id)} trả audio bytes > 0.",
             )
+            job = record_music_job_full_send(job, sent_message, bytes(polled.get("audio_bytes") or b""), result=job, updated_by=uid)
         return await safe_edit_or_send(
             query,
             engine_async_status_text(job, admin=bool(is_admin_user(uid))),
@@ -74117,12 +74632,40 @@ def normalize_music_duration_seconds(value, default: int = 30) -> int:
         return max(MUSIC_AI_SHORT_DURATION_SECONDS, min(600, int(default or MUSIC_AI_SHORT_DURATION_SECONDS)))
     return max(MUSIC_AI_SHORT_DURATION_SECONDS, min(600, int(match.group(0))))
 
+def music_short_mode_verified() -> bool:
+    return bool(
+        MUSIC_SHORT_MODE_VERIFIED
+        or str(get_system_setting("music_short_mode_verified", "") or "").strip().lower() in {"1", "true", "yes", "on", "verified"}
+    )
+
+def music_preview_seconds() -> int:
+    return int(MUSIC_PREVIEW_SECONDS or 12)
+
+def music_preview_start_seconds() -> int:
+    return int(MUSIC_PREVIEW_START_SECONDS or 0)
+
+def voice_preview_seconds() -> int:
+    return int(VOICE_PREVIEW_SECONDS or 6)
+
+def video_preview_seconds() -> int:
+    return int(VIDEO_PREVIEW_SECONDS or 6)
+
+def music_product_quote_price_xu(product_kind: str = "background") -> int:
+    kind = str(product_kind or "background").strip().lower()
+    if kind in {"song", "song_full", "lyrics", "vocal_ai"}:
+        return int(MUSIC_VOCAL_FULL_PRICE_XU or 500)
+    if kind in {"background", "music_background", "instrumental_ai"}:
+        return int(MUSIC_BACKGROUND_FULL_PRICE_XU or 250)
+    if kind == "song_half" and music_short_mode_verified():
+        return int(HALF_SONG_PRICE_XU or 0)
+    return int(MUSIC_BACKGROUND_FULL_PRICE_XU or 250)
+
 def music_ai_output_price_xu(duration_seconds, product_kind: str = "background") -> int:
     kind = str(product_kind or "background").strip().lower()
     if kind == "song_half":
-        return int(HALF_SONG_PRICE_XU or 0)
+        return int(HALF_SONG_PRICE_XU or 0) if music_short_mode_verified() else int(MUSIC_VOCAL_FULL_PRICE_XU or 500)
     if kind == "song_full":
-        return round_video_xu(float(HALF_SONG_PRICE_XU or 0) * float(FULL_SONG_MULTIPLIER or 1.8), MUSIC_AI_PRICE_ROUND_TO_XU)
+        return int(MUSIC_VOCAL_FULL_PRICE_XU or 500)
     duration = normalize_music_duration_seconds(duration_seconds, 30)
     if kind == "song_seconds":
         if duration <= MUSIC_AI_SHORT_DURATION_SECONDS:
@@ -74136,8 +74679,10 @@ def music_ai_output_price_xu(duration_seconds, product_kind: str = "background")
             float(LYRIC_SONG_60S_PRICE_XU or 0) + extra_blocks * float(LYRIC_SONG_EXTRA_30S_PRICE_XU or 0),
             MUSIC_AI_PRICE_ROUND_TO_XU,
         )
+    if kind in {"background", "music_background", "instrumental_ai"}:
+        return int(MUSIC_BACKGROUND_FULL_PRICE_XU or 250)
     if duration <= MUSIC_AI_SHORT_DURATION_SECONDS:
-        return int(MUSIC_AI_15S_PRICE_XU or 0)
+        return int(MUSIC_BACKGROUND_FULL_PRICE_XU or MUSIC_AI_15S_PRICE_XU or 0)
     if duration <= 30:
         return int(MUSIC_AI_30S_PRICE_XU or 0)
     extra_blocks = int(math.ceil((duration - 30) / 30.0))
@@ -74152,6 +74697,8 @@ def music_ai_output_price_xu(duration_seconds, product_kind: str = "background")
 def music_song_length_mode(result: dict | None = None) -> str:
     result = dict(result or {})
     mode = str(result.get("song_length_mode") or result.get("song_product") or "").strip().lower()
+    if mode == "half" and not music_short_mode_verified():
+        return "full"
     return mode if mode in {"half", "full"} else ""
 
 def music_result_duration_seconds(result: dict | None = None) -> int:
@@ -74169,7 +74716,7 @@ def music_result_duration_seconds(result: dict | None = None) -> int:
 def music_result_product_kind(result: dict | None = None) -> str:
     result = dict(result or {})
     package_mode = music_song_length_mode(result)
-    if package_mode == "half":
+    if package_mode == "half" and music_short_mode_verified():
         return "song_half"
     if package_mode == "full":
         return "song_full"
@@ -74189,7 +74736,7 @@ def music_song_length_selection_text(result: dict | None = None, lang: str = "vi
         if mode == "half":
             return f"Selected: Half song.\nTOAN AAS will create a short complete song segment and will not cut mid-sentence.\nEstimated price: {price} Xu."
         if mode == "full":
-            return f"Selected: Full song.\nTOAN AAS will create a complete song with clear structure.\nEstimated price: {price} Xu."
+            return f"Selected: Song with AI lyrics.\nTOAN AAS will create a complete song. Preview sends the first {music_preview_seconds()} seconds only; the full file stays in the vault until confirmation.\nEstimated price: {price} Xu."
         return f"Estimated price: {price} Xu."
     if mode == "half":
         return (
@@ -74199,8 +74746,9 @@ def music_song_length_selection_text(result: dict | None = None, lang: str = "vi
         )
     if mode == "full":
         return (
-            "Đã chọn: Full bài.\n"
-            "TOAN AAS sẽ tạo một bài hoàn chỉnh có cấu trúc rõ ràng.\n"
+            "Đã chọn: Bài hát có lời AI.\n"
+            f"TOAN AAS sẽ tạo một bài hoàn chỉnh. Nghe thử chỉ gửi {music_preview_seconds()} giây đầu. "
+            "Bản đầy đủ được lưu trong kho và chỉ giao khi xác nhận.\n"
             f"Giá dự kiến: {price} Xu."
         )
     return f"Giá dự kiến: {price} Xu."
@@ -74208,27 +74756,32 @@ def music_song_length_selection_text(result: dict | None = None, lang: str = "vi
 def music_song_product_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
         return (
-            "🎤 <b>Create a song with lyrics</b>\n\n"
-            "TOAN AAS will ask for the topic, genre, mood, vocal direction and product length. "
-            "A half song still requires coherent lyrics and complete sentences; a full song completes the whole structure."
+            "🎤 <b>AI song with lyrics</b>\n\n"
+            f"TOAN AAS will create a complete song. Preview sends the first {music_preview_seconds()} seconds only. "
+            "The full file is stored in the music vault and delivered only after final confirmation."
         )
+    if music_short_mode_verified():
+        short_line = f"• Nửa bài thật đã xác minh: <b>{music_ai_output_price_xu(60, 'song_half')} Xu</b>\n"
+    else:
+        short_line = "• Nửa bài: <b>đang khóa</b> cho tới khi provider có short/clip mode thật.\n"
     return (
-        "🎤 <b>Tạo bài hát có lời</b>\n\n"
-        "TOAN AAS sẽ hỏi chủ đề, thể loại, cảm xúc, giọng hát và độ dài sản phẩm.\n\n"
-        f"• Nửa bài đủ lời: <b>{music_ai_output_price_xu(60, 'song_half')} Xu</b>\n"
-        f"• Hoàn chỉnh một bài: <b>{music_ai_output_price_xu(120, 'song_full')} Xu</b>\n\n"
-        "Nửa bài vẫn phải đủ câu, có mở/verse/điệp khúc rõ ràng và không cắt giữa câu. Full bài là bản hoàn chỉnh nối tiếp cấu trúc đó."
+        "🎤 <b>Bài hát có lời AI</b>\n\n"
+        f"TOAN AAS sẽ tạo một bài hoàn chỉnh. Nghe thử chỉ gửi {music_preview_seconds()} giây đầu. "
+        "Bản đầy đủ được lưu trong kho và chỉ giao khi xác nhận.\n\n"
+        f"• Bài hát có lời AI: <b>{music_ai_output_price_xu(120, 'song_full')} Xu</b>\n"
+        f"{short_line}\n"
+        "Không bán nửa bài nếu provider chưa có mode short/clip thật."
     )
 
 def music_song_product_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
+    buttons = [("🎤 Bài hát có lời AI" if is_vi else "🎤 AI song with lyrics", cb("song_start_full"))]
+    if music_short_mode_verified():
+        buttons.append(("1️⃣ Nửa bài thật" if is_vi else "1️⃣ Verified short song", cb("song_start_half")))
     return build_2col_keyboard(
-        [
-            ("1️⃣ Nửa bài" if is_vi else "1️⃣ Half song", cb("song_start_half")),
-            ("2️⃣ Full bài" if is_vi else "2️⃣ Full song", cb("song_start_full")),
-        ],
+        buttons,
         nav_back=("⬅️ Nhạc" if is_vi else "⬅️ Music", cb("music_hub")),
         nav_main=True,
         lang=lang,
@@ -74321,8 +74874,8 @@ def music_song_step_text(step: str, result: dict | None = None, lang: str = "vi"
     package_mode = music_song_length_mode(result)
     product = {
         "seconds": f"Có lời theo {music_result_duration_seconds(result)} giây",
-        "half": "Nửa bài đủ lời",
-        "full": "Hoàn chỉnh một bài",
+        "half": "Nửa bài thật đã xác minh" if music_short_mode_verified() else "Bài hát có lời AI",
+        "full": "Bài hát có lời AI",
     }.get(package_mode or str(result.get("song_product") or ""), "Bài hát có lời")
     return f"{titles.get(step, '🎤 <b>Tạo bài hát có lời</b>')}\n\nSản phẩm: <b>{product}</b>\n\n{labels.get(step, 'Chọn một lựa chọn bên dưới.')}"
 
@@ -74400,20 +74953,20 @@ def music_guided_description_from_result(result: dict, lang: str = "vi") -> str:
     mood = music_guided_label(MUSIC_GUIDED_MOODS, str(result.get("guided_mood") or "cheerful"), lang)
     package_mode = music_song_length_mode(result)
     duration = (
-        "nửa bài" if package_mode == "half"
-        else "full bài" if package_mode == "full"
+        "nửa bài thật" if package_mode == "half" and music_short_mode_verified()
+        else "bài hát hoàn chỉnh" if package_mode == "full"
         else music_guided_label(MUSIC_GUIDED_DURATIONS, str(result.get("guided_duration") or "18s"), lang)
     )
     song_requirement = ""
-    if package_mode == "half":
+    if package_mode == "half" and music_short_mode_verified():
         song_requirement = " Half-song product with coherent complete lyrics, full sentences, clear opening/verse/chorus, never cut mid-sentence."
     elif package_mode == "full":
         song_requirement = " Full-song product with complete original lyrics and a finished verse/chorus/bridge structure."
     if music_ui_lang(lang=lang) != "vi":
         return f"Guided AI music: purpose={purpose}; style={style}; mood={mood}; duration={duration}; original safe melody; no famous artist imitation.{song_requirement}"
     song_requirement_vi = ""
-    if package_mode == "half":
-        song_requirement_vi = " Nửa bài phải đủ câu, có mở/verse/điệp khúc rõ ràng và không cắt giữa câu."
+    if package_mode == "half" and music_short_mode_verified():
+        song_requirement_vi = " Nửa bài chỉ được tạo khi provider đã xác minh short/clip mode thật, đủ câu và không cắt giữa câu."
     elif package_mode == "full":
         song_requirement_vi = " Bài hoàn chỉnh phải có lời nguyên bản và cấu trúc verse/điệp khúc/bridge kết thúc trọn vẹn."
     return f"Tạo nhạc theo hướng dẫn: mục đích {purpose}; phong cách {style}; cảm xúc {mood}; thời lượng {duration}; giai điệu nguyên bản, an toàn để dùng cho nội dung TOAN AAS.{song_requirement_vi}"
@@ -74474,7 +75027,7 @@ def suno_user_guard_text(lang: str = "vi", admin_detail: str = "") -> str:
 def music_ai_preview_text(result: dict | None = None, lang: str = "vi") -> str:
     result = dict(result or {})
     duration = music_result_duration_seconds(result)
-    preview_seconds = paid_preview_seconds(duration)
+    preview_seconds = music_preview_seconds()
     price = music_result_price_xu(result)
     prompt = str(result.get("selected_prompt") or result.get("description") or "").strip()
     product = "bài hát có lời" if result.get("song_product") else "nhạc nền"
@@ -74485,7 +75038,7 @@ def music_ai_preview_text(result: dict | None = None, lang: str = "vi") -> str:
                 "▶️ <b>Song preview</b>\n\n"
                 f"{html.escape(music_song_length_selection_text(result, lang))}\n\n"
                 f"Selected direction: <code>{html.escape(prompt[:700])}</code>\n\n"
-                "TOAN AAS does not create or send the complete song before final confirmation."
+                f"Preview sends the first {preview_seconds} seconds only. The full file stays in the vault until confirmation."
             )
         return (
             f"▶️ <b>Short {product} preview</b>\n\n"
@@ -74493,8 +75046,7 @@ def music_ai_preview_text(result: dict | None = None, lang: str = "vi") -> str:
             f"Preview limit: <b>{preview_seconds}s</b>\n"
             f"Full output estimate: <b>{price} Xu</b>\n\n"
             f"Selected direction: <code>{html.escape(prompt[:700])}</code>\n\n"
-            "TOAN AAS does not create or send the complete track before final confirmation. "
-            "If a cost-safe short preview route is unavailable, you can preview stock samples and confirm the full job only when ready."
+            "Preview sends only the short clip. The full file stays in the vault and is not delivered before confirmation."
         )
     preview_title = "Nghe thử bài hát" if result.get("song_product") else "Nghe thử nhạc"
     if package_mode:
@@ -74502,16 +75054,15 @@ def music_ai_preview_text(result: dict | None = None, lang: str = "vi") -> str:
             f"▶️ <b>{preview_title}</b>\n\n"
             f"{html.escape(music_song_length_selection_text(result, lang))}\n\n"
             f"Hướng đã chọn: <code>{html.escape(prompt[:700])}</code>\n\n"
-            "TOAN AAS không tạo hoặc gửi toàn bộ bài trước khi xác nhận cuối."
+            f"Nghe thử {preview_seconds} giây đầu. Bản đầy đủ đã được lưu trong kho, chưa giao và chưa trừ Xu final."
         )
     return (
         f"▶️ <b>{preview_title}</b>\n\n"
         f"Thời lượng bản đầy đủ: <b>{duration} giây</b>\n"
-        f"Preview: <b>tối đa {preview_seconds} giây</b>\n"
+        f"Preview: <b>{preview_seconds} giây đầu</b>\n"
         f"Giá dự kiến bản đầy đủ: <b>{price} Xu</b>\n\n"
         f"Hướng đã chọn: <code>{html.escape(prompt[:700])}</code>\n\n"
-        "TOAN AAS không tạo hoặc gửi toàn bộ bài trước khi xác nhận cuối. "
-        "Nếu chưa có đường preview ngắn an toàn về chi phí, bạn có thể nghe mẫu trong kho rồi mới xác nhận tạo bản đầy đủ."
+        "Nghe thử chỉ gửi preview. Bản đầy đủ đã được lưu trong kho, chưa giao và chưa trừ Xu final."
     )
 
 def music_ai_preview_keyboard(
@@ -74523,13 +75074,15 @@ def music_ai_preview_keyboard(
     is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
-    is_song = bool((result or {}).get("song_product"))
-    preview_label = "▶️ Nghe thử"
-    full_label = "✅ Tạo bài hát" if is_song else "✅ Tạo nhạc"
+    preview_label = f"▶️ Nghe thử {music_preview_seconds()} giây"
+    full_label = "✅ Dùng bản đầy đủ"
     rows = [
         [
             InlineKeyboardButton(preview_label if is_vi else "▶️ Short preview", callback_data=cb("music_ai_preview")),
-            InlineKeyboardButton(full_label if is_vi else "✅ Create full output", callback_data=cb("music_ai_confirm")),
+            InlineKeyboardButton(full_label if is_vi else "✅ Use full output", callback_data=cb("music_ai_confirm")),
+        ],
+        [
+            InlineKeyboardButton("🗂 Lưu vào kho nhạc" if is_vi else "🗂 Save to music vault", callback_data=cb("music_ai_save_vault")),
         ],
         [
             InlineKeyboardButton("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", callback_data=cb("music_ai_edit_description")),
@@ -74602,17 +75155,10 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
     readiness = get_suno_music_readiness()
     if not music_ai_public_processing_ready(readiness) and not admin_smoke:
         return {"ok": False, "status": "NOT_READY", "detail": ",".join(music_ai_admin_blockers())}
-    prompt = str(result.get("selected_prompt") or result.get("description") or "").strip()[:1200]
     full_duration = music_result_duration_seconds(result)
-    duration = calculate_preview_seconds(full_duration) if preview else full_duration
+    duration = full_duration
     product_kind = music_result_product_kind(result)
-    prompt = f"{prompt}. Target output duration: {duration} seconds."
-    if preview:
-        prompt += " This is a short preview only; produce one coherent excerpt and do not expand to the full requested song."
-    if product_kind == "song_half":
-        prompt += " Create a coherent half-song with complete original lyrics, verse plus hook/chorus, and no sentence cut off."
-    elif product_kind == "song_full":
-        prompt += " Create a complete original song with intro, verse, chorus, bridge and outro structure."
+    prompt = music_provider_prompt_for_result(result, preview=preview)
     providers = dict(readiness.get("providers") or {})
 
     async def submit_key4u() -> dict:
@@ -74775,6 +75321,19 @@ def create_music_suno_async_job(
         "admin_test": bool(admin_test),
         "product_kind": music_result_product_kind(payload),
         "duration_seconds": music_result_duration_seconds(payload) if payload else 0,
+        "preview_seconds": music_preview_seconds(),
+        "preview_start_seconds": music_preview_start_seconds(),
+        "category": music_vault_category_for_result(payload),
+        "prompt_summary": music_prompt_selection_summary(payload),
+        "safe_prompt": music_vault_safe_prompt(payload),
+        "provider_prompt_sha256": hashlib.sha256(music_provider_prompt_for_result(payload).encode("utf-8")).hexdigest() if payload else "",
+        "sent_preview_at": "",
+        "sent_full_at": "",
+        "output_file_id": "",
+        "output_sha256": "",
+        "send_attempt_count": 0,
+        "last_send_error": "",
+        "vault_id": "",
     })
     return job
 
@@ -74862,11 +75421,20 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             updated_by=updated_by,
         )
         if audio_bytes:
+            vault_entry = upsert_music_vault_from_output(
+                audio_bytes=audio_bytes,
+                result=job,
+                job=job,
+                status="generated_unused",
+                updated_by=updated_by,
+            )
             job.update({
                 "status": "completed",
                 "progress_text": "Output nhạc đã tải thành công và bytes > 0.",
                 "output_bytes": len(audio_bytes),
                 "output_path": "",
+                "output_sha256": music_audio_sha256(audio_bytes),
+                "vault_id": str(vault_entry.get("vault_id") or job.get("vault_id") or ""),
                 "error_category": "",
                 "completed_at": now_text(),
             })
@@ -74936,7 +75504,7 @@ async def send_music_preview_output(query, context, result: dict, lang: str = "v
     if not polled.get("ok") or not output_url:
         return False, polled
     try:
-        audio_bytes, _detail, _status = await _download_audio_url_bytes(output_url, timeout_seconds=60.0)
+        audio_bytes, _detail, _status = await _download_music_audio_url_bytes(output_url, timeout_seconds=60.0)
         record_music_provider_attempt(
             provider=str(result.get("music_preview_provider") or ""),
             task_id=str(result.get("music_preview_task_id") or ""),
@@ -74945,7 +75513,19 @@ async def send_music_preview_output(query, context, result: dict, lang: str = "v
             error=_detail,
             updated_by=updated_by,
         )
-        preview_seconds = calculate_preview_seconds(music_result_duration_seconds(result))
+        vault_entry = upsert_music_vault_from_output(
+            audio_bytes=audio_bytes,
+            result=result,
+            job={
+                "provider": str(result.get("music_preview_provider") or ""),
+                "provider_task_id": str(result.get("music_preview_task_id") or ""),
+                "user_id": str(result.get("user_id") or ""),
+                "chat_id": str(getattr(query.message, "chat_id", "") or ""),
+            },
+            status="preview_sent",
+            updated_by=updated_by,
+        )
+        preview_seconds = music_preview_seconds()
         capped_bytes, _cap_detail = await cap_voice_preview_audio_bytes(audio_bytes, preview_seconds)
         if not capped_bytes:
             return False, {**polled, "status": "PREVIEW_CAP_FAILED"}
@@ -74956,16 +75536,65 @@ async def send_music_preview_output(query, context, result: dict, lang: str = "v
             audio=audio_file,
             title="TOAN AAS Music Preview",
             caption=(
-                f"▶️ Bản nghe thử ngắn {preview_seconds} giây. Bản đầy đủ dài {music_result_duration_seconds(result)} giây và chỉ được tạo sau khi bạn xác nhận."
+                f"▶️ Nghe thử {preview_seconds} giây. Bản đầy đủ đã được lưu trong kho, chưa giao và chưa trừ Xu final."
                 if music_ui_lang(lang=lang) == "vi" else
-                f"▶️ {preview_seconds}-second preview. The {music_result_duration_seconds(result)}-second full output is created only after confirmation."
+                f"▶️ {preview_seconds}-second preview. The full output is stored in the vault and not delivered before confirmation."
             ),
         )
         preview_ref = str(getattr(getattr(sent, "audio", None), "file_id", "") or "")
-        return True, {**polled, "preview_audio_ref": preview_ref, "preview_seconds": preview_seconds}
+        return True, {**polled, "preview_audio_ref": preview_ref, "preview_seconds": preview_seconds, "music_vault_id": str(vault_entry.get("vault_id") or "")}
     except Exception as exc:
         logger.warning("music preview send failed | %s", sanitize_log_text(str(exc))[:180])
         return False, {**polled, "status": "PREVIEW_SEND_FAILED"}
+
+def music_job_full_already_sent(job: dict | None, audio_bytes: bytes | bytearray | None = None) -> bool:
+    job = dict(job or {})
+    if not job.get("sent_full_at"):
+        return False
+    output_sha = music_audio_sha256(audio_bytes)
+    stored_sha = str(job.get("output_sha256") or "").strip()
+    if output_sha and stored_sha and output_sha == stored_sha:
+        return True
+    return bool(job.get("output_file_id"))
+
+def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: bytes | bytearray | None = None, result: dict | None = None, updated_by="") -> dict:
+    current = dict(job or {})
+    if not current:
+        return {}
+    output_sha = music_audio_sha256(audio_bytes)
+    file_id = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or "")
+    vault_entry = upsert_music_vault_from_output(
+        audio_bytes=bytes(audio_bytes or b""),
+        result=result or current,
+        job=current,
+        status="used",
+        updated_by=updated_by,
+    )
+    current.update({
+        "sent_full_at": now_text(),
+        "output_file_id": file_id,
+        "output_sha256": output_sha or str(current.get("output_sha256") or ""),
+        "send_attempt_count": int(current.get("send_attempt_count") or 0) + 1,
+        "last_send_error": "",
+        "vault_id": str(vault_entry.get("vault_id") or current.get("vault_id") or ""),
+    })
+    if current.get("internal_job_id"):
+        save_engine_async_job(current)
+    if current.get("vault_id"):
+        mark_music_vault_status(str(current.get("vault_id")), "used", updated_by=updated_by)
+    return current
+
+def record_music_job_full_send_error(job: dict | None, error: str, updated_by="") -> dict:
+    current = dict(job or {})
+    if not current:
+        return {}
+    current.update({
+        "send_attempt_count": int(current.get("send_attempt_count") or 0) + 1,
+        "last_send_error": sanitize_provider_status_text(error, current.get("provider_task_id") or "", 220),
+    })
+    if current.get("internal_job_id"):
+        save_engine_async_job(current)
+    return current
 
 def media_merge_status_lines(user_id) -> tuple[bool, bool]:
     has_video = bool(get_recent_media_state(LAST_USER_VIDEO, user_id))
@@ -75689,7 +76318,7 @@ def voice_clone_preview_entry_keyboard(profile_id: int, lang: str = "vi", produc
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶️ Nghe thử" if is_vi else "▶️ Preview", callback_data=cb(f"voice_clone_confirmed:{pid}"))],
+        [InlineKeyboardButton(f"▶️ Nghe thử {voice_preview_seconds()} giây" if is_vi else f"▶️ {voice_preview_seconds()}s preview", callback_data=cb(f"voice_clone_confirmed:{pid}"))],
         [
             InlineKeyboardButton("🔁 Đổi giọng" if is_vi else "🔁 Change voice", callback_data=cb("voice_custom")),
             InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=cb(f"voice_profile_rename:{pid}")),
@@ -77042,7 +77671,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "song_back_duration":
         await query.answer()
         return await query.message.reply_text(
-            "⏱ <b>Bài hát có lời theo thời lượng</b>\n\nChọn thời lượng bản đầy đủ. 6 giây chỉ là giới hạn bản nghe thử, không phải thời lượng bài hát.",
+            f"⏱ <b>Bài hát có lời theo thời lượng</b>\n\nChọn thời lượng bản đầy đủ. {music_preview_seconds()} giây chỉ là giới hạn bản nghe thử, không phải thời lượng bài hát.",
             parse_mode="HTML",
             reply_markup=music_song_duration_keyboard(lang, ctx),
         )
@@ -77090,13 +77719,15 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "lyrics_state": "lyrics_select_duration",
         })
         return await query.message.reply_text(
-            "⏱ <b>Bài hát có lời theo thời lượng</b>\n\nChọn thời lượng bản đầy đủ. 6 giây chỉ là giới hạn bản nghe thử, không phải thời lượng bài hát.",
+            f"⏱ <b>Bài hát có lời theo thời lượng</b>\n\nChọn thời lượng bản đầy đủ. {music_preview_seconds()} giây chỉ là giới hạn bản nghe thử, không phải thời lượng bài hát.",
             parse_mode="HTML",
             reply_markup=music_song_duration_keyboard(lang, ctx),
         )
     if action in {"song_start_half", "song_start_full"}:
         await query.answer()
         product = "half" if action.endswith("half") else "full"
+        if product == "half" and not music_short_mode_verified():
+            product = "full"
         result = {
             "guided_purpose": "song",
             "music_ai_kind": "lyrics",
@@ -77226,9 +77857,9 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         vocal = music_guided_label(MUSIC_SONG_VOCALS, key, lang)
         scope = {
             "seconds": f"một đoạn có lời hoàn chỉnh dài {music_result_duration_seconds(result)} giây",
-            "half": "nửa bài đủ lời",
+            "half": "nửa bài thật đã xác minh" if music_short_mode_verified() else "một bài hát hoàn chỉnh",
             "full": "một bài hát hoàn chỉnh",
-        }.get(str(result.get("song_product") or ""), "một bài hát có lời")
+        }.get(music_song_length_mode(result) or str(result.get("song_product") or ""), "một bài hát có lời")
         desc = (
             f"Tạo {scope} về {topic}; thể loại {genre}; cảm xúc {mood}; giọng hát {vocal}; "
             "lời nguyên bản, đủ câu, cấu trúc rõ ràng, không cắt giữa câu, không bắt chước nghệ sĩ hoặc giai điệu nổi tiếng"
@@ -77868,7 +78499,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             f"✅ Đã chọn gợi ý {idx}.\n\n<code>{html.escape(prompt_text)}</code>\n\n"
             f"Thời lượng bản đầy đủ: <b>{music_result_duration_seconds(result)} giây</b>. "
             f"Giá dự kiến: <b>{music_result_price_xu(result)} Xu</b>.\n\n"
-            "Bước tiếp theo là nghe thử ngắn tối đa 6 giây hoặc guard an toàn trước khi xác nhận bản đầy đủ.",
+            f"Bước tiếp theo là nghe thử {music_preview_seconds()} giây đầu hoặc guard an toàn trước khi xác nhận bản đầy đủ.",
             parse_mode="HTML",
             reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
         )
@@ -77941,7 +78572,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             result.update({
                 "music_preview_seen": False,
                 "music_preview_guard_acknowledged": True,
-                "music_preview_seconds": calculate_preview_seconds(music_result_duration_seconds(result)),
+                "music_preview_seconds": music_preview_seconds(),
                 "music_status": "preview_guard_ready",
             })
             save_music_guided_result(user_id, result)
@@ -77958,7 +78589,8 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                     "music_preview_seen": True,
                     "music_preview_guard_acknowledged": False,
                     "music_preview_audio_ref": str(preview_result.get("preview_audio_ref") or ""),
-                    "music_preview_seconds": int(preview_result.get("preview_seconds") or calculate_preview_seconds(music_result_duration_seconds(result))),
+                    "music_preview_seconds": int(preview_result.get("preview_seconds") or music_preview_seconds()),
+                    "music_vault_id": str(preview_result.get("music_vault_id") or result.get("music_vault_id") or ""),
                     "music_status": "preview_ready",
                 })
                 save_music_guided_result(user_id, result)
@@ -77969,7 +78601,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 )
             if not any(token in status for token in ("fail", "error", "cancel")):
                 return await query.message.reply_text(
-                    "⏳ Bản nghe thử đang được xử lý. Bạn chờ một chút rồi bấm kiểm tra lại; bản đầy đủ chưa được tạo và chưa trừ Xu final.",
+                    "⏳ Bản nhạc đang được provider xử lý. Khi xong, TOAN AAS sẽ gửi nghe thử 12 giây đầu và lưu bản đầy đủ trong kho; chưa giao full và chưa trừ Xu final.",
                     reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
                 )
             result.pop("music_preview_task_id", None)
@@ -78044,16 +78676,35 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False),
             )
         if preview_audio:
-            audio_file = video_dubbing_output_file(bytes(preview_audio), "toan_aas_music_preview.mp3")
+            vault_entry = upsert_music_vault_from_output(
+                audio_bytes=bytes(preview_audio),
+                result=result,
+                job={
+                    "provider": str(submitted.get("provider") or ""),
+                    "provider_task_id": preview_task_id,
+                    "user_id": str(user_id),
+                    "chat_id": str(query.message.chat_id),
+                },
+                status="preview_sent",
+                updated_by=user_id,
+            )
+            capped_bytes, _cap_detail = await cap_voice_preview_audio_bytes(bytes(preview_audio), music_preview_seconds())
+            if not capped_bytes:
+                return await query.message.reply_text(
+                    "⚠️ Provider đã trả audio nhưng chưa cắt được bản nghe thử. Bản đầy đủ đã lưu metadata trong kho, chưa giao và chưa trừ Xu final.",
+                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
+                )
+            audio_file = video_dubbing_output_file(bytes(capped_bytes), "toan_aas_music_preview.mp3")
             await query.message.reply_audio(
                 audio=audio_file,
                 filename="toan_aas_music_preview.mp3",
-                caption="▶️ Bản nghe thử đã tạo xong. Bản đầy đủ chưa được tạo và chưa trừ Xu final.",
+                caption=f"▶️ Nghe thử {music_preview_seconds()} giây. Bản đầy đủ đã được lưu trong kho, chưa giao và chưa trừ Xu final.",
             )
             result.update({
                 "music_preview_seen": True,
                 "music_preview_guard_acknowledged": False,
-                "music_preview_seconds": calculate_preview_seconds(music_result_duration_seconds(result)),
+                "music_preview_seconds": music_preview_seconds(),
+                "music_vault_id": str(vault_entry.get("vault_id") or ""),
                 "music_status": "preview_ready",
             })
             save_music_guided_result(user_id, result)
@@ -78065,15 +78716,34 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result.update({
             "music_preview_seen": False,
             "music_preview_guard_acknowledged": False,
-            "music_preview_seconds": calculate_preview_seconds(music_result_duration_seconds(result)),
+            "music_preview_seconds": music_preview_seconds(),
             "music_preview_task_id": preview_task_id,
             "music_preview_provider": str(submitted.get("provider") or ""),
             "music_status": "preview_submitted",
         })
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(
-            "▶️ Provider đã nhận task nghe thử thật. Bạn có thể kiểm tra kết quả sau một chút. Bản đầy đủ chưa được tạo và chưa trừ Xu final.",
+            "▶️ Provider đã nhận job nhạc thật. Khi có kết quả, TOAN AAS chỉ gửi nghe thử 12 giây đầu, bản đầy đủ lưu trong kho và chưa giao/trừ Xu final.",
             reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
+        )
+    if action == "music_ai_save_vault":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        vault_id = str(result.get("music_vault_id") or "").strip()
+        if vault_id:
+            entry = mark_music_vault_status(vault_id, "generated_unused", updated_by=user_id) or get_music_vault_entry(vault_id)
+            result["music_vault_id"] = str(entry.get("vault_id") or vault_id)
+            result["music_status"] = "vault_saved"
+            save_music_guided_result(user_id, result)
+            return await query.message.reply_text(
+                f"🗂 Đã lưu bản nhạc vào kho: <code>{html.escape(str(entry.get('vault_id') or vault_id))}</code>.\n"
+                "Bản đầy đủ chưa giao cho khách và chưa trừ Xu final.",
+                parse_mode="HTML",
+                reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=bool(result.get("music_preview_seen")), result=result),
+            )
+        return await query.message.reply_text(
+            "🗂 Chưa có file nhạc thật để lưu kho. Hãy bấm Nghe thử 12 giây hoặc Kiểm tra kết quả sau khi provider hoàn tất. TOAN AAS không tạo fake vault.",
+            reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=bool(result.get("music_preview_seen")), result=result),
         )
     if action == "music_ai_confirm":
         await query.answer()
@@ -78124,6 +78794,44 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             if not charge.get("ok"):
                 return await query.message.reply_text("⚠️ Chưa thể xác nhận số dư. TOAN AAS chưa tạo job nhạc.", reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result))
             charged = int(charge.get("final_cost") if charge.get("final_cost") is not None else price)
+        vault_id = str(result.get("music_vault_id") or "").strip()
+        vault_entry = get_music_vault_entry(vault_id) if vault_id else {}
+        storage_ref = str(vault_entry.get("storage_ref") or "").strip()
+        if vault_entry and storage_ref and os.path.exists(storage_ref) and os.path.getsize(storage_ref) > 0:
+            if result.get("music_full_sent_at"):
+                return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
+            try:
+                with open(storage_ref, "rb") as handle:
+                    audio_bytes = handle.read()
+                audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_music.mp3")
+                sent_message = await query.message.reply_audio(
+                    audio=audio_file,
+                    filename="toan_aas_music.mp3",
+                    caption=f"✅ Đã dùng bản đầy đủ từ kho nhạc: {music_confirm_product_label(result, lang)}.",
+                )
+                mark_music_vault_status(vault_id, "used", updated_by=user_id)
+                result.update({
+                    "music_status": "completed",
+                    "music_charged_xu": charged,
+                    "music_refunded": False,
+                    "music_completed_at": now_text(),
+                    "music_full_sent_at": now_text(),
+                    "music_output_file_id": str(getattr(getattr(sent_message, "audio", None), "file_id", "") or ""),
+                    "music_output_sha256": music_audio_sha256(audio_bytes),
+                    "music_vault_id": vault_id,
+                })
+                save_music_guided_result(user_id, result)
+                return await query.message.reply_text(
+                    f"✅ Đã gửi bản nhạc đầy đủ từ kho phía trên. Đã trừ: {charged} Xu.",
+                    reply_markup=music_hub_keyboard(lang, ctx),
+                )
+            except Exception as exc:
+                refund_charged_credit(user_id, charged, event_type="music_vault_delivery_refund", note="music vault delivery failed", was_charged=charged > 0)
+                logger.warning("music vault delivery failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
+                return await query.message.reply_text(
+                    "⚠️ Bản đầy đủ đã có trong kho nhưng Telegram chưa gửi được file. TOAN AAS đã hoàn Xu nếu có phát sinh.",
+                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
+                )
         engine_result = await execute_engine(
             feature,
             {"result": result, "preview": False},
@@ -78168,8 +78876,22 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
             )
         if music_audio:
+            if result.get("music_full_sent_at"):
+                return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
+            vault_entry = upsert_music_vault_from_output(
+                audio_bytes=bytes(music_audio),
+                result=result,
+                job={
+                    "provider": str(submitted.get("provider") or ""),
+                    "provider_task_id": music_task_id,
+                    "user_id": str(user_id),
+                    "chat_id": str(query.message.chat_id),
+                },
+                status="used",
+                updated_by=user_id,
+            )
             audio_file = video_dubbing_output_file(bytes(music_audio), "toan_aas_music.mp3")
-            await query.message.reply_audio(
+            sent_message = await query.message.reply_audio(
                 audio=audio_file,
                 filename="toan_aas_music.mp3",
                 caption=f"✅ Đã tạo {music_confirm_product_label(result, lang)}.",
@@ -78179,6 +78901,10 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 "music_charged_xu": charged,
                 "music_refunded": False,
                 "music_completed_at": now_text(),
+                "music_full_sent_at": now_text(),
+                "music_output_file_id": str(getattr(getattr(sent_message, "audio", None), "file_id", "") or ""),
+                "music_output_sha256": music_audio_sha256(music_audio),
+                "music_vault_id": str(vault_entry.get("vault_id") or ""),
             })
             save_music_guided_result(user_id, result)
             return await query.message.reply_text(
@@ -78250,16 +78976,20 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             if polled_job.get("ok") and audio_bytes:
                 result.update({"music_status": "completed", "music_completed_at": now_text()})
                 save_music_guided_result(user_id, result)
+                if music_job_full_already_sent(job_snapshot, audio_bytes):
+                    return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
                 try:
                     audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_music.mp3")
-                    await context.bot.send_audio(
+                    sent_message = await context.bot.send_audio(
                         chat_id=query.message.chat_id,
                         audio=audio_file,
                         filename="toan_aas_music.mp3",
                         caption=f"✅ Bản nhạc đầy đủ {music_result_duration_seconds(result)} giây của TOAN AAS.",
                     )
+                    record_music_job_full_send(job_snapshot, sent_message, audio_bytes, result=result, updated_by=user_id)
                 except Exception as exc:
                     logger.warning("music output send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
+                    record_music_job_full_send_error(job_snapshot, str(exc), updated_by=user_id)
                     return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
                 return await query.message.reply_text("✅ Đã gửi bản nhạc đầy đủ phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
             job_status = str((job_snapshot or {}).get("status") or "").lower()
@@ -78306,14 +79036,35 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 )
             result.update({"music_status": "completed", "music_output_url": output_url, "music_completed_at": now_text()})
             save_music_guided_result(user_id, result)
+            if result.get("music_full_sent_at"):
+                return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
+            vault_entry = upsert_music_vault_from_output(
+                audio_bytes=audio_bytes,
+                result=result,
+                job={
+                    "provider": str(result.get("music_provider") or ""),
+                    "provider_task_id": str(result.get("music_task_id") or ""),
+                    "user_id": str(user_id),
+                    "chat_id": str(query.message.chat_id),
+                },
+                status="used",
+                updated_by=user_id,
+            )
             try:
                 audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_music.mp3")
-                await context.bot.send_audio(
+                sent_message = await context.bot.send_audio(
                     chat_id=query.message.chat_id,
                     audio=audio_file,
                     filename="toan_aas_music.mp3",
                     caption=f"✅ Bản nhạc đầy đủ {music_result_duration_seconds(result)} giây của TOAN AAS.",
                 )
+                result.update({
+                    "music_full_sent_at": now_text(),
+                    "music_output_file_id": str(getattr(getattr(sent_message, "audio", None), "file_id", "") or ""),
+                    "music_output_sha256": music_audio_sha256(audio_bytes),
+                    "music_vault_id": str(vault_entry.get("vault_id") or ""),
+                })
+                save_music_guided_result(user_id, result)
             except Exception as exc:
                 logger.warning("music output send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
                 return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
@@ -80377,9 +81128,9 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         mood = music_guided_label(MUSIC_SONG_MOODS, str(result.get("song_mood") or result.get("guided_mood") or "emotional"), lang)
         scope = {
             "seconds": f"một đoạn có lời hoàn chỉnh dài {music_result_duration_seconds(result)} giây",
-            "half": "nửa bài đủ lời",
+            "half": "nửa bài thật đã xác minh" if music_short_mode_verified() else "một bài hát hoàn chỉnh",
             "full": "một bài hát hoàn chỉnh",
-        }.get(str(result.get("song_product") or ""), "một bài hát có lời")
+        }.get(music_song_length_mode(result) or str(result.get("song_product") or ""), "một bài hát có lời")
         desc = (
             f"Tạo {scope} về {topic}; thể loại {genre}; cảm xúc {mood}; giọng hát {text}; "
             "lời nguyên bản, đủ câu, cấu trúc rõ ràng, không cắt giữa câu, không bắt chước nghệ sĩ hoặc giai điệu nổi tiếng"
@@ -94823,7 +95574,7 @@ def music_confirm_product_label(result: dict | None = None, lang: str = "vi") ->
     result = dict(result or {})
     kind = music_result_product_kind(result)
     is_vi = music_ui_lang(lang=lang) == "vi"
-    if kind == "song_half":
+    if kind == "song_half" and music_short_mode_verified():
         return "nửa bài đủ lời" if is_vi else "a coherent half song"
     if kind == "song_full":
         return "một bài hát hoàn chỉnh" if is_vi else "a complete song"
@@ -98811,7 +99562,7 @@ def video_paid_preview_text(state: dict | None = None, lang: str = "vi") -> str:
     state = dict(state or {})
     pending = dict(state.get("pending_payload") or state)
     duration_model = video_final_duration_model(pending, state, pending.get("video_tier") or state.get("video_tier") or "")
-    preview_seconds = int(duration_model.get("preview_duration_seconds") or VIDEO_PREVIEW_DEFAULT_SECONDS)
+    preview_seconds = video_preview_seconds()
     music = str(pending.get("music_option") or state.get("current_video_music_option") or "none").strip().lower()
     subtitle = str(pending.get("subtitle_option") or state.get("current_video_subtitle_option") or "none").strip().lower()
     dubbing = str(pending.get("dubbing_option") or state.get("current_video_dubbing_option") or "none").strip().lower()
@@ -98820,7 +99571,7 @@ def video_paid_preview_text(state: dict | None = None, lang: str = "vi") -> str:
     has_paid_dub = dubbing not in {"", "none"}
     if normalize_user_language(lang) != "vi":
         lines = [
-            "▶️ <b>Video preview before full output</b>",
+            f"▶️ <b>{preview_seconds}s video preview before full output</b>",
             "",
             f"Preview length: <b>{preview_seconds} seconds max</b>.",
             "You can preview a short video segment first when this package supports it.",
@@ -98836,7 +99587,7 @@ def video_paid_preview_text(state: dict | None = None, lang: str = "vi") -> str:
         lines.append("• Video: preview is limited to the short segment above.")
         return "\n".join(lines)
     lines = [
-        "▶️ <b>Xem thử video</b>",
+        f"▶️ <b>Xem thử {preview_seconds} giây</b>",
         "",
         f"Thời lượng xem thử: <b>tối đa {preview_seconds} giây</b>.",
         "Bạn có thể xem thử một đoạn video ngắn nếu gói này hỗ trợ.",
@@ -98887,7 +99638,7 @@ def video_paid_preview_artifact(state: dict | None = None) -> dict:
 def video_paid_preview_entry_keyboard(token: str, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶️ Tạo bản xem thử video" if is_vi else "▶️ Create video preview", callback_data=f"videoaddon|preview|{token}")],
+        [InlineKeyboardButton(f"▶️ Xem thử {video_preview_seconds()} giây" if is_vi else f"▶️ {video_preview_seconds()}s video preview", callback_data=f"videoaddon|preview|{token}")],
         [
             InlineKeyboardButton("🎙 Đổi giọng đọc" if is_vi else "🎙 Change voice", callback_data="vfinal|voice"),
             InlineKeyboardButton("🎵 Đổi nhạc" if is_vi else "🎵 Change music", callback_data="vfinal|music"),
@@ -131040,6 +131791,17 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("music_suno_jobs", cmd_music_suno_jobs))
     tg_app.add_handler(CommandHandler("music_suno_job", cmd_music_suno_job))
     tg_app.add_handler(CommandHandler("music_suno_poll", cmd_music_suno_poll))
+    tg_app.add_handler(CommandHandler("music_prompt_debug", cmd_music_prompt_debug))
+    tg_app.add_handler(CommandHandler("music_vault_status", cmd_music_vault_status))
+    tg_app.add_handler(CommandHandler("music_vault_unused", cmd_music_vault_unused))
+    tg_app.add_handler(CommandHandler("music_vault_used", cmd_music_vault_used))
+    tg_app.add_handler(CommandHandler("music_vault_detail", cmd_music_vault_detail))
+    tg_app.add_handler(CommandHandler("music_vault_mark_used", cmd_music_vault_mark_used))
+    tg_app.add_handler(CommandHandler("music_vault_mark_unused", cmd_music_vault_mark_unused))
+    tg_app.add_handler(CommandHandler("music_vault_archive", cmd_music_vault_archive))
+    tg_app.add_handler(CommandHandler("vip_music_vault", cmd_vip_music_vault))
+    tg_app.add_handler(CommandHandler("vip_music_claim", cmd_vip_music_claim))
+    tg_app.add_handler(CommandHandler("vip_music_quota", cmd_vip_music_quota))
     tg_app.add_handler(CommandHandler("music_suno_timeout", cmd_music_suno_timeout))
     tg_app.add_handler(CommandHandler("key4u_suno_route_status", cmd_key4u_suno_route_status))
     tg_app.add_handler(CommandHandler("key4u_suno_job_status", cmd_key4u_suno_job_status))

@@ -188,22 +188,23 @@ def test_music_duration_menu_uses_18_30_60_and_custom_not_preview_length():
     assert bot.paid_preview_seconds(120) == 6
 
 
-def test_longer_music_costs_more_and_full_song_is_half_times_1_8():
-    assert bot.music_ai_output_price_xu(60) > bot.music_ai_output_price_xu(30)
+def test_music_quote_prices_are_product_fixed(monkeypatch):
+    monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", False)
+    assert bot.music_ai_output_price_xu(60) == bot.MUSIC_BACKGROUND_FULL_PRICE_XU
     half = bot.music_ai_output_price_xu(60, "song_half")
     full = bot.music_ai_output_price_xu(120, "song_full")
 
-    assert half == bot.HALF_SONG_PRICE_XU
-    assert full == bot.round_video_xu(half * 1.8, bot.MUSIC_AI_PRICE_ROUND_TO_XU)
+    assert half == bot.MUSIC_VOCAL_FULL_PRICE_XU
+    assert full == bot.MUSIC_VOCAL_FULL_PRICE_XU
 
 
-def test_song_product_has_half_and_full_complete_lyrics_choices():
+def test_song_product_removes_half_until_verified():
     labels = _labels(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
     text = bot.music_song_product_text("vi")
 
-    assert "1️⃣ Nửa bài" in labels
-    assert "2️⃣ Full bài" in labels
-    assert "không cắt giữa câu" in text
+    assert "🎤 Bài hát có lời AI" in labels
+    assert "1️⃣ Nửa bài" not in labels
+    assert "Không bán nửa bài" in text
 
 
 def test_change_music_suggestion_preserves_duration_and_song_product(monkeypatch):

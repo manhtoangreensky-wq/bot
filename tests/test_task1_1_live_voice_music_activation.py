@@ -258,25 +258,27 @@ def test_song_option_selected_then_invoice():
     labels = _labels(bot.music_ai_preview_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM, result=result))
     text = bot.music_ai_preview_text(result, "vi")
     assert "Thời lượng bản đầy đủ: <b>18 giây</b>" in text
-    assert f"Preview: <b>tối đa {bot.paid_preview_seconds(18)} giây</b>" in text
-    assert "✅ Tạo bài hát" in labels
+    assert "Preview: <b>12 giây đầu</b>" in text
+    assert "✅ Dùng bản đầy đủ" in labels
 
 
 def test_music_song_select_option_shows_confirmation_price():
     result = {"song_product": "half", "guided_duration_seconds": 60, "selected_prompt": "bài hát có lời"}
     text = bot.music_ai_preview_text(result, "vi")
     labels = _labels(bot.music_ai_preview_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM, result=result))
-    assert "Đã chọn: Nửa bài." in text
+    assert "Đã chọn: Bài hát có lời AI." in text
     assert "Giá dự kiến:" in text
     assert "Thời lượng bản đầy đủ" not in text
-    assert "▶️ Nghe thử" in labels
-    assert "✅ Tạo bài hát" in labels
+    assert "▶️ Nghe thử 12 giây" in labels
+    assert "✅ Dùng bản đầy đủ" in labels
 
 
 def test_music_song_half_full_provider_prompt_structure():
-    source = inspect.getsource(bot.submit_music_generation_job)
-    assert "verse plus hook/chorus" in source
-    assert "intro, verse, chorus, bridge and outro" in source
+    full_prompt = bot.music_provider_prompt_for_result({"song_product": "full", "selected_prompt": "bài hát"}, preview=True)
+    half_prompt = bot.music_provider_prompt_for_result({"song_product": "half", "selected_prompt": "bài hát"}, preview=True)
+    assert "intro, verse, chorus, bridge and outro" in full_prompt
+    assert "verified short song" not in half_prompt
+    assert "clip only the first 12 seconds" in full_prompt
 
 
 def test_song_preview_guard_reports_provider_not_ready(monkeypatch):
@@ -316,7 +318,8 @@ def test_song_preview_calls_provider_when_ready(monkeypatch):
         preview=True,
     ))
     assert result["ok"] is True
-    assert captured["duration_seconds"] == bot.calculate_preview_seconds(60)
+    assert captured["duration_seconds"] == 60
+    assert "clip only the first 12 seconds" in captured["prompt"]
 
 
 def test_song_full_create_calls_provider_when_ready(monkeypatch):
