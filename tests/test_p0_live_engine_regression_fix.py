@@ -8,18 +8,19 @@ def _admin_only(monkeypatch, admin_id=1):
     monkeypatch.setattr(bot, "is_admin_user", lambda uid: str(uid) == str(admin_id))
 
 
-def test_song_half_full_copy_uses_length_mode_not_legacy_60s():
+def test_song_legacy_half_normalizes_to_full_without_short_mode(monkeypatch):
+    monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", False)
     half = {"song_product": "half", "guided_duration_seconds": 60, "selected_prompt": "bài hát có lời"}
     full = {"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát có lời"}
 
     half_text = bot.music_ai_preview_text(half, "vi")
     full_text = bot.music_ai_preview_text(full, "vi")
 
-    assert "Đã chọn: Nửa bài." in half_text
-    assert "TOAN AAS sẽ tạo một đoạn/bài ngắn hoàn chỉnh, không cắt giữa câu." in half_text
+    assert "Đã chọn: Bài hát có lời AI." in half_text
+    assert "Nửa bài." not in half_text
     assert f"Giá dự kiến: {bot.music_result_price_xu(half)} Xu." in half_text
-    assert "Đã chọn: Full bài." in full_text
-    assert "TOAN AAS sẽ tạo một bài hoàn chỉnh có cấu trúc rõ ràng." in full_text
+    assert "Đã chọn: Bài hát có lời AI." in full_text
+    assert "Bản đầy đủ được lưu trong kho" in full_text
     assert f"Giá dự kiến: {bot.music_result_price_xu(full)} Xu." in full_text
     assert "Thời lượng bản đầy đủ" not in half_text
     assert "Thời lượng bản đầy đủ" not in full_text

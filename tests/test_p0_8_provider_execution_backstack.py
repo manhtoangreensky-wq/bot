@@ -172,8 +172,8 @@ def test_background_music_duration_menu_unchanged():
 
 
 def test_music_price_increases_with_duration():
-    assert bot.music_ai_output_price_xu(15) <= bot.music_ai_output_price_xu(30)
-    assert bot.music_ai_output_price_xu(60) > bot.music_ai_output_price_xu(30)
+    assert bot.music_ai_output_price_xu(15) == bot.MUSIC_BACKGROUND_FULL_PRICE_XU
+    assert bot.music_ai_output_price_xu(60) == bot.MUSIC_BACKGROUND_FULL_PRICE_XU
 
 
 def test_song_with_lyrics_menu_has_no_by_seconds_button():
@@ -185,7 +185,7 @@ def test_song_with_lyrics_menu_has_no_by_seconds_button():
 
 def test_song_with_lyrics_menu_has_half_and_full_only():
     labels = _labels(bot.music_song_product_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert labels == ["1️⃣ Nửa bài", "2️⃣ Full bài", "⬅️ Nhạc", "🏠 Menu chính"]
+    assert labels == ["🎤 Bài hát có lời AI", "⬅️ Nhạc", "🏠 Menu chính"]
 
 
 def test_song_seconds_has_18_30_60_custom():
@@ -193,11 +193,12 @@ def test_song_seconds_has_18_30_60_custom():
     assert labels[:4] == ["18 giây", "30 giây", "60 giây", "Nhập thời lượng khác"]
 
 
-def test_half_song_price_and_full_song_multiplier():
+def test_song_price_uses_real_full_quote_without_fake_half(monkeypatch):
+    monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", False)
     half = bot.music_ai_output_price_xu(60, "song_half")
     full = bot.music_ai_output_price_xu(120, "song_full")
-    assert half == bot.HALF_SONG_PRICE_XU
-    assert full == bot.round_video_xu(half * bot.FULL_SONG_MULTIPLIER, bot.MUSIC_AI_PRICE_ROUND_TO_XU)
+    assert half == bot.MUSIC_VOCAL_FULL_PRICE_XU
+    assert full == bot.MUSIC_VOCAL_FULL_PRICE_XU
 
 
 def test_song_seconds_pricing_uses_duration_product():

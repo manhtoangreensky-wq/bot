@@ -161,7 +161,7 @@ def test_music_preview_6s_not_full_duration():
     result = {"guided_duration_seconds": 60, "music_ai_kind": "guided", "selected_prompt": "nhạc nền"}
     text = bot.music_ai_preview_text(result, "vi")
     assert "Thời lượng bản đầy đủ: <b>60 giây</b>" in text
-    assert "tối đa 6 giây" in text
+    assert "Preview: <b>12 giây đầu</b>" in text
     callbacks = _callbacks(bot.music_ai_preview_keyboard("vi", result=result))
     assert "music_quick|showroom|music_ai_preview" in callbacks
     assert "music_quick|showroom|music_ai_confirm" in callbacks
@@ -175,9 +175,9 @@ def test_music_provider_guard_clean():
 
 
 def test_song_seconds_full_guided_flow():
-    assert _rows(bot.music_song_product_keyboard("vi"))[0] == ["1️⃣ Nửa bài", "2️⃣ Full bài"]
+    assert _rows(bot.music_song_product_keyboard("vi"))[0] == ["🎤 Bài hát có lời AI"]
     assert "⏱ Theo số giây" not in _labels(bot.music_song_product_keyboard("vi"))
-    assert "2️⃣ Full bài" in _labels(bot.music_song_product_keyboard("vi"))
+    assert "🎤 Bài hát có lời AI" in _labels(bot.music_song_product_keyboard("vi"))
     assert [item[0] for item in bot.MUSIC_SONG_GENRES] == ["pop", "ballad", "rap", "edm", "acoustic", "bolero", "custom"]
     assert "music_quick|showroom|song_back_topic" in _callbacks(bot.music_song_options_keyboard("genre", "vi"))
     assert "music_quick|showroom|song_back_genre" in _callbacks(bot.music_song_options_keyboard("mood", "vi"))
@@ -196,24 +196,23 @@ def test_song_half_structure():
         "guided_mood": "inspiring",
         "guided_duration": "60s",
     }, "vi")
-    assert "Nửa bài" in text
-    assert "verse" in text
+    assert "nửa bài đủ lời" not in text.lower()
+    assert "Bài hoàn chỉnh" in text
     assert "điệp khúc" in text
-    assert "không cắt giữa câu" in text
 
 
 def test_song_full_price_half_plus_80_percent(monkeypatch):
-    monkeypatch.setattr(bot, "HALF_SONG_PRICE_XU", 300)
-    monkeypatch.setattr(bot, "FULL_SONG_MULTIPLIER", 1.8)
-    assert bot.music_ai_output_price_xu(60, "song_half") == 300
-    assert bot.music_ai_output_price_xu(120, "song_full") == 540
+    monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", False)
+    monkeypatch.setattr(bot, "MUSIC_VOCAL_FULL_PRICE_XU", 500)
+    assert bot.music_ai_output_price_xu(60, "song_half") == 500
+    assert bot.music_ai_output_price_xu(120, "song_full") == 500
 
 
 def test_song_no_nghe_xem_label():
     result = {"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát"}
     labels = _labels(bot.music_ai_preview_keyboard("vi", result=result))
-    assert "▶️ Nghe thử" in labels
-    assert "✅ Tạo bài hát" in labels
+    assert "▶️ Nghe thử 12 giây" in labels
+    assert "✅ Dùng bản đầy đủ" in labels
     assert not any("nghe/xem" in label.lower() for label in labels)
 
 

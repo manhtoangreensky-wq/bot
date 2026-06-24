@@ -22,7 +22,7 @@ def test_public_voice_labels_use_nghe_not_nghe_xem():
     labels = _labels(bot.voice_clone_preview_entry_keyboard(1, "vi"))
     labels += _labels(bot.audio_voice_preview_keyboard("vi"))
     joined = "\n".join(labels)
-    assert "▶️ Nghe thử" in labels
+    assert "▶️ Nghe thử 6 giây" in labels
     assert "✅ Tạo giọng đọc" in labels
     assert "✏️ Sửa nội dung" in labels
     assert "nghe/xem" not in joined.lower()
@@ -131,7 +131,8 @@ def test_background_music_guided_flow_purpose_style_mood_duration_options():
 def test_song_seconds_half_full_guided_flow_complete():
     mode_labels = _labels(bot.music_song_product_keyboard("vi"))
     assert "⏱ Theo số giây" not in mode_labels
-    assert {"1️⃣ Nửa bài", "2️⃣ Full bài"}.issubset(set(mode_labels))
+    assert "🎤 Bài hát có lời AI" in mode_labels
+    assert "1️⃣ Nửa bài" not in mode_labels
     genre_labels = _labels(bot.music_song_options_keyboard("genre", "vi"))
     mood_labels = _labels(bot.music_song_options_keyboard("mood", "vi"))
     vocal_labels = _labels(bot.music_song_options_keyboard("vocal", "vi"))
@@ -140,19 +141,19 @@ def test_song_seconds_half_full_guided_flow_complete():
     assert {"Giọng nam", "Giọng nữ", "Song ca", "Không lời", "Tự nhập giọng hát"}.issubset(set(vocal_labels))
 
 
-def test_song_preview_6s_not_duration():
+def test_song_preview_12s_not_duration():
     result = {"song_product": "full", "guided_duration": "120s"}
     assert bot.music_result_duration_seconds(result) == 120
-    assert bot.paid_preview_seconds(bot.music_result_duration_seconds(result)) == 6
+    assert bot.music_preview_seconds() == 12
 
 
 def test_music_preview_labels_match_selected_product():
     background = {"song_product": ""}
     song = {"song_product": "full"}
-    assert "▶️ Nghe thử" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=background))
-    assert "✅ Tạo nhạc" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=background))
-    assert "▶️ Nghe thử" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=song))
-    assert "✅ Tạo bài hát" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=song))
+    assert "▶️ Nghe thử 12 giây" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=background))
+    assert "✅ Dùng bản đầy đủ" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=background))
+    assert "▶️ Nghe thử 12 giây" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=song))
+    assert "✅ Dùng bản đầy đủ" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=song))
     public_music_text = bot.suno_user_guard_text("vi").lower()
     assert "nhạc/giọng" not in public_music_text
     assert "nghe thử/guard" not in public_music_text
