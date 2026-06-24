@@ -2694,6 +2694,52 @@ def init_db():
         _add_column_if_missing(c, "voice_assets", column_name, column_sql, voice_asset_columns)
     c.execute("CREATE INDEX IF NOT EXISTS idx_voice_assets_user_status ON voice_assets(user_id,status,created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_voice_assets_kind ON voice_assets(voice_kind,status)")
+    for table_name in ("subtitle_assets", "translation_assets", "dub_assets"):
+        c.execute(f"""CREATE TABLE IF NOT EXISTS {table_name} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id TEXT UNIQUE,
+            user_id TEXT NOT NULL,
+            product_context TEXT DEFAULT 'showroom',
+            source_file_ref TEXT DEFAULT '',
+            source_language TEXT DEFAULT '',
+            target_language TEXT DEFAULT '',
+            output_type TEXT DEFAULT '',
+            duration_seconds INTEGER DEFAULT 0,
+            output_bytes INTEGER DEFAULT 0,
+            file_ref TEXT DEFAULT '',
+            file_id TEXT DEFAULT '',
+            local_path TEXT DEFAULT '',
+            status TEXT DEFAULT 'generated_unused',
+            linked_video_session_id TEXT DEFAULT '',
+            price_xu INTEGER DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT,
+            metadata_json TEXT DEFAULT ''
+        )""")
+        media_asset_columns = _table_columns(c, table_name)
+        for column_name, column_sql in [
+            ("asset_id", "asset_id TEXT UNIQUE"),
+            ("user_id", "user_id TEXT NOT NULL DEFAULT ''"),
+            ("product_context", "product_context TEXT DEFAULT 'showroom'"),
+            ("source_file_ref", "source_file_ref TEXT DEFAULT ''"),
+            ("source_language", "source_language TEXT DEFAULT ''"),
+            ("target_language", "target_language TEXT DEFAULT ''"),
+            ("output_type", "output_type TEXT DEFAULT ''"),
+            ("duration_seconds", "duration_seconds INTEGER DEFAULT 0"),
+            ("output_bytes", "output_bytes INTEGER DEFAULT 0"),
+            ("file_ref", "file_ref TEXT DEFAULT ''"),
+            ("file_id", "file_id TEXT DEFAULT ''"),
+            ("local_path", "local_path TEXT DEFAULT ''"),
+            ("status", "status TEXT DEFAULT 'generated_unused'"),
+            ("linked_video_session_id", "linked_video_session_id TEXT DEFAULT ''"),
+            ("price_xu", "price_xu INTEGER DEFAULT 0"),
+            ("created_at", "created_at TEXT"),
+            ("updated_at", "updated_at TEXT"),
+            ("metadata_json", "metadata_json TEXT DEFAULT ''"),
+        ]:
+            _add_column_if_missing(c, table_name, column_name, column_sql, media_asset_columns)
+        c.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_user_status ON {table_name}(user_id,status,created_at)")
+        c.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_linked_session ON {table_name}(linked_video_session_id,status)")
     c.execute("""CREATE TABLE IF NOT EXISTS music_generation_jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
@@ -30601,7 +30647,10 @@ def set_translation_menu_pending(user_id, source_type: str, **fields) -> None:
         "source_type": str(source_type or "text"),
         "created_at_ts": time.time(),
     }
-    payload.update({key: value for key, value in fields.items() if key in {"target_language", "return_action"}})
+    payload.update({
+        key: value for key, value in fields.items()
+        if key in {"target_language", "return_action", "source_text", "confirm_token", "source_language", "output_type"}
+    })
     TRANSLATION_MENU_PENDING[str(user_id)] = payload
 
 def get_translation_menu_pending(user_id) -> dict:
@@ -50585,6 +50634,33 @@ def translation_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         lang=lang,
     )
 
+def translation_text_confirm_text(source_text: str, target: str, lang: str = "vi") -> str:
+    preview = html.escape(str(source_text or "").strip()[:700])
+    target_label = html.escape(translate_target_label(target))
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🌐 <b>Confirm text translation</b>\n\n"
+            f"Target: <b>{target_label}</b>\n\n"
+            f"<blockquote>{preview}</blockquote>\n\n"
+            "TOAN AAS has not called the provider and has not charged Xu. Confirm to translate this text."
+        )
+    return (
+        "🌐 <b>Xác nhận dịch văn bản</b>\n\n"
+        f"Ngôn ngữ đích: <b>{target_label}</b>\n\n"
+        f"<blockquote>{preview}</blockquote>\n\n"
+        "TOAN AAS chưa gọi provider và chưa trừ Xu. Bấm xác nhận để dịch đoạn này."
+    )
+
+def translation_text_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận dịch" if is_vi else "✅ Confirm translation", callback_data="menu|translation_text_confirm")],
+        [
+            InlineKeyboardButton("❌ Hủy" if is_vi else "❌ Cancel", callback_data="menu|translation_text_cancel"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
 def translation_text_target_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return build_2col_keyboard(
@@ -60267,6 +60343,30 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             parse_mode="HTML",
             reply_markup=image_resize_start_keyboard(lang),
         )
+    if action == "translation_text_confirm":
+        pending = get_translation_menu_pending(query.from_user.id)
+        target = normalize_translate_target(pending.get("target_language"))
+        source_text = str(pending.get("source_text") or "").strip()
+        if str(pending.get("source_type") or "") != "text_confirm" or not target or not source_text:
+            return await safe_edit_query_message(
+                query,
+                "⚠️ Phiên xác nhận đã hết hạn. Bot chưa xử lý và chưa trừ Xu.",
+                reply_markup=translation_text_target_keyboard(lang),
+            )
+        clear_translation_menu_pending(query.from_user.id)
+        translate_update = SimpleNamespace(
+            effective_user=query.from_user,
+            callback_query=query,
+            message=query.message,
+        )
+        return await run_translate_text_to_target(translate_update, context, source_text, target)
+    if action == "translation_text_cancel":
+        clear_translation_menu_pending(query.from_user.id)
+        return await safe_edit_query_message(
+            query,
+            "✅ Đã hủy dịch văn bản. TOAN AAS chưa gọi provider và chưa trừ Xu.",
+            reply_markup=translation_language_hub_keyboard(lang),
+        )
     if action == "translation_text":
         return await safe_edit_query_message(
             query,
@@ -62606,10 +62706,81 @@ def subtitle_engine_status_lines() -> list[str]:
         f"admin_dub_audio_test_ready: <code>{_engine_yes_no(admin_dub_audio_test_ready)}</code>",
         f"public_mode_enabled: <code>{_engine_yes_no(public_mode_enabled)}</code>",
         f"partial_result_possible: <code>{_engine_yes_no(partial_result_possible)}</code>",
+        f"Asset storage ready: <code>{_engine_yes_no(media_asset_tables_ready())}</code>",
+        f"Subtitle assets generated_unused: <code>{subtitle_asset_status_counts().get('generated_unused', 0)}</code>",
+        f"Translation assets generated_unused: <code>{translation_asset_status_counts().get('generated_unused', 0)}</code>",
+        f"Dub assets generated_unused: <code>{dub_asset_status_counts().get('generated_unused', 0)}</code>",
         f"Admin paid smoke needed before public-ready claim: <code>{_engine_yes_no(not any_public_ready)}</code>",
         f"Guarded: <code>{_engine_yes_no(not any_public_ready)}</code>",
         "",
         *mode_rows,
+        "Secret handling: configured/missing only; no key, token or secret value is shown.",
+    ]
+
+def translation_engine_status_lines() -> list[str]:
+    pipeline = video_pipeline_status_payload()
+    translate_cap = video_dubbing_capability(
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        {"target_language": "English", "translate_requested": "1"},
+        public=True,
+    )
+    admin_cap = video_dubbing_capability(
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        {"target_language": "English", "translate_requested": "1"},
+        public=False,
+    )
+    counts = translation_asset_status_counts()
+    return [
+        "TRANSLATION ENGINE STATUS",
+        "",
+        "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
+        f"Translation route: <code>{_engine_safe(pipeline.get('translation_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('translation_test'))}</code>",
+        f"ASR route for subtitle files: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
+        f"Public ready: <code>{_engine_yes_no(translate_cap.get('ok'))}</code>",
+        f"Admin configured: <code>{_engine_yes_no(admin_cap.get('ok'))}</code>",
+        f"Public blocker: <code>{_engine_safe(translate_cap.get('reason'))}</code>",
+        f"Admin blocker: <code>{_engine_safe(admin_cap.get('reason'))}</code>",
+        f"Asset storage ready: <code>{_engine_yes_no(media_asset_tables_ready())}</code>",
+        f"generated_unused: <code>{counts.get('generated_unused', 0)}</code>",
+        f"used: <code>{counts.get('used', 0)}</code>",
+        f"failed: <code>{counts.get('failed', 0)}</code>",
+        "Admin smoke command: <code>/tool_test_translation_factory --confirm-paid</code>",
+        "Secret handling: configured/missing only; no key, token or secret value is shown.",
+    ]
+
+def dub_engine_status_lines() -> list[str]:
+    pipeline = video_pipeline_status_payload()
+    dub_cap = video_dubbing_capability(
+        VIDEO_SUBTITLE_MODE_DUB,
+        {"target_language": "English", "voice_kind": "default_female"},
+        public=True,
+    )
+    admin_cap = video_dubbing_capability(
+        VIDEO_SUBTITLE_MODE_DUB,
+        {"target_language": "English", "voice_kind": "default_female"},
+        public=False,
+    )
+    counts = dub_asset_status_counts()
+    return [
+        "DUB ENGINE STATUS",
+        "",
+        "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
+        f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
+        f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
+        f"TTS/dub route: <code>{_engine_safe(pipeline.get('tts_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('tts_test'))}</code>",
+        f"FFmpeg/mux: <code>{_engine_safe(pipeline.get('ffmpeg_mux'))}</code>",
+        f"Default voice fallback: <code>YES</code>",
+        f"Custom clone in dub flow: <code>GUARDED</code>",
+        f"Public ready: <code>{_engine_yes_no(dub_cap.get('ok'))}</code>",
+        f"Admin configured: <code>{_engine_yes_no(admin_cap.get('ok'))}</code>",
+        f"Public blocker: <code>{_engine_safe(dub_cap.get('reason'))}</code>",
+        f"Admin blocker: <code>{_engine_safe(admin_cap.get('reason'))}</code>",
+        f"Asset storage ready: <code>{_engine_yes_no(media_asset_tables_ready())}</code>",
+        f"generated_unused: <code>{counts.get('generated_unused', 0)}</code>",
+        f"used: <code>{counts.get('used', 0)}</code>",
+        f"failed: <code>{counts.get('failed', 0)}</code>",
+        "Admin smoke command: <code>/tool_test_translation_factory --confirm-paid</code>",
         "Secret handling: configured/missing only; no key, token or secret value is shown.",
     ]
 
@@ -62783,6 +62954,110 @@ async def cmd_subtitle_engine_status(update: Update, context: ContextTypes.DEFAU
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await reply_html_lines(update, subtitle_engine_status_lines())
+
+async def cmd_translation_engine_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, translation_engine_status_lines())
+
+async def cmd_dub_engine_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, dub_engine_status_lines())
+
+async def cmd_media_asset_status(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    normalized = normalize_media_asset_kind(kind)
+    counts = media_asset_status_counts(normalized)
+    latest = list_media_asset_records(normalized, limit=5)
+    title = {
+        "subtitle": "SUBTITLE ASSET STATUS",
+        "translation": "TRANSLATION ASSET STATUS",
+        "dub": "DUB ASSET STATUS",
+    }.get(normalized, "MEDIA ASSET STATUS")
+    detail_cmd = {
+        "subtitle": "/subtitle_asset_detail <asset_id>",
+        "translation": "/translation_asset_detail <asset_id>",
+        "dub": "/dub_asset_detail <asset_id>",
+    }.get(normalized, "/media_asset_detail <asset_id>")
+    lines = [
+        title,
+        "",
+        "Scope: admin-only DB/local metadata. No provider call, no paid job, no Xu charge.",
+        f"generated_unused: <code>{counts.get('generated_unused', 0)}</code>",
+        f"used: <code>{counts.get('used', 0)}</code>",
+        f"archived: <code>{counts.get('archived', 0)}</code>",
+        f"failed: <code>{counts.get('failed', 0)}</code>",
+        f"blocked: <code>{counts.get('blocked', 0)}</code>",
+        "",
+        "Latest:",
+        *(media_asset_summary_line(normalized, row) for row in latest),
+        "",
+        f"Commands: <code>{html.escape(detail_cmd)}</code>",
+        "Secret handling: metadata keys only in detail; no token/key/secret values are shown.",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_media_asset_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, kind: str):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    normalized = normalize_media_asset_kind(kind)
+    asset_key = str((context.args or [""])[0] if context and context.args else "").strip()
+    if not asset_key:
+        return await update.message.reply_text(f"Cú pháp: /{normalized}_asset_detail <asset_id>")
+    row = get_media_asset_record(normalized, asset_key)
+    if not row:
+        return await update.message.reply_text("Không tìm thấy asset.")
+    try:
+        metadata = json.loads(str(row.get("metadata_json") or "{}"))
+    except Exception:
+        metadata = {}
+    metadata_keys = sorted(
+        key for key in (metadata if isinstance(metadata, dict) else {}).keys()
+        if not MEDIA_ASSET_DETAIL_HIDDEN_METADATA_KEY_RE.search(str(key))
+    )
+    lines = [
+        f"{normalized.upper()} ASSET DETAIL",
+        "",
+        "Scope: DB/local metadata only. No provider call.",
+        f"Asset: <code>{html.escape(str(row.get('asset_id') or row.get('id') or '-'))}</code>",
+        f"User: <code>{html.escape(str(row.get('user_id') or '-'))}</code>",
+        f"Context: <code>{html.escape(str(row.get('product_context') or '-'))}</code>",
+        f"Source ref: <code>{_engine_safe(row.get('source_file_ref'))}</code>",
+        f"Source language: <code>{_engine_safe(row.get('source_language'))}</code>",
+        f"Target language: <code>{_engine_safe(row.get('target_language'))}</code>",
+        f"Output type: <code>{_engine_safe(row.get('output_type'))}</code>",
+        f"Status: <code>{_engine_safe(row.get('status'))}</code>",
+        f"Duration: <code>{int(row.get('duration_seconds') or 0)}s</code>",
+        f"Output bytes: <code>{int(row.get('output_bytes') or 0)}</code>",
+        f"File ref: <code>{_engine_safe(row.get('file_ref'))}</code>",
+        f"Linked video session: <code>{_engine_safe(row.get('linked_video_session_id'))}</code>",
+        f"Price Xu: <code>{int(row.get('price_xu') or 0)}</code>",
+        f"Created: <code>{_engine_safe(row.get('created_at'))}</code>",
+        f"Updated: <code>{_engine_safe(row.get('updated_at'))}</code>",
+        f"Metadata keys: <code>{html.escape(', '.join(metadata_keys) or '-')}</code>",
+        "Secret handling: provider secrets/raw tokens are not shown.",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_subtitle_asset_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cmd_media_asset_status(update, context, "subtitle")
+
+async def cmd_subtitle_asset_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cmd_media_asset_detail(update, context, "subtitle")
+
+async def cmd_translation_asset_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cmd_media_asset_status(update, context, "translation")
+
+async def cmd_translation_asset_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cmd_media_asset_detail(update, context, "translation")
+
+async def cmd_dub_asset_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cmd_media_asset_status(update, context, "dub")
+
+async def cmd_dub_asset_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cmd_media_asset_detail(update, context, "dub")
 
 async def cmd_video_engine_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -72665,12 +72940,34 @@ async def run_translate_text_to_target(update: Update, context: ContextTypes.DEF
         )
     try:
         result = await translate_to_language(text, target)
+        translated_text = str(result.get("text") or "").strip()
+        if translated_text:
+            data = translated_text.encode("utf-8")
+            source_hash = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
+            asset_id = media_asset_make_id("translation", uid, PRODUCT_CONTEXT_SHOWROOM, f"text:{source_hash}", "txt", seed=f"text:{time.time_ns()}")
+            local_path = write_media_asset_bytes("translation", asset_id, data, ".txt")
+            create_translation_asset_record(
+                user_id=uid,
+                product_context=PRODUCT_CONTEXT_SHOWROOM,
+                source_file_ref=f"text:{source_hash}",
+                source_language="auto",
+                target_language=target,
+                output_type="txt",
+                duration_seconds=0,
+                output_bytes=len(data),
+                file_ref=local_path,
+                local_path=local_path,
+                status="generated_unused",
+                price_xu=0,
+                metadata={"source_type": "text", "provider": result.get("provider") or ""},
+                asset_id=asset_id,
+            )
         save_tool_test_result("translation", "PASS", f"provider={result.get('provider')}; translate success target={target}", uid)
         return await reply_translation_surface(
             update,
             "🌐 <b>BẢN DỊCH TOAN AAS</b>\n\n"
             f"• Đích: <b>{html.escape(translate_target_label(target))}</b>\n\n"
-            f"{html.escape(result.get('text') or '')}",
+            f"{html.escape(translated_text)}",
             parse_mode="HTML",
             reply_markup=translation_result_keyboard(lang),
         )
@@ -77316,6 +77613,321 @@ def voice_asset_summary_line(row: dict) -> str:
         f"| status <code>{html.escape(str(row.get('status') or '-'))}</code> "
         f"| bytes <code>{int(row.get('output_bytes') or 0)}</code>"
     )
+
+MEDIA_ASSET_STATUSES = {"generated_unused", "used", "archived", "failed", "blocked"}
+MEDIA_ASSET_TABLES = {
+    "subtitle": "subtitle_assets",
+    "translation": "translation_assets",
+    "dub": "dub_assets",
+}
+MEDIA_ASSET_PREFIXES = {
+    "subtitle": "sa",
+    "translation": "ta",
+    "dub": "da",
+}
+MEDIA_ASSET_DETAIL_HIDDEN_METADATA_KEY_RE = re.compile(
+    r"(api|token|secret|authorization|bearer|raw|traceback|password|key)",
+    re.I,
+)
+
+def normalize_media_asset_kind(kind: str = "") -> str:
+    value = str(kind or "").strip().lower()
+    if value in {"subtitle", "subtitles", "srt", "vtt"}:
+        return "subtitle"
+    if value in {"translation", "translate", "translated"}:
+        return "translation"
+    if value in {"dub", "dubbing", "audio"}:
+        return "dub"
+    return ""
+
+def media_asset_table(kind: str = "") -> str:
+    normalized = normalize_media_asset_kind(kind)
+    if normalized not in MEDIA_ASSET_TABLES:
+        raise ValueError("invalid_media_asset_kind")
+    return MEDIA_ASSET_TABLES[normalized]
+
+def media_asset_storage_dir(kind: str = "") -> Path:
+    normalized = normalize_media_asset_kind(kind) or "media"
+    env_name = f"{normalized.upper()}_ASSET_STORAGE_DIR"
+    configured = str(os.getenv(env_name) or "").strip()
+    if configured:
+        return Path(configured)
+    db_text = str(DB_FILE or "").replace("\\", "/")
+    folder_name = f"{normalized}_assets"
+    if db_text.startswith("/data/"):
+        return Path("/data") / folder_name
+    return Path(tempfile.gettempdir()) / f"toanaas_{folder_name}"
+
+def sanitize_media_asset_metadata(metadata: dict | None = None) -> dict:
+    clean = {}
+    for key, value in dict(metadata or {}).items():
+        key_text = str(key or "")[:80]
+        if MEDIA_ASSET_DETAIL_HIDDEN_METADATA_KEY_RE.search(key_text):
+            continue
+        if isinstance(value, (int, float, bool)) or value is None:
+            clean[key_text] = value
+        elif isinstance(value, (list, tuple)):
+            clean[key_text] = [sanitize_log_text(str(item))[:180] for item in value[:10]]
+        elif isinstance(value, dict):
+            clean[key_text] = {
+                str(k)[:60]: sanitize_log_text(str(v))[:180]
+                for k, v in value.items()
+                if not MEDIA_ASSET_DETAIL_HIDDEN_METADATA_KEY_RE.search(str(k))
+            }
+        else:
+            clean[key_text] = sanitize_log_text(str(value))[:500]
+    return clean
+
+def media_asset_make_id(
+    kind: str,
+    user_id,
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+    source_file_ref: str = "",
+    output_type: str = "",
+    seed: str = "",
+) -> str:
+    normalized = normalize_media_asset_kind(kind) or "subtitle"
+    payload = "|".join([
+        normalized,
+        str(user_id or ""),
+        normalize_product_context(product_context),
+        str(source_file_ref or "")[:120],
+        str(output_type or "")[:40],
+        str(seed or now_text()),
+    ])
+    prefix = MEDIA_ASSET_PREFIXES.get(normalized, "ma")
+    return f"{prefix}_" + hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()[:18]
+
+def media_asset_video_session_id(user_id, product_context: str = PRODUCT_CONTEXT_SHOWROOM, state: dict | None = None) -> str:
+    state = dict(state or {})
+    if normalize_product_context(product_context or state.get("product_context")) != PRODUCT_CONTEXT_VIDEO_ADDON:
+        return ""
+    for key in ("video_session_id", "linked_video_session_id", "order_id", "project_id", "source_file_id", "video_file_id"):
+        value = str(state.get(key) or "").strip()
+        if value:
+            return value[:180]
+    try:
+        final_state = get_video_finalization_state(user_id) or {}
+    except Exception:
+        final_state = {}
+    for key in ("video_session_id", "order_id", "project_id", "source_file_id", "source_video_file_id"):
+        value = str(final_state.get(key) or "").strip()
+        if value:
+            return value[:180]
+    return str(user_id or "")[:80]
+
+def write_media_asset_bytes(kind: str, asset_id: str, data: bytes, suffix: str = ".bin") -> str:
+    payload = bytes(data or b"")
+    if not asset_id or not payload:
+        return ""
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(asset_id))[:80]
+    suffix = suffix if str(suffix or "").startswith(".") else f".{suffix or 'bin'}"
+    try:
+        folder = media_asset_storage_dir(kind)
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{safe_id}{suffix}"
+        target.write_bytes(payload)
+        return str(target)
+    except Exception as exc:
+        logger.warning("media asset write failed | kind=%s | asset=%s | %s", kind, asset_id, sanitize_log_text(str(exc))[:180])
+        return ""
+
+def create_media_asset_record(
+    kind: str,
+    user_id,
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+    source_file_ref: str = "",
+    source_language: str = "",
+    target_language: str = "",
+    output_type: str = "",
+    duration_seconds: int = 0,
+    output_bytes: int = 0,
+    file_ref: str = "",
+    file_id: str = "",
+    local_path: str = "",
+    status: str = "generated_unused",
+    linked_video_session_id: str = "",
+    price_xu: int = 0,
+    metadata: dict | None = None,
+    asset_id: str = "",
+) -> dict:
+    normalized = normalize_media_asset_kind(kind)
+    table = media_asset_table(normalized)
+    product_context = normalize_product_context(product_context)
+    clean_status = str(status or "generated_unused").strip().lower()
+    if clean_status not in MEDIA_ASSET_STATUSES:
+        clean_status = "generated_unused"
+    final_asset_id = str(asset_id or "").strip() or media_asset_make_id(
+        normalized,
+        user_id,
+        product_context,
+        source_file_ref,
+        output_type,
+    )
+    now = now_text()
+    metadata_json = json.dumps(sanitize_media_asset_metadata(metadata), ensure_ascii=False)
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                f"""
+                INSERT OR REPLACE INTO {table}
+                (asset_id, user_id, product_context, source_file_ref, source_language,
+                 target_language, output_type, duration_seconds, output_bytes, file_ref,
+                 file_id, local_path, status, linked_video_session_id, price_xu,
+                 created_at, updated_at, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        COALESCE((SELECT created_at FROM {table} WHERE asset_id=?), ?), ?, ?)
+                """,
+                (
+                    final_asset_id,
+                    str(user_id),
+                    product_context,
+                    str(source_file_ref or "")[:600],
+                    str(source_language or "")[:120],
+                    str(target_language or "")[:120],
+                    str(output_type or "")[:60],
+                    max(0, int(duration_seconds or 0)),
+                    max(0, int(output_bytes or 0)),
+                    str(file_ref or "")[:600],
+                    str(file_id or "")[:240],
+                    str(local_path or "")[:600],
+                    clean_status,
+                    str(linked_video_session_id or "")[:180],
+                    max(0, int(price_xu or 0)),
+                    final_asset_id,
+                    now,
+                    now,
+                    metadata_json,
+                ),
+            )
+            conn.commit()
+    except Exception as exc:
+        logger.warning("media asset record failed | kind=%s | asset=%s | %s", normalized, final_asset_id, sanitize_log_text(str(exc))[:200])
+    return {
+        "asset_id": final_asset_id,
+        "kind": normalized,
+        "user_id": str(user_id),
+        "product_context": product_context,
+        "source_file_ref": str(source_file_ref or "")[:600],
+        "source_language": str(source_language or "")[:120],
+        "target_language": str(target_language or "")[:120],
+        "output_type": str(output_type or "")[:60],
+        "duration_seconds": max(0, int(duration_seconds or 0)),
+        "output_bytes": max(0, int(output_bytes or 0)),
+        "file_ref": str(file_ref or "")[:600],
+        "file_id": str(file_id or "")[:240],
+        "local_path": str(local_path or "")[:600],
+        "status": clean_status,
+        "linked_video_session_id": str(linked_video_session_id or "")[:180],
+        "price_xu": max(0, int(price_xu or 0)),
+    }
+
+def create_subtitle_asset_record(**kwargs) -> dict:
+    return create_media_asset_record("subtitle", **kwargs)
+
+def create_translation_asset_record(**kwargs) -> dict:
+    return create_media_asset_record("translation", **kwargs)
+
+def create_dub_asset_record(**kwargs) -> dict:
+    return create_media_asset_record("dub", **kwargs)
+
+def get_media_asset_record(kind: str, asset_key: str) -> dict:
+    try:
+        table = media_asset_table(kind)
+        with db_connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                f"SELECT * FROM {table} WHERE asset_id=? OR id=?",
+                (str(asset_key or "").strip(), _safe_int(asset_key, 0)),
+            ).fetchone()
+            return dict(row) if row else {}
+    except Exception as exc:
+        logger.warning("media asset detail failed | kind=%s | %s", kind, sanitize_log_text(str(exc))[:180])
+        return {}
+
+def list_media_asset_records(kind: str, status: str = "", user_id: str = "", limit: int = 20) -> list[dict]:
+    where = []
+    params: list[object] = []
+    if status:
+        where.append("status=?")
+        params.append(str(status).strip().lower())
+    if user_id:
+        where.append("user_id=?")
+        params.append(str(user_id))
+    table = media_asset_table(kind)
+    sql = f"SELECT * FROM {table}"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(max(1, min(100, int(limit or 20))))
+    try:
+        with db_connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return [dict(row) for row in conn.execute(sql, tuple(params)).fetchall()]
+    except Exception as exc:
+        logger.warning("media asset list failed | kind=%s | %s", kind, sanitize_log_text(str(exc))[:180])
+        return []
+
+def media_asset_status_counts(kind: str) -> dict:
+    counts = {status: 0 for status in sorted(MEDIA_ASSET_STATUSES)}
+    try:
+        table = media_asset_table(kind)
+        with db_connect() as conn:
+            for status, count in conn.execute(f"SELECT status, COUNT(1) FROM {table} GROUP BY status").fetchall():
+                counts[str(status or "generated_unused")] = int(count or 0)
+    except Exception as exc:
+        logger.warning("media asset counts failed | kind=%s | %s", kind, sanitize_log_text(str(exc))[:180])
+    return counts
+
+def subtitle_asset_status_counts() -> dict:
+    return media_asset_status_counts("subtitle")
+
+def translation_asset_status_counts() -> dict:
+    return media_asset_status_counts("translation")
+
+def dub_asset_status_counts() -> dict:
+    return media_asset_status_counts("dub")
+
+def get_subtitle_asset_record(asset_key: str) -> dict:
+    return get_media_asset_record("subtitle", asset_key)
+
+def get_translation_asset_record(asset_key: str) -> dict:
+    return get_media_asset_record("translation", asset_key)
+
+def get_dub_asset_record(asset_key: str) -> dict:
+    return get_media_asset_record("dub", asset_key)
+
+def list_subtitle_asset_records(status: str = "", user_id: str = "", limit: int = 20) -> list[dict]:
+    return list_media_asset_records("subtitle", status=status, user_id=user_id, limit=limit)
+
+def list_translation_asset_records(status: str = "", user_id: str = "", limit: int = 20) -> list[dict]:
+    return list_media_asset_records("translation", status=status, user_id=user_id, limit=limit)
+
+def list_dub_asset_records(status: str = "", user_id: str = "", limit: int = 20) -> list[dict]:
+    return list_media_asset_records("dub", status=status, user_id=user_id, limit=limit)
+
+def media_asset_summary_line(kind: str, row: dict) -> str:
+    if not row:
+        return "-"
+    label = normalize_media_asset_kind(kind) or "media"
+    return (
+        f"<code>{html.escape(str(row.get('asset_id') or row.get('id') or '-'))}</code> "
+        f"| kind <code>{html.escape(label)}</code> "
+        f"| user <code>{html.escape(str(row.get('user_id') or '-'))}</code> "
+        f"| output <code>{html.escape(str(row.get('output_type') or '-'))}</code> "
+        f"| status <code>{html.escape(str(row.get('status') or '-'))}</code> "
+        f"| bytes <code>{int(row.get('output_bytes') or 0)}</code>"
+    )
+
+def media_asset_tables_ready() -> bool:
+    try:
+        with db_connect() as conn:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('subtitle_assets','translation_assets','dub_assets')"
+            ).fetchall()
+            return {str(row[0]) for row in rows} == set(MEDIA_ASSET_TABLES.values())
+    except Exception:
+        return False
 
 def voice_profile_policy_label(lang: str = "vi") -> str:
     price = int(VOICE_PROFILE_PRICE_XU or 0)
@@ -128921,6 +129533,31 @@ def video_dubbing_current_video_source(user_id) -> dict:
         "source_kind": "current_video",
     }
 
+def video_dubbing_video_addon_session_ready(user_id) -> bool:
+    try:
+        state = dict(get_video_finalization_state(user_id) or {})
+    except Exception:
+        state = {}
+    if not state:
+        return False
+    payload = dict(state.get("source_payload") or {})
+    project = dict(state.get("video_project") or {})
+    return bool(
+        state.get("video_session_id")
+        or state.get("order_id")
+        or state.get("project_id")
+        or state.get("source_file_id")
+        or state.get("source_video_file_id")
+        or payload.get("source_file_id")
+        or payload.get("video_file_id")
+        or project.get("source_file_id")
+    )
+
+def video_dubbing_video_addon_missing_session_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "⚠️ The video session has expired. TOAN AAS has not processed anything and has not charged Xu. Please return to Video and choose the subtitle/dubbing add-on again."
+    return "⚠️ Phiên video đã hết hạn hoặc thiếu video nguồn. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng quay lại Video và chọn lại phụ đề/lồng tiếng."
+
 def social_link_import_validate(url: str) -> dict:
     clean_url = str(url or "").strip()
     try:
@@ -129060,7 +129697,7 @@ def video_dubbing_output_text(state: dict | None = None, lang: str = "vi") -> st
     if normalize_user_language(lang) != "vi":
         if combo_subtitle_stage:
             if has_subtitle_result:
-                return "📤 <b>Export translated subtitles</b>\n\nYou can export translated subtitles now, or continue to dubbing using those subtitles."
+                return "📤 <b>Export translated subtitles</b>\n\nYou can export SRT, VTT, TXT now, or continue to dubbing using those subtitles."
             return (
                 "✅ <b>Video is ready for translated subtitles</b>\n\n"
                 f"Subtitle language: <b>{html.escape(str(state.get('target_language') or '-'))}</b>\n"
@@ -129069,16 +129706,16 @@ def video_dubbing_output_text(state: dict | None = None, lang: str = "vi") -> st
             )
         if mode == VIDEO_SUBTITLE_MODE_CREATE:
             if has_subtitle_result:
-                return "📤 <b>Subtitles are ready to export</b>\n\nYou can export SRT or burn subtitles into the video."
+                return "📤 <b>Subtitles are ready to export</b>\n\nYou can export SRT, VTT, TXT or burn subtitles into the video if rendering is ready."
             return (
                 "✅ <b>Video is ready for subtitles</b>\n\n"
                 "TOAN AAS will recognize the speech and create subtitles in the spoken language.\n\n"
                 "You can preview or confirm the full output. TOAN AAS has not processed the file and has not charged Xu."
             )
-        return "📤 <b>Export subtitles</b>\n\nYou can preview, export SRT, or burn subtitles into the video."
+        return "📤 <b>Export subtitles</b>\n\nYou can preview, export SRT/VTT/TXT, or burn subtitles into the video if rendering is ready."
     if mode == VIDEO_SUBTITLE_MODE_CREATE:
         if has_subtitle_result:
-            return "📤 <b>Phụ đề đã sẵn sàng xuất</b>\n\nBạn có thể xuất SRT hoặc gắn phụ đề vào video."
+            return "📤 <b>Phụ đề đã sẵn sàng xuất</b>\n\nBạn có thể xuất SRT, VTT, TXT hoặc gắn phụ đề vào video nếu render đã sẵn sàng."
         return (
             "✅ <b>Video đã sẵn sàng tạo phụ đề</b>\n\n"
             "TOAN AAS sẽ nhận diện lời thoại trong video và tạo phụ đề theo đúng ngôn ngữ đang nói.\n\n"
@@ -129086,14 +129723,14 @@ def video_dubbing_output_text(state: dict | None = None, lang: str = "vi") -> st
         )
     if combo_subtitle_stage:
         if has_subtitle_result:
-            return "📤 <b>Xuất phụ đề dịch</b>\n\nBạn có thể xuất phụ đề dịch ngay hoặc tiếp tục lồng tiếng."
+            return "📤 <b>Xuất phụ đề dịch</b>\n\nBạn có thể xuất SRT, VTT, TXT ngay hoặc tiếp tục lồng tiếng."
         return (
             "✅ <b>Video đã sẵn sàng tạo phụ đề dịch</b>\n\n"
             f"Ngôn ngữ phụ đề: <b>{html.escape(str(state.get('target_language') or '-'))}</b>\n"
             "TOAN AAS sẽ tạo phụ đề dịch trước và giữ âm thanh gốc.\n\n"
             "TOAN AAS chưa xử lý và chưa trừ Xu."
         )
-    return "📤 <b>Xuất phụ đề dịch</b>\n\nBạn có thể xem thử, xuất SRT hoặc gắn phụ đề vào video."
+    return "📤 <b>Xuất phụ đề dịch</b>\n\nBạn có thể xem thử, xuất SRT/VTT/TXT hoặc gắn phụ đề vào video nếu render đã sẵn sàng."
 
 def video_dubbing_output_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     state = state or {}
@@ -129109,8 +129746,12 @@ def video_dubbing_output_keyboard(lang: str = "vi", state: dict | None = None) -
         if has_subtitle_result:
             rows = [[
                 InlineKeyboardButton("📄 Xuất SRT" if is_vi else "📄 Export SRT", callback_data="videodub|output|srt"),
-                InlineKeyboardButton("🎞 Gắn phụ đề vào video" if is_vi else "🎞 Burn into video", callback_data="videodub|output|burn"),
+                InlineKeyboardButton("📄 Xuất VTT" if is_vi else "📄 Export VTT", callback_data="videodub|output|vtt"),
             ]]
+            rows.append([
+                InlineKeyboardButton("📝 Xuất TXT" if is_vi else "📝 Export TXT", callback_data="videodub|output|txt"),
+                InlineKeyboardButton("🎞 Gắn phụ đề vào video" if is_vi else "🎞 Burn into video", callback_data="videodub|output|burn"),
+            ])
             rows.append([
                 InlineKeyboardButton("🗣 Tiếp tục lồng tiếng" if is_vi else "🗣 Continue dubbing", callback_data="videodub|continue_dubbing"),
                 InlineKeyboardButton("📝 Chỉnh phụ đề" if is_vi else "📝 Edit subtitles", callback_data="videodub|subtitle_editor"),
@@ -129132,8 +129773,12 @@ def video_dubbing_output_keyboard(lang: str = "vi", state: dict | None = None) -
     if mode == VIDEO_SUBTITLE_MODE_CREATE and has_subtitle_result:
         rows = [[
             InlineKeyboardButton("📄 Xuất SRT" if is_vi else "📄 Export SRT", callback_data="videodub|output|srt"),
-            InlineKeyboardButton("🎞 Gắn vào video" if is_vi else "🎞 Burn into video", callback_data="videodub|output|burn"),
+            InlineKeyboardButton("📄 Xuất VTT" if is_vi else "📄 Export VTT", callback_data="videodub|output|vtt"),
         ]]
+        rows.append([
+            InlineKeyboardButton("📝 Xuất TXT" if is_vi else "📝 Export TXT", callback_data="videodub|output|txt"),
+            InlineKeyboardButton("🎞 Gắn vào video" if is_vi else "🎞 Burn into video", callback_data="videodub|output|burn"),
+        ])
         rows.append([
             InlineKeyboardButton("📝 Chỉnh phụ đề" if is_vi else "📝 Edit subtitles", callback_data="videodub|subtitle_editor"),
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|output_back"),
@@ -129479,6 +130124,39 @@ def video_dubbing_voice_keyboard(lang: str = "vi", state: dict | None = None) ->
         back=(back_label if is_vi else "⬅️ Back one step", "videodub|back_voice"),
     )
 
+def video_dubbing_custom_voice_guard_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎙 <b>Custom dubbing voice is temporarily limited</b>\n\n"
+            "For this dubbing flow, TOAN AAS currently uses the free default male/female voices first.\n\n"
+            "TOAN AAS has not processed the file and has not charged Xu. Please choose a default voice to continue."
+        )
+    return (
+        "🎙 <b>Voice riêng cho lồng tiếng đang tạm giới hạn</b>\n\n"
+        "Ở flow lồng tiếng này, TOAN AAS dùng giọng nam/nữ mặc định miễn phí trước để tạo audio ổn định.\n\n"
+        "TOAN AAS chưa xử lý file và chưa trừ Xu. Anh/chị chọn giọng mặc định để tiếp tục."
+    )
+
+def video_dubbing_custom_voice_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", "videodub|voice|default_female"),
+            ("👨 Giọng nam mặc định" if is_vi else "👨 Default male", "videodub|voice|default_male"),
+        ],
+        lang,
+        back=("⬅️ Quay lại giọng" if is_vi else "⬅️ Back to voices", "videodub|back_voice"),
+    )
+
+def video_dubbing_uses_custom_voice(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    voice_kind = str(state.get("voice_kind") or "").strip().lower()
+    voice_id = str(state.get("voice_id") or "").strip()
+    voice_profile_id = _safe_int(state.get("voice_profile_id"), 0)
+    if voice_kind in {"saved_voice", "custom_clone", "custom_prompt"}:
+        return True
+    return bool(voice_profile_id or (voice_id and voice_kind not in {"default_female", "default_male"}))
+
 def video_dubbing_saved_voice_keyboard(user_id, lang: str = "vi", page: int = 0) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     page = max(0, int(page or 0))
@@ -129691,6 +130369,8 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
 def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     rows = []
+    if str(origin or "").strip().lower() == "video_addon":
+        rows.append([InlineKeyboardButton("⬅️ Quay lại tùy chọn video" if is_vi else "⬅️ Back to video options", callback_data="videodub|return_origin")])
     if normalize_video_translate_mode((state or {}).get("requested_mode")) == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         rows.append([InlineKeyboardButton("🗣 Tiếp tục lồng tiếng" if is_vi else "🗣 Continue dubbing", callback_data="videodub|continue_dubbing")])
     rows.extend([
@@ -130050,6 +130730,47 @@ def video_dubbing_plain_script(subtitle_or_text: str) -> str:
             lines.append(line)
     return "\n".join(lines).strip()
 
+def video_dubbing_srt_to_vtt_text(srt_text: str) -> str:
+    body = str(srt_text or "").replace("\r", "").strip()
+    if not body:
+        return "WEBVTT\n"
+    body = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", body)
+    return "WEBVTT\n\n" + body + "\n"
+
+def video_dubbing_subtitle_plain_text(srt_text: str) -> str:
+    plain = video_dubbing_plain_script(srt_text)
+    return (plain or str(srt_text or "").strip()) + ("\n" if plain or str(srt_text or "").strip() else "")
+
+def video_dubbing_subtitle_output_items(srt_text: str, output_type: str = "srt", mode: str = "") -> list[dict]:
+    output_type = str(output_type or "srt").strip().lower()
+    if output_type not in {"srt", "vtt", "txt"}:
+        output_type = "srt"
+    filename_stem = re.sub(r"[^a-z0-9_]+", "_", f"toan_aas_{normalize_video_translate_mode(mode) or 'subtitle'}".lower()).strip("_")
+    payloads = {
+        "srt": {
+            "output_type": "srt",
+            "suffix": ".srt",
+            "filename": f"{filename_stem}.srt",
+            "caption": "phụ đề SRT",
+            "bytes": str(srt_text or "").encode("utf-8"),
+        },
+        "vtt": {
+            "output_type": "vtt",
+            "suffix": ".vtt",
+            "filename": f"{filename_stem}.vtt",
+            "caption": "phụ đề VTT",
+            "bytes": video_dubbing_srt_to_vtt_text(srt_text).encode("utf-8"),
+        },
+        "txt": {
+            "output_type": "txt",
+            "suffix": ".txt",
+            "filename": f"{filename_stem}.txt",
+            "caption": "transcript TXT",
+            "bytes": video_dubbing_subtitle_plain_text(srt_text).encode("utf-8"),
+        },
+    }
+    return [payloads[output_type]]
+
 async def video_dubbing_extract_embedded_subtitle(source_bytes: bytes, content_type: str = "video/mp4") -> tuple[str, str]:
     if not source_bytes or not str(content_type or "").lower().startswith("video/"):
         return "", "no_video_subtitle_stream"
@@ -130195,10 +130916,10 @@ async def execute_video_dubbing_preview(
             else video_dubbing_guard_text(mode, state, lang, admin=False)
         )
         return {"ok": False, "guard": True, "text": text}
+    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_uses_custom_voice(state):
+        return {"ok": False, "guard": True, "text": video_dubbing_custom_voice_guard_text(lang)}
     source_bytes, content_type = await video_dubbing_download_source(context, state)
-    preview_seconds = calculate_preview_seconds(
-        state.get("video_duration") or state.get("source_duration") or 6
-    )
+    preview_seconds = preview_duration_seconds("subtitle_dub_ai")
     source_info = await video_dubbing_resolve_source_script(
         source_bytes,
         content_type,
@@ -130302,6 +131023,18 @@ def video_dubbing_output_file(data: bytes, filename: str) -> io.BytesIO:
     output.seek(0)
     return output
 
+def video_dubbing_video_render_ready(output_type: str = "", *, audio: bool = False, subtitle: bool = False) -> bool:
+    output_type = str(output_type or "").strip().lower()
+    if output_type not in {"burn", "both", "video", "video_subtitle"}:
+        return False
+    worker = local_worker_status_payload()
+    worker_ready = bool(worker.get("connected") and worker.get("ffmpeg_path"))
+    if audio and not (VIDEO_DUB_MUX_ENABLED and worker_ready):
+        return False
+    if subtitle and not (VIDEO_SUBTITLE_BURN_IN_ENABLED and worker_ready):
+        return False
+    return bool(worker_ready)
+
 async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, state: dict, user_id, allow_admin: bool = False) -> dict:
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
@@ -130393,6 +131126,8 @@ async def execute_video_dubbing_pipeline(
                 else video_dubbing_guard_text(mode, state, lang, admin=False)
             ),
         }
+    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_uses_custom_voice(state):
+        return {"ok": False, "guard": True, "text": video_dubbing_custom_voice_guard_text(lang)}
     pricing = calculate_video_translate_price(
         mode,
         state.get("video_duration") or state.get("source_duration"),
@@ -130425,6 +131160,7 @@ async def execute_video_dubbing_pipeline(
     output_subtitle = str(prepared.get("output_subtitle") or "").strip()
     output_text = str(prepared.get("output_script") or "").strip()
     srt_bytes = b""
+    srt_text = ""
     if mode in {
         VIDEO_SUBTITLE_MODE_CREATE,
         VIDEO_SUBTITLE_MODE_TRANSLATE,
@@ -130454,17 +131190,22 @@ async def execute_video_dubbing_pipeline(
                 state.get("voice_id") or "",
                 state.get("voice_speed") or "1.0",
             )
-    output_type = str(state.get("output_type") or "").strip()
+    output_type = str(state.get("output_type") or "srt").strip().lower()
+    subtitle_items = video_dubbing_subtitle_output_items(srt_text, output_type, mode) if srt_bytes else []
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
     video_output = b""
     if str(content_type or "").lower().startswith("video/"):
-        if audio_bytes and VIDEO_DUB_MUX_ENABLED:
+        if audio_bytes and video_dubbing_video_render_ready(
+            output_type,
+            audio=True,
+            subtitle=wants_subtitle_video,
+        ):
             video_output, _render_detail = await video_dubbing_render_video(
                 video_bytes,
                 dubbed_audio=audio_bytes,
                 subtitle_bytes=srt_bytes if wants_subtitle_video else b"",
             )
-        elif wants_subtitle_video and VIDEO_SUBTITLE_BURN_IN_ENABLED:
+        elif wants_subtitle_video and video_dubbing_video_render_ready(output_type, subtitle=True):
             video_output, _render_detail = await video_dubbing_render_video(
                 video_bytes,
                 subtitle_bytes=srt_bytes,
@@ -130485,18 +131226,98 @@ async def execute_video_dubbing_pipeline(
         if not charge.get("ok"):
             return {"ok": False, "insufficient": True, "text": "⚠️ Số dư đã thay đổi. TOAN AAS chưa gửi output và chưa trừ Xu."}
         charged = int(charge.get("final_cost") or 0)
-    try:
-        if srt_bytes and (not video_output or output_type not in {"burn", "video", "video_subtitle"}):
-            await query.message.reply_document(
-                document=video_dubbing_output_file(srt_bytes, f"toan_aas_{mode}.srt"),
-                filename=f"toan_aas_{mode}.srt",
-                caption=f"✅ {video_dubbing_process_label(mode, lang)} — phụ đề SRT",
+    product_context = normalize_product_context(state.get("product_context") or (PRODUCT_CONTEXT_VIDEO_ADDON if str(state.get("origin") or "") == "video_addon" else PRODUCT_CONTEXT_SHOWROOM))
+    source_ref = str(state.get("source_file_id") or state.get("video_file_id") or state.get("source_ref") or "")[:600]
+    linked_session_id = media_asset_video_session_id(uid, product_context, state)
+    duration_seconds = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
+    subtitle_asset_ids: list[str] = []
+    translation_asset_ids: list[str] = []
+    dub_asset_id = ""
+    for item in subtitle_items:
+        data = bytes(item.get("bytes") or b"")
+        if not data:
+            continue
+        asset_id = media_asset_make_id("subtitle", uid, product_context, source_ref, item.get("output_type"), seed=f"{mode}:{item.get('output_type')}:{time.time_ns()}")
+        local_path = write_media_asset_bytes("subtitle", asset_id, data, item.get("suffix") or ".srt")
+        asset = create_subtitle_asset_record(
+            user_id=uid,
+            product_context=product_context,
+            source_file_ref=source_ref,
+            source_language=str(state.get("source_language") or "auto"),
+            target_language=str(state.get("target_language") or ""),
+            output_type=str(item.get("output_type") or "srt"),
+            duration_seconds=duration_seconds,
+            output_bytes=len(data),
+            file_ref=local_path,
+            local_path=local_path,
+            status="generated_unused",
+            linked_video_session_id=linked_session_id,
+            price_xu=charged,
+            metadata={"mode": mode, "caption": item.get("caption"), "product_context": product_context},
+            asset_id=asset_id,
+        )
+        subtitle_asset_ids.append(str(asset.get("asset_id") or asset_id))
+        if mode == VIDEO_SUBTITLE_MODE_TRANSLATE or str(state.get("translate_requested") or "") == "1":
+            translation_id = media_asset_make_id("translation", uid, product_context, source_ref, item.get("output_type"), seed=f"{mode}:{item.get('output_type')}:{time.time_ns()}")
+            translation_path = write_media_asset_bytes("translation", translation_id, data, item.get("suffix") or ".srt")
+            translation = create_translation_asset_record(
+                user_id=uid,
+                product_context=product_context,
+                source_file_ref=source_ref,
+                source_language=str(state.get("source_language") or "auto"),
+                target_language=str(state.get("target_language") or ""),
+                output_type=str(item.get("output_type") or "srt"),
+                duration_seconds=duration_seconds,
+                output_bytes=len(data),
+                file_ref=translation_path,
+                local_path=translation_path,
+                status="generated_unused",
+                linked_video_session_id=linked_session_id,
+                price_xu=charged,
+                metadata={"mode": mode, "caption": item.get("caption"), "product_context": product_context},
+                asset_id=translation_id,
             )
+            translation_asset_ids.append(str(translation.get("asset_id") or translation_id))
+    if audio_bytes:
+        dub_asset_id = media_asset_make_id("dub", uid, product_context, source_ref, "audio", seed=f"{mode}:audio:{time.time_ns()}")
+        dub_path = write_media_asset_bytes("dub", dub_asset_id, audio_bytes, ".mp3")
+        dub_record = create_dub_asset_record(
+            user_id=uid,
+            product_context=product_context,
+            source_file_ref=source_ref,
+            source_language=str(state.get("source_language") or "auto"),
+            target_language=str(state.get("target_language") or ""),
+            output_type="audio",
+            duration_seconds=duration_seconds,
+            output_bytes=len(audio_bytes),
+            file_ref=dub_path,
+            local_path=dub_path,
+            status="generated_unused",
+            linked_video_session_id=linked_session_id,
+            price_xu=charged,
+            metadata={"mode": mode, "voice_kind": state.get("voice_kind") or "", "product_context": product_context},
+            asset_id=dub_asset_id,
+        )
+        dub_asset_id = str(dub_record.get("asset_id") or dub_asset_id)
+    try:
+        if subtitle_items and (not video_output or output_type not in {"burn", "video", "video_subtitle"}):
+            for item in subtitle_items:
+                data = bytes(item.get("bytes") or b"")
+                if not data:
+                    continue
+                await query.message.reply_document(
+                    document=video_dubbing_output_file(data, str(item.get("filename") or f"toan_aas_{mode}.srt")),
+                    filename=str(item.get("filename") or f"toan_aas_{mode}.srt"),
+                    caption=f"✅ {video_dubbing_process_label(mode, lang)} — {item.get('caption') or 'phụ đề'}",
+                )
         if audio_bytes:
             await query.message.reply_audio(
                 audio=video_dubbing_output_file(audio_bytes, f"toan_aas_{mode}.mp3"),
                 filename=f"toan_aas_{mode}.mp3",
-                caption="✅ Audio lồng tiếng. Ghép audio vào video sẽ thực hiện ở bước xuất video khi đủ điều kiện.",
+                caption=(
+                    "✅ Audio lồng tiếng đã được tạo và lưu thành asset. "
+                    "Ghép audio vào video chỉ thực hiện khi mux/render thật sự sẵn sàng."
+                ),
             )
         if video_output:
             await query.message.reply_video(
@@ -130547,6 +131368,9 @@ async def execute_video_dubbing_pipeline(
         "has_audio": bool(audio_bytes),
         "has_video": bool(video_output),
         "internal_job_id": internal_job_id,
+        "subtitle_asset_ids": subtitle_asset_ids,
+        "translation_asset_ids": translation_asset_ids,
+        "dub_asset_id": dub_asset_id,
     }
 
 async def handle_video_dubbing_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -130838,54 +131662,24 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
         VIDEO_SUBTITLE_MODE_DUB,
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }:
-        match = re.fullmatch(r"\s*(\d{1,3})\s*", value)
-        if not match:
-            set_video_dubbing_pending(uid, "voice_saved_select")
-            await update.message.reply_text(
-                "⚠️ Hãy nhập số voice trong Kho voice, ví dụ: 1 hoặc 2.",
-                reply_markup=video_dubbing_saved_voice_keyboard(uid, lang, _safe_int(state.get("voice_vault_page"), 0)),
-            )
-            return True
-        profile = user_voice_profile_by_display_code(uid, _safe_int(match.group(1), 0))
-        if not voice_profile_can_generate_tts(profile):
-            set_video_dubbing_pending(uid, "voice_saved_select")
-            await update.message.reply_text(
-                "⚠️ Voice này chưa sẵn sàng để lồng tiếng. Hãy chọn voice khác hoặc dùng giọng nam/nữ mặc định.",
-                reply_markup=video_dubbing_saved_voice_keyboard(uid, lang, _safe_int(state.get("voice_vault_page"), 0)),
-            )
-            return True
-        next_step = "voice_speed" if video_dubbing_has_media(state) else "await_video"
-        state = set_video_dubbing_pending(uid, next_step, **video_dubbing_voice_payload("saved_voice", profile, lang))
-        if next_step == "voice_speed":
-            await update.message.reply_text(
-                video_dubbing_voice_speed_text(state, lang),
-                parse_mode="HTML",
-                reply_markup=video_dubbing_voice_speed_keyboard(lang),
-            )
-        else:
-            await update.message.reply_text(
-                video_dubbing_upload_text(state, lang),
-                parse_mode="HTML",
-                reply_markup=video_dubbing_upload_keyboard(lang, state),
-            )
+        set_video_dubbing_pending(uid, "voice")
+        await update.message.reply_text(
+            video_dubbing_custom_voice_guard_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+        )
+        return True
     elif state.get("step") == "voice_custom" and mode in {
         VIDEO_SUBTITLE_MODE_DUB,
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }:
-        next_step = "voice_speed" if video_dubbing_has_media(state) else "await_video"
-        state = set_video_dubbing_pending(uid, next_step, **video_dubbing_voice_payload(value, None, lang))
-        if next_step == "voice_speed":
-            await update.message.reply_text(
-                video_dubbing_voice_speed_text(state, lang),
-                parse_mode="HTML",
-                reply_markup=video_dubbing_voice_speed_keyboard(lang),
-            )
-        else:
-            await update.message.reply_text(
-                video_dubbing_upload_text(state, lang),
-                parse_mode="HTML",
-                reply_markup=video_dubbing_upload_keyboard(lang, state),
-            )
+        set_video_dubbing_pending(uid, "voice")
+        await update.message.reply_text(
+            video_dubbing_custom_voice_guard_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+        )
+        return True
     elif mode in {
         VIDEO_SUBTITLE_MODE_TRANSLATE,
         VIDEO_SUBTITLE_MODE_DUB,
@@ -131011,6 +131805,16 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         origin = "translation"
     if origin not in {"translation", "video", "video_addon"}:
         origin = "video"
+    if origin == "video_addon" and action not in {"return_origin"} and not video_dubbing_video_addon_session_ready(uid):
+        clear_video_dubbing_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            video_dubbing_video_addon_missing_session_text(lang),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎬 Quay lại Video" if normalize_user_language(lang) == "vi" else "🎬 Back to Video", callback_data="menu|main_video")],
+                [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            ]),
+        )
     enter_product_context(
         uid,
         PRODUCT_CONTEXT_SHOWROOM if origin == "translation" else PRODUCT_CONTEXT_VIDEO_ADDON,
@@ -131203,17 +132007,19 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             reply_markup=social_link_import_ready_keyboard(lang),
         )
     if action == "output":
-        output_type = value if value in {"srt", "burn", "both", "audio", "video", "video_subtitle"} else "srt"
+        output_type = value if value in {"srt", "vtt", "txt", "burn", "both", "audio", "video", "video_subtitle"} else "srt"
         output_label = {
             "srt": "File SRT",
+            "vtt": "File VTT",
+            "txt": "Transcript TXT",
             "burn": "Gắn phụ đề vào video",
             "both": "File SRT + video phụ đề",
             "audio": "File audio lồng tiếng",
             "video": "Video lồng tiếng",
             "video_subtitle": "Video lồng tiếng kèm phụ đề",
         }.get(output_type, "File SRT")
-        action_mode = VIDEO_SUBTITLE_MODE_TRANSLATE if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and output_type in {"srt", "burn", "both"} else mode
-        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and output_type in {"srt", "burn", "both"}:
+        action_mode = VIDEO_SUBTITLE_MODE_TRANSLATE if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and output_type in {"srt", "vtt", "txt", "burn", "both"} else mode
+        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and output_type in {"srt", "vtt", "txt", "burn", "both"}:
             state = set_video_dubbing_pending(uid, "confirm", mode=VIDEO_SUBTITLE_MODE_TRANSLATE, process_type=VIDEO_SUBTITLE_MODE_TRANSLATE, video_processing_mode=VIDEO_SUBTITLE_MODE_TRANSLATE, output_type=output_type, output_label=output_label)
         else:
             state = set_video_dubbing_pending(uid, "confirm", output_type=output_type, output_label=output_label)
@@ -131409,47 +132215,41 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
     if action == "voice_saved":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
-        state = set_video_dubbing_pending(uid, "voice_saved_select", voice_vault_page=0)
+        state = set_video_dubbing_pending(uid, "voice")
         return await safe_edit_or_send(
             query,
-            user_voice_profiles_summary(uid, lang, product_context=PRODUCT_CONTEXT_SHOWROOM) + "\n\nNhập số voice hoặc bấm mã số để dùng cho lồng tiếng.",
+            video_dubbing_custom_voice_guard_text(lang),
             parse_mode="HTML",
-            reply_markup=video_dubbing_saved_voice_keyboard(uid, lang, 0),
+            reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
         )
     if action == "voice_create":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
-        enter_product_context(uid, PRODUCT_CONTEXT_VIDEO_ADDON if origin == "video_addon" else PRODUCT_CONTEXT_SHOWROOM, origin_screen="videodub|voice_create", product_area="voice")
+        state = set_video_dubbing_pending(uid, "voice")
         return await safe_edit_or_send(
             query,
-            voice_clone_intro_text(lang),
+            video_dubbing_custom_voice_guard_text(lang),
             parse_mode="HTML",
-            reply_markup=voice_clone_keyboard(lang, PRODUCT_CONTEXT_VIDEO_ADDON if origin == "video_addon" else PRODUCT_CONTEXT_SHOWROOM),
+            reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
         )
     if action == "voice_profile_page":
-        page = max(0, _safe_int(value, 0))
-        state = set_video_dubbing_pending(uid, "voice_saved_select", voice_vault_page=page)
+        state = set_video_dubbing_pending(uid, "voice")
         return await safe_edit_or_send(
             query,
-            user_voice_profiles_summary(uid, lang, product_context=PRODUCT_CONTEXT_SHOWROOM, page=page) + "\n\nNhập số voice hoặc bấm mã số để dùng cho lồng tiếng.",
+            video_dubbing_custom_voice_guard_text(lang),
             parse_mode="HTML",
-            reply_markup=video_dubbing_saved_voice_keyboard(uid, lang, page),
+            reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
         )
     if action == "voice_profile":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
-        profile = user_voice_profile_by_display_code(uid, _safe_int(value, 0))
-        if not voice_profile_can_generate_tts(profile):
-            return await safe_edit_or_send(
-                query,
-                "⚠️ Voice này chưa sẵn sàng để lồng tiếng. Hãy chọn voice khác hoặc dùng giọng nam/nữ mặc định.",
-                reply_markup=video_dubbing_saved_voice_keyboard(uid, lang, _safe_int(state.get("voice_vault_page"), 0)),
-            )
-        next_step = "voice_speed" if video_dubbing_has_media(state) else "await_video"
-        state = set_video_dubbing_pending(uid, next_step, **video_dubbing_voice_payload("saved_voice", profile, lang))
-        if next_step == "voice_speed":
-            return await safe_edit_or_send(query, video_dubbing_voice_speed_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_speed_keyboard(lang))
-        return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
+        state = set_video_dubbing_pending(uid, "voice")
+        return await safe_edit_or_send(
+            query,
+            video_dubbing_custom_voice_guard_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+        )
     if action == "voice":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
@@ -132536,8 +133336,21 @@ async def handle_translation_menu_pending_text(update: Update, context: ContextT
         return True
     target = normalize_translate_target(pending.get("target_language"))
     if source_type == "text" and target:
-        clear_translation_menu_pending(uid)
-        await run_translate_text_to_target(update, context, text, target)
+        token = hashlib.sha256(f"translate:{uid}:{target}:{time.time_ns()}".encode("utf-8")).hexdigest()[:16]
+        set_translation_menu_pending(
+            uid,
+            "text_confirm",
+            target_language=target,
+            source_text=text[:1800],
+            source_language="auto",
+            output_type="txt",
+            confirm_token=token,
+        )
+        await update.message.reply_text(
+            translation_text_confirm_text(text, target, lang),
+            parse_mode="HTML",
+            reply_markup=translation_text_confirm_keyboard(lang),
+        )
         return True
     clear_translation_menu_pending(uid)
     save_translation_request(uid, source_type, source_text=text)
@@ -133789,6 +134602,14 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_tier_status", cmd_video_tier_status))
     tg_app.add_handler(CommandHandler("subtitle_dub_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("subtitle_engine_status", cmd_subtitle_engine_status))
+    tg_app.add_handler(CommandHandler("translation_engine_status", cmd_translation_engine_status))
+    tg_app.add_handler(CommandHandler("dub_engine_status", cmd_dub_engine_status))
+    tg_app.add_handler(CommandHandler("subtitle_asset_status", cmd_subtitle_asset_status))
+    tg_app.add_handler(CommandHandler("subtitle_asset_detail", cmd_subtitle_asset_detail))
+    tg_app.add_handler(CommandHandler("translation_asset_status", cmd_translation_asset_status))
+    tg_app.add_handler(CommandHandler("translation_asset_detail", cmd_translation_asset_detail))
+    tg_app.add_handler(CommandHandler("dub_asset_status", cmd_dub_asset_status))
+    tg_app.add_handler(CommandHandler("dub_asset_detail", cmd_dub_asset_detail))
     tg_app.add_handler(CommandHandler("video_engine_status", cmd_video_engine_status))
     tg_app.add_handler(CommandHandler("translation_provider_status", cmd_translation_provider_status))
     tg_app.add_handler(CommandHandler("translation_provider_curl", cmd_translation_provider_curl))
