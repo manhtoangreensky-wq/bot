@@ -93,7 +93,7 @@ def test_paid_voice_profile_first_free_then_50_xu(monkeypatch):
     assert bot.voice_profile_storage_price_xu(123, bot.PRODUCT_CONTEXT_SHOWROOM, 11) == bot.VOICE_PROFILE_PRICE_XU == 50
 
 
-def test_text_to_voice_generates_audio_with_selected_default_voice(monkeypatch):
+def test_text_to_voice_prepares_default_free_confirmation(monkeypatch):
     user_id = 960601
     _reset_user(user_id)
     calls = {}
@@ -116,10 +116,15 @@ def test_text_to_voice_generates_audio_with_selected_default_voice(monkeypatch):
     handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert handled is True
-    assert calls["text"] == "Xin chào khách hàng TOAN AAS."
-    assert calls["voice_id"] == bot.default_tts_voice_id("female")
-    assert message.outputs[-1]["filename"] == "toan_aas_voice_preview.mp3"
-    assert "giọng nữ mặc định" in message.outputs[-1]["caption"]
+    assert calls == {}
+    assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
+    callbacks = [
+        button.callback_data
+        for row in message.outputs[-1]["reply_markup"].inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+    assert any("voice_default_confirm:female" in callback for callback in callbacks)
 
 
 def test_text_to_voice_flow_does_not_reask_voice_after_default_selected(monkeypatch):
@@ -137,7 +142,7 @@ def test_text_to_voice_flow_does_not_reask_voice_after_default_selected(monkeypa
     asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert "Chọn kiểu giọng" not in "\n".join(str(item.get("text") or item.get("caption") or "") for item in message.outputs)
-    assert message.outputs[-1]["filename"] == "toan_aas_voice_preview.mp3"
+    assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
 
 
 def test_speech_to_text_upload_transcribes_public_audio(monkeypatch):

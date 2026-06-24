@@ -145,8 +145,8 @@ def test_selected_voice_text_generates_audio_without_style_chooser(monkeypatch):
     message = CaptureMessage(user_id, "Nội dung cần đọc")
     handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
     assert handled is True
-    assert calls[0][3] == bot.get_tts_voice_id("default_female")
-    assert not message.outputs
+    assert calls == []
+    assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
 
 
 def test_public_tts_no_admin_blocker_terms():
