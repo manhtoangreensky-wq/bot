@@ -62429,6 +62429,11 @@ def _engine_yes_no(value) -> str:
 def _engine_safe(value, limit: int = 220) -> str:
     return html.escape(sanitize_log_text(str(value or "-"))[:limit])
 
+def _engine_secret_safe(value, limit: int = 220) -> str:
+    safe = sanitize_provider_error(str(value or "-"))
+    safe = re.sub(r"\b(token|secret|api[_-]?key)\s*=\s*[^\s;,&<]+", "[redacted]", safe, flags=re.I)
+    return html.escape(safe[:limit])
+
 def voice_engine_status_lines() -> list[str]:
     tts = get_minimax_voice_readiness()
     clone = get_minimax_voice_clone_readiness()
@@ -62471,7 +62476,12 @@ def voice_engine_status_lines() -> list[str]:
         f"Custom voice usage minimum text: <code>&gt;{int(CUSTOM_VOICE_USAGE_MIN_CHARS or 10)} characters</code>",
         f"Custom voice usage valid duration: <code>&gt;{int(CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS or 3)} seconds</code>",
         f"Clone readiness: <code>{_engine_safe(clone_readiness)}</code>",
-        f"Known blocker: <code>{_engine_safe(clone_blocker or '-')}</code>",
+        f"Known blocker: <code>{_engine_secret_safe(clone_blocker or '-')}</code>",
+        f"ShopAIKey MiniMax configured: <code>{_engine_yes_no(clone.get('shopaikey_configured'))}</code>",
+        f"Key4U MiniMax configured: <code>{_engine_yes_no(clone.get('key4u_configured'))}</code>",
+        f"ShopAIKey clone readiness: <code>{_engine_safe(clone.get('shopaikey_clone_readiness') or 'UNKNOWN')}</code>",
+        f"Key4U clone readiness: <code>{_engine_safe(clone.get('key4u_clone_readiness') or 'UNKNOWN')}</code>",
+        f"Active custom voice route: <code>{_engine_safe(clone.get('active_custom_voice_route') or 'blocked')}</code>",
         f"Custom voice preview quota gate active: <code>{_engine_yes_no(True)}</code> | product <code>voice_ai</code> | window <code>{PREVIEW_QUOTA_WINDOW_DAYS}d</code> | min tier <code>{html.escape(PREVIEW_QUOTA_MIN_TIER)}</code>",
         "Admin smoke commands: <code>/voice_tts_admin_test --confirm-paid</code> | <code>/voice_clone_admin_test --confirm-paid</code>",
         f"MiniMax TTS configured: <code>{_engine_yes_no(tts.get('ready'))}</code>",
@@ -62493,7 +62503,7 @@ def voice_engine_status_lines() -> list[str]:
         f"Clone public ready: <code>{_engine_yes_no(clone_public_ready)}</code>",
         f"TTS admin_test_ready: <code>{_engine_yes_no(tts_admin_test_ready)}</code>",
         f"Clone admin_test_ready: <code>{_engine_yes_no(clone_admin_test_ready)}</code>",
-        f"Clone blocker: <code>{_engine_safe(clone_blocker or clone.get('reason'))}</code>",
+        f"Clone blocker: <code>{_engine_secret_safe(clone_blocker or clone.get('reason'))}</code>",
         f"Admin paid smoke needed before public-ready claim: <code>{_engine_yes_no(admin_smoke_needed)}</code>",
         f"Guarded: <code>{_engine_yes_no(not (tts_public_ready and clone_public_ready))}</code>",
         f"Reason: <code>{_engine_safe(clone.get('reason') or tts.get('reason'))}</code>",
@@ -62716,7 +62726,7 @@ async def cmd_voice_asset_detail(update: Update, context: ContextTypes.DEFAULT_T
         metadata = {}
     metadata_keys = sorted(
         key for key in (metadata if isinstance(metadata, dict) else {}).keys()
-        if not re.search(r"(secret|token|api[_-]?key|authorization|bearer|provider_voice_id|voice_id)", str(key), re.I)
+        if not VOICE_ASSET_DETAIL_HIDDEN_METADATA_KEY_RE.search(str(key))
     )
     lines = [
         "VOICE ASSET DETAIL",
@@ -63222,6 +63232,41 @@ def get_minimax_voice_readiness() -> dict:
 def voice_clone_optional_adapter_available(names: list[str]) -> bool:
     return any(callable(globals().get(name)) for name in names)
 
+def voice_clone_last_forbidden_provider() -> str:
+    attempt = load_provider_attempt("voice_clone")
+    marker = " ".join(str(attempt.get(key) or "") for key in ("status", "error", "clone_status", "route")).lower()
+    if not ("clone_permission_forbidden" in marker or "voice clone user forbidden" in marker or "forbidden" in marker):
+        return ""
+    provider = str(attempt.get("provider") or "").strip().lower()
+    return provider if provider in {"shopaikey_minimax", "key4u_minimax"} else ""
+
+def voice_clone_route_readiness_statuses(readiness: dict | None = None) -> dict:
+    readiness = dict(readiness or get_minimax_voice_clone_readiness())
+    blocked_provider = voice_clone_last_forbidden_provider()
+    statuses = {}
+    for provider, configured_key in (
+        ("shopaikey_minimax", "shopaikey_configured"),
+        ("key4u_minimax", "key4u_configured"),
+    ):
+        configured = bool(readiness.get(configured_key))
+        if not configured:
+            statuses[provider] = "MISSING"
+        elif blocked_provider == provider:
+            statuses[provider] = "BLOCKED"
+        elif provider_status_is_pass(str(readiness.get("clone_smoke") or "")):
+            statuses[provider] = "PASS"
+        else:
+            statuses[provider] = "UNKNOWN"
+    return statuses
+
+def voice_clone_active_custom_voice_route(readiness: dict | None = None) -> str:
+    readability = dict(readiness or get_minimax_voice_clone_readiness())
+    statuses = voice_clone_route_readiness_statuses(readability)
+    for provider in ("shopaikey_minimax", "key4u_minimax"):
+        if bool(readability.get("shopaikey_configured" if provider == "shopaikey_minimax" else "key4u_configured")) and statuses.get(provider) != "BLOCKED":
+            return provider
+    return "blocked"
+
 def get_minimax_voice_clone_readiness() -> dict:
     shopaikey_configured = bool(
         SHOPAIKEY_API_KEY
@@ -63264,6 +63309,19 @@ def get_minimax_voice_clone_readiness() -> dict:
     clone_smoke = preferred_tool_test_status_text("minimax_voice_clone")
     smoke_ok = provider_status_is_pass(tts_smoke) and provider_status_is_pass(clone_smoke)
     configured = bool(shopaikey_configured or key4u_configured or fish_configured or elevenlabs_configured)
+    minimax_configured_routes = [
+        provider
+        for provider, enabled in (
+            ("shopaikey_minimax", shopaikey_configured),
+            ("key4u_minimax", key4u_configured),
+        )
+        if enabled
+    ]
+    blocked_provider = voice_clone_last_forbidden_provider()
+    alternate_minimax_ready = bool(
+        blocked_provider
+        and any(provider != blocked_provider for provider in minimax_configured_routes)
+    )
     provider_public = bool(
         (shopaikey_configured and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED)
         or (key4u_configured and KEY4U_PUBLIC_ENABLED)
@@ -63276,7 +63334,12 @@ def get_minimax_voice_clone_readiness() -> dict:
         and (smoke_ok or not MINIMAX_REQUIRE_SMOKE_PASS)
     )
     alternate_clone_ready = bool(fish_configured or elevenlabs_configured)
-    permission_blocked = bool(voice_clone_last_forbidden_attempt() and not provider_status_is_pass(clone_smoke) and not alternate_clone_ready)
+    permission_blocked = bool(
+        voice_clone_last_forbidden_attempt()
+        and not provider_status_is_pass(clone_smoke)
+        and not alternate_clone_ready
+        and not alternate_minimax_ready
+    )
     if not configured:
         reason = "Missing " + ", ".join(missing)
     elif permission_blocked:
@@ -63285,7 +63348,7 @@ def get_minimax_voice_clone_readiness() -> dict:
         reason = "configured_for_admin_smoke; clone public gate remains closed until smoke/cost pass"
     else:
         reason = "ready"
-    return {
+    payload = {
         "ready": configured,
         "public_enabled": public_ready,
         "missing_env": missing,
@@ -63304,7 +63367,7 @@ def get_minimax_voice_clone_readiness() -> dict:
         "elevenlabs_clone_adapter_ready": elevenlabs_clone_ready,
         "alternate_clone_ready": alternate_clone_ready,
         "provider_permission_blocked": permission_blocked,
-        "provider_permission_blocker": "clone_permission_forbidden" if permission_blocked else "",
+        "provider_permission_blocker": "clone_permission_forbidden" if (permission_blocked or blocked_provider) else "",
         "upload_adapter_missing": optional_missing,
         "routes": [
             name
@@ -63317,6 +63380,11 @@ def get_minimax_voice_clone_readiness() -> dict:
             if enabled
         ],
     }
+    payload["shopaikey_clone_readiness"] = voice_clone_route_readiness_statuses(payload).get("shopaikey_minimax", "MISSING")
+    payload["key4u_clone_readiness"] = voice_clone_route_readiness_statuses(payload).get("key4u_minimax", "MISSING")
+    payload["active_custom_voice_route"] = voice_clone_active_custom_voice_route(payload)
+    payload["blocked_provider"] = blocked_provider
+    return payload
 
 def get_asr_readiness() -> dict:
     missing = []
@@ -76684,16 +76752,26 @@ def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
 VOICE_PROFILE_PREVIEW_TEXT = "Xin chào, đây là bản nghe thử giọng TOAN AAS."
 VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT = "Cảm ơn bạn đã sử dụng trình nhân bản giọng nói của TOAN AAS."
 VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI = (
-    "Tạo giọng riêng đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. "
-    "Bạn có thể dùng giọng đọc mặc định trước."
+    "🎙 Tạo voice riêng đang tạm giới hạn\n\n"
+    "Hiện tại tính năng tạo/clone voice riêng chưa sẵn sàng trên nhà cung cấp.\n\n"
+    "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này.\n\n"
+    "Anh/chị có thể dùng giọng nam/nữ mặc định miễn phí trước, hoặc quay lại sau khi TOAN AAS mở được quyền tạo voice riêng."
 )
 VOICE_CLONE_PROVIDER_NOT_READY_ADMIN_VI = (
     "Tạo giọng riêng chưa sẵn sàng: nhà cung cấp chưa mở quyền clone voice hoặc thiếu adapter upload. "
     "TOAN AAS chưa trừ Xu."
 )
 VOICE_CLONE_PERMISSION_FORBIDDEN_PUBLIC_VI = (
-    "Hiện tại tính năng tạo giọng riêng đang tạm giới hạn bởi nhà cung cấp. "
-    "Anh/chị có thể dùng giọng mặc định chất lượng cao trước, hoặc gửi yêu cầu để TOAN AAS kiểm tra phương án thay thế."
+    "🎙 Tạo voice riêng đang tạm giới hạn\n\n"
+    "Hiện tại tính năng tạo/clone voice riêng chưa sẵn sàng trên nhà cung cấp.\n\n"
+    "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này.\n\n"
+    "Anh/chị có thể dùng giọng nam/nữ mặc định miễn phí trước, hoặc quay lại sau khi TOAN AAS mở được quyền tạo voice riêng."
+)
+VOICE_ASSET_DETAIL_HIDDEN_METADATA_KEY_RE = re.compile(
+    r"(secret|token|api[_-]?key|authorization|bearer|provider[_-]?voice[_-]?id|voice[_-]?id|"
+    r"selected[_-]?adapter|route[_-]?errors?|error[_-]?code|provider[_-]?status|payload[_-]?fields|"
+    r"http[_-]?status|operation|adapter|provider[_-]?message|raw|endpoint|url|api[_-]?(route|url))",
+    re.I,
 )
 VOICE_PROFILE_FAILED_DETAIL_VI = "Giọng này chưa sẵn sàng để tạo file đọc. Bạn có thể đổi tên, xóa hoặc tạo giọng mới."
 VOICE_CLONE_PERMISSION_FORBIDDEN_PROFILE_STATUSES = {
@@ -76737,13 +76815,12 @@ def voice_clone_permission_forbidden_keyboard(lang: str = "vi", product_context:
     is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
-    buttons = [
-        ("🎙 Dùng giọng nữ mặc định" if is_vi else "🎙 Use default female", cb("voice_default_female")),
-        ("🎙 Dùng giọng nam mặc định" if is_vi else "🎙 Use default male", cb("voice_default_male")),
-        ("📝 Nhập chữ để đọc thử" if is_vi else "📝 Enter text to preview", cb("voice_tts_text")),
-        ("⬅️ Quay lại" if is_vi else "⬅️ Back", cb("voice_hub")),
-    ]
-    return build_2col_keyboard(buttons, nav_main=True, lang=lang)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎙 Dùng giọng nữ mặc định miễn phí" if is_vi else "🎙 Use default female free", callback_data=cb("voice_default_female"))],
+        [InlineKeyboardButton("🎙 Dùng giọng nam mặc định miễn phí" if is_vi else "🎙 Use default male free", callback_data=cb("voice_default_male"))],
+        [InlineKeyboardButton("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", callback_data=cb("voice_profiles"))],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
 
 def voice_clone_provider_not_ready_public_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) == "vi":
@@ -78344,6 +78421,15 @@ def voice_clone_not_ready_status(route_errors: list[dict | str] | None = None, e
         return "CLONE_ADAPTER_MISSING"
     return "CLONE_NOT_READY"
 
+def voice_clone_permission_error(error: Exception | str = "") -> bool:
+    marker = str(error or "").lower()
+    return bool(
+        "clone_permission_forbidden" in marker
+        or "clone_permis" in marker
+        or "voice clone user forbidden" in marker
+        or "forbidden" in marker
+    )
+
 def voice_clone_last_forbidden_attempt() -> bool:
     attempt = load_provider_attempt("voice_clone")
     marker = " ".join(str(attempt.get(key) or "") for key in ("status", "error", "clone_status", "route")).lower()
@@ -78477,6 +78563,49 @@ def voice_clone_access_allowed(user_id, readiness: dict | None = None) -> bool:
     )
     return bool(decision.get("allowed"))
 
+def voice_clone_provider_route_names(readiness: dict | None = None, *, include_optional: bool = True) -> list[str]:
+    readiness = dict(readiness or get_minimax_voice_clone_readiness())
+    names = []
+    if readiness.get("shopaikey_configured"):
+        names.append("shopaikey_minimax")
+    if readiness.get("key4u_configured"):
+        names.append("key4u_minimax")
+    if include_optional and readiness.get("fish_audio_configured"):
+        names.append("fish_audio")
+    if include_optional and readiness.get("elevenlabs_configured"):
+        names.append("elevenlabs")
+    if readiness.get("provider_permission_blocked") and not voice_clone_last_forbidden_provider() and len(names) <= 1:
+        return []
+    preferred = str(readiness.get("active_custom_voice_route") or "").strip()
+    if preferred in names:
+        names = [preferred, *[name for name in names if name != preferred]]
+    blocked = voice_clone_last_forbidden_provider()
+    if blocked in names:
+        unblocked = [name for name in names if name != blocked]
+        if unblocked:
+            names = unblocked
+        else:
+            names = []
+    return names
+
+def voice_clone_provider_route_attempts(readiness: dict | None = None, *, admin_access: bool = False) -> list[tuple[str, object, object, object]]:
+    readiness = dict(readiness or get_minimax_voice_clone_readiness())
+
+    async def key4u_clone_tts(text: str, voice_id: str = "", voice_style: str = ""):
+        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=admin_access)
+
+    route_map = {
+        "shopaikey_minimax": (shopaikey_minimax_upload_voice_sample, shopaikey_minimax_voice_clone, shopaikey_minimax_tts_bytes),
+        "key4u_minimax": (key4u_minimax_upload_voice_sample, key4u_minimax_voice_clone, key4u_clone_tts),
+        "fish_audio": (fish_audio_upload_voice_sample_adapter, fish_audio_voice_clone_adapter, lambda text, voice_id="", voice_style="": tts_fish_audio_bytes(text)),
+        "elevenlabs": (elevenlabs_upload_voice_sample_adapter, elevenlabs_voice_clone_adapter, lambda text, voice_id="", voice_style="": tts_elevenlabs_bytes(text)),
+    }
+    attempts = []
+    for name in voice_clone_provider_route_names(readiness):
+        upload_call, clone_call, tts_call = route_map[name]
+        attempts.append((name, upload_call, clone_call, tts_call))
+    return attempts
+
 def mark_voice_profile_activation_failed(user_id, profile_id: int, profile: dict | None, status: str, admin_error: str) -> dict:
     metadata = voice_profile_metadata(profile or {})
     metadata["activation_status"] = str(status or "failed")
@@ -78531,8 +78660,9 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
     readiness = get_minimax_voice_clone_readiness()
     admin_access = is_admin_user(user_id)
-    if readiness.get("provider_permission_blocked"):
-        failed_profile = mark_voice_profile_activation_failed(
+    route_attempts = voice_clone_provider_route_attempts(readiness, admin_access=admin_access)
+    if readiness.get("provider_permission_blocked") and not route_attempts:
+        mark_voice_profile_activation_failed(
             user_id,
             profile_id,
             profile,
@@ -78540,19 +78670,8 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             "CLONE_PERMISSION_FORBIDDEN",
         )
         return await query.message.reply_text(
-            voice_clone_admin_preview_failure_text(
-                readiness,
-                provider_name="clone_permission_forbidden",
-                output_bytes=0,
-                route_errors=[voice_clone_route_error("voice_clone", "clone", "clone", "CLONE_PERMISSION_FORBIDDEN", "voice clone user forbidden")],
-                error="CLONE_PERMISSION_FORBIDDEN",
-            ) if admin_access else voice_clone_permission_forbidden_public_text(lang),
-            parse_mode="HTML" if admin_access else None,
-            reply_markup=(
-                voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile)
-                if admin_access
-                else voice_clone_permission_forbidden_keyboard(lang, ctx)
-            ),
+            voice_clone_permission_forbidden_public_text(lang),
+            reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
         )
     if not voice_clone_access_allowed(user_id, readiness):
         if not load_provider_attempt("voice_clone"):
@@ -78566,7 +78685,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
                 },
                 user_id,
             )
-        failed_profile = mark_voice_profile_activation_failed(
+        mark_voice_profile_activation_failed(
             user_id,
             profile_id,
             profile,
@@ -78575,11 +78694,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
         return await query.message.reply_text(
             voice_clone_provider_not_ready_public_text(lang),
-            reply_markup=(
-                voice_clone_admin_guard_keyboard(profile_id, lang, ctx)
-                if is_admin_user(user_id)
-                else voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile)
-            ),
+            reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
         )
     if not full_generation:
         quota_decision = preview_quota_guard(user_id, "voice_ai")
@@ -78642,22 +78757,6 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         provider_voice_id = make_minimax_voice_id(user_id, profile_id=profile_id)
         preview_text = str(guard.get("preview_text") or capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT))
         provider_file_id = ""
-        route_attempts = []
-        async def key4u_clone_tts(text: str, voice_id: str = "", voice_style: str = ""):
-            return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=admin_access)
-        async def fish_audio_clone_tts(text: str, voice_id: str = "", voice_style: str = ""):
-            return await tts_fish_audio_bytes(text)
-        async def elevenlabs_clone_tts(text: str, voice_id: str = "", voice_style: str = ""):
-            return await tts_elevenlabs_bytes(text)
-        if readiness.get("key4u_configured") and (KEY4U_PUBLIC_ENABLED or admin_access):
-            route_attempts.append(("key4u_minimax", key4u_minimax_upload_voice_sample, key4u_minimax_voice_clone, key4u_clone_tts))
-        smoke_ok = str(readiness.get("tts_smoke") or "") == "PASS" and str(readiness.get("clone_smoke") or "") == "PASS"
-        if readiness.get("shopaikey_configured") and (admin_access or smoke_ok or not MINIMAX_REQUIRE_SMOKE_PASS):
-            route_attempts.append(("shopaikey_minimax", shopaikey_minimax_upload_voice_sample, shopaikey_minimax_voice_clone, shopaikey_minimax_tts_bytes))
-        if readiness.get("fish_audio_configured"):
-            route_attempts.append(("fish_audio", fish_audio_upload_voice_sample_adapter, fish_audio_voice_clone_adapter, fish_audio_clone_tts))
-        if readiness.get("elevenlabs_configured"):
-            route_attempts.append(("elevenlabs", elevenlabs_upload_voice_sample_adapter, elevenlabs_voice_clone_adapter, elevenlabs_clone_tts))
         if not route_attempts:
             raise RuntimeError("voice_routes_not_ready:" + voice_clone_admin_blocker(readiness))
         async def _voice_clone_executor_gate():
@@ -78855,22 +78954,10 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             updated_by=user_id,
         )
         failed_profile = mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed_" + fail_status.lower(), str(exc))
-        if voice_clone_permission_error(exc) and not admin_access:
+        if voice_clone_permission_error(exc):
             return await query.message.reply_text(
                 voice_clone_permission_forbidden_public_text(lang),
                 reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
-            )
-        if admin_access:
-            return await query.message.reply_text(
-                voice_clone_admin_preview_failure_text(
-                    readiness,
-                    provider_name=provider_name,
-                    output_bytes=len(preview_bytes or b""),
-                    route_errors=route_errors,
-                    error=exc,
-                ),
-                parse_mode="HTML",
-                reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
             )
         return await query.message.reply_text(
             "⚙️ Bản nghe thử giọng chưa tạo được. TOAN AAS chưa trừ Xu. Bạn có thể dùng giọng mặc định miễn phí hoặc thử lại sau.",
