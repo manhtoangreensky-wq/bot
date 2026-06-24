@@ -46199,7 +46199,7 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_kling_video", "tool_test_runway_video", "tool_test_heygen_avatar",
     "tool_test_music_library", "tool_test_sfx_library", "tool_test_media_library",
     "tool_test_music_ai", "tool_test_replicate_media",
-    "orchestrator_status", "provider_matrix", "tool_test_openrouter",
+    "orchestrator_status", "provider_matrix", "provider_usage", "providers_compact", "provider_detail", "core_4_status", "core_blockers", "tool_test_openrouter",
     "tool_test_kling_status", "tool_test_replicate_status",
     "tool_test_elevenlabs_status", "tool_test_deepgram_status",
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_chat", "tool_test_shopaikey_tts",
@@ -65362,6 +65362,245 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not db_status["ok"]:
         lines.append(f"DB error: <code>{html.escape(db_status.get('error') or '-')}</code>")
     await reply_html_lines(update, lines)
+
+def providers_compact_text() -> str:
+    providers = provider_status_payload()
+    db_status = db_status_payload()
+    shopaikey_usage = shopaikey_last_usage_snapshot()
+    key4u = key4u_status_payload()
+    key4u_manual = key4u_manual_usage_snapshot()
+    multiscene = video_multiscene_status_payload()
+    media = providers.get("media_factory") or {}
+    return "\n".join([
+        "🔐 <b>TOAN AAS Providers Compact</b>",
+        "",
+        "<b>Core</b>",
+        f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
+        f"• Public URL: <code>{provider_status_text(providers['core']['public_base_url'])}</code>",
+        f"• DB: <code>{'OK' if db_status.get('ok') else 'FAIL'}</code>",
+        "",
+        "<b>AI</b>",
+        f"• Gemini/OpenAI/OpenRouter: <code>{provider_status_text(providers['ai']['gemini'])}/{provider_status_text(providers['ai']['openai'])}/{provider_status_text(providers['ai']['openrouter'])}</code>",
+        f"• AI smoke: <code>{html.escape(preferred_tool_test_status_text('ai_chat', 'ai'))}</code>",
+        "",
+        "<b>ShopAIKey</b>",
+        f"• Enabled/configured: <code>{'YES' if providers['ai'].get('shopaikey') else 'NO'}</code>",
+        f"• Usage remaining: <code>{html.escape(str(shopaikey_usage.get('remaining') or shopaikey_usage.get('balance') or '-'))}</code>",
+        "• Refresh: <code>/shopaikey_usage</code>",
+        "",
+        "<b>Key4U</b>",
+        f"• Enabled/configured: <code>{'YES' if key4u.get('enabled') else 'NO'}/{ 'YES' if key4u.get('configured') else 'NO'}</code>",
+        f"• Manual balance: <code>{html.escape(str(key4u_manual.get('balance_display') or 'not_set'))}</code>",
+        "• Usage commands: <code>/key4u_usage_refresh</code> | <code>/key4u_usage_status</code>",
+        "",
+        "<b>Audio</b>",
+        f"• Deepgram/Fish/Eleven/Edge: <code>{provider_status_text(providers['audio']['deepgram'])}/{provider_status_text(providers['audio']['fish_audio'])}/{provider_status_text(providers['audio']['elevenlabs'])}/{provider_status_text(providers['audio']['edge_tts'])}</code>",
+        f"• Voice clone public: <code>{'ON' if get_minimax_voice_clone_readiness().get('public_enabled') else 'OFF'}</code>",
+        "",
+        "<b>Video</b>",
+        f"• Multiscene admin ready: <code>{'YES' if multiscene.get('admin_multiscene_smoke_ready') else 'NO'}</code>",
+        f"• Multiscene missing: <code>{html.escape(', '.join(multiscene.get('exact_missing_components') or []) or '-')}</code>",
+        "",
+        "<b>Publish</b>",
+        f"• Customer publish: <code>{'ON' if media.get('customer_publish') else 'OFF'}</code>",
+        f"• Auto publish: <code>{'ON' if media.get('auto_publish') else 'OFF'}</code> | admin planning only",
+        "",
+        "Chi tiết: <code>/provider_detail core|ai|shopaikey|key4u|audio|video|publish</code>",
+        "Bản dài vẫn còn ở <code>/providers</code>.",
+    ])
+
+def provider_detail_text(section: str) -> str:
+    section = str(section or "").strip().lower()
+    providers = provider_status_payload()
+    if section in {"", "help"}:
+        return "\n".join([
+            "📋 <b>Provider Detail</b>",
+            "Dùng: <code>/provider_detail core|ai|shopaikey|key4u|audio|video|publish</code>",
+            "Không gọi provider mới, chỉ đọc trạng thái hiện có.",
+        ])
+    if section == "core":
+        db_status = db_status_payload()
+        return "\n".join([
+            "🧩 <b>Provider Detail — Core</b>",
+            f"• Telegram: <code>{provider_status_text(providers['core']['telegram'])}</code>",
+            f"• Public URL: <code>{provider_status_text(providers['core']['public_base_url'])}</code>",
+            f"• DB: <code>{'OK' if db_status.get('ok') else 'FAIL'}</code>",
+            f"• System mode: <code>{html.escape(str(current_system_mode().get('label') or 'NORMAL'))}</code>",
+        ])
+    if section == "ai":
+        return "\n".join([
+            "🤖 <b>Provider Detail — AI</b>",
+            f"• Gemini: <code>{provider_runtime_status_text(providers['ai']['gemini'], 'ai_gemini', 'ai_chat', 'ai')}</code>",
+            f"• OpenAI: <code>{provider_runtime_status_text(providers['ai']['openai'], 'ai_openai', 'ai_chat', 'ai')}</code>",
+            f"• OpenRouter: <code>{provider_status_text(providers['ai']['openrouter'])}</code>",
+            f"• ShopAIKey chat fallback: <code>{'ON' if shopaikey_public_chat_fallback_enabled() else 'OFF'}</code>",
+        ])
+    if section == "shopaikey":
+        usage = shopaikey_last_usage_snapshot()
+        return "\n".join([
+            "🧾 <b>Provider Detail — ShopAIKey</b>",
+            f"• Enabled/configured: <code>{'YES' if providers['ai'].get('shopaikey') else 'NO'}</code>",
+            f"• Remaining: <code>{html.escape(str(usage.get('remaining') or '-'))}</code>",
+            f"• Total: <code>{html.escape(str(usage.get('total') or '-'))}</code>",
+            f"• Group: <code>{html.escape(str(usage.get('group_name') or usage.get('group') or '-'))}</code>",
+            f"• Last refresh: <code>{html.escape(str(usage.get('last_at') or '-'))}</code>",
+            "• Refresh: <code>/shopaikey_usage</code>",
+        ])
+    if section == "key4u":
+        snapshot = key4u_usage_snapshot()
+        return "\n".join([
+            "🔑 <b>Provider Detail — Key4U</b>",
+            f"• Remote usage: <code>{html.escape(str(snapshot.get('remote_usage') or '-'))}</code>",
+            f"• Manual balance: <code>{html.escape(str(snapshot.get('manual_balance') or 'not_set'))}</code>",
+            f"• Source: <code>{html.escape(str(snapshot.get('manual_source') or '-'))}</code>",
+            f"• Local estimated used: <code>{html.escape(str(snapshot.get('local_estimated_used') or '-'))}</code>",
+            f"• Estimated remaining: <code>{html.escape(str(snapshot.get('estimated_remaining') or '-'))}</code>",
+            "• Commands: <code>/key4u_usage_refresh</code> | <code>/key4u_usage_set_manual &lt;amount&gt;</code> | <code>/key4u_usage_status</code>",
+        ])
+    if section == "audio":
+        return "\n".join([
+            "🎙 <b>Provider Detail — Audio</b>",
+            f"• Deepgram: <code>{provider_status_text(providers['audio']['deepgram'])}</code>",
+            f"• Fish Audio: <code>{provider_runtime_status_text(providers['audio']['fish_audio'], 'tts:fish', 'tts')}</code>",
+            f"• ElevenLabs: <code>{provider_runtime_status_text(providers['audio']['elevenlabs'], 'tts:elevenlabs', 'tts')}</code>",
+            f"• Edge TTS: <code>{'configured/built_in' if providers['audio']['edge_tts'] else 'missing'}</code>",
+            f"• Voice clone public: <code>{'ON' if get_minimax_voice_clone_readiness().get('public_enabled') else 'OFF'}</code>",
+            "• Detail: <code>/voice_status</code>",
+        ])
+    if section == "video":
+        item = video_multiscene_status_payload()
+        return "\n".join([
+            "🎞 <b>Provider Detail — Video</b>",
+            f"• Multiscene admin ready: <code>{'YES' if item.get('admin_multiscene_smoke_ready') else 'NO'}</code>",
+            f"• Missing: <code>{html.escape(', '.join(item.get('exact_missing_components') or []) or '-')}</code>",
+            f"• Last result: <code>{html.escape(str(item.get('last_result') or '-'))}</code>",
+            f"• Public enabled: <code>{'YES' if item.get('public_enabled') else 'NO'}</code>",
+            "• Detail: <code>/video_multiscene_status</code>",
+        ])
+    if section == "publish":
+        media = providers.get("media_factory") or {}
+        return "\n".join([
+            "📣 <b>Provider Detail — Publish</b>",
+            f"• Customer publish: <code>{'ON' if media.get('customer_publish') else 'OFF'}</code>",
+            f"• Auto publish: <code>{'ON' if media.get('auto_publish') else 'OFF'}</code>",
+            "• Marketing tự động sẽ xử lý sau khi 4 lỗi lõi ổn định.",
+            "• Current rule: admin-only, planning/UX only, no social API call, no auto publish, không trừ Xu.",
+        ])
+    return "⚠️ Section không hợp lệ. Dùng: <code>/provider_detail core|ai|shopaikey|key4u|audio|video|publish</code>"
+
+def core_4_latest_job_summary(*features: str) -> str:
+    for feature in features:
+        try:
+            jobs = list_engine_async_jobs(feature, limit=1, active_only=False)
+        except Exception:
+            jobs = []
+        if jobs:
+            job = dict(jobs[0] or {})
+            internal_id = str(job.get("internal_job_id") or job.get("parent_task_id") or "-")
+            status = str(job.get("status") or "-")
+            age = engine_async_age_text(job) if job.get("created_at") else "-"
+            error = sanitize_log_text(str(job.get("error") or job.get("fail_category") or ""))[:120]
+            suffix = f" | error={error}" if error else ""
+            return f"{internal_id} | {status} | age={age}{suffix}"
+    return "none"
+
+def core_4_status_text() -> str:
+    clone = get_minimax_voice_clone_readiness()
+    clone_attempt = load_provider_attempt("voice_clone")
+    clone_blocker = (
+        clone.get("provider_permission_blocker")
+        or clone_attempt.get("error")
+        or clone.get("reason")
+        or "permission/fallback not ready"
+    )
+    clone_status = "READY" if clone.get("public_enabled") else "BLOCKED"
+
+    suno = get_suno_music_readiness()
+    music_attempt = load_provider_attempt("music")
+    music_status = "READY" if suno.get("full_result_ready") else "BLOCKED"
+    music_blocker = (
+        music_attempt.get("download_status")
+        or music_attempt.get("fetch_status")
+        or music_attempt.get("error")
+        or ", ".join(music_ai_admin_blockers())
+        or "processing/no audio download"
+    )
+
+    multiscene = video_multiscene_status_payload()
+    video_missing = ", ".join(multiscene.get("exact_missing_components") or [])
+    video_last = str(multiscene.get("last_result") or "")
+    video_status = "READY" if multiscene.get("admin_multiscene_smoke_ready") and not video_missing else "BLOCKED"
+    video_blocker = video_last or video_missing or "upstream overloaded/retry/fallback review"
+
+    subtitle = get_subtitle_dub_readiness()
+    subtitle_caps = [
+        video_dubbing_capability(mode, public=True)
+        for mode in (VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
+    ]
+    subtitle_missing = []
+    for cap in subtitle_caps:
+        subtitle_missing.extend(cap.get("missing") or [])
+    subtitle_missing_text = ", ".join(dict.fromkeys(str(item) for item in subtitle_missing if item)) or "-"
+    subtitle_status = "READY" if subtitle.get("ready") and subtitle.get("public_enabled") else "GUARDED"
+    subtitle_blocker = subtitle.get("admin_debug_reason") or subtitle.get("reason") or subtitle_missing_text or "not public-ready"
+
+    providers = provider_status_payload()
+    media = providers.get("media_factory") or {}
+    return "\n".join([
+        "🧭 <b>P0 Core Blockers</b>",
+        "",
+        "<b>1. Voice clone</b>",
+        f"Status: <code>{html.escape(clone_status)}</code>",
+        f"Blocker: <code>{html.escape(sanitize_log_text(str(clone_blocker))[:220])}</code>",
+        "Next action: <code>/voice_status</code> + smoke clone route after provider permission/fallback is ready.",
+        "Public impact: <code>voice clone stays guarded; default TTS fallback only</code>",
+        "",
+        "<b>2. Suno/music</b>",
+        f"Status: <code>{html.escape(music_status)}</code>",
+        f"Latest job: <code>{html.escape(core_4_latest_job_summary('music_suno', 'music_song'))}</code>",
+        f"Blocker: <code>{html.escape(sanitize_log_text(str(music_blocker))[:220])}</code>",
+        "Next action: <code>/suno_status</code> + inspect processing/fetch/download path; no provider call from this board.",
+        "",
+        "<b>3. Video multiscene</b>",
+        f"Status: <code>{html.escape(video_status)}</code>",
+        f"Latest job: <code>{html.escape(core_4_latest_job_summary('video_multiscene'))}</code>",
+        f"Blocker: <code>{html.escape(sanitize_log_text(str(video_blocker))[:220])}</code>",
+        "Next action: <code>/video_multiscene_status</code> + retry/fallback after provider overload clears.",
+        "",
+        "<b>4. Subtitle/dub</b>",
+        f"Status: <code>{html.escape(subtitle_status)}</code>",
+        f"Blocker: <code>{html.escape(sanitize_log_text(str(subtitle_blocker))[:220])}</code>",
+        f"Missing: <code>{html.escape(subtitle_missing_text)}</code>",
+        "Next action: <code>/subtitle_dub_status</code> + verify ASR/translate/TTS/mux route.",
+        "",
+        "<b>Marketing</b>",
+        f"• Auto publish public: <code>{'ON' if media.get('auto_publish') else 'OFF'}</code>",
+        "• Marketing tự động sẽ xử lý sau khi 4 lỗi lõi ổn định.",
+        "• Current rule: <code>admin-only / planning UX only / no social API call / no auto publish / không trừ Xu</code>",
+        "",
+        "Board này chỉ đọc trạng thái local/settings; không gọi provider.",
+    ])
+
+async def cmd_provider_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await reply_html_lines(update, admin_provider_usage_text_v2().splitlines())
+
+async def cmd_providers_compact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await reply_html_lines(update, providers_compact_text().splitlines())
+
+async def cmd_provider_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    section = context.args[0] if context.args else ""
+    await reply_html_lines(update, provider_detail_text(section).splitlines())
+
+async def cmd_core_4_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await reply_html_lines(update, core_4_status_text().splitlines())
 
 LOCAL_RENDER_ADMIN_ONLY_MESSAGE = "⚠️ Công cụ local render đang admin test. Bot chưa trừ Xu."
 
@@ -124037,6 +124276,12 @@ def admin_provider_usage_text_v2() -> str:
         "",
         *key4u_provider_usage_lines_for_admin(),
         "",
+        "<b>Commands</b>",
+        "• <code>/shopaikey_usage</code>",
+        "• <code>/key4u_usage_refresh</code>",
+        "• <code>/key4u_usage_set_manual &lt;amount&gt;</code>",
+        "• <code>/key4u_usage_status</code>",
+        "",
         "Không hiển thị khóa bí mật.",
     ]
     return "\n".join(lines)
@@ -130151,6 +130396,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("unfreeze_tools", cmd_unfreeze_tools))
     tg_app.add_handler(CommandHandler("ops_plan", cmd_ops_plan))
     tg_app.add_handler(CommandHandler("providers",   cmd_providers))
+    tg_app.add_handler(CommandHandler("providers_compact", cmd_providers_compact))
+    tg_app.add_handler(CommandHandler("provider_detail", cmd_provider_detail))
+    tg_app.add_handler(CommandHandler("provider_usage", cmd_provider_usage))
+    tg_app.add_handler(CommandHandler("core_4_status", cmd_core_4_status))
+    tg_app.add_handler(CommandHandler("core_blockers", cmd_core_4_status))
     tg_app.add_handler(CommandHandler("free_hub_status", cmd_free_hub_status))
     tg_app.add_handler(CommandHandler("free_hub_prompt_test", cmd_free_hub_prompt_test))
     tg_app.add_handler(CommandHandler("free_provider_status", cmd_free_provider_status))
