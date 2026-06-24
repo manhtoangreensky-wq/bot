@@ -2650,6 +2650,47 @@ def init_db():
         _add_column_if_missing(c, "voice_profiles", column_name, column_sql, voice_profile_columns)
     c.execute("CREATE INDEX IF NOT EXISTS idx_voice_profiles_user_id ON voice_profiles(user_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_voice_profiles_status ON voice_profiles(status)")
+    c.execute("""CREATE TABLE IF NOT EXISTS voice_assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        voice_asset_id TEXT UNIQUE,
+        user_id TEXT NOT NULL,
+        source_feature TEXT DEFAULT '',
+        product_context TEXT DEFAULT 'showroom',
+        voice_kind TEXT DEFAULT '',
+        text_hash TEXT DEFAULT '',
+        duration_seconds INTEGER DEFAULT 0,
+        output_bytes INTEGER DEFAULT 0,
+        file_ref TEXT DEFAULT '',
+        file_id TEXT DEFAULT '',
+        local_path TEXT DEFAULT '',
+        status TEXT DEFAULT 'generated_unused',
+        linked_video_session_id TEXT DEFAULT '',
+        created_at TEXT,
+        updated_at TEXT,
+        metadata_json TEXT DEFAULT ''
+    )""")
+    voice_asset_columns = _table_columns(c, "voice_assets")
+    for column_name, column_sql in [
+        ("voice_asset_id", "voice_asset_id TEXT UNIQUE"),
+        ("user_id", "user_id TEXT NOT NULL DEFAULT ''"),
+        ("source_feature", "source_feature TEXT DEFAULT ''"),
+        ("product_context", "product_context TEXT DEFAULT 'showroom'"),
+        ("voice_kind", "voice_kind TEXT DEFAULT ''"),
+        ("text_hash", "text_hash TEXT DEFAULT ''"),
+        ("duration_seconds", "duration_seconds INTEGER DEFAULT 0"),
+        ("output_bytes", "output_bytes INTEGER DEFAULT 0"),
+        ("file_ref", "file_ref TEXT DEFAULT ''"),
+        ("file_id", "file_id TEXT DEFAULT ''"),
+        ("local_path", "local_path TEXT DEFAULT ''"),
+        ("status", "status TEXT DEFAULT 'generated_unused'"),
+        ("linked_video_session_id", "linked_video_session_id TEXT DEFAULT ''"),
+        ("created_at", "created_at TEXT"),
+        ("updated_at", "updated_at TEXT"),
+        ("metadata_json", "metadata_json TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(c, "voice_assets", column_name, column_sql, voice_asset_columns)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_voice_assets_user_status ON voice_assets(user_id,status,created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_voice_assets_kind ON voice_assets(voice_kind,status)")
     c.execute("""CREATE TABLE IF NOT EXISTS music_generation_jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
@@ -62406,11 +62447,20 @@ def voice_engine_status_lines() -> list[str]:
     clone_admin_test_ready = bool(clone.get("ready") and not clone.get("provider_permission_blocked") and (clone_smoke_pass or clone.get("alternate_clone_ready")))
     admin_smoke_needed = bool((tts.get("ready") or clone.get("ready")) and not (tts_public_ready and clone_public_ready))
     routes = ", ".join(clone.get("routes") or []) or str(tts.get("provider") or "-")
+    default_tts_configured = bool(default_tts_voice_id("female") or default_tts_voice_id("male") or deps.get("edge_tts", {}).get("available"))
+    default_tts_readiness = "PASS" if (tts_admin_test_ready or deps.get("edge_tts", {}).get("available")) else ("BLOCKED" if not default_tts_configured else "UNKNOWN")
+    clone_readiness = "BLOCKED" if clone.get("provider_permission_blocked") else ("PASS" if clone_admin_test_ready else ("UNKNOWN" if clone.get("ready") else "BLOCKED"))
     return [
         "VOICE ENGINE STATUS",
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
         f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
+        f"Default TTS configured: <code>{_engine_yes_no(default_tts_configured)}</code>",
+        f"Default TTS readiness: <code>{_engine_safe(default_tts_readiness)}</code>",
+        f"Clone readiness: <code>{_engine_safe(clone_readiness)}</code>",
+        f"Known blocker: <code>{_engine_safe(clone_blocker or '-')}</code>",
+        f"Preview quota gate active: <code>{_engine_yes_no(True)}</code> | product <code>voice_ai</code> | window <code>{PREVIEW_QUOTA_WINDOW_DAYS}d</code> | min tier <code>{html.escape(PREVIEW_QUOTA_MIN_TIER)}</code>",
+        "Admin smoke commands: <code>/voice_tts_admin_test --confirm-paid</code> | <code>/voice_clone_admin_test --confirm-paid</code>",
         f"MiniMax TTS configured: <code>{_engine_yes_no(tts.get('ready'))}</code>",
         f"MiniMax clone configured: <code>{_engine_yes_no(clone.get('ready'))}</code>",
         f"ShopAIKey /audio/speech configured: <code>{_engine_yes_no(SHOPAIKEY_API_KEY and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED)}</code>",
@@ -62614,6 +62664,92 @@ async def cmd_voice_engine_status(update: Update, context: ContextTypes.DEFAULT_
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await reply_html_lines(update, voice_engine_status_lines())
+
+async def cmd_voice_asset_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    counts = voice_asset_status_counts()
+    latest = list_voice_asset_records(limit=5)
+    lines = [
+        "VOICE ASSET STATUS",
+        "",
+        "Scope: admin-only DB status. No provider call, no paid job, no Xu charge.",
+        f"generated_unused: <code>{counts.get('generated_unused', 0)}</code>",
+        f"preview_sent: <code>{counts.get('preview_sent', 0)}</code>",
+        f"reserved: <code>{counts.get('reserved', 0)}</code>",
+        f"used: <code>{counts.get('used', 0)}</code>",
+        f"failed: <code>{counts.get('failed', 0)}</code>",
+        f"blocked: <code>{counts.get('blocked', 0)}</code>",
+        "",
+        "Latest:",
+        *(voice_asset_summary_line(row) for row in latest),
+        "",
+        "Commands: <code>/voice_asset_detail &lt;voice_asset_id&gt;</code> | <code>/voice_asset_unused</code> | <code>/voice_asset_used</code>",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_voice_asset_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    asset_key = str((context.args or [""])[0] if context and context.args else "").strip()
+    if not asset_key:
+        return await update.message.reply_text("Cú pháp: /voice_asset_detail <voice_asset_id>")
+    row = get_voice_asset_record(asset_key)
+    if not row:
+        return await update.message.reply_text("Không tìm thấy voice asset.")
+    try:
+        metadata = json.loads(str(row.get("metadata_json") or "{}"))
+    except Exception:
+        metadata = {}
+    metadata_keys = sorted(
+        key for key in (metadata if isinstance(metadata, dict) else {}).keys()
+        if not re.search(r"(secret|token|api[_-]?key|authorization|bearer|provider_voice_id|voice_id)", str(key), re.I)
+    )
+    lines = [
+        "VOICE ASSET DETAIL",
+        "",
+        "Scope: DB metadata only. No provider call.",
+        f"Asset: <code>{html.escape(str(row.get('voice_asset_id') or row.get('id') or '-'))}</code>",
+        f"User: <code>{html.escape(str(row.get('user_id') or '-'))}</code>",
+        f"Feature: <code>{html.escape(str(row.get('source_feature') or '-'))}</code>",
+        f"Context: <code>{html.escape(str(row.get('product_context') or '-'))}</code>",
+        f"Kind: <code>{html.escape(str(row.get('voice_kind') or '-'))}</code>",
+        f"Status: <code>{html.escape(str(row.get('status') or '-'))}</code>",
+        f"Duration: <code>{int(row.get('duration_seconds') or 0)}s</code>",
+        f"Output bytes: <code>{int(row.get('output_bytes') or 0)}</code>",
+        f"File ref: <code>{_engine_safe(row.get('file_ref'))}</code>",
+        f"Linked video session: <code>{_engine_safe(row.get('linked_video_session_id'))}</code>",
+        f"Created: <code>{_engine_safe(row.get('created_at'))}</code>",
+        f"Updated: <code>{_engine_safe(row.get('updated_at'))}</code>",
+        f"Metadata keys: <code>{html.escape(', '.join(metadata_keys) or '-')}</code>",
+        "Secret handling: provider secrets/raw tokens are not shown.",
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_voice_asset_unused(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    rows = list_voice_asset_records(status="generated_unused", limit=20)
+    preview_rows = list_voice_asset_records(status="preview_sent", limit=20)
+    lines = [
+        "VOICE ASSET UNUSED",
+        "",
+        "No provider call. generated_unused + preview_sent assets are not final-used yet.",
+        *(voice_asset_summary_line(row) for row in (rows + preview_rows)[:20]),
+    ]
+    await reply_html_lines(update, lines)
+
+async def cmd_voice_asset_used(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    rows = list_voice_asset_records(status="used", limit=20)
+    lines = [
+        "VOICE ASSET USED",
+        "",
+        "No provider call.",
+        *(voice_asset_summary_line(row) for row in rows),
+    ]
+    await reply_html_lines(update, lines)
 
 async def cmd_music_engine_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -74220,7 +74356,39 @@ async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_s
             last_detail = sanitize_log_text(str(exc))[:160]
     return False, b"", last_detail or "not_ready"
 
-async def send_standalone_tts_result(message, user_id, text: str, voice_label: str, voice_id: str = "", voice_style: str = "", speed: str = "normal", lang: str = "vi") -> bool:
+async def send_standalone_tts_result(
+    message,
+    user_id,
+    text: str,
+    voice_label: str,
+    voice_id: str = "",
+    voice_style: str = "",
+    speed: str = "normal",
+    lang: str = "vi",
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+) -> bool:
+    ctx = normalize_product_context(product_context)
+    quota_decision = preview_quota_guard(user_id, "voice_ai")
+    if not quota_decision.get("allowed"):
+        create_voice_asset_record(
+            user_id,
+            "voice_tts_preview",
+            ctx,
+            normalize_voice_asset_kind(voice_id, voice_label),
+            text=text,
+            duration_seconds=0,
+            output_bytes=0,
+            status="blocked",
+            linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
+            metadata={"reason": str(quota_decision.get("reason") or "preview_gate")},
+        )
+        await message.reply_text(
+            preview_quota_block_text(quota_decision, "voice_ai", lang),
+            parse_mode="HTML",
+            reply_markup=voice_hub_keyboard(lang, ctx),
+        )
+        return False
+    await message.reply_text(voice_preview_notice_text(lang), parse_mode="HTML")
     engine_result = await execute_engine(
         "voice_tts",
         {
@@ -74242,24 +74410,83 @@ async def send_standalone_tts_result(message, user_id, text: str, voice_label: s
     audio_bytes = bytes(engine_result.get("output_bytes") or b"")
     detail = str(engine_result.get("detail") or engine_result.get("status") or "")
     if not ok or not audio_bytes:
+        create_voice_asset_record(
+            user_id,
+            "voice_tts_preview",
+            ctx,
+            normalize_voice_asset_kind(voice_id, voice_label),
+            text=text,
+            duration_seconds=0,
+            output_bytes=0,
+            status="failed",
+            linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
+            metadata={"reason": sanitize_log_text(detail)[:160]},
+        )
         logger.info("standalone tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
-        await message.reply_text(standalone_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM))
+        await message.reply_text(standalone_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, ctx))
         return False
-    audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_voice.mp3")
+    preview_bytes, cap_detail = await cap_voice_preview_audio_bytes(audio_bytes, voice_preview_seconds())
+    voice_kind = normalize_voice_asset_kind(voice_id, voice_label)
+    asset_id = voice_asset_make_id(user_id, "voice_tts_preview", voice_kind, voice_asset_text_hash(text))
+    local_path = write_voice_asset_audio_bytes(asset_id, audio_bytes)
+    if not preview_bytes:
+        create_voice_asset_record(
+            user_id,
+            "voice_tts_preview",
+            ctx,
+            voice_kind,
+            text=text,
+            duration_seconds=estimate_voice_duration_seconds(text, speed),
+            output_bytes=len(audio_bytes or b""),
+            file_ref=local_path,
+            local_path=local_path,
+            status="failed",
+            linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
+            metadata={"reason": f"preview_cap_failed:{sanitize_log_text(cap_detail)[:120]}"},
+            voice_asset_id=asset_id,
+        )
+        await message.reply_text(standalone_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, ctx))
+        return False
+    audio_file = video_dubbing_output_file(preview_bytes, "toan_aas_voice_preview.mp3")
     price = tts_full_price_xu(text, speed)
     duration = estimate_voice_duration_seconds(text, speed)
     chars = voice_tts_billable_chars(text)
     caption = (
-        f"✅ Đã tạo file giọng đọc bằng {voice_label}.\n"
-        f"Ước tính {duration} giây, {chars} ký tự tính phí. Dự kiến bản đầy đủ {price} Xu.\n"
-        "TOAN AAS chưa trừ Xu final trong bước Studio này."
+        f"✅ Đã tạo bản nghe thử {voice_preview_seconds()} giây bằng {voice_label}.\n"
+        f"Voice asset: {asset_id}\n"
+        f"Ước tính bản đầy đủ {duration} giây, {chars} ký tự tính phí. Dự kiến bản đầy đủ {price} Xu.\n"
+        "Bản đầy đủ đã được lưu làm asset và chỉ giao/ghép khi quý khách xác nhận. TOAN AAS chưa trừ Xu final."
         if music_ui_lang(lang=lang) == "vi" else
-        f"✅ Voice file created with {voice_label}.\nEstimated {duration}s, {chars} billable chars. Full output estimate {price} Xu.\nTOAN AAS has not charged final Xu."
+        f"✅ {voice_preview_seconds()}s voice preview created with {voice_label}.\nVoice asset: {asset_id}\nEstimated full output {duration}s, {chars} billable chars. Full output estimate {price} Xu.\nTOAN AAS has not charged final Xu."
     )
     if hasattr(message, "reply_audio"):
-        await message.reply_audio(audio=audio_file, filename="toan_aas_voice.mp3", caption=caption)
+        sent = await message.reply_audio(audio=audio_file, filename="toan_aas_voice_preview.mp3", caption=caption)
     else:
-        await message.reply_document(document=audio_file, filename="toan_aas_voice.mp3", caption=caption)
+        sent = await message.reply_document(document=audio_file, filename="toan_aas_voice_preview.mp3", caption=caption)
+    sent_file_id = str(getattr(getattr(sent, "audio", None), "file_id", "") or getattr(getattr(sent, "document", None), "file_id", "") or "")
+    create_voice_asset_record(
+        user_id,
+        "voice_tts_preview",
+        ctx,
+        voice_kind,
+        text=text,
+        duration_seconds=duration,
+        output_bytes=len(audio_bytes or b""),
+        file_ref=local_path or sent_file_id,
+        file_id=sent_file_id,
+        local_path=local_path,
+        status="preview_sent",
+        linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
+        metadata={
+            "voice_label": str(voice_label or "")[:120],
+            "voice_id": str(voice_id or "")[:120],
+            "preview_seconds": voice_preview_seconds(),
+            "preview_output_bytes": len(preview_bytes or b""),
+            "full_price_xu": price,
+        },
+        voice_asset_id=asset_id,
+    )
+    consume_preview_quota(user_id, "voice_ai", updated_by=user_id)
     return True
 
 async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text: str, speed: str = "normal", lang: str = "vi") -> bool:
@@ -74332,9 +74559,31 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
         f"Số ký tự: {voice_tts_billable_chars(text)}. Đã trừ: {charged} Xu."
     )
     if hasattr(message, "reply_audio"):
-        await message.reply_audio(audio=audio_file, filename="toan_aas_saved_voice.mp3", caption=caption)
+        sent = await message.reply_audio(audio=audio_file, filename="toan_aas_saved_voice.mp3", caption=caption)
     else:
-        await message.reply_document(document=audio_file, filename="toan_aas_saved_voice.mp3", caption=caption)
+        sent = await message.reply_document(document=audio_file, filename="toan_aas_saved_voice.mp3", caption=caption)
+    asset_id = voice_asset_make_id(user_id, "voice_saved_tts", "custom_clone", voice_asset_text_hash(text))
+    local_path = write_voice_asset_audio_bytes(asset_id, audio_bytes)
+    sent_file_id = str(getattr(getattr(sent, "audio", None), "file_id", "") or getattr(getattr(sent, "document", None), "file_id", "") or "")
+    create_voice_asset_record(
+        user_id,
+        "voice_saved_tts",
+        PRODUCT_CONTEXT_SHOWROOM,
+        "custom_clone",
+        text=text,
+        duration_seconds=estimate_voice_duration_seconds(text, speed),
+        output_bytes=len(audio_bytes or b""),
+        file_ref=local_path or sent_file_id,
+        file_id=sent_file_id,
+        local_path=local_path,
+        status="used",
+        metadata={
+            "profile_id": profile_id,
+            "provider": str(profile.get("provider") or "")[:80],
+            "charged_xu": charged,
+        },
+        voice_asset_id=asset_id,
+    )
     update_user_voice_profile(user_id, profile_id, last_used_at=now_text())
     return True
 
@@ -76233,16 +76482,59 @@ VOICE_CLONE_PROVIDER_NOT_READY_ADMIN_VI = (
     "Tạo giọng riêng chưa sẵn sàng: nhà cung cấp chưa mở quyền clone voice hoặc thiếu adapter upload. "
     "TOAN AAS chưa trừ Xu."
 )
+VOICE_CLONE_PERMISSION_FORBIDDEN_PUBLIC_VI = (
+    "Hiện tại tính năng tạo giọng riêng đang tạm giới hạn bởi nhà cung cấp. "
+    "Anh/chị có thể dùng giọng mặc định chất lượng cao trước, hoặc gửi yêu cầu để TOAN AAS kiểm tra phương án thay thế."
+)
 VOICE_PROFILE_FAILED_DETAIL_VI = "Giọng này chưa sẵn sàng để tạo file đọc. Bạn có thể đổi tên, xóa hoặc tạo giọng mới."
 VOICE_CLONE_PERMISSION_FORBIDDEN_PROFILE_STATUSES = {
     "failed_clone_permission_forbidden",
     "clone_permission_forbidden",
 }
 
+def voice_preview_notice_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "🎙 <b>AI voice preview</b>\n\n"
+            "TOAN AAS will generate the real voice output and send only a 6-second preview from the start.\n\n"
+            "• Preview: 6 seconds\n"
+            "• Full voice output is delivered or attached to a product only after final confirmation.\n"
+            "• Preview is available from Silver tier and above, once every 15 days for each product type."
+        )
+    return (
+        "🎙 <b>Nghe thử giọng AI</b>\n\n"
+        "TOAN AAS sẽ xử lý giọng thật rồi gửi quý khách đoạn nghe thử 6 giây.\n\n"
+        "• Bản thử: 6 giây\n"
+        "• Nhãn: Nghe thử 6 giây\n"
+        "• Bản đầy đủ chỉ giao hoặc ghép vào sản phẩm khi quý khách xác nhận.\n"
+        "• Tính năng nghe thử áp dụng từ hạng Silver trở lên, mỗi loại sản phẩm được thử 1 lần trong 15 ngày.\n\n"
+        "Vui lòng sử dụng hợp lý để hệ thống hoạt động ổn định và phục vụ mọi người tốt hơn."
+    )
+
 def voice_clone_public_guard_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) == "vi":
         return VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
     return public_product_maintenance_text(lang, "Custom voice")
+
+def voice_clone_permission_forbidden_public_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) == "vi":
+        return VOICE_CLONE_PERMISSION_FORBIDDEN_PUBLIC_VI
+    return (
+        "Custom voice creation is temporarily limited by the provider. "
+        "You can use a high-quality default voice first, or ask TOAN AAS to check another option."
+    )
+
+def voice_clone_permission_forbidden_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    buttons = [
+        ("🎙 Dùng giọng nữ mặc định" if is_vi else "🎙 Use default female", cb("voice_default_female")),
+        ("🎙 Dùng giọng nam mặc định" if is_vi else "🎙 Use default male", cb("voice_default_male")),
+        ("📝 Nhập chữ để đọc thử" if is_vi else "📝 Enter text to preview", cb("voice_tts_text")),
+        ("⬅️ Quay lại" if is_vi else "⬅️ Back", cb("voice_hub")),
+    ]
+    return build_2col_keyboard(buttons, nav_main=True, lang=lang)
 
 def voice_clone_provider_not_ready_public_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) == "vi":
@@ -76495,6 +76787,204 @@ def voice_profile_storage_price_xu(user_id, product_context: str = PRODUCT_CONTE
         return 0
     return int(VOICE_PROFILE_PRICE_XU or 0)
 
+VOICE_ASSET_STATUSES = {"generated_unused", "preview_sent", "reserved", "used", "archived", "failed", "blocked"}
+
+def voice_asset_storage_dir() -> Path:
+    configured = str(os.getenv("VOICE_ASSET_STORAGE_DIR") or "").strip()
+    if configured:
+        return Path(configured)
+    db_text = str(DB_FILE or "").replace("\\", "/")
+    if db_text.startswith("/data/"):
+        return Path("/data/voice_assets")
+    return Path(tempfile.gettempdir()) / "toanaas_voice_assets"
+
+def voice_asset_text_hash(text: str) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    return hashlib.sha256(clean.encode("utf-8", errors="ignore")).hexdigest()[:24] if clean else ""
+
+def voice_asset_make_id(user_id, source_feature: str, voice_kind: str, text_hash: str = "", seed: str = "") -> str:
+    payload = "|".join([
+        str(user_id or ""),
+        str(source_feature or ""),
+        str(voice_kind or ""),
+        str(text_hash or ""),
+        str(seed or now_text()),
+    ])
+    return "va_" + hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()[:18]
+
+def normalize_voice_asset_kind(voice_id: str = "", voice_label: str = "", profile: dict | None = None) -> str:
+    profile = dict(profile or {})
+    if profile.get("provider_voice_id"):
+        return "custom_clone"
+    marker = " ".join([str(voice_id or ""), str(voice_label or "")]).lower()
+    if "saved" in marker or "profile" in marker or "clone" in marker:
+        return "custom_clone"
+    if "female" in marker or "nữ" in marker or "nu" in marker:
+        return "default_female"
+    if "male" in marker or "nam" in marker:
+        return "default_male"
+    return "default_female" if default_tts_voice_id("female") == str(voice_id or "").strip() else "default_male"
+
+def voice_asset_video_session_id(user_id, product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
+    if normalize_product_context(product_context) != PRODUCT_CONTEXT_VIDEO_ADDON:
+        return ""
+    try:
+        state = get_video_finalization_state(user_id) or {}
+    except Exception:
+        state = {}
+    for key in ("video_session_id", "order_id", "project_id", "source_file_id", "source_video_file_id"):
+        value = str(state.get(key) or "").strip()
+        if value:
+            return value[:180]
+    return str(user_id or "")[:80]
+
+def write_voice_asset_audio_bytes(voice_asset_id: str, audio_bytes: bytes, suffix: str = ".mp3") -> str:
+    data = bytes(audio_bytes or b"")
+    if not voice_asset_id or not data:
+        return ""
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(voice_asset_id))[:80]
+    suffix = suffix if str(suffix or "").startswith(".") else f".{suffix or 'mp3'}"
+    try:
+        folder = voice_asset_storage_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{safe_id}{suffix}"
+        target.write_bytes(data)
+        return str(target)
+    except Exception as exc:
+        logger.warning("voice asset write failed | asset=%s | %s", voice_asset_id, sanitize_log_text(str(exc))[:180])
+        return ""
+
+def create_voice_asset_record(
+    user_id,
+    source_feature: str,
+    product_context: str,
+    voice_kind: str,
+    text: str = "",
+    duration_seconds: int = 0,
+    output_bytes: int = 0,
+    file_ref: str = "",
+    file_id: str = "",
+    local_path: str = "",
+    status: str = "generated_unused",
+    linked_video_session_id: str = "",
+    metadata: dict | None = None,
+    voice_asset_id: str = "",
+) -> dict:
+    product_context = normalize_product_context(product_context)
+    text_hash = voice_asset_text_hash(text)
+    clean_status = str(status or "generated_unused").strip().lower()
+    if clean_status not in VOICE_ASSET_STATUSES:
+        clean_status = "generated_unused"
+    asset_id = str(voice_asset_id or "").strip() or voice_asset_make_id(user_id, source_feature, voice_kind, text_hash)
+    now = now_text()
+    metadata_json = json.dumps(dict(metadata or {}), ensure_ascii=False)
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO voice_assets
+                (voice_asset_id, user_id, source_feature, product_context, voice_kind, text_hash,
+                 duration_seconds, output_bytes, file_ref, file_id, local_path, status,
+                 linked_video_session_id, created_at, updated_at, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        COALESCE((SELECT created_at FROM voice_assets WHERE voice_asset_id=?), ?), ?, ?)
+                """,
+                (
+                    asset_id,
+                    str(user_id),
+                    str(source_feature or "")[:80],
+                    product_context,
+                    str(voice_kind or "")[:60],
+                    text_hash,
+                    max(0, int(duration_seconds or 0)),
+                    max(0, int(output_bytes or 0)),
+                    str(file_ref or "")[:600],
+                    str(file_id or "")[:240],
+                    str(local_path or "")[:600],
+                    clean_status,
+                    str(linked_video_session_id or "")[:180],
+                    asset_id,
+                    now,
+                    now,
+                    metadata_json,
+                ),
+            )
+            conn.commit()
+    except Exception as exc:
+        logger.warning("voice asset record failed | asset=%s | %s", asset_id, sanitize_log_text(str(exc))[:200])
+    return {
+        "voice_asset_id": asset_id,
+        "user_id": str(user_id),
+        "source_feature": str(source_feature or "")[:80],
+        "product_context": product_context,
+        "voice_kind": str(voice_kind or "")[:60],
+        "text_hash": text_hash,
+        "duration_seconds": max(0, int(duration_seconds or 0)),
+        "output_bytes": max(0, int(output_bytes or 0)),
+        "file_ref": str(file_ref or "")[:600],
+        "file_id": str(file_id or "")[:240],
+        "local_path": str(local_path or "")[:600],
+        "status": clean_status,
+        "linked_video_session_id": str(linked_video_session_id or "")[:180],
+        "metadata": dict(metadata or {}),
+    }
+
+def get_voice_asset_record(voice_asset_id: str) -> dict:
+    try:
+        with db_connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM voice_assets WHERE voice_asset_id=? OR id=?",
+                (str(voice_asset_id or "").strip(), _safe_int(voice_asset_id, 0)),
+            ).fetchone()
+            return dict(row) if row else {}
+    except Exception as exc:
+        logger.warning("voice asset detail failed | %s", sanitize_log_text(str(exc))[:180])
+        return {}
+
+def list_voice_asset_records(status: str = "", user_id: str = "", limit: int = 20) -> list[dict]:
+    where = []
+    params: list[object] = []
+    if status:
+        where.append("status=?")
+        params.append(str(status).strip().lower())
+    if user_id:
+        where.append("user_id=?")
+        params.append(str(user_id))
+    sql = "SELECT * FROM voice_assets"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(max(1, min(100, int(limit or 20))))
+    try:
+        with db_connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return [dict(row) for row in conn.execute(sql, tuple(params)).fetchall()]
+    except Exception as exc:
+        logger.warning("voice asset list failed | %s", sanitize_log_text(str(exc))[:180])
+        return []
+
+def voice_asset_status_counts() -> dict:
+    counts = {status: 0 for status in sorted(VOICE_ASSET_STATUSES)}
+    try:
+        with db_connect() as conn:
+            for status, count in conn.execute("SELECT status, COUNT(1) FROM voice_assets GROUP BY status").fetchall():
+                counts[str(status or "generated_unused")] = int(count or 0)
+    except Exception as exc:
+        logger.warning("voice asset counts failed | %s", sanitize_log_text(str(exc))[:180])
+    return counts
+
+def voice_asset_summary_line(row: dict) -> str:
+    if not row:
+        return "-"
+    return (
+        f"<code>{html.escape(str(row.get('voice_asset_id') or row.get('id') or '-'))}</code> "
+        f"| user <code>{html.escape(str(row.get('user_id') or '-'))}</code> "
+        f"| kind <code>{html.escape(str(row.get('voice_kind') or '-'))}</code> "
+        f"| status <code>{html.escape(str(row.get('status') or '-'))}</code> "
+        f"| bytes <code>{int(row.get('output_bytes') or 0)}</code>"
+    )
+
 def voice_profile_policy_label(lang: str = "vi") -> str:
     price = int(VOICE_PROFILE_PRICE_XU or 0)
     if VOICE_PROFILE_FIRST_FREE and int(VOICE_PROFILE_MAX_FREE_PER_USER or 0) > 0:
@@ -76578,14 +77068,9 @@ def voice_profile_not_ready_text(profile: dict | None = None, lang: str = "vi") 
     status = str((profile or {}).get("status") or "-")
     if voice_profile_clone_permission_forbidden(profile):
         if music_ui_lang(lang=lang) != "vi":
-            return (
-                "⚠️ Custom voice cannot run because the provider account has not enabled voice cloning. "
-                "TOAN AAS has not charged Xu. Use a default voice first."
-            )
-        return (
-            "⚠️ Tạo giọng riêng chưa chạy được vì tài khoản provider chưa mở quyền clone voice. "
-            "TOAN AAS chưa trừ Xu.\n\n"
-            f"Tên giọng: <b>{html.escape(name)}</b>\nTrạng thái: <b>{html.escape(status)}</b>"
+            return "⚠️ " + voice_clone_permission_forbidden_public_text(lang)
+        return "⚠️ " + voice_clone_permission_forbidden_public_text(lang) + (
+            f"\n\nTên giọng: <b>{html.escape(name)}</b>\nTrạng thái: <b>{html.escape(status)}</b>"
         )
     if music_ui_lang(lang=lang) != "vi":
         return f"⚠️ Voice “{html.escape(name)}” is not ready for audio generation yet. Status: {html.escape(status)}. You can rename, delete, or create a new voice."
@@ -77763,9 +78248,13 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
                 output_bytes=0,
                 route_errors=[voice_clone_route_error("voice_clone", "clone", "clone", "CLONE_PERMISSION_FORBIDDEN", "voice clone user forbidden")],
                 error="CLONE_PERMISSION_FORBIDDEN",
-            ) if admin_access else voice_clone_provider_not_ready_public_text(lang),
+            ) if admin_access else voice_clone_permission_forbidden_public_text(lang),
             parse_mode="HTML" if admin_access else None,
-            reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile),
+            reply_markup=(
+                voice_profile_actions_keyboard(profile_id, lang, ctx, failed_profile)
+                if admin_access
+                else voice_clone_permission_forbidden_keyboard(lang, ctx)
+            ),
         )
     if not voice_clone_access_allowed(user_id, readiness):
         if not load_provider_attempt("voice_clone"):
@@ -77836,8 +78325,6 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             voice_preview_guard_message("inflight"),
             reply_markup=voice_clone_preview_entry_keyboard(profile_id, lang, ctx),
         )
-    if not full_generation:
-        consume_preview_quota(user_id, "voice_ai", updated_by=user_id)
     profile = locked_profile or profile
     metadata = voice_profile_metadata(profile)
     cost = voice_profile_storage_price_xu(user_id, ctx, profile_id)
@@ -78003,6 +78490,27 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         preview_ref = str(getattr(getattr(sent, "audio", None), "file_id", "") or "")
         if not preview_ref:
             raise RuntimeError("voice_preview_missing_file_id")
+        create_voice_asset_record(
+            user_id,
+            "voice_clone_preview",
+            ctx,
+            "custom_clone",
+            text=preview_text,
+            duration_seconds=voice_preview_seconds(),
+            output_bytes=len(preview_bytes or b""),
+            file_ref=preview_ref,
+            file_id=preview_ref,
+            status="preview_sent",
+            linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
+            metadata={
+                "profile_id": profile_id,
+                "provider": provider_name,
+                "provider_voice_id": provider_voice_id,
+                "preview_output_bytes": len(capped_bytes or b""),
+            },
+        )
+        if not full_generation:
+            consume_preview_quota(user_id, "voice_ai", updated_by=user_id)
         metadata["preview_attempts"] = int(metadata.get("preview_attempts") or 0) + 1
         metadata["provider_file_id"] = provider_file_id
         metadata["provider_route"] = provider_name
@@ -78047,6 +78555,11 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             updated_by=user_id,
         )
         failed_profile = mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed_" + fail_status.lower(), str(exc))
+        if voice_clone_permission_error(exc) and not admin_access:
+            return await query.message.reply_text(
+                voice_clone_permission_forbidden_public_text(lang),
+                reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
+            )
         if admin_access:
             return await query.message.reply_text(
                 voice_clone_admin_preview_failure_text(
@@ -78655,7 +79168,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result.update({"selected_voice_id": voice_id, "selected_voice_kind": f"default_{gender}", "selected_voice_style": label, "voice_is_free": True})
         save_music_guided_result(user_id, result)
         await query.message.reply_text(f"✅ Đã chọn {label}. TOAN AAS đang tạo file audio theo văn bản đã nhập.")
-        return await send_standalone_tts_result(query.message, user_id, voice_text, label, voice_id=voice_id, voice_style=label, speed=str(result.get("tts_speed") or "normal"), lang=lang)
+        return await send_standalone_tts_result(query.message, user_id, voice_text, label, voice_id=voice_id, voice_style=label, speed=str(result.get("tts_speed") or "normal"), lang=lang, product_context=ctx)
     if action.startswith("voice_profile_select_code:") or action.startswith("voice_profile_select:"):
         await query.answer()
         value = _safe_int(action.split(":", 1)[1], 0)
@@ -79693,6 +80206,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 voice_style=str(result.get("selected_voice_style") or selected_voice),
                 speed=str(result.get("tts_speed") or "normal"),
                 lang=lang,
+                product_context=ctx,
             )
         return await query.message.reply_text(
             voice_tts_ready_text(str(voice_text), lang, str(result.get("tts_speed") or "normal")),
@@ -81932,6 +82446,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
                 voice_style=str(result.get("selected_voice_style") or selected_voice),
                 speed=str(result.get("tts_speed") or "normal"),
                 lang=lang,
+                product_context=ctx,
             )
             return True
         suggestions = voice_style_suggestions(text, 0, lang)
@@ -132414,6 +132929,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_provider_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_engine_status", cmd_voice_engine_status))
+    tg_app.add_handler(CommandHandler("voice_asset_status", cmd_voice_asset_status))
+    tg_app.add_handler(CommandHandler("voice_asset_detail", cmd_voice_asset_detail))
+    tg_app.add_handler(CommandHandler("voice_asset_unused", cmd_voice_asset_unused))
+    tg_app.add_handler(CommandHandler("voice_asset_used", cmd_voice_asset_used))
     tg_app.add_handler(CommandHandler("voice_public_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("music_status", cmd_music_status))
     tg_app.add_handler(CommandHandler("music_public_status", cmd_music_provider_status))
@@ -132432,8 +132951,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_minimax_tts", cmd_tool_test_minimax_tts))
     tg_app.add_handler(CommandHandler("tool_test_voice_tts", cmd_tool_test_minimax_tts))
     tg_app.add_handler(CommandHandler("tool_test_voice_tts_product", cmd_tool_test_voice_tts_product))
+    tg_app.add_handler(CommandHandler("voice_tts_admin_test", cmd_tool_test_voice_tts_product))
     tg_app.add_handler(CommandHandler("tool_test_minimax_voice_clone", cmd_tool_test_minimax_voice_clone))
     tg_app.add_handler(CommandHandler("tool_test_voice_clone", cmd_tool_test_minimax_voice_clone))
+    tg_app.add_handler(CommandHandler("voice_clone_admin_test", cmd_tool_test_minimax_voice_clone))
     tg_app.add_handler(CommandHandler("minimax_voice_job", cmd_minimax_voice_job))
     tg_app.add_handler(CommandHandler("voice_public_open", cmd_voice_public_open))
     tg_app.add_handler(CommandHandler("voice_public_open_safe", cmd_voice_public_open_safe))

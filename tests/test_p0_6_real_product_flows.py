@@ -98,12 +98,15 @@ def test_text_to_voice_generates_audio_with_selected_default_voice(monkeypatch):
     _reset_user(user_id)
     calls = {}
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    monkeypatch.setattr(bot, "preview_quota_guard", lambda *_args, **_kwargs: {"allowed": True, "reason": "ok", "product_type": "voice_ai", "quota": {}})
+    monkeypatch.setattr(bot, "consume_preview_quota", lambda *_args, **_kwargs: {"ok": True})
 
     async def fake_tts(text, voice_id="", voice_style="", speed="normal"):
         calls.update(text=text, voice_id=voice_id, voice_style=voice_style, speed=speed)
         return True, b"mp3-bytes", "ok"
 
     monkeypatch.setattr(bot, "synthesize_standalone_tts_audio", fake_tts)
+    monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", lambda audio_bytes, seconds=6: asyncio.sleep(0, result=(b"preview-bytes", "ok")))
 
     query = CaptureQuery("music_quick|showroom|voice_default_female", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
@@ -115,7 +118,7 @@ def test_text_to_voice_generates_audio_with_selected_default_voice(monkeypatch):
     assert handled is True
     assert calls["text"] == "Xin chào khách hàng TOAN AAS."
     assert calls["voice_id"] == bot.default_tts_voice_id("female")
-    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
+    assert message.outputs[-1]["filename"] == "toan_aas_voice_preview.mp3"
     assert "giọng nữ mặc định" in message.outputs[-1]["caption"]
 
 
@@ -124,6 +127,9 @@ def test_text_to_voice_flow_does_not_reask_voice_after_default_selected(monkeypa
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
     monkeypatch.setattr(bot, "synthesize_standalone_tts_audio", lambda *args, **kwargs: asyncio.sleep(0, result=(True, b"ok", "ok")))
+    monkeypatch.setattr(bot, "preview_quota_guard", lambda *_args, **_kwargs: {"allowed": True, "reason": "ok", "product_type": "voice_ai", "quota": {}})
+    monkeypatch.setattr(bot, "consume_preview_quota", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", lambda audio_bytes, seconds=6: asyncio.sleep(0, result=(b"preview-bytes", "ok")))
 
     query = CaptureQuery("music_quick|showroom|voice_default_male", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
@@ -131,7 +137,7 @@ def test_text_to_voice_flow_does_not_reask_voice_after_default_selected(monkeypa
     asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert "Chọn kiểu giọng" not in "\n".join(str(item.get("text") or item.get("caption") or "") for item in message.outputs)
-    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
+    assert message.outputs[-1]["filename"] == "toan_aas_voice_preview.mp3"
 
 
 def test_speech_to_text_upload_transcribes_public_audio(monkeypatch):

@@ -150,6 +150,9 @@ def test_showroom_voice_default_asks_text_then_preview(monkeypatch):
     async def fake_tts(text, voice_id="", voice_style="", speed="normal"):
         return True, b"mp3-bytes", "ok"
     monkeypatch.setattr(bot, "synthesize_standalone_tts_audio", fake_tts)
+    monkeypatch.setattr(bot, "preview_quota_guard", lambda *_args, **_kwargs: {"allowed": True, "reason": "ok", "product_type": "voice_ai", "quota": {}})
+    monkeypatch.setattr(bot, "consume_preview_quota", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", lambda audio_bytes, seconds=6: asyncio.sleep(0, result=(b"preview-bytes", "ok")))
 
     query = CaptureQuery("music_quick|showroom|voice_default_female", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
@@ -159,7 +162,7 @@ def test_showroom_voice_default_asks_text_then_preview(monkeypatch):
     handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert handled is True
-    assert message.outputs[-1]["filename"] == "toan_aas_voice.mp3"
+    assert message.outputs[-1]["filename"] == "toan_aas_voice_preview.mp3"
     assert "giọng nữ mặc định" in message.outputs[-1]["caption"]
 
 
