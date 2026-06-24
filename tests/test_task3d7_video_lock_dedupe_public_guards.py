@@ -307,7 +307,9 @@ def test_public_unready_guards_are_clean_and_have_no_admin_blocker():
 
 def test_voice_clone_public_guard_verified_copy():
     assert bot.voice_clone_provider_not_ready_public_text("vi") == bot.VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
-    assert "đang được kiểm tra" in bot.voice_clone_provider_not_ready_public_text("vi")
+    text = bot.voice_clone_provider_not_ready_public_text("vi")
+    assert "Tạo voice riêng đang tạm giới hạn" in text
+    assert "tính năng tạo/clone voice riêng chưa sẵn sàng trên nhà cung cấp" in text
 
 
 def test_ai_music_public_guard_verified_copy():

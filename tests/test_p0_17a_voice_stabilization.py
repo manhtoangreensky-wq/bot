@@ -202,8 +202,9 @@ def test_voice_preview_no_full_delivery_before_confirm(monkeypatch, tmp_path):
 
 def test_clone_permission_forbidden_public_clean_message():
     text = bot.voice_clone_permission_forbidden_public_text("vi")
-    assert "tạm giới hạn bởi nhà cung cấp" in text
-    assert "giọng mặc định chất lượng cao" in text
+    assert "Tạo voice riêng đang tạm giới hạn" in text
+    assert "tính năng tạo/clone voice riêng chưa sẵn sàng trên nhà cung cấp" in text
+    assert "giọng nam/nữ mặc định miễn phí" in text
     assert "user forbidden" not in text.lower()
 
 
@@ -224,10 +225,10 @@ def test_clone_permission_forbidden_admin_sanitized(monkeypatch):
 
 def test_clone_failure_offers_default_voice_fallback():
     labels = _labels(bot.voice_clone_permission_forbidden_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert "🎙 Dùng giọng nữ mặc định" in labels
-    assert "🎙 Dùng giọng nam mặc định" in labels
-    assert "📝 Nhập chữ để đọc thử" in labels
-    assert "⬅️ Quay lại" in labels
+    assert "🎙 Dùng giọng nữ mặc định miễn phí" in labels
+    assert "🎙 Dùng giọng nam mặc định miễn phí" in labels
+    assert "⬅️ Kho voice" in labels
+    assert "🏠 Menu chính" in labels
 
 
 def test_clone_no_secret_leak():
@@ -239,7 +240,7 @@ def test_clone_no_secret_leak():
 
 def test_clone_no_charge_before_confirm():
     source = inspect.getsource(bot.create_minimax_voice_profile_preview)
-    forbidden_block = source[source.index('if readiness.get("provider_permission_blocked"):'):source.index("if not voice_clone_access_allowed")]
+    forbidden_block = source[source.index('if readiness.get("provider_permission_blocked") and not route_attempts:'):source.index("if not voice_clone_access_allowed")]
     assert "spend_fixed_credit_info" not in forbidden_block
 
 

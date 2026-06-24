@@ -444,11 +444,13 @@ def test_key4u_adapter_supports_scoped_voice_music_routes():
 def test_voice_music_provider_fallbacks_are_registered():
     tts_source = inspect.getsource(bot.synthesize_standalone_tts_audio)
     clone_source = inspect.getsource(bot.create_minimax_voice_profile_preview)
+    clone_route_source = inspect.getsource(bot.voice_clone_provider_route_attempts)
     music_source = inspect.getsource(bot.submit_music_generation_job)
     assert "shopaikey_minimax_tts_bytes" in tts_source
     assert "key4u_minimax_tts_bytes" in tts_source
     assert "voice_tts_fallback" in inspect.getsource(bot.key4u_minimax_tts_bytes)
-    assert "shopaikey_minimax_upload_voice_sample" in clone_source
-    assert "key4u_minimax_upload_voice_sample" in clone_source
+    assert "voice_clone_provider_route_attempts" in clone_source
+    assert "shopaikey_minimax_upload_voice_sample" in clone_route_source
+    assert "key4u_minimax_upload_voice_sample" in clone_route_source
     assert 'route_order = ["key4u_suno", "shopaikey_music"]' in music_source
     assert 'else ["shopaikey_music", "key4u_suno"]' in music_source
