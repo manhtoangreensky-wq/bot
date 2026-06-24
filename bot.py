@@ -591,7 +591,7 @@ VOICE_PREVIEW_START_SECONDS = max(0, env_int("VOICE_PREVIEW_START_SECONDS", 0))
 VIDEO_PREVIEW_SECONDS = max(1, env_int("VIDEO_PREVIEW_SECONDS", 6))
 VIDEO_PREVIEW_START_SECONDS = max(0, env_int("VIDEO_PREVIEW_START_SECONDS", 0))
 MUSIC_SHORT_MODE_VERIFIED = env_flag("MUSIC_SHORT_MODE_VERIFIED", "false")
-MUSIC_VOCAL_FULL_PRICE_XU = max(0, env_int("MUSIC_VOCAL_FULL_PRICE_XU", 500))
+MUSIC_VOCAL_FULL_PRICE_XU = max(0, env_int("MUSIC_VOCAL_FULL_PRICE_XU", 800))
 MUSIC_BACKGROUND_FULL_PRICE_XU = max(0, env_int("MUSIC_BACKGROUND_FULL_PRICE_XU", 250))
 VIP_MUSIC_VAULT_DAILY_LIMIT = max(0, env_int("VIP_MUSIC_VAULT_DAILY_LIMIT", 1))
 VIP_MUSIC_VAULT_MONTHLY_LIMIT = max(0, env_int("VIP_MUSIC_VAULT_MONTHLY_LIMIT", 10))
@@ -75159,7 +75159,7 @@ def video_preview_gate_text(decision: dict, lang: str = "vi") -> str:
 def music_product_quote_price_xu(product_kind: str = "background") -> int:
     kind = str(product_kind or "background").strip().lower()
     if kind in {"song", "song_full", "lyrics", "vocal_ai"}:
-        return int(MUSIC_VOCAL_FULL_PRICE_XU or 500)
+        return int(MUSIC_VOCAL_FULL_PRICE_XU or 800)
     if kind in {"background", "music_background", "instrumental_ai"}:
         return int(MUSIC_BACKGROUND_FULL_PRICE_XU or 250)
     if kind == "song_half" and music_short_mode_verified():
@@ -75169,9 +75169,9 @@ def music_product_quote_price_xu(product_kind: str = "background") -> int:
 def music_ai_output_price_xu(duration_seconds, product_kind: str = "background") -> int:
     kind = str(product_kind or "background").strip().lower()
     if kind == "song_half":
-        return int(HALF_SONG_PRICE_XU or 0) if music_short_mode_verified() else int(MUSIC_VOCAL_FULL_PRICE_XU or 500)
+        return int(HALF_SONG_PRICE_XU or 0) if music_short_mode_verified() else int(MUSIC_VOCAL_FULL_PRICE_XU or 800)
     if kind == "song_full":
-        return int(MUSIC_VOCAL_FULL_PRICE_XU or 500)
+        return int(MUSIC_VOCAL_FULL_PRICE_XU or 800)
     duration = normalize_music_duration_seconds(duration_seconds, 30)
     if kind == "song_seconds":
         if duration <= MUSIC_AI_SHORT_DURATION_SECONDS:
@@ -75240,14 +75240,15 @@ def music_song_length_selection_text(result: dict | None = None, lang: str = "vi
     price = music_result_price_xu(result)
     if music_ui_lang(lang=lang) != "vi":
         if mode == "half":
-            return f"Selected: Half song.\nTOAN AAS will create a short complete song segment and will not cut mid-sentence.\nEstimated price: {price} Xu."
+            return f"Selected: Song with AI lyrics.\nTOAN AAS will create a complete song. Preview sends the first {music_preview_seconds()} seconds only; the full file stays in the vault until confirmation.\nEstimated price: {price} Xu."
         if mode == "full":
             return f"Selected: Song with AI lyrics.\nTOAN AAS will create a complete song. Preview sends the first {music_preview_seconds()} seconds only; the full file stays in the vault until confirmation.\nEstimated price: {price} Xu."
         return f"Estimated price: {price} Xu."
     if mode == "half":
         return (
-            "Đã chọn: Nửa bài.\n"
-            "TOAN AAS sẽ tạo một đoạn/bài ngắn hoàn chỉnh, không cắt giữa câu.\n"
+            "Đã chọn: Bài hát có lời AI.\n"
+            f"TOAN AAS sẽ tạo một bài hoàn chỉnh. Nghe thử chỉ gửi {music_preview_seconds()} giây đầu. "
+            "Bản đầy đủ được lưu trong kho và chỉ giao khi xác nhận.\n"
             f"Giá dự kiến: {price} Xu."
         )
     if mode == "full":
@@ -75263,20 +75264,11 @@ def music_song_product_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
         return (
             "🎤 <b>AI song with lyrics</b>\n\n"
-            f"TOAN AAS will create a complete song. Preview sends the first {music_preview_seconds()} seconds only. "
-            "The full file is stored in the music vault and delivered only after final confirmation."
+            "Choose a topic for the song. TOAN AAS has not started processing and no Xu has been used."
         )
-    if music_short_mode_verified():
-        short_line = f"• Nửa bài thật đã xác minh: <b>{music_ai_output_price_xu(60, 'song_half')} Xu</b>\n"
-    else:
-        short_line = "• Nửa bài: <b>đang khóa</b> cho tới khi provider có short/clip mode thật.\n"
     return (
         "🎤 <b>Bài hát có lời AI</b>\n\n"
-        f"TOAN AAS sẽ tạo một bài hoàn chỉnh. Nghe thử chỉ gửi {music_preview_seconds()} giây đầu. "
-        "Bản đầy đủ được lưu trong kho và chỉ giao khi xác nhận.\n\n"
-        f"• Bài hát có lời AI: <b>{music_ai_output_price_xu(120, 'song_full')} Xu</b>\n"
-        f"{short_line}\n"
-        "Không bán nửa bài nếu provider chưa có mode short/clip thật."
+        "Hãy chọn chủ đề cho bài hát. TOAN AAS chưa xử lý và chưa trừ Xu."
     )
 
 def music_song_product_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
@@ -75284,8 +75276,6 @@ def music_song_product_keyboard(lang: str = "vi", product_context: str = PRODUCT
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     buttons = [("🎤 Bài hát có lời AI" if is_vi else "🎤 AI song with lyrics", cb("song_start_full"))]
-    if music_short_mode_verified():
-        buttons.append(("1️⃣ Nửa bài thật" if is_vi else "1️⃣ Verified short song", cb("song_start_half")))
     return build_2col_keyboard(
         buttons,
         nav_back=("⬅️ Nhạc" if is_vi else "⬅️ Music", cb("music_hub")),
@@ -75380,10 +75370,21 @@ def music_song_step_text(step: str, result: dict | None = None, lang: str = "vi"
     package_mode = music_song_length_mode(result)
     product = {
         "seconds": f"Có lời theo {music_result_duration_seconds(result)} giây",
-        "half": "Nửa bài thật đã xác minh" if music_short_mode_verified() else "Bài hát có lời AI",
+        "half": "Bài hát có lời AI",
         "full": "Bài hát có lời AI",
     }.get(package_mode or str(result.get("song_product") or ""), "Bài hát có lời")
     return f"{titles.get(step, '🎤 <b>Tạo bài hát có lời</b>')}\n\nSản phẩm: <b>{product}</b>\n\n{labels.get(step, 'Chọn một lựa chọn bên dưới.')}"
+
+def music_vocal_full_initial_result() -> dict:
+    return {
+        "guided_purpose": "song",
+        "music_ai_kind": "lyrics",
+        "song_product": "full",
+        "song_length_mode": "full",
+        "guided_step": "song_topic",
+        "lyrics_state": "lyrics_wait_topic",
+        "song_topic_offset": 0,
+    }
 
 def music_guided_label(options: list[tuple[str, str, str]], key: str, lang: str = "vi") -> str:
     lang = music_ui_lang(lang=lang)
@@ -75459,21 +75460,16 @@ def music_guided_description_from_result(result: dict, lang: str = "vi") -> str:
     mood = music_guided_label(MUSIC_GUIDED_MOODS, str(result.get("guided_mood") or "cheerful"), lang)
     package_mode = music_song_length_mode(result)
     duration = (
-        "nửa bài thật" if package_mode == "half" and music_short_mode_verified()
-        else "bài hát hoàn chỉnh" if package_mode == "full"
+        "bài hát hoàn chỉnh" if package_mode in {"half", "full"}
         else music_guided_label(MUSIC_GUIDED_DURATIONS, str(result.get("guided_duration") or "18s"), lang)
     )
     song_requirement = ""
-    if package_mode == "half" and music_short_mode_verified():
-        song_requirement = " Half-song product with coherent complete lyrics, full sentences, clear opening/verse/chorus, never cut mid-sentence."
-    elif package_mode == "full":
+    if package_mode in {"half", "full"}:
         song_requirement = " Full-song product with complete original lyrics and a finished verse/chorus/bridge structure."
     if music_ui_lang(lang=lang) != "vi":
         return f"Guided AI music: purpose={purpose}; style={style}; mood={mood}; duration={duration}; original safe melody; no famous artist imitation.{song_requirement}"
     song_requirement_vi = ""
-    if package_mode == "half" and music_short_mode_verified():
-        song_requirement_vi = " Nửa bài chỉ được tạo khi provider đã xác minh short/clip mode thật, đủ câu và không cắt giữa câu."
-    elif package_mode == "full":
+    if package_mode in {"half", "full"}:
         song_requirement_vi = " Bài hoàn chỉnh phải có lời nguyên bản và cấu trúc verse/điệp khúc/bridge kết thúc trọn vẹn."
     return f"Tạo nhạc theo hướng dẫn: mục đích {purpose}; phong cách {style}; cảm xúc {mood}; thời lượng {duration}; giai điệu nguyên bản, an toàn để dùng cho nội dung TOAN AAS.{song_requirement_vi}"
 
@@ -75556,6 +75552,17 @@ def music_ai_preview_text(result: dict | None = None, lang: str = "vi") -> str:
         )
     preview_title = "Nghe thử bài hát" if result.get("song_product") else "Nghe thử nhạc"
     if package_mode:
+        if package_mode == "full":
+            selected_line = f"\n\nHướng đã chọn: <code>{html.escape(prompt[:700])}</code>" if prompt else ""
+            return (
+                "🎧 <b>Nghe thử bài hát có lời AI</b>\n\n"
+                f"TOAN AAS sẽ tạo một bài hát hoàn chỉnh, sau đó chỉ gửi {preview_seconds} giây đầu để quý khách nghe thử.\n\n"
+                "• Nghe thử: theo chính sách preview của hệ thống\n"
+                f"• Bản đầy đủ bài hát có lời AI: <b>{price} Xu</b>\n"
+                "• Bản đầy đủ được lưu trong kho và chỉ giao khi quý khách xác nhận dùng bản đầy đủ.\n\n"
+                "Lưu ý: Hệ thống tạo sản phẩm thật để cắt bản nghe thử, vì vậy mỗi loại sản phẩm chỉ được nghe/xem thử 1 lần trong 15 ngày, áp dụng từ hạng Silver trở lên."
+                f"{selected_line}"
+            )
         return (
             f"▶️ <b>{preview_title}</b>\n\n"
             f"{html.escape(music_song_length_selection_text(result, lang))}\n\n"
@@ -75581,7 +75588,23 @@ def music_ai_preview_keyboard(
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     preview_label = f"▶️ Nghe thử {music_preview_seconds()} giây"
-    full_label = "✅ Dùng bản đầy đủ"
+    is_vocal_full = music_result_product_kind(result or {}) == "song_full"
+    full_price = music_result_price_xu(result or {}) if is_vocal_full else 0
+    full_label = f"✅ Dùng bản đầy đủ {full_price} Xu" if is_vi and is_vocal_full else "✅ Dùng bản đầy đủ"
+    if is_vocal_full:
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(preview_label if is_vi else "▶️ Short preview", callback_data=cb("music_ai_preview")),
+                InlineKeyboardButton(full_label if is_vi else "✅ Use full output", callback_data=cb("music_ai_confirm")),
+            ],
+            [
+                InlineKeyboardButton("🗂 Lưu vào kho nhạc" if is_vi else "🗂 Save to music vault", callback_data=cb("music_ai_save_vault")),
+            ],
+            [
+                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("music_ai_back_suggestions")),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
+        ])
     rows = [
         [
             InlineKeyboardButton(preview_label if is_vi else "▶️ Short preview", callback_data=cb("music_ai_preview")),
@@ -78179,10 +78202,13 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "song_menu":
         await query.answer()
         enter_product_context(user_id, ctx, origin_screen=origin_screen, product_area="music")
+        result = music_vocal_full_initial_result()
+        save_music_guided_result(user_id, result)
+        set_music_guided_pending(user_id, "music_song_topic", product_context=ctx, previous_screen="music_hub", return_to="music_hub")
         return await query.message.reply_text(
-            music_song_product_text(lang),
+            music_song_step_text("topic", result, lang),
             parse_mode="HTML",
-            reply_markup=music_song_product_keyboard(lang, ctx),
+            reply_markup=music_song_topic_keyboard(lang, ctx, 0, "music_hub"),
         )
     if action == "song_back_duration":
         await query.answer()
@@ -78204,10 +78230,10 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 user_id,
                 "music_song_topic",
                 product_context=ctx,
-                previous_screen="song_product" if result.get("song_product") in {"half", "full"} else "song_duration",
-                return_to="song_menu" if result.get("song_product") in {"half", "full"} else "song_back_duration",
+                previous_screen="music_hub" if result.get("song_product") in {"half", "full"} else "song_duration",
+                return_to="music_hub" if result.get("song_product") in {"half", "full"} else "song_back_duration",
             )
-            back_action = "song_menu" if result.get("song_product") in {"half", "full"} else "song_back_duration"
+            back_action = "music_hub" if result.get("song_product") in {"half", "full"} else "song_back_duration"
             return await query.message.reply_text(
                 music_song_step_text("topic", result, lang),
                 parse_mode="HTML",
@@ -78244,7 +78270,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         product = "half" if action.endswith("half") else "full"
         if product == "half" and not music_short_mode_verified():
             product = "full"
-        result = {
+        result = music_vocal_full_initial_result() if product == "full" else {
             "guided_purpose": "song",
             "music_ai_kind": "lyrics",
             "song_product": product,
@@ -78254,11 +78280,11 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "song_topic_offset": 0,
         }
         save_music_guided_result(user_id, result)
-        set_music_guided_pending(user_id, "music_song_topic", product_context=ctx, previous_screen="song_product", return_to="song_menu")
+        set_music_guided_pending(user_id, "music_song_topic", product_context=ctx, previous_screen="music_hub", return_to="music_hub")
         return await query.message.reply_text(
             music_song_step_text("topic", result, lang),
             parse_mode="HTML",
-            reply_markup=music_song_topic_keyboard(lang, ctx, 0, "song_menu"),
+            reply_markup=music_song_topic_keyboard(lang, ctx, 0, "music_hub"),
         )
     if action == "song_duration_custom":
         await query.answer()
@@ -78373,7 +78399,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         vocal = music_guided_label(MUSIC_SONG_VOCALS, key, lang)
         scope = {
             "seconds": f"một đoạn có lời hoàn chỉnh dài {music_result_duration_seconds(result)} giây",
-            "half": "nửa bài thật đã xác minh" if music_short_mode_verified() else "một bài hát hoàn chỉnh",
+            "half": "một bài hát hoàn chỉnh",
             "full": "một bài hát hoàn chỉnh",
         }.get(music_song_length_mode(result) or str(result.get("song_product") or ""), "một bài hát có lời")
         desc = (
@@ -81617,15 +81643,15 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         )
         return True
     if action == "music_song_topic":
+        result = get_music_guided_result(uid) or music_vocal_full_initial_result()
         blocked = music_copyright_block_reason(text)
         if blocked:
             await update.message.reply_text(
                 "⛔ Chủ đề này có rủi ro bắt chước nội dung có bản quyền.\n\n"
                 "Hãy mô tả câu chuyện, thông điệp và cảm xúc nguyên bản của bạn. TOAN AAS chưa xử lý và chưa trừ Xu.",
-                reply_markup=music_song_product_keyboard(lang, ctx),
+                reply_markup=music_song_topic_keyboard(lang, ctx, _safe_int(result.get("song_topic_offset"), 0), "music_hub"),
             )
             return True
-        result = get_music_guided_result(uid) or {}
         result.update({"song_topic": text, "guided_step": "song_genre", "lyrics_state": "lyrics_select_genre"})
         save_music_guided_result(uid, result)
         await update.message.reply_text(
@@ -81662,7 +81688,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         mood = music_guided_label(MUSIC_SONG_MOODS, str(result.get("song_mood") or result.get("guided_mood") or "emotional"), lang)
         scope = {
             "seconds": f"một đoạn có lời hoàn chỉnh dài {music_result_duration_seconds(result)} giây",
-            "half": "nửa bài thật đã xác minh" if music_short_mode_verified() else "một bài hát hoàn chỉnh",
+            "half": "một bài hát hoàn chỉnh",
             "full": "một bài hát hoàn chỉnh",
         }.get(music_song_length_mode(result) or str(result.get("song_product") or ""), "một bài hát có lời")
         desc = (
@@ -96109,7 +96135,7 @@ def music_confirm_product_label(result: dict | None = None, lang: str = "vi") ->
     kind = music_result_product_kind(result)
     is_vi = music_ui_lang(lang=lang) == "vi"
     if kind == "song_half" and music_short_mode_verified():
-        return "nửa bài đủ lời" if is_vi else "a coherent half song"
+        return "một bài hát hoàn chỉnh" if is_vi else "a complete song"
     if kind == "song_full":
         return "một bài hát hoàn chỉnh" if is_vi else "a complete song"
     if kind == "song_seconds":
@@ -108068,8 +108094,13 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• <code>/music_policy</code>",
         "",
         "<b>Trừ Xu / VIP khi xử lý thật:</b>",
+        "🎵 <b>Nhạc AI</b>",
+        f"• Nhạc nền AI: giữ giá hiện tại theo lựa chọn trong flow",
+        f"• Bài hát có lời AI: {int(MUSIC_VOCAL_FULL_PRICE_XU or 800)} Xu",
+        f"• Nghe thử nhạc: {music_preview_seconds()} giây theo chính sách preview",
+        "• Bản vocal đầy đủ chỉ giao khi quý khách xác nhận dùng bản đầy đủ",
         "• <code>/music_bg</code>: từ 300 Xu/lần",
-        "• <code>/music_song</code>: từ 500–1.000 Xu/lần, admin-only trước",
+        f"• <code>/music_song</code>: Bài hát có lời AI {int(MUSIC_VOCAL_FULL_PRICE_XU or 800)} Xu/lần, admin-only trước",
         "• <code>/audio_enhance</code>: từ 80 Xu/file ngắn",
         "• <code>/add_music</code>: từ 120 Xu/video ngắn",
         "• <code>/add_voice_to_video</code>: từ 150 Xu/video ngắn",

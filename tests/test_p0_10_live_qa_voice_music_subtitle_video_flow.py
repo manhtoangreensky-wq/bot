@@ -153,7 +153,7 @@ def test_music_preview_labels_match_selected_product():
     assert "▶️ Nghe thử 12 giây" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=background))
     assert "✅ Dùng bản đầy đủ" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=background))
     assert "▶️ Nghe thử 12 giây" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=False, result=song))
-    assert "✅ Dùng bản đầy đủ" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=song))
+    assert "✅ Dùng bản đầy đủ 800 Xu" in _labels(bot.music_ai_preview_keyboard("vi", preview_seen=True, result=song))
     public_music_text = bot.suno_user_guard_text("vi").lower()
     assert "nhạc/giọng" not in public_music_text
     assert "nghe thử/guard" not in public_music_text

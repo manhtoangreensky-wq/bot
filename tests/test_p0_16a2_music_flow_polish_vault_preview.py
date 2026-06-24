@@ -55,7 +55,7 @@ def test_full_output_not_delivered_before_confirm():
     assert "toan_aas_music_preview.mp3" in preview_block
     assert "toan_aas_music.mp3" not in preview_block
     assert "cap_voice_preview_audio_bytes" in preview_block
-    assert "Bản đầy đủ đã được lưu trong kho" in bot.music_ai_preview_text({"song_product": "full", "selected_prompt": "bài hát"}, "vi")
+    assert "Bản đầy đủ được lưu trong kho" in bot.music_ai_preview_text({"song_product": "full", "selected_prompt": "bài hát"}, "vi")
 
 
 def test_music_half_option_removed_if_not_verified(monkeypatch):
@@ -71,7 +71,8 @@ def test_music_short_option_only_if_provider_verified(monkeypatch):
     monkeypatch.setattr(bot, "MUSIC_SHORT_MODE_VERIFIED", True)
     labels = _labels(bot.music_song_product_keyboard("vi"))
 
-    assert "1️⃣ Nửa bài thật" in labels
+    assert "🎤 Bài hát có lời AI" in labels
+    assert not any("Nửa bài" in label for label in labels)
     assert bot.music_result_product_kind({"song_product": "half"}) == "song_half"
 
 
@@ -80,7 +81,8 @@ def test_music_does_not_sell_fake_half_song(monkeypatch):
     text = bot.music_song_product_text("vi")
     preview = bot.music_ai_preview_text({"song_product": "half", "selected_prompt": "bài hát"}, "vi")
 
-    assert "Không bán nửa bài" in text
+    assert "Không bán nửa bài" not in text
+    assert "Nửa bài" not in text
     assert "Đã chọn: Nửa bài." not in preview
     assert bot.music_ai_output_price_xu(60, "song_half") == bot.MUSIC_VOCAL_FULL_PRICE_XU
 

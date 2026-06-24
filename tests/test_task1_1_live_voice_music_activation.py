@@ -267,11 +267,12 @@ def test_music_song_select_option_shows_confirmation_price():
     result = {"song_product": "half", "guided_duration_seconds": 60, "selected_prompt": "bài hát có lời"}
     text = bot.music_ai_preview_text(result, "vi")
     labels = _labels(bot.music_ai_preview_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM, result=result))
-    assert "Đã chọn: Bài hát có lời AI." in text
-    assert "Giá dự kiến:" in text
+    assert "Nghe thử bài hát có lời AI" in text
+    assert "Bản đầy đủ bài hát có lời AI: <b>800 Xu</b>" in text
+    assert "1 lần trong 15 ngày" in text
     assert "Thời lượng bản đầy đủ" not in text
     assert "▶️ Nghe thử 12 giây" in labels
-    assert "✅ Dùng bản đầy đủ" in labels
+    assert "✅ Dùng bản đầy đủ 800 Xu" in labels
 
 
 def test_music_song_half_full_provider_prompt_structure():

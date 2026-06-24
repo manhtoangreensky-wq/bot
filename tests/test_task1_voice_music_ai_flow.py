@@ -212,7 +212,7 @@ def test_song_no_nghe_xem_label():
     result = {"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát"}
     labels = _labels(bot.music_ai_preview_keyboard("vi", result=result))
     assert "▶️ Nghe thử 12 giây" in labels
-    assert "✅ Dùng bản đầy đủ" in labels
+    assert "✅ Dùng bản đầy đủ 800 Xu" in labels
     assert not any("nghe/xem" in label.lower() for label in labels)
 
 
@@ -294,12 +294,13 @@ def test_no_public_provider_terms_voice_music():
 
 
 def test_no_public_nghe_xem_combo():
-    surfaces = "\n".join([
+    labels = "\n".join([
         "\n".join(_labels(bot.saved_voice_tts_confirm_keyboard(1, "vi"))),
         "\n".join(_labels(bot.music_ai_preview_keyboard("vi", result={"song_product": "full"}))),
-        bot.music_ai_preview_text({"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát"}, "vi"),
     ]).lower()
-    assert "nghe/xem" not in surfaces
+    assert "nghe/xem" not in labels
+    text = bot.music_ai_preview_text({"song_product": "full", "guided_duration_seconds": 120, "selected_prompt": "bài hát"}, "vi")
+    assert "nghe/xem thử 1 lần trong 15 ngày" in text
 
 
 def test_shopaikey_minimax_clone_payload_matches_documented_voice_id_rules():
