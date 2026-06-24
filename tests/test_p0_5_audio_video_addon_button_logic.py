@@ -143,7 +143,7 @@ def test_music_inner_menu_restores_stock_sfx_user_media_create_new_music():
     assert "Không thêm nhạc" not in "\n".join(labels)
 
 
-def test_showroom_voice_default_asks_text_then_preview(monkeypatch):
+def test_showroom_voice_default_asks_text_then_confirm(monkeypatch):
     user_id = 950501
     _reset_user(user_id)
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
@@ -162,11 +162,12 @@ def test_showroom_voice_default_asks_text_then_preview(monkeypatch):
     handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
 
     assert handled is True
-    assert message.outputs[-1]["filename"] == "toan_aas_voice_preview.mp3"
-    assert "giọng nữ mặc định" in message.outputs[-1]["caption"]
+    assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
+    assert "Không cần nghe thử 6 giây" in message.outputs[-1]["text"]
+    assert "music_quick|showroom|voice_default_confirm:female" in _callbacks(message.outputs[-1]["reply_markup"])
 
 
-def test_showroom_saved_voice_profile_asks_text_then_preview(monkeypatch):
+def test_showroom_saved_voice_profile_asks_text_then_confirm(monkeypatch):
     user_id = 950502
     _reset_user(user_id)
     profile = {"id": 77, "display_name": "Voice bán hàng", "provider_voice_id": "voice-77", "status": "active"}
@@ -185,7 +186,8 @@ def test_showroom_saved_voice_profile_asks_text_then_preview(monkeypatch):
     result = bot.get_music_guided_result(user_id)
     assert handled is True
     assert result["selected_voice_profile_id"] == 77
-    assert "Xác nhận tạo giọng đọc" in message.outputs[-1]["text"]
+    assert "Dùng voice riêng để đọc văn bản" in message.outputs[-1]["text"]
+    assert "0.1 Xu / ký tự" in message.outputs[-1]["text"]
     assert "music_quick|showroom|voice_profile_generate:77" in _callbacks(message.outputs[-1]["reply_markup"])
     assert touched.get("last_used_at")
 

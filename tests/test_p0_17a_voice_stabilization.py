@@ -107,7 +107,8 @@ def test_voice_admin_status_no_secret_leak(monkeypatch):
     })
     lines = "\n".join(bot.voice_engine_status_lines())
     assert "Default TTS configured" in lines
-    assert "Preview quota gate active" in lines
+    assert "Default TTS mode" in lines
+    assert "Custom voice preview quota gate active" in lines
     assert "/voice_tts_admin_test --confirm-paid" in lines
     assert "sk-live" not in lines
     assert "Bearer live" not in lines
@@ -121,7 +122,7 @@ def test_voice_preview_duration_6s():
 
 
 def test_voice_preview_uses_global_quota_voice_ai():
-    source = inspect.getsource(bot.send_standalone_tts_result)
+    source = inspect.getsource(bot.create_minimax_voice_profile_preview)
     assert 'preview_quota_guard(user_id, "voice_ai")' in source
     assert 'consume_preview_quota(user_id, "voice_ai"' in source
 
@@ -151,8 +152,8 @@ def test_voice_preview_blocks_before_provider_when_quota_exhausted(monkeypatch, 
         message,
         17003,
         "Xin chào TOAN AAS",
-        "giọng nữ mặc định",
-        voice_id=bot.default_tts_voice_id("female"),
+        "giọng nâng cao",
+        voice_id="style_voice",
         lang="vi",
     ))
     assert ok is False
@@ -187,8 +188,8 @@ def test_voice_preview_no_full_delivery_before_confirm(monkeypatch, tmp_path):
         message,
         17004,
         "Xin chào TOAN AAS",
-        "giọng nữ mặc định",
-        voice_id=bot.default_tts_voice_id("female"),
+        "giọng nâng cao",
+        voice_id="style_voice",
         lang="vi",
     ))
     assert ok is True

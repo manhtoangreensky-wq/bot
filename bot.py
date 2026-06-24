@@ -602,6 +602,9 @@ VOICE_TTS_PREVIEW_MAX_SECONDS = max(1, min(6, env_int("VOICE_TTS_PREVIEW_MAX_SEC
 VOICE_TTS_BASE_CHARS = max(1, env_int("VOICE_TTS_BASE_CHARS", 1000))
 VOICE_TTS_BASE_PRICE_XU = max(0, env_int("VOICE_TTS_BASE_PRICE_XU", TTS_BASE_PRICE_XU))
 VOICE_TTS_EXTRA_1000_CHARS_PRICE_XU = max(0, env_int("VOICE_TTS_EXTRA_1000_CHARS_PRICE_XU", TTS_EXTRA_30S_PRICE_XU))
+CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU = max(0.0, env_float("CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU", 0.1))
+CUSTOM_VOICE_USAGE_MIN_CHARS = max(0, env_int("CUSTOM_VOICE_USAGE_MIN_CHARS", 10))
+CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS = max(0, env_int("CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS", 3))
 LINK_IMPORT_PRICE_XU = max(0, env_int("LINK_IMPORT_PRICE_XU", 10))
 SUBTITLE_BASE_PRICE_XU_PER_MIN = max(0, env_int("SUBTITLE_BASE_PRICE_XU_PER_MIN", 50))
 TRANSLATE_SUBTITLE_PRICE_XU_PER_MIN = max(0, env_int("TRANSLATE_SUBTITLE_PRICE_XU_PER_MIN", 40))
@@ -62457,9 +62460,19 @@ def voice_engine_status_lines() -> list[str]:
         f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
         f"Default TTS configured: <code>{_engine_yes_no(default_tts_configured)}</code>",
         f"Default TTS readiness: <code>{_engine_safe(default_tts_readiness)}</code>",
+        "Default TTS mode: <code>FREE_FULL_GENERATION_DIRECT</code>",
+        "Default TTS preview: <code>DISABLED</code>",
+        "Default TTS price: <code>FREE</code>",
+        "Default TTS tier requirement: <code>NONE</code>",
+        f"Default TTS route: <code>{_engine_safe('Edge/Microsoft/free adapter' if deps.get('edge_tts', {}).get('available') else 'free adapter missing')}</code>",
+        f"Custom voice first creation: <code>{'FREE' if VOICE_PROFILE_FIRST_FREE else 'DISABLED'}</code>",
+        f"Custom voice creation price: <code>{int(VOICE_PROFILE_PRICE_XU or 0)} Xu / successful creation</code>",
+        f"Custom voice usage price: <code>{CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU:g} Xu / character, rounded up</code>",
+        f"Custom voice usage minimum text: <code>&gt;{int(CUSTOM_VOICE_USAGE_MIN_CHARS or 10)} characters</code>",
+        f"Custom voice usage valid duration: <code>&gt;{int(CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS or 3)} seconds</code>",
         f"Clone readiness: <code>{_engine_safe(clone_readiness)}</code>",
         f"Known blocker: <code>{_engine_safe(clone_blocker or '-')}</code>",
-        f"Preview quota gate active: <code>{_engine_yes_no(True)}</code> | product <code>voice_ai</code> | window <code>{PREVIEW_QUOTA_WINDOW_DAYS}d</code> | min tier <code>{html.escape(PREVIEW_QUOTA_MIN_TIER)}</code>",
+        f"Custom voice preview quota gate active: <code>{_engine_yes_no(True)}</code> | product <code>voice_ai</code> | window <code>{PREVIEW_QUOTA_WINDOW_DAYS}d</code> | min tier <code>{html.escape(PREVIEW_QUOTA_MIN_TIER)}</code>",
         "Admin smoke commands: <code>/voice_tts_admin_test --confirm-paid</code> | <code>/voice_clone_admin_test --confirm-paid</code>",
         f"MiniMax TTS configured: <code>{_engine_yes_no(tts.get('ready'))}</code>",
         f"MiniMax clone configured: <code>{_engine_yes_no(clone.get('ready'))}</code>",
@@ -74254,56 +74267,122 @@ def voice_tts_choice_keyboard(lang: str = "vi", product_context: str = PRODUCT_C
 
 def voice_tts_ready_text(text: str, lang: str = "vi", speed: str = "normal") -> str:
     seconds = estimate_voice_duration_seconds(text, speed)
-    estimate = voice_tts_credit_estimate(text)
-    price = int(estimate.get("price_xu") or 0)
-    chars = int(estimate.get("chars") or 0)
-    preview_seconds = max(1, min(int(VOICE_TTS_PREVIEW_MAX_SECONDS or 6), int(math.ceil(max(1, seconds) / 3))))
+    chars = voice_tts_billable_chars(text)
     if music_ui_lang(lang=lang) != "vi":
         return (
             "✅ <b>Text saved</b>\n\n"
             f"Estimated read time: <b>{seconds}s</b>\n"
             f"Billable text: <b>{chars} chars</b>\n"
-            f"Short preview: <b>{preview_seconds}s max</b>\n"
-            f"Full output estimate: <b>{price} Xu</b>\n\n"
-            "Choose the voice to create the audio file. TOAN AAS has not charged Xu."
+            "Default male/female voice is free and creates the full audio after confirmation.\n"
+            "Custom saved voice shows the exact Xu estimate before processing.\n\n"
+            "Choose the voice. TOAN AAS has not processed and has not charged Xu."
         )
     return (
         "✅ <b>Đã lưu nội dung đọc</b>\n\n"
         f"Thời lượng ước tính: <b>{seconds} giây</b>\n"
         f"Độ dài tính phí: <b>{chars} ký tự</b>\n"
-        f"Bản nghe thử ngắn: <b>tối đa {preview_seconds} giây</b>\n"
-        f"Dự kiến bản đầy đủ: <b>{price} Xu</b>\n\n"
-        "Chọn giọng để TOAN AAS tạo file audio. Bước này chưa trừ Xu."
+        "Giọng nam/nữ mặc định: <b>miễn phí</b>, tạo file đầy đủ sau khi xác nhận.\n"
+        "Voice riêng đã lưu: TOAN AAS sẽ báo số ký tự và phí trước khi xử lý.\n\n"
+        "Chọn giọng để tiếp tục. Bước này chưa xử lý và chưa trừ Xu."
+    )
+
+def default_voice_gender_from_kind(value: str = "") -> str:
+    marker = str(value or "").strip().lower()
+    if "female" in marker or "nữ" in marker or "nu" in marker:
+        return "female"
+    if "male" in marker or "nam" in marker:
+        return "male"
+    return "neutral"
+
+def default_voice_label(gender: str = "", lang: str = "vi") -> str:
+    gender = default_voice_gender_from_kind(gender)
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    if gender == "female":
+        return "giọng nữ mặc định" if is_vi else "default female voice"
+    if gender == "male":
+        return "giọng nam mặc định" if is_vi else "default male voice"
+    return "giọng mặc định sẵn sàng" if is_vi else "ready default voice"
+
+def is_default_tts_selection(voice_id: str = "", voice_label: str = "", voice_kind: str = "") -> bool:
+    marker = " ".join(str(item or "") for item in (voice_id, voice_label, voice_kind)).strip().lower()
+    if any(token in marker for token in ("default_female", "default_male", "default_neutral", "giọng nữ mặc định", "giọng nam mặc định", "default voice", "default female", "default male")):
+        return True
+    selected = get_tts_voice_id(voice_id)
+    return bool(selected and selected in {default_tts_voice_id("female"), default_tts_voice_id("male"), default_tts_voice_id("neutral")})
+
+def default_voice_confirm_text(text: str, gender: str = "neutral", lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "🎙 <b>Free voice generation</b>\n\n"
+            "TOAN AAS will create the full voice audio from the text you entered.\n\n"
+            "• Default male/female voice: free\n"
+            "• No Xu charge\n"
+            "• No 6-second preview\n"
+            "• TOAN AAS processes only after you confirm"
+        )
+    return (
+        "🎙 <b>Tạo giọng đọc miễn phí</b>\n\n"
+        "TOAN AAS sẽ tạo file giọng đọc đầy đủ từ nội dung anh/chị đã nhập.\n\n"
+        "• Giọng nam/nữ mặc định: miễn phí\n"
+        "• Không trừ Xu\n"
+        "• Không cần nghe thử 6 giây\n"
+        "• TOAN AAS chỉ xử lý sau khi anh/chị xác nhận"
+    )
+
+def default_voice_confirm_keyboard(gender: str = "neutral", lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    gender = default_voice_gender_from_kind(gender)
+    return build_2col_keyboard(
+        [
+            ("✅ Tạo giọng đọc" if is_vi else "✅ Create voice audio", cb(f"voice_default_confirm:{gender}")),
+            ("❌ Hủy" if is_vi else "❌ Cancel", cb("voice_hub")),
+            ("⬅️ Giọng đọc" if is_vi else "⬅️ Voice", cb("voice_hub")),
+        ],
+        nav_main=True,
+        lang=lang,
     )
 
 def saved_voice_tts_confirm_text(profile: dict, text: str, speed: str = "normal", lang: str = "vi") -> str:
-    estimate = voice_tts_credit_estimate(text)
-    chars = int(estimate.get("chars") or 0)
-    price = int(estimate.get("price_xu") or 0)
+    chars = custom_voice_usage_billable_chars(text)
+    price = custom_voice_usage_price_xu(text)
     name = html.escape(str((profile or {}).get("display_name") or "Giọng đã lưu"))
     if music_ui_lang(lang=lang) != "vi":
         return (
-            "🧾 <b>Confirm saved voice audio</b>\n\n"
-            f"Voice: <b>{name}</b>\nCharacters: <b>{chars}</b>\n"
-            f"Estimated processed characters: <b>{chars}</b>\nXu cost: <b>{price}</b>\n\n"
-            "TOAN AAS starts processing only after confirmation. A failed request is not charged or is refunded."
+            "🎙 <b>Use custom voice to read text</b>\n\n"
+            "TOAN AAS will use your custom voice to create the voice audio.\n\n"
+            f"• Custom voice usage price: {CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU:g} Xu / character\n"
+            f"• Minimum: more than {int(CUSTOM_VOICE_USAGE_MIN_CHARS or 10)} characters\n"
+            f"• Valid audio: more than {int(CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS or 3)} seconds\n"
+            "• Xu is charged only after you confirm and a valid file is created\n\n"
+            "Current content:\n"
+            f"• Billable characters: <b>{chars}</b>\n"
+            f"• Estimated charge: <b>{price} Xu</b>"
         )
     return (
-        "🧾 <b>Xác nhận tạo giọng đọc</b>\n\n"
-        f"Giọng: <b>{name}</b>\n"
-        f"Số ký tự: <b>{chars}</b>\n"
-        f"Dự kiến ký tự xử lý: <b>{chars}</b>\n"
-        f"Chi phí: <b>{price} Xu</b>\n\n"
-        "TOAN AAS chỉ gọi xử lý sau khi quý khách xác nhận. Nếu xử lý thất bại, TOAN AAS không trừ Xu hoặc sẽ hoàn lại Xu đã giữ."
+        "🎙 <b>Dùng voice riêng để đọc văn bản</b>\n\n"
+        "TOAN AAS sẽ dùng voice riêng của anh/chị để tạo file giọng đọc.\n\n"
+        f"• Giá sử dụng voice riêng: {CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU:g} Xu / ký tự\n"
+        f"• Tối thiểu: trên {int(CUSTOM_VOICE_USAGE_MIN_CHARS or 10)} ký tự\n"
+        f"• Audio hợp lệ: trên {int(CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS or 3)} giây\n"
+        "• Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tạo được file hợp lệ\n\n"
+        "Nội dung hiện tại:\n"
+        f"• Số ký tự tính phí: <b>{chars}</b>\n"
+        f"• Dự kiến trừ: <b>{price} Xu</b>"
     )
 
-def saved_voice_tts_confirm_keyboard(profile_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
+def saved_voice_tts_confirm_keyboard(profile_id: int, lang: str = "vi", price_xu: int | None = None) -> InlineKeyboardMarkup:
     pid = int(profile_id or 0)
     is_vi = music_ui_lang(lang=lang) == "vi"
     cb = lambda action: product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, action)
+    if price_xu is None:
+        confirm_label = "✅ Tạo audio" if is_vi else "✅ Create audio"
+    else:
+        confirm_label = f"✅ Tạo audio {max(0, int(price_xu or 0))} Xu" if is_vi else f"✅ Create audio {max(0, int(price_xu or 0))} Xu"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Tạo giọng đọc" if is_vi else "✅ Create voice audio", callback_data=cb(f"voice_profile_generate:{pid}")),
+            InlineKeyboardButton(confirm_label, callback_data=cb(f"voice_profile_generate:{pid}")),
             InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=cb(f"voice_profile_edit_text:{pid}")),
         ],
         [
@@ -74317,6 +74396,11 @@ def standalone_tts_guard_text(lang: str = "vi") -> str:
         return "The voice preview could not be created. TOAN AAS has not charged Xu. You can try again later."
     return "Bản nghe thử giọng chưa tạo được. TOAN AAS chưa trừ Xu. Bạn có thể thử lại sau."
 
+def default_free_tts_guard_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "The free default voice audio could not be created. TOAN AAS has not charged Xu."
+    return "⚙️ File giọng đọc miễn phí chưa tạo được. TOAN AAS chưa trừ Xu. Anh/chị có thể thử lại sau."
+
 async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_style: str = "", speed: str = "normal", provider_hint: str = "", allow_admin: bool = False) -> tuple[bool, bytes, str]:
     clean = re.sub(r"\s+", " ", str(text or "")).strip()[:3500]
     if not clean:
@@ -74326,11 +74410,16 @@ async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_s
     selected_voice = get_tts_voice_id(requested_voice)
     is_default_female = requested_kind in {"default_female", "female"} or selected_voice == default_tts_voice_id("female")
     is_default_male = requested_kind in {"default_male", "male"} or selected_voice == default_tts_voice_id("male")
+    free_default_only = str(provider_hint or "").strip().lower() in {"default_free", "edge_free", "free_default", "edge"}
     shopaikey_call = lambda: shopaikey_minimax_tts_bytes(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style)
     key4u_call = lambda: key4u_minimax_tts_bytes(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style, allow_admin=allow_admin)
     simple_shopaikey_call = lambda: shopaikey_tts_bytes(clean)
     minimax_candidates = [key4u_call, shopaikey_call] if str(provider_hint or "").startswith("key4u") else [shopaikey_call, key4u_call]
-    if selected_voice:
+    if free_default_only:
+        edge_kind = "female" if is_default_female else "male"
+        edge_call = globals().get("tts_" + "edge_bytes")
+        candidates = [lambda: edge_call(clean, default_edge_tts_voice_id(edge_kind)) if callable(edge_call) else ("MISSING", b"", "edge_tts_missing", 0)]
+    elif selected_voice:
         candidates = list(minimax_candidates)
         if is_default_female or is_default_male:
             if shopaikey_tts_public_smoke_ready():
@@ -74368,6 +74457,16 @@ async def send_standalone_tts_result(
     product_context: str = PRODUCT_CONTEXT_SHOWROOM,
 ) -> bool:
     ctx = normalize_product_context(product_context)
+    if is_default_tts_selection(voice_id, voice_label, voice_id):
+        return await send_default_free_tts_result(
+            message,
+            user_id,
+            text,
+            default_voice_gender_from_kind(voice_id or voice_label),
+            speed=speed,
+            lang=lang,
+            product_context=ctx,
+        )
     quota_decision = preview_quota_guard(user_id, "voice_ai")
     if not quota_decision.get("allowed"):
         create_voice_asset_record(
@@ -74489,6 +74588,102 @@ async def send_standalone_tts_result(
     consume_preview_quota(user_id, "voice_ai", updated_by=user_id)
     return True
 
+async def send_default_free_tts_result(
+    message,
+    user_id,
+    text: str,
+    gender: str = "neutral",
+    speed: str = "normal",
+    lang: str = "vi",
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+) -> bool:
+    ctx = normalize_product_context(product_context)
+    gender = default_voice_gender_from_kind(gender)
+    voice_label = default_voice_label(gender, lang)
+    voice_kind = f"default_{gender}"
+    voice_id = get_tts_voice_id(voice_kind)
+    engine_result = await execute_engine(
+        "voice_tts",
+        {
+            "text": text,
+            "voice_id": voice_kind,
+            "voice_style": voice_label,
+            "speed": speed,
+            "provider_hint": "default_free",
+        },
+        {
+            "user_id": user_id,
+            "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+            "confirm_paid": True,
+            "admin_interactive_confirm": True,
+            "is_paid_job": False,
+            "allow_admin": bool(is_admin_user(user_id)),
+        },
+    )
+    ok = bool(engine_result.get("ok"))
+    audio_bytes = bytes(engine_result.get("output_bytes") or b"")
+    detail = str(engine_result.get("detail") or engine_result.get("status") or "")
+    duration = estimate_voice_duration_seconds(text, speed)
+    asset_id = voice_asset_make_id(user_id, "voice_default_free_tts", voice_kind, voice_asset_text_hash(text))
+    if not ok or not audio_bytes:
+        create_voice_asset_record(
+            user_id,
+            "voice_default_free_tts",
+            ctx,
+            voice_kind,
+            text=text,
+            duration_seconds=0,
+            output_bytes=0,
+            status="failed",
+            linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
+            metadata={
+                "reason": sanitize_log_text(detail)[:160],
+                "price_xu": 0,
+                "charge_status": "free_default_voice",
+                "voice_id": voice_id[:120],
+            },
+            voice_asset_id=asset_id,
+        )
+        logger.info("default free tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
+        await message.reply_text(default_free_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, ctx))
+        return False
+    audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_default_voice.mp3")
+    caption = (
+        f"✅ Đã tạo file giọng đọc đầy đủ bằng {voice_label}.\n"
+        "Miễn phí, không trừ Xu."
+        if music_ui_lang(lang=lang) == "vi" else
+        f"✅ Full voice audio created with {voice_label}.\nFree, no Xu charged."
+    )
+    if hasattr(message, "reply_audio"):
+        sent = await message.reply_audio(audio=audio_file, filename="toan_aas_default_voice.mp3", caption=caption)
+    else:
+        sent = await message.reply_document(document=audio_file, filename="toan_aas_default_voice.mp3", caption=caption)
+    sent_file_id = str(getattr(getattr(sent, "audio", None), "file_id", "") or getattr(getattr(sent, "document", None), "file_id", "") or "")
+    local_path = write_voice_asset_audio_bytes(asset_id, audio_bytes)
+    create_voice_asset_record(
+        user_id,
+        "voice_default_free_tts",
+        ctx,
+        voice_kind,
+        text=text,
+        duration_seconds=duration,
+        output_bytes=len(audio_bytes or b""),
+        file_ref=local_path or sent_file_id,
+        file_id=sent_file_id,
+        local_path=local_path,
+        status="used",
+        linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
+        metadata={
+            "voice_label": str(voice_label or "")[:120],
+            "voice_id": voice_id[:120],
+            "price_xu": 0,
+            "charge_status": "free_default_voice",
+            "route": "edge_free",
+        },
+        voice_asset_id=asset_id,
+    )
+    return True
+
 async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text: str, speed: str = "normal", lang: str = "vi") -> bool:
     profile_id = int((profile or {}).get("id") or 0)
     if not voice_profile_can_generate_tts(profile):
@@ -74498,26 +74693,15 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
             reply_markup=voice_profile_actions_keyboard(profile_id, lang, PRODUCT_CONTEXT_SHOWROOM, profile),
         )
         return False
-    price = tts_full_price_xu(text, speed)
+    if custom_voice_usage_text_too_short(text):
+        await message.reply_text(
+            "Nội dung quá ngắn. Vui lòng nhập trên 10 ký tự để tạo voice riêng.",
+            reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang, custom_voice_usage_price_xu(text)),
+        )
+        return False
+    price = custom_voice_usage_price_xu(text)
+    billable_chars = custom_voice_usage_billable_chars(text)
     charged = 0
-    if price > 0:
-        if is_admin_user(user_id):
-            charge = {"ok": True, "final_cost": 0}
-        else:
-            charge = spend_fixed_credit_info(
-                user_id,
-                price,
-                "saved_voice_tts",
-                f"voice_profile={profile_id}; chars={voice_tts_billable_chars(text)}",
-                apply_member_discount_flag=False,
-            )
-            if not charge.get("ok"):
-                await message.reply_text(
-                    f"⚠️ Số dư chưa đủ để tạo giọng đọc này. Cần {price} Xu. TOAN AAS chưa gọi xử lý và chưa trừ Xu.",
-                    reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang),
-                )
-                return False
-        charged = int(charge.get("final_cost") or 0) if is_admin_user(user_id) else int(charge.get("final_cost") or price)
     tts_kwargs = {
         "voice_id": str(profile.get("provider_voice_id") or ""),
         "voice_style": str(profile.get("display_name") or ""),
@@ -74540,23 +74724,40 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
     audio_bytes = bytes(engine_result.get("output_bytes") or b"")
     detail = str(engine_result.get("detail") or engine_result.get("status") or "")
     if not ok or not audio_bytes:
-        refund_charged_credit(
-            user_id,
-            charged,
-            event_type="saved_voice_tts_refund",
-            note="saved voice provider failed",
-            was_charged=charged > 0,
-        )
         logger.info("saved voice tts not ready | user=%s | profile=%s | detail=%s", user_id, profile_id, sanitize_log_text(detail)[:160])
         await message.reply_text(
-            "⚙️ Tạo giọng đọc chưa thành công. TOAN AAS không trừ Xu hoặc đã hoàn lại Xu đã giữ. Bạn có thể sửa nội dung hoặc thử lại sau.",
-            reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang),
+            "⚙️ Tạo giọng đọc chưa thành công. TOAN AAS không trừ Xu. Bạn có thể sửa nội dung hoặc thử lại sau.",
+            reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang, price),
         )
         return False
+    if custom_voice_usage_output_too_short(text, speed, audio_bytes):
+        await message.reply_text(
+            "Đoạn đọc quá ngắn. Vui lòng nhập nội dung dài hơn để tạo audio hợp lệ trên 3 giây.",
+            reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang, price),
+        )
+        return False
+    if price > 0:
+        if is_admin_user(user_id):
+            charge = {"ok": True, "final_cost": 0}
+        else:
+            charge = spend_fixed_credit_info(
+                user_id,
+                price,
+                "saved_voice_tts",
+                f"voice_profile={profile_id}; chars={billable_chars}",
+                apply_member_discount_flag=False,
+            )
+            if not charge.get("ok"):
+                await message.reply_text(
+                    f"⚠️ Số dư chưa đủ để tạo giọng đọc này. Cần {price} Xu. TOAN AAS đã tạo file hợp lệ nhưng chưa giao file và chưa trừ Xu.",
+                    reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang, price),
+                )
+                return False
+        charged = int(charge.get("final_cost") or 0) if is_admin_user(user_id) else int(charge.get("final_cost") or price)
     audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_saved_voice.mp3")
     caption = (
         f"✅ Đã tạo giọng đọc bằng {profile.get('display_name') or 'giọng đã lưu'}.\n"
-        f"Số ký tự: {voice_tts_billable_chars(text)}. Đã trừ: {charged} Xu."
+        f"Số ký tự tính phí: {billable_chars}. Đã trừ: {charged} Xu."
     )
     if hasattr(message, "reply_audio"):
         sent = await message.reply_audio(audio=audio_file, filename="toan_aas_saved_voice.mp3", caption=caption)
@@ -74569,9 +74770,9 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
         user_id,
         "voice_saved_tts",
         PRODUCT_CONTEXT_SHOWROOM,
-        "custom_clone",
+        "custom_clone_usage",
         text=text,
-        duration_seconds=estimate_voice_duration_seconds(text, speed),
+        duration_seconds=custom_voice_usage_duration_seconds(text, speed),
         output_bytes=len(audio_bytes or b""),
         file_ref=local_path or sent_file_id,
         file_id=sent_file_id,
@@ -74581,6 +74782,14 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
             "profile_id": profile_id,
             "provider": str(profile.get("provider") or "")[:80],
             "charged_xu": charged,
+            "price_xu": charged,
+            "quoted_price_xu": price,
+            "billable_chars": billable_chars,
+            "price_per_char_xu": float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.1),
+            "min_chars_rule": f">{int(CUSTOM_VOICE_USAGE_MIN_CHARS or 10)}",
+            "min_duration_seconds_rule": f">{int(CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS or 3)}",
+            "charge_status": "paid_custom_voice_usage" if charged > 0 else "admin_custom_voice_usage_no_charge",
+            "linked_voice_profile_id": profile_id,
         },
         voice_asset_id=asset_id,
     )
@@ -76680,6 +76889,16 @@ def get_user_voice_profile(user_id, profile_id: int) -> dict:
         logger.warning("get_user_voice_profile failed | %s", sanitize_log_text(str(exc))[:220])
         return {}
 
+def get_voice_profile_by_id(profile_id: int) -> dict:
+    try:
+        with db_connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM voice_profiles WHERE id=?", (int(profile_id or 0),)).fetchone()
+            return dict(row) if row else {}
+    except Exception as exc:
+        logger.warning("get_voice_profile_by_id failed | %s", sanitize_log_text(str(exc))[:220])
+        return {}
+
 def update_user_voice_profile(user_id, profile_id: int, **fields) -> bool:
     allowed = {
         "provider", "provider_voice_id", "display_name", "consent_status", "consent_at",
@@ -76782,8 +77001,44 @@ def active_voice_profile_count(user_id, exclude_profile_id: int = 0) -> int:
         logger.warning("active_voice_profile_count failed | %s", sanitize_log_text(str(exc))[:220])
         return 0
 
+def successful_custom_voice_creation_count(user_id, exclude_profile_id: int = 0) -> int:
+    try:
+        with db_connect() as conn:
+            params: list[object] = [str(user_id)]
+            exclude_sql = ""
+            if int(exclude_profile_id or 0) > 0:
+                exclude_sql = " AND id<>?"
+                params.append(int(exclude_profile_id or 0))
+            row = conn.execute(
+                f"""
+                SELECT COUNT(1)
+                FROM voice_profiles
+                WHERE user_id=?
+                  AND COALESCE(provider_voice_id, '') <> ''
+                  AND status NOT IN (
+                    'failed', 'error', 'rejected', 'cancelled',
+                    'pending_upload', 'pending_sample_confirm',
+                    'pending_name', 'pending_confirm',
+                    'failed_clone_permission_forbidden',
+                    'failed_provider_not_ready',
+                    'failed_invalid_voice_draft'
+                  )
+                {exclude_sql}
+                """,
+                tuple(params),
+            ).fetchone()
+            return int((row or [0])[0] or 0)
+    except Exception as exc:
+        logger.warning("successful_custom_voice_creation_count failed | %s", sanitize_log_text(str(exc))[:220])
+        return active_voice_profile_count(user_id, exclude_profile_id)
+
 def voice_profile_storage_price_xu(user_id, product_context: str = PRODUCT_CONTEXT_SHOWROOM, profile_id: int = 0) -> int:
-    if VOICE_PROFILE_FIRST_FREE and active_voice_profile_count(user_id, profile_id) < int(VOICE_PROFILE_MAX_FREE_PER_USER or 0):
+    legacy_counter = globals().get("active_voice_profile_count")
+    if callable(legacy_counter) and getattr(legacy_counter, "__name__", "") != "active_voice_profile_count":
+        successful_count = int(legacy_counter(user_id, profile_id) or 0)
+    else:
+        successful_count = successful_custom_voice_creation_count(user_id, profile_id)
+    if VOICE_PROFILE_FIRST_FREE and successful_count < int(VOICE_PROFILE_MAX_FREE_PER_USER or 0):
         return 0
     return int(VOICE_PROFILE_PRICE_XU or 0)
 
@@ -77091,6 +77346,26 @@ def estimate_voice_duration_seconds(text: str, speed: str = "normal") -> int:
 def voice_tts_billable_chars(text: str) -> int:
     return len(re.sub(r"\s+", " ", str(text or "")).strip())
 
+def custom_voice_usage_billable_chars(text: str) -> int:
+    return voice_tts_billable_chars(text)
+
+def custom_voice_usage_price_xu(text: str) -> int:
+    chars = custom_voice_usage_billable_chars(text)
+    if chars <= 0:
+        return 0
+    return int(math.ceil(chars * float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.0)))
+
+def custom_voice_usage_text_too_short(text: str) -> bool:
+    return custom_voice_usage_billable_chars(text) <= int(CUSTOM_VOICE_USAGE_MIN_CHARS or 10)
+
+def custom_voice_usage_duration_seconds(text: str, speed: str = "normal") -> int:
+    return estimate_voice_duration_seconds(text, speed)
+
+def custom_voice_usage_output_too_short(text: str, speed: str = "normal", audio_bytes: bytes | bytearray | None = None) -> bool:
+    if not audio_bytes:
+        return True
+    return custom_voice_usage_duration_seconds(text, speed) <= int(CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS or 3)
+
 def voice_tts_credit_estimate(text: str) -> dict:
     chars = voice_tts_billable_chars(text)
     if chars <= 0:
@@ -77278,25 +77553,41 @@ def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_co
     return build_2col_keyboard(buttons, nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")), nav_main=ctx == PRODUCT_CONTEXT_VIDEO_ADDON, lang=lang)
 
 def voice_clone_quote_text(profile: dict, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
-    name = html.escape(str(profile.get("display_name") or "Giọng mới"))
     user_id = str(profile.get("user_id") or "")
     profile_id = int(profile.get("id") or 0)
     cost = voice_profile_storage_price_xu(user_id, product_context, profile_id)
-    cost_label = "Miễn phí lượt đầu" if cost <= 0 else f"{cost} Xu"
     if music_ui_lang(lang=lang) != "vi":
-        cost_label = "First profile free" if cost <= 0 else f"{cost} Xu"
+        if cost <= 0:
+            return (
+                "🎙 <b>Create custom voice</b>\n\n"
+                "TOAN AAS will create a custom voice from your submitted sample.\n\n"
+                "• First custom voice creation: free\n"
+                f"• From the second creation: {int(VOICE_PROFILE_PRICE_XU or 0)} Xu / successful creation\n"
+                "• TOAN AAS processes only after you confirm\n"
+                "• If the provider blocks clone voice or no valid profile is created, no Xu is charged"
+            )
         return (
-            "🧾 <b>Confirm new voice creation</b>\n\n"
-            f"Name: <b>{name}</b>\nService: consent-based custom voice profile\nCost: <b>{cost_label}</b>\n\n"
-            "TOAN AAS starts processing and charges Xu only after confirmation. A failed creation is refunded."
+            "🎙 <b>Create custom voice</b>\n\n"
+            "TOAN AAS will create a custom voice from your submitted sample.\n\n"
+            f"• Custom voice creation fee: {cost} Xu / successful creation\n"
+            "• TOAN AAS processes only after you confirm\n"
+            "• If the provider blocks clone voice or no valid profile is created, no Xu is charged"
+        )
+    if cost <= 0:
+        return (
+            "🎙 <b>Tạo voice riêng</b>\n\n"
+            "TOAN AAS sẽ tạo giọng riêng từ mẫu giọng anh/chị đã gửi.\n\n"
+            "• Lần đầu tạo voice riêng: miễn phí\n"
+            f"• Từ lần thứ 2: {int(VOICE_PROFILE_PRICE_XU or 0)} Xu / lần tạo thành công\n"
+            "• TOAN AAS chỉ xử lý sau khi anh/chị xác nhận\n"
+            "• Nếu nhà cung cấp tạm chặn clone voice hoặc không tạo được profile hợp lệ, hệ thống sẽ không trừ Xu"
         )
     return (
-        "🧾 <b>Xác nhận tạo giọng mới</b>\n\n"
-        f"Tên giọng: <b>{name}</b>\n"
-        "Dịch vụ: Tạo voice profile riêng từ file đã xác nhận quyền\n"
-        f"Chi phí: <b>{cost_label}</b>\n\n"
-        f"Câu nghe thử cố định: <i>{html.escape(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT)}</i>\n\n"
-        "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi quý khách xác nhận. Nếu tạo giọng thất bại, Xu sẽ được hoàn theo chính sách."
+        "🎙 <b>Tạo voice riêng</b>\n\n"
+        "TOAN AAS sẽ tạo giọng riêng từ mẫu giọng anh/chị đã gửi.\n\n"
+        f"• Phí tạo voice riêng: {cost} Xu / lần tạo thành công\n"
+        "• TOAN AAS chỉ xử lý sau khi anh/chị xác nhận\n"
+        "• Nếu nhà cung cấp tạm chặn clone voice hoặc không tạo được profile hợp lệ, hệ thống sẽ không trừ Xu"
     )
 
 def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
@@ -77304,10 +77595,17 @@ def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi", product_contex
     pid = int(profile_id or 0)
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
+    profile = get_voice_profile_by_id(pid)
+    cost = voice_profile_storage_price_xu((profile or {}).get("user_id"), ctx, pid) if profile else (0 if VOICE_PROFILE_FIRST_FREE else int(VOICE_PROFILE_PRICE_XU or 0))
+    confirm_label = "✅ Tạo voice riêng miễn phí" if cost <= 0 else f"✅ Tạo voice riêng {cost} Xu"
+    if not is_vi:
+        confirm_label = "✅ Create custom voice free" if cost <= 0 else f"✅ Create custom voice {cost} Xu"
     return build_2col_keyboard(
         [
-            ("✅ Xác nhận tạo giọng" if is_vi else "✅ Confirm", cb(f"voice_clone_confirm:{pid}")),
-            ("✏️ Đổi tên" if is_vi else "✏️ Rename", cb(f"voice_profile_rename:{pid}")),
+            (confirm_label, cb(f"voice_clone_confirm:{pid}")),
+            ("❌ Hủy" if is_vi else "❌ Cancel", cb("voice_hub")),
+            ("🎙 Dùng giọng nữ mặc định miễn phí" if is_vi else "🎙 Use default female free", cb("voice_default_female")),
+            ("🎙 Dùng giọng nam mặc định miễn phí" if is_vi else "🎙 Use default male free", cb("voice_default_male")),
         ],
         nav_back=("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Quay lại" if is_vi else "⬅️ Back"), cb(f"voice_clone_back_name:{pid}")),
         lang=lang,
@@ -78507,6 +78805,8 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
                 "provider": provider_name,
                 "provider_voice_id": provider_voice_id,
                 "preview_output_bytes": len(capped_bytes or b""),
+                "price_xu": cost,
+                "charge_status": "free_custom_voice_created" if int(cost or 0) <= 0 else "paid_custom_voice_created_pending_finalize",
             },
         )
         if not full_generation:
@@ -79167,8 +79467,28 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         voice_id = get_tts_voice_id(f"default_{gender}")
         result.update({"selected_voice_id": voice_id, "selected_voice_kind": f"default_{gender}", "selected_voice_style": label, "voice_is_free": True})
         save_music_guided_result(user_id, result)
-        await query.message.reply_text(f"✅ Đã chọn {label}. TOAN AAS đang tạo file audio theo văn bản đã nhập.")
-        return await send_standalone_tts_result(query.message, user_id, voice_text, label, voice_id=voice_id, voice_style=label, speed=str(result.get("tts_speed") or "normal"), lang=lang, product_context=ctx)
+        return await query.message.reply_text(
+            default_voice_confirm_text(voice_text, gender, lang),
+            parse_mode="HTML",
+            reply_markup=default_voice_confirm_keyboard(gender, lang, ctx),
+        )
+    if action.startswith("voice_default_confirm:"):
+        await query.answer()
+        gender = default_voice_gender_from_kind(action.split(":", 1)[1])
+        result = get_music_guided_result(user_id) or {}
+        voice_text = str(result.get("voice_text") or "").strip()
+        if not voice_text:
+            set_music_guided_pending(user_id, "voice_tts_text_input", product_context=ctx)
+            return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"))
+        return await send_default_free_tts_result(
+            query.message,
+            user_id,
+            voice_text,
+            gender,
+            speed=str(result.get("tts_speed") or "normal"),
+            lang=lang,
+            product_context=ctx,
+        )
     if action.startswith("voice_profile_select_code:") or action.startswith("voice_profile_select:"):
         await query.answer()
         value = _safe_int(action.split(":", 1)[1], 0)
@@ -79349,6 +79669,8 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             charged = int(charge.get("final_cost") or cost)
             metadata["charged_xu"] = charged
             metadata["charged_at"] = now_text()
+        metadata["price_xu"] = int(cost or 0)
+        metadata["charge_status"] = "paid_custom_voice_created" if int(charged or 0) > 0 else "free_custom_voice_created"
         update_user_voice_profile(user_id, profile_id, status="active", metadata_json=json.dumps(metadata, ensure_ascii=False))
         return await query.message.reply_text(
             f"✅ Đã lưu giọng “{profile.get('display_name') or 'Giọng mới'}” vào Kho voice của bạn."
@@ -80196,6 +80518,14 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"))
         selected_voice = str(result.get("selected_voice_style") or result.get("selected_voice_id") or "").strip()
         if selected_voice:
+            selected_kind = str(result.get("selected_voice_kind") or "")
+            if is_default_tts_selection(str(result.get("selected_voice_id") or ""), selected_voice, selected_kind):
+                gender = default_voice_gender_from_kind(selected_kind or selected_voice)
+                return await query.message.reply_text(
+                    default_voice_confirm_text(str(voice_text), gender, lang),
+                    parse_mode="HTML",
+                    reply_markup=default_voice_confirm_keyboard(gender, lang, ctx),
+                )
             await query.message.reply_text("🎙 TOAN AAS đang tạo file audio bằng giọng đã chọn.")
             return await send_standalone_tts_result(
                 query.message,
@@ -82420,7 +82750,7 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         await update.message.reply_text(
             saved_voice_tts_confirm_text(profile, text, str(result.get("tts_speed") or "normal"), lang),
             parse_mode="HTML",
-            reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang),
+            reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang, custom_voice_usage_price_xu(text)),
         )
         return True
     if action in {"voice_text", "audio_voice_waiting_text"}:
@@ -82431,12 +82761,21 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             or ("Voice đã lưu" if result.get("selected_voice_profile_id") else "")
         )
         if selected_voice:
+            selected_kind = str(result.get("selected_voice_kind") or "")
             result.update({
                 "voice_text": text,
                 "voice_suggestions": [],
                 "selected_voice_style": selected_voice[:180],
             })
             save_music_guided_result(uid, result)
+            if is_default_tts_selection(str(result.get("selected_voice_id") or ""), selected_voice, selected_kind):
+                gender = default_voice_gender_from_kind(selected_kind or selected_voice)
+                await update.message.reply_text(
+                    default_voice_confirm_text(text, gender, lang),
+                    parse_mode="HTML",
+                    reply_markup=default_voice_confirm_keyboard(gender, lang, ctx),
+                )
+                return True
             await send_standalone_tts_result(
                 update.message,
                 uid,

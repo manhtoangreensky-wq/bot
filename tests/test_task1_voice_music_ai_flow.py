@@ -97,7 +97,8 @@ def test_saved_voice_uses_real_voice_id():
     assert bot.get_tts_voice_id("saved_voice", profile) == "toanaas-real-voice-123"
     source = inspect.getsource(bot.send_paid_saved_voice_tts_result)
     assert 'profile.get("provider_voice_id")' in source
-    assert "refund_charged_credit" in source
+    assert "spend_fixed_credit_info" in source
+    assert source.index("execute_engine(") < source.index("spend_fixed_credit_info")
 
 
 def test_voice_vault_number_select(monkeypatch):
