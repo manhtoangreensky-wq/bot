@@ -237,6 +237,7 @@ def test_music_preview_submits_preview_job_and_confirm_submits_full_job(monkeypa
         "music_ai_kind": "guided",
     })
     monkeypatch.setattr(bot, "music_ui_lang", lambda user_id=None, lang="": "vi")
+    monkeypatch.setattr(bot, "get_member_profile", lambda *_args, **_kwargs: {"tier": "silver"})
     monkeypatch.setattr(bot, "get_suno_music_readiness", lambda: {
         "public_enabled": True,
         "ready": True,

@@ -36,7 +36,9 @@ def _video_state(user_id, token="preview-token"):
     pending = {
         "job_type": "video",
         "base_cost": 300,
-        "duration_seconds": 18,
+        "duration_seconds": 24,
+        "scene_count": 4,
+        "selected_scene_count": 4,
         "processing_type": "ai_text_to_video",
         "video_tier": "basic",
         "prompt": "Video giới thiệu sản phẩm sạch và rõ",
@@ -47,7 +49,9 @@ def _video_state(user_id, token="preview-token"):
         "source": "ai",
         "video_tier": "basic",
         "pending_confirm_token": token,
-        "current_video_duration_seconds": 18,
+        "current_video_duration_seconds": 24,
+        "scene_count": 4,
+        "selected_scene_count": 4,
         "current_video_processing_type": "ai_text_to_video",
         "pending_payload": dict(pending),
     })
@@ -62,12 +66,29 @@ def _run_video_callback(monkeypatch, user_id, data, context=None):
     return query
 
 
+def _allow_video_preview_quota(monkeypatch):
+    decision = {
+        "allowed": True,
+        "reason": "ok",
+        "product_type": "video_ai",
+        "tier": "platinum",
+        "quota": {},
+    }
+    monkeypatch.setattr(
+        bot,
+        "preview_quota_guard",
+        lambda *_args, **_kwargs: dict(decision),
+    )
+    monkeypatch.setattr(bot, "consume_preview_quota", lambda *_args, **_kwargs: {})
+
+
 def test_paid_video_preview_created_when_missing(monkeypatch):
     user_id = 992001
     token = "create-missing"
     bot.clear_video_addon_state(user_id)
     _video_state(user_id, token)
     captured = {}
+    _allow_video_preview_quota(monkeypatch)
     monkeypatch.setattr(bot, "video_paid_preview_worker_available", lambda: True)
     monkeypatch.setattr(bot, "get_local_worker_job", lambda _job_id: {})
 
@@ -92,6 +113,7 @@ def test_paid_video_no_fake_preview_file_id_required(monkeypatch):
     token = "no-fake-file"
     pending = _video_state(user_id, token)
     assert "paid_preview_video_file_id" not in pending
+    _allow_video_preview_quota(monkeypatch)
     monkeypatch.setattr(bot, "video_paid_preview_worker_available", lambda: True)
     monkeypatch.setattr(bot, "get_local_worker_job", lambda _job_id: {})
     monkeypatch.setattr(bot, "create_local_worker_job", lambda **_kwargs: 702)
@@ -105,6 +127,7 @@ def test_paid_video_missing_preview_does_not_dead_end(monkeypatch):
     user_id = 992003
     token = "worker-busy"
     _video_state(user_id, token)
+    _allow_video_preview_quota(monkeypatch)
     monkeypatch.setattr(bot, "video_paid_preview_worker_available", lambda: False)
     monkeypatch.setattr(bot, "get_local_worker_job", lambda _job_id: {})
     query = _run_video_callback(monkeypatch, user_id, f"videoaddon|preview|{token}")
@@ -328,6 +351,7 @@ def _voice_profile(profile_id=1, status="pending_name", metadata=None, preview_r
 
 def _install_voice_store(monkeypatch, profile):
     store = dict(profile)
+    monkeypatch.setattr(bot, "get_member_profile", lambda *_args, **_kwargs: {"tier": "silver"})
 
     def get_profile(_user_id, _profile_id):
         return dict(store)

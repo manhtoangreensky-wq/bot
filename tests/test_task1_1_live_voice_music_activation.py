@@ -56,6 +56,7 @@ def _profile(status="pending_confirm", profile_id=11):
 def _install_voice_store(monkeypatch, profile):
     store = dict(profile)
     statuses = []
+    monkeypatch.setattr(bot, "get_member_profile", lambda *_args, **_kwargs: {"tier": "silver"})
 
     def get_profile(_user_id, _profile_id):
         return dict(store)
