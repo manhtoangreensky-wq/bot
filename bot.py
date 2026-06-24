@@ -68189,27 +68189,28 @@ async def handle_engine_async_job_callback(update: Update, context: ContextTypes
             return await safe_edit_or_send(query, "⚠️ Không tìm thấy job nhạc nội bộ.")
         if not is_admin_user(uid) and str(job.get("user_id") or "") != str(uid):
             return await safe_edit_or_send(query, "⚠️ Không tìm thấy job của bạn. TOAN AAS chưa gọi provider mới.")
-        polled = await poll_music_suno_async_job(job_id, updated_by=uid, download=True)
-        job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
-        if polled.get("ok") and polled.get("audio_bytes") and query.message:
-            if music_job_full_already_sent(job, polled.get("audio_bytes")):
-                return await safe_edit_or_send(
-                    query,
-                    "✅ Đã gửi bản nhạc phía trên.\n\n" + engine_async_status_text(job, admin=bool(is_admin_user(uid))),
-                    reply_markup=engine_async_status_keyboard(job_id, "music"),
-                    parse_mode="HTML",
+        if str(job.get("status") or "").lower() == "completed" and int(job.get("output_bytes") or 0) > 0:
+            upsert_music_vault_from_completed_job(job, updated_by=uid)
+            job = get_engine_async_job(job_id) or job
+        else:
+            polled = await poll_music_suno_async_job(job_id, updated_by=uid, download=True)
+            job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
+            if polled.get("ok") and polled.get("audio_bytes"):
+                vault_entry = upsert_music_vault_from_output(
+                    audio_bytes=bytes(polled.get("audio_bytes") or b""),
+                    result=job,
+                    job=job,
+                    status=music_vault_status_for_completed_job(job),
+                    updated_by=uid,
                 )
-            audio = video_dubbing_output_file(bytes(polled.get("audio_bytes") or b""), "toan_aas_suno_status.mp3")
-            sent_message = await context.bot.send_audio(
-                chat_id=query.message.chat_id,
-                audio=audio,
-                filename="toan_aas_suno_status.mp3",
-                caption=f"✅ Suno job {html.escape(job_id)} trả audio bytes > 0.",
-            )
-            job = record_music_job_full_send(job, sent_message, bytes(polled.get("audio_bytes") or b""), result=job, updated_by=uid)
+                job["vault_id"] = str(vault_entry.get("vault_id") or job.get("vault_id") or "")
+                save_engine_async_job(job)
+            else:
+                upsert_music_vault_from_completed_job(job, updated_by=uid)
+                job = get_engine_async_job(job_id) or job
         return await safe_edit_or_send(
             query,
-            engine_async_status_text(job, admin=bool(is_admin_user(uid))),
+            "\n".join(_music_suno_job_lines(job, admin=bool(is_admin_user(uid)))),
             reply_markup=engine_async_status_keyboard(job_id, "music"),
             parse_mode="HTML",
         )

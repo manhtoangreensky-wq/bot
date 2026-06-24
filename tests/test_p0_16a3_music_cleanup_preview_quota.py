@@ -9,9 +9,25 @@ import bot
 class DummyMessage:
     def __init__(self):
         self.texts = []
+        self.chat_id = 456
 
     async def reply_text(self, text, **kwargs):
         self.texts.append((text, kwargs))
+        return SimpleNamespace()
+
+
+class DummyQuery:
+    def __init__(self, user_id=123, data="enginejob|music|MUS-STATUS"):
+        self.from_user = SimpleNamespace(id=user_id)
+        self.data = data
+        self.message = DummyMessage()
+        self.edits = []
+
+    async def answer(self, *args, **kwargs):
+        return None
+
+    async def edit_message_text(self, text, **kwargs):
+        self.edits.append((text, kwargs))
         return SimpleNamespace()
 
 
@@ -21,6 +37,49 @@ def _admin_update(user_id=123):
         effective_chat=SimpleNamespace(id=456),
         message=DummyMessage(),
     )
+
+
+def _completed_suno_job(job_id="MUS-STATUS", **overrides):
+    job = {
+        "feature": "music_suno",
+        "internal_job_id": job_id,
+        "status": "completed",
+        "output_bytes": 999,
+        "output_sha256": "sha-status",
+        "provider": "key4u_suno",
+        "provider_task_id": "raw-provider-task",
+        "user_id": "123",
+        "chat_id": "456",
+        "send_attempt_count": 3,
+    }
+    job.update(overrides)
+    return job
+
+
+def _patch_music_job_store(monkeypatch, job):
+    jobs = {str(job["internal_job_id"]): dict(job)}
+    vault = {}
+    monkeypatch.setattr(bot, "is_admin_user", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(bot, "get_engine_async_job", lambda job_id: dict(jobs.get(str(job_id), {})))
+    monkeypatch.setattr(bot, "_music_vault_index", lambda: list(vault))
+    monkeypatch.setattr(bot, "get_music_vault_entry", lambda vault_id: dict(vault.get(str(vault_id), {})))
+
+    def save_vault(entry, updated_by=""):
+        vault[str(entry["vault_id"])] = dict(entry)
+        return dict(entry)
+
+    def save_job(updated):
+        jobs[str(updated["internal_job_id"])] = dict(updated)
+        return dict(updated)
+
+    monkeypatch.setattr(bot, "save_music_vault_entry", save_vault)
+    monkeypatch.setattr(bot, "save_engine_async_job", save_job)
+
+    async def no_provider_poll(*_args, **_kwargs):
+        raise AssertionError("music_suno_job must not poll provider")
+
+    monkeypatch.setattr(bot, "poll_music_suno_async_job", no_provider_poll)
+    return jobs, vault
 
 
 def _patch_preview_store(monkeypatch, tier="silver"):
@@ -135,6 +194,107 @@ def test_music_suno_job_status_does_not_auto_send_audio(monkeypatch):
 
     assert "Đã gửi bản nhạc phía trên" not in text
     assert "/music_suno_send" in text
+
+
+def test_music_suno_job_completed_does_not_auto_send_audio(monkeypatch):
+    job = _completed_suno_job()
+    _patch_music_job_store(monkeypatch, job)
+
+    class NoSendBot:
+        async def send_audio(self, *args, **kwargs):
+            raise AssertionError("music_suno_job must not send audio")
+
+    update = _admin_update()
+    asyncio.run(bot.cmd_music_suno_job(update, SimpleNamespace(args=["MUS-STATUS"], bot=NoSendBot())))
+
+    assert "Job nhạc đã hoàn tất" in update.message.texts[-1][0]
+
+
+def test_music_suno_job_no_sent_above_text(monkeypatch):
+    job = _completed_suno_job()
+    _patch_music_job_store(monkeypatch, job)
+    update = _admin_update()
+
+    asyncio.run(bot.cmd_music_suno_job(update, SimpleNamespace(args=["MUS-STATUS"], bot=SimpleNamespace())))
+
+    assert "Đã gửi bản nhạc phía trên" not in update.message.texts[-1][0]
+
+
+def test_music_suno_job_completed_shows_vault_id(monkeypatch):
+    job = _completed_suno_job()
+    _patch_music_job_store(monkeypatch, job)
+    update = _admin_update()
+
+    asyncio.run(bot.cmd_music_suno_job(update, SimpleNamespace(args=["MUS-STATUS"], bot=SimpleNamespace())))
+    text = update.message.texts[-1][0]
+
+    assert "• Vault: <code>MV-" in text
+    assert "/music_vault_detail" in text
+
+
+def test_music_suno_job_suggests_music_suno_send(monkeypatch):
+    job = _completed_suno_job()
+    _patch_music_job_store(monkeypatch, job)
+    update = _admin_update()
+
+    asyncio.run(bot.cmd_music_suno_job(update, SimpleNamespace(args=["MUS-STATUS"], bot=SimpleNamespace())))
+
+    assert "/music_suno_send" in update.message.texts[-1][0]
+
+
+def test_music_suno_job_does_not_increment_send_attempt_count(monkeypatch):
+    job = _completed_suno_job(send_attempt_count=7)
+    jobs, _vault = _patch_music_job_store(monkeypatch, job)
+    update = _admin_update()
+
+    asyncio.run(bot.cmd_music_suno_job(update, SimpleNamespace(args=["MUS-STATUS"], bot=SimpleNamespace())))
+
+    assert jobs["MUS-STATUS"]["send_attempt_count"] == 7
+    assert not jobs["MUS-STATUS"].get("sent_full_at")
+
+
+def test_music_suno_send_still_explicit_admin_resend(monkeypatch):
+    job = _completed_suno_job(output_file_id="tg-old-file", send_attempt_count=0)
+    jobs, _vault = _patch_music_job_store(monkeypatch, job)
+    sent = []
+
+    class SendBot:
+        async def send_audio(self, **kwargs):
+            sent.append(kwargs)
+            return SimpleNamespace(audio=SimpleNamespace(file_id="tg-new-file"))
+
+    update = _admin_update()
+    asyncio.run(bot.cmd_music_suno_send(update, SimpleNamespace(args=["MUS-STATUS"], bot=SendBot())))
+
+    assert sent and sent[0]["audio"] == "tg-old-file"
+    assert jobs["MUS-STATUS"]["send_attempt_count"] == 1
+    assert jobs["MUS-STATUS"]["sent_full_at"]
+    assert "Đã gửi lại file nhạc" in update.message.texts[-1][0]
+
+
+def test_music_engine_status_callback_completed_metadata_only_no_send(monkeypatch):
+    job = _completed_suno_job("MUS-CALLBACK")
+    jobs, _vault = _patch_music_job_store(monkeypatch, job)
+    async def fake_poll(*_args, **_kwargs):
+        return {"ok": True, "audio_bytes": b"real-audio", "job": dict(job)}
+
+    monkeypatch.setattr(bot, "poll_music_suno_async_job", fake_poll)
+    monkeypatch.setattr(bot, "upsert_music_vault_from_output", lambda **_kwargs: {"vault_id": "MV-CALLBACK"})
+    monkeypatch.setattr(bot, "find_music_vault_entry_for_job", lambda *_args, **_kwargs: {"vault_id": "MV-CALLBACK"})
+
+    class NoSendBot:
+        async def send_audio(self, *args, **kwargs):
+            raise AssertionError("engine music status must not auto-send full audio")
+
+    query = DummyQuery(data="enginejob|music|MUS-CALLBACK")
+    asyncio.run(bot.handle_engine_async_job_callback(SimpleNamespace(callback_query=query), SimpleNamespace(bot=NoSendBot())))
+    text = query.edits[-1][0]
+
+    assert "Đã gửi bản nhạc phía trên" not in text
+    assert "Job nhạc đã hoàn tất" in text
+    assert "/music_suno_send" in text
+    assert jobs["MUS-CALLBACK"]["vault_id"] == "MV-CALLBACK"
+    assert jobs["MUS-CALLBACK"]["send_attempt_count"] == 3
 
 
 def test_music_suno_poll_completed_does_not_auto_send_audio(monkeypatch):
