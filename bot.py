@@ -4428,7 +4428,12 @@ ENGINE_ASYNC_MEMORY_JOBS: dict[str, dict] = {}
 ENGINE_ASYNC_MEMORY_INDEX: dict[str, list[str]] = {}
 ENGINE_ASYNC_ACTIVE_STATUSES = {"submitted", "queued", "processing", "downloading"}
 ENGINE_ASYNC_PUBLIC_CHECKING_VI = "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
-ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS = max(60, env_int("ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS", 45 * 60))
+ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS = max(30, env_int("ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS", 60))
+ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS = max(60, env_int("ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS", 5 * 60))
+ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS = max(
+    ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS + 60,
+    env_int("ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS", 20 * 60),
+)
 ENGINE_ASYNC_JOB_FEATURE_PREFIX = {
     "music_suno": "MUS",
     "music_song": "MUS",
@@ -4543,6 +4548,7 @@ def normalize_engine_async_job(job: dict) -> dict:
     current["poll_count"] = int(current.get("poll_count") or 0)
     current.setdefault("last_poll_at", "")
     current.setdefault("next_poll_after", "")
+    current.setdefault("parsed_fields", {})
     current.setdefault("expire_at", "")
     return current
 
@@ -4637,6 +4643,11 @@ def engine_async_job_age_seconds(job: dict, now: datetime | None = None) -> int:
     current = now or datetime.now()
     return max(0, int((current - created).total_seconds()))
 
+def engine_async_next_poll_after_text(now: datetime | None = None, interval_seconds: int | None = None) -> str:
+    current = now or datetime.now()
+    interval = max(30, int(interval_seconds or ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS))
+    return (current + timedelta(seconds=interval)).strftime("%Y-%m-%d %H:%M:%S")
+
 def engine_async_age_text(job: dict, now: datetime | None = None) -> str:
     seconds = engine_async_job_age_seconds(job, now)
     if seconds <= 0:
@@ -4653,11 +4664,21 @@ def engine_async_provider_processing_timed_out(job: dict, now: datetime | None =
     current = dict(job or {})
     if str(current.get("feature") or "").lower() not in {"music_suno", "music_song"}:
         return False
-    if str(current.get("status") or "").lower() not in {"submitted", "queued", "processing"}:
+    if str(current.get("status") or "").lower() not in {"submitted", "queued", "processing", "timeout_provider_processing"}:
         return False
     if int(current.get("output_bytes") or 0) > 0:
         return False
     return engine_async_job_age_seconds(current, now) >= ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS
+
+def engine_async_provider_processing_soft_timed_out(job: dict, now: datetime | None = None) -> bool:
+    current = dict(job or {})
+    if str(current.get("feature") or "").lower() not in {"music_suno", "music_song"}:
+        return False
+    if str(current.get("status") or "").lower() not in {"submitted", "queued", "processing", "timeout_provider_processing"}:
+        return False
+    if int(current.get("output_bytes") or 0) > 0:
+        return False
+    return engine_async_job_age_seconds(current, now) >= ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS
 
 def engine_async_status_text(job: dict, *, admin: bool = False) -> str:
     current = dict(job or {})
@@ -4704,6 +4725,11 @@ def engine_async_status_text(job: dict, *, admin: bool = False) -> str:
             f"• Provider task: <code>{html.escape(mask_provider_task_id(provider_task_id))}</code>",
             f"• Last provider status: <code>{html.escape(sanitize_provider_status_text(current.get('last_provider_status') or '-', provider_task_id, 260))}</code>",
         ])
+        parsed_fields = current.get("parsed_fields") if isinstance(current.get("parsed_fields"), dict) else {}
+        if parsed_fields:
+            lines.append(f"• Parsed fields: <code>{html.escape(suno_parsed_fields_text(parsed_fields))}</code>")
+        if str(current.get("feature") or "").lower() in {"music_suno", "music_song"}:
+            lines.append(f"• Fallback: <code>{html.escape(sanitize_provider_status_text(suno_fallback_status_text(str(current.get('provider') or 'key4u_suno')), provider_task_id, 260))}</code>")
     return "\n".join(lines)
 
 def engine_async_status_keyboard(internal_job_id: str, kind: str = "music") -> InlineKeyboardMarkup:
@@ -42550,6 +42576,73 @@ def extract_shopaikey_suno_audio_urls(payload) -> list[str]:
     visit(payload)
     return urls
 
+SUNO_RESULT_FIELD_KEYS = (
+    "status", "state", "result", "output",
+    "audio_url", "url", "file_url", "download_url", "stream_url",
+)
+SUNO_AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")
+
+def suno_response_parsed_fields(payload) -> dict:
+    fields = {key: False for key in SUNO_RESULT_FIELD_KEYS}
+
+    def visit(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                lowered = str(key or "").strip().lower()
+                for field in fields:
+                    if lowered == field:
+                        fields[field] = True
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return fields
+
+def suno_result_parsed_fields(result: dict | None) -> dict:
+    current = dict(result or {})
+    fields = current.get("parsed_fields")
+    if isinstance(fields, dict):
+        return {key: bool(fields.get(key)) for key in SUNO_RESULT_FIELD_KEYS}
+    debug = current.get("raw_debug_admin_only")
+    if isinstance(debug, dict):
+        nested = debug.get("parsed_fields")
+        if isinstance(nested, dict):
+            return {key: bool(nested.get(key)) for key in SUNO_RESULT_FIELD_KEYS}
+    return {key: False for key in SUNO_RESULT_FIELD_KEYS}
+
+def suno_parsed_fields_text(fields: dict | None) -> str:
+    current = {key: bool((fields or {}).get(key)) for key in SUNO_RESULT_FIELD_KEYS}
+    return ", ".join(f"{key}={'yes' if current.get(key) else 'no'}" for key in SUNO_RESULT_FIELD_KEYS)
+
+def music_audio_url_has_acceptable_extension(url: str) -> bool:
+    try:
+        path = urlparse(str(url or "")).path.lower()
+    except Exception:
+        path = str(url or "").split("?", 1)[0].lower()
+    return path.endswith(SUNO_AUDIO_EXTENSIONS) or "/audio" in path
+
+async def _download_music_audio_url_bytes(url: str, timeout_seconds: float = 60.0) -> tuple[bytes, str, int]:
+    audio_bytes, detail, http_status = await _download_audio_url_bytes(url, timeout_seconds=timeout_seconds)
+    if not audio_bytes:
+        return b"", detail, http_status
+    detail_text = str(detail or "")
+    if music_audio_url_has_acceptable_extension(url) or "content_type=audio/" in detail_text.lower():
+        return audio_bytes, detail, http_status
+    return b"", f"audio_mime_or_extension_missing; {sanitize_provider_status_text(detail_text, '', 180)}", http_status
+
+def tool_test_result_audio_bytes_positive(result: dict | None) -> bool:
+    current = dict(result or {})
+    try:
+        if int(current.get("output_bytes") or 0) > 0:
+            return True
+    except Exception:
+        pass
+    detail = str(current.get("detail") or current.get("message") or "")
+    matches = re.findall(r"\bbytes=(\d+)\b", detail)
+    return any(int(item or 0) > 0 for item in matches)
+
 def extract_shopaikey_suno_media_presence(payload) -> dict:
     presence = {"audio": False, "video": False, "image": False}
 
@@ -61957,7 +62050,9 @@ def music_engine_status_lines() -> list[str]:
     fetch_status = str(fetch_smoke.get("status") or "NOT_TESTED")
     download_status = str(download_smoke.get("status") or "NOT_TESTED")
     submit_pass = provider_status_is_pass(submit_status)
-    full_result_ok = bool(readiness.get("full_result_ok") and provider_status_is_pass(download_status))
+    latest_jobs = list_engine_async_jobs("music_suno", limit=1)
+    latest_job = dict(latest_jobs[0]) if latest_jobs else {}
+    full_result_ok = bool(readiness.get("full_result_ok") and provider_status_is_pass(download_status) and tool_test_result_audio_bytes_positive(download_smoke))
     public_ready = bool(music_ai_public_processing_ready(readiness) and submit_pass and full_result_ok)
     partial_lifecycle_possible = bool(readiness.get("ready") and readiness.get("fetch_ready"))
     admin_smoke_needed = bool(readiness.get("ready") and not public_ready)
@@ -61975,6 +62070,11 @@ def music_engine_status_lines() -> list[str]:
         f"Submit smoke: <code>{_engine_safe(submit_status)}</code>",
         f"Fetch smoke: <code>{_engine_safe(fetch_status)}</code>",
         f"Download smoke: <code>{_engine_safe(download_status)}</code>",
+        f"Latest Suno job: <code>{_engine_safe(core_4_latest_job_summary('music_suno', 'music_song'))}</code>",
+        f"Latest poll: <code>{_engine_safe(latest_job.get('last_poll_at') or '-')}</code>",
+        f"Timeout policy: <code>soft={ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS // 60}m; hard={ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS // 60}m; poll={ENGINE_ASYNC_PROVIDER_POLL_INTERVAL_SECONDS}s</code>",
+        f"Latest download bytes: <code>{int(latest_job.get('output_bytes') or 0)}</code>",
+        f"Fallback provider: <code>{_engine_safe(suno_fallback_status_text(str(latest_job.get('provider') or 'key4u_suno')))}</code>",
         f"submit_ready: <code>{_engine_yes_no(readiness.get('submit_ready'))}</code>",
         f"fetch_ready: <code>{_engine_yes_no(readiness.get('fetch_ready'))}</code>",
         f"download_ready: <code>{_engine_yes_no(readiness.get('download_ready'))}</code>",
@@ -62396,8 +62496,8 @@ def get_suno_music_readiness() -> dict:
     fetch_status = str(fetch_smoke.get("status") or "").upper()
     submit_ready = provider_status_is_pass(str(submit_smoke.get("status") or ""))
     fetch_ready = bool((KEY4U_SUNO_QUERY_ENDPOINT if key4u_configured else SHOPAIKEY_MUSIC_STATUS_ENDPOINT) and fetch_status not in {"", "NOT_TESTED", "MISSING", "NEED_DOCS"})
-    download_ready = provider_status_is_pass(str(download_smoke.get("status") or ""))
-    full_result_ok = bool(fetch_status == "PASS_FULL_RESULT" and provider_status_is_pass(str(download_smoke.get("status") or "")))
+    download_ready = bool(provider_status_is_pass(str(download_smoke.get("status") or "")) and tool_test_result_audio_bytes_positive(download_smoke))
+    full_result_ok = bool(fetch_status == "PASS_FULL_RESULT" and download_ready)
     smoke_ok = bool(provider_status_is_pass(str(submit_smoke.get("status") or "")) and full_result_ok)
     preferred_provider = "key4u_suno" if key4u_configured else ("shopaikey_music" if shopaikey_configured else "none")
     preferred_model = KEY4U_SUNO_MODEL if key4u_configured else (SHOPAIKEY_MUSIC_MODEL or "auto")
@@ -66964,6 +67064,29 @@ async def cmd_music_suno_poll(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup=engine_async_status_keyboard(job_id, "music"),
     )
 
+async def cmd_music_suno_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    job_id = _admin_music_suno_job_arg(context)
+    if not job_id:
+        return await update.message.reply_text("Cú pháp: /music_suno_timeout <MUS-job-id>")
+    job = get_engine_async_job(job_id)
+    if not job:
+        return await update.message.reply_text("Không tìm thấy MUS-id nội bộ. Dùng /music_suno_jobs để xem job gần nhất.")
+    job.update({
+        "status": "timeout_provider_processing",
+        "progress_text": "Provider xử lý quá lâu, chưa có file nhạc. TOAN AAS chưa trừ Xu.",
+        "error_category": "timeout_provider_processing",
+        "last_poll_at": now_text(),
+        "next_poll_after": engine_async_next_poll_after_text(),
+    })
+    save_engine_async_job(job)
+    return await update.message.reply_text(
+        engine_async_status_text(job, admin=True),
+        parse_mode="HTML",
+        reply_markup=engine_async_status_keyboard(job_id, "music"),
+    )
+
 async def cmd_key4u_suno_route_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -66989,29 +67112,19 @@ async def cmd_key4u_suno_job_status(update: Update, context: ContextTypes.DEFAUL
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     arg = _admin_music_suno_job_arg(context)
     if not arg:
-        return await update.message.reply_text("Cú pháp: /key4u_suno_job_status <task_id_or_MUS-job-id>")
+        return await update.message.reply_text("Cú pháp: /key4u_suno_job_status <MUS-job-id>")
+    if not str(arg).upper().startswith("MUS-"):
+        return await update.message.reply_text("Vui lòng dùng MUS-id nội bộ từ /music_suno_admin_test hoặc /music_suno_jobs. Lệnh này không cần raw provider task id.")
     internal = get_engine_async_job(arg)
-    if internal:
-        polled = await poll_music_suno_async_job(arg, updated_by=update.effective_user.id, download=False)
-        job = dict(polled.get("job") or get_engine_async_job(arg) or {})
-        return await update.message.reply_text(
-            engine_async_status_text(job, admin=True),
-            parse_mode="HTML",
-            reply_markup=engine_async_status_keyboard(arg, "music"),
-        )
-    result = await key4u_provider_instance().suno_query(arg)
-    task_id = str(result.get("task_id") or arg)
-    lines = [
-        "🎵 <b>KEY4U SUNO JOB STATUS</b>",
-        "",
-        f"• Provider task: <code>{html.escape(mask_provider_task_id(task_id))}</code>",
-        f"• Status: <code>{html.escape(str(result.get('status') or '-'))}</code>",
-        f"• HTTP: <code>{int(result.get('http_status') or 0)}</code>",
-        f"• Audio URL: <code>{'yes' if str(result.get('output_url') or '').strip() else 'no'}</code>",
-        f"• Error: <code>{html.escape(sanitize_provider_status_text(result.get('error_message_safe') or '-', task_id, 220))}</code>",
-        "• Provider secret: <code>hidden</code>",
-    ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    if not internal:
+        return await update.message.reply_text("Không tìm thấy MUS-id nội bộ. Dùng /music_suno_jobs để xem job gần nhất.")
+    polled = await poll_music_suno_async_job(arg, updated_by=update.effective_user.id, download=False)
+    job = dict(polled.get("job") or get_engine_async_job(arg) or {})
+    return await update.message.reply_text(
+        engine_async_status_text(job, admin=True),
+        parse_mode="HTML",
+        reply_markup=engine_async_status_keyboard(arg, "music"),
+    )
 
 async def cmd_key4u_suno_download_probe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -67022,6 +67135,8 @@ async def cmd_key4u_suno_download_probe(update: Update, context: ContextTypes.DE
     job_id = str((args or [""])[0] or "").strip()
     if not job_id:
         return await update.message.reply_text("Cú pháp: /key4u_suno_download_probe <MUS-job-id> --confirm-paid")
+    if not job_id.upper().startswith("MUS-"):
+        return await update.message.reply_text("Vui lòng dùng MUS-id nội bộ. Lệnh này không cần raw provider task id.")
     polled = await poll_music_suno_async_job(job_id, updated_by=update.effective_user.id, download=True)
     job = dict(polled.get("job") or get_engine_async_job(job_id) or {})
     if polled.get("ok") and polled.get("audio_bytes"):
@@ -74295,6 +74410,7 @@ async def poll_music_generation_job(result: dict, updated_by="") -> dict:
             record_music_provider_attempt(provider=provider, task_id=task_id, fetch_status="MISSING_STATUS_ROUTE", error="key4u suno query endpoint missing", updated_by=updated_by)
             return {"ok": False, "status": "MISSING_STATUS_ROUTE", "output_url": "", "detail": "music status endpoint missing"}
         polled = await key4u_provider_instance().suno_query(task_id)
+        parsed_fields = suno_result_parsed_fields(polled)
         record_music_provider_attempt(
             provider=provider,
             task_id=task_id,
@@ -74307,6 +74423,7 @@ async def poll_music_generation_job(result: dict, updated_by="") -> dict:
             "status": str(polled.get("status") or ""),
             "output_url": str(polled.get("output_url") or ""),
             "detail": str(polled.get("error_message_safe") or "")[:240],
+            "parsed_fields": parsed_fields,
         }
     if not SHOPAIKEY_MUSIC_STATUS_ENDPOINT:
         record_music_provider_attempt(provider=provider or "shopaikey_music", task_id=task_id, fetch_status="MISSING_STATUS_ROUTE", error="shopaikey music status endpoint missing", updated_by=updated_by)
@@ -74320,8 +74437,9 @@ async def poll_music_generation_job(result: dict, updated_by="") -> dict:
         output_urls = extract_shopaikey_suno_audio_urls(payload)
         output_url = output_urls[0] if output_urls else ""
         final_status = normalize_shopaikey_suno_fetch_status(payload, int(response.status_code or 0))
+        parsed_fields = suno_response_parsed_fields(payload)
         record_music_provider_attempt(provider=provider, task_id=task_id, fetch_status=final_status, error="", updated_by=updated_by)
-        return {"ok": bool(output_url), "status": final_status, "output_url": output_url, "detail": ""}
+        return {"ok": bool(output_url), "status": final_status, "output_url": output_url, "detail": "", "parsed_fields": parsed_fields}
     except Exception as exc:
         safe_error = sanitize_provider_error(exc)[:240]
         record_music_provider_attempt(provider=provider, task_id=task_id, fetch_status="FAILED", error=safe_error, updated_by=updated_by)
@@ -74376,6 +74494,33 @@ def music_poll_status_is_success_without_url(status: str) -> bool:
     normalized = str(status or "").strip().upper()
     return normalized in {"SUCCESS", "SUCCEEDED", "COMPLETED", "COMPLETE", "DONE", "FINISHED", "PASS", "PASS_FULL_RESULT", "COMPLETED_NO_AUDIO"}
 
+def suno_verified_fallback_provider(primary_provider: str = "key4u_suno") -> str:
+    primary = str(primary_provider or "").strip()
+    readiness = get_suno_music_readiness()
+    providers = dict(readiness.get("providers") or {})
+    download_smoke = preferred_tool_test_result("music_ai_download", "music_ai_preview_download")
+    if not tool_test_result_audio_bytes_positive(download_smoke):
+        return ""
+    candidates = [
+        ("shopaikey_music", "shopaikey_music_job"),
+        ("key4u_suno", "key4u_suno_job"),
+    ]
+    for provider_name, fetch_tool in candidates:
+        if provider_name == primary:
+            continue
+        if not dict(providers.get(provider_name) or {}).get("configured"):
+            continue
+        fetch_status = str(get_tool_test_result(fetch_tool).get("status") or "").upper()
+        if fetch_status == "PASS_FULL_RESULT":
+            return provider_name
+    return ""
+
+def suno_fallback_status_text(primary_provider: str = "key4u_suno") -> str:
+    fallback = suno_verified_fallback_provider(primary_provider)
+    if fallback:
+        return f"Fallback đã xác minh: {fallback}. Chỉ chạy khi admin xác nhận rõ; không auto-run."
+    return "Chưa có provider nhạc AI fallback đã xác minh."
+
 async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", download: bool = True) -> dict:
     job = get_engine_async_job(internal_job_id)
     if not job:
@@ -74394,6 +74539,8 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
     output_url = str(polled.get("output_url") or "").strip()
     job["poll_count"] = int(job.get("poll_count") or 0) + 1
     job["last_poll_at"] = now_text()
+    job["next_poll_after"] = engine_async_next_poll_after_text()
+    job["parsed_fields"] = suno_result_parsed_fields(polled)
     job["last_provider_status"] = sanitize_provider_status_text(provider_status or polled.get("detail") or "-", provider_task_id)
     if polled.get("ok") and output_url:
         if not download:
@@ -74404,7 +74551,7 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         job["status"] = "downloading"
         job["progress_text"] = "Đã có kết quả, TOAN AAS đang tải file nhạc."
         save_engine_async_job(job)
-        audio_bytes, detail, http_status = await _download_audio_url_bytes(output_url, timeout_seconds=60.0)
+        audio_bytes, detail, http_status = await _download_music_audio_url_bytes(output_url, timeout_seconds=60.0)
         record_music_provider_attempt(
             provider=str(job.get("provider") or ""),
             task_id=provider_task_id,
@@ -74433,9 +74580,20 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         save_engine_async_job(job)
         return {"ok": False, "status": "AUDIO_DOWNLOAD_FAILED", "job": job, "output_url": output_url, "audio_bytes": b""}
     if music_poll_status_is_processing(provider_status):
+        if engine_async_provider_processing_timed_out(job):
+            job.update({
+                "status": "timeout_provider_processing",
+                "progress_text": "Provider xử lý quá lâu, chưa có file nhạc. TOAN AAS chưa trừ Xu.",
+                "error_category": "timeout_provider_processing",
+            })
+            save_engine_async_job(job)
+            return {"ok": False, "status": "TIMEOUT_PROVIDER_PROCESSING", "job": job, "audio_bytes": b""}
+        progress_text = "Provider đang tạo nhạc. Thường mất vài phút."
+        if engine_async_provider_processing_soft_timed_out(job):
+            progress_text = "Provider xử lý lâu hơn 5 phút, chưa có file nhạc. TOAN AAS chưa trừ Xu."
         job.update({
             "status": "processing",
-            "progress_text": "Provider đang tạo nhạc. Thường mất vài phút.",
+            "progress_text": progress_text,
             "error_category": "",
         })
         save_engine_async_job(job)
@@ -130523,6 +130681,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("music_suno_jobs", cmd_music_suno_jobs))
     tg_app.add_handler(CommandHandler("music_suno_job", cmd_music_suno_job))
     tg_app.add_handler(CommandHandler("music_suno_poll", cmd_music_suno_poll))
+    tg_app.add_handler(CommandHandler("music_suno_timeout", cmd_music_suno_timeout))
     tg_app.add_handler(CommandHandler("key4u_suno_route_status", cmd_key4u_suno_route_status))
     tg_app.add_handler(CommandHandler("key4u_suno_job_status", cmd_key4u_suno_job_status))
     tg_app.add_handler(CommandHandler("key4u_suno_download_probe", cmd_key4u_suno_download_probe))
