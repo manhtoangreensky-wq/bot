@@ -43502,18 +43502,75 @@ def shopaikey_stt_public_ready() -> bool:
     smoke = str(preferred_tool_test_result("shopaikey_stt", "asr_shopaikey", "stt_shopaikey").get("status") or "").upper()
     return bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT and provider_status_is_pass(smoke))
 
-def video_asr_provider_available(public: bool = True) -> bool:
-    provider = str(ASR_PROVIDER or "auto").lower()
+def video_dubbing_audio_extract_ready() -> bool:
+    return bool(frame_video_ffmpeg_path())
+
+def get_asr_adapter_readiness(public: bool = True) -> dict:
+    provider = str(ASR_PROVIDER or "auto").strip().lower()
+    if provider in {"shopai"}:
+        provider = "shopaikey"
+    allowed = {"auto", "key4u", "deepgram", "shopaikey"}
+    if provider not in allowed:
+        provider = "auto"
     key4u_ready = key4u_asr_public_ready() if public else key4u_asr_configured()
-    shopaikey_ready = shopaikey_stt_public_ready() if public else bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
     deepgram_ready = bool(DEEPGRAM_API_KEY and globals().get("AgentDeepgram"))
-    if provider == "key4u":
-        return bool(key4u_ready or (not public and deepgram_ready))
-    if provider == "deepgram":
-        return deepgram_ready
-    if provider in {"shopaikey", "shopai"}:
-        return bool(shopaikey_ready or (not public and deepgram_ready))
-    return bool(key4u_ready or deepgram_ready or shopaikey_ready)
+    shopaikey_ready = shopaikey_stt_public_ready() if public else bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
+    candidates = {
+        "key4u": {
+            "ready": bool(key4u_ready),
+            "configured": bool(key4u_asr_configured()),
+            "reason": "ready" if key4u_ready else "key4u_asr_not_ready",
+        },
+        "deepgram": {
+            "ready": bool(deepgram_ready),
+            "configured": bool(DEEPGRAM_API_KEY and globals().get("AgentDeepgram")),
+            "reason": "ready" if deepgram_ready else "deepgram_not_configured",
+        },
+        "shopaikey": {
+            "ready": bool(shopaikey_ready),
+            "configured": bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT),
+            "reason": "ready" if shopaikey_ready else "shopaikey_stt_not_ready",
+        },
+    }
+    order_map = {
+        "key4u": ["key4u", "deepgram", "shopaikey"],
+        "deepgram": ["deepgram", "key4u", "shopaikey"],
+        "shopaikey": ["shopaikey", "deepgram", "key4u"],
+        "auto": ["key4u", "deepgram", "shopaikey"],
+    }
+    order = order_map.get(provider, order_map["auto"])
+    selected = "none"
+    for name in order:
+        if candidates[name]["ready"]:
+            selected = name
+            break
+    configured_names = [name for name, item in candidates.items() if item["configured"]]
+    enabled = bool(VIDEO_ASR_ENABLED)
+    ready = bool(enabled and selected != "none")
+    audio_extract_ready = video_dubbing_audio_extract_ready()
+    reason = "ready" if ready else (
+        "VIDEO_ASR_ENABLED disabled"
+        if not enabled
+        else "asr_adapter_missing"
+        if not configured_names
+        else "; ".join(candidates[name]["reason"] for name in order if candidates[name]["configured"] and not candidates[name]["ready"]) or "asr_adapter_missing"
+    )
+    return {
+        "ready": ready,
+        "adapter": selected,
+        "configured": bool(enabled and configured_names),
+        "configured_adapters": configured_names,
+        "reason": reason,
+        "supports_audio": bool(ready),
+        "supports_video": bool(ready and audio_extract_ready),
+        "needs_audio_extract": True,
+        "audio_extract_ready": bool(audio_extract_ready),
+        "public": bool(public),
+        "provider_preference": provider,
+    }
+
+def video_asr_provider_available(public: bool = True) -> bool:
+    return bool(get_asr_adapter_readiness(public=public).get("ready"))
 
 def video_asr_provider_available_for(public: bool = True) -> bool:
     try:
@@ -62665,6 +62722,7 @@ def music_engine_status_lines() -> list[str]:
 def subtitle_engine_status_lines() -> list[str]:
     readiness = get_subtitle_dub_readiness()
     pipeline = dict(readiness.get("pipeline") or video_pipeline_status_payload())
+    asr_readiness = get_asr_adapter_readiness(public=True)
     modes = dict(readiness.get("modes") or {})
     mode_rows = []
     for mode in (
@@ -62696,6 +62754,10 @@ def subtitle_engine_status_lines() -> list[str]:
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
         f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
+        f"ASR adapter readiness: <code>{'READY' if asr_readiness.get('ready') else 'MISSING'}</code>",
+        f"Detected ASR adapter: <code>{_engine_safe(asr_readiness.get('adapter'))}</code>",
+        f"ASR audio/video support: <code>audio={_engine_yes_no(asr_readiness.get('supports_audio'))}; video={_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"Subtitle from file readiness: <code>READY</code>",
         f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
         f"Translation route: <code>{_engine_safe(pipeline.get('translation_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('translation_test'))}</code>",
         f"TTS/dub route: <code>{_engine_safe(pipeline.get('tts_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('tts_test'))}</code>",
@@ -62721,12 +62783,12 @@ def translation_engine_status_lines() -> list[str]:
     pipeline = video_pipeline_status_payload()
     translate_cap = video_dubbing_capability(
         VIDEO_SUBTITLE_MODE_TRANSLATE,
-        {"target_language": "English", "translate_requested": "1"},
+        {"target_language": "English", "translate_requested": "1", "source_kind": "subtitle_file", "source_file_name": "input.srt"},
         public=True,
     )
     admin_cap = video_dubbing_capability(
         VIDEO_SUBTITLE_MODE_TRANSLATE,
-        {"target_language": "English", "translate_requested": "1"},
+        {"target_language": "English", "translate_requested": "1", "source_kind": "subtitle_file", "source_file_name": "input.srt"},
         public=False,
     )
     counts = translation_asset_status_counts()
@@ -62751,6 +62813,7 @@ def translation_engine_status_lines() -> list[str]:
 
 def dub_engine_status_lines() -> list[str]:
     pipeline = video_pipeline_status_payload()
+    asr_readiness = get_asr_adapter_readiness(public=True)
     dub_cap = video_dubbing_capability(
         VIDEO_SUBTITLE_MODE_DUB,
         {"target_language": "English", "voice_kind": "default_female"},
@@ -62767,6 +62830,10 @@ def dub_engine_status_lines() -> list[str]:
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
         f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
+        f"ASR adapter readiness: <code>{'READY' if asr_readiness.get('ready') else 'MISSING'}</code>",
+        f"Detected ASR adapter: <code>{_engine_safe(asr_readiness.get('adapter'))}</code>",
+        f"ASR audio/video support: <code>audio={_engine_yes_no(asr_readiness.get('supports_audio'))}; video={_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"Subtitle from file readiness: <code>READY</code>",
         f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
         f"TTS/dub route: <code>{_engine_safe(pipeline.get('tts_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('tts_test'))}</code>",
         f"FFmpeg/mux: <code>{_engine_safe(pipeline.get('ffmpeg_mux'))}</code>",
@@ -63662,29 +63729,37 @@ def get_minimax_voice_clone_readiness() -> dict:
     return payload
 
 def get_asr_readiness() -> dict:
+    adapter = get_asr_adapter_readiness(public=True)
     missing = []
     if not VIDEO_ASR_ENABLED:
         missing.append("VIDEO_ASR_ENABLED")
-    if ASR_PROVIDER not in {"deepgram", "auto", "shopaikey", "shopai"}:
-        missing.append("ASR_PROVIDER=deepgram/auto/shopaikey")
-    if not video_asr_provider_available():
-        missing.append("DEEPGRAM_API_KEY or SHOPAIKEY_API_KEY")
+    if str(ASR_PROVIDER or "auto").strip().lower() not in {"deepgram", "auto", "shopaikey", "shopai", "key4u"}:
+        missing.append("ASR_PROVIDER=auto/key4u/deepgram/shopaikey")
+    if not adapter.get("ready"):
+        missing.append("asr_adapter_missing")
     configured = not missing
-    provider_label = "deepgram" if DEEPGRAM_API_KEY else ("shopaikey" if SHOPAIKEY_API_KEY else "missing")
-    return _media_readiness_payload(
+    provider_label = str(adapter.get("adapter") or "none")
+    payload = _media_readiness_payload(
         name="asr",
         provider=provider_label,
         model=ASR_PROVIDER,
-        endpoint="Deepgram listen API / ShopAIKey audio transcriptions",
-        api_key_configured=bool(DEEPGRAM_API_KEY or SHOPAIKEY_API_KEY),
-        endpoint_configured=bool(DEEPGRAM_API_KEY or (SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)),
+        endpoint="Deepgram / Key4U STT / ShopAIKey audio transcription",
+        api_key_configured=bool(adapter.get("configured")),
+        endpoint_configured=bool(adapter.get("configured")),
         admin_smoke_tool="asr",
         public_enabled=bool(configured and (VIDEO_SUBTITLE_PUBLIC_ENABLED or VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED or VIDEO_DUB_PUBLIC_ENABLED or VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED)),
         ready=configured,
-        reason="ready" if configured else "Missing " + ", ".join(missing),
+        reason="ready" if configured else str(adapter.get("reason") or "Missing " + ", ".join(missing)),
         missing_env=missing,
         safe_user_message="⚙️ Công cụ lấy lời thoại/phụ đề đang được kiểm tra. TOAN AAS chưa xử lý video và chưa trừ Xu.",
     )
+    payload.update({
+        "adapter_readiness": adapter,
+        "supports_audio": bool(adapter.get("supports_audio")),
+        "supports_video": bool(adapter.get("supports_video")),
+        "needs_audio_extract": bool(adapter.get("needs_audio_extract")),
+    })
+    return payload
 
 def get_subtitle_dub_readiness() -> dict:
     pipeline = video_pipeline_status_payload()
@@ -97455,6 +97530,14 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             for item in _engine_missing_values(admin_cap.get("missing"))
             if not _engine_is_public_blocker(item)
         ]
+        if (
+            admin_real_test
+            and getattr(video_dubbing_capability, "__name__", "") == "video_dubbing_capability"
+            and not video_dubbing_state_has_subtitle_or_transcript(state)
+            and not VIDEO_ASR_ENABLED
+            and "asr_adapter_missing" not in technical_missing
+        ):
+            technical_missing.append("asr_adapter_missing")
         if admin_cap.get("reason") == "mode_disabled" and not admin_real_test:
             technical_missing = ["mode_disabled"]
         elif not admin_cap.get("ok") and not technical_missing:
@@ -97465,7 +97548,13 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
                     mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
                     and bool(state.get("target_language") or str(state.get("translate_requested") or "") == "1")
                 )
-                if not VIDEO_ASR_ENABLED or not video_asr_provider_available_for(public=False):
+                if (
+                    not video_dubbing_asr_ready_for_state(mode, state, public=False)
+                    or (
+                        not video_dubbing_state_has_subtitle_or_transcript(state)
+                        and not video_asr_provider_available_for(public=False)
+                    )
+                ):
                     technical_missing.append("asr_adapter_missing")
                 if needs_translation and not video_translation_provider_available():
                     technical_missing.append("subtitle_translate_adapter_missing")
@@ -98219,6 +98308,73 @@ def is_translate_ready() -> bool:
 def is_dub_ready() -> bool:
     return bool(VIDEO_DUB_TTS_ENABLED and video_tts_provider_available())
 
+def video_dubbing_state_has_subtitle_or_transcript(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    text_fields = (
+        "subtitle_ref",
+        "source_subtitle_ref",
+        "translated_subtitle_ref",
+        "source_subtitle",
+        "subtitle_draft",
+        "subtitle_text",
+        "transcript_ref",
+        "source_script",
+        "transcript_text",
+    )
+    if any(str(state.get(key) or "").strip() for key in text_fields):
+        return True
+    source_kind = str(state.get("source_kind") or "").strip().lower()
+    if source_kind in {"subtitle", "subtitle_file", "transcript", "transcript_file", "text", "text_file"}:
+        return True
+    file_name = str(state.get("source_file_name") or state.get("file_name") or "").strip().lower()
+    mime_type = str(state.get("source_mime_type") or state.get("mime_type") or "").strip().lower()
+    if file_name.endswith((".srt", ".vtt", ".txt")):
+        return True
+    if mime_type in {"text/plain", "text/vtt", "application/x-subrip", "application/srt"}:
+        return True
+    return False
+
+def video_dubbing_state_requires_asr(mode: str, state: dict | None = None) -> bool:
+    mode = normalize_video_translate_mode(mode)
+    state = dict(state or {})
+    if mode not in {
+        VIDEO_SUBTITLE_MODE_CREATE,
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_DUB,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    }:
+        return False
+    if video_dubbing_state_has_subtitle_or_transcript(state):
+        return False
+    source_markers = (
+        "source_file_name",
+        "source_mime_type",
+        "mime_type",
+        "media_kind",
+        "source_media_kind",
+    )
+    if not any(str(state.get(key) or "").strip() for key in source_markers):
+        return False
+    return True
+
+def video_dubbing_asr_ready_for_state(mode: str, state: dict | None = None, public: bool = True) -> bool:
+    if not video_dubbing_state_requires_asr(mode, state):
+        return True
+    readiness = get_asr_adapter_readiness(public=public)
+    if not readiness.get("ready"):
+        return False
+    state = dict(state or {})
+    media_kind = str(state.get("media_kind") or state.get("source_media_kind") or "").strip().lower()
+    mime_type = str(state.get("source_mime_type") or state.get("mime_type") or "").strip().lower()
+    file_name = str(state.get("source_file_name") or state.get("file_name") or "").strip().lower()
+    is_video = bool(media_kind == "video" or mime_type.startswith("video/") or file_name.endswith((".mp4", ".mov", ".mkv", ".webm")))
+    is_audio = bool(media_kind in {"audio", "voice"} or mime_type.startswith("audio/") or file_name.endswith((".mp3", ".wav", ".m4a", ".ogg", ".oga", ".aac")))
+    if is_video:
+        return bool(readiness.get("supports_video"))
+    if is_audio:
+        return bool(readiness.get("supports_audio"))
+    return bool(readiness.get("supports_audio"))
+
 def video_dubbing_public_processing_ready(mode: str, state: dict | None = None) -> bool:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
@@ -98235,7 +98391,7 @@ def video_dubbing_public_processing_ready(mode: str, state: dict | None = None) 
     )
     if not ffmpeg_ready or not pipeline_smoke_ready:
         return False
-    if not is_asr_ready():
+    if not video_dubbing_asr_ready_for_state(mode, state, public=True):
         return False
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
         mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
@@ -130459,7 +130615,7 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
     if public and not video_dubbing_public_flag(mode):
         return {"ok": False, "reason": "public_disabled", "missing": ["public_flag"]}
     missing = []
-    if not VIDEO_ASR_ENABLED or not video_asr_provider_available_for(public=public):
+    if not video_dubbing_asr_ready_for_state(mode, state, public=public):
         missing.append("asr")
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
         mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
@@ -130476,7 +130632,7 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
         "ok": not missing,
         "reason": "ready" if not missing else f"missing_{missing[0]}",
         "missing": missing,
-        "asr": "key4u" if (key4u_asr_public_ready() if public else key4u_asr_configured()) else ("deepgram" if DEEPGRAM_API_KEY else ("shopaikey" if (shopaikey_stt_public_ready() if public else SHOPAIKEY_API_KEY) else "")),
+        "asr": str(get_asr_adapter_readiness(public=public).get("adapter") or ""),
         "translation": TRANSLATE_PROVIDER if video_translation_provider_available() else "",
         "tts": ("minimax" if minimax_tts_configured() else TTS_PROVIDER) if video_tts_provider_available_for(public=public) else "",
         "mux": "enabled" if VIDEO_DUB_MUX_ENABLED else "not_enabled_audio_output_only",
@@ -130506,7 +130662,7 @@ def video_translation_admin_blockers(mode: str, state: dict | None = None, publi
         blockers.append(public_name)
     if not VIDEO_ASR_ENABLED:
         blockers.append("VIDEO_ASR_ENABLED")
-    if not video_asr_provider_available_for(public=public):
+    if not video_dubbing_asr_ready_for_state(mode, state, public=public):
         blockers.append("Key4U ASR smoke, Deepgram, or ShopAIKey STT smoke")
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
         mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
@@ -130524,9 +130680,13 @@ def video_translation_admin_blockers(mode: str, state: dict | None = None, publi
 def video_pipeline_status_payload() -> dict:
     worker = local_worker_status_payload()
     mux_worker_ready = bool(worker.get("connected") and worker.get("ffmpeg_path"))
+    asr_readiness = get_asr_adapter_readiness(public=True)
     return {
-        "asr_provider": "key4u" if key4u_asr_public_ready() else ("deepgram" if DEEPGRAM_API_KEY else ("shopaikey" if shopaikey_stt_public_ready() else "missing")),
+        "asr_provider": str(asr_readiness.get("adapter") or "missing"),
         "asr_test": preferred_tool_test_status_text("key4u_stt", "asr", "shopaikey_stt", "stt"),
+        "asr_readiness": "READY" if asr_readiness.get("ready") else "MISSING",
+        "asr_supports_audio": bool(asr_readiness.get("supports_audio")),
+        "asr_supports_video": bool(asr_readiness.get("supports_video")),
         "translation_provider": active_translation_provider_label(),
         "translation_test": preferred_tool_test_status_text("key4u_translation", "shopaikey_chat", "translation"),
         "tts_provider": (
@@ -130547,11 +130707,47 @@ def video_pipeline_status_payload() -> dict:
         "subtitle_dub_test": preferred_tool_test_status_text("subtitle_plus_dub"),
     }
 
+def video_dubbing_asr_missing_guard_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📝 <b>Auto subtitles are temporarily limited</b>\n\n"
+            "TOAN AAS received your video/audio, but speech recognition for extracting dialogue is not ready yet.\n\n"
+            "TOAN AAS has not processed the file and has not charged Xu at this step.\n\n"
+            "You can send an existing SRT/VTT/TXT subtitle file, use text translation, or come back after ASR/STT is ready."
+        )
+    return (
+        "📝 <b>Tạo phụ đề đang tạm giới hạn</b>\n\n"
+        "TOAN AAS đã nhận video/audio của anh/chị, nhưng bộ nhận diện giọng nói để bóc lời thoại hiện chưa sẵn sàng.\n\n"
+        "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này.\n\n"
+        "Anh/chị có thể:\n"
+        "• gửi file phụ đề SRT/VTT/TXT có sẵn để dịch phụ đề\n"
+        "• dùng công cụ dịch văn bản\n"
+        "• quay lại sau khi hệ thống mở ASR/STT"
+    )
+
+def video_dubbing_asr_missing_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📄 Gửi phụ đề SRT/VTT/TXT" if is_vi else "📄 Send SRT/VTT/TXT", callback_data="menu|translation_document"),
+            InlineKeyboardButton("🌐 Dịch văn bản" if is_vi else "🌐 Translate text", callback_data="menu|translation_text"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_type"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def video_dubbing_asr_missing_for_state(mode: str, state: dict | None = None, public: bool = True) -> bool:
+    return bool(video_dubbing_state_requires_asr(mode, state) and not video_dubbing_asr_ready_for_state(mode, state, public=public))
+
 def video_dubbing_guard_text(mode: str, state: dict | None = None, lang: str = "vi", admin: bool = False) -> str:
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
     combo_guard = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB or normalize_video_translate_mode(state.get("requested_mode")) == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    if normalize_user_language(lang) != "vi":
+    if video_dubbing_asr_missing_for_state(mode, state, public=not admin):
+        text = video_dubbing_asr_missing_guard_text(lang)
+    elif normalize_user_language(lang) != "vi":
         text = "Video translation, subtitles and dubbing are under maintenance/upgrading. Please try again later. TOAN AAS has not processed the request or charged Xu."
     else:
         text = {
@@ -132028,6 +132224,14 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             if state.get("return_to") == "invoice" or updated.get("return_to_invoice"):
                 return await video_finalization_render_invoice(query, uid, updated, lang)
             return await video_finalization_return_after_addon(query, uid, updated, lang)
+        if video_dubbing_asr_missing_for_state(action_mode, state, public=not is_admin_user(uid)):
+            set_video_dubbing_pending(uid, "guarded", processing="0", preview_guard_acknowledged=True)
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_asr_missing_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_asr_missing_guard_keyboard(lang),
+            )
         return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
     if action == "continue_dubbing":
         requested = normalize_video_translate_mode(state.get("requested_mode")) or mode
@@ -132318,6 +132522,20 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             state = set_video_dubbing_pending(uid, "voice_speed")
             return await safe_edit_or_send(query, video_dubbing_voice_speed_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_speed_keyboard(lang))
         feature = video_dubbing_product_area_for_mode(mode)
+        if video_dubbing_asr_missing_for_state(mode, state, public=not is_admin_user(uid)):
+            set_video_dubbing_pending(
+                uid,
+                "preview_guarded",
+                processing="0",
+                preview_seen=False,
+                preview_guard_acknowledged=True,
+            )
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_asr_missing_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_asr_missing_guard_keyboard(lang),
+            )
         access = video_dubbing_engine_access_decision(
             uid,
             mode,
@@ -132333,18 +132551,15 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 preview_seen=False,
                 preview_guard_acknowledged=True,
             )
-            if is_admin_user(uid) and access.get("status") != "blocked_public_maintenance":
-                return await safe_edit_or_send(
-                    query,
-                    access.get("message") or "⚙️ Admin test chưa chạy được: thiếu cấu hình hoặc adapter chưa sẵn sàng. Không có Xu bị trừ.",
-                    parse_mode="HTML",
-                    reply_markup=video_dubbing_confirm_keyboard(lang, state),
-                )
             return await safe_edit_or_send(
                 query,
                 video_dubbing_guard_text(mode, state, lang, admin=False),
                 parse_mode="HTML",
-                reply_markup=video_dubbing_guard_keyboard(lang, admin=False),
+                reply_markup=(
+                    video_dubbing_asr_missing_guard_keyboard(lang)
+                    if video_dubbing_asr_missing_for_state(mode, state, public=not is_admin_user(uid))
+                    else video_dubbing_guard_keyboard(lang, admin=False)
+                ),
             )
         if is_preview_action:
             try:
