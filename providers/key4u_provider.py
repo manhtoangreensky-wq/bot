@@ -162,6 +162,111 @@ def is_placeholder_task_id(value: str | None) -> bool:
     return False
 
 
+SUNO_RESULT_FIELD_KEYS = (
+    "status", "state", "result", "output",
+    "audio_url", "url", "file_url", "download_url", "stream_url",
+)
+SUNO_AUDIO_URL_KEYS = {
+    "audio_url", "audiourl", "audio", "download_url", "downloadurl",
+    "stream_url", "streamurl", "file_url", "fileurl", "output_url",
+    "outputurl", "source_audio_url", "sourceaudiourl", "url",
+}
+SUNO_STATUS_KEYS = {"status", "state", "task_status", "taskstatus"}
+SUNO_FAILURE_KEYS = {"fail_reason", "failreason", "error", "message", "reason"}
+SUNO_TEXT_KEYS = {"prompt", "text", "lyrics", "lyric"}
+SUNO_ID_KEYS = {"clip_id", "clipid", "id"}
+SUNO_AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")
+
+
+def _suno_payload_field_presence(payload: Any) -> dict[str, bool]:
+    fields = {key: False for key in SUNO_RESULT_FIELD_KEYS}
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                lowered = str(key or "").strip().lower()
+                for field in fields:
+                    if lowered == field:
+                        fields[field] = True
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return fields
+
+
+def _suno_first_string_for_keys(payload: Any, keys: set[str]) -> str:
+    found = ""
+
+    def visit(value: Any) -> None:
+        nonlocal found
+        if found:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                lowered = str(key or "").strip().lower()
+                if lowered in keys and isinstance(child, (str, int, float)):
+                    found = str(child).strip()
+                    return
+                visit(child)
+                if found:
+                    return
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+                if found:
+                    return
+
+    visit(payload)
+    return found
+
+
+def _suno_audio_urls_from_payload(payload: Any) -> list[str]:
+    urls: list[str] = []
+
+    def add_candidate(key: str, raw: Any) -> None:
+        if not isinstance(raw, str):
+            return
+        value = raw.strip()
+        if not value.startswith(("http://", "https://")):
+            return
+        lowered_key = str(key or "").strip().lower()
+        lowered_url = value.lower().split("?", 1)[0]
+        key_supports_audio = lowered_key in SUNO_AUDIO_URL_KEYS or "audio" in lowered_key
+        url_supports_audio = lowered_url.endswith(SUNO_AUDIO_EXTENSIONS) or "/audio" in lowered_url
+        if (key_supports_audio or url_supports_audio) and value not in urls:
+            urls.append(value)
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                add_candidate(key, child)
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return urls
+
+
+def _normalize_suno_query_status(raw_status: str, *, has_audio: bool, http_status: int = 0) -> str:
+    lowered = str(raw_status or "").strip().lower()
+    if has_audio:
+        return "SUCCESS"
+    if lowered in {"success", "ok", "complete", "completed", "succeeded", "done", "finish", "finished"}:
+        return "SUCCESS"
+    if lowered in {"submitted", "queued", "queue", "pending", "processing", "running", "in_progress", "generating", "process"}:
+        return "PROCESSING"
+    if lowered in {"fail", "failed", "error", "cancelled", "canceled", "timeout"}:
+        return "FAILED"
+    if http_status and int(http_status or 0) >= 400:
+        return _classify_http(int(http_status or 0), raw_status)
+    return raw_status.upper() if raw_status else "PROCESSING"
+
+
 def should_try_model_fallback(result: dict[str, Any]) -> bool:
     haystack = " ".join(
         str(result.get(key) or "")
@@ -1319,29 +1424,40 @@ class Key4UProvider:
                 data = response.json()
             except Exception:
                 data = {}
-            body = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
-            items = (body or {}).get("data") if isinstance(body, dict) else []
-            if isinstance(items, dict):
-                items = [items]
-            output_url = ""
-            output_id = ""
-            lyrics_text = ""
-            for item in items or []:
-                if isinstance(item, dict) and (item.get("audio_url") or item.get("url")):
-                    output_url = str(item.get("audio_url") or item.get("url") or "")
-                    output_id = str(item.get("clip_id") or item.get("id") or "")
-                    lyrics_text = str(item.get("prompt") or item.get("text") or "")
-                    break
-                if isinstance(item, dict) and item.get("text") and not lyrics_text:
-                    lyrics_text = str(item.get("text") or "")
-                    output_id = str(item.get("id") or "")
-            if not output_url and isinstance(body, dict):
-                output_url = str(body.get("audio_url") or body.get("url") or "")
-            status = str((body or {}).get("status") or data.get("status") or "") if isinstance(data, dict) else ""
-            fail_reason = str((body or {}).get("fail_reason") or (body or {}).get("failReason") or data.get("message") or "") if isinstance(data, dict) and isinstance(body, dict) else ""
-            result = _result(ok=bool(output_url or (status.upper() == "SUCCESS" and lyrics_text)), capability="suno_query", model=selected_model, status="SUCCESS" if (output_url or (status.upper() == "SUCCESS" and lyrics_text)) else (status or "PROCESSING"), http_status=response.status_code, latency_ms=latency_ms, task_id=safe_task_id, output_url=output_url, final_url=endpoint, error_message_safe=fail_reason)
+            audio_urls = _suno_audio_urls_from_payload(data)
+            output_url = audio_urls[0] if audio_urls else ""
+            status = _suno_first_string_for_keys(data, SUNO_STATUS_KEYS)
+            fail_reason = _suno_first_string_for_keys(data, SUNO_FAILURE_KEYS)
+            output_id = _suno_first_string_for_keys(data, SUNO_ID_KEYS)
+            lyrics_text = _suno_first_string_for_keys(data, SUNO_TEXT_KEYS)
+            parsed_fields = _suno_payload_field_presence(data)
+            normalized_status = _normalize_suno_query_status(
+                status,
+                has_audio=bool(output_url),
+                http_status=int(response.status_code or 0),
+            )
+            ok = bool(200 <= response.status_code < 300 and output_url)
+            result = _result(
+                ok=ok,
+                capability="suno_query",
+                model=selected_model,
+                status=normalized_status,
+                http_status=response.status_code,
+                latency_ms=latency_ms,
+                task_id=safe_task_id,
+                output_url=output_url,
+                final_url=endpoint,
+                error_class="" if ok else _classify_http(response.status_code, fail_reason or normalized_status),
+                error_message_safe=fail_reason,
+                raw_debug_admin_only={
+                    "parsed_fields": parsed_fields,
+                    "audio_url_count": len(audio_urls),
+                    "response_shape": sorted(data.keys())[:12] if isinstance(data, dict) else [],
+                },
+            )
             result["clip_id"] = output_id
             result["text"] = lyrics_text
+            result["parsed_fields"] = parsed_fields
             return result
         except httpx.TimeoutException as exc:
             return _result(ok=False, capability="suno_query", model=selected_model, status="FAIL_TIMEOUT", task_id=safe_task_id, final_url=endpoint, error_class="FAIL_TIMEOUT", error_message_safe=exc)
