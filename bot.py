@@ -522,6 +522,10 @@ KEY4U_ADMIN_SMOKE_ENABLED = env_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true")
 KEY4U_DASHBOARD_BALANCE_USD = _env("KEY4U_DASHBOARD_BALANCE_USD", "")
 KEY4U_LOW_BALANCE_WARN_USD = env_float("KEY4U_LOW_BALANCE_WARN_USD", 5.0)
 KEY4U_LOW_BALANCE_FREEZE_USD = env_float("KEY4U_LOW_BALANCE_FREEZE_USD", 2.0)
+KEY4U_WARN_USD = env_float("KEY4U_WARN_USD", 5.0)
+KEY4U_CRITICAL_USD = env_float("KEY4U_CRITICAL_USD", 2.0)
+KEY4U_FREEZE_USD = env_float("KEY4U_FREEZE_USD", 1.0)
+KEY4U_USAGE_ALERT_ENABLED = env_flag("KEY4U_USAGE_ALERT_ENABLED", "true")
 SUNO_PUBLIC_ENABLED = env_flag("SUNO_PUBLIC_ENABLED", "false")
 SUNO_ADMIN_SMOKE_ENABLED = env_flag("SUNO_ADMIN_SMOKE_ENABLED", "true")
 SUNO_REQUIRE_SMOKE_PASS = env_flag("SUNO_REQUIRE_SMOKE_PASS", "true")
@@ -5180,6 +5184,7 @@ def provider_usage_summary(provider: str = "key4u", since_hours: int = 24) -> di
         "fail_count": 0,
         "estimated_cost_usd": 0.0,
         "estimated_cost_xu": 0,
+        "unknown_cost_count": 0,
         "by_capability": {},
         "last_event_at": "",
     }
@@ -5228,6 +5233,12 @@ def provider_usage_summary(provider: str = "key4u", since_hours: int = 24) -> di
             else:
                 bucket["fail"] += count_int
                 summary["fail_count"] += count_int
+        row = conn.execute(
+            """SELECT COUNT(*) FROM provider_usage_events
+            WHERE provider=? AND created_at>=? AND note LIKE ?""",
+            (str(provider or "key4u")[:60], since, "%cost_unverified%"),
+        ).fetchone()
+        summary["unknown_cost_count"] = int(row[0] or 0) if row else 0
         row = conn.execute(
             "SELECT created_at FROM provider_usage_events WHERE provider=? ORDER BY id DESC LIMIT 1",
             (str(provider or "key4u")[:60],),
@@ -46590,7 +46601,9 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_shopaikey_image", "tool_test_wf_i2v",
     "tool_test_shopaikey_video", "shopaikey_video_job", "tool_test_asr",
     "key4u_status", "key4u_usage", "key4u_set_manual_balance", "key4u_usage_set_manual", "key4u_usage_manual",
-    "key4u_usage_status", "key4u_usage_clear_manual", "key4u_usage_refresh", "tool_test_key4u_chat", "tool_test_key4u_vision",
+    "key4u_usage_status", "key4u_usage_clear_manual", "key4u_usage_refresh",
+    "key4u_usage_alert", "key4u_usage_alert_set", "key4u_usage_alert_on", "key4u_usage_alert_off",
+    "key4u_usage_freeze_if_low", "key4u_usage_unfreeze", "tool_test_key4u_chat", "tool_test_key4u_vision",
     "tool_test_key4u_image", "tool_test_key4u_image_edit", "tool_test_key4u_video", "tool_test_key4u_video_model",
     "tool_test_key4u_video_all", "key4u_video_job",
     "tool_test_key4u_tts", "tool_test_key4u_stt", "tool_test_key4u_suno", "key4u_suno_job", "tool_test_key4u_rerank",
@@ -65532,6 +65545,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key4u_payload = key4u_status_payload()
     key4u_local_usage = provider_usage_summary("key4u", 24)
     key4u_manual_balance = key4u_manual_balance_usd()
+    key4u_alert = key4u_usage_alert_snapshot()
     woku_payload = woku_provider_status_payload()
     if providers["downloader"].get("cobalt_self_host"):
         cobalt_status = "configured/self-host"
@@ -65575,6 +65589,7 @@ async def cmd_providers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Smart routing: <code>{'ON' if key4u_payload.get('smart_routing') else 'OFF'}</code> | role <code>parallel/admin smoke</code>",
         f"• Models: chat <code>{html.escape(str(key4u_payload.get('chat_model') or '-'))}</code> | vision <code>{html.escape(str(key4u_payload.get('vision_model') or '-'))}</code> | image edit <code>{html.escape(str(key4u_payload.get('image_edit_model') or '-'))}</code> | nano-banana edit <code>{html.escape(str(key4u_payload.get('nano_banana_edit_model') or '-'))}</code> | video <code>{html.escape(str(key4u_payload.get('video_model') or '-'))}</code>",
         f"• Usage: manual balance <code>{html.escape(f'{key4u_manual_balance:.2f} USD' if key4u_manual_balance is not None else 'not_set')}</code> | local calls 24h <code>{int(key4u_local_usage.get('total_calls') or 0)}</code> | failures <code>{int(key4u_local_usage.get('fail_count') or 0)}</code>",
+        f"• Usage alert: <code>{html.escape(str(key4u_alert.get('alert_level') or 'UNKNOWN_BALANCE'))}</code> | remaining <code>{html.escape(str(key4u_alert.get('estimated_remaining') or 'unknown'))}</code> | thresholds <code>{html.escape(str(key4u_alert.get('thresholds_text') or '-'))}</code>",
         f"• Provider router: <code>{'ON' if PROVIDER_ROUTER_ENABLED else 'OFF'}</code> | parallel <code>{'ON' if PROVIDER_PARALLEL_ENABLED else 'OFF'}</code> | fallback <code>{'ON' if PROVIDER_FALLBACK_ENABLED else 'OFF'}</code> | order <code>{html.escape(', '.join(provider_router_fallback_order()))}</code>",
         f"• WokuShop: <code>parked</code> | reason <code>{html.escape(str(woku_payload.get('reason') or 'cost_high_parked'))}</code> | calls <code>disabled</code>",
         "• Commands: <code>/key4u_status</code> | <code>/key4u_usage</code> | <code>/key4u_set_manual_balance</code> | <code>/tool_test_key4u_chat</code> | <code>/tool_test_key4u_vision</code> | <code>/tool_test_key4u_image_edit</code> | <code>/tool_test_key4u_video</code> | <code>/tool_test_key4u_video_model</code> | <code>/key4u_video_job</code>",
@@ -65767,7 +65782,7 @@ def providers_compact_text() -> str:
     db_status = db_status_payload()
     shopaikey_usage = shopaikey_last_usage_snapshot()
     key4u = key4u_status_payload()
-    key4u_manual = key4u_manual_usage_snapshot()
+    key4u_alert = key4u_usage_alert_snapshot()
     multiscene = video_multiscene_status_payload()
     media = providers.get("media_factory") or {}
     return "\n".join([
@@ -65789,8 +65804,9 @@ def providers_compact_text() -> str:
         "",
         "<b>Key4U</b>",
         f"• Enabled/configured: <code>{'YES' if key4u.get('enabled') else 'NO'}/{ 'YES' if key4u.get('configured') else 'NO'}</code>",
-        f"• Manual balance: <code>{html.escape(str(key4u_manual.get('balance_display') or 'not_set'))}</code>",
-        "• Usage commands: <code>/key4u_usage_refresh</code> | <code>/key4u_usage_status</code>",
+        f"• Manual balance: <code>{html.escape(str(key4u_alert.get('manual_balance') or 'not_set'))}</code>",
+        f"• Alert: <code>{html.escape(str(key4u_alert.get('alert_level') or 'UNKNOWN_BALANCE'))}</code> | remaining <code>{html.escape(str(key4u_alert.get('estimated_remaining') or 'unknown'))}</code>",
+        "• Usage commands: <code>/key4u_usage_refresh</code> | <code>/key4u_usage_status</code> | <code>/key4u_usage_alert</code>",
         "",
         "<b>Audio</b>",
         f"• Deepgram/Fish/Eleven/Edge: <code>{provider_status_text(providers['audio']['deepgram'])}/{provider_status_text(providers['audio']['fish_audio'])}/{provider_status_text(providers['audio']['elevenlabs'])}/{provider_status_text(providers['audio']['edge_tts'])}</code>",
@@ -65846,7 +65862,7 @@ def provider_detail_text(section: str) -> str:
             "• Refresh: <code>/shopaikey_usage</code>",
         ])
     if section == "key4u":
-        snapshot = key4u_usage_snapshot()
+        snapshot = key4u_usage_alert_snapshot()
         return "\n".join([
             "🔑 <b>Provider Detail — Key4U</b>",
             f"• Remote usage: <code>{html.escape(str(snapshot.get('remote_usage') or '-'))}</code>",
@@ -65854,7 +65870,8 @@ def provider_detail_text(section: str) -> str:
             f"• Source: <code>{html.escape(str(snapshot.get('manual_source') or '-'))}</code>",
             f"• Local estimated used: <code>{html.escape(str(snapshot.get('local_estimated_used') or '-'))}</code>",
             f"• Estimated remaining: <code>{html.escape(str(snapshot.get('estimated_remaining') or '-'))}</code>",
-            "• Commands: <code>/key4u_usage_refresh</code> | <code>/key4u_usage_set_manual &lt;amount&gt;</code> | <code>/key4u_usage_status</code>",
+            f"• Alert: <code>{html.escape(str(snapshot.get('alert_level') or 'UNKNOWN_BALANCE'))}</code> | thresholds <code>{html.escape(str(snapshot.get('thresholds_text') or '-'))}</code>",
+            "• Commands: <code>/key4u_usage_refresh</code> | <code>/key4u_usage_set_manual &lt;amount&gt;</code> | <code>/key4u_usage_status</code> | <code>/key4u_usage_alert</code>",
         ])
     if section == "audio":
         return "\n".join([
@@ -66629,16 +66646,106 @@ def key4u_manual_usage_snapshot() -> dict:
 def key4u_usage_endpoint_verified() -> bool:
     return bool(str(globals().get("KEY4U_USAGE_ENDPOINT") or "").strip())
 
+KEY4U_COST_UNVERIFIED_MARKER = "cost_unverified"
+
+def key4u_decimal_or_default(value, default="0") -> Decimal:
+    try:
+        dec = Decimal(str(value if value is not None else default).strip())
+    except (InvalidOperation, ValueError):
+        dec = Decimal(str(default))
+    if dec < 0:
+        return Decimal("0")
+    return dec
+
+def key4u_alert_thresholds() -> dict:
+    warn = key4u_decimal_or_default(get_system_setting("key4u_usage_alert_warn_usd", ""), KEY4U_WARN_USD)
+    critical = key4u_decimal_or_default(get_system_setting("key4u_usage_alert_critical_usd", ""), KEY4U_CRITICAL_USD)
+    freeze = key4u_decimal_or_default(get_system_setting("key4u_usage_alert_freeze_usd", ""), KEY4U_FREEZE_USD)
+    if critical < freeze:
+        critical = freeze
+    if warn < critical:
+        warn = critical
+    return {
+        "warn_usd": float(warn),
+        "critical_usd": float(critical),
+        "freeze_usd": float(freeze),
+        "warn_display": key4u_format_usd_amount(warn),
+        "critical_display": key4u_format_usd_amount(critical),
+        "freeze_display": key4u_format_usd_amount(freeze),
+    }
+
+def key4u_alert_thresholds_text(thresholds: dict | None = None) -> str:
+    item = thresholds or key4u_alert_thresholds()
+    return (
+        f"warn <= {item.get('warn_display')} USD / "
+        f"critical <= {item.get('critical_display')} USD / "
+        f"freeze <= {item.get('freeze_display')} USD"
+    )
+
+def set_key4u_alert_thresholds(warn, critical, freeze, updated_by="") -> dict:
+    warn_dec = key4u_decimal_or_default(warn)
+    critical_dec = key4u_decimal_or_default(critical)
+    freeze_dec = key4u_decimal_or_default(freeze)
+    if not (warn_dec >= critical_dec >= freeze_dec >= 0):
+        raise ValueError("threshold_order")
+    set_system_setting("key4u_usage_alert_warn_usd", key4u_format_usd_amount(warn_dec), "Key4U usage alert warn USD", updated_by)
+    set_system_setting("key4u_usage_alert_critical_usd", key4u_format_usd_amount(critical_dec), "Key4U usage alert critical USD", updated_by)
+    set_system_setting("key4u_usage_alert_freeze_usd", key4u_format_usd_amount(freeze_dec), "Key4U usage alert freeze USD", updated_by)
+    return key4u_alert_thresholds()
+
+def key4u_usage_alert_enabled() -> bool:
+    value = get_system_setting("key4u_usage_alert_enabled", "")
+    if str(value or "").strip() == "":
+        return bool(KEY4U_USAGE_ALERT_ENABLED)
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+def set_key4u_usage_alert_enabled(enabled: bool, updated_by="") -> None:
+    set_system_setting(
+        "key4u_usage_alert_enabled",
+        "1" if enabled else "0",
+        "Key4U usage alert runtime switch",
+        updated_by,
+    )
+
+def key4u_local_usage_estimate(since_hours: int = 24) -> dict:
+    local = provider_usage_summary("key4u", since_hours)
+    return {
+        "since_hours": int(since_hours or 24),
+        "estimated_used_usd": max(0.0, float(local.get("estimated_cost_usd") or 0)),
+        "unknown_cost_count": int(local.get("unknown_cost_count") or 0),
+        "total_calls": int(local.get("total_calls") or 0),
+        "success_count": int(local.get("success_count") or 0),
+        "fail_count": int(local.get("fail_count") or 0),
+        "last_event_at": str(local.get("last_event_at") or "-"),
+        "by_capability": local.get("by_capability") or {},
+    }
+
+def key4u_alert_level(remaining_usd: float | None, thresholds: dict | None = None, frozen: bool = False) -> str:
+    if remaining_usd is None:
+        return "UNKNOWN_BALANCE"
+    item = thresholds or key4u_alert_thresholds()
+    remaining = float(remaining_usd)
+    if remaining <= float(item.get("freeze_usd") or 0):
+        return "AUTO_FREEZE" if frozen else "FREEZE_RECOMMENDED"
+    if remaining <= float(item.get("critical_usd") or 0):
+        return "CRITICAL"
+    if remaining <= float(item.get("warn_usd") or 0):
+        return "WARN"
+    return "OK"
+
 def key4u_usage_snapshot(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> dict:
-    local = provider_usage_summary("key4u", 24)
+    local = key4u_local_usage_estimate(24)
     manual = key4u_manual_usage_snapshot()
     remote_balance = key4u_extract_balance_usd(remote_balance_result or {})
-    estimated_used = float(local.get("estimated_cost_usd") or 0)
+    estimated_used = float(local.get("estimated_used_usd") or 0)
     estimated_remaining = None
+    remaining_source = "unknown_balance"
     if remote_balance is not None:
         estimated_remaining = remote_balance
+        remaining_source = "remote_verified"
     elif manual.get("balance_usd") is not None:
         estimated_remaining = max(0.0, float(manual["balance_usd"]) - estimated_used)
+        remaining_source = "manual_admin_minus_local_estimate"
     remote_status = str((remote_usage or {}).get("status") or "")
     if not key4u_usage_endpoint_verified():
         remote_text = "chưa xác minh endpoint (Key4U usage: chưa có endpoint usage đã xác minh)"
@@ -66655,7 +66762,11 @@ def key4u_usage_snapshot(remote_usage: dict | None = None, remote_balance_result
         "manual_source": manual.get("source") or "not_set",
         "manual_updated_at": manual.get("updated_at") or "-",
         "local_estimated_used": f"{estimated_used:.4f} USD",
+        "local_estimated_used_value": estimated_used,
+        "unknown_cost_count": int(local.get("unknown_cost_count") or 0),
         "estimated_remaining": f"{estimated_remaining:.4f} USD" if estimated_remaining is not None else "unknown",
+        "estimated_remaining_value": estimated_remaining,
+        "remaining_source": remaining_source,
         "total_calls": int(local.get("total_calls") or 0),
         "success_count": int(local.get("success_count") or 0),
         "fail_count": int(local.get("fail_count") or 0),
@@ -66663,8 +66774,68 @@ def key4u_usage_snapshot(remote_usage: dict | None = None, remote_balance_result
         "groups_routes": "key4u_suno, key4u_minimax, key4u_kling, key4u_video",
     }
 
-def key4u_usage_status_lines(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> list[str]:
+def key4u_usage_alert_snapshot(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> dict:
     snapshot = key4u_usage_snapshot(remote_usage, remote_balance_result)
+    thresholds = key4u_alert_thresholds()
+    freeze_state = provider_freeze_display("key4u")
+    remaining = snapshot.get("estimated_remaining_value")
+    level = key4u_alert_level(remaining, thresholds, frozen=bool(freeze_state.get("frozen")))
+    if level == "UNKNOWN_BALANCE":
+        note = "Key4U chưa có số dư để cảnh báo. Dùng /key4u_usage_set_manual <amount>."
+    elif level in {"FREEZE_RECOMMENDED", "AUTO_FREEZE"}:
+        note = "Số dư Key4U đã chạm ngưỡng freeze. Dùng /key4u_usage_freeze_if_low nếu cần khóa Key4U."
+    elif level == "CRITICAL":
+        note = "Số dư Key4U rất thấp. Cần nạp/cập nhật dashboard trước khi chạy thêm job."
+    elif level == "WARN":
+        note = "Số dư Key4U thấp. Theo dõi trước khi chạy test tốn phí."
+    else:
+        note = "Số dư Key4U đang trên ngưỡng cảnh báo."
+    snapshot.update({
+        "alert_enabled": key4u_usage_alert_enabled(),
+        "alert_level": level,
+        "alert_note": note,
+        "thresholds": thresholds,
+        "thresholds_text": key4u_alert_thresholds_text(thresholds),
+        "provider_frozen": bool(freeze_state.get("frozen")),
+        "provider_freeze_reason": str(freeze_state.get("reason") or freeze_state.get("reason_code") or "-"),
+    })
+    return snapshot
+
+def key4u_usage_alert_lines(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> list[str]:
+    snapshot = key4u_usage_alert_snapshot(remote_usage, remote_balance_result)
+    enabled_text = "ON" if snapshot.get("alert_enabled") else "OFF"
+    frozen_text = "ON" if snapshot.get("provider_frozen") else "OFF"
+    return [
+        "🚨 <b>Key4U Usage Alert</b>",
+        "",
+        f"• Alert enabled: <code>{enabled_text}</code>",
+        f"• Alert level: <code>{html.escape(str(snapshot.get('alert_level') or 'UNKNOWN_BALANCE'))}</code>",
+        f"• Remote usage: <code>{html.escape(str(snapshot.get('remote_usage') or '-'))}</code>",
+        f"• Remote balance: <code>{html.escape(str(snapshot.get('remote_balance') or 'unknown'))}</code>",
+        f"• Dashboard balance thủ công: <code>{html.escape(str(snapshot.get('manual_balance') or 'not_set'))}</code>",
+        f"• Local estimated used: <code>{html.escape(str(snapshot.get('local_estimated_used') or '0 USD'))}</code>",
+        f"• Unknown-cost local events: <code>{int(snapshot.get('unknown_cost_count') or 0)}</code> | <code>không trừ estimate</code>",
+        f"• Estimated remaining: <code>{html.escape(str(snapshot.get('estimated_remaining') or 'unknown'))}</code>",
+        f"• Remaining source: <code>{html.escape(str(snapshot.get('remaining_source') or '-'))}</code>",
+        f"• Thresholds: <code>{html.escape(str(snapshot.get('thresholds_text') or '-'))}</code>",
+        f"• Freeze state: <code>{frozen_text}</code> | reason <code>{html.escape(str(snapshot.get('provider_freeze_reason') or '-'))}</code>",
+        f"• Last manual update: <code>{html.escape(str(snapshot.get('manual_updated_at') or '-'))}</code>",
+        f"• Groups/routes: <code>{html.escape(str(snapshot.get('groups_routes') or '-'))}</code>",
+        "",
+        f"Note: <code>{html.escape(str(snapshot.get('alert_note') or '-'))}</code>",
+        "",
+        "<b>Commands</b>",
+        "• <code>/key4u_usage_alert</code>",
+        "• <code>/key4u_usage_alert_set &lt;warn_usd&gt; &lt;critical_usd&gt; &lt;freeze_usd&gt;</code>",
+        "• <code>/key4u_usage_alert_on</code> | <code>/key4u_usage_alert_off</code>",
+        "• <code>/key4u_usage_set_manual &lt;amount&gt;</code>",
+        "• <code>/key4u_usage_freeze_if_low</code> | <code>/key4u_usage_unfreeze</code>",
+        "",
+        "Không gọi provider, không đọc dashboard tự động, không hiển thị khóa bí mật.",
+    ]
+
+def key4u_usage_status_lines(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> list[str]:
+    snapshot = key4u_usage_alert_snapshot(remote_usage, remote_balance_result)
     return [
         "📊 <b>Key4U Usage Snapshot</b>",
         "",
@@ -66673,7 +66844,11 @@ def key4u_usage_status_lines(remote_usage: dict | None = None, remote_balance_re
         f"• Dashboard balance thủ công: <code>{html.escape(str(snapshot['manual_balance']))}</code>",
         f"• Nguồn manual: <code>{html.escape(str(snapshot['manual_source']))}</code>",
         f"• Local estimated used: <code>{html.escape(str(snapshot['local_estimated_used']))}</code>",
+        f"• Unknown-cost local events: <code>{int(snapshot.get('unknown_cost_count') or 0)}</code> | <code>không trừ estimate</code>",
         f"• Estimated remaining: <code>{html.escape(str(snapshot['estimated_remaining']))}</code>",
+        f"• Alert level: <code>{html.escape(str(snapshot['alert_level']))}</code>",
+        f"• Alert thresholds: <code>{html.escape(str(snapshot['thresholds_text']))}</code>",
+        f"• Alert enabled: <code>{'ON' if snapshot.get('alert_enabled') else 'OFF'}</code>",
         f"• Last manual update: <code>{html.escape(str(snapshot['manual_updated_at']))}</code>",
         f"• Last local event: <code>{html.escape(str(snapshot['last_event_at']))}</code>",
         f"• Groups/routes: <code>{html.escape(str(snapshot['groups_routes']))}</code>",
@@ -66684,16 +66859,21 @@ def key4u_usage_status_lines(remote_usage: dict | None = None, remote_balance_re
     ]
 
 def key4u_provider_usage_lines_for_admin() -> list[str]:
-    snapshot = key4u_usage_snapshot()
+    snapshot = key4u_usage_alert_snapshot()
     return [
         "<b>Key4U</b>",
         f"• Remote usage: <code>{html.escape(str(snapshot['remote_usage']))}</code>",
+        f"• Remote balance: <code>{html.escape(str(snapshot['remote_balance']))}</code>",
         f"• Dashboard balance thủ công: <code>{html.escape(str(snapshot['manual_balance']))}</code>",
         f"• Local estimated used: <code>{html.escape(str(snapshot['local_estimated_used']))}</code>",
+        f"• Unknown-cost local events: <code>{int(snapshot.get('unknown_cost_count') or 0)}</code> | <code>không trừ estimate</code>",
         f"• Estimated remaining: <code>{html.escape(str(snapshot['estimated_remaining']))}</code>",
+        f"• Alert level: <code>{html.escape(str(snapshot['alert_level']))}</code>",
+        f"• Thresholds: <code>{html.escape(str(snapshot['thresholds_text']))}</code>",
         f"• Last manual update: <code>{html.escape(str(snapshot['manual_updated_at']))}</code>",
         f"• Groups/routes: <code>{html.escape(str(snapshot['groups_routes']))}</code>",
         "• Hành động: <code>/key4u_usage_set_manual 14.101</code> — cập nhật số dư Key4U theo dashboard.",
+        "• Cảnh báo: <code>/key4u_usage_alert</code> | <code>/key4u_usage_freeze_if_low</code> | <code>/key4u_usage_unfreeze</code>.",
     ]
 
 def key4u_extract_balance_usd(result: dict) -> float | None:
@@ -66748,16 +66928,57 @@ def key4u_smoke_status_map() -> dict[str, str]:
     }
     return {label: tool_test_status_text(tool_name) for label, tool_name in names.items()}
 
-def record_key4u_smoke_usage(user_id, result: dict, note: str = "") -> None:
+def record_key4u_usage_event(
+    capability: str = "unknown",
+    user_id="",
+    result: dict | None = None,
+    is_admin_smoke: bool = True,
+    provider_task_id: str = "",
+    status: str = "",
+    estimated_cost_usd=None,
+    estimated_cost_xu: int = 0,
+    media_units: int = 0,
+    note: str = "",
+) -> None:
+    result = result or {}
+    cost_known = estimated_cost_usd is not None
+    if not cost_known and "estimated_cost_usd" in result and result.get("estimated_cost_usd") not in (None, ""):
+        estimated_cost_usd = result.get("estimated_cost_usd")
+        cost_known = True
+    cost_value = 0.0
+    if cost_known:
+        try:
+            cost_value = max(0.0, float(estimated_cost_usd or 0))
+        except Exception:
+            cost_value = 0.0
+            cost_known = False
+    note_text = note or f"key4u_{result.get('capability') or capability or 'usage'}"
+    if not cost_known and KEY4U_COST_UNVERIFIED_MARKER not in note_text:
+        note_text = f"{note_text} {KEY4U_COST_UNVERIFIED_MARKER}".strip()
     record_provider_usage_event(
         provider="key4u",
-        capability=str(result.get("capability") or note or "unknown"),
+        capability=str(capability or result.get("capability") or "unknown"),
         model=str(result.get("model") or ""),
         user_id=str(user_id or ""),
+        is_admin_smoke=is_admin_smoke,
+        provider_task_id=str(provider_task_id or result.get("task_id") or ""),
+        status=str(status or result.get("status") or "FAIL"),
+        estimated_cost_usd=cost_value,
+        estimated_cost_xu=int(estimated_cost_xu or result.get("estimated_cost_xu") or 0),
+        media_units=int(media_units or 0),
+        note=note_text,
+    )
+
+def record_key4u_smoke_usage(user_id, result: dict, note: str = "") -> None:
+    cost_arg = result.get("estimated_cost_usd") if "estimated_cost_usd" in result else None
+    record_key4u_usage_event(
+        capability=str(result.get("capability") or note or "unknown"),
+        user_id=user_id,
+        result=result,
         is_admin_smoke=True,
         provider_task_id=str(result.get("task_id") or ""),
         status=str(result.get("status") or "FAIL"),
-        estimated_cost_usd=float(result.get("estimated_cost_usd") or 0),
+        estimated_cost_usd=cost_arg,
         estimated_cost_xu=int(result.get("estimated_cost_xu") or 0),
         media_units=1 if (result.get("output_url") or result.get("output_bytes") or result.get("task_id")) else 0,
         note=note or f"key4u_{result.get('capability') or 'smoke'}",
@@ -66776,6 +66997,7 @@ async def key4u_usage_lines(remote_usage: dict | None = None, remote_balance_res
         estimated_remaining = max(0.0, float(manual_balance) - estimated_used)
     smoke = key4u_smoke_status_map()
     warning = key4u_warning_text(remote_balance, manual_balance, estimated_used)
+    alert = key4u_usage_alert_snapshot(remote_usage, remote_balance_result)
     usage_status = str((remote_usage or {}).get("status") or "NEED_ENDPOINT")
     balance_status = str((remote_balance_result or {}).get("status") or "NEED_ENDPOINT")
     lines = [
@@ -66823,6 +67045,8 @@ async def key4u_usage_lines(remote_usage: dict | None = None, remote_balance_res
         "",
         "<b>Warnings</b>",
         f"• <code>{html.escape(warning)}</code>",
+        f"• Alert level: <code>{html.escape(str(alert.get('alert_level') or 'UNKNOWN_BALANCE'))}</code>",
+        f"• Thresholds: <code>{html.escape(str(alert.get('thresholds_text') or '-'))}</code>",
         "No API key, prompt, or raw provider response is shown.",
     ])
     return lines
@@ -67017,9 +67241,86 @@ async def cmd_key4u_usage_refresh(update: Update, context: ContextTypes.DEFAULT_
     if not key4u_usage_endpoint_verified():
         return await update.message.reply_text(
             "Key4U chưa có endpoint usage đã xác minh. "
-            "Dùng /key4u_usage_set_manual <amount> để cập nhật số dư theo dashboard."
+            "Dùng /key4u_usage_set_manual <amount> để cập nhật số dư theo dashboard. "
+            "Hệ thống đang dùng số dư thủ công + local estimate để cảnh báo."
         )
     await cmd_key4u_usage(update, context)
+
+async def cmd_key4u_usage_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await reply_html_lines(update, key4u_usage_alert_lines())
+
+async def cmd_key4u_usage_alert_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if len(context.args or []) < 3:
+        return await update.message.reply_text("Cú pháp: /key4u_usage_alert_set <warn_usd> <critical_usd> <freeze_usd>")
+    try:
+        thresholds = set_key4u_alert_thresholds(context.args[0], context.args[1], context.args[2], update.effective_user.id)
+    except ValueError:
+        return await update.message.reply_text("Ngưỡng không hợp lệ. Cần warn >= critical >= freeze >= 0.")
+    await update.message.reply_text(
+        "Đã cập nhật ngưỡng cảnh báo Key4U: "
+        f"{key4u_alert_thresholds_text(thresholds)}. Không gọi provider."
+    )
+
+async def cmd_key4u_usage_alert_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    set_key4u_usage_alert_enabled(True, update.effective_user.id)
+    await update.message.reply_text("Đã bật cảnh báo Key4U usage. Không gọi provider.")
+
+async def cmd_key4u_usage_alert_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    set_key4u_usage_alert_enabled(False, update.effective_user.id)
+    await update.message.reply_text("Đã tắt cảnh báo Key4U usage runtime. Không gọi provider.")
+
+async def cmd_key4u_usage_freeze_if_low(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    snapshot = key4u_usage_alert_snapshot()
+    if snapshot.get("alert_level") == "UNKNOWN_BALANCE":
+        return await update.message.reply_text(
+            "Key4U chưa có số dư để quyết định freeze. "
+            "Dùng /key4u_usage_set_manual <amount> để cập nhật dashboard balance. Không gọi provider."
+        )
+    remaining = snapshot.get("estimated_remaining_value")
+    freeze_usd = float((snapshot.get("thresholds") or {}).get("freeze_usd") or KEY4U_FREEZE_USD)
+    if remaining is not None and float(remaining) <= freeze_usd:
+        set_provider_freeze_state(
+            "key4u",
+            True,
+            reason_code="key4u_usage_low_balance",
+            reason_message=(
+                f"Key4U estimated remaining {key4u_format_usd_amount(remaining)} USD "
+                f"<= freeze {key4u_format_usd_amount(freeze_usd)} USD"
+            ),
+            updated_by=update.effective_user.id,
+        )
+        return await update.message.reply_text(
+            "Đã freeze Key4U vì số dư ước tính thấp: "
+            f"{key4u_format_usd_amount(remaining)} USD <= {key4u_format_usd_amount(freeze_usd)} USD. "
+            "Không gọi provider."
+        )
+    await update.message.reply_text(
+        "Key4U chưa chạm ngưỡng freeze. "
+        f"Estimated remaining: {snapshot.get('estimated_remaining')}. "
+        f"Ngưỡng freeze: {key4u_format_usd_amount(freeze_usd)} USD. Không gọi provider."
+    )
+
+async def cmd_key4u_usage_unfreeze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    set_provider_freeze_state(
+        "key4u",
+        False,
+        reason_code="manual_key4u_usage_unfreeze",
+        reason_message="manual Key4U usage unfreeze",
+        updated_by=update.effective_user.id,
+    )
+    await update.message.reply_text("Đã unfreeze Key4U theo lệnh admin. Không gọi provider.")
 
 async def cmd_tool_test_key4u_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -125138,10 +125439,24 @@ def admin_provider_keyboard_v2() -> InlineKeyboardMarkup:
     ])
 
 def admin_provider_child_keyboard(current_menu: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    rows = []
+    if current_menu == "admin_provider_usage":
+        rows.extend([
+            [InlineKeyboardButton("🚨 Key4U cảnh báo", callback_data="menu|admin_provider_key4u_alert")],
+            [InlineKeyboardButton("✍️ Cập nhật số dư Key4U", callback_data="menu|admin_provider_key4u_manual")],
+            [InlineKeyboardButton("🧊 Freeze Key4U nếu thấp", callback_data="menu|admin_provider_key4u_freeze_low")],
+        ])
+    rows.extend([
         [InlineKeyboardButton("🔄 Làm mới", callback_data=admin_menu_callback(current_menu)), InlineKeyboardButton("📋 Chi tiết", callback_data="menu|admin_provider_routes")],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|admin_provider"), InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def admin_provider_key4u_action_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Provider Usage", callback_data="menu|admin_provider_usage"), InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider")],
+        [InlineKeyboardButton("⚙️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def admin_provider_status_text_v2() -> str:
@@ -125190,10 +125505,45 @@ def admin_provider_usage_text_v2() -> str:
         "• <code>/key4u_usage_refresh</code>",
         "• <code>/key4u_usage_set_manual &lt;amount&gt;</code>",
         "• <code>/key4u_usage_status</code>",
+        "• <code>/key4u_usage_alert</code>",
+        "• <code>/key4u_usage_alert_set &lt;warn_usd&gt; &lt;critical_usd&gt; &lt;freeze_usd&gt;</code>",
+        "• <code>/key4u_usage_freeze_if_low</code> | <code>/key4u_usage_unfreeze</code>",
         "",
         "Không hiển thị khóa bí mật.",
     ]
     return "\n".join(lines)
+
+def admin_provider_key4u_manual_text() -> str:
+    snapshot = key4u_usage_alert_snapshot()
+    return "\n".join([
+        "✍️ <b>Cập nhật số dư Key4U</b>",
+        "",
+        "Dùng lệnh admin:",
+        "• <code>/key4u_usage_set_manual 14.101</code>",
+        "",
+        f"Manual hiện tại: <code>{html.escape(str(snapshot.get('manual_balance') or 'not_set'))}</code>",
+        f"Estimated remaining: <code>{html.escape(str(snapshot.get('estimated_remaining') or 'unknown'))}</code>",
+        f"Alert level: <code>{html.escape(str(snapshot.get('alert_level') or 'UNKNOWN_BALANCE'))}</code>",
+        "",
+        "Lệnh này chỉ lưu số dư dashboard thủ công, không gọi provider và không hiển thị khóa bí mật.",
+    ])
+
+def admin_provider_key4u_freeze_low_text() -> str:
+    snapshot = key4u_usage_alert_snapshot()
+    return "\n".join([
+        "🧊 <b>Freeze Key4U nếu thấp</b>",
+        "",
+        f"Alert level: <code>{html.escape(str(snapshot.get('alert_level') or 'UNKNOWN_BALANCE'))}</code>",
+        f"Estimated remaining: <code>{html.escape(str(snapshot.get('estimated_remaining') or 'unknown'))}</code>",
+        f"Thresholds: <code>{html.escape(str(snapshot.get('thresholds_text') or '-'))}</code>",
+        f"Freeze state: <code>{'ON' if snapshot.get('provider_frozen') else 'OFF'}</code>",
+        "",
+        "Dùng lệnh admin:",
+        "• <code>/key4u_usage_freeze_if_low</code> — chỉ freeze nếu remaining <= ngưỡng freeze.",
+        "• <code>/key4u_usage_unfreeze</code> — mở lại sau khi đã cập nhật/nạp số dư.",
+        "",
+        "Nút này chỉ hướng dẫn trạng thái, không gọi provider và không tự chạy job.",
+    ])
 
 def admin_provider_routes_text() -> str:
     return "\n".join([
@@ -125254,6 +125604,9 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "admin_provider_status": lambda: (admin_provider_status_text_v2(), admin_provider_child_keyboard("admin_provider_status")),
     "admin_provider_test": lambda: (admin_provider_test_text_v2(), admin_provider_child_keyboard("admin_provider_test")),
     "admin_provider_usage": lambda: (admin_provider_usage_text_v2(), admin_provider_child_keyboard("admin_provider_usage")),
+    "admin_provider_key4u_alert": lambda: ("\n".join(key4u_usage_alert_lines()), admin_provider_key4u_action_keyboard()),
+    "admin_provider_key4u_manual": lambda: (admin_provider_key4u_manual_text(), admin_provider_key4u_action_keyboard()),
+    "admin_provider_key4u_freeze_low": lambda: (admin_provider_key4u_freeze_low_text(), admin_provider_key4u_action_keyboard()),
     "admin_provider_routes": lambda: (admin_provider_routes_text(), admin_provider_child_keyboard("admin_provider_routes")),
     "admin_provider_freeze": lambda: (admin_provider_freeze_text("freeze"), admin_provider_freeze_keyboard("freeze")),
     "admin_provider_unfreeze": lambda: (admin_provider_freeze_text("unfreeze"), admin_provider_freeze_keyboard("unfreeze")),
@@ -131378,6 +131731,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("key4u_usage_status", cmd_key4u_usage_status))
     tg_app.add_handler(CommandHandler("key4u_usage_clear_manual", cmd_key4u_usage_clear_manual))
     tg_app.add_handler(CommandHandler("key4u_usage_refresh", cmd_key4u_usage_refresh))
+    tg_app.add_handler(CommandHandler("key4u_usage_alert", cmd_key4u_usage_alert))
+    tg_app.add_handler(CommandHandler("key4u_usage_alert_set", cmd_key4u_usage_alert_set))
+    tg_app.add_handler(CommandHandler("key4u_usage_alert_on", cmd_key4u_usage_alert_on))
+    tg_app.add_handler(CommandHandler("key4u_usage_alert_off", cmd_key4u_usage_alert_off))
+    tg_app.add_handler(CommandHandler("key4u_usage_freeze_if_low", cmd_key4u_usage_freeze_if_low))
+    tg_app.add_handler(CommandHandler("key4u_usage_unfreeze", cmd_key4u_usage_unfreeze))
     tg_app.add_handler(CommandHandler("maintenance_status", cmd_maintenance_status))
     tg_app.add_handler(CommandHandler("provider_freeze", cmd_provider_freeze))
     tg_app.add_handler(CommandHandler("provider_unfreeze", cmd_provider_unfreeze))

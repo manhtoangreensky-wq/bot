@@ -111,7 +111,8 @@ def test_key4u_usage_refresh_unknown_endpoint_clear_message(monkeypatch):
     assert update.message.replies
     assert update.message.replies[-1][0] == (
         "Key4U chưa có endpoint usage đã xác minh. "
-        "Dùng /key4u_usage_set_manual <amount> để cập nhật số dư theo dashboard."
+        "Dùng /key4u_usage_set_manual <amount> để cập nhật số dư theo dashboard. "
+        "Hệ thống đang dùng số dư thủ công + local estimate để cảnh báo."
     )
 
 
