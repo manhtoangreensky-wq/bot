@@ -216,9 +216,9 @@ def test_subtitle_dubbing_translate_subtitle_first():
         "source_file_id": "video",
     }
     state, text, _markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
-    assert state["step"] == "output"
-    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
-    assert "Tạo phụ đề gốc trước" in text
+    assert state["step"] == "waiting_media"
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    assert "Tạo phụ đề gốc" in text
 
 
 def test_subtitle_dubbing_export_before_voice(monkeypatch):
@@ -233,10 +233,10 @@ def test_subtitle_dubbing_export_before_voice(monkeypatch):
         "target_language": "Tiếng Việt",
     }
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
-    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
-    assert state["step"] == "output"
-    assert "Tạo phụ đề gốc trước" in text
-    assert "✅ Xác nhận tạo đầy đủ" in _labels(markup)
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    assert state["step"] == "waiting_media"
+    assert "Tạo phụ đề gốc" in text
+    assert "✅ Xác nhận tạo đầy đủ" not in _labels(markup)
     assert "📄 Xuất SRT" not in _labels(markup)
     assert not any("Giọng nữ" in label for label in _labels(markup))
 
@@ -407,9 +407,9 @@ def test_subtitle_dubbing_back_continue_voice_to_subtitle_output(monkeypatch):
     )
     query = asyncio.run(_press("videodub|back_voice", uid))
     state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "output"
-    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in query.outputs[-1]["text"]
+    assert state["step"] == "choosing_voice"
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    assert "Chọn giọng lồng tiếng" in query.outputs[-1]["text"]
 
 
 def test_translation_provider_curl_appendix_complete():

@@ -229,11 +229,30 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
-        translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
-        state = bot.set_video_dubbing_pending(user_id, state.get("step") or "output", translated_subtitle_ref=translated_ref)
-        return {"state": state, "output_subtitle": "Translated subtitle", "output_script": "Translated subtitle"}
+        mode = bot.normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
+        if mode == bot.VIDEO_SUBTITLE_MODE_CREATE:
+            source = "1\n00:00:00,000 --> 00:00:02,000\nXin chào"
+            subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+            saved = bot.set_video_dubbing_pending(user_id, state.get("step") or "creating_original_subtitle", subtitle_ref=subtitle_ref)
+            return {
+                "state": saved,
+                "source_subtitle": source,
+                "source_segments": [{"start": 0, "end": 2, "text": "Xin chào"}],
+                "detected_language": "vi",
+            }
+        translated = "1\n00:00:00,000 --> 00:00:02,000\nHello"
+        translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", translated)
+        state = bot.set_video_dubbing_pending(user_id, state.get("step") or "translating_subtitle", translated_subtitle_ref=translated_ref)
+        return {
+            "state": state,
+            "output_subtitle": translated,
+            "output_script": "Hello",
+            "output_segments": [{"start": 0, "end": 2, "text": "Hello"}],
+        }
 
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
 
@@ -244,27 +263,23 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
         SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=message),
         SimpleNamespace(),
     ))
-    assert bot.get_video_dubbing_pending(user_id)["step"] == "output"
-    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
+    assert bot.get_video_dubbing_pending(user_id)["step"] == "original_subtitle_ready"
+    assert "Đã tạo phụ đề gốc" in message.outputs[-1]["text"]
 
-    asyncio.run(_press_videodub("videodub|result_translate_dub", user_id))
+    asyncio.run(_press_videodub("videodub|combo_translate", user_id))
     lang_query = asyncio.run(_press_videodub("videodub|language|English", user_id))
     state = bot.get_video_dubbing_pending(user_id)
-    assert state["step"] == "output"
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in lang_query.outputs[-1]["text"]
-    assert "🗣 Tiếp tục lồng tiếng" not in _labels(lang_query.outputs[-1]["reply_markup"])
+    assert state["step"] == "translated_subtitle_ready"
+    assert "Đã dịch phụ đề sang English" in lang_query.outputs[-1]["text"]
 
-    translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
-    bot.set_video_dubbing_pending(user_id, "output", translated_subtitle_ref=translated_ref)
-
-    continue_query = asyncio.run(_press_videodub("videodub|continue_dubbing", user_id))
+    continue_query = asyncio.run(_press_videodub("videodub|combo_dub_translated", user_id))
     assert "Chọn giọng lồng tiếng" in continue_query.outputs[-1]["text"]
 
     voice_query = asyncio.run(_press_videodub("videodub|voice|default_female", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["voice_style"]
-    assert state["step"] == "voice_speed"
-    assert "Tốc độ giọng" in voice_query.outputs[-1]["text"]
+    assert state["step"] == "dub_confirmation"
+    assert "Xác nhận lồng tiếng" in voice_query.outputs[-1]["text"]
     _assert_public_clean(voice_query.outputs[-1]["text"])
 
 

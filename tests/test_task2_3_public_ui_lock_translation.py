@@ -125,14 +125,29 @@ def test_task2_upload_video_stays_in_auto_dubbing(monkeypatch):
 def test_task2_upload_video_stays_in_subtitle_plus_dubbing(monkeypatch):
     uid = 823012
     _prepare_upload(monkeypatch, uid, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chào"
+        subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(user_id, state.get("step") or "creating_original_subtitle", subtitle_ref=subtitle_ref)
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chào"}],
+            "detected_language": "vi",
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
     message = CaptureMessage("subtitle-dubbing")
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace())) is True
     state = bot.get_video_dubbing_pending(uid)
-    assert state["product"] == "auto_subtitle"
+    assert state["product"] == "subtitle_plus_dubbing"
     assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert state["source_ref"] == "subtitle-dubbing"
-    assert state["step"] == "output"
-    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
+    assert state["step"] == "original_subtitle_ready"
+    assert "Đã tạo phụ đề gốc" in message.outputs[-1]["text"]
 
 
 def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):

@@ -102,11 +102,11 @@ def test_subtitle_plus_dubbing_export_before_voice(monkeypatch):
     }
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
     labels = _labels(markup)
-    assert state["step"] == "output"
-    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
+    assert state["step"] == "waiting_media"
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    assert "Tạo phụ đề gốc trước" in text
-    assert "✅ Xác nhận tạo đầy đủ" in labels
+    assert "Tạo phụ đề gốc" in text
+    assert "✅ Xác nhận tạo đầy đủ" not in labels
     assert "📄 Xuất SRT" not in labels
     assert "🗣 Tiếp tục lồng tiếng" not in labels
     assert not any("Giọng" in label for label in labels)
@@ -142,7 +142,7 @@ def test_no_copied_source_menu_inside_product_flows():
     ]
 
     combo_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert combo_labels[0] == "📎 Gửi video/audio"
+    assert combo_labels == ["⬅️ Dịch video", "🏠 Menu chính"]
 
 
 def test_auto_subtitle_input_and_output_are_basic_product():
