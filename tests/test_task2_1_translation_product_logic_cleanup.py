@@ -58,31 +58,15 @@ def _source_markup(mode):
     return bot.video_dubbing_source_keyboard("vi", {"mode": mode, "origin": "translation"})
 
 
-def _configured_translation_dub(monkeypatch):
-    monkeypatch.setattr(
-        bot,
-        "get_asr_adapter_readiness",
-        lambda public=True: {
-            "configured": True,
-            "ready": True,
-            "public_ready": False,
-            "adapter": "deepgram",
-            "supports_audio": True,
-            "supports_video": True,
-        },
-    )
-    monkeypatch.setattr(bot, "video_translation_provider_configured", lambda: True)
-    monkeypatch.setattr(bot, "video_tts_provider_configured_for_dub", lambda: True)
-
-
 def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert labels[:5] == [
-        "👁 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
-        "🎬 Phụ đề + lồng tiếng",
-        "🔗 Tải video từ link",
+    assert labels[:6] == [
+        "📝 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề / video",
+        "🎙 Lồng tiếng / Voice video",
+        "🎬 Phụ đề + Lồng tiếng",
+        "📄 Dịch file phụ đề",
+        "🧾 Transcript / Bóc lời",
     ]
 
 
@@ -92,13 +76,13 @@ def test_create_subtitle_auto_label():
 
 
 def test_auto_dubbing_label():
-    assert bot.VIDEO_TRANSLATE_MODES[bot.VIDEO_SUBTITLE_MODE_DUB] == "Lồng tiếng tự động"
-    assert "Lồng tiếng tự động" in bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "vi")
+    assert bot.VIDEO_TRANSLATE_MODES[bot.VIDEO_SUBTITLE_MODE_DUB] == "Lồng tiếng / Voice video"
+    assert "Lồng tiếng / Voice video" in bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "vi")
 
 
 def test_link_import_only_top_level():
     top = bot.video_dubbing_menu_keyboard("vi", "translation")
-    assert "videodub|link_start" in _callbacks(top)
+    assert "videodub|link_start" not in _callbacks(top)
     for mode in (
         bot.VIDEO_SUBTITLE_MODE_CREATE,
         bot.VIDEO_SUBTITLE_MODE_DUB,
@@ -108,12 +92,13 @@ def test_link_import_only_top_level():
 
 
 def test_no_copied_source_menu_inside_product_flows():
-    for mode in (
-        bot.VIDEO_SUBTITLE_MODE_CREATE,
-        bot.VIDEO_SUBTITLE_MODE_DUB,
-        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-    ):
-        assert _labels(_source_markup(mode))[:2] == ["📎 Gửi video/audio", "📂 Chọn từ Media"]
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_CREATE))[0] == "📎 Gửi video/audio"
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:2] == ["📎 Gửi video/audio", "📄 Gửi SRT/VTT/TXT"]
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_DUB))[:3] == [
+        "📎 Gửi video/audio để tự bóc lời",
+        "📄 Gửi file phụ đề có sẵn",
+        "🕘 Dùng phụ đề vừa tạo",
+    ]
 
 
 def test_auto_subtitle_only_original_language():
@@ -199,19 +184,23 @@ def test_auto_dubbing_preview_6s():
 
 
 def test_auto_dubbing_no_fake_output_when_provider_off(monkeypatch):
-    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"ok": False, "reason": "missing_tts", "missing": ["tts"]})
-    query = CaptureQuery("unused", 991202)
-    result = asyncio.run(
-        bot.execute_video_dubbing_preview(
-            query,
-            SimpleNamespace(),
-            {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "video_file_id": "video"},
-            "vi",
-        )
+    uid = 991202
+    bot.clear_video_dubbing_pending(uid)
+    bot.set_video_dubbing_pending(
+        uid,
+        "confirm",
+        mode=bot.VIDEO_SUBTITLE_MODE_DUB,
+        source_file_id="video",
+        video_file_id="video",
+        target_language="English",
+        voice_style="giọng nữ mặc định",
+        voice_speed="1.0",
     )
-    assert result["ok"] is False
-    assert result["guard"] is True
-    assert query.outputs == []
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(bot, "video_dubbing_engine_access_decision", lambda *_args, **_kwargs: {"allowed": False})
+    query = asyncio.run(_press("videodub|confirm_dub", uid))
+    assert "TOAN AAS chưa thể" in query.outputs[-1]["text"]
+    assert "chưa trừ Xu" in query.outputs[-1]["text"]
 
 
 def test_subtitle_dubbing_input_no_link_button():
@@ -227,12 +216,12 @@ def test_subtitle_dubbing_translate_subtitle_first():
         "source_file_id": "video",
     }
     state, text, _markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
-    assert state["step"] == "language"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in text
+    assert state["step"] == "output"
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
+    assert "Tạo phụ đề gốc trước" in text
 
 
 def test_subtitle_dubbing_export_before_voice(monkeypatch):
-    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     uid = "task21-combo-export"
     bot.clear_video_dubbing_pending(uid)
@@ -244,9 +233,9 @@ def test_subtitle_dubbing_export_before_voice(monkeypatch):
         "target_language": "Tiếng Việt",
     }
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
-    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
+    assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
     assert state["step"] == "output"
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in text
+    assert "Tạo phụ đề gốc trước" in text
     assert "✅ Xác nhận tạo đầy đủ" in _labels(markup)
     assert "📄 Xuất SRT" not in _labels(markup)
     assert not any("Giọng nữ" in label for label in _labels(markup))
@@ -286,7 +275,6 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
         captured.update({"text": text, "voice_style": voice_style, "voice_id": voice_id, "voice_speed": voice_speed})
         return "TTS", b"audio", "ok"
 
-    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
@@ -294,7 +282,6 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
-    monkeypatch.setattr(bot, "normalize_dub_audio_bytes", lambda data: asyncio.sleep(0, result=(data, "test_normalized")))
     monkeypatch.setattr(bot, "get_user", lambda _uid: (99999, 0, 0))
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
     monkeypatch.setattr(bot, "apply_member_service_discount", lambda _uid, amount, _event: {"final_cost": amount})
@@ -331,7 +318,8 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
 def test_public_guard_no_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi", admin=False)
     assert "Admin blocker" not in text
-    assert "bảo trì/nâng cấp" not in text
+    assert "TOAN AAS chưa thể" in text
+    assert "chưa trừ Xu" in text
 
 
 def test_admin_guard_can_show_blocker():

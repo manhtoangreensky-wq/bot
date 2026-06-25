@@ -364,8 +364,8 @@ def test_tool_test_full_dub_video_outputs_mp4_when_mux_ready(monkeypatch):
 
     asyncio.run(bot.cmd_tool_test_full_dub_video(update, SimpleNamespace(args=["--confirm-paid"])))
 
-    assert len([item for item in update.message.outputs if item.get("document")]) == 0
-    assert not any(item.get("audio") for item in update.message.outputs)
+    assert len([item for item in update.message.outputs if item.get("document")]) == 6
+    assert any(item.get("audio") for item in update.message.outputs)
     assert any(item.get("video") for item in update.message.outputs)
     assert "Full Dub Video Smoke PASS" in update.message.outputs[-1]["text"]
 
@@ -407,10 +407,10 @@ def test_tool_test_full_dub_video_partial_outputs_when_mux_unavailable(monkeypat
 
     asyncio.run(bot.cmd_tool_test_full_dub_video(update, SimpleNamespace(args=["--confirm-paid"])))
 
-    assert len([item for item in update.message.outputs if item.get("document")]) == 1
+    assert len([item for item in update.message.outputs if item.get("document")]) == 6
     assert any(item.get("audio") for item in update.message.outputs)
     assert not any(item.get("video") for item in update.message.outputs)
-    assert any("ghép video đang tạm chưa sẵn sàng" in item.get("text", "").lower() for item in update.message.outputs)
+    assert any("ghép video đang tạm chưa sẵn sàng" in item.get("text", "") for item in update.message.outputs)
 
 
 def test_tool_test_full_dub_video_no_customer_charge(monkeypatch):
@@ -512,15 +512,13 @@ def test_asr_provider_order_prefers_openai_compatible_before_deepgram():
     assert source.index('route == "key4u"') < source.index('route == "shopaikey"') < source.index('route == "deepgram"')
 
 
-def test_public_subtitle_plus_dub_uses_final_only_sender():
-    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
+def test_public_subtitle_plus_dub_outputs_all_assets():
+    source = inspect.getsource(bot.send_public_subtitle_dub_final_outputs)
 
-    assert "_execute_video_dubbing_pipeline_core" in source
-    final_sender = inspect.getsource(bot.send_public_subtitle_dub_final_outputs)
-    assert "toan_aas_full_dub_video.mp4" in final_sender
-    assert "toan_aas_full_dub_subtitle.srt" in final_sender
-    assert "original_subtitle_items" not in final_sender
-    assert "reply_video" in final_sender
+    assert "mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB" in source
+    assert "reply_document" in source
+    assert "reply_audio" in source
+    assert "reply_video" in source
 
 
 def test_public_final_mp4_only_when_mux_ready():
@@ -630,13 +628,15 @@ def test_public_dub_opens_after_asr_and_tts_ready(monkeypatch):
     assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_DUB)
 
 
-def test_public_not_over_guarded_when_asr_configured_even_if_smoke_fail(monkeypatch):
+def test_public_still_guarded_if_asr_smoke_fail(monkeypatch):
     configured_deepgram(monkeypatch, "FAIL")
     monkeypatch.setattr(bot, "VIDEO_ASR_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PUBLIC_ENABLED", False)
 
-    assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_CREATE)
+    readiness = bot.get_asr_adapter_readiness(public=True)
+    assert readiness["configured"] is True
+    assert readiness["public_ready"] is False
 
 
 def test_status_no_confusing_missing_when_adapter_detected(monkeypatch):
@@ -843,7 +843,7 @@ def test_dub_audio_source_keyboard_offers_recent_subtitle():
     )
 
     labels = " ".join(_button_labels(markup))
-    assert "Gửi SRT/VTT/TXT" in labels
+    assert "Gửi file phụ đề có sẵn" in labels
     assert "Dùng phụ đề vừa tạo" in labels
 
 

@@ -84,11 +84,6 @@ def _prepare_upload(monkeypatch, uid, mode, step="source", **fields):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: "video")
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    monkeypatch.setattr(
-        bot,
-        "video_dubbing_configured_readiness",
-        lambda *_args, **_kwargs: {"ok": True, "reason": "ready", "missing": []},
-    )
 
 
 def test_auto_subtitle_after_upload_shows_product_confirmation(monkeypatch):
@@ -126,16 +121,17 @@ def test_auto_subtitle_provider_off_clean_buttons(monkeypatch):
     uid = 824002
     bot.clear_video_dubbing_pending(uid)
     bot.set_video_dubbing_pending(uid, "output", mode=bot.VIDEO_SUBTITLE_MODE_CREATE, source_file_id="file-subtitle")
-    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": False})
-    monkeypatch.setattr(bot, "is_translation_admin", lambda _uid: True)
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(bot, "video_dubbing_engine_access_decision", lambda *_args, **_kwargs: {"allowed": False})
     query = DummyQuery(uid, "videodub|confirm_subtitle_create")
 
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     text = query.edits[-1]["text"]
     markup = query.edits[-1]["reply_markup"]
-    assert "Chưa cấu hình nhận diện giọng nói" in text
-    assert "bảo trì/nâng cấp" not in text
+    assert "TOAN AAS chưa thể" in text
+    assert "chưa xử lý file" in text
+    assert "chưa trừ Xu" in text
     assert _callbacks(markup) == ["videodub|guard_back", "menu|main"]
     assert "Admin blocker" not in text
 
@@ -175,19 +171,14 @@ def test_auto_dubbing_provider_off_no_debug_buttons(monkeypatch):
         voice_style="giọng nữ mặc định",
         voice_speed="1.0",
     )
-    monkeypatch.setattr(
-        bot,
-        "video_dubbing_configured_readiness",
-        lambda *_args, **_kwargs: {"ok": False, "reason": "missing_tts", "missing": ["tts"]},
-    )
-    monkeypatch.setattr(bot, "is_translation_admin", lambda _uid: True)
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(bot, "video_dubbing_engine_access_decision", lambda *_args, **_kwargs: {"allowed": False})
     query = DummyQuery(uid, "videodub|confirm_dub")
 
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "chưa cấu hình giọng đọc để lồng tiếng" in ui
-    assert "bảo trì/nâng cấp" not in ui
+    assert "toan aas chưa thể tạo giọng lồng tiếng" in ui
     for term in ("admin blocker", "kiểm tra factory", "trạng thái dịch", "curl provider", "provider", "api", "key4u", "shopaikey"):
         assert term not in ui
 
@@ -250,8 +241,8 @@ def test_subtitle_plus_provider_off_no_debug_buttons(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "chưa cấu hình bộ dịch phụ đề" in ui
-    assert "bảo trì/nâng cấp" not in ui
+    assert "video đã sẵn sàng tạo phụ đề dịch" in ui
+    assert "xác nhận tạo đầy đủ" in ui
     assert "admin blocker" not in ui
     assert "curl provider" not in ui
 
@@ -284,9 +275,9 @@ def test_subtitle_plus_dubbing_confirmation_has_preview_and_full():
     assert labels == ["▶️ Nghe thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
 
 
-def test_link_import_top_level_usable_or_guarded():
-    assert "🔗 Tải video từ link" in _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert "videodub|link_start" in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
+def test_link_import_not_exposed_in_b6_studio_but_guard_stays_clean():
+    assert "🔗 Tải video từ link" not in _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    assert "videodub|link_start" not in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
     guard = bot.social_link_import_guard_text("vi")
     labels = _labels(bot.social_link_import_guard_keyboard("vi"))
     assert guard == "Tải video từ link đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu. Bạn có thể gửi video/audio trực tiếp."

@@ -41,16 +41,11 @@ def _prepare_upload(monkeypatch, uid, mode, step="source"):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: "video")
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    monkeypatch.setattr(
-        bot,
-        "video_dubbing_configured_readiness",
-        lambda *_args, **_kwargs: {"ok": True, "reason": "ready", "missing": []},
-    )
 
 
 def test_public_translation_guard_hides_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi", admin=False)
-    assert "bảo trì/nâng cấp" not in text
+    assert "TOAN AAS chưa thể tạo giọng lồng tiếng" in text
     assert "chưa trừ Xu" in text
     assert "Admin blocker" not in text
 
@@ -133,10 +128,11 @@ def test_task2_upload_video_stays_in_subtitle_plus_dubbing(monkeypatch):
     message = CaptureMessage("subtitle-dubbing")
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace())) is True
     state = bot.get_video_dubbing_pending(uid)
-    assert state["product"] == "subtitle_plus_dubbing"
+    assert state["product"] == "auto_subtitle"
+    assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert state["source_ref"] == "subtitle-dubbing"
-    assert state["step"] == "language"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert state["step"] == "output"
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
 
 
 def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):

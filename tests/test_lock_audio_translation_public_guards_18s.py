@@ -12,14 +12,6 @@ def _callbacks(markup):
     return [button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data]
 
 
-def _configured_translation_dub(monkeypatch):
-    monkeypatch.setattr(
-        bot,
-        "video_dubbing_configured_readiness",
-        lambda *_args, **_kwargs: {"ok": True, "reason": "ready", "missing": []},
-    )
-
-
 def _public_texts():
     return [
         bot.music_ai_public_guard_text("vi"),
@@ -71,7 +63,6 @@ def test_music_menu_still_visible():
 
 
 def test_video_subtitle_public_action_allows_real_srt_without_mux(monkeypatch):
-    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": False, "ffmpeg_path_configured": True})
@@ -79,7 +70,6 @@ def test_video_subtitle_public_action_allows_real_srt_without_mux(monkeypatch):
 
 
 def test_video_dub_public_action_allows_real_audio_without_mux(monkeypatch):
-    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_dub_ready", lambda: True)
@@ -88,7 +78,6 @@ def test_video_dub_public_action_allows_real_audio_without_mux(monkeypatch):
 
 
 def test_subtitle_plus_dub_public_action_allows_partial_outputs_without_mux(monkeypatch):
-    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_translate_ready", lambda: True)
@@ -98,7 +87,6 @@ def test_subtitle_plus_dub_public_action_allows_partial_outputs_without_mux(monk
 
 
 def test_translation_public_ready_does_not_require_mux_for_partial_outputs(monkeypatch):
-    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "is_asr_ready", lambda: True)
     monkeypatch.setattr(bot, "is_translate_ready", lambda: True)
@@ -139,8 +127,16 @@ def test_translation_public_guard_no_xu_charge():
 
 def test_translation_menu_still_visible():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    for label in ("👁 Tạo phụ đề tự động", "🌐 Dịch phụ đề", "🎙 Lồng tiếng", "🎬 Phụ đề + lồng tiếng", "🔗 Tải video từ link"):
+    for label in (
+        "📝 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề / video",
+        "🎙 Lồng tiếng / Voice video",
+        "🎬 Phụ đề + Lồng tiếng",
+        "📄 Dịch file phụ đề",
+        "🧾 Transcript / Bóc lời",
+    ):
         assert label in labels
+    assert "🔗 Tải video từ link" not in labels
 
 
 def test_completed_add_voice_guard_if_mux_unready():

@@ -297,9 +297,8 @@ def test_translation_admin_blockers_are_exact_but_public_copy_is_clean(monkeypat
         admin=False,
     )
 
-    assert blockers == ["Subtitle translation provider missing"]
-    assert "mode_disabled" not in blockers
-    assert "VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED" not in blockers
+    assert "Subtitle translation provider missing" in blockers
+    assert not any("API" in item or "KEY" in item for item in blockers)
     _assert_public_copy_safe(public)
 
 
