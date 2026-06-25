@@ -364,8 +364,8 @@ def test_tool_test_full_dub_video_outputs_mp4_when_mux_ready(monkeypatch):
 
     asyncio.run(bot.cmd_tool_test_full_dub_video(update, SimpleNamespace(args=["--confirm-paid"])))
 
-    assert len([item for item in update.message.outputs if item.get("document")]) == 0
-    assert not any(item.get("audio") for item in update.message.outputs)
+    assert len([item for item in update.message.outputs if item.get("document")]) == 6
+    assert any(item.get("audio") for item in update.message.outputs)
     assert any(item.get("video") for item in update.message.outputs)
     assert "Full Dub Video Smoke PASS" in update.message.outputs[-1]["text"]
 
@@ -407,10 +407,10 @@ def test_tool_test_full_dub_video_partial_outputs_when_mux_unavailable(monkeypat
 
     asyncio.run(bot.cmd_tool_test_full_dub_video(update, SimpleNamespace(args=["--confirm-paid"])))
 
-    assert len([item for item in update.message.outputs if item.get("document")]) == 1
+    assert len([item for item in update.message.outputs if item.get("document")]) == 6
     assert any(item.get("audio") for item in update.message.outputs)
     assert not any(item.get("video") for item in update.message.outputs)
-    assert any("ghép video đang tạm chưa sẵn sàng" in item.get("text", "").lower() for item in update.message.outputs)
+    assert any("ghép video đang tạm chưa sẵn sàng" in item.get("text", "") for item in update.message.outputs)
 
 
 def test_tool_test_full_dub_video_no_customer_charge(monkeypatch):
@@ -512,15 +512,13 @@ def test_asr_provider_order_prefers_openai_compatible_before_deepgram():
     assert source.index('route == "key4u"') < source.index('route == "shopaikey"') < source.index('route == "deepgram"')
 
 
-def test_public_subtitle_plus_dub_uses_final_only_sender():
+def test_public_subtitle_plus_dub_outputs_all_assets():
     source = inspect.getsource(bot.execute_video_dubbing_pipeline)
 
-    assert "_execute_video_dubbing_pipeline_core" in source
-    final_sender = inspect.getsource(bot.send_public_subtitle_dub_final_outputs)
-    assert "toan_aas_full_dub_video.mp4" in final_sender
-    assert "toan_aas_full_dub_subtitle.srt" in final_sender
-    assert "original_subtitle_items" not in final_sender
-    assert "reply_video" in final_sender
+    assert "original_subtitle_items" in source
+    assert "reply_document" in source
+    assert "reply_audio" in source
+    assert "reply_video" in source
 
 
 def test_public_final_mp4_only_when_mux_ready():
@@ -538,14 +536,14 @@ def test_public_no_generic_video_menu_in_active_flows():
 
 
 def test_public_no_custom_voice_clone_dependency():
-    source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
 
     assert "synthesize_dub_segment_chunks" in source
     assert "voice_clone_intro_text" not in source
 
 
 def test_public_dub_audio_invalid_no_charge():
-    source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
 
     assert source.index('"status": "NO_AUDIO_BYTES"') < source.index("spend_fixed_credit_info")
 

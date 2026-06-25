@@ -1589,18 +1589,7 @@ VIDEO_LONG_AI_PUBLIC_ENABLED = env_flag(
 VIDEO_UPLOAD_MAX_MB = max(1, env_int("VIDEO_UPLOAD_MAX_MB", 100))
 VIDEO_TEMP_STORAGE_MAX_MB = max(1, env_int("VIDEO_TEMP_STORAGE_MAX_MB", 150))
 VIDEO_LARGE_FILE_WARNING_MB = max(1, env_int("VIDEO_LARGE_FILE_WARNING_MB", 80))
-PIPELINE_MAX_INPUT_MB_ADMIN = max(1, env_int("PIPELINE_MAX_INPUT_MB_ADMIN", 100))
-PIPELINE_MAX_INPUT_MB_PUBLIC = max(1, env_int("PIPELINE_MAX_INPUT_MB_PUBLIC", 50))
-PIPELINE_MAX_DURATION_SECONDS_ADMIN = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_ADMIN", 180))
-PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_PUBLIC", 90))
-PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_MB", 49))
-VIDEO_PROCESSING_MAX_INPUT_MB = max(1, env_int("VIDEO_PROCESSING_MAX_INPUT_MB", PIPELINE_MAX_INPUT_MB_ADMIN))
-PIPELINE_TEMP_ROOT = _env("PIPELINE_TEMP_ROOT", os.path.join(tempfile.gettempdir(), "toan_aas_pipeline"))
-PIPELINE_JOB_LOCK_TTL_SECONDS = max(60, env_int("PIPELINE_JOB_LOCK_TTL_SECONDS", 30 * 60))
-DUB_AUDIO_NORMALIZE_ENABLED = env_flag("DUB_AUDIO_NORMALIZE_ENABLED", "true")
-DUB_AUDIO_TARGET_LUFS = env_float("DUB_AUDIO_TARGET_LUFS", -16.0)
-DUB_AUDIO_FALLBACK_GAIN_DB = env_float("DUB_AUDIO_FALLBACK_GAIN_DB", 8.0)
-ORIGINAL_AUDIO_MIX_VOLUME = max(0.0, min(1.0, env_float("ORIGINAL_AUDIO_MIX_VOLUME", 0.15)))
+VIDEO_PROCESSING_MAX_INPUT_MB = max(1, env_int("VIDEO_PROCESSING_MAX_INPUT_MB", 15))
 ASR_PROVIDER = _env("ASR_PROVIDER", "auto").strip().lower()
 TRANSLATE_PROVIDER = _env("TRANSLATE_PROVIDER", "auto").strip().lower()
 TTS_PROVIDER = _env("TTS_PROVIDER", "auto").strip().lower()
@@ -30291,8 +30280,6 @@ LAST_MEDIA_BY_USER: dict = {}
 LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
 ADMIN_TOOL_TEST_PENDING_TTL_SECONDS = 120
 PENDING_ADMIN_TOOL_TEST: dict[int, dict] = {}
-SUBTITLE_DUB_PIPELINE_JOBS: dict[str, dict] = {}
-SUBTITLE_DUB_PIPELINE_RESULTS: dict[str, dict] = {}
 ADMIN_CAPTION_TOOL_TEST_COMMANDS = {
     "tool_test_asr": "asr",
     "tool_test_auto_subtitle": "auto_subtitle",
@@ -30497,12 +30484,10 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
     if media:
         meta = {
             "file_id": str(getattr(media, "file_id", "") or ""),
-            "file_unique_id": str(getattr(media, "file_unique_id", "") or ""),
             "file_type": file_type,
             "mime_type": media_content_type(media, file_type),
             "file_name": str(getattr(media, "file_name", "") or ""),
             "file_size": int(getattr(media, "file_size", 0) or 0),
-            "duration": int(getattr(media, "duration", 0) or 0),
             "created_at": "",
         }
         try:
@@ -30542,40 +30527,16 @@ async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_T
         "source": source,
         "content_type": meta.get("mime_type") or "application/octet-stream",
     })
-    uid = update.effective_user.id if update.effective_user else 0
-    is_admin = bool(is_admin_user(uid))
-    max_bytes = pipeline_input_limit_mb(is_admin) * 1024 * 1024
-    max_duration = pipeline_duration_limit_seconds(is_admin)
-    if int(meta.get("file_size", 0) or 0) > max_bytes or int(meta.get("duration", 0) or 0) > max_duration:
+    if int(meta.get("file_size", 0) or 0) > 15 * 1024 * 1024:
         meta["bytes"] = b""
-        meta["error"] = "input_too_large"
         return meta
     try:
-        if callable(getattr(file_obj, "download_to_drive", None)):
-            with tempfile.TemporaryDirectory(prefix="toanaas_pipeline_download_") as tmpdir:
-                download_path = os.path.join(tmpdir, os.path.basename(str(meta.get("file_name") or "source_media.bin")))
-                await file_obj.download_to_drive(custom_path=download_path)
-                if not os.path.exists(download_path) or os.path.getsize(download_path) <= 0:
-                    raise RuntimeError("telegram_download_empty")
-                if os.path.getsize(download_path) > max_bytes:
-                    meta["bytes"] = b""
-                    meta["error"] = "input_too_large"
-                    return meta
-                with open(download_path, "rb") as handle:
-                    file_bytes = handle.read()
-                meta["download_mode"] = "stream_path"
-        else:
-            file_bytes = bytes(await file_obj.download_as_bytearray())
-            meta["download_mode"] = "bytearray_fallback"
+        file_bytes = bytes(await file_obj.download_as_bytearray())
     except Exception as e:
         logger.warning(f"audio download failed: {provider_error_summary(e)}")
         meta["bytes"] = b""
         meta["error"] = "telegram_timeout" if is_audio_timeout_error(e) else "telegram_download_error"
         meta["error_detail"] = provider_error_summary(e)
-        return meta
-    if len(file_bytes) > max_bytes:
-        meta["bytes"] = b""
-        meta["error"] = "input_too_large"
         return meta
     meta["bytes"] = file_bytes
     return meta
@@ -74177,9 +74138,9 @@ async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     clear_pending_admin_tool_test(update.effective_user.id)
     file_size = int(media_info.get("file_size", 0) or 0)
-    if media_info.get("error") == "input_too_large" or file_size > pipeline_input_limit_mb(True) * 1024 * 1024:
+    if file_size > 15 * 1024 * 1024:
         save_tool_test_result("stt", "FAIL", f"file_too_large={file_size}", update.effective_user.id)
-        return await update.message.reply_text(pipeline_limit_guard_message("vi"))
+        return await update.message.reply_text("⚠️ File quá lớn để smoke test. Hãy dùng audio ngắn dưới 15MB.")
     try:
         content_type = media_info.get("content_type") or "application/octet-stream"
         file_type = str(media_info.get("file_type") or "").lower()
@@ -74439,31 +74400,21 @@ def admin_full_dub_video_target_language(args: list[str] | tuple[str, ...] | Non
             continue
         if value in {"--target", "--lang", "--language"}:
             candidate = str(values[index + 1] if index + 1 < len(values) else "").strip()
-            if candidate.lower() in {"same", "original", "source", "giữ nguyên", "giu nguyen"}:
-                return "same"
             target = normalize_translate_target(candidate)
             if target:
                 return target
             skip_next = True
             continue
         if value.startswith("--target=") or value.startswith("--lang=") or value.startswith("--language="):
-            candidate = value.split("=", 1)[1]
-            if candidate.strip().lower() in {"same", "original", "source", "giữ nguyên", "giu nguyen"}:
-                return "same"
-            target = normalize_translate_target(candidate)
+            target = normalize_translate_target(value.split("=", 1)[1])
             if target:
                 return target
             continue
         if not value.startswith("--"):
-            if value.lower() in {"same", "original", "source", "giữ nguyên", "giu nguyen"}:
-                return "same"
             target = normalize_translate_target(value)
             if target:
                 return target
     return "vi"
-
-def admin_full_dub_debug_output(args: list[str] | tuple[str, ...] | None) -> bool:
-    return any(str(item or "").strip().lower() == "--debug-output" for item in (args or []))
 
 async def send_admin_full_dub_subtitle_assets(message, srt_text: str, stem: str, caption_prefix: str):
     if not str(srt_text or "").strip():
@@ -74483,63 +74434,10 @@ async def send_admin_full_dub_subtitle_assets(message, srt_text: str, stem: str,
         sent += 1
     return sent
 
-async def send_admin_full_dub_final_outputs(message, result: dict, target_language: str, *, debug_output: bool = False, is_video: bool = True) -> dict:
-    original_sent = 0
-    translated_sent = 0
-    translated_srt = str(result.get("translated_srt") or result.get("original_srt") or "").strip()
-    if debug_output:
-        original_sent = await send_admin_full_dub_subtitle_assets(
-            message,
-            str(result.get("original_srt") or ""),
-            "toan_aas_full_dub_original",
-            "✅ Phụ đề gốc",
-        )
-        if translated_srt:
-            translated_sent = await send_admin_full_dub_subtitle_assets(
-                message,
-                translated_srt,
-                "toan_aas_full_dub_translated",
-                f"✅ Phụ đề đích ({target_language})",
-            )
-    dub_audio = bytes(result.get("dub_audio") or b"")
-    final_video = bytes(result.get("final_video") or b"")
-    video_sendable = pipeline_final_video_sendable(final_video)
-    if video_sendable:
-        await message.reply_video(
-            video=video_dubbing_output_file(final_video, "toan_aas_full_dub_video.mp4"),
-            filename="toan_aas_full_dub_video.mp4",
-            caption="✅ MP4 đã ghép audio lồng tiếng bằng mux thật — admin smoke / 0 Xu",
-        )
-    else:
-        if dub_audio:
-            await message.reply_audio(
-                audio=video_dubbing_output_file(dub_audio, "toan_aas_full_dub_audio.mp3"),
-                filename="toan_aas_full_dub_audio.mp3",
-                caption="✅ Audio lồng tiếng đã chuẩn hóa âm lượng — admin smoke / 0 Xu",
-            )
-        if translated_srt and not debug_output:
-            await message.reply_document(
-                document=video_dubbing_output_file(translated_srt.encode("utf-8"), "toan_aas_full_dub_translated.srt"),
-                filename="toan_aas_full_dub_translated.srt",
-                caption=f"✅ Phụ đề đích ({target_language}) — admin smoke / 0 Xu",
-            )
-            translated_sent = 1
-        if is_video:
-            await message.reply_text("Đã tạo phụ đề và audio lồng tiếng. Ghép video đang tạm chưa sẵn sàng.")
-    return {
-        "original_sent": original_sent,
-        "translated_sent": translated_sent,
-        "audio_bytes": len(dub_audio),
-        "video_bytes": len(final_video),
-        "final_video": video_sendable,
-        "video_too_large": bool(final_video) and not video_sendable,
-    }
-
 async def cmd_tool_test_full_dub_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     uid = update.effective_user.id
-    chat_id = update.effective_chat.id if getattr(update, "effective_chat", None) else uid
     command_label = "/tool_test_full_dub_video"
     if not has_admin_paid_confirmation(context):
         save_tool_test_result("full_dub_video", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
@@ -74552,9 +74450,6 @@ async def cmd_tool_test_full_dub_video(update: Update, context: ContextTypes.DEF
         )
     clear_pending_admin_tool_test(uid)
     if media_info.get("error"):
-        if media_info.get("error") == "input_too_large":
-            save_tool_test_result("full_dub_video", "FAIL", "input_limit_guard", uid)
-            return await update.message.reply_text(pipeline_limit_guard_message("vi"))
         save_tool_test_result("full_dub_video", "FAIL", f"media_download_failed:{media_info.get('error')}", uid)
         return await update.message.reply_text("⚠️ Chưa tải được media từ Telegram. Không trừ Xu và không gọi provider tiếp.")
     source_bytes = bytes(media_info.get("bytes") or b"")
@@ -74562,39 +74457,16 @@ async def cmd_tool_test_full_dub_video(update: Update, context: ContextTypes.DEF
         save_tool_test_result("full_dub_video", "FAIL", "empty_media_bytes", uid)
         return await update.message.reply_text("⚠️ Media không có dữ liệu hợp lệ. Không trừ Xu.")
     file_size = int(media_info.get("file_size") or len(source_bytes))
-    duration = int(media_info.get("duration") or 0)
-    if file_size > pipeline_input_limit_mb(True) * 1024 * 1024 or duration > pipeline_duration_limit_seconds(True):
+    if file_size > VIDEO_PROCESSING_MAX_INPUT_MB * 1024 * 1024:
         save_tool_test_result("full_dub_video", "FAIL", f"file_too_large={file_size}", uid)
-        return await update.message.reply_text(pipeline_limit_guard_message("vi"))
+        return await update.message.reply_text(
+            f"⚠️ File vượt giới hạn smoke {VIDEO_PROCESSING_MAX_INPUT_MB}MB. Không gọi API và không trừ Xu."
+        )
     source_content_type = str(media_info.get("content_type") or media_info.get("mime_type") or "application/octet-stream")
     is_video = media_info_is_video(media_info)
     target_language = admin_full_dub_video_target_language(getattr(context, "args", None))
-    debug_output = admin_full_dub_debug_output(getattr(context, "args", None))
-    job_key = subtitle_dub_pipeline_job_key(
-        uid,
-        chat_id,
-        media_info.get("file_id") or "",
-        media_info.get("file_unique_id") or "",
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-        command_label,
-    )
-    acquired, job = acquire_subtitle_dub_pipeline_job(
-        job_key,
-        user_id=uid,
-        chat_id=chat_id,
-        mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-        command=command_label,
-        source_file_id=str(media_info.get("file_id") or ""),
-        source_file_unique_id=str(media_info.get("file_unique_id") or ""),
-    )
-    if not acquired:
-        if str(job.get("status") or "") == "completed":
-            return await update.message.reply_text("Tác vụ này đã hoàn tất và kết quả đã được gửi. TOAN AAS sẽ không gửi lặp lại.")
-        return await update.message.reply_text("TOAN AAS đang xử lý tác vụ này, vui lòng chờ kết quả.")
-    workspace = create_subtitle_dub_pipeline_workspace(job.get("job_id") or "")
-    update_subtitle_dub_pipeline_job(job_key, workspace=workspace)
     await update.message.reply_text(
-        f"⏳ TOAN AAS đang xử lý full dub video, ngôn ngữ đích: {target_language}. Không trừ Xu."
+        "⏳ TOAN AAS đang chạy full dub video smoke: ASR segment → SRT/VTT/TXT → dịch segment → TTS segment → timeline audio → mux nếu sẵn sàng. Không trừ Xu."
     )
     try:
         result = await build_subtitle_dubbed_video_pipeline(
@@ -74608,79 +74480,11 @@ async def cmd_tool_test_full_dub_video(update: Update, context: ContextTypes.DEF
             context=context,
             allow_admin=True,
             updated_by=uid,
-            translate_requested=target_language != "same",
+            translate_requested=bool(target_language),
             create_dub=True,
-        )
-        if subtitle_dub_pipeline_cancelled(job_key):
-            finish_subtitle_dub_pipeline_job(job_key, "cancelled")
-            return await update.message.reply_text("Tác vụ đã được hủy. TOAN AAS không gửi output và không trừ Xu.")
-        if not result.get("ok"):
-            status = sanitize_log_text(str(result.get("status") or "failed"))[:120]
-            detail = sanitize_log_text(str(result.get("detail") or ""))[:180]
-            finish_subtitle_dub_pipeline_job(job_key, "failed", fail_status=status)
-            save_tool_test_result("full_dub_video", "FAIL", f"status={status}; {detail}", uid)
-            return await update.message.reply_text(
-                "⚙️ Full dub video smoke chưa tạo đủ output hợp lệ.\n"
-                f"Status: <code>{html.escape(status)}</code>\n"
-                "Không trừ Xu và không fake MP4.",
-                parse_mode="HTML",
-            )
-        workspace_info = record_subtitle_dub_pipeline_workspace_outputs(
-            workspace,
-            result,
-            source_bytes=source_bytes,
-            source_content_type=source_content_type,
-            target_language=target_language,
-            include_source=True,
-        )
-        update_subtitle_dub_pipeline_job(
-            job_key,
-            manifest_path=workspace_info.get("manifest_path") or "",
-            mux_status=str(result.get("mux_status") or ""),
-        )
-        if subtitle_dub_pipeline_cancelled(job_key):
-            finish_subtitle_dub_pipeline_job(job_key, "cancelled")
-            return await update.message.reply_text("Tác vụ đã được hủy. TOAN AAS không gửi output và không trừ Xu.")
-        output_info = await send_admin_full_dub_final_outputs(
-            update.message,
-            result,
-            target_language,
-            debug_output=debug_output,
-            is_video=is_video,
-        )
-        if not mark_subtitle_dub_pipeline_output_sent(job_key):
-            finish_subtitle_dub_pipeline_job(job_key, "completed")
-            return None
-        mux_status = (
-            "too_large_fallback"
-            if output_info.get("video_too_large")
-            else str(result.get("mux_status") or ("completed" if output_info.get("final_video") else "unavailable"))
-        )
-        detail = (
-            f"asr={result.get('asr_provider') or '-'}; translation={result.get('translation_provider') or '-'}; "
-            f"tts={result.get('tts_provider') or '-'}; original_assets={output_info.get('original_sent') or 0}; "
-            f"translated_assets={output_info.get('translated_sent') or 0}; audio_bytes={output_info.get('audio_bytes') or 0}; "
-            f"video_bytes={output_info.get('video_bytes') or 0}; mux={mux_status}; debug_output={int(debug_output)}; charged_xu=0"
-        )
-        finish_subtitle_dub_pipeline_job(job_key, "completed", mux_status=mux_status)
-        save_tool_test_result("full_dub_video", "PASS", detail, uid)
-        return await update.message.reply_text(
-            "✅ <b>Full Dub Video Smoke PASS</b>\n\n"
-            f"• Target: <code>{html.escape(target_language)}</code>\n"
-            f"• ASR: <code>{html.escape(str(result.get('asr_provider') or '-'))}</code>\n"
-            f"• Translation: <code>{html.escape(str(result.get('translation_provider') or ('NOT_USED' if target_language == 'same' else '-')))}</code>\n"
-            f"• TTS: <code>{html.escape(str(result.get('tts_provider') or '-'))}</code>\n"
-            f"• Dub audio bytes: <code>{int(output_info.get('audio_bytes') or 0)}</code>\n"
-            f"• Final MP4 bytes: <code>{int(output_info.get('video_bytes') or 0)}</code>\n"
-            f"• Mux: <code>{html.escape(mux_status)}</code>\n"
-            f"• Debug output: <code>{'yes' if debug_output else 'no'}</code>\n"
-            "• No Xu deducted: <code>yes</code>\n"
-            "• LIVE PASS claimed: <code>NO</code>",
-            parse_mode="HTML",
         )
     except Exception as exc:
         error_class = type(exc).__name__
-        finish_subtitle_dub_pipeline_job(job_key, "failed", error_class=error_class)
         save_tool_test_result("full_dub_video", "FAIL", f"error_class={error_class}", uid)
         logger.warning("full dub video smoke failed | error_class=%s", error_class)
         return await update.message.reply_text(
@@ -74689,8 +74493,68 @@ async def cmd_tool_test_full_dub_video(update: Update, context: ContextTypes.DEF
             "Không trừ Xu và không hiển thị raw provider response.",
             parse_mode="HTML",
         )
-    finally:
-        cleanup_subtitle_dub_pipeline_workspace(workspace, job_key)
+    if not result.get("ok"):
+        status = sanitize_log_text(str(result.get("status") or "failed"))[:120]
+        detail = sanitize_log_text(str(result.get("detail") or ""))[:180]
+        save_tool_test_result("full_dub_video", "FAIL", f"status={status}; {detail}", uid)
+        return await update.message.reply_text(
+            "⚙️ Full dub video smoke chưa tạo đủ output hợp lệ.\n"
+            f"Status: <code>{html.escape(status)}</code>\n"
+            "Không trừ Xu và không fake MP4.",
+            parse_mode="HTML",
+        )
+    original_sent = await send_admin_full_dub_subtitle_assets(
+        update.message,
+        str(result.get("original_srt") or ""),
+        "toan_aas_full_dub_original",
+        "✅ Phụ đề gốc",
+    )
+    translated_sent = 0
+    translated_srt = str(result.get("translated_srt") or "").strip()
+    if translated_srt:
+        translated_sent = await send_admin_full_dub_subtitle_assets(
+            update.message,
+            translated_srt,
+            "toan_aas_full_dub_translated",
+            f"✅ Phụ đề dịch ({target_language})",
+        )
+    dub_audio = bytes(result.get("dub_audio") or b"")
+    if dub_audio:
+        await update.message.reply_audio(
+            audio=video_dubbing_output_file(dub_audio, "toan_aas_full_dub_audio.mp3"),
+            filename="toan_aas_full_dub_audio.mp3",
+            caption="✅ Audio lồng tiếng theo timeline phụ đề — admin smoke / 0 Xu",
+        )
+    final_video = bytes(result.get("final_video") or b"")
+    if final_video:
+        await update.message.reply_video(
+            video=video_dubbing_output_file(final_video, "toan_aas_full_dub_video.mp4"),
+            filename="toan_aas_full_dub_video.mp4",
+            caption="✅ MP4 đã ghép audio lồng tiếng bằng mux thật — admin smoke / 0 Xu",
+        )
+    elif is_video:
+        await update.message.reply_text("Đã tạo phụ đề/audio lồng tiếng, nhưng ghép video đang tạm chưa sẵn sàng.")
+    mux_status = str(result.get("mux_status") or ("completed" if final_video else "unavailable"))
+    detail = (
+        f"asr={result.get('asr_provider') or '-'}; translation={result.get('translation_provider') or '-'}; "
+        f"tts={result.get('tts_provider') or '-'}; original_assets={original_sent}; translated_assets={translated_sent}; "
+        f"audio_bytes={len(dub_audio)}; video_bytes={len(final_video)}; mux={mux_status}; charged_xu=0"
+    )
+    save_tool_test_result("full_dub_video", "PASS", detail, uid)
+    return await update.message.reply_text(
+        "✅ <b>Full Dub Video Smoke PASS</b>\n\n"
+        f"• ASR: <code>{html.escape(str(result.get('asr_provider') or '-'))}</code>\n"
+        f"• Translation: <code>{html.escape(str(result.get('translation_provider') or '-'))}</code>\n"
+        f"• TTS: <code>{html.escape(str(result.get('tts_provider') or '-'))}</code>\n"
+        f"• Original subtitle assets: <code>{original_sent}</code>\n"
+        f"• Translated subtitle assets: <code>{translated_sent}</code>\n"
+        f"• Dub audio bytes: <code>{len(dub_audio)}</code>\n"
+        f"• Final MP4 bytes: <code>{len(final_video)}</code>\n"
+        f"• Mux: <code>{html.escape(mux_status)}</code>\n"
+        "• No Xu deducted: <code>yes</code>\n"
+        "• LIVE PASS claimed: <code>NO</code>",
+        parse_mode="HTML",
+    )
 
 async def cmd_tool_test_stt_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -74705,9 +74569,9 @@ async def cmd_tool_test_stt_debug(update: Update, context: ContextTypes.DEFAULT_
     if not DEEPGRAM_API_KEY:
         return await update.message.reply_text("🎤 <b>STT Debug</b>\n\n• Deepgram: <code>MISSING</code>", parse_mode="HTML")
     file_size = int(media_info.get("file_size", 0) or 0)
-    if media_info.get("error") == "input_too_large" or file_size > pipeline_input_limit_mb(True) * 1024 * 1024:
+    if file_size > 15 * 1024 * 1024:
         save_tool_test_result("stt_debug", "FAIL", f"file_too_large={file_size}", update.effective_user.id)
-        return await update.message.reply_text(pipeline_limit_guard_message("vi"))
+        return await update.message.reply_text("⚠️ File quá lớn để debug. Hãy dùng audio ngắn dưới 15MB.")
     diagnostic = await AgentDeepgram.diagnostic(media_info["bytes"], media_info.get("content_type") or "application/octet-stream")
     stats = diagnostic.get("stats") or {}
     status = str(diagnostic.get("status") or "FAIL")
@@ -131073,10 +130937,8 @@ def video_dubbing_language_keyboard(lang: str = "vi", state: dict | None = None)
         ("🇨🇳 中文", "videodub|language|中文"),
         ("🇯🇵 日本語", "videodub|language|日本語"),
         ("🇰🇷 한국어", "videodub|language|한국어"),
+        ("🌐 Nhập ngôn ngữ khác" if is_vi else "🌐 Enter another language", "videodub|language_custom"),
     ])
-    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-        items.append(("✅ Giữ nguyên ngôn ngữ gốc" if is_vi else "✅ Keep original language", "videodub|language|same"))
-    items.append(("🌐 Nhập ngôn ngữ khác" if is_vi else "🌐 Enter another language", "videodub|language_custom"))
     back_callback = "videodub|back_language_to_source"
     back_label = "⬅️ Quay lại" if is_vi else "⬅️ Back"
     return video_v6_keyboard(
@@ -131695,315 +131557,6 @@ def video_dubbing_job_result_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
-def pipeline_input_limit_mb(is_admin: bool = False) -> int:
-    return int(PIPELINE_MAX_INPUT_MB_ADMIN if is_admin else PIPELINE_MAX_INPUT_MB_PUBLIC)
-
-def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
-    return int(PIPELINE_MAX_DURATION_SECONDS_ADMIN if is_admin else PIPELINE_MAX_DURATION_SECONDS_PUBLIC)
-
-def pipeline_limit_guard_message(lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
-        return "The file exceeds the current test processing limit. Please use a shorter or compressed video."
-    return "File hiện vượt giới hạn xử lý thử nghiệm. Vui lòng dùng video ngắn hơn hoặc nén lại."
-
-def subtitle_dub_pipeline_job_key(user_id, chat_id=None, source_file_id: str = "", source_file_unique_id: str = "", mode: str = "", command: str = "") -> str:
-    source = str(source_file_unique_id or source_file_id or "no_source").strip()
-    return "|".join([
-        str(user_id or "0"),
-        str(chat_id or user_id or "0"),
-        source[:160],
-        normalize_video_translate_mode(mode) or str(mode or "pipeline")[:80],
-        str(command or "product")[:80],
-    ])
-
-def subtitle_dub_pipeline_job_key_from_state(user_id, chat_id, state: dict | None = None, command: str = "") -> str:
-    state = dict(state or {})
-    return subtitle_dub_pipeline_job_key(
-        user_id,
-        chat_id,
-        state.get("source_file_id") or state.get("video_file_id") or state.get("source_ref") or "",
-        state.get("source_file_unique_id") or state.get("video_file_unique_id") or "",
-        state.get("video_processing_mode") or state.get("mode") or state.get("process_type") or "",
-        command,
-    )
-
-def _prune_subtitle_dub_pipeline_jobs(now_ts: float | None = None) -> None:
-    now_ts = float(now_ts or time.time())
-    for key, job in list(SUBTITLE_DUB_PIPELINE_JOBS.items()):
-        if str((job or {}).get("status") or "") in {"completed", "failed", "cancelled"}:
-            if now_ts - float((job or {}).get("last_heartbeat_at") or (job or {}).get("started_at") or 0) > PIPELINE_JOB_LOCK_TTL_SECONDS:
-                SUBTITLE_DUB_PIPELINE_JOBS.pop(key, None)
-
-def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dict]:
-    _prune_subtitle_dub_pipeline_jobs()
-    key = str(job_key or "").strip()
-    if not key:
-        key = subtitle_dub_pipeline_job_key(fields.get("user_id"), fields.get("chat_id"), mode=fields.get("mode"), command=fields.get("command"))
-    existing = SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {}
-    if (
-        str(existing.get("status") or "") == "running"
-        and not existing.get("cancelled")
-    ) or (
-        str(existing.get("status") or "") == "completed"
-        and existing.get("output_sent")
-    ):
-        existing["last_duplicate_at"] = time.time()
-        existing["duplicate_count"] = int(existing.get("duplicate_count") or 0) + 1
-        SUBTITLE_DUB_PIPELINE_JOBS[key] = existing
-        return False, dict(existing)
-    now_ts = time.time()
-    job_id = hashlib.sha256(f"{key}:{now_ts}".encode("utf-8")).hexdigest()[:20]
-    job = {
-        "job_key": key,
-        "job_id": job_id,
-        "status": "running",
-        "started_at": now_ts,
-        "last_heartbeat_at": now_ts,
-        "output_sent": False,
-        "cleanup_done": False,
-        "cancelled": False,
-        "duplicate_count": 0,
-        **fields,
-    }
-    SUBTITLE_DUB_PIPELINE_JOBS[key] = job
-    return True, dict(job)
-
-def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
-    key = str(job_key or "").strip()
-    job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {"job_key": key})
-    job.update(fields)
-    job["last_heartbeat_at"] = time.time()
-    SUBTITLE_DUB_PIPELINE_JOBS[key] = job
-    return dict(job)
-
-def get_subtitle_dub_pipeline_job(job_key: str) -> dict:
-    _prune_subtitle_dub_pipeline_jobs()
-    return dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
-
-def subtitle_dub_pipeline_cancelled(job_or_key) -> bool:
-    job = SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_or_key or "")) if isinstance(job_or_key, str) else dict(job_or_key or {})
-    return bool((job or {}).get("cancelled") or str((job or {}).get("status") or "") == "cancelled")
-
-def mark_subtitle_dub_pipeline_output_sent(job_key: str) -> bool:
-    job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
-    if job.get("output_sent"):
-        return False
-    job["output_sent"] = True
-    job["last_heartbeat_at"] = time.time()
-    SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
-    return True
-
-def finish_subtitle_dub_pipeline_job(job_key: str, status: str = "completed", **fields) -> dict:
-    status = str(status or "completed").lower()
-    if status not in {"completed", "failed", "cancelled"}:
-        status = "completed"
-    return update_subtitle_dub_pipeline_job(job_key, status=status, **fields)
-
-def cancel_subtitle_dub_pipeline_jobs(user_id, chat_id=None) -> int:
-    cancelled = 0
-    for key, job in list(SUBTITLE_DUB_PIPELINE_JOBS.items()):
-        if str(job.get("status") or "") != "running":
-            continue
-        if str(job.get("user_id") or "") != str(user_id or ""):
-            continue
-        if chat_id is not None and str(job.get("chat_id") or "") != str(chat_id or ""):
-            continue
-        job["status"] = "cancelled"
-        job["cancelled"] = True
-        job["last_heartbeat_at"] = time.time()
-        SUBTITLE_DUB_PIPELINE_JOBS[key] = job
-        cancelled += 1
-    return cancelled
-
-def subtitle_dub_pipeline_workspace_path(job_id: str) -> str:
-    safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(job_id or "job")).strip("._") or "job"
-    return os.path.abspath(os.path.join(PIPELINE_TEMP_ROOT, safe_id))
-
-def create_subtitle_dub_pipeline_workspace(job_id: str) -> str:
-    root = os.path.abspath(PIPELINE_TEMP_ROOT)
-    path = subtitle_dub_pipeline_workspace_path(job_id)
-    if not (path == root or path.startswith(root + os.sep)):
-        raise RuntimeError("unsafe_pipeline_workspace")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-def write_pipeline_workspace_file(workspace: str, filename: str, data) -> str:
-    safe_name = os.path.basename(str(filename or "output.bin"))
-    path = os.path.abspath(os.path.join(workspace, safe_name))
-    root = os.path.abspath(workspace)
-    if not (path == root or path.startswith(root + os.sep)):
-        raise RuntimeError("unsafe_pipeline_output_path")
-    payload = data.encode("utf-8") if isinstance(data, str) else bytes(data or b"")
-    with open(path, "wb") as handle:
-        handle.write(payload)
-    return path
-
-def write_subtitle_dub_pipeline_manifest(workspace: str, manifest: dict) -> str:
-    manifest_path = os.path.abspath(os.path.join(workspace, "manifest.json"))
-    with open(manifest_path, "w", encoding="utf-8") as handle:
-        json.dump(manifest, handle, ensure_ascii=False, indent=2)
-    return manifest_path
-
-def cleanup_subtitle_dub_pipeline_workspace(workspace: str, job_key: str = "") -> bool:
-    path = os.path.abspath(str(workspace or ""))
-    root = os.path.abspath(PIPELINE_TEMP_ROOT)
-    if not path or path == root or not path.startswith(root + os.sep):
-        return False
-    if os.path.isdir(path):
-        shutil.rmtree(path, ignore_errors=True)
-    if job_key:
-        update_subtitle_dub_pipeline_job(job_key, cleanup_done=True)
-    return True
-
-def record_subtitle_dub_pipeline_workspace_outputs(workspace: str, result: dict, *, source_bytes: bytes = b"", source_content_type: str = "", target_language: str = "", include_source: bool = False) -> dict:
-    outputs = {}
-    if include_source and source_bytes:
-        outputs["source_video"] = write_pipeline_workspace_file(workspace, "source_video.mp4", source_bytes)
-    for key, filename in (
-        ("original_srt", "original.srt"),
-        ("original_vtt", "original.vtt"),
-        ("original_txt", "original.txt"),
-        ("translated_srt", "translated.srt"),
-        ("translated_vtt", "translated.vtt"),
-        ("translated_txt", "translated.txt"),
-    ):
-        value = result.get(key)
-        if str(value or "").strip():
-            outputs[key] = write_pipeline_workspace_file(workspace, filename, str(value))
-    if result.get("dub_audio_raw"):
-        outputs["dub_audio_raw"] = write_pipeline_workspace_file(workspace, "dub_audio_raw.mp3", bytes(result.get("dub_audio_raw") or b""))
-    if result.get("dub_audio"):
-        outputs["dub_audio_normalized"] = write_pipeline_workspace_file(workspace, "dub_audio_normalized.mp3", bytes(result.get("dub_audio") or b""))
-    if result.get("final_video"):
-        outputs["final_video"] = write_pipeline_workspace_file(workspace, "final.mp4", bytes(result.get("final_video") or b""))
-    manifest = {
-        "created_at": now_text(),
-        "source_content_type": str(source_content_type or ""),
-        "source_bytes": len(source_bytes or b""),
-        "target_language": str(target_language or ""),
-        "mux_status": str(result.get("mux_status") or ""),
-        "outputs": {name: {"path": path, "bytes": os.path.getsize(path) if os.path.exists(path) else 0} for name, path in outputs.items()},
-    }
-    manifest_path = write_subtitle_dub_pipeline_manifest(workspace, manifest)
-    return {"workspace": workspace, "manifest_path": manifest_path, "manifest": manifest, "outputs": outputs}
-
-def video_dub_mux_ready() -> bool:
-    return bool(VIDEO_DUB_MUX_ENABLED and frame_video_ffmpeg_path())
-
-def pipeline_final_video_sendable(video_bytes: bytes) -> bool:
-    return bool(video_bytes) and len(video_bytes) <= PIPELINE_MAX_TELEGRAM_OUTPUT_MB * 1024 * 1024
-
-def remember_subtitle_dub_pipeline_result(user_id, **fields) -> dict:
-    result = {
-        "user_id": str(user_id or ""),
-        "created_at": time.time(),
-        **fields,
-    }
-    SUBTITLE_DUB_PIPELINE_RESULTS[str(user_id or "")] = result
-    return dict(result)
-
-def get_subtitle_dub_pipeline_result(user_id) -> dict:
-    result = dict(SUBTITLE_DUB_PIPELINE_RESULTS.get(str(user_id or "")) or {})
-    if result and time.time() - float(result.get("created_at") or 0) > PIPELINE_JOB_LOCK_TTL_SECONDS:
-        SUBTITLE_DUB_PIPELINE_RESULTS.pop(str(user_id or ""), None)
-        return {}
-    return result
-
-def video_dubbing_final_result_keyboard(lang: str = "vi", *, has_video: bool = False) -> InlineKeyboardMarkup:
-    is_vi = normalize_user_language(lang) == "vi"
-    rows = []
-    if has_video:
-        rows.append([
-            InlineKeyboardButton("📄 Tải phụ đề" if is_vi else "📄 Download subtitles", callback_data="videodub|job_download|subtitle"),
-            InlineKeyboardButton("🎙 Tải audio lồng tiếng" if is_vi else "🎙 Download dub audio", callback_data="videodub|job_download|audio"),
-        ])
-    else:
-        rows.append([
-            InlineKeyboardButton("📦 Tải toàn bộ" if is_vi else "📦 Download all", callback_data="videodub|job_download|all"),
-        ])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    return InlineKeyboardMarkup(rows)
-
-async def send_public_subtitle_dub_final_outputs(
-    message,
-    *,
-    mode: str,
-    requested_mode: str = "",
-    subtitle_items: list[dict] | None = None,
-    srt_text: str = "",
-    audio_bytes: bytes = b"",
-    video_bytes: bytes = b"",
-    lang: str = "vi",
-) -> dict:
-    mode = normalize_video_translate_mode(mode)
-    requested_mode = normalize_video_translate_mode(requested_mode)
-    is_full_dub = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB or requested_mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    sent_documents = 0
-    sent_audio = 0
-    sent_video = 0
-    if is_full_dub and pipeline_final_video_sendable(video_bytes):
-        await message.reply_video(
-            video=video_dubbing_output_file(video_bytes, "toan_aas_full_dub_video.mp4"),
-            filename="toan_aas_full_dub_video.mp4",
-            caption="✅ Video lồng tiếng đã hoàn tất.",
-            reply_markup=video_dubbing_final_result_keyboard(lang, has_video=True),
-        )
-        sent_video = 1
-    elif is_full_dub:
-        if audio_bytes:
-            await message.reply_audio(
-                audio=video_dubbing_output_file(audio_bytes, "toan_aas_full_dub_audio.mp3"),
-                filename="toan_aas_full_dub_audio.mp3",
-                caption="✅ Audio lồng tiếng đã hoàn tất.",
-            )
-            sent_audio = 1
-        if str(srt_text or "").strip():
-            await message.reply_document(
-                document=video_dubbing_output_file(str(srt_text).encode("utf-8"), "toan_aas_full_dub_subtitle.srt"),
-                filename="toan_aas_full_dub_subtitle.srt",
-                caption="✅ Phụ đề đích SRT.",
-            )
-            sent_documents = 1
-        if callable(getattr(message, "reply_text", None)):
-            await message.reply_text(
-                "Đã tạo phụ đề và audio lồng tiếng. Ghép video đang tạm chưa sẵn sàng.",
-                reply_markup=video_dubbing_final_result_keyboard(lang, has_video=False),
-            )
-    elif mode == VIDEO_SUBTITLE_MODE_DUB:
-        if audio_bytes:
-            await message.reply_audio(
-                audio=video_dubbing_output_file(audio_bytes, "toan_aas_dub_audio.mp3"),
-                filename="toan_aas_dub_audio.mp3",
-                caption="✅ Audio lồng tiếng đã hoàn tất.",
-                reply_markup=video_dubbing_final_result_keyboard(lang, has_video=False),
-            )
-            sent_audio = 1
-    else:
-        for item in subtitle_items or []:
-            data = bytes(item.get("bytes") or b"")
-            if not data:
-                continue
-            filename = str(item.get("filename") or f"toan_aas_{mode}.srt")
-            await message.reply_document(
-                document=video_dubbing_output_file(data, filename),
-                filename=filename,
-                caption=f"✅ {video_dubbing_process_label(mode, lang)} — {item.get('caption') or 'phụ đề'}",
-            )
-            sent_documents += 1
-    return {
-        "documents": sent_documents,
-        "audio": sent_audio,
-        "video": sent_video,
-    }
-
-async def cmd_cancel_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id if update.effective_user else 0
-    chat_id = update.effective_chat.id if getattr(update, "effective_chat", None) else uid
-    count = cancel_subtitle_dub_pipeline_jobs(uid, chat_id)
-    if count:
-        return await update.message.reply_text("✅ Đã hủy tác vụ pipeline đang chạy. TOAN AAS sẽ không gửi thêm output cho tác vụ này.")
-    return await update.message.reply_text("Không có tác vụ pipeline subtitle/dub nào đang chạy trong chat này.")
-
 def video_dubbing_back_route(state: dict | None, action: str) -> str:
     state = dict(state or {})
     mode = normalize_video_translate_mode(
@@ -132077,29 +131630,14 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
     file_id = str(state.get("video_file_id") or state.get("source_file_id") or "")
     if not file_id:
         raise RuntimeError("missing_video_file_id")
-    is_admin = bool(state.get("_pipeline_is_admin") or state.get("allow_admin"))
-    max_bytes = pipeline_input_limit_mb(is_admin) * 1024 * 1024
-    max_duration = pipeline_duration_limit_seconds(is_admin)
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
-    duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
-    if file_size > max_bytes or duration > max_duration:
+    if file_size > VIDEO_PROCESSING_MAX_INPUT_MB * 1024 * 1024:
         raise RuntimeError("video_too_large")
     tg_file = await context.bot.get_file(file_id)
-    if callable(getattr(tg_file, "download_to_drive", None)):
-        with tempfile.TemporaryDirectory(prefix="toanaas_pipeline_source_") as tmpdir:
-            source_path = os.path.join(tmpdir, os.path.basename(str(state.get("source_file_name") or "source_media.bin")))
-            await tg_file.download_to_drive(custom_path=source_path)
-            if not os.path.exists(source_path) or os.path.getsize(source_path) <= 0:
-                raise RuntimeError("empty_video")
-            if os.path.getsize(source_path) > max_bytes:
-                raise RuntimeError("video_too_large")
-            with open(source_path, "rb") as handle:
-                data = handle.read()
-    else:
-        data = bytes(await tg_file.download_as_bytearray())
+    data = bytes(await tg_file.download_as_bytearray())
     if not data:
         raise RuntimeError("empty_video")
-    if len(data) > max_bytes:
+    if len(data) > VIDEO_PROCESSING_MAX_INPUT_MB * 1024 * 1024:
         raise RuntimeError("video_too_large")
     return data, str(state.get("source_mime_type") or "video/mp4")
 
@@ -132337,7 +131875,6 @@ async def transcribe_media_to_segments(
         duration_seconds = int(duration_seconds or _safe_int(file_ref.get("duration_seconds") or file_ref.get("duration") or file_ref.get("source_duration"), 0))
     if not source_bytes and context is not None and isinstance(file_ref, dict):
         try:
-            file_ref = {**file_ref, "_pipeline_is_admin": bool(allow_admin)}
             source_bytes, content_type = await video_dubbing_download_source(context, file_ref)
             content_type = str(content_type or "application/octet-stream").lower()
         except Exception as exc:
@@ -132560,7 +132097,7 @@ async def video_dubbing_render_video(
             command.extend(["-c:v", "copy"])
         if dubbed_audio and keep_original_audio:
             command.extend([
-                "-filter_complex", f"[0:a]volume={ORIGINAL_AUDIO_MIX_VOLUME:.3f}[original];[original][1:a]amix=inputs=2:duration=longest:dropout_transition=0,alimiter=limit=0.95[mixed]",
+                "-filter_complex", "[0:a]volume=0.18[original];[original][1:a]amix=inputs=2:duration=longest:dropout_transition=0[mixed]",
                 "-map", "0:v:0", "-map", "[mixed]", "-c:a", "aac", "-b:a", "160k", "-shortest",
             ])
         elif dubbed_audio:
@@ -132608,7 +132145,6 @@ async def build_subtitle_dubbed_video_pipeline(
         return {"ok": False, "status": "subtitle_generation_failed", "detail": "original_srt_empty"}
     output_segments = original_segments
     translation_provider = ""
-    translated_srt = original_srt
     if translate_requested and str(target_language or "").strip().lower() not in {"", "auto", "original", "same"}:
         translated = await translate_subtitle_segments(
             original_segments,
@@ -132620,8 +132156,6 @@ async def build_subtitle_dubbed_video_pipeline(
         translation_provider = str(translated.get("provider") or "")
         translated_srt = video_dubbing_srt_from_segments(output_segments)
     dubbed_audio = b""
-    dubbed_audio_raw = b""
-    normalization_detail = "not_requested"
     tts_provider = ""
     tts_chunks = []
     if create_dub:
@@ -132636,12 +132170,9 @@ async def build_subtitle_dubbed_video_pipeline(
         tts_chunks = list(tts_result.get("chunks") or [])
         tts_provider = str(tts_result.get("provider") or "")
         total_duration = max(float(item.get("end") or 0) for item in output_segments)
-        dubbed_audio_raw, timeline_detail = await build_dub_timeline_audio(tts_chunks, total_duration)
-        if not dubbed_audio_raw:
-            return {"ok": False, "status": "dub_timeline_failed", "detail": timeline_detail}
-        dubbed_audio, normalization_detail = await normalize_dub_audio_bytes(dubbed_audio_raw)
+        dubbed_audio, timeline_detail = await build_dub_timeline_audio(tts_chunks, total_duration)
         if not dubbed_audio:
-            return {"ok": False, "status": "dub_normalization_failed", "detail": normalization_detail}
+            return {"ok": False, "status": "dub_timeline_failed", "detail": timeline_detail}
     final_video = b""
     mux_detail = "not_requested"
     is_video = str(source_content_type or "").lower().startswith("video/")
@@ -132667,9 +132198,7 @@ async def build_subtitle_dubbed_video_pipeline(
         "translated_srt": translated_srt,
         "translated_vtt": video_dubbing_srt_to_vtt_text(translated_srt),
         "translated_txt": video_dubbing_subtitle_plain_text(translated_srt),
-        "dub_audio_raw": dubbed_audio_raw,
         "dub_audio": dubbed_audio,
-        "normalization_detail": normalization_detail,
         "final_video": final_video,
         "tts_chunks": tts_chunks,
         "mux_status": "completed" if final_video else ("unavailable" if is_video and create_dub else "not_requested"),
@@ -132704,8 +132233,6 @@ async def execute_video_dubbing_preview(
         return {"ok": False, "guard": True, "text": text}
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_uses_custom_voice(state):
         return {"ok": False, "guard": True, "text": video_dubbing_custom_voice_guard_text(lang)}
-    state = dict(state or {})
-    state["_pipeline_is_admin"] = bool(is_admin_user(uid))
     source_bytes, content_type = await video_dubbing_download_source(context, state)
     preview_seconds = preview_duration_seconds("subtitle_dub_ai")
     source_info = await video_dubbing_resolve_source_script(
@@ -133001,49 +132528,6 @@ async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0
         with open(output_path, "rb") as handle:
             return handle.read(), "ffmpeg_timeline_audio"
 
-async def normalize_dub_audio_bytes(audio_bytes: bytes) -> tuple[bytes, str]:
-    if not audio_bytes:
-        return b"", "empty_audio"
-    if not DUB_AUDIO_NORMALIZE_ENABLED:
-        return bytes(audio_bytes), "normalization_disabled"
-    ffmpeg = frame_video_ffmpeg_path()
-    if not ffmpeg:
-        return bytes(audio_bytes), "ffmpeg_unavailable_original_audio"
-    target_lufs = max(-30.0, min(-5.0, float(DUB_AUDIO_TARGET_LUFS or -16.0)))
-    fallback_gain = max(0.0, min(12.0, float(DUB_AUDIO_FALLBACK_GAIN_DB or 8.0)))
-    with tempfile.TemporaryDirectory(prefix="toanaas_dub_normalize_") as tmpdir:
-        source_path = os.path.join(tmpdir, "dub_audio_raw.mp3")
-        normalized_path = os.path.join(tmpdir, "dub_audio_normalized.mp3")
-        with open(source_path, "wb") as handle:
-            handle.write(bytes(audio_bytes))
-        loudnorm_filter = f"loudnorm=I={target_lufs:.1f}:TP=-1.5:LRA=11"
-        ok, detail = await run_ffmpeg_command([
-            ffmpeg, "-y", "-i", source_path,
-            "-af", loudnorm_filter,
-            "-c:a", "libmp3lame", "-b:a", "160k",
-            normalized_path,
-        ], timeout=120)
-        if ok and os.path.exists(normalized_path) and os.path.getsize(normalized_path) > 0:
-            with open(normalized_path, "rb") as handle:
-                return handle.read(), "ffmpeg_loudnorm"
-        fallback_path = os.path.join(tmpdir, "dub_audio_gain.mp3")
-        fallback_filter = f"volume={fallback_gain:.1f}dB,alimiter=limit=0.95"
-        fallback_ok, fallback_detail = await run_ffmpeg_command([
-            ffmpeg, "-y", "-i", source_path,
-            "-af", fallback_filter,
-            "-c:a", "libmp3lame", "-b:a", "160k",
-            fallback_path,
-        ], timeout=120)
-        if fallback_ok and os.path.exists(fallback_path) and os.path.getsize(fallback_path) > 0:
-            with open(fallback_path, "rb") as handle:
-                return handle.read(), "ffmpeg_gain_fallback"
-        logger.warning(
-            "dub audio normalization failed | loudnorm=%s | gain=%s",
-            sanitize_log_text(str(detail or ""))[:120],
-            sanitize_log_text(str(fallback_detail or ""))[:120],
-        )
-        return bytes(audio_bytes), "normalization_failed_original_audio"
-
 def video_dubbing_video_render_ready(output_type: str = "", *, audio: bool = False, subtitle: bool = False) -> bool:
     output_type = str(output_type or "").strip().lower()
     if output_type not in {"burn", "both", "video", "video_subtitle"}:
@@ -133151,7 +132635,7 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         "asr_provider": str(source_info.get("asr_provider") or ("cached_subtitle" if source_subtitle else "")),
     }
 
-async def _execute_video_dubbing_pipeline_core(
+async def execute_video_dubbing_pipeline(
     query,
     context: ContextTypes.DEFAULT_TYPE,
     state: dict,
@@ -133182,10 +132666,6 @@ async def _execute_video_dubbing_pipeline_core(
         }
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_uses_custom_voice(state):
         return {"ok": False, "guard": True, "text": video_dubbing_custom_voice_guard_text(lang)}
-    state = dict(state or {})
-    state["_pipeline_is_admin"] = bool(is_admin_user(uid))
-    pipeline_job_key = str(state.get("_pipeline_job_key") or "")
-    pipeline_workspace = str(state.get("_pipeline_workspace") or "")
     pricing = calculate_video_translate_price(
         mode,
         state.get("video_duration") or state.get("source_duration"),
@@ -133211,8 +132691,6 @@ async def _execute_video_dubbing_pipeline_core(
         uid,
         allow_admin=is_admin_user(uid),
     )
-    if pipeline_job_key and subtitle_dub_pipeline_cancelled(pipeline_job_key):
-        return {"ok": False, "cancelled": True, "text": "Tác vụ đã được hủy. TOAN AAS không gửi output và không trừ Xu."}
     state = dict(prepared.get("state") or state)
     video_bytes = prepared["source_bytes"]
     content_type = prepared["content_type"]
@@ -133237,8 +132715,6 @@ async def _execute_video_dubbing_pipeline_core(
         srt_bytes = srt_text.encode("utf-8")
     tts_provider = ""
     audio_bytes = b""
-    raw_audio_bytes = b""
-    normalization_detail = "not_requested"
     tts_chunks = []
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         # synthesize_dub_segment_chunks calls video_dubbing_tts_bytes per segment.
@@ -133256,26 +132732,22 @@ async def _execute_video_dubbing_pipeline_core(
             _safe_int(state.get("video_duration") or state.get("source_duration"), 0),
             int(max((float(item.get("end") or 0) for item in output_segments), default=0)),
         )
-        raw_audio_bytes, _timeline_detail = await build_dub_timeline_audio(tts_chunks, timeline_duration)
-        if not raw_audio_bytes:
+        audio_bytes, _timeline_detail = await build_dub_timeline_audio(tts_chunks, timeline_duration)
+        if not audio_bytes:
             return {
                 "ok": False,
                 "status": "NO_AUDIO_BYTES",
                 "text": "⚠️ Chưa tạo được audio lồng tiếng hợp lệ. TOAN AAS chưa trừ Xu.",
             }
-        audio_bytes, normalization_detail = await normalize_dub_audio_bytes(raw_audio_bytes)
-        if not audio_bytes:
-            return {
-                "ok": False,
-                "status": "NO_NORMALIZED_AUDIO_BYTES",
-                "text": "⚠️ Chưa chuẩn hóa được audio lồng tiếng hợp lệ. TOAN AAS chưa trừ Xu.",
-            }
-    if pipeline_job_key and subtitle_dub_pipeline_cancelled(pipeline_job_key):
-        return {"ok": False, "cancelled": True, "text": "Tác vụ đã được hủy. TOAN AAS không gửi output và không trừ Xu."}
     output_type = str(state.get("output_type") or "").strip().lower()
     if not output_type:
         output_type = "all" if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} else "srt"
     subtitle_items = video_dubbing_subtitle_output_items(srt_text, output_type, mode) if srt_bytes else []
+    original_subtitle_items = []
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        source_subtitle = str(prepared.get("source_subtitle") or "").strip()
+        if source_subtitle and source_subtitle != srt_text:
+            original_subtitle_items = video_dubbing_subtitle_output_items(source_subtitle, "all", VIDEO_SUBTITLE_MODE_CREATE)
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
     video_output = b""
     if str(content_type or "").lower().startswith("video/"):
@@ -133293,36 +132765,6 @@ async def _execute_video_dubbing_pipeline_core(
             )
     if not (srt_bytes or audio_bytes or video_output):
         return {"ok": False, "status": "NO_OUTPUT_BYTES", "text": "⚠️ Chưa tạo được phụ đề/audio hợp lệ. TOAN AAS chưa trừ Xu."}
-    if pipeline_workspace:
-        source_srt = str(prepared.get("source_subtitle") or "").strip()
-        workspace_result = {
-            "original_srt": source_srt,
-            "original_vtt": video_dubbing_srt_to_vtt_text(source_srt) if source_srt else "",
-            "original_txt": video_dubbing_subtitle_plain_text(source_srt) if source_srt else "",
-            "translated_srt": srt_text,
-            "translated_vtt": video_dubbing_srt_to_vtt_text(srt_text) if srt_text else "",
-            "translated_txt": video_dubbing_subtitle_plain_text(srt_text) if srt_text else "",
-            "dub_audio_raw": raw_audio_bytes,
-            "dub_audio": audio_bytes,
-            "final_video": video_output,
-            "mux_status": "completed" if video_output else ("unavailable" if audio_bytes else "not_requested"),
-        }
-        workspace_info = record_subtitle_dub_pipeline_workspace_outputs(
-            pipeline_workspace,
-            workspace_result,
-            source_bytes=video_bytes,
-            source_content_type=content_type,
-            target_language=str(state.get("target_language") or ""),
-            include_source=True,
-        )
-        if pipeline_job_key:
-            update_subtitle_dub_pipeline_job(
-                pipeline_job_key,
-                manifest_path=workspace_info.get("manifest_path") or "",
-                mux_status=workspace_result["mux_status"],
-            )
-    if pipeline_job_key and subtitle_dub_pipeline_cancelled(pipeline_job_key):
-        return {"ok": False, "cancelled": True, "text": "Tác vụ đã được hủy. TOAN AAS không gửi output và không trừ Xu."}
     tts_price = int(video_dubbing_tts_price_estimate(mode, output_text=output_text).get("price_xu") or 0)
     final_price_xu = int(pricing.get("total_price_xu") or 0) + tts_price
     if is_admin_user(uid):
@@ -133410,34 +132852,42 @@ async def _execute_video_dubbing_pipeline_core(
             asset_id=dub_asset_id,
         )
         dub_asset_id = str(dub_record.get("asset_id") or dub_asset_id)
-    remember_subtitle_dub_pipeline_result(
-        uid,
-        subtitle_asset_ids=subtitle_asset_ids,
-        translation_asset_ids=translation_asset_ids,
-        dub_asset_id=dub_asset_id,
-        mode=mode,
-        requested_mode=str(state.get("requested_mode") or ""),
-    )
-    if pipeline_job_key and subtitle_dub_pipeline_cancelled(pipeline_job_key):
-        refund_charged_credit(
-            uid,
-            charged,
-            event_type=f"video_{mode}_cancelled_refund",
-            note="Pipeline cancelled before Telegram output send",
-            was_charged=charged > 0,
-        )
-        return {"ok": False, "cancelled": True, "text": "Tác vụ đã được hủy. TOAN AAS không gửi output và không trừ Xu."}
     try:
-        delivery = await send_public_subtitle_dub_final_outputs(
-            query.message,
-            mode=mode,
-            requested_mode=str(state.get("requested_mode") or ""),
-            subtitle_items=subtitle_items,
-            srt_text=srt_text,
-            audio_bytes=audio_bytes,
-            video_bytes=video_output,
-            lang=lang,
-        )
+        if original_subtitle_items:
+            for item in original_subtitle_items:
+                data = bytes(item.get("bytes") or b"")
+                if not data:
+                    continue
+                await query.message.reply_document(
+                    document=video_dubbing_output_file(data, str(item.get("filename") or "toan_aas_original.srt")),
+                    filename=str(item.get("filename") or "toan_aas_original.srt"),
+                    caption=f"✅ Phụ đề gốc — {item.get('caption') or 'phụ đề'}",
+                )
+        if subtitle_items and (not video_output or output_type not in {"burn", "video", "video_subtitle"}):
+            for item in subtitle_items:
+                data = bytes(item.get("bytes") or b"")
+                if not data:
+                    continue
+                await query.message.reply_document(
+                    document=video_dubbing_output_file(data, str(item.get("filename") or f"toan_aas_{mode}.srt")),
+                    filename=str(item.get("filename") or f"toan_aas_{mode}.srt"),
+                    caption=f"✅ {video_dubbing_process_label(mode, lang)} — {item.get('caption') or 'phụ đề'}",
+                )
+        if audio_bytes:
+            await query.message.reply_audio(
+                audio=video_dubbing_output_file(audio_bytes, f"toan_aas_{mode}.mp3"),
+                filename=f"toan_aas_{mode}.mp3",
+                caption=(
+                    "✅ Audio lồng tiếng đã được tạo và lưu thành asset. "
+                    "Ghép audio vào video chỉ thực hiện khi mux/render thật sự sẵn sàng."
+                ),
+            )
+        if video_output:
+            await query.message.reply_video(
+                video=video_dubbing_output_file(video_output, f"toan_aas_{mode}.mp4"),
+                filename=f"toan_aas_{mode}.mp4",
+                caption="✅ Video đã ghép phụ đề/giọng lồng tiếng theo lựa chọn.",
+            )
     except Exception:
         refund_charged_credit(
             uid,
@@ -133447,8 +132897,6 @@ async def _execute_video_dubbing_pipeline_core(
             was_charged=charged > 0,
         )
         raise
-    if pipeline_job_key:
-        mark_subtitle_dub_pipeline_output_sent(pipeline_job_key)
     internal_job_id = ""
     try:
         output_size = len(srt_bytes or b"") + len(audio_bytes or b"") + len(video_output or b"")
@@ -133483,76 +132931,11 @@ async def _execute_video_dubbing_pipeline_core(
         "has_subtitle": bool(srt_bytes),
         "has_audio": bool(audio_bytes),
         "has_video": bool(video_output),
-        "sent_documents": int(delivery.get("documents") or 0),
-        "sent_audio": int(delivery.get("audio") or 0),
-        "sent_video": int(delivery.get("video") or 0),
-        "normalization_detail": normalization_detail,
         "internal_job_id": internal_job_id,
         "subtitle_asset_ids": subtitle_asset_ids,
         "translation_asset_ids": translation_asset_ids,
         "dub_asset_id": dub_asset_id,
     }
-
-async def execute_video_dubbing_pipeline(
-    query,
-    context: ContextTypes.DEFAULT_TYPE,
-    state: dict,
-    lang: str = "vi",
-    *,
-    admin_interactive_confirm: bool = False,
-) -> dict:
-    uid = query.from_user.id
-    chat_id = getattr(query.message, "chat_id", uid)
-    mode = normalize_video_translate_mode(
-        (state or {}).get("video_processing_mode") or (state or {}).get("mode") or (state or {}).get("process_type")
-    )
-    job_key = subtitle_dub_pipeline_job_key_from_state(uid, chat_id, state, command="product")
-    acquired, job = acquire_subtitle_dub_pipeline_job(
-        job_key,
-        user_id=uid,
-        chat_id=chat_id,
-        mode=mode,
-        command="product",
-        source_file_id=str((state or {}).get("source_file_id") or (state or {}).get("video_file_id") or ""),
-        source_file_unique_id=str((state or {}).get("source_file_unique_id") or (state or {}).get("video_file_unique_id") or ""),
-    )
-    if not acquired:
-        return {
-            "ok": False,
-            "deduped": True,
-            "text": (
-                "Tác vụ này đã hoàn tất và kết quả đã được gửi. TOAN AAS sẽ không gửi lặp lại."
-                if str(job.get("status") or "") == "completed"
-                else "TOAN AAS đang xử lý tác vụ này, vui lòng chờ kết quả."
-            ),
-        }
-    workspace = create_subtitle_dub_pipeline_workspace(job.get("job_id") or "")
-    update_subtitle_dub_pipeline_job(job_key, workspace=workspace)
-    pipeline_state = {
-        **dict(state or {}),
-        "_pipeline_job_key": job_key,
-        "_pipeline_workspace": workspace,
-    }
-    try:
-        result = await _execute_video_dubbing_pipeline_core(
-            query,
-            context,
-            pipeline_state,
-            lang,
-            admin_interactive_confirm=admin_interactive_confirm,
-        )
-        if result.get("cancelled"):
-            finish_subtitle_dub_pipeline_job(job_key, "cancelled")
-        elif result.get("ok"):
-            finish_subtitle_dub_pipeline_job(job_key, "completed")
-        else:
-            finish_subtitle_dub_pipeline_job(job_key, "failed", fail_status=str(result.get("status") or "failed"))
-        return result
-    except Exception as exc:
-        finish_subtitle_dub_pipeline_job(job_key, "failed", error_class=type(exc).__name__)
-        raise
-    finally:
-        cleanup_subtitle_dub_pipeline_workspace(workspace, job_key)
 
 def translation_studio_lost_state_recovery_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -134221,39 +133604,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, video_dubbing_job_status_text(job, lang), reply_markup=video_dubbing_guard_keyboard(lang, admin=False))
         return await safe_edit_or_send(query, video_dubbing_job_status_text(job, lang), reply_markup=video_dubbing_job_progress_keyboard(job_id, lang))
     if action == "job_download":
-        result = get_subtitle_dub_pipeline_result(uid)
-        if not result:
-            return await query.answer("Không còn file kết quả trong phiên hiện tại.", show_alert=True)
-        sent = 0
-        if value in {"subtitle", "all", ""}:
-            asset_ids = list(result.get("translation_asset_ids") or result.get("subtitle_asset_ids") or [])
-            for asset_id in asset_ids:
-                record = get_translation_asset_record(asset_id) or get_subtitle_asset_record(asset_id)
-                path = str(record.get("local_path") or record.get("file_ref") or "")
-                if not path or not os.path.exists(path) or os.path.getsize(path) <= 0:
-                    continue
-                filename = os.path.basename(path)
-                with open(path, "rb") as handle:
-                    await query.message.reply_document(
-                        document=handle,
-                        filename=filename,
-                        caption="📄 File phụ đề đã tạo, không chạy lại provider.",
-                    )
-                sent += 1
-        if value in {"audio", "all", ""}:
-            record = get_dub_asset_record(str(result.get("dub_asset_id") or ""))
-            path = str(record.get("local_path") or record.get("file_ref") or "")
-            if path and os.path.exists(path) and os.path.getsize(path) > 0:
-                with open(path, "rb") as handle:
-                    await query.message.reply_audio(
-                        audio=handle,
-                        filename=os.path.basename(path),
-                        caption="🎙 Audio lồng tiếng đã tạo, không chạy lại provider.",
-                    )
-                sent += 1
-        if sent:
-            return None
-        return await query.answer("File kết quả không còn khả dụng.", show_alert=True)
+        return await query.answer("File kết quả sẽ được gửi trong chat khi worker hoàn tất.", show_alert=True)
     if action == "source_media":
         source = video_dubbing_recent_source(uid)
         if not source:
@@ -134530,19 +133881,6 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         state = set_video_dubbing_pending(uid, "language", target_language="")
         return await safe_edit_or_send(query, video_dubbing_language_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_language_keyboard(lang, state))
     if action == "language":
-        if value == "same" and mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-            state = set_video_dubbing_pending(
-                uid,
-                "voice",
-                target_language="Giữ nguyên ngôn ngữ gốc",
-                translate_requested="0",
-            )
-            return await safe_edit_or_send(
-                query,
-                video_dubbing_voice_text(state, lang),
-                parse_mode="HTML",
-                reply_markup=video_dubbing_voice_keyboard(lang, state),
-            )
         if mode in {
             VIDEO_SUBTITLE_MODE_TRANSLATE,
             VIDEO_SUBTITLE_MODE_DUB,
@@ -134776,12 +134114,6 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     else video_dubbing_guard_keyboard(lang, admin=False)
                 ),
             )
-        preflight_job_key = subtitle_dub_pipeline_job_key_from_state(uid, query.message.chat_id, state, command="product")
-        existing_pipeline_job = get_subtitle_dub_pipeline_job(preflight_job_key)
-        if str(existing_pipeline_job.get("status") or "") == "running":
-            return await query.message.reply_text("TOAN AAS đang xử lý tác vụ này, vui lòng chờ kết quả.")
-        if str(existing_pipeline_job.get("status") or "") == "completed" and existing_pipeline_job.get("output_sent"):
-            return await query.message.reply_text("Tác vụ này đã hoàn tất và kết quả đã được gửi. TOAN AAS sẽ không gửi lặp lại.")
         set_video_dubbing_pending(uid, "processing", processing="1", pending_video_action=action)
         await safe_edit_or_send(
             query,
@@ -136556,7 +135888,6 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_minimax_dub", cmd_tool_test_minimax_dub))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_plus_dub", cmd_tool_test_subtitle_plus_dub))
     tg_app.add_handler(CommandHandler("tool_test_full_dub_video", cmd_tool_test_full_dub_video))
-    tg_app.add_handler(CommandHandler("cancel_pipeline", cmd_cancel_pipeline))
     tg_app.add_handler(CommandHandler("subtitle_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("dub_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("subtitle_jobs", cmd_subtitle_jobs))
