@@ -289,6 +289,12 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
     async def download(context, state):
         return b"video", "video/mp4"
 
+    async def extract_audio(data, content_type="application/octet-stream", max_seconds=0):
+        assert data == b"video"
+        assert content_type == "video/mp4"
+        assert max_seconds == 6
+        return b"audio-from-video", "audio/mpeg", "ffmpeg_audio_extract"
+
     async def cap(data, seconds):
         assert seconds == 6
         return b"preview-audio", "ok"
@@ -303,6 +309,8 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
         raise AssertionError("preview must not deduct final Xu")
 
     monkeypatch.setattr(bot, "video_dubbing_download_source", download)
+    monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_dubbing_extract_audio", extract_audio)
     monkeypatch.setattr(bot, "cap_voice_preview_audio_bytes", cap)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", translate)

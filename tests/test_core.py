@@ -7963,8 +7963,14 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     async def fake_download(_context, _state):
         return b"video-bytes", "video/mp4"
 
-    async def fake_transcribe(_data, _context, content_type="application/octet-stream"):
+    async def fake_extract_audio(_data, content_type="application/octet-stream", max_seconds=0):
+        assert _data == b"video-bytes"
         assert content_type == "video/mp4"
+        return b"audio-from-video", "audio/mpeg", "ffmpeg_audio_extract"
+
+    async def fake_transcribe(_data, _context, content_type="application/octet-stream"):
+        assert _data == b"audio-from-video"
+        assert content_type == "audio/mpeg"
         return "Test ASR", "Xin chào từ video", "chars=17"
 
     async def fake_translate(text, target, **_kwargs):
@@ -7974,6 +7980,8 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         return "Test TTS", b"audio-bytes", f"voice={voice_style}; voice_id={voice_id}; speed={voice_speed}; chars={len(text)}"
 
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
+    monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_dubbing_extract_audio", fake_extract_audio)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
