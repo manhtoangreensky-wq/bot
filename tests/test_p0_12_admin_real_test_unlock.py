@@ -90,7 +90,6 @@ def test_admin_real_test_bypasses_mode_disabled(monkeypatch):
     monkeypatch.setattr(bot, "AgentDeepgram", object)
     monkeypatch.setattr(bot, "VIDEO_DUB_TTS_ENABLED", True)
     monkeypatch.setattr(bot, "video_tts_provider_available_for", lambda public=True: True)
-    monkeypatch.setattr(bot, "video_tts_provider_configured_for_dub", lambda: True)
 
     admin_decision = bot.can_user_access_product_engine(
         1,
@@ -104,7 +103,7 @@ def test_admin_real_test_bypasses_mode_disabled(monkeypatch):
     public_decision = bot.can_user_access_product_engine(2, "video_dub", bot.VIDEO_SUBTITLE_MODE_DUB, is_provider_call=True)
 
     assert admin_decision["status"] == "allowed_admin"
-    assert public_decision["status"] == "allowed_public"
+    assert public_decision["status"] == "blocked_public_maintenance"
 
 
 def test_admin_real_test_mode_disabled_still_blocks_missing_asr(monkeypatch):

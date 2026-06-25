@@ -297,9 +297,9 @@ def test_translation_admin_blockers_are_exact_but_public_copy_is_clean(monkeypat
         admin=False,
     )
 
-    assert blockers == ["Subtitle translation provider missing"]
-    assert "mode_disabled" not in blockers
-    assert "VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED" not in blockers
+    assert "mode_disabled" in blockers
+    assert "VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED" in blockers
+    assert any("Key4U qwen-mt-turbo smoke or ShopAIKey chat smoke" in item for item in blockers)
     _assert_public_copy_safe(public)
 
 

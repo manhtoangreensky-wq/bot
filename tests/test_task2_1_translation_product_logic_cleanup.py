@@ -58,29 +58,11 @@ def _source_markup(mode):
     return bot.video_dubbing_source_keyboard("vi", {"mode": mode, "origin": "translation"})
 
 
-def _configured_translation_dub(monkeypatch):
-    monkeypatch.setattr(
-        bot,
-        "get_asr_adapter_readiness",
-        lambda public=True: {
-            "configured": True,
-            "ready": True,
-            "public_ready": False,
-            "adapter": "deepgram",
-            "supports_audio": True,
-            "supports_video": True,
-        },
-    )
-    monkeypatch.setattr(bot, "video_translation_provider_configured", lambda: True)
-    monkeypatch.setattr(bot, "video_tts_provider_configured_for_dub", lambda: True)
-
-
 def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert labels[:5] == [
+    assert labels[:4] == [
         "👁 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🗣 Lồng tiếng tự động",
         "🎬 Phụ đề + lồng tiếng",
         "🔗 Tải video từ link",
     ]
@@ -199,7 +181,7 @@ def test_auto_dubbing_preview_6s():
 
 
 def test_auto_dubbing_no_fake_output_when_provider_off(monkeypatch):
-    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"ok": False, "reason": "missing_tts", "missing": ["tts"]})
+    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": False, "reason": "public_disabled"})
     query = CaptureQuery("unused", 991202)
     result = asyncio.run(
         bot.execute_video_dubbing_preview(
@@ -232,7 +214,6 @@ def test_subtitle_dubbing_translate_subtitle_first():
 
 
 def test_subtitle_dubbing_export_before_voice(monkeypatch):
-    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     uid = "task21-combo-export"
     bot.clear_video_dubbing_pending(uid)
@@ -286,7 +267,6 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
         captured.update({"text": text, "voice_style": voice_style, "voice_id": voice_id, "voice_speed": voice_speed})
         return "TTS", b"audio", "ok"
 
-    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
@@ -331,7 +311,7 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
 def test_public_guard_no_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi", admin=False)
     assert "Admin blocker" not in text
-    assert "bảo trì/nâng cấp" not in text
+    assert "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp" in text
 
 
 def test_admin_guard_can_show_blocker():

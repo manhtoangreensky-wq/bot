@@ -181,16 +181,13 @@ def test_dub_mode_disabled_not_asr_or_tts_missing(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_DUB_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_ASR_ENABLED", True)
     monkeypatch.setattr(bot, "DEEPGRAM_API_KEY", "configured")
-    monkeypatch.setattr(bot, "AgentDeepgram", object)
     monkeypatch.setattr(bot, "VIDEO_DUB_TTS_ENABLED", True)
     monkeypatch.setattr(bot, "video_tts_provider_available_for", lambda public=True: True)
-    monkeypatch.setattr(bot, "video_tts_provider_configured_for_dub", lambda: True)
 
     readiness = bot._product_engine_readiness("video_dub", bot.VIDEO_SUBTITLE_MODE_DUB)
     missing = bot.engine_technical_missing(readiness)
 
-    assert missing == []
-    assert "mode_disabled" not in missing
+    assert missing == ["mode_disabled"]
     assert "asr_adapter_missing" not in missing
     assert "video_dub_tts_adapter_missing" not in missing
 
@@ -225,13 +222,12 @@ def test_dub_tts_not_missing_when_minimax_tts_smoke_pass(monkeypatch):
 
 
 def test_dub_pipeline_returns_partial_srt_when_mux_disabled():
-    source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
-    render_source = inspect.getsource(bot.video_dubbing_video_render_ready)
+    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
 
     assert "VIDEO_SUBTITLE_MODE_DUB" in source
     assert "if wants_subtitle_video and not VIDEO_SUBTITLE_BURN_IN_ENABLED" not in source
     assert "not (srt_bytes or audio_bytes or video_output)" in source
-    assert 'output_type not in {"burn", "both", "video", "video_subtitle"}' in render_source
+    assert 'output_type not in {"burn", "video", "video_subtitle"}' in source
 
 
 def test_video_multiscene_status_command_exists():

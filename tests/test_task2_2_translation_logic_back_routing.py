@@ -113,7 +113,7 @@ def test_auto_subtitle_capcut_style_original_language(monkeypatch):
 
 def test_auto_subtitle_no_translate_no_voice():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}
-    capability_source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    capability_source = inspect.getsource(bot.execute_video_dubbing_pipeline)
     assert bot.video_dubbing_requires_voice(state["mode"]) is False
     assert "mode == VIDEO_SUBTITLE_MODE_TRANSLATE" in inspect.getsource(bot.video_dubbing_prepare_subtitles)
     assert "mode in {VIDEO_SUBTITLE_MODE_DUB" in capability_source
@@ -167,9 +167,9 @@ def test_auto_dubbing_target_language_voice_speed():
 
 
 def test_auto_dubbing_tts_reads_transcript():
-    source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
     assert 'output_text = str(prepared.get("output_script")' in source
-    assert "synthesize_dub_segment_chunks(" in source
+    assert "video_dubbing_tts_bytes(" in source
     assert "output_text," in source
 
 

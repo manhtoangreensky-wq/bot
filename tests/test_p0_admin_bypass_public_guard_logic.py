@@ -34,11 +34,6 @@ def _closed_subtitle(monkeypatch):
         return {"ok": True, "reason": "ready", "missing": []}
 
     monkeypatch.setattr(bot, "video_dubbing_capability", capability)
-    monkeypatch.setattr(
-        bot,
-        "video_dubbing_configured_readiness",
-        lambda *_args, **_kwargs: {"ok": True, "reason": "ready", "missing": []},
-    )
 
 
 def _closed_video(monkeypatch):
@@ -201,7 +196,7 @@ def test_dub_admin_interactive_confirm_counts_as_confirm_paid(monkeypatch):
         is_paid_job=True,
         admin_interactive_confirm=True,
     )
-    assert decision["status"] == "allowed_admin_configured"
+    assert decision["status"] == "allowed_admin"
 
 
 def test_video_public_can_reach_invoice_before_guard(monkeypatch):
