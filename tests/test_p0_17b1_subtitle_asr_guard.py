@@ -79,6 +79,7 @@ def _ready_deepgram(monkeypatch):
     monkeypatch.setattr(bot, "key4u_asr_configured", lambda: False)
     monkeypatch.setattr(bot, "key4u_asr_public_ready", lambda: False)
     monkeypatch.setattr(bot, "shopaikey_stt_public_ready", lambda: False)
+    monkeypatch.setattr(bot, "asr_smoke_status", lambda: "PASS")
 
 
 def test_asr_readiness_detects_deepgram_if_configured(monkeypatch):
@@ -97,6 +98,7 @@ def test_asr_readiness_detects_existing_transcribe_adapter(monkeypatch):
     _missing_asr(monkeypatch)
     monkeypatch.setattr(bot, "key4u_asr_configured", lambda: True)
     monkeypatch.setattr(bot, "key4u_asr_public_ready", lambda: True)
+    monkeypatch.setattr(bot, "asr_smoke_status", lambda: "PASS")
 
     readiness = bot.get_asr_adapter_readiness(public=True)
 
@@ -255,7 +257,9 @@ def test_public_flow_admin_user_still_customer_clean(monkeypatch):
 def test_subtitle_engine_status_shows_asr_readiness():
     joined = "\n".join(bot.subtitle_engine_status_lines())
 
-    assert "ASR adapter readiness" in joined
+    assert "ASR configured" in joined
+    assert "ASR smoke" in joined
+    assert "Public ASR ready" in joined
     assert "Detected ASR adapter" in joined
     assert "Subtitle from file readiness" in joined
 
@@ -263,7 +267,9 @@ def test_subtitle_engine_status_shows_asr_readiness():
 def test_dub_engine_status_shows_asr_dependency():
     joined = "\n".join(bot.dub_engine_status_lines())
 
-    assert "ASR adapter readiness" in joined
+    assert "ASR configured" in joined
+    assert "ASR smoke" in joined
+    assert "Public ASR ready" in joined
     assert "ASR route" in joined
 
 

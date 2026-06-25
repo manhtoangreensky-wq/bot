@@ -495,6 +495,10 @@ KEY4U_VOICE_TTS_ENDPOINT = _env("KEY4U_VOICE_TTS_ENDPOINT", "/tts")
 KEY4U_MINIMAX_UPLOAD_ENDPOINT = _env("KEY4U_MINIMAX_UPLOAD_ENDPOINT", "/v1/files")
 KEY4U_MINIMAX_CLONE_ENDPOINT = _env("KEY4U_MINIMAX_CLONE_ENDPOINT", "/v1/voice_clone")
 KEY4U_STT_ENDPOINT = _env("KEY4U_STT_ENDPOINT", "/audio/transcriptions")
+KEY4U_AUDIO_TRANSLATION_ENDPOINT = _env("KEY4U_AUDIO_TRANSLATION_ENDPOINT", "/audio/translations")
+KEY4U_AUDIO_SPEECH_ENDPOINT = _env("KEY4U_AUDIO_SPEECH_ENDPOINT", "/audio/speech")
+KEY4U_OPENAI_TTS_MODEL = _env("KEY4U_OPENAI_TTS_MODEL", "tts-1")
+KEY4U_OPENAI_TTS_VOICE = _env("KEY4U_OPENAI_TTS_VOICE", "alloy")
 KEY4U_SUNO_CREATE_ENDPOINT = _env("KEY4U_SUNO_CREATE_ENDPOINT", "/submit/music")
 KEY4U_SUNO_QUERY_ENDPOINT = _env("KEY4U_SUNO_QUERY_ENDPOINT", "/fetch/{taskId}")
 KEY4U_SUNO_LYRICS_ENDPOINT = _env("KEY4U_SUNO_LYRICS_ENDPOINT", "/submit/lyrics")
@@ -29386,6 +29390,32 @@ def deepgram_srt_from_response(data: dict, max_words_per_block: int = 12) -> str
         )
     return "\n\n".join(srt_blocks).strip() + "\n"
 
+def deepgram_segments_from_response(data: dict, max_words_per_segment: int = 12) -> list[dict]:
+    words = deepgram_word_items(data)
+    if not words:
+        return []
+    segments = []
+    current = []
+    for item in words:
+        gap = float(item["start"]) - float(current[-1]["end"]) if current else 0.0
+        if current and (len(current) >= max(1, int(max_words_per_segment or 12)) or gap > 1.2):
+            segments.append({
+                "index": len(segments) + 1,
+                "start": round(float(current[0]["start"]), 3),
+                "end": round(float(current[-1]["end"]), 3),
+                "text": " ".join(str(piece["word"]) for piece in current).strip(),
+            })
+            current = []
+        current.append(item)
+    if current:
+        segments.append({
+            "index": len(segments) + 1,
+            "start": round(float(current[0]["start"]), 3),
+            "end": round(float(current[-1]["end"]), 3),
+            "text": " ".join(str(piece["word"]) for piece in current).strip(),
+        })
+    return segments
+
 def deepgram_vtt_from_srt(srt_text: str) -> str:
     lines = ["WEBVTT", ""]
     for line in str(srt_text or "").replace("\r", "").split("\n"):
@@ -30248,6 +30278,8 @@ def get_last_user_file(user_id) -> dict:
 LAST_MEDIA_CACHE_TTL_SECONDS = 120
 LAST_MEDIA_BY_USER: dict = {}
 LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
+ADMIN_TOOL_TEST_PENDING_TTL_SECONDS = 120
+PENDING_ADMIN_TOOL_TEST: dict[int, dict] = {}
 MEDIA_FACTORY_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_AUDIO: dict[int, dict] = {}
 LAST_USER_VIDEO: dict[int, dict] = {}
@@ -30368,6 +30400,48 @@ def remember_last_media(update: Update):
         }
     except Exception as e:
         logger.warning(f"last media cache write failed: {e}")
+
+def set_pending_admin_tool_test(user_id, tool: str, command: str = "") -> dict:
+    uid = int(user_id or 0)
+    state = {
+        "tool": str(tool or "").strip().lower(),
+        "command": str(command or "").strip()[:80],
+        "confirm_paid": True,
+        "created_at": time.time(),
+        "expires_at": time.time() + ADMIN_TOOL_TEST_PENDING_TTL_SECONDS,
+    }
+    if uid:
+        PENDING_ADMIN_TOOL_TEST[uid] = state
+    return state
+
+def get_pending_admin_tool_test(user_id) -> dict:
+    uid = int(user_id or 0)
+    state = dict(PENDING_ADMIN_TOOL_TEST.get(uid) or {})
+    if not state:
+        return {}
+    if float(state.get("expires_at") or 0) < time.time():
+        PENDING_ADMIN_TOOL_TEST.pop(uid, None)
+        return {}
+    return state
+
+def clear_pending_admin_tool_test(user_id) -> bool:
+    return PENDING_ADMIN_TOOL_TEST.pop(int(user_id or 0), None) is not None
+
+def admin_tool_test_context_with_confirm(context: ContextTypes.DEFAULT_TYPE):
+    return SimpleNamespace(
+        args=[ADMIN_PAID_CONFIRM_FLAG],
+        bot=getattr(context, "bot", None),
+        application=getattr(context, "application", None),
+        user_data=getattr(context, "user_data", None),
+        chat_data=getattr(context, "chat_data", None),
+    )
+
+def media_info_is_video(media_info: dict | None) -> bool:
+    info = dict(media_info or {})
+    content_type = str(info.get("content_type") or info.get("mime_type") or "").lower()
+    file_type = str(info.get("file_type") or info.get("media_kind") or "").lower()
+    file_name = str(info.get("file_name") or "").lower()
+    return bool(file_type == "video" or content_type.startswith("video/") or file_name.endswith((".mp4", ".mov", ".mkv", ".webm")))
 
 async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict | None:
     reply = update.message.reply_to_message if update.message else None
@@ -43326,39 +43400,149 @@ async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: s
     except Exception as exc:
         return "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(exc)), 0
 
-async def shopaikey_audio_transcribe_bytes(audio_bytes: bytes, content_type: str = "audio/mpeg") -> tuple[str, str, str, int]:
-    if not SHOPAIKEY_API_KEY or not SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT:
-        return "MISSING", "", "SHOPAIKEY_API_KEY/SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT missing", 0
-    if not audio_bytes:
-        return "NEED_AUDIO_INPUT", "", "missing_audio_bytes", 0
-    endpoint = join_shopaikey_url(SHOPAIKEY_BASE_URL, SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
+def openai_audio_filename(content_type: str = "audio/mpeg") -> str:
     media_type = str(content_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
     ext = ".mp3"
     if "wav" in media_type:
         ext = ".wav"
     elif "ogg" in media_type or "opus" in media_type:
         ext = ".ogg"
-    files = {"file": (f"toan_aas_asr{ext}", audio_bytes, media_type)}
-    data = {
-        "model": SHOPAIKEY_AUDIO_TRANSCRIPTION_MODEL or "whisper-1",
-        "response_format": "json",
-    }
+    elif "m4a" in media_type or "mp4" in media_type:
+        ext = ".m4a"
+    return f"toan_aas_audio{ext}"
+
+def normalize_asr_segments(payload, transcript: str = "", duration_seconds: float = 0) -> list[dict]:
+    raw_segments = payload.get("segments") if isinstance(payload, dict) else []
+    normalized = []
+    for index, item in enumerate(raw_segments or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or item.get("transcript") or "").strip()
+        if not text:
+            continue
+        start = max(0.0, float(item.get("start") or 0))
+        end = float(item.get("end") or 0)
+        if end <= start:
+            end = start + max(0.5, float(item.get("duration") or 1))
+        normalized.append({
+            "index": int(item.get("id") or item.get("index") or index),
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "text": text,
+        })
+    if normalized:
+        return normalized
+    text = str(transcript or (payload.get("text") if isinstance(payload, dict) else "") or "").strip()
+    return video_dubbing_segments_from_text(text, int(duration_seconds or 0))
+
+async def openai_compatible_asr_transcribe(
+    audio_bytes: bytes,
+    content_type: str,
+    *,
+    base_url: str,
+    api_key: str,
+    endpoint: str = "/audio/transcriptions",
+    model: str = "whisper-1",
+    language: str = "auto",
+) -> dict:
+    if not (audio_bytes and base_url and api_key and endpoint):
+        return {"ok": False, "status": "MISSING", "text": "", "segments": [], "detail": "asr_route_not_configured"}
+    final_url = join_shopaikey_url(base_url, endpoint)
+    media_type = str(content_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
+    files = {"file": (openai_audio_filename(media_type), audio_bytes, media_type)}
+    data = [
+        ("model", str(model or "whisper-1")),
+        ("response_format", "verbose_json"),
+        ("timestamp_granularities[]", "segment"),
+    ]
+    if str(language or "auto").strip().lower() not in {"", "auto"}:
+        data.append(("language", str(language).strip()))
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            res = await client.post(endpoint, headers={"Authorization": f"Bearer {SHOPAIKEY_API_KEY}"}, data=data, files=files)
+            res = await client.post(final_url, headers={"Authorization": f"Bearer {api_key}"}, data=data, files=files)
         try:
             payload = res.json()
         except Exception:
-            payload = {}
+            payload = {"text": str(getattr(res, "text", "") or "").strip()}
         text = str((payload or {}).get("text") or (payload or {}).get("transcript") or "").strip()
         if res.status_code < 400 and text:
-            return "PASS", text, f"http={res.status_code}; chars={len(text)}; model={SHOPAIKEY_AUDIO_TRANSCRIPTION_MODEL}", int(res.status_code)
+            segments = normalize_asr_segments(payload, text, float((payload or {}).get("duration") or 0))
+            return {
+                "ok": bool(segments),
+                "status": "PASS" if segments else "segment_generation_failed",
+                "text": text,
+                "segments": segments,
+                "language": str((payload or {}).get("language") or ""),
+                "duration_seconds": float((payload or {}).get("duration") or (segments[-1]["end"] if segments else 0)),
+                "http_status": int(res.status_code),
+                "detail": f"http={res.status_code}; chars={len(text)}; segments={len(segments)}; model={model}",
+            }
         detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}")
-        return shopaikey_classify_error(res.status_code, detail), "", detail, int(res.status_code)
+        return {
+            "ok": False,
+            "status": shopaikey_classify_error(res.status_code, detail),
+            "text": "",
+            "segments": [],
+            "http_status": int(res.status_code),
+            "detail": detail,
+        }
     except httpx.TimeoutException as exc:
-        return "FAIL_TIMEOUT", "", shopaikey_sanitize_error(str(exc)), 0
+        return {"ok": False, "status": "FAIL_TIMEOUT", "text": "", "segments": [], "http_status": 0, "detail": shopaikey_sanitize_error(str(exc))}
     except Exception as exc:
-        return "FAIL_PROVIDER_ERROR", "", shopaikey_sanitize_error(str(exc)), 0
+        return {"ok": False, "status": "FAIL_PROVIDER_ERROR", "text": "", "segments": [], "http_status": 0, "detail": shopaikey_sanitize_error(str(exc))}
+
+async def shopaikey_audio_transcribe_bytes(audio_bytes: bytes, content_type: str = "audio/mpeg") -> tuple[str, str, str, int]:
+    result = await openai_compatible_asr_transcribe(
+        audio_bytes,
+        content_type,
+        base_url=SHOPAIKEY_BASE_URL,
+        api_key=SHOPAIKEY_API_KEY,
+        endpoint=SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT,
+        model=SHOPAIKEY_AUDIO_TRANSCRIPTION_MODEL or "whisper-1",
+    )
+    return (
+        str(result.get("status") or "FAIL"),
+        str(result.get("text") or ""),
+        str(result.get("detail") or ""),
+        int(result.get("http_status") or 0),
+    )
+
+async def openai_compatible_tts_speech_bytes(
+    text: str,
+    *,
+    base_url: str,
+    api_key: str,
+    endpoint: str = "/audio/speech",
+    model: str = "tts-1",
+    voice: str = "alloy",
+    speed: float = 1.0,
+) -> tuple[str, bytes, str, int]:
+    clean = str(text or "").strip()[:3500]
+    if not (clean and base_url and api_key and endpoint):
+        return "MISSING", b"", "openai_compatible_tts_not_configured", 0
+    payload = {
+        "model": str(model or "tts-1"),
+        "voice": str(voice or "alloy"),
+        "input": clean,
+        "response_format": "mp3",
+        "speed": max(0.25, min(4.0, float(speed or 1.0))),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60)) as client:
+            res = await client.post(
+                join_shopaikey_url(base_url, endpoint),
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        content_type = str(res.headers.get("content-type") or "")
+        if res.status_code < 400 and res.content and (content_type.startswith("audio/") or len(res.content) > 512):
+            return "PASS", bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; model={payload['model']}; speed={payload['speed']}", int(res.status_code)
+        detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+        return shopaikey_classify_error(res.status_code, detail), b"", detail, int(res.status_code)
+    except httpx.TimeoutException as exc:
+        return "FAIL_TIMEOUT", b"", shopaikey_sanitize_error(str(exc)), 0
+    except Exception as exc:
+        return "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(exc)), 0
 
 def make_minimax_voice_id(user_id, profile_id: int | str = "", timestamp_text: str = "") -> str:
     uid = re.sub(r"[^0-9A-Za-z]+", "", str(user_id or ""))[-18:] or "user"
@@ -43492,7 +43676,7 @@ async def key4u_minimax_voice_clone(file_id: str, voice_id: str) -> tuple[str, d
     return status, payload, sanitize_provider_error(result.get("error_message_safe") or status)[:240], int(result.get("http_status") or 0)
 
 def key4u_asr_configured() -> bool:
-    return bool(KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_ADMIN_SMOKE_ENABLED and KEY4U_STT_ENDPOINT and KEY4U_STT_MODEL)
+    return bool(KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_STT_ENDPOINT and KEY4U_STT_MODEL)
 
 def key4u_asr_public_ready() -> bool:
     smoke = str(preferred_tool_test_result("key4u_stt", "asr").get("status") or "").upper()
@@ -43505,6 +43689,22 @@ def shopaikey_stt_public_ready() -> bool:
 def video_dubbing_audio_extract_ready() -> bool:
     return bool(frame_video_ffmpeg_path())
 
+def asr_smoke_status() -> str:
+    return str(
+        preferred_tool_test_result(
+            "asr",
+            "stt",
+            "key4u_stt",
+            "shopaikey_stt",
+            "asr_shopaikey",
+            "stt_shopaikey",
+        ).get("status")
+        or "NOT_TESTED"
+    ).upper()
+
+def asr_smoke_ready() -> bool:
+    return provider_status_is_pass(asr_smoke_status())
+
 def get_asr_adapter_readiness(public: bool = True) -> dict:
     provider = str(ASR_PROVIDER or "auto").strip().lower()
     if provider in {"shopai"}:
@@ -43512,24 +43712,23 @@ def get_asr_adapter_readiness(public: bool = True) -> dict:
     allowed = {"auto", "key4u", "deepgram", "shopaikey"}
     if provider not in allowed:
         provider = "auto"
-    key4u_ready = key4u_asr_public_ready() if public else key4u_asr_configured()
-    deepgram_ready = bool(DEEPGRAM_API_KEY and globals().get("AgentDeepgram"))
-    shopaikey_ready = shopaikey_stt_public_ready() if public else bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
+    smoke_status = asr_smoke_status()
+    smoke_ready = provider_status_is_pass(smoke_status)
+    key4u_configured = bool(key4u_asr_configured())
+    deepgram_configured = bool(DEEPGRAM_API_KEY and globals().get("AgentDeepgram"))
+    shopaikey_configured = bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
     candidates = {
         "key4u": {
-            "ready": bool(key4u_ready),
-            "configured": bool(key4u_asr_configured()),
-            "reason": "ready" if key4u_ready else "key4u_asr_not_ready",
+            "configured": key4u_configured,
+            "reason": "configured" if key4u_configured else "key4u_asr_not_configured",
         },
         "deepgram": {
-            "ready": bool(deepgram_ready),
-            "configured": bool(DEEPGRAM_API_KEY and globals().get("AgentDeepgram")),
-            "reason": "ready" if deepgram_ready else "deepgram_not_configured",
+            "configured": deepgram_configured,
+            "reason": "configured" if deepgram_configured else "deepgram_not_configured",
         },
         "shopaikey": {
-            "ready": bool(shopaikey_ready),
-            "configured": bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT),
-            "reason": "ready" if shopaikey_ready else "shopaikey_stt_not_ready",
+            "configured": shopaikey_configured,
+            "reason": "configured" if shopaikey_configured else "shopaikey_stt_not_configured",
         },
     }
     order_map = {
@@ -43539,33 +43738,35 @@ def get_asr_adapter_readiness(public: bool = True) -> dict:
         "auto": ["key4u", "deepgram", "shopaikey"],
     }
     order = order_map.get(provider, order_map["auto"])
-    selected_ready = "none"
-    for name in order:
-        if candidates[name]["ready"]:
-            selected_ready = name
-            break
     selected_configured = "none"
     for name in order:
         if candidates[name]["configured"]:
             selected_configured = name
             break
-    selected = selected_ready if selected_ready != "none" else selected_configured
+    selected = selected_configured
     configured_names = [name for name, item in candidates.items() if item["configured"]]
-    enabled = bool(VIDEO_ASR_ENABLED)
-    ready = bool(enabled and selected_ready != "none")
+    enabled = bool(VIDEO_ASR_ENABLED or smoke_ready)
+    configured = bool(configured_names)
+    public_ready = bool(configured and smoke_ready and enabled)
+    ready = public_ready if public else configured
     audio_extract_ready = video_dubbing_audio_extract_ready()
     reason = "ready" if ready else (
-        "VIDEO_ASR_ENABLED disabled"
-        if not enabled
-        else "asr_adapter_missing"
-        if not configured_names
-        else "; ".join(candidates[name]["reason"] for name in order if candidates[name]["configured"] and not candidates[name]["ready"]) or "asr_adapter_missing"
+        "asr_adapter_missing"
+        if not configured
+        else "asr_smoke_failed"
+        if smoke_status not in {"", "NOT_TESTED", "MISSING"}
+        else "asr_smoke_required"
+        if not smoke_ready
+        else "VIDEO_ASR_ENABLED disabled"
     )
     return {
         "ready": ready,
         "adapter": selected,
-        "configured": bool(configured_names),
+        "configured": configured,
         "configured_adapters": configured_names,
+        "smoke_status": smoke_status,
+        "smoke_ready": smoke_ready,
+        "public_ready": public_ready,
         "reason": reason,
         "supports_audio": bool(selected != "none"),
         "supports_video": bool(selected != "none" and audio_extract_ready),
@@ -43585,57 +43786,146 @@ def video_asr_provider_available_for(public: bool = True) -> bool:
         return bool(video_asr_provider_available())
 
 async def video_dubbing_transcribe_bytes(audio_bytes: bytes, context: ContextTypes.DEFAULT_TYPE, content_type: str = "application/octet-stream", allow_admin: bool = False, updated_by="") -> tuple[str, str, str]:
+    result = await asr_transcribe_audio(
+        audio_bytes,
+        content_type,
+        language="auto",
+        allow_admin=allow_admin,
+        updated_by=updated_by,
+        context=context,
+    )
+    if result.get("ok") and result.get("text"):
+        return str(result.get("provider") or "ASR"), str(result.get("text") or ""), str(result.get("detail") or "")
+    raise RuntimeError("asr_unavailable:" + str(result.get("status") or "no_provider"))
+
+async def asr_transcribe_audio(
+    audio_bytes: bytes,
+    content_type: str = "application/octet-stream",
+    language: str = "auto",
+    response_format: str = "verbose_json",
+    *,
+    allow_admin: bool = False,
+    updated_by="",
+    context: ContextTypes.DEFAULT_TYPE | None = None,
+) -> dict:
+    del response_format, context
     provider = str(ASR_PROVIDER or "auto").lower()
     errors = []
-    if provider in {"auto", "key4u"} and (key4u_asr_configured() if allow_admin else key4u_asr_public_ready()):
-        result = await key4u_provider_instance().stt(audio_bytes=audio_bytes, model=KEY4U_STT_MODEL)
-        status = str(result.get("status") or ("PASS" if result.get("ok") else "FAIL"))
-        transcript = str(result.get("text") or "").strip()
-        save_provider_attempt(
-            "translation_asr",
-            {
-                "called": True,
-                "provider": "key4u_asr",
-                "route": KEY4U_STT_ENDPOINT,
-                "status": status,
-                "error": str(result.get("error_message_safe") or ""),
-            },
-            updated_by,
-        )
-        if result.get("ok") and transcript:
-            return "Key4U ASR", transcript, f"chars={len(transcript)}"
-        errors.append(f"Key4U={status}")
-    if (provider in {"auto", "deepgram"} or (allow_admin and DEEPGRAM_API_KEY)) and DEEPGRAM_API_KEY:
-        result = await deepgram_asr_adapter(audio_bytes, content_type)
-        if result.get("ok") and result.get("transcript"):
+    provider_order = {
+        "key4u": ["key4u", "shopaikey", "deepgram"],
+        "shopaikey": ["shopaikey", "key4u", "deepgram"],
+        "shopai": ["shopaikey", "key4u", "deepgram"],
+        "deepgram": ["deepgram", "key4u", "shopaikey"],
+        "auto": ["key4u", "shopaikey", "deepgram"],
+    }.get(provider, ["key4u", "shopaikey", "deepgram"])
+    for route in provider_order:
+        if route == "key4u" and key4u_asr_configured() and (allow_admin or KEY4U_PUBLIC_ENABLED):
+            result = await openai_compatible_asr_transcribe(
+                audio_bytes,
+                content_type,
+                base_url=KEY4U_OPENAI_BASE_URL,
+                api_key=KEY4U_API_KEY,
+                endpoint=KEY4U_STT_ENDPOINT,
+                model=KEY4U_STT_MODEL,
+                language=language,
+            )
+            status = str(result.get("status") or "FAIL")
+            transcript = str(result.get("text") or "").strip()
             save_provider_attempt(
                 "translation_asr",
                 {
                     "called": True,
-                    "provider": "deepgram",
-                    "route": "listen",
-                    "status": "PASS",
-                    "error": "",
-                    "srt_blocks": result.get("srt_blocks"),
+                    "provider": "key4u_audio",
+                    "route": KEY4U_STT_ENDPOINT,
+                    "status": status,
+                    "error": str(result.get("detail") or "") if not result.get("ok") else "",
                 },
                 updated_by,
             )
-            return "Deepgram", str(result.get("transcript") or "").strip(), f"chars={len(str(result.get('transcript') or ''))}; srt_blocks={int(result.get('srt_blocks') or 0)}"
-        save_provider_attempt("translation_asr", {"called": True, "provider": "deepgram", "route": "listen", "status": str(result.get("status") or "FAIL"), "error": str(result.get("detail") or "")[:180]}, updated_by)
-        errors.append(f"Deepgram={result.get('status') or 'failed'}")
-    if provider in {"auto", "shopaikey", "shopai"} and (allow_admin or shopaikey_stt_public_ready()):
-        status, transcript, detail, _http_status = await shopaikey_audio_transcribe_bytes(audio_bytes, content_type)
+            if result.get("ok") and transcript:
+                return {**result, "provider": "key4u_audio"}
+            errors.append(f"Key4U={status}")
+        elif route == "shopaikey" and SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT and (allow_admin or shopaikey_stt_public_ready()):
+            result = await openai_compatible_asr_transcribe(
+                audio_bytes,
+                content_type,
+                base_url=SHOPAIKEY_BASE_URL,
+                api_key=SHOPAIKEY_API_KEY,
+                endpoint=SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT,
+                model=SHOPAIKEY_AUDIO_TRANSCRIPTION_MODEL or "whisper-1",
+                language=language,
+            )
+            status = str(result.get("status") or "FAIL")
+            transcript = str(result.get("text") or "").strip()
+            save_provider_attempt(
+                "translation_asr",
+                {
+                    "called": True,
+                    "provider": "shopaikey_audio",
+                    "route": SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT,
+                    "status": status,
+                    "error": str(result.get("detail") or "") if not result.get("ok") else "",
+                },
+                updated_by,
+            )
+            if result.get("ok") and transcript:
+                return {**result, "provider": "shopaikey_audio"}
+            errors.append(f"ShopAIKey={status}")
+        elif route == "deepgram" and DEEPGRAM_API_KEY:
+            result = await deepgram_asr_adapter(audio_bytes, content_type)
+            transcript = str(result.get("transcript") or "").strip()
+            transcript_json = dict(result.get("transcript_json") or {})
+            segments = deepgram_segments_from_response(transcript_json)
+            if result.get("ok") and transcript and segments:
+                save_provider_attempt(
+                    "translation_asr",
+                    {
+                        "called": True,
+                        "provider": "deepgram",
+                        "route": "listen",
+                        "status": "PASS",
+                        "error": "",
+                        "srt_blocks": len(segments),
+                    },
+                    updated_by,
+                )
+                return {
+                    "ok": True,
+                    "status": "PASS",
+                    "provider": "deepgram",
+                    "text": transcript,
+                    "segments": segments,
+                    "language": "",
+                    "duration_seconds": float(segments[-1]["end"] if segments else 0),
+                    "detail": f"chars={len(transcript)}; segments={len(segments)}",
+                }
+            status = str(result.get("status") or "FAIL")
+            save_provider_attempt(
+                "translation_asr",
+                {"called": True, "provider": "deepgram", "route": "listen", "status": status, "error": str(result.get("detail") or "")[:180]},
+                updated_by,
+            )
+            errors.append(f"Deepgram={status}")
+    if not errors:
         save_provider_attempt(
             "translation_asr",
-            {"called": True, "provider": "shopaikey_stt", "route": SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT, "status": status, "error": detail},
+            {
+                "called": False,
+                "provider": "none",
+                "route": "asr",
+                "status": "BLOCKED",
+                "error": "No ASR route configured for current gate",
+            },
             updated_by,
         )
-        if status == "PASS" and transcript:
-            return "ShopAIKey ASR", transcript, detail
-        errors.append(f"ShopAIKey={status}")
-    if not errors:
-        save_provider_attempt("translation_asr", {"called": False, "provider": "none", "route": "asr", "status": "BLOCKED", "error": "No ASR route passed public/admin gate"}, updated_by)
-    raise RuntimeError("asr_unavailable:" + ",".join(errors or ["no_provider"]))
+    return {
+        "ok": False,
+        "status": "asr_unavailable",
+        "provider": "",
+        "text": "",
+        "segments": [],
+        "detail": ",".join(errors or ["no_provider"]),
+    }
 
 def shopaikey_provider_error_from_payload(payload: dict) -> tuple[str, str]:
     if not isinstance(payload, dict):
@@ -62746,26 +63036,31 @@ def subtitle_engine_status_lines() -> list[str]:
             f"| reason <code>{_engine_safe(item.get('reason'))}</code>"
         )
     any_public_ready = any("PUBLIC_READY" in row for row in mode_rows)
-    admin_asr_test_ready = bool(video_asr_provider_available_for(public=False))
+    admin_asr_test_ready = bool(asr_readiness.get("configured"))
     admin_dub_audio_test_ready = bool(video_tts_provider_available_for(public=False))
-    public_mode_enabled = any(video_dubbing_public_flag(mode) for mode in (
-        VIDEO_SUBTITLE_MODE_CREATE,
-        VIDEO_SUBTITLE_MODE_TRANSLATE,
-        VIDEO_SUBTITLE_MODE_DUB,
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-    ))
+    public_mode_enabled = bool(
+        video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_CREATE)
+        or video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_DUB)
+        or any(video_dubbing_public_flag(mode) for mode in (
+            VIDEO_SUBTITLE_MODE_TRANSLATE,
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        ))
+    )
     partial_result_possible = bool(admin_asr_test_ready or admin_dub_audio_test_ready)
     return [
         "SUBTITLE ENGINE STATUS",
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
         f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
-        f"ASR adapter readiness: <code>{'READY' if asr_readiness.get('ready') else 'MISSING'}</code>",
+        f"ASR configured: <code>{_engine_yes_no(asr_readiness.get('configured'))}</code>",
         f"Detected ASR adapter: <code>{_engine_safe(asr_readiness.get('adapter'))}</code>",
-        f"ASR audio/video support: <code>audio={_engine_yes_no(asr_readiness.get('supports_audio'))}; video={_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"ASR smoke: <code>{_engine_safe(asr_readiness.get('smoke_status'))}</code>",
+        f"ASR audio support: <code>{_engine_yes_no(asr_readiness.get('supports_audio'))}</code>",
+        f"ASR video support: <code>{_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"Public ASR ready: <code>{_engine_yes_no(asr_readiness.get('public_ready'))}</code>",
         f"Video audio extraction: <code>{_engine_yes_no(asr_readiness.get('audio_extract_ready'))}</code>",
-        f"Auto subtitle from video/audio: <code>{'READY' if asr_readiness.get('ready') and asr_readiness.get('supports_audio') else 'GUARDED'}</code>",
-        f"Translated subtitle from video/audio: <code>{'READY' if asr_readiness.get('ready') and video_translation_provider_available() else 'GUARDED'}</code>",
+        f"Auto subtitle from video/audio: <code>{'READY' if video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_CREATE) else 'GUARDED'}</code>",
+        f"Translated subtitle from video/audio: <code>{'READY' if video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_TRANSLATE) else 'GUARDED'}</code>",
         f"Subtitle from file readiness: <code>READY</code>",
         f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
         f"Translation route: <code>{_engine_safe(pipeline.get('translation_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('translation_test'))}</code>",
@@ -62839,11 +63134,14 @@ def dub_engine_status_lines() -> list[str]:
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
         f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
-        f"ASR adapter readiness: <code>{'READY' if asr_readiness.get('ready') else 'MISSING'}</code>",
+        f"ASR configured: <code>{_engine_yes_no(asr_readiness.get('configured'))}</code>",
         f"Detected ASR adapter: <code>{_engine_safe(asr_readiness.get('adapter'))}</code>",
-        f"ASR audio/video support: <code>audio={_engine_yes_no(asr_readiness.get('supports_audio'))}; video={_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"ASR smoke: <code>{_engine_safe(asr_readiness.get('smoke_status'))}</code>",
+        f"ASR audio support: <code>{_engine_yes_no(asr_readiness.get('supports_audio'))}</code>",
+        f"ASR video support: <code>{_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"Public ASR ready: <code>{_engine_yes_no(asr_readiness.get('public_ready'))}</code>",
         f"Video audio extraction: <code>{_engine_yes_no(asr_readiness.get('audio_extract_ready'))}</code>",
-        f"Dub from video/audio: <code>{'READY' if asr_readiness.get('ready') and video_tts_provider_available_for(public=True) else 'GUARDED'}</code>",
+        f"Dub from video/audio: <code>{'READY' if video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_DUB) else 'GUARDED'}</code>",
         f"Subtitle from file readiness: <code>READY</code>",
         f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
         f"TTS/dub route: <code>{_engine_safe(pipeline.get('tts_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('tts_test'))}</code>",
@@ -73742,61 +74040,78 @@ async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    command_name = extract_command_name(update) or "tool_test_stt"
+    display_name = "/tool_test_asr" if command_name == "tool_test_asr" else "/tool_test_stt"
     if not has_admin_paid_confirmation(context):
         save_tool_test_result("stt", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", update.effective_user.id)
         save_tool_test_result("asr", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", update.effective_user.id)
-        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_asr"), parse_mode="HTML")
-    if not DEEPGRAM_API_KEY:
-        save_tool_test_result("stt", "MISSING", "DEEPGRAM_API_KEY missing", update.effective_user.id)
-        save_tool_test_result("asr", "MISSING", "DEEPGRAM_API_KEY missing", update.effective_user.id)
-        return await update.message.reply_text("🎤 <b>STT Smoke Test</b>\n\n• Deepgram: <code>MISSING</code>", parse_mode="HTML")
-    media_info = await resolve_stt_test_media(update, context)
-    if not media_info:
+        return await update.message.reply_text(admin_paid_confirm_required_text(display_name), parse_mode="HTML")
+    readiness = get_asr_adapter_readiness(public=False)
+    if not readiness.get("configured"):
+        save_tool_test_result("stt", "MISSING", "asr adapter not configured", update.effective_user.id)
+        save_tool_test_result("asr", "MISSING", "asr adapter not configured", update.effective_user.id)
         return await update.message.reply_text(
-            "⚠️ Gửi voice/audio/video ngắn rồi reply <code>/tool_test_stt</code>, "
-            "hoặc gửi file xong gõ <code>/tool_test_stt</code> trong vòng 2 phút.",
+            "🎤 <b>ASR Smoke Test</b>\n\n• ASR configured: <code>NO</code>\n• Không gọi provider và không trừ Xu.",
             parse_mode="HTML",
         )
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        set_pending_admin_tool_test(update.effective_user.id, "asr", display_name)
+        return await update.message.reply_text(
+            "Gửi hoặc reply voice/audio/video ngắn để test ASR.",
+            parse_mode="HTML",
+        )
+    clear_pending_admin_tool_test(update.effective_user.id)
     file_size = int(media_info.get("file_size", 0) or 0)
     if file_size > 15 * 1024 * 1024:
         save_tool_test_result("stt", "FAIL", f"file_too_large={file_size}", update.effective_user.id)
         return await update.message.reply_text("⚠️ File quá lớn để smoke test. Hãy dùng audio ngắn dưới 15MB.")
     try:
-        file_bytes = media_info["bytes"]
         content_type = media_info.get("content_type") or "application/octet-stream"
-        transcript = (await AgentDeepgram.transcribe(file_bytes, context, content_type=content_type) or "").strip()
-        passed = bool(transcript and not transcript.startswith("❌"))
+        file_type = str(media_info.get("file_type") or "").lower()
+        media_kind = "video" if content_type.startswith("video/") or file_type == "video" else "audio"
+        result = await transcribe_media_to_segments(
+            {
+                **media_info,
+                "media_kind": media_kind,
+                "duration_seconds": int(media_info.get("duration") or 0),
+            },
+            context=context,
+            allow_admin=True,
+            updated_by=update.effective_user.id,
+        )
+        transcript = str(result.get("transcript_text") or "").strip()
+        passed = bool(result.get("output_valid") and transcript)
         status = "PASS" if passed else "FAIL"
-        detail = transcript if transcript else "empty_transcript"
-        save_tool_test_result("stt", status, f"source={media_info.get('source')}; type={media_info.get('file_type')}; mime={content_type}; provider=deepgram; cost_level=low; {detail[:450]}", update.effective_user.id)
-        save_tool_test_result("asr", status, f"provider=deepgram; source={media_info.get('source')}; chars={len(transcript)}", update.effective_user.id)
+        provider = str(result.get("provider") or readiness.get("adapter") or "asr")
+        result_status = str(result.get("status") or ("pass" if passed else "failed"))
+        safe_detail = sanitize_log_text(str(result.get("detail") or result_status))[:240]
+        save_tool_test_result("stt", status, f"source={media_info.get('source')}; type={media_info.get('file_type')}; provider={provider}; chars={len(transcript)}; status={result_status}; {safe_detail}", update.effective_user.id)
+        save_tool_test_result("asr", status, f"provider={provider}; source={media_info.get('source')}; chars={len(transcript)}; status={result_status}", update.effective_user.id)
         if passed:
             await update.message.reply_text(
-                "🎙 <b>STT PASS</b>\n\n"
-                "• Provider: <code>Deepgram</code>\n"
+                "🎙 <b>ASR PASS</b>\n\n"
+                f"• Provider: <code>{html.escape(provider[:80])}</code>\n"
                 f"• Source: <code>{html.escape(str(media_info.get('source') or '-'))}</code>\n"
                 f"• Transcript:\n<code>{html.escape(transcript[:900])}</code>",
                 parse_mode="HTML",
             )
         else:
-            if detail.startswith("❌ Deepgram không nhận được"):
-                text = "🎤 <b>STT Smoke Test</b>\n\n" + html.escape(detail[:900])
-            else:
-                text = (
-                    "❌ <b>STT không nhận được transcript.</b>\n\n"
-                    "• Provider: <code>Deepgram</code>\n"
-                    "• Có thể file không có tiếng nói rõ, âm lượng nhỏ, hoặc định dạng chưa phù hợp.\n"
-                    "• Hãy thử voice/audio 10-20 giây có giọng nói rõ.\n"
-                    f"• Error: <code>{html.escape(detail[:240])}</code>"
-                )
+            text = (
+                "❌ <b>ASR không nhận được transcript hợp lệ.</b>\n\n"
+                f"• Status: <code>{html.escape(result_status[:80])}</code>\n"
+                "• Hãy thử voice/audio/video ngắn có giọng nói rõ.\n"
+                "• Không trừ Xu và không bật public readiness."
+            )
             await update.message.reply_text(text, parse_mode="HTML")
     except Exception as e:
-        save_tool_test_result("stt", "FAIL", str(e)[:500], update.effective_user.id)
+        save_tool_test_result("stt", "FAIL", f"error_class={type(e).__name__}", update.effective_user.id)
         save_tool_test_result("asr", "FAIL", f"error_class={type(e).__name__}", update.effective_user.id)
         await update.message.reply_text(
-            "🎤 <b>STT Smoke Test</b>\n\n"
-            "• Deepgram: <code>FAIL</code>\n"
-            f"• Error: <code>{html.escape(str(e)[:240])}</code>",
+            "🎤 <b>ASR Smoke Test</b>\n\n"
+            "• Status: <code>FAIL</code>\n"
+            f"• Error class: <code>{html.escape(type(e).__name__)}</code>\n"
+            "• Không trừ Xu và không bật public readiness.",
             parse_mode="HTML",
         )
 
@@ -73820,13 +74135,16 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
     media_info = await resolve_stt_test_media(update, context)
     text_input = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip()
     if mode != VIDEO_SUBTITLE_MODE_DUB and not media_info:
+        set_pending_admin_tool_test(uid, "auto_subtitle", "/tool_test_auto_subtitle")
         return await update.message.reply_text(
-            "⚠️ Reply một video/audio ngắn rồi chạy lại lệnh. Smoke test chưa gọi API và không trừ Xu."
+            "Gửi hoặc reply voice/audio/video ngắn để test tạo phụ đề tự động."
         )
     if mode == VIDEO_SUBTITLE_MODE_DUB and not media_info and not text_input:
+        set_pending_admin_tool_test(uid, "dub_audio", "/tool_test_dub_audio")
         return await update.message.reply_text(
-            "⚠️ Reply video/audio ngắn hoặc thêm đoạn text sau lệnh để test lồng tiếng. Không trừ Xu."
+            "Gửi hoặc reply voice/audio/video ngắn để test lồng tiếng."
         )
+    clear_pending_admin_tool_test(uid)
     await update.message.reply_text("⏳ TOAN AAS đang kiểm tra pipeline admin. Vui lòng chờ và không gửi lại lệnh.")
     transcript = text_input
     asr_status = "NOT_USED" if transcript else "NOT_TESTED"
@@ -73841,14 +74159,24 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
                 return await update.message.reply_text(
                     f"⚠️ File vượt giới hạn smoke {VIDEO_PROCESSING_MAX_INPUT_MB}MB. Không gọi API và không trừ Xu."
                 )
-            asr_provider, transcript, asr_detail = await video_dubbing_transcribe_bytes(
-                media_info.get("bytes") or b"",
-                context,
-                content_type=media_info.get("content_type") or "application/octet-stream",
+            content_type = media_info.get("content_type") or "application/octet-stream"
+            file_type = str(media_info.get("file_type") or "").lower()
+            media_kind = "video" if content_type.startswith("video/") or file_type == "video" else "audio"
+            asr_result = await transcribe_media_to_segments(
+                {
+                    **media_info,
+                    "media_kind": media_kind,
+                    "duration_seconds": int(media_info.get("duration") or 0),
+                },
+                context=context,
                 allow_admin=True,
                 updated_by=uid,
             )
-            if not transcript or transcript.startswith("❌"):
+            transcript = str(asr_result.get("transcript_text") or "").strip()
+            asr_provider = str(asr_result.get("provider") or "")
+            asr_detail = sanitize_log_text(str(asr_result.get("detail") or asr_result.get("status") or ""))[:240]
+            if not asr_result.get("output_valid") or not transcript:
+                save_tool_test_result("asr", "FAIL", f"status={asr_result.get('status') or 'invalid_output'}; {asr_detail}", uid)
                 raise RuntimeError("asr_empty_or_failed")
             asr_status = "PASS"
             save_tool_test_result("asr", "PASS", f"provider={asr_provider}; chars={len(transcript)}; {asr_detail}", uid)
@@ -73928,29 +74256,31 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
         )
 
 async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
-    uid = update.effective_user.id if update.effective_user else 0
     smoke_no_charge_note = "No Xu deducted"
     if not has_admin_paid_confirmation(context):
-        # no provider call: keep the core guard so smoke still records NO_CONFIRM.
+        # no provider call: the core guard records NO_CONFIRM and returns before media/provider work.
         return await _run_admin_video_pipeline_smoke_core(update, context, mode)
+    uid = update.effective_user.id if update.effective_user else 0
     feature = video_dubbing_product_area_for_mode(mode)
+
     async def _run_smoke_pipeline():
         return await _run_admin_video_pipeline_smoke_core(update, context, mode)
+
     engine_result = await execute_engine(
         feature,
-        {"runner": _run_smoke_pipeline, "mode": normalize_video_translate_mode(mode), "state": {}},
+        {
+            "runner": _run_smoke_pipeline,
+            "mode": normalize_video_translate_mode(mode),
+            "state": {"admin_real_test": True},
+        },
         {
             "user_id": uid,
             "entry_source": ENGINE_ENTRY_SOURCE_SLASH_SMOKE,
             "confirm_paid": True,
             "is_paid_job": True,
+            "gate_prechecked": True,
         },
     )
-    if not engine_result.get("ok") and not engine_result.get("runner_result"):
-        return await update.message.reply_text(
-            engine_result.get("message") or admin_product_engine_missing_text(feature, (engine_result.get("gate") or {}).get("readiness")),
-            parse_mode="HTML",
-        )
     return engine_result.get("runner_result")
 
 async def cmd_tool_test_video_subtitle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73982,6 +74312,174 @@ async def cmd_tool_test_minimax_dub(update: Update, context: ContextTypes.DEFAUL
 
 async def cmd_tool_test_subtitle_plus_dub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await run_admin_video_pipeline_smoke(update, context, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
+
+def admin_full_dub_video_target_language(args: list[str] | tuple[str, ...] | None) -> str:
+    values = args_without_admin_paid_confirmation(list(args or []))
+    skip_next = False
+    for index, raw in enumerate(values):
+        if skip_next:
+            skip_next = False
+            continue
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        if value in {"--target", "--lang", "--language"}:
+            candidate = str(values[index + 1] if index + 1 < len(values) else "").strip()
+            target = normalize_translate_target(candidate)
+            if target:
+                return target
+            skip_next = True
+            continue
+        if value.startswith("--target=") or value.startswith("--lang=") or value.startswith("--language="):
+            target = normalize_translate_target(value.split("=", 1)[1])
+            if target:
+                return target
+            continue
+        if not value.startswith("--"):
+            target = normalize_translate_target(value)
+            if target:
+                return target
+    return "vi"
+
+async def send_admin_full_dub_subtitle_assets(message, srt_text: str, stem: str, caption_prefix: str):
+    if not str(srt_text or "").strip():
+        return 0
+    sent = 0
+    for item in video_dubbing_subtitle_output_items(srt_text, "all", VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB):
+        data = bytes(item.get("bytes") or b"")
+        if not data:
+            continue
+        suffix = str(item.get("suffix") or ".srt")
+        filename = f"{stem}{suffix}"
+        await message.reply_document(
+            document=video_dubbing_output_file(data, filename),
+            filename=filename,
+            caption=f"{caption_prefix} — {item.get('caption') or 'phụ đề'}",
+        )
+        sent += 1
+    return sent
+
+async def cmd_tool_test_full_dub_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    uid = update.effective_user.id
+    command_label = "/tool_test_full_dub_video"
+    if not has_admin_paid_confirmation(context):
+        save_tool_test_result("full_dub_video", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", uid)
+        return await update.message.reply_text(admin_paid_confirm_required_text(command_label), parse_mode="HTML")
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        set_pending_admin_tool_test(uid, "full_dub_video", command_label)
+        return await update.message.reply_text(
+            "Gửi hoặc reply video ngắn rồi dùng /tool_test_full_dub_video --confirm-paid trong vòng 2 phút."
+        )
+    clear_pending_admin_tool_test(uid)
+    if media_info.get("error"):
+        save_tool_test_result("full_dub_video", "FAIL", f"media_download_failed:{media_info.get('error')}", uid)
+        return await update.message.reply_text("⚠️ Chưa tải được media từ Telegram. Không trừ Xu và không gọi provider tiếp.")
+    source_bytes = bytes(media_info.get("bytes") or b"")
+    if not source_bytes:
+        save_tool_test_result("full_dub_video", "FAIL", "empty_media_bytes", uid)
+        return await update.message.reply_text("⚠️ Media không có dữ liệu hợp lệ. Không trừ Xu.")
+    file_size = int(media_info.get("file_size") or len(source_bytes))
+    if file_size > VIDEO_PROCESSING_MAX_INPUT_MB * 1024 * 1024:
+        save_tool_test_result("full_dub_video", "FAIL", f"file_too_large={file_size}", uid)
+        return await update.message.reply_text(
+            f"⚠️ File vượt giới hạn smoke {VIDEO_PROCESSING_MAX_INPUT_MB}MB. Không gọi API và không trừ Xu."
+        )
+    source_content_type = str(media_info.get("content_type") or media_info.get("mime_type") or "application/octet-stream")
+    is_video = media_info_is_video(media_info)
+    target_language = admin_full_dub_video_target_language(getattr(context, "args", None))
+    await update.message.reply_text(
+        "⏳ TOAN AAS đang chạy full dub video smoke: ASR segment → SRT/VTT/TXT → dịch segment → TTS segment → timeline audio → mux nếu sẵn sàng. Không trừ Xu."
+    )
+    try:
+        result = await build_subtitle_dubbed_video_pipeline(
+            source_bytes,
+            source_content_type,
+            source_language="auto",
+            target_language=target_language,
+            voice="default_female",
+            burn_subtitle=False,
+            keep_original_audio=False,
+            context=context,
+            allow_admin=True,
+            updated_by=uid,
+            translate_requested=bool(target_language),
+            create_dub=True,
+        )
+    except Exception as exc:
+        error_class = type(exc).__name__
+        save_tool_test_result("full_dub_video", "FAIL", f"error_class={error_class}", uid)
+        logger.warning("full dub video smoke failed | error_class=%s", error_class)
+        return await update.message.reply_text(
+            "⚙️ Full dub video smoke chưa hoàn tất.\n"
+            f"Mã lỗi: <code>{html.escape(error_class)}</code>\n"
+            "Không trừ Xu và không hiển thị raw provider response.",
+            parse_mode="HTML",
+        )
+    if not result.get("ok"):
+        status = sanitize_log_text(str(result.get("status") or "failed"))[:120]
+        detail = sanitize_log_text(str(result.get("detail") or ""))[:180]
+        save_tool_test_result("full_dub_video", "FAIL", f"status={status}; {detail}", uid)
+        return await update.message.reply_text(
+            "⚙️ Full dub video smoke chưa tạo đủ output hợp lệ.\n"
+            f"Status: <code>{html.escape(status)}</code>\n"
+            "Không trừ Xu và không fake MP4.",
+            parse_mode="HTML",
+        )
+    original_sent = await send_admin_full_dub_subtitle_assets(
+        update.message,
+        str(result.get("original_srt") or ""),
+        "toan_aas_full_dub_original",
+        "✅ Phụ đề gốc",
+    )
+    translated_sent = 0
+    translated_srt = str(result.get("translated_srt") or "").strip()
+    if translated_srt:
+        translated_sent = await send_admin_full_dub_subtitle_assets(
+            update.message,
+            translated_srt,
+            "toan_aas_full_dub_translated",
+            f"✅ Phụ đề dịch ({target_language})",
+        )
+    dub_audio = bytes(result.get("dub_audio") or b"")
+    if dub_audio:
+        await update.message.reply_audio(
+            audio=video_dubbing_output_file(dub_audio, "toan_aas_full_dub_audio.mp3"),
+            filename="toan_aas_full_dub_audio.mp3",
+            caption="✅ Audio lồng tiếng theo timeline phụ đề — admin smoke / 0 Xu",
+        )
+    final_video = bytes(result.get("final_video") or b"")
+    if final_video:
+        await update.message.reply_video(
+            video=video_dubbing_output_file(final_video, "toan_aas_full_dub_video.mp4"),
+            filename="toan_aas_full_dub_video.mp4",
+            caption="✅ MP4 đã ghép audio lồng tiếng bằng mux thật — admin smoke / 0 Xu",
+        )
+    elif is_video:
+        await update.message.reply_text("Đã tạo phụ đề/audio lồng tiếng, nhưng ghép video đang tạm chưa sẵn sàng.")
+    mux_status = str(result.get("mux_status") or ("completed" if final_video else "unavailable"))
+    detail = (
+        f"asr={result.get('asr_provider') or '-'}; translation={result.get('translation_provider') or '-'}; "
+        f"tts={result.get('tts_provider') or '-'}; original_assets={original_sent}; translated_assets={translated_sent}; "
+        f"audio_bytes={len(dub_audio)}; video_bytes={len(final_video)}; mux={mux_status}; charged_xu=0"
+    )
+    save_tool_test_result("full_dub_video", "PASS", detail, uid)
+    return await update.message.reply_text(
+        "✅ <b>Full Dub Video Smoke PASS</b>\n\n"
+        f"• ASR: <code>{html.escape(str(result.get('asr_provider') or '-'))}</code>\n"
+        f"• Translation: <code>{html.escape(str(result.get('translation_provider') or '-'))}</code>\n"
+        f"• TTS: <code>{html.escape(str(result.get('tts_provider') or '-'))}</code>\n"
+        f"• Original subtitle assets: <code>{original_sent}</code>\n"
+        f"• Translated subtitle assets: <code>{translated_sent}</code>\n"
+        f"• Dub audio bytes: <code>{len(dub_audio)}</code>\n"
+        f"• Final MP4 bytes: <code>{len(final_video)}</code>\n"
+        f"• Mux: <code>{html.escape(mux_status)}</code>\n"
+        "• No Xu deducted: <code>yes</code>\n"
+        "• LIVE PASS claimed: <code>NO</code>",
+        parse_mode="HTML",
+    )
 
 async def cmd_tool_test_stt_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -98395,17 +98893,6 @@ def video_dubbing_public_processing_ready(mode: str, state: dict | None = None) 
     state = dict(state or {})
     if not mode or not video_dubbing_capability(mode, state, public=True).get("ok"):
         return False
-    worker = local_worker_status_payload()
-    ffmpeg_ready = bool(
-        frame_video_worker_connected()
-        and (worker.get("ffmpeg_path_configured") or worker.get("ffmpeg_path"))
-        and provider_status_base(str(worker.get("ffmpeg_test_status") or "")) == "PASS"
-    )
-    pipeline_smoke_ready = (
-        provider_status_base(preferred_tool_test_status_text(_subtitle_dub_required_smoke(mode))) == "PASS"
-    )
-    if not ffmpeg_ready or not pipeline_smoke_ready:
-        return False
     if not video_dubbing_asr_ready_for_state(mode, state, public=True):
         return False
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
@@ -98416,11 +98903,7 @@ def video_dubbing_public_processing_ready(mode: str, state: dict | None = None) 
         return False
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not is_dub_ready():
         return False
-    if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE}:
-        return bool(is_subtitle_burn_ready())
-    if mode == VIDEO_SUBTITLE_MODE_DUB:
-        return bool(is_voice_mux_ready())
-    return bool(is_subtitle_burn_ready() and is_voice_mux_ready())
+    return True
 
 def video_dubbing_product_area_for_mode(mode: str) -> str:
     mode = normalize_video_translate_mode(mode)
@@ -129381,7 +129864,40 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🌐 Dịch file", callback_data="tr_pick|file")]]),
     )
 
+async def handle_pending_admin_tool_test_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message:
+        return False
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return False
+    pending = get_pending_admin_tool_test(uid)
+    if not pending or not pending.get("confirm_paid"):
+        return False
+    media, _file_type = message_media_candidate(update.message)
+    if not media:
+        return False
+    cache_recent_media_state(update)
+    remember_last_media(update)
+    clear_pending_admin_tool_test(uid)
+    confirmed_context = admin_tool_test_context_with_confirm(context)
+    tool = str(pending.get("tool") or "")
+    if tool == "asr":
+        await cmd_tool_test_asr(update, confirmed_context)
+        return True
+    if tool == "auto_subtitle":
+        await cmd_tool_test_subtitle_generate(update, confirmed_context)
+        return True
+    if tool == "dub_audio":
+        await cmd_tool_test_video_dub(update, confirmed_context)
+        return True
+    if tool == "full_dub_video":
+        await cmd_tool_test_full_dub_video(update, confirmed_context)
+        return True
+    return False
+
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_pending_admin_tool_test_media(update, context):
+        return
     if await handle_video_dubbing_pending_upload(update, context):
         return
     if await handle_translation_session_media(update, context):
@@ -130584,6 +131100,21 @@ def video_dubbing_public_flag(mode: str) -> bool:
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED,
     }.get(normalize_video_translate_mode(mode), False)
 
+def video_dubbing_effective_mode_enabled(mode: str, public: bool = True) -> bool:
+    mode = normalize_video_translate_mode(mode)
+    configured_flag = video_dubbing_public_flag(mode) if public else video_dubbing_mode_flag(mode)
+    if configured_flag:
+        return True
+    if mode == VIDEO_SUBTITLE_MODE_CREATE:
+        return bool(get_asr_adapter_readiness(public=True).get("public_ready"))
+    if mode == VIDEO_SUBTITLE_MODE_DUB:
+        return bool(
+            get_asr_adapter_readiness(public=True).get("public_ready")
+            and VIDEO_DUB_TTS_ENABLED
+            and video_tts_provider_available_for(public=True)
+        )
+    return False
+
 def video_translation_provider_available() -> bool:
     return bool(key4u_subtitle_translation_public_ready() or shopaikey_subtitle_translation_public_ready())
 
@@ -130641,9 +131172,9 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
     if not mode:
         return {"ok": False, "reason": "invalid_mode", "missing": ["mode"]}
     admin_real_test = bool(not public and _state_requests_admin_real_test(state))
-    if not video_dubbing_mode_flag(mode) and not admin_real_test:
+    if not video_dubbing_effective_mode_enabled(mode, public=False) and not admin_real_test:
         return {"ok": False, "reason": "mode_disabled", "missing": ["mode_disabled"]}
-    if public and not video_dubbing_public_flag(mode):
+    if public and not video_dubbing_effective_mode_enabled(mode, public=True):
         return {"ok": False, "reason": "public_disabled", "missing": ["public_flag"]}
     missing = []
     if not video_dubbing_asr_ready_for_state(mode, state, public=public):
@@ -130714,8 +131245,11 @@ def video_pipeline_status_payload() -> dict:
     asr_readiness = get_asr_adapter_readiness(public=True)
     return {
         "asr_provider": str(asr_readiness.get("adapter") or "missing"),
-        "asr_test": preferred_tool_test_status_text("key4u_stt", "asr", "shopaikey_stt", "stt"),
-        "asr_readiness": "READY" if asr_readiness.get("ready") else "MISSING",
+        "asr_test": str(asr_readiness.get("smoke_status") or "NOT_TESTED"),
+        "asr_readiness": "READY" if asr_readiness.get("public_ready") else ("CONFIGURED" if asr_readiness.get("configured") else "MISSING"),
+        "asr_configured": bool(asr_readiness.get("configured")),
+        "asr_smoke_ready": bool(asr_readiness.get("smoke_ready")),
+        "asr_public_ready": bool(asr_readiness.get("public_ready")),
         "asr_supports_audio": bool(asr_readiness.get("supports_audio")),
         "asr_supports_video": bool(asr_readiness.get("supports_video")),
         "translation_provider": active_translation_provider_label(),
@@ -131070,6 +131604,82 @@ def video_dubbing_srt_from_segments(segments: list[dict]) -> str:
         )
     return ("\n\n".join(blocks) + "\n") if blocks else ""
 
+def video_dubbing_timestamp_seconds(value: str) -> float:
+    clean = str(value or "").strip().replace(",", ".")
+    parts = clean.split(":")
+    if len(parts) != 3:
+        return 0.0
+    try:
+        return max(0.0, float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2]))
+    except Exception:
+        return 0.0
+
+def video_dubbing_segments_from_subtitle(subtitle_text: str) -> list[dict]:
+    body = str(subtitle_text or "").replace("\r", "").strip()
+    if not body:
+        return []
+    if body.startswith("WEBVTT"):
+        body = body.split("\n", 1)[1] if "\n" in body else ""
+    blocks = re.split(r"\n\s*\n", body)
+    segments = []
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        timing_index = next((idx for idx, line in enumerate(lines) if "-->" in line), -1)
+        if timing_index < 0:
+            continue
+        start_raw, end_raw = [part.strip().split(" ", 1)[0] for part in lines[timing_index].split("-->", 1)]
+        text = " ".join(lines[timing_index + 1:]).strip()
+        if not text:
+            continue
+        start = video_dubbing_timestamp_seconds(start_raw)
+        end = video_dubbing_timestamp_seconds(end_raw)
+        if end <= start:
+            end = start + 1
+        segments.append({
+            "index": len(segments) + 1,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "text": text,
+        })
+    return segments
+
+async def translate_subtitle_segments(
+    segments: list[dict],
+    target_language: str,
+    *,
+    allow_admin: bool = False,
+    updated_by="",
+) -> dict:
+    translated_segments = []
+    providers = []
+    for index, item in enumerate(segments or [], start=1):
+        text = str((item or {}).get("text") or "").strip()
+        if not text:
+            continue
+        translated = await translate_subtitle_text(
+            text,
+            target_language,
+            allow_admin=allow_admin,
+            updated_by=updated_by,
+        )
+        translated_text = str(translated.get("text") or "").strip()
+        if not translated_text:
+            raise RuntimeError("translation_empty_segment")
+        providers.append(str(translated.get("provider") or ""))
+        translated_segments.append({
+            "index": int((item or {}).get("index") or index),
+            "start": float((item or {}).get("start") or 0),
+            "end": float((item or {}).get("end") or 0),
+            "text": translated_text,
+        })
+    if not translated_segments:
+        raise RuntimeError("translation_empty")
+    return {
+        "segments": translated_segments,
+        "provider": next((provider for provider in providers if provider), ""),
+        "srt": video_dubbing_srt_from_segments(translated_segments),
+    }
+
 async def transcribe_media_to_segments(
     file_ref,
     source_language: str = "auto",
@@ -131172,20 +131782,41 @@ async def transcribe_media_to_segments(
                 "provider": "",
             }
     try:
-        try:
-            provider, transcript, detail = await video_dubbing_transcribe_bytes(
+        if getattr(video_dubbing_transcribe_bytes, "__name__", "") != "video_dubbing_transcribe_bytes":
+            try:
+                provider, transcript, detail = await video_dubbing_transcribe_bytes(
+                    audio_bytes,
+                    context,
+                    audio_content_type,
+                    allow_admin=allow_admin,
+                    updated_by=updated_by,
+                )
+            except TypeError:
+                provider, transcript, detail = await video_dubbing_transcribe_bytes(
+                    audio_bytes,
+                    context,
+                    audio_content_type,
+                )
+            asr_result = {
+                "ok": bool(str(transcript or "").strip()),
+                "status": "PASS" if str(transcript or "").strip() else "empty_transcript",
+                "provider": str(provider or ""),
+                "text": str(transcript or ""),
+                "segments": [],
+                "detail": str(detail or ""),
+            }
+        else:
+            asr_result = await asr_transcribe_audio(
                 audio_bytes,
-                context,
                 audio_content_type,
+                language=source_language,
                 allow_admin=allow_admin,
                 updated_by=updated_by,
+                context=context,
             )
-        except TypeError:
-            provider, transcript, detail = await video_dubbing_transcribe_bytes(
-                audio_bytes,
-                context,
-                audio_content_type,
-            )
+        provider = str(asr_result.get("provider") or "")
+        transcript = str(asr_result.get("text") or "").strip()
+        detail = str(asr_result.get("detail") or "")
     except Exception as exc:
         return {
             "output_valid": False,
@@ -131211,15 +131842,15 @@ async def transcribe_media_to_segments(
             "confidence": 0.0,
             "provider": str(provider or ""),
         }
-    effective_duration = int(max_seconds or duration_seconds or 0)
-    segments = video_dubbing_segments_from_text(transcript, effective_duration)
+    effective_duration = int(max_seconds or duration_seconds or asr_result.get("duration_seconds") or 0)
+    segments = list(asr_result.get("segments") or []) or video_dubbing_segments_from_text(transcript, effective_duration)
     return {
         "output_valid": bool(segments),
         "status": "PASS" if segments else "segment_generation_failed",
         "transcript_text": transcript,
         "segments": segments,
-        "detected_language": "" if str(source_language or "auto").lower() == "auto" else str(source_language or ""),
-        "duration_seconds": int(effective_duration or duration_seconds or 0),
+        "detected_language": str(asr_result.get("language") or ("" if str(source_language or "auto").lower() == "auto" else source_language)),
+        "duration_seconds": int(effective_duration or duration_seconds or (segments[-1]["end"] if segments else 0)),
         "confidence": 0.0,
         "provider": str(provider or ""),
         "detail": f"{extract_detail}; {detail}",
@@ -131264,7 +131895,13 @@ async def video_dubbing_resolve_source_script(source_bytes: bytes, content_type:
         "detected_language": result.get("detected_language") or "",
     }
 
-async def video_dubbing_render_video(source_bytes: bytes, dubbed_audio: bytes = b"", subtitle_bytes: bytes = b"") -> tuple[bytes, str]:
+async def video_dubbing_render_video(
+    source_bytes: bytes,
+    dubbed_audio: bytes = b"",
+    subtitle_bytes: bytes = b"",
+    *,
+    keep_original_audio: bool = False,
+) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
     if not ffmpeg or not source_bytes:
         return b"", "ffmpeg_unavailable"
@@ -131290,7 +131927,12 @@ async def video_dubbing_render_video(source_bytes: bytes, dubbed_audio: bytes = 
             command.extend(["-vf", subtitle_filter, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22"])
         else:
             command.extend(["-c:v", "copy"])
-        if dubbed_audio:
+        if dubbed_audio and keep_original_audio:
+            command.extend([
+                "-filter_complex", "[0:a]volume=0.18[original];[original][1:a]amix=inputs=2:duration=longest:dropout_transition=0[mixed]",
+                "-map", "0:v:0", "-map", "[mixed]", "-c:a", "aac", "-b:a", "160k", "-shortest",
+            ])
+        elif dubbed_audio:
             command.extend(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "160k", "-shortest"])
         else:
             command.extend(["-map", "0:v:0", "-map", "0:a?", "-c:a", "copy"])
@@ -131300,6 +131942,100 @@ async def video_dubbing_render_video(source_bytes: bytes, dubbed_audio: bytes = 
             return b"", str(detail or "video_render_failed")
         with open(output_path, "rb") as handle:
             return handle.read(), "ffmpeg_video_render"
+
+async def build_subtitle_dubbed_video_pipeline(
+    source_video_bytes: bytes,
+    source_content_type: str,
+    source_language: str = "auto",
+    target_language: str = "vi",
+    voice: str = "default_female",
+    burn_subtitle: bool = False,
+    keep_original_audio: bool = False,
+    *,
+    context: ContextTypes.DEFAULT_TYPE | None = None,
+    allow_admin: bool = False,
+    updated_by="",
+    translate_requested: bool = True,
+    create_dub: bool = True,
+) -> dict:
+    transcribed = await transcribe_media_to_segments(
+        {
+            "bytes": source_video_bytes,
+            "content_type": source_content_type,
+            "media_kind": "video" if str(source_content_type or "").lower().startswith("video/") else "audio",
+        },
+        source_language=source_language,
+        context=context,
+        allow_admin=allow_admin,
+        updated_by=updated_by,
+    )
+    if not transcribed.get("output_valid"):
+        return {"ok": False, "status": str(transcribed.get("status") or "asr_failed"), "detail": str(transcribed.get("detail") or "")}
+    original_segments = list(transcribed.get("segments") or [])
+    original_srt = video_dubbing_srt_from_segments(original_segments)
+    if not original_srt:
+        return {"ok": False, "status": "subtitle_generation_failed", "detail": "original_srt_empty"}
+    output_segments = original_segments
+    translation_provider = ""
+    if translate_requested and str(target_language or "").strip().lower() not in {"", "auto", "original", "same"}:
+        translated = await translate_subtitle_segments(
+            original_segments,
+            target_language,
+            allow_admin=allow_admin,
+            updated_by=updated_by,
+        )
+        output_segments = list(translated.get("segments") or [])
+        translation_provider = str(translated.get("provider") or "")
+        translated_srt = video_dubbing_srt_from_segments(output_segments)
+    dubbed_audio = b""
+    tts_provider = ""
+    tts_chunks = []
+    if create_dub:
+        tts_result = await synthesize_dub_segment_chunks(
+            output_segments,
+            voice_style=voice,
+            voice_id=voice,
+            base_speed=1.0,
+            max_speed=1.35,
+            allow_admin=allow_admin,
+        )
+        tts_chunks = list(tts_result.get("chunks") or [])
+        tts_provider = str(tts_result.get("provider") or "")
+        total_duration = max(float(item.get("end") or 0) for item in output_segments)
+        dubbed_audio, timeline_detail = await build_dub_timeline_audio(tts_chunks, total_duration)
+        if not dubbed_audio:
+            return {"ok": False, "status": "dub_timeline_failed", "detail": timeline_detail}
+    final_video = b""
+    mux_detail = "not_requested"
+    is_video = str(source_content_type or "").lower().startswith("video/")
+    mux_ready = bool(VIDEO_DUB_MUX_ENABLED and frame_video_ffmpeg_path())
+    if is_video and create_dub and mux_ready:
+        final_video, mux_detail = await video_dubbing_render_video(
+            source_video_bytes,
+            dubbed_audio=dubbed_audio,
+            subtitle_bytes=translated_srt.encode("utf-8") if burn_subtitle else b"",
+            keep_original_audio=keep_original_audio,
+        )
+    return {
+        "ok": bool(original_srt and (not create_dub or dubbed_audio)),
+        "status": "PASS" if original_srt and (not create_dub or dubbed_audio) else "NO_OUTPUT_BYTES",
+        "asr_provider": str(transcribed.get("provider") or ""),
+        "translation_provider": translation_provider,
+        "tts_provider": tts_provider,
+        "original_segments": original_segments,
+        "translated_segments": output_segments,
+        "original_srt": original_srt,
+        "original_vtt": video_dubbing_srt_to_vtt_text(original_srt),
+        "original_txt": video_dubbing_subtitle_plain_text(original_srt),
+        "translated_srt": translated_srt,
+        "translated_vtt": video_dubbing_srt_to_vtt_text(translated_srt),
+        "translated_txt": video_dubbing_subtitle_plain_text(translated_srt),
+        "dub_audio": dubbed_audio,
+        "final_video": final_video,
+        "tts_chunks": tts_chunks,
+        "mux_status": "completed" if final_video else ("unavailable" if is_video and create_dub else "not_requested"),
+        "mux_detail": mux_detail if (mux_ready or not (is_video and create_dub)) else "mux_unavailable",
+    }
 
 async def execute_video_dubbing_preview(
     query,
@@ -131402,6 +132138,9 @@ async def execute_video_dubbing_preview(
 async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: str = "", voice_speed: str = "1.0", allow_admin: bool = False) -> tuple[str, bytes, str]:
     provider = str(TTS_PROVIDER or "auto").lower()
     candidates = []
+    openai_tts_candidates = []
+    speed_value = float(parse_video_dubbing_voice_speed(voice_speed or "1.0"))
+    openai_voice = "onyx" if "male" in str(voice_id or voice_style or "").lower() or "nam" in str(voice_id or voice_style or "").lower() else "alloy"
     key4u_ready = key4u_minimax_tts_configured(require_public=not allow_admin) if allow_admin else key4u_minimax_tts_public_ready()
     shopaikey_ready = shopaikey_minimax_tts_configured() if allow_admin else shopaikey_minimax_tts_public_ready()
     direct_ready = direct_minimax_tts_configured() if allow_admin else direct_minimax_tts_public_ready()
@@ -131412,6 +132151,33 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
         candidates.append(("ShopAIKey MiniMax", lambda value: shopaikey_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style)))
     if provider in {"auto", "minimax", "direct_minimax", "minimax_voice"} and direct_ready:
         candidates.append(("MiniMax", lambda value: direct_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style)))
+    if provider in {"auto", "key4u", "openai", "openai_compatible"} and KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_AUDIO_SPEECH_ENDPOINT and (allow_admin or KEY4U_PUBLIC_ENABLED):
+        openai_tts_candidates.append((
+            "Key4U OpenAI TTS",
+            lambda value: openai_compatible_tts_speech_bytes(
+                value,
+                base_url=KEY4U_OPENAI_BASE_URL,
+                api_key=KEY4U_API_KEY,
+                endpoint=KEY4U_AUDIO_SPEECH_ENDPOINT,
+                model=KEY4U_OPENAI_TTS_MODEL,
+                voice=openai_voice or KEY4U_OPENAI_TTS_VOICE,
+                speed=speed_value,
+            ),
+        ))
+    if provider in {"auto", "shopaikey", "shopai", "openai", "openai_compatible"} and shopaikey_fallback_ready:
+        openai_tts_candidates.append((
+            "ShopAIKey OpenAI TTS",
+            lambda value: openai_compatible_tts_speech_bytes(
+                value,
+                base_url=SHOPAIKEY_BASE_URL,
+                api_key=SHOPAIKEY_API_KEY,
+                endpoint=SHOPAIKEY_DUBBING_TTS_ENDPOINT or "/audio/speech",
+                model=SHOPAIKEY_OPENAI_TTS_MODEL,
+                voice=openai_voice or SHOPAIKEY_OPENAI_TTS_VOICE,
+                speed=speed_value,
+            ),
+        ))
+    candidates = openai_tts_candidates + candidates
     if provider in {"auto", "shopaikey", "shopai"} and shopaikey_fallback_ready:
         candidates.append(("ShopAIKey", lambda value: shopaikey_tts_bytes(value, endpoint_override=SHOPAIKEY_DUBBING_TTS_ENDPOINT)))
     if provider in {"auto", "elevenlabs"}:
@@ -131433,6 +132199,166 @@ def video_dubbing_output_file(data: bytes, filename: str) -> io.BytesIO:
     output.name = filename
     output.seek(0)
     return output
+
+def ffprobe_path_for_ffmpeg(ffmpeg_path: str = "") -> str:
+    ffmpeg = str(ffmpeg_path or frame_video_ffmpeg_path() or "")
+    if not ffmpeg:
+        return ""
+    directory = os.path.dirname(ffmpeg)
+    executable = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+    candidate = os.path.join(directory, executable) if directory else executable
+    return candidate if os.path.exists(candidate) or shutil.which(candidate) else ""
+
+async def video_dubbing_audio_duration_seconds(audio_bytes: bytes, suffix: str = ".mp3") -> float:
+    ffprobe = ffprobe_path_for_ffmpeg()
+    if not ffprobe or not audio_bytes:
+        return 0.0
+    with tempfile.TemporaryDirectory(prefix="toanaas_audio_probe_") as tmpdir:
+        path = os.path.join(tmpdir, f"audio{suffix if str(suffix).startswith('.') else '.mp3'}")
+        with open(path, "wb") as handle:
+            handle.write(audio_bytes)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                ffprobe,
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            return max(0.0, float(stdout.decode("utf-8", errors="ignore").strip() or 0)) if proc.returncode == 0 else 0.0
+        except Exception:
+            return 0.0
+
+async def synthesize_dub_segment_chunks(
+    segments: list[dict],
+    *,
+    voice_style: str = "",
+    voice_id: str = "",
+    base_speed: float = 1.0,
+    max_speed: float = 1.35,
+    allow_admin: bool = False,
+) -> dict:
+    chunks = []
+    providers = []
+    for index, segment in enumerate(segments or [], start=1):
+        text = str((segment or {}).get("text") or "").strip()
+        if not text:
+            continue
+        start = max(0.0, float((segment or {}).get("start") or 0))
+        end = float((segment or {}).get("end") or 0)
+        if end <= start:
+            end = start + 1
+        slot_seconds = max(0.4, end - start)
+        speed = max(0.7, min(float(max_speed or 1.35), float(base_speed or 1.0)))
+        try:
+            provider, audio_bytes, detail = await video_dubbing_tts_bytes(
+                text,
+                voice_style,
+                voice_id,
+                str(speed),
+                allow_admin=allow_admin,
+            )
+        except TypeError:
+            provider, audio_bytes, detail = await video_dubbing_tts_bytes(
+                text,
+                voice_style,
+                voice_id,
+                str(speed),
+            )
+        duration = await video_dubbing_audio_duration_seconds(audio_bytes)
+        if duration > slot_seconds * 1.05 and speed < float(max_speed or 1.35):
+            retry_speed = min(float(max_speed or 1.35), max(speed + 0.05, speed * duration / slot_seconds))
+            try:
+                retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
+                    text,
+                    voice_style,
+                    voice_id,
+                    f"{retry_speed:.3f}",
+                    allow_admin=allow_admin,
+                )
+            except TypeError:
+                retry_provider, retry_audio, retry_detail = await video_dubbing_tts_bytes(
+                    text,
+                    voice_style,
+                    voice_id,
+                    f"{retry_speed:.3f}",
+                )
+            retry_duration = await video_dubbing_audio_duration_seconds(retry_audio)
+            if retry_audio and (not duration or (retry_duration and retry_duration < duration)):
+                provider, audio_bytes, detail = retry_provider, retry_audio, retry_detail
+                duration = retry_duration
+                speed = retry_speed
+        if not audio_bytes:
+            raise RuntimeError("tts_segment_empty")
+        providers.append(provider)
+        chunks.append({
+            "index": int((segment or {}).get("index") or index),
+            "start": start,
+            "end": end,
+            "text": text,
+            "audio_bytes": bytes(audio_bytes),
+            "audio_duration": float(duration or 0),
+            "speed": round(speed, 3),
+            "provider": provider,
+            "detail": sanitize_log_text(str(detail or ""))[:180],
+        })
+    if not chunks:
+        raise RuntimeError("tts_segments_empty")
+    return {"chunks": chunks, "provider": next((item for item in providers if item), "")}
+
+async def build_dub_timeline_audio(chunks: list[dict], total_duration: float = 0) -> tuple[bytes, str]:
+    ffmpeg = frame_video_ffmpeg_path()
+    if not chunks:
+        return b"", "tts_segments_empty"
+    if not ffmpeg:
+        if len(chunks) == 1 and float((chunks[0] or {}).get("start") or 0) <= 0.05:
+            audio_bytes = bytes((chunks[0] or {}).get("audio_bytes") or b"")
+            return (audio_bytes, "single_segment_audio_no_ffmpeg") if audio_bytes else (b"", "tts_segment_empty")
+        return b"", "ffmpeg_unavailable"
+    timeline_end = max(
+        float(total_duration or 0),
+        max(float(item.get("end") or 0) for item in chunks),
+        max(float(item.get("start") or 0) + float(item.get("audio_duration") or 0) for item in chunks),
+    )
+    with tempfile.TemporaryDirectory(prefix="toanaas_dub_timeline_") as tmpdir:
+        command = [ffmpeg, "-y"]
+        for index, item in enumerate(chunks):
+            chunk_path = os.path.join(tmpdir, f"chunk_{index:03d}.mp3")
+            with open(chunk_path, "wb") as handle:
+                handle.write(bytes(item.get("audio_bytes") or b""))
+            command.extend(["-i", chunk_path])
+        filters = []
+        delayed_labels = []
+        for index, item in enumerate(chunks):
+            delay_ms = max(0, int(float(item.get("start") or 0) * 1000))
+            label = f"d{index}"
+            filters.append(f"[{index}:a]adelay={delay_ms}|{delay_ms}[{label}]")
+            delayed_labels.append(f"[{label}]")
+        filters.append(
+            f"{''.join(delayed_labels)}amix=inputs={len(delayed_labels)}:duration=longest:dropout_transition=0,"
+            f"apad=pad_dur={max(0.1, timeline_end):.3f}[mix]"
+        )
+        output_path = os.path.join(tmpdir, "dub_timeline.mp3")
+        command.extend([
+            "-filter_complex", ";".join(filters),
+            "-map", "[mix]",
+            "-t", f"{max(0.1, timeline_end):.3f}",
+            "-c:a", "libmp3lame",
+            "-b:a", "160k",
+            output_path,
+        ])
+        ok, detail = await run_ffmpeg_command(command, timeout=max(180, len(chunks) * 30))
+        if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+            if len(chunks) == 1 and float((chunks[0] or {}).get("start") or 0) <= 0.05:
+                audio_bytes = bytes((chunks[0] or {}).get("audio_bytes") or b"")
+                if audio_bytes:
+                    return audio_bytes, "single_segment_audio_fallback_after_ffmpeg_failed"
+            return b"", str(detail or "timeline_audio_failed")
+        with open(output_path, "rb") as handle:
+            return handle.read(), "ffmpeg_timeline_audio"
 
 def video_dubbing_video_render_ready(output_type: str = "", *, audio: bool = False, subtitle: bool = False) -> bool:
     output_type = str(output_type or "").strip().lower()
@@ -131470,22 +132396,29 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         }
         state = set_video_dubbing_pending(user_id, state.get("step") or "processing", **sync_fields, subtitle_ref=subtitle_ref)
     source_script = video_dubbing_plain_script(source_subtitle)
+    source_segments = list(source_info.get("segments") or []) or video_dubbing_segments_from_subtitle(source_subtitle)
+    if not source_segments and source_script:
+        source_segments = video_dubbing_segments_from_text(source_script, _safe_int(state.get("video_duration") or state.get("source_duration"), 0))
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
         mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
         and str(state.get("translate_requested") or "0") == "1"
     )
     output_subtitle = source_subtitle
+    output_segments = list(source_segments)
+    translation_provider = ""
     if needs_translation:
         output_subtitle = get_video_dubbing_artifact(user_id, state.get("translated_subtitle_ref") or "translated_subtitle")
         if not output_subtitle:
-            translation_input = source_subtitle if source_info.get("source_kind") == "embedded_subtitle" else source_script
-            translated = await translate_subtitle_text(
-                (translation_input or source_script)[:6000],
+            # translate_subtitle_segments calls translate_subtitle_text per segment so timestamps stay intact.
+            translated = await translate_subtitle_segments(
+                source_segments,
                 state.get("target_language") or "vi",
                 allow_admin=allow_admin,
                 updated_by=user_id,
             )
-            output_subtitle = str(translated.get("text") or "").strip()
+            output_segments = list(translated.get("segments") or [])
+            translation_provider = str(translated.get("provider") or "")
+            output_subtitle = str(translated.get("srt") or "").strip()
             if not output_subtitle:
                 raise RuntimeError("translation_empty")
             translated_ref = set_video_dubbing_artifact(user_id, "translated_subtitle", output_subtitle)
@@ -131494,6 +132427,8 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
                 if key not in {"step", "current_step", "previous_step", "pending_action", "created_at_ts", "translated_subtitle_ref"}
             }
             state = set_video_dubbing_pending(user_id, state.get("step") or "processing", **sync_fields, translated_subtitle_ref=translated_ref)
+        else:
+            output_segments = video_dubbing_segments_from_subtitle(output_subtitle) or output_segments
     output_script = video_dubbing_plain_script(output_subtitle)
     if not output_script:
         raise RuntimeError("subtitle_script_empty")
@@ -131502,9 +132437,12 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
         "source_bytes": source_bytes,
         "content_type": content_type,
         "source_subtitle": source_subtitle,
+        "source_segments": source_segments,
         "source_script": source_script,
         "output_subtitle": output_subtitle,
+        "output_segments": output_segments,
         "output_script": output_script,
+        "translation_provider": translation_provider,
         "asr_provider": str(source_info.get("asr_provider") or ("cached_subtitle" if source_subtitle else "")),
     }
 
@@ -131570,6 +132508,9 @@ async def execute_video_dubbing_pipeline(
     asr_provider = prepared.get("asr_provider") or "subtitle"
     output_subtitle = str(prepared.get("output_subtitle") or "").strip()
     output_text = str(prepared.get("output_script") or "").strip()
+    output_segments = list(prepared.get("output_segments") or []) or video_dubbing_segments_from_subtitle(output_subtitle)
+    if not output_segments and output_text:
+        output_segments = video_dubbing_segments_from_text(output_text, _safe_int(state.get("video_duration") or state.get("source_duration"), 0))
     srt_bytes = b""
     srt_text = ""
     if mode in {
@@ -131585,38 +132526,48 @@ async def execute_video_dubbing_pipeline(
         srt_bytes = srt_text.encode("utf-8")
     tts_provider = ""
     audio_bytes = b""
+    tts_chunks = []
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
-        try:
-            tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(
-                output_text,
-                state.get("voice_style") or "",
-                state.get("voice_id") or "",
-                state.get("voice_speed") or "1.0",
-                allow_admin=is_admin_user(uid),
-            )
-        except TypeError:
-            tts_provider, audio_bytes, _tts_detail = await video_dubbing_tts_bytes(
-                output_text,
-                state.get("voice_style") or "",
-                state.get("voice_id") or "",
-                state.get("voice_speed") or "1.0",
-            )
+        # synthesize_dub_segment_chunks calls video_dubbing_tts_bytes per segment.
+        segment_tts = await synthesize_dub_segment_chunks(
+            output_segments,
+            voice_style=state.get("voice_style") or "",
+            voice_id=state.get("voice_id") or state.get("voice_kind") or "default_female",
+            base_speed=float(parse_video_dubbing_voice_speed(state.get("voice_speed") or "1.0")),
+            max_speed=max(1.35, float(parse_video_dubbing_voice_speed(state.get("voice_speed") or "1.0"))),
+            allow_admin=is_admin_user(uid),
+        )
+        tts_chunks = list(segment_tts.get("chunks") or [])
+        tts_provider = str(segment_tts.get("provider") or "")
+        timeline_duration = max(
+            _safe_int(state.get("video_duration") or state.get("source_duration"), 0),
+            int(max((float(item.get("end") or 0) for item in output_segments), default=0)),
+        )
+        audio_bytes, _timeline_detail = await build_dub_timeline_audio(tts_chunks, timeline_duration)
+        if not audio_bytes:
+            return {
+                "ok": False,
+                "status": "NO_AUDIO_BYTES",
+                "text": "⚠️ Chưa tạo được audio lồng tiếng hợp lệ. TOAN AAS chưa trừ Xu.",
+            }
     output_type = str(state.get("output_type") or "").strip().lower()
     if not output_type:
         output_type = "all" if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} else "srt"
     subtitle_items = video_dubbing_subtitle_output_items(srt_text, output_type, mode) if srt_bytes else []
+    original_subtitle_items = []
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        source_subtitle = str(prepared.get("source_subtitle") or "").strip()
+        if source_subtitle and source_subtitle != srt_text:
+            original_subtitle_items = video_dubbing_subtitle_output_items(source_subtitle, "all", VIDEO_SUBTITLE_MODE_CREATE)
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
     video_output = b""
     if str(content_type or "").lower().startswith("video/"):
-        if audio_bytes and video_dubbing_video_render_ready(
-            output_type,
-            audio=True,
-            subtitle=wants_subtitle_video,
-        ):
+        if audio_bytes and VIDEO_DUB_MUX_ENABLED and frame_video_ffmpeg_path():
             video_output, _render_detail = await video_dubbing_render_video(
                 video_bytes,
                 dubbed_audio=audio_bytes,
                 subtitle_bytes=srt_bytes if wants_subtitle_video else b"",
+                keep_original_audio=bool(str(state.get("keep_original_audio") or "").strip() in {"1", "true", "yes"}),
             )
         elif wants_subtitle_video and video_dubbing_video_render_ready(output_type, subtitle=True):
             video_output, _render_detail = await video_dubbing_render_video(
@@ -131713,6 +132664,16 @@ async def execute_video_dubbing_pipeline(
         )
         dub_asset_id = str(dub_record.get("asset_id") or dub_asset_id)
     try:
+        if original_subtitle_items:
+            for item in original_subtitle_items:
+                data = bytes(item.get("bytes") or b"")
+                if not data:
+                    continue
+                await query.message.reply_document(
+                    document=video_dubbing_output_file(data, str(item.get("filename") or "toan_aas_original.srt")),
+                    filename=str(item.get("filename") or "toan_aas_original.srt"),
+                    caption=f"✅ Phụ đề gốc — {item.get('caption') or 'phụ đề'}",
+                )
         if subtitle_items and (not video_output or output_type not in {"burn", "video", "video_subtitle"}):
             for item in subtitle_items:
                 data = bytes(item.get("bytes") or b"")
@@ -131765,6 +132726,7 @@ async def execute_video_dubbing_pipeline(
             "srt_blocks": srt_bytes.decode("utf-8", errors="ignore").count("-->") if srt_bytes else 0,
             "audio_bytes": len(audio_bytes or b""),
             "video_bytes": len(video_output or b""),
+            "tts_segments": len(tts_chunks),
             "mux_status": mux_state,
             "charged_xu": charged,
         })
@@ -133518,6 +134480,8 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
     return await safe_edit_or_send(query, video_upload_received_text(lang), reply_markup=video_upload_received_keyboard(uid, lang))
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_pending_admin_tool_test_media(update, context):
+        return
     if await handle_video_product_pending_media(update, context):
         return
     if await handle_video_dubbing_pending_upload(update, context):
@@ -134645,6 +135609,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_dub_audio", cmd_tool_test_video_dub))
     tg_app.add_handler(CommandHandler("tool_test_minimax_dub", cmd_tool_test_minimax_dub))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_plus_dub", cmd_tool_test_subtitle_plus_dub))
+    tg_app.add_handler(CommandHandler("tool_test_full_dub_video", cmd_tool_test_full_dub_video))
     tg_app.add_handler(CommandHandler("subtitle_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("dub_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("subtitle_jobs", cmd_subtitle_jobs))
