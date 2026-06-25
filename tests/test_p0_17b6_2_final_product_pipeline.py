@@ -114,10 +114,11 @@ def test_subtitle_plus_dub_stepwise_only():
         "active_flow": "subtitle_plus_dub",
     }
     next_state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
-    assert next_state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
+    assert next_state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert next_state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    assert "Tạo phụ đề gốc trước" in text
-    assert _callbacks(markup)[0] == "videodub|final"
+    assert next_state["step"] == "waiting_media"
+    assert "Tạo phụ đề gốc" in text
+    assert "videodub|final" not in _callbacks(markup)
     bot.clear_video_dubbing_pending(uid)
 
 

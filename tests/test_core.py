@@ -7825,9 +7825,27 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
     monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
+        mode = bot.normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
+        if mode == bot.VIDEO_SUBTITLE_MODE_CREATE:
+            source = "1\n00:00:00,000 --> 00:00:02,000\nXin chào"
+            subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+            state = bot.set_video_dubbing_pending(
+                user_id,
+                state.get("step") or "output",
+                subtitle_ref=subtitle_ref,
+            )
+            return {
+                "state": state,
+                "source_subtitle": source,
+                "output_subtitle": source,
+                "output_script": "Xin chào",
+                "source_segments": [{"start": 0, "end": 2, "text": "Xin chào"}],
+                "detected_language": "vi",
+            }
         translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
         state = bot.set_video_dubbing_pending(user_id, state.get("step") or "output", translated_subtitle_ref=translated_ref)
         return {"state": state, "output_subtitle": "Translated subtitle", "output_script": "Translated subtitle"}
@@ -7845,10 +7863,17 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         result = asyncio.run(press(f"videodub|type|{mode}", uid))
         state = bot.get_video_dubbing_pending(uid)
         assert state["video_processing_mode"] == mode
-        assert state["step"] == "source"
-        assert "gửi video/audio" in result["text"].lower()
+        if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            assert state["step"] == "waiting_media"
+            assert "gửi video hoặc audio" in result["text"].lower()
+        else:
+            assert state["step"] == "source"
+            assert "gửi video/audio" in result["text"].lower()
         callbacks = [button.callback_data for row in result["reply_markup"].inline_keyboard for button in row]
         assert "videodub|link_start" not in callbacks
+        if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            assert "videodub|source_upload" not in callbacks
+            continue
         result = asyncio.run(press("videodub|source_upload", uid))
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == "await_video"
@@ -7870,22 +7895,20 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     message = FakeMessage("video-71004")
     update = SimpleNamespace(effective_user=SimpleNamespace(id=71004), message=message)
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(update, SimpleNamespace())) is True
-    assert bot.get_video_dubbing_pending(71004)["step"] == "output"
-    assert bot.get_video_dubbing_pending(71004)["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
-    asyncio.run(press("videodub|result_translate_dub", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] == "language"
+    assert bot.get_video_dubbing_pending(71004)["step"] == "original_subtitle_ready"
+    assert bot.get_video_dubbing_pending(71004)["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    asyncio.run(press("videodub|combo_translate", 71004))
+    assert bot.get_video_dubbing_pending(71004)["step"] == "choosing_translation_language"
     asyncio.run(press("videodub|language|English", 71004))
     plus_state = bot.get_video_dubbing_pending(71004)
-    assert plus_state["step"] == "output"
+    assert plus_state["step"] == "translated_subtitle_ready"
     assert plus_state["target_language"] == "English"
     translated_ref = bot.set_video_dubbing_artifact(71004, "translated_subtitle", "1\n00:00:00,000 --> 00:00:02,000\nHello")
-    bot.set_video_dubbing_pending(71004, "output", translated_subtitle_ref=translated_ref)
-    asyncio.run(press("videodub|continue_dubbing", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] == "voice"
+    bot.set_video_dubbing_pending(71004, "translated_subtitle_ready", translated_subtitle_ref=translated_ref)
+    asyncio.run(press("videodub|combo_dub_translated", 71004))
+    assert bot.get_video_dubbing_pending(71004)["step"] == "choosing_voice"
     asyncio.run(press("videodub|voice|default_female", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] == "voice_speed"
-    asyncio.run(press("videodub|speed_default", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] == "confirm"
+    assert bot.get_video_dubbing_pending(71004)["step"] == "dub_confirmation"
 
     upload_cases = [
         (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|final", "Video đã sẵn sàng tạo phụ đề"),
@@ -7909,9 +7932,9 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
             71104,
             bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             {"target_language": "English", "translate_requested": "1"},
-            "output",
-            "videodub|final",
-            "Tạo phụ đề gốc trước",
+            "original_subtitle_ready",
+            "videodub|combo_translate",
+            "Đã tạo phụ đề gốc",
         ),
     ]
     for uid, mode, extra, expected_step, expected_callback, expected_label in upload_cases:
@@ -7927,8 +7950,9 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == expected_step
         if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            assert state["video_processing_mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
+            assert state["video_processing_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
             assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+            assert state["active_flow"] == bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
         else:
             assert state["video_processing_mode"] == mode
         assert expected_label in message.sent[-1]["text"]
