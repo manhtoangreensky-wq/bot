@@ -30248,6 +30248,8 @@ def get_last_user_file(user_id) -> dict:
 LAST_MEDIA_CACHE_TTL_SECONDS = 120
 LAST_MEDIA_BY_USER: dict = {}
 LAST_AUDIO_FILE = LAST_MEDIA_BY_USER
+ADMIN_TOOL_TEST_PENDING_TTL_SECONDS = 120
+PENDING_ADMIN_TOOL_TEST: dict[int, dict] = {}
 MEDIA_FACTORY_STATE_TTL_SECONDS = 10 * 60
 LAST_USER_AUDIO: dict[int, dict] = {}
 LAST_USER_VIDEO: dict[int, dict] = {}
@@ -30368,6 +30370,41 @@ def remember_last_media(update: Update):
         }
     except Exception as e:
         logger.warning(f"last media cache write failed: {e}")
+
+def set_pending_admin_tool_test(user_id, tool: str, command: str = "") -> dict:
+    uid = int(user_id or 0)
+    state = {
+        "tool": str(tool or "").strip().lower(),
+        "command": str(command or "").strip()[:80],
+        "confirm_paid": True,
+        "created_at": time.time(),
+        "expires_at": time.time() + ADMIN_TOOL_TEST_PENDING_TTL_SECONDS,
+    }
+    if uid:
+        PENDING_ADMIN_TOOL_TEST[uid] = state
+    return state
+
+def get_pending_admin_tool_test(user_id) -> dict:
+    uid = int(user_id or 0)
+    state = dict(PENDING_ADMIN_TOOL_TEST.get(uid) or {})
+    if not state:
+        return {}
+    if float(state.get("expires_at") or 0) < time.time():
+        PENDING_ADMIN_TOOL_TEST.pop(uid, None)
+        return {}
+    return state
+
+def clear_pending_admin_tool_test(user_id) -> bool:
+    return PENDING_ADMIN_TOOL_TEST.pop(int(user_id or 0), None) is not None
+
+def admin_tool_test_context_with_confirm(context: ContextTypes.DEFAULT_TYPE):
+    return SimpleNamespace(
+        args=[ADMIN_PAID_CONFIRM_FLAG],
+        bot=getattr(context, "bot", None),
+        application=getattr(context, "application", None),
+        user_data=getattr(context, "user_data", None),
+        chat_data=getattr(context, "chat_data", None),
+    )
 
 async def resolve_stt_test_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict | None:
     reply = update.message.reply_to_message if update.message else None
@@ -43505,6 +43542,22 @@ def shopaikey_stt_public_ready() -> bool:
 def video_dubbing_audio_extract_ready() -> bool:
     return bool(frame_video_ffmpeg_path())
 
+def asr_smoke_status() -> str:
+    return str(
+        preferred_tool_test_result(
+            "asr",
+            "stt",
+            "key4u_stt",
+            "shopaikey_stt",
+            "asr_shopaikey",
+            "stt_shopaikey",
+        ).get("status")
+        or "NOT_TESTED"
+    ).upper()
+
+def asr_smoke_ready() -> bool:
+    return provider_status_is_pass(asr_smoke_status())
+
 def get_asr_adapter_readiness(public: bool = True) -> dict:
     provider = str(ASR_PROVIDER or "auto").strip().lower()
     if provider in {"shopai"}:
@@ -43512,24 +43565,23 @@ def get_asr_adapter_readiness(public: bool = True) -> dict:
     allowed = {"auto", "key4u", "deepgram", "shopaikey"}
     if provider not in allowed:
         provider = "auto"
-    key4u_ready = key4u_asr_public_ready() if public else key4u_asr_configured()
-    deepgram_ready = bool(DEEPGRAM_API_KEY and globals().get("AgentDeepgram"))
-    shopaikey_ready = shopaikey_stt_public_ready() if public else bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
+    smoke_status = asr_smoke_status()
+    smoke_ready = provider_status_is_pass(smoke_status)
+    key4u_configured = bool(key4u_asr_configured())
+    deepgram_configured = bool(DEEPGRAM_API_KEY and globals().get("AgentDeepgram"))
+    shopaikey_configured = bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT)
     candidates = {
         "key4u": {
-            "ready": bool(key4u_ready),
-            "configured": bool(key4u_asr_configured()),
-            "reason": "ready" if key4u_ready else "key4u_asr_not_ready",
+            "configured": key4u_configured,
+            "reason": "configured" if key4u_configured else "key4u_asr_not_configured",
         },
         "deepgram": {
-            "ready": bool(deepgram_ready),
-            "configured": bool(DEEPGRAM_API_KEY and globals().get("AgentDeepgram")),
-            "reason": "ready" if deepgram_ready else "deepgram_not_configured",
+            "configured": deepgram_configured,
+            "reason": "configured" if deepgram_configured else "deepgram_not_configured",
         },
         "shopaikey": {
-            "ready": bool(shopaikey_ready),
-            "configured": bool(SHOPAIKEY_API_KEY and SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT),
-            "reason": "ready" if shopaikey_ready else "shopaikey_stt_not_ready",
+            "configured": shopaikey_configured,
+            "reason": "configured" if shopaikey_configured else "shopaikey_stt_not_configured",
         },
     }
     order_map = {
@@ -43539,33 +43591,35 @@ def get_asr_adapter_readiness(public: bool = True) -> dict:
         "auto": ["key4u", "deepgram", "shopaikey"],
     }
     order = order_map.get(provider, order_map["auto"])
-    selected_ready = "none"
-    for name in order:
-        if candidates[name]["ready"]:
-            selected_ready = name
-            break
     selected_configured = "none"
     for name in order:
         if candidates[name]["configured"]:
             selected_configured = name
             break
-    selected = selected_ready if selected_ready != "none" else selected_configured
+    selected = selected_configured
     configured_names = [name for name, item in candidates.items() if item["configured"]]
-    enabled = bool(VIDEO_ASR_ENABLED)
-    ready = bool(enabled and selected_ready != "none")
+    enabled = bool(VIDEO_ASR_ENABLED or smoke_ready)
+    configured = bool(configured_names)
+    public_ready = bool(configured and smoke_ready and enabled)
+    ready = public_ready if public else configured
     audio_extract_ready = video_dubbing_audio_extract_ready()
     reason = "ready" if ready else (
-        "VIDEO_ASR_ENABLED disabled"
-        if not enabled
-        else "asr_adapter_missing"
-        if not configured_names
-        else "; ".join(candidates[name]["reason"] for name in order if candidates[name]["configured"] and not candidates[name]["ready"]) or "asr_adapter_missing"
+        "asr_adapter_missing"
+        if not configured
+        else "asr_smoke_failed"
+        if smoke_status not in {"", "NOT_TESTED", "MISSING"}
+        else "asr_smoke_required"
+        if not smoke_ready
+        else "VIDEO_ASR_ENABLED disabled"
     )
     return {
         "ready": ready,
         "adapter": selected,
-        "configured": bool(configured_names),
+        "configured": configured,
         "configured_adapters": configured_names,
+        "smoke_status": smoke_status,
+        "smoke_ready": smoke_ready,
+        "public_ready": public_ready,
         "reason": reason,
         "supports_audio": bool(selected != "none"),
         "supports_video": bool(selected != "none" and audio_extract_ready),
@@ -62746,26 +62800,31 @@ def subtitle_engine_status_lines() -> list[str]:
             f"| reason <code>{_engine_safe(item.get('reason'))}</code>"
         )
     any_public_ready = any("PUBLIC_READY" in row for row in mode_rows)
-    admin_asr_test_ready = bool(video_asr_provider_available_for(public=False))
+    admin_asr_test_ready = bool(asr_readiness.get("configured"))
     admin_dub_audio_test_ready = bool(video_tts_provider_available_for(public=False))
-    public_mode_enabled = any(video_dubbing_public_flag(mode) for mode in (
-        VIDEO_SUBTITLE_MODE_CREATE,
-        VIDEO_SUBTITLE_MODE_TRANSLATE,
-        VIDEO_SUBTITLE_MODE_DUB,
-        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-    ))
+    public_mode_enabled = bool(
+        video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_CREATE)
+        or video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_DUB)
+        or any(video_dubbing_public_flag(mode) for mode in (
+            VIDEO_SUBTITLE_MODE_TRANSLATE,
+            VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        ))
+    )
     partial_result_possible = bool(admin_asr_test_ready or admin_dub_audio_test_ready)
     return [
         "SUBTITLE ENGINE STATUS",
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
         f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
-        f"ASR adapter readiness: <code>{'READY' if asr_readiness.get('ready') else 'MISSING'}</code>",
+        f"ASR configured: <code>{_engine_yes_no(asr_readiness.get('configured'))}</code>",
         f"Detected ASR adapter: <code>{_engine_safe(asr_readiness.get('adapter'))}</code>",
-        f"ASR audio/video support: <code>audio={_engine_yes_no(asr_readiness.get('supports_audio'))}; video={_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"ASR smoke: <code>{_engine_safe(asr_readiness.get('smoke_status'))}</code>",
+        f"ASR audio support: <code>{_engine_yes_no(asr_readiness.get('supports_audio'))}</code>",
+        f"ASR video support: <code>{_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"Public ASR ready: <code>{_engine_yes_no(asr_readiness.get('public_ready'))}</code>",
         f"Video audio extraction: <code>{_engine_yes_no(asr_readiness.get('audio_extract_ready'))}</code>",
-        f"Auto subtitle from video/audio: <code>{'READY' if asr_readiness.get('ready') and asr_readiness.get('supports_audio') else 'GUARDED'}</code>",
-        f"Translated subtitle from video/audio: <code>{'READY' if asr_readiness.get('ready') and video_translation_provider_available() else 'GUARDED'}</code>",
+        f"Auto subtitle from video/audio: <code>{'READY' if video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_CREATE) else 'GUARDED'}</code>",
+        f"Translated subtitle from video/audio: <code>{'READY' if video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_TRANSLATE) else 'GUARDED'}</code>",
         f"Subtitle from file readiness: <code>READY</code>",
         f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
         f"Translation route: <code>{_engine_safe(pipeline.get('translation_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('translation_test'))}</code>",
@@ -62839,11 +62898,14 @@ def dub_engine_status_lines() -> list[str]:
         "",
         "Scope: admin-only readiness. No provider call, no paid job, no Xu charge.",
         f"Product path executor: <code>{ENGINE_PRODUCT_PATH_EXECUTOR}</code>",
-        f"ASR adapter readiness: <code>{'READY' if asr_readiness.get('ready') else 'MISSING'}</code>",
+        f"ASR configured: <code>{_engine_yes_no(asr_readiness.get('configured'))}</code>",
         f"Detected ASR adapter: <code>{_engine_safe(asr_readiness.get('adapter'))}</code>",
-        f"ASR audio/video support: <code>audio={_engine_yes_no(asr_readiness.get('supports_audio'))}; video={_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"ASR smoke: <code>{_engine_safe(asr_readiness.get('smoke_status'))}</code>",
+        f"ASR audio support: <code>{_engine_yes_no(asr_readiness.get('supports_audio'))}</code>",
+        f"ASR video support: <code>{_engine_yes_no(asr_readiness.get('supports_video'))}</code>",
+        f"Public ASR ready: <code>{_engine_yes_no(asr_readiness.get('public_ready'))}</code>",
         f"Video audio extraction: <code>{_engine_yes_no(asr_readiness.get('audio_extract_ready'))}</code>",
-        f"Dub from video/audio: <code>{'READY' if asr_readiness.get('ready') and video_tts_provider_available_for(public=True) else 'GUARDED'}</code>",
+        f"Dub from video/audio: <code>{'READY' if video_dubbing_public_processing_ready(VIDEO_SUBTITLE_MODE_DUB) else 'GUARDED'}</code>",
         f"Subtitle from file readiness: <code>READY</code>",
         f"ASR route: <code>{_engine_safe(pipeline.get('asr_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('asr_test'))}</code>",
         f"TTS/dub route: <code>{_engine_safe(pipeline.get('tts_provider'))}</code> | smoke <code>{_engine_safe(pipeline.get('tts_test'))}</code>",
@@ -73742,61 +73804,78 @@ async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_tool_test_stt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    command_name = extract_command_name(update) or "tool_test_stt"
+    display_name = "/tool_test_asr" if command_name == "tool_test_asr" else "/tool_test_stt"
     if not has_admin_paid_confirmation(context):
         save_tool_test_result("stt", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", update.effective_user.id)
         save_tool_test_result("asr", "NO_CONFIRM", f"missing {ADMIN_PAID_CONFIRM_FLAG}; no provider call", update.effective_user.id)
-        return await update.message.reply_text(admin_paid_confirm_required_text("/tool_test_asr"), parse_mode="HTML")
-    if not DEEPGRAM_API_KEY:
-        save_tool_test_result("stt", "MISSING", "DEEPGRAM_API_KEY missing", update.effective_user.id)
-        save_tool_test_result("asr", "MISSING", "DEEPGRAM_API_KEY missing", update.effective_user.id)
-        return await update.message.reply_text("🎤 <b>STT Smoke Test</b>\n\n• Deepgram: <code>MISSING</code>", parse_mode="HTML")
-    media_info = await resolve_stt_test_media(update, context)
-    if not media_info:
+        return await update.message.reply_text(admin_paid_confirm_required_text(display_name), parse_mode="HTML")
+    readiness = get_asr_adapter_readiness(public=False)
+    if not readiness.get("configured"):
+        save_tool_test_result("stt", "MISSING", "asr adapter not configured", update.effective_user.id)
+        save_tool_test_result("asr", "MISSING", "asr adapter not configured", update.effective_user.id)
         return await update.message.reply_text(
-            "⚠️ Gửi voice/audio/video ngắn rồi reply <code>/tool_test_stt</code>, "
-            "hoặc gửi file xong gõ <code>/tool_test_stt</code> trong vòng 2 phút.",
+            "🎤 <b>ASR Smoke Test</b>\n\n• ASR configured: <code>NO</code>\n• Không gọi provider và không trừ Xu.",
             parse_mode="HTML",
         )
+    media_info = await resolve_stt_test_media(update, context)
+    if not media_info:
+        set_pending_admin_tool_test(update.effective_user.id, "asr", display_name)
+        return await update.message.reply_text(
+            "Gửi hoặc reply voice/audio/video ngắn để test ASR.",
+            parse_mode="HTML",
+        )
+    clear_pending_admin_tool_test(update.effective_user.id)
     file_size = int(media_info.get("file_size", 0) or 0)
     if file_size > 15 * 1024 * 1024:
         save_tool_test_result("stt", "FAIL", f"file_too_large={file_size}", update.effective_user.id)
         return await update.message.reply_text("⚠️ File quá lớn để smoke test. Hãy dùng audio ngắn dưới 15MB.")
     try:
-        file_bytes = media_info["bytes"]
         content_type = media_info.get("content_type") or "application/octet-stream"
-        transcript = (await AgentDeepgram.transcribe(file_bytes, context, content_type=content_type) or "").strip()
-        passed = bool(transcript and not transcript.startswith("❌"))
+        file_type = str(media_info.get("file_type") or "").lower()
+        media_kind = "video" if content_type.startswith("video/") or file_type == "video" else "audio"
+        result = await transcribe_media_to_segments(
+            {
+                **media_info,
+                "media_kind": media_kind,
+                "duration_seconds": int(media_info.get("duration") or 0),
+            },
+            context=context,
+            allow_admin=True,
+            updated_by=update.effective_user.id,
+        )
+        transcript = str(result.get("transcript_text") or "").strip()
+        passed = bool(result.get("output_valid") and transcript)
         status = "PASS" if passed else "FAIL"
-        detail = transcript if transcript else "empty_transcript"
-        save_tool_test_result("stt", status, f"source={media_info.get('source')}; type={media_info.get('file_type')}; mime={content_type}; provider=deepgram; cost_level=low; {detail[:450]}", update.effective_user.id)
-        save_tool_test_result("asr", status, f"provider=deepgram; source={media_info.get('source')}; chars={len(transcript)}", update.effective_user.id)
+        provider = str(result.get("provider") or readiness.get("adapter") or "asr")
+        result_status = str(result.get("status") or ("pass" if passed else "failed"))
+        safe_detail = sanitize_log_text(str(result.get("detail") or result_status))[:240]
+        save_tool_test_result("stt", status, f"source={media_info.get('source')}; type={media_info.get('file_type')}; provider={provider}; chars={len(transcript)}; status={result_status}; {safe_detail}", update.effective_user.id)
+        save_tool_test_result("asr", status, f"provider={provider}; source={media_info.get('source')}; chars={len(transcript)}; status={result_status}", update.effective_user.id)
         if passed:
             await update.message.reply_text(
-                "🎙 <b>STT PASS</b>\n\n"
-                "• Provider: <code>Deepgram</code>\n"
+                "🎙 <b>ASR PASS</b>\n\n"
+                f"• Provider: <code>{html.escape(provider[:80])}</code>\n"
                 f"• Source: <code>{html.escape(str(media_info.get('source') or '-'))}</code>\n"
                 f"• Transcript:\n<code>{html.escape(transcript[:900])}</code>",
                 parse_mode="HTML",
             )
         else:
-            if detail.startswith("❌ Deepgram không nhận được"):
-                text = "🎤 <b>STT Smoke Test</b>\n\n" + html.escape(detail[:900])
-            else:
-                text = (
-                    "❌ <b>STT không nhận được transcript.</b>\n\n"
-                    "• Provider: <code>Deepgram</code>\n"
-                    "• Có thể file không có tiếng nói rõ, âm lượng nhỏ, hoặc định dạng chưa phù hợp.\n"
-                    "• Hãy thử voice/audio 10-20 giây có giọng nói rõ.\n"
-                    f"• Error: <code>{html.escape(detail[:240])}</code>"
-                )
+            text = (
+                "❌ <b>ASR không nhận được transcript hợp lệ.</b>\n\n"
+                f"• Status: <code>{html.escape(result_status[:80])}</code>\n"
+                "• Hãy thử voice/audio/video ngắn có giọng nói rõ.\n"
+                "• Không trừ Xu và không bật public readiness."
+            )
             await update.message.reply_text(text, parse_mode="HTML")
     except Exception as e:
-        save_tool_test_result("stt", "FAIL", str(e)[:500], update.effective_user.id)
+        save_tool_test_result("stt", "FAIL", f"error_class={type(e).__name__}", update.effective_user.id)
         save_tool_test_result("asr", "FAIL", f"error_class={type(e).__name__}", update.effective_user.id)
         await update.message.reply_text(
-            "🎤 <b>STT Smoke Test</b>\n\n"
-            "• Deepgram: <code>FAIL</code>\n"
-            f"• Error: <code>{html.escape(str(e)[:240])}</code>",
+            "🎤 <b>ASR Smoke Test</b>\n\n"
+            "• Status: <code>FAIL</code>\n"
+            f"• Error class: <code>{html.escape(type(e).__name__)}</code>\n"
+            "• Không trừ Xu và không bật public readiness.",
             parse_mode="HTML",
         )
 
@@ -73820,13 +73899,16 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
     media_info = await resolve_stt_test_media(update, context)
     text_input = " ".join(args_without_admin_paid_confirmation(context.args or [])).strip()
     if mode != VIDEO_SUBTITLE_MODE_DUB and not media_info:
+        set_pending_admin_tool_test(uid, "auto_subtitle", "/tool_test_auto_subtitle")
         return await update.message.reply_text(
-            "⚠️ Reply một video/audio ngắn rồi chạy lại lệnh. Smoke test chưa gọi API và không trừ Xu."
+            "Gửi hoặc reply voice/audio/video ngắn để test tạo phụ đề tự động."
         )
     if mode == VIDEO_SUBTITLE_MODE_DUB and not media_info and not text_input:
+        set_pending_admin_tool_test(uid, "dub_audio", "/tool_test_dub_audio")
         return await update.message.reply_text(
-            "⚠️ Reply video/audio ngắn hoặc thêm đoạn text sau lệnh để test lồng tiếng. Không trừ Xu."
+            "Gửi hoặc reply voice/audio/video ngắn để test lồng tiếng."
         )
+    clear_pending_admin_tool_test(uid)
     await update.message.reply_text("⏳ TOAN AAS đang kiểm tra pipeline admin. Vui lòng chờ và không gửi lại lệnh.")
     transcript = text_input
     asr_status = "NOT_USED" if transcript else "NOT_TESTED"
@@ -73841,14 +73923,24 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
                 return await update.message.reply_text(
                     f"⚠️ File vượt giới hạn smoke {VIDEO_PROCESSING_MAX_INPUT_MB}MB. Không gọi API và không trừ Xu."
                 )
-            asr_provider, transcript, asr_detail = await video_dubbing_transcribe_bytes(
-                media_info.get("bytes") or b"",
-                context,
-                content_type=media_info.get("content_type") or "application/octet-stream",
+            content_type = media_info.get("content_type") or "application/octet-stream"
+            file_type = str(media_info.get("file_type") or "").lower()
+            media_kind = "video" if content_type.startswith("video/") or file_type == "video" else "audio"
+            asr_result = await transcribe_media_to_segments(
+                {
+                    **media_info,
+                    "media_kind": media_kind,
+                    "duration_seconds": int(media_info.get("duration") or 0),
+                },
+                context=context,
                 allow_admin=True,
                 updated_by=uid,
             )
-            if not transcript or transcript.startswith("❌"):
+            transcript = str(asr_result.get("transcript_text") or "").strip()
+            asr_provider = str(asr_result.get("provider") or "")
+            asr_detail = sanitize_log_text(str(asr_result.get("detail") or asr_result.get("status") or ""))[:240]
+            if not asr_result.get("output_valid") or not transcript:
+                save_tool_test_result("asr", "FAIL", f"status={asr_result.get('status') or 'invalid_output'}; {asr_detail}", uid)
                 raise RuntimeError("asr_empty_or_failed")
             asr_status = "PASS"
             save_tool_test_result("asr", "PASS", f"provider={asr_provider}; chars={len(transcript)}; {asr_detail}", uid)
@@ -73928,29 +74020,31 @@ async def _run_admin_video_pipeline_smoke_core(update: Update, context: ContextT
         )
 
 async def run_admin_video_pipeline_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
-    uid = update.effective_user.id if update.effective_user else 0
     smoke_no_charge_note = "No Xu deducted"
     if not has_admin_paid_confirmation(context):
-        # no provider call: keep the core guard so smoke still records NO_CONFIRM.
+        # no provider call: the core guard records NO_CONFIRM and returns before media/provider work.
         return await _run_admin_video_pipeline_smoke_core(update, context, mode)
+    uid = update.effective_user.id if update.effective_user else 0
     feature = video_dubbing_product_area_for_mode(mode)
+
     async def _run_smoke_pipeline():
         return await _run_admin_video_pipeline_smoke_core(update, context, mode)
+
     engine_result = await execute_engine(
         feature,
-        {"runner": _run_smoke_pipeline, "mode": normalize_video_translate_mode(mode), "state": {}},
+        {
+            "runner": _run_smoke_pipeline,
+            "mode": normalize_video_translate_mode(mode),
+            "state": {"admin_real_test": True},
+        },
         {
             "user_id": uid,
             "entry_source": ENGINE_ENTRY_SOURCE_SLASH_SMOKE,
             "confirm_paid": True,
             "is_paid_job": True,
+            "gate_prechecked": True,
         },
     )
-    if not engine_result.get("ok") and not engine_result.get("runner_result"):
-        return await update.message.reply_text(
-            engine_result.get("message") or admin_product_engine_missing_text(feature, (engine_result.get("gate") or {}).get("readiness")),
-            parse_mode="HTML",
-        )
     return engine_result.get("runner_result")
 
 async def cmd_tool_test_video_subtitle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -98395,17 +98489,6 @@ def video_dubbing_public_processing_ready(mode: str, state: dict | None = None) 
     state = dict(state or {})
     if not mode or not video_dubbing_capability(mode, state, public=True).get("ok"):
         return False
-    worker = local_worker_status_payload()
-    ffmpeg_ready = bool(
-        frame_video_worker_connected()
-        and (worker.get("ffmpeg_path_configured") or worker.get("ffmpeg_path"))
-        and provider_status_base(str(worker.get("ffmpeg_test_status") or "")) == "PASS"
-    )
-    pipeline_smoke_ready = (
-        provider_status_base(preferred_tool_test_status_text(_subtitle_dub_required_smoke(mode))) == "PASS"
-    )
-    if not ffmpeg_ready or not pipeline_smoke_ready:
-        return False
     if not video_dubbing_asr_ready_for_state(mode, state, public=True):
         return False
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
@@ -98416,11 +98499,7 @@ def video_dubbing_public_processing_ready(mode: str, state: dict | None = None) 
         return False
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not is_dub_ready():
         return False
-    if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE}:
-        return bool(is_subtitle_burn_ready())
-    if mode == VIDEO_SUBTITLE_MODE_DUB:
-        return bool(is_voice_mux_ready())
-    return bool(is_subtitle_burn_ready() and is_voice_mux_ready())
+    return True
 
 def video_dubbing_product_area_for_mode(mode: str) -> str:
     mode = normalize_video_translate_mode(mode)
@@ -129381,7 +129460,37 @@ async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAU
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🌐 Dịch file", callback_data="tr_pick|file")]]),
     )
 
+async def handle_pending_admin_tool_test_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message:
+        return False
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return False
+    pending = get_pending_admin_tool_test(uid)
+    if not pending or not pending.get("confirm_paid"):
+        return False
+    media, _file_type = message_media_candidate(update.message)
+    if not media:
+        return False
+    cache_recent_media_state(update)
+    remember_last_media(update)
+    clear_pending_admin_tool_test(uid)
+    confirmed_context = admin_tool_test_context_with_confirm(context)
+    tool = str(pending.get("tool") or "")
+    if tool == "asr":
+        await cmd_tool_test_asr(update, confirmed_context)
+        return True
+    if tool == "auto_subtitle":
+        await cmd_tool_test_subtitle_generate(update, confirmed_context)
+        return True
+    if tool == "dub_audio":
+        await cmd_tool_test_video_dub(update, confirmed_context)
+        return True
+    return False
+
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_pending_admin_tool_test_media(update, context):
+        return
     if await handle_video_dubbing_pending_upload(update, context):
         return
     if await handle_translation_session_media(update, context):
@@ -130584,6 +130693,21 @@ def video_dubbing_public_flag(mode: str) -> bool:
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED,
     }.get(normalize_video_translate_mode(mode), False)
 
+def video_dubbing_effective_mode_enabled(mode: str, public: bool = True) -> bool:
+    mode = normalize_video_translate_mode(mode)
+    configured_flag = video_dubbing_public_flag(mode) if public else video_dubbing_mode_flag(mode)
+    if configured_flag:
+        return True
+    if mode == VIDEO_SUBTITLE_MODE_CREATE:
+        return bool(get_asr_adapter_readiness(public=True).get("public_ready"))
+    if mode == VIDEO_SUBTITLE_MODE_DUB:
+        return bool(
+            get_asr_adapter_readiness(public=True).get("public_ready")
+            and VIDEO_DUB_TTS_ENABLED
+            and video_tts_provider_available_for(public=True)
+        )
+    return False
+
 def video_translation_provider_available() -> bool:
     return bool(key4u_subtitle_translation_public_ready() or shopaikey_subtitle_translation_public_ready())
 
@@ -130641,9 +130765,9 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
     if not mode:
         return {"ok": False, "reason": "invalid_mode", "missing": ["mode"]}
     admin_real_test = bool(not public and _state_requests_admin_real_test(state))
-    if not video_dubbing_mode_flag(mode) and not admin_real_test:
+    if not video_dubbing_effective_mode_enabled(mode, public=False) and not admin_real_test:
         return {"ok": False, "reason": "mode_disabled", "missing": ["mode_disabled"]}
-    if public and not video_dubbing_public_flag(mode):
+    if public and not video_dubbing_effective_mode_enabled(mode, public=True):
         return {"ok": False, "reason": "public_disabled", "missing": ["public_flag"]}
     missing = []
     if not video_dubbing_asr_ready_for_state(mode, state, public=public):
@@ -130714,8 +130838,11 @@ def video_pipeline_status_payload() -> dict:
     asr_readiness = get_asr_adapter_readiness(public=True)
     return {
         "asr_provider": str(asr_readiness.get("adapter") or "missing"),
-        "asr_test": preferred_tool_test_status_text("key4u_stt", "asr", "shopaikey_stt", "stt"),
-        "asr_readiness": "READY" if asr_readiness.get("ready") else "MISSING",
+        "asr_test": str(asr_readiness.get("smoke_status") or "NOT_TESTED"),
+        "asr_readiness": "READY" if asr_readiness.get("public_ready") else ("CONFIGURED" if asr_readiness.get("configured") else "MISSING"),
+        "asr_configured": bool(asr_readiness.get("configured")),
+        "asr_smoke_ready": bool(asr_readiness.get("smoke_ready")),
+        "asr_public_ready": bool(asr_readiness.get("public_ready")),
         "asr_supports_audio": bool(asr_readiness.get("supports_audio")),
         "asr_supports_video": bool(asr_readiness.get("supports_video")),
         "translation_provider": active_translation_provider_label(),
@@ -133518,6 +133645,8 @@ async def handle_video_upload_callback(update: Update, context: ContextTypes.DEF
     return await safe_edit_or_send(query, video_upload_received_text(lang), reply_markup=video_upload_received_keyboard(uid, lang))
 
 async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await handle_pending_admin_tool_test_media(update, context):
+        return
     if await handle_video_product_pending_media(update, context):
         return
     if await handle_video_dubbing_pending_upload(update, context):
