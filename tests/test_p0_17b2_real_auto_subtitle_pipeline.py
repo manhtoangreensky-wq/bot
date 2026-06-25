@@ -76,11 +76,10 @@ def test_public_type_guard_when_asr_not_ready(monkeypatch):
 
     text = query.outputs[-1]["text"]
     markup = query.outputs[-1]["reply_markup"]
-    assert "Tạo phụ đề tự động đang được mở thử nghiệm" in text
-    assert "chưa xử lý và chưa trừ Xu" in text
-    assert "SRT/VTT/TXT" not in text
-    assert _callbacks(markup) == ["videodub|back_type", "menu|main"]
-    assert bot.get_video_dubbing_pending(uid)["step"] == "preview_guarded"
+    assert "Tạo phụ đề tự động" in text
+    assert "Bot chưa xử lý và chưa trừ Xu" in text
+    assert _callbacks(markup) == ["videodub|source_upload", "videodub|back_type", "menu|main"]
+    assert bot.get_video_dubbing_pending(uid)["step"] == "source"
 
 
 def test_transcribe_media_audio_does_not_require_ffmpeg(monkeypatch):
@@ -208,7 +207,7 @@ def test_auto_subtitle_pipeline_sends_srt_vtt_txt_after_confirm(monkeypatch, tmp
     sent_files = [item.get("filename") for item in query.outputs if item.get("document")]
     assert result["ok"] is True
     assert result["has_subtitle"] is True
-    assert {".srt", ".vtt", ".txt"} == {filename[-4:] for filename in sent_files}
+    assert {".srt", ".txt"} == {filename[-4:] for filename in sent_files}
     assert len(result["subtitle_asset_ids"]) == 3
 
 

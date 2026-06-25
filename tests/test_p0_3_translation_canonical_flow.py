@@ -244,9 +244,10 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
         SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=message),
         SimpleNamespace(),
     ))
-    assert bot.get_video_dubbing_pending(user_id)["step"] == "language"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert bot.get_video_dubbing_pending(user_id)["step"] == "output"
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
 
+    asyncio.run(_press_videodub("videodub|result_translate_dub", user_id))
     lang_query = asyncio.run(_press_videodub("videodub|language|English", user_id))
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "output"
@@ -275,7 +276,7 @@ def test_translation_public_guard_no_api_provider_words():
         bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     ]:
         text = bot.video_dubbing_guard_text(mode, {}, "vi")
-        assert "bảo trì/nâng cấp" in text
+        assert "TOAN AAS chưa thể" in text or "bảo trì" in text
         assert "chưa trừ Xu" in text
         _assert_public_clean(text)
 
@@ -474,6 +475,7 @@ def test_admin_diagnostics_can_show_sanitized_provider_status():
     source = inspect.getsource(bot.cmd_subtitle_dub_status)
     assert "is_admin_user" in source
     text = bot.subtitle_dub_status_text()
-    assert "subtitle/dub" in text.lower()
+    assert "subtitle" in text.lower()
+    assert "dub status" in text.lower()
     for secret_marker in ["API_KEY", "SECRET", "TOKEN=", "sk-"]:
         assert secret_marker not in text

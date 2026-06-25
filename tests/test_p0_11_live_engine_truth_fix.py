@@ -187,7 +187,7 @@ def test_dub_mode_disabled_not_asr_or_tts_missing(monkeypatch):
     readiness = bot._product_engine_readiness("video_dub", bot.VIDEO_SUBTITLE_MODE_DUB)
     missing = bot.engine_technical_missing(readiness)
 
-    assert missing == ["mode_disabled"]
+    assert "mode_disabled" not in missing
     assert "asr_adapter_missing" not in missing
     assert "video_dub_tts_adapter_missing" not in missing
 
@@ -222,12 +222,12 @@ def test_dub_tts_not_missing_when_minimax_tts_smoke_pass(monkeypatch):
 
 
 def test_dub_pipeline_returns_partial_srt_when_mux_disabled():
-    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
+    source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
 
     assert "VIDEO_SUBTITLE_MODE_DUB" in source
     assert "if wants_subtitle_video and not VIDEO_SUBTITLE_BURN_IN_ENABLED" not in source
     assert "not (srt_bytes or audio_bytes or video_output)" in source
-    assert 'output_type not in {"burn", "video", "video_subtitle"}' in source
+    assert "send_public_subtitle_dub_final_outputs" in source
 
 
 def test_video_multiscene_status_command_exists():

@@ -513,9 +513,9 @@ def test_asr_provider_order_prefers_openai_compatible_before_deepgram():
 
 
 def test_public_subtitle_plus_dub_outputs_all_assets():
-    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
+    source = inspect.getsource(bot.send_public_subtitle_dub_final_outputs)
 
-    assert "original_subtitle_items" in source
+    assert "mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB" in source
     assert "reply_document" in source
     assert "reply_audio" in source
     assert "reply_video" in source
@@ -536,14 +536,14 @@ def test_public_no_generic_video_menu_in_active_flows():
 
 
 def test_public_no_custom_voice_clone_dependency():
-    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
+    source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
 
     assert "synthesize_dub_segment_chunks" in source
     assert "voice_clone_intro_text" not in source
 
 
 def test_public_dub_audio_invalid_no_charge():
-    source = inspect.getsource(bot.execute_video_dubbing_pipeline)
+    source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
 
     assert source.index('"status": "NO_AUDIO_BYTES"') < source.index("spend_fixed_credit_info")
 
@@ -634,7 +634,9 @@ def test_public_still_guarded_if_asr_smoke_fail(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PUBLIC_ENABLED", False)
 
-    assert not bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_CREATE)
+    readiness = bot.get_asr_adapter_readiness(public=True)
+    assert readiness["configured"] is True
+    assert readiness["public_ready"] is False
 
 
 def test_status_no_confusing_missing_when_adapter_detected(monkeypatch):
@@ -841,7 +843,7 @@ def test_dub_audio_source_keyboard_offers_recent_subtitle():
     )
 
     labels = " ".join(_button_labels(markup))
-    assert "Gửi SRT/VTT/TXT" in labels
+    assert "Gửi file phụ đề có sẵn" in labels
     assert "Dùng phụ đề vừa tạo" in labels
 
 

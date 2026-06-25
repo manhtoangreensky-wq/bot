@@ -127,8 +127,16 @@ def test_translation_public_guard_no_xu_charge():
 
 def test_translation_menu_still_visible():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    for label in ("👁 Tạo phụ đề tự động", "🗣 Lồng tiếng tự động", "🎬 Phụ đề + lồng tiếng", "🔗 Tải video từ link"):
+    for label in (
+        "📝 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề / video",
+        "🎙 Lồng tiếng / Voice video",
+        "🎬 Phụ đề + Lồng tiếng",
+        "📄 Dịch file phụ đề",
+        "🧾 Transcript / Bóc lời",
+    ):
         assert label in labels
+    assert "🔗 Tải video từ link" not in labels
 
 
 def test_completed_add_voice_guard_if_mux_unready():
