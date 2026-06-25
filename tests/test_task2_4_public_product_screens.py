@@ -84,6 +84,11 @@ def _prepare_upload(monkeypatch, uid, mode, step="source", **fields):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: "video")
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_configured_readiness",
+        lambda *_args, **_kwargs: {"ok": True, "reason": "ready", "missing": []},
+    )
 
 
 def test_auto_subtitle_after_upload_shows_product_confirmation(monkeypatch):
@@ -129,7 +134,8 @@ def test_auto_subtitle_provider_off_clean_buttons(monkeypatch):
 
     text = query.edits[-1]["text"]
     markup = query.edits[-1]["reply_markup"]
-    assert text == "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu."
+    assert "Chưa cấu hình nhận diện giọng nói" in text
+    assert "bảo trì/nâng cấp" not in text
     assert _callbacks(markup) == ["videodub|guard_back", "menu|main"]
     assert "Admin blocker" not in text
 
@@ -169,14 +175,19 @@ def test_auto_dubbing_provider_off_no_debug_buttons(monkeypatch):
         voice_style="giọng nữ mặc định",
         voice_speed="1.0",
     )
-    monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": False})
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_configured_readiness",
+        lambda *_args, **_kwargs: {"ok": False, "reason": "missing_tts", "missing": ["tts"]},
+    )
     monkeypatch.setattr(bot, "is_translation_admin", lambda _uid: True)
     query = DummyQuery(uid, "videodub|confirm_dub")
 
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp" in ui
+    assert "chưa cấu hình giọng đọc để lồng tiếng" in ui
+    assert "bảo trì/nâng cấp" not in ui
     for term in ("admin blocker", "kiểm tra factory", "trạng thái dịch", "curl provider", "provider", "api", "key4u", "shopaikey"):
         assert term not in ui
 
@@ -239,8 +250,8 @@ def test_subtitle_plus_provider_off_no_debug_buttons(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "video đã sẵn sàng tạo phụ đề dịch" in ui
-    assert "xác nhận tạo đầy đủ" in ui
+    assert "chưa cấu hình bộ dịch phụ đề" in ui
+    assert "bảo trì/nâng cấp" not in ui
     assert "admin blocker" not in ui
     assert "curl provider" not in ui
 

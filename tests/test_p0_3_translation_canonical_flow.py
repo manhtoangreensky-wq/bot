@@ -119,6 +119,14 @@ def _reset_user(user_id: int):
     bot.clear_product_context(user_id)
 
 
+def _configured_translation_dub(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_configured_readiness",
+        lambda *_args, **_kwargs: {"ok": True, "reason": "ready", "missing": []},
+    )
+
+
 def _assert_public_clean(text: str):
     lowered = str(text or "").lower()
     for term in FORBIDDEN_PUBLIC_TERMS:
@@ -152,6 +160,7 @@ def test_standalone_translate_menu_no_api_text():
 def test_standalone_subtitle_asks_upload(monkeypatch):
     user_id = 990302
     _reset_user(user_id)
+    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
 
@@ -175,6 +184,7 @@ def test_standalone_subtitle_asks_upload(monkeypatch):
 def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     user_id = 990303
     _reset_user(user_id)
+    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
@@ -202,6 +212,7 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
 def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
     user_id = 990304
     _reset_user(user_id)
+    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
@@ -225,6 +236,7 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
 def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     user_id = 990305
     _reset_user(user_id)
+    _configured_translation_dub(monkeypatch)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
@@ -275,7 +287,7 @@ def test_translation_public_guard_no_api_provider_words():
         bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     ]:
         text = bot.video_dubbing_guard_text(mode, {}, "vi")
-        assert "bảo trì/nâng cấp" in text
+        assert "bảo trì/nâng cấp" not in text
         assert "chưa trừ Xu" in text
         _assert_public_clean(text)
 
@@ -442,7 +454,7 @@ def test_dubbing_preview_max_6_seconds():
 
 
 def test_no_full_translation_output_before_final_confirm():
-    preconfirm = _source_between("async def handle_video_dubbing_callback", "    confirm_modes = {")
+    preconfirm = _source_between("async def handle_video_dubbing_callback", "    if action == \"job_download\":")
     assert "execute_video_dubbing_pipeline" not in preconfirm
     assert "reply_document" not in preconfirm
     assert "reply_audio" not in preconfirm
@@ -474,6 +486,6 @@ def test_admin_diagnostics_can_show_sanitized_provider_status():
     source = inspect.getsource(bot.cmd_subtitle_dub_status)
     assert "is_admin_user" in source
     text = bot.subtitle_dub_status_text()
-    assert "subtitle/dub" in text.lower()
+    assert "subtitle / dub" in text.lower()
     for secret_marker in ["API_KEY", "SECRET", "TOKEN=", "sk-"]:
         assert secret_marker not in text

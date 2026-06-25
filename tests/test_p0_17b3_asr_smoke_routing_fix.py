@@ -630,13 +630,13 @@ def test_public_dub_opens_after_asr_and_tts_ready(monkeypatch):
     assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_DUB)
 
 
-def test_public_still_guarded_if_asr_smoke_fail(monkeypatch):
+def test_public_not_over_guarded_when_asr_configured_even_if_smoke_fail(monkeypatch):
     configured_deepgram(monkeypatch, "FAIL")
     monkeypatch.setattr(bot, "VIDEO_ASR_ENABLED", True)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PUBLIC_ENABLED", False)
 
-    assert not bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_CREATE)
+    assert bot.video_dubbing_public_processing_ready(bot.VIDEO_SUBTITLE_MODE_CREATE)
 
 
 def test_status_no_confusing_missing_when_adapter_detected(monkeypatch):

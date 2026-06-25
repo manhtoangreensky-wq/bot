@@ -317,11 +317,15 @@ def test_ai_music_public_guard_verified_copy():
 
 
 def test_video_dub_public_guard_maintenance():
-    assert "bảo trì/nâng cấp" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {"origin": "video_addon"}, "vi", admin=False)
+    text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {"origin": "video_addon"}, "vi", admin=False)
+    assert "bảo trì/nâng cấp" not in text
+    assert "chưa trừ Xu" in text
 
 
 def test_subtitle_public_guard_maintenance():
-    assert "bảo trì/nâng cấp" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {"origin": "video_addon"}, "vi", admin=False)
+    text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {"origin": "video_addon"}, "vi", admin=False)
+    assert "bảo trì/nâng cấp" not in text
+    assert "chưa trừ Xu" in text
 
 
 def test_public_buttons_stay_visible_for_unready_products():

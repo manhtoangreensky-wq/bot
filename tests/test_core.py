@@ -7663,7 +7663,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert {"videoref|image_prompts", "videoref|frame_plan", "videoref|generate", "videoref|save"}.issubset(set(ref_result_callbacks))
 
     dub_labels = [button.text for row in bot.video_dubbing_menu_keyboard("vi").inline_keyboard for button in row]
-    assert {"👁 Tạo phụ đề tự động", "🗣 Lồng tiếng tự động", "🎬 Phụ đề + lồng tiếng", "🔗 Tải video từ link"}.issubset(set(dub_labels))
+    assert {"👁 Tạo phụ đề tự động", "🌐 Dịch phụ đề", "🎙 Lồng tiếng", "🎬 Phụ đề + lồng tiếng", "🔗 Tải video từ link"}.issubset(set(dub_labels))
     assert "🎭 Dịch + lồng tiếng" not in dub_labels
     assert "🎬 Dịch + lồng tiếng + video" not in dub_labels
     assert "🎙 Lồng tiếng voice" not in dub_labels
@@ -7816,6 +7816,20 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        bot,
+        "get_asr_adapter_readiness",
+        lambda public=True: {
+            "configured": True,
+            "ready": True,
+            "public_ready": False,
+            "adapter": "deepgram",
+            "supports_audio": True,
+            "supports_video": True,
+        },
+    )
+    monkeypatch.setattr(bot, "video_translation_provider_configured", lambda: True)
+    monkeypatch.setattr(bot, "video_tts_provider_configured_for_dub", lambda: True)
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
         translated_ref = bot.set_video_dubbing_artifact(user_id, "translated_subtitle", "Translated subtitle")
@@ -7940,20 +7954,38 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_TRANSLATE_SUBTITLE_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_DUB_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PLUS_DUB_ENABLED", False)
-    for mode, maintenance_text in [
-        (bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp"),
-        (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp"),
-        (bot.VIDEO_SUBTITLE_MODE_DUB, "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp"),
-        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp"),
+    monkeypatch.setattr(bot, "get_asr_adapter_readiness", lambda public=True: {"configured": False, "adapter": "none"})
+    monkeypatch.setattr(bot, "video_translation_provider_configured", lambda: False)
+    monkeypatch.setattr(bot, "video_tts_provider_configured_for_dub", lambda: False)
+    for mode in [
+        bot.VIDEO_SUBTITLE_MODE_CREATE,
+        bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        bot.VIDEO_SUBTITLE_MODE_DUB,
+        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     ]:
         capability = bot.video_dubbing_capability(mode, {})
-        assert capability["reason"] == "mode_disabled"
+        assert capability["reason"].startswith("missing_")
+        assert capability["reason"] not in {"mode_disabled", "public_disabled"}
         guard = bot.video_dubbing_guard_text(mode, {}, "vi")
-        assert maintenance_text in guard
         assert "chưa trừ Xu" in guard
+        assert "bảo trì/nâng cấp" not in guard
         assert "API" not in guard
         assert "provider" not in guard.lower()
 
+    monkeypatch.setattr(
+        bot,
+        "get_asr_adapter_readiness",
+        lambda public=True: {
+            "configured": True,
+            "ready": True,
+            "public_ready": False,
+            "adapter": "deepgram",
+            "supports_audio": True,
+            "supports_video": True,
+        },
+    )
+    monkeypatch.setattr(bot, "video_translation_provider_configured", lambda: True)
+    monkeypatch.setattr(bot, "video_tts_provider_configured_for_dub", lambda: True)
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "apply_member_service_discount", lambda _uid, amount, _event: {"final_cost": amount})
     monkeypatch.setattr(bot, "get_user", lambda _uid: (99999, 0, 0))
@@ -10534,9 +10566,9 @@ def test_provider_pipeline_v32_public_subtitle_guards_are_separate(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PUBLIC_ENABLED", False)
     capability = bot.video_dubbing_capability(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, public=True)
     assert capability["ok"] is False
-    assert capability["reason"] == "public_disabled"
+    assert capability["reason"] == "missing_asr"
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
-    assert "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp" in guard
+    assert "bảo trì/nâng cấp" not in guard
     assert "chưa trừ Xu" in guard
     assert "API" not in guard
     assert "provider" not in guard.lower()
