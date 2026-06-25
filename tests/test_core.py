@@ -2652,6 +2652,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🎬 Phim AI nhiều cảnh",
         "📥 Video mẫu / Kênh mẫu",
         "🎵 Nhạc / Voice / SFX",
+        "📥 Tải video từ link",
         "🛠 Chỉnh sửa video local",
         "🏠 Menu chính",
     ]
@@ -7645,6 +7646,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
 
     main_labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert "🌐 Dịch/Lồng tiếng video" not in main_labels
+    assert "📥 Tải video từ link" in main_labels
     assert "🎞 Video mẫu → Video AI" in [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert "🎞 Video mẫu → Video AI" not in main_labels
 

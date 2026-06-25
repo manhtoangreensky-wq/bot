@@ -340,9 +340,10 @@ def test_public_buttons_stay_visible_for_unready_products():
 def test_video_flow_lock_snapshots_are_unchanged():
     assert bot.VIDEO_FLOW_LOCKED_AFTER_TASK3D7 is True
     menu = bot.main_video_keyboard("vi")
-    assert len(menu.inline_keyboard) == 7
-    assert sum(len(row) for row in menu.inline_keyboard) == 14  # 13 products + Menu chính
+    assert len(menu.inline_keyboard) == 8
+    assert sum(len(row) for row in menu.inline_keyboard) == 15  # 13 products + downloader utility + Menu chính
     assert len([item for item in _callbacks(menu) if item.startswith("vproduct|open|")]) == 13
+    assert "vdownload|start" in _callbacks(menu)
     assert _labels(bot.task3d_result_keyboard("storyboard_prompt", "vi")) == [
         ["🖼 Tạo prompt ảnh", "🎥 Tạo prompt video"],
         ["📦 Xuất bộ prompt", "🔁 Đổi phong cách"],

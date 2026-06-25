@@ -108,11 +108,12 @@ def _bundle(product_id="storyboard_prompt", shots=9, package_id=""):
 
 def test_video_menu_all_buttons_have_product_registry():
     markup = bot.main_video_keyboard("vi")
-    assert len(markup.inline_keyboard) == 7
-    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 2]
+    assert len(markup.inline_keyboard) == 8
+    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2, 1, 2]
     callbacks = _callbacks(markup)
     for product_id in VIDEO_PRODUCT_REGISTRY:
         assert f"vproduct|open|{product_id}" in callbacks
+    assert "vdownload|start" in callbacks
     assert callbacks[-1] == "menu|main"
 
 
