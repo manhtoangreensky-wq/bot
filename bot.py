@@ -144,6 +144,10 @@ from free_tools_hub import (
     sensitive_free_task_reason,
     should_show_soft_promo,
 )
+from providers.video_downloader_provider import (
+    VIDEO_DOWNLOADER_RIGHTS_COPY,
+    VideoDownloaderProvider,
+)
 try:
     import edge_tts
     EDGE_TTS_IMPORT_ERROR = ""
@@ -610,6 +614,10 @@ CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU = max(0.0, env_float("CUSTOM_VOICE_USAGE_PR
 CUSTOM_VOICE_USAGE_MIN_CHARS = max(0, env_int("CUSTOM_VOICE_USAGE_MIN_CHARS", 10))
 CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS = max(0, env_int("CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS", 3))
 LINK_IMPORT_PRICE_XU = max(0, env_int("LINK_IMPORT_PRICE_XU", 10))
+VIDEO_DOWNLOADER_PUBLIC_ENABLED = env_flag("VIDEO_DOWNLOADER_PUBLIC_ENABLED", "false")
+VIDEO_DOWNLOADER_MAX_MB_PUBLIC = max(1, env_int("VIDEO_DOWNLOADER_MAX_MB_PUBLIC", 100))
+VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC", 300))
+VIDEO_DOWNLOADER_TEMP_CLEANUP = env_flag("VIDEO_DOWNLOADER_TEMP_CLEANUP", "true")
 SUBTITLE_BASE_PRICE_XU_PER_MIN = max(0, env_int("SUBTITLE_BASE_PRICE_XU_PER_MIN", 50))
 TRANSLATE_SUBTITLE_PRICE_XU_PER_MIN = max(0, env_int("TRANSLATE_SUBTITLE_PRICE_XU_PER_MIN", 40))
 VIDEO_RENDER_PRICE_XU_PER_MIN = max(0, env_int("VIDEO_RENDER_PRICE_XU_PER_MIN", 30))
@@ -29958,6 +29966,7 @@ VIDEO_LAST_EXPORT_ERROR: dict[str, object] = {}
 LAST_TREND_VIDEO_WORKFLOWS: dict[str, dict] = {}
 LAST_WORKFLOW_IMAGES: dict[str, dict] = {}
 LAST_DEVELOPING_VIDEO_PLANS: dict[str, dict] = {}
+VIDEO_DOWNLOADER_PENDING_TTL_SECONDS = 10 * 60
 
 def free_hub_pending_key(user_id) -> str:
     return f"free_hub:{user_id}"
@@ -29995,6 +30004,40 @@ def get_free_hub_pending(user_id) -> dict:
 
 def clear_free_hub_pending(user_id) -> bool:
     return USER_PENDING.pop(free_hub_pending_key(user_id), None) is not None
+
+def video_downloader_pending_key(user_id) -> str:
+    return f"video_downloader:{user_id}"
+
+def set_video_downloader_pending(user_id, step: str, **fields) -> dict:
+    current = USER_PENDING.get(video_downloader_pending_key(user_id)) or {}
+    payload = {
+        "pending_action": "video_downloader",
+        "step": str(step or ""),
+        "created_at_ts": time.time(),
+    }
+    if current.get("pending_action") == "video_downloader":
+        payload.update({
+            key: value
+            for key, value in current.items()
+            if key not in {"pending_action", "step", "created_at_ts"}
+        })
+    payload.update(fields)
+    USER_PENDING[video_downloader_pending_key(user_id)] = payload
+    return payload
+
+def get_video_downloader_pending(user_id) -> dict:
+    key = video_downloader_pending_key(user_id)
+    state = USER_PENDING.get(key) or {}
+    if state.get("pending_action") != "video_downloader":
+        return {}
+    created_at = float(state.get("created_at_ts") or 0.0)
+    if created_at and time.time() - created_at > VIDEO_DOWNLOADER_PENDING_TTL_SECONDS:
+        USER_PENDING.pop(key, None)
+        return {}
+    return dict(state)
+
+def clear_video_downloader_pending(user_id) -> bool:
+    return USER_PENDING.pop(video_downloader_pending_key(user_id), None) is not None
 LAST_IMAGE_TOOL_RESULTS: dict[str, dict] = {}
 IMAGE_ACTION_LOCKS: dict[str, float] = {}
 FRAME_VIDEO_JOBS: dict[str, dict] = {}
@@ -42147,12 +42190,13 @@ def clear_media_creator_pending_states(user_id) -> bool:
     music_guided_cleared = clear_music_guided_pending(user_id)
     translation_menu_cleared = clear_translation_menu_pending(user_id)
     video_editor_cleared = clear_video_editor_pending(user_id)
+    video_downloader_cleared = clear_video_downloader_pending(user_id)
     video_dubbing_cleared = clear_video_dubbing_pending(user_id)
     video_finalization_cleared = clear_video_finalization_state(user_id)
     video_addon_cleared = clear_video_addon_state(user_id)
     marketing_cleared = clear_marketing_pending(user_id)
     shopaikey_confirm_cleared = clear_shopaikey_pending_confirmations_for_user(user_id)
-    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or product_context_cleared or music_guided_cleared or translation_menu_cleared or video_editor_cleared or video_dubbing_cleared or video_finalization_cleared or video_addon_cleared or marketing_cleared or shopaikey_confirm_cleared)
+    return bool(free_hub_cleared or support_cleared or quick_cleared or quick_image_flow_cleared or public_image_cleared or public_video_cleared or media_aspect_cleared or public_video_context_cleared or creative_motion_cleared or cinematic_ad_cleared or trend_cleared or trend_confirm_cleared or feedback_cleared or image_menu_cleared or frame_video_cleared or storyboard_cleared or developing_video_cleared or product_context_cleared or music_guided_cleared or translation_menu_cleared or video_editor_cleared or video_downloader_cleared or video_dubbing_cleared or video_finalization_cleared or video_addon_cleared or marketing_cleared or shopaikey_confirm_cleared)
 
 def clear_pending_start_notice(user_id) -> str:
     if clear_media_creator_pending_states(user_id):
@@ -48751,7 +48795,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             "image_to_video": "🖼 Image → Video", "frame_video_local": "🎞 Image slideshow video",
             "self_shot_scene_change": "🎥 Self-shot scene AI", "multi_scene_film": "🎬 Multi-scene AI film",
             "video_reference": "📥 Reference video / Channel", "audio_addons": "🎵 Music / Voice / SFX",
-            "video_local_edit": "🛠 Local video editor",
+            "video_local_edit": "🛠 Local video editor", "video_downloader": "📥 Download video from link",
         },
         "zh": {
             "video_trend": "🔥 Trend 视频", "video_idea": "🧠 视频创意",
@@ -48760,7 +48804,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             "image_to_video": "🖼 图片 → 视频", "frame_video_local": "🎞 图片合成视频",
             "self_shot_scene_change": "🎥 自拍换场景 AI", "multi_scene_film": "🎬 多场景 AI 影片",
             "video_reference": "📥 参考视频 / 频道", "audio_addons": "🎵 音乐 / Voice / SFX",
-            "video_local_edit": "🛠 本地视频编辑",
+            "video_local_edit": "🛠 本地视频编辑", "video_downloader": "📥 链接下载视频",
         },
     }
     rows = []
@@ -48775,6 +48819,10 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
                 label = translated.get(lang, translated["en"]).get(product_id, label)
             row.append(InlineKeyboardButton(label, callback_data=f"vproduct|open|{product_id}"))
         rows.append(row)
+    downloader_label = "📥 Tải video từ link"
+    if lang != "vi":
+        downloader_label = translated.get(lang, translated["en"]).get("video_downloader", downloader_label)
+    rows.insert(max(len(rows) - 1, 0), [InlineKeyboardButton(downloader_label, callback_data="vdownload|start")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -130615,6 +130663,288 @@ def social_link_import_ready_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
+def video_downloader_provider() -> VideoDownloaderProvider:
+    return VideoDownloaderProvider(
+        max_mb=VIDEO_DOWNLOADER_MAX_MB_PUBLIC,
+        max_duration_seconds=VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC,
+        temp_cleanup=VIDEO_DOWNLOADER_TEMP_CLEANUP,
+    )
+
+def video_downloader_detect_link(url: str) -> dict:
+    return video_downloader_provider().detect_link(url)
+
+def video_downloader_format_seconds(seconds) -> str:
+    total = _safe_int(seconds, 0)
+    if total <= 0:
+        return "chưa rõ"
+    minutes, sec = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{sec:02d}"
+    return f"{minutes}:{sec:02d}"
+
+def video_downloader_format_size(size_bytes) -> str:
+    size = _safe_int(size_bytes, 0)
+    if size <= 0:
+        return "chưa rõ"
+    mb = size / (1024 * 1024)
+    if mb >= 1:
+        return f"{mb:.1f} MB"
+    kb = size / 1024
+    return f"{kb:.0f} KB"
+
+def video_downloader_start_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📥 <b>Download video from link</b>\n\n"
+            "Send a public video link to download.\n\n"
+            f"Limits: up to <b>{VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB</b> and <b>{VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC}s</b>.\n"
+            f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}\n\n"
+            "TOAN AAS does not charge Xu if the download fails."
+        )
+    return (
+        "📥 <b>Tải video từ link</b>\n\n"
+        "Gửi link video công khai cần tải.\n\n"
+        f"Giới hạn: tối đa <b>{VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB</b> và <b>{VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} giây</b>.\n"
+        f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}\n\n"
+        "TOAN AAS không trừ Xu nếu tải lỗi."
+    )
+
+def video_downloader_start_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Video Studio" if is_vi else "⬅️ Video Studio", callback_data="menu|main_video")],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+def video_downloader_choice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎬 Tải video" if is_vi else "🎬 Video", callback_data="vdownload|download|video"),
+            InlineKeyboardButton("🎵 Tải audio" if is_vi else "🎵 Audio", callback_data="vdownload|download|audio"),
+        ],
+        [
+            InlineKeyboardButton("🖼 Tải ảnh bìa" if is_vi else "🖼 Cover", callback_data="vdownload|download|cover"),
+            InlineKeyboardButton("✏️ Gửi link khác" if is_vi else "✏️ Another link", callback_data="vdownload|start"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Video Studio" if is_vi else "⬅️ Video Studio", callback_data="menu|main_video"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def video_downloader_guard_text(reason: str = "", lang: str = "vi", detection: dict | None = None) -> str:
+    reason = str(reason or "").split(":", 1)[0]
+    detection = detection or {}
+    if normalize_user_language(lang) != "vi":
+        messages = {
+            "private_or_invalid": "Only valid public video links are supported. TOAN AAS will not download private, paywalled, DRM-protected or login-required content.",
+            "unsupported_platform": "This platform or link type is not supported yet.",
+            "disabled": "The public video-link downloader is being completed. TOAN AAS has not processed the link and has not charged Xu.",
+            "adapter_missing": "The downloader backend is not available yet. TOAN AAS has not charged Xu.",
+            "too_large": f"This file is over the public limit of {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB.",
+            "duration_too_long": f"This video is over the public limit of {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} seconds.",
+            "cover_unavailable": "This link does not expose a downloadable cover image.",
+        }
+        body = messages.get(reason, "TOAN AAS could not download this link. No Xu was charged.")
+        platform = html.escape(str(detection.get("platform") or "-"))
+        return (
+            f"📥 <b>Video link downloader</b>\n\n"
+            f"{body}\n"
+            "TOAN AAS has not processed the link and has not charged Xu.\n\n"
+            f"Platform: <b>{platform}</b>\n"
+            f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}"
+        )
+    messages = {
+        "private_or_invalid": "Chỉ xử lý link video công khai hợp lệ. TOAN AAS không tải video riêng tư/paywall/DRM hoặc nội dung cần đăng nhập.",
+        "unsupported_platform": "Nền tảng hoặc kiểu link này chưa hỗ trợ.",
+        "disabled": "Công cụ tải video từ link đang hoàn thiện. TOAN AAS chưa xử lý link và chưa trừ Xu.",
+        "adapter_missing": "Backend tải link chưa khả dụng. TOAN AAS chưa trừ Xu.",
+        "too_large": f"File vượt giới hạn công khai {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB.",
+        "duration_too_long": f"Video vượt giới hạn công khai {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} giây.",
+        "cover_unavailable": "Link này chưa có ảnh bìa có thể tải.",
+    }
+    body = messages.get(reason, "TOAN AAS chưa tải được link này. Bạn chưa bị trừ Xu.")
+    platform = html.escape(str(detection.get("platform") or "-"))
+    return (
+        "📥 <b>Tải video từ link</b>\n\n"
+        f"{body}\n"
+        "TOAN AAS chưa xử lý link và chưa trừ Xu.\n\n"
+        f"Nền tảng: <b>{platform}</b>\n"
+        f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}"
+    )
+
+def video_downloader_preview_text(detection: dict, metadata: dict | None = None, lang: str = "vi") -> str:
+    metadata = metadata or {}
+    platform = html.escape(str(detection.get("platform") or "-"))
+    title = html.escape(str(metadata.get("title") or "chưa lấy được tiêu đề")[:160])
+    duration = video_downloader_format_seconds(metadata.get("duration_seconds"))
+    size = video_downloader_format_size(metadata.get("size_bytes"))
+    url = html.escape(str(detection.get("url") or "")[:700])
+    status_line = "Sẵn sàng tải khi chọn định dạng."
+    if not VIDEO_DOWNLOADER_PUBLIC_ENABLED:
+        status_line = "Tải công khai đang tắt bằng cấu hình, bot sẽ báo guard khi bấm tải."
+    elif metadata and not metadata.get("ok"):
+        status_line = "Chưa lấy được metadata đầy đủ, bot sẽ kiểm tra lại trước khi tải."
+    if normalize_user_language(lang) != "vi":
+        return (
+            "📥 <b>Link detected</b>\n\n"
+            f"• Platform: <b>{platform}</b>\n"
+            f"• Title: <b>{title}</b>\n"
+            f"• Duration: <b>{html.escape(duration)}</b>\n"
+            f"• Estimated size: <b>{html.escape(size)}</b>\n"
+            f"• Link: <code>{url}</code>\n\n"
+            f"{html.escape(status_line)}\n"
+            f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}\n\n"
+            "Choose one output format. No AI engine is called and no Xu is charged if downloading fails."
+        )
+    return (
+        "📥 <b>Đã nhận diện link</b>\n\n"
+        f"• Nền tảng: <b>{platform}</b>\n"
+        f"• Tiêu đề: <b>{title}</b>\n"
+        f"• Thời lượng: <b>{html.escape(duration)}</b>\n"
+        f"• Dung lượng ước tính: <b>{html.escape(size)}</b>\n"
+        f"• Link: <code>{url}</code>\n\n"
+        f"{html.escape(status_line)}\n"
+        f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}\n\n"
+        "Chọn định dạng cần tải. Không gọi AI và không trừ Xu nếu tải lỗi."
+    )
+
+def video_downloader_result_caption(kind: str, detection: dict, lang: str = "vi") -> str:
+    platform = str((detection or {}).get("platform") or "link")
+    if normalize_user_language(lang) != "vi":
+        return f"✅ Downloaded {kind} from {platform}. No Xu was charged."
+    label = {"video": "video", "audio": "audio", "cover": "ảnh bìa"}.get(str(kind or ""), "file")
+    return f"✅ Đã tải {label} từ {platform}. TOAN AAS không trừ Xu cho công cụ này."
+
+async def handle_video_downloader_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.message or not update.message.text or not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    state = get_video_downloader_pending(uid)
+    if not state or state.get("step") != "await_link":
+        return False
+    lang = get_user_language(uid) or "vi"
+    url = extract_first_http_url(update.message.text) or str(update.message.text or "").strip()
+    adapter = video_downloader_provider()
+    detection = adapter.detect_link(url)
+    if not detection.get("ok"):
+        await update.message.reply_text(
+            video_downloader_guard_text(detection.get("reason"), lang, detection),
+            parse_mode="HTML",
+            reply_markup=video_downloader_start_keyboard(lang),
+        )
+        return True
+    metadata = {}
+    if VIDEO_DOWNLOADER_PUBLIC_ENABLED:
+        metadata = await asyncio.to_thread(adapter.metadata, detection["url"])
+        if metadata.get("reason") in {"too_large", "duration_too_long", "private_or_invalid", "unsupported_platform"}:
+            await update.message.reply_text(
+                video_downloader_guard_text(metadata.get("reason"), lang, detection),
+                parse_mode="HTML",
+                reply_markup=video_downloader_start_keyboard(lang),
+            )
+            return True
+    set_video_downloader_pending(
+        uid,
+        "choose_format",
+        source_url=detection["url"],
+        source_platform=detection.get("platform") or "",
+        detection=detection,
+        metadata=metadata,
+    )
+    await update.message.reply_text(
+        video_downloader_preview_text(detection, metadata, lang),
+        parse_mode="HTML",
+        reply_markup=video_downloader_choice_keyboard(lang),
+    )
+    return True
+
+async def send_video_downloader_file(query, result: dict, lang: str = "vi") -> None:
+    file_path = str(result.get("file_path") or "")
+    kind = str(result.get("kind") or "video")
+    detection = dict(result.get("detection") or {})
+    caption = video_downloader_result_caption(kind, detection, lang)
+    filename = os.path.basename(file_path) or f"toan-aas-{kind}"
+    with open(file_path, "rb") as handle:
+        if kind == "audio":
+            await query.message.reply_audio(audio=handle, filename=filename, caption=caption)
+        elif kind == "cover":
+            try:
+                await query.message.reply_photo(photo=handle, caption=caption)
+            except Exception:
+                handle.seek(0)
+                await query.message.reply_document(document=handle, filename=filename, caption=caption)
+        else:
+            try:
+                await query.message.reply_video(video=handle, caption=caption)
+            except Exception:
+                handle.seek(0)
+                await query.message.reply_document(document=handle, filename=filename, caption=caption)
+
+async def handle_video_downloader_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    parts = str(query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "start"
+    value = parts[2] if len(parts) > 2 else ""
+    if action == "start":
+        clear_video_downloader_pending(uid)
+        set_video_downloader_pending(uid, "await_link")
+        return await safe_edit_or_send(
+            query,
+            video_downloader_start_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_downloader_start_keyboard(lang),
+        )
+    if action != "download":
+        clear_video_downloader_pending(uid)
+        return await safe_edit_or_send(query, video_downloader_start_text(lang), parse_mode="HTML", reply_markup=video_downloader_start_keyboard(lang))
+    state = get_video_downloader_pending(uid)
+    source_url = str(state.get("source_url") or "")
+    if not source_url:
+        set_video_downloader_pending(uid, "await_link")
+        return await safe_edit_or_send(query, video_downloader_start_text(lang), parse_mode="HTML", reply_markup=video_downloader_start_keyboard(lang))
+    detection = dict(state.get("detection") or {})
+    if not VIDEO_DOWNLOADER_PUBLIC_ENABLED:
+        return await safe_edit_or_send(
+            query,
+            video_downloader_guard_text("disabled", lang, detection),
+            parse_mode="HTML",
+            reply_markup=video_downloader_choice_keyboard(lang),
+        )
+    kind = value if value in {"video", "audio", "cover"} else "video"
+    await safe_edit_or_send(
+        query,
+        f"⏳ Đang tải {html.escape(kind)} từ link công khai. TOAN AAS chưa trừ Xu.",
+        parse_mode="HTML",
+        reply_markup=video_downloader_choice_keyboard(lang),
+    )
+    adapter = video_downloader_provider()
+    result = await asyncio.to_thread(adapter.download, source_url, kind)
+    file_path = str(result.get("file_path") or "")
+    try:
+        if not result.get("ok"):
+            return await safe_edit_or_send(
+                query,
+                video_downloader_guard_text(result.get("reason"), lang, dict(result.get("detection") or detection)),
+                parse_mode="HTML",
+                reply_markup=video_downloader_choice_keyboard(lang),
+            )
+        await send_video_downloader_file(query, result, lang)
+        clear_video_downloader_pending(uid)
+        return await safe_edit_or_send(
+            query,
+            "✅ Đã gửi file tải về. File tạm đã được dọn sau khi gửi." if normalize_user_language(lang) == "vi" else "✅ Download sent. Temporary file was cleaned after sending.",
+            reply_markup=video_downloader_start_keyboard(lang),
+        )
+    finally:
+        if file_path:
+            VideoDownloaderProvider.cleanup_temp_files([file_path], enabled=VIDEO_DOWNLOADER_TEMP_CLEANUP)
+
 def video_dubbing_output_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
@@ -136076,6 +136406,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_marketing_pending_text(update, context):
         return
 
+    if await handle_video_downloader_pending_text(update, context):
+        return
+
     if await handle_video_dubbing_pending_text(update, context):
         return
 
@@ -137228,6 +137561,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_prompt_video_callback, pattern=r"^promptvideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_video_callback, pattern=r"^imagevideo\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_reference_callback, pattern=r"^videoref\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_downloader_callback, pattern=r"^vdownload\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_dubbing_callback, pattern=r"^videodub\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_marketing_callback, pattern=r"^marketing\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_self_scene_ai_callback, pattern=r"^selfscene\|"))
