@@ -60,11 +60,27 @@ def _init_media_asset_db(monkeypatch, tmp_path):
     bot.init_db()
 
 
+def _configured_asr(monkeypatch):
+    monkeypatch.setattr(
+        bot,
+        "get_asr_adapter_readiness",
+        lambda public=True: {
+            "configured": True,
+            "ready": True,
+            "public_ready": False,
+            "adapter": "deepgram",
+            "supports_audio": True,
+            "supports_video": True,
+        },
+    )
+
+
 def test_public_type_guard_when_asr_not_ready(monkeypatch):
     uid = 172202
     bot.clear_video_dubbing_pending(uid)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(bot, "TRANSLATION_DUB_MAINTENANCE", False)
+    monkeypatch.setattr(bot, "get_asr_adapter_readiness", lambda public=True: {"configured": False, "adapter": "none"})
 
     async def forbidden_provider(*_args, **_kwargs):
         raise AssertionError("public guard must not call providers")
@@ -76,10 +92,10 @@ def test_public_type_guard_when_asr_not_ready(monkeypatch):
 
     text = query.outputs[-1]["text"]
     markup = query.outputs[-1]["reply_markup"]
-    assert "Tạo phụ đề tự động đang được mở thử nghiệm" in text
+    assert "Chưa cấu hình nhận diện giọng nói" in text
     assert "chưa xử lý và chưa trừ Xu" in text
     assert "SRT/VTT/TXT" not in text
-    assert _callbacks(markup) == ["videodub|back_type", "menu|main"]
+    assert _callbacks(markup) == ["videodub|guard_back", "menu|main"]
     assert bot.get_video_dubbing_pending(uid)["step"] == "preview_guarded"
 
 
@@ -180,7 +196,7 @@ def test_auto_subtitle_pipeline_sends_srt_vtt_txt_after_confirm(monkeypatch, tmp
         assert content_type == "audio/mpeg"
         return "stub_asr", "xin chao day la phu de tu dong", "ok"
 
-    monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
+    _configured_asr(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "get_user", lambda _uid: (99999, 0, 0))
@@ -225,6 +241,8 @@ def test_subtitle_translate_upload_keeps_product_context(monkeypatch):
         entry_surface="studio",
     )
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    _configured_asr(monkeypatch)
+    monkeypatch.setattr(bot, "video_translation_provider_configured", lambda: True)
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     message = CaptureMessage(

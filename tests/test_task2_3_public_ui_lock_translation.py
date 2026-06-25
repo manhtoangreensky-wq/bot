@@ -41,11 +41,17 @@ def _prepare_upload(monkeypatch, uid, mode, step="source"):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: "video")
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_configured_readiness",
+        lambda *_args, **_kwargs: {"ok": True, "reason": "ready", "missing": []},
+    )
 
 
 def test_public_translation_guard_hides_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi", admin=False)
-    assert text == "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu."
+    assert "bảo trì/nâng cấp" not in text
+    assert "chưa trừ Xu" in text
     assert "Admin blocker" not in text
 
 

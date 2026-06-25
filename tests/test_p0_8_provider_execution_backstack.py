@@ -285,6 +285,11 @@ def test_dubbing_preview_max_6_and_no_final_xu(monkeypatch):
         "target_language": "vi",
     }
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda mode, state=None: True)
+    monkeypatch.setattr(
+        bot,
+        "video_dubbing_configured_readiness",
+        lambda *_args, **_kwargs: {"ok": True, "reason": "ready", "missing": []},
+    )
 
     async def download(context, state):
         return b"video", "video/mp4"

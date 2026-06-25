@@ -40,21 +40,21 @@ def test_no_language_translation_tools_deleted():
         "menu|translation_voice",
         "menu|translation_language",
         "menu|translation_auto_target",
-        "menu|translation_stop_session",
     }.issubset(callbacks)
+    assert "menu|translation_stop_session" not in callbacks
 
 
 def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert labels[:6] == [
+    assert labels[:7] == [
         "👁 Tạo phụ đề tự động",
-        "🗣 Lồng tiếng tự động",
+        "🌐 Dịch phụ đề",
+        "🎙 Lồng tiếng",
         "🎬 Phụ đề + lồng tiếng",
         "🔗 Tải video từ link",
         "📂 Media",
         "📝 Chỉnh phụ đề",
     ]
-    assert "🌐 Dịch phụ đề" not in labels
     assert "menu|translation_video_factory" not in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
 
 
@@ -221,7 +221,7 @@ def test_key4u_asr_adapter_or_guard():
     assert bot.KEY4U_STT_ENDPOINT == "/audio/transcriptions"
     assert bot.KEY4U_STT_MODEL == "whisper-1"
     assert hasattr(bot.key4u_provider_instance(), "stt")
-    assert "Tạo/gắn phụ đề vào video đang bảo trì/nâng cấp" in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
+    assert "bảo trì/nâng cấp" not in bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "vi")
 
 
 def test_key4u_translation_adapter_or_guard():
@@ -237,7 +237,7 @@ def test_key4u_minimax_tts_for_dubbing_or_guard():
     assert "key4u_minimax_tts_public_ready" in source
     assert "key4u_minimax_tts_bytes" in source
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi")
-    assert "Dịch video, phụ đề và lồng tiếng đang bảo trì/nâng cấp" in guard
+    assert "bảo trì/nâng cấp" not in guard
 
 
 def test_shopaikey_base_url_no_double_v1():
@@ -255,7 +255,7 @@ def test_shopaikey_tts_fallback_guarded(monkeypatch):
 
 
 def test_shopaikey_stt_probe_not_hardcoded():
-    source = inspect.getsource(bot.video_dubbing_transcribe_bytes)
+    source = inspect.getsource(bot.asr_transcribe_audio)
     assert "shopaikey_stt_public_ready" in source
     assert "allow_admin" in source
     assert bot.SHOPAIKEY_AUDIO_TRANSCRIPTION_ENDPOINT == "/audio/transcriptions"

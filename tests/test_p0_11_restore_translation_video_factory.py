@@ -34,7 +34,8 @@ def test_language_translation_menu_restored():
 def test_video_factory_menu_from_gateway():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     assert "👁 Tạo phụ đề tự động" in labels
-    assert "🗣 Lồng tiếng tự động" in labels
+    assert "🌐 Dịch phụ đề" in labels
+    assert "🎙 Lồng tiếng" in labels
     assert "🎬 Phụ đề + lồng tiếng" in labels
     assert "🔗 Tải video từ link" in labels
     assert "📂 Media" in labels
