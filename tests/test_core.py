@@ -7927,8 +7927,8 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
 
 def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     source = bot_source_text()
-    pipeline_source = source_between(source, "async def execute_video_dubbing_pipeline", "async def handle_video_dubbing_pending_upload")
-    prepare_source = source_between(source, "async def video_dubbing_prepare_subtitles", "async def execute_video_dubbing_pipeline")
+    pipeline_source = source_between(source, "async def _execute_video_dubbing_pipeline_core", "async def execute_video_dubbing_pipeline")
+    prepare_source = source_between(source, "async def video_dubbing_prepare_subtitles", "async def _execute_video_dubbing_pipeline_core")
     resolver_source = source_between(source, "async def video_dubbing_resolve_source_script", "async def video_dubbing_render_video")
     assert "video_dubbing_prepare_subtitles" in pipeline_source
     assert "video_dubbing_transcribe_bytes" in resolver_source
@@ -7985,6 +7985,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
+    monkeypatch.setattr(bot, "normalize_dub_audio_bytes", lambda data: asyncio.sleep(0, result=(data, "test_normalized")))
     monkeypatch.setattr(
         bot,
         "spend_fixed_credit_info",
@@ -8002,11 +8003,11 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         async def reply_audio(self, audio, **kwargs):
             self.audio.append((audio, kwargs))
 
-    for mode, expect_subtitle, expect_audio in [
-        (bot.VIDEO_SUBTITLE_MODE_CREATE, True, False),
-        (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, True, False),
-        (bot.VIDEO_SUBTITLE_MODE_DUB, True, True),
-        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, True, True),
+    for mode, expect_sent_subtitle, expect_output_subtitle, expect_audio in [
+        (bot.VIDEO_SUBTITLE_MODE_CREATE, True, True, False),
+        (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, True, True, False),
+        (bot.VIDEO_SUBTITLE_MODE_DUB, False, True, True),
+        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, True, True, True),
     ]:
         message = OutputMessage()
         query = SimpleNamespace(from_user=SimpleNamespace(id=72001), message=message)
@@ -8020,9 +8021,9 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         }
         result = asyncio.run(bot.execute_video_dubbing_pipeline(query, SimpleNamespace(), state, "vi"))
         assert result["ok"] is True
-        assert bool(message.documents) is expect_subtitle
+        assert bool(message.documents) is expect_sent_subtitle
         assert bool(message.audio) is expect_audio
-        assert result["has_subtitle"] is expect_subtitle
+        assert result["has_subtitle"] is expect_output_subtitle
         assert result["has_audio"] is expect_audio
 
 
