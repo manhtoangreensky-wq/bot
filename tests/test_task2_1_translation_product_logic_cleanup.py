@@ -77,13 +77,13 @@ def _configured_translation_dub(monkeypatch):
 
 def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert labels[:5] == [
+    assert labels[:4] == [
         "👁 Tạo phụ đề tự động",
         "🌐 Dịch phụ đề",
         "🎙 Lồng tiếng",
         "🎬 Phụ đề + lồng tiếng",
-        "🔗 Tải video từ link",
     ]
+    assert "🔗 Tải video từ link" not in labels
 
 
 def test_create_subtitle_auto_label():
@@ -98,7 +98,8 @@ def test_auto_dubbing_label():
 
 def test_link_import_only_top_level():
     top = bot.video_dubbing_menu_keyboard("vi", "translation")
-    assert "videodub|link_start" in _callbacks(top)
+    assert "videodub|link_start" not in _callbacks(top)
+    assert "vdownload|start" in _callbacks(bot.main_video_keyboard("vi"))
     for mode in (
         bot.VIDEO_SUBTITLE_MODE_CREATE,
         bot.VIDEO_SUBTITLE_MODE_DUB,

@@ -285,8 +285,10 @@ def test_subtitle_plus_dubbing_confirmation_has_preview_and_full():
 
 
 def test_link_import_top_level_usable_or_guarded():
-    assert "🔗 Tải video từ link" in _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert "videodub|link_start" in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    assert "🔗 Tải video từ link" not in _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    assert "videodub|link_start" not in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    assert "📥 Tải video từ link" in _labels(bot.main_video_keyboard("vi"))
+    assert "vdownload|start" in _callbacks(bot.main_video_keyboard("vi"))
     guard = bot.social_link_import_guard_text("vi")
     labels = _labels(bot.social_link_import_guard_keyboard("vi"))
     assert guard == "Tải video từ link đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu. Bạn có thể gửi video/audio trực tiếp."

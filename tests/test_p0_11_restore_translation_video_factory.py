@@ -37,10 +37,11 @@ def test_video_factory_menu_from_gateway():
     assert "🌐 Dịch phụ đề" in labels
     assert "🎙 Lồng tiếng" in labels
     assert "🎬 Phụ đề + lồng tiếng" in labels
-    assert "🔗 Tải video từ link" in labels
+    assert "🔗 Tải video từ link" not in labels
     assert "📂 Media" in labels
     assert "📝 Chỉnh phụ đề" in labels
     assert "⬅️ Trung tâm" in labels
+    assert "📥 Tải video từ link" in _labels(bot.main_video_keyboard("vi"))
 
 
 def test_back_language_menu_to_gateway():

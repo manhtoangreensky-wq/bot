@@ -46,15 +46,15 @@ def test_no_language_translation_tools_deleted():
 
 def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert labels[:7] == [
+    assert labels[:6] == [
         "👁 Tạo phụ đề tự động",
         "🌐 Dịch phụ đề",
         "🎙 Lồng tiếng",
         "🎬 Phụ đề + lồng tiếng",
-        "🔗 Tải video từ link",
         "📂 Media",
         "📝 Chỉnh phụ đề",
     ]
+    assert "🔗 Tải video từ link" not in labels
     assert "menu|translation_video_factory" not in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
 
 
@@ -113,9 +113,11 @@ def test_subtitle_plus_dubbing_export_before_voice(monkeypatch):
     assert not any("Giọng" in label for label in labels)
 
 
-def test_link_import_only_top_level_video_translation_menu():
-    assert "🔗 Tải video từ link" in _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert "videodub|link_start" in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
+def test_link_import_moved_to_video_studio():
+    assert "🔗 Tải video từ link" not in _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    assert "videodub|link_start" not in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    assert "📥 Tải video từ link" in _labels(bot.main_video_keyboard("vi"))
+    assert "vdownload|start" in _callbacks(bot.main_video_keyboard("vi"))
     for mode in [
         bot.VIDEO_SUBTITLE_MODE_CREATE,
         bot.VIDEO_SUBTITLE_MODE_DUB,
