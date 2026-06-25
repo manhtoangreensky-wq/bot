@@ -7,9 +7,9 @@ import bot
 
 
 class CaptureMessage:
-    def __init__(self, text="", video=None, audio=None, voice=None, document=None):
+    def __init__(self, text="", caption="", video=None, audio=None, voice=None, document=None):
         self.text = text
-        self.caption = ""
+        self.caption = caption
         self.chat_id = 173300
         self.message_id = 31
         self.reply_to_message = None
@@ -647,3 +647,209 @@ def test_status_no_confusing_missing_when_adapter_detected(monkeypatch):
     assert "Detected ASR adapter: <code>deepgram</code>" in joined
     assert "ASR adapter readiness: <code>MISSING</code>" not in joined
     assert not any(secret in joined for secret in ("Bearer ", "Authorization:", "API_KEY=", "SECRET="))
+
+
+def _button_labels(markup):
+    return [
+        button.text
+        for row in getattr(markup, "inline_keyboard", []) or []
+        for button in row
+    ]
+
+
+def test_caption_tool_test_asr_consumes_video(monkeypatch):
+    uid = 173401
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    called = []
+
+    async def fake_asr(_update, context):
+        called.append(tuple(context.args))
+
+    monkeypatch.setattr(bot, "cmd_tool_test_asr", fake_asr)
+    update = media_update(uid, "video")
+    update.message.caption = "/tool_test_asr --confirm-paid"
+
+    asyncio.run(bot.handle_media_cache_only(update, SimpleNamespace(bot=SimpleNamespace())))
+
+    assert called == [("--confirm-paid",)]
+    assert update.message.outputs == []
+
+
+def test_caption_tool_test_requires_confirm_paid(monkeypatch):
+    uid = 173402
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    monkeypatch.setattr(bot, "save_tool_test_result", lambda *_args, **_kwargs: None)
+    called = {"provider": 0}
+
+    async def forbidden_provider(*_args, **_kwargs):
+        called["provider"] += 1
+
+    monkeypatch.setattr(bot, "transcribe_media_to_segments", forbidden_provider)
+    update = media_update(uid, "video")
+    update.message.caption = "/tool_test_asr"
+
+    asyncio.run(bot.handle_media_cache_only(update, SimpleNamespace(bot=SimpleNamespace())))
+
+    assert called["provider"] == 0
+    assert "--confirm-paid" in update.message.outputs[-1]["text"]
+    assert "TOAN AAS đã nhận video" not in update.message.outputs[-1]["text"]
+
+
+def test_caption_tool_test_non_admin_rejected(monkeypatch):
+    uid = 173403
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
+    update = media_update(uid, "video")
+    update.message.caption = "/tool_test_full_dub_video --confirm-paid"
+
+    asyncio.run(bot.handle_media_cache_only(update, SimpleNamespace(bot=SimpleNamespace())))
+
+    assert "không có quyền" in update.message.outputs[-1]["text"]
+    assert "TOAN AAS đã nhận video" not in update.message.outputs[-1]["text"]
+
+
+def test_caption_tool_test_all_admin_smoke_commands_consume_media(monkeypatch):
+    uid = 173404
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
+    called = []
+
+    async def fake_auto(_update, context):
+        called.append(("auto", tuple(context.args)))
+
+    async def fake_dub(_update, context):
+        called.append(("dub", tuple(context.args)))
+
+    async def fake_full(_update, context):
+        called.append(("full", tuple(context.args)))
+
+    monkeypatch.setattr(bot, "cmd_tool_test_subtitle_generate", fake_auto)
+    monkeypatch.setattr(bot, "cmd_tool_test_video_dub", fake_dub)
+    monkeypatch.setattr(bot, "cmd_tool_test_full_dub_video", fake_full)
+
+    for caption in (
+        "/tool_test_auto_subtitle --confirm-paid",
+        "/tool_test_dub_audio --confirm-paid",
+        "/tool_test_full_dub_video --confirm-paid",
+    ):
+        update = media_update(uid, "video")
+        update.message.caption = caption
+        asyncio.run(bot.handle_media_cache_only(update, SimpleNamespace(bot=SimpleNamespace())))
+        assert update.message.outputs == []
+
+    assert called == [
+        ("auto", ("--confirm-paid",)),
+        ("dub", ("--confirm-paid",)),
+        ("full", ("--confirm-paid",)),
+    ]
+
+
+def test_active_subtitle_flows_do_not_show_generic_video_menu(monkeypatch):
+    uid = 173405
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    modes = [
+        bot.VIDEO_SUBTITLE_MODE_CREATE,
+        bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        bot.VIDEO_SUBTITLE_MODE_DUB,
+        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    ]
+    for mode in modes:
+        bot.clear_video_dubbing_pending(uid)
+        bot.set_video_dubbing_pending(
+            uid,
+            "source",
+            mode=mode,
+            video_processing_mode=mode,
+            origin="translation",
+            product_context=bot.PRODUCT_CONTEXT_SHOWROOM,
+            active_flow={
+                bot.VIDEO_SUBTITLE_MODE_CREATE: "auto_subtitle",
+                bot.VIDEO_SUBTITLE_MODE_TRANSLATE: "subtitle_translate",
+                bot.VIDEO_SUBTITLE_MODE_DUB: "dub_audio",
+                bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB: "subtitle_plus_dub",
+            }[mode],
+        )
+        update = media_update(uid, "video")
+
+        asyncio.run(bot.handle_media_cache_only(update, SimpleNamespace(bot=SimpleNamespace())))
+
+        joined = "\n".join(item.get("text", "") for item in update.message.outputs)
+        assert "TOAN AAS đã nhận video" not in joined
+        assert "Bạn muốn xử lý video này theo hướng nào" not in joined
+    bot.clear_video_dubbing_pending(uid)
+
+
+def test_translation_studio_lost_state_recovery_menu(monkeypatch):
+    uid = 173406
+    bot.clear_video_dubbing_pending(uid)
+    bot.enter_product_context(uid, bot.PRODUCT_CONTEXT_SHOWROOM, origin_screen="menu|translate", product_area="translation")
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    update = media_update(uid, "video")
+
+    asyncio.run(bot.handle_media_cache_only(update, SimpleNamespace(bot=SimpleNamespace())))
+
+    text = update.message.outputs[-1]["text"]
+    labels = _button_labels(update.message.outputs[-1]["reply_markup"])
+    assert "Studio Dịch / Phụ đề / Lồng tiếng" in text
+    assert "Tạo phụ đề" in " ".join(labels)
+    assert "Lồng tiếng" in " ".join(labels)
+    assert "Tự quay" not in text + " ".join(labels)
+    assert "Nâng cấp video" not in text + " ".join(labels)
+    bot.clear_video_dubbing_pending(uid)
+    bot.clear_product_context(uid)
+
+
+def test_subtitle_file_upload_stays_in_dub_flow(monkeypatch):
+    uid = 173407
+    bot.clear_video_dubbing_pending(uid)
+    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
+    bot.set_video_dubbing_pending(
+        uid,
+        "source",
+        mode=bot.VIDEO_SUBTITLE_MODE_DUB,
+        video_processing_mode=bot.VIDEO_SUBTITLE_MODE_DUB,
+        origin="translation",
+        product_context=bot.PRODUCT_CONTEXT_SHOWROOM,
+        active_flow="dub_audio",
+    )
+    document = SimpleNamespace(
+        file_id="subtitle-file",
+        file_unique_id="subtitle-unique",
+        file_name="captions.srt",
+        mime_type="application/x-subrip",
+        file_size=128,
+    )
+    message = CaptureMessage(document=document)
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=uid),
+        effective_chat=SimpleNamespace(id=uid),
+        effective_message=message,
+        message=message,
+    )
+
+    asyncio.run(bot.handle_document_cache_only(update, SimpleNamespace(bot=SimpleNamespace())))
+
+    joined = "\n".join(item.get("text", "") for item in update.message.outputs)
+    assert "Chọn ngôn ngữ" in joined or "ngôn ngữ" in joined
+    assert "Dịch file" not in joined
+    assert "TOAN AAS đã nhận video" not in joined
+    bot.clear_video_dubbing_pending(uid)
+
+
+def test_dub_audio_source_keyboard_offers_recent_subtitle():
+    markup = bot.video_dubbing_source_keyboard(
+        "vi",
+        {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_DUB},
+    )
+
+    labels = " ".join(_button_labels(markup))
+    assert "Gửi SRT/VTT/TXT" in labels
+    assert "Dùng phụ đề vừa tạo" in labels
+
+
+def test_status_mentions_b4_isolation_flags(monkeypatch):
+    configured_deepgram(monkeypatch, "NOT_TESTED")
+
+    joined = "\n".join(bot.subtitle_engine_status_lines() + bot.dub_engine_status_lines())
+
+    assert "ASR provider: <code>deepgram</code>" in joined
+    assert "Generic video handler isolation: <code>YES</code>" in joined
+    assert "Caption smoke command support: <code>YES</code>" in joined
