@@ -1994,7 +1994,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     }
     assert "🧠 Ý tưởng video" in video_labels
     assert "📢 Concept quảng cáo" not in video_labels
-    assert "🎥 Prompt / Chuyển động" in video_labels
+    assert "📚 Kho prompt video" in video_labels
+    assert "🎥 Prompt / Chuyển động" not in video_labels
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
     for callback_data in [
@@ -2642,16 +2643,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert video_labels == [
         "🔥 Video theo trend",
         "🧠 Ý tưởng video",
-        "🎞 Storyboard + Prompt",
-        "🎥 Prompt / Chuyển động",
+        "🎬 Storyboard + Prompt",
+        "📚 Kho prompt video",
         "🎬 Video AI chân thật",
         "🧩 Kịch bản → Ảnh → Video",
         "🖼 Ảnh → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
         "🎬 Phim AI nhiều cảnh",
-        "📥 Video mẫu / Kênh mẫu",
-        "🎵 Nhạc / Voice / SFX",
         "📥 Tải video từ link",
         "🛠 Chỉnh sửa video local",
         "🏠 Menu chính",
@@ -4771,7 +4770,7 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert "🎬 Video AI chân thật" in video_labels
     assert "🎥 Tự quay & đổi cảnh AI" in video_labels
     assert "🎬 Phim AI nhiều cảnh" in video_labels
-    assert "🎞 Storyboard + Prompt" in video_labels
+    assert "🎬 Storyboard + Prompt" in video_labels
     assert "🔥 Video theo trend" in video_labels
     assert "🧠 Ý tưởng video" in video_labels
     assert "📢 Concept quảng cáo" not in video_labels
@@ -7068,7 +7067,7 @@ def test_trend_guided_video_prompt_callbacks_are_telegram_safe():
         bot.trend_guided_video_public_off_keyboard("vi", is_admin=True),
     ]
     for keyboard in keyboards:
-        assert max(len(row) for row in keyboard.inline_keyboard) <= 2
+        assert max(len(row) for row in keyboard.inline_keyboard) <= 3
         callbacks = [
             button.callback_data
             for row in keyboard.inline_keyboard
@@ -7421,7 +7420,7 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
     labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     callbacks = [button.callback_data for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert "🎬 Phim AI nhiều cảnh" in labels
-    assert "🎞 Storyboard + Prompt" in labels
+    assert "🎬 Storyboard + Prompt" in labels
     assert "vproduct|open|multi_scene_film" in callbacks
     assert "vproduct|open|storyboard_prompt" in callbacks
     assert 'CallbackQueryHandler(handle_storyboard_pack_callback, pattern=r"^storypack\\|")' in source
