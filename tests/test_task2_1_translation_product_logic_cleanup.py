@@ -249,7 +249,13 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
     async def fake_download(_context, _state):
         return b"video", "video/mp4"
 
+    async def fake_extract_audio(data, content_type="application/octet-stream", max_seconds=0):
+        assert data == b"video"
+        assert content_type == "video/mp4"
+        return b"audio-from-video", "audio/mpeg", "ffmpeg_audio_extract"
+
     async def fake_transcribe(_data, _context, _content_type="application/octet-stream"):
+        assert _data == b"audio-from-video"
         return "ASR", "hello world", "ok"
 
     async def fake_translate(text, target, **_kwargs):
@@ -263,6 +269,8 @@ def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):
 
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
+    monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
+    monkeypatch.setattr(bot, "video_dubbing_extract_audio", fake_extract_audio)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)

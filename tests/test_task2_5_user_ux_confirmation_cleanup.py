@@ -18,7 +18,9 @@ def test_auto_subtitle_final_confirmation_is_public_clean():
     text = bot.video_dubbing_output_text(state, "vi")
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
 
-    assert "Video đã sẵn sàng tạo phụ đề" in text
+    assert "Tạo phụ đề tự động" in text
+    assert "Đầu ra: SRT, VTT, TXT" in text
+    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in text
     assert labels == ["👁 Xem thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
     forbidden = ("tác vụ", "nguồn", "chi phí", "sửa lựa chọn", "đổi giọng", "đổi tốc độ", "admin", "curl")
     ui = _joined(text, bot.video_dubbing_output_keyboard("vi", state))

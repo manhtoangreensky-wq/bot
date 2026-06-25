@@ -147,7 +147,7 @@ def test_subtitle_audio_requires_asr(monkeypatch):
 def test_subtitle_asr_missing_clean_public_guard():
     text = bot.video_dubbing_asr_missing_guard_text("vi")
 
-    assert "Tạo phụ đề đang tạm giới hạn" in text
+    assert "Tạo phụ đề tự động đang được mở thử nghiệm" in text
     assert "chưa xử lý và chưa trừ Xu" in text
     forbidden = ["asr_adapter_missing", "component kỹ thuật", "Admin test", "provider", "API", "route"]
     assert not any(item in text for item in forbidden)
@@ -161,7 +161,7 @@ def test_subtitle_asr_missing_no_confirm_buttons():
     assert not any("Xem thử" in label for label in labels)
     assert not any("Xác nhận tạo đầy đủ" in label for label in labels)
     assert not any(callback.startswith("videodub|confirm") for callback in callbacks)
-    assert "menu|translation_text" in callbacks
+    assert callbacks == ["videodub|back_type", "menu|main"]
 
 
 def test_subtitle_asr_missing_no_provider_call(monkeypatch):
@@ -222,7 +222,7 @@ def test_dub_asr_missing_clean_guard(monkeypatch):
     state = {"source_mime_type": "audio/mpeg", "source_file_name": "input.mp3", "media_kind": "audio"}
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, state, "vi", admin=False)
 
-    assert "Tạo phụ đề đang tạm giới hạn" in text
+    assert "Tạo phụ đề tự động đang được mở thử nghiệm" in text
     assert "asr_adapter_missing" not in text
 
 
@@ -247,7 +247,7 @@ def test_public_flow_admin_user_still_customer_clean(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     joined = "\n".join(item.get("text", "") for item in query.outputs)
 
-    assert "Tạo phụ đề đang tạm giới hạn" in joined
+    assert "Tạo phụ đề tự động đang được mở thử nghiệm" in joined
     assert "Admin test" not in joined
     assert "component kỹ thuật" not in joined
 
