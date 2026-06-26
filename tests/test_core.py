@@ -8048,7 +8048,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         (bot.VIDEO_SUBTITLE_MODE_CREATE, True, False, True),
         (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, True, False, True),
         (bot.VIDEO_SUBTITLE_MODE_DUB, False, True, True),
-        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, True, True, True),
+        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, False, True, True),
     ]:
         message = OutputMessage()
         query = SimpleNamespace(from_user=SimpleNamespace(id=72001), message=message)

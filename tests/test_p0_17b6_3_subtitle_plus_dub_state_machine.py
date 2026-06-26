@@ -202,7 +202,7 @@ def test_subtitle_plus_dub_translated_subtitle_ready_buttons():
     state = {"target_language": "English"}
     labels = _labels(bot.subtitle_plus_dub_translated_ready_keyboard("vi"))
     assert "Đã dịch phụ đề sang English" in bot.subtitle_plus_dub_translated_ready_text(state, "vi")
-    assert labels == ["📄 Tải SRT dịch", "🧾 Xem bản dịch", "🎙 Lồng tiếng bằng bản dịch này", "🔁 Dịch sang tiếng khác", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["👁 Xem thử", "📄 Tải SRT", "📄 Tải VTT", "🧾 Tải TXT", "🎙 Lồng tiếng từ bản dịch này", "🌐 Dịch ngôn ngữ khác", "⬅️ Quay lại", "🏠 Menu chính"]
 
 
 def test_subtitle_plus_dub_voice_selection_after_subtitle():
@@ -252,19 +252,20 @@ def test_subtitle_plus_dub_full_requires_confirm(monkeypatch):
     query = asyncio.run(_press(uid, "videodub|combo_full_dub"))
     assert calls["full"] == 1
     assert bot.get_video_dubbing_pending(uid)["step"] == "completed"
-    assert "Đã tạo audio lồng tiếng" in query.message.outputs[-1]["text"]
+    assert "đã tạo audio lồng tiếng" in query.message.outputs[-1]["text"]
 
 
 def test_subtitle_plus_dub_outputs_audio_or_video_cleanly():
     audio_state = {"final_audio_available": "1", "final_video_available": "0"}
     video_state = {"final_audio_available": "1", "final_video_available": "1"}
-    assert "Tải video hoàn chỉnh" not in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
-    assert any("Tải video hoàn chỉnh" in label for label in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", video_state)))
+    assert "📹 Tải video" not in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
+    assert "📹 Thử ghép lại" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
+    assert "📹 Tải video" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", video_state))
 
 
 def test_subtitle_plus_dub_mux_unavailable_no_fake_mp4():
     text = bot.subtitle_plus_dub_completed_text({}, {"has_audio": True, "has_video": False}, "vi")
-    assert "Đã tạo audio lồng tiếng" in text
+    assert "đã tạo audio lồng tiếng" in text
     assert "MP4" not in text
 
 

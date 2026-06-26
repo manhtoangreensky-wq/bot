@@ -84,8 +84,8 @@ def test_subtitle_ready_keyboard_exports_srt_vtt_txt():
     labels = _labels(markup)
 
     assert {"videodub|output|srt", "videodub|output|vtt", "videodub|output|txt"}.issubset(callbacks)
-    assert "📄 Xuất VTT" in labels
-    assert "📝 Xuất TXT" in labels
+    assert "📄 Tải VTT" in labels
+    assert "🧾 Tải TXT" in labels
 
 
 def test_translation_menu_text_requires_confirm_before_provider(monkeypatch):

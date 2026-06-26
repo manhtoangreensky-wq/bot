@@ -118,11 +118,10 @@ def test_auto_subtitle_after_upload_shows_product_confirmation(monkeypatch):
     assert "Tác vụ:" not in text
     assert "Nguồn:" not in text
     assert labels == [
-        "📄 Xuất SRT",
-        "📄 Xuất VTT",
-        "📝 Xuất TXT",
-        "🎞 Gắn vào video",
-        "📝 Chỉnh phụ đề",
+        "👁 Xem thử",
+        "📄 Tải SRT",
+        "📄 Tải VTT",
+        "🧾 Tải TXT",
         "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
@@ -274,7 +273,7 @@ def test_subtitle_plus_continue_dubbing_only_after_subtitle_output():
     }
     ready_state = {**pending_state, "translated_subtitle_ref": "video_dubbing_artifact:824:translated"}
     assert "🗣 Tiếp tục lồng tiếng" not in _labels(bot.video_dubbing_output_keyboard("vi", pending_state))
-    assert "🗣 Tiếp tục lồng tiếng" in _labels(bot.video_dubbing_output_keyboard("vi", ready_state))
+    assert "🎙 Lồng tiếng từ bản dịch này" in _labels(bot.video_dubbing_output_keyboard("vi", ready_state))
 
 
 def test_subtitle_plus_dubbing_confirmation_has_preview_and_full():
