@@ -108,8 +108,8 @@ def _bundle(product_id="storyboard_prompt", shots=9, package_id=""):
 
 def test_video_menu_all_buttons_have_product_registry():
     markup = bot.main_video_keyboard("vi")
-    assert len(markup.inline_keyboard) == 7
-    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 1, 1, 2]
+    assert len(markup.inline_keyboard) == 6
+    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2]
     callbacks = _callbacks(markup)
     public_product_ids = (
         "video_trend",
@@ -1898,7 +1898,7 @@ def test_prompt_image_scene_selector():
     labels = _labels(markup)
     callbacks = _callbacks(markup)
     for index in range(1, 7):
-        assert str(index) in labels
+        assert bot.VIDEO_NUMBER_BUTTON_LABELS[index - 1] in labels
         assert f"vproduct|prompt_image_select|{index}" in callbacks
     assert "📦 Tất cả cảnh" in labels
     assert "⭐ Cảnh chính" in labels

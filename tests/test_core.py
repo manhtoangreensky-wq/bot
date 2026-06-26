@@ -2646,7 +2646,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🎬 Storyboard + Prompt",
         "📚 Kho prompt video",
         "🎬 Video AI chân thật",
-        "🧩 Kịch bản → Ảnh → Video",
+        "🧩 Kịch bản → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
         "🎬 Phim AI nhiều cảnh",
@@ -4764,7 +4764,7 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
         for row in bot.main_video_keyboard("vi").inline_keyboard
         for button in row
     }
-    assert "🧩 Kịch bản → Ảnh → Video" in video_labels
+    assert "🧩 Kịch bản → Video" in video_labels
     assert "🎞 Ghép ảnh thành video" in video_labels
     assert "🎬 Video AI chân thật" in video_labels
     assert "🎥 Tự quay & đổi cảnh AI" in video_labels
