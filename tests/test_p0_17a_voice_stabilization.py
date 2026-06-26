@@ -202,9 +202,9 @@ def test_voice_preview_no_full_delivery_before_confirm(monkeypatch, tmp_path):
 
 def test_clone_permission_forbidden_public_clean_message():
     text = bot.voice_clone_permission_forbidden_public_text("vi")
-    assert "Tạo voice riêng đang tạm giới hạn" in text
-    assert "tính năng tạo/clone voice riêng chưa sẵn sàng trên nhà cung cấp" in text
-    assert "giọng nam/nữ mặc định miễn phí" in text
+    assert "Voice riêng đang được chuẩn bị" in text
+    assert "chưa xử lý và chưa trừ Xu" in text
+    assert "giọng nữ/nam mặc định miễn phí" in text
     assert "user forbidden" not in text.lower()
 
 
@@ -225,8 +225,9 @@ def test_clone_permission_forbidden_admin_sanitized(monkeypatch):
 
 def test_clone_failure_offers_default_voice_fallback():
     labels = _labels(bot.voice_clone_permission_forbidden_keyboard("vi", bot.PRODUCT_CONTEXT_SHOWROOM))
-    assert "🎙 Dùng giọng nữ mặc định miễn phí" in labels
-    assert "🎙 Dùng giọng nam mặc định miễn phí" in labels
+    assert "🎙 Dùng giọng nữ mặc định" in labels
+    assert "🎙 Dùng giọng nam mặc định" in labels
+    assert "🔁 Thử lại sau" in labels
     assert "⬅️ Kho voice" in labels
     assert "🏠 Menu chính" in labels
 

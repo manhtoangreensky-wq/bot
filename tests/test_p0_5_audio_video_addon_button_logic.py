@@ -163,7 +163,7 @@ def test_showroom_voice_default_asks_text_then_confirm(monkeypatch):
 
     assert handled is True
     assert "Tạo giọng đọc miễn phí" in message.outputs[-1]["text"]
-    assert "Không cần nghe thử 6 giây" in message.outputs[-1]["text"]
+    assert "6 giây" not in message.outputs[-1]["text"]
     assert "music_quick|showroom|voice_default_confirm:female" in _callbacks(message.outputs[-1]["reply_markup"])
 
 
