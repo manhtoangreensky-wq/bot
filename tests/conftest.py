@@ -1,6 +1,24 @@
+import re
+import shutil
+import uuid
+from pathlib import Path
+
 import pytest
 
 import bot
+
+
+@pytest.fixture
+def tmp_path(request):
+    root = Path(__file__).resolve().parents[1] / ".pytest_tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", request.node.name)[:80] or "test"
+    path = root / f"{safe_name}_{uuid.uuid4().hex[:8]}"
+    path.mkdir(parents=True, exist_ok=False)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)

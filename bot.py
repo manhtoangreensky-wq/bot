@@ -89,6 +89,7 @@ from video_product_system import (
     validate_video_prompt_bundle,
 )
 import video_image_to_video_flow as ivf
+from services import multiscene_video_pipeline as multiscene_blackbox
 from video_multiscene_engine import (
     build_detailed_multiscene_prompt_plan,
     context_bundle_debug_summary,
@@ -36397,6 +36398,160 @@ VIDEO_MULTISCENE_FINAL_PASS_STATUSES = {"PASS", "SUCCESS", "OK"}
 VIDEO_MULTISCENE_BACKGROUND_TASKS: set[asyncio.Task] = set()
 VIDEO_MULTISCENE_JOB_SETTING_PREFIX = "video_multiscene_job:"
 VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT = "Dịch vụ đang được kiểm tra. TOAN AAS chưa xử lý và chưa trừ Xu. Vui lòng thử lại sau."
+MULTISCENE_BLACKBOX_BACKGROUND_TASKS: set[asyncio.Task] = set()
+MULTISCENE_BLACKBOX_PUBLIC_GUARD_TEXT = "Video nhiều cảnh đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
+MULTISCENE_LONG_VIDEO_GUARD_TEXT = "Phim AI nhiều cảnh đang phát triển / đang hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
+
+def multiscene_blackbox_max_concurrent() -> int:
+    return max(1, safe_int(os.getenv("MULTISCENE_VIDEO_MAX_CONCURRENT"), 1))
+
+def multiscene_blackbox_active_count() -> int:
+    return sum(1 for task in list(MULTISCENE_BLACKBOX_BACKGROUND_TASKS) if not task.done())
+
+def multiscene_blackbox_job_id(user_id, scene_count: int) -> str:
+    nonce = hashlib.sha256(f"{user_id}:{scene_count}:{time.time_ns()}".encode("utf-8")).hexdigest()[:12]
+    return f"msbb-{int(time.time())}-{nonce}"
+
+def multiscene_blackbox_save_job(job: dict) -> dict:
+    try:
+        save_multiscene_job_record(job)
+    except Exception as exc:
+        logger.warning("multiscene blackbox job save failed | %s", type(exc).__name__)
+    return job
+
+def multiscene_blackbox_fake_renderer(duration: float = 6.0):
+    colors = ["0x1E88E5", "0x43A047", "0xF4511E", "0x8E24AA", "0xFDD835"]
+
+    def _render(scene, output_path: str) -> str:
+        ffmpeg = video_multiscene_ffmpeg_path()
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg_missing")
+        color = colors[(int(scene.scene_id) - 1) % len(colors)]
+        result = multiscene_blackbox.safe_run_ffmpeg(
+            [
+                ffmpeg,
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c={color}:s=540x960:r=30:d={float(duration):.3f}",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "20",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                output_path,
+            ],
+            timeout=90,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("fake_renderer_ffmpeg_failed")
+        return multiscene_blackbox.ensure_video_output(output_path)
+
+    return _render
+
+async def send_multiscene_blackbox_final_once(bot_client, chat_id, job: dict, result: dict) -> dict:
+    final_path = str(result.get("final_video_path") or "")
+    multiscene_blackbox.ensure_video_output(final_path)
+    if not bot_client or not chat_id:
+        return {"sent": False, "reason": "telegram_target_missing"}
+    with open(final_path, "rb") as handle:
+        message = await bot_client.send_video(
+            chat_id=chat_id,
+            video=handle,
+            caption="✅ Video nhiều cảnh đã hoàn tất. TOAN AAS chỉ gửi video cuối cùng.",
+            supports_streaming=True,
+        )
+    file_id = ""
+    if getattr(message, "video", None):
+        file_id = str(getattr(message.video, "file_id", "") or "")
+    return {"sent": True, "output_file_id": file_id}
+
+async def run_multiscene_blackbox_job(order_or_session: dict, *, wait_for_completion: bool = False, render_video_func=None, sender=None) -> dict:
+    order = dict(order_or_session or {})
+    user_id = order.get("user_id") or order.get("uid") or 0
+    chat_id = order.get("chat_id") or user_id
+    admin = bool(is_admin_user(user_id) or order.get("admin_test"))
+    scene_count = max(1, safe_int(order.get("scene_count") or order.get("max_scenes"), 3))
+    scene_duration = max(1.0, float(order.get("scene_duration") or order.get("duration") or 6.0))
+    total_duration = scene_count * scene_duration
+    if scene_count > 3 or total_duration > 24:
+        return {"ok": False, "status": "LONG_VIDEO_GUARDED", "message": MULTISCENE_LONG_VIDEO_GUARD_TEXT, "scene_count": scene_count}
+    if not admin:
+        return {"ok": False, "status": "PUBLIC_GUARDED", "message": MULTISCENE_BLACKBOX_PUBLIC_GUARD_TEXT, "scene_count": scene_count}
+    if multiscene_blackbox_active_count() >= multiscene_blackbox_max_concurrent():
+        return {"ok": False, "status": "QUEUE_BUSY", "message": "Video nhiều cảnh đang có job khác chạy. TOAN AAS chưa xử lý thêm và chưa trừ Xu.", "scene_count": scene_count}
+    if not render_video_func:
+        if not order.get("fake_renderer"):
+            return {"ok": False, "status": "RENDERER_MISSING", "message": VIDEO_MULTISCENE_PUBLIC_GUARD_TEXT, "scene_count": scene_count}
+        render_video_func = multiscene_blackbox_fake_renderer(scene_duration)
+    job_id = str(order.get("job_id") or multiscene_blackbox_job_id(user_id, scene_count))
+    workspace = multiscene_blackbox.create_multiscene_workspace(job_id)
+    job = {
+        "parent_task_id": job_id,
+        "user_id": str(user_id or ""),
+        "chat_id": chat_id,
+        "status": "PENDING",
+        "scene_count": scene_count,
+        "scene_duration": scene_duration,
+        "admin_test": admin,
+        "blackbox": True,
+        "result_sent": False,
+        "created_at": now_text(),
+        "updated_at": now_text(),
+        "workspace_dir": workspace,
+        "charge_xu": False,
+        "xu_deducted": 0,
+    }
+    multiscene_blackbox_save_job(job)
+
+    async def _worker() -> dict:
+        job["status"] = "RUNNING"
+        job["updated_at"] = now_text()
+        multiscene_blackbox_save_job(job)
+        result = await asyncio.to_thread(
+            multiscene_blackbox.process_multiscene_video_pipeline,
+            user_id=str(user_id or ""),
+            job_id=job_id,
+            user_prompt=str(order.get("user_prompt") or order.get("prompt") or "TOAN AAS short multi-scene video"),
+            workspace_dir=workspace,
+            render_video_func=render_video_func,
+            max_scenes=scene_count,
+            default_scene_duration=scene_duration,
+            aspect_ratio=str(order.get("aspect_ratio") or "9:16"),
+            enable_voice=False,
+            enable_subtitle=bool(order.get("enable_subtitle", True)),
+            enable_logo=False,
+        )
+        job["pipeline_result"] = {key: value for key, value in result.items() if key not in {"created_files"}}
+        job["status"] = "COMPLETED" if result.get("ok") else "FAILED"
+        job["final_output"] = str(result.get("final_video_path") or "")
+        job["manifest_path"] = str(result.get("manifest_path") or "")
+        job["updated_at"] = now_text()
+        multiscene_blackbox_save_job(job)
+        if result.get("ok"):
+            send_func = sender or send_multiscene_blackbox_final_once
+            send_result = await send_func(order.get("bot_client"), chat_id, job, result)
+            job["send_result"] = send_result
+            job["result_sent"] = bool(send_result.get("sent"))
+            job["status"] = "SENT" if send_result.get("sent") else "COMPLETED"
+            job["updated_at"] = now_text()
+            multiscene_blackbox_save_job(job)
+            if bool(order.get("cleanup", True)) and send_result.get("sent"):
+                multiscene_blackbox.cleanup_multiscene_workspace(workspace)
+        return job
+
+    if wait_for_completion:
+        return await _worker()
+    task = asyncio.create_task(_worker())
+    MULTISCENE_BLACKBOX_BACKGROUND_TASKS.add(task)
+    task.add_done_callback(MULTISCENE_BLACKBOX_BACKGROUND_TASKS.discard)
+    return {**job, "background_started": True}
 
 def video_multiscene_setting_bool(key: str, default: bool = False) -> bool:
     value = str(os.getenv(key) or get_system_setting(key, "1" if default else "") or "").strip().lower()
@@ -37103,6 +37258,48 @@ async def cmd_tool_test_video_multiscene(update: Update, context: ContextTypes.D
         "Bot sẽ poll đủ child output, stitch và chỉ đánh dấu PASS sau khi final result được gửi đúng một lần. Lệnh test không tự mở public.",
         parse_mode="HTML",
         reply_markup=engine_async_status_keyboard(str(started.get("parent_task_id") or ""), "multiscene"),
+    )
+
+async def cmd_tool_test_multiscene_blackbox(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    lang = get_user_language(uid) or "vi"
+    if not is_admin_user(uid):
+        return await update.message.reply_text(MULTISCENE_BLACKBOX_PUBLIC_GUARD_TEXT)
+    args = {str(item).strip().lower() for item in (getattr(context, "args", []) or [])}
+    if "--fake-renderer" not in args or "--no-charge" not in args:
+        return await update.message.reply_text(
+            "Cú pháp: /tool_test_multiscene_blackbox --fake-renderer --no-charge\n"
+            "Smoke này chỉ tạo 3 cảnh x 6 giây bằng renderer giả local, không provider, không Telegram scene lẻ, không trừ Xu."
+        )
+    started = await run_multiscene_blackbox_job(
+        {
+            "user_id": uid,
+            "chat_id": update.message.chat_id,
+            "scene_count": 3,
+            "scene_duration": 6,
+            "fake_renderer": True,
+            "admin_test": True,
+            "bot_client": getattr(context, "bot", None),
+            "cleanup": True,
+            "user_prompt": "Admin blackbox smoke: hook, benefit, clean brand ending.",
+        },
+        wait_for_completion=False,
+    )
+    if not started.get("background_started"):
+        return await update.message.reply_text(
+            started.get("message") or "TOAN AAS chưa bắt đầu được smoke video nhiều cảnh. Hệ thống chưa trừ Xu."
+        )
+    return await update.message.reply_text(
+        "🧪 <b>Multi-scene blackbox smoke started</b>\n\n"
+        "• Scene count: <code>3</code>\n"
+        "• Scene duration: <code>6s</code>\n"
+        "• Renderer: <code>fake-local-ffmpeg</code>\n"
+        "• Charge: <code>NO</code>\n"
+        "• Public: <code>LOCKED</code>\n"
+        f"• Job: <code>{html.escape(str(started.get('parent_task_id') or '-'))}</code>\n\n"
+        "Bot xử lý trong nền và chỉ gửi final MP4 khi hoàn tất.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
     )
 
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
@@ -50484,6 +50681,16 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value not in VIDEO_PRODUCT_REGISTRY:
             return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
         clear_video_session(uid)
+        if value == "multi_scene_film" and not is_admin_user(uid):
+            return await safe_edit_or_send(
+                query,
+                MULTISCENE_LONG_VIDEO_GUARD_TEXT,
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Menu video" if normalize_user_language(lang) == "vi" else "⬅️ Video menu", callback_data="menu|main_video")],
+                    [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+                ]),
+            )
         if value in {"image_to_video", "frame_video_local"}:
             return await safe_edit_or_send(
                 query,
@@ -57821,6 +58028,17 @@ async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAU
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
+    if not is_admin_user(uid):
+        clear_developing_video_pending(uid)
+        return await safe_edit_query_message(
+            query,
+            MULTISCENE_LONG_VIDEO_GUARD_TEXT,
+            parse_mode=None,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Menu video" if normalize_user_language(lang) == "vi" else "⬅️ Video menu", callback_data="menu|main_video")],
+                [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            ]),
+        )
     if action == "start":
         clear_developing_video_pending(uid)
         return await safe_edit_query_message(query, long_video_start_text(lang), reply_markup=long_video_topic_keyboard(lang))
@@ -98973,6 +99191,37 @@ async def execute_engine(feature: str, params: dict | None = None, context: dict
 
     if feature_key in {"video_multiscene", "multiscene"}:
         order = dict(params.get("order") or params.get("order_or_session") or {})
+        if params.get("blackbox"):
+            started = await run_multiscene_blackbox_job(
+                order,
+                wait_for_completion=bool(params.get("wait_for_completion", False)),
+                render_video_func=params.get("render_video_func"),
+                sender=params.get("sender"),
+            )
+            task_id = str(started.get("parent_task_id") or "").strip() if isinstance(started, dict) else ""
+            final_output = str((started or {}).get("final_output") or "") if isinstance(started, dict) else ""
+            final_output_ok = bool(final_output and os.path.exists(final_output) and os.path.getsize(final_output) > 0)
+            async_submission = bool(not params.get("wait_for_completion", False) and task_id and (started or {}).get("background_started"))
+            if not final_output_ok and not async_submission:
+                return engine_fail(
+                    feature_key,
+                    str((started or {}).get("status") or "BLACKBOX_NO_OUTPUT"),
+                    str((started or {}).get("message") or ""),
+                    gate=gate,
+                    provider_result=started,
+                    message=str((started or {}).get("message") or ""),
+                )
+            return engine_success(
+                feature_key,
+                "PASS" if final_output_ok else "PASS_SUBMITTED",
+                "multiscene blackbox output ready" if final_output_ok else "multiscene blackbox job submitted",
+                gate=gate,
+                provider_result=started,
+                provider_task_id=task_id,
+                job_created=bool(task_id),
+                final_output=final_output,
+                has_output_bytes=final_output_ok,
+            )
         if is_admin_user(uid) and bool(context.get("admin_interactive_confirm") or context.get("confirm_paid")):
             order["admin_test"] = True
             order["confirm_paid"] = True
@@ -139262,6 +139511,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_multiscene_status", cmd_video_multiscene_status))
     tg_app.add_handler(CommandHandler("video_multiscene_engine_status", cmd_video_multiscene_status))
     tg_app.add_handler(CommandHandler("tool_test_video_multiscene", cmd_tool_test_video_multiscene))
+    tg_app.add_handler(CommandHandler("tool_test_multiscene_blackbox", cmd_tool_test_multiscene_blackbox))
     tg_app.add_handler(CommandHandler("video_jobs", cmd_video_jobs))
     tg_app.add_handler(CommandHandler("video_job", cmd_video_job))
     tg_app.add_handler(CommandHandler("video_multiscene_job", cmd_video_multiscene_job))
