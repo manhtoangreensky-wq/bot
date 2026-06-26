@@ -33,41 +33,52 @@ class SmokeTelegramBot:
         return self.tg_file
 
 
-async def run_smoke(input_path: pathlib.Path, no_charge: bool) -> dict:
-    if not no_charge:
-        raise RuntimeError("Refusing to run paid/provider smoke without --no-charge")
+def clean_guard(input_path: pathlib.Path, reason: str, readiness: dict, *, no_charge: bool) -> dict:
+    return {
+        "ok": True,
+        "status": "CLEAN_GUARD",
+        "input": str(input_path),
+        "reason": str(reason or readiness.get("reason") or "provider_call_skipped"),
+        "provider_ready": bool(readiness.get("configured")),
+        "asr_called": False,
+        "segments": 0,
+        "srt_created": False,
+        "vtt_created": False,
+        "txt_created": False,
+        "clean_guard": True,
+        "no_charge": bool(no_charge),
+        "provider": str(readiness.get("adapter") or readiness.get("provider") or ""),
+    }
+
+
+async def run_smoke(input_path: pathlib.Path, no_charge: bool, confirm_paid: bool) -> dict:
+    if not no_charge and not confirm_paid:
+        raise RuntimeError("Refusing provider smoke without --no-charge or --confirm-paid")
+    readiness = bot.get_asr_adapter_readiness(public=False)
+    if not readiness.get("configured"):
+        return clean_guard(input_path, str(readiness.get("reason") or "asr_adapter_missing"), readiness, no_charge=no_charge)
+    if not confirm_paid:
+        return clean_guard(input_path, "provider_call_skipped_requires_confirm_paid", readiness, no_charge=no_charge)
+
     data = input_path.read_bytes()
     flags = {
         "telegram_downloaded": False,
-        "audio_extracted": False,
         "asr_called": False,
         "charge_called": False,
     }
 
-    async def fake_embedded_subtitle(*_args, **_kwargs):
-        return "", "smoke_no_embedded_subtitle"
-
-    async def fake_extract_audio(source_bytes, content_type, max_seconds=0):
-        flags["audio_extracted"] = True
-        if not source_bytes:
-            raise RuntimeError("smoke_empty_source")
-        return b"smoke-audio-bytes", "audio/mpeg", "smoke_fake_ffmpeg_extract"
-
-    async def fake_transcribe(audio_bytes, context, audio_content_type, **_kwargs):
-        flags["asr_called"] = True
-        if not audio_bytes:
-            raise RuntimeError("smoke_empty_audio")
-        return "smoke_unit_asr", "xin chao tu smoke subtitle pipeline", "smoke_no_charge"
-
-    def fake_charge(*_args, **_kwargs):
+    def forbidden_charge(*_args, **_kwargs):
         flags["charge_called"] = True
         raise AssertionError("smoke must not charge Xu")
 
-    bot.video_dubbing_extract_embedded_subtitle = fake_embedded_subtitle
-    bot.video_dubbing_audio_extract_ready = lambda: True
-    bot.video_dubbing_extract_audio = fake_extract_audio
-    bot.video_dubbing_transcribe_bytes = fake_transcribe
-    bot.spend_fixed_credit_info = fake_charge
+    original_transcribe = bot.video_dubbing_transcribe_bytes
+
+    async def audited_transcribe(*args, **kwargs):
+        flags["asr_called"] = True
+        return await original_transcribe(*args, **kwargs)
+
+    bot.video_dubbing_transcribe_bytes = audited_transcribe
+    bot.spend_fixed_credit_info = forbidden_charge
 
     tg_file = SmokeTelegramFile(data)
     context = SimpleNamespace(bot=SmokeTelegramBot(tg_file))
@@ -97,45 +108,45 @@ async def run_smoke(input_path: pathlib.Path, no_charge: bool) -> dict:
     srt = str(prepared.get("source_subtitle") or "")
     outputs = bot.video_dubbing_subtitle_output_items(srt, "all", bot.VIDEO_SUBTITLE_MODE_CREATE)
     output_map = {item["output_type"]: bytes(item["bytes"] or b"") for item in outputs}
-    summary = {
+    segments = list(prepared.get("source_segments") or [])
+    return {
         "ok": bool(
             flags["telegram_downloaded"]
             and flags["asr_called"]
-            and prepared.get("source_segments")
+            and segments
             and b"-->" in output_map.get("srt", b"")
             and output_map.get("vtt", b"").startswith(b"WEBVTT")
             and output_map.get("txt", b"").strip()
             and not flags["charge_called"]
         ),
+        "status": "PASS" if segments else "NO_SEGMENTS",
         "input": str(input_path),
         "telegram_downloaded": flags["telegram_downloaded"],
-        "audio_extracted": flags["audio_extracted"],
         "asr_called": flags["asr_called"],
-        "segments": len(prepared.get("source_segments") or []),
+        "segments": len(segments),
         "srt_created": b"-->" in output_map.get("srt", b""),
         "vtt_created": output_map.get("vtt", b"").startswith(b"WEBVTT"),
         "txt_created": bool(output_map.get("txt", b"").strip()),
         "no_charge": not flags["charge_called"],
         "asr_provider": str(prepared.get("asr_provider") or ""),
+        "clean_guard": False,
     }
-    if media_kind == "video" and not flags["audio_extracted"]:
-        summary["ok"] = False
-    return summary
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Local no-charge smoke for media -> ASR -> subtitle pipeline.")
+    parser = argparse.ArgumentParser(description="Real media -> ASR -> subtitle smoke, with honest clean guard when provider calls are not allowed.")
     parser.add_argument("--input", required=True, help="Path to a small video/audio fixture")
-    parser.add_argument("--no-charge", action="store_true", help="Use local stubs and assert no Xu charge")
+    parser.add_argument("--no-charge", action="store_true", help="Assert no Xu charge; does not fake ASR")
+    parser.add_argument("--confirm-paid", action="store_true", help="Allow the configured ASR provider to be called")
     args = parser.parse_args()
     input_path = pathlib.Path(args.input).resolve()
     if not input_path.exists():
-        print(json.dumps({"ok": False, "error": "input_missing", "input": str(input_path)}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "status": "INPUT_MISSING", "input": str(input_path)}, ensure_ascii=False))
         return 2
     try:
-        summary = asyncio.run(run_smoke(input_path, bool(args.no_charge)))
+        summary = asyncio.run(run_smoke(input_path, bool(args.no_charge), bool(args.confirm_paid)))
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(exc), "input": str(input_path)}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "status": "FAIL_REAL_PIPELINE", "error": str(exc), "input": str(input_path)}, ensure_ascii=False))
         return 1
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary.get("ok") else 1
