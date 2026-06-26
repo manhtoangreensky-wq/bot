@@ -83,11 +83,17 @@ def test_dubbing_requires_voice_only_in_dubbing():
     assert not bot.video_dubbing_requires_voice(bot.VIDEO_SUBTITLE_MODE_TRANSLATE)
     assert bot.video_dubbing_requires_voice(bot.VIDEO_SUBTITLE_MODE_DUB)
     labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
-    for label in ["👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📂 Kho voice", "🎙 Tạo voice riêng"]:
+    for label in ["👩 Giọng nữ mặc định", "👨 Giọng nam mặc định"]:
         assert label in labels
+    assert "📂 Kho voice" not in labels
+    assert "🎙 Tạo voice riêng" not in labels
+    admin_labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "entry_surface": "admin_test_mode"}))
+    assert "📂 Kho voice" in admin_labels
+    assert "🎙 Tạo voice riêng" in admin_labels
 
 
 def test_subtitle_plus_dubbing_export_before_voice(monkeypatch):
+    monkeypatch.setattr(bot, "is_admin_user", lambda _uid: True)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
     uid = "task2-plus-export"
     bot.clear_video_dubbing_pending(uid)
@@ -128,7 +134,10 @@ def test_no_copied_source_menu_inside_product_flows():
     assert "🔗 Tải link" not in create_labels
 
     translate_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
-    assert translate_labels[:2] == ["📎 Gửi video/audio", "📄 Gửi SRT/VTT/TXT"]
+    assert translate_labels[0] == "📎 Gửi video/audio"
+    assert "📄 Gửi SRT/VTT/TXT" not in translate_labels
+    admin_translate_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "entry_surface": "admin_test_mode"}))
+    assert admin_translate_labels[:2] == ["📎 Gửi video/audio", "📄 Gửi SRT/VTT/TXT"]
 
     dub_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert dub_labels[:3] == [

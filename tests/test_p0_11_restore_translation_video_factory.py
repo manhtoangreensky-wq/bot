@@ -178,8 +178,11 @@ def test_auto_dubbing_voice_selection_required():
     labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert "👩 Giọng nữ mặc định" in labels
     assert "👨 Giọng nam mặc định" in labels
-    assert "📂 Kho voice" in labels
-    assert "🎙 Tạo voice riêng" in labels
+    assert "📂 Kho voice" not in labels
+    assert "🎙 Tạo voice riêng" not in labels
+    admin_labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "entry_surface": "admin_test_mode"}))
+    assert "📂 Kho voice" in admin_labels
+    assert "🎙 Tạo voice riêng" in admin_labels
 
 
 def test_auto_dubbing_voice_settings():

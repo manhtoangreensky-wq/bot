@@ -93,7 +93,8 @@ def test_link_import_only_top_level():
 
 def test_no_copied_source_menu_inside_product_flows():
     assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_CREATE))[0] == "📎 Gửi video/audio"
-    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:2] == ["📎 Gửi video/audio", "📄 Gửi SRT/VTT/TXT"]
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:1] == ["📎 Gửi video/audio"]
+    assert "📄 Gửi SRT/VTT/TXT" not in _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))
     assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_DUB))[:3] == [
         "📎 Gửi video/audio để tự bóc lời",
         "📄 Gửi file phụ đề có sẵn",
