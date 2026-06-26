@@ -826,8 +826,18 @@ def test_subtitle_file_upload_stays_in_dub_flow(monkeypatch):
         effective_message=message,
         message=message,
     )
+    subtitle_bytes = b"1\n00:00:00,000 --> 00:00:02,000\nXin chao\n"
 
-    asyncio.run(bot.handle_document_cache_only(update, SimpleNamespace(bot=SimpleNamespace())))
+    class FakeTelegramFile:
+        async def download_as_bytearray(self):
+            return bytearray(subtitle_bytes)
+
+    class FakeBot:
+        async def get_file(self, file_id):
+            assert file_id == "subtitle-file"
+            return FakeTelegramFile()
+
+    asyncio.run(bot.handle_document_cache_only(update, SimpleNamespace(bot=FakeBot())))
 
     joined = "\n".join(item.get("text", "") for item in update.message.outputs)
     assert "Chọn ngôn ngữ" in joined or "ngôn ngữ" in joined

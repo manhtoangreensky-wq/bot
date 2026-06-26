@@ -1,0 +1,3 @@
+TOAN_AAS_SMOKE_MP4_PLACEHOLDER
+This tiny fixture is intentionally not a real media file.
+tools/smoke_subtitle_pipeline.py --no-charge stubs FFmpeg extraction and ASR while verifying the Telegram-download-to-ASR wiring.

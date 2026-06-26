@@ -130344,7 +130344,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "subtitle_find_text", "subtitle_replace_text", "subtitle_time_shift_ms",
             "requested_mode", "preview_seen", "preview_guard_acknowledged",
             "translation_session_id", "product", "current_step", "previous_step",
-            "source_ref", "subtitle_ref", "translated_subtitle_ref",
+            "source_ref", "subtitle_ref", "source_subtitle_ref", "translated_subtitle_ref",
             "source_file_ref", "source_media_type", "source_content_type",
             "active_flow", "output_format", "entry_surface", "media_kind",
             "selected_language", "selected_voice", "speed",
@@ -132823,7 +132823,14 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
     if file_size > max_bytes or duration > max_duration:
         raise RuntimeError("video_too_large")
     tg_file = await context.bot.get_file(file_id)
-    if callable(getattr(tg_file, "download_to_drive", None)):
+    data = b""
+    bytearray_error = ""
+    if callable(getattr(tg_file, "download_as_bytearray", None)):
+        try:
+            data = bytes(await tg_file.download_as_bytearray())
+        except Exception as exc:
+            bytearray_error = sanitize_log_text(str(exc))[:120]
+    if not data and callable(getattr(tg_file, "download_to_drive", None)):
         with tempfile.TemporaryDirectory(prefix="toanaas_pipeline_source_") as tmpdir:
             source_path = os.path.join(tmpdir, os.path.basename(str(state.get("source_file_name") or "source.bin")))
             await tg_file.download_to_drive(custom_path=source_path)
@@ -132831,10 +132838,8 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
                 raise RuntimeError("video_too_large")
             with open(source_path, "rb") as handle:
                 data = handle.read()
-    else:
-        data = bytes(await tg_file.download_as_bytearray())
     if not data:
-        raise RuntimeError("empty_video")
+        raise RuntimeError(f"empty_video:{bytearray_error}" if bytearray_error else "empty_video")
     if len(data) > max_bytes:
         raise RuntimeError("video_too_large")
     return data, str(state.get("source_mime_type") or "video/mp4")
@@ -133279,7 +133284,17 @@ async def transcribe_media_to_segments(
         "detail": f"{extract_detail}; {detail}",
     }
 
-async def video_dubbing_resolve_source_script(source_bytes: bytes, content_type: str, context: ContextTypes.DEFAULT_TYPE, duration_seconds: int = 0, max_seconds: int = 0, allow_admin: bool = False, updated_by="") -> dict:
+async def video_dubbing_resolve_source_script(
+    source_bytes: bytes,
+    content_type: str,
+    context: ContextTypes.DEFAULT_TYPE,
+    duration_seconds: int = 0,
+    max_seconds: int = 0,
+    allow_admin: bool = False,
+    updated_by="",
+    file_name: str = "",
+    media_kind: str = "",
+) -> dict:
     embedded_subtitle, subtitle_detail = await video_dubbing_extract_embedded_subtitle(source_bytes, content_type)
     if embedded_subtitle:
         return {
@@ -133294,6 +133309,10 @@ async def video_dubbing_resolve_source_script(source_bytes: bytes, content_type:
         {
             "bytes": source_bytes,
             "content_type": content_type,
+            "file_name": file_name,
+            "source_file_name": file_name,
+            "media_kind": media_kind,
+            "source_media_kind": media_kind,
             "duration_seconds": duration_seconds,
         },
         context=context,
@@ -133505,6 +133524,8 @@ async def execute_video_dubbing_preview(
         max_seconds=preview_seconds,
         allow_admin=is_admin_user(query.from_user.id),
         updated_by=query.from_user.id,
+        file_name=str(state.get("source_file_name") or ""),
+        media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
     )
     source_subtitle = str(source_info.get("subtitle") or "").strip()
     source_script = str(source_info.get("script") or "").strip()
@@ -133922,18 +133943,28 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
                 duration_seconds=_safe_int(state.get("video_duration") or state.get("source_duration"), 0),
                 allow_admin=allow_admin,
                 updated_by=user_id,
+                file_name=str(state.get("source_file_name") or ""),
+                media_kind=str(state.get("source_media_type") or state.get("media_kind") or ""),
             )
             source_subtitle = str(source_info.get("subtitle") or "").strip()
         subtitle_ref = set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
         sync_fields = {
             key: value for key, value in state.items()
-            if key not in {"step", "current_step", "previous_step", "pending_action", "created_at_ts", "subtitle_ref"}
+            if key not in {"step", "current_step", "previous_step", "pending_action", "created_at_ts", "subtitle_ref", "source_subtitle_ref"}
         }
-        state = set_video_dubbing_pending(user_id, state.get("step") or "processing", **sync_fields, subtitle_ref=subtitle_ref)
+        state = set_video_dubbing_pending(
+            user_id,
+            state.get("step") or "processing",
+            **sync_fields,
+            subtitle_ref=subtitle_ref,
+            source_subtitle_ref=subtitle_ref,
+        )
     source_script = video_dubbing_plain_script(source_subtitle)
     source_segments = list(source_info.get("segments") or []) or video_dubbing_segments_from_subtitle(source_subtitle)
     if not source_segments and source_script:
         source_segments = video_dubbing_segments_from_text(source_script, _safe_int(state.get("video_duration") or state.get("source_duration"), 0))
+    if not source_segments:
+        raise RuntimeError("subtitle_segments_empty")
     needs_translation = mode == VIDEO_SUBTITLE_MODE_TRANSLATE or (
         mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
         and str(state.get("translate_requested") or "0") == "1"
@@ -134544,6 +134575,7 @@ async def subtitle_plus_dub_create_original_from_media(
         requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
         subtitle_ref=subtitle_ref,
+        source_subtitle_ref=subtitle_ref,
         detected_language=detected_language,
         source_language=detected_language or "auto",
         segment_count=len(segments),
@@ -134706,6 +134738,7 @@ async def video_dubbing_create_original_subtitle_then_language(
         requested_mode=VIDEO_SUBTITLE_MODE_TRANSLATE,
         active_flow="subtitle_translate",
         subtitle_ref=subtitle_ref,
+        source_subtitle_ref=subtitle_ref,
         detected_language=str(prepared.get("detected_language") or prepared_state.get("source_language") or ""),
         source_language=str(prepared.get("detected_language") or prepared_state.get("source_language") or "auto"),
         segment_count=len(segments),
@@ -134721,6 +134754,108 @@ async def video_dubbing_create_original_subtitle_then_language(
         video_dubbing_language_text(state, lang),
         parse_mode="HTML",
         reply_markup=video_dubbing_language_keyboard(lang, state),
+    )
+    return state
+
+async def video_dubbing_create_dub_source_subtitle_then_next(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id,
+    state: dict,
+    lang: str = "vi",
+) -> dict:
+    state = set_video_dubbing_pending(
+        user_id,
+        "creating_original_subtitle",
+        mode=VIDEO_SUBTITLE_MODE_DUB,
+        process_type=VIDEO_SUBTITLE_MODE_DUB,
+        video_processing_mode=VIDEO_SUBTITLE_MODE_DUB,
+        requested_mode=VIDEO_SUBTITLE_MODE_DUB,
+        active_flow="dub_audio",
+        processing="1",
+    )
+    await message.reply_text("TOAN AAS đang tạo phụ đề gốc từ video/audio...")
+    try:
+        prepared = await video_dubbing_prepare_subtitles(
+            context,
+            {
+                **dict(state or {}),
+                "mode": VIDEO_SUBTITLE_MODE_CREATE,
+                "process_type": VIDEO_SUBTITLE_MODE_CREATE,
+                "video_processing_mode": VIDEO_SUBTITLE_MODE_CREATE,
+                "requested_mode": VIDEO_SUBTITLE_MODE_DUB,
+                "active_flow": "dub_audio",
+                "translate_requested": "0",
+            },
+            user_id,
+            allow_admin=is_translation_admin(user_id),
+        )
+    except Exception as exc:
+        detail = sanitize_log_text(str(exc))[:160]
+        state = set_video_dubbing_pending(user_id, "failed", processing="0", processing_error=detail)
+        await message.reply_text(video_dubbing_asr_failure_text(lang), reply_markup=video_dubbing_asr_failure_keyboard(lang))
+        return state
+    prepared_state = dict(prepared.get("state") or {})
+    source_subtitle = str(prepared.get("source_subtitle") or "").strip()
+    if not source_subtitle:
+        source_subtitle = get_video_dubbing_artifact(user_id, prepared_state.get("subtitle_ref") or "").strip()
+    if not source_subtitle:
+        state = set_video_dubbing_pending(user_id, "failed", processing="0", processing_error="subtitle_empty")
+        await message.reply_text(video_dubbing_asr_failure_text(lang), reply_markup=video_dubbing_asr_failure_keyboard(lang))
+        return state
+    subtitle_ref = str(prepared_state.get("subtitle_ref") or "") or set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
+    segments = list(prepared.get("source_segments") or []) or video_dubbing_segments_from_subtitle(source_subtitle)
+    target_language = str(prepared_state.get("target_language") or state.get("target_language") or "").strip()
+    voice_style = str(prepared_state.get("voice_style") or state.get("voice_style") or "").strip()
+    voice_speed = str(prepared_state.get("voice_speed") or state.get("voice_speed") or "").strip()
+    translate_requested = "1" if target_language else "0"
+    common_fields = {
+        "mode": VIDEO_SUBTITLE_MODE_DUB,
+        "process_type": VIDEO_SUBTITLE_MODE_DUB,
+        "video_processing_mode": VIDEO_SUBTITLE_MODE_DUB,
+        "requested_mode": VIDEO_SUBTITLE_MODE_DUB,
+        "active_flow": "dub_audio",
+        "subtitle_ref": subtitle_ref,
+        "source_subtitle_ref": subtitle_ref,
+        "detected_language": str(prepared.get("detected_language") or prepared_state.get("source_language") or ""),
+        "source_language": str(prepared.get("detected_language") or prepared_state.get("source_language") or "auto"),
+        "segment_count": len(segments),
+        "subtitle_segment_count": len(segments),
+        "translate_requested": translate_requested,
+        "output_type": "srt",
+        "output_format": "srt",
+        "processing": "0",
+        "last_ready_step": "original_subtitle_ready",
+    }
+    if not target_language:
+        state = set_video_dubbing_pending(user_id, "language", **common_fields)
+        await message.reply_text(
+            video_dubbing_language_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_language_keyboard(lang, state),
+        )
+        return state
+    if not voice_style:
+        state = set_video_dubbing_pending(user_id, "voice", **common_fields)
+        await message.reply_text(
+            video_dubbing_voice_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_voice_keyboard(lang, state),
+        )
+        return state
+    if not voice_speed:
+        state = set_video_dubbing_pending(user_id, "voice_speed", **common_fields)
+        await message.reply_text(
+            video_dubbing_voice_speed_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_voice_speed_keyboard(lang),
+        )
+        return state
+    state = set_video_dubbing_pending(user_id, "confirm", **common_fields)
+    await message.reply_text(
+        video_dubbing_confirm_text(state, lang),
+        parse_mode="HTML",
+        reply_markup=video_dubbing_confirm_keyboard(lang, state),
     )
     return state
 
@@ -134775,6 +134910,7 @@ async def video_dubbing_create_original_subtitle_then_output(
         return state
     subtitle_ref = str(prepared_state.get("subtitle_ref") or "") or set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
     segments = list(prepared.get("source_segments") or []) or video_dubbing_segments_from_subtitle(source_subtitle)
+    output_type = "txt" if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT else "all"
     state = set_video_dubbing_pending(
         user_id,
         "output",
@@ -134784,12 +134920,13 @@ async def video_dubbing_create_original_subtitle_then_output(
         requested_mode=normalize_video_translate_mode(state.get("requested_mode")) or mode,
         active_flow=active_flow,
         subtitle_ref=subtitle_ref,
+        source_subtitle_ref=subtitle_ref,
         detected_language=str(prepared.get("detected_language") or prepared_state.get("source_language") or ""),
         source_language=str(prepared.get("detected_language") or prepared_state.get("source_language") or "auto"),
         segment_count=len(segments),
         subtitle_segment_count=len(segments),
-        output_type="all",
-        output_format="all",
+        output_type=output_type,
+        output_format=output_type,
         processing="0",
         last_ready_step="original_subtitle_ready",
     )
@@ -134862,6 +134999,7 @@ async def video_dubbing_translate_current_subtitle_to_output(
         requested_mode=VIDEO_SUBTITLE_MODE_TRANSLATE,
         active_flow="subtitle_translate",
         subtitle_ref=source_ref,
+        source_subtitle_ref=source_ref,
         translated_subtitle_ref=translated_ref,
         target_language=target_language,
         translated_segment_count=len(segments),
@@ -135047,6 +135185,11 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
             cache_recent_media_state(update)
             remember_last_media(update)
             upload_fields = video_dubbing_source_fields_from_upload(subtitle_info, subtitle_file=True)
+            upload_fields.update({
+                "subtitle_ref": "",
+                "source_subtitle_ref": "",
+                "translated_subtitle_ref": "",
+            })
             upload_fields["video_message_id"] = getattr(update.message, "message_id", "")
             state = set_video_dubbing_pending(
                 uid,
@@ -135070,6 +135213,11 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         cache_recent_media_state(update)
         remember_last_media(update)
         upload_fields = video_dubbing_source_fields_from_upload(media_info, subtitle_file=False)
+        upload_fields.update({
+            "subtitle_ref": "",
+            "source_subtitle_ref": "",
+            "translated_subtitle_ref": "",
+        })
         upload_fields["video_message_id"] = getattr(update.message, "message_id", "")
         state = set_video_dubbing_pending(
             uid,
@@ -135116,6 +135264,11 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         )
         return True
     upload_fields = video_dubbing_source_fields_from_upload(info, subtitle_file=bool(subtitle_info))
+    upload_fields.update({
+        "subtitle_ref": "",
+        "source_subtitle_ref": "",
+        "translated_subtitle_ref": "",
+    })
     if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE and subtitle_info:
         subtitle_output_type = video_dubbing_subtitle_output_type_from_name(
             upload_fields.get("source_file_name") or ""
@@ -135197,6 +135350,9 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
             str(state.get("target_language") or "Tiếng Việt"),
             lang,
         )
+        return True
+    if mode == VIDEO_SUBTITLE_MODE_DUB and not (state.get("subtitle_ref") or state.get("source_subtitle_ref")):
+        await video_dubbing_create_dub_source_subtitle_then_next(update.message, context, uid, state, lang)
         return True
     if mode == VIDEO_SUBTITLE_MODE_DUB and not state.get("target_language"):
         state = set_video_dubbing_pending(uid, "language")
