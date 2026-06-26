@@ -2562,6 +2562,19 @@ def init_db():
         apply_error TEXT DEFAULT '',
         processed_at DATETIME
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS payos_processed_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_key TEXT UNIQUE,
+        order_code TEXT DEFAULT '',
+        payment_link_id TEXT DEFAULT '',
+        transaction_id TEXT DEFAULT '',
+        user_id TEXT DEFAULT '',
+        amount INTEGER DEFAULT 0,
+        status TEXT DEFAULT '',
+        credited INTEGER DEFAULT 0,
+        created_at DATETIME,
+        raw_hash TEXT DEFAULT ''
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS payos_orders (
         order_code TEXT PRIMARY KEY,
         user_id TEXT,
@@ -2591,6 +2604,24 @@ def init_db():
         ("apply_error", "apply_error TEXT DEFAULT ''"),
     ]:
         _add_column_if_missing(c, "payos_processed", column_name, column_sql, payos_processed_columns)
+    payos_processed_event_columns = _table_columns(c, "payos_processed_events")
+    for column_name, column_sql in [
+        ("event_key", "event_key TEXT"),
+        ("order_code", "order_code TEXT DEFAULT ''"),
+        ("payment_link_id", "payment_link_id TEXT DEFAULT ''"),
+        ("transaction_id", "transaction_id TEXT DEFAULT ''"),
+        ("user_id", "user_id TEXT DEFAULT ''"),
+        ("amount", "amount INTEGER DEFAULT 0"),
+        ("status", "status TEXT DEFAULT ''"),
+        ("credited", "credited INTEGER DEFAULT 0"),
+        ("created_at", "created_at DATETIME"),
+        ("raw_hash", "raw_hash TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(c, "payos_processed_events", column_name, column_sql, payos_processed_event_columns)
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payos_processed_events_event_key ON payos_processed_events(event_key)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_payos_processed_events_order ON payos_processed_events(order_code)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_payos_processed_events_payment_link ON payos_processed_events(payment_link_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_payos_processed_events_transaction ON payos_processed_events(transaction_id)")
     payos_order_columns = _table_columns(c, "payos_orders")
     for column_name, column_sql in [
         ("payment_type", "payment_type TEXT DEFAULT 'topup_xu'"),
@@ -6829,6 +6860,155 @@ def record_payos_processed_conn(
             str(apply_error or "")[:300],
             now_text(),
         ),
+    )
+
+def normalize_payos_webhook_status(value: str = "") -> str:
+    return str(value or "").strip().upper()
+
+def payos_webhook_is_paid_status(value: str = "") -> bool:
+    return normalize_payos_webhook_status(value) == PAYOS_STATUS_PAID
+
+def payos_payload_text(data: dict, *keys: str) -> str:
+    if not isinstance(data, dict):
+        return ""
+    for key in keys:
+        value = data.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+def payos_order_code_from_webhook_data(data: dict) -> str:
+    return payos_payload_text(data, "orderCode", "order_code")
+
+def payos_payment_link_id_from_webhook_data(data: dict) -> str:
+    return payos_payload_text(data, "paymentLinkId", "payment_link_id", "paymentLinkID")
+
+def payos_transaction_id_from_webhook_data(data: dict) -> str:
+    return payos_payload_text(
+        data,
+        "transactionId",
+        "transactionID",
+        "transaction_id",
+        "reference",
+        "referenceId",
+        "reference_id",
+        "paymentId",
+        "payment_id",
+    )
+
+def payos_idempotency_event_key(order_code: str, payment_link_id: str = "", transaction_id: str = "") -> str:
+    tx = str(transaction_id or "").strip()
+    if tx:
+        return f"transaction:{tx}"
+    link_id = str(payment_link_id or "").strip()
+    if link_id:
+        return f"payment_link:{link_id}"
+    return f"order:{str(order_code or '').strip()}"
+
+def _payos_processed_event_by_key_conn(conn, column: str, value: str):
+    if column not in {"order_code", "payment_link_id", "transaction_id", "event_key"}:
+        return None
+    clean_value = str(value or "").strip()
+    if not clean_value:
+        return None
+    return conn.execute(
+        f"""SELECT order_code, payment_link_id, transaction_id, credited, event_key
+            FROM payos_processed_events
+            WHERE {column}=? AND credited=1
+            ORDER BY id ASC LIMIT 1""",
+        (clean_value,),
+    ).fetchone()
+
+def reserve_payos_idempotency_conn(
+    conn,
+    order_code: str,
+    amount_vnd: int,
+    user_id: str = "",
+    payment_link_id: str = "",
+    transaction_id: str = "",
+    status: str = PAYOS_STATUS_PAID,
+    raw_hash: str = "",
+) -> dict:
+    clean_order_code = str(order_code or "").strip()
+    clean_payment_link_id = str(payment_link_id or "").strip()
+    clean_transaction_id = str(transaction_id or "").strip()
+    if not clean_order_code:
+        return {"ok": False, "reason": "missing_order_code"}
+
+    if conn.execute("SELECT 1 FROM payos_processed WHERE order_code=?", (clean_order_code,)).fetchone():
+        return {"ok": False, "reason": "duplicate_order", "order_code": clean_order_code}
+
+    checks = [
+        ("order_code", clean_order_code, "duplicate_order", "order_conflict"),
+        ("transaction_id", clean_transaction_id, "duplicate_transaction", "transaction_conflict"),
+        ("payment_link_id", clean_payment_link_id, "duplicate_payment_link", "payment_link_conflict"),
+    ]
+    for column, value, duplicate_reason, conflict_reason in checks:
+        existing = _payos_processed_event_by_key_conn(conn, column, value)
+        if not existing:
+            continue
+        existing_order_code = str(existing[0] or "").strip()
+        reason = duplicate_reason if existing_order_code == clean_order_code else conflict_reason
+        return {
+            "ok": False,
+            "reason": reason,
+            "order_code": clean_order_code,
+            "existing_order_code": existing_order_code,
+            "payment_link_id": clean_payment_link_id,
+            "transaction_id": clean_transaction_id,
+        }
+
+    event_key = payos_idempotency_event_key(clean_order_code, clean_payment_link_id, clean_transaction_id)
+    try:
+        conn.execute(
+            """INSERT INTO payos_processed_events
+               (event_key, order_code, payment_link_id, transaction_id, user_id, amount, status, credited, created_at, raw_hash)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                event_key,
+                clean_order_code,
+                clean_payment_link_id,
+                clean_transaction_id,
+                str(user_id or ""),
+                int(amount_vnd or 0),
+                normalize_payos_webhook_status(status),
+                0,
+                now_text(),
+                str(raw_hash or "")[:128],
+            ),
+        )
+    except sqlite3.IntegrityError:
+        existing = conn.execute(
+            """SELECT order_code, payment_link_id, transaction_id, credited
+               FROM payos_processed_events WHERE event_key=? LIMIT 1""",
+            (event_key,),
+        ).fetchone()
+        existing_order_code = str(existing[0] or "").strip() if existing else ""
+        reason = "duplicate_idempotency_event" if existing_order_code == clean_order_code else "idempotency_conflict"
+        return {
+            "ok": False,
+            "reason": reason,
+            "order_code": clean_order_code,
+            "existing_order_code": existing_order_code,
+            "event_key": event_key,
+        }
+
+    return {
+        "ok": True,
+        "reason": "reserved",
+        "event_key": event_key,
+        "order_code": clean_order_code,
+        "payment_link_id": clean_payment_link_id,
+        "transaction_id": clean_transaction_id,
+    }
+
+def mark_payos_idempotency_credited_conn(conn, event_key: str) -> None:
+    clean_event_key = str(event_key or "").strip()
+    if not clean_event_key:
+        return
+    conn.execute(
+        "UPDATE payos_processed_events SET credited=1, status=? WHERE event_key=?",
+        (PAYOS_STATUS_PAID, clean_event_key),
     )
 
 def create_order(
@@ -28332,7 +28512,15 @@ def deduct_dynamic_credit(user_id, action_type, size_or_length) -> tuple:
         return True, final_cost, discount_rate
     return False, final_cost, discount_rate
 
-def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, str, dict]:
+def process_payos_paid_order(
+    order_code: str,
+    amount_vnd: int,
+    webhook_payment_link_id: str = "",
+    transaction_id: str = "",
+    webhook_status: str = "",
+    webhook_currency: str = "",
+    raw_hash: str = "",
+) -> tuple[bool, str, dict]:
     """
     Cộng xu cho đơn PayOS trong một transaction để tránh cộng trùng.
     Trả về (processed, desc, info).
@@ -28361,6 +28549,10 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
 
         target_id, expected_amount, xu, status, expires_at, order_type, plan_id, plan_name, duration_days, plan_xu, metadata_json, payment_type, package_id, payment_link_id = order
         order_type = str(order_type or "topup")
+        stored_payment_link_id = str(payment_link_id or "").strip()
+        incoming_payment_link_id = str(webhook_payment_link_id or "").strip()
+        effective_payment_link_id = incoming_payment_link_id or stored_payment_link_id
+        clean_transaction_id = str(transaction_id or "").strip()
         try:
             metadata = json.loads(metadata_json or "{}") if metadata_json else {}
             if not isinstance(metadata, dict):
@@ -28369,6 +28561,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             metadata = {}
         payment_type = normalize_payment_type(payment_type, order_type, metadata)
         package_id = str(package_id or payment_package_id(order_type, plan_id, metadata))
+        expected_currency = str(metadata.get("currency") or "VND").strip().upper()
+        incoming_currency = str(webhook_currency or "").strip().upper()
         stored_xu = int(xu or 0)
         calculated_base_xu = package_base_xu(expected_amount)
         base_xu = calculated_base_xu if calculated_base_xu > 0 else stored_xu
@@ -28392,7 +28586,10 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             "metadata": metadata,
             "payment_type": payment_type,
             "package_id": package_id,
-            "payment_link_id": payment_link_id or "",
+            "payment_link_id": effective_payment_link_id or "",
+            "transaction_id": clean_transaction_id,
+            "currency": expected_currency,
+            "webhook_currency": incoming_currency,
         }
 
         if status == PAYOS_STATUS_PAID:
@@ -28408,11 +28605,32 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
         if int(expected_amount) != int(amount_vnd):
             conn.rollback()
             return False, "amount_mismatch", info
-
-        c.execute("SELECT 1 FROM payos_processed WHERE order_code=?", (str(order_code),))
-        if c.fetchone():
+        if incoming_currency and expected_currency and incoming_currency != expected_currency:
             conn.rollback()
-            return False, "duplicate", info
+            return False, "currency_mismatch", info
+
+        if webhook_status and not payos_webhook_is_paid_status(webhook_status):
+            conn.rollback()
+            return False, "status_not_paid", info
+        if incoming_payment_link_id and stored_payment_link_id and incoming_payment_link_id != stored_payment_link_id:
+            conn.rollback()
+            return False, "payment_link_mismatch", info
+
+        idempotency = reserve_payos_idempotency_conn(
+            conn,
+            order_code=str(order_code),
+            amount_vnd=int(amount_vnd or 0),
+            user_id=str(target_id or ""),
+            payment_link_id=effective_payment_link_id,
+            transaction_id=clean_transaction_id,
+            status=webhook_status or PAYOS_STATUS_PAID,
+            raw_hash=raw_hash,
+        )
+        info["idempotency"] = idempotency
+        if not idempotency.get("ok"):
+            conn.rollback()
+            return False, str(idempotency.get("reason") or "duplicate"), info
+        idempotency_event_key = str(idempotency.get("event_key") or "")
 
         if order_type == "package_purchase":
             package_type = "monthly" if str(metadata.get("package_type") or "").lower() == "monthly" else "combo"
@@ -28444,7 +28662,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
-            record_payos_processed_conn(conn, order_code, payment_type, "success", payment_link_id)
+            record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
+            mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
             item_summary = package_items_summary(entry.get("items") or {})
             record_usage_event_conn(
                 conn,
@@ -28521,7 +28740,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
-            record_payos_processed_conn(conn, order_code, payment_type, "success", payment_link_id)
+            record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
+            mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
             record_usage_event_conn(
                 conn,
                 target_id,
@@ -28598,7 +28818,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
-            record_payos_processed_conn(conn, order_code, payment_type, "success", payment_link_id)
+            record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
+            mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
             record_usage_event_conn(
                 conn,
                 target_id,
@@ -28690,7 +28911,8 @@ def process_payos_paid_order(order_code: str, amount_vnd: int) -> tuple[bool, st
             "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
             (PAYOS_STATUS_PAID, now_text(), str(order_code))
         )
-        record_payos_processed_conn(conn, order_code, payment_type, "success", payment_link_id)
+        record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
+        mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
         record_credit_event(conn, target_id, base_xu, "payos_deposit", order_code, f"Nạp PayOS {amount_vnd}đ")
         if launch_bonus > 0:
             record_credit_event(conn, target_id, launch_bonus, "launch_bonus", order_code, f"Launch Bonus gói {amount_vnd}đ")
@@ -143967,6 +144189,37 @@ async def api_operator_performance(payload: OperatorPerformanceRequest, request:
     }
 
 # ─── WEBHOOK PAYOS (DYNAMIC UPDATED) ─────────────────────────────────────────
+def extract_payos_webhook_signature(body: dict, request: Request) -> str:
+    if isinstance(body, dict):
+        signature = body.get("signature") or body.get("checksum")
+        if signature:
+            return str(signature).strip()
+    for header_name in ("x-payos-signature", "x-payos-checksum", "payos-signature"):
+        signature = request.headers.get(header_name)
+        if signature:
+            return str(signature).strip()
+    return ""
+
+def record_payos_webhook_security_event(kind: str, severity: str, detail: str) -> None:
+    try:
+        record_anomaly(
+            kind,
+            severity,
+            str(detail or "")[:500],
+            user_id="payos",
+            username="payos",
+            auto_lock=False,
+        )
+    except Exception as e:
+        logger.warning(f"PayOS webhook security event record failed: {e}")
+
+def payos_webhook_rejection_severity(reason: str) -> str:
+    if reason in {"amount_mismatch", "currency_mismatch", "payment_link_mismatch", "transaction_conflict", "payment_link_conflict", "idempotency_conflict"}:
+        return "high"
+    if reason in {"missing_signature", "invalid_signature", "order_not_found", "duplicate_idempotency_event"}:
+        return "medium"
+    return "low"
+
 def verify_payos_signature(data: dict, received_sig: str) -> bool:
     if not PAYOS_CHECKSUM_KEY:
         return False
@@ -143987,9 +144240,13 @@ async def webhook_payos(request: Request):
     Tự đối chiếu orderCode nội bộ để cộng Xu mà khách không cần điền nội dung.
     """
     try:
-        body = await request.json()
+        raw_payload = await request.body()
+        body = json.loads(raw_payload.decode("utf-8")) if raw_payload else {}
+        if not isinstance(body, dict):
+            raise ValueError("PayOS webhook payload must be an object")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+    raw_hash = hashlib.sha256(raw_payload or b"").hexdigest()
 
     if flag_on("emergency_lock") or flag_on("payment_freeze"):
         record_anomaly(
@@ -144002,8 +144259,15 @@ async def webhook_payos(request: Request):
         )
         return JSONResponse({"code": "00", "desc": "payment_frozen"})
 
-    sig  = body.get("signature", "")
+    sig = extract_payos_webhook_signature(body, request)
     data = body.get("data", {})
+    if not isinstance(data, dict):
+        record_payos_webhook_security_event(
+            "payos_webhook_invalid_data",
+            "medium",
+            "PayOS webhook data payload is missing or not an object",
+        )
+        raise HTTPException(status_code=400, detail="Invalid data")
 
     if not PAYOS_CHECKSUM_KEY:
         logger.warning("PayOS webhook rejected: PAYOS_CHECKSUM_KEY is not configured")
@@ -144011,25 +144275,69 @@ async def webhook_payos(request: Request):
             await record_payos_failure_and_maybe_alert(SimpleNamespace(bot=tg_app.bot), "PayOS webhook checksum config missing")
         raise HTTPException(status_code=500, detail="PayOS checksum key not configured")
 
+    if not sig:
+        logger.warning("PayOS webhook rejected: missing signature")
+        record_payos_webhook_security_event(
+            "payos_webhook_missing_signature",
+            "medium",
+            "PayOS webhook missing signature; no order data trusted",
+        )
+        if tg_app:
+            await record_payos_failure_and_maybe_alert(SimpleNamespace(bot=tg_app.bot), "PayOS webhook missing signature")
+        raise HTTPException(status_code=400, detail="Missing signature")
+
     if not verify_payos_signature(data, sig):
         logger.warning("PayOS webhook: chữ ký xác thực không hợp lệ!")
+        record_payos_webhook_security_event(
+            "payos_webhook_invalid_signature",
+            "medium",
+            "PayOS webhook invalid signature; no order data trusted",
+        )
         if tg_app:
             await record_payos_failure_and_maybe_alert(SimpleNamespace(bot=tg_app.bot), "PayOS webhook invalid signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    if not (body.get("success") or data.get("status") == "PAID"):
-        return JSONResponse({"code": "00", "desc": "ignored"})
+    webhook_status = normalize_payos_webhook_status(data.get("status"))
+    order_code = payos_order_code_from_webhook_data(data)
+    if not payos_webhook_is_paid_status(webhook_status):
+        logger.info(f"PayOS webhook ignored: status_not_paid | status={webhook_status or 'missing'} | order={order_code or '-'}")
+        record_payos_webhook_security_event(
+            "payos_webhook_status_not_paid",
+            "low",
+            f"status={webhook_status or 'missing'}; order={order_code or '-'}",
+        )
+        return JSONResponse({"code": "00", "desc": "status_not_paid"})
 
-    order_code = str(data.get("orderCode", data.get("order_code", "")))
     try:
         amount_vnd = int(data.get("amount", 0))
     except (TypeError, ValueError):
         logger.warning(f"PayOS webhook: amount không hợp lệ | order={order_code} | data={data}")
+        record_payos_webhook_security_event(
+            "payos_webhook_invalid_amount",
+            "medium",
+            f"order={order_code or '-'}; status={webhook_status}",
+        )
         return JSONResponse({"code": "00", "desc": "invalid_amount"})
 
-    processed, desc, info = process_payos_paid_order(order_code, amount_vnd)
+    payment_link_id = payos_payment_link_id_from_webhook_data(data)
+    transaction_id = payos_transaction_id_from_webhook_data(data)
+    webhook_currency = payos_payload_text(data, "currency")
+    processed, desc, info = process_payos_paid_order(
+        order_code,
+        amount_vnd,
+        webhook_payment_link_id=payment_link_id,
+        transaction_id=transaction_id,
+        webhook_status=webhook_status,
+        webhook_currency=webhook_currency,
+        raw_hash=raw_hash,
+    )
     if not processed:
         logger.warning(f"PayOS webhook ignored: {desc} | order={order_code} | amount={amount_vnd} | info={info}")
+        record_payos_webhook_security_event(
+            f"payos_webhook_{str(desc or 'rejected')[:80]}",
+            payos_webhook_rejection_severity(str(desc or "")),
+            f"reason={desc}; order={order_code or '-'}; amount={amount_vnd}; status={webhook_status}; payment_link_id={payment_link_id or '-'}; transaction_id={transaction_id or '-'}",
+        )
         return JSONResponse({"code": "00", "desc": desc})
 
     if info.get("order_type") == "package_purchase":
