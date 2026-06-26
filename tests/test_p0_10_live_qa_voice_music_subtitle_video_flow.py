@@ -179,7 +179,9 @@ def test_dubbing_flow_requires_voice_selection_and_clean_guard():
     labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert any("Giọng nữ" in label for label in labels)
     assert any("Giọng nam" in label for label in labels)
-    assert any("Kho voice" in label for label in labels)
+    assert not any("Kho voice" in label for label in labels)
+    admin_labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "entry_surface": "admin_test_mode"}))
+    assert any("Kho voice" in label for label in admin_labels)
     confirm_labels = _labels(bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert "▶️ Nghe thử" not in confirm_labels
     assert "✅ Xuất video lồng tiếng" in confirm_labels

@@ -792,7 +792,8 @@ def test_translation_studio_lost_state_recovery_menu(monkeypatch):
     labels = _button_labels(update.message.outputs[-1]["reply_markup"])
     assert "Studio Dịch / Phụ đề / Lồng tiếng" in text
     assert "Tạo phụ đề" in " ".join(labels)
-    assert "Lồng tiếng" in " ".join(labels)
+    assert "Dịch phụ đề" in " ".join(labels)
+    assert "Lồng tiếng" not in " ".join(labels)
     assert "Tự quay" not in text + " ".join(labels)
     assert "Nâng cấp video" not in text + " ".join(labels)
     bot.clear_video_dubbing_pending(uid)

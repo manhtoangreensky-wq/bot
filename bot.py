@@ -1563,6 +1563,10 @@ VIDEO_SUBTITLE_PUBLIC_ENABLED = env_flag("VIDEO_SUBTITLE_PUBLIC_ENABLED", "false
 VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED = env_flag("VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED", "false")
 VIDEO_DUB_PUBLIC_ENABLED = env_flag("VIDEO_DUB_PUBLIC_ENABLED", "false")
 VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED = env_flag("VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED", "false")
+PUBLIC_CUSTOM_VOICE_ENABLED = env_flag("PUBLIC_CUSTOM_VOICE_ENABLED", "false")
+PUBLIC_VOICE_VIDEO_ENABLED = env_flag("PUBLIC_VOICE_VIDEO_ENABLED", "false")
+PUBLIC_SUBTITLE_DUB_ENABLED = env_flag("PUBLIC_SUBTITLE_DUB_ENABLED", "false")
+P0_17B12_5_LIVE_ROUTER_AUDIT_TIMESTAMP = "2026-06-26"
 TRANSLATION_DUB_MAINTENANCE = env_flag("TRANSLATION_DUB_MAINTENANCE", "false")
 VIDEO_SUBTITLE_BURN_IN_ENABLED = env_flag("VIDEO_SUBTITLE_BURN_IN_ENABLED", "false")
 VIDEO_DUB_MUX_ENABLED = env_flag("VIDEO_DUB_MUX_ENABLED", "false")
@@ -65405,6 +65409,11 @@ async def cmd_subtitle_dub_status(update: Update, context: ContextTypes.DEFAULT_
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await update.message.reply_text(subtitle_dub_status_text(), parse_mode="HTML")
+
+async def cmd_translation_voice_gate_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(translation_voice_gate_status_text(get_user_language(update.effective_user.id) or "vi"), parse_mode="HTML")
 
 def subtitle_dub_job_status_text(job: dict) -> str:
     if not job:
@@ -130662,6 +130671,105 @@ def video_dubbing_back_target(origin: str = "video") -> tuple[str, str]:
         return "⬅️ Tùy chọn video", "videodub|return_origin"
     return "⬅️ Quay lại Video", "menu|main_video"
 
+def video_dubbing_admin_test_entry(user_id) -> str:
+    return "admin_test_mode" if is_admin_user(user_id) else "public_type"
+
+def video_dubbing_state_is_admin_test(state: dict | None = None) -> bool:
+    return str((state or {}).get("entry_surface") or "") == "admin_test_mode"
+
+def video_dubbing_custom_voice_public_enabled() -> bool:
+    return bool(PUBLIC_CUSTOM_VOICE_ENABLED and MINIMAX_VOICE_CLONE_PUBLIC_ENABLED)
+
+def video_dubbing_public_gate_mode(mode: str, state: dict | None = None) -> str:
+    state = dict(state or {})
+    requested = normalize_video_translate_mode(state.get("requested_mode"))
+    active_flow = str(state.get("active_flow") or "")
+    mode = normalize_video_translate_mode(mode)
+    if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB or requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        mode = VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    return mode
+
+def video_dubbing_public_flow_locked(user_id, mode: str, state: dict | None = None) -> bool:
+    if is_admin_user(user_id):
+        return False
+    mode = video_dubbing_public_gate_mode(mode, state)
+    if mode == VIDEO_SUBTITLE_MODE_DUB:
+        return not bool(PUBLIC_VOICE_VIDEO_ENABLED and VIDEO_DUB_PUBLIC_ENABLED)
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return not bool(PUBLIC_SUBTITLE_DUB_ENABLED and VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED)
+    return False
+
+def video_dubbing_public_locked_text(mode: str, lang: str = "vi") -> str:
+    mode = normalize_video_translate_mode(mode)
+    is_vi = normalize_user_language(lang) == "vi"
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return (
+            "Subtitles + dubbing is being completed. TOAN AAS has not processed the file and has not charged Xu. "
+            "Please use Auto subtitles or Translate subtitles first."
+            if not is_vi
+            else "Phụ đề + lồng tiếng đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị có thể dùng Tạo phụ đề tự động hoặc Dịch phụ đề trước."
+        )
+    return (
+        "Video dubbing is being completed. TOAN AAS has not processed the file and has not charged Xu. "
+        "Please use Auto subtitles or Translate subtitles first."
+        if not is_vi
+        else "Lồng tiếng video đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị có thể dùng Tạo phụ đề tự động hoặc Dịch phụ đề trước."
+    )
+
+def video_dubbing_public_locked_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📝 Tạo phụ đề tự động" if is_vi else "📝 Auto subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_CREATE}"),
+            InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_TRANSLATE}"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def video_dubbing_custom_voice_public_locked(user_id) -> bool:
+    return bool(not is_admin_user(user_id) and not video_dubbing_custom_voice_public_enabled())
+
+def video_dubbing_custom_voice_admin_test_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🧪 <b>ADMIN TEST MODE</b>\n\n"
+            "Custom voice stays hidden from public users. Admin can test saved/custom voice routes from the voice studio or smoke commands. "
+            "No public provider call has been made here."
+        )
+    return (
+        "🧪 <b>ADMIN TEST MODE</b>\n\n"
+        "Voice riêng đang ẩn với public. Admin vẫn có thể test route voice lưu/clone trong Studio âm thanh hoặc bằng lệnh smoke. "
+        "Màn này chưa gọi provider và chưa trừ Xu của user public."
+    )
+
+def translation_voice_gate_status_text(lang: str = "vi") -> str:
+    is_vi = normalize_user_language(lang) == "vi"
+    bool_text = lambda value: "ON" if value else "OFF"
+    lines = [
+        "🧪 <b>TRANSLATION / VOICE PUBLIC GATE STATUS</b>",
+        "",
+        f"• PUBLIC_CUSTOM_VOICE_ENABLED: <code>{bool_text(PUBLIC_CUSTOM_VOICE_ENABLED)}</code>",
+        f"• PUBLIC_VOICE_VIDEO_ENABLED: <code>{bool_text(PUBLIC_VOICE_VIDEO_ENABLED)}</code>",
+        f"• PUBLIC_SUBTITLE_DUB_ENABLED: <code>{bool_text(PUBLIC_SUBTITLE_DUB_ENABLED)}</code>",
+        f"• Legacy VIDEO_DUB_PUBLIC_ENABLED: <code>{bool_text(VIDEO_DUB_PUBLIC_ENABLED)}</code>",
+        f"• Legacy VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED: <code>{bool_text(VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED)}</code>",
+        f"• Legacy MINIMAX_VOICE_CLONE_PUBLIC_ENABLED: <code>{bool_text(MINIMAX_VOICE_CLONE_PUBLIC_ENABLED)}</code>",
+        "",
+        f"• Admin bypass active: <code>YES</code>",
+        f"• Auto subtitle public route: <code>{'CONFIRM_REQUIRED' if VIDEO_SUBTITLE_PUBLIC_ENABLED or video_dubbing_configured_readiness(VIDEO_SUBTITLE_MODE_CREATE, {}, public=True).get('ok') else 'GUARDED'}</code>",
+        f"• Translate subtitle public route: <code>{'CONFIRM_REQUIRED' if VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED or video_dubbing_configured_readiness(VIDEO_SUBTITLE_MODE_TRANSLATE, {}, public=True).get('ok') else 'GUARDED'}</code>",
+        f"• Voice video public route: <code>{'OPEN' if PUBLIC_VOICE_VIDEO_ENABLED and VIDEO_DUB_PUBLIC_ENABLED else 'LOCKED'}</code>",
+        f"• Subtitle + dub public route: <code>{'OPEN' if PUBLIC_SUBTITLE_DUB_ENABLED and VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED else 'LOCKED'}</code>",
+        f"• Custom voice public route: <code>{'OPEN' if video_dubbing_custom_voice_public_enabled() else 'LOCKED'}</code>",
+        f"• Last live route audit: <code>{html.escape(P0_17B12_5_LIVE_ROUTER_AUDIT_TIMESTAMP)}</code>",
+        "",
+        "Không gọi provider, không xử lý file, không trừ Xu." if is_vi else "No provider call, no file processing, no Xu charge.",
+    ]
+    return "\n".join(lines)
+
 def video_dubbing_menu_keyboard(lang: str = "vi", origin: str = "video") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     back_label, back_callback = video_dubbing_back_target(origin)
@@ -130698,7 +130806,9 @@ def video_dubbing_source_text(state: dict | None = None, lang: str = "vi") -> st
         if mode == VIDEO_SUBTITLE_MODE_CREATE:
             return "👁 <b>Auto subtitles</b>\n\nSend the video/audio that needs captions. TOAN AAS detects the original speech and creates subtitles in the spoken language.\n\nNo processing and no Xu charged yet."
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-            return "🌐 <b>Translate subtitles / video</b>\n\nSend video/audio to create then translate subtitles, or send an SRT/VTT/TXT subtitle file to translate directly.\n\nNo dubbing or Xu charge starts here."
+            if video_dubbing_state_is_admin_test(state):
+                return "🌐 <b>ADMIN TEST MODE - Translate subtitles / video</b>\n\nSend video/audio to create then translate subtitles, or send an SRT/VTT/TXT subtitle file to translate directly.\n\nNo dubbing or Xu charge starts here."
+            return "🌐 <b>Translate subtitles / video</b>\n\nSend the video/audio that needs translated subtitles. This tool only translates subtitles, does not dub, and does not open Video Studio.\n\nNo processing and no Xu charged yet."
         if mode == VIDEO_SUBTITLE_MODE_DUB:
             return "🗣 <b>Dubbing</b>\n\nSend video/audio to extract speech, send an SRT/VTT/TXT subtitle file, or use the most recent subtitle. TOAN AAS will then ask for language and voice.\n\nNo processing and no Xu charged yet."
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -130733,6 +130843,13 @@ def video_dubbing_source_text(state: dict | None = None, lang: str = "vi") -> st
             "Bot chưa xử lý và chưa trừ Xu."
         )
     if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
+        if not video_dubbing_state_is_admin_test(state):
+            return (
+                "🌐 <b>Dịch phụ đề / video</b>\n\n"
+                "Gửi video/audio cần dịch phụ đề.\n\n"
+                "Công cụ này chỉ dịch phụ đề, không lồng tiếng và không mở Video Studio.\n\n"
+                "Bot chưa xử lý và chưa trừ Xu."
+            )
         return (
             "🌐 <b>Dịch phụ đề / video</b>\n\n"
             "Gửi video/audio để tự bóc phụ đề rồi dịch, hoặc gửi file SRT/VTT/TXT để dịch trực tiếp.\n\n"
@@ -130766,6 +130883,7 @@ def video_dubbing_source_text(state: dict | None = None, lang: str = "vi") -> st
 def video_dubbing_source_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     state = state or {}
     is_vi = normalize_user_language(lang) == "vi"
+    admin_mode = video_dubbing_state_is_admin_test(state)
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or state.get("process_type"))
     active_flow = str(state.get("active_flow") or "")
     if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE:
@@ -130773,10 +130891,9 @@ def video_dubbing_source_keyboard(lang: str = "vi", state: dict | None = None) -
     elif active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
         items = [("📎 Gửi video/audio" if is_vi else "📎 Send video/audio", "videodub|source_upload")]
     elif mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-        items = [
-            ("📎 Gửi video/audio" if is_vi else "📎 Send video/audio", "videodub|source_upload"),
-            ("📄 Gửi SRT/VTT/TXT" if is_vi else "📄 Send SRT/VTT/TXT", "videodub|source_upload"),
-        ]
+        items = [("📎 Gửi video/audio" if is_vi else "📎 Send video/audio", "videodub|source_upload")]
+        if admin_mode:
+            items.append(("📄 Gửi SRT/VTT/TXT" if is_vi else "📄 Send SRT/VTT/TXT", "videodub|source_upload"))
     elif mode == VIDEO_SUBTITLE_MODE_DUB:
         items = [
             ("📎 Gửi video/audio để tự bóc lời" if is_vi else "📎 Send video/audio", "videodub|source_upload"),
@@ -132110,13 +132227,17 @@ def video_dubbing_voice_keyboard(lang: str = "vi", state: dict | None = None) ->
     if subtitle_plus_dub_is_active(state) and str((state or {}).get("active_flow") or "") == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
         return subtitle_plus_dub_voice_keyboard(lang)
     back_label = "⬅️ Quay lại ngôn ngữ" if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else "⬅️ Quay lại loại xử lý"
-    return video_v6_keyboard(
-        [
-            ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", "videodub|voice|default_female"),
-            ("👨 Giọng nam mặc định" if is_vi else "👨 Default male", "videodub|voice|default_male"),
+    items = [
+        ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", "videodub|voice|default_female"),
+        ("👨 Giọng nam mặc định" if is_vi else "👨 Default male", "videodub|voice|default_male"),
+    ]
+    if video_dubbing_state_is_admin_test(state) or video_dubbing_custom_voice_public_enabled():
+        items.extend([
             ("📂 Kho voice" if is_vi else "📂 Voice vault", "videodub|voice_saved"),
             ("🎙 Tạo voice riêng" if is_vi else "🎙 Create custom voice", "videodub|voice_create"),
-        ],
+        ])
+    return video_v6_keyboard(
+        items,
         lang,
         back=(back_label if is_vi else "⬅️ Back one step", "videodub|back_voice"),
     )
@@ -132624,6 +132745,8 @@ def video_dubbing_effective_mode_enabled(mode: str, public: bool = True) -> bool
     mode = normalize_video_translate_mode(mode)
     if TRANSLATION_DUB_MAINTENANCE:
         return False
+    if public and mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+        return bool(video_dubbing_public_flag(mode))
     configured_flag = video_dubbing_public_flag(mode) if public else video_dubbing_mode_flag(mode)
     if configured_flag:
         return True
@@ -132856,51 +132979,35 @@ def video_dubbing_asr_missing_guard_keyboard(lang: str = "vi") -> InlineKeyboard
 def subtitle_translate_failure_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "TOAN AAS could not translate the subtitles right now. No Xu was charged. "
-            "Please retry or download the original subtitles first."
+            "TOAN AAS could not translate the subtitles right now. No Xu was charged. Please try again later."
         )
     return (
-        "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. "
-        "Anh/chị có thể thử lại hoặc tải phụ đề gốc trước."
+        "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại sau."
     )
 
 def subtitle_translate_failure_keyboard(lang: str = "vi", target_language: str = "") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    target = str(target_language or "").strip()[:48]
-    retry_callback = f"videodub|language|{target}" if target else "videodub|back_language"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔁 Thử lại" if is_vi else "🔁 Retry", callback_data=retry_callback)],
-        [InlineKeyboardButton("📄 Tải phụ đề gốc" if is_vi else "📄 Download original subtitles", callback_data="videodub|download_original_srt")],
         [InlineKeyboardButton("🌐 Chọn ngôn ngữ khác" if is_vi else "🌐 Choose another language", callback_data="videodub|back_language")],
-        [
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_language_to_source"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def video_dubbing_asr_failure_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "TOAN AAS could not create subtitles from this file. Please try a clearer video/audio file "
-            "or send an existing SRT/VTT/TXT subtitle file. No Xu was charged."
+            "TOAN AAS could not create subtitles from this file. No Xu was charged. "
+            "Please try a clearer video/audio file or come back later."
         )
     return (
-        "TOAN AAS chưa tạo được phụ đề từ file này. Anh/chị có thể thử gửi lại video/audio rõ tiếng hơn "
-        "hoặc gửi file phụ đề SRT/VTT/TXT có sẵn. Hệ thống chưa trừ Xu."
+        "TOAN AAS chưa tạo được phụ đề từ file này. Hệ thống chưa trừ Xu. "
+        "Anh/chị có thể thử video rõ tiếng hơn hoặc quay lại sau."
     )
 
 def video_dubbing_asr_failure_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔁 Thử lại" if is_vi else "🔁 Retry", callback_data="videodub|retry_media"),
-            InlineKeyboardButton("📄 Gửi file phụ đề" if is_vi else "📄 Send subtitle file", callback_data="videodub|send_subtitle_file"),
-        ],
-        [
-            InlineKeyboardButton("✍️ Nhập lời thoại" if is_vi else "✍️ Enter dialogue text", callback_data="videodub|enter_dialogue_text"),
-        ],
-        [
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_type"),
+            InlineKeyboardButton("🔁 Thử video khác" if is_vi else "🔁 Try another video", callback_data="videodub|retry_media"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -135581,19 +135688,21 @@ def translation_studio_lost_state_recovery_text(lang: str = "vi") -> str:
         "Video/audio này dùng để tạo phụ đề, dịch phụ đề hay lồng tiếng?"
     )
 
-def translation_studio_lost_state_recovery_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def translation_studio_lost_state_recovery_keyboard(lang: str = "vi", admin: bool = False) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    return InlineKeyboardMarkup([
+    rows = [
         [
             InlineKeyboardButton("📝 Tạo phụ đề" if is_vi else "📝 Create subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_CREATE}"),
             InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_TRANSLATE}"),
         ],
-        [
+    ]
+    if admin:
+        rows.append([
             InlineKeyboardButton("🎙 Lồng tiếng" if is_vi else "🎙 Dubbing", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_DUB}"),
             InlineKeyboardButton("🎬 Phụ đề + lồng tiếng" if is_vi else "🎬 Subtitles + dubbing", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"),
-        ],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+        ])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
 
 def translation_studio_context_active(user_id) -> bool:
     state = get_product_context_state(user_id)
@@ -135626,7 +135735,7 @@ async def handle_translation_studio_lost_state_media(update: Update, context: Co
     await update.message.reply_text(
         translation_studio_lost_state_recovery_text(lang),
         parse_mode="HTML",
-        reply_markup=translation_studio_lost_state_recovery_keyboard(lang),
+        reply_markup=translation_studio_lost_state_recovery_keyboard(lang, admin=is_admin_user(uid)),
     )
     return True
 
@@ -135644,6 +135753,26 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         return False
     lang = get_user_language(uid) or "vi"
     active_flow = str(state.get("active_flow") or "")
+    initial_mode = normalize_video_translate_mode(
+        state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
+    )
+    if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB and not initial_mode:
+        initial_mode = VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    if video_dubbing_public_flow_locked(uid, initial_mode, state):
+        set_video_dubbing_pending(
+            uid,
+            "locked_public",
+            mode=initial_mode,
+            process_type=initial_mode,
+            video_processing_mode=initial_mode,
+            processing="0",
+        )
+        await update.message.reply_text(
+            video_dubbing_public_locked_text(video_dubbing_public_gate_mode(initial_mode, state), lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_public_locked_keyboard(lang),
+        )
+        return True
     if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
         media_info = video_reference_media_info(update.message)
         if incoming_step not in {"waiting_media", "await_video", "source", "failed"}:
@@ -135709,6 +135838,18 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
             reply_markup=video_dubbing_source_keyboard(lang, state),
         )
         return True
+    if (
+        subtitle_info
+        and not is_admin_user(uid)
+        and active_flow != VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE
+        and initial_mode == VIDEO_SUBTITLE_MODE_TRANSLATE
+    ):
+        await update.message.reply_text(
+            "🌐 Dịch phụ đề public hiện nhận video/audio để TOAN AAS xử lý trong nền. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị vui lòng gửi video/audio cần dịch phụ đề.",
+            parse_mode="HTML",
+            reply_markup=video_dubbing_source_keyboard(lang, state),
+        )
+        return True
     if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT and subtitle_info:
         await update.message.reply_text(
             "🧾 Vui lòng gửi video/audio để bóc lời. Công cụ transcript không dịch file phụ đề và không lồng tiếng.",
@@ -135731,7 +135872,7 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         await update.message.reply_text(
             translation_studio_lost_state_recovery_text(lang),
             parse_mode="HTML",
-            reply_markup=translation_studio_lost_state_recovery_keyboard(lang),
+            reply_markup=translation_studio_lost_state_recovery_keyboard(lang, admin=is_admin_user(uid)),
         )
         return True
     upload_fields = video_dubbing_source_fields_from_upload(info, subtitle_file=bool(subtitle_info))
@@ -136231,6 +136372,9 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
+    if video_dubbing_public_flow_locked(user_id, mode, state):
+        state = set_video_dubbing_pending(user_id, "locked_public", processing="0")
+        return state, video_dubbing_public_locked_text(video_dubbing_public_gate_mode(mode, state), lang), video_dubbing_public_locked_keyboard(lang)
     if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             state = set_video_dubbing_pending(
@@ -136371,12 +136515,20 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             "product_context": PRODUCT_CONTEXT_VIDEO_ADDON if origin == "video_addon" else PRODUCT_CONTEXT_SHOWROOM,
             "return_to": str(state.get("return_to") or ("invoice" if origin == "video_addon" and (get_video_finalization_state(uid) or {}).get("return_to_invoice") else "vfinal|menu" if origin == "video_addon" else "menu|translate")),
             "requested_mode": mode,
-            "entry_surface": "public_type" if action == "type" else action,
+            "entry_surface": video_dubbing_admin_test_entry(uid) if action == "type" else action,
             "active_flow": active_flow,
             "output_type": "",
             "output_format": "",
             "output_label": "",
         }
+        if video_dubbing_public_flow_locked(uid, mode, base_fields):
+            state = set_video_dubbing_pending(uid, "locked_public", **base_fields)
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_public_locked_text(video_dubbing_public_gate_mode(mode, base_fields), lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_public_locked_keyboard(lang),
+            )
         if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
             base_fields.update({"output_type": "txt", "output_format": "txt", "output_label": "Transcript TXT"})
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -136388,7 +136540,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
             return await safe_edit_or_send(
                 query,
-                video_dubbing_source_text(state, lang),
+                ("🧪 <b>ADMIN TEST MODE</b>\n\n" + video_dubbing_source_text(state, lang)) if is_admin_user(uid) else video_dubbing_source_text(state, lang),
                 parse_mode="HTML",
                 reply_markup=video_dubbing_source_keyboard(lang, state),
             )
@@ -136406,7 +136558,10 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 state = set_video_dubbing_pending(uid, "source", **source)
                 state, text, markup = video_dubbing_next_screen_after_source(uid, state, lang)
                 return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=markup)
-        return await safe_edit_or_send(query, video_dubbing_source_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
+        text = video_dubbing_source_text(state, lang)
+        if is_admin_user(uid):
+            text = "🧪 <b>ADMIN TEST MODE</b>\n\n" + text
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
@@ -136431,6 +136586,14 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return None
         state = set_video_dubbing_pending(uid, "voice", processing="0", voice_style="", voice_id="", voice_kind="", voice_speed="")
         return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
+    if video_dubbing_public_flow_locked(uid, mode, state) and action not in {"start", "back_type", "cancel"}:
+        state = set_video_dubbing_pending(uid, "locked_public", processing="0")
+        return await safe_edit_or_send(
+            query,
+            video_dubbing_public_locked_text(video_dubbing_public_gate_mode(mode, state), lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_public_locked_keyboard(lang),
+        )
     if action == "language_strategy":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, video_dubbing_menu_text(lang, origin), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
@@ -136722,6 +136885,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
         if action in {"voice_library", "voice_saved"}:
             state = set_video_dubbing_pending(uid, "choosing_voice")
+            if is_admin_user(uid):
+                return await safe_edit_or_send(
+                    query,
+                    video_dubbing_custom_voice_admin_test_text(lang),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+                )
             return await safe_edit_or_send(
                 query,
                 video_dubbing_custom_voice_guard_text(lang),
@@ -137160,6 +137330,22 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
     if action == "voice_custom":
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
+        if video_dubbing_custom_voice_public_locked(uid):
+            state = set_video_dubbing_pending(uid, "voice", processing="0")
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+            )
+        if is_admin_user(uid):
+            state = set_video_dubbing_pending(uid, "voice_custom", entry_surface="admin_test_mode")
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_admin_test_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+            )
         set_video_dubbing_pending(uid, "voice_custom")
         return await safe_edit_or_send(
             query,
@@ -137170,6 +137356,21 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         state = set_video_dubbing_pending(uid, "voice")
+        if video_dubbing_custom_voice_public_locked(uid):
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+            )
+        if is_admin_user(uid):
+            state = set_video_dubbing_pending(uid, "voice", entry_surface="admin_test_mode")
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_admin_test_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_saved_voice_keyboard(uid, lang),
+            )
         return await safe_edit_or_send(
             query,
             video_dubbing_custom_voice_guard_text(lang),
@@ -137180,6 +137381,21 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         state = set_video_dubbing_pending(uid, "voice")
+        if video_dubbing_custom_voice_public_locked(uid):
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+            )
+        if is_admin_user(uid):
+            state = set_video_dubbing_pending(uid, "voice", entry_surface="admin_test_mode")
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_admin_test_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+            )
         return await safe_edit_or_send(
             query,
             video_dubbing_custom_voice_guard_text(lang),
@@ -137188,6 +137404,22 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         )
     if action == "voice_profile_page":
         state = set_video_dubbing_pending(uid, "voice")
+        if video_dubbing_custom_voice_public_locked(uid):
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+            )
+        if is_admin_user(uid):
+            page = _safe_int(value, 0)
+            state = set_video_dubbing_pending(uid, "voice", entry_surface="admin_test_mode", voice_vault_page=str(page))
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_admin_test_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_saved_voice_keyboard(uid, lang, page),
+            )
         return await safe_edit_or_send(
             query,
             video_dubbing_custom_voice_guard_text(lang),
@@ -137198,6 +137430,21 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, "⚠️ Mode này không dùng bước lồng tiếng.", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         state = set_video_dubbing_pending(uid, "voice")
+        if video_dubbing_custom_voice_public_locked(uid):
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
+            )
+        if is_admin_user(uid):
+            state = set_video_dubbing_pending(uid, "voice", entry_surface="admin_test_mode")
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_custom_voice_admin_test_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_saved_voice_keyboard(uid, lang),
+            )
         return await safe_edit_or_send(
             query,
             video_dubbing_custom_voice_guard_text(lang),
@@ -139133,6 +139380,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_full_dub_video", cmd_tool_test_full_dub_video))
     tg_app.add_handler(CommandHandler("subtitle_status", cmd_subtitle_dub_status))
     tg_app.add_handler(CommandHandler("dub_status", cmd_subtitle_dub_status))
+    tg_app.add_handler(CommandHandler("translation_voice_gate_status", cmd_translation_voice_gate_status))
     tg_app.add_handler(CommandHandler("subtitle_jobs", cmd_subtitle_jobs))
     tg_app.add_handler(CommandHandler("subtitle_job", cmd_subtitle_job))
     tg_app.add_handler(CommandHandler("dub_job", cmd_dub_job))

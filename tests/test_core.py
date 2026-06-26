@@ -7830,6 +7830,10 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
     monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(bot, "PUBLIC_VOICE_VIDEO_ENABLED", True)
+    monkeypatch.setattr(bot, "PUBLIC_SUBTITLE_DUB_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_DUB_PUBLIC_ENABLED", True)
+    monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED", True)
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
         mode = bot.normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))

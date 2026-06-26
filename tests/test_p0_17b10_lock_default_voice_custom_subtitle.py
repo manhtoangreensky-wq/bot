@@ -122,11 +122,10 @@ def test_subtitle_translate_failure_guard_clean_copy():
     labels = _labels(bot.subtitle_translate_failure_keyboard("vi", "English"))
     callbacks = _callbacks(bot.subtitle_translate_failure_keyboard("vi", "English"))
 
-    assert text == "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc tải phụ đề gốc trước."
-    assert labels == ["🔁 Thử lại", "📄 Tải phụ đề gốc", "🌐 Chọn ngôn ngữ khác", "⬅️ Quay lại", "🏠 Menu chính"]
-    assert "videodub|language|English" in callbacks
-    assert "videodub|download_original_srt" in callbacks
+    assert text == "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại sau."
+    assert labels == ["🌐 Chọn ngôn ngữ khác", "🏠 Menu chính"]
     assert "videodub|back_language" in callbacks
+    assert "videodub|download_original_srt" not in callbacks
 
 
 def test_subtitle_translate_failure_not_reported_as_asr(monkeypatch):

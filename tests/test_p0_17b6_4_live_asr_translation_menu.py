@@ -120,7 +120,7 @@ def test_video_prepare_media_ignores_stale_default_source_subtitle(monkeypatch):
     assert bot.get_video_dubbing_pending(uid)["subtitle_ref"]
 
 
-def test_subtitle_plus_dub_asr_failure_has_retry_and_subtitle_file_buttons(monkeypatch):
+def test_subtitle_plus_dub_asr_failure_has_clean_retry_buttons(monkeypatch):
     uid = 646403
     bot.clear_video_dubbing_pending(uid)
     bot.set_video_dubbing_pending(
@@ -146,8 +146,9 @@ def test_subtitle_plus_dub_asr_failure_has_retry_and_subtitle_file_buttons(monke
     callbacks = _callbacks(last["reply_markup"])
     assert "TOAN AAS chưa tạo được phụ đề từ file này" in text
     assert "Hệ thống chưa trừ Xu" in text
-    assert "videodub|retry_media" in callbacks
-    assert "videodub|send_subtitle_file" in callbacks
+    assert callbacks == ["videodub|retry_media", "menu|main"]
+    assert "videodub|send_subtitle_file" not in callbacks
+    assert "videodub|enter_dialogue_text" not in callbacks
     forbidden = ["adapter", "provider", "env", "ffmpeg", "stack", "mode_disabled", "none", "null", "asr"]
     assert not any(word in text.lower() for word in forbidden)
     assert bot.get_video_dubbing_pending(uid)["step"] == "failed"

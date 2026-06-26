@@ -80,12 +80,14 @@ def test_tts_failure_keyboard_has_required_actions():
     assert "menu|main" in callbacks
 
 
-def test_asr_failure_keyboard_offers_dialogue_text():
+def test_asr_failure_keyboard_keeps_public_in_clean_retry_flow():
     labels = _labels(bot.video_dubbing_asr_failure_keyboard("vi"))
     callbacks = _callbacks(bot.video_dubbing_asr_failure_keyboard("vi"))
 
-    assert labels == ["🔁 Thử lại", "📄 Gửi file phụ đề", "✍️ Nhập lời thoại", "⬅️ Quay lại", "🏠 Menu chính"]
-    assert "videodub|enter_dialogue_text" in callbacks
+    assert labels == ["🔁 Thử video khác", "🏠 Menu chính"]
+    assert callbacks == ["videodub|retry_media", "menu|main"]
+    assert "videodub|enter_dialogue_text" not in callbacks
+    assert "videodub|send_subtitle_file" not in callbacks
 
 
 def test_manual_dialogue_text_routes_translate_without_asr(monkeypatch):
