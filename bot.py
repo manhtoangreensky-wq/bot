@@ -48749,7 +48749,18 @@ VIDEO_EDITOR_PRESETS = {
     "video_cinematic": "Cinematic",
     "video_soft_clean": "Mềm và sạch",
 }
+VIDEO_EDITOR_ACTION_ALIASES = {
+    "upload": "upload",
+    "cut": "crop",
+    "resize": "crop",
+    "compress": "compress",
+}
 VIDEO_EDITOR_TTL_SECONDS = 10 * 60
+
+
+def video_editor_normalize_action(action: str) -> str:
+    action = str(action or "menu").strip().lower()
+    return VIDEO_EDITOR_ACTION_ALIASES.get(action, action)
 
 
 def video_editor_pending_key(user_id) -> str:
@@ -48801,14 +48812,40 @@ def video_editor_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "🛠 <b>Local Video Editor</b>\n\n"
-            "Color, crop/ratio, vertical 9:16, text watermark and basic sharpen run through Windows Local Worker/FFmpeg. "
-            "No AI provider and no Xu charge in V1."
+            "Send a short video to prepare color, crop/ratio, vertical 9:16, text watermark or basic sharpen edits.\n\n"
+            "This screen does not process anything or charge Xu until the tool is ready."
         )
     return (
         "🛠 <b>Chỉnh sửa video local</b>\n\n"
-        "Màu, crop/tỉ lệ, video dọc 9:16, chữ/watermark và tăng nét cơ bản được gửi sang Windows Local Worker/FFmpeg.\n\n"
-        "V1 không gọi provider AI và chưa trừ Xu. Nếu worker offline, bot dừng trước khi tạo job."
+        "Gửi video ngắn để chuẩn bị cắt, đổi tỉ lệ, làm dọc 9:16, thêm chữ/watermark hoặc tăng nét cơ bản.\n\n"
+        "Màn này chưa xử lý và chưa trừ Xu cho đến khi công cụ sẵn sàng."
     )
+
+
+def video_editor_upload_required_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "🎞 Please upload the video first. TOAN AAS has not processed anything and has not charged Xu."
+    return "🎞 Anh/chị gửi video cần xử lý trước. TOAN AAS chưa xử lý và chưa trừ Xu."
+
+
+def video_editor_public_guard_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "Local video editing is being prepared. TOAN AAS has not processed anything and has not charged Xu. "
+            "You can return to the video menu or try another tool first."
+        )
+    return (
+        "Chỉnh sửa video local đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu. "
+        "Anh/chị có thể quay lại menu video hoặc thử công cụ khác trước."
+    )
+
+
+def video_editor_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Menu video" if is_vi else "⬅️ Video menu", callback_data="menu|main_video"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
 
 
 def video_editor_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -48897,6 +48934,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     vi_overrides = {
         "storyboard_prompt": "🎬 Storyboard + Prompt",
         "prompt_library": "📚 Kho prompt video",
+        "script_image_video": "🧩 Kịch bản → Video",
         "video_downloader": "📥 Tải video từ link",
     }
     menu_rows = (
@@ -48904,8 +48942,7 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         (("storyboard_prompt", "vproduct|open|storyboard_prompt"), ("prompt_library", "vpromptlib|start")),
         (("video_ai_real", "vproduct|open|video_ai_real"), ("script_image_video", "vproduct|open|script_image_video")),
         (("frame_video_local", "vproduct|open|frame_video_local"), ("self_shot_scene_change", "vproduct|open|self_shot_scene_change")),
-        (("multi_scene_film", "vproduct|open|multi_scene_film"),),
-        (("video_downloader", "vdownload|start"),),
+        (("multi_scene_film", "vproduct|open|multi_scene_film"), ("video_downloader", "vdownload|start")),
         (("video_local_edit", "vproduct|open|video_local_edit"), ("main_menu", "menu|main")),
     )
     rows = []
@@ -49294,8 +49331,8 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
             [("📂 Chọn từ kho", "vproduct|legacy|audio_addons"), (menu_label, parent_callback)],
         ],
         "video_local_edit": [
-            [("📎 Gửi video", "vproduct|legacy|video_local_edit"), ("✂️ Cắt video", "vproduct|legacy|video_local_edit")],
-            [("📐 Đổi tỉ lệ", "vproduct|legacy|video_local_edit"), ("🗜 Nén video", "vproduct|legacy|video_local_edit")],
+            [("📎 Gửi video", "videoedit|upload"), ("✂️ Cắt video", "videoedit|cut")],
+            [("📐 Đổi tỉ lệ", "videoedit|resize"), ("🗜 Nén video", "videoedit|compress")],
             [(menu_label, parent_callback)],
         ],
     }
@@ -49358,18 +49395,16 @@ def task3d_idea_suggestions_text(session: dict, lang: str = "vi") -> str:
 
 def task3d_idea_suggestions_keyboard(session: dict, lang: str = "vi") -> InlineKeyboardMarkup:
     ideas = task3d_idea_suggestions(str(session.get("product_id") or ""), lang, safe_int((session.get("draft") or {}).get("idea_offset"), 0))
-    rows = []
-    for index in range(0, len(ideas[:5]), 2):
-        rows.append([
-            InlineKeyboardButton(str(i + 1), callback_data=f"vproduct|idea_select|{i}")
-            for i in range(index, min(index + 2, len(ideas[:5])))
-        ])
-    rows.append([
-        InlineKeyboardButton("✍️ Nhập thủ công", callback_data=f"vproduct|input_text|{session.get('product_id') or ''}"),
-        InlineKeyboardButton("🔁 Gợi ý khác", callback_data="vproduct|ideas_refresh"),
-    ])
-    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-    return InlineKeyboardMarkup(rows)
+    return video_numbered_choice_keyboard(
+        [(str(index + 1), f"vproduct|idea_select|{index}") for index in range(len(ideas[:5]))],
+        lang,
+        action_items=[
+            ("✍️ Nhập thủ công", f"vproduct|input_text|{session.get('product_id') or ''}"),
+            ("🔁 Gợi ý khác", "vproduct|ideas_refresh"),
+        ],
+        back=(ui_text(lang, "common.back"), "vproduct|back"),
+        main=True,
+    )
 
 def task3d_guided_steps(product_id: str) -> tuple[str, ...]:
     return tuple(TASK3D_GUIDED_FLOW_STEPS.get(str(product_id or "")) or ("platform", "aspect", "style", "result"))
@@ -49994,6 +50029,12 @@ def task3d_prompt_number_rows(count: int, action: str, prefix: str = "") -> list
         InlineKeyboardButton(f"{prefix}{index}", callback_data=f"vproduct|{action}|{index}")
         for index in range(1, max(0, min(16, int(count or 0))) + 1)
     ]
+    if not prefix:
+        markup = video_numbered_choice_keyboard(
+            [(str(index), f"vproduct|{action}|{index}") for index in range(1, len(buttons) + 1)],
+            main=False,
+        )
+        return [list(row) for row in markup.inline_keyboard]
     return [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
 
 
@@ -131318,8 +131359,8 @@ def video_downloader_guard_text(reason: str = "", lang: str = "vi", detection: d
         messages = {
             "private_or_invalid": "Only valid public video links are supported. TOAN AAS will not download private, paywalled, DRM-protected or login-required content.",
             "unsupported_platform": "This platform or link type is not supported yet.",
-            "disabled": "The public video-link downloader is being completed. TOAN AAS has not processed the link and has not charged Xu.",
-            "adapter_missing": "The downloader backend is not available yet. TOAN AAS has not charged Xu.",
+            "disabled": "Download from link is being prepared. TOAN AAS has not processed the link and has not charged Xu.",
+            "adapter_missing": "Download from link is being prepared. TOAN AAS has not processed the link and has not charged Xu.",
             "too_large": f"This file is over the public limit of {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB.",
             "duration_too_long": f"This video is over the public limit of {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} seconds.",
             "cover_unavailable": "This link does not expose a downloadable cover image.",
@@ -131336,8 +131377,8 @@ def video_downloader_guard_text(reason: str = "", lang: str = "vi", detection: d
     messages = {
         "private_or_invalid": "Chỉ xử lý link video công khai hợp lệ. TOAN AAS không tải video riêng tư/paywall/DRM hoặc nội dung cần đăng nhập.",
         "unsupported_platform": "Nền tảng hoặc kiểu link này chưa hỗ trợ.",
-        "disabled": "Công cụ tải video từ link đang hoàn thiện. TOAN AAS chưa xử lý link và chưa trừ Xu.",
-        "adapter_missing": "Backend tải link chưa khả dụng. TOAN AAS chưa trừ Xu.",
+        "disabled": "Tải video từ link đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu.",
+        "adapter_missing": "Tải video từ link đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu.",
         "too_large": f"File vượt giới hạn công khai {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB.",
         "duration_too_long": f"Video vượt giới hạn công khai {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} giây.",
         "cover_unavailable": "Link này chưa có ảnh bìa có thể tải.",
@@ -131359,12 +131400,17 @@ def video_downloader_preview_text(detection: dict, metadata: dict | None = None,
     duration = video_downloader_format_seconds(metadata.get("duration_seconds"))
     size = video_downloader_format_size(metadata.get("size_bytes"))
     url = html.escape(str(detection.get("url") or "")[:700])
-    status_line = "Sẵn sàng tải khi chọn định dạng."
+    english_ui = normalize_user_language(lang) != "vi"
+    status_line = "Ready to download when you choose a format." if english_ui else "Sẵn sàng tải khi chọn định dạng."
     if not VIDEO_DOWNLOADER_PUBLIC_ENABLED:
-        status_line = "Tải công khai đang tắt bằng cấu hình, bot sẽ báo guard khi bấm tải."
+        status_line = (
+            "Download from link is being prepared. TOAN AAS has not processed the link and has not charged Xu."
+            if english_ui else
+            "Tải video từ link đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu."
+        )
     elif metadata and not metadata.get("ok"):
-        status_line = "Chưa lấy được metadata đầy đủ, bot sẽ kiểm tra lại trước khi tải."
-    if normalize_user_language(lang) != "vi":
+        status_line = "Some link details are not ready yet; TOAN AAS will check again before downloading." if english_ui else "Chưa lấy đủ thông tin, TOAN AAS sẽ kiểm tra lại trước khi tải."
+    if english_ui:
         return (
             "📥 <b>Link detected</b>\n\n"
             f"• Platform: <b>{platform}</b>\n"
@@ -137502,8 +137548,8 @@ async def submit_local_video_editor_job(update: Update, context: ContextTypes.DE
     lang = get_user_language(uid) or "vi"
     source_file_id = str((state or {}).get("source_file_id") or "")
     if not source_file_id:
-        set_video_editor_pending(uid, "await_video", requested_action=str((state or {}).get("requested_action") or "color"))
-        text = "🎞 Gửi video cần xử lý. Nên gửi file MP4/MOV ngắn dưới 50MB. Bot chưa trừ Xu."
+        set_video_editor_pending(uid, "await_video", requested_action=video_editor_normalize_action(str((state or {}).get("requested_action") or "color")))
+        text = video_editor_upload_required_text(lang)
         if query:
             await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
         else:
@@ -137517,11 +137563,11 @@ async def submit_local_video_editor_job(update: Update, context: ContextTypes.DE
             await message.reply_text(text, reply_markup=video_editor_menu_keyboard(lang))
         return True
     if not video_editor_worker_ready():
-        text = "🎞 Công cụ chỉnh video local đang bảo trì hoặc cần worker xử lý. TOAN AAS chưa trừ Xu. Vui lòng thử lại sau."
+        text = video_editor_public_guard_text(lang)
         if query:
-            await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
+            await safe_edit_or_send(query, text, parse_mode=None, reply_markup=video_editor_guard_keyboard(lang))
         else:
-            await message.reply_text(text, reply_markup=video_editor_menu_keyboard(lang))
+            await message.reply_text(text, reply_markup=video_editor_guard_keyboard(lang))
         return True
     payload = {
         "user_id": str(uid),
@@ -137571,9 +137617,15 @@ async def handle_video_editor_pending_upload(update: Update, context: ContextTyp
     if not source.get("source_file_id"):
         return False
     cache_recent_media_state(update)
-    action = str(state.get("requested_action") or "color")
+    action = video_editor_normalize_action(str(state.get("requested_action") or "color"))
     current = set_video_editor_pending(uid, "menu", **source, requested_action=action)
     lang = get_user_language(uid) or "vi"
+    if action == "upload":
+        await update.message.reply_text(video_editor_menu_text(lang), parse_mode="HTML", reply_markup=video_editor_menu_keyboard(lang))
+        return True
+    if action == "compress":
+        await update.message.reply_text(video_editor_public_guard_text(lang), reply_markup=video_editor_guard_keyboard(lang))
+        return True
     if action == "color":
         await update.message.reply_text("🎨 Chọn công thức màu video.", reply_markup=video_editor_preset_keyboard(lang))
         return True
@@ -137611,7 +137663,8 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
-    action = parts[1] if len(parts) > 1 else "menu"
+    raw_action = parts[1] if len(parts) > 1 else "menu"
+    action = video_editor_normalize_action(raw_action)
     if action == "menu":
         source = recent_video_editor_source(uid)
         set_video_editor_pending(uid, "menu", **source)
@@ -137626,9 +137679,13 @@ async def handle_video_editor_callback(update: Update, context: ContextTypes.DEF
     source = {key: value for key, value in state.items() if key.startswith("source_")}
     if not source.get("source_file_id"):
         source = recent_video_editor_source(uid)
-    if action in {"color", "crop", "vertical", "text", "sharpen"} and not source.get("source_file_id"):
+    if action in {"upload", "color", "crop", "vertical", "text", "sharpen", "compress"} and not source.get("source_file_id"):
         set_video_editor_pending(uid, "await_video", requested_action=action)
-        return await safe_edit_or_send(query, "🎞 Gửi video cần xử lý. Nên gửi MP4/MOV ngắn dưới 50MB. Bot chưa trừ Xu.", parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
+        return await safe_edit_or_send(query, video_editor_upload_required_text(lang), parse_mode=None, reply_markup=video_editor_menu_keyboard(lang))
+    if action == "upload":
+        return await safe_edit_or_send(query, video_editor_menu_text(lang), parse_mode="HTML", reply_markup=video_editor_menu_keyboard(lang))
+    if action == "compress":
+        return await safe_edit_or_send(query, video_editor_public_guard_text(lang), parse_mode=None, reply_markup=video_editor_guard_keyboard(lang))
     if action == "color":
         set_video_editor_pending(uid, "menu", **source, requested_action="color")
         return await safe_edit_or_send(query, "🎨 Chọn công thức màu video.", parse_mode=None, reply_markup=video_editor_preset_keyboard(lang))

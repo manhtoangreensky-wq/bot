@@ -342,7 +342,7 @@ def test_public_buttons_stay_visible_for_unready_products():
 def test_video_flow_lock_snapshots_are_unchanged():
     assert bot.VIDEO_FLOW_LOCKED_AFTER_TASK3D7 is True
     menu = bot.main_video_keyboard("vi")
-    assert len(menu.inline_keyboard) == 7
+    assert len(menu.inline_keyboard) == 6
     assert sum(len(row) for row in menu.inline_keyboard) == 12  # 9 public products + prompt library + downloader utility + Menu chính
     assert len([item for item in _callbacks(menu) if item.startswith("vproduct|open|")]) == 9
     assert "vpromptlib|start" in _callbacks(menu)
