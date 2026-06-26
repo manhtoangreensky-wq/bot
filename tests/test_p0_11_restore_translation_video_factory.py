@@ -192,10 +192,11 @@ def test_auto_dubbing_voice_settings():
 
 def test_auto_dubbing_public_confirmation_clean():
     text = bot.video_dubbing_confirm_text({"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "video_duration": 61, "voice_style": "Giọng nữ"}, "vi")
-    assert "Video đã sẵn sàng lồng tiếng" in text
-    assert "Chi phí dự kiến" not in text
+    assert "Lồng tiếng video" in text
+    assert "Xuất video MP4 lồng tiếng" in text
+    assert "Chi phí:" in text
     assert "Tác vụ:" not in text
-    assert "TOAN AAS chưa xử lý và chưa trừ Xu" in text
+    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in text
 
 
 def test_translate_dub_translate_first_then_voice():

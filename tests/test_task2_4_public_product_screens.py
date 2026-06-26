@@ -111,16 +111,16 @@ def test_auto_subtitle_after_upload_shows_product_confirmation(monkeypatch):
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace())) is True
 
     state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "output"
+    assert state["step"] == "confirm"
     text = message.outputs[-1]["text"]
     labels = _labels(message.outputs[-1]["reply_markup"])
-    assert "Phụ đề đã sẵn sàng" in text
+    assert "Tạo phụ đề tự động" in text
+    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in text
     assert "Tác vụ:" not in text
     assert "Nguồn:" not in text
     assert labels == [
-        "📹 Tải video phụ đề",
-        "📄 Tải SRT",
-        "🔁 Tạo lại phụ đề",
+        "✅ Xuất video phụ đề",
+        "❌ Hủy",
         "🏠 Menu chính",
     ]
 
@@ -167,12 +167,13 @@ def test_auto_dubbing_confirmation_has_final_only():
     }
     text = bot.video_dubbing_confirm_text(state, "vi")
     labels = _labels(bot.video_dubbing_confirm_keyboard("vi", state))
-    assert "✅ <b>Video đã sẵn sàng lồng tiếng</b>" in text
+    assert "🎙 <b>Lồng tiếng video</b>" in text
+    assert "Xuất video MP4 lồng tiếng" in text
     assert "Tác vụ:" not in text
     assert "Nguồn:" not in text
     assert "Chi phí dự kiến" not in text
     assert "Tốc độ: <b>0.9</b>" in text
-    assert labels == ["✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["✅ Xuất video lồng tiếng", "🎙 Đổi giọng", "❌ Hủy", "🏠 Menu chính"]
 
 
 def test_auto_dubbing_provider_off_no_debug_buttons(monkeypatch):
@@ -220,7 +221,7 @@ def test_auto_dubbing_no_reupload_after_guard_back(monkeypatch):
     state = bot.get_video_dubbing_pending(uid)
     assert state["source_file_id"] == "kept-dub-file"
     assert state["step"] == "confirm"
-    assert "Video đã sẵn sàng lồng tiếng" in query.edits[-1]["text"]
+    assert "Lồng tiếng video" in query.edits[-1]["text"]
 
 
 def test_subtitle_plus_confirmation_has_preview_and_full_subtitle():
@@ -285,10 +286,10 @@ def test_subtitle_plus_dubbing_confirmation_has_final_only():
     }
     text = bot.video_dubbing_confirm_text(state, "vi")
     labels = _labels(bot.video_dubbing_confirm_keyboard("vi", state))
-    assert "Video đã sẵn sàng lồng tiếng" in text
+    assert "Phụ đề + Lồng tiếng" in text
     assert "Tác vụ:" not in text
     assert "Chi phí dự kiến" not in text
-    assert labels == ["✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["✅ Tạo video hoàn chỉnh", "🎙 Đổi giọng", "❌ Hủy", "🏠 Menu chính"]
 
 
 def test_link_import_not_exposed_in_b6_studio_but_guard_stays_clean():
@@ -371,7 +372,8 @@ def test_task2_upload_does_not_open_generic_video_menu(monkeypatch):
     asyncio.run(bot.handle_media_cache_only(_update(uid, message), SimpleNamespace()))
     joined = " ".join(item["text"] for item in message.outputs)
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
-    assert "Phụ đề đã sẵn sàng" in joined
+    assert "Tạo phụ đề tự động" in joined
+    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in joined
 
 
 def test_task2_upload_preserves_session_source_ref(monkeypatch):

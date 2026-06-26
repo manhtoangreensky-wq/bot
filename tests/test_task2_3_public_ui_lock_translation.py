@@ -122,8 +122,9 @@ def test_task2_upload_video_stays_in_auto_subtitle(monkeypatch):
     state = bot.get_video_dubbing_pending(uid)
     assert state["product"] == "auto_subtitle"
     assert state["source_ref"] == "auto-subtitle"
-    assert state["step"] == "output"
-    assert "Phụ đề đã sẵn sàng" in message.outputs[-1]["text"]
+    assert state["step"] == "confirm"
+    assert "Tạo phụ đề tự động" in message.outputs[-1]["text"]
+    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in message.outputs[-1]["text"]
 
 
 def test_task2_upload_video_stays_in_auto_dubbing(monkeypatch):
@@ -182,7 +183,8 @@ def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):
     asyncio.run(bot.handle_media_cache_only(_update(uid, message), SimpleNamespace()))
     joined = " ".join(item["text"] for item in message.outputs)
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
-    assert "Phụ đề đã sẵn sàng" in joined
+    assert "Tạo phụ đề tự động" in joined
+    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in joined
 
 
 def test_auto_subtitle_preview_back_to_output():

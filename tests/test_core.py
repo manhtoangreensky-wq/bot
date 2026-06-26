@@ -7687,23 +7687,25 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
         },
         "vi",
     )
-    assert "Video đã sẵn sàng lồng tiếng" in dub_confirm
+    assert "Phụ đề + Lồng tiếng" in dub_confirm
     assert "1.050 Xu" not in dub_confirm
-    assert "Chi phí dự kiến" not in dub_confirm
-    assert "trừ Xu" in dub_confirm
+    assert "Chi phí:" in dub_confirm
+    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in dub_confirm
     assert "Tác vụ:" not in dub_confirm
 
     subtitle_confirm = bot.video_dubbing_confirm_text(
         {"mode": "subtitle", "video_file_id": "video-2", "source_language": "auto", "video_duration": 45},
         "vi",
     )
-    assert "Video đã sẵn sàng tạo phụ đề" in subtitle_confirm
+    assert "Tạo phụ đề tự động" in subtitle_confirm
+    assert "Xuất video MP4 có phụ đề" in subtitle_confirm
     assert "Kiểu giọng" not in subtitle_confirm
     translated_subtitle_confirm = bot.video_dubbing_confirm_text(
         {"mode": "translate_subtitle", "video_file_id": "video-3", "target_language": "Tiếng Việt", "video_duration": 61},
         "vi",
     )
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in translated_subtitle_confirm
+    assert "Dịch phụ đề video" in translated_subtitle_confirm
+    assert "Xuất video MP4 có phụ đề dịch" in translated_subtitle_confirm
     assert "Kiểu giọng" not in translated_subtitle_confirm
 
     pricing = bot.calculate_video_translate_price("translate_subtitle", 383)
@@ -7912,14 +7914,14 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     assert bot.get_video_dubbing_pending(71004)["step"] == "dub_confirmation"
 
     upload_cases = [
-        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|final", "Phụ đề đã sẵn sàng"),
+        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "confirm", "videodub|final", "Tạo phụ đề tự động"),
         (
             71102,
             bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
             {"target_language": "English", "translate_requested": "1"},
-            "output",
+            "confirm",
             "videodub|final",
-            "Đã dịch phụ đề",
+            "Dịch phụ đề video",
         ),
         (
             71103,
@@ -7927,7 +7929,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
             {"target_language": "Tiếng Việt", "voice_style": "Nữ tự nhiên", "voice_speed": "1.0"},
             "confirm",
             "videodub|final",
-            "Video đã sẵn sàng lồng tiếng",
+            "Lồng tiếng video",
         ),
         (
             71104,

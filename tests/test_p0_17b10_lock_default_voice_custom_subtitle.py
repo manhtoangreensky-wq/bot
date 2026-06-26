@@ -143,17 +143,22 @@ def test_subtitle_translate_failure_not_reported_as_asr(monkeypatch):
         translate_requested="1",
     )
 
+    prepare_calls = {"count": 0}
+
     async def fail_prepare(*_args, **_kwargs):
-        raise bot.TranslationProviderError({"deepl": "FAIL", "gemini": "MISSING"}, {"deepl": "quota"})
+        prepare_calls["count"] += 1
+        raise AssertionError("translation must wait until final confirmation")
 
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fail_prepare)
     message = CaptureMessage(uid)
 
     asyncio.run(bot.video_dubbing_translate_current_subtitle_to_output(message, SimpleNamespace(), uid, state, "English", "vi"))
 
-    assert "chưa dịch được phụ đề" in message.outputs[-1]["text"]
+    assert "Dịch phụ đề video" in message.outputs[-1]["text"]
     assert "chưa tạo được phụ đề" not in message.outputs[-1]["text"]
-    assert "videodub|download_original_srt" in _callbacks(message.outputs[-1]["reply_markup"])
+    assert "videodub|final" in _callbacks(message.outputs[-1]["reply_markup"])
+    assert "videodub|download_original_srt" not in _callbacks(message.outputs[-1]["reply_markup"])
+    assert prepare_calls["count"] == 0
 
 
 def test_subtitle_translate_stores_translated_ref_and_exports_all(monkeypatch):
@@ -177,21 +182,24 @@ def test_subtitle_translate_stores_translated_ref_and_exports_all(monkeypatch):
         output_format="srt",
     )
 
+    translate_calls = {"count": 0}
+
     async def fake_translate(text, target, **_kwargs):
-        return {"provider": "unit", "text": f"{text} EN", "target": target}
+        translate_calls["count"] += 1
+        raise AssertionError("translation must wait until final confirmation")
 
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     message = CaptureMessage(uid)
 
     final_state = asyncio.run(bot.video_dubbing_translate_current_subtitle_to_output(message, SimpleNamespace(), uid, state, "English", "vi"))
-    translated = bot.get_video_dubbing_artifact(uid, final_state["translated_subtitle_ref"])
-    items = bot.video_dubbing_subtitle_output_items(translated, "all", bot.VIDEO_SUBTITLE_MODE_TRANSLATE)
+    callbacks = _callbacks(message.outputs[-1]["reply_markup"])
 
-    assert final_state["translated_subtitle_ref"]
-    assert "00:00:00,000 --> 00:00:01,200" in translated
-    assert "Xin chào EN" in translated
-    assert [item["suffix"] for item in items] == [".srt", ".vtt", ".txt"]
-    assert all(item["bytes"] for item in items)
+    assert final_state["step"] == "confirm"
+    assert not final_state.get("translated_subtitle_ref")
+    assert "Dịch phụ đề video" in message.outputs[-1]["text"]
+    assert "videodub|final" in callbacks
+    assert "videodub|output|srt" not in callbacks
+    assert translate_calls["count"] == 0
 
 
 def test_download_original_srt_callback_uses_source_subtitle_ref(monkeypatch):
