@@ -253,9 +253,9 @@ def test_pr38_asr_engine_path_is_called_for_auto_subtitle_media(monkeypatch):
     assert state["step"] == "output"
     assert state["subtitle_ref"]
     assert state["source_subtitle_ref"] == state["subtitle_ref"]
-    assert "📄 Xuất SRT" in labels
-    assert "📄 Xuất VTT" in labels
-    assert "📝 Xuất TXT" in labels
+    assert "📄 Tải SRT" in labels
+    assert "📄 Tải VTT" in labels
+    assert "🧾 Tải TXT" in labels
 
 
 def test_pr38_asr_engine_path_is_called_for_dub_media_before_language(monkeypatch):

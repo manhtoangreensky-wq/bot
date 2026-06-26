@@ -239,6 +239,19 @@ def test_subtitle_translate_language_runs_translation_before_export(monkeypatch)
         }
 
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
+    tts_calls = {"count": 0}
+    mux_calls = {"count": 0}
+
+    async def forbidden_tts(*_args, **_kwargs):
+        tts_calls["count"] += 1
+        raise AssertionError("subtitle translate must not auto-start TTS")
+
+    async def forbidden_mux(*_args, **_kwargs):
+        mux_calls["count"] += 1
+        raise AssertionError("subtitle translate must not auto-start mux")
+
+    monkeypatch.setattr(bot, "synthesize_dub_segment_chunks", forbidden_tts)
+    monkeypatch.setattr(bot, "video_dubbing_render_video", forbidden_mux)
     message = CaptureMessage("language-choice", chat_id=uid)
 
     state = asyncio.run(
@@ -257,6 +270,9 @@ def test_subtitle_translate_language_runs_translation_before_export(monkeypatch)
     assert state["translated_subtitle_ref"]
     assert "Xuất phụ đề dịch" in message.outputs[-1]["text"]
     assert "videodub|output|srt" in callbacks
+    assert "videodub|result_dub_translated" in callbacks
+    assert tts_calls["count"] == 0
+    assert mux_calls["count"] == 0
 
 
 def test_auto_subtitle_media_outputs_srt_vtt_txt_after_real_create(monkeypatch):
@@ -292,9 +308,9 @@ def test_auto_subtitle_media_outputs_srt_vtt_txt_after_real_create(monkeypatch):
     labels = _labels(message.outputs[-1]["reply_markup"])
     assert state["step"] == "output"
     assert state["subtitle_ref"]
-    assert "📄 Xuất SRT" in labels
-    assert "📄 Xuất VTT" in labels
-    assert "📝 Xuất TXT" in labels
+    assert "📄 Tải SRT" in labels
+    assert "📄 Tải VTT" in labels
+    assert "🧾 Tải TXT" in labels
 
 
 def test_public_asr_failure_copy_has_no_internal_terms():

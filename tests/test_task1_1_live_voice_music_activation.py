@@ -191,7 +191,7 @@ def test_voice_vault_pending_buttons_no_download_primary(monkeypatch):
         bot.PRODUCT_CONTEXT_SHOWROOM,
         {"id": 8, "status": "failed_provider_not_ready", "provider_voice_id": "", "preview_audio_ref": ""},
     ))
-    assert "🔁 Tạo/nghe thử lại" not in labels
+    assert "🔁 Tạo/nghe thử lại" in labels
     assert "✏️ Đổi tên" in labels
     assert "🗑 Xóa" in labels
     assert not any("Tải" in label for label in labels)

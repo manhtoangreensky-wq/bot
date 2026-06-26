@@ -132,7 +132,9 @@ def test_auto_subtitle_output_srt_burn_edit():
         "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
         "subtitle_ref": "video_dubbing_artifact:test:subtitle",
     }))
-    assert {"videodub|output|srt", "videodub|output|burn", "videodub|subtitle_editor"}.issubset(ready_callbacks)
+    assert {"videodub|output|srt", "videodub|output|vtt", "videodub|output|txt"}.issubset(ready_callbacks)
+    assert "videodub|output|burn" not in ready_callbacks
+    assert "videodub|subtitle_editor" not in ready_callbacks
 
 
 def test_auto_dubbing_input_no_link_button():
@@ -248,7 +250,7 @@ def test_subtitle_dubbing_continue_voice_after_output():
         "target_language": "English",
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
-    assert "🗣 Tiếp tục lồng tiếng" in _labels(bot.video_dubbing_output_keyboard("vi", state))
+    assert "🎙 Lồng tiếng từ bản dịch này" in _labels(bot.video_dubbing_output_keyboard("vi", state))
 
 
 def test_subtitle_dubbing_uses_translated_subtitle_for_tts(monkeypatch):

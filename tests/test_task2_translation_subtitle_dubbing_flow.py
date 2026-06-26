@@ -178,7 +178,7 @@ def test_subtitle_dubbing_continue_voice_after_output():
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
-    assert "🗣 Tiếp tục lồng tiếng" in labels
+    assert "🎙 Lồng tiếng từ bản dịch này" in labels
     assert not any("Giọng nữ" in label for label in labels)
 
 

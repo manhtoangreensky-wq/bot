@@ -63,9 +63,9 @@ def test_subtitle_plus_stage_a_hides_export_until_subtitle_result_exists():
 
     ready = {**pending, "translated_subtitle_ref": "video_dubbing_artifact:test:translated"}
     ready_labels = _labels(bot.video_dubbing_output_keyboard("vi", ready))
-    assert "📄 Xuất SRT" in ready_labels
-    assert "🎞 Gắn phụ đề vào video" in ready_labels
-    assert "🗣 Tiếp tục lồng tiếng" in ready_labels
+    assert "📄 Tải SRT" in ready_labels
+    assert "🎞 Gắn phụ đề vào video" not in ready_labels
+    assert "🎙 Lồng tiếng từ bản dịch này" in ready_labels
 
 
 def test_guard_public_buttons_are_clean_and_back_preserves_source():

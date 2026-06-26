@@ -78171,10 +78171,14 @@ def voice_clone_permission_forbidden_keyboard(lang: str = "vi", product_context:
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎙 Dùng giọng nữ mặc định" if is_vi else "🎙 Use default female", callback_data=cb("voice_default_female"))],
-        [InlineKeyboardButton("🎙 Dùng giọng nam mặc định" if is_vi else "🎙 Use default male", callback_data=cb("voice_default_male"))],
-        [InlineKeyboardButton("🔁 Thử lại sau" if is_vi else "🔁 Try again later", callback_data=cb("voice_clone"))],
-        [InlineKeyboardButton("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", callback_data=cb("voice_profiles"))],
+        [
+            InlineKeyboardButton("🎙 Dùng giọng nữ mặc định" if is_vi else "🎙 Use default female", callback_data=cb("voice_default_female")),
+            InlineKeyboardButton("🎙 Dùng giọng nam mặc định" if is_vi else "🎙 Use default male", callback_data=cb("voice_default_male")),
+        ],
+        [
+            InlineKeyboardButton("🔁 Thử lại sau" if is_vi else "🔁 Try again later", callback_data=cb("voice_clone")),
+            InlineKeyboardButton("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", callback_data=cb("voice_profiles")),
+        ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -79031,6 +79035,28 @@ def get_tts_voice_id(kind: str, profile: dict | None = None) -> str:
         return str((profile or {}).get("provider_voice_id") or "").strip()
     return str((profile or {}).get("provider_voice_id") or kind or "").strip()
 
+def resolve_video_dub_tts_voice_id(user_id, state: dict | None = None) -> str:
+    state = dict(state or {})
+    requested = str(state.get("voice_id") or "").strip()
+    kind = str(state.get("voice_kind") or state.get("voice_style") or "").strip().lower()
+    if requested and requested.lower() not in {"saved_voice", "saved", "voice_profile", "cloned_voice", "clone"}:
+        resolved = get_tts_voice_id(requested)
+        if resolved:
+            return resolved
+    if "female" in kind or "nữ" in kind or "nu" in kind:
+        return default_tts_voice_id("female")
+    if "male" in kind or "nam" in kind:
+        return default_tts_voice_id("male")
+    fallback = default_tts_voice_id("female")
+    try:
+        from services.dubbing_pipeline import get_user_voice_id as blackbox_get_user_voice_id
+
+        with db_connect() as conn:
+            return blackbox_get_user_voice_id(str(user_id), conn, requested_voice_id=requested, default_voice_id=fallback)
+    except Exception as exc:
+        logger.warning("resolve_video_dub_tts_voice_id fallback | %s", sanitize_log_text(str(exc))[:160])
+        return fallback
+
 def default_edge_tts_voice_id(kind: str) -> str:
     normalized = str(kind or "").strip().lower()
     if normalized in {"default_female", "female", "nữ", "nu"}:
@@ -79264,27 +79290,17 @@ def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_co
         final_ready = False
         preview_ready = False
     if not final_ready:
-        if voice_profile_clone_permission_forbidden(profile):
-            buttons = [
-                ("🎙 Dùng giọng mặc định" if is_vi else "🎙 Use default voice", cb("voice_default_neutral")),
-                ("🗑 Xóa" if is_vi else "🗑 Delete", cb(f"voice_profile_delete:{pid}")),
-            ]
-            return build_2col_keyboard(
-                buttons,
-                nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")),
-                nav_main=True,
-                lang=lang,
-            )
-        clone_gate = get_minimax_voice_clone_readiness()
-        buttons = []
-        profile_user_id = (profile or {}).get("user_id")
-        if clone_gate.get("public_enabled") or (clone_gate.get("ready") and is_admin_user(profile_user_id)):
-            buttons.append(("🔁 Tạo/nghe thử lại" if is_vi else "🔁 Retry preview/create", cb(f"voice_clone_retry:{pid}")))
-        buttons.extend([
-            ("✏️ Đổi tên" if is_vi else "✏️ Rename", cb(f"voice_profile_rename:{pid}")),
-            ("🗑 Xóa" if is_vi else "🗑 Delete", cb(f"voice_profile_delete:{pid}")),
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔁 Tạo/nghe thử lại" if is_vi else "🔁 Retry preview/create", callback_data=cb(f"voice_clone_retry:{pid}")),
+                InlineKeyboardButton("✏️ Đổi tên" if is_vi else "✏️ Rename", callback_data=cb(f"voice_profile_rename:{pid}")),
+            ],
+            [
+                InlineKeyboardButton("🗑 Xóa" if is_vi else "🗑 Delete", callback_data=cb(f"voice_profile_delete:{pid}")),
+                InlineKeyboardButton("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", callback_data=cb("voice_profiles")),
+            ],
+            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
-        return build_2col_keyboard(buttons, nav_back=("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", cb("voice_profiles")), nav_main=True, lang=lang)
     video_callback = cb(f"voice_profile_use:{pid}") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else cb(f"voice_profile_video_hint:{pid}")
     buttons = [
         ("▶️ Nghe demo" if is_vi else "▶️ Demo", cb(f"voice_profile_listen:{pid}")),
@@ -131155,11 +131171,17 @@ def subtitle_plus_dub_translated_ready_keyboard(lang: str = "vi") -> InlineKeybo
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📄 Tải SRT dịch" if is_vi else "📄 Download translated SRT", callback_data="videodub|combo_download_translated_srt"),
-            InlineKeyboardButton("🧾 Xem bản dịch" if is_vi else "🧾 View translation", callback_data="videodub|combo_view_translated_text"),
+            InlineKeyboardButton("👁 Xem thử" if is_vi else "👁 Preview", callback_data="videodub|combo_view_translated_text"),
+            InlineKeyboardButton("📄 Tải SRT" if is_vi else "📄 Download SRT", callback_data="videodub|combo_download_translated_srt"),
         ],
-        [InlineKeyboardButton("🎙 Lồng tiếng bằng bản dịch này" if is_vi else "🎙 Dub this translation", callback_data="videodub|combo_dub_translated")],
-        [InlineKeyboardButton("🔁 Dịch sang tiếng khác" if is_vi else "🔁 Translate another language", callback_data="videodub|combo_translate")],
+        [
+            InlineKeyboardButton("📄 Tải VTT" if is_vi else "📄 Download VTT", callback_data="videodub|combo_download_translated_vtt"),
+            InlineKeyboardButton("🧾 Tải TXT" if is_vi else "🧾 Download TXT", callback_data="videodub|combo_download_translated_txt"),
+        ],
+        [
+            InlineKeyboardButton("🎙 Lồng tiếng từ bản dịch này" if is_vi else "🎙 Dub this translation", callback_data="videodub|combo_dub_translated"),
+            InlineKeyboardButton("🌐 Dịch ngôn ngữ khác" if is_vi else "🌐 Translate another language", callback_data="videodub|combo_translate"),
+        ],
         [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|combo_back_original"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
@@ -131246,24 +131268,46 @@ def subtitle_plus_dub_preview_ready_keyboard(lang: str = "vi") -> InlineKeyboard
 def subtitle_plus_dub_completed_text(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     result = dict(result or {})
     if normalize_user_language(lang) != "vi":
-        return "✅ <b>Dubbing completed.</b>\n\nThe available output files were sent in this chat."
+        if result.get("has_video"):
+            return "✅ <b>Dubbing video completed.</b>\n\nTOAN AAS sent the final video. Optional audio/subtitle downloads are available below."
+        return "TOAN AAS created the dubbed audio. Video mux did not finish, so the system sent audio first. You can retry mux or download subtitles if needed."
     if result.get("has_video"):
-        return "✅ <b>Đã tạo audio/video lồng tiếng.</b>\n\nFile kết quả đã được gửi trong chat."
-    return "✅ <b>Đã tạo audio lồng tiếng.</b>\n\nNếu video chưa được ghép, TOAN AAS đã gửi audio và phụ đề kèm theo."
+        return "✅ <b>Đã tạo video phụ đề + lồng tiếng.</b>\n\nTOAN AAS đã gửi video hoàn chỉnh. Audio/phụ đề có thể tải thêm bằng nút bên dưới."
+    return "TOAN AAS đã tạo audio lồng tiếng. Ghép vào video chưa hoàn tất nên hệ thống gửi audio trước. Anh/chị có thể thử ghép lại hoặc tải phụ đề nếu cần."
 
 def subtitle_plus_dub_completed_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     state = dict(state or {})
     is_vi = normalize_user_language(lang) == "vi"
-    rows = [[
-        InlineKeyboardButton("📄 Tải phụ đề" if is_vi else "📄 Download subtitles", callback_data="videodub|combo_download_final_subtitle"),
-        InlineKeyboardButton("🎧 Tải audio lồng tiếng" if is_vi else "🎧 Download dub audio", callback_data="videodub|combo_download_final_audio"),
-    ]]
     if str(state.get("final_video_available") or "") == "1":
-        rows.append([InlineKeyboardButton("🎬 Tải video hoàn chỉnh" if is_vi else "🎬 Download final video", callback_data="videodub|combo_download_final_video")])
-    rows.extend([
-        [InlineKeyboardButton("🔁 Lồng tiếng lại voice khác" if is_vi else "🔁 Dub again with another voice", callback_data="videodub|combo_redub_voice")],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
+        rows = [
+            [
+                InlineKeyboardButton("📹 Tải video" if is_vi else "📹 Download video", callback_data="videodub|combo_download_final_video"),
+                InlineKeyboardButton("🎧 Tải audio" if is_vi else "🎧 Download audio", callback_data="videodub|combo_download_final_audio"),
+            ],
+            [
+                InlineKeyboardButton("📄 Tải phụ đề" if is_vi else "📄 Download subtitles", callback_data="videodub|combo_download_final_subtitle"),
+                InlineKeyboardButton("🔁 Lồng tiếng lại" if is_vi else "🔁 Dub again", callback_data="videodub|combo_redub_voice"),
+            ],
+            [
+                InlineKeyboardButton("🌐 Dịch phụ đề khác" if is_vi else "🌐 Translate another subtitle", callback_data="videodub|combo_translate"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
+        ]
+    else:
+        rows = [
+            [
+                InlineKeyboardButton("📹 Thử ghép lại" if is_vi else "📹 Retry mux", callback_data="videodub|combo_retry_mux"),
+                InlineKeyboardButton("🎧 Tải audio" if is_vi else "🎧 Download audio", callback_data="videodub|combo_download_final_audio"),
+            ],
+            [
+                InlineKeyboardButton("📄 Tải phụ đề" if is_vi else "📄 Download subtitles", callback_data="videodub|combo_download_final_subtitle"),
+                InlineKeyboardButton("🔁 Lồng tiếng lại" if is_vi else "🔁 Dub again", callback_data="videodub|combo_redub_voice"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|combo_back_voice"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
+        ]
     return InlineKeyboardMarkup(rows)
 
 def subtitle_plus_dub_ready_step_for_dub_source(state: dict | None = None) -> str:
@@ -131690,23 +131734,24 @@ def video_dubbing_output_keyboard(lang: str = "vi", state: dict | None = None) -
         return video_dubbing_source_keyboard(lang, {**state, "mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
     if combo_subtitle_stage:
         if has_translated_result:
-            rows = [[
-                InlineKeyboardButton("📄 Xuất SRT" if is_vi else "📄 Export SRT", callback_data="videodub|output|srt"),
-                InlineKeyboardButton("📄 Xuất VTT" if is_vi else "📄 Export VTT", callback_data="videodub|output|vtt"),
-            ]]
-            rows.append([
-                InlineKeyboardButton("📝 Xuất TXT" if is_vi else "📝 Export TXT", callback_data="videodub|output|txt"),
-                InlineKeyboardButton("🎞 Gắn phụ đề vào video" if is_vi else "🎞 Burn into video", callback_data="videodub|output|burn"),
+            return InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("👁 Xem thử" if is_vi else "👁 Preview", callback_data="videodub|subtitle_preview_lines"),
+                    InlineKeyboardButton("📄 Tải SRT" if is_vi else "📄 Download SRT", callback_data="videodub|output|srt"),
+                ],
+                [
+                    InlineKeyboardButton("📄 Tải VTT" if is_vi else "📄 Download VTT", callback_data="videodub|output|vtt"),
+                    InlineKeyboardButton("🧾 Tải TXT" if is_vi else "🧾 Download TXT", callback_data="videodub|output|txt"),
+                ],
+                [
+                    InlineKeyboardButton("🎙 Lồng tiếng từ bản dịch này" if is_vi else "🎙 Dub this translation", callback_data="videodub|continue_dubbing"),
+                    InlineKeyboardButton("🌐 Dịch ngôn ngữ khác" if is_vi else "🌐 Translate another language", callback_data="videodub|combo_translate"),
+                ],
+                [
+                    InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|output_back"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ],
             ])
-            rows.append([
-                InlineKeyboardButton("🗣 Tiếp tục lồng tiếng" if is_vi else "🗣 Continue dubbing", callback_data="videodub|continue_dubbing"),
-                InlineKeyboardButton("📝 Chỉnh phụ đề" if is_vi else "📝 Edit subtitles", callback_data="videodub|subtitle_editor"),
-            ])
-            rows.append([
-                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|output_back"),
-                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-            ])
-            return InlineKeyboardMarkup(rows)
         rows = [[
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|output_back"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
@@ -131720,35 +131765,39 @@ def video_dubbing_output_keyboard(lang: str = "vi", state: dict | None = None) -
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ]])
     if mode == VIDEO_SUBTITLE_MODE_TRANSLATE and has_translated_result:
-        rows = [[
-            InlineKeyboardButton("📄 Xuất SRT" if is_vi else "📄 Export SRT", callback_data="videodub|output|srt"),
-            InlineKeyboardButton("📄 Xuất VTT" if is_vi else "📄 Export VTT", callback_data="videodub|output|vtt"),
-        ]]
-        rows.append([
-            InlineKeyboardButton("📝 Xuất TXT" if is_vi else "📝 Export TXT", callback_data="videodub|output|txt"),
-            InlineKeyboardButton("🎞 Gắn phụ đề vào video" if is_vi else "🎞 Burn into video", callback_data="videodub|output|burn"),
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("👁 Xem thử" if is_vi else "👁 Preview", callback_data="videodub|subtitle_preview_lines"),
+                InlineKeyboardButton("📄 Tải SRT" if is_vi else "📄 Download SRT", callback_data="videodub|output|srt"),
+            ],
+            [
+                InlineKeyboardButton("📄 Tải VTT" if is_vi else "📄 Download VTT", callback_data="videodub|output|vtt"),
+                InlineKeyboardButton("🧾 Tải TXT" if is_vi else "🧾 Download TXT", callback_data="videodub|output|txt"),
+            ],
+            [
+                InlineKeyboardButton("🎙 Lồng tiếng từ bản dịch này" if is_vi else "🎙 Dub this translation", callback_data="videodub|result_dub_translated"),
+                InlineKeyboardButton("🌐 Dịch ngôn ngữ khác" if is_vi else "🌐 Translate another language", callback_data="videodub|result_translate"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|output_back"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
         ])
-        rows.append([
-            InlineKeyboardButton("📝 Chỉnh phụ đề" if is_vi else "📝 Edit subtitles", callback_data="videodub|subtitle_editor"),
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|output_back"),
-        ])
-        rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-        return InlineKeyboardMarkup(rows)
     if mode == VIDEO_SUBTITLE_MODE_CREATE and has_subtitle_result:
-        rows = [[
-            InlineKeyboardButton("📄 Xuất SRT" if is_vi else "📄 Export SRT", callback_data="videodub|output|srt"),
-            InlineKeyboardButton("📄 Xuất VTT" if is_vi else "📄 Export VTT", callback_data="videodub|output|vtt"),
-        ]]
-        rows.append([
-            InlineKeyboardButton("📝 Xuất TXT" if is_vi else "📝 Export TXT", callback_data="videodub|output|txt"),
-            InlineKeyboardButton("🎞 Gắn vào video" if is_vi else "🎞 Burn into video", callback_data="videodub|output|burn"),
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("👁 Xem thử" if is_vi else "👁 Preview", callback_data="videodub|subtitle_preview_lines"),
+                InlineKeyboardButton("📄 Tải SRT" if is_vi else "📄 Download SRT", callback_data="videodub|output|srt"),
+            ],
+            [
+                InlineKeyboardButton("📄 Tải VTT" if is_vi else "📄 Download VTT", callback_data="videodub|output|vtt"),
+                InlineKeyboardButton("🧾 Tải TXT" if is_vi else "🧾 Download TXT", callback_data="videodub|output|txt"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|output_back"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
         ])
-        rows.append([
-            InlineKeyboardButton("📝 Chỉnh phụ đề" if is_vi else "📝 Edit subtitles", callback_data="videodub|subtitle_editor"),
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|output_back"),
-        ])
-        rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-        return InlineKeyboardMarkup(rows)
     rows = [[
         InlineKeyboardButton(preview_label, callback_data=f"videodub|{preview_action}"),
         InlineKeyboardButton(full_label, callback_data="videodub|final"),
@@ -132976,6 +133025,8 @@ async def send_public_subtitle_dub_final_outputs(
             caption="✅ Audio lồng tiếng đã hoàn tất.",
         )
         sent["audio"] = 1
+    if is_combined:
+        return sent
     if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
         wanted_types = ("txt",)
     elif active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE:
@@ -132990,8 +133041,6 @@ async def send_public_subtitle_dub_final_outputs(
         wanted_types = (available_type,)
     elif mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE}:
         wanted_types = ("srt", "txt")
-    elif is_combined:
-        wanted_types = ("srt",)
     else:
         wanted_types = ()
     for wanted_type in wanted_types:
@@ -133010,8 +133059,6 @@ async def send_public_subtitle_dub_final_outputs(
                 caption="✅ File kết quả.",
             )
             sent["documents"] += 1
-    if is_combined and not sent["video"] and callable(getattr(message, "reply_text", None)):
-        await message.reply_text("Đã tạo audio lồng tiếng. Ghép video đang tạm chưa sẵn sàng, TOAN AAS chưa tạo MP4.")
     return sent
 
 def video_dubbing_back_route(state: dict | None, action: str) -> str:
@@ -134387,12 +134434,13 @@ async def _execute_video_dubbing_pipeline_core(
     raw_audio_bytes = b""
     normalization_detail = "not_requested"
     tts_chunks = []
+    selected_tts_voice_id = resolve_video_dub_tts_voice_id(uid, state)
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
         # synthesize_dub_segment_chunks calls video_dubbing_tts_bytes per segment.
         segment_tts = await synthesize_dub_segment_chunks(
             output_segments,
             voice_style=state.get("voice_style") or "",
-            voice_id=state.get("voice_id") or state.get("voice_kind") or "default_female",
+            voice_id=selected_tts_voice_id,
             base_speed=float(parse_video_dubbing_voice_speed(state.get("voice_speed") or "1.0")),
             max_speed=max(1.35, float(parse_video_dubbing_voice_speed(state.get("voice_speed") or "1.0"))),
             allow_admin=is_admin_user(uid),
@@ -134435,14 +134483,33 @@ async def _execute_video_dubbing_pipeline_core(
                 workspace_artifacts["translated_subtitles"].append(artifact_path)
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
     video_output = b""
+    blackbox_pipeline_result: dict = {}
     if str(content_type or "").lower().startswith("video/"):
         if audio_bytes and VIDEO_DUB_MUX_ENABLED and frame_video_ffmpeg_path():
-            video_output, _render_detail = await video_dubbing_render_video(
-                video_bytes,
-                dubbed_audio=audio_bytes,
-                subtitle_bytes=srt_bytes if wants_subtitle_video else b"",
-                keep_original_audio=bool(str(state.get("keep_original_audio") or "").strip() in {"1", "true", "yes"}),
-            )
+            try:
+                from services.dubbing_pipeline import process_dubbing_pipeline
+
+                mux_workspace = workspace or tempfile.mkdtemp(prefix="toanaas_blackbox_dub_")
+                source_video_path = workspace_artifacts.get("source") or write_subtitle_dub_pipeline_artifact(
+                    mux_workspace,
+                    "input.mp4",
+                    video_bytes,
+                )
+                blackbox_pipeline_result = process_dubbing_pipeline(
+                    source_video_path=source_video_path,
+                    subtitle_segments=output_segments,
+                    voice_id=selected_tts_voice_id,
+                    workspace_dir=mux_workspace,
+                    tts_func=lambda *_args, **_kwargs: audio_bytes,
+                    burn_subtitles=wants_subtitle_video,
+                    final_only=True,
+                )
+                final_video_path = str(blackbox_pipeline_result.get("video_path") or "")
+                if blackbox_pipeline_result.get("result_type") == "mp4" and final_video_path and os.path.exists(final_video_path):
+                    with open(final_video_path, "rb") as handle:
+                        video_output = handle.read()
+            except Exception as exc:
+                logger.warning("blackbox dubbing mux failed | %s", sanitize_log_text(str(exc))[:180])
         elif wants_subtitle_video and video_dubbing_video_render_ready(output_type, subtitle=True):
             video_output, _render_detail = await video_dubbing_render_video(
                 video_bytes,
@@ -134483,6 +134550,7 @@ async def _execute_video_dubbing_pipeline_core(
     subtitle_asset_ids: list[str] = []
     translation_asset_ids: list[str] = []
     dub_asset_id = ""
+    dub_video_asset_id = ""
     for item in subtitle_items:
         data = bytes(item.get("bytes") or b"")
         if not data:
@@ -134545,10 +134613,31 @@ async def _execute_video_dubbing_pipeline_core(
             status="generated_unused",
             linked_video_session_id=linked_session_id,
             price_xu=charged,
-            metadata={"mode": mode, "voice_kind": state.get("voice_kind") or "", "product_context": product_context},
+            metadata={"mode": mode, "voice_kind": state.get("voice_kind") or "", "voice_id": selected_tts_voice_id, "product_context": product_context},
             asset_id=dub_asset_id,
         )
         dub_asset_id = str(dub_record.get("asset_id") or dub_asset_id)
+    if video_output:
+        dub_video_asset_id = media_asset_make_id("dub", uid, product_context, source_ref, "video", seed=f"{mode}:video:{time.time_ns()}")
+        dub_video_path = write_media_asset_bytes("dub", dub_video_asset_id, video_output, ".mp4")
+        dub_video_record = create_dub_asset_record(
+            user_id=uid,
+            product_context=product_context,
+            source_file_ref=source_ref,
+            source_language=str(state.get("source_language") or "auto"),
+            target_language=str(state.get("target_language") or ""),
+            output_type="video",
+            duration_seconds=duration_seconds,
+            output_bytes=len(video_output),
+            file_ref=dub_video_path,
+            local_path=dub_video_path,
+            status="generated_unused",
+            linked_video_session_id=linked_session_id,
+            price_xu=charged,
+            metadata={"mode": mode, "voice_kind": state.get("voice_kind") or "", "voice_id": selected_tts_voice_id, "product_context": product_context},
+            asset_id=dub_video_asset_id,
+        )
+        dub_video_asset_id = str(dub_video_record.get("asset_id") or dub_video_asset_id)
     try:
         delivery = await send_public_subtitle_dub_final_outputs(
             query.message,
@@ -134619,6 +134708,7 @@ async def _execute_video_dubbing_pipeline_core(
         "subtitle_asset_ids": subtitle_asset_ids,
         "translation_asset_ids": translation_asset_ids,
         "dub_asset_id": dub_asset_id,
+        "dub_video_asset_id": dub_video_asset_id,
     }
 
 async def execute_video_dubbing_pipeline(
@@ -134725,20 +134815,23 @@ def subtitle_plus_dub_selected_segments(user_id, state: dict | None = None) -> l
         )
     return segments
 
-async def subtitle_plus_dub_send_subtitle_document(message, user_id, state: dict, *, translated: bool = False) -> bool:
+async def subtitle_plus_dub_send_subtitle_document(message, user_id, state: dict, *, translated: bool = False, output_type: str = "srt") -> bool:
     subtitle_text = subtitle_plus_dub_subtitle_text(user_id, state, translated=translated)
     if not str(subtitle_text or "").strip():
         if callable(getattr(message, "reply_text", None)):
             await message.reply_text("Phụ đề chưa sẵn sàng để tải. Anh/chị quay lại bước trước và thử lại.")
         return False
     mode = VIDEO_SUBTITLE_MODE_TRANSLATE if translated else VIDEO_SUBTITLE_MODE_CREATE
-    item = video_dubbing_subtitle_output_items(subtitle_text, "srt", mode)[0]
+    safe_output_type = str(output_type or "srt").strip().lower()
+    if safe_output_type not in {"srt", "vtt", "txt"}:
+        safe_output_type = "srt"
+    item = video_dubbing_subtitle_output_items(subtitle_text, safe_output_type, mode)[0]
     filename = str(item.get("filename") or "toan_aas_subtitle.srt")
     if callable(getattr(message, "reply_document", None)):
         await message.reply_document(
             document=video_dubbing_output_file(bytes(item.get("bytes") or b""), filename),
             filename=filename,
-            caption="✅ File SRT.",
+            caption=f"✅ File {safe_output_type.upper()}.",
         )
     elif callable(getattr(message, "reply_text", None)):
         await message.reply_text("✅ File SRT đã sẵn sàng.")
@@ -134773,6 +134866,100 @@ async def subtitle_plus_dub_send_final_audio(message, state: dict) -> bool:
     if callable(getattr(message, "reply_text", None)):
         await message.reply_text("Audio lồng tiếng đã được gửi phía trên. Nếu cần tạo lại, anh/chị chọn lồng tiếng lại voice khác.")
     return False
+
+async def subtitle_plus_dub_send_final_video(message, state: dict) -> bool:
+    asset_id = str((state or {}).get("final_dub_video_asset_id") or "")
+    row = get_media_asset_record("dub", asset_id) if asset_id else {}
+    path = str(row.get("local_path") or row.get("file_ref") or "")
+    if path and os.path.exists(path) and callable(getattr(message, "reply_video", None)):
+        with open(path, "rb") as handle:
+            await message.reply_video(
+                video=video_dubbing_output_file(handle.read(), "toan_aas_subtitle_dub.mp4"),
+                filename="toan_aas_subtitle_dub.mp4",
+                caption="✅ Video phụ đề + lồng tiếng.",
+            )
+        return True
+    if callable(getattr(message, "reply_text", None)):
+        await message.reply_text("Video hoàn chỉnh chưa có file để tải. Anh/chị bấm Thử ghép lại hoặc tải audio trước.")
+    return False
+
+async def subtitle_plus_dub_retry_mux_final_video(query, context: ContextTypes.DEFAULT_TYPE, uid, state: dict, lang: str = "vi") -> bool:
+    audio_asset_id = str((state or {}).get("final_dub_asset_id") or "")
+    audio_row = get_media_asset_record("dub", audio_asset_id) if audio_asset_id else {}
+    audio_path = str(audio_row.get("local_path") or audio_row.get("file_ref") or "")
+    if not audio_path or not os.path.exists(audio_path):
+        await query.message.reply_text("Audio lồng tiếng chưa có file để ghép lại. Anh/chị lồng tiếng lại hoặc tải audio nếu đã được gửi phía trên.")
+        return False
+    if not video_dubbing_has_media(state):
+        await query.message.reply_text("Chưa có video nguồn để ghép lại. Anh/chị có thể tải audio lồng tiếng trước.")
+        return False
+    workspace = create_subtitle_dub_pipeline_workspace(f"retry_mux_{uid}_{int(time.time())}")
+    try:
+        source_bytes, _content_type = await video_dubbing_download_source(context, state)
+        source_path = write_subtitle_dub_pipeline_artifact(workspace, "input.mp4", source_bytes)
+        subtitle_text = subtitle_plus_dub_subtitle_text(uid, state, translated=bool(state.get("translated_subtitle_ref")))
+        subtitle_path = ""
+        if str(subtitle_text or "").strip():
+            subtitle_path = write_subtitle_dub_pipeline_artifact(workspace, "subtitle.srt", str(subtitle_text).encode("utf-8"))
+        output_path = os.path.join(workspace, "final_retry.mp4")
+        from services.dubbing_pipeline import mux_final_video
+
+        final_path = mux_final_video(
+            source_path,
+            audio_path,
+            output_path,
+            srt_path=subtitle_path or None,
+            burn_subtitles=False,
+            replace_audio=True,
+        )
+        with open(final_path, "rb") as handle:
+            video_bytes = handle.read()
+        if not pipeline_final_video_sendable(video_bytes):
+            await query.message.reply_text("Video đã ghép nhưng vượt giới hạn gửi Telegram hiện tại. Anh/chị tải audio trước hoặc gửi video ngắn hơn.")
+            return False
+        product_context = normalize_product_context(state.get("product_context") or PRODUCT_CONTEXT_SHOWROOM)
+        source_ref = str(state.get("source_file_id") or state.get("video_file_id") or state.get("source_ref") or "")[:600]
+        asset_id = media_asset_make_id("dub", uid, product_context, source_ref, "video", seed=f"retry_mux:{time.time_ns()}")
+        local_path = write_media_asset_bytes("dub", asset_id, video_bytes, ".mp4")
+        record = create_dub_asset_record(
+            user_id=uid,
+            product_context=product_context,
+            source_file_ref=source_ref,
+            source_language=str(state.get("source_language") or "auto"),
+            target_language=str(state.get("target_language") or ""),
+            output_type="video",
+            duration_seconds=_safe_int(state.get("video_duration") or state.get("source_duration"), 0),
+            output_bytes=len(video_bytes),
+            file_ref=local_path,
+            local_path=local_path,
+            status="generated_unused",
+            linked_video_session_id=media_asset_video_session_id(uid, product_context, state),
+            price_xu=0,
+            metadata={"mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "retry_mux": True, "product_context": product_context},
+            asset_id=asset_id,
+        )
+        state = set_video_dubbing_pending(
+            uid,
+            "completed",
+            final_video_available="1",
+            final_dub_video_asset_id=str(record.get("asset_id") or asset_id),
+        )
+        await query.message.reply_video(
+            video=video_dubbing_output_file(video_bytes, "toan_aas_subtitle_dub.mp4"),
+            filename="toan_aas_subtitle_dub.mp4",
+            caption="✅ Video đã ghép lại thành công.",
+            reply_markup=subtitle_plus_dub_completed_keyboard(lang, state),
+        )
+        return True
+    except Exception as exc:
+        logger.warning("subtitle_plus_dub retry mux failed | %s", sanitize_log_text(str(exc))[:180])
+        await query.message.reply_text(
+            "TOAN AAS chưa ghép lại được video lúc này. Hệ thống không chạy lại TTS và không trừ Xu; anh/chị có thể tải audio trước.",
+            reply_markup=subtitle_plus_dub_completed_keyboard(lang, state),
+        )
+        return False
+    finally:
+        cleanup_subtitle_dub_pipeline_workspace(workspace)
 
 async def subtitle_plus_dub_create_original_from_media(
     update: Update,
@@ -136478,7 +136665,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             await subtitle_plus_dub_send_transcript_text(query.message, uid, state, translated=False)
             return None
         if action == "combo_download_translated_srt":
-            await subtitle_plus_dub_send_subtitle_document(query.message, uid, state, translated=True)
+            await subtitle_plus_dub_send_subtitle_document(query.message, uid, state, translated=True, output_type="srt")
+            return None
+        if action == "combo_download_translated_vtt":
+            await subtitle_plus_dub_send_subtitle_document(query.message, uid, state, translated=True, output_type="vtt")
+            return None
+        if action == "combo_download_translated_txt":
+            await subtitle_plus_dub_send_subtitle_document(query.message, uid, state, translated=True, output_type="txt")
             return None
         if action == "combo_view_translated_text":
             await subtitle_plus_dub_send_transcript_text(query.message, uid, state, translated=True)
@@ -136599,6 +136792,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 final_audio_available="1" if result.get("has_audio") else "0",
                 final_video_available="1" if result.get("has_video") else "0",
                 final_dub_asset_id=str(result.get("dub_asset_id") or ""),
+                final_dub_video_asset_id=str(result.get("dub_video_asset_id") or ""),
             )
             return await query.message.reply_text(
                 subtitle_plus_dub_completed_text(state, result, lang),
@@ -136608,14 +136802,17 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if action == "combo_redub_voice":
             state = set_video_dubbing_pending(uid, "choosing_voice", processing="0", voice_style="", voice_id="", voice_kind="")
             return await safe_edit_or_send(query, subtitle_plus_dub_voice_text(state, lang), parse_mode="HTML", reply_markup=subtitle_plus_dub_voice_keyboard(lang))
-        if action in {"combo_download_final_subtitle", "combo_download_final_audio", "combo_download_final_video"}:
+        if action in {"combo_download_final_subtitle", "combo_download_final_audio", "combo_download_final_video", "combo_retry_mux"}:
             if action == "combo_download_final_subtitle":
                 await subtitle_plus_dub_send_subtitle_document(query.message, uid, state, translated=bool(state.get("translated_subtitle_ref")))
                 return None
             if action == "combo_download_final_audio":
                 await subtitle_plus_dub_send_final_audio(query.message, state)
                 return None
-            await query.message.reply_text("Video hoàn chỉnh đã được gửi phía trên nếu bước ghép video tạo được MP4.")
+            if action == "combo_download_final_video":
+                await subtitle_plus_dub_send_final_video(query.message, state)
+                return None
+            await subtitle_plus_dub_retry_mux_final_video(query, context, uid, state, lang)
             return None
     if action == "output":
         output_type = value if value in {"srt", "vtt", "txt", "burn", "both", "audio", "video", "video_subtitle"} else "srt"

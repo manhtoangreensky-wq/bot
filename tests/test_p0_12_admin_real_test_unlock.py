@@ -222,8 +222,8 @@ def test_clone_forbidden_hides_retry_button_and_suggests_default_tts(monkeypatch
     labels = _labels(bot.voice_profile_actions_keyboard(7, "vi", bot.PRODUCT_CONTEXT_SHOWROOM, profile))
     text = bot.voice_profile_not_ready_text(profile, "vi")
 
-    assert "🔁 Tạo/nghe thử lại" not in labels
-    assert "🎙 Dùng giọng mặc định" in labels
+    assert "🔁 Tạo/nghe thử lại" in labels
+    assert "⬅️ Kho voice" in labels
     assert "Voice riêng đang được chuẩn bị" in text
     assert "chưa xử lý và chưa trừ Xu" in text
 

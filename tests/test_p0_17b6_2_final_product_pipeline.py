@@ -243,9 +243,10 @@ def test_mux_unavailable_no_fake_mp4():
         subtitle_items=[{"output_type": "srt", "bytes": b"srt", "filename": "result.srt"}],
         video_bytes=b"",
     ))
-    assert result == {"documents": 1, "audio": 1, "video": 0}
+    assert result == {"documents": 0, "audio": 1, "video": 0}
     assert "video" not in [kind for kind, _ in message.outputs]
-    assert any("chưa tạo MP4" in payload["text"] for kind, payload in message.outputs if kind == "text")
+    assert "document" not in [kind for kind, _ in message.outputs]
+    assert "text" not in [kind for kind, _ in message.outputs]
 
 
 def test_no_duplicate_job():

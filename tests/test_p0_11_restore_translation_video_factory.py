@@ -141,7 +141,7 @@ def test_subtitle_export_after_generation():
         "subtitle_ref": "video_dubbing_artifact:test:subtitle",
     }))
     assert "videodub|output|srt" in callbacks
-    assert "videodub|output|burn" in callbacks
+    assert "videodub|output|burn" not in callbacks
     assert "videodub|output|both" not in callbacks
 
 
@@ -206,8 +206,8 @@ def test_translate_dub_translate_first_then_voice():
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
-    assert "📄 Xuất SRT" in labels
-    assert "🗣 Tiếp tục lồng tiếng" in labels
+    assert "📄 Tải SRT" in labels
+    assert "🎙 Lồng tiếng từ bản dịch này" in labels
 
 
 def test_translate_dub_can_export_srt_before_voice():
