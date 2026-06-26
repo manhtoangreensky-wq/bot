@@ -2647,7 +2647,6 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "📚 Kho prompt video",
         "🎬 Video AI chân thật",
         "🧩 Kịch bản → Ảnh → Video",
-        "🖼 Ảnh → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
         "🎬 Phim AI nhiều cảnh",
@@ -4838,9 +4837,11 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
     assert status["direct_render_enabled"] == bot.FRAME_VIDEO_DIRECT_RENDER_ENABLED
     assert status["max_concurrent_jobs"] == bot.FRAME_VIDEO_MAX_CONCURRENT_JOBS
     effect_labels = str(bot.frame_video_effect_keyboard().inline_keyboard)
-    assert "Pan trái/phải" in effect_labels
-    assert "Slide ngang" in effect_labels
-    assert "Random nhẹ" in effect_labels
+    assert "▶️ Dùng mặc định" in effect_labels
+    assert "Fade" in effect_labels
+    assert "Slide" in effect_labels
+    assert "Zoom nhẹ" in effect_labels
+    assert "Không hiệu ứng" in effect_labels
     assert "Chọn nhạc có sẵn" in str(bot.frame_video_music_keyboard().inline_keyboard)
     assert "Thêm voice/TTS" in str(bot.frame_video_music_keyboard().inline_keyboard)
     mode_labels = str(bot.storyboard_after_images_keyboard(123).inline_keyboard)
