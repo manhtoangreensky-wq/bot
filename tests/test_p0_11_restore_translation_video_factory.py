@@ -152,7 +152,7 @@ def test_subtitle_continue_to_dubbing_option():
 
 def test_translate_subtitle_no_voice_selection():
     labels = _labels(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
-    assert "✅ Xác nhận tạo đầy đủ" in labels
+    assert "✅ Xác nhận tạo đầy đủ" not in labels
     assert "📄 Xuất SRT" not in labels
     assert not any("lồng tiếng" in label.lower() for label in labels)
     assert not any("giọng" in label.lower() for label in labels)
@@ -161,7 +161,7 @@ def test_translate_subtitle_no_voice_selection():
 def test_translate_subtitle_export_before_dubbing():
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
     assert "videodub|output|srt" not in callbacks
-    assert "videodub|final" in callbacks
+    assert "videodub|final" not in callbacks
     assert "videodub|continue_dubbing" not in callbacks
 
 
@@ -216,7 +216,7 @@ def test_translate_dub_can_export_srt_before_voice():
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }))
     assert "videodub|output|srt" not in callbacks
-    assert "videodub|final" in callbacks
+    assert "videodub|final" not in callbacks
     assert "videodub|continue_dubbing" not in callbacks
     ready_callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {
         "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,

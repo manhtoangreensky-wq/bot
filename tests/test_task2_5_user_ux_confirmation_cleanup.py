@@ -58,7 +58,7 @@ def test_subtitle_plus_stage_a_hides_export_until_subtitle_result_exists():
         "target_language": "Tiếng Việt",
     }
     pending_labels = _labels(bot.video_dubbing_output_keyboard("vi", pending))
-    assert pending_labels == ["👁 Xem thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert pending_labels == ["⬅️ Quay lại", "🏠 Menu chính"]
     assert "🗣 Tiếp tục lồng tiếng" not in pending_labels
 
     ready = {**pending, "translated_subtitle_ref": "video_dubbing_artifact:test:translated"}

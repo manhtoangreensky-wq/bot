@@ -40,8 +40,8 @@ def test_no_language_translation_tools_deleted():
         "menu|translation_voice",
         "menu|translation_language",
         "menu|translation_auto_target",
-        "menu|translation_stop_session",
     }.issubset(callbacks)
+    assert "menu|translation_stop_session" not in callbacks
 
 
 def test_video_translation_menu_labels_auto():

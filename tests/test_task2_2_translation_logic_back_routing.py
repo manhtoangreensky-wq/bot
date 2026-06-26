@@ -213,7 +213,7 @@ def test_subtitle_plus_dubbing_export_before_voice():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", state))
     assert "videodub|output|srt" not in callbacks
-    assert "videodub|final" in callbacks
+    assert "videodub|final" not in callbacks
     assert "videodub|continue_dubbing" not in callbacks
     ready_callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {
         **state,
