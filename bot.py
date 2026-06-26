@@ -42953,6 +42953,94 @@ def direct_minimax_tts_configured() -> bool:
 def minimax_tts_configured() -> bool:
     return bool(shopaikey_minimax_tts_configured() or key4u_minimax_tts_configured() or direct_minimax_tts_configured())
 
+def get_tts_provider_readiness(public: bool = False) -> dict:
+    require_public = bool(public)
+    default_female = default_tts_voice_id("female")
+    default_male = default_tts_voice_id("male")
+    routes = [
+        {
+            "provider": "key4u_minimax",
+            "model": KEY4U_TTS_MODEL,
+            "configured": bool(key4u_minimax_tts_configured(require_public=False)),
+            "public_ready": bool(key4u_minimax_tts_public_ready()),
+            "reason": "KEY4U_ENABLED/KEY4U_API_KEY/KEY4U_TTS_ENDPOINT/KEY4U_TTS_MODEL missing",
+        },
+        {
+            "provider": "shopaikey_minimax",
+            "model": MINIMAX_TTS_MODEL or SHOPAIKEY_TTS_MODEL,
+            "configured": bool(shopaikey_minimax_tts_configured() and SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED),
+            "public_ready": bool(shopaikey_minimax_tts_public_ready()),
+            "reason": "SHOPAIKEY_API_KEY/MINIMAX_TTS_ENDPOINT/MINIMAX_TTS_MODEL missing",
+        },
+        {
+            "provider": "minimax_direct",
+            "model": MINIMAX_TTS_MODEL,
+            "configured": bool(direct_minimax_tts_configured()),
+            "public_ready": bool(direct_minimax_tts_public_ready()),
+            "reason": "MINIMAX_API_KEY/MINIMAX_GROUP_ID/MINIMAX_TTS_MODEL missing",
+        },
+        {
+            "provider": "shopaikey_audio_speech",
+            "model": SHOPAIKEY_OPENAI_TTS_MODEL or SHOPAIKEY_TTS_MODEL,
+            "configured": bool(SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_DUBBING_TTS_ENDPOINT),
+            "public_ready": bool(shopaikey_tts_fallback_public_ready()),
+            "reason": "SHOPAIKEY_API_KEY/SHOPAIKEY_DUBBING_TTS_ENDPOINT missing",
+        },
+        {
+            "provider": "edge_tts",
+            "model": "edge-tts",
+            "configured": bool(edge_tts),
+            "public_ready": bool(edge_tts),
+            "reason": f"edge-tts package missing: {EDGE_TTS_IMPORT_ERROR or 'import failed'}",
+        },
+    ]
+    ready_route = next(
+        (
+            route for route in routes
+            if route["configured"] and (route["public_ready"] or not require_public)
+        ),
+        None,
+    )
+    configured_routes = [route["provider"] for route in routes if route["configured"]]
+    public_routes = [route["provider"] for route in routes if route["public_ready"]]
+    if ready_route:
+        reason = "ready"
+    elif configured_routes and require_public:
+        reason = "tts_public_gate_closed"
+    else:
+        reason = "tts_provider_missing"
+    supported_voices = [
+        item for item in [
+            default_female,
+            default_male,
+            default_edge_tts_voice_id("female") if edge_tts else "",
+            default_edge_tts_voice_id("male") if edge_tts else "",
+        ]
+        if item
+    ]
+    return {
+        "ready": bool(ready_route),
+        "configured": bool(configured_routes),
+        "public_ready": bool(public_routes),
+        "provider": str((ready_route or {}).get("provider") or ""),
+        "model": str((ready_route or {}).get("model") or ""),
+        "supported_voices": list(dict.fromkeys(supported_voices)),
+        "default_female_voice_id": default_female,
+        "default_male_voice_id": default_male,
+        "reason": reason,
+        "configured_providers": configured_routes,
+        "public_providers": public_routes,
+        "routes": [
+            {
+                "provider": route["provider"],
+                "model": str(route.get("model") or ""),
+                "configured": bool(route["configured"]),
+                "public_ready": bool(route["public_ready"]),
+            }
+            for route in routes
+        ],
+    }
+
 def key4u_minimax_tts_public_ready() -> bool:
     smoke = str(preferred_tool_test_result("minimax_tts_key4u", "minimax_tts", "key4u_tts").get("status") or "").upper()
     return bool(
@@ -75633,13 +75721,37 @@ def saved_voice_tts_confirm_keyboard(profile_id: int, lang: str = "vi", price_xu
 
 def standalone_tts_guard_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
-        return "The voice preview could not be created. TOAN AAS has not charged Xu. You can try again later."
-    return "Bản nghe thử giọng chưa tạo được. TOAN AAS chưa trừ Xu. Bạn có thể thử lại sau."
+        return "TOAN AAS could not create the voice audio right now. No Xu was charged. You can try again or change voice."
+    return "TOAN AAS chưa tạo được giọng đọc lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng khác."
 
 def default_free_tts_guard_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
-        return "The free default voice audio could not be created. TOAN AAS has not charged Xu."
-    return "⚙️ File giọng đọc miễn phí chưa tạo được. TOAN AAS chưa trừ Xu. Anh/chị có thể thử lại sau."
+        return "TOAN AAS could not create the voice audio right now. No Xu was charged. You can try again or change voice."
+    return "TOAN AAS chưa tạo được giọng đọc lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng khác."
+
+def tts_provider_guard_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "AI voice is being prepared. TOAN AAS has not called a provider and has not charged Xu. You can try again later or use another tool first."
+    return "Giọng đọc AI đang được chuẩn bị. TOAN AAS chưa gọi provider và chưa trừ Xu. Anh/chị có thể thử lại sau hoặc dùng công cụ khác trước."
+
+def tts_failure_text(lang: str = "vi") -> str:
+    return standalone_tts_guard_text(lang)
+
+def tts_failure_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔁 Thử lại" if is_vi else "🔁 Retry", callback_data=cb("voice_tts_guard")),
+            InlineKeyboardButton("🎙 Đổi giọng" if is_vi else "🎙 Change voice", callback_data=cb("voice_hub")),
+        ],
+        [
+            InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=cb("voice_tts_text")),
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("voice_hub")),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
 
 async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_style: str = "", speed: str = "normal", provider_hint: str = "", allow_admin: bool = False) -> tuple[bool, bytes, str]:
     clean = re.sub(r"\s+", " ", str(text or "")).strip()[:3500]
@@ -75762,7 +75874,7 @@ async def send_standalone_tts_result(
             metadata={"reason": sanitize_log_text(detail)[:160]},
         )
         logger.info("standalone tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
-        await message.reply_text(standalone_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, ctx))
+        await message.reply_text(tts_failure_text(lang), reply_markup=tts_failure_keyboard(lang, ctx))
         return False
     preview_bytes, cap_detail = await cap_voice_preview_audio_bytes(audio_bytes, voice_preview_seconds())
     voice_kind = normalize_voice_asset_kind(voice_id, voice_label)
@@ -75784,7 +75896,7 @@ async def send_standalone_tts_result(
             metadata={"reason": f"preview_cap_failed:{sanitize_log_text(cap_detail)[:120]}"},
             voice_asset_id=asset_id,
         )
-        await message.reply_text(standalone_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, ctx))
+        await message.reply_text(tts_failure_text(lang), reply_markup=tts_failure_keyboard(lang, ctx))
         return False
     audio_file = video_dubbing_output_file(preview_bytes, "toan_aas_voice_preview.mp3")
     price = tts_full_price_xu(text, speed)
@@ -75885,7 +75997,7 @@ async def send_default_free_tts_result(
             voice_asset_id=asset_id,
         )
         logger.info("default free tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
-        await message.reply_text(default_free_tts_guard_text(lang), reply_markup=voice_hub_keyboard(lang, ctx))
+        await message.reply_text(default_free_tts_guard_text(lang), reply_markup=tts_failure_keyboard(lang, ctx))
         return False
     audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_default_voice.mp3")
     caption = (
@@ -75966,8 +76078,8 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
     if not ok or not audio_bytes:
         logger.info("saved voice tts not ready | user=%s | profile=%s | detail=%s", user_id, profile_id, sanitize_log_text(detail)[:160])
         await message.reply_text(
-            "⚙️ Tạo giọng đọc chưa thành công. TOAN AAS không trừ Xu. Bạn có thể sửa nội dung hoặc thử lại sau.",
-            reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang, price),
+            tts_failure_text(lang),
+            reply_markup=tts_failure_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
         )
         return False
     if custom_voice_usage_output_too_short(text, speed, audio_bytes):
@@ -98239,29 +98351,36 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
     state = dict(state or {})
     if area in {"voice", "voice_tts", "minimax", "minimax_tts"}:
         item = get_minimax_voice_readiness()
+        tts_readiness = get_tts_provider_readiness(public=False)
         synth_adapter = globals().get("synthesize_standalone_tts_audio")
         adapter_overridden = callable(synth_adapter) and getattr(synth_adapter, "__name__", "") != "synthesize_standalone_tts_audio"
-        shopaikey_public_smoke = globals().get("shopaikey_tts_public_smoke_ready")
         fallback_public_ready = bool(
             adapter_overridden
-            or (callable(shopaikey_public_smoke) and shopaikey_public_smoke())
-            or globals().get("edge_tts")
+            or tts_readiness.get("public_ready")
         )
         configured = bool(
-            item.get("ready")
+            tts_readiness.get("configured")
+            or item.get("ready")
             or fallback_public_ready
-            or (callable(globals().get("key4u_minimax_tts_configured")) and key4u_minimax_tts_configured(require_public=False))
-            or (callable(globals().get("shopaikey_minimax_tts_configured")) and shopaikey_minimax_tts_configured())
-            or (callable(globals().get("direct_minimax_tts_configured")) and direct_minimax_tts_configured())
         )
         tts_smoke_pass = provider_status_is_pass(str(item.get("last_tts_smoke") or preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job")))
         public_ready = bool(item.get("public_enabled") or fallback_public_ready or (configured and tts_smoke_pass))
+        technical_missing = [] if tts_readiness.get("configured") else list(item.get("missing_env") or [])
+        if not configured and "tts_provider_missing" not in technical_missing:
+            technical_missing.append("tts_provider_missing")
         return engine_readiness_payload(
             configured=configured,
             public_ready=public_ready,
-            technical_missing=list(item.get("missing_env") or []),
+            technical_missing=technical_missing,
             public_blockers=[] if public_ready else ["public_flag"],
-            reason=item.get("reason") or item.get("admin_debug_reason") or "",
+            reason=tts_readiness.get("reason") or item.get("reason") or item.get("admin_debug_reason") or "",
+            provider=tts_readiness.get("provider") or item.get("provider") or "",
+            model=tts_readiness.get("model") or item.get("model") or "",
+            supported_voices=tts_readiness.get("supported_voices") or [],
+            default_female_voice_id=tts_readiness.get("default_female_voice_id") or "",
+            default_male_voice_id=tts_readiness.get("default_male_voice_id") or "",
+            configured_providers=tts_readiness.get("configured_providers") or [],
+            public_providers=tts_readiness.get("public_providers") or [],
         )
     if area in {"voice_clone", "minimax_clone", "minimax_voice_clone"}:
         item = get_minimax_voice_clone_readiness()
@@ -132444,6 +132563,24 @@ def video_dubbing_asr_failure_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
             InlineKeyboardButton("📄 Gửi file phụ đề" if is_vi else "📄 Send subtitle file", callback_data="videodub|send_subtitle_file"),
         ],
         [
+            InlineKeyboardButton("✍️ Nhập lời thoại" if is_vi else "✍️ Enter dialogue text", callback_data="videodub|enter_dialogue_text"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_type"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def video_dubbing_dialogue_text_prompt(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "✍️ Send the dialogue text. TOAN AAS will create timed subtitle segments from this text and continue the selected tool. No Xu is charged at this step."
+    return "✍️ Gửi lời thoại cần xử lý. TOAN AAS sẽ tạo phụ đề có mốc thời gian từ nội dung này rồi đi tiếp đúng công cụ đang chọn. Bước này chưa trừ Xu."
+
+def video_dubbing_dialogue_text_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📄 Gửi file phụ đề" if is_vi else "📄 Send subtitle file", callback_data="videodub|send_subtitle_file")],
+        [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_type"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
@@ -135456,6 +135593,128 @@ def create_social_link_import_job(user_id, chat_id, state: dict) -> int:
         admin_only=False,
     )
 
+async def video_dubbing_store_dialogue_text_and_route(
+    message,
+    user_id,
+    state: dict,
+    dialogue_text: str,
+    lang: str = "vi",
+) -> dict:
+    state = dict(state or {})
+    clean_text = re.sub(r"\s+", " ", str(dialogue_text or "")).strip()
+    if not clean_text:
+        await message.reply_text(video_dubbing_dialogue_text_prompt(lang), reply_markup=video_dubbing_dialogue_text_keyboard(lang))
+        return state
+    duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
+    source_segments = video_dubbing_qc_segments(
+        video_dubbing_segments_from_text(clean_text, duration),
+        preserve_timestamps=False,
+    )
+    source_subtitle = video_dubbing_srt_from_segments(source_segments)
+    if not source_segments or not source_subtitle.strip():
+        next_state = set_video_dubbing_pending(user_id, "failed", processing="0", processing_error="dialogue_text_empty")
+        await message.reply_text(video_dubbing_asr_failure_text(lang), reply_markup=video_dubbing_asr_failure_keyboard(lang))
+        return next_state
+    subtitle_ref = set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
+    mode = normalize_video_translate_mode(
+        state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
+    ) or VIDEO_SUBTITLE_MODE_CREATE
+    requested = normalize_video_translate_mode(state.get("requested_mode")) or mode
+    active_flow = str(state.get("active_flow") or "")
+    if requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB or active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
+        mode = VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        requested = VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        active_flow = VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
+    common_fields = {
+        "mode": mode,
+        "process_type": mode,
+        "video_processing_mode": mode,
+        "requested_mode": requested,
+        "active_flow": active_flow,
+        "subtitle_ref": subtitle_ref,
+        "source_subtitle_ref": subtitle_ref,
+        "source_language": str(state.get("source_language") or "manual_text"),
+        "detected_language": str(state.get("detected_language") or "manual_text"),
+        "segment_count": len(source_segments),
+        "subtitle_segment_count": len(source_segments),
+        "processing": "0",
+        "last_ready_step": "original_subtitle_ready",
+    }
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        next_state = set_video_dubbing_pending(
+            user_id,
+            "original_subtitle_ready",
+            **common_fields,
+            translate_requested="0",
+            output_type="srt",
+            output_format="srt",
+        )
+        await message.reply_text(
+            subtitle_plus_dub_original_ready_text(next_state, lang),
+            parse_mode="HTML",
+            reply_markup=subtitle_plus_dub_original_ready_keyboard(lang),
+        )
+        return next_state
+    if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
+        next_state = set_video_dubbing_pending(
+            user_id,
+            "language",
+            **common_fields,
+            target_language="",
+            translate_requested="1",
+            output_type="srt",
+            output_format="srt",
+        )
+        await message.reply_text(
+            video_dubbing_language_text(next_state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_language_keyboard(lang, next_state),
+        )
+        return next_state
+    if mode == VIDEO_SUBTITLE_MODE_DUB:
+        if not str(state.get("target_language") or "").strip():
+            next_state = set_video_dubbing_pending(
+                user_id,
+                "language",
+                **common_fields,
+                target_language="",
+                translate_requested=str(state.get("translate_requested") or "0"),
+            )
+            await message.reply_text(
+                video_dubbing_language_text(next_state, lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_language_keyboard(lang, next_state),
+            )
+            return next_state
+        next_state = set_video_dubbing_pending(
+            user_id,
+            "voice",
+            **common_fields,
+            target_language=state.get("target_language"),
+            translate_requested=str(state.get("translate_requested") or "0"),
+        )
+        await message.reply_text(
+            video_dubbing_voice_text(next_state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_voice_keyboard(lang, next_state),
+        )
+        return next_state
+    output_type = "txt" if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT else "all"
+    next_state = set_video_dubbing_pending(
+        user_id,
+        "output",
+        **common_fields,
+        output_type=output_type,
+        output_format=output_type,
+        translate_requested="0",
+    )
+    await message.reply_text(
+        video_dubbing_output_text(next_state, lang),
+        parse_mode="HTML",
+        reply_markup=video_dubbing_output_keyboard(lang, next_state),
+    )
+    return next_state
+
 async def handle_video_dubbing_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
         return False
@@ -135466,6 +135725,7 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
         "voice_speed",
         "link_input", "subtitle_edit_line_number", "subtitle_edit_line_text",
         "subtitle_find_text", "subtitle_replace_text", "subtitle_time_shift",
+        "dialogue_text_input",
     }:
         return False
     lang = get_user_language(uid) or "vi"
@@ -135474,6 +135734,9 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
     )
     active_flow = str(state.get("active_flow") or "")
     value = _short_pending_text(update.message.text, 100)
+    if state.get("step") == "dialogue_text_input":
+        await video_dubbing_store_dialogue_text_and_route(update.message, uid, state, update.message.text, lang)
+        return True
     if state.get("step") == "link_input":
         validation = social_link_import_validate(update.message.text)
         if not validation.get("ok"):
@@ -135963,6 +136226,50 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             query,
             "📂 Đã ghi nhớ video import làm Media gần đây trong phiên. TOAN AAS chưa trừ thêm Xu.",
             reply_markup=social_link_import_ready_keyboard(lang),
+        )
+    if action in {"retry_media", "send_subtitle_file", "enter_dialogue_text"}:
+        is_combo = active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB or mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        route_mode = VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB if is_combo else (mode or VIDEO_SUBTITLE_MODE_CREATE)
+        route_requested = route_mode if is_combo else (normalize_video_translate_mode(state.get("requested_mode")) or route_mode)
+        if action == "enter_dialogue_text":
+            state = set_video_dubbing_pending(
+                uid,
+                "dialogue_text_input",
+                mode=route_mode,
+                process_type=route_mode,
+                video_processing_mode=route_mode,
+                requested_mode=route_requested,
+                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB if is_combo else active_flow,
+                processing="0",
+            )
+            return await safe_edit_or_send(
+                query,
+                video_dubbing_dialogue_text_prompt(lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_dialogue_text_keyboard(lang),
+            )
+        next_step = "waiting_media" if is_combo else "await_video"
+        state = set_video_dubbing_pending(
+            uid,
+            next_step,
+            mode=route_mode,
+            process_type=route_mode,
+            video_processing_mode=route_mode,
+            requested_mode=route_requested,
+            active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB if is_combo else active_flow,
+            translate_requested="0" if is_combo else str(state.get("translate_requested") or "0"),
+            processing="0",
+        )
+        text = (
+            "📄 Gửi file phụ đề SRT/VTT/TXT có sẵn."
+            if action == "send_subtitle_file"
+            else "🔁 Gửi lại video/audio rõ tiếng hơn để TOAN AAS tạo phụ đề gốc."
+        )
+        return await safe_edit_or_send(
+            query,
+            text,
+            parse_mode="HTML",
+            reply_markup=video_dubbing_source_keyboard(lang, state),
         )
     if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
         if action in {"retry_media", "send_subtitle_file"}:
