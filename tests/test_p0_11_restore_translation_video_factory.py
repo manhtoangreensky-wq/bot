@@ -128,7 +128,7 @@ def test_social_link_rights_notice():
 
 def test_subtitle_flow_no_voice_selection():
     labels = _labels(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
-    assert "👁 Xem thử" in labels
+    assert "👁 Xem thử" not in labels
     assert "✅ Xác nhận tạo đầy đủ" in labels
     assert "📄 Xuất SRT" not in labels
     assert not any("giọng" in label.lower() for label in labels)
@@ -206,7 +206,7 @@ def test_translate_dub_translate_first_then_voice():
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
-    assert "📄 Tải SRT" in labels
+    assert "📄 Tải SRT" not in labels
     assert "🎙 Lồng tiếng từ bản dịch này" in labels
 
 
@@ -223,7 +223,8 @@ def test_translate_dub_can_export_srt_before_voice():
         "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }))
-    assert "videodub|continue_dubbing" in ready_callbacks
+    assert "videodub|combo_dub_translated" in ready_callbacks
+    assert "videodub|continue_dubbing" not in ready_callbacks
 
 
 def test_subtitle_editor_line_number_edit():

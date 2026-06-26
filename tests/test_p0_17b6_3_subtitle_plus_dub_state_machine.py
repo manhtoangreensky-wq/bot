@@ -202,7 +202,7 @@ def test_subtitle_plus_dub_translated_subtitle_ready_buttons():
     state = {"target_language": "English"}
     labels = _labels(bot.subtitle_plus_dub_translated_ready_keyboard("vi"))
     assert "Đã dịch phụ đề sang English" in bot.subtitle_plus_dub_translated_ready_text(state, "vi")
-    assert labels == ["👁 Xem thử", "📄 Tải SRT", "📄 Tải VTT", "🧾 Tải TXT", "🎙 Lồng tiếng từ bản dịch này", "🌐 Dịch ngôn ngữ khác", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["🎙 Lồng tiếng từ bản dịch này", "🌐 Dịch ngôn ngữ khác", "⬅️ Quay lại", "🏠 Menu chính"]
 
 
 def test_subtitle_plus_dub_voice_selection_after_subtitle():
@@ -227,9 +227,9 @@ def test_subtitle_plus_dub_preview_only_short_audio(monkeypatch):
     monkeypatch.setattr(bot, "execute_subtitle_plus_dub_voice_preview", fake_preview)
     monkeypatch.setattr(bot, "execute_video_dubbing_pipeline", fake_full)
     query = asyncio.run(_press(uid, "videodub|combo_preview_dub"))
-    assert calls == {"preview": 1, "full": 0}
-    assert bot.get_video_dubbing_pending(uid)["step"] == "preview_ready"
-    assert "Nghe thử voice này ổn chưa" in query.message.outputs[-1]["text"]
+    assert calls == {"preview": 0, "full": 0}
+    assert bot.get_video_dubbing_pending(uid)["step"] == "dub_confirmation"
+    assert "Preview đang tạm khóa" in query.message.outputs[-1]["text"]
 
 
 def test_subtitle_plus_dub_full_requires_confirm(monkeypatch):
@@ -260,7 +260,7 @@ def test_subtitle_plus_dub_outputs_audio_or_video_cleanly():
     video_state = {"final_audio_available": "1", "final_video_available": "1"}
     assert "📹 Tải video" not in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
     assert "📹 Thử ghép lại" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
-    assert "📹 Tải video" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", video_state))
+    assert "📹 Tải video hoàn chỉnh" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", video_state))
 
 
 def test_subtitle_plus_dub_mux_unavailable_no_fake_mp4():

@@ -219,10 +219,11 @@ def test_subtitle_plus_dubbing_export_before_voice():
         **state,
         "translated_subtitle_ref": "video_dubbing_artifact:test:translated",
     }))
-    assert "videodub|output|srt" in ready_callbacks
-    assert "videodub|continue_dubbing" in ready_callbacks
+    assert "videodub|output|srt" not in ready_callbacks
+    assert "videodub|combo_dub_translated" in ready_callbacks
+    assert "videodub|continue_dubbing" not in ready_callbacks
     ready_state = {**state, "translated_subtitle_ref": "video_dubbing_artifact:ready:translated"}
-    assert "videodub|continue_dubbing" in _callbacks(bot.video_dubbing_output_keyboard("vi", ready_state))
+    assert "videodub|combo_dub_translated" in _callbacks(bot.video_dubbing_output_keyboard("vi", ready_state))
     assert not any(callback.startswith("videodub|voice|") for callback in callbacks)
 
 

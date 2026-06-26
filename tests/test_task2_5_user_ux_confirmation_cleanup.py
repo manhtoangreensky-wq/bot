@@ -19,9 +19,9 @@ def test_auto_subtitle_final_confirmation_is_public_clean():
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
 
     assert "Tạo phụ đề tự động" in text
-    assert "Đầu ra: SRT, VTT, TXT" in text
+    assert "Đầu ra chính: video MP4 có phụ đề đẹp" in text
     assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in text
-    assert labels == ["👁 Xem thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
     forbidden = ("tác vụ", "nguồn", "chi phí", "sửa lựa chọn", "đổi giọng", "đổi tốc độ", "admin", "curl")
     ui = _joined(text, bot.video_dubbing_output_keyboard("vi", state))
     for term in forbidden:
@@ -44,7 +44,7 @@ def test_auto_dubbing_final_confirmation_is_public_clean():
     assert "Video đã sẵn sàng lồng tiếng" in text
     assert "Ngôn ngữ lồng tiếng: <b>English</b>" in text
     assert "Tốc độ: <b>0.9</b>" in text
-    assert labels == ["▶️ Nghe thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
     ui = _joined(text, bot.video_dubbing_confirm_keyboard("vi", state))
     for term in ("tác vụ", "nguồn", "chi phí dự kiến", "sửa lựa chọn", "đổi giọng", "đổi tốc độ", "admin", "curl"):
         assert term not in ui
@@ -63,7 +63,7 @@ def test_subtitle_plus_stage_a_hides_export_until_subtitle_result_exists():
 
     ready = {**pending, "translated_subtitle_ref": "video_dubbing_artifact:test:translated"}
     ready_labels = _labels(bot.video_dubbing_output_keyboard("vi", ready))
-    assert "📄 Tải SRT" in ready_labels
+    assert "📄 Tải SRT" not in ready_labels
     assert "🎞 Gắn phụ đề vào video" not in ready_labels
     assert "🎙 Lồng tiếng từ bản dịch này" in ready_labels
 

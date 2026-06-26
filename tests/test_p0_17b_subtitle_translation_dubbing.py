@@ -75,7 +75,7 @@ def test_subtitle_output_formats_srt_vtt_txt():
     assert txt_item["bytes"].strip() == b"Xin chao"
 
 
-def test_subtitle_ready_keyboard_exports_srt_vtt_txt():
+def test_subtitle_ready_keyboard_exports_final_video_and_optional_srt():
     markup = bot.video_dubbing_output_keyboard("vi", {
         "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
         "subtitle_ref": "video_dubbing_artifact:u:source_subtitle",
@@ -83,9 +83,11 @@ def test_subtitle_ready_keyboard_exports_srt_vtt_txt():
     callbacks = set(_callbacks(markup))
     labels = _labels(markup)
 
-    assert {"videodub|output|srt", "videodub|output|vtt", "videodub|output|txt"}.issubset(callbacks)
-    assert "📄 Tải VTT" in labels
-    assert "🧾 Tải TXT" in labels
+    assert {"videodub|final", "videodub|output|srt"}.issubset(callbacks)
+    assert "📹 Tải video phụ đề" in labels
+    assert "📄 Tải SRT" in labels
+    assert "📄 Tải VTT" not in labels
+    assert "🧾 Tải TXT" not in labels
 
 
 def test_translation_menu_text_requires_confirm_before_provider(monkeypatch):
