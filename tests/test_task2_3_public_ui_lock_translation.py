@@ -43,6 +43,21 @@ def _prepare_upload(monkeypatch, uid, mode, step="source"):
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
 
 
+def _patch_create_subtitle(monkeypatch):
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chào"
+        subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(user_id, state.get("step") or "creating_original_subtitle", subtitle_ref=subtitle_ref)
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chào"}],
+            "detected_language": "vi",
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
+
+
 def test_public_translation_guard_hides_admin_blocker():
     text = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi", admin=False)
     assert "TOAN AAS chưa thể tạo giọng lồng tiếng" in text
@@ -100,6 +115,7 @@ def test_no_curl_button_public_translation_flow():
 def test_task2_upload_video_stays_in_auto_subtitle(monkeypatch):
     uid = 823010
     _prepare_upload(monkeypatch, uid, bot.VIDEO_SUBTITLE_MODE_CREATE)
+    _patch_create_subtitle(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": False})
     message = CaptureMessage("auto-subtitle")
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace())) is True
@@ -107,7 +123,7 @@ def test_task2_upload_video_stays_in_auto_subtitle(monkeypatch):
     assert state["product"] == "auto_subtitle"
     assert state["source_ref"] == "auto-subtitle"
     assert state["step"] == "output"
-    assert "Video đã sẵn sàng tạo phụ đề" in message.outputs[-1]["text"]
+    assert "Phụ đề đã sẵn sàng xuất" in message.outputs[-1]["text"]
 
 
 def test_task2_upload_video_stays_in_auto_dubbing(monkeypatch):
@@ -153,6 +169,7 @@ def test_task2_upload_video_stays_in_subtitle_plus_dubbing(monkeypatch):
 def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):
     uid = 823013
     _prepare_upload(monkeypatch, uid, bot.VIDEO_SUBTITLE_MODE_CREATE, step="await_video")
+    _patch_create_subtitle(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": False})
 
     async def must_not_run(*_args, **_kwargs):
@@ -164,7 +181,7 @@ def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):
     asyncio.run(bot.handle_media_cache_only(_update(uid, message), SimpleNamespace()))
     joined = " ".join(item["text"] for item in message.outputs)
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
-    assert "Video đã sẵn sàng tạo phụ đề" in joined
+    assert "Phụ đề đã sẵn sàng xuất" in joined
 
 
 def test_auto_subtitle_preview_back_to_output():

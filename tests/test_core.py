@@ -7911,13 +7911,13 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     assert bot.get_video_dubbing_pending(71004)["step"] == "dub_confirmation"
 
     upload_cases = [
-        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|final", "Video đã sẵn sàng tạo phụ đề"),
+        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|output|srt", "Phụ đề đã sẵn sàng xuất"),
         (
             71102,
             bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
             {"target_language": "English", "translate_requested": "1"},
             "output",
-            "videodub|final",
+            "videodub|output|srt",
             "Xuất phụ đề dịch",
         ),
         (

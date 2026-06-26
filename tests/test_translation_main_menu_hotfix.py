@@ -58,8 +58,8 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
         "menu|translation_auto_target",
         "menu|main",
         "menu|translate",
-        "menu|translation_stop_session",
     }.issubset(language_callbacks)
+    assert "menu|translation_stop_session" not in language_callbacks
 
 
 def test_translation_child_callbacks_have_handlers_or_existing_routes():

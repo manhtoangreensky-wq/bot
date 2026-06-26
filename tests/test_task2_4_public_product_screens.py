@@ -86,9 +86,25 @@ def _prepare_upload(monkeypatch, uid, mode, step="source", **fields):
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
 
 
+def _patch_create_subtitle(monkeypatch):
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chào"
+        subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(user_id, state.get("step") or "creating_original_subtitle", subtitle_ref=subtitle_ref)
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chào"}],
+            "detected_language": "vi",
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
+
+
 def test_auto_subtitle_after_upload_shows_product_confirmation(monkeypatch):
     uid = 824001
     _prepare_upload(monkeypatch, uid, bot.VIDEO_SUBTITLE_MODE_CREATE)
+    _patch_create_subtitle(monkeypatch)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": False})
     message = CaptureMessage("subtitle-product")
 
@@ -98,12 +114,15 @@ def test_auto_subtitle_after_upload_shows_product_confirmation(monkeypatch):
     assert state["step"] == "output"
     text = message.outputs[-1]["text"]
     labels = _labels(message.outputs[-1]["reply_markup"])
-    assert "Video đã sẵn sàng tạo phụ đề" in text
+    assert "Phụ đề đã sẵn sàng xuất" in text
     assert "Tác vụ:" not in text
     assert "Nguồn:" not in text
     assert labels == [
-        "👁 Xem thử",
-        "✅ Xác nhận tạo đầy đủ",
+        "📄 Xuất SRT",
+        "📄 Xuất VTT",
+        "📝 Xuất TXT",
+        "🎞 Gắn vào video",
+        "📝 Chỉnh phụ đề",
         "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
@@ -216,9 +235,9 @@ def test_subtitle_plus_confirmation_has_preview_and_full_subtitle():
     }
     text = bot.video_dubbing_output_text(state, "vi")
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
-    assert "Video đã sẵn sàng tạo phụ đề dịch" in text
-    assert "TOAN AAS sẽ tạo phụ đề dịch trước" in text
-    assert labels == ["👁 Xem thử", "✅ Xác nhận tạo đầy đủ", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert "Phụ đề dịch chưa sẵn sàng" in text
+    assert "cần tạo phụ đề gốc và dịch xong" in text
+    assert labels == ["⬅️ Quay lại", "🏠 Menu chính"]
     assert "📄 Xuất SRT" not in labels
     assert "🎞 Gắn phụ đề vào video" not in labels
 
@@ -241,8 +260,8 @@ def test_subtitle_plus_provider_off_no_debug_buttons(monkeypatch):
     asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
 
     ui = _joined_ui(query.edits[-1]["text"], query.edits[-1]["reply_markup"])
-    assert "video đã sẵn sàng tạo phụ đề dịch" in ui
-    assert "xác nhận tạo đầy đủ" in ui
+    assert "phụ đề dịch chưa sẵn sàng" in ui
+    assert "xác nhận tạo đầy đủ" not in ui
     assert "admin blocker" not in ui
     assert "curl provider" not in ui
 
@@ -350,16 +369,18 @@ def test_admin_commands_still_available():
 def test_task2_upload_does_not_open_generic_video_menu(monkeypatch):
     uid = 824007
     _prepare_upload(monkeypatch, uid, bot.VIDEO_SUBTITLE_MODE_CREATE, step="await_video")
+    _patch_create_subtitle(monkeypatch)
     message = CaptureMessage("routing-product")
     asyncio.run(bot.handle_media_cache_only(_update(uid, message), SimpleNamespace()))
     joined = " ".join(item["text"] for item in message.outputs)
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
-    assert "Video đã sẵn sàng tạo phụ đề" in joined
+    assert "Phụ đề đã sẵn sàng xuất" in joined
 
 
 def test_task2_upload_preserves_session_source_ref(monkeypatch):
     uid = 824008
     _prepare_upload(monkeypatch, uid, bot.VIDEO_SUBTITLE_MODE_CREATE)
+    _patch_create_subtitle(monkeypatch)
     message = CaptureMessage("preserve-source")
     asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace()))
     state = bot.get_video_dubbing_pending(uid)
