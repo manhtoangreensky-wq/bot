@@ -88,6 +88,7 @@ from video_product_system import (
     validate_package_selection,
     validate_video_prompt_bundle,
 )
+import video_image_to_video_flow as ivf
 from video_multiscene_engine import (
     build_detailed_multiscene_prompt_plan,
     context_bundle_debug_summary,
@@ -48814,8 +48815,8 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         (("video_trend", "vproduct|open|video_trend"), ("video_idea", "vproduct|open|video_idea")),
         (("storyboard_prompt", "vproduct|open|storyboard_prompt"), ("prompt_library", "vpromptlib|start")),
         (("video_ai_real", "vproduct|open|video_ai_real"), ("script_image_video", "vproduct|open|script_image_video")),
-        (("image_to_video", "vproduct|open|image_to_video"), ("frame_video_local", "vproduct|open|frame_video_local")),
-        (("self_shot_scene_change", "vproduct|open|self_shot_scene_change"), ("multi_scene_film", "vproduct|open|multi_scene_film")),
+        (("frame_video_local", "vproduct|open|frame_video_local"), ("self_shot_scene_change", "vproduct|open|self_shot_scene_change")),
+        (("multi_scene_film", "vproduct|open|multi_scene_film"),),
         (("video_downloader", "vdownload|start"),),
         (("video_local_edit", "vproduct|open|video_local_edit"), ("main_menu", "menu|main")),
     )
@@ -50350,6 +50351,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value not in VIDEO_PRODUCT_REGISTRY:
             return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
         clear_video_session(uid)
+        if value in {"image_to_video", "frame_video_local"}:
+            return await safe_edit_or_send(
+                query,
+                ivf.frame_video_unified_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=ivf.frame_video_unified_menu_keyboard(lang),
+            )
         parent_callback = str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
         session = task3d_session_step(uid, "intro", product_id=value, return_to=parent_callback)
         return await task3d_render_step(query, uid, session, lang)
@@ -85744,9 +85752,9 @@ def frame_video_effect_text(state: dict) -> str:
 
 def frame_video_effect_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Không hiệu ứng", callback_data="framevideo|effect|none"), InlineKeyboardButton("Fade nhẹ", callback_data="framevideo|effect|fade")],
-        [InlineKeyboardButton("Zoom nhẹ", callback_data="framevideo|effect|zoom"), InlineKeyboardButton("Pan trái/phải", callback_data="framevideo|effect|pan")],
-        [InlineKeyboardButton("Slide ngang", callback_data="framevideo|effect|slide"), InlineKeyboardButton("Random nhẹ", callback_data="framevideo|effect|random")],
+        [InlineKeyboardButton("▶️ Dùng mặc định", callback_data="framevideo|effect|default")],
+        [InlineKeyboardButton("Fade", callback_data="framevideo|effect|fade"), InlineKeyboardButton("Slide", callback_data="framevideo|effect|slide")],
+        [InlineKeyboardButton("Zoom nhẹ", callback_data="framevideo|effect|zoom"), InlineKeyboardButton("Không hiệu ứng", callback_data="framevideo|effect|none")],
         [InlineKeyboardButton("🔙 Quay lại", callback_data="framevideo|back|duration"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
@@ -107378,6 +107386,11 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             reply_markup=frame_video_job_status_keyboard(parts[2]) if job else InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")]]),
         )
 
+    if action in {"hub", "menu", "ai_first", "layout"}:
+        text = ivf.frame_video_ai_first_guard_text(lang) if action == "ai_first" else ivf.frame_video_layout_helper_text(lang) if action == "layout" else ivf.frame_video_unified_menu_text(lang)
+        markup = ivf.frame_video_layout_helper_keyboard(lang) if action == "layout" else ivf.frame_video_unified_menu_keyboard(lang)
+        return await safe_edit_or_send(query, text, parse_mode=None if action == "ai_first" else "HTML", reply_markup=markup)
+
     if action == "main":
         clear_frame_video_state(uid)
         return await safe_edit_or_send(
@@ -107401,19 +107414,16 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         if not FRAME_VIDEO_ENABLED:
             set_frame_video_last_error("frame_video_disabled")
             return await safe_edit_or_send(query, frame_video_maintenance_text(), parse_mode=None)
-        if frame_video_active_jobs_count() >= int(FRAME_VIDEO_MAX_CONCURRENT_JOBS or 1):
-            return await safe_edit_or_send(query, "Bạn đang có tác vụ ghép video đang xử lý. Vui lòng chờ kết quả, không cần gửi lại lệnh.", parse_mode=None)
-        if FRAME_VIDEO_REQUIRE_LOCAL_WORKER and not frame_video_worker_connected():
-            set_frame_video_last_error("worker_unavailable_direct_render_disabled")
-            return await safe_edit_or_send(query, frame_video_maintenance_text(), parse_mode=None)
-        if not FRAME_VIDEO_DIRECT_RENDER_ENABLED and not frame_video_worker_connected():
-            set_frame_video_last_error("direct_render_disabled")
-            return await safe_edit_or_send(query, frame_video_maintenance_text(), parse_mode=None)
         if not FRAME_VIDEO_PUBLIC_ENABLED and not is_admin_user(uid):
             return await safe_edit_or_send(query, "Công cụ ghép video đang bảo trì, vui lòng thử lại sau. Bot chưa trừ Xu.", parse_mode=None)
         clear_media_creator_pending_states(uid)
-        set_frame_video_state(uid, {"step": "collect", "photos": []})
-        return await safe_edit_or_send(query, frame_video_collect_text(0), reply_markup=frame_video_collect_keyboard(), parse_mode=None)
+        set_frame_video_state(uid, {"step": "collect", "photos": [], "source": "existing_images"})
+        return await safe_edit_or_send(
+            query,
+            "📷 <b>Tôi có ảnh sẵn</b>\n\n" + frame_video_collect_text(0),
+            reply_markup=frame_video_collect_keyboard(),
+            parse_mode="HTML",
+        )
     if not state:
         return await safe_edit_or_send(query, "⏰ Yêu cầu đã hết hạn hoặc đã xử lý. Bot chưa trừ Xu.", parse_mode=None)
     if state.get("step") == "rendering" and action != "confirm":
@@ -107597,9 +107607,11 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             state["step"] = "mode_select"
             set_frame_video_state(uid, state)
             return await safe_edit_or_send(query, frame_video_mode_select_text(), parse_mode=None, reply_markup=frame_video_mode_select_keyboard())
-        state["step"] = "planning"
+        state["ratio"] = state.get("ratio") or "9x16"
+        state["duration"] = state.get("duration") or "standard"
+        state["step"] = "effect"
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, frame_video_planning_text(state, lang), parse_mode="HTML", reply_markup=frame_video_planning_keyboard(lang))
+        return await safe_edit_or_send(query, frame_video_effect_text(state), parse_mode="HTML", reply_markup=frame_video_effect_keyboard())
 
     if action == "back":
         target = parts[2] if len(parts) > 2 else "collect"
@@ -107658,11 +107670,9 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         return await safe_edit_or_send(query, frame_video_effect_text(state), parse_mode="HTML", reply_markup=frame_video_effect_keyboard())
 
     if action == "effect" and len(parts) > 2:
-        state = invalidate_frame_video_paid_preview(state)
-        state["effect"] = parts[2]
-        state["step"] = "music"
+        state = ivf.frame_video_apply_effect_defaults(invalidate_frame_video_paid_preview(state), parts[2])
         set_frame_video_state(uid, state)
-        return await safe_edit_or_send(query, frame_video_music_text(state), parse_mode="HTML", reply_markup=frame_video_music_keyboard())
+        return await safe_edit_or_send(query, frame_video_confirm_text(state, uid), parse_mode="HTML", reply_markup=frame_video_confirm_keyboard(state))
 
     if action == "music" and len(parts) > 2:
         state = invalidate_frame_video_paid_preview(state)
