@@ -207,8 +207,8 @@ def test_auto_subtitle_pipeline_sends_srt_vtt_txt_after_confirm(monkeypatch, tmp
     sent_files = [item.get("filename") for item in query.outputs if item.get("document")]
     assert result["ok"] is True
     assert result["has_subtitle"] is True
-    assert {".srt", ".txt"} == {filename[-4:] for filename in sent_files}
-    assert len(result["subtitle_asset_ids"]) == 3
+    assert {".srt"} == {filename[-4:] for filename in sent_files}
+    assert len(result["subtitle_asset_ids"]) == 1
 
 
 def test_subtitle_translate_upload_keeps_product_context(monkeypatch):

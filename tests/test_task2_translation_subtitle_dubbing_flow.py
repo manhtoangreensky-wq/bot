@@ -63,20 +63,16 @@ def test_video_translation_menu_labels_auto():
 def test_subtitle_auto_no_translation_no_voice():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
-    assert "👁 Xem thử" in labels
+    assert "✅ Xác nhận tạo đầy đủ" in labels
+    assert "👁 Xem thử" not in labels
     assert "🗣 Lồng tiếng" not in labels
     assert not any("giọng" in label.lower() for label in labels)
     assert not bot.video_dubbing_requires_voice(bot.VIDEO_SUBTITLE_MODE_CREATE)
 
 
-def test_subtitle_output_preview_dub_srt_burn():
+def test_subtitle_output_final_only_before_result():
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
-    assert callbacks[:4] == [
-        "videodub|confirm_subtitle_create",
-        "videodub|final",
-        "videodub|output_back",
-        "menu|main",
-    ]
+    assert callbacks == ["videodub|final", "videodub|output_back", "menu|main"]
     assert "videodub|output|srt" not in callbacks
     assert "videodub|output|burn" not in callbacks
     assert "videodub|continue_dubbing" not in callbacks
@@ -152,7 +148,7 @@ def test_auto_subtitle_input_and_output_are_basic_product():
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
     assert "🗣 Lồng tiếng" not in labels
     assert "🗣 Tiếp tục lồng tiếng" not in labels
-    assert "👁 Xem thử" in labels
+    assert "👁 Xem thử" not in labels
     assert "✅ Xác nhận tạo đầy đủ" in labels
     assert "📄 Xuất SRT" not in labels
 

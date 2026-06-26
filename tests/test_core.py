@@ -7912,21 +7912,21 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     assert bot.get_video_dubbing_pending(71004)["step"] == "dub_confirmation"
 
     upload_cases = [
-        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|output|srt", "Phụ đề đã sẵn sàng xuất"),
+        (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "output", "videodub|final", "Phụ đề đã sẵn sàng"),
         (
             71102,
             bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
             {"target_language": "English", "translate_requested": "1"},
             "output",
-            "videodub|output|srt",
-            "Xuất phụ đề dịch",
+            "videodub|final",
+            "Đã dịch phụ đề",
         ),
         (
             71103,
             bot.VIDEO_SUBTITLE_MODE_DUB,
             {"target_language": "Tiếng Việt", "voice_style": "Nữ tự nhiên", "voice_speed": "1.0"},
             "confirm",
-            "videodub|confirm_dub",
+            "videodub|final",
             "Video đã sẵn sàng lồng tiếng",
         ),
         (
@@ -8021,12 +8021,27 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     async def fake_tts(text, voice_style="", voice_id="", voice_speed="1.0"):
         return "Test TTS", b"audio-bytes", f"voice={voice_style}; voice_id={voice_id}; speed={voice_speed}; chars={len(text)}"
 
+    async def fake_render_video(_source, dubbed_audio=b"", subtitle_bytes=b"", keep_original_audio=False):
+        return b"mp4-bytes", "fake_render"
+
+    async def fake_timeline_audio(*_args, **_kwargs):
+        return b"timeline-audio", "timeline"
+
+    async def fake_normalize_audio(*_args, **_kwargs):
+        return b"normalized-audio", "normalized"
+
     monkeypatch.setattr(bot, "video_dubbing_download_source", fake_download)
     monkeypatch.setattr(bot, "video_dubbing_audio_extract_ready", lambda: True)
     monkeypatch.setattr(bot, "video_dubbing_extract_audio", fake_extract_audio)
     monkeypatch.setattr(bot, "video_dubbing_transcribe_bytes", fake_transcribe)
     monkeypatch.setattr(bot, "translate_subtitle_text", fake_translate)
     monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
+    monkeypatch.setattr(bot, "video_dubbing_render_video", fake_render_video)
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(bot, "VIDEO_DUB_MUX_ENABLED", True)
+    monkeypatch.setattr(bot, "video_dubbing_video_render_ready", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(bot, "build_dub_timeline_audio", fake_timeline_audio)
+    monkeypatch.setattr(bot, "normalize_dub_audio_bytes", fake_normalize_audio)
     monkeypatch.setattr(
         bot,
         "spend_fixed_credit_info",
@@ -8037,6 +8052,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         def __init__(self):
             self.documents = []
             self.audio = []
+            self.video = []
 
         async def reply_document(self, document, **kwargs):
             self.documents.append((document, kwargs))
@@ -8044,11 +8060,14 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         async def reply_audio(self, audio, **kwargs):
             self.audio.append((audio, kwargs))
 
-    for mode, expect_document, expect_audio, expect_result_subtitle in [
+        async def reply_video(self, video, **kwargs):
+            self.video.append((video, kwargs))
+
+    for mode, expect_video, expect_audio, expect_result_subtitle in [
         (bot.VIDEO_SUBTITLE_MODE_CREATE, True, False, True),
         (bot.VIDEO_SUBTITLE_MODE_TRANSLATE, True, False, True),
-        (bot.VIDEO_SUBTITLE_MODE_DUB, False, True, True),
-        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, False, True, True),
+        (bot.VIDEO_SUBTITLE_MODE_DUB, True, False, True),
+        (bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, True, False, True),
     ]:
         message = OutputMessage()
         query = SimpleNamespace(from_user=SimpleNamespace(id=72001), message=message)
@@ -8062,10 +8081,11 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         }
         result = asyncio.run(bot.execute_video_dubbing_pipeline(query, SimpleNamespace(), state, "vi"))
         assert result["ok"] is True
-        assert bool(message.documents) is expect_document
+        assert bool(message.documents) is False
+        assert bool(message.video) is expect_video
         assert bool(message.audio) is expect_audio
         assert result["has_subtitle"] is expect_result_subtitle
-        assert result["has_audio"] is expect_audio
+        assert result["has_audio"] is (mode in {bot.VIDEO_SUBTITLE_MODE_DUB, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
 
 
 def test_quick_image_flow_prompt_before_ratio_and_pricing():

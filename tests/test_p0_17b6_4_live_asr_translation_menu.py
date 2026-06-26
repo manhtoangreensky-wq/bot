@@ -268,9 +268,10 @@ def test_subtitle_translate_language_runs_translation_before_export(monkeypatch)
     callbacks = _callbacks(message.outputs[-1]["reply_markup"])
     assert state["step"] == "output"
     assert state["translated_subtitle_ref"]
-    assert "Xuất phụ đề dịch" in message.outputs[-1]["text"]
+    assert "Đã dịch phụ đề" in message.outputs[-1]["text"]
+    assert "videodub|final" in callbacks
     assert "videodub|output|srt" in callbacks
-    assert "videodub|result_dub_translated" in callbacks
+    assert "videodub|result_dub_translated" not in callbacks
     assert tts_calls["count"] == 0
     assert mux_calls["count"] == 0
 
@@ -308,9 +309,10 @@ def test_auto_subtitle_media_outputs_srt_vtt_txt_after_real_create(monkeypatch):
     labels = _labels(message.outputs[-1]["reply_markup"])
     assert state["step"] == "output"
     assert state["subtitle_ref"]
+    assert "📹 Tải video phụ đề" in labels
     assert "📄 Tải SRT" in labels
-    assert "📄 Tải VTT" in labels
-    assert "🧾 Tải TXT" in labels
+    assert "📄 Tải VTT" not in labels
+    assert "🧾 Tải TXT" not in labels
 
 
 def test_public_asr_failure_copy_has_no_internal_terms():

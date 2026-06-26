@@ -142,6 +142,158 @@ def mux_final_video(
         shutil.rmtree(staging, ignore_errors=True)
 
 
+def render_subtitled_video(
+    source_video_path: str,
+    subtitle_path: str,
+    output_path: str,
+    style_options: dict[str, Any] | None = None,
+) -> str:
+    """Burn subtitles into a source video and return the MP4 path."""
+    source_video = _validate_existing_file(source_video_path, "video")
+    subtitle_source = _validate_existing_file(subtitle_path, "subtitle")
+    output = Path(str(output_path or "")).expanduser()
+    if not output.name:
+        raise DubbingPipelineError("output_path_missing")
+    output = output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg = _ffmpeg_binary()
+    staging_root = output.parent if output.parent.exists() else Path(tempfile.gettempdir())
+    staging = Path(tempfile.mkdtemp(prefix="toanaas_subtitle_video_", dir=str(staging_root)))
+    try:
+        safe_video = staging / "input.mp4"
+        safe_subtitle = staging / "subtitle.srt"
+        safe_output = staging / "final.mp4"
+        shutil.copyfile(source_video, safe_video)
+        shutil.copyfile(subtitle_source, safe_subtitle)
+        style = dict(style_options or {})
+        force_style = str(style.get("force_style") or "").strip()
+        subtitle_filter = "subtitles=subtitle.srt"
+        if force_style:
+            subtitle_filter += f":force_style='{force_style}'"
+        command = [
+            ffmpeg,
+            "-y",
+            "-i",
+            "input.mp4",
+            "-vf",
+            subtitle_filter,
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "22",
+            "-c:a",
+            "copy",
+            "-movflags",
+            "+faststart",
+            "final.mp4",
+        ]
+        result = _run_ffmpeg(command, cwd=str(staging))
+        if result.returncode != 0:
+            detail = _first_error_line(result.stderr or result.stdout) or "ffmpeg_failed"
+            raise DubbingPipelineError(f"ffmpeg_failed:{detail}")
+        if not safe_output.exists() or safe_output.stat().st_size <= 0:
+            raise DubbingPipelineError("subtitle_video_output_empty")
+        shutil.copyfile(safe_output, output)
+        if not output.exists() or output.stat().st_size <= 0:
+            raise DubbingPipelineError("subtitle_video_verify_failed")
+        return str(output)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def mux_dubbed_video(
+    source_video_path: str,
+    dub_audio_path: str,
+    output_path: str,
+    subtitle_path: str | None = None,
+    burn_subtitle: bool = False,
+) -> str:
+    """Replace source audio with dubbed audio and optionally burn subtitles."""
+    return mux_final_video(
+        source_video_path,
+        dub_audio_path,
+        output_path,
+        srt_path=subtitle_path,
+        burn_subtitles=burn_subtitle,
+        replace_audio=True,
+    )
+
+
+def process_final_video_product(
+    *,
+    mode: str,
+    source_video_path: str,
+    original_subtitle_path: str | None = None,
+    translated_subtitle_path: str | None = None,
+    dub_audio_path: str | None = None,
+    logo_path: str | None = None,
+    bgm_path: str | None = None,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Blackbox final-product file processor. It never imports chat framework code or charges Xu."""
+    del logo_path, bgm_path
+    selected_mode = str(mode or "").strip().lower()
+    source_video = _validate_existing_file(source_video_path, "video")
+    output = Path(str(output_path or source_video.with_name("toan_aas_final.mp4"))).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    subtitle_path = str(translated_subtitle_path or original_subtitle_path or "").strip()
+    try:
+        if selected_mode == "auto_subtitle_video":
+            final_path = render_subtitled_video(str(source_video), str(original_subtitle_path or ""), str(output))
+        elif selected_mode == "translated_subtitle_video":
+            final_path = render_subtitled_video(str(source_video), str(translated_subtitle_path or ""), str(output))
+        elif selected_mode == "dubbed_video":
+            final_path = mux_dubbed_video(
+                str(source_video),
+                str(dub_audio_path or ""),
+                str(output),
+                subtitle_path=subtitle_path or None,
+                burn_subtitle=False,
+            )
+        elif selected_mode == "subtitle_plus_dub_video":
+            final_path = mux_dubbed_video(
+                str(source_video),
+                str(dub_audio_path or ""),
+                str(output),
+                subtitle_path=subtitle_path or None,
+                burn_subtitle=bool(subtitle_path),
+            )
+        else:
+            raise DubbingPipelineError("unknown_final_video_mode")
+        return {
+            "ok": True,
+            "result_type": "mp4",
+            "video_path": final_path,
+            "audio_path": str(dub_audio_path or "") or None,
+            "subtitle_path": subtitle_path or None,
+            "fallback_reason": None,
+        }
+    except Exception as exc:
+        if dub_audio_path and Path(str(dub_audio_path)).exists() and Path(str(dub_audio_path)).stat().st_size > 0:
+            return {
+                "ok": True,
+                "result_type": "audio_fallback",
+                "video_path": None,
+                "audio_path": str(Path(str(dub_audio_path)).resolve()),
+                "subtitle_path": subtitle_path or None,
+                "fallback_reason": str(exc)[:240] or "mux_failed",
+            }
+        return {
+            "ok": False,
+            "result_type": "guard",
+            "video_path": None,
+            "audio_path": None,
+            "subtitle_path": subtitle_path or None,
+            "fallback_reason": str(exc)[:240] or type(exc).__name__,
+        }
+
+
 def _requested_voice_is_valid(value: str | None) -> bool:
     normalized = str(value or "").strip()
     if normalized.lower() in INVALID_REQUESTED_VOICE_IDS:

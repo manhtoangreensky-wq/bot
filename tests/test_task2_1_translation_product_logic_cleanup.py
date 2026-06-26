@@ -126,13 +126,14 @@ def test_auto_subtitle_output_no_dubbing_button_basic_product():
 
 def test_auto_subtitle_output_srt_burn_edit():
     callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
-    assert callbacks == ["videodub|confirm_subtitle_create", "videodub|final", "videodub|output_back", "menu|main"]
+    assert callbacks == ["videodub|final", "videodub|output_back", "menu|main"]
     assert not {"videodub|output|srt", "videodub|output|burn", "videodub|subtitle_editor"}.intersection(callbacks)
     ready_callbacks = _callbacks(bot.video_dubbing_output_keyboard("vi", {
         "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
         "subtitle_ref": "video_dubbing_artifact:test:subtitle",
     }))
-    assert {"videodub|output|srt", "videodub|output|vtt", "videodub|output|txt"}.issubset(ready_callbacks)
+    assert {"videodub|final", "videodub|output|srt"}.issubset(ready_callbacks)
+    assert not {"videodub|output|vtt", "videodub|output|txt"}.intersection(ready_callbacks)
     assert "videodub|output|burn" not in ready_callbacks
     assert "videodub|subtitle_editor" not in ready_callbacks
 
