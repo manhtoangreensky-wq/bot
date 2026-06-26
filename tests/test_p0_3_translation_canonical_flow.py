@@ -222,6 +222,21 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
 
+    async def fake_prepare(_context, passed_state, user_id, allow_admin=False):
+        assert passed_state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
+        assert passed_state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_DUB
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chao tu video"
+        ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(user_id, passed_state.get("step") or "creating_original_subtitle", subtitle_ref=ref)
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chao tu video"}],
+            "detected_language": "vi",
+        }
+
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
+
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_DUB}", user_id))
     query = asyncio.run(_press_videodub("videodub|source_upload", user_id))
     assert "Bạn gửi hoặc reply video/audio cần xử lý" in query.outputs[-1]["text"]

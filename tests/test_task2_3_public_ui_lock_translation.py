@@ -129,6 +129,7 @@ def test_task2_upload_video_stays_in_auto_subtitle(monkeypatch):
 def test_task2_upload_video_stays_in_auto_dubbing(monkeypatch):
     uid = 823011
     _prepare_upload(monkeypatch, uid, bot.VIDEO_SUBTITLE_MODE_DUB)
+    _patch_create_subtitle(monkeypatch)
     message = CaptureMessage("auto-dubbing")
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace())) is True
     state = bot.get_video_dubbing_pending(uid)
