@@ -180,18 +180,11 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
 
-    async def fake_prepare(_context, passed_state, user_id, allow_admin=False):
-        assert passed_state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
-        assert passed_state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
-        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chao tu video"
-        ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
-        saved = bot.set_video_dubbing_pending(user_id, passed_state.get("step") or "creating_original_subtitle", subtitle_ref=ref)
-        return {
-            "state": saved,
-            "source_subtitle": source,
-            "source_segments": [{"start": 0, "end": 2, "text": "Xin chao tu video"}],
-            "detected_language": "vi",
-        }
+    prepare_calls = {"count": 0}
+
+    async def fake_prepare(*_args, **_kwargs):
+        prepare_calls["count"] += 1
+        raise AssertionError("ASR must wait until final confirmation")
 
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
 
@@ -209,9 +202,10 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     assert handled is True
     state = bot.get_video_dubbing_pending(user_id)
     assert state["step"] == "language"
-    assert state["subtitle_ref"]
+    assert not state["subtitle_ref"]
     assert state["video_file_id"] == "translate-video"
     assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert prepare_calls["count"] == 0
     _assert_public_clean(message.outputs[-1]["text"])
 
 

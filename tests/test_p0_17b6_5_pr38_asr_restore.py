@@ -221,10 +221,10 @@ def test_pr38_asr_engine_path_is_called_for_subtitle_translate_media(monkeypatch
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
 
     state = bot.get_video_dubbing_pending(uid)
-    assert calls
+    assert calls == []
     assert state["step"] == "language"
-    assert state["subtitle_ref"]
-    assert state["source_subtitle_ref"] == state["subtitle_ref"]
+    assert not state["subtitle_ref"]
+    assert not state["source_subtitle_ref"]
     assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
     assert "videodub|output|srt" not in _callbacks(message.outputs[-1]["reply_markup"])
 
@@ -249,12 +249,12 @@ def test_pr38_asr_engine_path_is_called_for_auto_subtitle_media(monkeypatch):
 
     state = bot.get_video_dubbing_pending(uid)
     labels = _labels(message.outputs[-1]["reply_markup"])
-    assert calls
-    assert state["step"] == "output"
-    assert state["subtitle_ref"]
-    assert state["source_subtitle_ref"] == state["subtitle_ref"]
-    assert "📹 Tải video phụ đề" in labels
-    assert "📄 Tải SRT" in labels
+    assert calls == []
+    assert state["step"] == "confirm"
+    assert not state["subtitle_ref"]
+    assert not state["source_subtitle_ref"]
+    assert "✅ Xuất video phụ đề" in labels
+    assert "📄 Tải SRT" not in labels
     assert "📄 Tải VTT" not in labels
     assert "🧾 Tải TXT" not in labels
 
@@ -278,11 +278,11 @@ def test_pr38_asr_engine_path_is_called_for_dub_media_before_language(monkeypatc
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
 
     state = bot.get_video_dubbing_pending(uid)
-    assert calls
+    assert calls == []
     assert state["step"] == "language"
-    assert state["subtitle_ref"]
-    assert state["source_subtitle_ref"] == state["subtitle_ref"]
-    assert "TOAN AAS đang tạo phụ đề gốc" in message.outputs[0]["text"]
+    assert not state["subtitle_ref"]
+    assert not state["source_subtitle_ref"]
+    assert "TOAN AAS đang tạo phụ đề gốc" not in message.outputs[0]["text"]
     assert "lồng tiếng sang ngôn ngữ nào" in message.outputs[-1]["text"]
 
 
@@ -353,8 +353,8 @@ def test_transcript_media_uses_asr_and_defaults_to_txt_output(monkeypatch):
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
 
     state = bot.get_video_dubbing_pending(uid)
-    assert calls
-    assert state["step"] == "output"
+    assert calls == []
+    assert state["step"] == "confirm"
     assert state["active_flow"] == bot.VIDEO_DUBBING_FLOW_TRANSCRIPT
     assert state["output_type"] == "txt"
     assert state["output_format"] == "txt"
@@ -382,7 +382,7 @@ def test_no_charge_before_final_confirm(monkeypatch):
     message = CaptureMessage("no-charge-media", kind="audio")
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
-    assert calls
+    assert calls == []
     assert bot.get_video_dubbing_pending(uid)["step"] == "language"
 
 

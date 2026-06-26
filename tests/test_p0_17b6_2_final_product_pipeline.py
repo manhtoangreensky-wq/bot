@@ -152,7 +152,7 @@ def test_translation_qc_splits_long_translation_inside_original_timing():
     assert len({(item["start"], item["end"]) for item in result}) == len(result)
 
 
-def test_receipt_next_actions_keep_tools_separate(monkeypatch):
+def test_receipt_next_actions_stay_final_only(monkeypatch):
     uid = 917621
     bot.clear_video_dubbing_pending(uid)
     state = bot.set_video_dubbing_pending(
@@ -163,21 +163,15 @@ def test_receipt_next_actions_keep_tools_separate(monkeypatch):
         active_flow="auto_subtitle",
         source_file_id="source",
         subtitle_ref="video_dubbing_artifact:917621:source_subtitle",
+        final_video_available="1",
+        final_subtitle_available="1",
     )
     callbacks = _callbacks(bot.video_dubbing_receipt_keyboard("vi", "translation", state))
-    assert "videodub|result_translate" in callbacks
-    assert "videodub|result_dub_original" in callbacks
-    assert "videodub|result_translate_dub" in callbacks
-
-    monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
-    query = DummyQuery(uid, "videodub|result_translate")
-    asyncio.run(bot.handle_video_dubbing_callback(_callback_update(query), SimpleNamespace()))
-    next_state = bot.get_video_dubbing_pending(uid)
-    assert next_state["step"] == "language"
-    assert next_state["mode"] == bot.VIDEO_SUBTITLE_MODE_TRANSLATE
-    assert next_state["active_flow"] == "subtitle_translate"
-    assert next_state["translate_requested"] == "1"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in query.edits[-1]["text"]
+    assert "videodub|download_final_video" in callbacks
+    assert "videodub|download_final_subtitle" in callbacks
+    assert "videodub|result_translate" not in callbacks
+    assert "videodub|result_dub_original" not in callbacks
+    assert "videodub|result_translate_dub" not in callbacks
 
     bot.clear_video_dubbing_pending(uid)
 

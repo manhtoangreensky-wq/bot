@@ -57,16 +57,17 @@ def test_subtitle_translate_outputs_final_video_without_dub_or_editor():
 
 
 def test_confirm_keyboards_hide_preview_for_public_product_flows():
-    for mode in (
-        bot.VIDEO_SUBTITLE_MODE_CREATE,
-        bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
-        bot.VIDEO_SUBTITLE_MODE_DUB,
-        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
-    ):
+    expected = {
+        bot.VIDEO_SUBTITLE_MODE_CREATE: "✅ Xuất video phụ đề",
+        bot.VIDEO_SUBTITLE_MODE_TRANSLATE: "✅ Xuất video phụ đề dịch",
+        bot.VIDEO_SUBTITLE_MODE_DUB: "✅ Xuất video lồng tiếng",
+    }
+    for mode, first_label in expected.items():
         markup = bot.video_dubbing_confirm_keyboard("vi", {"mode": mode, "video_processing_mode": mode})
         labels = _labels(markup)
         callbacks = _callbacks(markup)
-        assert labels[0] == "✅ Xác nhận tạo đầy đủ"
+        assert labels[0] == first_label
+        assert "❌ Hủy" in labels
         assert not any("Xem thử" in label or "Nghe thử" in label for label in labels)
         assert callbacks[0] == "videodub|final"
 
@@ -138,6 +139,71 @@ def test_voice_video_sends_audio_fallback_only_when_mp4_missing():
     assert message.video == []
     assert len(message.audio) == 1
     assert "chưa ghép được audio vào video" in message.audio[0]["caption"]
+
+
+def test_b12_4_confirm_texts_have_price_and_final_product_contract():
+    auto_text = bot.video_dubbing_confirm_text({"mode": bot.VIDEO_SUBTITLE_MODE_CREATE, "source_duration": 30}, "vi")
+    translate_text = bot.video_dubbing_confirm_text({
+        "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "target_language": "English",
+        "source_duration": 30,
+    }, "vi")
+    dub_text = bot.video_dubbing_confirm_text({
+        "mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "target_language": "English",
+        "voice_style": "giọng nữ mặc định",
+        "voice_speed": "1.0",
+        "source_duration": 30,
+    }, "vi")
+
+    assert "Chi phí:" in auto_text and "Xuất video MP4 có phụ đề" in auto_text
+    assert "Chi phí:" in translate_text and "Xuất video MP4 có phụ đề dịch" in translate_text
+    assert "Chi phí:" in dub_text and "Xuất video MP4 lồng tiếng" in dub_text
+    assert "xem thử" not in (auto_text + translate_text + dub_text).lower()
+
+
+def test_b12_4_receipt_keyboards_final_only_no_tool_jump():
+    create_markup = bot.video_dubbing_receipt_keyboard("vi", "translation", {
+        "mode": bot.VIDEO_SUBTITLE_MODE_CREATE,
+        "active_flow": "auto_subtitle",
+        "final_video_available": "1",
+        "final_subtitle_available": "1",
+    })
+    translate_markup = bot.video_dubbing_receipt_keyboard("vi", "translation", {
+        "mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "active_flow": "subtitle_translate",
+        "final_video_available": "1",
+        "final_subtitle_available": "1",
+        "final_translation_asset_ids": "translation-asset",
+    })
+    dub_markup = bot.video_dubbing_receipt_keyboard("vi", "translation", {
+        "mode": bot.VIDEO_SUBTITLE_MODE_DUB,
+        "active_flow": "dub_audio",
+        "final_video_available": "1",
+        "final_audio_available": "1",
+    })
+
+    create_callbacks = _callbacks(create_markup)
+    translate_callbacks = _callbacks(translate_markup)
+    dub_callbacks = _callbacks(dub_markup)
+    assert "videodub|download_final_video" in create_callbacks
+    assert "videodub|download_final_subtitle" in create_callbacks
+    assert "videodub|result_dub_original" not in create_callbacks
+    assert "videodub|result_translate_dub" not in create_callbacks
+    assert "videodub|download_final_video" in translate_callbacks
+    assert "videodub|download_final_subtitle" in translate_callbacks
+    assert "videodub|result_dub_translated" not in translate_callbacks
+    assert "videodub|download_final_video" in dub_callbacks
+    assert "videodub|download_final_audio" in dub_callbacks
+
+
+def test_b12_4_dialogue_unavailable_public_copy():
+    text = bot.video_dubbing_dialogue_unavailable_text("vi")
+    callbacks = _callbacks(bot.video_dubbing_dialogue_unavailable_keyboard("vi"))
+    assert "chưa lấy được lời thoại" in text
+    assert "chưa trừ Xu" in text
+    assert f"videodub|type|{bot.VIDEO_SUBTITLE_MODE_CREATE}" in callbacks
+    assert "videodub|retry_media" in callbacks
 
 
 def test_restore_previous_dub_audio_engine_for_live_pipeline():
