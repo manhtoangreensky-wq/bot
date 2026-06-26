@@ -45,14 +45,13 @@ def _active_profile(user_id=18010, profile_id=1):
 def test_default_voice_free_copy():
     text = bot.default_voice_confirm_text("Xin chào", "female", "vi")
     assert "Tạo giọng đọc miễn phí" in text
-    assert "Giọng nam/nữ mặc định: miễn phí" in text
-    assert "Không trừ Xu" in text
+    assert "Giọng nam/nữ mặc định miễn phí và không trừ Xu" in text
 
 
 def test_default_voice_no_6s_preview_copy():
     text = bot.default_voice_confirm_text("Xin chào", "male", "vi")
-    assert "Không cần nghe thử 6 giây" in text
-    assert "Nghe thử 6 giây" not in text
+    assert "6 giây" not in text
+    assert "Nghe thử" not in text
 
 
 def test_default_voice_no_preview_quota():

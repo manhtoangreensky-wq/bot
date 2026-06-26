@@ -73503,12 +73503,50 @@ def shopaikey_subtitle_translation_public_ready() -> bool:
 
 async def translate_subtitle_text(text: str, target_lang: str = "vi", allow_admin: bool = False, updated_by="") -> dict:
     target = normalize_translate_target(target_lang) or str(target_lang or "vi").strip() or "vi"
-    target_label = translate_target_label(target)
     source_text = str(text or "").strip()[:6000]
     if not source_text:
         raise RuntimeError("subtitle_translation_empty_input")
     errors = []
+    try:
+        result = await translate_to_language(source_text, target)
+        provider = str(result.get("provider") or "translation")
+        translated = str(result.get("text") or "").strip()
+        if translated:
+            save_tool_test_result(
+                "translation_text",
+                "PASS",
+                f"provider={provider}; target={target}; chars={len(translated)}",
+                updated_by,
+            )
+            save_provider_attempt(
+                "translation_text",
+                {"called": True, "provider": provider, "route": "translate_to_language", "status": "PASS", "error": ""},
+                updated_by,
+            )
+            return {"provider": provider, "text": translated, "target": target}
+        errors.append(f"{provider}=empty")
+    except TranslationProviderError as exc:
+        statuses = dict(getattr(exc, "statuses", {}) or {})
+        provider_errors = dict(getattr(exc, "errors", {}) or {})
+        for name in ("deepl", "key4u", "gemini", "openai"):
+            status = str(statuses.get(name) or "MISSING")
+            if status != "MISSING" or provider_errors.get(name):
+                errors.append(f"{name}={status}")
+        save_provider_attempt(
+            "translation_text",
+            {
+                "called": bool(errors),
+                "provider": "translate_to_language",
+                "route": "deepl/key4u/gemini/openai",
+                "status": "FAIL" if errors else "BLOCKED",
+                "error": " | ".join(errors or [provider_error_summary(exc)])[:500],
+            },
+            updated_by,
+        )
+    except Exception as exc:
+        errors.append("translate_to_language=" + provider_error_summary(exc))
     if key4u_subtitle_translation_configured() and (allow_admin or key4u_subtitle_translation_public_ready()):
+        target_label = translate_target_label(target)
         result = await key4u_provider_instance().translate(
             source_text,
             target_lang=target_label,
@@ -75642,18 +75680,14 @@ def default_voice_confirm_text(text: str, gender: str = "neutral", lang: str = "
     if music_ui_lang(lang=lang) != "vi":
         return (
             "🎙 <b>Free voice generation</b>\n\n"
-            "TOAN AAS will create the full voice audio from the text you entered.\n\n"
-            "• Default male/female voice: free\n"
-            "• No Xu charge\n"
-            "• No 6-second preview\n"
+            "TOAN AAS will create an audio file from the text you entered. "
+            "The default male/female voices are free and do not charge Xu.\n\n"
             "• TOAN AAS processes only after you confirm"
         )
     return (
         "🎙 <b>Tạo giọng đọc miễn phí</b>\n\n"
-        "TOAN AAS sẽ tạo file giọng đọc đầy đủ từ nội dung anh/chị đã nhập.\n\n"
-        "• Giọng nam/nữ mặc định: miễn phí\n"
-        "• Không trừ Xu\n"
-        "• Không cần nghe thử 6 giây\n"
+        "TOAN AAS sẽ tạo file giọng đọc từ nội dung anh/chị đã nhập. "
+        "Giọng nam/nữ mặc định miễn phí và không trừ Xu.\n\n"
         "• TOAN AAS chỉ xử lý sau khi anh/chị xác nhận"
     )
 
@@ -78036,20 +78070,16 @@ def music_merge_check_text(kind: str, user_id, lang: str = "vi") -> str:
 VOICE_PROFILE_PREVIEW_TEXT = "Xin chào, đây là bản nghe thử giọng TOAN AAS."
 VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT = "Cảm ơn bạn đã sử dụng trình nhân bản giọng nói của TOAN AAS."
 VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI = (
-    "🎙 Tạo voice riêng đang tạm giới hạn\n\n"
-    "Hiện tại tính năng tạo/clone voice riêng chưa sẵn sàng trên nhà cung cấp.\n\n"
-    "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này.\n\n"
-    "Anh/chị có thể dùng giọng nam/nữ mặc định miễn phí trước, hoặc quay lại sau khi TOAN AAS mở được quyền tạo voice riêng."
+    "Voice riêng đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu. "
+    "Anh/chị có thể dùng giọng nữ/nam mặc định miễn phí trước."
 )
 VOICE_CLONE_PROVIDER_NOT_READY_ADMIN_VI = (
     "Tạo giọng riêng chưa sẵn sàng: nhà cung cấp chưa mở quyền clone voice hoặc thiếu adapter upload. "
     "TOAN AAS chưa trừ Xu."
 )
 VOICE_CLONE_PERMISSION_FORBIDDEN_PUBLIC_VI = (
-    "🎙 Tạo voice riêng đang tạm giới hạn\n\n"
-    "Hiện tại tính năng tạo/clone voice riêng chưa sẵn sàng trên nhà cung cấp.\n\n"
-    "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này.\n\n"
-    "Anh/chị có thể dùng giọng nam/nữ mặc định miễn phí trước, hoặc quay lại sau khi TOAN AAS mở được quyền tạo voice riêng."
+    "Voice riêng đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu. "
+    "Anh/chị có thể dùng giọng nữ/nam mặc định miễn phí trước."
 )
 VOICE_ASSET_DETAIL_HIDDEN_METADATA_KEY_RE = re.compile(
     r"(secret|token|api[_-]?key|authorization|bearer|provider[_-]?voice[_-]?id|voice[_-]?id|"
@@ -78100,8 +78130,9 @@ def voice_clone_permission_forbidden_keyboard(lang: str = "vi", product_context:
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎙 Dùng giọng nữ mặc định miễn phí" if is_vi else "🎙 Use default female free", callback_data=cb("voice_default_female"))],
-        [InlineKeyboardButton("🎙 Dùng giọng nam mặc định miễn phí" if is_vi else "🎙 Use default male free", callback_data=cb("voice_default_male"))],
+        [InlineKeyboardButton("🎙 Dùng giọng nữ mặc định" if is_vi else "🎙 Use default female", callback_data=cb("voice_default_female"))],
+        [InlineKeyboardButton("🎙 Dùng giọng nam mặc định" if is_vi else "🎙 Use default male", callback_data=cb("voice_default_male"))],
+        [InlineKeyboardButton("🔁 Thử lại sau" if is_vi else "🔁 Try again later", callback_data=cb("voice_clone"))],
         [InlineKeyboardButton("⬅️ Kho voice" if is_vi else "⬅️ Voice vault", callback_data=cb("voice_profiles"))],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
@@ -79280,8 +79311,8 @@ def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi", product_contex
         [
             (confirm_label, cb(f"voice_clone_confirm:{pid}")),
             ("❌ Hủy" if is_vi else "❌ Cancel", cb("voice_hub")),
-            ("🎙 Dùng giọng nữ mặc định miễn phí" if is_vi else "🎙 Use default female free", cb("voice_default_female")),
-            ("🎙 Dùng giọng nam mặc định miễn phí" if is_vi else "🎙 Use default male free", cb("voice_default_male")),
+            ("🎙 Dùng giọng nữ mặc định" if is_vi else "🎙 Use default female", cb("voice_default_female")),
+            ("🎙 Dùng giọng nam mặc định" if is_vi else "🎙 Use default male", cb("voice_default_male")),
         ],
         nav_back=("⬅️ Quay lại video" if is_vi else "⬅️ Back to video", "vfinal|voice") if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else (("⬅️ Quay lại" if is_vi else "⬅️ Back"), cb(f"voice_clone_back_name:{pid}")),
         lang=lang,
@@ -80162,6 +80193,21 @@ def voice_clone_access_allowed(user_id, readiness: dict | None = None) -> bool:
     )
     return bool(decision.get("allowed"))
 
+def voice_clone_ready_for_processing(readiness: dict | None = None, route_attempts: list | None = None) -> bool:
+    readiness = dict(readiness or get_minimax_voice_clone_readiness())
+    if not readiness.get("ready"):
+        return False
+    if readiness.get("provider_permission_blocked"):
+        return False
+    if route_attempts is not None and not route_attempts:
+        return False
+    if MINIMAX_REQUIRE_SMOKE_PASS:
+        tts_smoke = str(readiness.get("tts_smoke") or "NOT_TESTED")
+        clone_smoke = str(readiness.get("clone_smoke") or "NOT_TESTED")
+        if not provider_status_is_pass(tts_smoke) or not provider_status_is_pass(clone_smoke):
+            return False
+    return True
+
 def voice_clone_provider_route_names(readiness: dict | None = None, *, include_optional: bool = True) -> list[str]:
     readiness = dict(readiness or get_minimax_voice_clone_readiness())
     names = []
@@ -80272,7 +80318,7 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             voice_clone_permission_forbidden_public_text(lang),
             reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
         )
-    if not voice_clone_access_allowed(user_id, readiness):
+    if not voice_clone_access_allowed(user_id, readiness) or not voice_clone_ready_for_processing(readiness, route_attempts):
         if not load_provider_attempt("voice_clone"):
             save_provider_attempt(
                 "voice_clone",
@@ -132339,14 +132385,32 @@ def video_dubbing_effective_mode_enabled(mode: str, public: bool = True) -> bool
     return bool(video_dubbing_configured_readiness(mode, {}, public=public).get("ok"))
 
 def video_translation_provider_available() -> bool:
-    return bool(key4u_subtitle_translation_public_ready() or shopaikey_subtitle_translation_public_ready())
+    return bool(
+        DEEPL_API_KEY
+        or key4u_subtitle_translation_public_ready()
+        or gemini_client
+        or openai_client
+        or shopaikey_subtitle_translation_public_ready()
+    )
 
 def video_translation_provider_configured() -> bool:
-    return bool(key4u_subtitle_translation_configured() or shopaikey_public_chat_fallback_enabled())
+    return bool(
+        DEEPL_API_KEY
+        or key4u_subtitle_translation_configured()
+        or gemini_client
+        or openai_client
+        or shopaikey_public_chat_fallback_enabled()
+    )
 
 def active_translation_provider_label() -> str:
+    if DEEPL_API_KEY:
+        return "deepl"
     if key4u_subtitle_translation_public_ready():
         return "key4u_qwen_mt"
+    if gemini_client:
+        return "gemini"
+    if openai_client:
+        return "openai"
     if shopaikey_subtitle_translation_public_ready():
         return "shopaikey_chat"
     return "missing"
@@ -132540,6 +132604,31 @@ def video_dubbing_asr_missing_guard_keyboard(lang: str = "vi") -> InlineKeyboard
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_type"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def subtitle_translate_failure_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "TOAN AAS could not translate the subtitles right now. No Xu was charged. "
+            "Please retry or download the original subtitles first."
+        )
+    return (
+        "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. "
+        "Anh/chị có thể thử lại hoặc tải phụ đề gốc trước."
+    )
+
+def subtitle_translate_failure_keyboard(lang: str = "vi", target_language: str = "") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    target = str(target_language or "").strip()[:48]
+    retry_callback = f"videodub|language|{target}" if target else "videodub|back_language"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Thử lại" if is_vi else "🔁 Retry", callback_data=retry_callback)],
+        [InlineKeyboardButton("📄 Tải phụ đề gốc" if is_vi else "📄 Download original subtitles", callback_data="videodub|download_original_srt")],
+        [InlineKeyboardButton("🌐 Chọn ngôn ngữ khác" if is_vi else "🌐 Choose another language", callback_data="videodub|back_language")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_language_to_source"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -134574,7 +134663,7 @@ async def execute_video_dubbing_pipeline(
 
 def subtitle_plus_dub_subtitle_text(user_id, state: dict | None = None, *, translated: bool = False) -> str:
     state = dict(state or {})
-    ref = state.get("translated_subtitle_ref") if translated else state.get("subtitle_ref")
+    ref = state.get("translated_subtitle_ref") if translated else (state.get("subtitle_ref") or state.get("source_subtitle_ref"))
     fallback_kind = "translated_subtitle" if translated else "source_subtitle"
     return get_video_dubbing_artifact(user_id, ref or fallback_kind)
 
@@ -134746,7 +134835,10 @@ async def subtitle_plus_dub_translate_current_subtitle(
     missing = set(readiness.get("missing") or [])
     if "maintenance" in missing or "translation" in missing:
         state = set_video_dubbing_pending(user_id, "original_subtitle_ready", processing="0", processing_error="translation_unavailable")
-        await message.reply_text(subtitle_plus_dub_safe_fail_text("translation_unavailable", lang))
+        await message.reply_text(
+            subtitle_translate_failure_text(lang),
+            reply_markup=subtitle_translate_failure_keyboard(lang, target_language),
+        )
         return state
     state = set_video_dubbing_pending(
         user_id,
@@ -134780,7 +134872,10 @@ async def subtitle_plus_dub_translate_current_subtitle(
     except Exception as exc:
         detail = sanitize_log_text(str(exc))[:160]
         state = set_video_dubbing_pending(user_id, "original_subtitle_ready", processing="0", processing_error=detail)
-        await message.reply_text(subtitle_plus_dub_safe_fail_text(detail or "translation_failed", lang))
+        await message.reply_text(
+            subtitle_translate_failure_text(lang),
+            reply_markup=subtitle_translate_failure_keyboard(lang, target_language),
+        )
         return state
     prepared_state = dict(prepared.get("state") or {})
     translated_subtitle = str(prepared.get("output_subtitle") or "").strip()
@@ -134788,7 +134883,10 @@ async def subtitle_plus_dub_translate_current_subtitle(
         translated_subtitle = get_video_dubbing_artifact(user_id, prepared_state.get("translated_subtitle_ref") or "translated_subtitle").strip()
     if not translated_subtitle:
         state = set_video_dubbing_pending(user_id, "original_subtitle_ready", processing="0", processing_error="translation_empty")
-        await message.reply_text(subtitle_plus_dub_safe_fail_text("translation_empty", lang))
+        await message.reply_text(
+            subtitle_translate_failure_text(lang),
+            reply_markup=subtitle_translate_failure_keyboard(lang, target_language),
+        )
         return state
     translated_ref = str(prepared_state.get("translated_subtitle_ref") or "") or set_video_dubbing_artifact(user_id, "translated_subtitle", translated_subtitle)
     segments = list(prepared.get("output_segments") or []) or video_dubbing_segments_from_subtitle(translated_subtitle)
@@ -135114,7 +135212,10 @@ async def video_dubbing_translate_current_subtitle_to_output(
     except Exception as exc:
         detail = sanitize_log_text(str(exc))[:160]
         state = set_video_dubbing_pending(user_id, "language", processing="0", processing_error=detail)
-        await message.reply_text(video_dubbing_asr_failure_text(lang), reply_markup=video_dubbing_asr_failure_keyboard(lang))
+        await message.reply_text(
+            subtitle_translate_failure_text(lang),
+            reply_markup=subtitle_translate_failure_keyboard(lang, target_language),
+        )
         return state
     prepared_state = dict(prepared.get("state") or {})
     translated_subtitle = str(prepared.get("output_subtitle") or "").strip()
@@ -135122,7 +135223,10 @@ async def video_dubbing_translate_current_subtitle_to_output(
         translated_subtitle = get_video_dubbing_artifact(user_id, prepared_state.get("translated_subtitle_ref") or "").strip()
     if not translated_subtitle:
         state = set_video_dubbing_pending(user_id, "language", processing="0", processing_error="translation_empty")
-        await message.reply_text(subtitle_plus_dub_safe_fail_text("translation_empty", lang))
+        await message.reply_text(
+            subtitle_translate_failure_text(lang),
+            reply_markup=subtitle_translate_failure_keyboard(lang, target_language),
+        )
         return state
     translated_ref = str(prepared_state.get("translated_subtitle_ref") or "") or set_video_dubbing_artifact(user_id, "translated_subtitle", translated_subtitle)
     source_ref = str(prepared_state.get("subtitle_ref") or state.get("subtitle_ref") or "")
@@ -136734,6 +136838,9 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
     if action == "back_upload":
         state = set_video_dubbing_pending(uid, "source")
         return await safe_edit_or_send(query, video_dubbing_source_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
+    if action == "download_original_srt":
+        await subtitle_plus_dub_send_subtitle_document(query.message, uid, state, translated=False)
+        return None
     if action == "language_custom":
         if mode not in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
             return await safe_edit_or_send(query, video_dubbing_menu_text(lang, origin), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
