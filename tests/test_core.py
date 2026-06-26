@@ -7378,6 +7378,10 @@ def test_video_regression_v91_callback_chains_restore_planning_flows(monkeypatch
     image_prompt = asyncio.run(press(bot.handle_self_scene_ai_callback, "selfscene|image_guard", uid))
     assert "Prompt ảnh khung chính" in image_prompt["text"]
 
+    public_long_guard = asyncio.run(press(bot.handle_long_video_callback, "longvideo|start", uid))
+    assert "Phim AI nhiều cảnh đang phát triển" in public_long_guard["text"]
+    assert "chưa trừ Xu" in public_long_guard["text"]
+    monkeypatch.setattr(bot, "is_admin_user", lambda check_uid: check_uid == uid)
     asyncio.run(press(bot.handle_long_video_callback, "longvideo|start", uid))
     asyncio.run(press(bot.handle_long_video_callback, "longvideo|topic|sales", uid))
     asyncio.run(press(bot.handle_long_video_callback, "longvideo|topic_choice|1", uid))
