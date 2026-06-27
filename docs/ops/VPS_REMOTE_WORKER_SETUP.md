@@ -210,6 +210,46 @@ Yeu cau:
 - `--dry-run --once` khong claim job, khong complete job, khong xu ly video that.
 - Neu token sai, log chi duoc co status/reason an toan, khong co full token.
 
+## G2. W4 safe canary end-to-end
+
+W4 chi kiem tra duong claim -> heartbeat -> upload/complete bang job canary admin. Khong bat worker xu ly video khach that, khong goi provider, khong tru Xu.
+
+Tren Railway/Telegram admin:
+
+```text
+/runtime
+/remote_worker_status
+/tool_test_remote_worker_ping --no-charge
+/remote_worker_canary --no-charge
+```
+
+Lenh canary se tra ve ma job dang `RW-CANARY-<id>`.
+
+Tren VPS:
+
+```bash
+cd /opt/toanaas/bot
+source .venv/bin/activate
+python remote_worker.py --doctor
+python remote_worker.py --ping
+python remote_worker.py --canary --once
+```
+
+Quay lai Telegram admin:
+
+```text
+/remote_worker_canary_status RW-CANARY-<id>
+/remote_worker_status
+```
+
+Yeu cau:
+
+- Canary status la `completed`.
+- Result uploaded la `yes`.
+- Sent to admin co the la `yes` neu Telegram app san sang, hoac `no` neu chi dang test API/server.
+- Production jobs enabled van la `no` tru khi owner da cau hinh rieng o phase sau.
+- Neu fail, xem log systemd/VPS voi cac ly do an toan nhu `ffmpeg_missing`, `upload failed`, `HTTP 401/403`, hoac network error. Khong paste token vao log chia se.
+
 ## H. Safety
 
 - Do not paste token into GitHub.
@@ -219,8 +259,10 @@ Yeu cau:
 - Do not start real worker before B14.5 video flow is fixed.
 - Do not route production jobs to VPS until B14.5 video flow/queue/status is stable.
 - W3 dry-run only verifies handshake; it must not process real user video.
+- W4 canary only claims `remote_worker_canary` jobs; it must not process real user video.
 - First run only after `/tool_test_remote_worker_api --fake-job --no-charge` passes.
 - Staging ping can run first with `/tool_test_remote_worker_ping --no-charge`.
+- Safe canary can run manually with `/remote_worker_canary --no-charge` and `python remote_worker.py --canary --once`.
 - VPS khong can PayOS ENV, wallet ENV, Telegram bot token, webhook secret, hay quyen doc SQLite.
 - Neu `/runtime` khong dung build, dung worker.
 - Neu public video queue/status broken, dung worker.

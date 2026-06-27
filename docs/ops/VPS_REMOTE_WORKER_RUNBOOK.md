@@ -34,6 +34,21 @@ python remote_worker.py --ping
 python remote_worker.py --dry-run --once
 ```
 
+- Chay W4 canary thu cong truoc khi nghi toi production worker:
+
+```text
+/remote_worker_canary --no-charge
+```
+
+```bash
+python remote_worker.py --canary --once
+```
+
+```text
+/remote_worker_canary_status RW-CANARY-<id>
+/remote_worker_status
+```
+
 - Chay Telegram admin dry-run:
 
 ```text
@@ -72,6 +87,48 @@ Only after all pass:
 - `sudo systemctl start toanaas-worker`
 - Still do not route production jobs until B14.5 video flow/queue/status is stable.
 
+## W4 safe canary checklist
+
+W4 la canary end-to-end an toan giua Railway va VPS. No chi tao job `remote_worker_canary`, sinh MP4 nho tai VPS bang ffmpeg, upload ve Railway, va bao status/admin. No khong claim video khach that, khong goi ShopAIKey/Key4U/provider, khong tru/hoan Xu.
+
+On Railway/Telegram:
+
+```text
+/runtime
+/remote_worker_status
+/tool_test_remote_worker_ping --no-charge
+/remote_worker_canary --no-charge
+```
+
+On VPS:
+
+```bash
+source .venv/bin/activate
+python remote_worker.py --doctor
+python remote_worker.py --ping
+python remote_worker.py --canary --once
+```
+
+Back on Telegram:
+
+```text
+/remote_worker_canary_status RW-CANARY-<id>
+/remote_worker_status
+```
+
+Can thay:
+
+- `status=completed`.
+- `result_uploaded=yes`.
+- `Production jobs enabled=no` tru khi owner da cau hinh rieng.
+- Neu Telegram app san sang, admin co the nhan file canary MP4.
+
+Systemd staging:
+
+- Khong start production service trong W4.
+- Co the chay one-shot canary thu cong truoc.
+- W5 moi duoc them controlled production canary neu owner approve.
+
 ## Daily check
 
 ```bash
@@ -107,6 +164,7 @@ Kiem tra:
 - `/remote_worker_status` pass va khong hien token/path nhay cam.
 - `/tool_test_remote_worker_ping --no-charge` pass truoc khi fake job test.
 - `/tool_test_remote_worker_api --fake-job --no-charge` pass truoc khi worker that xu ly job.
+- `/remote_worker_canary --no-charge` va `python remote_worker.py --canary --once` pass truoc moi rollout production.
 
 Neu deploy thay doi worker contract, restart VPS worker:
 
@@ -222,8 +280,9 @@ sudo systemctl stop toanaas-worker
 Sau do rotate token hoac sua `/etc/toanaas-worker.env`.
 
 5. Neu worker lap loi ket noi Railway, dung service va kiem tra `BOT_API_URL`, Railway health, firewall/DNS.
-6. Neu worker dang claim job nhung khong heartbeat, stop service va de Railway lease het han/retry theo queue policy. Khong sua SQLite truc tiep tu VPS.
-7. Khi da sua xong:
+6. Neu canary fail, xem `/remote_worker_canary_status RW-CANARY-<id>` truoc. Ly do an toan thuong gap: `ffmpeg_missing`, bad token / `HTTP 401` / `HTTP 403`, upload failed, job lease expired, hoac no canary job.
+7. Neu worker dang claim job nhung khong heartbeat, stop service va de Railway lease het han/retry theo queue policy. Khong sua SQLite truc tiep tu VPS.
+8. Khi da sua xong:
 
 ```bash
 sudo systemctl restart toanaas-worker
