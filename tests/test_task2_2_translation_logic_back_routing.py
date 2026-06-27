@@ -168,9 +168,11 @@ def test_auto_dubbing_target_language_voice_speed():
 
 def test_auto_dubbing_tts_reads_transcript():
     source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
-    assert 'output_text = str(prepared.get("output_script")' in source
-    assert "synthesize_dub_segment_chunks" in source
-    assert "output_segments" in source
+    service_source = inspect.getsource(bot.subtitle_dub_product_pipeline.process_subtitle_dub_job)
+    assert "subtitle_dub_product_pipeline.process_subtitle_dub_job" in source
+    assert 'output_text = str(prepared.get("output_script")' in service_source
+    assert "synthesize_segments" in service_source
+    assert "output_segments" in service_source
 
 
 def test_auto_dubbing_preview_back_invoice():
