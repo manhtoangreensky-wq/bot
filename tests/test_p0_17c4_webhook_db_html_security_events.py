@@ -253,7 +253,7 @@ def test_html_escape_for_admin_security_surfaces(monkeypatch, tmp_path):
 
 
 def test_c4_admin_buttons_public_version_and_report_present():
-    rows = _keyboard_labels(bot.menu_nav_keyboard("admin", True))
+    rows = _keyboard_labels(bot.admin_module_keyboard("security_db"))
     flat = [label for row in rows for label in row]
     report = Path(bot.__file__).resolve().parent / "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md"
 
@@ -282,6 +282,8 @@ def test_p0_17c4_static_guard_no_unrelated_files_touched():
     allowed = {
         "bot.py",
         "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md",
+        "tests/test_core.py",
+        "tests/test_p0_17a1_admin_control_center_handbook.py",
         "tests/test_p0_4_hard_reset_audio_video_flow.py",
         "tests/test_p0_5_audio_video_addon_button_logic.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",

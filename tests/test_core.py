@@ -352,17 +352,18 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert "🧠 Operator" not in button_texts
     assert "⚙️ Hệ Thống" not in button_texts
     admin_nav_labels = [button.text for row in bot.menu_nav_keyboard("admin", True).inline_keyboard for button in row]
-    assert "🧠 Operator" in admin_nav_labels
-    assert "⚙️ Hệ thống" in admin_nav_labels
+    assert "👤 User / Xu" in admin_nav_labels
+    assert "💳 Bill / PayOS" in admin_nav_labels
+    assert "🖥 Hệ thống" in admin_nav_labels
     assert "🎁 Gói / Combo" in admin_nav_labels
-    assert "🧊 Freeze / Queue" in admin_nav_labels
-    assert "📊 Báo cáo tổng" in admin_nav_labels
-    assert "🧪 Smoke Test" in admin_nav_labels
-    assert "🤖 Provider" in admin_nav_labels
+    assert "🧊 Queue / Freeze" in admin_nav_labels
+    assert "🛡 Bảo mật / DB" in admin_nav_labels
+    assert "🤖 Provider / Worker" in admin_nav_labels
+    assert "📘 Hướng dẫn Admin" in admin_nav_labels
     admin_nav_rows = [[button.text for button in row] for row in bot.menu_nav_keyboard("admin", True).inline_keyboard]
-    assert ["💰 Tài chính", "🧊 Freeze / Queue"] in admin_nav_rows
-    assert ["🤖 Provider", "📣 Marketing tự động"] in admin_nav_rows
-    assert ["⬅️ Quay lại", "🏠 Menu chính"] in admin_nav_rows
+    assert ["🎁 Gói / Combo", "🧊 Queue / Freeze"] in admin_nav_rows
+    assert ["🤖 Provider / Worker", "💰 Tài chính"] in admin_nav_rows
+    assert ["🏠 Menu chính"] in admin_nav_rows
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
     for label in ["📊 Tổng quan", "💵 Doanh thu", "📅 Doanh thu tháng", "📉 Chi phí tháng", "📈 Lãi / Lỗ", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📚 Hướng dẫn lệnh"]:
         assert label in finance_labels
@@ -406,6 +407,15 @@ def test_admin_menu_contains_grouped_operator_and_system():
         for button in row
         if button.callback_data
     )
+    admin_module_text = "\n".join([
+        bot.admin_module_page_text("users"),
+        bot.admin_module_page_text("billing"),
+        bot.admin_module_page_text("packages"),
+        bot.admin_module_page_text("queue"),
+        bot.admin_module_page_text("security_db"),
+        bot.admin_module_page_text("system_ops"),
+        bot.admin_module_page_text("provider_worker"),
+    ])
     for command in [
         "/add",
         "/setvip",
@@ -435,11 +445,11 @@ def test_admin_menu_contains_grouped_operator_and_system():
         "/provider_freeze",
         "/provider_unfreeze",
     ]:
-        assert command in admin_menu
-    assert "cộng Xu trực tiếp" in admin_menu
-    assert "đối soát tiền thật" in admin_menu
-    assert "kiểm tra job video" in admin_menu
-    assert "hoàn Xu/lượt thủ công" in admin_menu
+        assert command in admin_module_text
+    assert "cộng Xu thủ công" in admin_module_text
+    assert "đối soát tiền thật" in admin_module_text
+    assert "kiểm tra job video" in admin_module_text
+    assert "hoàn Xu/lượt thủ công" in admin_module_text
     system_menu = bot.menu_text_system()
     assert "/data_status" in system_menu and "persistent volume" in system_menu
     operator_menu = bot.menu_text_operator(True)
@@ -804,8 +814,8 @@ def test_video_maintenance_guard_low_credit_lock_refund_and_stale(monkeypatch):
         bot.set_provider_freeze_state("shopaikey_video", False, "manual_unfreeze", "ok", "test")
         bot.record_provider_error("shopaikey", "video", "NO_CHANNEL", "no available channel")
         assert int(bot.provider_freeze_row("shopaikey_video").get("is_frozen") or 0) == 1
-        assert "/queue_status" in bot.menu_text_admin()
-        assert "/refund_job" in bot.menu_text_admin()
+        assert "/queue_status" in bot.admin_module_page_text("queue")
+        assert "/refund_job" in bot.admin_module_page_text("queue")
         bot.set_provider_freeze_state("shopaikey_video", False, "manual_unfreeze", "ok", "test")
 
         bot.get_user("lock_user", "Lock user")
@@ -3292,7 +3302,7 @@ def test_support_ticket_menu_admin_registry_and_no_auto_refund():
     source = bot_source_text()
     admin_buttons = [
         button.callback_data
-        for row in bot.menu_nav_keyboard("admin", True).inline_keyboard
+        for row in bot.admin_module_keyboard("support").inline_keyboard
         for button in row
         if button.callback_data
     ]
@@ -7760,7 +7770,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert "confirm_subtitle_translate" in dubbing_callback_source
     assert "confirm_subtitle_plus_dub" in dubbing_callback_source
 
-    admin_labels = [button.text for row in bot.menu_nav_keyboard("admin", True).inline_keyboard for button in row]
+    admin_labels = [button.text for row in bot.admin_module_keyboard("support").inline_keyboard for button in row]
     assert "📣 Marketing tự động" in admin_labels
     public_admin_labels = [button.text for row in bot.menu_nav_keyboard("admin", False).inline_keyboard for button in row]
     assert "📣 Marketing tự động" not in public_admin_labels
@@ -8442,7 +8452,7 @@ def test_global_ux_polish_v6_keyboard_navigation_and_storage_policy():
     assert callbacks(bot.image_prompt_ratio_keyboard("vi"))[-1] == ["imgtool|prompt_back_style", "menu|main"]
     assert callbacks(bot.image_prompt_output_keyboard("vi"))[-1] == ["imgtool|prompt_back_ratio", "menu|main"]
     assert callbacks(bot.main_docs_keyboard("vi"))[-1] == ["menu|main_memory", "menu|main"]
-    assert callbacks(bot.menu_nav_keyboard("admin", True))[-1] == ["menu|main", "menu|main"]
+    assert callbacks(bot.menu_nav_keyboard("admin", True))[-1] == ["menu|main"]
     assert callbacks(bot.freeze_queue_keyboard())[-1] == ["menu|admin", "menu|main"]
     assert callbacks(bot.smoke_test_menu_keyboard())[-1] == ["menu|admin", "menu|main"]
 

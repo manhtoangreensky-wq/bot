@@ -54511,17 +54511,7 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
     elif section == "billing":
         rows.append([InlineKeyboardButton("💳 Cú pháp /naptien", callback_data="menu|hint_naptien"), InlineKeyboardButton("👤 Cú pháp /profile", callback_data="menu|hint_profile")])
     elif section == "admin" and is_admin:
-        rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
-        rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_packages")])
-        rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")])
-        rows.append([InlineKeyboardButton("🛡 Rủi ro nạp tiền", callback_data="menu|payos_risk")])
-        rows.append([InlineKeyboardButton("🗄 DB trạng thái", callback_data="menu|admin_db_status"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db")])
-        rows.append([InlineKeyboardButton("🛡 Nhật ký bảo mật", callback_data="menu|admin_security_log")])
-        rows.append([InlineKeyboardButton("📊 Báo cáo tổng", callback_data="menu|admin_overview"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")])
-        rows.append([InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider"), InlineKeyboardButton("📣 Marketing tự động", callback_data="marketing|start")])
-        rows.append([InlineKeyboardButton("🎧 CSKH / Ticket", callback_data="ticket|admin")])
-        rows.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
-        return InlineKeyboardMarkup(rows)
+        return admin_control_center_keyboard()
     elif section == "finance" and is_admin:
         rows.append([InlineKeyboardButton("📊 Quản trị", callback_data="menu|admin"), InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing")])
     elif section == "freeze_queue" and is_admin:
@@ -54822,43 +54812,9 @@ def menu_text_operator(is_admin: bool) -> str:
 
 def menu_text_admin() -> str:
     return (
-        "📊 <b>Quản Trị</b>\n\n"
-        "Màn này là bảng điều hướng nhanh cho admin, giữ ngắn để Telegram mở ổn định. "
-        "Bấm các nút bên dưới để vào nhóm chi tiết.\n\n"
-        "<b>A. User & Xu</b>\n"
-        "• <code>/add &lt;ID&gt; &lt;Xu&gt;</code> — cộng Xu trực tiếp khi cần hỗ trợ\n"
-        "• <code>/deduct &lt;ID&gt; &lt;Xu&gt;</code>, <code>/settier</code>, <code>/setvip</code>\n"
-        "• <code>/profile_user</code>, <code>/ledger_user</code>, <code>/member_user</code>\n\n"
-        "<b>B. Bill / Nạp tiền</b>\n"
-        "• <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code> — chỉ xử lý sau khi đối soát tiền thật\n"
-        "• <code>/payos_test_plan</code>, <code>/mark_payos_test</code>, <code>/fx_price_test</code>\n\n"
-        "• <code>/billing_bridge_status</code>, <code>/billing_bridge_test topup 10000 dry_run=1</code>, <code>/payos_confirm_webhook</code>\n\n"
-        "• <code>/payos_risk</code>, <code>/payos_risk_user</code>, <code>/payos_risk_block</code>, <code>/payos_risk_unblock</code>, <code>/payos_risk_cancel</code> — quản trị rủi ro nạp tiền PayOS\n\n"
-        "<b>C. Gói / Combo</b>\n"
-        "• <code>/package_catalog</code>, <code>/grant_combo</code>, <code>/grant_monthly</code>, <code>/grant_storage</code>\n"
-        "• <code>/user_packages</code>, <code>/adjust_package</code>, <code>/revoke_package</code>\n\n"
-        "<b>D. Trạng thái hệ thống</b>\n"
-        "• <code>/runtime</code>, <code>/data_status</code>, <code>/storage_status</code>, <code>/storage_user</code>\n"
-        "• <code>/db_status</code>, <code>/backup_db_now</code>, <code>/security_log</code> — DB/backup và nhật ký bảo mật an toàn\n"
-        "• <code>/cleanup_temp_files</code>, <code>/providers</code>, <code>/dashboard</code>, <code>/stats</code>, <code>/sales_ready</code>\n\n"
-        "<b>E. ShopAIKey / Provider</b>\n"
-        "• <code>/shopaikey_status</code>, <code>/shopaikey_usage</code>, <code>/shopaikey_video_job</code> — kiểm tra job video\n"
-        "• <code>/tool_test_shopaikey</code>, <code>/tool_test_shopaikey_image</code>, <code>/tool_test_shopaikey_video</code>, <code>/tool_test_shopaikey_tts</code>\n"
-        "• <code>/key4u_status</code>, <code>/key4u_usage</code>, <code>/key4u_set_manual_balance</code> — Key4U parallel hub/admin smoke\n"
-        "• <code>/tool_test_key4u_chat</code>, <code>/tool_test_key4u_vision</code>, <code>/tool_test_key4u_image_edit</code>, <code>/tool_test_key4u_video</code>, <code>/tool_test_key4u_video_model</code>, <code>/key4u_video_job</code>\n"
-        "• <code>/tool_test_key4u_tts</code>, <code>/tool_test_key4u_stt</code>, <code>/tool_test_key4u_suno</code>, <code>/key4u_suno_job</code>, <code>/tool_test_key4u_rerank</code>\n"
-        "• <code>/tool_test_asr</code>, <code>/tool_test_translate</code>, <code>/tool_test_video_subtitle</code>, <code>/tool_test_video_dub</code>, <code>/tool_test_subtitle_plus_dub</code>\n\n"
-        "<b>F. Giá / Sẵn sàng bán</b>\n"
-        "• <code>/banggia</code>, <code>/video_price_test</code>, <code>/pricing_audit</code>, <code>/costs</code>, <code>/sales_ready</code>\n\n"
-        "<b>G. Tài chính nội bộ</b>\n"
-        "• <code>/finance_dashboard</code>, <code>/revenue_report</code>, <code>/expense_report</code>, <code>/profit_report</code>\n"
-        "• <code>/expense_add</code>, <code>/expense_add_pre</code>, <code>/finance_export</code>\n\n"
-        "<b>H. Maintenance / Freeze / Refund / Queue</b>\n"
-        "• <code>/maintenance_status</code>, <code>/freeze_status</code>, <code>/maintenance_on</code>, <code>/maintenance_off</code>\n"
-        "• <code>/freeze_video</code>, <code>/unfreeze_video</code>, <code>/queue_status</code>, <code>/job_status</code>\n"
-        "• <code>/refund_job</code> — hoàn Xu/lượt thủ công; <code>/clear_job_lock</code>, <code>/freeze_tools</code>, <code>/unfreeze_tools</code>\n"
-        "• <code>/provider_freeze</code>, <code>/provider_unfreeze</code>\n\n"
-        "<b>I. Góp ý / Admin notes</b>\n• <code>/admin_gopy</code>"
+        "📊 <b>Quản trị TOAN AAS</b>\n\n"
+        "Đây là bảng điều khiển nội bộ. Chọn từng khối bên dưới để xem hướng dẫn, thao tác nhanh và lệnh chi tiết. "
+        "Các thao tác nạp tiền, hoàn Xu, khóa hệ thống và backup DB chỉ dành cho người có quyền."
     )
 
 def menu_text_system() -> str:
@@ -64100,6 +64056,18 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await query.answer("Không gửi lại được file đính kèm.", show_alert=True)
         return
     return await query.answer("Thao tác ticket chưa được hỗ trợ.", show_alert=True)
+
+async def handle_admin_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin_user(query.from_user.id):
+        return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    kind = (query.data.split("|", 1)[1] if "|" in query.data else "payment").strip()
+    return await safe_edit_query_message(
+        query,
+        admin_handbook_section_text(kind),
+        reply_markup=admin_handbook_section_keyboard(kind),
+    )
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -131867,12 +131835,478 @@ def admin_packages_help_text(kind: str) -> str:
     }
     return pages.get(kind, admin_packages_text())
 
+def admin_control_center_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("👤 User / Xu", callback_data="menu|admin_users"), InlineKeyboardButton("💳 Bill / PayOS", callback_data="menu|admin_billing")],
+        [InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_packages"), InlineKeyboardButton("🧊 Queue / Freeze", callback_data="menu|admin_queue")],
+        [InlineKeyboardButton("🛡 Bảo mật / DB", callback_data="menu|admin_security_db"), InlineKeyboardButton("🖥 Hệ thống", callback_data="menu|admin_system_ops")],
+        [InlineKeyboardButton("🤖 Provider / Worker", callback_data="menu|admin_provider_worker"), InlineKeyboardButton("💰 Tài chính", callback_data="menu|admin_finance")],
+        [InlineKeyboardButton("🎧 CSKH / Góp ý", callback_data="menu|admin_support"), InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+ADMIN_CONTROL_MODULES = {
+    "users": {
+        "title": "👤 User / Xu",
+        "guide": "users",
+        "purpose": "Dùng để xem hồ sơ user, số dư Xu, lịch sử giao dịch và hỗ trợ cộng/trừ Xu thủ công khi cần.",
+        "when": "Dùng khi CSKH cần tra user, kiểm tra ledger, chỉnh hạng hoặc hỗ trợ cộng/trừ Xu có lý do rõ.",
+        "buttons": [
+            [("🔎 Tra user", "admin_help|users"), ("📒 Ledger user", "admin_help|users")],
+            [("➕ Cộng Xu", "admin_help|xu"), ("➖ Trừ Xu", "admin_help|xu")],
+            [("⭐ Set VIP/Tier", "admin_help|users")],
+        ],
+        "commands": [
+            ("/profile_user <ID>", "xem hồ sơ user"),
+            ("/ledger_user <ID>", "xem lịch sử Xu/giao dịch"),
+            ("/add <ID> <Xu>", "cộng Xu thủ công"),
+            ("/deduct <ID> <Xu>", "trừ Xu thủ công"),
+            ("/settier <ID> <tier>", "set hạng"),
+            ("/setvip <ID>", "set VIP nếu còn dùng"),
+            ("/member_user <ID>", "xem trạng thái thành viên"),
+        ],
+        "safety": [
+            "Chỉ cộng/trừ Xu khi có lý do rõ.",
+            "Không dùng /add để thay thế PayOS tự động nếu chưa đối soát.",
+            "Mọi thao tác cộng/trừ nên ghi chú/audit nếu hệ thống hỗ trợ.",
+        ],
+    },
+    "billing": {
+        "title": "💳 Bill / PayOS",
+        "guide": "payment",
+        "purpose": "Dùng để kiểm tra giao dịch nạp tiền, xử lý bill thủ công, theo dõi PayOS và đối soát khi có lỗi thanh toán.",
+        "when": "Dùng khi có bill chờ, PayOS cần kiểm tra, user báo chưa cộng Xu hoặc cần review rủi ro nạp tiền.",
+        "buttons": [
+            [("⏳ Bill chờ duyệt", "menu|admin_billing_pending"), ("✅ Duyệt bill", "menu|admin_billing_duyet")],
+            [("❌ Từ chối bill", "menu|admin_billing_tuchoi"), ("🧪 Kế hoạch test PayOS", "menu|admin_billing_payos")],
+            [("🛡 Rủi ro nạp tiền", "menu|payos_risk")],
+        ],
+        "commands": [
+            ("/pending", "xem bill chờ"),
+            ("/duyet <mã/ID>", "duyệt sau khi đối soát tiền thật"),
+            ("/tuchoi <mã/ID>", "từ chối bill"),
+            ("/payos_test_plan", "hướng dẫn test PayOS"),
+            ("/mark_payos_test", "đánh dấu đơn test"),
+            ("/payos_confirm_webhook", "kiểm tra webhook PayOS"),
+            ("/billing_bridge_status", "trạng thái bridge billing"),
+            ("/payos_risk", "mở khu rủi ro PayOS"),
+            ("/payos_risk_user <ID>", "xem rủi ro user"),
+            ("/payos_risk_block <ID>", "khóa rủi ro"),
+            ("/payos_risk_unblock <ID>", "mở khóa rủi ro"),
+            ("/payos_risk_cancel <order>", "hủy đơn nghi ngờ"),
+        ],
+        "safety": [
+            "Không duyệt bill nếu chưa đối soát tiền thật.",
+            "Không sửa core PayOS trong module này.",
+            "Không hiển thị checksum/token/bank raw data cho public.",
+        ],
+    },
+    "packages": {
+        "title": "🎁 Gói / Combo",
+        "guide": "packages",
+        "purpose": "Dùng để xem, cấp, chỉnh hoặc thu hồi gói dịch vụ/combo/tháng/lưu trữ cho user.",
+        "when": "Dùng khi cần hỗ trợ gói, combo, monthly plan, storage hoặc rà soát quyền lợi hiện có của user.",
+        "buttons": [
+            [("📦 Catalog gói", "menu|admin_packages_catalog"), ("🎁 Cấp combo", "menu|admin_packages_grant_combo")],
+            [("📅 Cấp tháng", "menu|admin_packages_grant_monthly"), ("💾 Cấp lưu trữ", "admin_help|packages")],
+            [("👤 Gói của user", "menu|admin_packages_user")],
+        ],
+        "commands": [
+            ("/package_catalog", "xem danh mục gói"),
+            ("/grant_combo <ID> <combo>", "cấp combo"),
+            ("/grant_monthly <ID> <gói>", "cấp gói tháng"),
+            ("/grant_storage <ID> <dung lượng>", "cấp storage"),
+            ("/user_packages <ID>", "xem gói user"),
+            ("/adjust_package <ID> ...", "chỉnh gói"),
+            ("/revoke_package <ID> ...", "thu hồi gói"),
+        ],
+        "safety": [
+            "Chỉ cấp gói khi có giao dịch/hỗ trợ rõ ràng.",
+            "Gói thu hồi phải cẩn thận tránh ảnh hưởng user đang dùng.",
+        ],
+    },
+    "queue": {
+        "title": "🧊 Queue / Freeze / Refund",
+        "guide": "freeze",
+        "purpose": "Dùng để kiểm tra hàng chờ job, đóng/mở công cụ, hoàn Xu/lượt khi job lỗi, và xử lý lock job.",
+        "when": "Dùng khi provider lỗi, job kẹt, cần bảo trì, cần hoàn Xu/lượt hoặc cần kiểm tra queue trước khi mở lại public.",
+        "buttons": [
+            [("📊 Queue status", "menu|freeze_queue_status"), ("🔎 Job status", "admin_help|refund")],
+            [("🧊 Freeze tools", "menu|freeze_queue_help"), ("🔓 Unfreeze tools", "menu|admin_confirm_unfreeze_tool")],
+            [("🎬 Freeze video", "menu|admin_confirm_freeze_video"), ("💸 Refund job", "menu|admin_confirm_refund_job")],
+        ],
+        "commands": [
+            ("/queue_status", "xem hàng chờ"),
+            ("/job_status <job_id>", "xem job"),
+            ("/freeze_video", "khóa video"),
+            ("/unfreeze_video", "mở video"),
+            ("/freeze_tools", "khóa nhóm công cụ"),
+            ("/unfreeze_tools", "mở nhóm công cụ"),
+            ("/provider_freeze", "khóa provider"),
+            ("/provider_unfreeze", "mở provider"),
+            ("/refund_job <job_id>", "hoàn Xu/lượt thủ công"),
+            ("/clear_job_lock <job_id>", "xóa lock job"),
+            ("/maintenance_status", "trạng thái bảo trì"),
+            ("/freeze_status", "trạng thái freeze"),
+            ("/maintenance_on", "bật bảo trì"),
+            ("/maintenance_off", "tắt bảo trì"),
+        ],
+        "safety": [
+            "Freeze là công cụ chống cháy, không dùng bừa.",
+            "Refund phải kiểm tra job/user trước.",
+            "Maintenance ảnh hưởng public user, cần thông báo nếu bán thật.",
+        ],
+    },
+    "security_db": {
+        "title": "🛡 Bảo mật / DB",
+        "guide": "backup",
+        "purpose": "Dùng để kiểm tra DB, backup SQLite, nhật ký bảo mật, webhook secret, và dấu hiệu file secret/backup nằm sai vị trí.",
+        "when": "Dùng trước/sau deploy, trước khi bán, khi cần backup DB hoặc khi nghi ngờ webhook/security event bất thường.",
+        "buttons": [
+            [("🗄 DB trạng thái", "menu|admin_db_status"), ("💾 Sao lưu DB", "menu|admin_backup_db")],
+            [("🛡 Nhật ký bảo mật", "menu|admin_security_log"), ("🧬 Runtime", "menu|system_runtime_help")],
+            [("✅ Sales ready", "menu|smoke_sales_ready")],
+        ],
+        "commands": [
+            ("/db_status", "kiểm tra DB, bảng quan trọng, backup, file risk"),
+            ("/backup_db_now", "tạo backup DB an toàn"),
+            ("/security_log", "xem nhật ký bảo mật gần đây"),
+            ("/runtime", "kiểm tra build/deploy/webhook"),
+            ("/data_status", "kiểm tra persistent DB"),
+            ("/storage_status", "kiểm tra storage"),
+            ("/sales_ready", "checklist trước khi bán"),
+        ],
+        "safety": [
+            "Không gửi backup DB cho người không có quyền.",
+            "Không public file backup.",
+            "Không lộ token/secret/full path.",
+            "Nếu webhook secret chưa configured/enforced thì chưa nên bán.",
+        ],
+    },
+    "system_ops": {
+        "title": "🖥 Hệ thống",
+        "guide": "runtime",
+        "purpose": "Dùng để kiểm tra runtime, deployment, webhook Telegram, provider tổng quan, cleanup file tạm và trạng thái sẵn sàng vận hành.",
+        "when": "Dùng sau deploy, khi nghi ngờ bot instance cũ giữ webhook, khi cần cleanup hoặc khi kiểm tra dashboard hệ thống.",
+        "buttons": [
+            [("🧬 Runtime", "menu|system_runtime_help"), ("📡 Telegram status", "admin_help|runtime")],
+            [("🔁 Telegram takeover", "admin_help|runtime"), ("🧹 Cleanup temp", "admin_help|runtime")],
+            [("📊 Dashboard", "menu|admin_overview")],
+        ],
+        "commands": [
+            ("/runtime", "build/deploy/current webhook owner"),
+            ("/telegram_status", "trạng thái Telegram webhook/polling"),
+            ("/telegram_takeover", "xử lý bot instance cũ giành webhook"),
+            ("/cleanup_temp_files", "dọn file tạm"),
+            ("/providers", "trạng thái provider"),
+            ("/dashboard", "dashboard tổng quan"),
+            ("/stats", "thống kê"),
+            ("/costs", "chi phí nội bộ nếu có"),
+        ],
+        "safety": [
+            "Không chạy takeover nếu không hiểu deployment hiện tại.",
+            "Cleanup phải tránh xóa file job đang xử lý.",
+        ],
+    },
+    "provider_worker": {
+        "title": "🤖 Provider / Worker",
+        "guide": "provider",
+        "purpose": "Dùng để kiểm tra ShopAIKey, Key4U, ASR/TTS/STT/video/music provider, worker/video job và các smoke test nội bộ.",
+        "when": "Dùng khi provider lỗi, cần smoke test nội bộ, cần kiểm tra video job hoặc worker trước khi mở public.",
+        "buttons": [
+            [("🤖 Provider status", "menu|admin_provider_status"), ("🧪 Smoke Test", "menu|smoke_test")],
+            [("🎬 Video job", "menu|admin_provider_routes"), ("🔊 TTS/Voice test", "admin_help|provider")],
+            [("📝 ASR/Sub/Dub test", "admin_help|provider")],
+        ],
+        "commands": [
+            ("/shopaikey_status", "ShopAIKey status"),
+            ("/shopaikey_usage", "ShopAIKey usage"),
+            ("/shopaikey_video_job", "kiểm tra job video"),
+            ("/tool_test_shopaikey", "smoke ShopAIKey"),
+            ("/tool_test_shopaikey_image", "smoke image"),
+            ("/tool_test_shopaikey_video", "smoke video"),
+            ("/tool_test_shopaikey_tts", "smoke TTS"),
+            ("/key4u_status", "Key4U status"),
+            ("/key4u_usage", "Key4U usage"),
+            ("/key4u_set_manual_balance", "ghi chú số dư Key4U"),
+            ("/tool_test_key4u_chat", "smoke chat"),
+            ("/tool_test_key4u_vision", "smoke vision"),
+            ("/tool_test_key4u_image_edit", "smoke image edit"),
+            ("/tool_test_key4u_video", "smoke video"),
+            ("/tool_test_key4u_video_model", "smoke video model"),
+            ("/key4u_video_job", "kiểm tra video job"),
+            ("/tool_test_key4u_tts", "smoke TTS"),
+            ("/tool_test_key4u_stt", "smoke STT"),
+            ("/tool_test_key4u_suno", "smoke Suno"),
+            ("/key4u_suno_job", "kiểm tra Suno job"),
+            ("/tool_test_key4u_rerank", "smoke rerank"),
+            ("/tool_test_asr", "smoke ASR"),
+            ("/tool_test_translate", "smoke translate"),
+            ("/tool_test_video_subtitle", "smoke subtitle"),
+            ("/tool_test_video_dub", "smoke dub"),
+            ("/tool_test_subtitle_plus_dub", "smoke subtitle plus dub"),
+        ],
+        "safety": [
+            "Smoke test có thể tốn provider cost nếu không fake/no-charge.",
+            "Không hiện provider raw error/API key cho public.",
+            "Worker/VPS remote bridge để task riêng, không làm trong task này nếu chưa có W1.",
+        ],
+    },
+    "finance": {
+        "title": "💰 Tài chính nội bộ",
+        "guide": "finance",
+        "purpose": "Dùng để xem doanh thu, chi phí, lợi nhuận, thêm chi phí và xuất báo cáo tài chính nội bộ.",
+        "when": "Dùng khi cần đối soát doanh thu/chi phí, chuẩn bị báo cáo hoặc hỗ trợ kế toán nội bộ.",
+        "buttons": [
+            [("📊 Tổng quan", "menu|finance_overview"), ("💵 Doanh thu", "menu|finance_revenue")],
+            [("🧾 Chi phí", "menu|finance_expense_month"), ("📈 Lợi nhuận", "menu|finance_profit")],
+            [("➕ Thêm chi phí", "menu|finance_add_expense"), ("📤 Xuất báo cáo", "menu|finance_export")],
+        ],
+        "commands": [
+            ("/finance_dashboard", "tổng quan tài chính"),
+            ("/revenue_report", "báo cáo doanh thu"),
+            ("/expense_report", "báo cáo chi phí"),
+            ("/profit_report", "báo cáo lãi/lỗ"),
+            ("/expense_add", "thêm chi phí"),
+            ("/expense_add_pre", "thêm chi phí nhanh"),
+            ("/finance_export", "xuất báo cáo"),
+        ],
+        "safety": [
+            "Số liệu nội bộ, không gửi cho public.",
+            "Khi thuê nhân viên, chỉ người phụ trách tài chính mới nên dùng.",
+        ],
+    },
+    "support": {
+        "title": "🎧 CSKH / Góp ý / Ticket",
+        "guide": "support",
+        "purpose": "Dùng để xem góp ý, ticket, phản hồi user, ghi chú vận hành và theo dõi việc cần xử lý.",
+        "when": "Dùng khi có user cần hỗ trợ, cần xem ticket, hoặc cần ghi chú vận hành sau ca trực.",
+        "buttons": [
+            [("🎧 Ticket admin", "ticket|admin"), ("📝 Góp ý admin", "admin_help|support")],
+            [("📌 Admin notes", "admin_help|support"), ("📣 Marketing tự động", "marketing|start")],
+        ],
+        "commands": [
+            ("/admin_gopy", "xem/gửi ghi chú góp ý admin"),
+            ("ticket admin callbacks", "mở ticket admin nếu đã có"),
+            ("các lệnh CSKH hiện hữu nếu có", "dùng theo hướng dẫn từng ticket"),
+        ],
+        "safety": [
+            "Không gửi thông tin riêng tư user ra ngoài.",
+            "Ticket nên ghi rõ trạng thái: mới / đang xử lý / xong.",
+        ],
+    },
+}
+
+def admin_module_command_lines(commands: list[tuple[str, str]]) -> str:
+    return "\n".join(
+        f"• <code>{safe_html(command)}</code> — {safe_html(description)}"
+        for command, description in commands
+    )
+
+def admin_module_bullet_lines(items: list[str]) -> str:
+    return "\n".join(f"• {safe_html(item)}" for item in items)
+
+def admin_module_quick_labels(module: dict) -> list[str]:
+    labels = []
+    for row in module.get("buttons") or []:
+        for label, _callback in row:
+            labels.append(str(label))
+    return labels
+
+def admin_module_page_text(module_key: str) -> str:
+    module = ADMIN_CONTROL_MODULES.get(module_key) or ADMIN_CONTROL_MODULES["users"]
+    quick_labels = admin_module_quick_labels(module)
+    return (
+        f"{module['title']}\n\n"
+        "<b>Dùng để làm gì?</b>\n"
+        f"{safe_html(module['purpose'])}\n\n"
+        "<b>Khi nào dùng?</b>\n"
+        f"{safe_html(module['when'])}\n\n"
+        "<b>Thao tác nhanh</b>\n"
+        f"{admin_module_bullet_lines(quick_labels)}\n\n"
+        "<b>Lệnh chi tiết</b>\n"
+        f"{admin_module_command_lines(module.get('commands') or [])}\n\n"
+        "<b>Lưu ý an toàn</b>\n"
+        f"{admin_module_bullet_lines(module.get('safety') or [])}"
+    )
+
+def admin_module_keyboard(module_key: str) -> InlineKeyboardMarkup:
+    module = ADMIN_CONTROL_MODULES.get(module_key) or ADMIN_CONTROL_MODULES["users"]
+    action = f"admin_{module_key}"
+    rows = [
+        [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
+        for row in module.get("buttons") or []
+    ]
+    rows.append([
+        InlineKeyboardButton("🔄 Làm mới", callback_data=f"menu|{action}"),
+        InlineKeyboardButton("📘 Hướng dẫn", callback_data=f"admin_help|{module.get('guide') or module_key}"),
+    ])
+    rows.append([
+        InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin"),
+        InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+def admin_handbook_menu_text() -> str:
+    return (
+        "📘 <b>Hướng dẫn Admin TOAN AAS</b>\n\n"
+        "Tài liệu vận hành ngắn cho owner, admin, kế toán, CSKH và kỹ thuật. "
+        "Chọn từng mục để xem quy trình thực hành. Đây là hướng dẫn quyền hạn, không tạo RBAC mới.\n\n"
+        "1. Quy tắc an toàn khi thao tác Xu\n"
+        "2. Quy trình xử lý nạp tiền\n"
+        "3. Quy trình hoàn Xu khi job lỗi\n"
+        "4. Quy trình freeze khi provider lỗi\n"
+        "5. Quy trình backup DB\n"
+        "6. Quy trình kiểm tra runtime sau deploy\n"
+        "7. Quy trình kiểm tra trước khi bán\n"
+        "8. Quyền hạn nhân viên sau này"
+    )
+
+def admin_handbook_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1. An toàn Xu", callback_data="admin_help|xu"), InlineKeyboardButton("2. Nạp tiền", callback_data="admin_help|payment")],
+        [InlineKeyboardButton("3. Hoàn Xu", callback_data="admin_help|refund"), InlineKeyboardButton("4. Freeze", callback_data="admin_help|freeze")],
+        [InlineKeyboardButton("5. Backup DB", callback_data="admin_help|backup"), InlineKeyboardButton("6. Runtime", callback_data="admin_help|runtime")],
+        [InlineKeyboardButton("7. Trước khi bán", callback_data="admin_help|sales"), InlineKeyboardButton("8. Quyền hạn", callback_data="admin_help|roles")],
+        [InlineKeyboardButton("🔄 Làm mới", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def admin_handbook_section_text(kind: str) -> str:
+    pages = {
+        "xu": (
+            "1. Chỉ cộng/trừ Xu khi có lý do rõ.\n"
+            "2. Kiểm tra <code>/profile_user &lt;ID&gt;</code> và <code>/ledger_user &lt;ID&gt;</code> trước khi thao tác.\n"
+            "3. Không dùng <code>/add</code> thay cho duyệt bill nếu chưa đối soát.\n"
+            "4. Nếu job lỗi, ưu tiên quy trình <code>/refund_job</code> thay vì cộng tay.\n"
+            "5. Sau thao tác, kiểm tra lại ledger."
+        ),
+        "users": (
+            "1. Dùng <code>/profile_user &lt;ID&gt;</code> để xem hồ sơ.\n"
+            "2. Dùng <code>/ledger_user &lt;ID&gt;</code> để kiểm tra giao dịch Xu.\n"
+            "3. Chỉ dùng <code>/add</code>/<code>/deduct</code> khi có lý do hỗ trợ rõ.\n"
+            "4. Dùng <code>/settier</code>, <code>/setvip</code>, <code>/member_user</code> cho hạng/thành viên.\n"
+            "5. Không gửi số liệu riêng tư user ra ngoài."
+        ),
+        "payment": (
+            "1. User gửi bill hoặc PayOS callback.\n"
+            "2. Kiểm tra <code>/pending</code> hoặc <code>/payos_risk_user &lt;ID&gt;</code>.\n"
+            "3. Nếu tiền thật đã vào, dùng <code>/duyet</code>.\n"
+            "4. Nếu sai bill/chưa tiền, dùng <code>/tuchoi</code> hoặc giữ pending.\n"
+            "5. Không dùng <code>/add</code> thay cho duyệt bill nếu chưa có lý do.\n"
+            "6. Sau khi xử lý, kiểm tra <code>/ledger_user</code>."
+        ),
+        "refund": (
+            "1. Kiểm tra <code>/job_status &lt;job_id&gt;</code> và user liên quan.\n"
+            "2. Xác nhận job lỗi thật, chưa refund bởi guard tự động.\n"
+            "3. Dùng <code>/refund_job &lt;job_id&gt;</code> nếu đủ điều kiện.\n"
+            "4. Kiểm tra ledger sau refund.\n"
+            "5. Không refund theo cảm tính hoặc khi job vẫn đang xử lý."
+        ),
+        "freeze": (
+            "1. Kiểm tra <code>/providers</code>, <code>/freeze_status</code>, <code>/queue_status</code>.\n"
+            "2. Nếu provider lỗi, freeze đúng nhánh nhỏ nhất có thể.\n"
+            "3. Dùng <code>/freeze_video</code>, <code>/freeze_tools</code> hoặc <code>/provider_freeze</code> theo tình huống.\n"
+            "4. Smoke test lại trước khi <code>/unfreeze_video</code>, <code>/unfreeze_tools</code> hoặc <code>/provider_unfreeze</code>.\n"
+            "5. Freeze ảnh hưởng public user, cần ghi chú lý do."
+        ),
+        "backup": (
+            "1. Vào 🛡 Bảo mật / DB.\n"
+            "2. Bấm 💾 Sao lưu DB.\n"
+            "3. Kiểm tra file backup tạo thành công.\n"
+            "4. Kiểm tra <code>/security_log</code>.\n"
+            "5. Không chia sẻ file backup cho nhân viên không có quyền.\n"
+            "6. Không đưa backup lên public/static."
+        ),
+        "runtime": (
+            "1. Sau deploy, mở <code>/runtime</code>.\n"
+            "2. Kiểm tra public version, commit/deploy id và webhook owner.\n"
+            "3. Dùng <code>/telegram_status</code> nếu nghi Telegram webhook/polling lỗi.\n"
+            "4. Chỉ dùng <code>/telegram_takeover</code> khi hiểu deployment hiện tại.\n"
+            "5. Kiểm tra <code>/providers</code>, <code>/sales_ready</code> trước khi bán."
+        ),
+        "sales": (
+            "1. Chạy <code>/sales_ready</code>.\n"
+            "2. Kiểm tra PayOS, DB backup, webhook secret, provider readiness.\n"
+            "3. Kiểm tra các public flow quan trọng bằng tài khoản test.\n"
+            "4. Không claim LIVE PASS nếu chưa test Telegram thật.\n"
+            "5. Không mở bán nếu còn secret/runtime/provider blocker."
+        ),
+        "roles": (
+            "• Owner: toàn quyền, backup DB, PayOS, finance, freeze.\n"
+            "• Admin vận hành: user, queue, ticket, provider status.\n"
+            "• Kế toán: finance, bill, revenue/expense.\n"
+            "• CSKH: ticket, user lookup read-only nếu có.\n"
+            "• Kỹ thuật: runtime, provider, queue, smoke test.\n\n"
+            "Đây chỉ là hướng dẫn phân quyền vận hành. Task này không triển khai RBAC rộng."
+        ),
+        "packages": (
+            "1. Xem catalog bằng <code>/package_catalog</code>.\n"
+            "2. Chỉ cấp combo/tháng/storage khi có giao dịch hoặc lý do hỗ trợ rõ.\n"
+            "3. Kiểm tra <code>/user_packages &lt;ID&gt;</code> trước khi chỉnh.\n"
+            "4. Thu hồi gói phải cẩn thận vì có thể ảnh hưởng user đang dùng."
+        ),
+        "provider": (
+            "1. Kiểm tra tổng quan bằng <code>/providers</code> hoặc Provider / Worker.\n"
+            "2. Smoke test thật có thể tốn cost; chỉ chạy khi cần và theo lệnh admin.\n"
+            "3. Không gửi raw provider error/API key cho public.\n"
+            "4. Nếu provider lỗi, freeze đúng nhánh và ghi chú."
+        ),
+        "finance": (
+            "1. Xem tổng quan bằng <code>/finance_dashboard</code>.\n"
+            "2. Xem doanh thu/chi phí/lợi nhuận bằng report tương ứng.\n"
+            "3. Thêm chi phí bằng <code>/expense_add</code> hoặc <code>/expense_add_pre</code>.\n"
+            "4. Xuất báo cáo bằng <code>/finance_export</code>.\n"
+            "5. Không gửi số liệu nội bộ cho public."
+        ),
+        "support": (
+            "1. Mở Ticket admin hoặc dùng <code>/admin_gopy</code>.\n"
+            "2. Không gửi thông tin riêng tư user ra ngoài.\n"
+            "3. Ticket nên có trạng thái mới / đang xử lý / xong.\n"
+            "4. Khi cần can thiệp Xu hoặc bill, chuyển đúng module User/Xu hoặc Bill/PayOS."
+        ),
+    }
+    title_map = {
+        "xu": "📘 An toàn Xu",
+        "users": "📘 User / Xu",
+        "payment": "📘 Quy trình nạp tiền",
+        "refund": "📘 Quy trình hoàn Xu",
+        "freeze": "📘 Quy trình freeze",
+        "backup": "📘 Quy trình backup DB",
+        "runtime": "📘 Kiểm tra runtime sau deploy",
+        "sales": "📘 Kiểm tra trước khi bán",
+        "roles": "📘 Quyền hạn nhân viên sau này",
+        "packages": "📘 Gói / Combo",
+        "provider": "📘 Provider / Worker",
+        "finance": "📘 Tài chính nội bộ",
+        "support": "📘 CSKH / Góp ý",
+    }
+    clean = str(kind or "payment").strip().lower()
+    body = pages.get(clean) or pages["payment"]
+    return f"{title_map.get(clean, title_map['payment'])}\n\n{body}"
+
+def admin_handbook_section_keyboard(kind: str = "") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📘 Hướng dẫn Admin", callback_data="menu|admin_handbook"), InlineKeyboardButton("⬅️ Quản trị", callback_data="menu|admin")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
 def admin_child_keyboard(back_action: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ Quay lại", callback_data=f"menu|{back_action}"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 ADMIN_NAV_PARENT_ACTIONS = {
+    "admin_users": "admin",
+    "admin_billing": "admin",
+    "admin_packages": "admin",
+    "admin_queue": "admin",
+    "admin_security_db": "admin",
+    "admin_system_ops": "admin",
+    "admin_provider_worker": "admin",
+    "admin_finance": "admin",
+    "admin_support": "admin",
+    "admin_handbook": "admin",
     "admin_provider": "admin",
     "admin_provider_status": "admin_provider",
     "admin_provider_test": "admin_provider",
@@ -132159,17 +132593,26 @@ def admin_provider_freeze_keyboard(kind: str) -> InlineKeyboardMarkup:
     ])
 
 ADMIN_MENU_PAGE_HANDLERS = {
+    "admin_users": lambda: (admin_module_page_text("users"), admin_module_keyboard("users")),
+    "admin_billing": lambda: (admin_module_page_text("billing"), admin_module_keyboard("billing")),
+    "admin_queue": lambda: (admin_module_page_text("queue"), admin_module_keyboard("queue")),
+    "admin_security_db": lambda: (admin_module_page_text("security_db"), admin_module_keyboard("security_db")),
+    "admin_system_ops": lambda: (admin_module_page_text("system_ops"), admin_module_keyboard("system_ops")),
+    "admin_provider_worker": lambda: (admin_module_page_text("provider_worker"), admin_module_keyboard("provider_worker")),
+    "admin_finance": lambda: (admin_module_page_text("finance"), admin_module_keyboard("finance")),
+    "admin_support": lambda: (admin_module_page_text("support"), admin_module_keyboard("support")),
+    "admin_handbook": lambda: (admin_handbook_menu_text(), admin_handbook_menu_keyboard()),
     "admin_overview": lambda: (admin_overview_text(), finance_admin_keyboard()),
     "smoke_test": lambda: (smoke_test_menu_text(), smoke_test_menu_keyboard()),
     "payos_risk": lambda: (payos_risk_menu_text(), payos_risk_menu_keyboard()),
     "admin_db_status": lambda: (db_status_admin_text(), admin_db_status_keyboard()),
     "admin_security_log": lambda: (security_log_text(), security_log_keyboard()),
-    "billing": lambda: (admin_billing_text(), admin_billing_keyboard()),
-    "admin_billing_pending": lambda: (admin_billing_help_text("pending"), admin_child_keyboard("billing")),
-    "admin_billing_duyet": lambda: (admin_billing_help_text("duyet"), admin_child_keyboard("billing")),
-    "admin_billing_tuchoi": lambda: (admin_billing_help_text("tuchoi"), admin_child_keyboard("billing")),
-    "admin_billing_payos": lambda: (admin_billing_help_text("payos"), admin_child_keyboard("billing")),
-    "admin_packages": lambda: (admin_packages_text(), admin_packages_keyboard()),
+    "billing": lambda: (admin_module_page_text("billing"), admin_module_keyboard("billing")),
+    "admin_billing_pending": lambda: (admin_billing_help_text("pending"), admin_child_keyboard("admin_billing")),
+    "admin_billing_duyet": lambda: (admin_billing_help_text("duyet"), admin_child_keyboard("admin_billing")),
+    "admin_billing_tuchoi": lambda: (admin_billing_help_text("tuchoi"), admin_child_keyboard("admin_billing")),
+    "admin_billing_payos": lambda: (admin_billing_help_text("payos"), admin_child_keyboard("admin_billing")),
+    "admin_packages": lambda: (admin_module_page_text("packages"), admin_module_keyboard("packages")),
     "admin_packages_catalog": lambda: (admin_packages_help_text("catalog"), admin_child_keyboard("admin_packages")),
     "admin_packages_grant_combo": lambda: (admin_packages_help_text("grant_combo"), admin_child_keyboard("admin_packages")),
     "admin_packages_grant_monthly": lambda: (admin_packages_help_text("grant_monthly"), admin_child_keyboard("admin_packages")),
@@ -143263,6 +143706,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback, pattern=r"^freehub\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_payos_risk_callback, pattern=r"^payrisk\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_payos_alert_callback, pattern=r"^payosalert\|"))

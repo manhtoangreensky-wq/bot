@@ -385,6 +385,8 @@ def test_p0_17c2_static_guard_no_unrelated_files_touched():
         "docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md",
         "docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md",
         "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md",
+        "tests/test_core.py",
+        "tests/test_p0_17a1_admin_control_center_handbook.py",
         "tests/test_p0_4_hard_reset_audio_video_flow.py",
         "tests/test_p0_5_audio_video_addon_button_logic.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",

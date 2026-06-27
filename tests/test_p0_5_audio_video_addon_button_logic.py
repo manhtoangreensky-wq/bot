@@ -460,6 +460,7 @@ def test_no_forbidden_payment_files_touched():
     changed.discard("docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md")
     changed.discard("docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md")
     changed.discard("docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md")
+    changed.discard("tests/test_p0_17a1_admin_control_center_handbook.py")
     changed.discard("tests/test_p0_17c1_payos_signature_idempotency.py")
     changed.discard("tests/test_p0_17c2_payos_auto_topup_limits.py")
     changed.discard("tests/test_p0_17c3_payos_admin_risk_lock_review.py")
