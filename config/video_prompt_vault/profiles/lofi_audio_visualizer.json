@@ -1,0 +1,30 @@
+{
+  "profile_id": "lofi_audio_visualizer",
+  "profile_name_vi": "Video chill / lofi / visualizer",
+  "product_goal": "Tạo visual loop êm, liền mạch theo nhạc/lyrics.",
+  "script_formulas": ["mood -> loop visual -> subtle variation -> return to loop"],
+  "hook_templates": ["Một khung cảnh để nhạc thở", "Loop nhẹ để giữ cảm xúc"],
+  "scene_role_templates": [{"role": "loop_intro", "purpose": "establish mood"}, {"role": "variation", "purpose": "subtle movement"}, {"role": "return", "purpose": "return to first motif"}],
+  "shot_templates": ["static cozy room", "rainy window", "soft neon detail"],
+  "camera_templates": ["static or very slow camera"],
+  "motion_templates": ["seamless loop, rain, blinking light"],
+  "visual_style_templates": ["cozy lofi loop animation"],
+  "color_tone_templates": ["soft warm night palette"],
+  "transition_templates": ["loop bridge"],
+  "voice_cues": ["usually no voice"],
+  "music_cues": ["lofi/chill music drives pacing"],
+  "subtitle_cues": ["karaoke lyrics if lyrics exist"],
+  "logo_cues": ["small title/logo only"],
+  "negative_prompt_blocks": ["no hard jump at loop point"],
+  "do_rules": ["make ending return to beginning"],
+  "avoid_rules": ["avoid sudden fast motion"],
+  "example_story_bibles": ["room/weather/mood motif"],
+  "example_scene_cards": ["loop intro, variation, return"],
+  "example_provider_prompts": ["seamless lofi rainy room loop"],
+  "product_domains": {
+    "lyrics": {"keywords": ["lyrics", "lời bài hát", "karaoke"], "subtitle_cues": ["karaoke-safe lower text area"]},
+    "rain": {"keywords": ["mưa", "rain", "đêm"], "visual_style": "rainy window soft neon"},
+    "study": {"keywords": ["study", "học", "focus"], "visual_style": "cozy desk focus loop"},
+    "general": {"keywords": ["lofi", "chill", "visualizer"], "transition": "loop bridge"}
+  }
+}

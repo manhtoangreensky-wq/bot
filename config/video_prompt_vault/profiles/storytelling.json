@@ -1,0 +1,27 @@
+{
+  "profile_id": "storytelling",
+  "profile_name_vi": "Video kể chuyện",
+  "product_goal": "Kể một câu chuyện liền mạch với nhân vật/cảm xúc nhất quán.",
+  "script_formulas": ["hook -> setup -> pressure -> emotional turn -> resolution"],
+  "hook_templates": ["Một khoảnh khắc nhỏ làm thay đổi mọi thứ", "Nhân vật chính đứng trước một lựa chọn rõ ràng"],
+  "scene_role_templates": [{"role": "hook", "purpose": "show character and problem"}, {"role": "conflict", "purpose": "show visible pressure"}, {"role": "ending", "purpose": "resolve or twist"}],
+  "shot_templates": ["medium close-up", "over-shoulder", "wide emotional reveal"],
+  "camera_templates": ["gentle push-in with stable emotional framing"],
+  "motion_templates": ["natural movement with pauses"],
+  "visual_style_templates": ["cinematic realistic story footage"],
+  "color_tone_templates": ["warm dramatic palette"],
+  "transition_templates": ["match cut on character movement"],
+  "voice_cues": ["warm storyteller"],
+  "music_cues": ["soft emotional bed"],
+  "subtitle_cues": ["readable lower captions"],
+  "logo_cues": ["logo only at ending"],
+  "negative_prompt_blocks": ["no random extra main character"],
+  "do_rules": ["keep character identity stable"],
+  "avoid_rules": ["avoid disconnected scenes"],
+  "example_story_bibles": ["one person, one goal, one emotional arc"],
+  "example_scene_cards": ["entry state and exit state visible"],
+  "example_provider_prompts": ["continuity locked emotional scene"],
+  "product_domains": {
+    "general": {"keywords": ["story", "câu chuyện", "nhân vật"], "transition": "match cut", "motion": "gentle push-in"}
+  }
+}

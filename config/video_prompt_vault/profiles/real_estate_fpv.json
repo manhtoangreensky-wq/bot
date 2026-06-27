@@ -1,0 +1,33 @@
+{
+  "profile_id": "real_estate_fpv",
+  "profile_name_vi": "Video bất động sản / địa điểm",
+  "product_goal": "Tour không gian mượt, rõ vị trí, diện tích, trải nghiệm và CTA.",
+  "script_formulas": ["location -> exterior -> interior highlight -> amenities -> contact CTA"],
+  "hook_templates": ["Điểm đầu tiên khi bước vào không gian này", "Một góc nhìn giúp hiểu ngay giá trị của địa điểm"],
+  "scene_role_templates": [{"role": "location", "purpose": "establish location"}, {"role": "exterior", "purpose": "front/context"}, {"role": "interior", "purpose": "main room"}, {"role": "amenity", "purpose": "highlight detail"}, {"role": "CTA", "purpose": "contact/booking"}],
+  "shot_templates": ["wide establishing", "FPV fly-through", "detail pan"],
+  "camera_templates": ["ultra-wide architecture framing"],
+  "motion_templates": ["smooth FPV fly-through reveal"],
+  "visual_style_templates": ["luxury architectural photography"],
+  "color_tone_templates": ["bright premium real estate color"],
+  "transition_templates": ["motivated camera pan"],
+  "voice_cues": ["calm premium narrator"],
+  "music_cues": ["luxury lounge ambient"],
+  "subtitle_cues": ["minimal lower-third"],
+  "logo_cues": ["subtle logo at ending"],
+  "negative_prompt_blocks": ["no warped walls or impossible room layout"],
+  "do_rules": ["keep spatial direction logical"],
+  "avoid_rules": ["avoid jumpy room order"],
+  "example_story_bibles": ["location, route, highlight rooms"],
+  "example_scene_cards": ["entry from exterior to interior"],
+  "example_provider_prompts": ["smooth FPV architecture tour with bright realistic lighting"],
+  "product_domains": {
+    "apartment": {"keywords": ["căn hộ", "apartment", "phòng ngủ", "ban công"], "camera": "wide apartment FPV and balcony reveal", "motion": "smooth door-to-room fly-through", "transition": "motivated camera pan"},
+    "house": {"keywords": ["nhà phố", "villa", "house"], "camera": "exterior-to-interior wide tour"},
+    "hotel": {"keywords": ["hotel", "khách sạn", "resort"], "visual_style": "premium hospitality tour"},
+    "cafe": {"keywords": ["cafe", "quán", "nhà hàng"], "motion": "entrance to seating to signature detail"},
+    "travel_destination": {"keywords": ["du lịch", "destination", "địa điểm"], "camera": "wide establishing travel reveal"},
+    "showroom": {"keywords": ["showroom", "cửa hàng"], "camera": "clean walkthrough and product display"},
+    "general": {"keywords": ["bất động sản", "địa điểm"], "transition": "motivated camera pan"}
+  }
+}

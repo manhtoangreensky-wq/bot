@@ -1,0 +1,33 @@
+{
+  "profile_id": "ugc_affiliate",
+  "profile_name_vi": "Video Affiliate / UGC",
+  "product_goal": "Bán hàng tự nhiên như người dùng thật chia sẻ trải nghiệm.",
+  "script_formulas": ["relatable pain -> product in hand -> personal proof -> casual CTA"],
+  "hook_templates": ["Mình không nghĩ món này lại giải quyết đúng vấn đề này", "Nếu bạn cũng gặp chuyện này thì xem thử"],
+  "scene_role_templates": [{"role": "hook", "purpose": "selfie relatable hook"}, {"role": "problem", "purpose": "pain point"}, {"role": "product_reveal", "purpose": "product in hand"}, {"role": "proof", "purpose": "personal result"}, {"role": "CTA", "purpose": "casual CTA"}],
+  "shot_templates": ["vertical selfie shot", "product in hand close-up", "quick reaction cut"],
+  "camera_templates": ["vertical smartphone selfie-style footage"],
+  "motion_templates": ["casual handheld eye-level camera and fast cuts"],
+  "visual_style_templates": ["raw realistic everyday UGC"],
+  "color_tone_templates": ["bright clean natural lighting"],
+  "transition_templates": ["cut on beat"],
+  "voice_cues": ["natural excited UGC voice"],
+  "music_cues": ["viral low-volume TikTok beat"],
+  "subtitle_cues": ["large popup captions"],
+  "logo_cues": ["logo only at CTA"],
+  "negative_prompt_blocks": ["no corporate ad language"],
+  "do_rules": ["show product naturally in hand"],
+  "avoid_rules": ["avoid too polished commercial style"],
+  "example_story_bibles": ["creator persona, product, pain point, proof"],
+  "example_scene_cards": ["selfie hook and product proof"],
+  "example_provider_prompts": ["vertical smartphone selfie-style footage, bright clean lighting, casual handheld eye-level camera, fast cuts, product shown naturally in hand"],
+  "product_domains": {
+    "perfume": {"keywords": ["nước hoa", "perfume", "mùi hương"], "visual_style": "raw smartphone perfume try-on", "camera": "selfie and product close-up", "motion": "spray, reaction, bottle close-up", "color": "bright clean premium bathroom/vanity lighting"},
+    "skincare": {"keywords": ["skincare", "kem", "serum", "da"], "camera": "selfie skin close-up", "motion": "apply product naturally"},
+    "fashion_item": {"keywords": ["áo", "váy", "outfit", "giày", "túi"], "transition": "cut on beat outfit change"},
+    "kitchen_item": {"keywords": ["máy xay", "bếp", "nồi", "chảo"], "camera": "handheld kitchen demo"},
+    "gadget": {"keywords": ["gadget", "điện thoại", "tai nghe", "tech"], "motion": "hand demo, quick feature reveal"},
+    "digital_product": {"keywords": ["app", "AI tool", "phần mềm", "khóa học"], "visual_style": "screen-friendly UGC explainer"},
+    "general": {"keywords": ["affiliate", "ugc", "bán hàng"], "transition": "cut on beat"}
+  }
+}

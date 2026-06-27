@@ -1,0 +1,14 @@
+{
+  "name": "transitions",
+  "blocks": [
+    "match cut on subject position",
+    "motivated camera pan",
+    "object close-up to next scene",
+    "movement continuation",
+    "light/color bridge",
+    "sound bridge",
+    "fade or crossfade",
+    "cut on beat",
+    "loop bridge"
+  ]
+}
