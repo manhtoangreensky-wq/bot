@@ -223,10 +223,12 @@ def test_dub_tts_not_missing_when_minimax_tts_smoke_pass(monkeypatch):
 
 def test_dub_pipeline_returns_partial_srt_when_mux_disabled():
     source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    service_source = inspect.getsource(bot.subtitle_dub_product_pipeline.process_subtitle_dub_job)
 
     assert "VIDEO_SUBTITLE_MODE_DUB" in source
     assert "if wants_subtitle_video and not VIDEO_SUBTITLE_BURN_IN_ENABLED" not in source
-    assert "not (srt_bytes or audio_bytes or video_output)" in source
+    assert "subtitle_dub_product_pipeline.process_subtitle_dub_job" in source
+    assert "not (srt_bytes or audio_bytes or video_output)" in service_source
     assert "send_public_subtitle_dub_final_outputs" in source
 
 

@@ -361,7 +361,7 @@ def test_dubbing_back_voice_to_language(monkeypatch):
         video_file_id="video",
     )
     asyncio.run(_press("videodub|back_voice", uid))
-    assert bot.get_video_dubbing_pending(uid)["step"] == "voice"
+    assert bot.get_video_dubbing_pending(uid)["step"] == "language"
 
 
 def test_dubbing_back_speed_to_voice(monkeypatch):

@@ -544,8 +544,10 @@ def test_public_no_custom_voice_clone_dependency():
 
 def test_public_dub_audio_invalid_no_charge():
     source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
+    service_source = inspect.getsource(bot.subtitle_dub_product_pipeline.process_subtitle_dub_job)
 
-    assert source.index('"status": "NO_AUDIO_BYTES"') < source.index("spend_fixed_credit_info")
+    assert '"status": "NO_AUDIO_BYTES"' in service_source
+    assert source.index("subtitle_dub_product_pipeline.process_subtitle_dub_job") < source.index("spend_fixed_credit_info")
 
 
 def test_normal_video_menu_still_works_without_pending_context(monkeypatch):
