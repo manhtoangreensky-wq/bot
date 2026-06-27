@@ -35,11 +35,15 @@ REMOTE_WORKER_CANARY_CAPABILITY = "canary"
 REMOTE_WORKER_ADMIN_CANARY_SOURCE = "admin_prod_canary"
 REMOTE_WORKER_ADMIN_CANARY_CAPABILITY = "admin_canary"
 REMOTE_WORKER_ADMIN_CANARY_REF_PREFIX = "RW-PROD-CANARY"
+REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
+REMOTE_WORKER_ADMIN_VIDEO_CAPABILITY = "admin_video"
+REMOTE_WORKER_ADMIN_VIDEO_QUEUE_LABEL = "OWNER/ADMIN TEST MODE — video delivery, không trừ Xu"
 REMOTE_WORKER_RENDER_CAPABILITIES = ("ffmpeg", "video_postprocess", "local_render_helpers")
 REMOTE_WORKER_CAPABILITIES = (
     *REMOTE_WORKER_RENDER_CAPABILITIES,
     REMOTE_WORKER_CANARY_CAPABILITY,
     REMOTE_WORKER_ADMIN_CANARY_CAPABILITY,
+    REMOTE_WORKER_ADMIN_VIDEO_CAPABILITY,
 )
 REMOTE_WORKER_PRODUCTION_ENABLED_ENV = "REMOTE_WORKER_PRODUCTION_ENABLED"
 REMOTE_WORKER_ADMIN_CANARY_ENABLED_ENV = "REMOTE_WORKER_ADMIN_CANARY_ENABLED"
@@ -212,6 +216,41 @@ def _admin_canary_safety_flags(project: dict) -> dict:
     }
 
 
+def _admin_video_safety_flags(project: dict) -> dict:
+    asset_pack = _json_loads(project.get("asset_pack_json"), {})
+    invoice = _json_loads(project.get("invoice_json"), {})
+    source = str(asset_pack.get("source") or invoice.get("source") or "")
+    return {
+        "source": source,
+        "admin_video_delivery": _safe_bool(
+            asset_pack.get("admin_video_delivery")
+            or invoice.get("admin_video_delivery")
+            or asset_pack.get("owner_admin_test_mode")
+            or invoice.get("owner_admin_test_mode")
+            or asset_pack.get("admin_test")
+            or invoice.get("admin_test")
+        ),
+        "admin_only": _safe_bool(
+            asset_pack.get("admin_only")
+            or invoice.get("admin_only")
+            or asset_pack.get("created_by_admin")
+            or invoice.get("created_by_admin")
+            or asset_pack.get("owner")
+        ),
+        "created_by_admin": _safe_bool(asset_pack.get("created_by_admin") or invoice.get("created_by_admin") or asset_pack.get("owner")),
+        "no_charge": _safe_bool(
+            asset_pack.get("no_charge")
+            or invoice.get("no_charge")
+            or asset_pack.get("admin_no_charge")
+            or invoice.get("admin_no_charge")
+        ) or _safe_int(project.get("total_xu_estimated"), 0) == 0,
+        "provider_call": _safe_bool(asset_pack.get("provider_call") or invoice.get("provider_call")),
+        "public_user": _safe_bool(asset_pack.get("public_user") or invoice.get("public_user")),
+        "duration_seconds": max(1, _safe_int(asset_pack.get("duration_seconds") or invoice.get("duration_seconds"), 6)),
+        "scene_count": max(1, min(20, _safe_int(asset_pack.get("scene_count") or invoice.get("scene_count"), 1))),
+    }
+
+
 def _is_admin_fake_video_job(project: dict) -> bool:
     asset_pack = _json_loads(project.get("asset_pack_json"), {})
     if str(asset_pack.get("source") or "") == "admin_fake_job" and _safe_bool(asset_pack.get("no_charge")):
@@ -230,6 +269,29 @@ def _admin_canary_is_safe(project: dict) -> bool:
         and not flags["provider_call"]
         and not flags["public_user"]
     )
+
+
+def is_remote_worker_admin_video_job(job: dict | None = None, project: dict | None = None) -> bool:
+    job = job or {}
+    project = project or {}
+    if str(job.get("job_type") or video_project_queue.VIDEO_RENDER_JOB_TYPE) != video_project_queue.VIDEO_RENDER_JOB_TYPE:
+        return False
+    if is_remote_worker_admin_canary_job(job, project):
+        return False
+    flags = _admin_video_safety_flags(project)
+    return bool(
+        flags["admin_video_delivery"]
+        and flags["admin_only"]
+        and flags["no_charge"]
+        and not flags["provider_call"]
+        and not flags["public_user"]
+    )
+
+
+def _admin_video_is_safe(project: dict) -> bool:
+    if _is_admin_fake_video_job(project):
+        return True
+    return is_remote_worker_admin_video_job({"job_type": video_project_queue.VIDEO_RENDER_JOB_TYPE}, project)
 
 
 def _scene_cards_from_project(project: dict, scenes: list[dict]) -> list[dict]:
@@ -342,6 +404,29 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "resolution": "320x180",
                 "provider_call": False,
                 "no_charge": True,
+            }
+        )
+    if is_remote_worker_admin_video_job(hydrated_job, project) or _is_admin_fake_video_job(project):
+        safety = _admin_video_safety_flags(project)
+        payload.update(
+            {
+                "admin_video_delivery": True,
+                "admin_only": True,
+                "no_charge": True,
+                "provider_call": False,
+                "public_user": False,
+                "source": safety["source"] or REMOTE_WORKER_ADMIN_VIDEO_SOURCE,
+                "queue_label": REMOTE_WORKER_ADMIN_VIDEO_QUEUE_LABEL,
+                "expected_duration_seconds": max(1, min(120, safety["duration_seconds"] or scene_count * 6)),
+                "scene_count": max(1, min(20, safety["scene_count"] or scene_count)),
+            }
+        )
+        payload["output_requirements"].update(
+            {
+                "admin_video_mp4": True,
+                "provider_call": False,
+                "no_charge": True,
+                "final_video_bytes_gt_zero": True,
             }
         )
     return payload
@@ -667,6 +752,7 @@ def _claim_video_render_candidate(
     lease_seconds: int = 600,
     now: datetime | None = None,
     admin_canary_only: bool = False,
+    admin_video_only: bool = False,
     public_enabled: bool = False,
 ) -> dict:
     video_project_queue.ensure_video_project_queue_schema(conn)
@@ -714,6 +800,12 @@ def _claim_video_render_candidate(
                     chosen_project = project
                     break
                 continue
+            if admin_video_only:
+                if _admin_video_is_safe(project):
+                    chosen = job
+                    chosen_project = project
+                    break
+                continue
             if is_remote_worker_admin_canary_job(job, project):
                 continue
             if _is_admin_fake_video_job(project) or public_enabled:
@@ -723,7 +815,12 @@ def _claim_video_render_candidate(
         if not chosen or not chosen_project:
             conn.commit()
             return {}
-        progress_message = "admin canary claimed" if admin_canary_only else "claimed"
+        if admin_canary_only:
+            progress_message = "admin canary claimed"
+        elif admin_video_only:
+            progress_message = "admin video claimed"
+        else:
+            progress_message = "claimed"
         cursor = conn.execute(
             """UPDATE video_jobs
                SET status='processing', attempts=COALESCE(attempts,0)+1, locked_by=?, locked_at=?,
@@ -768,6 +865,25 @@ def claim_remote_worker_admin_canary_job(
         lease_seconds=lease_seconds,
         now=now,
         admin_canary_only=True,
+        admin_video_only=False,
+        public_enabled=False,
+    )
+
+
+def claim_remote_worker_admin_video_job(
+    conn: sqlite3.Connection,
+    *,
+    worker_id: str,
+    lease_seconds: int = 600,
+    now: datetime | None = None,
+) -> dict:
+    return _claim_video_render_candidate(
+        conn,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        now=now,
+        admin_canary_only=False,
+        admin_video_only=True,
         public_enabled=False,
     )
 
@@ -786,6 +902,7 @@ def claim_remote_worker_render_job(
         lease_seconds=lease_seconds,
         now=now,
         admin_canary_only=False,
+        admin_video_only=False,
         public_enabled=public_enabled,
     )
 
@@ -799,6 +916,7 @@ def claim_remote_worker_job(
     lease_seconds: int = 600,
     canary_only: bool = False,
     admin_canary_only: bool = False,
+    admin_video_only: bool = False,
 ) -> dict:
     worker = sanitize_worker_id(worker_id)
     requested = {str(item).strip().lower() for item in (capabilities or []) if str(item).strip()}
@@ -821,6 +939,12 @@ def claim_remote_worker_job(
         job = claim_remote_worker_admin_canary_job(conn, worker_id=worker, lease_seconds=lease_seconds)
         hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
         return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "admin_canary_only": True}
+    if admin_video_only:
+        if requested and REMOTE_WORKER_ADMIN_VIDEO_CAPABILITY not in requested:
+            return {"ok": True, "job": None, "reason": "admin_video_capability_required"}
+        job = claim_remote_worker_admin_video_job(conn, worker_id=worker, lease_seconds=lease_seconds)
+        hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
+        return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "admin_video_only": True, "reason": "" if hydrated else "no_admin_video_job"}
     if requested and not (requested & set(REMOTE_WORKER_RENDER_CAPABILITIES)):
         return {"ok": True, "job": None, "reason": "capability_not_supported"}
     config = remote_worker_production_guard_config()
@@ -887,6 +1011,7 @@ def complete_remote_worker_job(
     project = video_project_queue.get_video_project(conn, int(job.get("project_id") or 0))
     is_canary = is_remote_worker_canary_job(job, project)
     is_admin_canary = is_remote_worker_admin_canary_job(job, project)
+    is_admin_video = is_remote_worker_admin_video_job(job, project) or _is_admin_fake_video_job(project)
     if str(job.get("status") or "") == "completed":
         if not worker_owns_job(job, worker):
             return {"ok": False, "reason": "job_already_completed_by_other_worker"}
@@ -907,6 +1032,10 @@ def complete_remote_worker_job(
         validation = validate_uploaded_result_file(final_video_path)
         if not validation.get("ok"):
             return {"ok": False, "reason": "admin_canary_result_file_missing"}
+    if is_admin_video:
+        validation = validate_uploaded_result_file(final_video_path)
+        if not validation.get("ok"):
+            return {"ok": False, "reason": "admin_video_result_file_missing"}
     payload = dict(result or {})
     if uploaded_file:
         payload["uploaded_file_bytes"] = os.path.getsize(final_video_path)
@@ -930,6 +1059,17 @@ def complete_remote_worker_job(
                 "provider_call": False,
                 "public_user": False,
                 "queue_label": REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL,
+            }
+        )
+    if is_admin_video:
+        payload.update(
+            {
+                "admin_video_delivery": True,
+                "admin_only": True,
+                "no_charge": True,
+                "provider_call": False,
+                "public_user": False,
+                "queue_label": REMOTE_WORKER_ADMIN_VIDEO_QUEUE_LABEL,
             }
         )
     completed = video_project_queue.complete_video_job(
@@ -1169,6 +1309,99 @@ def remote_worker_admin_canary_queue_snapshot(conn: sqlite3.Connection) -> dict:
         "invoice": False,
         "wallet": False,
     }
+
+
+def create_admin_video_delivery_test_job(
+    conn: sqlite3.Connection,
+    *,
+    admin_user_id: int | str,
+    scene_count: int = 3,
+    duration_seconds: int = 18,
+) -> dict:
+    admin_id = _safe_int(admin_user_id, 0)
+    if admin_id <= 0:
+        return {"ok": False, "reason": "admin_user_id_required"}
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    safe_scene_count = max(1, min(20, _safe_int(scene_count, 3)))
+    safe_duration = max(1, min(120, _safe_int(duration_seconds, safe_scene_count * 6)))
+    now = video_project_queue.now_text()
+    asset_pack = {
+        "source": REMOTE_WORKER_ADMIN_VIDEO_SOURCE,
+        "admin_video_delivery": True,
+        "owner_admin_test_mode": True,
+        "created_by_admin": True,
+        "owner": True,
+        "admin_only": True,
+        "no_charge": True,
+        "admin_no_charge": True,
+        "provider_call": False,
+        "public_user": False,
+        "scene_count": safe_scene_count,
+        "duration_seconds": safe_duration,
+        "queue_label": REMOTE_WORKER_ADMIN_VIDEO_QUEUE_LABEL,
+    }
+    invoice = {
+        "total_xu": 0,
+        "admin_video_delivery": True,
+        "owner_admin_test_mode": True,
+        "created_by_admin": True,
+        "admin_only": True,
+        "no_charge": True,
+        "admin_no_charge": True,
+        "provider_call": False,
+        "public_user": False,
+        "invoice_disabled": True,
+        "scene_count": safe_scene_count,
+        "duration_seconds": safe_duration,
+        "source": REMOTE_WORKER_ADMIN_VIDEO_SOURCE,
+        "queue_label": REMOTE_WORKER_ADMIN_VIDEO_QUEUE_LABEL,
+    }
+    project = video_project_queue.create_video_project(
+        conn,
+        user_id=admin_id,
+        profile_id="admin_video_delivery_test",
+        topic="OWNER/ADMIN TEST MODE - video delivery output test",
+        ratio="9:16",
+        asset_pack=asset_pack,
+    )
+    project_id = int(project["project_id"])
+    scene_cards = [
+        {
+            "scene_index": index,
+            "role": "admin_video_delivery",
+            "narration_line": f"OWNER/ADMIN TEST MODE cảnh {index}.",
+            "subtitle_line": f"OWNER/ADMIN TEST MODE {index}",
+            "visual_goal": "Kiểm tra hệ thống nhận xử lý và xuất MP4 thật.",
+            "provider_prompt": "Do not call provider. Generate a local admin test MP4.",
+        }
+        for index in range(1, safe_scene_count + 1)
+    ]
+    video_project_queue.save_video_project_storyboard(conn, project_id, {"scene_cards": scene_cards})
+    project = video_project_queue.update_video_project(
+        conn,
+        project_id,
+        status="draft_invoice",
+        asset_pack_json=asset_pack,
+        scene_cards_json=scene_cards,
+        prompt_text="OWNER/ADMIN TEST MODE video delivery output test. No customer job, no Xu, no provider call.",
+        addon_plan_json={"source": REMOTE_WORKER_ADMIN_VIDEO_SOURCE, "provider_call": False, "no_charge": True},
+        creative_control_json={"admin_video_delivery": True, "safe_output_delivery_test": True},
+        quality_tier=0,
+        scene_count=safe_scene_count,
+        invoice_json=invoice,
+        total_xu_estimated=0,
+    )
+    result = video_project_queue.confirm_video_project_invoice(
+        conn,
+        project_id=project_id,
+        user_id=admin_id,
+        balance_xu=0,
+        deduct_func=lambda _uid, _amount: {"ok": True, "final_cost": 0, "no_charge": True},
+    )
+    if result.get("ok"):
+        job = result.get("job") or {}
+        video_project_queue.update_video_project(conn, project_id, job_id=int(job.get("id") or 0), invoice_json=invoice)
+    return {"ok": bool(result.get("ok")), "project": result.get("project") or project, "job": result.get("job") or {}, "reason": result.get("reason") or ""}
 
 
 def create_fake_video_job_for_admin_test(conn: sqlite3.Connection, *, user_id: int | str) -> dict:

@@ -39597,7 +39597,7 @@ def video_b14_live_buttons_regression_report(user_id: int = 0) -> dict:
     save_video_session(uid, session)
     session = task3d_session_step(uid, "b14_queue_status", provider_called=False, xu_charged=0)
     status_text = video_b14_queue_status_text(session, result, uid, "vi")
-    status_ok = all(marker in status_text for marker in ["Mã xử lý", "Trạng thái", "Tiến độ", "Add-ons", "OWNER/ADMIN TEST MODE"]) and safe_int(job.get("id"), 0) > 0
+    status_ok = all(marker in status_text for marker in ["Mã xử lý", "Trạng thái", "Tiến độ", "Tùy chọn thêm", "OWNER/ADMIN TEST MODE"]) and safe_int(job.get("id"), 0) > 0
     checks = {
         "prompt_video_no_generic_error": prompt_ok,
         "logo_sent_then_position": logo_ok,
@@ -39676,6 +39676,56 @@ async def cmd_tool_test_video_job_status(update: Update, context: ContextTypes.D
     session = get_video_session(uid)
     text = video_b14_queue_status_text(session, None, uid, get_user_language(uid) or "vi")
     return await update.message.reply_text(text, parse_mode="HTML", reply_markup=video_b14_queue_status_keyboard(get_user_language(uid) or "vi"))
+
+
+async def cmd_tool_test_video_delivery_worker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    args = [str(item or "").strip() for item in getattr(context, "args", [])]
+    if "--no-charge" not in args:
+        return await update.message.reply_text("Dùng: /tool_test_video_delivery_worker --no-charge")
+    flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
+    if not flags.get("worker_api_enabled"):
+        return await update.message.reply_text(
+            "⚠️ <b>Kiểm tra xuất video</b>\n\nLOCAL_WORKER_TOKEN chưa cấu hình. TOAN AAS chưa tạo job và chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+    conn = db_connect()
+    try:
+        result = remote_worker_api.create_admin_video_delivery_test_job(conn, admin_user_id=safe_int(uid, 0), scene_count=3, duration_seconds=18)
+    finally:
+        conn.close()
+    if not result.get("ok"):
+        return await update.message.reply_text(
+            f"⚠️ <b>Kiểm tra xuất video</b>\n\nChưa tạo được job: <code>{html.escape(result.get('reason') or 'create_failed')}</code>. Chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+    job = dict(result.get("job") or {})
+    project = dict(result.get("project") or {})
+    job_id = safe_int(job.get("id") or job.get("job_id"), 0)
+    try:
+        set_system_setting("remote_worker:last_admin_video_delivery_job_id", str(job_id), "last admin video delivery job", uid)
+    except Exception:
+        logger.warning("admin video delivery setting skipped")
+    lines = [
+        "✅ <b>OWNER/ADMIN TEST MODE — kiểm tra xuất video</b>",
+        "",
+        "TOAN AAS đã đưa video test vào hệ thống xử lý nền.",
+        f"• Mã xử lý: <code>{job_id or '-'}</code>",
+        f"• Project: <code>{safe_int(project.get('project_id'), 0) or '-'}</code>",
+        "• Số cảnh: <code>3</code>",
+        "• Thời lượng dự kiến: <code>18s</code>",
+        "• Trừ Xu: Không",
+        "• Public: Không",
+        "• Gọi provider: Không",
+        "",
+        "Chạy trên VPS:",
+        "<code>python remote_worker.py --admin-video --once</code>",
+        "",
+        "Kết quả đúng phải là file MP4 thật gửi về Telegram.",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
@@ -51938,7 +51988,7 @@ VIDEO_B14_2_ASSET_RECOMMENDATION_VI = (
 VIDEO_B14_2_ASSET_SKIP_WARNING_VI = (
     "Anh/chị đang bỏ qua ảnh tư liệu. Video vẫn tạo được, nhưng nếu cần giống sản phẩm/nhân vật/bối cảnh thật thì nên gửi ảnh trước."
 )
-VIDEO_B14_2_WORKER_NOT_READY_VI = "Tác vụ video nền chưa sẵn sàng trên máy chủ. TOAN AAS chưa xử lý và chưa trừ Xu."
+VIDEO_B14_2_WORKER_NOT_READY_VI = "Hệ thống dựng video nền chưa sẵn sàng. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_PUBLIC_MULTISCENE_OFF_VI = "Phim AI nhiều cảnh đang mở thử nghiệm nội bộ. TOAN AAS chưa xử lý và chưa trừ Xu."
 VIDEO_B14_2_PACKAGE_200_NOTE_VI = "Gói trải nghiệm chỉ tạo video gốc. Giọng đọc, nhạc, phụ đề và logo sẽ tắt trong hóa đơn này."
 VIDEO_B14_2_QUALITY_OPTIONS = (200, 300, 400, 500, 600, 800, 1000, 1200, 1500)
@@ -53197,6 +53247,7 @@ def video_b14_addon_label(kind: str, value: str) -> str:
         },
         "logo": {
             "none": "không dùng",
+            "default_watermark": "Watermark TOAN AAS mặc định",
             "uploaded": "logo đã gửi",
             "top_left": "góc trái trên",
             "top_right": "góc phải trên",
@@ -53675,10 +53726,13 @@ def video_b14_logo_text(session: dict | None = None, lang: str = "vi") -> str:
 def video_b14_logo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🚫 Không logo", callback_data="vproduct|b14_logo_source|none"),
-            InlineKeyboardButton("📁 Logo đã gửi", callback_data="vproduct|b14_logo_source|uploaded"),
+            InlineKeyboardButton("🚫 Không logo/watermark", callback_data="vproduct|b14_logo_source|none"),
+            InlineKeyboardButton("🏷 Watermark TOAN AAS mặc định", callback_data="vproduct|b14_logo_source|default_watermark"),
         ],
-        [InlineKeyboardButton("📤 Gửi logo mới", callback_data="vproduct|b14_logo_upload")],
+        [
+            InlineKeyboardButton("📁 Logo đã gửi", callback_data="vproduct|b14_logo_source|uploaded"),
+            InlineKeyboardButton("📤 Gửi logo mới", callback_data="vproduct|b14_logo_upload"),
+        ],
         [
             InlineKeyboardButton("↖️ Góc trái trên", callback_data="vproduct|b14_logo_position|top_left"),
             InlineKeyboardButton("↗️ Góc phải trên", callback_data="vproduct|b14_logo_position|top_right"),
@@ -53835,10 +53889,7 @@ def video_b14_public_max_scene_count() -> int:
 
 
 def video_b14_scene_count_keyboard(user_id=0, lang: str = "vi") -> InlineKeyboardMarkup:
-    max_count = 20 if video_b14_is_admin_or_owner(user_id) else video_b14_public_max_scene_count()
-    choices = [count for count in VIDEO_B14_2_SCENE_OPTIONS if count <= max_count]
-    if not choices:
-        choices = [1]
+    choices = list(VIDEO_B14_2_SCENE_OPTIONS)
     rows = []
     for index in range(0, len(choices), 3):
         rows.append([
@@ -53867,24 +53918,15 @@ def video_b14_scene_count_custom_text(lang: str = "vi") -> str:
         "🎬 <b>Nhập số cảnh</b>\n\n"
         "Gửi số cảnh muốn tạo.\n"
         "Ví dụ: <code>3</code>, <code>5</code>, <code>8</code>\n\n"
-        "Hiện tại khuyến nghị: <b>1–5 cảnh</b> để ổn định.\n"
-        "10–20 cảnh chỉ nên dùng khi worker/render đã pass smoke.\n\n"
+        "Khuyến nghị: <b>1–5 cảnh</b> nếu anh/chị cần kết quả nhanh.\n"
+        "10–20 cảnh sẽ lâu hơn và hệ thống sẽ báo rõ trước khi xử lý.\n\n"
         "Cho phép: <b>1–20 cảnh</b>. Chưa xử lý video và chưa trừ Xu."
     )
 
 
 def video_b14_extended_scene_guard(user_id=0, scene_count: int = 1) -> tuple[bool, str]:
     count = max(1, min(20, safe_int(scene_count, 1)))
-    if count <= 5 or video_b14_is_admin_or_owner(user_id):
-        return True, ""
-    if VIDEO_B14_EXTENDED_SCENES_PUBLIC_READY and PUBLIC_MULTISCENE_VIDEO_ENABLED and VIDEO_B14_2_PROJECT_WORKER_READY and frame_video_worker_connected():
-        return True, ""
-    return False, (
-        "⚠️ <b>Video nhiều cảnh đang ở chế độ kiểm soát.</b>\n\n"
-        "TOAN AAS khuyến nghị chọn <b>1–5 cảnh</b> để ổn định. "
-        "Các mức 10–20 cảnh chỉ mở khi worker/render đã pass smoke.\n\n"
-        "TOAN AAS chưa xử lý video và chưa trừ Xu."
-    )
+    return count >= 1, ""
 
 
 def video_b14_scene_discount_percent(scene_count: int) -> int:
@@ -53893,7 +53935,7 @@ def video_b14_scene_discount_percent(scene_count: int) -> int:
         return 20
     if count <= 9:
         return 25
-    if count <= 19:
+    if count <= 20:
         return 30
     return 0
 
@@ -54040,27 +54082,46 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         except Exception:
             project = {}
     duplicate = bool(result.get("duplicate_prevented") or draft.get("b14_duplicate_prevented"))
-    status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip() or "draft"
-    stage = str(job.get("progress_message") or project.get("status") or "đang chờ worker").strip()
+    status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip().lower() or "draft"
     progress = safe_int(job.get("progress_percent"), 0)
-    if status in {"queued", "queued_for_worker"} and progress <= 0:
-        stage = "đang chờ worker"
+    if status in {"queued", "queued_for_worker"}:
+        status_label = "đang chuẩn bị"
+        stage = "hệ thống đang xếp lịch dựng video"
+        if progress <= 0:
+            progress = 5 if job_id else 0
+    elif status in {"processing", "running"}:
+        status_label = "đang dựng video"
+        if progress >= 80:
+            stage = "hệ thống đang đóng gói video cuối"
+        elif progress >= 35:
+            stage = "hệ thống đang dựng các cảnh"
+        else:
+            stage = "hệ thống đang chuẩn bị dữ liệu dựng"
+    elif status in {"completed", "success"}:
+        status_label = "đã dựng xong"
+        stage = "hệ thống đang gửi kết quả cuối"
+        progress = max(progress, 100)
+    elif status in {"failed", "error"}:
+        status_label = "chưa dựng được"
+        stage = "hệ thống chưa dựng được video"
+    else:
+        status_label = "chưa xác nhận"
+        stage = "chưa bắt đầu xử lý"
     final_path = str(project.get("final_video_path") or job.get("final_video_path") or "")
     final_file_id = str(project.get("final_video_file_id") or job.get("final_video_file_id") or "")
     error_log = str(project.get("error_log") or job.get("last_error") or "")
     if status in {"completed", "success"} and (final_path or final_file_id):
-        result_text = "đã có MP4, TOAN AAS sẽ gửi kết quả cuối"
+        result_text = "đã có video thành phẩm, TOAN AAS sẽ gửi kết quả cuối"
     elif status in {"failed", "error"}:
-        result_text = f"lỗi: {error_log[:160] or 'worker báo lỗi'}"
+        result_text = "hệ thống chưa dựng được video. TOAN AAS chưa báo hoàn tất khi chưa có file cuối"
     elif status in {"queued", "queued_for_worker"}:
-        result_text = "đang chờ worker, chưa có file thành phẩm"
+        result_text = "đang chuẩn bị xử lý, chưa có file thành phẩm"
     elif status in {"processing", "running"}:
-        result_text = "đang xử lý nền, chưa có file thành phẩm"
+        result_text = "đang dựng video trong nền, chưa có file thành phẩm"
     else:
         result_text = "chưa có file thành phẩm"
     package_label = str(invoice.get("package_label") or video_b14_package_full_label(safe_int(invoice.get("quality_xu"), 200)))
     updated_at = str(job.get("updated_at") or project.get("updated_at") or now_text())
-    worker = str(job.get("locked_by") or "chưa nhận")
     xu_line = "OWNER/ADMIN TEST MODE: không trừ Xu" if video_b14_is_admin_or_owner(user_id) else f"Xu: {xu_number(safe_int(draft.get('xu_charged'), safe_int(invoice.get('total_xu'), 0)))} Xu theo chính sách xác nhận"
     voice_label = str(addon_plan.get("voice_label") or video_b14_addon_label("voice", str(addon_plan.get("voice_source") or "none")))
     music_label = video_b14_addon_label("music", str(addon_plan.get("music_source") or "none"))
@@ -54073,19 +54134,18 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         "✅ <b>Đã xác nhận tạo video</b>" if job_id else "ℹ️ <b>Video chưa xác nhận</b>",
         "",
         f"• Mã xử lý: <b>{job_id or project_id or '-'}</b>",
-        f"• Trạng thái: <b>{html.escape(status)}</b>",
+        f"• Trạng thái: <b>{html.escape(status_label)}</b>",
         f"• Giai đoạn: <b>{html.escape(stage)}</b>",
         f"• Tiến độ: <b>{max(0, min(100, progress))}%</b>",
         f"• Số cảnh: <b>{scene_count}</b>",
         f"• Thời lượng dự kiến: <b>{duration}s</b>",
         f"• Gói: <b>{html.escape(package_label)}</b>",
-        "• Add-ons:",
+        "• Tùy chọn thêm:",
         f"  Voice: <b>{'bật' if addon_plan.get('voice_enabled') else 'tắt'}</b> · {html.escape(voice_label)}",
         f"  Nhạc: <b>{'bật' if addon_plan.get('music_enabled') else 'tắt'}</b> · {html.escape(music_label)} · {safe_int(addon_plan.get('music_volume_percent'), 10)}%",
         f"  Phụ đề: <b>{'bật' if addon_plan.get('subtitle_enabled') else 'tắt'}</b> · {html.escape(subtitle_label)}",
         f"  Lồng tiếng: <b>{'bật' if addon_plan.get('dub_enabled') else 'tắt'}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
         f"  Logo: <b>{'bật' if addon_plan.get('logo_enabled') else 'tắt'}</b> · {html.escape(logo_label)}",
-        f"• Worker: <b>{html.escape(worker)}</b>",
         f"• Cập nhật lần cuối: <code>{html.escape(updated_at)}</code>",
         f"• Thời gian chờ dự kiến: <b>{video_b14_eta_text(eta)}</b>",
         f"• Kết quả: <b>{html.escape(result_text)}</b>",
@@ -54101,7 +54161,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     if duplicate:
         lines.append("• Ghi chú: video này đã có trong danh sách chờ, TOAN AAS không tạo trùng lần nữa.")
     lines.append("")
-    lines.append("Nếu hàng chờ lâu, trạng thái sẽ hiện đang chờ worker. TOAN AAS không báo hoàn tất khi chưa có MP4.")
+    lines.append("Nếu chờ lâu, anh/chị bấm kiểm tra trạng thái để TOAN AAS đọc dữ liệu mới nhất. TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
@@ -54166,6 +54226,36 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     profile_id = str(draft.get("b14_profile_id") or video_b14_profile_id_for_session(session))
     topic = str((session or {}).get("topic") or draft.get("topic") or "")
     ratio = str(draft.get("b14_aspect_ratio") or (session or {}).get("aspect_ratio") or "9:16")
+    is_internal = video_b14_is_admin_or_owner(user_id)
+    asset_pack_payload = dict(draft.get("asset_pack") or {})
+    if is_internal:
+        asset_pack_payload.update({
+            "source": asset_pack_payload.get("source") or "video_b14_admin_no_charge",
+            "admin_video_delivery": True,
+            "owner_admin_test_mode": True,
+            "created_by_admin": True,
+            "admin_only": True,
+            "admin_no_charge": True,
+            "no_charge": True,
+            "provider_call": False,
+            "public_user": False,
+            "scene_count": invoice["scene_count"],
+            "duration_seconds": invoice["duration_seconds"],
+        })
+        invoice.update({
+            "admin_video_delivery": True,
+            "owner_admin_test_mode": True,
+            "created_by_admin": True,
+            "admin_only": True,
+            "admin_no_charge": True,
+            "no_charge": True,
+            "provider_call": False,
+            "public_user": False,
+            "source": asset_pack_payload.get("source"),
+        })
+    else:
+        asset_pack_payload.update({"public_user": True, "admin_only": False})
+        invoice.update({"public_user": True, "admin_only": False, "no_charge": False})
     project_id = safe_int(draft.get("b14_project_id"), 0)
     if project_id:
         project = get_video_project(project_id)
@@ -54175,7 +54265,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             profile_id=profile_id,
             topic=topic,
             ratio=ratio,
-            asset_pack=dict(draft.get("asset_pack") or {}),
+            asset_pack=asset_pack_payload,
         )
         project_id = safe_int(project.get("project_id"), 0)
     save_video_project_storyboard(project_id, plan)
@@ -54201,7 +54291,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         profile_id=profile_id,
         topic=topic,
         ratio=ratio,
-        asset_pack_json=dict(draft.get("asset_pack") or {}),
+        asset_pack_json=asset_pack_payload,
         prompt_text=str(plan.get("preview_text") or topic or "")[:8000],
         addon_plan_json=addon_plan,
         creative_control_json=creative_controls,
@@ -54214,6 +54304,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     draft["b14_project_id"] = project_id
     draft["b14_invoice"] = invoice
     draft["b14_addon_plan"] = addon_plan
+    draft["asset_pack"] = asset_pack_payload
     session["draft"] = draft
     save_video_session(user_id, session)
     return update
@@ -56081,13 +56172,23 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_logo", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_logo_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_keyboard(lang))
     if action in {"b14_logo_source", "b14_logo_set"}:
-        source = value if value in {"none", "uploaded"} else "none"
+        source = value if value in {"none", "uploaded", "default_watermark"} else "none"
         if value in {"top_left", "top_right", "bottom_left", "bottom_right"}:
             session = video_b14_set_addon_plan(
                 uid,
                 session,
                 logo_position=value,
                 logo_note="Đã lưu vị trí logo. Anh/chị chọn logo đã gửi hoặc gửi logo mới để bật logo.",
+            )
+        elif source == "default_watermark":
+            session = video_b14_set_addon_plan(
+                uid,
+                session,
+                logo_enabled=True,
+                logo_source="default_watermark",
+                logo_file_id="",
+                logo_position=str(video_b14_addon_plan_from_session(session).get("logo_position") or "bottom_right"),
+                logo_note="Đã chọn watermark TOAN AAS mặc định. Anh/chị có thể đổi vị trí rồi bấm Xong logo.",
             )
         elif source == "uploaded":
             file_id = video_b14_logo_file_id_from_session(session)
@@ -56130,12 +56231,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         position = value if value in {"top_left", "top_right", "bottom_left", "bottom_right"} else "bottom_right"
         file_id = video_b14_logo_file_id_from_session(session)
         source = str(video_b14_addon_plan_from_session(session).get("logo_source") or "none")
+        has_default_watermark = source == "default_watermark"
         session = video_b14_set_addon_plan(
             uid,
             session,
             logo_position=position,
-            logo_enabled=bool(file_id and source == "uploaded"),
-            logo_note="" if file_id and source == "uploaded" else "Đã lưu vị trí logo. Anh/chị chọn logo đã gửi hoặc gửi logo mới để bật logo.",
+            logo_enabled=bool(has_default_watermark or (file_id and source == "uploaded")),
+            logo_note="" if has_default_watermark or (file_id and source == "uploaded") else "Đã lưu vị trí logo. Anh/chị chọn watermark mặc định, logo đã gửi hoặc gửi logo mới để bật logo.",
         )
         session = task3d_session_step(uid, "b14_logo", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_logo_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_keyboard(lang))
@@ -56168,9 +56270,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             ok, guard_message = video_b14_extended_scene_guard(uid, safe_int(draft.get("b14_scene_count"), 3))
             if not ok:
                 return await safe_edit_or_send(query, guard_message, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
-            ok, guard_message = video_b14_public_render_guard(uid)
-            if not ok:
-                return await safe_edit_or_send(query, guard_message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_quality_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
             video_b14_prepare_project_for_invoice(uid, session)
             session = get_video_session(uid)
             session = task3d_session_step(uid, "b14_invoice", provider_called=False, xu_charged=0)
@@ -56184,8 +56283,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "waiting_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_custom_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if action == "b14_scene_count":
-        max_count = 20 if video_b14_is_admin_or_owner(uid) else video_b14_public_max_scene_count()
-        count = max(1, min(max_count, safe_int(value, 3)))
+        count = max(1, min(20, safe_int(value, 3)))
         ok, guard_message = video_b14_extended_scene_guard(uid, count)
         if not ok:
             return await safe_edit_or_send(query, guard_message, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
@@ -56198,9 +56296,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if not (session.get("draft") or {}).get("b14_quality_xu"):
             session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
-        ok, guard_message = video_b14_public_render_guard(uid)
-        if not ok:
-            return await safe_edit_or_send(query, guard_message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
         session = task3d_session_step(uid, "b14_invoice", provider_called=False, xu_charged=0)
@@ -56717,8 +56812,7 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         if not ok:
             await update.message.reply_text(guard_message, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
             return True
-        max_count = 20 if video_b14_is_admin_or_owner(uid) else video_b14_public_max_scene_count()
-        count = max(1, min(max_count, requested))
+        count = max(1, min(20, requested))
         draft = dict(session.get("draft") or {})
         draft["b14_scene_count"] = count
         draft["b14_scene_count_selected"] = True
@@ -146759,6 +146853,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_video_backstack", cmd_tool_test_video_backstack))
     tg_app.add_handler(CommandHandler("tool_test_video_live_dry_run", cmd_tool_test_video_live_dry_run))
     tg_app.add_handler(CommandHandler("tool_test_video_job_status", cmd_tool_test_video_job_status))
+    tg_app.add_handler(CommandHandler("tool_test_video_delivery_worker", cmd_tool_test_video_delivery_worker))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_live_video_ux_regression(?:@\w+)?(?:\s|$)"), cmd_tool_test_live_video_ux_regression))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_live_video_buttons_regression(?:@\w+)?(?:\s|$)"), cmd_tool_test_live_video_buttons_regression))
     tg_app.add_handler(CommandHandler("tool_test_voice_gate", cmd_tool_test_voice_gate))
@@ -148059,6 +148154,7 @@ async def api_worker_claim(request: Request):
     lease_seconds = max(30, min(3600, safe_int(payload.get("lease_seconds"), LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
     canary_only = str(payload.get("canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     admin_canary_only = str(payload.get("admin_canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+    admin_video_only = str(payload.get("admin_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
     conn = db_connect()
@@ -148071,6 +148167,7 @@ async def api_worker_claim(request: Request):
             lease_seconds=lease_seconds,
             canary_only=canary_only,
             admin_canary_only=admin_canary_only,
+            admin_video_only=admin_video_only,
         )
     finally:
         conn.close()
@@ -148114,12 +148211,15 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
         return {"sent": False, "reason": "missing_user_or_file"}
     is_canary = remote_worker_api.is_remote_worker_canary_job(job, project)
     is_admin_canary = remote_worker_api.is_remote_worker_admin_canary_job(job, project)
+    is_admin_video = remote_worker_api.is_remote_worker_admin_video_job(job, project)
     if is_admin_canary:
         caption = "🧪 VPS Worker Production Canary hoàn tất. File test admin từ VPS/Railway."
     elif is_canary:
         caption = "🧪 Remote Worker Canary hoàn tất. File kết quả test từ VPS/Railway."
+    elif is_admin_video:
+        caption = "✅ OWNER/ADMIN TEST MODE — video đã dựng xong, không trừ Xu."
     else:
-        caption = "✅ Video đã xử lý xong. TOAN AAS gửi file kết quả từ Railway."
+        caption = "✅ Video đã dựng xong. TOAN AAS gửi file kết quả cuối."
     try:
         with open(final_path, "rb") as handle:
             await tg_app.bot.send_video(

@@ -89,7 +89,7 @@ def test_public_render_guard_blocks_before_invoice(monkeypatch):
     monkeypatch.setattr(bot, "VIDEO_B14_2_PROJECT_WORKER_READY", False)
     ok, message = bot.video_b14_public_render_guard(123456)
     assert ok is False
-    assert "Tác vụ video nền chưa sẵn sàng" in message
+    assert "Hệ thống dựng video nền chưa sẵn sàng" in message
 
     monkeypatch.setattr(bot, "VIDEO_B14_2_PROJECT_WORKER_READY", True)
     monkeypatch.setattr(bot, "frame_video_worker_connected", lambda: False)
