@@ -250,20 +250,16 @@ def test_trend_select_generates_hook_script_storyboard_prompt():
     query = _FakeQuery(user_id, "vproduct|trend_select|0")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "style"
+    assert session["current_step"] == "asset_intake"
     prepared = session["draft"]["prepared_prompt_bundle"]
     assert prepared["trend_hooks"]
-    for callback in ("vproduct|style|ugc", "vproduct|color|bright", "vproduct|motion|skip"):
-        query = _FakeQuery(user_id, callback)
-        asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    query = _FakeQuery(user_id, "vproduct|asset_skip_confirm")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    bundle = session["draft"]["prompt_bundle"]
-    assert session["current_step"] == "result"
-    assert bundle["trend_hooks"]
-    assert bundle["script"]
-    assert bundle["storyboard_panels"]
-    assert bundle["video_prompts"]
-    assert bundle["caption"]
+    assert session["current_step"] == "storyboard_preview"
+    assert session["draft"]["b14_storyboard_plan"]
+    assert session["draft"]["provider_called"] is False
+    assert session["draft"]["xu_charged"] == 0
     bot.clear_video_session(user_id)
 
 
@@ -418,15 +414,9 @@ def test_video_ai_real_motion_step_after_prompt_or_image():
     _press_vproduct(user_id, "video_ai_real", "vproduct|ideas|video_ai_real")
     query = _FakeQuery(user_id, "vproduct|idea_select|0")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert bot.get_video_session(user_id)["current_step"] == "style"
+    assert bot.get_video_session(user_id)["current_step"] == "asset_intake"
     assert "🎥 Gợi ý chuyển động" not in _labels(bot.task3d_product_intro_keyboard("video_ai_real", "vi"))
-    query = _FakeQuery(user_id, "vproduct|style|realistic")
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert bot.get_video_session(user_id)["current_step"] == "color"
-    query = _FakeQuery(user_id, "vproduct|color|warm")
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert bot.get_video_session(user_id)["current_step"] == "movement"
-    assert "Slow push-in" in _labels(bot.task3d_motion_keyboard("vi", "video_ai_real"))
+    assert "📸 Gửi ảnh nhân vật/sản phẩm" in _labels(bot.video_asset_intake_keyboard("vi"))
     bot.clear_video_session(user_id)
 
 
@@ -500,21 +490,15 @@ def test_guided_idea_motion_and_scene_skip_are_free_prompt_steps():
     query = _FakeQuery(user_id, "vproduct|idea_select|0")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "style"
+    assert session["current_step"] == "asset_intake"
     assert session["draft"]["provider_called"] is not True
     assert session["draft"].get("xu_charged", 0) == 0
 
-    query = _FakeQuery(user_id, "vproduct|style|realistic")
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert bot.get_video_session(user_id)["current_step"] == "color"
-    query = _FakeQuery(user_id, "vproduct|color|default")
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    assert bot.get_video_session(user_id)["current_step"] == "movement"
-    query = _FakeQuery(user_id, "vproduct|motion|skip")
+    query = _FakeQuery(user_id, "vproduct|asset_skip_confirm")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "result"
-    assert session["draft"]["motion_skipped"] is True
+    assert session["current_step"] == "storyboard_preview"
+    assert session["draft"]["b14_storyboard_plan"]
     assert session["draft"].get("xu_charged", 0) == 0
 
     bot.clear_video_session(user_id)
@@ -591,7 +575,7 @@ def test_task1_not_touched():
 def test_task2_not_touched():
     hotfix_source = inspect.getsource(bot.handle_video_product_callback).lower()
     assert "translation" not in hotfix_source
-    assert "subtitle" not in hotfix_source
+    assert "videodub" not in hotfix_source
     assert "dubbing" not in hotfix_source
 
 
@@ -1491,7 +1475,7 @@ def test_all_video_products_output_use_same_action_menu():
         assert required <= set(_callbacks(bot.task3d_result_keyboard(product_id, "vi"))), product_id
 
 
-def test_use_to_create_video_opens_aspect_gate_before_tools_package(monkeypatch):
+def test_use_to_create_video_opens_b14_storyboard_preview(monkeypatch):
     user_id = 993290
     bot.clear_video_session(user_id)
     bundle = _bundle(shots=3).to_dict()
@@ -1505,10 +1489,9 @@ def test_use_to_create_video_opens_aspect_gate_before_tools_package(monkeypatch)
     query = _FakeQuery(user_id, "vproduct|render")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "result"
-    assert captured["kwargs"]["initial_step"] == "aspect"
-    assert captured["args"][5] == "vproduct|result"
-    assert "selected_scene_count" not in captured["args"][6]
+    assert session["current_step"] == "storyboard_preview"
+    assert not captured
+    assert "Storyboard + prompt preview" in query.edits[-1][0]
     bot.clear_video_session(user_id)
 
 
@@ -2035,7 +2018,7 @@ def test_prompt_video_detail_shows_video_prompt():
     assert bundle["video_prompts"][2][:80] in text
 
 
-def test_prompt_video_create_routes_to_aspect_gate_before_tools_package(monkeypatch):
+def test_prompt_video_create_routes_to_b14_storyboard_preview(monkeypatch):
     user_id = 993304
     bot.clear_video_session(user_id)
     bundle = _bundle(shots=3).to_dict()
@@ -2049,15 +2032,13 @@ def test_prompt_video_create_routes_to_aspect_gate_before_tools_package(monkeypa
     query = _FakeQuery(user_id, "vproduct|prompt_video_create")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "prompt_video_detail"
+    assert session["current_step"] == "storyboard_preview"
     assert session["draft"]["scene_count_back_callback"] == "vproduct|prompt_video_detail"
     assert session["draft"]["scene_count_render_selected_shots"] == [2]
     assert bundle["video_prompts"][1] in session["draft"]["scene_count_render_video_prompt"]
-    package = captured["args"][6]
-    assert package["selected_shots"] == [2]
-    assert bundle["video_prompts"][1] in package["video_prompt"]
-    assert captured["kwargs"]["initial_step"] == "aspect"
-    assert captured["args"][5] == "vproduct|prompt_video_detail"
+    assert session["draft"]["b14_storyboard_plan"]
+    assert not captured
+    assert "Storyboard + prompt preview" in query.edits[-1][0]
     bot.clear_video_session(user_id)
 
 
