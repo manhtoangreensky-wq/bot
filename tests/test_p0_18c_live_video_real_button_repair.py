@@ -77,7 +77,7 @@ def test_p0_18c_audit_report_exists():
     assert report.is_file()
     text = report.read_text(encoding="utf-8")
     assert "Xem prompt video" in text
-    assert "Logo da gui" in text
+    assert "Logo/watermark chu" in text
     assert "waiting_voice_volume_percent" in text
     assert "Kiem tra trang thai" in text
 
@@ -116,48 +116,55 @@ def test_prompt_video_back_to_storyboard():
     assert "vproduct|b14_storyboard_screen" in callbacks
 
 
-def test_logo_sent_selects_source_before_position():
+def test_logo_text_button_opens_input():
     user_id = 918304
-    session = _seed(user_id)
-    pack = bot.video_b14_asset_pack_from_session(session)
-    pack.logo_refs = []
-    bot.video_assets.add_asset(pack, asset_type="logo", file_id="logo-existing", admin=True)
-    bot.video_b14_save_asset_pack(user_id, session, pack)
-    query, session = _press(user_id, "vproduct|b14_logo_source|uploaded")
-    plan = bot.video_b14_addon_plan_from_session(session)
-    assert plan["logo_source"] == "uploaded"
-    assert plan["logo_enabled"] is True
-    assert "Vị trí" in query.edits[-1]["text"]
+    _seed(user_id)
+    query, session = _press(user_id, "vproduct|b14_logo_text_start")
+    assert session["current_step"] == "b14_logo_text_wait"
+    assert "Nhập chữ logo/watermark" in query.edits[-1]["text"]
 
 
-def test_logo_position_without_logo_saves_position_and_guides():
+def test_logo_text_saves_then_asks_position():
     user_id = 918305
     _seed(user_id)
-    query, session = _press(user_id, "vproduct|b14_logo_position|top_left")
-    plan = bot.video_b14_addon_plan_from_session(session)
-    assert plan["logo_position"] == "top_left"
-    assert plan["logo_enabled"] is False
-    assert "Đã lưu vị trí logo" in query.edits[-1]["text"]
-
-
-def test_logo_upload_sets_waiting_state():
-    user_id = 918306
-    _seed(user_id)
-    query, session = _press(user_id, "vproduct|b14_logo_upload")
-    assert session["current_step"] == "b14_logo_upload_wait"
-    assert "Gửi logo mới" in query.edits[-1]["text"]
-
-
-def test_logo_upload_media_saves_logo():
-    user_id = 918307
-    _seed(user_id)
-    _press(user_id, "vproduct|b14_logo_upload")
-    handled, message, session = _send_logo(user_id)
+    _press(user_id, "vproduct|b14_logo_text_start")
+    handled, message, session = _send_text(user_id, "TOAN AAS")
     plan = bot.video_b14_addon_plan_from_session(session)
     assert handled is True
-    assert plan["logo_source"] == "uploaded"
-    assert plan["logo_file_id"] == "logo-file"
-    assert "Đã lưu logo mới" in message.sent[-1]["text"]
+    assert plan["logo_source"] == "text"
+    assert plan["logo_text"] == "TOAN AAS"
+    assert plan["logo_enabled"] is False
+    assert session["current_step"] == "b14_logo_position"
+    assert "Chọn vị trí" in message.sent[-1]["text"]
+
+
+def test_logo_position_requires_confirm():
+    user_id = 918306
+    _seed(user_id)
+    _press(user_id, "vproduct|b14_logo_text_start")
+    _send_text(user_id, "TOAN AAS")
+    query, session = _press(user_id, "vproduct|b14_logo_position|top_center")
+    plan = bot.video_b14_addon_plan_from_session(session)
+    assert plan["logo_position"] == "top_center"
+    assert plan["logo_enabled"] is False
+    assert session["current_step"] == "b14_logo_confirm"
+    assert "Xác nhận logo/watermark" in query.edits[-1]["text"]
+
+
+def test_logo_confirm_returns_addons():
+    user_id = 918307
+    _seed(user_id)
+    _press(user_id, "vproduct|b14_logo_text_start")
+    _send_text(user_id, "TOAN AAS")
+    _press(user_id, "vproduct|b14_logo_position|bottom_center")
+    query, session = _press(user_id, "vproduct|b14_logo_confirm")
+    plan = bot.video_b14_addon_plan_from_session(session)
+    assert plan["logo_source"] == "text"
+    assert plan["logo_enabled"] is True
+    assert plan["logo_text"] == "TOAN AAS"
+    assert plan["logo_position"] == "bottom_center"
+    assert session["current_step"] == "b14_addons"
+    assert "Voice / nhạc / phụ đề / logo" in query.edits[-1]["text"]
 
 
 def test_logo_done_returns_addons():
@@ -171,6 +178,7 @@ def test_logo_done_returns_addons():
 def test_logo_back_returns_addons():
     callbacks = _callbacks(bot.video_b14_logo_keyboard("vi"))
     assert "vproduct|b14_addons" in callbacks
+    assert "vproduct|b14_logo_upload" not in callbacks
 
 
 def test_voice_edit_text_sets_waiting_state():
@@ -365,7 +373,7 @@ def test_video_status_shows_job_stage_progress():
 
 
 def test_video_status_shows_addons():
-    session = {"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3}, "b14_addon_plan": {"voice_enabled": True, "voice_source": "default_female", "voice_label": "Nữ mặc định", "music_enabled": True, "music_source": "default", "music_volume_percent": 10, "subtitle_enabled": True, "subtitle_source": "from_narration", "dub_enabled": False, "logo_enabled": True, "logo_source": "uploaded", "logo_position": "top_right"}}}
+    session = {"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3}, "b14_addon_plan": {"voice_enabled": True, "voice_source": "default_female", "voice_label": "Nữ mặc định", "music_enabled": True, "music_source": "default", "music_volume_percent": 10, "subtitle_enabled": True, "subtitle_source": "from_narration", "dub_enabled": False, "logo_enabled": True, "logo_source": "text", "logo_text": "TOAN AAS", "logo_position": "top_right"}}}
     text = bot.video_b14_queue_status_text(session, None, bot.ADMIN_ID, "vi")
     assert "Voice:" in text and "Nhạc:" in text and "Logo:" in text
 
@@ -406,7 +414,7 @@ def test_tool_test_live_video_buttons_regression_covers_prompt_logo_voice_volume
     assert report["ok"] is True
     for key in [
         "prompt_video_no_generic_error",
-        "logo_sent_then_position",
+        "logo_text_position_confirm",
         "voice_text_saved",
         "voice_volume_120",
         "music_volume_10",
