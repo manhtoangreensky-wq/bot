@@ -10,6 +10,10 @@ import bot
 BASE_TIME = datetime(2026, 6, 27, 12, 0, 0)
 
 
+def _freeze_payos_limit_time(monkeypatch, frozen_time: datetime = BASE_TIME) -> None:
+    monkeypatch.setattr(bot, "_payos_limit_now", lambda now_dt=None: now_dt or frozen_time)
+
+
 def _init_db(monkeypatch, tmp_path, name="p0_17c2.db"):
     monkeypatch.setattr(bot, "DB_FILE", str(tmp_path / name))
     bot.USER_BILL_STATE.clear()
@@ -258,6 +262,7 @@ def test_payos_auto_review_lock_does_not_auto_expire(monkeypatch, tmp_path):
 
 def test_payos_auto_rolling_limit_does_not_call_payos_api(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
+    _freeze_payos_limit_time(monkeypatch)
     uid = 170203
     _seed_many(str(uid), 500_000, [10, 15, 20, 25, 30, 35])
     before_count = _order_count()
