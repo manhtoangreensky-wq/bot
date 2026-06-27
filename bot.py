@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║   TOAN AAS V15.2 - DYNAMIC QR READY                             ║
+║   TOAN AAS v1.0 Beta - DYNAMIC QR READY                         ║
 ║   FastAPI + Telegram Bot (Shared Event Loop via Lifespan)        ║
 ║   Dynamic Billing | Deepgram | Auto-Tiers | PayOS Dynamic QR     ║
 ║   Cutout Fallback | OpenAI Fallback | Full Env Vars              ║
@@ -382,7 +382,8 @@ if ADMIN_ID:
     ADMIN_IDS.add(str(ADMIN_ID))
 OWNER_IDS_RAW       = _env("OWNER_IDS", "")
 OWNER_IDS           = parse_id_set(OWNER_IDS_RAW)
-APP_VERSION         = "TOAN AAS V15.2"
+PUBLIC_VERSION      = "v1.0 Beta"
+APP_VERSION         = f"TOAN AAS {PUBLIC_VERSION}"
 START_TIME          = time.time()
 APP_BUILD_SHA       = (
     _env("RAILWAY_GIT_COMMIT_SHA")
@@ -52607,7 +52608,8 @@ def menu_text_system() -> str:
     return (
         "⚙️ <b>Hệ Thống</b>\n\n"
         f"• Runtime build: <code>{APP_BUILD}</code>\n"
-        f"• App version: <code>{html.escape(APP_VERSION)}</code>\n"
+        f"• Public version: <code>{html.escape(PUBLIC_VERSION)}</code>\n"
+        f"• App: <code>{html.escape(APP_VERSION)}</code>\n"
         "• <code>/runtime</code> — kiểm tra build, git commit, startup warning\n"
         "• <code>/data_status</code> — kiểm tra DB persistent volume và backup\n"
         "• <code>/telegram_takeover</code> — hướng dẫn xử lý xung đột bot instance\n"
@@ -113948,6 +113950,7 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ownership = telegram_update_ownership_diagnosis(webhook_info)
     payload = {
         "app": APP_VERSION,
+        "public_version": PUBLIC_VERSION,
         "build": APP_BUILD,
         "deploy_id": APP_DEPLOY_ID or "-",
         "bot_username_env": BOT_USERNAME,
@@ -141069,7 +141072,7 @@ async def lifespan(app: FastAPI):
         await tg_app.shutdown()
     logger.info("🛑 Bot đã dừng an toàn.")
 
-fastapi_app = FastAPI(title="TOAN AAS V15.2", lifespan=lifespan)
+fastapi_app = FastAPI(title=APP_VERSION, lifespan=lifespan)
 
 def verify_runtime_access(request: Request):
     token = (
@@ -141205,7 +141208,9 @@ async def home_page():
     if not os.path.exists(index_path):
         return {
             "status": "ok",
-            "service": APP_VERSION,
+            "service": "TOAN AAS",
+            "public_version": PUBLIC_VERSION,
+            "app_version": APP_VERSION,
             "message": "Landing page not found. Use /health for status."
         }
     return FileResponse(index_path)
@@ -141215,6 +141220,8 @@ async def status_page():
     return {
         "status": "ok",
         "service": "TOAN AAS",
+        "public_version": PUBLIC_VERSION,
+        "app_version": APP_VERSION,
         "build": APP_BUILD,
         "health": "/health",
         "landing": "/",
@@ -141286,7 +141293,8 @@ async def health_check():
     return {
         "status": "ok" if db_ok else "degraded",
         "service": "TOAN AAS",
-        "version": APP_VERSION.replace("TOAN AAS", "").strip(),
+        "version": PUBLIC_VERSION,
+        "public_version": PUBLIC_VERSION,
         "app_version": APP_VERSION,
         "build": APP_BUILD,
         "uptime_seconds": int(time.time() - START_TIME),
@@ -141379,7 +141387,8 @@ async def runtime_health(request: Request):
     return {
         "ok": True,
         "status": "ok",
-        "service": APP_VERSION,
+        "service": "TOAN AAS",
+        "public_version": PUBLIC_VERSION,
         "app_version": APP_VERSION,
         "build": APP_BUILD,
         "deploy_id": APP_DEPLOY_ID or "",
