@@ -128,6 +128,8 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
             lease_expires_at DATETIME,
             last_error TEXT,
             result_json TEXT,
+            progress_percent INTEGER DEFAULT 0,
+            progress_message TEXT DEFAULT '',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             started_at DATETIME,
@@ -187,6 +189,8 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
         ("lease_expires_at", "lease_expires_at DATETIME"),
         ("last_error", "last_error TEXT"),
         ("result_json", "result_json TEXT"),
+        ("progress_percent", "progress_percent INTEGER DEFAULT 0"),
+        ("progress_message", "progress_message TEXT DEFAULT ''"),
         ("updated_at", "updated_at DATETIME"),
         ("started_at", "started_at DATETIME"),
         ("completed_at", "completed_at DATETIME"),
@@ -287,6 +291,8 @@ def _job_from_row(row: sqlite3.Row | tuple | None) -> dict[str, Any]:
         "updated_at",
         "started_at",
         "completed_at",
+        "progress_percent",
+        "progress_message",
     ]
     data = {key: row[idx] for idx, key in enumerate(keys) if idx < len(row)}
     data["job_id"] = data.get("id")
@@ -497,7 +503,8 @@ def get_active_video_render_job(conn: sqlite3.Connection, project_id: int) -> di
     ensure_video_project_queue_schema(conn)
     row = conn.execute(
         """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,locked_by,locked_at,
-                  lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at
+                  lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at,
+                  progress_percent,progress_message
            FROM video_jobs
            WHERE project_id=? AND job_type=? AND status IN ('queued','processing')
            ORDER BY id ASC LIMIT 1""",
@@ -510,7 +517,8 @@ def get_video_render_job(conn: sqlite3.Connection, job_id: int) -> dict[str, Any
     ensure_video_project_queue_schema(conn)
     row = conn.execute(
         """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,locked_by,locked_at,
-                  lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at
+                  lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at,
+                  progress_percent,progress_message
            FROM video_jobs WHERE id=?""",
         (int(job_id),),
     ).fetchone()
@@ -623,11 +631,15 @@ def claim_next_video_job(
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
-            """SELECT id,project_id,user_id,job_type,status,priority,attempts,max_attempts,locked_by,locked_at,
-                      lease_expires_at,last_error,result_json,created_at,updated_at,started_at,completed_at
-               FROM video_jobs
-               WHERE job_type=? AND status='queued'
-               ORDER BY priority ASC, created_at ASC, id ASC
+            """SELECT j.id,j.project_id,j.user_id,j.job_type,j.status,j.priority,j.attempts,j.max_attempts,j.locked_by,j.locked_at,
+                      j.lease_expires_at,j.last_error,j.result_json,j.created_at,j.updated_at,j.started_at,j.completed_at,
+                      j.progress_percent,j.progress_message
+               FROM video_jobs j
+               JOIN video_projects p ON p.project_id=j.project_id
+               WHERE j.job_type=? AND j.status='queued'
+                 AND COALESCE(p.is_confirmed,0)=1
+                 AND p.status IN ('queued_for_worker','processing')
+               ORDER BY j.priority ASC, j.created_at ASC, j.id ASC
                LIMIT 1""",
             (VIDEO_RENDER_JOB_TYPE,),
         ).fetchone()
@@ -658,6 +670,40 @@ def claim_next_video_job(
 
 def video_worker_poll_queued_job(conn: sqlite3.Connection, worker_id: str = "local_worker") -> dict[str, Any]:
     return claim_next_video_job(conn, worker_id=worker_id)
+
+
+def heartbeat_video_job(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    worker_id: str,
+    progress_percent: int = 0,
+    message: str = "",
+    lease_seconds: int = 600,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    ensure_video_project_queue_schema(conn)
+    current_dt = now or datetime.now()
+    current = now_text(current_dt)
+    lease_expires = now_text(current_dt + timedelta(seconds=max(30, int(lease_seconds or 600))))
+    progress = max(0, min(100, int(progress_percent or 0)))
+    cursor = conn.execute(
+        """UPDATE video_jobs
+           SET lease_expires_at=?, progress_percent=?, progress_message=?, updated_at=?
+           WHERE id=? AND status='processing' AND locked_by=?""",
+        (
+            lease_expires,
+            progress,
+            str(message or "")[:500],
+            current,
+            int(job_id),
+            str(worker_id or "")[:120],
+        ),
+    )
+    conn.commit()
+    if cursor.rowcount != 1:
+        return {"ok": False, "reason": "job_not_owned_or_not_processing", "job": get_video_render_job(conn, int(job_id))}
+    return {"ok": True, "job": get_video_render_job(conn, int(job_id))}
 
 
 def complete_video_job(
