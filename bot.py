@@ -90,6 +90,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
+from services import remote_worker_api, worker_auth
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
 from services import video_product_profiles as video_profiles
@@ -946,6 +947,7 @@ LOCAL_WORKER_ENABLED = env_flag("LOCAL_WORKER_ENABLED", "false")
 LOCAL_WORKER_TOKEN = _env("LOCAL_WORKER_TOKEN")
 LOCAL_WORKER_POLL_ENABLED = env_flag("LOCAL_WORKER_POLL_ENABLED", "true")
 LOCAL_WORKER_MAX_JOB_SECONDS = max(30, env_int("LOCAL_WORKER_MAX_JOB_SECONDS", 600))
+WORKER_RESULT_UPLOAD_DIR = _env("WORKER_RESULT_UPLOAD_DIR", os.path.join("files", "worker_results"))
 LOCAL_FFMPEG_PATH = _env("LOCAL_FFMPEG_PATH", r"D:\TOANAAS\ffmpeg-8.1.1\bin\ffmpeg.exe")
 LOCAL_COMFY_URL = _env("LOCAL_COMFY_URL", "http://127.0.0.1:8188")
 LOCAL_COMFY_ENABLED = env_flag("LOCAL_COMFY_ENABLED", "false")
@@ -117232,6 +117234,82 @@ async def cmd_payos_test_plan(update: Update, context: ContextTypes.DEFAULT_TYPE
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
+async def cmd_tool_test_remote_worker_api(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = set(str(arg or "").strip() for arg in (getattr(context, "args", None) or []))
+    if "--fake-job" not in args or "--no-charge" not in args:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/tool_test_remote_worker_api --fake-job --no-charge</code>",
+            parse_mode="HTML",
+        )
+    conn = db_connect()
+    uploaded_path = ""
+    try:
+        fake = remote_worker_api.create_fake_video_job_for_admin_test(conn, user_id=safe_int(uid, 0))
+        claim = remote_worker_api.claim_remote_worker_job(
+            conn,
+            worker_id="admin-remote-worker-api-test",
+            capabilities=["ffmpeg", "video_postprocess"],
+            max_jobs=1,
+            lease_seconds=120,
+        )
+        job = claim.get("job") or {}
+        job_id = safe_int(job.get("job_id"), 0)
+        heartbeat = remote_worker_api.heartbeat_remote_worker_job(
+            conn,
+            worker_id="admin-remote-worker-api-test",
+            job_id=job_id,
+            progress_percent=50,
+            message="admin fake bridge test",
+            lease_seconds=120,
+        ) if job_id else {"ok": False, "reason": "job_missing"}
+        upload_root = os.path.join(os.path.dirname(__file__), WORKER_RESULT_UPLOAD_DIR)
+        uploaded_path = remote_worker_api.save_uploaded_result(
+            upload_root,
+            job_id=job_id or 0,
+            filename="admin_remote_worker_api_test.mp4",
+            content=b"TOAN_AAS_ADMIN_REMOTE_WORKER_API_TEST_MP4",
+        ) if job_id else ""
+        complete = remote_worker_api.complete_remote_worker_job(
+            conn,
+            worker_id="admin-remote-worker-api-test",
+            job_id=job_id,
+            result={"admin_test": True, "no_charge": True},
+            final_video_path=uploaded_path,
+            uploaded_file=True,
+        ) if job_id else {"ok": False, "reason": "job_missing"}
+        duplicate = remote_worker_api.complete_remote_worker_job(
+            conn,
+            worker_id="admin-remote-worker-api-test",
+            job_id=job_id,
+            result={"admin_test": True, "duplicate_probe": True},
+            final_video_path=uploaded_path,
+            uploaded_file=True,
+        ) if job_id else {"ok": False, "reason": "job_missing"}
+        lines = [
+            "ADMIN TEST MODE — Remote Worker API Bridge",
+            "",
+            f"fake job: {'OK' if fake.get('ok') else 'FAIL'}",
+            f"claim: {'OK' if claim.get('ok') and job else 'NO_JOB'}",
+            f"heartbeat: {'OK' if heartbeat.get('ok') else heartbeat.get('reason') or 'FAIL'}",
+            f"complete: {'OK' if complete.get('ok') else complete.get('reason') or 'FAIL'}",
+            f"duplicate complete guard: {'OK' if duplicate.get('duplicate') else 'FAIL'}",
+            "no charge: OK",
+            "provider call: NO",
+        ]
+        return await update.message.reply_text("\n".join(lines))
+    except Exception as exc:
+        logger.warning(f"remote worker api admin test failed: {type(exc).__name__}")
+        return await update.message.reply_text(
+            f"ADMIN TEST MODE — Remote Worker API Bridge\n\nFAIL: <code>{html.escape(type(exc).__name__)}</code>",
+            parse_mode="HTML",
+        )
+    finally:
+        conn.close()
+
+
 async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
@@ -117259,6 +117337,7 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         webhook_info = {"ok": False, "error": str(e), "expected_url": expected_webhook}
     ownership = telegram_update_ownership_diagnosis(webhook_info)
+    worker_flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
     payload = {
         "app": APP_VERSION,
         "public_version": PUBLIC_VERSION,
@@ -117289,6 +117368,7 @@ async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "telegram_webhook_info": webhook_info,
         "telegram_ownership": ownership,
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
+        **worker_flags,
     }
     env_warning_text = (
         f"⚠️ <b>ENV warning:</b> {TELEGRAM_UPDATE_MODE_ENV_WARNING_TEXT}\n\n"
@@ -143291,6 +143371,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("guide_debug", cmd_guide_debug))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
+    tg_app.add_handler(CommandHandler("tool_test_remote_worker_api", cmd_tool_test_remote_worker_api))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
@@ -144378,6 +144459,28 @@ def verify_local_worker_access(request: Request):
     if not token or not hmac.compare_digest(str(token), LOCAL_WORKER_TOKEN):
         raise HTTPException(status_code=401, detail="invalid worker token")
 
+def verify_remote_worker_api_access(request: Request):
+    result = worker_auth.verify_worker_bearer_token(
+        request.headers.get("authorization", ""),
+        LOCAL_WORKER_TOKEN,
+    )
+    if result.ok:
+        return
+    event = worker_auth.worker_auth_security_event(
+        endpoint=str(request.url.path),
+        client_host=(request.client.host if request.client else ""),
+        user_agent=request.headers.get("user-agent", ""),
+        reason=result.reason,
+    )
+    logger.warning("remote_worker_api_auth_failed | %s", json.dumps(event, ensure_ascii=False, sort_keys=True))
+    raise HTTPException(status_code=result.status_code, detail=result.reason)
+
+def worker_result_upload_root() -> str:
+    configured = str(WORKER_RESULT_UPLOAD_DIR or os.path.join("files", "worker_results"))
+    if os.path.isabs(configured):
+        return configured
+    return os.path.join(os.path.dirname(__file__), configured)
+
 async def read_json_body(request: Request) -> dict:
     try:
         payload = await request.json()
@@ -144521,6 +144624,170 @@ async def internal_worker_upload_result(request: Request, job_id: str = Form(def
         "detail": "upload_result is reserved for later local render phases",
         "job_id": str(job_id),
     }
+
+
+@fastapi_app.post("/api/v1/worker/claim")
+async def api_worker_claim(request: Request):
+    verify_remote_worker_api_access(request)
+    payload = await read_json_body(request)
+    worker_id = remote_worker_api.sanitize_worker_id(payload.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker")
+    capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
+    max_jobs = max(1, min(safe_int(payload.get("max_jobs"), 1), 1))
+    lease_seconds = max(30, min(3600, safe_int(payload.get("lease_seconds"), LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
+    set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
+    set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
+    conn = db_connect()
+    try:
+        return remote_worker_api.claim_remote_worker_job(
+            conn,
+            worker_id=worker_id,
+            capabilities=capabilities,
+            max_jobs=max_jobs,
+            lease_seconds=lease_seconds,
+        )
+    finally:
+        conn.close()
+
+
+@fastapi_app.post("/api/v1/worker/heartbeat")
+async def api_worker_heartbeat(request: Request):
+    verify_remote_worker_api_access(request)
+    payload = await read_json_body(request)
+    worker_id = remote_worker_api.sanitize_worker_id(payload.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker")
+    job_id = safe_int(payload.get("job_id"), 0)
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+    set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker heartbeat", worker_id)
+    set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
+    conn = db_connect()
+    try:
+        result = remote_worker_api.heartbeat_remote_worker_job(
+            conn,
+            worker_id=worker_id,
+            job_id=job_id,
+            progress_percent=safe_int(payload.get("progress_percent"), 0),
+            message=str(payload.get("message") or "")[:500],
+            lease_seconds=max(30, min(3600, safe_int(payload.get("lease_seconds"), LOCAL_WORKER_MAX_JOB_SECONDS or 600))),
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=409, detail=result.get("reason") or "heartbeat_rejected")
+        return result
+    finally:
+        conn.close()
+
+
+async def maybe_send_remote_worker_final_video(result: dict) -> dict:
+    if not result.get("ok") or result.get("duplicate") or not tg_app:
+        return {"sent": False, "reason": "not_ready_or_duplicate"}
+    project = result.get("project") or {}
+    user_id = str(project.get("user_id") or "").strip()
+    final_path = str(project.get("final_video_path") or "")
+    if not user_id or not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
+        return {"sent": False, "reason": "missing_user_or_file"}
+    try:
+        with open(final_path, "rb") as handle:
+            await tg_app.bot.send_video(
+                chat_id=int(user_id),
+                video=handle,
+                caption="✅ Video đã xử lý xong. TOAN AAS gửi file kết quả từ Railway.",
+            )
+        return {"sent": True}
+    except Exception as exc:
+        logger.warning(f"remote worker final video send failed: {type(exc).__name__}")
+        return {"sent": False, "reason": type(exc).__name__}
+
+
+@fastapi_app.post("/api/v1/worker/complete")
+async def api_worker_complete(request: Request):
+    verify_remote_worker_api_access(request)
+    content_type = request.headers.get("content-type", "").lower()
+    uploaded_path = ""
+    uploaded_file = False
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        raw_metadata = form.get("metadata") or "{}"
+        try:
+            payload = json.loads(str(raw_metadata))
+        except Exception:
+            raise HTTPException(status_code=400, detail="metadata must be JSON")
+        upload = form.get("file")
+        if not upload or not hasattr(upload, "read"):
+            raise HTTPException(status_code=400, detail="file required")
+        job_id_for_path = safe_int(payload.get("job_id"), 0)
+        content = await upload.read()
+        try:
+            uploaded_path = remote_worker_api.save_uploaded_result(
+                worker_result_upload_root(),
+                job_id=job_id_for_path,
+                filename=getattr(upload, "filename", "result.mp4"),
+                content=content,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        uploaded_file = True
+    else:
+        payload = await read_json_body(request)
+    worker_id = remote_worker_api.sanitize_worker_id(payload.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker")
+    job_id = safe_int(payload.get("job_id"), 0)
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+    result_payload = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    conn = db_connect()
+    try:
+        result = remote_worker_api.complete_remote_worker_job(
+            conn,
+            worker_id=worker_id,
+            job_id=job_id,
+            result=result_payload,
+            final_video_path=uploaded_path or str(result_payload.get("final_video_path") or ""),
+            final_video_file_id=str(result_payload.get("final_video_file_id") or ""),
+            uploaded_file=uploaded_file,
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=409, detail=result.get("reason") or "complete_rejected")
+    finally:
+        conn.close()
+    delivery = await maybe_send_remote_worker_final_video(result)
+    return {"ok": True, "result": result, "delivery": delivery}
+
+
+@fastapi_app.post("/api/v1/worker/fail")
+async def api_worker_fail(request: Request):
+    verify_remote_worker_api_access(request)
+    payload = await read_json_body(request)
+    worker_id = remote_worker_api.sanitize_worker_id(payload.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker")
+    job_id = safe_int(payload.get("job_id"), 0)
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+    partial_artifacts = payload.get("partial_artifacts") if isinstance(payload.get("partial_artifacts"), list) else []
+    conn = db_connect()
+    try:
+        result = remote_worker_api.fail_remote_worker_job(
+            conn,
+            worker_id=worker_id,
+            job_id=job_id,
+            safe_error=str(payload.get("safe_error") or "remote_worker_failed")[:500],
+            retryable=bool(payload.get("retryable", True)),
+            partial_artifacts=partial_artifacts,
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=409, detail=result.get("reason") or "fail_rejected")
+        return result
+    finally:
+        conn.close()
+
+
+@fastapi_app.get("/api/v1/worker/assets/{asset_id}")
+async def api_worker_asset_download(asset_id: str, request: Request):
+    verify_remote_worker_api_access(request)
+    safe_asset_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(asset_id or ""))[:120]
+    if not safe_asset_id:
+        raise HTTPException(status_code=400, detail="asset_id required")
+    asset_root = os.path.join(os.path.dirname(__file__), "files", "worker_assets")
+    candidate = os.path.abspath(os.path.join(asset_root, safe_asset_id))
+    if not candidate.startswith(os.path.abspath(asset_root)) or not os.path.exists(candidate) or not os.path.isfile(candidate):
+        raise HTTPException(status_code=404, detail="asset_not_found")
+    return FileResponse(candidate, filename=os.path.basename(candidate))
 
 # ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 @fastapi_app.get("/")
@@ -144699,6 +144966,7 @@ async def runtime_health(request: Request):
     db_summary = runtime_db_status()
     data_persistence = data_persistence_status_payload(include_counts=True)
     backup_info = latest_db_backup_info()
+    worker_flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
     webhook_info = {"ok": False, "reason": "telegram_app_not_ready", "expected_url": expected_webhook}
     if tg_app:
         try:
@@ -144764,6 +145032,7 @@ async def runtime_health(request: Request):
         "telegram_webhook_info": webhook_info,
         "telegram_ownership": ownership,
         "cobalt_public_disabled": AgentDownloader._uses_public_cobalt(COBALT_API_URL),
+        **worker_flags,
     }
 
 @fastapi_app.post("/api/telegram/takeover")

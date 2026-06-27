@@ -30,6 +30,7 @@ def pytest_collection_modifyitems(config, items):
     branch_scoped_static_guards = {
         "test_p0_17c1_static_guard_no_unrelated_files_touched": "docs/reports/P0_17C1_PAYOS_SIGNATURE_IDEMPOTENCY.md",
         "test_p0_17c2_static_guard_no_unrelated_files_touched": "docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md",
+        "test_p0_17c4_static_guard_no_unrelated_files_touched": "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md",
     }
     for item in items:
         report_path = branch_scoped_static_guards.get(item.name)
