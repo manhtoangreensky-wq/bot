@@ -54,6 +54,47 @@ def sanitize_worker_id(worker_id: str) -> str:
     return (clean or "remote-worker")[:120]
 
 
+def mask_worker_id(worker_id: str) -> str:
+    clean = sanitize_worker_id(worker_id)
+    if len(clean) <= 4:
+        return clean[:1] + "***"
+    return clean[:2] + "***" + clean[-2:]
+
+
+def sanitize_capabilities(capabilities: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    result: list[str] = []
+    for item in capabilities or []:
+        value = re.sub(r"[^A-Za-z0-9_.:-]+", "-", str(item or "").strip().lower())[:80]
+        if value and value not in result:
+            result.append(value)
+    return result[:20]
+
+
+def build_worker_ping_payload(
+    *,
+    worker_id: str,
+    capabilities: list[str] | tuple[str, ...] | None = None,
+    server_time: str = "",
+    build: str = "",
+    public_version: str = "",
+    worker_api_enabled: bool = True,
+    remote_worker_mode_supported: bool = True,
+    dry_run: bool = True,
+) -> dict:
+    return {
+        "ok": True,
+        "worker_api_enabled": bool(worker_api_enabled),
+        "worker_id": sanitize_worker_id(worker_id),
+        "server_time": str(server_time or ""),
+        "build": str(build or ""),
+        "public_version": str(public_version or ""),
+        "remote_worker_mode_supported": bool(remote_worker_mode_supported),
+        "can_claim_jobs": False,
+        "dry_run": bool(dry_run),
+        "capabilities": sanitize_capabilities(capabilities),
+    }
+
+
 def strip_secret_fields(value: Any) -> Any:
     if isinstance(value, dict):
         safe: dict[str, Any] = {}

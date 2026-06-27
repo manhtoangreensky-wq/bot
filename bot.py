@@ -117830,6 +117830,63 @@ async def cmd_tool_test_remote_worker_api(update: Update, context: ContextTypes.
         conn.close()
 
 
+async def cmd_remote_worker_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    status = remote_worker_status_snapshot()
+    lines = [
+        "🤖 <b>Remote Worker Status</b>",
+        "",
+        f"• worker_api_enabled: <code>{str(bool(status.get('worker_api_enabled'))).lower()}</code>",
+        f"• LOCAL_WORKER_TOKEN configured: <code>{'yes' if status.get('local_worker_token_configured') else 'no'}</code>",
+        f"• remote_worker_mode_supported: <code>{str(bool(status.get('remote_worker_mode_supported'))).lower()}</code>",
+        f"• last heartbeat: <code>{html.escape(status.get('last_remote_worker_heartbeat') or '-')}</code>",
+        f"• last worker_id: <code>{html.escape(status.get('last_worker_id') or '-')}</code>",
+        f"• worker result upload dir configured: <code>{'yes' if status.get('worker_result_upload_dir_configured') else 'no'}</code>",
+        "",
+        "Chạy trên VPS: <code>python remote_worker.py --ping</code>",
+        "Dry-run an toàn: <code>python remote_worker.py --dry-run --once</code>",
+        "Chưa route job video thật cho VPS cho tới khi B14.5 ổn định.",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_tool_test_remote_worker_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = set(str(arg or "").strip() for arg in (getattr(context, "args", None) or []))
+    if "--no-charge" not in args:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/tool_test_remote_worker_ping --no-charge</code>",
+            parse_mode="HTML",
+        )
+    flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
+    payload = remote_worker_api.build_worker_ping_payload(
+        worker_id=f"telegram-admin-{safe_int(uid, 0)}",
+        capabilities=["staging_ping"],
+        server_time=now_text(),
+        build=APP_BUILD,
+        public_version=PUBLIC_VERSION,
+        worker_api_enabled=flags["worker_api_enabled"],
+        remote_worker_mode_supported=flags["remote_worker_mode_supported"],
+        dry_run=True,
+    )
+    lines = [
+        "ADMIN TEST MODE — Remote Worker Ping",
+        "",
+        f"ping: {'OK' if flags.get('worker_api_enabled') else 'FAIL'}",
+        f"token configured: {'OK' if flags.get('local_worker_token_configured') else 'NO'}",
+        f"remote mode supported: {'OK' if flags.get('remote_worker_mode_supported') else 'NO'}",
+        f"dry-run: {'OK' if payload.get('dry_run') else 'FAIL'}",
+        f"job claimed: {'NO' if payload.get('can_claim_jobs') is False else 'UNSAFE'}",
+        "charge: NO",
+        "provider call: NO",
+    ]
+    return await update.message.reply_text("\n".join(lines))
+
+
 async def cmd_runtime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
@@ -133528,8 +133585,13 @@ ADMIN_CONTROL_MODULES = {
             [("🤖 Provider status", "menu|admin_provider_status"), ("🧪 Smoke Test", "menu|smoke_test")],
             [("🎬 Video job", "menu|admin_provider_routes"), ("🔊 TTS/Voice test", "admin_help|provider")],
             [("📝 ASR/Sub/Dub test", "admin_help|provider")],
+            [("🤖 Remote Worker Status", "admin_help|provider"), ("🧪 Test worker API", "admin_help|provider")],
+            [("📘 Hướng dẫn VPS", "admin_help|provider")],
         ],
         "commands": [
+            ("/remote_worker_status", "trạng thái remote VPS worker, không lộ token"),
+            ("/tool_test_remote_worker_ping --no-charge", "ping staging worker API, không claim job"),
+            ("/tool_test_remote_worker_api --fake-job --no-charge", "fake job admin, không trừ Xu"),
             ("/shopaikey_status", "ShopAIKey status"),
             ("/shopaikey_usage", "ShopAIKey usage"),
             ("/shopaikey_video_job", "kiểm tra job video"),
@@ -133560,7 +133622,8 @@ ADMIN_CONTROL_MODULES = {
         "safety": [
             "Smoke test có thể tốn provider cost nếu không fake/no-charge.",
             "Không hiện provider raw error/API key cho public.",
-            "Worker/VPS remote bridge để task riêng, không làm trong task này nếu chưa có W1.",
+            "Remote worker ping/dry-run không claim job thật và không trừ Xu.",
+            "Worker VPS thật chỉ bật sau khi B14.5 video flow/queue/status ổn định.",
         ],
     },
     "finance": {
@@ -144366,6 +144429,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("guide_debug", cmd_guide_debug))
     tg_app.add_handler(CommandHandler("customer_surface", cmd_customer_surface))
     tg_app.add_handler(CommandHandler("runtime",     cmd_runtime))
+    tg_app.add_handler(CommandHandler("remote_worker_status", cmd_remote_worker_status))
+    tg_app.add_handler(CommandHandler("tool_test_remote_worker_ping", cmd_tool_test_remote_worker_ping))
     tg_app.add_handler(CommandHandler("tool_test_remote_worker_api", cmd_tool_test_remote_worker_api))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
@@ -145488,6 +145553,37 @@ async def read_json_body(request: Request) -> dict:
     except Exception:
         return {}
 
+
+def _safe_worker_ping_capabilities(payload: dict, request: Request) -> list[str]:
+    raw = payload.get("capabilities")
+    if raw is None:
+        raw = request.query_params.get("capabilities", "")
+    if isinstance(raw, list):
+        return remote_worker_api.sanitize_capabilities(raw)
+    return remote_worker_api.sanitize_capabilities([part for part in str(raw or "").split(",") if part.strip()])
+
+
+def _record_remote_worker_ping(worker_id: str) -> None:
+    try:
+        set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker ping", worker_id)
+        set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
+    except Exception as exc:
+        logger.warning("remote worker ping setting skipped: %s", type(exc).__name__)
+
+
+def remote_worker_status_snapshot() -> dict:
+    worker_flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
+    settings = get_system_settings(["remote_worker:last_heartbeat", "remote_worker:worker_id"])
+    last_worker_id = str(settings.get("remote_worker:worker_id") or "").strip()
+    return {
+        **worker_flags,
+        "last_remote_worker_heartbeat": settings.get("remote_worker:last_heartbeat") or "",
+        "last_worker_id": remote_worker_api.sanitize_worker_id(last_worker_id) if last_worker_id else "",
+        "worker_result_upload_dir_configured": bool(str(WORKER_RESULT_UPLOAD_DIR or "").strip()),
+        "instructions": "Chạy trên VPS: python remote_worker.py --ping",
+    }
+
+
 @fastapi_app.post("/internal/worker/heartbeat")
 async def internal_worker_heartbeat(request: Request):
     verify_local_worker_access(request)
@@ -145624,6 +145720,40 @@ async def internal_worker_upload_result(request: Request, job_id: str = Form(def
         "detail": "upload_result is reserved for later local render phases",
         "job_id": str(job_id),
     }
+
+
+@fastapi_app.get("/api/v1/worker/ping")
+@fastapi_app.post("/api/v1/worker/ping")
+async def api_worker_ping(request: Request):
+    verify_remote_worker_api_access(request)
+    payload = await read_json_body(request) if request.method.upper() == "POST" else {}
+    worker_id = remote_worker_api.sanitize_worker_id(
+        payload.get("worker_id") or request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker"
+    )
+    capabilities = _safe_worker_ping_capabilities(payload, request)
+    _record_remote_worker_ping(worker_id)
+    logger.info(
+        "remote_worker_api_ping | %s",
+        json.dumps(
+            {
+                "worker_id": remote_worker_api.mask_worker_id(worker_id),
+                "capabilities": capabilities,
+                "dry_run": True,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+    return remote_worker_api.build_worker_ping_payload(
+        worker_id=worker_id,
+        capabilities=capabilities,
+        server_time=now_text(),
+        build=APP_BUILD,
+        public_version=PUBLIC_VERSION,
+        worker_api_enabled=bool(LOCAL_WORKER_TOKEN),
+        remote_worker_mode_supported=True,
+        dry_run=True,
+    )
 
 
 @fastapi_app.post("/api/v1/worker/claim")

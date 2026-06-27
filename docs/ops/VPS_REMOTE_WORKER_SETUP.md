@@ -46,6 +46,27 @@ remote_worker_mode_supported=true
 
 Neu mot trong cac flag nay khong dung, dung setup worker va sua Railway ENV truoc.
 
+W3 staging handshake tren Railway:
+
+1. Set `LOCAL_WORKER_TOKEN`.
+2. Deploy build moi.
+3. Telegram admin chay:
+
+```text
+/runtime
+/remote_worker_status
+/tool_test_remote_worker_ping --no-charge
+```
+
+Ket qua can thay:
+
+- Worker API enabled.
+- Token configured yes/no chi la boolean, khong hien token.
+- Remote mode supported.
+- Ping OK.
+- No job claimed.
+- No charge.
+
 ## C. Chuan bi VPS Ubuntu
 
 Chay bang user co quyen `sudo`:
@@ -172,6 +193,23 @@ sudo bash scripts/vps/remote_worker_doctor.sh
 
 Doctor khong in full token; chi bao token da cau hinh hay chua.
 
+W3 staging handshake tren VPS:
+
+```bash
+cd /opt/toanaas/bot
+source .venv/bin/activate
+python remote_worker.py --doctor
+python remote_worker.py --ping
+python remote_worker.py --dry-run --once
+```
+
+Yeu cau:
+
+- `--doctor` chi kiem tra local env, token masked, ffmpeg va tmp dir.
+- `--ping` chi goi `/api/v1/worker/ping`.
+- `--dry-run --once` khong claim job, khong complete job, khong xu ly video that.
+- Neu token sai, log chi duoc co status/reason an toan, khong co full token.
+
 ## H. Safety
 
 - Do not paste token into GitHub.
@@ -179,7 +217,10 @@ Doctor khong in full token; chi bao token da cau hinh hay chua.
 - Rotate `LOCAL_WORKER_TOKEN` if leaked.
 - Do not run two workers with the same `WORKER_ID`.
 - Do not start real worker before B14.5 video flow is fixed.
+- Do not route production jobs to VPS until B14.5 video flow/queue/status is stable.
+- W3 dry-run only verifies handshake; it must not process real user video.
 - First run only after `/tool_test_remote_worker_api --fake-job --no-charge` passes.
+- Staging ping can run first with `/tool_test_remote_worker_ping --no-charge`.
 - VPS khong can PayOS ENV, wallet ENV, Telegram bot token, webhook secret, hay quyen doc SQLite.
 - Neu `/runtime` khong dung build, dung worker.
 - Neu public video queue/status broken, dung worker.

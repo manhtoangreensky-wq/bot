@@ -11,6 +11,8 @@ Runbook nay danh cho van hanh VPS chi chay `remote_worker.py`. Railway van giu b
   - `worker_api_enabled=true`
   - `local_worker_token_configured=true`
   - `remote_worker_mode_supported=true`
+- Telegram admin `/remote_worker_status` khong lo token va huong dan dung `python remote_worker.py --ping`.
+- Telegram admin `/tool_test_remote_worker_ping --no-charge` pass, bao `no job claimed` va `charge: NO`.
 - `LOCAL_WORKER_TOKEN` da tao tren Railway va chi copy vao `/etc/toanaas-worker.env` tren VPS.
 - `/etc/toanaas-worker.env` co quyen `600`.
 - `BOT_API_URL` tro ve Railway public URL.
@@ -22,13 +24,53 @@ Runbook nay danh cho van hanh VPS chi chay `remote_worker.py`. Railway van giu b
 sudo bash /opt/toanaas/bot/scripts/vps/remote_worker_doctor.sh
 ```
 
+- Chay W3 staging tren VPS:
+
+```bash
+cd /opt/toanaas/bot
+source .venv/bin/activate
+python remote_worker.py --doctor
+python remote_worker.py --ping
+python remote_worker.py --dry-run --once
+```
+
 - Chay Telegram admin dry-run:
 
 ```text
+/tool_test_remote_worker_ping --no-charge
 /tool_test_remote_worker_api --fake-job --no-charge
 ```
 
-- Chi start service sau khi dry-run pass va release owner xac nhan video flow san sang.
+- Chi start service sau khi staging/dry-run pass va release owner xac nhan video flow san sang.
+- Van chua route production video jobs cho VPS cho toi khi B14.5 video flow/queue/status on dinh.
+
+## W3 staging handshake checklist
+
+On Railway:
+
+1. Set `LOCAL_WORKER_TOKEN`.
+2. Deploy build.
+3. Telegram: `/runtime`.
+4. Telegram: `/remote_worker_status`.
+5. Telegram: `/tool_test_remote_worker_ping --no-charge`.
+
+On VPS:
+
+1. Create `/etc/toanaas-worker.env`.
+2. Run `chmod 600 /etc/toanaas-worker.env`.
+3. Run:
+
+```bash
+source .venv/bin/activate
+python remote_worker.py --doctor
+python remote_worker.py --ping
+python remote_worker.py --dry-run --once
+```
+
+Only after all pass:
+
+- `sudo systemctl start toanaas-worker`
+- Still do not route production jobs until B14.5 video flow/queue/status is stable.
 
 ## Daily check
 
@@ -62,6 +104,8 @@ Kiem tra:
 - `local_worker_token_configured=true`.
 - `remote_worker_mode_supported=true`.
 - Public video queue/status khong bi loi.
+- `/remote_worker_status` pass va khong hien token/path nhay cam.
+- `/tool_test_remote_worker_ping --no-charge` pass truoc khi fake job test.
 - `/tool_test_remote_worker_api --fake-job --no-charge` pass truoc khi worker that xu ly job.
 
 Neu deploy thay doi worker contract, restart VPS worker:
@@ -204,6 +248,8 @@ Khong start hoac phai stop worker neu:
 
 - Video flow B14.5 not stable.
 - `LOCAL_WORKER_TOKEN` missing.
+- `/tool_test_remote_worker_ping --no-charge` fails.
+- `python remote_worker.py --dry-run --once` fails.
 - `/tool_test_remote_worker_api --fake-job --no-charge` fails.
 - Railway `/runtime` not on expected build.
 - Public video queue/status broken.
