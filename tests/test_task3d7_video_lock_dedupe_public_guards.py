@@ -308,7 +308,7 @@ def test_public_unready_guards_are_clean_and_have_no_admin_blocker():
 def test_voice_clone_public_guard_verified_copy():
     assert bot.voice_clone_provider_not_ready_public_text("vi") == bot.VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
     text = bot.voice_clone_provider_not_ready_public_text("vi")
-    assert "Voice riêng đang được chuẩn bị" in text
+    assert "Tạo voice riêng đang tạm khóa" in text
     assert "chưa xử lý và chưa trừ Xu" in text
 
 

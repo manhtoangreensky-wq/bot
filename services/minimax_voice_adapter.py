@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import inspect
+import hashlib
 import os
 import re
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -65,6 +66,17 @@ class CustomVoiceFlowState:
     fallback_available: bool
     reason: str = ""
     public_message: str = ""
+
+
+@dataclass(frozen=True)
+class CustomVoiceCreateResult:
+    ok: bool
+    provider_voice_id: str = ""
+    display_name: str = ""
+    error_code: str = ""
+    error_message: str = ""
+    public_message: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def normalize_voice_id(value: str | None) -> str:
@@ -259,7 +271,7 @@ def custom_voice_flow_state(*, ready: bool = False, locked_reason: str = "") -> 
         fallback_available=True,
         reason=reason,
         public_message=(
-            "Voice riêng đang được chuẩn bị, tạm khóa để kiểm soát chất lượng. TOAN AAS chưa xử lý và chưa trừ Xu. "
+            "Tạo voice riêng đang tạm khóa để kiểm soát chất lượng. TOAN AAS chưa xử lý và chưa trừ Xu. "
             "Anh/chị có thể dùng giọng nữ/nam mặc định hoặc voice đã lưu."
         ),
     )
@@ -308,6 +320,118 @@ def safe_public_error(error: str = "") -> str:
     if any(term in text for term in ("provider", "api", "endpoint", "minimax", "traceback", "token")):
         return PUBLIC_SAFE_TTS_ERROR
     return str(error or "").strip() or PUBLIC_SAFE_TTS_ERROR
+
+
+def _custom_voice_provider_id_from_result(result: Any) -> str:
+    if isinstance(result, dict):
+        for key in ("provider_voice_id", "voice_id", "id", "custom_voice_id"):
+            value = normalize_voice_id(result.get(key))
+            if validate_provider_voice_id(value):
+                return value
+    for key in ("provider_voice_id", "voice_id", "id", "custom_voice_id"):
+        value = normalize_voice_id(getattr(result, key, ""))
+        if validate_provider_voice_id(value):
+            return value
+    return ""
+
+
+def create_custom_voice_from_sample(
+    sample_path: str | os.PathLike[str],
+    display_name: str,
+    user_id: str | int,
+    idempotency_key: str,
+    fake: bool = False,
+    create_func: Callable[..., Any] | None = None,
+) -> CustomVoiceCreateResult:
+    label = re.sub(r"\s+", " ", str(display_name or "")).strip()[:120] or "Voice riêng"
+    sample = Path(str(sample_path or "")).expanduser()
+    if not sample.exists() or not sample.is_file():
+        return CustomVoiceCreateResult(
+            ok=False,
+            display_name=label,
+            error_code="sample_missing",
+            public_message="TOAN AAS chưa nhận được file mẫu hợp lệ. Anh/chị gửi lại mẫu voice/audio rõ hơn.",
+        )
+    sample_size = int(sample.stat().st_size or 0)
+    if sample_size <= 0:
+        return CustomVoiceCreateResult(
+            ok=False,
+            display_name=label,
+            error_code="sample_empty",
+            public_message="File mẫu chưa có dữ liệu âm thanh hợp lệ. Anh/chị gửi lại mẫu voice/audio rõ hơn.",
+        )
+    stable_key = str(idempotency_key or f"{user_id}:{sample.name}:{sample_size}")
+    if fake:
+        digest = hashlib.sha256(
+            "|".join([str(user_id or ""), label, stable_key, str(sample_size)]).encode("utf-8", errors="ignore")
+        ).hexdigest()[:18]
+        safe_user = re.sub(r"[^A-Za-z0-9]+", "-", str(user_id or "user")).strip("-")[:24] or "user"
+        provider_voice_id = normalize_voice_id(f"toanaas-custom-{safe_user}-{digest}")
+        if not validate_provider_voice_id(provider_voice_id):
+            return CustomVoiceCreateResult(
+                ok=False,
+                display_name=label,
+                error_code="provider_voice_id_invalid",
+                public_message=PUBLIC_SAFE_VOICE_NOT_READY,
+            )
+        return CustomVoiceCreateResult(
+            ok=True,
+            provider_voice_id=provider_voice_id,
+            display_name=label,
+            metadata={
+                "fake": True,
+                "sample_size": sample_size,
+                "idempotency_key": stable_key,
+            },
+        )
+    if not callable(create_func):
+        return CustomVoiceCreateResult(
+            ok=False,
+            display_name=label,
+            error_code="provider_adapter_missing",
+            public_message=(
+                "Tạo voice riêng đang tạm khóa để kiểm soát chất lượng. "
+                "Anh/chị có thể dùng giọng nam/nữ mặc định hoặc voice đã lưu."
+            ),
+        )
+    try:
+        result = create_func(
+            sample_path=str(sample),
+            display_name=label,
+            user_id=user_id,
+            idempotency_key=stable_key,
+        )
+        if inspect.isawaitable(result):
+            return CustomVoiceCreateResult(
+                ok=False,
+                display_name=label,
+                error_code="provider_adapter_async_not_supported",
+                public_message=PUBLIC_SAFE_VOICE_NOT_READY,
+            )
+        provider_voice_id = _custom_voice_provider_id_from_result(result)
+        if not provider_voice_id:
+            return CustomVoiceCreateResult(
+                ok=False,
+                display_name=label,
+                error_code="missing_provider_voice_id",
+                public_message=PUBLIC_SAFE_VOICE_NOT_READY,
+            )
+        metadata = dict(result or {}) if isinstance(result, dict) else {}
+        metadata.update({"sample_size": sample_size, "idempotency_key": stable_key})
+        return CustomVoiceCreateResult(
+            ok=True,
+            provider_voice_id=provider_voice_id,
+            display_name=label,
+            metadata=metadata,
+        )
+    except Exception as exc:
+        return CustomVoiceCreateResult(
+            ok=False,
+            display_name=label,
+            error_code=type(exc).__name__,
+            error_message=safe_public_error(str(exc)),
+            public_message=safe_public_error(str(exc)),
+        )
 
 
 def synthesize_text_to_audio(

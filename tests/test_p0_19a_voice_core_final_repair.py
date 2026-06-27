@@ -165,8 +165,10 @@ def test_p0_19a_admin_voice_commands_registered():
         "tool_test_voice_default_tts",
         "tool_test_voice_preview_policy",
         "tool_test_custom_voice_flow",
+        "tool_test_custom_voice_provider",
     ):
         assert f'CommandHandler("{command}"' in source
     assert "--fake" in inspect.getsource(bot.cmd_tool_test_voice_default_tts)
     assert "--fake" in inspect.getsource(bot.cmd_tool_test_voice_preview_policy)
     assert "--fake" in inspect.getsource(bot.cmd_tool_test_custom_voice_flow)
+    assert "--fake" in inspect.getsource(bot.cmd_tool_test_custom_voice_provider)

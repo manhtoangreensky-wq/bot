@@ -224,7 +224,7 @@ def test_clone_forbidden_hides_retry_button_and_suggests_default_tts(monkeypatch
 
     assert "🔁 Tạo/nghe thử lại" in labels
     assert "⬅️ Kho voice" in labels
-    assert "Voice riêng đang được chuẩn bị" in text
+    assert "Tạo voice riêng đang tạm khóa" in text
     assert "chưa xử lý và chưa trừ Xu" in text
 
 
