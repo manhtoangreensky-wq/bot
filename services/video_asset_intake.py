@@ -79,6 +79,7 @@ class VideoAssetPack:
     existing_video_refs: list[AssetSlot] = field(default_factory=list)
     subtitle_files: list[AssetSlot] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    skipped_by_user: bool = False
 
 
 ASSET_LIST_FIELD = {
@@ -111,7 +112,10 @@ def asset_slot_from_dict(payload: dict[str, Any]) -> AssetSlot:
 
 def pack_from_dict(payload: dict[str, Any] | None) -> VideoAssetPack:
     payload = dict(payload or {})
-    pack = VideoAssetPack(notes=list(payload.get("notes") or []))
+    pack = VideoAssetPack(
+        notes=list(payload.get("notes") or []),
+        skipped_by_user=bool(payload.get("skipped_by_user")),
+    )
     for asset_type, field_name in ASSET_LIST_FIELD.items():
         items = [asset_slot_from_dict(item) for item in list(payload.get(field_name) or [])]
         if asset_type == "storyboard_frame":

@@ -35,7 +35,7 @@ Same subject/product/character: {story_bible.subject_description}
 Same style: {story_bible.visual_style}
 Same setting logic: {story_bible.setting}
 Same lighting/camera language: {story_bible.lighting}; {story_bible.camera_style}
-Reference assets: {reference_summary}
+Asset summary: {reference_summary}
 
 [SCENE OBJECTIVE]
 Scene {scene_card.scene_index}/{total_scenes}
@@ -60,6 +60,9 @@ Prepare next scene:
 [TEXT/LOGO RULE]
 Avoid random text unless logo/subtitle is applied later in postprocess.
 Do not embed unreadable words in the generated scene.
+Subtitle/narration planned for postprocess: {scene_card.subtitle_line}
+Music cue: {scene_card.music_cue}
+Logo cue: {scene_card.logo_cue}
 
 [QUALITY]
 stable framing, natural motion, consistent identity, clean background, cinematic quality
@@ -85,7 +88,7 @@ def _reference_summary_from_bible(story_bible: StoryBible) -> str:
     for key, value in payload.items():
         if isinstance(value, list) and value:
             counts.append(f"{key}:{len(value)}")
-    return ", ".join(counts) if counts else "no reference assets; use textual continuity rules"
+    return ", ".join(counts) if counts else "no user-supplied assets; use textual continuity rules"
 
 
 def create_reference_plan(

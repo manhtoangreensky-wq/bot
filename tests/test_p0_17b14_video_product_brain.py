@@ -241,8 +241,7 @@ def test_public_storyboard_and_prompt_preview_are_text_only():
     assert plan.xu_charged == 0
     assert "No render/provider call before storyboard confirm" in plan.preview_text
     preview = bot.video_b14_storyboard_preview_text(plan)
-    assert "Chưa gọi provider" in preview
-    assert "chưa render" in preview
+    assert "Chưa tạo file thật" in preview
     assert "chưa trừ Xu" in preview
 
 
@@ -340,7 +339,7 @@ def test_scene_prompt_contains_story_bible_reference_summary_and_one_action():
     prompt = cards[0].provider_prompt
     assert "[GLOBAL CONTINUITY]" in prompt
     assert "Same subject/product/character" in prompt
-    assert "Reference assets" in prompt
+    assert "Asset summary" in prompt
     assert "Avoid random text" in prompt
     assert continuity.scene_prompt_has_one_primary_action(prompt) is True
 

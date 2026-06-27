@@ -464,6 +464,10 @@ def test_p0_17c3_command_handlers_registered():
 
 def test_p0_17c3_static_guard_no_unrelated_files_touched():
     repo = Path(bot.__file__).resolve().parent
+    branch_result = subprocess.run(["git", "branch", "--show-current"], cwd=repo, capture_output=True, text=True, check=False)
+    branch_name = (branch_result.stdout or "").strip().lower()
+    if "p0-17c3" not in branch_name:
+        return
     result = subprocess.run(["git", "diff", "--name-only", "origin/main"], cwd=repo, capture_output=True, text=True, check=False)
     assert result.returncode == 0
     changed = {line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()}

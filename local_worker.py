@@ -597,7 +597,11 @@ def run_video_render_job(job: dict) -> None:
         final_path = str(result.get("final_video_path") or "")
         if not result.get("ok") or not final_path:
             raise RuntimeError(str(result.get("error") or result.get("status") or "video_render_failed"))
-        output_file_id = telegram_send_video(user_id, final_path, "✅ Video TOAN AAS đã hoàn tất.")
+        output_file_id = telegram_send_video(
+            user_id,
+            final_path,
+            "ADMIN TEST MODE — fake renderer. Video này chỉ kiểm tra pipeline ghép cảnh, không phải render AI thật.",
+        )
         update_video_render_job(job_id, "completed", "video project sent", final_video_path=final_path, final_video_file_id=output_file_id, result=result)
     except subprocess.TimeoutExpired:
         update_video_render_job(job_id, "failed", "video_render_timeout")

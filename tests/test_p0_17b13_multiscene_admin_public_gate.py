@@ -129,7 +129,8 @@ def test_video_multiscene_public_ready_follows_existing_runtime_flags(monkeypatc
 
 def test_long_multiscene_film_public_guard_is_product_specific():
     source = Path(bot.__file__).read_text(encoding="utf-8")
-    assert 'value == "multi_scene_film" and not is_admin_user(uid)' in source
+    assert 'if action == "b14_confirm":' in source
+    assert "video_b14_public_render_guard(uid)" in source
     assert "MULTISCENE_LONG_VIDEO_GUARD_TEXT" in source
     assert "return bool(video_multiscene_public_enabled() and video_multiscene_stitching_ready() and video_multiscene_scene_tested(count))" in source
 
