@@ -290,5 +290,7 @@ def test_p0_17c4_static_guard_no_unrelated_files_touched():
         "tests/test_p0_17c2_payos_auto_topup_limits.py",
         "tests/test_p0_17c3_payos_admin_risk_lock_review.py",
         "tests/test_p0_17c4_webhook_db_html_security_events.py",
+        "docs/reports/P0_17B14_5_VIDEO_FLOW_ROUTER_BACKSTACK_AUDIT.md",
+        "tests/test_p0_17b14_5_video_flow_router_backstack.py",
     }
     assert changed <= allowed
