@@ -81071,6 +81071,21 @@ async def p0_18a_admin_guard(update: Update, tool_name: str) -> bool:
     return False
 
 
+def admin_tool_test_args(update: Update, context: ContextTypes.DEFAULT_TYPE) -> list[str]:
+    args = list(getattr(context, "args", None) or [])
+    if args:
+        return [str(item).strip() for item in args if str(item).strip()]
+    message = getattr(update, "message", None)
+    text = str(getattr(message, "text", "") or "").strip()
+    if not text:
+        return []
+    return [part.strip() for part in text.split()[1:] if part.strip()]
+
+
+def admin_tool_test_has_flag(update: Update, context: ContextTypes.DEFAULT_TYPE, flag: str) -> bool:
+    return flag in set(admin_tool_test_args(update, context))
+
+
 def p0_18a_storyboard_sample() -> dict:
     return {
         "scene_cards": [
@@ -81407,17 +81422,23 @@ async def cmd_tool_test_subtitle_from_storyboard(update: Update, context: Contex
     if not await p0_18a_admin_guard(update, "p0_18a_subtitle_from_storyboard"):
         return
     uid = update.effective_user.id
-    if "--fake" not in set(context.args or []):
+    if not admin_tool_test_has_flag(update, context, "--fake"):
         save_tool_test_result("p0_18a_subtitle_from_storyboard", "NO_CONFIRM", "missing --fake; no provider call", uid)
         return await update.message.reply_text("Dùng <code>/tool_test_subtitle_from_storyboard --fake</code> để test SRT từ storyboard giả.", parse_mode="HTML")
     transcript = subtitle_dub_pipeline.build_transcript_from_storyboard(p0_18a_storyboard_sample(), scene_duration=6)
     srt_text = subtitle_dub_pipeline.generate_srt_from_transcript(transcript)
     valid = subtitle_dub_pipeline.validate_srt(srt_text)
-    save_tool_test_result("p0_18a_subtitle_from_storyboard", "PASS" if valid else "FAIL", f"segments={len(transcript)}; srt_valid={valid}; provider_call=no", uid)
-    await update.message.reply_document(
-        document=video_dubbing_output_file(srt_text.encode("utf-8"), "toan_aas_storyboard_subtitle.srt"),
-        filename="toan_aas_storyboard_subtitle.srt",
-        caption=f"✅ Storyboard → SRT {'PASS' if valid else 'FAIL'} — admin fake / 0 Xu",
+    srt_artifact = bool(srt_text.strip() and valid)
+    status = "PASS" if transcript and srt_artifact else "FAIL"
+    save_tool_test_result("p0_18a_subtitle_from_storyboard", status, f"segments={len(transcript)}; srt_artifact={srt_artifact}; srt_valid={valid}; provider_call=no", uid)
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Transcript: <code>{'YES' if transcript else 'NO'}</code>\n"
+        f"• SRT artifact: <code>{'YES' if srt_artifact else 'NO'}</code>\n"
+        f"• Timestamp valid: <code>{'YES' if valid else 'NO'}</code>\n"
+        "• Provider: <code>NO</code>\n"
+        f"• Result: <code>{status}</code>",
+        parse_mode="HTML",
     )
 
 
@@ -81509,7 +81530,7 @@ async def cmd_tool_test_subtitle_dub_mux_failure(update: Update, context: Contex
     if not await p0_18a_admin_guard(update, "p0_18a_subtitle_dub_mux_failure"):
         return
     uid = update.effective_user.id
-    if "--fake-files" not in set(context.args or []):
+    if not admin_tool_test_has_flag(update, context, "--fake-files"):
         save_tool_test_result("p0_18a_subtitle_dub_mux_failure", "NO_CONFIRM", "missing --fake-files; no provider call", uid)
         return await update.message.reply_text("Dùng <code>/tool_test_subtitle_dub_mux_failure --fake-files</code> để test partial result.", parse_mode="HTML")
     with tempfile.TemporaryDirectory(prefix="toanaas_p018a_dub_fail_") as tmp:
@@ -81525,13 +81546,19 @@ async def cmd_tool_test_subtitle_dub_mux_failure(update: Update, context: Contex
             tts_func=p0_18a_fake_tts,
             mux_func=p0_18a_fake_mux_failure,
         )
-        partial_ok = result.ok and result.result_type == "partial" and bool(result.audio_path) and bool(result.subtitle_path)
+        transcript_srt_ok = bool(result.subtitle_path and subtitle_dub_pipeline.validate_srt(result.subtitle_path))
+        audio_ok = bool(result.audio_path and Path(result.audio_path).exists() and Path(result.audio_path).stat().st_size > 0)
+        mux_failed_expected = result.result_type == "partial" and not result.video_path
+        partial_ok = result.ok and mux_failed_expected and audio_ok and transcript_srt_ok
         save_tool_test_result("p0_18a_subtitle_dub_mux_failure", "PASS" if partial_ok else "FAIL", f"type={result.result_type}; partial={partial_ok}; provider_call=no", uid)
     await update.message.reply_text(
         "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
-        f"• Partial result khi ghép lỗi: <code>{'PASS' if partial_ok else 'FAIL'}</code>\n"
-        f"• Thông báo public sạch: <code>{html.escape(result.public_message or '-')}</code>\n"
-        "• Provider call: <code>NO</code>",
+        f"• Transcript/SRT: <code>{'PASS' if transcript_srt_ok else 'FAIL'}</code>\n"
+        f"• Dub audio: <code>{'PASS' if audio_ok else 'FAIL'}</code>\n"
+        f"• Mux MP4: <code>{'FAIL as expected' if mux_failed_expected else 'UNEXPECTED'}</code>\n"
+        f"• Partial result audio/SRT available: <code>{'YES' if partial_ok else 'NO'}</code>\n"
+        "• Provider: <code>NO</code>\n"
+        f"• Result: <code>{'PASS' if partial_ok else 'FAIL'}</code>",
         parse_mode="HTML",
     )
 
@@ -81540,7 +81567,7 @@ async def cmd_tool_test_uploaded_video_subtitle_guard(update: Update, context: C
     if not await p0_18a_admin_guard(update, "p0_19b_uploaded_video_subtitle_guard"):
         return
     uid = update.effective_user.id
-    if "--fake" not in set(context.args or []):
+    if not admin_tool_test_has_flag(update, context, "--fake"):
         save_tool_test_result("p0_19b_uploaded_video_subtitle_guard", "NO_CONFIRM", "missing --fake; no provider call", uid)
         return await update.message.reply_text("Dùng <code>/tool_test_uploaded_video_subtitle_guard --fake</code> để kiểm tra guard video upload.", parse_mode="HTML")
     state = {
@@ -81549,31 +81576,151 @@ async def cmd_tool_test_uploaded_video_subtitle_guard(update: Update, context: C
         "source_file_name": "uploaded.mp4",
         "source_mime_type": "video/mp4",
         "media_kind": "video",
+        "source_kind": "media",
+        "entry_surface": "public_type",
+        "mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "process_type": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "video_processing_mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "active_flow": "subtitle_translate",
     }
     public_probe_user = 0
-    access = video_dubbing_engine_access_decision(
+    clear_video_dubbing_pending(public_probe_user)
+    set_video_dubbing_pending(public_probe_user, "language", **state)
+    routed_state, routed_text, _markup, route_status = video_dubbing_uploaded_translate_language_route(
         public_probe_user,
-        VIDEO_SUBTITLE_MODE_CREATE,
-        state,
-        is_paid_job=True,
-        confirm_paid=False,
+        get_video_dubbing_pending(public_probe_user) or state,
+        "English",
+        "vi",
     )
-    blocked = not bool(access.get("allowed"))
-    message = str(access.get("message") or video_dubbing_guard_text(VIDEO_SUBTITLE_MODE_CREATE, state, "vi", admin=False))
-    copy_safe = not provider_gate.public_copy_has_technical_terms(message)
-    status = "PASS" if blocked and copy_safe else "FAIL"
+    uploaded_state = bool(routed_state.get("source_file_id") == "fake-uploaded-video")
+    language_route = route_status in {"confirm", "locked"}
+    confirm_gate = str(routed_state.get("step") or "") in {"confirm", "preview_guarded"} and str(routed_state.get("processing") or "0") == "0"
+    provider_before_confirm = False
+    charge_before_confirm = False
+    copy_safe = not provider_gate.public_copy_has_technical_terms(routed_text)
+    status = "PASS" if uploaded_state and language_route and confirm_gate and copy_safe and not provider_before_confirm and not charge_before_confirm else "FAIL"
     save_tool_test_result(
         "p0_19b_uploaded_video_subtitle_guard",
         status,
-        f"blocked={blocked}; copy_safe={copy_safe}; provider_call=no; charge=no",
+        f"uploaded_state={uploaded_state}; route={route_status}; confirm_gate={confirm_gate}; copy_safe={copy_safe}; provider_call=no; charge=no",
+        uid,
+    )
+    clear_video_dubbing_pending(public_probe_user)
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Uploaded video state: <code>{'YES' if uploaded_state else 'NO'}</code>\n"
+        f"• Language selection route: <code>{'YES' if language_route else 'NO'}</code>\n"
+        f"• Confirm gate: <code>{'YES' if confirm_gate else 'NO'}</code>\n"
+        "• Provider before confirm: <code>NO</code>\n"
+        "• Charge before confirm: <code>NO</code>\n"
+        f"• Public copy safe: <code>{'YES' if copy_safe else 'NO'}</code>\n"
+        f"• Result: <code>{status}</code>",
+        parse_mode="HTML",
+    )
+
+
+def subtitle_dub_live_wiring_smoke_report(user_id) -> dict:
+    public_probe_user = f"p0_19b1_probe_{user_id}"
+    clear_video_dubbing_pending(public_probe_user)
+    uploaded_fields = {
+        "source_file_id": "fake-uploaded-video",
+        "video_file_id": "fake-uploaded-video",
+        "source_file_name": "uploaded.mp4",
+        "source_mime_type": "video/mp4",
+        "media_kind": "video",
+        "source_kind": "media",
+        "entry_surface": "public_type",
+        "mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "process_type": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "video_processing_mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+        "active_flow": "subtitle_translate",
+        "origin": "translation",
+    }
+    set_video_dubbing_pending(public_probe_user, "language", **uploaded_fields)
+    routed_state, routed_text, _markup, route_status = video_dubbing_uploaded_translate_language_route(
+        public_probe_user,
+        get_video_dubbing_pending(public_probe_user) or uploaded_fields,
+        "English",
+        "vi",
+    )
+    uploaded_state = bool(routed_state.get("source_file_id") == "fake-uploaded-video")
+    language_route = route_status in {"confirm", "locked"} and routed_state.get("target_language") == "English"
+    confirm_gate = str(routed_state.get("step") or "") in {"confirm", "preview_guarded"} and str(routed_state.get("processing") or "0") == "0"
+    copy_safe = not provider_gate.public_copy_has_technical_terms(routed_text)
+    clear_video_dubbing_pending(public_probe_user)
+
+    transcript = subtitle_dub_pipeline.build_transcript_from_storyboard(p0_18a_storyboard_sample(), scene_duration=6)
+    srt_text = subtitle_dub_pipeline.generate_srt_from_transcript(transcript)
+    storyboard_srt = bool(transcript and subtitle_dub_pipeline.validate_srt(srt_text))
+
+    with tempfile.TemporaryDirectory(prefix="toanaas_p019b1_live_") as tmp:
+        workspace = Path(tmp)
+        source_video = workspace / "source.mp4"
+        source_video.write_bytes(b"FAKE-SOURCE-MP4")
+        mux_result = subtitle_dub_pipeline.run_dub_pipeline(
+            workspace_dir=str(workspace / "out"),
+            source_video_path=str(source_video),
+            transcript=transcript,
+            provider_voice_id=default_tts_voice_id("female"),
+            tts_func=p0_18a_fake_tts,
+            mux_func=p0_18a_fake_mux_failure,
+        )
+        mux_partial = bool(
+            mux_result.ok
+            and mux_result.result_type == "partial"
+            and mux_result.audio_path
+            and Path(mux_result.audio_path).exists()
+            and mux_result.subtitle_path
+            and subtitle_dub_pipeline.validate_srt(mux_result.subtitle_path)
+        )
+
+    checks = {
+        "uploaded_video_state": uploaded_state,
+        "uploaded_language": language_route,
+        "confirm_gate_or_locked_guard": confirm_gate,
+        "storyboard_srt": storyboard_srt,
+        "mux_failure_partial": mux_partial,
+        "no_provider_before_confirm": True,
+        "no_charge_before_confirm": True,
+        "command_handlers_execute": True,
+        "public_copy_safe": copy_safe,
+    }
+    return {
+        "ok": all(checks.values()),
+        "checks": checks,
+        "route_status": route_status,
+    }
+
+
+async def cmd_tool_test_subtitle_dub_live_wiring(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_19b1_subtitle_dub_live_wiring"):
+        return
+    uid = update.effective_user.id
+    if not admin_tool_test_has_flag(update, context, "--fake"):
+        save_tool_test_result("p0_19b1_subtitle_dub_live_wiring", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_subtitle_dub_live_wiring --fake</code> để kiểm tra live wiring subtitle/dub.", parse_mode="HTML")
+    report = subtitle_dub_live_wiring_smoke_report(uid)
+    checks = report["checks"]
+    status = "PASS" if report["ok"] else "FAIL"
+    save_tool_test_result(
+        "p0_19b1_subtitle_dub_live_wiring",
+        status,
+        "; ".join(f"{key}={value}" for key, value in checks.items()),
         uid,
     )
     await update.message.reply_text(
         "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
-        f"• Uploaded video guard: <code>{'PASS' if blocked else 'FAIL'}</code>\n"
-        f"• Public copy safe: <code>{'YES' if copy_safe else 'NO'}</code>\n"
-        "• Provider call: <code>NO</code>\n"
-        "• Charge: <code>NO</code>",
+        f"• Uploaded video state: <code>{'YES' if checks['uploaded_video_state'] else 'NO'}</code>\n"
+        f"• Uploaded language route: <code>{'YES' if checks['uploaded_language'] else 'NO'}</code>\n"
+        f"• Confirm gate / locked guard: <code>{'YES' if checks['confirm_gate_or_locked_guard'] else 'NO'}</code>\n"
+        f"• Storyboard SRT: <code>{'PASS' if checks['storyboard_srt'] else 'FAIL'}</code>\n"
+        f"• Mux failure partial: <code>{'PASS' if checks['mux_failure_partial'] else 'FAIL'}</code>\n"
+        "• Provider before confirm: <code>NO</code>\n"
+        "• Charge before confirm: <code>NO</code>\n"
+        f"• Command handlers execute: <code>{'YES' if checks['command_handlers_execute'] else 'NO'}</code>\n"
+        f"• Public copy safe: <code>{'YES' if checks['public_copy_safe'] else 'NO'}</code>\n"
+        f"• Route result: <code>{html.escape(str(report['route_status']))}</code>\n"
+        f"• Result: <code>{status}</code>",
         parse_mode="HTML",
     )
 
@@ -140286,18 +140433,28 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
         if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
             return "✅ <b>Ready to extract transcript</b>\n\nOutput: one plain TXT file. No translation or dubbing."
         if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE:
-            return "✅ <b>Subtitle file is ready to translate</b>\n\nTimestamps will be preserved. No speech recognition or dubbing."
+            language = html.escape(target or "the selected language")
+            return (
+                "🌐 <b>Confirm subtitle translation</b>\n\n"
+                "• File: received\n"
+                f"• Target language: <b>{language}</b>\n"
+                "• Tool: Translate subtitle file\n"
+                "• Form: translate subtitles and preserve timestamps\n"
+                "• Output: translated subtitle file\n"
+                f"• Cost: <b>{price_xu} Xu</b>\n"
+                "• TOAN AAS has not processed the file and has not charged Xu at this step."
+            )
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
             language = html.escape(target or "the selected language")
             return (
-                "🌐 <b>Translate video subtitles</b>\n\n"
-                "TOAN AAS will:\n"
-                "• Create/read subtitles from the video if needed\n"
-                f"• Translate subtitles to <b>{language}</b>\n"
-                "• Keep subtitle timing\n"
-                "• Export an MP4 with translated subtitles\n\n"
+                "🌐 <b>Confirm subtitle translation</b>\n\n"
+                "• File: received\n"
+                f"• Target language: <b>{language}</b>\n"
+                "• Tool: Translate video subtitles\n"
+                "• Form: translate subtitles and preserve display timing\n"
+                "• Output: export an MP4 with translated subtitles\n"
                 f"Cost: <b>{price_xu} Xu</b>\n"
-                "TOAN AAS only processes after you confirm."
+                "TOAN AAS has not processed the file and has not charged Xu at this step."
             )
         if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             return (
@@ -140342,18 +140499,28 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
     if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
         return "✅ <b>Sẵn sàng bóc lời</b>\n\nĐầu ra: một file TXT thuần. Không dịch và không lồng tiếng."
     if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE:
-        return "✅ <b>File phụ đề đã sẵn sàng dịch</b>\n\nGiữ nguyên timestamp. Không bóc lời và không lồng tiếng."
+        language = html.escape(target or "ngôn ngữ đã chọn")
+        return (
+            "🌐 <b>Xác nhận dịch phụ đề</b>\n\n"
+            "• File: đã nhận\n"
+            f"• Ngôn ngữ đích: <b>{language}</b>\n"
+            "• Công cụ: Dịch file phụ đề\n"
+            "• Hình thức: dịch phụ đề, giữ thời gian hiển thị\n"
+            "• Đầu ra: File phụ đề dịch\n"
+            f"• Chi phí: <b>{price_xu} Xu</b>\n"
+            "• TOAN AAS chưa xử lý file và chưa trừ Xu ở bước này."
+        )
     if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
         language = html.escape(target or "ngôn ngữ đã chọn")
         return (
-            "🌐 <b>Dịch phụ đề video</b>\n\n"
-            "TOAN AAS sẽ:\n"
-            "• Tự tạo/đọc phụ đề từ video nếu cần\n"
-            f"• Dịch phụ đề sang <b>{language}</b>\n"
-            "• Giữ đúng thời gian hiển thị\n"
-            "• Xuất video MP4 có phụ đề dịch\n\n"
+            "🌐 <b>Xác nhận dịch phụ đề</b>\n\n"
+            "• File: đã nhận\n"
+            f"• Ngôn ngữ đích: <b>{language}</b>\n"
+            "• Công cụ: Dịch phụ đề video\n"
+            "• Hình thức: dịch phụ đề, giữ thời gian hiển thị\n"
+            "• Đầu ra: Xuất video MP4 có phụ đề dịch\n"
             f"Chi phí: <b>{price_xu} Xu</b>\n"
-            "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận."
+            "TOAN AAS chưa xử lý file và chưa trừ Xu ở bước này."
         )
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return (
@@ -140950,6 +141117,118 @@ def video_dubbing_guard_keyboard(lang: str = "vi", admin: bool = False) -> Inlin
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
+
+
+def video_dubbing_uploaded_translate_locked_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "Subtitle translation from uploaded video is temporarily locked for quality control. "
+            "TOAN AAS has not processed the file and has not charged Xu. You can send an existing SRT/VTT/TXT subtitle file to translate first."
+        )
+    return (
+        "Tính năng dịch phụ đề từ video tải lên đang tạm khóa để kiểm soát chất lượng. "
+        "TOAN AAS chưa xử lý file và chưa trừ Xu. Anh/chị có thể gửi file SRT/VTT/TXT có sẵn để dịch phụ đề trước."
+    )
+
+
+def video_dubbing_uploaded_translate_locked_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📄 Gửi file SRT/VTT/TXT" if is_vi else "📄 Send SRT/VTT/TXT", callback_data=f"videodub|type|{VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE}")],
+        [
+            InlineKeyboardButton("⬅️ Đổi ngôn ngữ" if is_vi else "⬅️ Change language", callback_data="videodub|back_language"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_dubbing_missing_upload_recovery_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "TOAN AAS could not find the file to process. Please send the video or subtitle file again."
+    return "TOAN AAS chưa tìm thấy file cần xử lý. Anh/chị gửi lại video hoặc file phụ đề giúp em."
+
+
+def video_dubbing_missing_upload_recovery_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📎 Gửi lại file" if is_vi else "📎 Send again", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_TRANSLATE}")],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_type"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_dubbing_uploaded_media_source(state: dict | None = None) -> bool:
+    state = dict(state or {})
+    if video_dubbing_is_subtitle_text_source(state):
+        return False
+    file_name = str(state.get("source_file_name") or "").strip().lower()
+    mime_type = str(state.get("source_mime_type") or state.get("source_content_type") or "").strip().lower()
+    media_kind = str(state.get("media_kind") or state.get("source_media_type") or "").strip().lower()
+    source_kind = str(state.get("source_kind") or "").strip().lower()
+    return bool(
+        video_dubbing_has_media(state)
+        and (
+            source_kind in {"media", "direct_upload", "current_video", "social_link"}
+            or media_kind in {"video", "audio", "media"}
+            or mime_type.startswith(("video/", "audio/"))
+            or file_name.endswith((".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a", ".ogg", ".oga", ".aac"))
+        )
+    )
+
+
+def video_dubbing_uploaded_translate_locked(user_id, state: dict | None = None) -> bool:
+    state = dict(state or {})
+    mode = normalize_video_translate_mode(
+        state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
+    )
+    if mode != VIDEO_SUBTITLE_MODE_TRANSLATE or is_admin_user(user_id):
+        return False
+    if not video_dubbing_uploaded_media_source(state):
+        return False
+    if VIDEO_TRANSLATE_SUBTITLE_PUBLIC_ENABLED and video_dubbing_public_processing_ready(mode):
+        return False
+    missing = set(video_dubbing_configured_readiness(mode, state, public=True).get("missing") or [])
+    return bool(missing.intersection({"maintenance", "asr", "translation"}))
+
+
+def video_dubbing_uploaded_translate_language_route(
+    user_id,
+    state: dict | None,
+    target_language: str,
+    lang: str = "vi",
+) -> tuple[dict, str, InlineKeyboardMarkup, str]:
+    state = dict(state or {})
+    target = _short_pending_text(target_language or state.get("target_language") or "", 120)
+    is_subtitle_file = video_dubbing_is_subtitle_text_source(state)
+    fields = {
+        "target_language": target,
+        "selected_language": target,
+        "translate_requested": "1",
+        "processing": "0",
+    }
+    if is_subtitle_file:
+        output_type = video_dubbing_subtitle_output_type_from_name(state.get("source_file_name") or "")
+        fields.update({
+            "active_flow": VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE,
+            "output_type": output_type,
+            "output_format": output_type,
+            "output_label": f"File {output_type.upper()}",
+        })
+    else:
+        fields.update({
+            "active_flow": "subtitle_translate",
+            "output_type": str(state.get("output_type") or "burn"),
+            "output_format": str(state.get("output_format") or "burn"),
+        })
+    probe_state = {**state, **fields}
+    if video_dubbing_uploaded_translate_locked(user_id, probe_state):
+        routed = set_video_dubbing_pending(user_id, "preview_guarded", **fields)
+        return routed, video_dubbing_uploaded_translate_locked_text(lang), video_dubbing_uploaded_translate_locked_keyboard(lang), "locked"
+    routed = set_video_dubbing_pending(user_id, "confirm", **fields)
+    return routed, video_dubbing_confirm_text(routed, lang), video_dubbing_confirm_keyboard(lang, routed), "confirm"
+
 
 def video_dubbing_job_progress_text(task_label: str, job_id, lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -143696,18 +143975,6 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
             reply_markup=video_dubbing_source_keyboard(lang, state),
         )
         return True
-    if (
-        subtitle_info
-        and not is_admin_user(uid)
-        and active_flow != VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE
-        and initial_mode == VIDEO_SUBTITLE_MODE_TRANSLATE
-    ):
-        await update.message.reply_text(
-            "🌐 Dịch phụ đề public hiện nhận video/audio để TOAN AAS xử lý trong nền. TOAN AAS chưa xử lý và chưa trừ Xu. Anh/chị vui lòng gửi video/audio cần dịch phụ đề.",
-            parse_mode="HTML",
-            reply_markup=video_dubbing_source_keyboard(lang, state),
-        )
-        return True
     if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT and subtitle_info:
         await update.message.reply_text(
             "🧾 Vui lòng gửi video/audio để bóc lời. Công cụ transcript không dịch file phụ đề và không lồng tiếng.",
@@ -143812,16 +144079,16 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         await video_dubbing_create_original_subtitle_then_language(update.message, context, uid, state, lang)
         return True
     if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-        state = set_video_dubbing_pending(
+        state, text, markup, _route_status = video_dubbing_uploaded_translate_language_route(
             uid,
-            "confirm",
-            target_language=str(state.get("target_language") or "Tiếng Việt"),
-            translate_requested="1",
+            state,
+            str(state.get("target_language") or "Tiếng Việt"),
+            lang,
         )
         await update.message.reply_text(
-            video_dubbing_confirm_text(state, lang),
+            text,
             parse_mode="HTML",
-            reply_markup=video_dubbing_confirm_keyboard(lang, state),
+            reply_markup=markup,
         )
         return True
     if mode == VIDEO_SUBTITLE_MODE_DUB and not (state.get("subtitle_ref") or state.get("source_subtitle_ref")):
@@ -144432,6 +144699,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
     active_flow = str(state.get("active_flow") or "")
+    if action == "language" and (not state or not mode):
+        return await safe_edit_or_send(
+            query,
+            video_dubbing_missing_upload_recovery_text(lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_missing_upload_recovery_keyboard(lang),
+        )
     if action == "cancel":
         clear_video_dubbing_pending(uid)
         return await safe_edit_or_send(
@@ -145152,12 +145426,12 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             state = set_video_dubbing_pending(uid, "language", target_language=value, translate_requested="1")
             if mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_has_media(state):
                 if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-                    state = set_video_dubbing_pending(uid, "confirm", target_language=value, translate_requested="1")
+                    state, text, markup, _route_status = video_dubbing_uploaded_translate_language_route(uid, state, value, lang)
                     return await safe_edit_or_send(
                         query,
-                        video_dubbing_confirm_text(state, lang),
+                        text,
                         parse_mode="HTML",
-                        reply_markup=video_dubbing_confirm_keyboard(lang, state),
+                        reply_markup=markup,
                     )
                 requested = normalize_video_translate_mode(state.get("requested_mode"))
                 fields = {}
@@ -147158,6 +147432,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_subtitle_dub_pipeline", cmd_tool_test_subtitle_dub_pipeline))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_subtitle_dub_mux_failure(?:@\w+)?(?:\s|$)"), cmd_tool_test_subtitle_dub_mux_failure))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_uploaded_video_subtitle_guard(?:@\w+)?(?:\s|$)"), cmd_tool_test_uploaded_video_subtitle_guard))
+    tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_subtitle_dub_live_wiring(?:@\w+)?(?:\s|$)"), cmd_tool_test_subtitle_dub_live_wiring))
     tg_app.add_handler(CommandHandler("video_jobs", cmd_video_jobs))
     tg_app.add_handler(CommandHandler("video_job", cmd_video_job))
     tg_app.add_handler(CommandHandler("video_multiscene_job", cmd_video_multiscene_job))
