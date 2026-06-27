@@ -259,7 +259,8 @@ def test_payos_auto_review_lock_does_not_auto_expire(monkeypatch, tmp_path):
 def test_payos_auto_rolling_limit_does_not_call_payos_api(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
     uid = 170203
-    _seed_many(str(uid), 500_000, [10, 15, 20, 25, 30, 35])
+    for index, offset in enumerate([10, 15, 20, 25, 30, 35], start=1):
+        _seed_auto_order(str(uid), f"{uid}-live-{index:03d}", 500_000, datetime.now() - timedelta(minutes=offset))
     before_count = _order_count()
     before_credits = _credits(str(uid))
     monkeypatch.setattr(bot, "create_payos_payment_request", _payos_api_must_not_be_called)
@@ -383,10 +384,12 @@ def test_p0_17c2_static_guard_no_unrelated_files_touched():
         "bot.py",
         "docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md",
         "docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md",
+        "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md",
         "tests/test_p0_4_hard_reset_audio_video_flow.py",
         "tests/test_p0_5_audio_video_addon_button_logic.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",
         "tests/test_p0_17c2_payos_auto_topup_limits.py",
         "tests/test_p0_17c3_payos_admin_risk_lock_review.py",
+        "tests/test_p0_17c4_webhook_db_html_security_events.py",
     }
     assert changed <= allowed
