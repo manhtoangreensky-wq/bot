@@ -7,10 +7,12 @@ does not need PayOS, wallet, or Telegram webhook authority.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -77,6 +79,15 @@ WORKER_TMP_DIR = str(os.environ.get("WORKER_TMP_DIR") or tempfile.gettempdir()).
 FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
 FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_PATH") or "ffmpeg").strip()
 LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
+
+
+def mask_secret(value: str) -> str:
+    secret = str(value or "").strip()
+    if not secret:
+        return "no"
+    if len(secret) <= 8:
+        return f"<configured len={len(secret)}>"
+    return f"{secret[:4]}...{secret[-4:]} len={len(secret)}"
 
 
 def remote_worker_config() -> dict:
@@ -157,6 +168,15 @@ def claim_job() -> dict | None:
     return data.get("job") if data.get("ok") else None
 
 
+def ping_server() -> dict:
+    payload = {
+        "worker_id": WORKER_ID,
+        "capabilities": ["ffmpeg", "video_postprocess"],
+        "dry_run": True,
+    }
+    return http_json("POST", "/api/v1/worker/ping", payload, timeout=20)
+
+
 def send_heartbeat(job_id: str, progress_percent: int = 0, message: str = "") -> None:
     payload = {
         "worker_id": WORKER_ID,
@@ -208,6 +228,34 @@ def local_ffmpeg_path() -> str:
     if FFMPEG_PATH and os.path.exists(FFMPEG_PATH):
         return FFMPEG_PATH
     return shutil.which(FFMPEG_PATH) or shutil.which("ffmpeg") or FFMPEG_PATH
+
+
+def ffmpeg_available() -> bool:
+    candidate = local_ffmpeg_path()
+    return bool(candidate and (os.path.exists(candidate) or shutil.which(candidate)))
+
+
+def local_doctor_lines() -> tuple[list[str], bool]:
+    token_ok = bool(LOCAL_WORKER_TOKEN)
+    ffmpeg_ok = ffmpeg_available()
+    tmp_ok = bool(WORKER_TMP_DIR)
+    lines = [
+        "[remote_worker] doctor",
+        f"Worker ID: {WORKER_ID}",
+        f"BOT_API_URL: {BOT_API_URL}",
+        f"token configured: {'yes' if token_ok else 'no'} ({mask_secret(LOCAL_WORKER_TOKEN)})",
+        f"ffmpeg found: {'yes' if ffmpeg_ok else 'no'}",
+        f"tmp dir configured: {'yes' if tmp_ok else 'no'}",
+    ]
+    return lines, bool(token_ok and ffmpeg_ok and tmp_ok)
+
+
+def run_doctor() -> int:
+    lines, ok = local_doctor_lines()
+    for line in lines:
+        print(line)
+    print(f"doctor: {'OK' if ok else 'FAIL'}")
+    return 0 if ok else 1
 
 
 def render_fake_video(job: dict, work_dir: str) -> str:
@@ -275,7 +323,63 @@ def run_once() -> str:
         return "failed"
 
 
-def main() -> None:
+def run_ping_mode(*, dry_run: bool = False) -> int:
+    lines, local_ok = local_doctor_lines()
+    for line in lines:
+        print(line)
+    if not LOCAL_WORKER_TOKEN:
+        print("ping: FAIL (LOCAL_WORKER_TOKEN missing)")
+        if dry_run:
+            print("claim skipped because dry-run: yes")
+        return 1
+    try:
+        payload = ping_server()
+    except urllib.error.HTTPError as exc:
+        print(f"ping: FAIL (HTTP {exc.code})")
+        if dry_run:
+            print("claim skipped because dry-run: yes")
+        return 1
+    except urllib.error.URLError as exc:
+        print(f"ping: FAIL ({type(exc.reason).__name__})")
+        if dry_run:
+            print("claim skipped because dry-run: yes")
+        return 1
+    except Exception as exc:
+        print(f"ping: FAIL ({type(exc).__name__})")
+        if dry_run:
+            print("claim skipped because dry-run: yes")
+        return 1
+    ping_ok = bool(payload.get("ok") and payload.get("dry_run") and payload.get("can_claim_jobs") is False)
+    print(f"ping: {'OK' if ping_ok else 'FAIL'}")
+    print(f"server build: {payload.get('build') or '-'}")
+    print(f"remote mode supported: {'yes' if payload.get('remote_worker_mode_supported') else 'no'}")
+    if dry_run:
+        print("claim skipped because dry-run: yes")
+    return 0 if (local_ok and ping_ok) else 1
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="TOAN AAS remote VPS worker")
+    parser.add_argument("--doctor", action="store_true", help="run local environment checks and exit")
+    parser.add_argument("--ping", action="store_true", help="ping Railway worker API and exit")
+    parser.add_argument("--once", action="store_true", help="run one polling cycle and exit")
+    parser.add_argument("--dry-run", action="store_true", help="ping only; never claim or complete real jobs")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_arg_parser().parse_args(argv)
+    if args.doctor:
+        return run_doctor()
+    if args.ping:
+        return run_ping_mode(dry_run=args.dry_run)
+    if args.dry_run:
+        return run_ping_mode(dry_run=True)
+    if args.once:
+        status = run_once()
+        print(f"[remote_worker] once status={status}")
+        return 1 if status == "failed" else 0
+
     print("[remote_worker] TOAN AAS Remote Worker starting")
     print(f"[remote_worker] base_url={BOT_API_URL}")
     print(f"[remote_worker] worker_id={WORKER_ID}")
@@ -288,7 +392,7 @@ def main() -> None:
                 time.sleep(WORKER_POLL_INTERVAL_SECONDS)
         except KeyboardInterrupt:
             print("[remote_worker] stopped")
-            return
+            return 0
         except urllib.error.HTTPError as exc:
             print(f"[remote_worker] HTTP {exc.code}; check BOT_API_URL/LOCAL_WORKER_TOKEN")
             time.sleep(WORKER_POLL_INTERVAL_SECONDS)
@@ -301,4 +405,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
