@@ -111,9 +111,9 @@ class FakeMessage:
 
 
 def test_admin_risk_menu_visible_to_admin():
-    rows = _keyboard_labels(bot.menu_nav_keyboard("admin", True))
-    assert ["💰 Tài chính", "🧊 Freeze / Queue"] in rows
+    rows = _keyboard_labels(bot.admin_module_keyboard("billing"))
     assert ["🛡 Rủi ro nạp tiền"] in rows
+    assert "💳 Bill / PayOS" in bot.admin_module_page_text("billing")
 
 
 def test_admin_risk_menu_hidden_from_public():
@@ -132,7 +132,8 @@ def test_admin_risk_menu_vietnamese_copy():
 
 def test_admin_finance_freeze_queue_row_not_broken_if_touched():
     rows = _keyboard_labels(bot.menu_nav_keyboard("admin", True))
-    assert rows.index(["💰 Tài chính", "🧊 Freeze / Queue"]) < rows.index(["🛡 Rủi ro nạp tiền"])
+    assert ["🎁 Gói / Combo", "🧊 Queue / Freeze"] in rows
+    assert ["🤖 Provider / Worker", "💰 Tài chính"] in rows
 
 
 def test_public_cannot_open_payos_risk_menu(monkeypatch, tmp_path):
@@ -475,6 +476,8 @@ def test_p0_17c3_static_guard_no_unrelated_files_touched():
         "bot.py",
         "docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md",
         "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md",
+        "tests/test_core.py",
+        "tests/test_p0_17a1_admin_control_center_handbook.py",
         "tests/test_p0_4_hard_reset_audio_video_flow.py",
         "tests/test_p0_5_audio_video_addon_button_logic.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",
