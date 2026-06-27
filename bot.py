@@ -90,6 +90,12 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
+from services import video_asset_intake as video_assets
+from services import video_postprocess_pipeline as video_postprocess
+from services import video_product_profiles as video_profiles
+from services import video_project_queue
+from services import video_prompt_continuity as video_continuity
+from services import video_storyboard_planner as video_storyboard
 from video_multiscene_engine import (
     build_detailed_multiscene_prompt_plan,
     context_bundle_debug_summary,
@@ -1601,6 +1607,11 @@ VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED = env_flag("VIDEO_SUBTITLE_PLUS_DUB_PUBLI
 PUBLIC_CUSTOM_VOICE_ENABLED = env_flag("PUBLIC_CUSTOM_VOICE_ENABLED", "false")
 PUBLIC_VOICE_VIDEO_ENABLED = env_flag("PUBLIC_VOICE_VIDEO_ENABLED", "false")
 PUBLIC_SUBTITLE_DUB_ENABLED = env_flag("PUBLIC_SUBTITLE_DUB_ENABLED", "false")
+PUBLIC_MULTISCENE_VIDEO_ENABLED = env_flag("PUBLIC_MULTISCENE_VIDEO_ENABLED", "false")
+PUBLIC_VIDEO_ADDONS_ENABLED = env_flag("PUBLIC_VIDEO_ADDONS_ENABLED", "false")
+PUBLIC_STANDALONE_VOICE_VIDEO_ENABLED = env_flag("PUBLIC_STANDALONE_VOICE_VIDEO_ENABLED", "false")
+PUBLIC_STANDALONE_SUBTITLE_DUB_ENABLED = env_flag("PUBLIC_STANDALONE_SUBTITLE_DUB_ENABLED", "false")
+P0_17B14_VIDEO_PRODUCT_BRAIN_TIMESTAMP = "2026-06-27"
 P0_17B12_5_LIVE_ROUTER_AUDIT_TIMESTAMP = "2026-06-26"
 TRANSLATION_DUB_MAINTENANCE = env_flag("TRANSLATION_DUB_MAINTENANCE", "false")
 VIDEO_SUBTITLE_BURN_IN_ENABLED = env_flag("VIDEO_SUBTITLE_BURN_IN_ENABLED", "false")
@@ -4542,11 +4553,144 @@ def init_db():
                 c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
             except Exception:
                 pass
+    video_project_queue.ensure_video_project_queue_schema(conn)
     conn.commit()
     conn.close()
 
 def now_text():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def ensure_video_project_queue_db(conn=None):
+    if conn is not None:
+        video_project_queue.ensure_video_project_queue_schema(conn)
+        return conn
+    owned = db_connect()
+    try:
+        video_project_queue.ensure_video_project_queue_schema(owned)
+        return owned
+    except Exception:
+        owned.close()
+        raise
+
+def create_video_project(user_id, profile_id: str = "storytelling", topic: str = "", ratio: str = "9:16", *, conn=None, **kwargs) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        return video_project_queue.create_video_project(
+            db,
+            user_id=int(user_id),
+            profile_id=profile_id,
+            topic=topic,
+            ratio=ratio,
+            selected_suggestion=kwargs.get("selected_suggestion"),
+            asset_pack=kwargs.get("asset_pack"),
+        )
+    finally:
+        if owned:
+            db.close()
+
+def get_video_project(project_id: int = 0, project_uuid: str = "", *, conn=None) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        return video_project_queue.get_video_project(db, int(project_id or 0) or None, project_uuid)
+    finally:
+        if owned:
+            db.close()
+
+def update_video_project(project_id: int, *, conn=None, **fields) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        return video_project_queue.update_video_project(db, int(project_id), **fields)
+    finally:
+        if owned:
+            db.close()
+
+def advance_video_project_state(project_id: int, next_status: str, *, strict: bool = True, conn=None) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        return video_project_queue.advance_video_project_state(db, int(project_id), next_status, strict=strict)
+    finally:
+        if owned:
+            db.close()
+
+def get_active_video_project(user_id, *, conn=None) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        return video_project_queue.get_active_video_project(db, int(user_id))
+    finally:
+        if owned:
+            db.close()
+
+def save_video_project_storyboard(project_id: int, storyboard, *, conn=None) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        return video_project_queue.save_video_project_storyboard(db, int(project_id), storyboard)
+    finally:
+        if owned:
+            db.close()
+
+def confirm_video_project_invoice(project_id: int, user_id, *, balance_xu=None, use_wallet: bool = True, deduct_func=None, conn=None) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        def _deduct(uid: int, amount: int):
+            if deduct_func is not None:
+                return deduct_func(uid, amount)
+            if not use_wallet:
+                return {"ok": True, "final_cost": int(amount or 0)}
+            return spend_fixed_credit_info(
+                uid,
+                int(amount or 0),
+                "video_project_confirm",
+                f"Video project #{int(project_id)} queued for worker",
+                apply_member_discount_flag=False,
+            )
+
+        return video_project_queue.confirm_video_project_invoice(
+            db,
+            project_id=int(project_id),
+            user_id=int(user_id),
+            balance_xu=balance_xu,
+            deduct_func=_deduct,
+        )
+    finally:
+        if owned:
+            db.close()
+
+def claim_video_project_job(worker_id: str, *, lease_seconds: int = 600, conn=None) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        job = video_project_queue.claim_next_video_job(db, worker_id=worker_id, lease_seconds=lease_seconds)
+        return video_project_queue.hydrate_video_job_payload(db, job) if job else {}
+    finally:
+        if owned:
+            db.close()
+
+def update_video_project_job_result(job_id: int, status: str, *, final_video_path: str = "", final_video_file_id: str = "", error: str = "", result: dict | None = None, conn=None) -> dict:
+    owned = conn is None
+    db = conn or db_connect()
+    try:
+        clean_status = str(status or "").lower()
+        if clean_status == "completed":
+            return video_project_queue.complete_video_job(
+                db,
+                job_id=int(job_id),
+                final_video_path=final_video_path,
+                final_video_file_id=final_video_file_id,
+                result=result,
+            )
+        if clean_status == "failed":
+            return video_project_queue.fail_video_job(db, job_id=int(job_id), error=error or "video_worker_failed")
+        raise ValueError("unsupported_video_job_status")
+    finally:
+        if owned:
+            db.close()
 
 SENSITIVE_AUDIT_KEYS = ("key", "token", "secret", "password", "authorization", "api")
 
@@ -37886,6 +38030,249 @@ async def cmd_tool_test_multiscene_blackbox(update: Update, context: ContextType
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
     )
 
+
+def _b14_arg_value(args: list[str], name: str, default: str = "") -> str:
+    marker = f"--{name}"
+    for index, arg in enumerate(args):
+        if arg == marker and index + 1 < len(args):
+            return str(args[index + 1])
+        if arg.startswith(marker + "="):
+            return arg.split("=", 1)[1]
+    return default
+
+
+def _b14_arg_set(context) -> set[str]:
+    return {str(item).strip().lower() for item in (getattr(context, "args", []) or [])}
+
+
+def _b14_arg_list(context) -> list[str]:
+    return [str(item).strip() for item in (getattr(context, "args", []) or [])]
+
+
+def _b14_smoke_workspace(prefix: str = "b14") -> str:
+    root = os.path.join(tempfile.gettempdir(), "toanaas_b14_video_product_brain")
+    os.makedirs(root, exist_ok=True)
+    return tempfile.mkdtemp(prefix=f"{prefix}-", dir=root)
+
+
+def _b14_ffmpeg_path() -> str:
+    return video_multiscene_ffmpeg_path() or shutil.which("ffmpeg") or ""
+
+
+def _b14_make_fake_video(path: str, *, duration: float = 3.0) -> str:
+    ffmpeg = _b14_ffmpeg_path()
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg_missing")
+    result = multiscene_blackbox.safe_run_ffmpeg([
+        ffmpeg, "-y", "-f", "lavfi", "-i", f"color=c=0x1E88E5:s=540x960:r=30:d={duration:.2f}",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", path,
+    ], timeout=90)
+    if result.returncode != 0:
+        raise RuntimeError("fake_video_failed")
+    return multiscene_blackbox.ensure_video_output(path)
+
+
+def _b14_make_fake_audio(path: str, *, duration: float = 2.0, frequency: int = 440) -> str:
+    ffmpeg = _b14_ffmpeg_path()
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg_missing")
+    result = multiscene_blackbox.safe_run_ffmpeg([
+        ffmpeg, "-y", "-f", "lavfi", "-i", f"sine=frequency={frequency}:duration={duration:.2f}",
+        "-c:a", "aac", path,
+    ], timeout=90)
+    if result.returncode != 0:
+        raise RuntimeError("fake_audio_failed")
+    if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+        raise RuntimeError("fake_audio_empty")
+    return path
+
+
+def _b14_make_fake_logo(path: str) -> str:
+    width, height = 64, 64
+    payload = bytearray()
+    for _y in range(height):
+        for _x in range(width):
+            payload.extend((255, 255, 255))
+    with open(path, "wb") as handle:
+        handle.write(f"P6\n{width} {height}\n255\n".encode("ascii") + bytes(payload))
+    return path
+
+
+def _b14_make_subtitle(path: str, plan=None) -> str:
+    cards = list(getattr(plan, "scene_cards", []) or [])
+    lines = []
+    if cards:
+        for index, card in enumerate(cards[:3], start=1):
+            start = max(0, (index - 1) * 2)
+            end = start + 1
+            lines.extend([
+                str(index),
+                f"00:00:{start:02d},000 --> 00:00:{end:02d},800",
+                str(card.subtitle_line or card.narration_line or f"Scene {index}")[:120],
+                "",
+            ])
+    else:
+        lines = ["1", "00:00:00,000 --> 00:00:01,800", "TOAN AAS generated subtitle", ""]
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
+    return path
+
+
+async def _b14_reply_video_or_text(message, video_path: str, caption: str):
+    if hasattr(message, "reply_video"):
+        with open(video_path, "rb") as handle:
+            return await message.reply_video(video=handle, caption=caption, supports_streaming=True)
+    return await message.reply_text(f"{caption}\n{video_path}")
+
+
+def _b14_postprocess_fake_assets(source_video: str, output_video: str, plan=None) -> dict:
+    workspace = os.path.dirname(os.path.abspath(output_video))
+    voice = _b14_make_fake_audio(os.path.join(workspace, "voice.m4a"), duration=2.0, frequency=440)
+    music = _b14_make_fake_audio(os.path.join(workspace, "music.m4a"), duration=2.0, frequency=220)
+    logo = _b14_make_fake_logo(os.path.join(workspace, "logo.ppm"))
+    subtitle = _b14_make_subtitle(os.path.join(workspace, "captions.srt"), plan)
+    result = video_postprocess.process_video_postprocess_plan(video_postprocess.VideoPostprocessPlan(
+        source_video_path=source_video,
+        output_video_path=output_video,
+        voice_audio_path=voice,
+        music_audio_path=music,
+        logo_path=logo,
+        subtitle_path=subtitle,
+        burn_subtitles=True,
+        replace_original_audio=True,
+    ))
+    return {"result": result, "voice": voice, "music": music, "logo": logo, "subtitle": subtitle}
+
+
+async def cmd_tool_test_video_profiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    unsafe = video_profiles.validate_profile_style_safety()
+    status = "PASS" if not unsafe else f"STYLE_UNSAFE {unsafe}"
+    return await update.message.reply_text(
+        "🧪 <b>ADMIN TEST MODE — B14 video profiles</b>\n\n"
+        f"<code>{html.escape(video_profiles.profiles_summary())}</code>\n\n"
+        f"Style safety: <code>{html.escape(status)}</code>\n"
+        "Provider called: <code>NO</code>\nXu charged: <code>0</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_asset_intake(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    if "--fake-assets" not in _b14_arg_set(context):
+        return await update.message.reply_text("Cú pháp: /tool_test_asset_intake --fake-assets")
+    pack = video_b14_fake_asset_pack(admin=True)
+    return await update.message.reply_text(
+        "🧪 <b>ADMIN TEST MODE — B14 asset intake smoke</b>\n\n"
+        f"<code>{html.escape(video_assets.safe_asset_summary(pack))}</code>\n\n"
+        f"Upload triggers render: <code>{video_assets.asset_upload_triggers_render()}</code>\n"
+        "Provider called: <code>NO</code>\nXu charged: <code>0</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_storyboard_planner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    args = _b14_arg_list(context)
+    profile_id = _b14_arg_value(args, "profile", "product_review")
+    scenes = safe_int(_b14_arg_value(args, "scenes", "3"), 3)
+    plan = video_b14_storyboard_plan(profile_id, scenes)
+    return await update.message.reply_text(video_b14_storyboard_preview_text(plan), parse_mode="HTML")
+
+
+async def cmd_tool_test_video_prompt_continuity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    args = _b14_arg_list(context)
+    profile_id = _b14_arg_value(args, "profile", "storytelling")
+    scenes = safe_int(_b14_arg_value(args, "scenes", "5"), 5)
+    plan = video_b14_storyboard_plan(profile_id, scenes, idea_text="Một câu chuyện liền mạch giữ cùng nhân vật và bối cảnh.")
+    ref_plan = video_continuity.create_reference_plan(
+        story_bible=plan.story_bible,
+        scene_cards=plan.scene_cards,
+        asset_pack=plan.asset_pack,
+        provider_supports_reference_image=True,
+        provider_supports_first_frame=True,
+    )
+    first_prompt = str(ref_plan.manifest.get("scene_prompts", [""])[0])[:2800]
+    return await update.message.reply_text(
+        "🧪 <b>ADMIN TEST MODE — B14 continuity prompt smoke</b>\n\n"
+        f"Reference mode: <code>{html.escape(str(ref_plan.manifest.get('reference_mode')))}</code>\n"
+        f"Scene prompts: <code>{len(ref_plan.manifest.get('scene_prompts') or [])}</code>\n\n"
+        f"<pre>{html.escape(first_prompt)}</pre>\n"
+        "Provider core touched: <code>NO</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_video_postprocess(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    flags = _b14_arg_set(context)
+    if "--fake-assets" not in flags or "--no-charge" not in flags:
+        return await update.message.reply_text("Cú pháp: /tool_test_video_postprocess --fake-assets --no-charge")
+    workspace = _b14_smoke_workspace("postprocess")
+    source = _b14_make_fake_video(os.path.join(workspace, "source.mp4"), duration=3.0)
+    output = os.path.join(workspace, "postprocess_final.mp4")
+    processed = _b14_postprocess_fake_assets(source, output)
+    result = processed["result"]
+    if not result.ok:
+        return await update.message.reply_text(f"❌ Postprocess fail: {html.escape(result.status)}\n{html.escape(result.detail[:500])}", parse_mode="HTML")
+    return await _b14_reply_video_or_text(
+        update.message,
+        result.output_video_path,
+        "✅ ADMIN TEST MODE — B14 postprocess PASS: voice + music + logo + subtitle, no provider, no Xu.",
+    )
+
+
+async def cmd_tool_test_video_full_addons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    flags = _b14_arg_set(context)
+    if not {"--fake-renderer", "--fake-assets", "--no-charge"}.issubset(flags):
+        return await update.message.reply_text("Cú pháp: /tool_test_video_full_addons --fake-renderer --fake-assets --profile product_review --scenes 3 --no-charge")
+    args = _b14_arg_list(context)
+    profile_id = _b14_arg_value(args, "profile", "product_review")
+    scenes = min(3, max(1, safe_int(_b14_arg_value(args, "scenes", "3"), 3)))
+    plan = video_b14_storyboard_plan(profile_id, scenes)
+    workspace = _b14_smoke_workspace("full-addons")
+    result = await asyncio.to_thread(
+        multiscene_blackbox.process_multiscene_video_pipeline,
+        user_id=str(uid),
+        job_id=f"b14-{uid}-{int(time.time())}",
+        user_prompt="\n\n".join(card.provider_prompt or card.visual_goal for card in plan.scene_cards),
+        workspace_dir=workspace,
+        render_video_func=multiscene_blackbox_fake_renderer(6),
+        max_scenes=scenes,
+        default_scene_duration=6,
+        aspect_ratio="9:16",
+        enable_voice=False,
+        enable_subtitle=True,
+        enable_logo=False,
+    )
+    final_mp4 = str(result.get("final_video_path") or "")
+    if not result.get("ok") or not final_mp4:
+        return await update.message.reply_text(f"❌ B13 fake render failed: {html.escape(str(result.get('error') or result.get('status')))}", parse_mode="HTML")
+    output = os.path.join(workspace, "b14_full_addons_final.mp4")
+    processed = _b14_postprocess_fake_assets(final_mp4, output, plan)
+    post_result = processed["result"]
+    if not post_result.ok:
+        return await update.message.reply_text(f"❌ B14 postprocess failed: {html.escape(post_result.status)}\n{html.escape(post_result.detail[:500])}", parse_mode="HTML")
+    return await _b14_reply_video_or_text(
+        update.message,
+        post_result.output_video_path,
+        "✅ ADMIN TEST MODE — B14 full addons PASS: fake B13 3-scene render -> postprocess -> one final MP4. No provider, no Xu.",
+    )
+
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
     if not job:
         return "⚠️ Không tìm thấy video multiscene job. TOAN AAS chưa gọi provider mới."
@@ -49966,7 +50353,7 @@ TASK3D_PUBLIC_COPY = {
     ),
     "frame_video_local": (
         "🎞 <b>Ghép ảnh thành video</b>\n\n"
-        "Gửi nhiều ảnh để ghép thành video MP4 bằng hiệu ứng chuyển cảnh đơn giản. Chức năng này dùng Local Worker/FFmpeg, không dùng hệ tạo video AI.\n\n"
+        "Gửi nhiều ảnh để ghép thành video MP4 bằng hiệu ứng chuyển cảnh đơn giản. Chức năng này dùng công cụ xử lý video nội bộ, không dùng hệ tạo video AI.\n\n"
         "Bot sẽ hỏi xác nhận theo quy trình ghép ảnh hiện có trước khi xử lý."
     ),
     "video_ai_real": (
@@ -49979,8 +50366,8 @@ TASK3D_PUBLIC_COPY = {
         "3. Chọn màu sắc/cảm xúc hoặc dùng mặc định\n"
         "4. Chọn chuyển động/camera hoặc bỏ qua\n"
         "5. TOAN AAS tối ưu prompt\n"
-        "6. Dùng để tạo video rồi mới chọn gói\n"
-        "7. Xem lại và xác nhận cuối"
+        "6. Chọn gói phù hợp\n"
+        "7. Xác nhận cuối rồi mới tạo file thật"
     ),
     "script_image_video": (
         "🧩 <b>Kịch bản → Ảnh → Video</b>\n\n"
@@ -50007,7 +50394,7 @@ TASK3D_PUBLIC_COPY = {
     ),
     "video_local_edit": (
         "🛠 <b>Chỉnh sửa video local</b>\n\n"
-        "Trim, crop, resize, nén hoặc ghép video bằng Local Worker/FFmpeg. Bot sẽ hỏi lựa chọn và xác nhận trước khi xử lý."
+        "Trim, crop, resize, nén hoặc ghép video bằng công cụ xử lý video nội bộ. Bot sẽ hỏi lựa chọn và xác nhận trước khi xử lý."
     ),
 }
 
@@ -50135,6 +50522,120 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
         else:
             rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+
+VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE = "Công cụ này đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
+VIDEO_B14_MULTISCENE_PUBLIC_MESSAGE = "Phim AI nhiều cảnh đang được hoàn thiện. TOAN AAS chưa xử lý và chưa trừ Xu."
+
+
+def video_b14_profile_for_product(product_id: str, user_text: str = ""):
+    return video_profiles.resolve_profile_for_menu_product(product_id, user_text=user_text)
+
+
+def video_asset_intake_intro_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "You may send character, product, object, background, style, storyboard, logo, voice, or music references first. "
+            "TOAN AAS uses them to plan a more consistent storyboard. You can skip this and let AI create from text only."
+        )
+    return (
+        "Anh/chị có thể gửi ảnh nhân vật, sản phẩm, đồ vật, bối cảnh, ảnh mẫu phong cách, logo hoặc audio trước. "
+        "TOAN AAS sẽ dùng các tư liệu này để lập storyboard và giữ video nhất quán hơn. Có thể bỏ qua nếu muốn AI tự tạo."
+    )
+
+
+def video_asset_intake_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📸 Gửi ảnh nhân vật/sản phẩm" if is_vi else "📸 Character/product refs", callback_data="vproduct|asset_wait|subject"),
+            InlineKeyboardButton("🏞 Gửi ảnh bối cảnh" if is_vi else "🏞 Background refs", callback_data="vproduct|asset_wait|background"),
+        ],
+        [
+            InlineKeyboardButton("🧩 Gửi ảnh storyboard theo thứ tự" if is_vi else "🧩 Storyboard frames", callback_data="vproduct|asset_wait|storyboard"),
+            InlineKeyboardButton("🏷 Gửi logo" if is_vi else "🏷 Logo", callback_data="vproduct|asset_wait|logo"),
+        ],
+        [
+            InlineKeyboardButton("🎙 Gửi audio/voice" if is_vi else "🎙 Voice/audio", callback_data="vproduct|asset_wait|voice"),
+            InlineKeyboardButton("🎵 Gửi nhạc nền" if is_vi else "🎵 Music", callback_data="vproduct|asset_wait|music"),
+        ],
+        [
+            InlineKeyboardButton("⏭ Bỏ qua, tự tạo bằng AI" if is_vi else "⏭ Skip", callback_data="vproduct|asset_skip"),
+            InlineKeyboardButton("✅ Xong phần tư liệu" if is_vi else "✅ Done", callback_data="vproduct|asset_done"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_asset_classify_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👤 Nhân vật/người" if is_vi else "👤 Character/person", callback_data="vproduct|asset_class|character_reference"),
+            InlineKeyboardButton("📦 Sản phẩm/đồ vật" if is_vi else "📦 Product/object", callback_data="vproduct|asset_class|product_reference"),
+        ],
+        [
+            InlineKeyboardButton("🏞 Bối cảnh/cảnh sắc" if is_vi else "🏞 Background", callback_data="vproduct|asset_class|scene_background"),
+            InlineKeyboardButton("🎨 Phong cách hình ảnh" if is_vi else "🎨 Style", callback_data="vproduct|asset_class|style_reference"),
+        ],
+        [
+            InlineKeyboardButton("🧩 Ảnh storyboard nối tiếp" if is_vi else "🧩 Storyboard frame", callback_data="vproduct|asset_class|storyboard_frame"),
+            InlineKeyboardButton("🏷 Logo" if is_vi else "🏷 Logo", callback_data="vproduct|asset_class|logo"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|asset_intro")],
+    ])
+
+
+def video_asset_scene_order_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    buttons = [InlineKeyboardButton(str(index), callback_data=f"vproduct|asset_scene|{index}") for index in range(1, 11)]
+    rows = [buttons[index:index + 5] for index in range(0, len(buttons), 5)]
+    rows.append([InlineKeyboardButton("Tự xếp theo thứ tự gửi" if normalize_user_language(lang) == "vi" else "Use upload order", callback_data="vproduct|asset_scene|auto")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|asset_class|storyboard_frame")])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_b14_fake_asset_pack(admin: bool = True):
+    pack = video_assets.new_asset_pack(["fake admin asset pack; no provider call"])
+    video_assets.add_asset(pack, asset_type="character_reference", file_id="fake-character", admin=admin)
+    video_assets.add_asset(pack, asset_type="product_reference", file_id="fake-product", admin=admin)
+    video_assets.add_asset(pack, asset_type="scene_background", file_id="fake-background", admin=admin)
+    video_assets.add_asset(pack, asset_type="storyboard_frame", file_id="fake-frame-1", scene_index=1, admin=admin)
+    video_assets.add_asset(pack, asset_type="logo", file_id="fake-logo", admin=admin)
+    video_assets.add_asset(pack, asset_type="voice_audio", file_id="fake-voice", admin=admin)
+    video_assets.add_asset(pack, asset_type="music_audio", file_id="fake-music", admin=admin)
+    return pack
+
+
+def video_b14_storyboard_plan(profile_id: str = "product_review", scenes: int = 3, *, idea_text: str = ""):
+    pack = video_b14_fake_asset_pack(admin=True)
+    plan = video_storyboard.create_storyboard_plan(
+        profile_id=profile_id,
+        idea_text=idea_text or "Review sản phẩm TOAN AAS bằng video ngắn, rõ lợi ích và CTA.",
+        asset_pack=pack,
+        scene_count=scenes,
+    )
+    video_continuity.build_continuity_prompts(plan.story_bible, plan.scene_cards)
+    return plan
+
+
+def video_b14_storyboard_preview_text(plan) -> str:
+    lines = [
+        "🧠 <b>B14 storyboard brain preview</b>",
+        "",
+        f"• Profile: <code>{html.escape(str(plan.profile.profile_id))}</code> — {html.escape(str(plan.profile.menu_label))}",
+        f"• Scene count: <code>{len(plan.scene_cards)}</code>",
+        f"• Assets: <code>{html.escape(video_assets.asset_reference_summary(plan.asset_pack))}</code>",
+        f"• Voice: {html.escape(str(plan.story_bible.voice_policy))}",
+        f"• Music: {html.escape(str(plan.story_bible.music_policy))}",
+        f"• Subtitle: {html.escape(str(plan.story_bible.subtitle_policy))}",
+        "",
+        "<b>Scenes</b>",
+    ]
+    for card in plan.scene_cards:
+        lines.append(f"{card.scene_index}. <b>{html.escape(card.role)}</b> — {html.escape(card.visual_goal)}")
+    lines.extend(["", "Chưa gọi provider, chưa render, chưa trừ Xu."])
+    return "\n".join(lines)
+
 
 def task3d_idea_suggestions(product_id: str, lang: str = "vi", offset: int = 0) -> list[str]:
     suggestions = list(TASK3D_GUIDED_IDEAS.get(str(product_id or "")) or [])
@@ -51310,6 +51811,45 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await handle_video_reference_callback(update, context)
         if prefix == "videoedit":
             return await handle_video_editor_callback(update, context)
+    if action == "asset_intro":
+        session = task3d_session_step(uid, "asset_intake", asset_intake_opened=True, provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            video_asset_intake_intro_text(lang),
+            parse_mode=None,
+            reply_markup=video_asset_intake_keyboard(lang),
+        )
+    if action == "asset_wait":
+        session = task3d_session_step(uid, "asset_intake", asset_waiting_for=value, provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            "Ảnh này dùng làm gì?" if normalize_user_language(lang) == "vi" else "What should this asset be used for?",
+            parse_mode=None,
+            reply_markup=video_asset_classify_keyboard(lang),
+        )
+    if action == "asset_class":
+        session = task3d_session_step(uid, "asset_intake", pending_asset_type=value, provider_called=False, xu_charged=0)
+        if value == "storyboard_frame":
+            return await safe_edit_or_send(
+                query,
+                "Ảnh này là cảnh số mấy?" if normalize_user_language(lang) == "vi" else "Which scene number is this frame?",
+                parse_mode=None,
+                reply_markup=video_asset_scene_order_keyboard(lang),
+            )
+        return await safe_edit_or_send(
+            query,
+            video_asset_intake_intro_text(lang),
+            parse_mode=None,
+            reply_markup=video_asset_intake_keyboard(lang),
+        )
+    if action in {"asset_skip", "asset_done"}:
+        session = task3d_session_step(uid, "collect_input", asset_intake_done=True, asset_intake_skipped=(action == "asset_skip"), provider_called=False, xu_charged=0)
+        prompt = task3d_text_input_prompt(product_id, lang)
+        return await safe_edit_or_send(
+            query,
+            prompt,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|asset_intro"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
     if action == "result":
         # View/export/finalization are children of the result menu. Returning to
         # their parent must not pop the workflow history back to style/output.
@@ -52658,7 +53198,7 @@ def menu_text_main_video() -> str:
         "Bạn muốn tạo hoặc xử lý video theo hướng nào?\n\n"
         "• Planning như ý tưởng, prompt, storyboard, chuyển động, nhạc hoặc giọng đọc là miễn phí.\n"
         "• Video AI chân thật chỉ xử lý thật và tính Xu sau màn xác nhận.\n"
-        "• Ghép ảnh thành video dùng Local Worker + ffmpeg và giữ nguyên giá render hiện tại.\n"
+        "• Ghép ảnh thành video dùng công cụ xử lý video nội bộ và giữ nguyên giá render hiện tại.\n"
         "• Phụ đề và lồng tiếng video sẽ hỏi từng bước; nếu công cụ xử lý chưa sẵn sàng bot chỉ lưu kế hoạch và không trừ Xu."
     )
 
@@ -52669,25 +53209,25 @@ def video_ai_true_text(lang: str = "vi") -> str:
         warning = "" if enabled else "\n\n🎬 真实 AI 视频目前维护中或尚未公开。TOAN AAS 未扣除 Xu。你可以先用 Trend 视频生成 prompt/计划。"
         return (
             "🎬 <b>真实 AI 视频</b>\n\n"
-            "使用 ShopAIKey VEO 等 AI 视频 provider 生成视频，后续可接 Kling/Runway/WokuShop/Key4U。\n\n"
-            "可以从 prompt、图片或参考视频开始。TOAN AAS 先创建免费计划；只有确认真实渲染后才调用 provider 并计费。"
+            "生成写实 AI 短视频。\n\n"
+            "可以从 prompt、图片或参考视频开始。TOAN AAS 先创建免费计划；只有确认真实生成后才处理并计费。"
             f"{warning}"
         )
     if normalize_user_language(lang) != "vi":
         warning = "" if enabled else "\n\n🎬 Real AI Video is currently under maintenance or not public yet. TOAN AAS has not charged Xu. You can use Trend video to create prompts/plans first."
         return (
             "🎬 <b>Real AI Video</b>\n\n"
-            "Generate video through AI providers such as ShopAIKey VEO, and later Kling/Runway/WokuShop/Key4U.\n\n"
-            "Start from a prompt, image or reference video. TOAN AAS creates the plan first; it only calls a provider and charges Xu after you confirm real rendering."
+            "Generate a realistic AI short video.\n\n"
+            "Start from a prompt, image or reference video. TOAN AAS creates the plan first; it only processes and charges Xu after you confirm real generation."
             f"{warning}"
         )
     warning = "" if enabled else "\n\n🎬 Video AI chân thật hiện đang được bảo trì hoặc chưa mở public. TOAN AAS chưa trừ Xu. Bạn có thể dùng Video theo trend để tạo prompt/kế hoạch trước."
     return (
         "🎬 <b>Video AI chân thật</b>\n\n"
-        "Tạo video bằng provider AI như ShopAIKey VEO, sau này có thể dùng Kling/Runway/WokuShop/Key4U.\n\n"
+        "Tạo video AI ngắn theo prompt, ảnh hoặc video tham khảo.\n\n"
         "Bạn có thể bắt đầu từ prompt, ảnh hoặc video mẫu tham khảo.\n"
-        "TOAN AAS luôn tạo prompt/kế hoạch trước; chỉ khi xác nhận render thật mới gọi provider và tính Xu.\n\n"
-        "Nếu public video đang tắt, bot sẽ không gọi API video và không trừ Xu."
+        "TOAN AAS luôn tạo prompt/kế hoạch trước; chỉ khi xác nhận tạo file thật mới xử lý và tính Xu.\n\n"
+        "Nếu công cụ tạo video đang bảo trì, bot chỉ lưu kế hoạch và không trừ Xu."
         f"{warning}"
     )
 
@@ -52706,21 +53246,21 @@ def video_frame_intro_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "zh":
         return (
             "🎞 <b>图片合成视频</b>\n\n"
-            "这个工具使用你已有的图片，通过 Local Worker + ffmpeg 合成短视频。\n"
-            "不使用 VEO，也不调用 AI 视频 provider。\n\n"
+            "这个工具使用你已有的图片合成短视频。\n"
+            "不使用写实 AI 视频生成。\n\n"
             "适合：产品图片短视频、slideshow、简单 short、基础转场效果。"
         )
     if normalize_user_language(lang) != "vi":
         return (
             "🎞 <b>Image slideshow video</b>\n\n"
-            "This tool uses your existing images to create a short video through Local Worker + ffmpeg.\n"
-            "It does not use VEO and does not call the AI video provider.\n\n"
+            "This tool uses your existing images to create a short video.\n"
+            "It does not use realistic AI video generation.\n\n"
             "Good for product slideshows, simple shorts and basic transitions."
         )
     return (
         "🎞 <b>Ghép ảnh thành video</b>\n\n"
-        "Công cụ này dùng ảnh có sẵn của bạn để ghép thành video ngắn bằng Local Worker + ffmpeg.\n"
-        "Không dùng VEO, không gọi provider video AI.\n\n"
+        "Công cụ này dùng ảnh có sẵn của bạn để ghép thành video ngắn.\n"
+        "Không dùng hệ tạo video AI chân thật.\n\n"
         "Phù hợp để:\n"
         "• ghép ảnh sản phẩm thành video ngắn\n"
         "• làm slideshow\n"
@@ -59530,17 +60070,17 @@ def menu_text_main_video_i18n(lang: str) -> str:
             "🎬 <b>TOAN AAS 视频</b>\n\n"
             "选择创建或处理视频的方式。\n\n"
             "• 创意、prompt、storyboard、镜头运动、音乐/voice 规划免费。\n"
-            "• 真实 AI 视频只在确认后调用 provider 并计费。\n"
-            "• 图片合成视频使用 Local Worker + ffmpeg，保留现有渲染价格。\n"
-            "• 翻译/配音按步骤引导；provider 未准备好时不扣 Xu。"
+            "• 真实 AI 视频只在确认后处理并计费。\n"
+            "• 图片合成视频使用内部视频处理工具，保留现有渲染价格。\n"
+            "• 翻译/配音按步骤引导；工具未准备好时不扣 Xu。"
         )
     return (
         "🎬 <b>TOAN AAS VIDEO</b>\n\n"
         "Choose how you want to create or process video.\n\n"
         "• Ideas, prompts, storyboards, motion and audio planning are free.\n"
-        "• Real AI Video only calls providers and charges Xu after confirmation.\n"
-        "• Image slideshow video uses Local Worker + ffmpeg and keeps existing render pricing.\n"
-        "• Translation/dubbing is guided step by step; no provider call or Xu charge when the provider is unavailable."
+        "• Real AI Video only processes and charges Xu after confirmation.\n"
+        "• Image slideshow video uses the internal video processor and keeps existing render pricing.\n"
+        "• Translation/dubbing is guided step by step; no Xu charge when the tool is unavailable."
     )
 
 def menu_text_main_ai_i18n(lang: str) -> str:
@@ -111781,7 +112321,7 @@ def pricing_frame_video_lines() -> list[str]:
     rows = [
         "🎞 <b>GHÉP ẢNH THÀNH VIDEO</b>",
         "",
-        "Dùng Local Worker/FFmpeg, không gọi VEO/video AI provider. Đây là luồng rẻ hơn Video AI chân thật.",
+        "Dùng công cụ xử lý video nội bộ, không dùng hệ tạo video AI chân thật. Đây là luồng rẻ hơn Video AI chân thật.",
         "",
     ]
     for label, state in examples:
@@ -111789,7 +112329,7 @@ def pricing_frame_video_lines() -> list[str]:
     rows.extend([
         "",
         "Giá tăng theo số ảnh, thời lượng và hiệu ứng. Bot luôn xác nhận giá trước khi trừ Xu.",
-        "Nếu worker offline, ffmpeg thiếu hoặc render guard đang khóa: TOAN AAS không render trực tiếp trên Railway, không trừ Xu.",
+        "Nếu công cụ xử lý video chưa sẵn sàng: TOAN AAS không tạo file thật và không trừ Xu.",
     ])
     return rows
 
@@ -140100,6 +140640,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_multiscene_engine_status", cmd_video_multiscene_status))
     tg_app.add_handler(CommandHandler("tool_test_video_multiscene", cmd_tool_test_video_multiscene))
     tg_app.add_handler(CommandHandler("tool_test_multiscene_blackbox", cmd_tool_test_multiscene_blackbox))
+    tg_app.add_handler(CommandHandler("tool_test_video_profiles", cmd_tool_test_video_profiles))
+    tg_app.add_handler(CommandHandler("tool_test_asset_intake", cmd_tool_test_asset_intake))
+    tg_app.add_handler(CommandHandler("tool_test_storyboard_planner", cmd_tool_test_storyboard_planner))
+    tg_app.add_handler(CommandHandler("tool_test_prompt_continuity", cmd_tool_test_video_prompt_continuity))
+    tg_app.add_handler(CommandHandler("tool_test_video_postprocess", cmd_tool_test_video_postprocess))
+    tg_app.add_handler(CommandHandler("tool_test_video_full_addons", cmd_tool_test_video_full_addons))
     tg_app.add_handler(CommandHandler("video_jobs", cmd_video_jobs))
     tg_app.add_handler(CommandHandler("video_job", cmd_video_job))
     tg_app.add_handler(CommandHandler("video_multiscene_job", cmd_video_multiscene_job))
@@ -141158,6 +141704,29 @@ async def internal_worker_poll(request: Request):
     finally:
         conn.close()
 
+@fastapi_app.get("/internal/video_worker/poll")
+async def internal_video_worker_poll(request: Request):
+    verify_local_worker_access(request)
+    worker_id = str(request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
+    lease_seconds = max(30, min(3600, int(request.query_params.get("lease_seconds") or LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
+    set_system_setting("local_worker:last_heartbeat", now_text(), "video project poll heartbeat", worker_id)
+    set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
+    if not LOCAL_WORKER_ENABLED or not LOCAL_WORKER_POLL_ENABLED:
+        return {"ok": True, "enabled": LOCAL_WORKER_ENABLED, "poll_enabled": LOCAL_WORKER_POLL_ENABLED, "job": None}
+    conn = db_connect()
+    try:
+        job = video_project_queue.claim_next_video_job(conn, worker_id=worker_id, lease_seconds=lease_seconds)
+        hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else None
+        return {
+            "ok": True,
+            "enabled": True,
+            "poll_enabled": True,
+            "queue": "video_jobs",
+            "job": hydrated,
+        }
+    finally:
+        conn.close()
+
 @fastapi_app.post("/internal/worker/job_update")
 async def internal_worker_job_update(request: Request):
     verify_local_worker_access(request)
@@ -141183,6 +141752,26 @@ async def internal_worker_job_update(request: Request):
     handle_paid_video_preview_worker_job_update(previous_job, job)
     handle_social_link_import_worker_job_update(previous_job, job)
     return {"ok": True, "job": job}
+
+@fastapi_app.post("/internal/video_worker/job_update")
+async def internal_video_worker_job_update(request: Request):
+    verify_local_worker_access(request)
+    payload = await read_json_body(request)
+    job_id = payload.get("id") or payload.get("job_id")
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+    status = str(payload.get("status") or "").strip().lower()
+    if status not in {"completed", "failed"}:
+        raise HTTPException(status_code=400, detail="status must be completed or failed")
+    result = update_video_project_job_result(
+        int(job_id),
+        status,
+        final_video_path=str(payload.get("final_video_path") or ""),
+        final_video_file_id=str(payload.get("final_video_file_id") or payload.get("output_file_id") or ""),
+        error=str(payload.get("error_short") or payload.get("last_error") or "")[:1000],
+        result=payload.get("result") if isinstance(payload.get("result"), dict) else {},
+    )
+    return {"ok": bool(result.get("ok")), "result": result}
 
 @fastapi_app.post("/internal/worker/upload_result")
 async def internal_worker_upload_result(request: Request, job_id: str = Form(default=""), file: UploadFile | None = File(default=None)):

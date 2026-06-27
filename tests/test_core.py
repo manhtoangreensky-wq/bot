@@ -2459,7 +2459,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Combo Ưu Đãi TikTok" in combo_price_text
     assert "khuyến nghị 9:16" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
-    assert "Local Worker/FFmpeg" in frame_price_text
+    assert "công cụ xử lý video nội bộ" in frame_price_text
+    assert "Local Worker/FFmpeg" not in frame_price_text
     assert "Ảnh sang PDF: <b>0 Xu</b>" in docs_price_text
     assert "PDF sang ảnh: <b>0 Xu</b>" in docs_price_text
     assert "Gộp PDF: <b>0 Xu</b>" in docs_price_text
@@ -2672,8 +2673,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video AI chân thật hiện đang được bảo trì" in bot.video_ai_true_text("vi")
     frame_intro_labels = [button.text for row in bot.video_frame_intro_keyboard("vi").inline_keyboard for button in row]
     assert "📷 Bắt đầu ghép ảnh" in frame_intro_labels
-    assert "Local Worker + ffmpeg" in bot.video_frame_intro_text("vi")
-    assert "Không dùng VEO" in bot.video_frame_intro_text("vi")
+    assert "công cụ xử lý video nội bộ" not in bot.video_frame_intro_text("vi")
+    assert "Local Worker + ffmpeg" not in bot.video_frame_intro_text("vi")
+    assert "Không dùng hệ tạo video AI chân thật" in bot.video_frame_intro_text("vi")
     assert "Tự quay & đổi cảnh AI" in bot.video_self_scene_ai_text("vi")
     assert "Mở màn hình này chưa xử lý video và chưa trừ Xu" in bot.video_self_scene_ai_text("vi")
     self_scene_labels = [button.text for row in bot.self_scene_input_keyboard("vi").inline_keyboard for button in row]

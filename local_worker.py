@@ -11,12 +11,21 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from services.multiscene_video_pipeline import (
+    SceneSpec,
+    create_multiscene_workspace,
+    ensure_video_output,
+    process_multiscene_video_pipeline,
+    safe_run_ffmpeg,
+)
 
 
 def load_dotenv(path: str) -> None:
@@ -78,6 +87,8 @@ LOCAL_FFMPEG_PATH = str(
 ).strip()
 LOCAL_FFMPEG_FONT_PATH = str(os.environ.get("LOCAL_FFMPEG_FONT_PATH", r"C:\Windows\Fonts\arial.ttf")).strip()
 LOCAL_COMFY_ENABLED = env_flag("LOCAL_COMFY_ENABLED", "false")
+VIDEO_PROJECT_QUEUE_ENABLED = env_flag("VIDEO_PROJECT_QUEUE_ENABLED", "true")
+LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
 
 
 def endpoint(path: str) -> str:
@@ -118,6 +129,12 @@ def poll_job() -> dict | None:
     return data.get("job") if data.get("ok") else None
 
 
+def poll_video_render_job() -> dict | None:
+    query = urllib.parse.urlencode({"worker_id": LOCAL_WORKER_ID, "lease_seconds": LOCAL_WORKER_MAX_JOB_SECONDS})
+    data = http_json("GET", f"/internal/video_worker/poll?{query}", timeout=25)
+    return data.get("job") if data.get("ok") else None
+
+
 def update_job(job_id, status: str, error_short: str = "", output_url: str = "", output_file_id: str = "") -> None:
     payload = {
         "job_id": job_id,
@@ -130,12 +147,38 @@ def update_job(job_id, status: str, error_short: str = "", output_url: str = "",
     http_json("POST", "/internal/worker/job_update", payload, timeout=20)
 
 
+def update_video_render_job(
+    job_id,
+    status: str,
+    error_short: str = "",
+    final_video_path: str = "",
+    final_video_file_id: str = "",
+    result: dict | None = None,
+) -> None:
+    payload = {
+        "job_id": job_id,
+        "status": status,
+        "worker_id": LOCAL_WORKER_ID,
+        "error_short": str(error_short or "")[:500],
+        "final_video_path": str(final_video_path or "")[:1000],
+        "final_video_file_id": str(final_video_file_id or "")[:500],
+        "result": result or {},
+    }
+    http_json("POST", "/internal/video_worker/job_update", payload, timeout=25)
+
+
 def first_line(text: str) -> str:
     for line in str(text or "").splitlines():
         clean = line.strip()
         if clean:
             return clean[:300]
     return ""
+
+
+def local_ffmpeg_path() -> str:
+    if LOCAL_FFMPEG_PATH and os.path.exists(LOCAL_FFMPEG_PATH):
+        return LOCAL_FFMPEG_PATH
+    return shutil.which("ffmpeg") or LOCAL_FFMPEG_PATH
 
 
 def run_ffmpeg_health(job: dict) -> None:
@@ -483,6 +526,85 @@ def run_social_link_import(job: dict) -> None:
         update_job(job_id, "failed", f"social_link_import:{type(exc).__name__}:{first_line(str(exc))}")
 
 
+def video_project_fake_scene_renderer(duration: float = 6.0):
+    colors = ["0x1E88E5", "0x43A047", "0xF4511E", "0x8E24AA", "0xFDD835"]
+
+    def _render(scene: SceneSpec, output_path: str) -> str:
+        ffmpeg = local_ffmpeg_path()
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg_missing")
+        color = colors[(int(scene.scene_id) - 1) % len(colors)]
+        command = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c={color}:s=540x960:r=30:d={float(duration):.3f}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            output_path,
+        ]
+        result = safe_run_ffmpeg(command, timeout=min(LOCAL_WORKER_MAX_JOB_SECONDS, 120))
+        if result.returncode != 0:
+            raise RuntimeError(first_line(result.stderr or result.stdout) or "fake_renderer_ffmpeg_failed")
+        return ensure_video_output(output_path)
+
+    return _render
+
+
+def run_video_render_job(job: dict) -> None:
+    job_id = job.get("id") or job.get("job_id")
+    project = job.get("project") or {}
+    try:
+        if not job_id:
+            return
+        if not LOCAL_VIDEO_FAKE_RENDERER_ENABLED:
+            update_video_render_job(job_id, "failed", "video_render_runner_missing")
+            return
+        if not TELEGRAM_BOT_TOKEN:
+            update_video_render_job(job_id, "failed", "telegram_token_missing_for_delivery")
+            return
+        user_id = str(project.get("user_id") or job.get("user_id") or "").strip()
+        if not user_id:
+            update_video_render_job(job_id, "failed", "video_render_missing_user")
+            return
+        scene_count = max(1, min(5, int(project.get("scene_count") or len(job.get("scenes") or []) or 3)))
+        duration = 6.0
+        prompt = str(project.get("prompt_text") or project.get("topic") or "TOAN AAS video project")[:4000]
+        workspace = create_multiscene_workspace(f"video-project-{job_id}")
+        result = process_multiscene_video_pipeline(
+            user_id=user_id,
+            job_id=str(job_id),
+            user_prompt=prompt,
+            workspace_dir=workspace,
+            render_video_func=video_project_fake_scene_renderer(duration),
+            max_scenes=scene_count,
+            default_scene_duration=duration,
+            aspect_ratio=str(project.get("ratio") or "9:16"),
+            enable_voice=False,
+            enable_subtitle=True,
+            enable_logo=False,
+        )
+        final_path = str(result.get("final_video_path") or "")
+        if not result.get("ok") or not final_path:
+            raise RuntimeError(str(result.get("error") or result.get("status") or "video_render_failed"))
+        output_file_id = telegram_send_video(user_id, final_path, "✅ Video TOAN AAS đã hoàn tất.")
+        update_video_render_job(job_id, "completed", "video project sent", final_video_path=final_path, final_video_file_id=output_file_id, result=result)
+    except subprocess.TimeoutExpired:
+        update_video_render_job(job_id, "failed", "video_render_timeout")
+    except Exception as exc:
+        update_video_render_job(job_id, "failed", f"video_render:{type(exc).__name__}:{first_line(str(exc))}")
+
+
 def run_frame_video_render(job: dict) -> None:
     job_id = job.get("id")
     try:
@@ -636,6 +758,9 @@ def process_job(job: dict) -> None:
     if job_type == "social_link_import":
         run_social_link_import(job)
         return
+    if job_type == "video_render":
+        run_video_render_job(job)
+        return
     if job_type.startswith("comfy_"):
         update_job(job_id, "failed", "ComfyUI Phase 1 planned/not_ready.")
         return
@@ -661,6 +786,13 @@ def main() -> None:
             if job:
                 print(f"[local_worker] job #{job.get('id')} {job.get('job_type')}")
                 process_job(job)
+            elif VIDEO_PROJECT_QUEUE_ENABLED:
+                video_job = poll_video_render_job()
+                if video_job:
+                    print(f"[local_worker] video_job #{video_job.get('id')} {video_job.get('job_type')}")
+                    run_video_render_job(video_job)
+                else:
+                    time.sleep(5)
             else:
                 time.sleep(5)
         except KeyboardInterrupt:
