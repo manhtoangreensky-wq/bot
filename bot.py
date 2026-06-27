@@ -81193,6 +81193,57 @@ async def cmd_tool_test_subtitle_from_storyboard(update: Update, context: Contex
     )
 
 
+async def cmd_tool_test_subtitle_srt_validate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_19b_subtitle_srt_validate"):
+        return
+    uid = update.effective_user.id
+    if "--fake" not in set(context.args or []):
+        save_tool_test_result("p0_19b_subtitle_srt_validate", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_subtitle_srt_validate --fake</code> để kiểm tra SRT giả, không gọi provider và không trừ Xu.", parse_mode="HTML")
+    transcript = subtitle_dub_pipeline.build_transcript_from_storyboard(p0_18a_storyboard_sample(), scene_duration=6)
+    valid_srt = subtitle_dub_pipeline.generate_srt_from_transcript(transcript)
+    valid = subtitle_dub_pipeline.validate_srt(valid_srt)
+    invalid_rejected = not subtitle_dub_pipeline.validate_srt("1\n00:00:03,000 --> 00:00:01,000\nSai mốc")
+    status = "PASS" if valid and invalid_rejected else "FAIL"
+    save_tool_test_result("p0_19b_subtitle_srt_validate", status, f"valid={valid}; invalid_rejected={invalid_rejected}; provider_call=no", uid)
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• SRT hợp lệ: <code>{'YES' if valid else 'NO'}</code>\n"
+        f"• Reject timestamp lỗi: <code>{'YES' if invalid_rejected else 'NO'}</code>\n"
+        "• Provider call: <code>NO</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_translate_srt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_19b_translate_srt"):
+        return
+    uid = update.effective_user.id
+    if "--fake" not in set(context.args or []):
+        save_tool_test_result("p0_19b_translate_srt", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_translate_srt --fake</code> để dịch SRT giả và giữ timestamp.", parse_mode="HTML")
+    source = subtitle_dub_pipeline.generate_srt_from_transcript(
+        subtitle_dub_pipeline.build_transcript_from_storyboard(p0_18a_storyboard_sample(), scene_duration=6)
+    )
+    translated = subtitle_dub_pipeline.translate_srt_preserve_timestamps(
+        source,
+        "English",
+        translate_func=lambda text, lang: f"{lang}: {text}",
+    )
+    timestamps_ok = [
+        line for line in source.splitlines() if "-->" in line
+    ] == [
+        line for line in translated.splitlines() if "-->" in line
+    ]
+    status = "PASS" if subtitle_dub_pipeline.validate_srt(translated) and timestamps_ok else "FAIL"
+    save_tool_test_result("p0_19b_translate_srt", status, f"timestamps_preserved={timestamps_ok}; provider_call=no", uid)
+    await update.message.reply_document(
+        document=video_dubbing_output_file(translated.encode("utf-8"), "toan_aas_translated_fake.srt"),
+        filename="toan_aas_translated_fake.srt",
+        caption=f"✅ Translate SRT {'PASS' if status == 'PASS' else 'FAIL'} — timestamps giữ nguyên / admin fake / 0 Xu",
+    )
+
+
 async def cmd_tool_test_subtitle_dub_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await p0_18a_admin_guard(update, "p0_18a_subtitle_dub_pipeline"):
         return
@@ -81253,6 +81304,48 @@ async def cmd_tool_test_subtitle_dub_mux_failure(update: Update, context: Contex
         f"• Partial result khi ghép lỗi: <code>{'PASS' if partial_ok else 'FAIL'}</code>\n"
         f"• Thông báo public sạch: <code>{html.escape(result.public_message or '-')}</code>\n"
         "• Provider call: <code>NO</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_uploaded_video_subtitle_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_19b_uploaded_video_subtitle_guard"):
+        return
+    uid = update.effective_user.id
+    if "--fake" not in set(context.args or []):
+        save_tool_test_result("p0_19b_uploaded_video_subtitle_guard", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_uploaded_video_subtitle_guard --fake</code> để kiểm tra guard video upload.", parse_mode="HTML")
+    state = {
+        "source_file_id": "fake-uploaded-video",
+        "video_file_id": "fake-uploaded-video",
+        "source_file_name": "uploaded.mp4",
+        "source_mime_type": "video/mp4",
+        "media_kind": "video",
+    }
+    public_probe_user = 0
+    access = video_dubbing_engine_access_decision(
+        public_probe_user,
+        VIDEO_SUBTITLE_MODE_CREATE,
+        state,
+        is_paid_job=True,
+        confirm_paid=False,
+    )
+    blocked = not bool(access.get("allowed"))
+    message = str(access.get("message") or video_dubbing_guard_text(VIDEO_SUBTITLE_MODE_CREATE, state, "vi", admin=False))
+    copy_safe = not provider_gate.public_copy_has_technical_terms(message)
+    status = "PASS" if blocked and copy_safe else "FAIL"
+    save_tool_test_result(
+        "p0_19b_uploaded_video_subtitle_guard",
+        status,
+        f"blocked={blocked}; copy_safe={copy_safe}; provider_call=no; charge=no",
+        uid,
+    )
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Uploaded video guard: <code>{'PASS' if blocked else 'FAIL'}</code>\n"
+        f"• Public copy safe: <code>{'YES' if copy_safe else 'NO'}</code>\n"
+        "• Provider call: <code>NO</code>\n"
+        "• Charge: <code>NO</code>",
         parse_mode="HTML",
     )
 
@@ -144533,22 +144626,6 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             if not state.get("target_language"):
                 state = set_video_dubbing_pending(uid, "language", mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
                 return await safe_edit_or_send(query, video_dubbing_language_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_language_keyboard(lang, state))
-            try:
-                prepared = await video_dubbing_prepare_subtitles(
-                    context,
-                    state,
-                    uid,
-                    allow_admin=is_translation_admin(uid),
-                )
-                state = dict(prepared.get("state") or state)
-            except Exception:
-                state = set_video_dubbing_pending(uid, "guarded", processing="0")
-                return await safe_edit_or_send(
-                    query,
-                    video_dubbing_guard_text(VIDEO_SUBTITLE_MODE_TRANSLATE, state, lang, admin=False),
-                    parse_mode="HTML",
-                    reply_markup=video_dubbing_guard_keyboard(lang, admin=False),
-                )
             state = set_video_dubbing_pending(
                 uid,
                 "voice",
@@ -146691,8 +146768,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_voice_preview_policy", cmd_tool_test_voice_preview_policy))
     tg_app.add_handler(CommandHandler("tool_test_custom_voice_flow", cmd_tool_test_custom_voice_flow))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_subtitle_from_storyboard(?:@\w+)?(?:\s|$)"), cmd_tool_test_subtitle_from_storyboard))
+    tg_app.add_handler(CommandHandler("tool_test_subtitle_srt_validate", cmd_tool_test_subtitle_srt_validate))
+    tg_app.add_handler(CommandHandler("tool_test_translate_srt", cmd_tool_test_translate_srt))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_dub_pipeline", cmd_tool_test_subtitle_dub_pipeline))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_subtitle_dub_mux_failure(?:@\w+)?(?:\s|$)"), cmd_tool_test_subtitle_dub_mux_failure))
+    tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_uploaded_video_subtitle_guard(?:@\w+)?(?:\s|$)"), cmd_tool_test_uploaded_video_subtitle_guard))
     tg_app.add_handler(CommandHandler("video_jobs", cmd_video_jobs))
     tg_app.add_handler(CommandHandler("video_job", cmd_video_job))
     tg_app.add_handler(CommandHandler("video_multiscene_job", cmd_video_multiscene_job))
