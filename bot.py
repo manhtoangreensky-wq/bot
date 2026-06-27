@@ -1096,6 +1096,40 @@ PAYMENT_PACKAGES = {
     "200k": {"amount": 200000, "xu": 2000,  "text": "Mệnh giá 200k: 200.000đ ➔ 2.000 Xu"},
     "500k": {"amount": 500000, "xu": 5000,  "text": "Mệnh giá 500k: 500.000đ ➔ 5.000 Xu"}
 }
+PAYOS_AUTO_TOPUP_LOCK_TYPE = "payos_auto_topup"
+PAYOS_AUTO_TOPUP_MAX_VND = 500_000
+PAYOS_AUTO_TOPUP_MAX_USD = 100
+PAYOS_AUTO_TOPUP_COOLDOWN_SECONDS = 5 * 60
+PAYOS_AUTO_TOPUP_LIMIT_60M_VND = 3_000_000
+PAYOS_AUTO_TOPUP_LIMIT_12H_VND = 9_000_000
+PAYOS_AUTO_TOPUP_LIMIT_24H_VND = 15_000_000
+PAYOS_AUTO_TOPUP_LOCK_60M_SECONDS = 60 * 60
+
+PAYOS_AUTO_TOPUP_CAP_MESSAGE = (
+    "Nạp tự động PayOS tối đa 500.000đ/lệnh. "
+    "Anh/chị muốn nạp nhiều hơn vui lòng dùng nạp thủ công hoặc liên hệ admin."
+)
+PAYOS_AUTO_TOPUP_CAP_WITH_MANUAL_NOTE = (
+    "Nạp tự động PayOS tối đa 500.000đ/lệnh. "
+    "Nếu cần nạp nhiều hơn, anh/chị dùng nạp thủ công. "
+    "Nạp thủ công không cộng Xu tự động; admin sẽ kiểm tra tiền vào rồi mới duyệt."
+)
+PAYOS_AUTO_TOPUP_COOLDOWN_MESSAGE = (
+    "Anh/chị vừa tạo lệnh nạp. Vui lòng đợi đủ 5 phút rồi tạo lệnh mới, "
+    "hoặc liên hệ admin nếu cần hỗ trợ."
+)
+PAYOS_AUTO_TOPUP_60M_LOCK_MESSAGE = (
+    "Tài khoản đang tạm khóa nạp tự động 1 giờ do đạt giới hạn 3.000.000đ/60 phút. "
+    "Anh/chị có thể liên hệ admin nếu cần mở khóa hoặc dùng nạp thủ công."
+)
+PAYOS_AUTO_TOPUP_12H_LOCK_MESSAGE = (
+    "Tài khoản đang tạm khóa nạp tự động để kiểm tra do đạt giới hạn 9.000.000đ/12 giờ. "
+    "Anh/chị có thể dùng nạp thủ công hoặc liên hệ admin."
+)
+PAYOS_AUTO_TOPUP_24H_LOCK_MESSAGE = (
+    "Tài khoản đang tạm khóa nạp tự động để kiểm tra do đạt giới hạn 15.000.000đ/24 giờ. "
+    "Anh/chị có thể dùng nạp thủ công hoặc liên hệ admin."
+)
 
 PLAN_CATALOG = {
     "starter": {
@@ -2575,6 +2609,17 @@ def init_db():
         created_at DATETIME,
         raw_hash TEXT DEFAULT ''
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS payos_topup_locks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        lock_type TEXT DEFAULT 'payos_auto_topup',
+        reason TEXT DEFAULT '',
+        locked_until DATETIME,
+        review_required INTEGER DEFAULT 0,
+        created_at DATETIME,
+        created_by TEXT DEFAULT 'system',
+        metadata_json TEXT DEFAULT ''
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS payos_orders (
         order_code TEXT PRIMARY KEY,
         user_id TEXT,
@@ -2622,6 +2667,20 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_payos_processed_events_order ON payos_processed_events(order_code)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_payos_processed_events_payment_link ON payos_processed_events(payment_link_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_payos_processed_events_transaction ON payos_processed_events(transaction_id)")
+    payos_topup_lock_columns = _table_columns(c, "payos_topup_locks")
+    for column_name, column_sql in [
+        ("user_id", "user_id TEXT"),
+        ("lock_type", "lock_type TEXT DEFAULT 'payos_auto_topup'"),
+        ("reason", "reason TEXT DEFAULT ''"),
+        ("locked_until", "locked_until DATETIME"),
+        ("review_required", "review_required INTEGER DEFAULT 0"),
+        ("created_at", "created_at DATETIME"),
+        ("created_by", "created_by TEXT DEFAULT 'system'"),
+        ("metadata_json", "metadata_json TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(c, "payos_topup_locks", column_name, column_sql, payos_topup_lock_columns)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_payos_topup_locks_user_type ON payos_topup_locks(user_id, lock_type)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_payos_topup_locks_active ON payos_topup_locks(lock_type, review_required, locked_until)")
     payos_order_columns = _table_columns(c, "payos_orders")
     for column_name, column_sql in [
         ("payment_type", "payment_type TEXT DEFAULT 'topup_xu'"),
@@ -7569,6 +7628,293 @@ def payos_package_callback_data(pkg_key: str, uid) -> str:
 def manual_package_callback_data(pkg_key: str, uid) -> str:
     return f"manual|start|{pkg_key}|{uid}"
 
+def payos_auto_topup_rules_text() -> str:
+    return (
+        "Quy tắc nạp tự động PayOS:\n"
+        "• Hiện áp dụng cho nạp VND qua QR PayOS.\n"
+        "• Tối đa 500.000đ/lệnh.\n"
+        "• Mỗi 5 phút chỉ tạo 1 lệnh nạp.\n"
+        "• Tối đa 3.000.000đ trong 60 phút.\n"
+        "• Tối đa 9.000.000đ trong 12 giờ.\n"
+        "• Tối đa 15.000.000đ trong 24 giờ.\n"
+        "• Nếu cần nạp nhiều hơn, vui lòng dùng nạp thủ công hoặc liên hệ admin.\n"
+        "• Xu chỉ cộng sau khi PayOS xác nhận thanh toán hợp lệ."
+    )
+
+def manual_topup_rules_text() -> str:
+    return (
+        "Nạp thủ công:\n"
+        "• Có thể nhập số tiền tùy ý.\n"
+        "• Không cộng Xu tự động.\n"
+        "• Admin chỉ duyệt sau khi xác nhận tiền đã vào.\n"
+        "• Phù hợp cho nạp số tiền lớn hoặc ngoại tệ như USD/CNY."
+    )
+
+def payos_auto_topup_block_keyboard(uid) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏦 Nạp thủ công", callback_data=manual_package_callback_data("manual_custom", uid))],
+        [InlineKeyboardButton("⬅️ Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def payos_auto_topup_order_metadata(pkg_key: str, amount: int, base_xu: int, launch_bonus_xu: int, expected_total_xu: int) -> str:
+    return json.dumps({
+        "payment_type": "topup_xu",
+        "payment_method": "payos",
+        "method": "payos",
+        "currency": "VND",
+        "package_key": str(pkg_key or ""),
+        "amount_vnd": int(amount or 0),
+        "base_xu": int(base_xu or 0),
+        "launch_bonus_preview_xu": int(launch_bonus_xu or 0),
+        "expected_total_xu": int(expected_total_xu or 0),
+        "auto_topup": True,
+    }, ensure_ascii=False)
+
+def payos_manual_topup_order_metadata(method: str = "manual_bank_acb_vnd", currency: str = "VND") -> str:
+    return json.dumps({
+        "payment_type": "manual_topup",
+        "payment_method": str(method or "manual_bank_acb_vnd"),
+        "method": str(method or "manual_bank_acb_vnd"),
+        "currency": str(currency or "VND").upper(),
+        "manual_topup": True,
+        "auto_topup": False,
+    }, ensure_ascii=False)
+
+def _payos_limit_now(now_dt: datetime | None = None) -> datetime:
+    return now_dt if isinstance(now_dt, datetime) else datetime.now()
+
+def _payos_datetime_text(value: datetime | None) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S") if isinstance(value, datetime) else ""
+
+def _payos_parse_datetime(value: str) -> datetime | None:
+    try:
+        return datetime.strptime(str(value or "")[:19], "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+def payos_auto_topup_statuses_for_exposure() -> tuple[str, ...]:
+    return (PAYOS_STATUS_PENDING, PAYOS_STATUS_PAID)
+
+def payos_auto_topup_order_filter_sql() -> str:
+    return (
+        "COALESCE(order_type,'topup') IN ('topup','topup_xu') "
+        "AND COALESCE(payment_type,'topup_xu')='topup_xu' "
+        "AND (LOWER(COALESCE(metadata_json,'')) LIKE '%auto_topup%' "
+        "OR COALESCE(checkout_url,'')<>'' "
+        "OR COALESCE(payment_link_id,'')<>'') "
+        "AND order_code NOT IN ("
+        "SELECT COALESCE(order_code,'') FROM pending_deposits WHERE COALESCE(order_code,'')<>''"
+        ")"
+    )
+
+def payos_auto_topup_last_created_at_conn(conn, user_id: str) -> str:
+    row = conn.execute(
+        f"""SELECT MAX(created_at) FROM payos_orders
+            WHERE user_id=? AND {payos_auto_topup_order_filter_sql()}""",
+        (str(user_id),),
+    ).fetchone()
+    return str(row[0] or "") if row else ""
+
+def payos_auto_topup_rolling_amounts_conn(conn, user_id: str, now_dt: datetime | None = None) -> dict:
+    now_dt = _payos_limit_now(now_dt)
+    statuses = payos_auto_topup_statuses_for_exposure()
+    status_placeholders = ",".join("?" for _ in statuses)
+
+    def window_sum(seconds: int) -> int:
+        since = _payos_datetime_text(now_dt - timedelta(seconds=int(seconds)))
+        row = conn.execute(
+            f"""SELECT COALESCE(SUM(amount),0) FROM payos_orders
+                WHERE user_id=?
+                  AND status IN ({status_placeholders})
+                  AND created_at>=?
+                  AND {payos_auto_topup_order_filter_sql()}""",
+            (str(user_id), *statuses, since),
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+
+    return {
+        "amount_60m": window_sum(60 * 60),
+        "amount_12h": window_sum(12 * 60 * 60),
+        "amount_24h": window_sum(24 * 60 * 60),
+        "last_order_time": payos_auto_topup_last_created_at_conn(conn, user_id),
+    }
+
+def active_payos_auto_topup_lock_conn(conn, user_id: str, now_dt: datetime | None = None) -> dict | None:
+    now_text_value = _payos_datetime_text(_payos_limit_now(now_dt))
+    row = conn.execute(
+        """SELECT id, reason, locked_until, review_required, created_at, metadata_json
+           FROM payos_topup_locks
+           WHERE user_id=? AND lock_type=?
+             AND (COALESCE(review_required,0)=1 OR locked_until IS NULL OR locked_until > ?)
+           ORDER BY id DESC LIMIT 1""",
+        (str(user_id), PAYOS_AUTO_TOPUP_LOCK_TYPE, now_text_value),
+    ).fetchone()
+    if not row:
+        return None
+    metadata = {}
+    try:
+        metadata = json.loads(row[5] or "{}") if row[5] else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+    except Exception:
+        metadata = {}
+    return {
+        "id": int(row[0] or 0),
+        "reason": str(row[1] or ""),
+        "locked_until": str(row[2] or ""),
+        "review_required": bool(int(row[3] or 0)),
+        "created_at": str(row[4] or ""),
+        "metadata": metadata,
+    }
+
+def active_payos_auto_topup_lock(user_id: str, now_dt: datetime | None = None) -> dict | None:
+    conn = db_connect()
+    try:
+        return active_payos_auto_topup_lock_conn(conn, user_id, now_dt)
+    finally:
+        conn.close()
+
+def payos_auto_topup_lock_message(lock: dict | None) -> str:
+    reason = str((lock or {}).get("reason") or "")
+    if reason == "limit_15m_24h":
+        return PAYOS_AUTO_TOPUP_24H_LOCK_MESSAGE
+    if reason == "limit_9m_12h":
+        return PAYOS_AUTO_TOPUP_12H_LOCK_MESSAGE
+    if reason == "limit_3m_60m":
+        return PAYOS_AUTO_TOPUP_60M_LOCK_MESSAGE
+    if (lock or {}).get("review_required"):
+        return PAYOS_AUTO_TOPUP_12H_LOCK_MESSAGE
+    return PAYOS_AUTO_TOPUP_60M_LOCK_MESSAGE
+
+def record_payos_auto_topup_limit_event(user_id: str, reason: str, metadata: dict | None = None, severity: str = "medium") -> None:
+    detail = {
+        "reason": str(reason or ""),
+        "metadata": metadata if isinstance(metadata, dict) else {},
+    }
+    try:
+        record_anomaly(
+            "payos_auto_topup_limit",
+            severity,
+            json.dumps(detail, ensure_ascii=False, default=str)[:500],
+            user_id=str(user_id or ""),
+            username="payos_auto_topup",
+            auto_lock=False,
+        )
+    except Exception as exc:
+        logger.warning("PayOS auto top-up limit event skipped: %s", type(exc).__name__)
+
+def create_payos_auto_topup_lock(
+    user_id: str,
+    reason: str,
+    metadata: dict | None = None,
+    duration_seconds: int | None = None,
+    review_required: bool = False,
+    now_dt: datetime | None = None,
+) -> dict:
+    now_dt = _payos_limit_now(now_dt)
+    locked_until = now_dt + timedelta(seconds=int(duration_seconds)) if duration_seconds else None
+    metadata = dict(metadata or {})
+    conn = db_connect()
+    try:
+        cursor = conn.execute(
+            """INSERT INTO payos_topup_locks
+               (user_id, lock_type, reason, locked_until, review_required, created_at, created_by, metadata_json)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                str(user_id),
+                PAYOS_AUTO_TOPUP_LOCK_TYPE,
+                str(reason or ""),
+                _payos_datetime_text(locked_until),
+                int(bool(review_required)),
+                _payos_datetime_text(now_dt),
+                "system",
+                json.dumps(metadata, ensure_ascii=False, default=str),
+            ),
+        )
+        conn.commit()
+        lock_id = int(cursor.lastrowid or 0)
+    finally:
+        conn.close()
+    event_severity = "high" if review_required else "medium"
+    record_payos_auto_topup_limit_event(user_id, reason, metadata, severity=event_severity)
+    return {
+        "id": lock_id,
+        "reason": str(reason or ""),
+        "locked_until": _payos_datetime_text(locked_until),
+        "review_required": bool(review_required),
+        "metadata": metadata,
+    }
+
+def payos_auto_topup_guard(user_id: str, amount_vnd: int, currency: str = "VND", now_dt: datetime | None = None) -> dict:
+    now_dt = _payos_limit_now(now_dt)
+    user_id = str(user_id)
+    currency = str(currency or "VND").upper()
+    amount = int(amount_vnd or 0)
+
+    if currency == "USD" and amount > PAYOS_AUTO_TOPUP_MAX_USD:
+        return {"ok": False, "reason": "amount_cap_usd", "message": "Nạp tự động PayOS USD tối đa 100 USD/lệnh."}
+    if currency == "VND" and amount > PAYOS_AUTO_TOPUP_MAX_VND:
+        return {"ok": False, "reason": "amount_cap_vnd", "message": PAYOS_AUTO_TOPUP_CAP_MESSAGE}
+
+    conn = db_connect()
+    try:
+        active_lock = active_payos_auto_topup_lock_conn(conn, user_id, now_dt)
+        if active_lock:
+            return {
+                "ok": False,
+                "reason": "auto_topup_locked",
+                "message": payos_auto_topup_lock_message(active_lock),
+                "lock": active_lock,
+            }
+
+        rolling = payos_auto_topup_rolling_amounts_conn(conn, user_id, now_dt)
+        last_order_time = str(rolling.get("last_order_time") or "")
+        last_order_dt = _payos_parse_datetime(last_order_time)
+        if last_order_dt and (now_dt - last_order_dt).total_seconds() < PAYOS_AUTO_TOPUP_COOLDOWN_SECONDS:
+            metadata = {**rolling, "trigger_order_amount": amount}
+            record_payos_auto_topup_limit_event(user_id, "cooldown_5m", metadata, severity="low")
+            return {
+                "ok": False,
+                "reason": "cooldown_5m",
+                "message": PAYOS_AUTO_TOPUP_COOLDOWN_MESSAGE,
+                "metadata": metadata,
+            }
+
+        projected_60m = int(rolling.get("amount_60m") or 0) + amount
+        projected_12h = int(rolling.get("amount_12h") or 0) + amount
+        projected_24h = int(rolling.get("amount_24h") or 0) + amount
+    finally:
+        conn.close()
+
+    metadata = {
+        "amount_60m": int(rolling.get("amount_60m") or 0),
+        "amount_12h": int(rolling.get("amount_12h") or 0),
+        "amount_24h": int(rolling.get("amount_24h") or 0),
+        "last_order_time": str(rolling.get("last_order_time") or ""),
+        "trigger_order_amount": amount,
+        "projected_60m": projected_60m,
+        "projected_12h": projected_12h,
+        "projected_24h": projected_24h,
+    }
+    if int(rolling.get("amount_24h") or 0) >= PAYOS_AUTO_TOPUP_LIMIT_24H_VND or projected_24h > PAYOS_AUTO_TOPUP_LIMIT_24H_VND:
+        lock = create_payos_auto_topup_lock(user_id, "limit_15m_24h", metadata, review_required=True, now_dt=now_dt)
+        return {"ok": False, "reason": "limit_15m_24h", "message": PAYOS_AUTO_TOPUP_24H_LOCK_MESSAGE, "lock": lock, "metadata": metadata}
+    if int(rolling.get("amount_12h") or 0) >= PAYOS_AUTO_TOPUP_LIMIT_12H_VND or projected_12h > PAYOS_AUTO_TOPUP_LIMIT_12H_VND:
+        lock = create_payos_auto_topup_lock(user_id, "limit_9m_12h", metadata, review_required=True, now_dt=now_dt)
+        return {"ok": False, "reason": "limit_9m_12h", "message": PAYOS_AUTO_TOPUP_12H_LOCK_MESSAGE, "lock": lock, "metadata": metadata}
+    if int(rolling.get("amount_60m") or 0) >= PAYOS_AUTO_TOPUP_LIMIT_60M_VND or projected_60m > PAYOS_AUTO_TOPUP_LIMIT_60M_VND:
+        lock = create_payos_auto_topup_lock(
+            user_id,
+            "limit_3m_60m",
+            metadata,
+            duration_seconds=PAYOS_AUTO_TOPUP_LOCK_60M_SECONDS,
+            review_required=False,
+            now_dt=now_dt,
+        )
+        return {"ok": False, "reason": "limit_3m_60m", "message": PAYOS_AUTO_TOPUP_60M_LOCK_MESSAGE, "lock": lock, "metadata": metadata}
+
+    return {"ok": True, "reason": "allowed", "metadata": metadata}
+
 PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT = "standard_sorted"
 PAYOS_CREATE_SIGNATURE_FIELDS = ("amount", "cancelUrl", "description", "orderCode", "returnUrl")
 PAYOS_CREATE_SIGNATURE_VARIANTS = {
@@ -8186,6 +8532,7 @@ def manual_payment_menu_text() -> str:
         "💵 <b>Nạp thủ công TOAN AAS</b>\n\n"
         "Bạn muốn nạp bằng loại tiền nào?\n\n"
         "TOAN AAS chỉ cộng Xu sau khi admin đối soát tiền thật. Ảnh bill hoặc TXID không tự động xác nhận giao dịch.\n\n"
+        f"{html.escape(manual_topup_rules_text())}\n\n"
         "Lưu ý:\n"
         "Ưu đãi nạp lần đầu, Launch Bonus 50k/100k/200k/500k và các ưu đãi cộng Xu chỉ áp dụng cho khách nội địa Việt Nam "
         "nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.\n\n"
@@ -32001,6 +32348,8 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 base_xu=base_xu,
                 launch_bonus_xu=launch_preview,
                 package_amount_vnd=amount,
+                order_type="manual_topup",
+                metadata_json=payos_manual_topup_order_metadata("manual_bank_acb_vnd", "VND"),
             )
             set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=manual_key)
             await query.edit_message_text(
@@ -32029,6 +32378,16 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
     pkg = PAYMENT_PACKAGES[pkg_key]
     amount = pkg["amount"]
+    topup_guard = payos_auto_topup_guard(uid, amount, "VND")
+    if not topup_guard.get("ok"):
+        blocked_message = str(topup_guard.get("message") or PAYOS_AUTO_TOPUP_CAP_WITH_MANUAL_NOTE)
+        return await query.edit_message_text(
+            "⚠️ <b>Nạp tự động PayOS tạm dừng</b>\n\n"
+            f"{html.escape(blocked_message)}\n\n"
+            f"{html.escape(manual_topup_rules_text())}",
+            parse_mode="HTML",
+            reply_markup=payos_auto_topup_block_keyboard(uid),
+        )
     get_user(uid, query.from_user.first_name or "PayOS user")
     package_credit = calculate_package_credit_for_user(uid, amount)
     base_xu = int(package_credit.get("base_xu") or pkg["xu"])
@@ -32072,6 +32431,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         base_xu=base_xu,
         launch_bonus_xu=launch_preview,
         package_amount_vnd=amount,
+        metadata_json=payos_auto_topup_order_metadata(pkg_key, amount, base_xu, launch_preview, xu),
     )
     if flag_on("payment_freeze"):
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
@@ -32462,6 +32822,8 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             base_xu=base_xu,
             launch_bonus_xu=launch_preview,
             package_amount_vnd=amount,
+            order_type="manual_topup",
+            metadata_json=payos_manual_topup_order_metadata("manual_bank_acb_vnd", "VND"),
         )
         set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
         return await query.edit_message_text(manual_payment_menu_text(), parse_mode="HTML", reply_markup=manual_payment_menu_keyboard(uid))
@@ -113822,6 +114184,8 @@ async def cmd_naptien(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{service_credit_legal_note()}\n\n"
         f"🏦 Nếu phải nạp thủ công, nội dung chuyển khoản sẽ là: <code>AAS {uid} &lt;order_code&gt;</code>\n\n"
         f"{payment_mode_note}"
+        f"{html.escape(payos_auto_topup_rules_text())}\n\n"
+        f"{html.escape(manual_topup_rules_text())}\n\n"
         f"👇 <b>Vui lòng bấm chọn mệnh giá muốn nạp:</b>"
     )
     buttons = [
@@ -113858,6 +114222,8 @@ async def cmd_thanhtoan_thucong(update: Update, context: ContextTypes.DEFAULT_TY
             base_xu=base_xu,
             launch_bonus_xu=launch_preview,
             package_amount_vnd=amount,
+            order_type="manual_topup",
+            metadata_json=payos_manual_topup_order_metadata("manual_bank_acb_vnd", "VND"),
         )
         set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=pkg_key)
     else:
