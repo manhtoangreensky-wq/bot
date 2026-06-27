@@ -85,7 +85,7 @@ def test_custom_voice_readiness_checked_before_create(monkeypatch):
     assert provider_calls["count"] == 0
     assert store["status"] == "failed_provider_not_ready"
     assert store["provider_voice_id"] == ""
-    assert "Voice riêng đang được chuẩn bị" in message.outputs[-1]["text"]
+    assert "Tạo voice riêng đang tạm khóa" in message.outputs[-1]["text"]
     assert "đang tạo voice riêng" not in "\n".join(item["text"] for item in message.outputs)
 
 

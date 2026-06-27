@@ -99,8 +99,8 @@ def test_paid_voice_real_route_or_admin_blocker_only():
 
 def test_voice_preview_failure_copy_voice_specific():
     source = _source_between("async def create_minimax_voice_profile_preview", "async def handle_music_quick_callback")
-    assert "Bản nghe thử giọng chưa tạo được" in source
-    assert "dùng giọng mặc định miễn phí hoặc thử lại sau" in source
+    assert "TOAN AAS chưa tạo được voice hợp lệ" in source
+    assert "dùng giọng nam/nữ mặc định" in source
 
 
 def test_custom_voice_no_600_label():

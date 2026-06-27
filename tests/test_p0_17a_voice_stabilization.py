@@ -202,9 +202,9 @@ def test_voice_preview_no_full_delivery_before_confirm(monkeypatch, tmp_path):
 
 def test_clone_permission_forbidden_public_clean_message():
     text = bot.voice_clone_permission_forbidden_public_text("vi")
-    assert "Voice riêng đang được chuẩn bị" in text
+    assert "Tạo voice riêng đang tạm khóa" in text
     assert "chưa xử lý và chưa trừ Xu" in text
-    assert "giọng nữ/nam mặc định miễn phí" in text
+    assert "giọng nam/nữ mặc định" in text
     assert "user forbidden" not in text.lower()
 
 
