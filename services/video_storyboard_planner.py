@@ -258,13 +258,23 @@ def _asset_summary_from_bible(bible: StoryBible) -> str:
 
 def _normalize_creative_controls(value: dict[str, Any] | None = None) -> dict[str, str]:
     raw = dict(value or {})
+    if "color_palette" not in raw and "color_tone" in raw:
+        raw["color_palette"] = raw.get("color_tone")
+    if "color_tone" not in raw and "color_palette" in raw:
+        raw["color_tone"] = raw.get("color_palette")
+    if "emotion_tone" not in raw and "mood" in raw:
+        raw["emotion_tone"] = raw.get("mood")
+    if "mood" not in raw and "emotion_tone" in raw:
+        raw["mood"] = raw.get("emotion_tone")
     allowed = (
         "topic_mode",
+        "color_palette",
         "color_tone",
         "visual_style",
         "camera_motion",
         "camera_angle",
         "pacing",
+        "emotion_tone",
         "mood",
         "negative_prompt_extra",
     )
@@ -282,12 +292,12 @@ def _creative_summary(controls: dict[str, str]) -> str:
     visible = []
     labels = {
         "topic_mode": "topic",
-        "color_tone": "color",
+        "color_palette": "color",
         "visual_style": "style",
         "camera_motion": "motion",
         "camera_angle": "angle",
         "pacing": "pacing",
-        "mood": "mood",
+        "emotion_tone": "emotion",
     }
     for key, label in labels.items():
         value = controls.get(key)
@@ -386,11 +396,15 @@ def create_story_bible(
     main_subject = _main_subject_label(item, idea, pack)
     controls = _normalize_creative_controls(creative_controls)
     visual_style = _creative_value(controls, "visual_style", item.image_style)
-    color_palette = _creative_value(controls, "color_tone", "consistent palette based on profile and references")
+    color_palette = _creative_value(
+        controls,
+        "color_palette",
+        _creative_value(controls, "color_tone", "consistent palette based on profile and references"),
+    )
     camera_style = _creative_value(controls, "camera_angle", item.camera_style)
     motion_style = _creative_value(controls, "camera_motion", item.motion_style)
     pacing = _creative_value(controls, "pacing", item.pacing_policy)
-    mood = _creative_value(controls, "mood", brand_tone)
+    mood = _creative_value(controls, "emotion_tone", _creative_value(controls, "mood", brand_tone))
     negative_prompt_extra = controls.get("negative_prompt_extra")
     negative_prompt = DEFAULT_NEGATIVE_PROMPT
     if negative_prompt_extra:

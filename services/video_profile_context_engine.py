@@ -21,6 +21,7 @@ class PromptContextBundle:
     selected_camera_language: str
     selected_motion_language: str
     selected_color_tone: str
+    selected_emotional_tone: str
     selected_transition_style: str
     selected_negative_prompt: str
     selected_voice_music_subtitle_cues: dict[str, Any]
@@ -119,9 +120,20 @@ def select_prompt_context(
     )
     color = _creative_override(
         creative_controls or {},
-        "color_tone",
+        "color_palette",
+        _creative_override(
+            creative_controls or {},
+            "color_tone",
+            _clean_text(domain.get("color") or (pack.get("color_tone_templates") or [""])[0]),
+        ),
+    )
+    emotion = _creative_override(
+        creative_controls or {},
+        "emotion_tone",
         _clean_text(domain.get("color") or (pack.get("color_tone_templates") or [""])[0]),
     )
+    if emotion == color:
+        emotion = _creative_override(creative_controls or {}, "mood", "theo mạch cảm xúc của câu chuyện")
     transition = _clean_text(domain.get("transition") or (pack.get("transition_templates") or [""])[0])
     negative_blocks = list(shared["negative_prompts"].get("blocks") or []) + list(pack.get("negative_prompt_blocks") or [])
     negative_extra = _clean_text((creative_controls or {}).get("negative_prompt_extra"))
@@ -142,6 +154,7 @@ def select_prompt_context(
         selected_camera_language=camera,
         selected_motion_language=motion,
         selected_color_tone=color,
+        selected_emotional_tone=emotion,
         selected_transition_style=transition,
         selected_negative_prompt=", ".join(dict.fromkeys(_clean_text(item) for item in negative_blocks if _clean_text(item))),
         selected_voice_music_subtitle_cues={

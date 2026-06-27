@@ -68,6 +68,7 @@ def test_storyboard_preview_buttons_are_text_planning_only():
         "vproduct|storyboard_confirm",
         "vproduct|asset_intro",
         "vproduct|b14_addons",
+        "vproduct|b14_creative_screen",
         "menu|main",
     ]
     combined = " ".join(_labels(bot.video_b14_storyboard_keyboard("vi")) + callbacks).lower()

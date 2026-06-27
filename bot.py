@@ -39465,6 +39465,81 @@ async def cmd_tool_test_video_flow_router(update: Update, context: ContextTypes.
     )
 
 
+def video_b14_live_ux_regression_report(user_id: int = 0) -> dict:
+    uid = int(user_id or 0)
+    clear_video_session(uid)
+    session = task3d_session_step(uid, "profile_select", product_id="multi_scene_film", return_to="menu|main_video", provider_called=False, xu_charged=0)
+    session = video_b14_set_profile(uid, session, "philosophy_quotes")
+    session = task3d_session_step(uid, "b14_creative_controls", topic="câu chuyện đạo lý về lòng tin", provider_called=False, xu_charged=0)
+    session = video_b14_set_creative_controls(uid, session, color_palette=video_b14_creative_choice_value("color_palette", "teal_white"))
+    session = video_b14_set_creative_controls(uid, session, emotion_tone=video_b14_creative_choice_value("emotion_tone", "trust"))
+    controls = video_b14_creative_controls_from_session(session)
+    color_ok = bool(controls.get("color_palette")) and controls.get("color_palette") != controls.get("emotion_tone")
+    emotion_ok = "tin tưởng" in str(controls.get("emotion_tone") or "").lower()
+    storyboard = video_b14_build_storyboard_for_session(uid, session, scene_count=3)
+    session = get_video_session(uid)
+    storyboard_ok = bool((session.get("draft") or {}).get("b14_storyboard_plan")) and len(storyboard.scene_cards) == 3
+
+    session = video_b14_set_addon_plan(uid, session, **video_b14_default_addon_plan(video_b14_profile_id_for_session(session)))
+    session, female_result = video_b14_apply_voice_choice(uid, session, "default_female")
+    session = task3d_session_step(uid, "b14_voice", provider_called=False, xu_charged=0)
+    voice_plan = video_b14_addon_plan_from_session(session)
+    voice_ok = bool(female_result.get("ok")) and voice_plan.get("voice_enabled") and voice_plan.get("voice_source") == "default_female"
+
+    session = video_b14_set_addon_plan(uid, session, music_enabled=True, music_source="default", music_volume_percent=10)
+    session = task3d_session_step(uid, "b14_music", provider_called=False, xu_charged=0)
+    music_ok = video_b14_addon_plan_from_session(session).get("music_source") == "default"
+
+    session = video_b14_set_addon_plan(
+        uid,
+        session,
+        subtitle_enabled=True,
+        subtitle_source="translated",
+        subtitle_target_language="English",
+        subtitle_note="TOAN AAS đã ghi nhận yêu cầu dịch phụ đề. File phụ đề sẽ được xử lý sau khi anh/chị xác nhận tạo video.",
+    )
+    subtitle_ok = video_b14_addon_plan_from_session(session).get("subtitle_target_language") == "English"
+
+    session = video_b14_set_addon_plan(uid, session, dub_enabled=True, dub_source="translated", dub_target_language="English")
+    dub_ok = video_b14_addon_plan_from_session(session).get("dub_target_language") == "English"
+
+    session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
+    session = task3d_session_step(uid, "b14_aspect", provider_called=False, xu_charged=0)
+    final_session = get_video_session(uid)
+    no_charge_ok = safe_int((final_session.get("draft") or {}).get("xu_charged"), 0) == 0
+    no_provider_ok = bool((final_session.get("draft") or {}).get("provider_called") is False)
+    checks = {
+        "emotion_color_distinct": color_ok and emotion_ok,
+        "storyboard_prompt": storyboard_ok,
+        "addons_backstack": final_session.get("current_step") == "b14_aspect",
+        "voice_default_female": voice_ok,
+        "music_default": music_ok,
+        "subtitle_translate_plan": subtitle_ok,
+        "dub_language_plan": dub_ok,
+        "no_provider_call": no_provider_ok,
+        "no_xu_charge": no_charge_ok,
+    }
+    return {"ok": all(checks.values()), "checks": checks, "session": final_session}
+
+
+async def cmd_tool_test_live_video_ux_regression(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    args = [str(item or "") for item in getattr(context, "args", [])]
+    if "--no-charge" not in args:
+        return await update.message.reply_text("Dùng: /tool_test_live_video_ux_regression --no-charge")
+    report = video_b14_live_ux_regression_report(uid)
+    lines = [
+        ("✅" if report.get("ok") else "❌") + " ADMIN TEST MODE — live video UX regression " + ("PASS" if report.get("ok") else "FAIL"),
+        "",
+    ]
+    for key, passed in dict(report.get("checks") or {}).items():
+        lines.append(("✅ " if passed else "❌ ") + key)
+    lines.extend(["", "No provider call. No Xu charge."])
+    return await update.message.reply_text("\n".join(lines))
+
+
 async def cmd_tool_test_video_backstack(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_admin_user(uid):
@@ -51817,14 +51892,13 @@ VIDEO_B14_3_CREATIVE_CHOICES = {
         ("🏠 Địa điểm", "place"),
         ("🎧 Chill", "chill"),
     ),
-    "color_tone": (
-        ("🌿 Tự nhiên", "natural"),
-        ("🌑 Tối điện ảnh", "dark_cinematic"),
-        ("☀️ Sáng sạch", "bright_clean"),
-        ("💎 Cao cấp", "premium"),
-        ("🌈 Rực rỡ", "vibrant"),
-        ("🟤 Vintage", "vintage"),
-        ("🟢 Thương hiệu xanh TOAN AAS", "toan_aas_green"),
+    "color_palette": (
+        ("🟢 Xanh ngọc / trắng sạch", "teal_white"),
+        ("🌤 Vàng ấm / nâu gỗ", "warm_wood"),
+        ("🎬 Đen vàng cinematic", "black_gold_cinematic"),
+        ("🌸 Pastel nhẹ", "soft_pastel"),
+        ("🌈 Neon TikTok", "neon_tiktok"),
+        ("☀️ Tự nhiên sáng", "natural_bright"),
     ),
     "visual_style": (
         ("📱 UGC đời thường", "ugc_everyday"),
@@ -51860,13 +51934,17 @@ VIDEO_B14_3_CREATIVE_CHOICES = {
         ("🎵 Theo beat", "beat_sync"),
         ("🎞 Trailer dồn dập", "trailer"),
     ),
-    "mood": (
-        ("😊 Tươi sáng", "bright"),
-        ("💎 Cao cấp", "premium"),
-        ("🔥 Viral", "viral"),
-        ("🧘 Sâu lắng", "reflective"),
-        ("🎬 Kịch tính", "dramatic"),
-        ("🎧 Chill", "chill"),
+    "emotion_tone": (
+        ("🕊 Bình yên", "peaceful"),
+        ("🤝 Tin tưởng", "trust"),
+        ("👀 Tò mò", "curious"),
+        ("⚡ Phấn khích", "excited"),
+        ("💎 Sang trọng", "luxury"),
+        ("🥹 Xúc động", "touching"),
+        ("😄 Hài hước", "humorous"),
+        ("⏱ Cấp bách", "urgent"),
+        ("🌟 Truyền cảm hứng", "inspiring"),
+        ("🧘 Thiền / tĩnh tâm", "meditative"),
     ),
 }
 VIDEO_B14_3_CREATIVE_VALUE_TEXT = {
@@ -51879,14 +51957,13 @@ VIDEO_B14_3_CREATIVE_VALUE_TEXT = {
         "place": "location-driven context with spatial continuity",
         "chill": "calm chill context with low-pressure pacing",
     },
-    "color_tone": {
-        "natural": "natural color, realistic skin/product tone",
-        "dark_cinematic": "dark cinematic contrast, controlled shadows, premium highlights",
-        "bright_clean": "bright clean lighting, white-balanced product-friendly image",
-        "premium": "premium luxury palette, polished highlights, refined contrast",
-        "vibrant": "vibrant social-media color, lively but not messy",
-        "vintage": "vintage warm palette, subtle film texture",
-        "toan_aas_green": "TOAN AAS green brand accent, clean tech-friendly palette",
+    "color_palette": {
+        "teal_white": "xanh ngọc / trắng sạch, ánh sáng rõ, tương phản gọn, cảm giác hiện đại",
+        "warm_wood": "vàng ấm / nâu gỗ, ánh sáng ấm, nền thân thiện, cảm giác gần gũi",
+        "black_gold_cinematic": "đen vàng cinematic, tương phản mạnh, highlight sang, nền sâu",
+        "soft_pastel": "pastel nhẹ, bão hòa thấp, ánh sáng dịu, nền mềm",
+        "neon_tiktok": "neon TikTok, màu nổi, ánh sáng trẻ trung, tương phản bắt mắt",
+        "natural_bright": "tự nhiên sáng, màu trung thực, ánh sáng ban ngày, ít filter",
     },
     "visual_style": {
         "ugc_everyday": "vertical smartphone UGC, everyday realistic footage, casual handheld framing",
@@ -51922,15 +51999,23 @@ VIDEO_B14_3_CREATIVE_VALUE_TEXT = {
         "beat_sync": "beat-synced editing rhythm",
         "trailer": "trailer pacing with escalation and impact cuts",
     },
-    "mood": {
-        "bright": "bright optimistic mood",
-        "premium": "premium confident mood",
-        "viral": "viral energetic mood",
-        "reflective": "reflective emotional mood",
-        "dramatic": "dramatic high-stakes mood",
-        "chill": "chill relaxed mood",
+    "emotion_tone": {
+        "peaceful": "bình yên, nhẹ nhàng, giúp người xem thấy thư thái",
+        "trust": "tin tưởng, chắc chắn, tạo cảm giác an tâm",
+        "curious": "tò mò, gợi mở, khiến người xem muốn xem tiếp",
+        "excited": "phấn khích, nhiều năng lượng, tạo cảm giác muốn hành động",
+        "luxury": "sang trọng, tự tin, tạo cảm giác cao cấp",
+        "touching": "xúc động, có điểm lắng, tạo cảm giác đồng cảm",
+        "humorous": "hài hước, tự nhiên, tạo cảm giác vui và dễ nhớ",
+        "urgent": "cấp bách, rõ việc cần làm, tạo cảm giác không muốn bỏ lỡ",
+        "inspiring": "truyền cảm hứng, tích cực, tạo cảm giác có động lực",
+        "meditative": "thiền / tĩnh tâm, chậm rãi, tạo cảm giác lắng lại",
     },
 }
+VIDEO_B14_3_CREATIVE_CHOICES["color_tone"] = VIDEO_B14_3_CREATIVE_CHOICES["color_palette"]
+VIDEO_B14_3_CREATIVE_CHOICES["mood"] = VIDEO_B14_3_CREATIVE_CHOICES["emotion_tone"]
+VIDEO_B14_3_CREATIVE_VALUE_TEXT["color_tone"] = VIDEO_B14_3_CREATIVE_VALUE_TEXT["color_palette"]
+VIDEO_B14_3_CREATIVE_VALUE_TEXT["mood"] = VIDEO_B14_3_CREATIVE_VALUE_TEXT["emotion_tone"]
 
 
 def video_b14_is_admin_or_owner(user_id=0) -> bool:
@@ -52251,6 +52336,7 @@ def video_b14_storyboard_preview_text(plan) -> str:
         f"• Ngữ cảnh sản phẩm / nhóm nội dung: <b>{html.escape(str(context.get('product_domain') or 'tổng quát'))}</b>",
         f"• Phong cách: {html.escape(str(context.get('selected_visual_style') or plan.story_bible.visual_style))}",
         f"• Màu sắc: {html.escape(str(context.get('selected_color_tone') or plan.story_bible.color_palette))}",
+        f"• Cảm xúc: {html.escape(str(context.get('selected_emotional_tone') or plan.story_bible.brand_tone or 'theo mạch câu chuyện'))}",
         f"• Chuyển động: {html.escape(str(context.get('selected_motion_language') or plan.story_bible.motion_style))}",
         f"• Chuyển cảnh: {html.escape(str(context.get('selected_transition_style') or 'match cut'))}",
         f"• Nhịp dựng: {html.escape(str(plan.story_bible.motion_style))}",
@@ -52258,7 +52344,7 @@ def video_b14_storyboard_preview_text(plan) -> str:
         f"• Nhân vật/sản phẩm chính: {html.escape(str(plan.story_bible.main_subject))}",
         f"• Bối cảnh: {html.escape(str(plan.story_bible.setting))}",
         f"• Số cảnh gợi ý: <b>{scene_count}</b>",
-        f"• Continuity arc / mạch cảm xúc: {html.escape(str(ledger.get('emotional_arc') or 'liền mạch từ mở đầu tới kết'))}",
+        f"• Continuity arc / Mạch cảm xúc: {html.escape(str(ledger.get('emotional_arc') or 'liền mạch từ mở đầu tới kết'))}",
         f"• Voice mặc định: {html.escape(str(plan.story_bible.voice_policy))}",
         f"• Nhạc mặc định: {html.escape(str(plan.story_bible.music_policy))}",
         f"• Phụ đề mặc định: {html.escape(str(plan.story_bible.subtitle_policy))}",
@@ -52368,6 +52454,7 @@ def video_b14_prompt_pack_text_from_session(session: dict) -> str:
         "selected_camera_language": prompt_context.get("selected_camera_language"),
         "selected_motion_language": prompt_context.get("selected_motion_language"),
         "selected_color_tone": prompt_context.get("selected_color_tone"),
+        "selected_emotional_tone": prompt_context.get("selected_emotional_tone"),
         "selected_transition_style": prompt_context.get("selected_transition_style"),
         "selected_negative_prompt": prompt_context.get("selected_negative_prompt"),
         "selected_voice_music_subtitle_cues": prompt_context.get("selected_voice_music_subtitle_cues") or {},
@@ -52460,8 +52547,35 @@ def video_b14_storyboard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🎙 Cấu hình add-ons" if is_vi else "🎙 Configure add-ons", callback_data="vproduct|b14_addons"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_creative_screen"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
+    ])
+
+
+def video_b14_missing_session_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "The video session is missing some data. You can return to the idea step or start a new video plan. "
+            "TOAN AAS has not processed anything and has not charged Xu."
+        )
+    return (
+        "⚠️ <b>Phiên tạo video bị thiếu dữ liệu.</b>\n\n"
+        "Anh/chị có thể quay lại bước ý tưởng hoặc bắt đầu lại kế hoạch video. "
+        "TOAN AAS chưa xử lý video và chưa trừ Xu."
+    )
+
+
+def video_b14_missing_session_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✍️ Nhập lại ý tưởng" if is_vi else "✍️ Enter idea again", callback_data="vproduct|open|multi_scene_film"),
+            InlineKeyboardButton("🎬 Menu video" if is_vi else "🎬 Video menu", callback_data="menu|main_video"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -52515,12 +52629,12 @@ def video_b14_default_creative_controls(profile_id: str = "storytelling") -> dic
     profile = video_profiles.get_video_profile(str(profile_id or "storytelling"))
     return {
         "topic_mode": "theo profile",
-        "color_tone": "theo profile",
+        "color_palette": "theo profile",
         "visual_style": profile.image_style,
         "camera_motion": profile.motion_style,
         "camera_angle": profile.camera_style,
         "pacing": profile.pacing_policy,
-        "mood": profile.product_goal,
+        "emotion_tone": "tin tưởng, tò mò hoặc cảm xúc phù hợp với loại video",
         "negative_prompt_extra": "",
     }
 
@@ -52530,6 +52644,10 @@ def video_b14_creative_controls_from_session(session: dict | None = None) -> dic
     profile_id = str(draft.get("b14_profile_id") or video_b14_profile_id_for_session(session))
     controls = video_b14_default_creative_controls(profile_id)
     saved = dict(draft.get("creative_control_json") or draft.get("b14_creative_controls") or {})
+    if "color_palette" not in saved and "color_tone" in saved:
+        saved["color_palette"] = saved.get("color_tone")
+    if "emotion_tone" not in saved and "mood" in saved:
+        saved["emotion_tone"] = saved.get("mood")
     for key in controls:
         if key in saved:
             controls[key] = str(saved.get(key) or "")
@@ -52538,17 +52656,26 @@ def video_b14_creative_controls_from_session(session: dict | None = None) -> dic
 
 def video_b14_creative_controls_to_storyboard(session: dict | None = None) -> dict:
     controls = video_b14_creative_controls_from_session(session)
-    return {
+    payload = {
         key: str(value or "")
         for key, value in controls.items()
         if str(value or "").strip()
     }
+    if payload.get("color_palette"):
+        payload["color_tone"] = payload["color_palette"]
+    if payload.get("emotion_tone"):
+        payload["mood"] = payload["emotion_tone"]
+    return payload
 
 
 def video_b14_set_creative_controls(user_id, session: dict, **fields) -> dict:
     draft = dict((session or {}).get("draft") or {})
     controls = video_b14_creative_controls_from_session(session)
     for key, value in fields.items():
+        if key == "color_tone":
+            key = "color_palette"
+        elif key == "mood":
+            key = "emotion_tone"
         if key in controls:
             controls[key] = str(value or "")[:500]
     draft["creative_control_json"] = controls
@@ -52563,11 +52690,13 @@ def video_b14_set_creative_controls(user_id, session: dict, **fields) -> dict:
 def video_b14_creative_field_label(field: str) -> str:
     return {
         "topic_mode": "Chủ đề / ngữ cảnh",
+        "color_palette": "Màu sắc / tone màu",
         "color_tone": "Màu sắc / tone màu",
         "visual_style": "Phong cách hình ảnh",
         "camera_motion": "Chuyển động camera",
         "camera_angle": "Góc máy",
         "pacing": "Nhịp dựng / tốc độ",
+        "emotion_tone": "Cảm xúc",
         "mood": "Cảm xúc",
         "negative_prompt_extra": "Điều cần tránh",
     }.get(str(field or ""), str(field or ""))
@@ -52581,17 +52710,21 @@ def video_b14_creative_controls_text(session: dict | None = None, user_id=0, lan
         "",
         f"• Loại video: <b>{html.escape(video_b14_profile_button_label(profile_id))}</b>",
         f"• Chủ đề: <code>{html.escape(str(controls.get('topic_mode') or 'theo profile'))}</code>",
-        f"• Màu sắc: <code>{html.escape(str(controls.get('color_tone') or 'theo profile'))}</code>",
+        f"• Màu sắc: <code>{html.escape(str(controls.get('color_palette') or 'theo profile'))}</code>",
         f"• Phong cách: <code>{html.escape(str(controls.get('visual_style') or 'theo profile'))}</code>",
         f"• Chuyển động: <code>{html.escape(str(controls.get('camera_motion') or 'theo profile'))}</code>",
         f"• Góc máy: <code>{html.escape(str(controls.get('camera_angle') or 'theo profile'))}</code>",
         f"• Nhịp dựng: <code>{html.escape(str(controls.get('pacing') or 'theo profile'))}</code>",
-        f"• Cảm xúc: <code>{html.escape(str(controls.get('mood') or 'theo profile'))}</code>",
+        f"• Cảm xúc: <code>{html.escape(str(controls.get('emotion_tone') or 'theo profile'))}</code>",
     ]
     negative = str(controls.get("negative_prompt_extra") or "").strip()
     if negative:
         lines.append(f"• Điều cần tránh thêm: <code>{html.escape(negative)}</code>")
-    lines.extend(["", "Bước này chỉ bổ sung cách dựng và lời mô tả cảnh. Chưa xử lý video và chưa trừ Xu."])
+    lines.extend([
+        "",
+        "Cảm xúc là cảm giác người xem nhận được, không phải màu sắc hay góc máy.",
+        "Bước này chỉ bổ sung cách dựng và lời mô tả cảnh. Chưa xử lý video và chưa trừ Xu.",
+    ])
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
@@ -52599,7 +52732,7 @@ def video_b14_creative_controls_keyboard(lang: str = "vi") -> InlineKeyboardMark
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔥 Chủ đề / ngữ cảnh", callback_data="vproduct|b14_creative_field|topic_mode"),
-            InlineKeyboardButton("🎨 Màu sắc", callback_data="vproduct|b14_creative_field|color_tone"),
+            InlineKeyboardButton("🎨 Màu sắc", callback_data="vproduct|b14_creative_field|color_palette"),
         ],
         [
             InlineKeyboardButton("🎥 Phong cách", callback_data="vproduct|b14_creative_field|visual_style"),
@@ -52610,7 +52743,7 @@ def video_b14_creative_controls_keyboard(lang: str = "vi") -> InlineKeyboardMark
             InlineKeyboardButton("🎞 Nhịp dựng", callback_data="vproduct|b14_creative_field|pacing"),
         ],
         [
-            InlineKeyboardButton("💫 Cảm xúc", callback_data="vproduct|b14_creative_field|mood"),
+            InlineKeyboardButton("💫 Cảm xúc", callback_data="vproduct|b14_creative_field|emotion_tone"),
             InlineKeyboardButton("🚫 Điều cần tránh", callback_data="vproduct|b14_negative_prompt"),
         ],
         [
@@ -52641,6 +52774,10 @@ def video_b14_creative_choice_keyboard(field: str, lang: str = "vi") -> InlineKe
 def video_b14_creative_choice_value(field: str, value: str) -> str:
     if value == "default":
         return "theo profile"
+    if field == "color_tone":
+        field = "color_palette"
+    elif field == "mood":
+        field = "emotion_tone"
     return str(VIDEO_B14_3_CREATIVE_VALUE_TEXT.get(field, {}).get(value) or value.replace("_", " "))
 
 
@@ -52765,12 +52902,14 @@ def video_b14_addon_label(kind: str, value: str) -> str:
             "default_female": "nữ mặc định",
             "uploaded": "voice đã gửi",
             "saved": "voice đã lưu",
+            "custom": "voice riêng",
         },
         "music": {
             "none": "không dùng",
             "default": "nhạc mặc định theo loại video",
             "vault": "kho nhạc TOAN AAS",
             "sfx_vault": "kho SFX TOAN AAS",
+            "media": "media của tôi",
             "uploaded": "nhạc đã gửi",
             "saved": "nhạc đã lưu",
         },
@@ -52911,15 +53050,65 @@ def video_b14_subtitle_text(session: dict | None = None, lang: str = "vi") -> st
     plan = video_b14_addon_plan_from_session(session)
     source = video_b14_addon_label("subtitle", str(plan.get("subtitle_source") or "none"))
     target = str(plan.get("subtitle_target_language") or "").strip()
+    note = str(plan.get("subtitle_note") or "").strip()
     lines = [
-        "💬 <b>Phụ đề cho video</b>",
+        "💬 <b>Phụ đề</b>",
         "",
         f"• Đang chọn: <b>{html.escape(source)}</b>",
         f"• Ngôn ngữ dịch: <b>{html.escape(target or 'không dịch')}</b>",
         "",
-        "TOAN AAS chỉ lưu lựa chọn phụ đề vào kế hoạch video. File thật chỉ tạo sau bước xác nhận cuối.",
+        "TOAN AAS có thể dùng lời đọc theo kịch bản từng cảnh để tạo phụ đề trong nền sau xác nhận.",
     ]
+    if note:
+        lines.extend(["", html.escape(note)])
+    lines.extend([
+        "TOAN AAS chỉ lưu lựa chọn phụ đề vào kế hoạch video. File thật chỉ tạo sau bước xác nhận cuối.",
+    ])
     return "\n".join(lines)
+
+
+def video_b14_subtitle_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🚫 Tắt phụ đề" if is_vi else "🚫 Subtitles off", callback_data="vproduct|b14_subtitle_source|none"),
+            InlineKeyboardButton("✅ Phụ đề theo lời đọc" if is_vi else "✅ From narration", callback_data="vproduct|b14_subtitle_source|from_narration"),
+        ],
+        [
+            InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data="vproduct|b14_subtitle_translate"),
+            InlineKeyboardButton("✍️ Sửa nội dung phụ đề" if is_vi else "✍️ Edit subtitle text", callback_data="vproduct|b14_subtitle_edit"),
+        ],
+        [
+            InlineKeyboardButton("👀 Xem thử SRT" if is_vi else "👀 Preview SRT", callback_data="vproduct|b14_subtitle_preview"),
+            InlineKeyboardButton("✅ Xong phụ đề" if is_vi else "✅ Done subtitles", callback_data="vproduct|b14_subtitle_done"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_b14_subtitle_language_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="vproduct|b14_subtitle_lang|Tiếng Việt"),
+            InlineKeyboardButton("🇺🇸 English", callback_data="vproduct|b14_subtitle_lang|English"),
+        ],
+        [
+            InlineKeyboardButton("🇯🇵 日本語", callback_data="vproduct|b14_subtitle_lang|日本語"),
+            InlineKeyboardButton("🇰🇷 한국어", callback_data="vproduct|b14_subtitle_lang|한국어"),
+        ],
+        [
+            InlineKeyboardButton("🇨🇳 中文", callback_data="vproduct|b14_subtitle_lang|中文"),
+            InlineKeyboardButton("🌍 Ngôn ngữ khác" if is_vi else "🌍 Other", callback_data="vproduct|b14_subtitle_other"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_subtitle"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
 
 
 def video_b14_dub_text(session: dict | None = None, lang: str = "vi") -> str:
@@ -52945,15 +53134,19 @@ def video_b14_dub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🚫 Tắt lồng tiếng" if is_vi else "🚫 Dubbing off", callback_data="vproduct|b14_dub_set|none"),
-            InlineKeyboardButton("🌐 Bật lồng tiếng" if is_vi else "🌐 Dubbing on", callback_data="vproduct|b14_dub_set|on"),
-        ],
-        [
             InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="vproduct|b14_dub_lang|Tiếng Việt"),
-            InlineKeyboardButton("🇺🇸 English", callback_data="vproduct|b14_dub_lang|English"),
         ],
         [
+            InlineKeyboardButton("🇺🇸 English", callback_data="vproduct|b14_dub_lang|English"),
             InlineKeyboardButton("🇯🇵 日本語", callback_data="vproduct|b14_dub_lang|日本語"),
+        ],
+        [
             InlineKeyboardButton("🇰🇷 한국어", callback_data="vproduct|b14_dub_lang|한국어"),
+            InlineKeyboardButton("🇨🇳 中文", callback_data="vproduct|b14_dub_lang|中文"),
+        ],
+        [
+            InlineKeyboardButton("🌍 Ngôn ngữ khác" if is_vi else "🌍 Other", callback_data="vproduct|b14_dub_other"),
+            InlineKeyboardButton("✅ Xong lồng tiếng" if is_vi else "✅ Done dubbing", callback_data="vproduct|b14_dub_done"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
@@ -52989,10 +53182,10 @@ def video_b14_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🚫 Không voice", callback_data="vproduct|b14_voice_source|none"),
-            InlineKeyboardButton("👨 Nam mặc định", callback_data="vproduct|b14_voice_source|default_male"),
+            InlineKeyboardButton("👩 Giọng nữ mặc định", callback_data="vproduct|b14_voice_source|default_female"),
         ],
         [
-            InlineKeyboardButton("👩 Nữ mặc định", callback_data="vproduct|b14_voice_source|default_female"),
+            InlineKeyboardButton("👨 Giọng nam mặc định", callback_data="vproduct|b14_voice_source|default_male"),
             InlineKeyboardButton("🎧 Voice đã gửi", callback_data="vproduct|b14_voice_source|uploaded"),
         ],
         [
@@ -53032,20 +53225,20 @@ def video_b14_music_text(session: dict | None = None, user_id=0, lang: str = "vi
 def video_b14_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Không nhạc", callback_data="vproduct|b14_music_source|none"),
-            InlineKeyboardButton("Nhạc mặc định", callback_data="vproduct|b14_music_source|default"),
+            InlineKeyboardButton("🚫 Không nhạc", callback_data="vproduct|b14_music_source|none"),
+            InlineKeyboardButton("🎵 Nhạc mặc định theo loại video", callback_data="vproduct|b14_music_source|default"),
         ],
         [
-            InlineKeyboardButton("Kho nhạc", callback_data="vproduct|b14_music_source|vault"),
-            InlineKeyboardButton("Kho SFX", callback_data="vproduct|b14_music_source|sfx_vault"),
+            InlineKeyboardButton("📚 Kho nhạc", callback_data="vproduct|b14_music_source|vault"),
+            InlineKeyboardButton("💥 Kho SFX", callback_data="vproduct|b14_music_source|sfx_vault"),
         ],
         [
-            InlineKeyboardButton("Nhạc đã gửi", callback_data="vproduct|b14_music_source|uploaded"),
-            InlineKeyboardButton("Nhạc đã lưu", callback_data="vproduct|b14_music_source|saved"),
+            InlineKeyboardButton("📁 Media của tôi", callback_data="vproduct|b14_music_source|media"),
+            InlineKeyboardButton("✂️ Ghép/cắt nhạc riêng", callback_data="vproduct|b14_music_cut"),
         ],
         [
-            InlineKeyboardButton("✂️ Cắt theo video", callback_data="vproduct|b14_music_cut"),
-            InlineKeyboardButton("✅ Áp dụng nhạc", callback_data="vproduct|b14_music_done"),
+            InlineKeyboardButton("🎚 Âm lượng nhạc", callback_data="vproduct|b14_music_volume"),
+            InlineKeyboardButton("✅ Xong nhạc", callback_data="vproduct|b14_music_done"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
@@ -53095,7 +53288,7 @@ def video_b14_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("💥 SFX" if is_vi else "💥 SFX", callback_data="vproduct|b14_addon_sfx"),
         ],
         [InlineKeyboardButton("✅ Xong add-ons" if is_vi else "✅ Done", callback_data="vproduct|b14_addon_done")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|storyboard_confirm"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_creative_done"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -54643,6 +54836,27 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     session = get_video_session(uid)
     product_id = str(session.get("product_id") or "")
     if not product_id or product_id not in VIDEO_PRODUCT_REGISTRY:
+        b14_recover_actions = {
+            "b14_creative_done",
+            "b14_prompt_image_text",
+            "b14_prompt_video_text",
+            "b14_export_pack",
+            "storyboard_confirm",
+            "b14_addons",
+            "b14_addon_voice",
+            "b14_addon_music",
+            "b14_addon_subtitle",
+            "b14_addon_dub",
+            "b14_addon_logo",
+            "b14_addon_sfx",
+        }
+        if action in b14_recover_actions:
+            return await safe_edit_or_send(
+                query,
+                video_b14_missing_session_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_b14_missing_session_keyboard(lang),
+            )
         if action == "legacy":
             await query.answer()
         return await safe_edit_or_send(query, "⌛ Phiên video đã hết hạn. Bot chưa trừ Xu.", reply_markup=main_video_keyboard(lang))
@@ -55046,7 +55260,14 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_voice", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_voice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_voice_keyboard(lang))
     if action == "b14_voice_source":
-        source = value if value in {"none", "default_male", "default_female", "uploaded", "saved"} else "none"
+        source = value if value in {"none", "default_male", "default_female", "uploaded", "saved", "custom"} else "none"
+        if source == "custom":
+            session = task3d_session_step(uid, "b14_voice", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(
+                query,
+                "🎙 Tạo voice riêng đang tạm khóa để kiểm soát chất lượng. Anh/chị có thể dùng giọng nam/nữ mặc định hoặc voice đã lưu.",
+                reply_markup=video_b14_voice_keyboard(lang),
+            )
         if source == "saved":
             profiles = video_b14_saved_voice_profiles(uid, 5)
             if not profiles:
@@ -55139,11 +55360,16 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = task3d_session_step(uid, "b14_music", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_music_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_music_keyboard(lang))
     if action == "b14_music_source":
-        source = value if value in {"none", "default", "vault", "sfx_vault", "uploaded", "saved"} else "none"
+        source = value if value in {"none", "default", "vault", "sfx_vault", "media", "uploaded", "saved"} else "none"
         fields = {"music_enabled": (source != "none"), "music_source": source}
         if source == "sfx_vault":
             fields["sfx_enabled"] = True
             fields["music_source"] = "vault"
+            fields["music_note"] = "TOAN AAS đã ghi nhận Kho SFX. SFX sẽ được xử lý sau xác nhận cuối nếu gói cho phép."
+        elif source == "vault":
+            fields["music_note"] = "TOAN AAS đã ghi nhận Kho nhạc. Nhạc nền sẽ được chọn theo loại video sau xác nhận cuối."
+        elif source == "media":
+            fields["music_note"] = "TOAN AAS đã ghi nhận Media của tôi. Nếu có file đã gửi, hệ thống sẽ ưu tiên dùng sau xác nhận cuối."
         session = video_b14_set_addon_plan(uid, session, **fields)
         session = task3d_session_step(uid, "b14_music", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_music_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_music_keyboard(lang))
@@ -55166,12 +55392,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = video_b14_set_addon_plan(uid, session, sfx_enabled=(value == "default"))
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addon_subtitle":
-        return await safe_edit_or_send(query, video_b14_subtitle_text(session, lang), parse_mode="HTML", reply_markup=video_b14_choice_keyboard("b14_subtitle_source", [
-            ("Không phụ đề", "none"),
-            ("Từ lời đọc", "from_narration"),
-            ("SRT/VTT đã gửi", "uploaded"),
-            ("Phụ đề dịch", "translated"),
-        ], lang))
+        session = task3d_session_step(uid, "b14_subtitle", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_b14_subtitle_text(session, lang), parse_mode="HTML", reply_markup=video_b14_subtitle_keyboard(lang))
     if action == "b14_subtitle_source":
         source = value if value in {"none", "from_narration", "uploaded", "translated"} else "none"
         fields = {"subtitle_enabled": (source != "none"), "subtitle_source": source}
@@ -55181,11 +55403,61 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(
                 query,
                 "TOAN AAS cần lời đọc/kịch bản trước khi tạo phụ đề theo lời đọc. Anh/chị vào Voice rồi bấm Sửa lời đọc.",
-                reply_markup=video_b14_addon_keyboard(lang),
+                reply_markup=video_b14_subtitle_keyboard(lang),
             )
+        if source == "from_narration":
+            fields["subtitle_note"] = "TOAN AAS đã ghi nhận phụ đề theo lời đọc. File phụ đề sẽ được xử lý sau khi anh/chị xác nhận tạo video."
         session = video_b14_set_addon_plan(uid, session, **fields)
+        session = task3d_session_step(uid, "b14_subtitle", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_b14_subtitle_text(session, lang), parse_mode="HTML", reply_markup=video_b14_subtitle_keyboard(lang))
+    if action == "b14_subtitle_translate":
+        session = task3d_session_step(uid, "b14_subtitle_language", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            "🌐 <b>Chọn ngôn ngữ dịch phụ đề</b>\n\nBước này chỉ lưu kế hoạch dịch phụ đề cho video. TOAN AAS chưa xử lý file và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=video_b14_subtitle_language_keyboard(lang),
+        )
+    if action == "b14_subtitle_lang":
+        target = str(value or "").strip()[:80]
+        session = video_b14_set_addon_plan(
+            uid,
+            session,
+            subtitle_enabled=True,
+            subtitle_source="translated",
+            subtitle_target_language=target,
+            subtitle_note="TOAN AAS đã ghi nhận yêu cầu dịch phụ đề. File phụ đề sẽ được xử lý sau khi anh/chị xác nhận tạo video.",
+        )
+        session = task3d_session_step(uid, "b14_subtitle", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_b14_subtitle_text(session, lang), parse_mode="HTML", reply_markup=video_b14_subtitle_keyboard(lang))
+    if action == "b14_subtitle_other":
+        session = task3d_session_step(uid, "b14_subtitle_custom", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            "✍️ Nhập ngôn ngữ muốn dịch phụ đề. TOAN AAS chỉ lưu kế hoạch, chưa xử lý video và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_subtitle_translate"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
+    if action == "b14_subtitle_edit":
+        session = task3d_session_step(uid, "b14_subtitle_edit", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            "✍️ Gửi nội dung phụ đề/lời đọc muốn dùng. TOAN AAS chỉ lưu vào kế hoạch video, chưa tạo file thật và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_subtitle"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
+    if action == "b14_subtitle_preview":
+        srt_preview = video_b14_narration_from_storyboard(session).splitlines()[:5]
+        preview = "\n".join(f"{idx}\n00:00:{idx * 2:02d},000 --> 00:00:{idx * 2 + 2:02d},000\n{line.split(': ', 1)[-1]}" for idx, line in enumerate(srt_preview, 1))
+        return await safe_edit_or_send(
+            query,
+            "👀 <b>Xem thử SRT</b>\n\n<code>" + html.escape(preview or "Chưa có lời đọc để xem thử.") + "</code>\n\nĐây chỉ là bản xem text trong kế hoạch. Chưa tạo file thật và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=video_b14_subtitle_keyboard(lang),
+        )
+    if action == "b14_subtitle_done":
+        session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addon_dub":
+        session = task3d_session_step(uid, "b14_dub", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_dub_text(session, lang), parse_mode="HTML", reply_markup=video_b14_dub_keyboard(lang))
     if action == "b14_dub_set":
         enabled = value == "on"
@@ -55210,7 +55482,18 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "b14_dub_lang":
         target = str(value or "").strip()[:80]
         session = video_b14_set_addon_plan(uid, session, dub_enabled=True, dub_source="translated", dub_target_language=target, subtitle_enabled=True, subtitle_source="translated", subtitle_target_language=target)
+        session = task3d_session_step(uid, "b14_dub", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_dub_text(session, lang), parse_mode="HTML", reply_markup=video_b14_dub_keyboard(lang))
+    if action == "b14_dub_other":
+        session = task3d_session_step(uid, "b14_dub_custom", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            "✍️ Nhập ngôn ngữ muốn lồng tiếng. TOAN AAS chỉ lưu kế hoạch, chưa gọi provider và chưa trừ Xu.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_dub"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
+    if action == "b14_dub_done":
+        session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addon_logo":
         return await safe_edit_or_send(query, "🏷 <b>Logo</b>", parse_mode="HTML", reply_markup=video_b14_choice_keyboard("b14_logo_set", [
             ("Không logo", "none"),
@@ -55667,6 +55950,68 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
             video_b14_voice_text(session, uid, lang),
             parse_mode="HTML",
             reply_markup=video_b14_voice_keyboard(lang),
+        )
+        return True
+    if str(session.get("current_step") or "") == "b14_subtitle_edit":
+        lang = get_user_language(uid) or "vi"
+        text = re.sub(r"\s+", " ", update.message.text.strip())[:3500]
+        if not text:
+            return True
+        session = video_b14_set_addon_plan(
+            uid,
+            session,
+            subtitle_enabled=True,
+            subtitle_source="from_narration",
+            narration_text=text,
+            subtitle_note="TOAN AAS đã lưu nội dung phụ đề/lời đọc trong kế hoạch video.",
+        )
+        session = task3d_session_step(uid, "b14_subtitle", provider_called=False, xu_charged=0)
+        await update.message.reply_text(
+            video_b14_subtitle_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=video_b14_subtitle_keyboard(lang),
+        )
+        return True
+    if str(session.get("current_step") or "") == "b14_subtitle_custom":
+        lang = get_user_language(uid) or "vi"
+        target = re.sub(r"\s+", " ", update.message.text.strip())[:80]
+        if not target:
+            return True
+        session = video_b14_set_addon_plan(
+            uid,
+            session,
+            subtitle_enabled=True,
+            subtitle_source="translated",
+            subtitle_target_language=target,
+            subtitle_note="TOAN AAS đã ghi nhận yêu cầu dịch phụ đề. File phụ đề sẽ được xử lý sau khi anh/chị xác nhận tạo video.",
+        )
+        session = task3d_session_step(uid, "b14_subtitle", provider_called=False, xu_charged=0)
+        await update.message.reply_text(
+            video_b14_subtitle_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=video_b14_subtitle_keyboard(lang),
+        )
+        return True
+    if str(session.get("current_step") or "") == "b14_dub_custom":
+        lang = get_user_language(uid) or "vi"
+        target = re.sub(r"\s+", " ", update.message.text.strip())[:80]
+        if not target:
+            return True
+        session = video_b14_set_addon_plan(
+            uid,
+            session,
+            dub_enabled=True,
+            dub_source="translated",
+            dub_target_language=target,
+            subtitle_enabled=True,
+            subtitle_source="translated",
+            subtitle_target_language=target,
+        )
+        session = task3d_session_step(uid, "b14_dub", provider_called=False, xu_charged=0)
+        await update.message.reply_text(
+            video_b14_dub_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=video_b14_dub_keyboard(lang),
         )
         return True
     if str(session.get("current_step") or "") == "b14_scene_custom":
@@ -142137,13 +142482,16 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         await video_dubbing_create_original_subtitle_then_language(update.message, context, uid, state, lang)
         return True
     if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-        await video_dubbing_translate_current_subtitle_to_output(
-            update.message,
-            context,
+        state = set_video_dubbing_pending(
             uid,
-            state,
-            str(state.get("target_language") or "Tiếng Việt"),
-            lang,
+            "confirm",
+            target_language=str(state.get("target_language") or "Tiếng Việt"),
+            translate_requested="1",
+        )
+        await update.message.reply_text(
+            video_dubbing_confirm_text(state, lang),
+            parse_mode="HTML",
+            reply_markup=video_dubbing_confirm_keyboard(lang, state),
         )
         return True
     if mode == VIDEO_SUBTITLE_MODE_DUB and not (state.get("subtitle_ref") or state.get("source_subtitle_ref")):
@@ -142510,7 +142858,12 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
         state = set_video_dubbing_pending(uid, "language", target_language=value, translate_requested="1")
         if mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_has_media(state):
             if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-                await video_dubbing_translate_current_subtitle_to_output(update.message, context, uid, state, value, lang)
+                state = set_video_dubbing_pending(uid, "confirm", target_language=value, translate_requested="1")
+                await update.message.reply_text(
+                    video_dubbing_confirm_text(state, lang),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_confirm_keyboard(lang, state),
+                )
                 return True
             fields = {}
             if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -143485,8 +143838,13 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             state = set_video_dubbing_pending(uid, "language", target_language=value, translate_requested="1")
             if mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_has_media(state):
                 if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
-                    await video_dubbing_translate_current_subtitle_to_output(query.message, context, uid, state, value, lang)
-                    return None
+                    state = set_video_dubbing_pending(uid, "confirm", target_language=value, translate_requested="1")
+                    return await safe_edit_or_send(
+                        query,
+                        video_dubbing_confirm_text(state, lang),
+                        parse_mode="HTML",
+                        reply_markup=video_dubbing_confirm_keyboard(lang, state),
+                    )
                 requested = normalize_video_translate_mode(state.get("requested_mode"))
                 fields = {}
                 if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB or requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -145470,6 +145828,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_video_backstack", cmd_tool_test_video_backstack))
     tg_app.add_handler(CommandHandler("tool_test_video_live_dry_run", cmd_tool_test_video_live_dry_run))
     tg_app.add_handler(CommandHandler("tool_test_video_job_status", cmd_tool_test_video_job_status))
+    tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_live_video_ux_regression(?:@\w+)?(?:\s|$)"), cmd_tool_test_live_video_ux_regression))
     tg_app.add_handler(CommandHandler("tool_test_voice_gate", cmd_tool_test_voice_gate))
     tg_app.add_handler(CommandHandler("tool_test_minimax_adapter", cmd_tool_test_minimax_adapter))
     tg_app.add_handler(CommandHandler("tool_test_voice_vault_lookup", cmd_tool_test_voice_vault_lookup))
