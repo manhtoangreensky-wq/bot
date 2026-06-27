@@ -1,6 +1,12 @@
-# P0.18D.1 Real Video Render Route + Watermark Default Off Audit
+# P0.18D.1 Safety Fix + Watermark Default Off Audit
 
 Scope: video render route metadata, fake/test-pattern isolation, final status wording, and B14 logo/watermark default state.
+
+## Ship Status
+
+CODE PASS / SAFETY FIX PASS / FAKE PRODUCT OUTPUT BLOCKED / WATERMARK DEFAULT OFF / REAL PROVIDER RENDERER PENDING / DEPLOY PENDING / LIVE QA NOT STARTED
+
+This PR is a safety fix. It does not complete the product video provider connector and does not claim live readiness.
 
 ## Test Pattern Source
 
@@ -36,6 +42,13 @@ Scope: video render route metadata, fake/test-pattern isolation, final status wo
 - B14 worker queue does not yet expose a real renderer adapter inside `remote_worker.py`; the reserved hook is `render_real_video`.
 - If the real route is unavailable, normal flow fails cleanly with `real_video_renderer_unavailable`; no charge/no fake MP4.
 
+## Real Renderer
+
+- connected: NO
+- current behavior: `real_video_renderer_unavailable`
+- product fake output blocked: YES
+- next required task: P0.18E Real Provider Renderer Connector
+
 ## Watermark Default State
 
 - `video_b14_default_addon_plan` defaults:
@@ -62,3 +75,47 @@ Scope: video render route metadata, fake/test-pattern isolation, final status wo
 - Changed `local_worker.py` normal video job behavior from fake renderer to unavailable/failed unless explicit test pattern.
 - Updated B14 status/delivery copy so only `render_mode=real` can say real video is completed.
 - Reworked B14 logo/watermark menu into text input + six-position confirm flow.
+- Sanitized legacy sessions so old `uploaded/default_watermark` logo state does not reappear in the add-on menu.
+
+## P0.18D.1 Done
+
+1. Chặn fake/testsrc/color bars khỏi normal product video flow.
+2. Admin test pattern vẫn chạy cho smoke/canary, có nhãn rõ.
+3. Normal/admin product video nếu chưa có renderer thật sẽ fail sạch/no-charge.
+4. Watermark/logo add-on chuyển sang flow chữ, 6 vị trí, xác nhận.
+5. Default watermark tắt và session cũ bị sanitize.
+
+## P0.18D.1 Not Done
+
+1. Chưa nối ShopAIKey/Key4U/VEO/Kling real provider renderer.
+2. Chưa tạo video thật theo prompt người dùng.
+3. Chưa test admin product 1 cảnh ra video AI thật.
+4. Chưa test admin product 3 cảnh ra final MP4 thật.
+5. Chưa mở public video.
+
+## Manual QA After Deploy
+
+1. `/tool_test_video_delivery_worker --no-charge`
+   - Có thể ra video test pattern.
+   - Phải nói rõ không phải video thật.
+2. Admin tạo video product bình thường:
+   - Không được ra video sọc màu.
+   - Nếu provider chưa nối, báo chưa sẵn sàng/no-charge.
+   - Không claim success.
+3. Public product video:
+   - Chưa mở.
+   - Không fake output.
+   - Không trừ Xu trước provider thật.
+
+## Next Required Task
+
+P0.18E Real Provider Renderer Connector
+
+Goal:
+
+- nối `render_real_video()` hoặc `video_project_real_scene_renderer()` vào provider thật.
+- ưu tiên ShopAIKey + Key4U fallback.
+- submit/poll/download MP4 thật.
+- scene prompt phải mềm, sát ý người dùng.
+- 1 cảnh admin ra video thật.
+- 3 cảnh admin stitch thành final MP4 thật.
