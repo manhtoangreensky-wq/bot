@@ -292,5 +292,10 @@ def test_p0_17c4_static_guard_no_unrelated_files_touched():
         "tests/test_p0_17c4_webhook_db_html_security_events.py",
         "docs/reports/P0_17B14_5_VIDEO_FLOW_ROUTER_BACKSTACK_AUDIT.md",
         "tests/test_p0_17b14_5_video_flow_router_backstack.py",
+        "docs/reports/P0_18A_VOICE_SUBTITLE_DUB_AUDIT.md",
+        "services/provider_gate.py",
+        "services/minimax_voice_adapter.py",
+        "services/subtitle_dub_pipeline.py",
+        "tests/test_p0_18a_voice_subtitle_dub_final_repair.py",
     }
     assert changed <= allowed
