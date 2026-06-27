@@ -241,8 +241,8 @@ def test_clone_no_secret_leak():
 
 def test_clone_no_charge_before_confirm():
     source = inspect.getsource(bot.create_minimax_voice_profile_preview)
-    forbidden_block = source[source.index('if readiness.get("provider_permission_blocked") and not route_attempts:'):source.index("if not voice_clone_access_allowed")]
-    assert "spend_fixed_credit_info" not in forbidden_block
+    assert "voice_clone_pipeline.process_custom_voice_create" in source
+    assert "spend_fixed_credit_info" not in source
 
 
 def test_voice_asset_created_for_preview(monkeypatch, tmp_path):

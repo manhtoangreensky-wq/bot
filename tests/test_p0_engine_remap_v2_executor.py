@@ -120,7 +120,7 @@ def test_slash_smoke_requires_confirm_but_interactive_product_does_not(monkeypat
 
 def test_product_and_smoke_sources_use_shared_executor():
     assert 'execute_engine(\n        "voice_tts"' in inspect.getsource(bot.send_standalone_tts_result)
-    assert 'execute_engine(\n        "voice_saved_tts"' in inspect.getsource(bot.send_paid_saved_voice_tts_result)
+    assert "voice_clone_pipeline.process_voice_tts" in inspect.getsource(bot.send_paid_saved_voice_tts_result)
     music_source = inspect.getsource(bot.handle_music_quick_callback)
     assert "music_engine_feature_for_result(result)" in music_source
     assert "execute_engine(" in music_source
