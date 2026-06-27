@@ -74992,6 +74992,7 @@ async def cmd_queue_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     queue = shopaikey_video_queue_counts()
     raw = queue.get("raw") or {}
     raw_text = ", ".join(f"{key}={value}" for key, value in sorted(raw.items())) or "-"
+    admin_canary_block = "\n".join(remote_worker_admin_canary_queue_lines())
     await update.message.reply_text(
         "🎞 <b>ShopAIKey Video Queue</b>\n\n"
         f"• Queued: <code>{int(queue.get('queued') or 0)}</code>\n"
@@ -75002,6 +75003,7 @@ async def cmd_queue_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Stale fixed now: <code>{len(stale) + len(stale_admin)}</code> "
         f"(public <code>{len(stale)}</code> / admin <code>{len(stale_admin)}</code>)\n"
         f"• Raw statuses: <code>{html.escape(raw_text)}</code>\n\n"
+        f"{admin_canary_block}\n\n"
         "Không gọi provider. Không trừ Xu.",
         parse_mode="HTML",
     )
@@ -118317,13 +118319,44 @@ def _remote_worker_canary_keyboard(canary_ref: str = "") -> InlineKeyboardMarkup
     )
 
 
+def _remote_worker_prod_canary_keyboard(canary_ref: str = "") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🔄 Làm mới", callback_data=f"remote_worker_prod_canary_status|{canary_ref or 'last'}")],
+            [InlineKeyboardButton("🧪 Tạo prod canary", callback_data="remote_worker_prod_canary_create")],
+            [InlineKeyboardButton("🤖 Worker status", callback_data="admin_help|provider")],
+            [InlineKeyboardButton("📊 Queue status", callback_data="menu|freeze_queue_status")],
+            [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        ]
+    )
+
+
 def _parse_remote_worker_canary_job_id(args: list[str] | tuple[str, ...] | None) -> int:
     for arg in args or []:
         text = str(arg or "").strip()
-        match = re.search(r"(?:RW-CANARY-)?(\d+)", text, re.IGNORECASE)
+        match = re.search(r"(?:RW-(?:PROD-)?CANARY-)?(\d+)", text, re.IGNORECASE)
         if match:
             return safe_int(match.group(1), 0)
     return 0
+
+
+def _remote_worker_prod_canary_options(args: list[str] | tuple[str, ...] | None) -> dict:
+    values = [str(arg or "").strip() for arg in (args or []) if str(arg or "").strip()]
+    options = {
+        "profile": "simple",
+        "duration_seconds": 3,
+        "scene_count": 1,
+        "provider_smoke": "--provider-smoke" in values,
+        "confirm_provider_cost": "--confirm-provider-cost" in values,
+    }
+    for index, value in enumerate(values):
+        if value == "--profile" and index + 1 < len(values):
+            options["profile"] = values[index + 1]
+        if value == "--duration" and index + 1 < len(values):
+            options["duration_seconds"] = safe_int(values[index + 1], 3)
+        if value == "--scenes" and index + 1 < len(values):
+            options["scene_count"] = safe_int(values[index + 1], 1)
+    return options
 
 
 def _format_remote_worker_canary_status(status: dict) -> str:
@@ -118345,6 +118378,38 @@ def _format_remote_worker_canary_status(status: dict) -> str:
             f"• Result uploaded: <code>{uploaded}</code>",
             f"• Result file size: <code>{safe_int(status.get('result_file_size'), 0)}</code>",
             f"• Sent to admin: <code>{sent}</code>",
+            f"• Failure: <code>{html.escape(failure)}</code>",
+        ]
+    )
+
+
+def _format_remote_worker_prod_canary_status(status: dict) -> str:
+    if not status.get("ok"):
+        return "🧪 <b>VPS Worker Production Canary</b>\n\nChưa tìm thấy job admin production canary."
+    uploaded = "yes" if status.get("result_uploaded") else "no"
+    sent = "yes" if status.get("sent_to_admin") else "no"
+    provider = "yes" if status.get("provider_call") else "no"
+    public = "yes" if status.get("public_user") else "no"
+    no_charge = "yes" if status.get("no_charge") else "no"
+    failure = status.get("safe_failure_reason") or "-"
+    return "\n".join(
+        [
+            "🧪 <b>VPS Worker Production Canary Status</b>",
+            "",
+            f"• Job: <code>{html.escape(status.get('canary_ref') or '-')}</code>",
+            f"• Label: <code>{html.escape(status.get('queue_label') or '-')}</code>",
+            f"• Status: <code>{html.escape(status.get('status') or '-')}</code>",
+            f"• Stage: <code>{html.escape(status.get('stage') or '-')}</code>",
+            f"• Worker: <code>{html.escape(status.get('worker_id') or '-')}</code>",
+            f"• Claimed at: <code>{html.escape(status.get('claimed_at') or '-')}</code>",
+            f"• Last heartbeat: <code>{html.escape(status.get('last_heartbeat_at') or '-')}</code>",
+            f"• Progress: <code>{safe_int(status.get('progress_percent'), 0)}%</code> {html.escape(status.get('progress_message') or '')}",
+            f"• Result uploaded: <code>{uploaded}</code>",
+            f"• Result file size: <code>{safe_int(status.get('result_file_size'), 0)}</code>",
+            f"• Telegram sent: <code>{sent}</code>",
+            f"• No-charge: <code>{no_charge}</code>",
+            f"• Public: <code>{public}</code>",
+            f"• Provider: <code>{provider}</code>",
             f"• Failure: <code>{html.escape(failure)}</code>",
         ]
     )
@@ -118499,12 +118564,176 @@ async def handle_remote_worker_canary_callback(update: Update, context: ContextT
     )
 
 
+async def cmd_remote_worker_prod_canary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho Admin.")
+    args = set(str(arg or "").strip() for arg in (getattr(context, "args", None) or []))
+    if "--no-charge" not in args:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/remote_worker_prod_canary --no-charge</code>",
+            parse_mode="HTML",
+        )
+    flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
+    if not flags.get("worker_api_enabled"):
+        return await update.message.reply_text(
+            "🧪 <b>VPS Worker Production Canary</b>\n\nLOCAL_WORKER_TOKEN chưa cấu hình. Chưa tạo job.",
+            parse_mode="HTML",
+        )
+    options = _remote_worker_prod_canary_options(getattr(context, "args", None) or [])
+    conn = db_connect()
+    try:
+        result = remote_worker_api.create_remote_worker_admin_canary_job(
+            conn,
+            admin_user_id=safe_int(uid, 0),
+            profile=str(options.get("profile") or "simple"),
+            duration_seconds=safe_int(options.get("duration_seconds"), 3),
+            scene_count=safe_int(options.get("scene_count"), 1),
+            provider_smoke=bool(options.get("provider_smoke")),
+            confirm_provider_cost=bool(options.get("confirm_provider_cost")),
+        )
+    finally:
+        conn.close()
+    if not result.get("ok"):
+        return await update.message.reply_text(
+            f"🧪 <b>VPS Worker Production Canary</b>\n\nFAIL: <code>{html.escape(result.get('reason') or 'admin_prod_canary_create_failed')}</code>",
+            parse_mode="HTML",
+        )
+    job = result.get("job") or {}
+    project = result.get("project") or {}
+    canary_ref = result.get("canary_ref") or f"RW-PROD-CANARY-{job.get('id') or ''}"
+    try:
+        set_system_setting("remote_worker:last_admin_prod_canary_job_id", str(job.get("id") or ""), "last remote worker admin prod canary job", uid)
+        set_system_setting("remote_worker:last_admin_prod_canary_status", "admin_canary_queued", "last remote worker admin prod canary status", uid)
+    except Exception:
+        logger.warning("remote worker admin prod canary setting skipped")
+    lines = [
+        "🧪 <b>VPS Worker Production Canary</b>",
+        "",
+        "Đã tạo job kiểm tra production nhỏ cho Admin.",
+        f"• Job: <code>{html.escape(canary_ref)}</code>",
+        f"• Số cảnh: <code>{safe_int(project.get('scene_count'), 1)}</code>",
+        f"• Thời lượng: <code>{safe_int(options.get('duration_seconds'), 3)}s</code>",
+        "• Trừ Xu: Không",
+        "• Public: Không",
+        "• Provider: Không",
+        "• Worker: VPS remote worker",
+        "",
+        "Chạy trên VPS:",
+        "<code>python remote_worker.py --admin-canary --once</code>",
+        "",
+        f"Kiểm tra: <code>/remote_worker_prod_canary_status {html.escape(canary_ref)}</code>",
+    ]
+    return await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=_remote_worker_prod_canary_keyboard(str(canary_ref)),
+    )
+
+
+async def cmd_remote_worker_prod_canary_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho Admin.")
+    job_id = _parse_remote_worker_canary_job_id(getattr(context, "args", None) or [])
+    if not job_id:
+        job_id = safe_int(get_system_setting("remote_worker:last_admin_prod_canary_job_id", ""), 0)
+    conn = db_connect()
+    try:
+        status = remote_worker_api.get_remote_worker_admin_canary_status(conn, job_id=job_id, admin_user_id=safe_int(uid, 0))
+    finally:
+        conn.close()
+    if status.get("ok"):
+        try:
+            set_system_setting("remote_worker:last_admin_prod_canary_status", status.get("status") or "", "last remote worker admin prod canary status", uid)
+        except Exception:
+            logger.warning("remote worker admin prod canary status setting skipped")
+    return await update.message.reply_text(
+        _format_remote_worker_prod_canary_status(status),
+        parse_mode="HTML",
+        reply_markup=_remote_worker_prod_canary_keyboard(str(status.get("canary_ref") or "")),
+    )
+
+
+async def handle_remote_worker_prod_canary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id if query.from_user else 0
+    if not is_admin_user(uid):
+        return await query.answer("⛔ Khu vực này chỉ dành cho Admin.", show_alert=True)
+    data = str(query.data or "")
+    if data.startswith("remote_worker_prod_canary_create"):
+        flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
+        if not flags.get("worker_api_enabled"):
+            return await query.edit_message_text(
+                "🧪 <b>VPS Worker Production Canary</b>\n\nLOCAL_WORKER_TOKEN chưa cấu hình. Chưa tạo job.",
+                parse_mode="HTML",
+            )
+        conn = db_connect()
+        try:
+            result = remote_worker_api.create_remote_worker_admin_canary_job(conn, admin_user_id=safe_int(uid, 0))
+        finally:
+            conn.close()
+        if not result.get("ok"):
+            return await query.edit_message_text(
+                f"🧪 <b>VPS Worker Production Canary</b>\n\nFAIL: <code>{html.escape(result.get('reason') or 'admin_prod_canary_create_failed')}</code>",
+                parse_mode="HTML",
+            )
+        job = result.get("job") or {}
+        canary_ref = result.get("canary_ref") or f"RW-PROD-CANARY-{job.get('id') or ''}"
+        try:
+            set_system_setting("remote_worker:last_admin_prod_canary_job_id", str(job.get("id") or ""), "last remote worker admin prod canary job", uid)
+            set_system_setting("remote_worker:last_admin_prod_canary_status", "admin_canary_queued", "last remote worker admin prod canary status", uid)
+        except Exception:
+            logger.warning("remote worker admin prod canary callback setting skipped")
+        text = "\n".join(
+            [
+                "🧪 <b>VPS Worker Production Canary</b>",
+                "",
+                "Đã tạo job kiểm tra production nhỏ cho Admin.",
+                f"• Job: <code>{html.escape(canary_ref)}</code>",
+                "• Số cảnh: <code>1</code>",
+                "• Thời lượng: <code>3s</code>",
+                "• Trừ Xu: Không",
+                "• Public: Không",
+                "• Provider: Không",
+                "• Worker: VPS remote worker",
+                "",
+                "Chạy trên VPS:",
+                "<code>python remote_worker.py --admin-canary --once</code>",
+                "",
+                f"Kiểm tra: <code>/remote_worker_prod_canary_status {html.escape(canary_ref)}</code>",
+            ]
+        )
+        return await query.edit_message_text(text, parse_mode="HTML", reply_markup=_remote_worker_prod_canary_keyboard(str(canary_ref)))
+    ref = data.split("|", 1)[1] if "|" in data else ""
+    job_id = 0 if ref == "last" else _parse_remote_worker_canary_job_id([ref])
+    if not job_id:
+        job_id = safe_int(get_system_setting("remote_worker:last_admin_prod_canary_job_id", ""), 0)
+    conn = db_connect()
+    try:
+        status = remote_worker_api.get_remote_worker_admin_canary_status(conn, job_id=job_id, admin_user_id=safe_int(uid, 0))
+    finally:
+        conn.close()
+    if status.get("ok"):
+        try:
+            set_system_setting("remote_worker:last_admin_prod_canary_status", status.get("status") or "", "last remote worker admin prod canary status", uid)
+        except Exception:
+            logger.warning("remote worker admin prod canary callback status setting skipped")
+    return await query.edit_message_text(
+        _format_remote_worker_prod_canary_status(status),
+        parse_mode="HTML",
+        reply_markup=_remote_worker_prod_canary_keyboard(str(status.get("canary_ref") or "")),
+    )
+
+
 async def cmd_remote_worker_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     status = remote_worker_status_snapshot()
     canary = status.get("canary") if isinstance(status.get("canary"), dict) else {}
+    admin_prod = status.get("admin_prod_canary") if isinstance(status.get("admin_prod_canary"), dict) else {}
     lines = [
         "🤖 <b>Remote Worker Status</b>",
         "",
@@ -118523,9 +118752,20 @@ async def cmd_remote_worker_status(update: Update, context: ContextTypes.DEFAULT
         f"• Last canary result: <code>{'yes' if canary.get('result_uploaded') else 'no'}</code>",
         f"• Production jobs enabled: <code>{'yes' if status.get('production_jobs_enabled') else 'no'}</code>",
         "",
+        "🧪 <b>Admin production canary</b>",
+        f"• Enabled: <code>{'yes' if status.get('admin_prod_canary_enabled') else 'no'}</code>",
+        f"• Last job: <code>{html.escape(admin_prod.get('canary_ref') or '-')}</code>",
+        f"• Last status: <code>{html.escape(admin_prod.get('status') or '-')}</code>",
+        f"• Last worker: <code>{html.escape(admin_prod.get('worker_id') or '-')}</code>",
+        f"• Last heartbeat: <code>{html.escape(admin_prod.get('last_heartbeat_at') or '-')}</code>",
+        f"• Last result: <code>{'yes' if admin_prod.get('result_uploaded') else 'no'}</code>",
+        f"• Public worker enabled: <code>{'YES' if status.get('public_worker_enabled') else 'NO'}</code>",
+        f"• Max active admin canary: <code>{safe_int(status.get('max_admin_canary_active'), 1)}</code>",
+        "",
         "Chạy trên VPS: <code>python remote_worker.py --ping</code>",
         "Dry-run an toàn: <code>python remote_worker.py --dry-run --once</code>",
         "Canary an toàn: <code>python remote_worker.py --canary --once</code>",
+        "Admin prod canary: <code>python remote_worker.py --admin-canary --once</code>",
         "Chưa route job video thật cho VPS cho tới khi B14.5 ổn định.",
     ]
     return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -133597,10 +133837,32 @@ def queue_status_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Freeze / Queue", callback_data="menu|freeze_queue"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
+def remote_worker_admin_canary_queue_lines() -> list[str]:
+    conn = None
+    try:
+        conn = db_connect()
+        snapshot = remote_worker_api.remote_worker_admin_canary_queue_snapshot(conn)
+    except Exception as exc:
+        logger.warning("remote worker admin canary queue snapshot skipped: %s", type(exc).__name__)
+        snapshot = {"ok": False, "queue_label": remote_worker_api.REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL, "active": 0, "last": {}}
+    finally:
+        if conn:
+            conn.close()
+    last = snapshot.get("last") if isinstance(snapshot.get("last"), dict) else {}
+    return [
+        "<b>VPS remote worker admin canary</b>",
+        f"• Label: <code>{html.escape(snapshot.get('queue_label') or remote_worker_api.REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL)}</code>",
+        f"• Active: <code>{safe_int(snapshot.get('active'), 0)}</code>",
+        f"• Last: <code>{html.escape(last.get('canary_ref') or '-')}</code> / <code>{html.escape(last.get('status') or '-')}</code>",
+        "• Invoice: <code>no</code>",
+        "• Wallet/Xu: <code>no</code>",
+    ]
+
 def freeze_queue_status_text() -> str:
     queue = shopaikey_video_queue_counts_readonly()
     frame = frame_video_status_payload()
     worker = local_worker_status_payload()
+    admin_canary_lines = remote_worker_admin_canary_queue_lines()
     return "\n".join([
         "📊 <b>Queue Status</b>",
         "",
@@ -133620,6 +133882,8 @@ def freeze_queue_status_text() -> str:
         f"• Require local worker: <code>{'ON' if frame.get('require_local_worker') else 'OFF'}</code>",
         f"• Worker connected: <code>{'yes' if worker.get('connected') else 'no'}</code>",
         f"• Active frame jobs: <code>{int(frame.get('active_jobs') or 0)}</code>",
+        "",
+        *admin_canary_lines,
         "",
         "<b>Ý nghĩa</b>",
         "• Queued: job đang chờ provider/worker.",
@@ -134274,6 +134538,8 @@ ADMIN_CONTROL_MODULES = {
             ("/tool_test_remote_worker_api --fake-job --no-charge", "fake job admin, không trừ Xu"),
             ("/remote_worker_canary --no-charge", "tạo canary VPS an toàn, không trừ Xu"),
             ("/remote_worker_canary_status <job_id>", "xem trạng thái canary VPS"),
+            ("/remote_worker_prod_canary --no-charge", "tạo admin production canary VPS, không trừ Xu"),
+            ("/remote_worker_prod_canary_status <job_id>", "xem trạng thái admin production canary"),
             ("/shopaikey_status", "ShopAIKey status"),
             ("/shopaikey_usage", "ShopAIKey usage"),
             ("/shopaikey_video_job", "kiểm tra job video"),
@@ -145116,6 +145382,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_remote_worker_api", cmd_tool_test_remote_worker_api))
     tg_app.add_handler(CommandHandler("remote_worker_canary", cmd_remote_worker_canary))
     tg_app.add_handler(CommandHandler("remote_worker_canary_status", cmd_remote_worker_canary_status))
+    tg_app.add_handler(CommandHandler("remote_worker_prod_canary", cmd_remote_worker_prod_canary))
+    tg_app.add_handler(CommandHandler("remote_worker_prod_canary_status", cmd_remote_worker_prod_canary_status))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
@@ -145982,6 +146250,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback, pattern=r"^freehub\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_payos_risk_callback, pattern=r"^payrisk\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_canary_callback, pattern=r"^remote_worker_canary_(create|status)(\||$)"))
+    tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_prod_canary_callback, pattern=r"^remote_worker_prod_canary_(create|status)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
@@ -146264,8 +146533,16 @@ def _record_remote_worker_ping(worker_id: str) -> None:
 
 def remote_worker_status_snapshot() -> dict:
     worker_flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
-    settings = get_system_settings(["remote_worker:last_heartbeat", "remote_worker:worker_id", "remote_worker:last_canary_job_id"])
+    settings = get_system_settings(
+        [
+            "remote_worker:last_heartbeat",
+            "remote_worker:worker_id",
+            "remote_worker:last_canary_job_id",
+            "remote_worker:last_admin_prod_canary_job_id",
+        ]
+    )
     last_worker_id = str(settings.get("remote_worker:worker_id") or "").strip()
+    guard = remote_worker_api.remote_worker_production_guard_config()
     canary = {"ok": False, "reason": "canary_not_found"}
     last_canary_job_id = safe_int(settings.get("remote_worker:last_canary_job_id"), 0)
     if last_canary_job_id:
@@ -146277,12 +146554,27 @@ def remote_worker_status_snapshot() -> dict:
             canary = {"ok": False, "reason": type(exc).__name__}
         finally:
             conn.close()
+    admin_prod_canary = {"ok": False, "reason": "admin_canary_not_found"}
+    last_admin_prod_canary_job_id = safe_int(settings.get("remote_worker:last_admin_prod_canary_job_id"), 0)
+    if last_admin_prod_canary_job_id:
+        conn = db_connect()
+        try:
+            admin_prod_canary = remote_worker_api.get_remote_worker_admin_canary_status(conn, job_id=last_admin_prod_canary_job_id)
+        except Exception as exc:
+            logger.warning("remote worker admin prod canary status snapshot skipped: %s", type(exc).__name__)
+            admin_prod_canary = {"ok": False, "reason": type(exc).__name__}
+        finally:
+            conn.close()
     return {
         **worker_flags,
         "last_remote_worker_heartbeat": settings.get("remote_worker:last_heartbeat") or "",
         "last_worker_id": remote_worker_api.sanitize_worker_id(last_worker_id) if last_worker_id else "",
         "worker_result_upload_dir_configured": bool(str(WORKER_RESULT_UPLOAD_DIR or "").strip()),
         "canary": canary if canary.get("ok") else {},
+        "admin_prod_canary": admin_prod_canary if admin_prod_canary.get("ok") else {},
+        "admin_prod_canary_enabled": bool(guard.get("admin_canary_enabled")),
+        "public_worker_enabled": bool(guard.get("public_enabled")),
+        "max_admin_canary_active": safe_int(guard.get("max_admin_canary_active"), 1),
         "production_jobs_enabled": bool(LOCAL_WORKER_ENABLED and LOCAL_WORKER_POLL_ENABLED),
         "instructions": "Chạy trên VPS: python remote_worker.py --ping",
     }
@@ -146469,6 +146761,7 @@ async def api_worker_claim(request: Request):
     max_jobs = max(1, min(safe_int(payload.get("max_jobs"), 1), 1))
     lease_seconds = max(30, min(3600, safe_int(payload.get("lease_seconds"), LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
     canary_only = str(payload.get("canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+    admin_canary_only = str(payload.get("admin_canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
     conn = db_connect()
@@ -146480,6 +146773,7 @@ async def api_worker_claim(request: Request):
             max_jobs=max_jobs,
             lease_seconds=lease_seconds,
             canary_only=canary_only,
+            admin_canary_only=admin_canary_only,
         )
     finally:
         conn.close()
@@ -146522,7 +146816,13 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
     if not user_id or not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
         return {"sent": False, "reason": "missing_user_or_file"}
     is_canary = remote_worker_api.is_remote_worker_canary_job(job, project)
-    caption = "🧪 Remote Worker Canary hoàn tất. File kết quả test từ VPS/Railway." if is_canary else "✅ Video đã xử lý xong. TOAN AAS gửi file kết quả từ Railway."
+    is_admin_canary = remote_worker_api.is_remote_worker_admin_canary_job(job, project)
+    if is_admin_canary:
+        caption = "🧪 VPS Worker Production Canary hoàn tất. File test admin từ VPS/Railway."
+    elif is_canary:
+        caption = "🧪 Remote Worker Canary hoàn tất. File kết quả test từ VPS/Railway."
+    else:
+        caption = "✅ Video đã xử lý xong. TOAN AAS gửi file kết quả từ Railway."
     try:
         with open(final_path, "rb") as handle:
             await tg_app.bot.send_video(
@@ -146589,7 +146889,9 @@ async def api_worker_complete(request: Request):
     delivery = await maybe_send_remote_worker_final_video(result)
     job = result.get("job") or {}
     project = result.get("project") or {}
-    if remote_worker_api.is_remote_worker_canary_job(job, project):
+    is_safe_worker_canary = remote_worker_api.is_remote_worker_canary_job(job, project)
+    is_admin_prod_canary = remote_worker_api.is_remote_worker_admin_canary_job(job, project)
+    if is_safe_worker_canary or is_admin_prod_canary:
         conn = db_connect()
         try:
             remote_worker_api.note_remote_worker_canary_delivery(
@@ -146601,8 +146903,12 @@ async def api_worker_complete(request: Request):
         finally:
             conn.close()
         try:
-            set_system_setting("remote_worker:last_canary_job_id", str(job_id), "last remote worker canary job", worker_id)
-            set_system_setting("remote_worker:last_canary_status", str(job.get("status") or "completed"), "last remote worker canary status", worker_id)
+            if is_admin_prod_canary:
+                set_system_setting("remote_worker:last_admin_prod_canary_job_id", str(job_id), "last remote worker admin prod canary job", worker_id)
+                set_system_setting("remote_worker:last_admin_prod_canary_status", str(job.get("status") or "completed"), "last remote worker admin prod canary status", worker_id)
+            else:
+                set_system_setting("remote_worker:last_canary_job_id", str(job_id), "last remote worker canary job", worker_id)
+                set_system_setting("remote_worker:last_canary_status", str(job.get("status") or "completed"), "last remote worker canary status", worker_id)
         except Exception:
             logger.warning("remote worker canary complete setting skipped")
     return {"ok": True, "result": result, "delivery": delivery}

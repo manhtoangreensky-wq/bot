@@ -250,6 +250,47 @@ Yeu cau:
 - Production jobs enabled van la `no` tru khi owner da cau hinh rieng o phase sau.
 - Neu fail, xem log systemd/VPS voi cac ly do an toan nhu `ffmpeg_missing`, `upload failed`, `HTTP 401/403`, hoac network error. Khong paste token vao log chia se.
 
+## G3. W5 admin production canary
+
+W5 la job `video_render` production-like dau tien cho VPS, nhung chi danh cho owner/admin. Mac dinh khong public, khong goi provider, khong tru Xu, va khong bat public worker.
+
+Tren Railway/Telegram admin:
+
+```text
+/runtime
+/remote_worker_status
+/remote_worker_prod_canary --no-charge
+```
+
+Lenh se tra ve ma job dang `RW-PROD-CANARY-<id>`.
+
+Tren VPS:
+
+```bash
+cd /opt/toanaas/bot
+source .venv/bin/activate
+python remote_worker.py --doctor
+python remote_worker.py --ping
+python remote_worker.py --admin-canary --once
+```
+
+Quay lai Telegram admin:
+
+```text
+/remote_worker_prod_canary_status RW-PROD-CANARY-<id>
+/queue_status
+/remote_worker_status
+```
+
+Yeu cau:
+
+- Status la `completed`.
+- Result uploaded la `yes`.
+- Queue label la `OWNER/ADMIN WORKER CANARY — không trừ Xu`.
+- Public worker enabled van la `NO`.
+- Khong set `REMOTE_WORKER_PUBLIC_ENABLED=true` trong W5.
+- Chi W6/P0.18A moi quyet dinh controlled production worker sau live QA.
+
 ## H. Safety
 
 - Do not paste token into GitHub.
@@ -260,9 +301,12 @@ Yeu cau:
 - Do not route production jobs to VPS until B14.5 video flow/queue/status is stable.
 - W3 dry-run only verifies handshake; it must not process real user video.
 - W4 canary only claims `remote_worker_canary` jobs; it must not process real user video.
+- W5 admin production canary only claims jobs marked `worker_admin_canary=true`; it must not process real user video.
 - First run only after `/tool_test_remote_worker_api --fake-job --no-charge` passes.
 - Staging ping can run first with `/tool_test_remote_worker_ping --no-charge`.
 - Safe canary can run manually with `/remote_worker_canary --no-charge` and `python remote_worker.py --canary --once`.
+- Admin production canary can run manually with `/remote_worker_prod_canary --no-charge` and `python remote_worker.py --admin-canary --once`.
+- Do not set `REMOTE_WORKER_PUBLIC_ENABLED=true` yet.
 - VPS khong can PayOS ENV, wallet ENV, Telegram bot token, webhook secret, hay quyen doc SQLite.
 - Neu `/runtime` khong dung build, dung worker.
 - Neu public video queue/status broken, dung worker.
