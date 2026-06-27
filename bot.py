@@ -90,6 +90,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
+from services import minimax_voice_adapter, provider_gate, subtitle_dub_pipeline
 from services import remote_worker_api, worker_auth
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
@@ -52703,10 +52704,15 @@ def video_b14_default_addon_plan(profile_id: str = "storytelling") -> dict:
     music_volume = int(round(float(defaults.get("music_volume", 0.0) or 0.0) * 100))
     voice_enabled = voice_volume > 0 and "usually no voice" not in str(profile.voice_style).lower()
     music_enabled = music_volume > 0
+    default_voice_source = "default_male" if voice_enabled else "none"
+    default_voice_id = default_tts_voice_id("male") if voice_enabled else ""
     return {
         "voice_enabled": bool(voice_enabled),
-        "voice_source": "default_male" if voice_enabled else "none",
+        "voice_source": default_voice_source,
         "voice_id": "",
+        "voice_provider_voice_id": default_voice_id,
+        "voice_profile_id": 0,
+        "voice_label": "Nam mặc định" if voice_enabled else "",
         "voice_volume_percent": max(70, min(120, voice_volume or 100)),
         "voice_speed_percent": 100,
         "music_enabled": bool(music_enabled),
@@ -52716,6 +52722,11 @@ def video_b14_default_addon_plan(profile_id: str = "storytelling") -> dict:
         "sfx_enabled": bool(profile.sfx_policy),
         "subtitle_enabled": bool(defaults.get("burn_subtitles", True)),
         "subtitle_source": "from_narration" if defaults.get("burn_subtitles", True) else "none",
+        "subtitle_target_language": "",
+        "dub_enabled": False,
+        "dub_source": "none",
+        "dub_target_language": "",
+        "dub_voice_source": "same_as_voice",
         "logo_enabled": False,
         "logo_file_id": "",
         "logo_position": str(defaults.get("logo_position") or "bottom_right"),
@@ -52728,7 +52739,7 @@ def video_b14_addon_plan_from_session(session: dict | None = None) -> dict:
     plan = dict(draft.get("b14_addon_plan") or {})
     defaults = video_b14_default_addon_plan(str(draft.get("b14_profile_id") or video_b14_profile_id_for_session(session)))
     defaults.update({key: value for key, value in plan.items() if key in defaults})
-    for extra_key in ("narration_text", "music_note", "sfx_note"):
+    for extra_key in ("narration_text", "music_note", "sfx_note", "subtitle_note", "dub_note"):
         if extra_key in plan:
             defaults[extra_key] = str(plan.get(extra_key) or "")
     return defaults
@@ -52738,7 +52749,7 @@ def video_b14_set_addon_plan(user_id, session: dict, **fields) -> dict:
     draft = dict((session or {}).get("draft") or {})
     plan = video_b14_addon_plan_from_session(session)
     plan.update({key: value for key, value in fields.items() if key in plan})
-    for extra_key in ("narration_text", "music_note", "sfx_note"):
+    for extra_key in ("narration_text", "music_note", "sfx_note", "subtitle_note", "dub_note"):
         if extra_key in fields:
             plan[extra_key] = str(fields.get(extra_key) or "")[:4000]
     draft["b14_addon_plan"] = plan
@@ -52767,6 +52778,13 @@ def video_b14_addon_label(kind: str, value: str) -> str:
             "none": "không dùng",
             "from_narration": "từ lời đọc",
             "uploaded": "file đã gửi",
+            "translated": "phụ đề dịch",
+        },
+        "dub": {
+            "none": "không dùng",
+            "from_voice": "theo lời đọc",
+            "translated": "theo bản dịch",
+            "same_as_voice": "theo voice đã chọn",
         },
         "logo": {
             "none": "không dùng",
@@ -52798,10 +52816,157 @@ def video_b14_narration_from_storyboard(session: dict | None = None) -> str:
     return f"Cảnh 1: {topic}\nCảnh 2: nhấn lợi ích chính.\nCảnh 3: kết thúc bằng lời kêu gọi hành động."
 
 
+def video_b14_narration_source(session: dict | None = None) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    addon_plan = dict(draft.get("b14_addon_plan") or {})
+    manual = str(addon_plan.get("narration_text") or "").strip()
+    if manual:
+        return {"ok": True, "source": "manual", "text": manual[:3500]}
+    plan = dict(draft.get("b14_storyboard_plan") or {})
+    lines = []
+    for card in list(plan.get("scene_cards") or [])[:20]:
+        line = str(card.get("narration_line") or card.get("subtitle_line") or "").strip()
+        if line:
+            lines.append(f"Cảnh {safe_int(card.get('scene_index'), len(lines) + 1)}: {line}")
+    if lines:
+        return {"ok": True, "source": "storyboard", "text": "\n".join(lines)[:3500]}
+    generated = video_b14_narration_from_storyboard(session)
+    if generated.strip():
+        return {"ok": True, "source": "generated", "text": generated[:3500]}
+    return {
+        "ok": False,
+        "source": "missing",
+        "text": "",
+        "public_message": "TOAN AAS cần lời đọc trước khi bật voice. Anh/chị bấm Sửa lời đọc rồi gửi kịch bản muốn đọc.",
+    }
+
+
+def video_b14_saved_voice_profiles(user_id, limit: int = 5) -> list[dict]:
+    try:
+        rows = user_voice_profile_rows(user_id, max(1, int(limit or 5)), 0, include_inactive=False)
+    except Exception:
+        rows = []
+    return [dict(row) for row in rows if voice_profile_can_generate_tts(row)]
+
+
+def video_b14_voice_select_keyboard(user_id, lang: str = "vi") -> InlineKeyboardMarkup:
+    rows = []
+    for profile in video_b14_saved_voice_profiles(user_id, 5):
+        label = str(profile.get("display_name") or f"Voice #{profile.get('id') or ''}").strip()[:32] or "Voice đã lưu"
+        rows.append([InlineKeyboardButton(f"📚 {label}", callback_data=f"vproduct|b14_voice_saved_pick|{int(profile.get('id') or 0)}")])
+    rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_voice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_b14_voice_resolution(source: str, profile: dict | None = None) -> minimax_voice_adapter.VoiceIdResolution:
+    return minimax_voice_adapter.resolve_provider_voice_id(
+        voice_source=source,
+        profile=profile,
+        uploaded_profile=profile,
+        default_male_voice_id=default_tts_voice_id("male"),
+        default_female_voice_id=default_tts_voice_id("female"),
+    )
+
+
+def video_b14_apply_voice_choice(user_id, session: dict, source: str, profile: dict | None = None) -> tuple[dict, dict]:
+    source = str(source or "none").strip()
+    if source == "none":
+        next_session = video_b14_set_addon_plan(
+            user_id,
+            session,
+            voice_enabled=False,
+            voice_source="none",
+            voice_id="",
+            voice_provider_voice_id="",
+            voice_profile_id=0,
+            voice_label="",
+        )
+        return next_session, {"ok": True, "source": "none"}
+    narration = video_b14_narration_source(session)
+    if not narration.get("ok"):
+        return session, narration
+    resolved = video_b14_voice_resolution(source, profile)
+    if not resolved.ok:
+        return session, {
+            "ok": False,
+            "source": source,
+            "reason": resolved.reason,
+            "public_message": resolved.public_message or minimax_voice_adapter.PUBLIC_SAFE_VOICE_NOT_READY,
+        }
+    next_session = video_b14_set_addon_plan(
+        user_id,
+        session,
+        voice_enabled=True,
+        voice_source=source,
+        voice_id=str(resolved.provider_voice_id or ""),
+        voice_provider_voice_id=str(resolved.provider_voice_id or ""),
+        voice_profile_id=int(resolved.profile_id or (profile or {}).get("id") or 0),
+        voice_label=str(resolved.voice_label or video_b14_addon_label("voice", source)),
+        narration_text=str(narration.get("text") or "")[:3500],
+    )
+    return next_session, {"ok": True, "source": source, "provider_voice_id": resolved.provider_voice_id, "narration_source": narration.get("source")}
+
+
+def video_b14_subtitle_text(session: dict | None = None, lang: str = "vi") -> str:
+    plan = video_b14_addon_plan_from_session(session)
+    source = video_b14_addon_label("subtitle", str(plan.get("subtitle_source") or "none"))
+    target = str(plan.get("subtitle_target_language") or "").strip()
+    lines = [
+        "💬 <b>Phụ đề cho video</b>",
+        "",
+        f"• Đang chọn: <b>{html.escape(source)}</b>",
+        f"• Ngôn ngữ dịch: <b>{html.escape(target or 'không dịch')}</b>",
+        "",
+        "TOAN AAS chỉ lưu lựa chọn phụ đề vào kế hoạch video. File thật chỉ tạo sau bước xác nhận cuối.",
+    ]
+    return "\n".join(lines)
+
+
+def video_b14_dub_text(session: dict | None = None, lang: str = "vi") -> str:
+    plan = video_b14_addon_plan_from_session(session)
+    voice_label = str(plan.get("voice_label") or video_b14_addon_label("voice", str(plan.get("voice_source") or "none")))
+    target = str(plan.get("dub_target_language") or plan.get("subtitle_target_language") or "").strip()
+    enabled = "Bật" if plan.get("dub_enabled") else "Tắt"
+    lines = [
+        "🌐 <b>Lồng tiếng cho video</b>",
+        "",
+        f"• Trạng thái: <b>{enabled}</b>",
+        f"• Giọng đọc: <b>{html.escape(voice_label)}</b>",
+        f"• Ngôn ngữ: <b>{html.escape(target or 'theo lời đọc')}</b>",
+        "",
+        "TOAN AAS sẽ dùng lời đọc theo kịch bản từng cảnh. Anh/chị có thể sửa lại lời đọc trước khi tạo video.",
+        "Bước này chỉ lưu kế hoạch, chưa tạo file thật và chưa trừ Xu.",
+    ]
+    return "\n".join(lines)
+
+
+def video_b14_dub_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🚫 Tắt lồng tiếng" if is_vi else "🚫 Dubbing off", callback_data="vproduct|b14_dub_set|none"),
+            InlineKeyboardButton("🌐 Bật lồng tiếng" if is_vi else "🌐 Dubbing on", callback_data="vproduct|b14_dub_set|on"),
+        ],
+        [
+            InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="vproduct|b14_dub_lang|Tiếng Việt"),
+            InlineKeyboardButton("🇺🇸 English", callback_data="vproduct|b14_dub_lang|English"),
+        ],
+        [
+            InlineKeyboardButton("🇯🇵 日本語", callback_data="vproduct|b14_dub_lang|日本語"),
+            InlineKeyboardButton("🇰🇷 한국어", callback_data="vproduct|b14_dub_lang|한국어"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
 def video_b14_voice_text(session: dict | None = None, user_id=0, lang: str = "vi") -> str:
     plan = video_b14_addon_plan_from_session(session)
-    source = video_b14_addon_label("voice", str(plan.get("voice_source") or "none"))
-    narration = video_b14_narration_from_storyboard(session)
+    source = str(plan.get("voice_label") or video_b14_addon_label("voice", str(plan.get("voice_source") or "none")))
+    narration_info = video_b14_narration_source(session)
+    narration = str(narration_info.get("text") or "")
     preview = narration[:500] + ("..." if len(narration) > 500 else "")
     lines = [
         "🎙 <b>Giọng đọc cho video</b>",
@@ -52809,11 +52974,13 @@ def video_b14_voice_text(session: dict | None = None, user_id=0, lang: str = "vi
         f"• Đang chọn: <b>{html.escape(source)}</b>",
         f"• Âm lượng: <b>{safe_int(plan.get('voice_volume_percent'), 100)}%</b>",
         f"• Tốc độ đọc: <b>{safe_int(plan.get('voice_speed_percent'), 100)}%</b>",
+        f"• Nguồn lời đọc: <b>{html.escape(str(narration_info.get('source') or 'missing'))}</b>",
         "",
         "<b>Lời đọc dự kiến</b>",
-        html.escape(preview),
+        html.escape(preview or "Chưa có lời đọc. Anh/chị bấm Sửa lời đọc để nhập kịch bản."),
         "",
-        "Voice mặc định chỉ áp dụng vào kế hoạch video. Chưa tạo file thật, chưa trừ Xu.",
+        "TOAN AAS sẽ dùng lời đọc theo kịch bản từng cảnh. Anh/chị có thể sửa lại lời đọc trước khi tạo video.",
+        "Bước này chỉ lưu lựa chọn voice vào kế hoạch video. Chưa tạo file thật, chưa trừ Xu.",
     ]
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
@@ -52821,20 +52988,23 @@ def video_b14_voice_text(session: dict | None = None, user_id=0, lang: str = "vi
 def video_b14_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Không voice", callback_data="vproduct|b14_voice_source|none"),
-            InlineKeyboardButton("Nam mặc định", callback_data="vproduct|b14_voice_source|default_male"),
+            InlineKeyboardButton("🚫 Không voice", callback_data="vproduct|b14_voice_source|none"),
+            InlineKeyboardButton("👨 Nam mặc định", callback_data="vproduct|b14_voice_source|default_male"),
         ],
         [
-            InlineKeyboardButton("Nữ mặc định", callback_data="vproduct|b14_voice_source|default_female"),
-            InlineKeyboardButton("Voice đã gửi", callback_data="vproduct|b14_voice_source|uploaded"),
+            InlineKeyboardButton("👩 Nữ mặc định", callback_data="vproduct|b14_voice_source|default_female"),
+            InlineKeyboardButton("🎧 Voice đã gửi", callback_data="vproduct|b14_voice_source|uploaded"),
         ],
         [
-            InlineKeyboardButton("Voice đã lưu", callback_data="vproduct|b14_voice_source|saved"),
+            InlineKeyboardButton("📚 Voice đã lưu", callback_data="vproduct|b14_voice_source|saved"),
             InlineKeyboardButton("✍️ Sửa lời đọc", callback_data="vproduct|b14_voice_edit"),
         ],
         [
-            InlineKeyboardButton("🔊 Xem đoạn mẫu sau khi xác nhận" if normalize_user_language(lang) == "vi" else "🔊 Preview after confirm", callback_data="vproduct|b14_voice_preview"),
-            InlineKeyboardButton("✅ Áp dụng voice", callback_data="vproduct|b14_voice_done"),
+            InlineKeyboardButton("🔊 Nghe thử đoạn ngắn" if normalize_user_language(lang) == "vi" else "🔊 Short preview", callback_data="vproduct|b14_voice_preview"),
+            InlineKeyboardButton("🎚 Âm lượng giọng", callback_data="vproduct|b14_voice_volume"),
+        ],
+        [
+            InlineKeyboardButton("✅ Xong voice", callback_data="vproduct|b14_voice_done"),
         ],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
@@ -52888,13 +53058,17 @@ def video_b14_addon_text(session: dict | None = None, lang: str = "vi") -> str:
     plan = video_b14_addon_plan_from_session(session)
     yes = "Bật" if normalize_user_language(lang) == "vi" else "On"
     no = "Tắt" if normalize_user_language(lang) == "vi" else "Off"
+    voice_label = str(plan.get("voice_label") or video_b14_addon_label("voice", str(plan["voice_source"])))
+    subtitle_target = str(plan.get("subtitle_target_language") or "").strip()
+    dub_target = str(plan.get("dub_target_language") or plan.get("subtitle_target_language") or "").strip()
     return "\n".join([
         "🎙 <b>Voice / nhạc / phụ đề / logo</b>",
         "",
-        f"• Voice: <b>{yes if plan['voice_enabled'] else no}</b> · {html.escape(video_b14_addon_label('voice', str(plan['voice_source'])))} · âm lượng <b>{plan['voice_volume_percent']}%</b>",
+        f"• Voice: <b>{yes if plan['voice_enabled'] else no}</b> · {html.escape(voice_label)} · âm lượng <b>{plan['voice_volume_percent']}%</b>",
         f"• Nhạc: <b>{yes if plan['music_enabled'] else no}</b> · {html.escape(video_b14_addon_label('music', str(plan['music_source'])))} · âm lượng <b>{plan['music_volume_percent']}%</b>",
         f"• SFX: <b>{yes if plan['sfx_enabled'] else no}</b>",
-        f"• Phụ đề: <b>{yes if plan['subtitle_enabled'] else no}</b> · {html.escape(video_b14_addon_label('subtitle', str(plan['subtitle_source'])))}",
+        f"• Phụ đề: <b>{yes if plan['subtitle_enabled'] else no}</b> · {html.escape(video_b14_addon_label('subtitle', str(plan['subtitle_source'])))}{(' · ' + html.escape(subtitle_target)) if subtitle_target else ''}",
+        f"• Lồng tiếng: <b>{yes if plan.get('dub_enabled') else no}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
         f"• Logo: <b>{yes if plan['logo_enabled'] else no}</b> · {html.escape(video_b14_addon_label('logo', str(plan['logo_position'])))}",
         "",
         "Bước này chỉ lưu lựa chọn hậu kỳ. Chưa tạo file thật, chưa trừ Xu.",
@@ -52914,12 +53088,13 @@ def video_b14_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("💬 Phụ đề" if is_vi else "💬 Subtitles", callback_data="vproduct|b14_addon_subtitle"),
-            InlineKeyboardButton("🏷 Logo" if is_vi else "🏷 Logo", callback_data="vproduct|b14_addon_logo"),
+            InlineKeyboardButton("🌐 Lồng tiếng" if is_vi else "🌐 Dubbing", callback_data="vproduct|b14_addon_dub"),
         ],
         [
+            InlineKeyboardButton("🏷 Logo" if is_vi else "🏷 Logo", callback_data="vproduct|b14_addon_logo"),
             InlineKeyboardButton("💥 SFX" if is_vi else "💥 SFX", callback_data="vproduct|b14_addon_sfx"),
-            InlineKeyboardButton("✅ Xong add-ons" if is_vi else "✅ Done", callback_data="vproduct|b14_addon_done"),
         ],
+        [InlineKeyboardButton("✅ Xong add-ons" if is_vi else "✅ Done", callback_data="vproduct|b14_addon_done")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|storyboard_confirm"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -53102,11 +53277,15 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
     if invoice["addons_disabled_by_package"]:
         lines.extend(["", VIDEO_B14_2_PACKAGE_200_NOTE_VI])
     else:
+        voice_label = str(addon_plan.get("voice_label") or video_b14_addon_label("voice", str(addon_plan.get("voice_source") or "none")))
+        subtitle_label = video_b14_addon_label("subtitle", str(addon_plan.get("subtitle_source") or "none"))
+        dub_target = str(addon_plan.get("dub_target_language") or addon_plan.get("subtitle_target_language") or "").strip()
         lines.extend([
             "",
-            f"• Voice: {'bật' if addon_plan.get('voice_enabled') else 'tắt'} · {addon_plan.get('voice_volume_percent', 100)}%",
+            f"• Voice: {'bật' if addon_plan.get('voice_enabled') else 'tắt'} · {html.escape(voice_label)} · {addon_plan.get('voice_volume_percent', 100)}%",
             f"• Nhạc: {'bật' if addon_plan.get('music_enabled') else 'tắt'} · {addon_plan.get('music_volume_percent', 10)}%",
-            f"• Phụ đề: {'bật' if addon_plan.get('subtitle_enabled') else 'tắt'}",
+            f"• Phụ đề: {'bật' if addon_plan.get('subtitle_enabled') else 'tắt'} · {html.escape(subtitle_label)}",
+            f"• Lồng tiếng: {'bật' if addon_plan.get('dub_enabled') else 'tắt'}{(' · ' + html.escape(dub_target)) if dub_target else ''}",
             f"• Logo: {'bật' if addon_plan.get('logo_enabled') else 'tắt'}",
         ])
     lines.extend(["", "Chỉ sau khi bấm xác nhận, TOAN AAS mới trừ Xu và đưa tác vụ vào hàng chờ xử lý nền."])
@@ -53136,6 +53315,7 @@ def video_b14_eta_text(seconds: int) -> str:
 def video_b14_queue_status_text(session: dict | None, result: dict | None = None, user_id=0, lang: str = "vi") -> str:
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
+    addon_plan = dict(draft.get("b14_addon_plan") or {})
     result = dict(result or {})
     job = dict(result.get("job") or draft.get("b14_queue_job") or {})
     project = dict(result.get("project") or {})
@@ -53154,6 +53334,13 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         f"• Thời gian chờ dự kiến: <b>{video_b14_eta_text(eta)}</b>",
         "• Kết quả cuối cùng: <b>MP4</b>, TOAN AAS sẽ tự gửi khi hoàn tất.",
     ]
+    enabled_stages = []
+    if addon_plan.get("voice_enabled") or addon_plan.get("dub_enabled"):
+        enabled_stages.append("giọng đọc/lồng tiếng")
+    if addon_plan.get("subtitle_enabled"):
+        enabled_stages.append("phụ đề")
+    if enabled_stages:
+        lines.append(f"• Hậu kỳ đã chọn: <b>{html.escape(', '.join(enabled_stages))}</b>.")
     if duplicate:
         lines.append("• Ghi chú: video này đã có trong danh sách chờ, TOAN AAS không tạo trùng lần nữa.")
     lines.append("")
@@ -53247,6 +53434,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "sfx_enabled": False,
             "subtitle_enabled": False,
             "subtitle_source": "none",
+            "dub_enabled": False,
+            "dub_source": "none",
             "logo_enabled": False,
         })
     update = update_video_project(
@@ -54858,7 +55047,57 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, video_b14_voice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_voice_keyboard(lang))
     if action == "b14_voice_source":
         source = value if value in {"none", "default_male", "default_female", "uploaded", "saved"} else "none"
-        session = video_b14_set_addon_plan(uid, session, voice_enabled=(source != "none"), voice_source=source, narration_text=video_b14_narration_from_storyboard(session))
+        if source == "saved":
+            profiles = video_b14_saved_voice_profiles(uid, 5)
+            if not profiles:
+                return await safe_edit_or_send(
+                    query,
+                    "📚 Chưa có voice đã lưu nào sẵn sàng để dùng. Anh/chị chọn giọng mặc định hoặc tạo lại voice.",
+                    parse_mode="HTML",
+                    reply_markup=video_b14_voice_keyboard(lang),
+                )
+            session = task3d_session_step(uid, "b14_voice_saved", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(
+                query,
+                "📚 <b>Chọn voice đã lưu</b>\n\nTOAN AAS chỉ hiện các voice đã sẵn sàng để dùng cho video. Chưa tạo file thật và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=video_b14_voice_select_keyboard(uid, lang),
+            )
+        if source == "uploaded":
+            profiles = video_b14_saved_voice_profiles(uid, 1)
+            profile = profiles[0] if profiles else {}
+            session, result = video_b14_apply_voice_choice(uid, session, "uploaded", profile)
+            if not result.get("ok"):
+                return await safe_edit_or_send(
+                    query,
+                    result.get("public_message") or minimax_voice_adapter.PUBLIC_SAFE_VOICE_NOT_READY,
+                    reply_markup=video_b14_voice_keyboard(lang),
+                )
+        else:
+            session, result = video_b14_apply_voice_choice(uid, session, source)
+            if not result.get("ok"):
+                return await safe_edit_or_send(
+                    query,
+                    result.get("public_message") or "TOAN AAS cần lời đọc trước khi bật voice.",
+                    reply_markup=video_b14_voice_keyboard(lang),
+                )
+        session = task3d_session_step(uid, "b14_voice", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_b14_voice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_voice_keyboard(lang))
+    if action == "b14_voice_saved_pick":
+        profile = get_voice_profile_by_id(safe_int(value, 0)) or {}
+        if safe_int(profile.get("user_id"), 0) != safe_int(uid, 0) or not voice_profile_can_generate_tts(profile):
+            return await safe_edit_or_send(
+                query,
+                minimax_voice_adapter.PUBLIC_SAFE_VOICE_NOT_READY,
+                reply_markup=video_b14_voice_select_keyboard(uid, lang),
+            )
+        session, result = video_b14_apply_voice_choice(uid, session, "saved", profile)
+        if not result.get("ok"):
+            return await safe_edit_or_send(
+                query,
+                result.get("public_message") or minimax_voice_adapter.PUBLIC_SAFE_VOICE_NOT_READY,
+                reply_markup=video_b14_voice_select_keyboard(uid, lang),
+            )
         session = task3d_session_step(uid, "b14_voice", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_voice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_voice_keyboard(lang))
     if action == "b14_voice_edit":
@@ -54869,9 +55108,22 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_voice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
     if action == "b14_voice_preview":
+        gate = provider_gate.evaluate_provider_gate(
+            context=provider_gate.PREVIEW_CONFIRMED,
+            is_admin=video_b14_is_admin_or_owner(uid),
+            is_owner=video_b14_is_admin_or_owner(uid),
+            configured=bool(video_b14_addon_plan_from_session(session).get("voice_provider_voice_id")),
+            public_ready=False,
+            preview_confirmed=False,
+            preview_no_charge=False,
+        )
+        if video_b14_is_admin_or_owner(uid) and gate.allowed:
+            message = "OWNER/ADMIN TEST MODE — không trừ Xu. Bản nghe thử thật chỉ chạy bằng lệnh smoke hoặc sau khi bật test rõ ràng."
+        else:
+            message = "🔊 Nghe thử đoạn ngắn sẽ được cắt từ video hoàn chỉnh sau khi anh/chị xác nhận tạo video. Hiện tại TOAN AAS chỉ lưu lựa chọn, chưa tạo file thật và chưa trừ Xu."
         return await safe_edit_or_send(
             query,
-            "🔊 Đoạn mẫu voice sẽ được cắt từ video hoàn chỉnh sau khi anh/chị xác nhận tạo video. Hiện tại TOAN AAS chỉ lưu lựa chọn, chưa tạo file thật và chưa trừ Xu.",
+            message,
             reply_markup=video_b14_voice_keyboard(lang),
         )
     if action == "b14_voice_done":
@@ -54914,15 +55166,51 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session = video_b14_set_addon_plan(uid, session, sfx_enabled=(value == "default"))
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addon_subtitle":
-        return await safe_edit_or_send(query, "💬 <b>Phụ đề</b>", parse_mode="HTML", reply_markup=video_b14_choice_keyboard("b14_subtitle_source", [
+        return await safe_edit_or_send(query, video_b14_subtitle_text(session, lang), parse_mode="HTML", reply_markup=video_b14_choice_keyboard("b14_subtitle_source", [
             ("Không phụ đề", "none"),
             ("Từ lời đọc", "from_narration"),
             ("SRT/VTT đã gửi", "uploaded"),
+            ("Phụ đề dịch", "translated"),
         ], lang))
     if action == "b14_subtitle_source":
-        source = value if value in {"none", "from_narration", "uploaded"} else "none"
-        session = video_b14_set_addon_plan(uid, session, subtitle_enabled=(source != "none"), subtitle_source=source)
+        source = value if value in {"none", "from_narration", "uploaded", "translated"} else "none"
+        fields = {"subtitle_enabled": (source != "none"), "subtitle_source": source}
+        if source == "translated" and not video_b14_addon_plan_from_session(session).get("subtitle_target_language"):
+            fields["subtitle_target_language"] = "Tiếng Việt"
+        if source == "from_narration" and not video_b14_narration_source(session).get("ok"):
+            return await safe_edit_or_send(
+                query,
+                "TOAN AAS cần lời đọc/kịch bản trước khi tạo phụ đề theo lời đọc. Anh/chị vào Voice rồi bấm Sửa lời đọc.",
+                reply_markup=video_b14_addon_keyboard(lang),
+            )
+        session = video_b14_set_addon_plan(uid, session, **fields)
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+    if action == "b14_addon_dub":
+        return await safe_edit_or_send(query, video_b14_dub_text(session, lang), parse_mode="HTML", reply_markup=video_b14_dub_keyboard(lang))
+    if action == "b14_dub_set":
+        enabled = value == "on"
+        plan = video_b14_addon_plan_from_session(session)
+        if enabled and not plan.get("voice_enabled"):
+            session, result = video_b14_apply_voice_choice(uid, session, "default_male")
+            if not result.get("ok"):
+                return await safe_edit_or_send(
+                    query,
+                    result.get("public_message") or "TOAN AAS cần lời đọc trước khi bật lồng tiếng.",
+                    reply_markup=video_b14_dub_keyboard(lang),
+                )
+        session = video_b14_set_addon_plan(
+            uid,
+            session,
+            dub_enabled=enabled,
+            dub_source="from_voice" if enabled else "none",
+            subtitle_enabled=True if enabled else plan.get("subtitle_enabled", False),
+            subtitle_source="from_narration" if enabled and plan.get("subtitle_source") == "none" else plan.get("subtitle_source", "from_narration"),
+        )
+        return await safe_edit_or_send(query, video_b14_dub_text(session, lang), parse_mode="HTML", reply_markup=video_b14_dub_keyboard(lang))
+    if action == "b14_dub_lang":
+        target = str(value or "").strip()[:80]
+        session = video_b14_set_addon_plan(uid, session, dub_enabled=True, dub_source="translated", dub_target_language=target, subtitle_enabled=True, subtitle_source="translated", subtitle_target_language=target)
+        return await safe_edit_or_send(query, video_b14_dub_text(session, lang), parse_mode="HTML", reply_markup=video_b14_dub_keyboard(lang))
     if action == "b14_addon_logo":
         return await safe_edit_or_send(query, "🏷 <b>Logo</b>", parse_mode="HTML", reply_markup=video_b14_choice_keyboard("b14_logo_set", [
             ("Không logo", "none"),
@@ -54959,7 +55247,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session["draft"] = draft
         session = save_video_session(uid, session)
         if quality == 200:
-            session = video_b14_set_addon_plan(uid, session, voice_enabled=False, voice_source="none", music_enabled=False, music_source="none", sfx_enabled=False, subtitle_enabled=False, subtitle_source="none", logo_enabled=False)
+            session = video_b14_set_addon_plan(uid, session, voice_enabled=False, voice_source="none", voice_provider_voice_id="", dub_enabled=False, dub_source="none", music_enabled=False, music_source="none", sfx_enabled=False, subtitle_enabled=False, subtitle_source="none", logo_enabled=False)
         if draft.get("b14_scene_count_selected"):
             ok, guard_message = video_b14_public_render_guard(uid)
             if not ok:
@@ -79576,6 +79864,194 @@ async def cmd_tool_test_full_dub_video(update: Update, context: ContextTypes.DEF
         f"• Mux: <code>{html.escape(mux_status)}</code>\n"
         "• No Xu deducted: <code>yes</code>\n"
         "• LIVE PASS claimed: <code>NO</code>",
+        parse_mode="HTML",
+    )
+
+
+def p0_18a_admin_allowed(user_id) -> bool:
+    return bool(is_admin_user(user_id) or is_owner_user(user_id))
+
+
+async def p0_18a_admin_guard(update: Update, tool_name: str) -> bool:
+    if p0_18a_admin_allowed(update.effective_user.id):
+        return True
+    save_tool_test_result(tool_name, "BLOCKED", "admin_only; no provider call; no charge", update.effective_user.id)
+    await update.message.reply_text("⛔ Khu vực này chỉ dành cho Admin. TOAN AAS chưa xử lý file và chưa trừ Xu.")
+    return False
+
+
+def p0_18a_storyboard_sample() -> dict:
+    return {
+        "scene_cards": [
+            {"scene_index": 1, "narration_line": "Cảnh mở đầu giới thiệu sản phẩm thật rõ ràng.", "start": 0, "end": 6},
+            {"scene_index": 2, "narration_line": "Cảnh thứ hai nhấn lợi ích chính và cách sử dụng.", "start": 6, "end": 12},
+            {"scene_index": 3, "narration_line": "Cảnh cuối chốt thông điệp và lời kêu gọi hành động.", "start": 12, "end": 18},
+        ]
+    }
+
+
+def p0_18a_fake_tts(text: str, voice_id: str = "", output_path: str = "", **_kwargs) -> bytes:
+    payload = (f"FAKE-AUDIO:{voice_id}:{text[:120]}").encode("utf-8")
+    if output_path:
+        Path(output_path).write_bytes(payload)
+    return payload
+
+
+def p0_18a_fake_mux_success(video_path: str, audio_path: str, output_path: str, subtitle_path: str = "") -> str:
+    del subtitle_path
+    Path(output_path).write_bytes(b"FAKE-MP4\n" + Path(video_path).read_bytes()[:64] + Path(audio_path).read_bytes()[:64])
+    return output_path
+
+
+def p0_18a_fake_mux_failure(*_args, **_kwargs) -> str:
+    raise RuntimeError("fake_mux_failure")
+
+
+async def cmd_tool_test_voice_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_18a_voice_gate"):
+        return
+    uid = update.effective_user.id
+    decisions = [
+        provider_gate.evaluate_provider_gate(context=provider_gate.INTERACTIVE_UI, configured=True),
+        provider_gate.evaluate_provider_gate(context=provider_gate.WORKER_CONFIRMED_JOB, configured=True, final_confirmed=True),
+        provider_gate.evaluate_provider_gate(context=provider_gate.ADMIN_TEST, is_admin=True, configured=True, fake_mode=True),
+    ]
+    ok = (not decisions[0].allowed) and decisions[1].allowed and decisions[2].allowed
+    save_tool_test_result("p0_18a_voice_gate", "PASS" if ok else "FAIL", "; ".join(item.reason for item in decisions), uid)
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Public UI blocked: <code>{'YES' if not decisions[0].allowed else 'NO'}</code>\n"
+        f"• Confirmed worker allowed: <code>{'YES' if decisions[1].allowed else 'NO'}</code>\n"
+        f"• Admin fake test allowed: <code>{'YES' if decisions[2].allowed else 'NO'}</code>\n"
+        "• Provider call: <code>NO</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_minimax_adapter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_18a_minimax_adapter"):
+        return
+    uid = update.effective_user.id
+    if "--fake" not in set(context.args or []):
+        save_tool_test_result("p0_18a_minimax_adapter", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_minimax_adapter --fake</code> để test adapter bằng file giả, không gọi provider và không trừ Xu.", parse_mode="HTML")
+    with tempfile.TemporaryDirectory(prefix="toanaas_p018a_voice_") as tmp:
+        output = Path(tmp) / "voice.mp3"
+        resolved = minimax_voice_adapter.resolve_provider_voice_id(voice_source="default_male", default_male_voice_id=default_tts_voice_id("male"))
+        artifact = minimax_voice_adapter.synthesize_text_to_audio(
+            text="Xin chào TOAN AAS",
+            provider_voice_id=resolved.provider_voice_id,
+            output_path=output,
+            tts_func=p0_18a_fake_tts,
+        )
+        status = "PASS" if resolved.ok and artifact.ok and artifact.size_bytes > 0 else "FAIL"
+        save_tool_test_result("p0_18a_minimax_adapter", status, f"resolved={resolved.ok}; bytes={artifact.size_bytes}; fake=yes; provider_call=no", uid)
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Voice id ready: <code>{'YES' if resolved.ok else 'NO'}</code>\n"
+        f"• Audio artifact bytes: <code>{artifact.size_bytes}</code>\n"
+        "• Provider call: <code>NO</code>\n"
+        f"• Result: <code>{status}</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_voice_vault_lookup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_18a_voice_vault_lookup"):
+        return
+    uid = update.effective_user.id
+    profiles = user_voice_profile_rows(uid, 8, 0, include_inactive=True)
+    ready = [profile for profile in profiles if voice_profile_can_generate_tts(profile)]
+    save_tool_test_result("p0_18a_voice_vault_lookup", "PASS", f"profiles={len(profiles)}; ready={len(ready)}; provider_call=no", uid)
+    names = ", ".join(str(profile.get("display_name") or f"#{profile.get('id')}")[:32] for profile in ready[:5]) or "-"
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Tổng voice trong kho: <code>{len(profiles)}</code>\n"
+        f"• Voice sẵn sàng: <code>{len(ready)}</code>\n"
+        f"• Tên hiển thị: <code>{html.escape(names)}</code>\n"
+        "• Provider call: <code>NO</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_subtitle_from_storyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_18a_subtitle_from_storyboard"):
+        return
+    uid = update.effective_user.id
+    if "--fake" not in set(context.args or []):
+        save_tool_test_result("p0_18a_subtitle_from_storyboard", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_subtitle_from_storyboard --fake</code> để test SRT từ storyboard giả.", parse_mode="HTML")
+    transcript = subtitle_dub_pipeline.build_transcript_from_storyboard(p0_18a_storyboard_sample(), scene_duration=6)
+    srt_text = subtitle_dub_pipeline.generate_srt_from_transcript(transcript)
+    valid = subtitle_dub_pipeline.validate_srt(srt_text)
+    save_tool_test_result("p0_18a_subtitle_from_storyboard", "PASS" if valid else "FAIL", f"segments={len(transcript)}; srt_valid={valid}; provider_call=no", uid)
+    await update.message.reply_document(
+        document=video_dubbing_output_file(srt_text.encode("utf-8"), "toan_aas_storyboard_subtitle.srt"),
+        filename="toan_aas_storyboard_subtitle.srt",
+        caption=f"✅ Storyboard → SRT {'PASS' if valid else 'FAIL'} — admin fake / 0 Xu",
+    )
+
+
+async def cmd_tool_test_subtitle_dub_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_18a_subtitle_dub_pipeline"):
+        return
+    uid = update.effective_user.id
+    if "--fake-files" not in set(context.args or []):
+        save_tool_test_result("p0_18a_subtitle_dub_pipeline", "NO_CONFIRM", "missing --fake-files; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_subtitle_dub_pipeline --fake-files</code> để test pipeline bằng file giả.", parse_mode="HTML")
+    with tempfile.TemporaryDirectory(prefix="toanaas_p018a_dub_") as tmp:
+        workspace = Path(tmp)
+        source_video = workspace / "source.mp4"
+        source_video.write_bytes(b"FAKE-SOURCE-MP4")
+        transcript = subtitle_dub_pipeline.build_transcript_from_storyboard(p0_18a_storyboard_sample(), scene_duration=6)
+        result = subtitle_dub_pipeline.run_dub_pipeline(
+            workspace_dir=str(workspace / "out"),
+            source_video_path=str(source_video),
+            transcript=transcript,
+            target_language="Tiếng Việt",
+            provider_voice_id=default_tts_voice_id("female"),
+            tts_func=p0_18a_fake_tts,
+            mux_func=p0_18a_fake_mux_success,
+        )
+        status = "PASS" if result.ok and result.result_type == "mp4" and result.video_path and Path(result.video_path).stat().st_size > 0 else "FAIL"
+        save_tool_test_result("p0_18a_subtitle_dub_pipeline", status, f"type={result.result_type}; files={len(result.created_files)}; provider_call=no", uid)
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Transcript/SRT/audio/video: <code>{status}</code>\n"
+        f"• Result type: <code>{html.escape(result.result_type)}</code>\n"
+        "• Provider call: <code>NO</code>\n"
+        "• LIVE PASS claimed: <code>NO</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_subtitle_dub_mux_failure(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_18a_subtitle_dub_mux_failure"):
+        return
+    uid = update.effective_user.id
+    if "--fake-files" not in set(context.args or []):
+        save_tool_test_result("p0_18a_subtitle_dub_mux_failure", "NO_CONFIRM", "missing --fake-files; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_subtitle_dub_mux_failure --fake-files</code> để test partial result.", parse_mode="HTML")
+    with tempfile.TemporaryDirectory(prefix="toanaas_p018a_dub_fail_") as tmp:
+        workspace = Path(tmp)
+        source_video = workspace / "source.mp4"
+        source_video.write_bytes(b"FAKE-SOURCE-MP4")
+        transcript = subtitle_dub_pipeline.build_transcript_from_storyboard(p0_18a_storyboard_sample(), scene_duration=6)
+        result = subtitle_dub_pipeline.run_dub_pipeline(
+            workspace_dir=str(workspace / "out"),
+            source_video_path=str(source_video),
+            transcript=transcript,
+            provider_voice_id=default_tts_voice_id("female"),
+            tts_func=p0_18a_fake_tts,
+            mux_func=p0_18a_fake_mux_failure,
+        )
+        partial_ok = result.ok and result.result_type == "partial" and bool(result.audio_path) and bool(result.subtitle_path)
+        save_tool_test_result("p0_18a_subtitle_dub_mux_failure", "PASS" if partial_ok else "FAIL", f"type={result.result_type}; partial={partial_ok}; provider_call=no", uid)
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Partial result khi ghép lỗi: <code>{'PASS' if partial_ok else 'FAIL'}</code>\n"
+        f"• Thông báo public sạch: <code>{html.escape(result.public_message or '-')}</code>\n"
+        "• Provider call: <code>NO</code>",
         parse_mode="HTML",
     )
 
@@ -144726,6 +145202,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_video_backstack", cmd_tool_test_video_backstack))
     tg_app.add_handler(CommandHandler("tool_test_video_live_dry_run", cmd_tool_test_video_live_dry_run))
     tg_app.add_handler(CommandHandler("tool_test_video_job_status", cmd_tool_test_video_job_status))
+    tg_app.add_handler(CommandHandler("tool_test_voice_gate", cmd_tool_test_voice_gate))
+    tg_app.add_handler(CommandHandler("tool_test_minimax_adapter", cmd_tool_test_minimax_adapter))
+    tg_app.add_handler(CommandHandler("tool_test_voice_vault_lookup", cmd_tool_test_voice_vault_lookup))
+    tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_subtitle_from_storyboard(?:@\w+)?(?:\s|$)"), cmd_tool_test_subtitle_from_storyboard))
+    tg_app.add_handler(CommandHandler("tool_test_subtitle_dub_pipeline", cmd_tool_test_subtitle_dub_pipeline))
+    tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_subtitle_dub_mux_failure(?:@\w+)?(?:\s|$)"), cmd_tool_test_subtitle_dub_mux_failure))
     tg_app.add_handler(CommandHandler("video_jobs", cmd_video_jobs))
     tg_app.add_handler(CommandHandler("video_job", cmd_video_job))
     tg_app.add_handler(CommandHandler("video_multiscene_job", cmd_video_multiscene_job))
