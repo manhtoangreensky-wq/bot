@@ -1,0 +1,10 @@
+{
+  "name": "postprocess_cues",
+  "blocks": [
+    "subtitles are added later in postprocess",
+    "logo/watermark is added later in postprocess",
+    "voice and music are mixed later in postprocess",
+    "no random embedded text in render",
+    "leave safe lower-third space when subtitles are enabled"
+  ]
+}

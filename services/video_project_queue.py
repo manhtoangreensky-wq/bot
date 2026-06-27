@@ -77,6 +77,7 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
             scene_cards_json TEXT,
             prompt_text TEXT,
             addon_plan_json TEXT,
+            creative_control_json TEXT,
             quality_tier INTEGER DEFAULT 200,
             scene_count INTEGER DEFAULT 1,
             addons_disabled_by_package INTEGER DEFAULT 0,
@@ -144,6 +145,7 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
         ("scene_cards_json", "scene_cards_json TEXT"),
         ("prompt_text", "prompt_text TEXT"),
         ("addon_plan_json", "addon_plan_json TEXT"),
+        ("creative_control_json", "creative_control_json TEXT"),
         ("quality_tier", "quality_tier INTEGER DEFAULT 200"),
         ("scene_count", "scene_count INTEGER DEFAULT 1"),
         ("addons_disabled_by_package", "addons_disabled_by_package INTEGER DEFAULT 0"),
@@ -223,6 +225,7 @@ def _project_from_row(row: sqlite3.Row | tuple | None) -> dict[str, Any]:
         "scene_cards_json",
         "prompt_text",
         "addon_plan_json",
+        "creative_control_json",
         "quality_tier",
         "scene_count",
         "addons_disabled_by_package",
@@ -295,7 +298,7 @@ def get_video_project(conn: sqlite3.Connection, project_id: int | None = None, p
     if project_id:
         row = conn.execute(
             """SELECT project_id,project_uuid,user_id,status,profile_id,topic,ratio,selected_suggestion_json,
-                      asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,
+                      asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,creative_control_json,
                       quality_tier,scene_count,addons_disabled_by_package,invoice_json,total_xu_estimated,
                       is_confirmed,job_id,final_video_file_id,final_video_path,error_log,created_at,updated_at,
                       confirmed_at,completed_at,cancelled_at
@@ -306,7 +309,7 @@ def get_video_project(conn: sqlite3.Connection, project_id: int | None = None, p
     if project_uuid:
         row = conn.execute(
             """SELECT project_id,project_uuid,user_id,status,profile_id,topic,ratio,selected_suggestion_json,
-                      asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,
+                      asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,creative_control_json,
                       quality_tier,scene_count,addons_disabled_by_package,invoice_json,total_xu_estimated,
                       is_confirmed,job_id,final_video_file_id,final_video_path,error_log,created_at,updated_at,
                       confirmed_at,completed_at,cancelled_at
@@ -362,6 +365,7 @@ PROJECT_UPDATE_FIELDS = {
     "scene_cards_json",
     "prompt_text",
     "addon_plan_json",
+    "creative_control_json",
     "quality_tier",
     "scene_count",
     "addons_disabled_by_package",
@@ -429,7 +433,7 @@ def get_active_video_project(conn: sqlite3.Connection, user_id: int) -> dict[str
     ensure_video_project_queue_schema(conn)
     row = conn.execute(
         """SELECT project_id,project_uuid,user_id,status,profile_id,topic,ratio,selected_suggestion_json,
-                  asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,
+                  asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,creative_control_json,
                   quality_tier,scene_count,addons_disabled_by_package,invoice_json,total_xu_estimated,
                   is_confirmed,job_id,final_video_file_id,final_video_path,error_log,created_at,updated_at,
                   confirmed_at,completed_at,cancelled_at

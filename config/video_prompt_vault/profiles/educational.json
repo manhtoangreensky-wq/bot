@@ -1,0 +1,29 @@
+{
+  "profile_id": "educational",
+  "profile_name_vi": "Video kiến thức",
+  "product_goal": "Giải thích một ý rõ ràng, dễ hiểu, có ví dụ.",
+  "script_formulas": ["question -> definition -> example -> process -> recap"],
+  "hook_templates": ["Hiểu nhanh trong vài giây", "Nếu mới bắt đầu, hãy nhìn ví dụ này"],
+  "scene_role_templates": [{"role": "question", "purpose": "ask what viewer learns"}, {"role": "example", "purpose": "concrete example"}, {"role": "recap", "purpose": "key takeaway"}],
+  "shot_templates": ["clean diagram frame", "isometric explanation shot"],
+  "camera_templates": ["diagram-friendly centered framing"],
+  "motion_templates": ["step-by-step reveal"],
+  "visual_style_templates": ["clean 3D infographic"],
+  "color_tone_templates": ["bright clean educational palette"],
+  "transition_templates": ["wipe between concepts"],
+  "voice_cues": ["trustworthy teacher"],
+  "music_cues": ["low corporate inspiration"],
+  "subtitle_cues": ["bullet-style captions"],
+  "logo_cues": ["small educational watermark"],
+  "negative_prompt_blocks": ["no unreadable diagram labels in render"],
+  "do_rules": ["one concept per scene"],
+  "avoid_rules": ["avoid overloaded visuals"],
+  "example_story_bibles": ["concept, analogy, practical value"],
+  "example_scene_cards": ["definition then example"],
+  "example_provider_prompts": ["clean visual metaphor"],
+  "product_domains": {
+    "ai_tool": {"keywords": ["AI", "agent", "tool", "automation"], "visual_style": "clean tech infographic", "camera": "centered UI-friendly framing"},
+    "tutorial": {"keywords": ["hướng dẫn", "tutorial", "cách"], "script_formulas": ["problem -> step 1 -> step 2 -> result"]},
+    "general": {"keywords": ["kiến thức", "giải thích"], "transition": "wipe between concepts"}
+  }
+}

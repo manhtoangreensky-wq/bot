@@ -1,0 +1,29 @@
+{
+  "profile_id": "philosophy_quotes",
+  "profile_name_vi": "Video triết lý / đạo lý",
+  "product_goal": "Tạo video chậm, sâu, có khoảng nghỉ và một thông điệp nhớ được.",
+  "script_formulas": ["quote hook -> pause -> reflection -> emotional closing"],
+  "hook_templates": ["Có những điều chỉ hiểu ra khi ta dừng lại", "Một câu hỏi nhỏ nhưng chạm vào cảm xúc"],
+  "scene_role_templates": [{"role": "quote", "purpose": "short thought"}, {"role": "pause", "purpose": "let visual breathe"}, {"role": "meaning", "purpose": "emotional meaning"}],
+  "shot_templates": ["quiet wide shot", "slow nature close-up"],
+  "camera_templates": ["locked-off or slow push"],
+  "motion_templates": ["slow natural movement"],
+  "visual_style_templates": ["minimal zen cinematic"],
+  "color_tone_templates": ["soft dark cinematic"],
+  "transition_templates": ["slow crossfade"],
+  "voice_cues": ["deep reflective voice"],
+  "music_cues": ["lofi or ambient rain"],
+  "subtitle_cues": ["elegant large text"],
+  "logo_cues": ["avoid logo unless requested"],
+  "negative_prompt_blocks": ["no cluttered quote text inside render"],
+  "do_rules": ["leave breathing room"],
+  "avoid_rules": ["avoid fast cuts"],
+  "example_story_bibles": ["one message, one mood"],
+  "example_scene_cards": ["pause beat included"],
+  "example_provider_prompts": ["calm visual metaphor"],
+  "product_domains": {
+    "healing": {"keywords": ["chữa lành", "bình yên", "healing"], "color": "soft warm calm palette"},
+    "motivation": {"keywords": ["động lực", "kỷ luật", "thành công"], "motion": "slow push toward light"},
+    "general": {"keywords": ["triết lý", "đạo lý", "quote"], "transition": "slow crossfade"}
+  }
+}

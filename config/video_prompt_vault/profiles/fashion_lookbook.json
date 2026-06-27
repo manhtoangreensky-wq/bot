@@ -1,0 +1,32 @@
+{
+  "profile_id": "fashion_lookbook",
+  "profile_name_vi": "Video thời trang / lookbook",
+  "product_goal": "Trình diễn outfit, chất liệu, pose và nhịp cắt theo beat.",
+  "script_formulas": ["style hook -> look 1 -> detail -> look variation -> CTA"],
+  "hook_templates": ["Một outfit đổi mood cả ngày", "Nhìn nhanh là biết style hôm nay"],
+  "scene_role_templates": [{"role": "hook", "purpose": "strong outfit pose"}, {"role": "detail", "purpose": "fabric/accessory close-up"}, {"role": "variation", "purpose": "pose or look change"}, {"role": "CTA", "purpose": "brand/sale keyword"}],
+  "shot_templates": ["full body pose", "fabric macro", "beat cut turn-around"],
+  "camera_templates": ["full-body fashion framing and detail close-up"],
+  "motion_templates": ["pose change, fabric movement, beat cut"],
+  "visual_style_templates": ["editorial fashion photography"],
+  "color_tone_templates": ["stylish clean palette"],
+  "transition_templates": ["cut on beat"],
+  "voice_cues": ["usually no voice or short hook"],
+  "music_cues": ["strong fashion beat"],
+  "subtitle_cues": ["short keyword flashes"],
+  "logo_cues": ["brand logo at final pose"],
+  "negative_prompt_blocks": ["no distorted body or clothing"],
+  "do_rules": ["keep outfit material and color consistent"],
+  "avoid_rules": ["avoid long narration"],
+  "example_story_bibles": ["outfit, model pose, material, mood"],
+  "example_scene_cards": ["pose to detail to full look"],
+  "example_provider_prompts": ["beat-cut fashion lookbook with consistent outfit"],
+  "product_domains": {
+    "outfit": {"keywords": ["outfit", "áo", "váy", "quần", "look"], "camera": "full-body pose and mirror angle", "transition": "cut on beat"},
+    "accessories": {"keywords": ["túi", "giày", "kính", "phụ kiện"], "camera": "macro accessory close-up"},
+    "seasonal_collection": {"keywords": ["summer", "winter", "bộ sưu tập", "collection"], "visual_style": "editorial seasonal campaign"},
+    "sale_campaign": {"keywords": ["sale", "giảm giá", "flash"], "motion": "fast beat cuts and price-safe empty space"},
+    "model_pose": {"keywords": ["pose", "người mẫu", "model"], "camera": "full body runway-like movement"},
+    "general": {"keywords": ["thời trang", "fashion"], "transition": "cut on beat"}
+  }
+}

@@ -61,10 +61,12 @@ def test_storyboard_preview_buttons_are_text_planning_only():
     callbacks = _callbacks(bot.video_b14_storyboard_keyboard("vi"))
     assert callbacks == [
         "vproduct|storyboard_confirm",
-        "vproduct|input_text",
+        "vproduct|b14_prompt_image_text",
+        "vproduct|b14_prompt_video_text",
+        "vproduct|b14_export_pack",
+        "vproduct|b14_creative_screen",
+        "vproduct|storyboard_confirm",
         "vproduct|asset_intro",
-        "vproduct|restyle",
-        "vproduct|b14_scene_count_screen",
         "vproduct|b14_addons",
         "menu|main",
     ]

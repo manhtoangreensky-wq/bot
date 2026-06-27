@@ -256,6 +256,10 @@ def test_trend_select_generates_hook_script_storyboard_prompt():
     query = _FakeQuery(user_id, "vproduct|asset_skip_confirm")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
+    assert session["current_step"] == "b14_creative_controls"
+    query = _FakeQuery(user_id, "vproduct|b14_creative_done")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
     assert session["current_step"] == "storyboard_preview"
     assert session["draft"]["b14_storyboard_plan"]
     assert session["draft"]["provider_called"] is False
@@ -454,8 +458,12 @@ def test_optional_skip_continues_to_prompt_output():
         query = _FakeQuery(user_id, callback)
         asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "result"
-    assert session["draft"]["prompt_bundle"]
+    assert session["current_step"] == "b14_creative_controls"
+    query = _FakeQuery(user_id, "vproduct|b14_creative_done")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] == "storyboard_preview"
+    assert session["draft"]["b14_storyboard_plan"]
     assert session["draft"]["provider_called"] is False
     assert session["draft"]["xu_charged"] == 0
     bot.clear_video_session(user_id)
@@ -495,6 +503,10 @@ def test_guided_idea_motion_and_scene_skip_are_free_prompt_steps():
     assert session["draft"].get("xu_charged", 0) == 0
 
     query = _FakeQuery(user_id, "vproduct|asset_skip_confirm")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] == "b14_creative_controls"
+    query = _FakeQuery(user_id, "vproduct|b14_creative_done")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
     assert session["current_step"] == "storyboard_preview"
@@ -2119,7 +2131,7 @@ def test_change_style_preserves_session():
     query = _FakeQuery(user_id, "vproduct|restyle")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "style"
+    assert session["current_step"] == "b14_creative_controls"
     assert session["source_media_ref"] == "telegram-file-1"
     assert session["topic"] == "chủ đề giữ lại"
     assert session["draft"]["prompt_bundle"] == bundle

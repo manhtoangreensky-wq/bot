@@ -1,0 +1,12 @@
+{
+  "name": "shot_types",
+  "blocks": [
+    "wide establishing shot with clear location logic",
+    "medium shot that keeps the subject readable",
+    "macro close-up for product/object detail",
+    "over-shoulder context shot",
+    "top-down process shot",
+    "low-angle hero shot",
+    "vertical selfie-style shot"
+  ]
+}

@@ -159,7 +159,8 @@ def test_no_profile_creates_separate_pipeline_or_large_bot_dict():
     assert "render_scene" not in source
     bot_source = Path("bot.py").read_text(encoding="utf-8")
     assert "VIDEO_PRODUCT_PROFILES" not in bot_source
-    assert "ugc_affiliate" not in bot_source
+    assert "raw smartphone perfume try-on" not in bot_source
+    assert "smooth FPV architecture tour" not in bot_source
 
 
 def test_bot_b14_admin_commands_and_asset_gate_wiring():
@@ -337,10 +338,10 @@ def test_scene_prompt_contains_story_bible_reference_summary_and_one_action():
     plan = planner.create_storyboard_plan(profile_id="storytelling", idea_text="nhân vật vượt qua nỗi sợ", asset_pack=pack)
     cards = continuity.build_continuity_prompts(plan.story_bible, plan.scene_cards)
     prompt = cards[0].provider_prompt
-    assert "[GLOBAL CONTINUITY]" in prompt
-    assert "Same subject/product/character" in prompt
+    assert "[CONTINUITY LOCK]" in prompt
+    assert "Keep the same subject/product/character" in prompt
     assert "Asset summary" in prompt
-    assert "Avoid random text" in prompt
+    assert "[NO TEXT RULE]" in prompt
     assert continuity.scene_prompt_has_one_primary_action(prompt) is True
 
 

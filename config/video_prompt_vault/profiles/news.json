@@ -1,0 +1,29 @@
+{
+  "profile_id": "news",
+  "profile_name_vi": "Video tin tức",
+  "product_goal": "Tóm tắt trung lập, có 5W1H, không bịa dữ kiện.",
+  "script_formulas": ["headline -> key facts -> context -> impact"],
+  "hook_templates": ["Điểm chính cần biết là gì", "Sự kiện này ảnh hưởng tới ai"],
+  "scene_role_templates": [{"role": "headline", "purpose": "main event"}, {"role": "facts", "purpose": "5W1H"}, {"role": "impact", "purpose": "what changes"}],
+  "shot_templates": ["news package framing", "clean lower-third safe frame"],
+  "camera_templates": ["controlled news framing"],
+  "motion_templates": ["clean cutaway"],
+  "visual_style_templates": ["realistic photojournalism"],
+  "color_tone_templates": ["neutral natural color"],
+  "transition_templates": ["clean news cut"],
+  "voice_cues": ["neutral anchor"],
+  "music_cues": ["light news bed"],
+  "subtitle_cues": ["professional lower-third"],
+  "logo_cues": ["logo only if provided"],
+  "negative_prompt_blocks": ["no fake dates or names"],
+  "do_rules": ["mark uncertain facts"],
+  "avoid_rules": ["avoid sensational claims"],
+  "example_story_bibles": ["verified fact fields"],
+  "example_scene_cards": ["fact-focused visual"],
+  "example_provider_prompts": ["neutral newsroom visual"],
+  "product_domains": {
+    "ai_news": {"keywords": ["AI", "công nghệ", "tech"], "visual_style": "clean tech newsroom visuals"},
+    "business": {"keywords": ["kinh tế", "doanh nghiệp", "market"], "visual_style": "business newsroom b-roll"},
+    "general": {"keywords": ["tin", "news"], "transition": "clean cut"}
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "profile_id": "product_review",
+  "profile_name_vi": "Video review sản phẩm",
+  "product_goal": "Chứng minh lợi ích sản phẩm nhanh, rõ, có CTA.",
+  "script_formulas": ["problem -> product reveal -> proof -> benefit -> CTA", "feature -> benefit -> proof -> CTA"],
+  "hook_templates": ["Vấn đề này làm nhiều người bỏ cuộc", "Một chi tiết nhỏ nhưng giải quyết đúng pain point"],
+  "scene_role_templates": [{"role": "hook", "purpose": "pain point"}, {"role": "product_reveal", "purpose": "show product clearly"}, {"role": "proof", "purpose": "prove one benefit"}, {"role": "CTA", "purpose": "clear action"}],
+  "shot_templates": ["macro product close-up", "top-down demo", "before-after split idea"],
+  "camera_templates": ["product close-up angle with clean hero framing"],
+  "motion_templates": ["snappy cutaway and macro reveal"],
+  "visual_style_templates": ["clean studio product photography"],
+  "color_tone_templates": ["bright clean lighting"],
+  "transition_templates": ["object close-up to next scene"],
+  "voice_cues": ["clear energetic reviewer"],
+  "music_cues": ["low upbeat beat"],
+  "subtitle_cues": ["large punchy captions"],
+  "logo_cues": ["brand logo at CTA"],
+  "negative_prompt_blocks": ["no warped product label"],
+  "do_rules": ["show product shape and use-case clearly"],
+  "avoid_rules": ["avoid vague benefit claims"],
+  "example_story_bibles": ["product shape, material, color, target user"],
+  "example_scene_cards": ["one feature per scene"],
+  "example_provider_prompts": ["macro proof shot with clean background"],
+  "product_domains": {
+    "kitchen_item": {"keywords": ["máy xay", "bếp", "kitchen", "nồi", "chảo"], "visual_style": "clean kitchen demo", "camera": "top-down and macro close-up", "motion": "hand demo with snappy cuts"},
+    "before_after": {"keywords": ["before", "after", "trước", "sau", "so sánh"], "script_formulas": ["before -> product use -> after proof -> CTA"], "transition": "before/after match cut"},
+    "unboxing": {"keywords": ["unbox", "mở hộp", "đập hộp"], "camera": "top-down unboxing angle", "motion": "hands reveal product layer by layer"},
+    "general": {"keywords": ["review", "sản phẩm", "product"], "transition": "object close-up to next scene"}
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "profile_id": "cinematic_trailer",
+  "profile_name_vi": "Phim ngắn / cinematic trailer",
+  "product_goal": "Dựng mini-film/trailer có stakes, bridge, mood và nhân vật nhất quán.",
+  "script_formulas": ["world setup -> inciting incident -> escalation -> climax glimpse -> title/CTA"],
+  "hook_templates": ["Một thế giới vừa đẹp vừa có điều bất ổn", "Khi nhân vật chính nhìn thấy dấu hiệu đầu tiên"],
+  "scene_role_templates": [{"role": "setup", "purpose": "world and mood"}, {"role": "incident", "purpose": "trigger event"}, {"role": "escalation", "purpose": "rising stakes"}, {"role": "climax", "purpose": "impact glimpse"}, {"role": "title", "purpose": "title/CTA"}],
+  "shot_templates": ["wide establishing", "dramatic close-up", "low-angle hero", "impact cut"],
+  "camera_templates": ["wide establishing and dramatic close-up"],
+  "motion_templates": ["slow dolly, tension handheld, impact reveal"],
+  "visual_style_templates": ["cinematic movie still, volumetric lighting"],
+  "color_tone_templates": ["teal-orange or dark cinematic palette"],
+  "transition_templates": ["match cut and light/color bridge"],
+  "voice_cues": ["deep trailer narrator"],
+  "music_cues": ["epic trailer riser and impact hits"],
+  "subtitle_cues": ["minimal cinematic lower-third"],
+  "logo_cues": ["title card at ending"],
+  "negative_prompt_blocks": ["no random title text inside render"],
+  "do_rules": ["keep emotional arc and visual stakes"],
+  "avoid_rules": ["avoid disconnected cool shots"],
+  "example_story_bibles": ["world, character, threat, motif"],
+  "example_scene_cards": ["entry/exit state plus match cut"],
+  "example_provider_prompts": ["continuity locked trailer shot with light bridge"],
+  "product_domains": {
+    "drama": {"keywords": ["drama", "tâm lý", "gia đình"], "color": "warm dramatic shadows"},
+    "action": {"keywords": ["action", "hành động", "rượt đuổi"], "motion": "impact cuts and handheld tension"},
+    "horror_thriller": {"keywords": ["horror", "kinh dị", "thriller", "bí ẩn"], "visual_style": "dark suspense cinematic"},
+    "sci_fi": {"keywords": ["sci-fi", "robot", "tương lai", "space"], "visual_style": "futuristic cinematic world"},
+    "historical": {"keywords": ["lịch sử", "cổ trang", "vua"], "visual_style": "historical cinematic trailer"},
+    "fantasy": {"keywords": ["fantasy", "phép thuật", "rồng"], "visual_style": "fantasy epic cinematic"},
+    "general": {"keywords": ["phim", "trailer", "cinematic"], "transition": "match cut and light/color bridge"}
+  }
+}

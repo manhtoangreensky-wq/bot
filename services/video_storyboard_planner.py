@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from services.video_asset_intake import VideoAssetPack, asset_reference_summary, pack_to_dict
+from services.video_cinematic_continuity import apply_continuity_to_scene_cards, build_continuity_ledger
+from services.video_profile_context_engine import select_prompt_context
 from services.video_product_profiles import VideoProductProfile, get_video_profile, profile_template
 
 
@@ -21,6 +23,10 @@ GENERIC_PROMPT_PHRASES = (
     "user idea",
     "main subject",
     "reference asset",
+    "reference image",
+    "do something",
+    "generic product",
+    "scene continues naturally",
 )
 
 
@@ -51,6 +57,7 @@ class StoryBible:
     subtitle_policy: str
     logo_policy: str
     fact_policy: str = ""
+    creative_controls: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -70,6 +77,17 @@ class SceneCard:
     transition_to_next: str
     music_cue: str
     logo_cue: str
+    exact_subject: str = ""
+    exact_product_or_object: str = ""
+    exact_location: str = ""
+    camera_angle: str = ""
+    lighting: str = ""
+    color_tone: str = ""
+    entry_state: str = ""
+    exit_state: str = ""
+    match_cut_hint: str = ""
+    sfx_cue: str = ""
+    continuity_lock: str = ""
     provider_prompt: str = ""
     negative_prompt: str = DEFAULT_NEGATIVE_PROMPT
     quality_score: dict[str, int] = field(default_factory=dict)
@@ -82,6 +100,8 @@ class StoryboardPlan:
     scene_cards: list[SceneCard]
     asset_pack: VideoAssetPack
     preview_text: str
+    prompt_context: dict[str, Any] = field(default_factory=dict)
+    continuity_ledger: dict[str, Any] = field(default_factory=dict)
     provider_called: bool = False
     xu_charged: int = 0
 
@@ -92,6 +112,8 @@ class StoryboardPlan:
             "scene_cards": [asdict(card) for card in self.scene_cards],
             "asset_pack": pack_to_dict(self.asset_pack),
             "preview_text": self.preview_text,
+            "prompt_context": dict(self.prompt_context or {}),
+            "continuity_ledger": dict(self.continuity_ledger or {}),
             "provider_called": self.provider_called,
             "xu_charged": self.xu_charged,
         }
@@ -234,41 +256,97 @@ def _asset_summary_from_bible(bible: StoryBible) -> str:
     return ", ".join(notes) if notes else "không có ảnh tư liệu; bám chặt mô tả chữ của người dùng"
 
 
+def _normalize_creative_controls(value: dict[str, Any] | None = None) -> dict[str, str]:
+    raw = dict(value or {})
+    allowed = (
+        "topic_mode",
+        "color_tone",
+        "visual_style",
+        "camera_motion",
+        "camera_angle",
+        "pacing",
+        "mood",
+        "negative_prompt_extra",
+    )
+    return {key: _clean_text(str(raw.get(key) or "")) for key in allowed}
+
+
+def _creative_value(controls: dict[str, str], key: str, fallback: str) -> str:
+    value = _clean_text(controls.get(key) or "")
+    if value and value.lower() not in {"default", "mặc định", "theo profile"}:
+        return value
+    return fallback
+
+
+def _creative_summary(controls: dict[str, str]) -> str:
+    visible = []
+    labels = {
+        "topic_mode": "topic",
+        "color_tone": "color",
+        "visual_style": "style",
+        "camera_motion": "motion",
+        "camera_angle": "angle",
+        "pacing": "pacing",
+        "mood": "mood",
+    }
+    for key, label in labels.items():
+        value = controls.get(key)
+        if value:
+            visible.append(f"{label}:{value}")
+    return "; ".join(visible) if visible else "profile defaults"
+
+
 def _provider_prompt_for_scene(bible: StoryBible, card: SceneCard, total: int) -> str:
     asset_notes = _asset_summary_from_bible(bible)
-    prompt = f"""[GLOBAL CONTINUITY]
-Profile: {bible.profile_id}
-Consistent subject/product/character: {bible.subject_description}
-Visual style: {bible.visual_style}
-Setting logic: {bible.setting}
-Lighting and camera language: {bible.lighting}; {bible.camera_style}
+    creative_notes = _creative_summary(dict(bible.creative_controls or {}))
+    prompt = f"""[CONTINUITY LOCK]
+Keep the same subject/product/character:
+{card.continuity_lock or bible.subject_description}
+Do not change:
+identity, product shape/color/material, location logic, time of day, random text/logo placement
 Asset summary: {asset_notes}
 
-[SCENE OBJECTIVE]
+[SCENE ROLE]
 Scene {card.scene_index}/{total}
 Role: {card.role}
 Purpose: {card.visual_goal}
 
+[VISUAL]
+Subject: {card.exact_subject or bible.main_subject}
+Product/object: {card.exact_product_or_object or bible.product_description}
+Location: {card.exact_location or bible.setting}
+Lighting: {card.lighting or bible.lighting}
+Color tone: {card.color_tone or bible.color_palette}
+Mood: {bible.brand_tone}
+
 [ACTION]
-One primary action:
+One clear visible action:
 {card.subject_action}
 
 [CAMERA]
-Shot type/composition: {card.composition}
-Camera movement: {card.camera_motion}
-Background: {card.background}
+Angle: {card.camera_angle or bible.camera_style}
+Framing: {card.composition}
+Movement: {card.camera_motion}
+
+[TRANSITION]
+Entry state: {card.entry_state or card.transition_from_previous}
+Exit state: {card.exit_state or card.transition_to_next}
+Bridge to next: {card.transition_to_next}
+Match cut hint: {card.match_cut_hint}
+
+[STYLE]
+Profile style: {bible.visual_style}
+Creative controls: {creative_notes}
+Pacing: {bible.motion_style}
 
 [POSTPROCESS READINESS]
 Narration/subtitle line: {card.subtitle_line}
 Music cue: {card.music_cue}
+SFX cue: {card.sfx_cue}
 Logo cue: {card.logo_cue}
 
-[TRANSITION]
-From previous: {card.transition_from_previous}
-To next: {card.transition_to_next}
-
-[QUALITY]
-stable framing, natural motion, consistent identity, clean background, cinematic quality
+[NO TEXT RULE]
+Do not generate random text/logos/watermarks. Subtitles/logo are added later in postprocess.
 
 [NEGATIVE]
 {card.negative_prompt}
@@ -299,12 +377,24 @@ def create_story_bible(
     idea_text: str = "",
     target_audience: str = "khán giả short-form",
     brand_tone: str = "rõ ràng, hữu ích, tự nhiên",
+    creative_controls: dict[str, Any] | None = None,
 ) -> StoryBible:
     item = get_video_profile(profile) if isinstance(profile, str) else profile
     pack = asset_pack or VideoAssetPack()
     idea = _clean_text(idea_text, item.product_goal)
     asset_summary = asset_reference_summary(pack)
     main_subject = _main_subject_label(item, idea, pack)
+    controls = _normalize_creative_controls(creative_controls)
+    visual_style = _creative_value(controls, "visual_style", item.image_style)
+    color_palette = _creative_value(controls, "color_tone", "consistent palette based on profile and references")
+    camera_style = _creative_value(controls, "camera_angle", item.camera_style)
+    motion_style = _creative_value(controls, "camera_motion", item.motion_style)
+    pacing = _creative_value(controls, "pacing", item.pacing_policy)
+    mood = _creative_value(controls, "mood", brand_tone)
+    negative_prompt_extra = controls.get("negative_prompt_extra")
+    negative_prompt = DEFAULT_NEGATIVE_PROMPT
+    if negative_prompt_extra:
+        negative_prompt = f"{negative_prompt}, {negative_prompt_extra}"
 
     fact_policy = item.fact_policy
     if item.profile_id in {"news", "history"} and not idea_text.strip():
@@ -319,15 +409,16 @@ def create_story_bible(
         "one main action per scene",
         "no random text artifacts in image/video",
         "no unnecessary style shift",
+        f"creative controls: {_creative_summary(controls)}",
     ]
     return StoryBible(
         profile_id=item.profile_id,
         title=_title_from_idea(idea, item),
         core_message=idea,
         target_audience=target_audience,
-        brand_tone=brand_tone,
-        visual_style=item.image_style,
-        color_palette="consistent palette based on profile and references",
+        brand_tone=mood,
+        visual_style=visual_style,
+        color_palette=color_palette,
         main_subject=main_subject,
         subject_description=f"{main_subject}; {asset_summary}",
         product_description=f"giữ đúng hình dáng/màu/chất liệu của {main_subject}" if (pack.product_refs or pack.object_refs) else f"chỉ dùng chi tiết sản phẩm có trong ý tưởng: {main_subject}",
@@ -335,17 +426,18 @@ def create_story_bible(
         object_description=f"giữ vật thể liên quan đến {main_subject} ổn định qua các cảnh" if pack.object_refs else "không thêm đồ vật phụ gây nhiễu nếu user không yêu cầu",
         setting=_setting_label(item, idea, pack),
         time_of_day="consistent time of day across connected scenes",
-        lighting=item.image_style,
-        camera_style=item.camera_style,
-        motion_style=item.motion_style,
+        lighting=f"{visual_style}; {color_palette}",
+        camera_style=camera_style,
+        motion_style=f"{motion_style}; {pacing}",
         continuity_rules=continuity_rules,
         reference_assets_used=pack_to_dict(pack),
-        negative_prompt=DEFAULT_NEGATIVE_PROMPT,
+        negative_prompt=negative_prompt,
         voice_policy=item.voice_style,
         music_policy=item.music_style,
         subtitle_policy=item.subtitle_style,
         logo_policy=item.logo_policy,
         fact_policy=fact_policy,
+        creative_controls=controls,
     )
 
 
@@ -392,14 +484,25 @@ def build_scene_cards(
             subtitle_line=narration.replace("[pause 0.8s]", "").strip(),
             visual_goal=purpose,
             subject_action=subject_action,
-            camera_motion=f"{item.camera_style}; bám {story_bible.main_subject} trong cảnh {index}",
-            composition=f"{template_item['title']}; khung hình rõ {story_bible.main_subject}; nền gọn",
+            camera_motion=f"{story_bible.motion_style}; bám {story_bible.main_subject} trong cảnh {index}",
+            composition=f"{template_item['title']}; {story_bible.camera_style}; khung hình rõ {story_bible.main_subject}; nền gọn",
             background=story_bible.setting,
             reference_asset_ids=asset_ids[:6],
             transition_from_previous=previous_hint,
             transition_to_next=next_hint,
             music_cue=item.music_style,
             logo_cue=item.logo_policy if index == count else "no logo unless subtle watermark is required",
+            exact_subject=story_bible.main_subject,
+            exact_product_or_object=story_bible.product_description,
+            exact_location=story_bible.setting,
+            camera_angle=story_bible.camera_style,
+            lighting=story_bible.lighting,
+            color_tone=story_bible.color_palette,
+            entry_state=previous_hint,
+            exit_state=next_hint,
+            match_cut_hint="match subject/object position or movement direction",
+            sfx_cue=getattr(item, "sfx_policy", "") or "postprocess SFX only if enabled",
+            continuity_lock="; ".join(story_bible.continuity_rules),
             negative_prompt=story_bible.negative_prompt,
         )
         card.provider_prompt = _provider_prompt_for_scene(story_bible, card, count)
@@ -441,12 +544,54 @@ def create_storyboard_plan(
     asset_pack: VideoAssetPack | None = None,
     scene_count: int = 3,
     target_audience: str = "khán giả short-form",
+    creative_controls: dict[str, Any] | None = None,
 ) -> StoryboardPlan:
     profile = get_video_profile(profile_id)
     pack = asset_pack or VideoAssetPack()
-    bible = create_story_bible(profile, pack, idea_text=idea_text, target_audience=target_audience)
+    prompt_context = select_prompt_context(
+        profile_id=profile.profile_id,
+        user_idea=idea_text,
+        asset_pack=pack,
+        creative_controls=creative_controls or {},
+        scene_count=scene_count,
+        language="vi",
+    )
+    controls = dict(creative_controls or {})
+    controls.setdefault("visual_style", prompt_context.selected_visual_style)
+    controls.setdefault("camera_angle", prompt_context.selected_camera_language)
+    controls.setdefault("camera_motion", prompt_context.selected_motion_language)
+    controls.setdefault("color_tone", prompt_context.selected_color_tone)
+    controls.setdefault("negative_prompt_extra", "")
+    bible = create_story_bible(
+        profile,
+        pack,
+        idea_text=idea_text,
+        target_audience=target_audience,
+        creative_controls=controls,
+    )
     cards = build_scene_cards(bible, profile, scene_count=scene_count, asset_pack=pack)
-    plan = StoryboardPlan(profile=profile, story_bible=bible, scene_cards=cards, asset_pack=pack, preview_text="")
+    ledger = build_continuity_ledger(
+        profile_id=profile.profile_id,
+        story_bible=bible,
+        prompt_context=prompt_context,
+        scene_count=len(cards),
+    )
+    cards = apply_continuity_to_scene_cards(cards, ledger, prompt_context)
+    for card in cards:
+        card.negative_prompt = prompt_context.selected_negative_prompt or card.negative_prompt
+        card.provider_prompt = _provider_prompt_for_scene(bible, card, len(cards))
+        card.quality_score = scene_quality_score(card)
+        if min(card.quality_score.values() or [0]) < 3:
+            card = repair_weak_scene_card(card, bible, profile, total=len(cards))
+    plan = StoryboardPlan(
+        profile=profile,
+        story_bible=bible,
+        scene_cards=cards,
+        asset_pack=pack,
+        preview_text="",
+        prompt_context=prompt_context.to_dict(),
+        continuity_ledger=ledger.to_dict(),
+    )
     plan.preview_text = storyboard_preview_text(plan)
     return plan
 
