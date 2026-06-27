@@ -1137,6 +1137,11 @@ PAYOS_AUTO_TOPUP_24H_LOCK_MESSAGE = (
     "Tài khoản đang tạm khóa nạp tự động để kiểm tra do đạt giới hạn 15.000.000đ/24 giờ. "
     "Anh/chị có thể dùng nạp thủ công hoặc liên hệ admin."
 )
+PAYOS_ADMIN_MANUAL_LOCK_MESSAGE = (
+    "Tài khoản đang tạm khóa nạp tự động để kiểm tra. "
+    "Anh/chị có thể dùng nạp thủ công hoặc liên hệ admin."
+)
+PAYOS_RISK_PENDING_CANCEL_STATUSES = {"PENDING", "CREATED", "WAITING", "UNPAID"}
 
 PLAN_CATALOG = {
     "starter": {
@@ -2630,6 +2635,9 @@ def init_db():
         review_required INTEGER DEFAULT 0,
         created_at DATETIME,
         created_by TEXT DEFAULT 'system',
+        resolved_at DATETIME,
+        resolved_by TEXT DEFAULT '',
+        resolved_note TEXT DEFAULT '',
         metadata_json TEXT DEFAULT ''
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS payos_orders (
@@ -2688,6 +2696,9 @@ def init_db():
         ("review_required", "review_required INTEGER DEFAULT 0"),
         ("created_at", "created_at DATETIME"),
         ("created_by", "created_by TEXT DEFAULT 'system'"),
+        ("resolved_at", "resolved_at DATETIME"),
+        ("resolved_by", "resolved_by TEXT DEFAULT ''"),
+        ("resolved_note", "resolved_note TEXT DEFAULT ''"),
         ("metadata_json", "metadata_json TEXT DEFAULT ''"),
     ]:
         _add_column_if_missing(c, "payos_topup_locks", column_name, column_sql, payos_topup_lock_columns)
@@ -7890,6 +7901,7 @@ def active_payos_auto_topup_lock_conn(conn, user_id: str, now_dt: datetime | Non
         """SELECT id, reason, locked_until, review_required, created_at, metadata_json
            FROM payos_topup_locks
            WHERE user_id=? AND lock_type=?
+             AND COALESCE(resolved_at,'')=''
              AND (COALESCE(review_required,0)=1 OR locked_until IS NULL OR locked_until > ?)
            ORDER BY id DESC LIMIT 1""",
         (str(user_id), PAYOS_AUTO_TOPUP_LOCK_TYPE, now_text_value),
@@ -7921,6 +7933,8 @@ def active_payos_auto_topup_lock(user_id: str, now_dt: datetime | None = None) -
 
 def payos_auto_topup_lock_message(lock: dict | None) -> str:
     reason = str((lock or {}).get("reason") or "")
+    if reason == "manual_admin_block":
+        return PAYOS_ADMIN_MANUAL_LOCK_MESSAGE
     if reason == "limit_15m_24h":
         return PAYOS_AUTO_TOPUP_24H_LOCK_MESSAGE
     if reason == "limit_9m_12h":
@@ -8059,6 +8073,816 @@ def payos_auto_topup_guard(user_id: str, amount_vnd: int, currency: str = "VND",
         return {"ok": False, "reason": "limit_3m_60m", "message": PAYOS_AUTO_TOPUP_60M_LOCK_MESSAGE, "lock": lock, "metadata": metadata}
 
     return {"ok": True, "reason": "allowed", "metadata": metadata}
+
+def _payos_risk_json(value: str) -> dict:
+    try:
+        parsed = json.loads(value or "{}") if value else {}
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+def _payos_risk_vnd(value) -> str:
+    return f"{int(value or 0):,}đ".replace(",", ".")
+
+def _payos_risk_metadata_summary(metadata: dict | None) -> dict:
+    metadata = metadata if isinstance(metadata, dict) else {}
+    allowed = {
+        "amount_60m", "amount_12h", "amount_24h", "trigger_order_amount",
+        "projected_60m", "projected_12h", "projected_24h", "last_order_time",
+        "admin_reason", "admin_note", "admin_risk_status", "marked_at",
+    }
+    return {key: metadata.get(key) for key in allowed if key in metadata}
+
+def _payos_risk_rows_to_locks(rows) -> list[dict]:
+    locks = []
+    for row in rows:
+        metadata = _payos_risk_json(row[7] if len(row) > 7 else "")
+        locks.append({
+            "id": int(row[0] or 0),
+            "user_id": str(row[1] or ""),
+            "reason": str(row[2] or ""),
+            "locked_until": str(row[3] or ""),
+            "review_required": bool(int(row[4] or 0)),
+            "created_at": str(row[5] or ""),
+            "created_by": str(row[6] or ""),
+            "metadata": metadata,
+        })
+    return locks
+
+def payos_risk_active_locks(review_required: bool | None = None, limit: int = 10) -> list[dict]:
+    now_value = now_text()
+    clauses = [
+        "lock_type=?",
+        "COALESCE(resolved_at,'')=''",
+        "(COALESCE(review_required,0)=1 OR locked_until IS NULL OR locked_until='' OR locked_until>?)",
+    ]
+    params: list = [PAYOS_AUTO_TOPUP_LOCK_TYPE, now_value]
+    if review_required is not None:
+        clauses.append("COALESCE(review_required,0)=?")
+        params.append(1 if review_required else 0)
+    if review_required is False:
+        clauses.append("locked_until IS NOT NULL")
+        clauses.append("locked_until<>''")
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            f"""SELECT id,user_id,reason,locked_until,review_required,created_at,created_by,metadata_json
+                FROM payos_topup_locks
+                WHERE {' AND '.join(clauses)}
+                ORDER BY id DESC LIMIT ?""",
+            (*params, max(1, min(int(limit or 10), 25))),
+        ).fetchall()
+    finally:
+        conn.close()
+    return _payos_risk_rows_to_locks(rows)
+
+def payos_risk_lock_by_id(lock_id: int) -> dict:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            """SELECT id,user_id,reason,locked_until,review_required,created_at,created_by,metadata_json
+               FROM payos_topup_locks WHERE id=? LIMIT 1""",
+            (int(lock_id or 0),),
+        ).fetchone()
+    finally:
+        conn.close()
+    return _payos_risk_rows_to_locks([row])[0] if row else {}
+
+def payos_risk_lock_list_text(review_required: bool | None = True, limit: int = 10) -> str:
+    title = "🔒 <b>DS khóa review PayOS</b>" if review_required else "⏳ <b>DS khóa 1 giờ PayOS</b>"
+    locks = payos_risk_active_locks(review_required=review_required, limit=limit)
+    lines = [title, ""]
+    if not locks:
+        lines.append("Chưa có khóa đang active.")
+    for item in locks:
+        metadata = item.get("metadata") or {}
+        lines.extend([
+            f"• Lock <code>#{item['id']}</code> user <code>{html.escape(item['user_id'])}</code>",
+            f"  Reason: <code>{html.escape(item.get('reason') or '-')}</code>",
+            f"  60m/12h/24h: <b>{_payos_risk_vnd(metadata.get('amount_60m'))}</b> / <b>{_payos_risk_vnd(metadata.get('amount_12h'))}</b> / <b>{_payos_risk_vnd(metadata.get('amount_24h'))}</b>",
+            f"  Trigger: <b>{_payos_risk_vnd(metadata.get('trigger_order_amount'))}</b> | Created: <code>{html.escape(item.get('created_at') or '-')}</code>",
+            f"  Until: <code>{html.escape(item.get('locked_until') or 'review')}</code> | Review: <b>{'yes' if item.get('review_required') else 'no'}</b>",
+        ])
+    lines.append("\nKhông hiển thị raw payload/checksum/secret.")
+    return "\n".join(lines)
+
+def payos_risk_lock_list_keyboard(review_required: bool | None = True, limit: int = 5) -> InlineKeyboardMarkup:
+    locks = payos_risk_active_locks(review_required=review_required, limit=limit)
+    rows = []
+    for item in locks[:5]:
+        lock_id = int(item.get("id") or 0)
+        uid = str(item.get("user_id") or "")[:24]
+        rows.append([
+            InlineKeyboardButton(f"👤 {uid}", callback_data=f"payrisk|user|{uid}"),
+            InlineKeyboardButton("✅ Mở khóa", callback_data=f"payrisk|unlocklock|{lock_id}"),
+            InlineKeyboardButton("🚫 Giữ", callback_data=f"payrisk|keep|{lock_id}"),
+        ])
+        rows.append([InlineKeyboardButton("🧾 Lệnh gần đây", callback_data=f"payrisk|orders|{uid}")])
+    rows.append([InlineKeyboardButton("🔄 Làm mới", callback_data="payrisk|review" if review_required else "payrisk|hour")])
+    rows.append([InlineKeyboardButton("⬅️ Rủi ro nạp tiền", callback_data="menu|payos_risk"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def payos_risk_menu_text() -> str:
+    return (
+        "🛡 <b>Rủi ro nạp tiền PayOS</b>\n\n"
+        "Quản lý khóa nạp tự động, lệnh nạp đáng ngờ và review thủ công.\n\n"
+        "• Xem user đang bị khóa nạp tự động\n"
+        "• Mở khóa review sau khi kiểm tra\n"
+        "• Khóa thủ công nạp tự động của user rủi ro\n"
+        "• Hủy/đánh dấu lệnh nạp đáng ngờ\n"
+        "• Xem báo cáo giới hạn 60m/12h/24h\n\n"
+        "An toàn: chỉ admin xem được; không hiển thị raw webhook payload, checksum hoặc secret."
+    )
+
+def payos_risk_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔒 DS khóa review", callback_data="payrisk|review"), InlineKeyboardButton("⏳ DS khóa 1 giờ", callback_data="payrisk|hour")],
+        [InlineKeyboardButton("👤 Tra user", callback_data="payrisk|user_help"), InlineKeyboardButton("🚫 Khóa user", callback_data="payrisk|block_help")],
+        [InlineKeyboardButton("✅ Mở khóa user", callback_data="payrisk|unlock_help"), InlineKeyboardButton("🧾 Lệnh nạp gần đây", callback_data="payrisk|orders_recent")],
+        [InlineKeyboardButton("⚠️ Lệnh đáng ngờ", callback_data="payrisk|suspicious"), InlineKeyboardButton("📊 Báo cáo rủi ro", callback_data="payrisk|report")],
+        [InlineKeyboardButton("⬅️ Admin menu", callback_data="menu|admin")],
+    ])
+
+def payos_risk_help_text(kind: str = "user") -> str:
+    if kind == "block":
+        return (
+            "🚫 <b>Khóa thủ công nạp tự động</b>\n\n"
+            "Dùng lệnh:\n<code>/payos_risk_block &lt;user_id&gt; reason=&lt;lý do&gt;</code>\n\n"
+            "User bị khóa vẫn dùng được nạp thủ công. Nạp thủ công không tự cộng Xu."
+        )
+    if kind == "unlock":
+        return (
+            "✅ <b>Mở khóa nạp tự động</b>\n\n"
+            "Dùng lệnh:\n<code>/payos_risk_unblock &lt;user_id|lock_id&gt; note=&lt;ghi chú&gt;</code>\n\n"
+            "Bot giữ lịch sử lock trong audit/lock table, không xóa record cũ."
+        )
+    return (
+        "👤 <b>Tra rủi ro user/order</b>\n\n"
+        "Dùng lệnh:\n<code>/payos_risk_user &lt;user_id|username|orderCode|paymentLinkId&gt;</code>\n\n"
+        "Màn chi tiết chỉ đọc: order gần đây, manual top-up đang chờ, lock active, cooldown và rolling 60m/12h/24h."
+    )
+
+def payos_risk_manual_block_user(admin_id, user_id: str, reason: str = "") -> dict:
+    clean_user_id = str(user_id or "").strip()
+    if not clean_user_id:
+        return {"ok": False, "reason": "missing_user_id"}
+    active = active_payos_auto_topup_lock(clean_user_id)
+    if active:
+        return {"ok": False, "reason": "already_locked", "lock": active}
+    metadata = {
+        "admin_reason": str(reason or "manual_admin_block")[:300],
+        "manual_admin_block": True,
+        "created_by_admin_id": str(admin_id or ""),
+    }
+    conn = db_connect()
+    try:
+        cursor = conn.execute(
+            """INSERT INTO payos_topup_locks
+               (user_id, lock_type, reason, locked_until, review_required, created_at, created_by, metadata_json)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                clean_user_id,
+                PAYOS_AUTO_TOPUP_LOCK_TYPE,
+                "manual_admin_block",
+                "",
+                1,
+                now_text(),
+                f"admin:{admin_id}",
+                json.dumps(metadata, ensure_ascii=False),
+            ),
+        )
+        lock_id = int(cursor.lastrowid or 0)
+        record_audit(
+            conn,
+            admin_id,
+            "admin",
+            "manual_block_auto_topup",
+            "payos_topup_lock",
+            str(lock_id),
+            before={},
+            after={"target_user_id": clean_user_id, "reason": metadata["admin_reason"], "review_required": True},
+            note=metadata["admin_reason"],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "lock_id": lock_id, "user_id": clean_user_id}
+
+def payos_risk_unlock_user(admin_id, target: str, note: str = "") -> dict:
+    target = str(target or "").strip()
+    if not target:
+        return {"ok": False, "reason": "missing_target"}
+    note_clean = str(note or "admin_review_ok")[:300]
+    conn = db_connect()
+    try:
+        if target.isdigit():
+            lock_row = conn.execute("SELECT id,user_id,reason FROM payos_topup_locks WHERE id=? LIMIT 1", (int(target),)).fetchone()
+            if lock_row:
+                params = (now_text(), f"admin:{admin_id}", note_clean, int(target))
+                conn.execute("UPDATE payos_topup_locks SET resolved_at=?, resolved_by=?, resolved_note=? WHERE id=? AND COALESCE(resolved_at,'')=''", params)
+                count = int(conn.total_changes or 0)
+                target_user_id = str(lock_row[1] or "")
+                object_id = str(target)
+            else:
+                target_user_id = target
+                object_id = target
+                conn.execute(
+                    """UPDATE payos_topup_locks SET resolved_at=?, resolved_by=?, resolved_note=?
+                       WHERE user_id=? AND lock_type=? AND COALESCE(resolved_at,'')=''""",
+                    (now_text(), f"admin:{admin_id}", note_clean, target_user_id, PAYOS_AUTO_TOPUP_LOCK_TYPE),
+                )
+                count = int(conn.total_changes or 0)
+        else:
+            target_user_id = target
+            object_id = target
+            conn.execute(
+                """UPDATE payos_topup_locks SET resolved_at=?, resolved_by=?, resolved_note=?
+                   WHERE user_id=? AND lock_type=? AND COALESCE(resolved_at,'')=''""",
+                (now_text(), f"admin:{admin_id}", note_clean, target_user_id, PAYOS_AUTO_TOPUP_LOCK_TYPE),
+            )
+            count = int(conn.total_changes or 0)
+        record_audit(
+            conn,
+            admin_id,
+            "admin",
+            "unlock_auto_topup",
+            "payos_topup_lock",
+            object_id,
+            before={"target": target},
+            after={"target_user_id": target_user_id, "resolved_count": count},
+            note=note_clean,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": count > 0, "resolved_count": count, "user_id": target_user_id, "reason": "unlocked" if count > 0 else "not_found"}
+
+def payos_risk_resolve_lock(admin_id, lock_id: int, note: str = "") -> dict:
+    return payos_risk_unlock_user(admin_id, str(int(lock_id or 0)), note or "admin_unlocked_from_button")
+
+def payos_risk_lookup_user_id(target: str) -> str:
+    clean = str(target or "").strip()
+    if not clean:
+        return ""
+    conn = db_connect()
+    try:
+        row = conn.execute("SELECT user_id FROM payos_orders WHERE order_code=? LIMIT 1", (clean,)).fetchone()
+        if row:
+            return str(row[0] or "")
+        row = conn.execute("SELECT user_id FROM payos_orders WHERE payment_link_id=? LIMIT 1", (clean,)).fetchone()
+        if row:
+            return str(row[0] or "")
+        row = conn.execute("SELECT user_id FROM users WHERE user_id=? OR lower(username)=lower(?) LIMIT 1", (clean, clean)).fetchone()
+        if row:
+            return str(row[0] or "")
+    finally:
+        conn.close()
+    return clean
+
+def payos_risk_recent_orders(user_id: str = "", limit: int = 8, suspicious_only: bool = False) -> list[dict]:
+    clauses = ["1=1"]
+    params: list = []
+    if user_id:
+        clauses.append("user_id=?")
+        params.append(str(user_id))
+    if suspicious_only:
+        clauses.append("LOWER(COALESCE(metadata_json,'')) LIKE '%admin_risk_status%'")
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            f"""SELECT order_code,user_id,amount,xu,status,created_at,paid_at,order_type,payment_type,payment_link_id,metadata_json
+                FROM payos_orders
+                WHERE {' AND '.join(clauses)}
+                ORDER BY created_at DESC LIMIT ?""",
+            (*params, max(1, min(int(limit or 8), 20))),
+        ).fetchall()
+    finally:
+        conn.close()
+    orders = []
+    for row in rows:
+        metadata = _payos_risk_json(row[10] or "")
+        orders.append({
+            "order_code": str(row[0] or ""),
+            "user_id": str(row[1] or ""),
+            "amount": int(row[2] or 0),
+            "xu": int(row[3] or 0),
+            "status": str(row[4] or ""),
+            "created_at": str(row[5] or ""),
+            "paid_at": str(row[6] or ""),
+            "order_type": str(row[7] or ""),
+            "payment_type": str(row[8] or ""),
+            "payment_link_id": str(row[9] or ""),
+            "metadata": metadata,
+        })
+    return orders
+
+def payos_risk_orders_text(user_id: str = "", suspicious_only: bool = False) -> str:
+    orders = payos_risk_recent_orders(user_id=user_id, suspicious_only=suspicious_only)
+    title = "⚠️ <b>Lệnh nạp đáng ngờ</b>" if suspicious_only else "🧾 <b>Lệnh nạp PayOS gần đây</b>"
+    lines = [title, ""]
+    if user_id:
+        lines.append(f"User: <code>{html.escape(str(user_id))}</code>\n")
+    if not orders:
+        lines.append("Chưa có lệnh phù hợp.")
+    for order in orders:
+        risk_status = str((order.get("metadata") or {}).get("admin_risk_status") or "")
+        risk_suffix = f" | risk=<code>{html.escape(risk_status)}</code>" if risk_status else ""
+        lines.append(
+            f"• <code>{html.escape(order['order_code'])}</code> user <code>{html.escape(order['user_id'])}</code> "
+            f"<b>{_payos_risk_vnd(order['amount'])}</b> status=<code>{html.escape(order['status'])}</code>{risk_suffix}"
+        )
+    lines.append("\nKhông hiển thị raw payload/checksum/secret.")
+    return "\n".join(lines)
+
+def payos_risk_orders_keyboard(user_id: str = "", suspicious_only: bool = False) -> InlineKeyboardMarkup:
+    orders = payos_risk_recent_orders(user_id=user_id, suspicious_only=suspicious_only, limit=5)
+    rows = []
+    for order in orders[:5]:
+        code = str(order.get("order_code") or "")[:24]
+        status = str(order.get("status") or "").upper()
+        if status in PAYOS_RISK_PENDING_CANCEL_STATUSES:
+            rows.append([
+                InlineKeyboardButton(f"❌ Hủy {code}", callback_data=f"payrisk|cancel|{code}"),
+                InlineKeyboardButton("⚠️ Đánh dấu", callback_data=f"payrisk|mark|{code}"),
+            ])
+    rows.append([InlineKeyboardButton("⬅️ Rủi ro nạp tiền", callback_data="menu|payos_risk"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
+
+def payos_risk_order_row_conn(conn, order_code: str):
+    return conn.execute(
+        """SELECT order_code,user_id,amount,xu,status,created_at,paid_at,order_type,payment_type,payment_link_id,metadata_json,checkout_url
+           FROM payos_orders WHERE order_code=? LIMIT 1""",
+        (str(order_code or ""),),
+    ).fetchone()
+
+def payos_risk_order_dict(row) -> dict:
+    if not row:
+        return {}
+    return {
+        "order_code": str(row[0] or ""),
+        "user_id": str(row[1] or ""),
+        "amount": int(row[2] or 0),
+        "xu": int(row[3] or 0),
+        "status": str(row[4] or ""),
+        "created_at": str(row[5] or ""),
+        "paid_at": str(row[6] or ""),
+        "order_type": str(row[7] or ""),
+        "payment_type": str(row[8] or ""),
+        "payment_link_id": str(row[9] or ""),
+        "metadata": _payos_risk_json(row[10] or ""),
+        "checkout_url": str(row[11] or ""),
+    }
+
+def payos_risk_is_auto_topup_order(order: dict) -> bool:
+    metadata = order.get("metadata") if isinstance(order, dict) else {}
+    order_type = str(order.get("order_type") or "topup")
+    payment_type = str(order.get("payment_type") or "topup_xu")
+    return (
+        order_type in {"topup", "topup_xu"}
+        and payment_type == "topup_xu"
+        and bool((metadata or {}).get("auto_topup") or order.get("checkout_url") or order.get("payment_link_id"))
+    )
+
+def payos_risk_order_processed_conn(conn, order_code: str) -> bool:
+    clean = str(order_code or "")
+    if conn.execute("SELECT 1 FROM payos_processed WHERE order_code=? LIMIT 1", (clean,)).fetchone():
+        return True
+    if conn.execute("SELECT 1 FROM payos_processed_events WHERE order_code=? AND COALESCE(credited,0)=1 LIMIT 1", (clean,)).fetchone():
+        return True
+    return False
+
+def payos_risk_cancel_order(admin_id, order_code: str, note: str = "") -> dict:
+    clean_order = str(order_code or "").strip()
+    if not clean_order:
+        return {"ok": False, "reason": "missing_order_code"}
+    note_clean = str(note or "admin_risk_cancel")[:300]
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = payos_risk_order_row_conn(conn, clean_order)
+        order = payos_risk_order_dict(row)
+        if not order:
+            conn.rollback()
+            return {"ok": False, "reason": "order_not_found"}
+        old_status = str(order.get("status") or "")
+        if old_status.upper() == PAYOS_STATUS_PAID:
+            conn.rollback()
+            return {"ok": False, "reason": "already_credited", "order": order}
+        if payos_risk_order_processed_conn(conn, clean_order):
+            conn.rollback()
+            return {"ok": False, "reason": "processed_idempotency_exists", "order": order}
+        if not payos_risk_is_auto_topup_order(order):
+            conn.rollback()
+            return {"ok": False, "reason": "not_auto_topup_order", "order": order}
+        if old_status.upper() not in PAYOS_RISK_PENDING_CANCEL_STATUSES:
+            conn.rollback()
+            return {"ok": False, "reason": "status_not_cancelable", "order": order}
+        metadata = dict(order.get("metadata") or {})
+        metadata.update({
+            "admin_risk_status": "cancelled_by_admin",
+            "admin_note": note_clean,
+            "cancelled_by_admin_id": str(admin_id or ""),
+            "cancelled_at": now_text(),
+        })
+        conn.execute(
+            "UPDATE payos_orders SET status=?, metadata_json=? WHERE order_code=?",
+            (PAYOS_STATUS_CANCELLED, json.dumps(metadata, ensure_ascii=False), clean_order),
+        )
+        record_audit(
+            conn,
+            admin_id,
+            "admin",
+            "cancel_payos_order",
+            "payos_order",
+            clean_order,
+            before={"status": old_status, "user_id": order.get("user_id"), "amount": order.get("amount")},
+            after={"status": PAYOS_STATUS_CANCELLED, "admin_risk_status": "cancelled_by_admin"},
+            note=note_clean,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "order_code": clean_order, "old_status": old_status, "new_status": PAYOS_STATUS_CANCELLED}
+
+def payos_risk_mark_order_suspicious(admin_id, order_code: str, note: str = "") -> dict:
+    clean_order = str(order_code or "").strip()
+    if not clean_order:
+        return {"ok": False, "reason": "missing_order_code"}
+    note_clean = str(note or "admin_mark_suspicious")[:300]
+    conn = db_connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = payos_risk_order_row_conn(conn, clean_order)
+        order = payos_risk_order_dict(row)
+        if not order:
+            conn.rollback()
+            return {"ok": False, "reason": "order_not_found"}
+        if str(order.get("status") or "").upper() == PAYOS_STATUS_PAID:
+            conn.rollback()
+            return {"ok": False, "reason": "already_credited", "order": order}
+        if not payos_risk_is_auto_topup_order(order):
+            conn.rollback()
+            return {"ok": False, "reason": "not_auto_topup_order", "order": order}
+        metadata = dict(order.get("metadata") or {})
+        metadata.update({
+            "admin_risk_status": "suspicious",
+            "admin_note": note_clean,
+            "marked_by_admin_id": str(admin_id or ""),
+            "marked_at": now_text(),
+        })
+        conn.execute("UPDATE payos_orders SET metadata_json=? WHERE order_code=?", (json.dumps(metadata, ensure_ascii=False), clean_order))
+        record_audit(
+            conn,
+            admin_id,
+            "admin",
+            "mark_payos_order_suspicious",
+            "payos_order",
+            clean_order,
+            before={"status": order.get("status"), "risk": (order.get("metadata") or {}).get("admin_risk_status")},
+            after={"status": order.get("status"), "risk": "suspicious"},
+            note=note_clean,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "order_code": clean_order, "status": order.get("status")}
+
+def payos_risk_manual_deposits(user_id: str, limit: int = 5) -> list[dict]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT id,user_id,amount_vnd,expected_xu,status,method,currency,submitted_at
+               FROM pending_deposits
+               WHERE (?='' OR user_id=?)
+               ORDER BY submitted_at DESC LIMIT ?""",
+            (str(user_id or ""), str(user_id or ""), max(1, min(int(limit or 5), 10))),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{
+        "id": int(row[0] or 0),
+        "user_id": str(row[1] or ""),
+        "amount_vnd": int(row[2] or 0),
+        "expected_xu": int(row[3] or 0),
+        "status": str(row[4] or ""),
+        "method": str(row[5] or ""),
+        "currency": str(row[6] or ""),
+        "submitted_at": str(row[7] or ""),
+    } for row in rows]
+
+def payos_risk_recent_anomalies(user_id: str, limit: int = 5) -> list[dict]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT event_type,severity,detail,created_at
+               FROM security_events
+               WHERE (?='' OR user_id=?)
+               ORDER BY id DESC LIMIT ?""",
+            (str(user_id or ""), str(user_id or ""), max(1, min(int(limit or 5), 10))),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{"event_type": str(row[0] or ""), "severity": str(row[1] or ""), "detail": str(row[2] or ""), "created_at": str(row[3] or "")} for row in rows]
+
+def payos_risk_user_detail_text(target: str) -> str:
+    uid = payos_risk_lookup_user_id(target)
+    conn = db_connect()
+    try:
+        user_row = conn.execute("SELECT credits,total_spent,is_vip,username FROM users WHERE user_id=? LIMIT 1", (str(uid),)).fetchone()
+        rolling = payos_auto_topup_rolling_amounts_conn(conn, str(uid), datetime.now()) if uid else {"amount_60m": 0, "amount_12h": 0, "amount_24h": 0, "last_order_time": ""}
+    finally:
+        conn.close()
+    active_lock = active_payos_auto_topup_lock(uid) if uid else None
+    orders = payos_risk_recent_orders(uid, limit=5)
+    manual = payos_risk_manual_deposits(uid, limit=5)
+    anomalies = payos_risk_recent_anomalies(uid, limit=3)
+    lines = [
+        "👤 <b>Chi tiết rủi ro PayOS</b>",
+        "",
+        f"User: <code>{html.escape(str(uid or target or '-'))}</code>",
+    ]
+    if user_row:
+        lines.append(f"Balance: <b>{int(user_row[0] or 0):,} Xu</b> | Spent: <b>{int(user_row[1] or 0):,} Xu</b> | Username: <code>{html.escape(str(user_row[3] or '-'))}</code>".replace(",", "."))
+    else:
+        lines.append("Balance: <code>chưa có user row</code>")
+    lines.extend([
+        "",
+        "<b>Rolling auto PayOS</b>",
+        f"• 60m: <b>{_payos_risk_vnd(rolling.get('amount_60m'))}</b>",
+        f"• 12h: <b>{_payos_risk_vnd(rolling.get('amount_12h'))}</b>",
+        f"• 24h: <b>{_payos_risk_vnd(rolling.get('amount_24h'))}</b>",
+        f"• Last order: <code>{html.escape(str(rolling.get('last_order_time') or '-'))}</code>",
+        "",
+        "<b>Active lock</b>",
+    ])
+    if active_lock:
+        lines.append(f"• <code>#{active_lock.get('id')}</code> reason=<code>{html.escape(active_lock.get('reason') or '-')}</code> until=<code>{html.escape(active_lock.get('locked_until') or 'review')}</code>")
+    else:
+        lines.append("• Không có lock active.")
+    lines.append("\n<b>PayOS orders gần đây</b>")
+    if orders:
+        for order in orders:
+            lines.append(f"• <code>{html.escape(order['order_code'])}</code> {_payos_risk_vnd(order['amount'])} status=<code>{html.escape(order['status'])}</code>")
+    else:
+        lines.append("• Chưa có order.")
+    lines.append("\n<b>Nạp thủ công gần đây</b>")
+    if manual:
+        for item in manual:
+            lines.append(f"• #{item['id']} {_payos_risk_vnd(item['amount_vnd'])} status=<code>{html.escape(item['status'])}</code>")
+    else:
+        lines.append("• Chưa có yêu cầu manual.")
+    lines.append("\n<b>Anomaly gần đây</b>")
+    if anomalies:
+        for item in anomalies:
+            lines.append(f"• <code>{html.escape(item['event_type'])}</code> severity=<code>{html.escape(item['severity'])}</code> at <code>{html.escape(item['created_at'])}</code>")
+    else:
+        lines.append("• Chưa có anomaly.")
+    lines.append("\nKhông hiển thị raw payload/checksum/secret.")
+    return "\n".join(lines)
+
+def payos_risk_user_detail_keyboard(user_id: str) -> InlineKeyboardMarkup:
+    uid = str(user_id or "")[:24]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Khóa nạp tự động", callback_data="payrisk|block_help"), InlineKeyboardButton("✅ Mở khóa nạp tự động", callback_data=f"payrisk|unlockuser|{uid}")],
+        [InlineKeyboardButton("🧾 Lệnh nạp gần đây", callback_data=f"payrisk|orders|{uid}"), InlineKeyboardButton("⚠️ Ghi chú rủi ro", callback_data="payrisk|mark_help")],
+        [InlineKeyboardButton("⬅️ Rủi ro nạp tiền", callback_data="menu|payos_risk"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def payos_risk_top_users(seconds: int, limit: int = 5) -> list[tuple[str, int]]:
+    statuses = payos_auto_topup_statuses_for_exposure()
+    status_placeholders = ",".join("?" for _ in statuses)
+    since = _payos_datetime_text(datetime.now() - timedelta(seconds=int(seconds)))
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            f"""SELECT user_id, COALESCE(SUM(amount),0) AS total_amount
+                FROM payos_orders
+                WHERE status IN ({status_placeholders}) AND created_at>=? AND {payos_auto_topup_order_filter_sql()}
+                GROUP BY user_id ORDER BY total_amount DESC LIMIT ?""",
+            (*statuses, since, max(1, min(int(limit or 5), 10))),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [(str(row[0] or ""), int(row[1] or 0)) for row in rows]
+
+def payos_risk_security_event_count(patterns: tuple[str, ...]) -> int:
+    conn = db_connect()
+    try:
+        total = 0
+        for pattern in patterns:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM security_events WHERE lower(event_type) LIKE ? OR lower(detail) LIKE ?",
+                (f"%{pattern.lower()}%", f"%{pattern.lower()}%"),
+            ).fetchone()
+            total += int(row[0] or 0) if row else 0
+    finally:
+        conn.close()
+    return total
+
+def payos_risk_report_payload() -> dict:
+    review_locks = payos_risk_active_locks(review_required=True, limit=100)
+    hour_locks = payos_risk_active_locks(review_required=False, limit=100)
+    conn = db_connect()
+    try:
+        suspicious = conn.execute("SELECT COUNT(*) FROM payos_orders WHERE LOWER(COALESCE(metadata_json,'')) LIKE '%admin_risk_status%'").fetchone()
+        manual_large = conn.execute(
+            """SELECT id,user_id,amount_vnd,status,submitted_at FROM pending_deposits
+               WHERE status IN ('pending','pending_admin_review') ORDER BY amount_vnd DESC LIMIT 5"""
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "active_review_locks": len(review_locks),
+        "active_one_hour_locks": len(hour_locks),
+        "blocked_users": len({item.get("user_id") for item in review_locks if item.get("user_id")}),
+        "suspicious_orders": int(suspicious[0] or 0) if suspicious else 0,
+        "invalid_signature_events": payos_risk_security_event_count(("invalid_signature", "missing_signature", "bad_signature")),
+        "amount_mismatch_events": payos_risk_security_event_count(("amount_mismatch",)),
+        "duplicate_webhook_events": payos_risk_security_event_count(("duplicate", "idempotency")),
+        "top_60m": payos_risk_top_users(60 * 60),
+        "top_12h": payos_risk_top_users(12 * 60 * 60),
+        "top_24h": payos_risk_top_users(24 * 60 * 60),
+        "manual_large": [{"id": int(row[0] or 0), "user_id": str(row[1] or ""), "amount_vnd": int(row[2] or 0), "status": str(row[3] or ""), "submitted_at": str(row[4] or "")} for row in manual_large],
+    }
+
+def payos_risk_report_text() -> str:
+    payload = payos_risk_report_payload()
+    def top_lines(items):
+        if not items:
+            return "• Chưa có dữ liệu."
+        return "\n".join(f"• <code>{html.escape(uid)}</code>: <b>{_payos_risk_vnd(amount)}</b>" for uid, amount in items[:5])
+    manual_lines = payload.get("manual_large") or []
+    manual_text = "\n".join(
+        f"• #{item['id']} user <code>{html.escape(item['user_id'])}</code>: <b>{_payos_risk_vnd(item['amount_vnd'])}</b> status=<code>{html.escape(item['status'])}</code>"
+        for item in manual_lines
+    ) or "• Chưa có yêu cầu lớn đang chờ."
+    return (
+        "📊 <b>Báo cáo rủi ro nạp tiền PayOS</b>\n\n"
+        f"• Active review locks: <b>{payload['active_review_locks']}</b>\n"
+        f"• Active 1h locks: <b>{payload['active_one_hour_locks']}</b>\n"
+        f"• Blocked users: <b>{payload['blocked_users']}</b>\n"
+        f"• Suspicious orders: <b>{payload['suspicious_orders']}</b>\n"
+        f"• Invalid/missing signature events: <b>{payload['invalid_signature_events']}</b>\n"
+        f"• Amount mismatch events: <b>{payload['amount_mismatch_events']}</b>\n"
+        f"• Duplicate/idempotency events: <b>{payload['duplicate_webhook_events']}</b>\n\n"
+        "<b>Top users 60m</b>\n"
+        f"{top_lines(payload['top_60m'])}\n\n"
+        "<b>Top users 12h</b>\n"
+        f"{top_lines(payload['top_12h'])}\n\n"
+        "<b>Top users 24h</b>\n"
+        f"{top_lines(payload['top_24h'])}\n\n"
+        "<b>Manual top-up lớn đang chờ</b>\n"
+        f"{manual_text}\n\n"
+        "Không hiển thị raw webhook payload, checksum, full bank data hoặc secret."
+    )
+
+def payos_risk_report_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Làm mới", callback_data="payrisk|report")],
+        [InlineKeyboardButton("⬅️ Admin menu", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+async def handle_payos_risk_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin_user(query.from_user.id):
+        return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "menu"
+    value = parts[2] if len(parts) > 2 else ""
+    if action in {"menu", "root"}:
+        return await safe_edit_query_message(query, payos_risk_menu_text(), reply_markup=payos_risk_menu_keyboard())
+    if action == "review":
+        return await safe_edit_query_message(query, payos_risk_lock_list_text(True), reply_markup=payos_risk_lock_list_keyboard(True))
+    if action == "hour":
+        return await safe_edit_query_message(query, payos_risk_lock_list_text(False), reply_markup=payos_risk_lock_list_keyboard(False))
+    if action == "report":
+        record_audit_event(query.from_user.id, "admin", "view_risk_report", "payos_risk", "report", note="callback")
+        return await safe_edit_query_message(query, payos_risk_report_text(), reply_markup=payos_risk_report_keyboard())
+    if action == "orders_recent":
+        return await safe_edit_query_message(query, payos_risk_orders_text(), reply_markup=payos_risk_orders_keyboard())
+    if action == "suspicious":
+        return await safe_edit_query_message(query, payos_risk_orders_text(suspicious_only=True), reply_markup=payos_risk_orders_keyboard(suspicious_only=True))
+    if action == "orders":
+        uid = payos_risk_lookup_user_id(value)
+        return await safe_edit_query_message(query, payos_risk_orders_text(uid), reply_markup=payos_risk_orders_keyboard(uid))
+    if action == "user":
+        uid = payos_risk_lookup_user_id(value)
+        return await safe_edit_query_message(query, payos_risk_user_detail_text(uid), reply_markup=payos_risk_user_detail_keyboard(uid))
+    if action == "user_help":
+        return await safe_edit_query_message(query, payos_risk_help_text("user"), reply_markup=payos_risk_menu_keyboard())
+    if action == "block_help":
+        return await safe_edit_query_message(query, payos_risk_help_text("block"), reply_markup=payos_risk_menu_keyboard())
+    if action == "unlock_help":
+        return await safe_edit_query_message(query, payos_risk_help_text("unlock"), reply_markup=payos_risk_menu_keyboard())
+    if action == "mark_help":
+        return await safe_edit_query_message(
+            query,
+            "⚠️ <b>Ghi chú rủi ro order</b>\n\nDùng lệnh:\n<code>/payos_risk_mark &lt;order_code&gt; note=&lt;ghi chú&gt;</code>",
+            reply_markup=payos_risk_menu_keyboard(),
+        )
+    if action == "unlocklock" and value.isdigit():
+        result = payos_risk_resolve_lock(query.from_user.id, int(value), "admin_button_unlock")
+        text = "✅ Đã mở khóa." if result.get("ok") else f"⚠️ Không mở được khóa: <code>{html.escape(result.get('reason') or 'not_found')}</code>"
+        return await safe_edit_query_message(query, text, reply_markup=payos_risk_menu_keyboard())
+    if action == "unlockuser" and value:
+        result = payos_risk_unlock_user(query.from_user.id, value, "admin_button_unlock_user")
+        text = f"✅ Đã mở <b>{int(result.get('resolved_count') or 0)}</b> lock cho user <code>{html.escape(value)}</code>." if result.get("ok") else "⚠️ Không tìm thấy lock active để mở."
+        return await safe_edit_query_message(query, text, reply_markup=payos_risk_menu_keyboard())
+    if action == "keep" and value.isdigit():
+        lock = payos_risk_lock_by_id(int(value))
+        record_audit_event(query.from_user.id, "admin", "keep_auto_topup_lock", "payos_topup_lock", str(value), before=lock, after={"kept": True}, note="admin_keep_lock")
+        return await safe_edit_query_message(query, f"🚫 Đã giữ khóa <code>#{html.escape(value)}</code> để tiếp tục review.", reply_markup=payos_risk_menu_keyboard())
+    if action == "cancel" and value:
+        result = payos_risk_cancel_order(query.from_user.id, value, "admin_button_cancel")
+        text = "❌ Đã hủy lệnh pending. Nếu webhook PAID tới sau, status gate hiện có sẽ không cộng Xu." if result.get("ok") else f"⚠️ Không hủy được: <code>{html.escape(result.get('reason') or 'unknown')}</code>"
+        return await safe_edit_query_message(query, text, reply_markup=payos_risk_menu_keyboard())
+    if action == "mark" and value:
+        result = payos_risk_mark_order_suspicious(query.from_user.id, value, "admin_button_mark_suspicious")
+        text = "⚠️ Đã đánh dấu lệnh đáng ngờ." if result.get("ok") else f"⚠️ Không đánh dấu được: <code>{html.escape(result.get('reason') or 'unknown')}</code>"
+        return await safe_edit_query_message(query, text, reply_markup=payos_risk_menu_keyboard())
+    return await query.answer("Thao tác rủi ro PayOS chưa được hỗ trợ.", show_alert=True)
+
+async def cmd_payos_risk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(payos_risk_menu_text(), parse_mode="HTML", reply_markup=payos_risk_menu_keyboard())
+
+async def cmd_payos_risk_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    target = (context.args[0] if context.args else "").strip()
+    if not target:
+        return await update.message.reply_text(payos_risk_help_text("user"), parse_mode="HTML", reply_markup=payos_risk_menu_keyboard())
+    uid = payos_risk_lookup_user_id(target)
+    await update.message.reply_text(payos_risk_user_detail_text(uid), parse_mode="HTML", reply_markup=payos_risk_user_detail_keyboard(uid))
+
+async def cmd_payos_risk_block(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text(payos_risk_help_text("block"), parse_mode="HTML", reply_markup=payos_risk_menu_keyboard())
+    user_id = context.args[0]
+    data = parse_key_value_args(" ".join(context.args[1:]))
+    reason = data.get("reason") or data.get("note") or "manual_admin_block"
+    result = payos_risk_manual_block_user(update.effective_user.id, user_id, reason)
+    if not result.get("ok"):
+        return await update.message.reply_text(f"⚠️ Không khóa được: <code>{html.escape(result.get('reason') or 'unknown')}</code>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"🚫 Đã khóa nạp tự động PayOS cho user <code>{html.escape(str(user_id))}</code>.\n"
+        "User vẫn có thể dùng nạp thủ công; nạp thủ công không tự cộng Xu.",
+        parse_mode="HTML",
+        reply_markup=payos_risk_menu_keyboard(),
+    )
+
+async def cmd_payos_risk_unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text(payos_risk_help_text("unlock"), parse_mode="HTML", reply_markup=payos_risk_menu_keyboard())
+    target = context.args[0]
+    data = parse_key_value_args(" ".join(context.args[1:]))
+    note = data.get("note") or data.get("reason") or "admin_review_ok"
+    result = payos_risk_unlock_user(update.effective_user.id, target, note)
+    if not result.get("ok"):
+        return await update.message.reply_text("⚠️ Không tìm thấy lock active để mở.", parse_mode="HTML", reply_markup=payos_risk_menu_keyboard())
+    await update.message.reply_text(
+        f"✅ Đã mở <b>{int(result.get('resolved_count') or 0)}</b> lock PayOS auto top-up.",
+        parse_mode="HTML",
+        reply_markup=payos_risk_menu_keyboard(),
+    )
+
+async def cmd_payos_risk_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/payos_risk_cancel &lt;order_code&gt; reason=&lt;lý do&gt;</code>", parse_mode="HTML")
+    order_code = context.args[0]
+    data = parse_key_value_args(" ".join(context.args[1:]))
+    result = payos_risk_cancel_order(update.effective_user.id, order_code, data.get("reason") or data.get("note") or "admin_cancel")
+    if not result.get("ok"):
+        return await update.message.reply_text(f"⚠️ Không hủy được: <code>{html.escape(result.get('reason') or 'unknown')}</code>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"❌ Đã hủy lệnh pending <code>{html.escape(order_code)}</code>. Xu chưa được cộng.",
+        parse_mode="HTML",
+        reply_markup=payos_risk_menu_keyboard(),
+    )
+
+async def cmd_payos_risk_mark(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/payos_risk_mark &lt;order_code&gt; note=&lt;ghi chú&gt;</code>", parse_mode="HTML")
+    order_code = context.args[0]
+    data = parse_key_value_args(" ".join(context.args[1:]))
+    result = payos_risk_mark_order_suspicious(update.effective_user.id, order_code, data.get("note") or data.get("reason") or "admin_mark")
+    if not result.get("ok"):
+        return await update.message.reply_text(f"⚠️ Không đánh dấu được: <code>{html.escape(result.get('reason') or 'unknown')}</code>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"⚠️ Đã đánh dấu lệnh <code>{html.escape(order_code)}</code> là đáng ngờ.",
+        parse_mode="HTML",
+        reply_markup=payos_risk_menu_keyboard(),
+    )
 
 PAYOS_CREATE_SIGNATURE_DEFAULT_VARIANT = "standard_sorted"
 PAYOS_CREATE_SIGNATURE_FIELDS = ("amount", "cancelUrl", "description", "orderCode", "returnUrl")
@@ -9094,6 +9918,7 @@ def manual_pending_admin_text(deposit: dict) -> str:
         f"Bill/TXID: <code>{html.escape(str(deposit.get('tx_hash') or ('image attached' if deposit.get('file_id') else '-')))}</code>\n"
         f"Transfer content: <code>{html.escape(str(deposit.get('transfer_content') or '-'))}</code>\n"
         f"Thời gian: <code>{html.escape(str(deposit.get('submitted_at') or now_text()))}</code>\n\n"
+        "⚠️ Nạp thủ công không tự cộng Xu. Chỉ duyệt sau khi xác nhận tiền đã vào.\n"
         "⚠️ Chỉ duyệt sau khi đã kiểm tra tiền/giao dịch thật."
     ).replace(",", ".")
 
@@ -52802,6 +53627,7 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("⚙️ Hệ thống", callback_data="menu|system"), InlineKeyboardButton("🧠 Operator", callback_data="menu|operator")])
         rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_packages")])
         rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")])
+        rows.append([InlineKeyboardButton("🛡 Rủi ro nạp tiền", callback_data="menu|payos_risk")])
         rows.append([InlineKeyboardButton("📊 Báo cáo tổng", callback_data="menu|admin_overview"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")])
         rows.append([InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider"), InlineKeyboardButton("📣 Marketing tự động", callback_data="marketing|start")])
         rows.append([InlineKeyboardButton("🎧 CSKH / Ticket", callback_data="ticket|admin")])
@@ -53118,6 +53944,7 @@ def menu_text_admin() -> str:
         "• <code>/pending</code>, <code>/duyet</code>, <code>/tuchoi</code> — chỉ xử lý sau khi đối soát tiền thật\n"
         "• <code>/payos_test_plan</code>, <code>/mark_payos_test</code>, <code>/fx_price_test</code>\n\n"
         "• <code>/billing_bridge_status</code>, <code>/billing_bridge_test topup 10000 dry_run=1</code>, <code>/payos_confirm_webhook</code>\n\n"
+        "• <code>/payos_risk</code>, <code>/payos_risk_user</code>, <code>/payos_risk_block</code>, <code>/payos_risk_unblock</code>, <code>/payos_risk_cancel</code> — quản trị rủi ro nạp tiền PayOS\n\n"
         "<b>C. Gói / Combo</b>\n"
         "• <code>/package_catalog</code>, <code>/grant_combo</code>, <code>/grant_monthly</code>, <code>/grant_storage</code>\n"
         "• <code>/user_packages</code>, <code>/adjust_package</code>, <code>/revoke_package</code>\n\n"
@@ -62284,7 +63111,7 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         "clear_stale",
         "unfreeze_",
     )
-    admin_only_pages = {"admin_overview", "freeze_queue", "freeze_status", "smoke_test"}
+    admin_only_pages = {"admin_overview", "freeze_queue", "freeze_status", "smoke_test", "payos_risk"}
     public_hints = {
         "hint_naptien", "hint_profile", "hint_terms", "hint_film", "hint_ai_prompt",
         "hint_note", "hint_search_note", "hint_remind", "hint_doc_tools", "hint_pricing",
@@ -130269,6 +131096,7 @@ def admin_provider_freeze_keyboard(kind: str) -> InlineKeyboardMarkup:
 ADMIN_MENU_PAGE_HANDLERS = {
     "admin_overview": lambda: (admin_overview_text(), finance_admin_keyboard()),
     "smoke_test": lambda: (smoke_test_menu_text(), smoke_test_menu_keyboard()),
+    "payos_risk": lambda: (payos_risk_menu_text(), payos_risk_menu_keyboard()),
     "billing": lambda: (admin_billing_text(), admin_billing_keyboard()),
     "admin_billing_pending": lambda: (admin_billing_help_text("pending"), admin_child_keyboard("billing")),
     "admin_billing_duyet": lambda: (admin_billing_help_text("duyet"), admin_child_keyboard("billing")),
@@ -141333,6 +142161,13 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("payos_confirm_webhook", cmd_payos_confirm_webhook))
     tg_app.add_handler(CommandHandler("payos_env_check", cmd_payos_env_check))
     tg_app.add_handler(CommandHandler("payos_key_fingerprint", cmd_payos_key_fingerprint))
+    tg_app.add_handler(CommandHandler("payos_risk", cmd_payos_risk))
+    tg_app.add_handler(CommandHandler("payos_risk_report", cmd_payos_risk))
+    tg_app.add_handler(CommandHandler("payos_risk_user", cmd_payos_risk_user))
+    tg_app.add_handler(CommandHandler("payos_risk_block", cmd_payos_risk_block))
+    tg_app.add_handler(CommandHandler("payos_risk_unblock", cmd_payos_risk_unblock))
+    tg_app.add_handler(CommandHandler("payos_risk_cancel", cmd_payos_risk_cancel))
+    tg_app.add_handler(CommandHandler("payos_risk_mark", cmd_payos_risk_mark))
     tg_app.add_handler(CommandHandler("tuchoi",      cmd_tuchoi))
     tg_app.add_handler(CommandHandler("pending",     cmd_pending))
     tg_app.add_handler(CommandHandler("stats",       cmd_stats))
@@ -141414,6 +142249,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_doc_tool_callback, pattern=r"^docflow\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_internal_archive_callback, pattern=r"^archive\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback, pattern=r"^freehub\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_payos_risk_callback, pattern=r"^payrisk\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_payos_alert_callback, pattern=r"^payosalert\|"))

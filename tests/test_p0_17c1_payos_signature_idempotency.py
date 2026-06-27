@@ -300,9 +300,11 @@ def test_p0_17c1_static_guard_no_unrelated_files_touched():
         "bot.py",
         "docs/reports/P0_17C1_PAYOS_SIGNATURE_IDEMPOTENCY.md",
         "docs/reports/P0_17C2_PAYOS_AUTO_TOPUP_LIMITS.md",
+        "docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md",
         "tests/test_p0_4_hard_reset_audio_video_flow.py",
         "tests/test_p0_5_audio_video_addon_button_logic.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",
         "tests/test_p0_17c2_payos_auto_topup_limits.py",
+        "tests/test_p0_17c3_payos_admin_risk_lock_review.py",
     }
     assert changed <= allowed
