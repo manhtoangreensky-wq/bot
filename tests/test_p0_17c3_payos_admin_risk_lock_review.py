@@ -470,10 +470,12 @@ def test_p0_17c3_static_guard_no_unrelated_files_touched():
     allowed = {
         "bot.py",
         "docs/reports/P0_17C3_PAYOS_ADMIN_RISK_LOCK_REVIEW.md",
+        "docs/reports/P0_17C4_WEBHOOK_DB_HTML_SECURITY_EVENTS.md",
         "tests/test_p0_4_hard_reset_audio_video_flow.py",
         "tests/test_p0_5_audio_video_addon_button_logic.py",
         "tests/test_p0_17c1_payos_signature_idempotency.py",
         "tests/test_p0_17c2_payos_auto_topup_limits.py",
         "tests/test_p0_17c3_payos_admin_risk_lock_review.py",
+        "tests/test_p0_17c4_webhook_db_html_security_events.py",
     }
     assert changed <= allowed

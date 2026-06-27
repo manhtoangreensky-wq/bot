@@ -286,6 +286,9 @@ def sanitize_log_text(text: str) -> str:
         safe = safe.replace(value, mask_secret(value))
     return safe
 
+def safe_html(text: object) -> str:
+    return html.escape("" if text is None else str(text), quote=True)
+
 class SecretMaskingFilter(logging.Filter):
     def filter(self, record):
         try:
@@ -1284,6 +1287,7 @@ DB_MIGRATION_DRY_RUN = env_flag("DB_MIGRATION_DRY_RUN", "false")
 DB_ALLOW_DESTRUCTIVE_MIGRATION = env_flag("DB_ALLOW_DESTRUCTIVE_MIGRATION", "false")
 DB_BACKUP_DIR = _env("DB_BACKUP_DIR", "/data/backups" if str(DB_FILE).replace("\\", "/").startswith("/data/") else "backups")
 DB_STARTUP_BACKUP_RETENTION = max(1, env_int("DB_STARTUP_BACKUP_RETENTION", 20))
+DB_BACKUP_KEEP_LAST = max(1, env_int("DB_BACKUP_KEEP_LAST", 10))
 BACKUP_MAX_BYTES  = 45 * 1024 * 1024
 DATA_PERSISTENCE_WARNINGS: list[dict] = []
 DB_STARTUP_BACKUP_RESULT: dict = {"status": "not_run", "path": "", "created_at": "", "reason": ""}
@@ -2148,6 +2152,163 @@ def cleanup_old_startup_backups():
                 logger.warning(f"Startup DB backup cleanup skipped {masked_db_path(path)}: {type(e).__name__}")
     except Exception as e:
         logger.warning(f"Startup DB backup cleanup failed: {type(e).__name__}")
+
+def db_backup_dir_is_public(path: str = "") -> bool:
+    value = str(path or DB_BACKUP_DIR or "").strip()
+    if not value:
+        return False
+    parts = [part.lower() for part in Path(os.path.abspath(value)).parts]
+    public_markers = {"public", "static", "assets", "www", "wwwroot", "htdocs"}
+    return any(part in public_markers for part in parts)
+
+def db_backup_filename(now_dt: datetime | None = None) -> str:
+    stamp = (now_dt or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    return f"toanaas_system_{stamp}.sqlite3"
+
+def db_backup_file_candidates() -> list[tuple[float, str]]:
+    backup_dir = str(DB_BACKUP_DIR or "backups")
+    files: list[tuple[float, str]] = []
+    try:
+        if not os.path.isdir(backup_dir):
+            return []
+        for name in os.listdir(backup_dir):
+            if name.startswith("toanaas_system_") and name.endswith(".sqlite3"):
+                path = os.path.join(backup_dir, name)
+                if os.path.isfile(path):
+                    files.append((os.path.getmtime(path), path))
+    except Exception:
+        return []
+    return sorted(files, reverse=True)
+
+def latest_db_backup_info() -> dict:
+    files = db_backup_file_candidates()
+    if files:
+        mtime, path = files[0]
+        return {
+            "status": "found",
+            "path": path,
+            "filename": os.path.basename(path),
+            "created_at": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            "size_bytes": os.path.getsize(path) if os.path.exists(path) else 0,
+        }
+    startup = latest_startup_backup_info()
+    if startup.get("path"):
+        return {
+            "status": startup.get("status") or "startup",
+            "path": startup.get("path") or "",
+            "filename": os.path.basename(startup.get("path") or ""),
+            "created_at": startup.get("created_at") or "",
+            "size_bytes": startup.get("size_bytes") or 0,
+        }
+    return {"status": "not_found", "path": "", "filename": "", "created_at": "", "size_bytes": 0}
+
+def cleanup_old_db_backups(keep_last: int | None = None) -> list[str]:
+    keep = max(1, int(keep_last or DB_BACKUP_KEEP_LAST or 10))
+    removed: list[str] = []
+    for _mtime, path in db_backup_file_candidates()[keep:]:
+        try:
+            os.remove(path)
+            removed.append(os.path.basename(path))
+        except Exception as e:
+            logger.warning("DB backup retention skipped %s: %s", masked_db_path(path), type(e).__name__)
+    return removed
+
+def create_db_backup_now(actor_id="", note: str = "") -> dict:
+    db_path = str(DB_FILE or "").strip()
+    backup_dir = str(DB_BACKUP_DIR or "backups").strip()
+    if DATA_PERSISTENCE_MODE != "sqlite":
+        return {"ok": False, "reason": "non_sqlite_mode", "backup_dir": display_db_path(backup_dir)}
+    if not db_path or not os.path.exists(db_path):
+        return {"ok": False, "reason": "db_file_not_found", "db_file": db_file_health_label(), "backup_dir": display_db_path(backup_dir)}
+    if db_backup_dir_is_public(backup_dir):
+        return {"ok": False, "reason": "backup_dir_public", "backup_dir": display_db_path(backup_dir)}
+    os.makedirs(backup_dir, exist_ok=True)
+    filename = db_backup_filename()
+    backup_path = os.path.join(backup_dir, filename)
+    if os.path.exists(backup_path):
+        filename = f"toanaas_system_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.sqlite3"
+        backup_path = os.path.join(backup_dir, filename)
+    try:
+        source = sqlite3.connect(db_path, timeout=30)
+        dest = sqlite3.connect(backup_path, timeout=30)
+        try:
+            source.execute("PRAGMA wal_checkpoint(FULL)")
+            source.backup(dest)
+            dest.commit()
+        finally:
+            dest.close()
+            source.close()
+        size = os.path.getsize(backup_path)
+        removed = cleanup_old_db_backups(DB_BACKUP_KEEP_LAST)
+        created_at = now_text_safe()
+        try:
+            if callable(globals().get("set_system_setting")):
+                set_system_setting("db_backup_last_path", backup_path, "last manual DB backup path", actor_id or "system")
+                set_system_setting("db_backup_last_at", created_at, "last manual DB backup timestamp", actor_id or "system")
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "path": backup_path,
+            "filename": filename,
+            "size_bytes": size,
+            "created_at": created_at,
+            "removed": removed,
+            "backup_dir": display_db_path(backup_dir),
+            "retention_keep_last": int(DB_BACKUP_KEEP_LAST),
+        }
+    except Exception as e:
+        try:
+            if backup_path and os.path.exists(backup_path):
+                os.remove(backup_path)
+        except Exception:
+            pass
+        return {"ok": False, "reason": type(e).__name__, "error": sanitize_log_text(str(e))[:200], "backup_dir": display_db_path(backup_dir)}
+
+def mask_risk_filename(name: str) -> str:
+    base = os.path.basename(str(name or ""))
+    if len(base) <= 8:
+        return "***"
+    stem, ext = os.path.splitext(base)
+    return f"{stem[:2]}***{stem[-2:]}{ext}" if stem else f"***{ext}"
+
+def secret_file_risk_check(root_dir: str | None = None) -> dict:
+    base_dir = os.path.abspath(root_dir or os.path.dirname(__file__))
+    scan_dirs = [base_dir]
+    for child in ("public", "static", "assets", "www", "wwwroot"):
+        candidate = os.path.join(base_dir, child)
+        if os.path.isdir(candidate):
+            scan_dirs.append(candidate)
+    risks: list[dict] = []
+    for directory in scan_dirs:
+        try:
+            names = os.listdir(directory)
+        except Exception:
+            continue
+        public_dir = db_backup_dir_is_public(directory)
+        for name in names:
+            path = os.path.join(directory, name)
+            if os.path.isdir(path):
+                continue
+            lower = name.lower()
+            ext = os.path.splitext(lower)[1]
+            reason = ""
+            if lower == ".env" or lower.endswith(".env"):
+                reason = "env_file"
+            elif any(marker in lower for marker in ("secret", "token", "api_key", "apikey", "checksum", "private_key")):
+                reason = "secret_like_filename"
+            elif public_dir and ext in {".sqlite", ".sqlite3", ".db"}:
+                reason = "public_db_backup"
+            elif ext in {".sqlite", ".sqlite3", ".db"} and ("backup" in lower or lower.startswith("toanaas_system_")):
+                reason = "db_backup_in_repo"
+            if reason:
+                risks.append({
+                    "masked_name": mask_risk_filename(name),
+                    "reason": reason,
+                    "public": bool(public_dir),
+                    "dir": "repo" if directory == base_dir else os.path.basename(directory),
+                })
+    return {"ok": not risks, "count": len(risks), "risks": risks[:20]}
 
 def backup_sqlite_before_migration(reason: str = "startup") -> dict:
     global DB_STARTUP_BACKUP_RESULT
@@ -8266,6 +8427,13 @@ def payos_risk_manual_block_user(admin_id, user_id: str, reason: str = "") -> di
         conn.commit()
     finally:
         conn.close()
+    record_security_event(
+        "admin_payos_risk_block_user",
+        "medium",
+        {"target_user_id": clean_user_id, "reason": metadata["admin_reason"], "lock_id": lock_id},
+        user_id=str(admin_id or ""),
+        action="payos_risk_block",
+    )
     return {"ok": True, "lock_id": lock_id, "user_id": clean_user_id}
 
 def payos_risk_unlock_user(admin_id, target: str, note: str = "") -> dict:
@@ -8315,6 +8483,14 @@ def payos_risk_unlock_user(admin_id, target: str, note: str = "") -> dict:
         conn.commit()
     finally:
         conn.close()
+    if count > 0:
+        record_security_event(
+            "admin_payos_risk_unlock_user",
+            "medium",
+            {"target_user_id": target_user_id, "target": target, "resolved_count": count},
+            user_id=str(admin_id or ""),
+            action="payos_risk_unlock",
+        )
     return {"ok": count > 0, "resolved_count": count, "user_id": target_user_id, "reason": "unlocked" if count > 0 else "not_found"}
 
 def payos_risk_resolve_lock(admin_id, lock_id: int, note: str = "") -> dict:
@@ -8502,6 +8678,14 @@ def payos_risk_cancel_order(admin_id, order_code: str, note: str = "") -> dict:
         conn.commit()
     finally:
         conn.close()
+    record_security_event(
+        "admin_payos_risk_cancel_order",
+        "high",
+        {"order_code": clean_order, "old_status": old_status, "new_status": PAYOS_STATUS_CANCELLED},
+        user_id=str(admin_id or ""),
+        action="payos_risk_cancel",
+        order_code=clean_order,
+    )
     return {"ok": True, "order_code": clean_order, "old_status": old_status, "new_status": PAYOS_STATUS_CANCELLED}
 
 def payos_risk_mark_order_suspicious(admin_id, order_code: str, note: str = "") -> dict:
@@ -8545,6 +8729,14 @@ def payos_risk_mark_order_suspicious(admin_id, order_code: str, note: str = "") 
         conn.commit()
     finally:
         conn.close()
+    record_security_event(
+        "admin_payos_risk_mark_order_suspicious",
+        "medium",
+        {"order_code": clean_order, "status": order.get("status")},
+        user_id=str(admin_id or ""),
+        action="payos_risk_mark",
+        order_code=clean_order,
+    )
     return {"ok": True, "order_code": clean_order, "status": order.get("status")}
 
 def payos_risk_manual_deposits(user_id: str, limit: int = 5) -> list[dict]:
@@ -34601,6 +34793,71 @@ def record_anomaly(kind, severity, detail, user_id="", username="", auto_lock=Tr
         conn.close()
     return {"event_type": str(kind or "unknown"), "severity": severity_clean, "detail": detail_clean, "auto_locked": bool(auto_lock and severity_clean == "critical")}
 
+def request_security_context(request: Request | None = None) -> dict:
+    if not request:
+        return {"ip": "", "user_agent": "", "endpoint": ""}
+    client = getattr(request, "client", None)
+    return {
+        "ip": sanitize_log_text(str(getattr(client, "host", "") or ""))[:80],
+        "user_agent": sanitize_log_text(str(request.headers.get("user-agent") or ""))[:240],
+        "endpoint": sanitize_log_text(str(getattr(getattr(request, "url", None), "path", "") or ""))[:160],
+    }
+
+def record_security_event(
+    kind: str,
+    severity: str = "low",
+    detail: str | dict = "",
+    request: Request | None = None,
+    user_id: str = "",
+    username: str = "",
+    action: str = "",
+    endpoint: str = "",
+    order_code: str = "",
+    payment_id: str = "",
+    auto_lock: bool = False,
+) -> dict:
+    ctx = request_security_context(request)
+    payload = {
+        "detail": detail if isinstance(detail, dict) else str(detail or ""),
+        "ip": ctx.get("ip") or "",
+        "user_agent": ctx.get("user_agent") or "",
+        "endpoint": endpoint or ctx.get("endpoint") or "",
+        "action": str(action or ""),
+        "order_code": str(order_code or ""),
+        "payment_id": str(payment_id or ""),
+    }
+    clean_detail = sanitize_log_text(json.dumps(payload, ensure_ascii=False, default=str))[:1500]
+    return record_anomaly(
+        kind,
+        severity,
+        clean_detail,
+        user_id=str(user_id or ""),
+        username=str(username or ""),
+        auto_lock=auto_lock,
+    )
+
+def recent_security_events(limit: int = 8) -> list[dict]:
+    conn = db_connect()
+    try:
+        rows = conn.execute(
+            """SELECT event_type,severity,user_id,username,detail,created_at
+               FROM security_events ORDER BY id DESC LIMIT ?""",
+            (max(1, min(50, int(limit or 8))),),
+        ).fetchall()
+    finally:
+        conn.close()
+    events = []
+    for row in rows:
+        events.append({
+            "event_type": str(row[0] or ""),
+            "severity": str(row[1] or ""),
+            "user_id": str(row[2] or ""),
+            "username": str(row[3] or ""),
+            "detail": sanitize_log_text(str(row[4] or ""))[:360],
+            "created_at": str(row[5] or ""),
+        })
+    return events
+
 def emergency_user_message() -> str:
     return (
         "🚧 <b>TOAN AAS đang ở chế độ bảo trì an toàn.</b>\n\n"
@@ -53628,6 +53885,8 @@ def menu_nav_keyboard(section: str = "main", is_admin: bool = False) -> InlineKe
         rows.append([InlineKeyboardButton("💳 Bill / Xu", callback_data="menu|billing"), InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_packages")])
         rows.append([InlineKeyboardButton("💰 Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🧊 Freeze / Queue", callback_data="menu|freeze_queue")])
         rows.append([InlineKeyboardButton("🛡 Rủi ro nạp tiền", callback_data="menu|payos_risk")])
+        rows.append([InlineKeyboardButton("🗄 DB trạng thái", callback_data="menu|admin_db_status"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db")])
+        rows.append([InlineKeyboardButton("🛡 Nhật ký bảo mật", callback_data="menu|admin_security_log")])
         rows.append([InlineKeyboardButton("📊 Báo cáo tổng", callback_data="menu|admin_overview"), InlineKeyboardButton("🧪 Smoke Test", callback_data="menu|smoke_test")])
         rows.append([InlineKeyboardButton("🤖 Provider", callback_data="menu|admin_provider"), InlineKeyboardButton("📣 Marketing tự động", callback_data="marketing|start")])
         rows.append([InlineKeyboardButton("🎧 CSKH / Ticket", callback_data="ticket|admin")])
@@ -53950,6 +54209,7 @@ def menu_text_admin() -> str:
         "• <code>/user_packages</code>, <code>/adjust_package</code>, <code>/revoke_package</code>\n\n"
         "<b>D. Trạng thái hệ thống</b>\n"
         "• <code>/runtime</code>, <code>/data_status</code>, <code>/storage_status</code>, <code>/storage_user</code>\n"
+        "• <code>/db_status</code>, <code>/backup_db_now</code>, <code>/security_log</code> — DB/backup và nhật ký bảo mật an toàn\n"
         "• <code>/cleanup_temp_files</code>, <code>/providers</code>, <code>/dashboard</code>, <code>/stats</code>, <code>/sales_ready</code>\n\n"
         "<b>E. ShopAIKey / Provider</b>\n"
         "• <code>/shopaikey_status</code>, <code>/shopaikey_usage</code>, <code>/shopaikey_video_job</code> — kiểm tra job video\n"
@@ -53979,13 +54239,15 @@ def menu_text_system() -> str:
         f"• App: <code>{html.escape(APP_VERSION)}</code>\n"
         "• <code>/runtime</code> — kiểm tra build, git commit, startup warning\n"
         "• <code>/data_status</code> — kiểm tra DB persistent volume và backup\n"
+        "• <code>/db_status</code> — kiểm tra DB/backup và risk file secret an toàn\n"
         "• <code>/telegram_takeover</code> — hướng dẫn xử lý xung đột bot instance\n"
         "• <code>/telegram_status</code> — trạng thái polling/webhook Telegram\n"
         "• <code>/providers</code> — provider/payment/worker status tổng\n"
         "• <code>/sales_ready</code> — checklist trước khi bán\n"
         "• <code>/costs</code> — chi phí nội bộ nếu có\n"
         "• <code>/payos_test_plan</code> — test PayOS không sửa logic thanh toán\n"
-        "• <code>/backup_db</code> — tạo backup SQLite thủ công\n"
+        "• <code>/backup_db</code> hoặc <code>/backup_db_now</code> — tạo backup SQLite thủ công\n"
+        "• <code>/security_log</code> — xem nhật ký bảo mật gần đây\n"
         "• <code>/checkpayos &lt;mã_đơn&gt;</code> — kiểm tra đơn PayOS\n"
         "• API health: <code>GET /health</code>"
     )
@@ -61971,6 +62233,129 @@ async def cmd_risk_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="HTML",
     )
 
+def db_status_admin_payload() -> dict:
+    payload = data_persistence_status_payload(include_counts=True)
+    backup = latest_db_backup_info()
+    risk = secret_file_risk_check()
+    tables = {
+        "users": False,
+        "credit_events": False,
+        "payos_orders": False,
+        "pending_deposits": False,
+        "transactions": False,
+        "payos_processed_events": False,
+        "payos_topup_locks": False,
+        "audit_logs": False,
+        "video_projects": False,
+        "video_jobs": False,
+    }
+    journal_mode = ""
+    try:
+        conn = db_connect()
+        try:
+            for table in list(tables):
+                tables[table] = sqlite_table_exists(conn, table)
+            row = conn.execute("PRAGMA journal_mode").fetchone()
+            journal_mode = str(row[0] or "") if row else ""
+        finally:
+            conn.close()
+    except Exception as e:
+        payload["db_status_error"] = sanitize_log_text(str(e))[:160]
+    return {
+        **payload,
+        "safe_db_path": masked_db_path(DB_FILE),
+        "safe_backup_dir": masked_db_path(DB_BACKUP_DIR),
+        "last_backup": backup,
+        "table_exists": tables,
+        "journal_mode": journal_mode,
+        "secret_file_risk": risk,
+    }
+
+def db_status_admin_text() -> str:
+    payload = db_status_admin_payload()
+    tables = payload.get("table_exists") or {}
+    risk = payload.get("secret_file_risk") or {}
+    risk_lines = []
+    for item in risk.get("risks") or []:
+        risk_lines.append(
+            f"• <code>{safe_html(item.get('masked_name') or '-')}</code> "
+            f"reason=<code>{safe_html(item.get('reason') or '-')}</code> dir=<code>{safe_html(item.get('dir') or '-')}</code>"
+        )
+    risk_text = "\n".join(risk_lines[:6]) if risk_lines else "• Không phát hiện file backup/secret nguy hiểm trong thư mục public."
+    return (
+        "🗄 <b>DB trạng thái</b>\n\n"
+        f"• DB ok: <code>{'yes' if payload.get('db_exists') and payload.get('db_writable') else 'check'}</code>\n"
+        f"• DB path: <code>{safe_html(payload.get('safe_db_path') or '-')}</code>\n"
+        f"• DB size: <code>{int(payload.get('db_size_bytes') or 0):,} bytes</code>\n"
+        f"• WAL/journal: <code>{safe_html(payload.get('journal_mode') or '-')}</code>\n"
+        f"• Backup dir exists/writable: <code>{'yes' if payload.get('backup_dir_writable') else 'no'}</code>\n"
+        f"• Backup dir: <code>{safe_html(payload.get('safe_backup_dir') or '-')}</code>\n"
+        f"• Last backup: <code>{safe_html((payload.get('last_backup') or {}).get('created_at') or '-')}</code>\n\n"
+        "<b>Important tables</b>\n"
+        f"• users/wallet: <code>{'yes' if tables.get('users') and tables.get('credit_events') else 'partial'}</code>\n"
+        f"• payments/orders: <code>{'yes' if tables.get('payos_orders') and tables.get('pending_deposits') else 'partial'}</code>\n"
+        f"• payos_processed_events: <code>{'yes' if tables.get('payos_processed_events') else 'no'}</code>\n"
+        f"• payos_topup_locks: <code>{'yes' if tables.get('payos_topup_locks') else 'no'}</code>\n"
+        f"• admin risk/audit: <code>{'yes' if tables.get('audit_logs') else 'no'}</code>\n"
+        f"• video project tables: <code>{'yes' if tables.get('video_projects') or tables.get('video_jobs') else 'no/optional'}</code>\n\n"
+        "<b>Backup/secret file risk</b>\n"
+        f"{risk_text}\n\n"
+        "Không hiển thị DB contents, user balances, raw secrets hoặc full private path."
+    )
+
+def admin_db_status_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Làm mới", callback_data="menu|admin_db_status"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db")],
+        [InlineKeyboardButton("🛡 Nhật ký bảo mật", callback_data="menu|admin_security_log")],
+        [InlineKeyboardButton("⬅️ Admin menu", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def backup_db_result_text(result: dict) -> str:
+    if not result.get("ok"):
+        return (
+            "❌ <b>Không tạo được backup DB</b>\n\n"
+            f"• Reason: <code>{safe_html(result.get('reason') or 'unknown')}</code>\n"
+            f"• Backup dir: <code>{safe_html(masked_db_path(result.get('backup_dir') or DB_BACKUP_DIR))}</code>"
+        )
+    removed = result.get("removed") or []
+    return (
+        "💾 <b>Đã sao lưu DB</b>\n\n"
+        f"• File: <code>{safe_html(result.get('filename') or '-')}</code>\n"
+        f"• Size: <code>{int(result.get('size_bytes') or 0):,} bytes</code>\n"
+        f"• Backup dir: <code>{safe_html(masked_db_path(result.get('backup_dir') or DB_BACKUP_DIR))}</code>\n"
+        f"• Retention: giữ <code>{int(result.get('retention_keep_last') or DB_BACKUP_KEEP_LAST)}</code> bản mới nhất\n"
+        f"• Cleanup: <code>{len(removed)}</code> file cũ\n\n"
+        "Không public file backup và không đưa secret/token vào tên file."
+    )
+
+def security_log_text(limit: int = 8) -> str:
+    events = recent_security_events(limit)
+    if not events:
+        body = "• Chưa có sự kiện bảo mật."
+    else:
+        rows = []
+        for item in events:
+            rows.append(
+                f"• <code>{safe_html(item.get('created_at') or '-')}</code> "
+                f"<b>{safe_html(item.get('severity') or '-')}</b> "
+                f"<code>{safe_html(item.get('event_type') or '-')}</code> "
+                f"user=<code>{safe_html(item.get('user_id') or '-')}</code>"
+            )
+        body = "\n".join(rows)
+    return (
+        "🛡 <b>Nhật ký bảo mật</b>\n\n"
+        "Xem các sự kiện bảo mật gần đây: webhook sai chữ ký, nạp bị chặn, thao tác admin, backup DB.\n\n"
+        f"{body}\n\n"
+        "Không hiển thị raw payload, checksum, token, secret hoặc full bank data."
+    )
+
+def security_log_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Làm mới", callback_data="menu|admin_security_log")],
+        [InlineKeyboardButton("🗄 DB trạng thái", callback_data="menu|admin_db_status"), InlineKeyboardButton("💾 Sao lưu DB", callback_data="menu|admin_backup_db")],
+        [InlineKeyboardButton("⬅️ Admin menu", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
 async def cmd_security_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -61985,7 +62370,7 @@ async def cmd_security_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"• ADMIN_IDS: <b>{admin_count}</b>",
         f"• Emergency lock: <b>{'ON' if flag_on('emergency_lock') else 'OFF'}</b>",
         f"• Maintenance: <b>{'ON' if flag_on('maintenance') else 'OFF'}</b>",
-        f"• DB file: <code>{html.escape(str(DB_FILE))}</code> — <b>{'OK' if db_ok else 'MISSING'}</b>",
+        f"• DB file: <code>{safe_html(masked_db_path(DB_FILE))}</code> — <b>{'OK' if db_ok else 'MISSING'}</b>",
         f"• Public URL: <code>{html.escape(effective_public_base_url() or '-')}</code>",
         f"• Update mode: <code>{html.escape(str(ACTIVE_TELEGRAM_UPDATE_MODE or TELEGRAM_UPDATE_MODE or '-'))}</code>",
         f"• Latest security event: <code>{html.escape(str(latest.get('event_type') or '-'))}</code> / <code>{html.escape(str(latest.get('created_at') or '-'))}</code>",
@@ -61993,6 +62378,24 @@ async def cmd_security_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         "2FA/secret checklist là thao tác thủ công: dùng /security_checklist để rà.",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+async def cmd_db_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    record_security_event(
+        "db_status_viewed",
+        "low",
+        "Admin viewed DB status",
+        user_id=str(update.effective_user.id),
+        username=str(update.effective_user.username or ""),
+        action="db_status",
+    )
+    await update.message.reply_text(db_status_admin_text(), parse_mode="HTML", reply_markup=admin_db_status_keyboard())
+
+async def cmd_security_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(security_log_text(), parse_mode="HTML", reply_markup=security_log_keyboard())
 
 async def cmd_data_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -63123,6 +63526,38 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return await query.answer("Khu vực này chỉ dành cho Admin.", show_alert=True)
     if action.startswith("hint_") and not user_is_admin and action not in public_hints:
         return await query.answer("Lệnh nội bộ chỉ dành cho Admin.", show_alert=True)
+    if action == "admin_db_status":
+        record_security_event(
+            "db_status_viewed",
+            "low",
+            "Admin viewed DB status from menu",
+            user_id=str(query.from_user.id),
+            username=str(query.from_user.username or ""),
+            action="db_status",
+        )
+        return await safe_edit_query_message(query, db_status_admin_text(), reply_markup=admin_db_status_keyboard())
+    if action == "admin_security_log":
+        return await safe_edit_query_message(query, security_log_text(), reply_markup=security_log_keyboard())
+    if action == "admin_backup_db":
+        result = create_db_backup_now(query.from_user.id, "menu|admin_backup_db")
+        record_audit_event(
+            query.from_user.id,
+            "admin",
+            "backup.created" if result.get("ok") else "backup.failed",
+            "database",
+            os.path.basename(str(DB_FILE or "toandaas_system.db")),
+            after={"ok": bool(result.get("ok")), "reason": result.get("reason") or "", "filename": result.get("filename") or ""},
+            note="menu|admin_backup_db",
+        )
+        record_security_event(
+            "db_backup_created" if result.get("ok") else "db_backup_failed",
+            "medium" if result.get("ok") else "high",
+            {"ok": bool(result.get("ok")), "reason": result.get("reason") or "", "filename": result.get("filename") or ""},
+            user_id=str(query.from_user.id),
+            username=str(query.from_user.username or ""),
+            action="backup_db",
+        )
+        return await safe_edit_query_message(query, backup_db_result_text(result), reply_markup=admin_db_status_keyboard())
     if action == "hint_note":
         if not memory_can_use_full(query.from_user.id):
             return await safe_edit_query_message(query, memory_access_message(), reply_markup=main_memory_keyboard(lang, query.from_user.id))
@@ -131097,6 +131532,8 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "admin_overview": lambda: (admin_overview_text(), finance_admin_keyboard()),
     "smoke_test": lambda: (smoke_test_menu_text(), smoke_test_menu_keyboard()),
     "payos_risk": lambda: (payos_risk_menu_text(), payos_risk_menu_keyboard()),
+    "admin_db_status": lambda: (db_status_admin_text(), admin_db_status_keyboard()),
+    "admin_security_log": lambda: (security_log_text(), security_log_keyboard()),
     "billing": lambda: (admin_billing_text(), admin_billing_keyboard()),
     "admin_billing_pending": lambda: (admin_billing_help_text("pending"), admin_child_keyboard("billing")),
     "admin_billing_duyet": lambda: (admin_billing_help_text("duyet"), admin_child_keyboard("billing")),
@@ -131705,104 +132142,47 @@ async def cmd_backup_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if flag_on("emergency_lock") and not is_owner_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Emergency mode: chỉ owner được chạy /backup_db.")
-    db_path = str(DB_FILE or "")
-    db_name = os.path.basename(db_path) or "toandaas_system.db"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_filename = f"toan_aas_db_backup_{timestamp}.db"
-
-    if not db_path or not os.path.exists(db_path):
-        safe_path = db_path or db_file_health_label()
-        record_audit_event(
-            ADMIN_ID,
-            "admin",
-            "backup.failed",
-            "database",
-            db_name,
-            after={"reason": "db_file_not_found", "db_file": db_file_health_label()},
-            note="/backup_db DB file not found",
-        )
-        return await update.message.reply_text(
-            "❌ <b>Không tìm thấy DB file để backup</b>\n\n"
-            f"• Path: <code>{html.escape(safe_path)}</code>\n"
-            "• Size: <code>unknown</code>\n"
-            "• Gợi ý: kiểm tra biến <code>DB_FILE</code> hoặc Railway volume.",
-            parse_mode="HTML",
-        )
-
-    try:
-        conn = db_connect()
+    admin_id = str(update.effective_user.id)
+    result = create_db_backup_now(admin_id, "/backup_db")
+    action = "backup.created" if result.get("ok") else "backup.failed"
+    record_audit_event(
+        update.effective_user.id,
+        "admin",
+        action,
+        "database",
+        os.path.basename(str(DB_FILE or "toandaas_system.db")),
+        after={
+            "ok": bool(result.get("ok")),
+            "reason": result.get("reason") or "",
+            "filename": result.get("filename") or "",
+            "size": result.get("size_bytes") or 0,
+        },
+        note="/backup_db_now" if (update.message and str(update.message.text or "").startswith("/backup_db_now")) else "/backup_db",
+    )
+    record_security_event(
+        "db_backup_created" if result.get("ok") else "db_backup_failed",
+        "medium" if result.get("ok") else "high",
+        {"ok": bool(result.get("ok")), "reason": result.get("reason") or "", "filename": result.get("filename") or ""},
+        user_id=admin_id,
+        username=str(update.effective_user.username or ""),
+        action="backup_db",
+    )
+    text = backup_db_result_text(result)
+    if result.get("ok") and result.get("path") and os.path.exists(result["path"]) and int(result.get("size_bytes") or 0) <= BACKUP_MAX_BYTES:
         try:
-            conn.execute("PRAGMA wal_checkpoint(FULL)")
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.warning(f"DB checkpoint before backup failed: {e}")
-
-    size = os.path.getsize(db_path)
-    if size > BACKUP_MAX_BYTES:
-        safe_path = db_path or db_file_health_label()
-        record_audit_event(
-            ADMIN_ID,
-            "admin",
-            "backup.failed",
-            "database",
-            db_name,
-            after={"reason": "file_too_large", "size": size, "limit": BACKUP_MAX_BYTES},
-            note="/backup_db file too large for Telegram",
-        )
-        return await update.message.reply_text(
-            "⚠️ <b>DB backup vượt giới hạn Telegram</b>\n\n"
-            f"• Path: <code>{html.escape(safe_path)}</code>\n"
-            f"• Size: <b>{size:,}</b> bytes\n"
-            f"• Limit: <b>{BACKUP_MAX_BYTES:,}</b> bytes\n\n"
-            "Hãy backup trực tiếp trên server/volume hoặc giảm dung lượng DB trước khi gửi qua Telegram.",
-            parse_mode="HTML",
-        )
-
-    try:
-        with open(db_path, "rb") as f:
-            await context.bot.send_document(
-                chat_id=ADMIN_ID,
-                document=f,
-                filename=backup_filename,
-                caption=(
-                    "🧩 <b>TOAN AAS DB Backup</b>\n\n"
-                    f"• Time: <code>{timestamp}</code>\n"
-                    f"• DB: <code>{html.escape(db_name)}</code>\n"
-                    f"• Size: <b>{size:,}</b> bytes"
-                ),
-                parse_mode="HTML",
-            )
-        record_audit_event(
-            ADMIN_ID,
-            "admin",
-            "backup.created",
-            "database",
-            db_name,
-            after={"db_file": db_file_health_label(), "size": size, "filename": backup_filename},
-            note="/backup_db sent to admin",
-        )
-    except Exception as e:
-        logger.error(f"DB backup send error: {e}")
-        safe_error = str(e)[:300]
-        safe_path = db_path or db_file_health_label()
-        record_audit_event(
-            ADMIN_ID,
-            "admin",
-            "backup.failed",
-            "database",
-            db_name,
-            after={"reason": "send_error", "error": str(e)[:300]},
-            note="/backup_db send failed",
-        )
-        await update.message.reply_text(
-            "❌ <b>Không gửi được backup DB qua Telegram</b>\n\n"
-            f"• Path: <code>{html.escape(safe_path)}</code>\n"
-            f"• Size: <b>{size:,}</b> bytes\n"
-            f"• Error: <code>{html.escape(safe_error)}</code>",
-            parse_mode="HTML",
-        )
+            with open(result["path"], "rb") as f:
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id if update.effective_chat else ADMIN_ID,
+                    document=f,
+                    filename=result.get("filename") or db_backup_filename(),
+                    caption=text,
+                    parse_mode="HTML",
+                )
+            return
+        except Exception as e:
+            logger.warning("DB backup document send failed: %s", sanitize_log_text(str(e))[:160])
+            text += f"\n\n⚠️ Không gửi được file qua Telegram: <code>{safe_html(provider_error_summary(e))}</code>"
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=admin_db_status_keyboard())
 
 # ─── OPERATIONS V1A: INTERNAL BUSINESS ARCHIVE ───────────────────────────────
 INTERNAL_ARCHIVE_TTL_SECONDS = 15 * 60
@@ -141393,6 +141773,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("admin_doc_sources", cmd_admin_doc_sources))
     tg_app.add_handler(CommandHandler("security_status", cmd_security_status))
     tg_app.add_handler(CommandHandler("data_status", cmd_data_status))
+    tg_app.add_handler(CommandHandler("db_status", cmd_db_status))
+    tg_app.add_handler(CommandHandler("security_log", cmd_security_log))
     tg_app.add_handler(CommandHandler("security_checklist", cmd_security_checklist))
     tg_app.add_handler(CommandHandler("risk_checklist", cmd_risk_checklist))
     tg_app.add_handler(CommandHandler("ip_notice", cmd_ip_notice))
@@ -141404,6 +141786,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
     tg_app.add_handler(CommandHandler("backup_db",   cmd_backup_db))
+    tg_app.add_handler(CommandHandler("backup_db_now", cmd_backup_db))
     tg_app.add_handler(CommandHandler("emergency_lock", cmd_emergency_lock))
     tg_app.add_handler(CommandHandler("emergency_unlock", cmd_emergency_unlock))
     tg_app.add_handler(CommandHandler("emergency_status", cmd_emergency_status))
@@ -142802,6 +143185,7 @@ async def runtime_health(request: Request):
     token_summary = telegram_token_runtime_summary()
     db_summary = runtime_db_status()
     data_persistence = data_persistence_status_payload(include_counts=True)
+    backup_info = latest_db_backup_info()
     webhook_info = {"ok": False, "reason": "telegram_app_not_ready", "expected_url": expected_webhook}
     if tg_app:
         try:
@@ -142820,6 +143204,11 @@ async def runtime_health(request: Request):
         "time": now_text(),
         "db": db_summary,
         "data_persistence": data_persistence,
+        "telegram_webhook_secret_configured": bool(TELEGRAM_WEBHOOK_SECRET),
+        "telegram_webhook_secret_enforced": bool(TELEGRAM_WEBHOOK_SECRET),
+        "db_backup_enabled": bool(DATA_PERSISTENCE_MODE == "sqlite" and DB_BACKUP_DIR),
+        "last_db_backup_at": backup_info.get("created_at") or "",
+        "security_event_logging_enabled": callable(globals().get("record_security_event")),
         "bot_username_env": BOT_USERNAME,
         "public_base_url": PUBLIC_BASE_URL or "",
         "public_base_url_source": PUBLIC_BASE_URL_SOURCE or "",
@@ -142835,6 +143224,15 @@ async def runtime_health(request: Request):
             "webhook_expected": expected_webhook,
             "webhook_actual": webhook_info.get("url") or "",
             "last_error": TELEGRAM_STARTUP_ERROR or webhook_info.get("last_error_message") or "",
+            "webhook_secret_configured": bool(TELEGRAM_WEBHOOK_SECRET),
+            "webhook_secret_enforced": bool(TELEGRAM_WEBHOOK_SECRET),
+        },
+        "security": {
+            "telegram_webhook_secret_configured": bool(TELEGRAM_WEBHOOK_SECRET),
+            "telegram_webhook_secret_enforced": bool(TELEGRAM_WEBHOOK_SECRET),
+            "db_backup_enabled": bool(DATA_PERSISTENCE_MODE == "sqlite" and DB_BACKUP_DIR),
+            "last_db_backup_at": backup_info.get("created_at") or "",
+            "security_event_logging_enabled": callable(globals().get("record_security_event")),
         },
         "telegram_update_mode": TELEGRAM_UPDATE_MODE,
         "telegram_update_mode_active": ACTIVE_TELEGRAM_UPDATE_MODE or "",
@@ -142886,8 +143284,28 @@ async def api_telegram_takeover(request: Request, drop_pending_updates: bool = T
 async def telegram_webhook(request: Request):
     if TELEGRAM_WEBHOOK_SECRET:
         token = request.headers.get("x-telegram-bot-api-secret-token", "")
+        if not token:
+            record_security_event(
+                "telegram_webhook_secret_missing",
+                "medium",
+                "Telegram webhook request missing secret token header",
+                request=request,
+                user_id="telegram",
+                username="telegram",
+                action="telegram_webhook",
+            )
+            raise HTTPException(status_code=401, detail="Invalid request")
         if not hmac.compare_digest(token, TELEGRAM_WEBHOOK_SECRET):
-            raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
+            record_security_event(
+                "telegram_webhook_secret_invalid",
+                "medium",
+                "Telegram webhook request had an invalid secret token header",
+                request=request,
+                user_id="telegram",
+                username="telegram",
+                action="telegram_webhook",
+            )
+            raise HTTPException(status_code=401, detail="Invalid request")
     if not tg_app:
         raise HTTPException(status_code=503, detail="Telegram app is not ready")
     payload = await request.json()
@@ -146000,14 +146418,18 @@ def extract_payos_webhook_signature(body: dict, request: Request) -> str:
             return str(signature).strip()
     return ""
 
-def record_payos_webhook_security_event(kind: str, severity: str, detail: str) -> None:
+def record_payos_webhook_security_event(kind: str, severity: str, detail: str, request: Request | None = None, order_code: str = "", payment_id: str = "") -> None:
     try:
-        record_anomaly(
+        record_security_event(
             kind,
             severity,
             str(detail or "")[:500],
+            request=request,
             user_id="payos",
             username="payos",
+            action="payos_webhook",
+            order_code=order_code,
+            payment_id=payment_id,
             auto_lock=False,
         )
     except Exception as e:
@@ -146049,12 +146471,14 @@ async def webhook_payos(request: Request):
     raw_hash = hashlib.sha256(raw_payload or b"").hexdigest()
 
     if flag_on("emergency_lock") or flag_on("payment_freeze"):
-        record_anomaly(
+        record_security_event(
             "payos_webhook_blocked_by_safe_mode",
             "medium",
             "PayOS webhook received while emergency/payment freeze is active",
+            request=request,
             user_id="payos",
             username="payos",
+            action="payos_webhook",
             auto_lock=False,
         )
         return JSONResponse({"code": "00", "desc": "payment_frozen"})
@@ -146066,6 +146490,7 @@ async def webhook_payos(request: Request):
             "payos_webhook_invalid_data",
             "medium",
             "PayOS webhook data payload is missing or not an object",
+            request=request,
         )
         raise HTTPException(status_code=400, detail="Invalid data")
 
@@ -146081,6 +146506,7 @@ async def webhook_payos(request: Request):
             "payos_webhook_missing_signature",
             "medium",
             "PayOS webhook missing signature; no order data trusted",
+            request=request,
         )
         if tg_app:
             await record_payos_failure_and_maybe_alert(SimpleNamespace(bot=tg_app.bot), "PayOS webhook missing signature")
@@ -146092,6 +146518,7 @@ async def webhook_payos(request: Request):
             "payos_webhook_invalid_signature",
             "medium",
             "PayOS webhook invalid signature; no order data trusted",
+            request=request,
         )
         if tg_app:
             await record_payos_failure_and_maybe_alert(SimpleNamespace(bot=tg_app.bot), "PayOS webhook invalid signature")
@@ -146105,6 +146532,8 @@ async def webhook_payos(request: Request):
             "payos_webhook_status_not_paid",
             "low",
             f"status={webhook_status or 'missing'}; order={order_code or '-'}",
+            request=request,
+            order_code=order_code,
         )
         return JSONResponse({"code": "00", "desc": "status_not_paid"})
 
@@ -146116,6 +146545,8 @@ async def webhook_payos(request: Request):
             "payos_webhook_invalid_amount",
             "medium",
             f"order={order_code or '-'}; status={webhook_status}",
+            request=request,
+            order_code=order_code,
         )
         return JSONResponse({"code": "00", "desc": "invalid_amount"})
 
@@ -146137,6 +146568,9 @@ async def webhook_payos(request: Request):
             f"payos_webhook_{str(desc or 'rejected')[:80]}",
             payos_webhook_rejection_severity(str(desc or "")),
             f"reason={desc}; order={order_code or '-'}; amount={amount_vnd}; status={webhook_status}; payment_link_id={payment_link_id or '-'}; transaction_id={transaction_id or '-'}",
+            request=request,
+            order_code=order_code,
+            payment_id=payment_link_id or transaction_id,
         )
         return JSONResponse({"code": "00", "desc": desc})
 
