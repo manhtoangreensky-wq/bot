@@ -1,0 +1,3 @@
+scripts/vps/*.sh text eol=lf
+deploy/systemd/*.service.example text eol=lf
+deploy/env/*.env.example text eol=lf
