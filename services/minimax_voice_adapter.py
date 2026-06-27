@@ -36,6 +36,37 @@ class AudioArtifact:
     public_message: str = ""
 
 
+@dataclass(frozen=True)
+class VoiceVaultEntry:
+    ok: bool
+    profile_id: int = 0
+    provider_voice_id: str = ""
+    display_name: str = ""
+    source: str = ""
+    reason: str = ""
+    public_message: str = ""
+
+
+@dataclass(frozen=True)
+class VoicePreviewPolicy:
+    allowed: bool
+    explicit: bool
+    short: bool
+    no_charge: bool
+    max_seconds: int
+    reason: str = ""
+    public_message: str = ""
+
+
+@dataclass(frozen=True)
+class CustomVoiceFlowState:
+    ready: bool
+    locked: bool
+    fallback_available: bool
+    reason: str = ""
+    public_message: str = ""
+
+
 def normalize_voice_id(value: str | None) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -55,9 +86,53 @@ def validate_provider_voice_id(value: str | None) -> bool:
     return bool(VOICE_ID_PATTERN.match(normalized))
 
 
+def _profile_id(profile: dict | None) -> int:
+    try:
+        return int((profile or {}).get("id") or 0)
+    except Exception:
+        return 0
+
+
+def _profile_voice_id_is_local_id(profile: dict | None, provider_voice_id: str) -> bool:
+    pid = _profile_id(profile)
+    return bool(pid and str(pid) == str(provider_voice_id or "").strip())
+
+
 def _safe_label(profile: dict | None, fallback: str = "") -> str:
     label = str((profile or {}).get("display_name") or fallback or "").strip()
     return re.sub(r"\s+", " ", label)[:120] or "Voice"
+
+
+def friendly_voice_name(profile: dict | None, fallback: str = "Voice đã lưu") -> str:
+    return _safe_label(profile, fallback)
+
+
+def voice_vault_entry(profile: dict | None, *, source: str = "saved") -> VoiceVaultEntry:
+    selected = dict(profile or {})
+    profile_id = _profile_id(selected)
+    provider_voice_id = normalize_voice_id(selected.get("provider_voice_id"))
+    label = _safe_label(selected, "Voice đã gửi" if source == "uploaded" else "Voice đã lưu")
+    if not validate_provider_voice_id(provider_voice_id) or _profile_voice_id_is_local_id(selected, provider_voice_id):
+        return VoiceVaultEntry(
+            ok=False,
+            profile_id=profile_id,
+            display_name=label,
+            source=source,
+            reason="missing_provider_voice_id",
+            public_message=PUBLIC_SAFE_VOICE_NOT_READY,
+        )
+    return VoiceVaultEntry(
+        ok=True,
+        profile_id=profile_id,
+        provider_voice_id=provider_voice_id,
+        display_name=label,
+        source=source,
+    )
+
+
+def list_friendly_voice_entries(profiles: list[dict] | tuple[dict, ...], *, source: str = "saved") -> list[VoiceVaultEntry]:
+    entries = [voice_vault_entry(profile, source=source) for profile in list(profiles or [])]
+    return [entry for entry in entries if entry.ok]
 
 
 def resolve_provider_voice_id(
@@ -91,7 +166,7 @@ def resolve_provider_voice_id(
     selected_profile = dict(profile or uploaded_profile or {})
     if source in {"saved", "saved_voice", "voice_profile"} or selected_profile:
         provider_voice_id = normalize_voice_id(selected_profile.get("provider_voice_id"))
-        if not validate_provider_voice_id(provider_voice_id):
+        if not validate_provider_voice_id(provider_voice_id) or _profile_voice_id_is_local_id(selected_profile, provider_voice_id):
             return VoiceIdResolution(
                 ok=False,
                 provider_voice_id="",
@@ -109,7 +184,7 @@ def resolve_provider_voice_id(
     if source in {"uploaded", "uploaded_voice"}:
         selected_profile = dict(uploaded_profile or profile or {})
         provider_voice_id = normalize_voice_id(selected_profile.get("provider_voice_id"))
-        if not validate_provider_voice_id(provider_voice_id):
+        if not validate_provider_voice_id(provider_voice_id) or _profile_voice_id_is_local_id(selected_profile, provider_voice_id):
             return VoiceIdResolution(
                 ok=False,
                 provider_voice_id="",
@@ -128,6 +203,66 @@ def resolve_provider_voice_id(
     if validate_provider_voice_id(requested):
         return VoiceIdResolution(ok=True, provider_voice_id=requested, voice_label="Voice")
     return VoiceIdResolution(ok=False, reason="missing_provider_voice_id", public_message=PUBLIC_SAFE_VOICE_NOT_READY)
+
+
+def voice_preview_policy(
+    *,
+    explicit: bool = False,
+    no_charge: bool = True,
+    max_seconds: int = 6,
+) -> VoicePreviewPolicy:
+    seconds = max(1, min(15, int(max_seconds or 6)))
+    if not explicit:
+        return VoicePreviewPolicy(
+            allowed=False,
+            explicit=False,
+            short=True,
+            no_charge=True,
+            max_seconds=seconds,
+            reason="preview_requires_explicit_confirm",
+            public_message="Bản nghe thử chỉ tạo khi anh/chị xác nhận rõ và không trừ Xu âm thầm.",
+        )
+    if not no_charge:
+        return VoicePreviewPolicy(
+            allowed=False,
+            explicit=True,
+            short=True,
+            no_charge=False,
+            max_seconds=seconds,
+            reason="preview_must_be_no_charge",
+            public_message="Bản nghe thử phải là bước không trừ Xu.",
+        )
+    return VoicePreviewPolicy(
+        allowed=True,
+        explicit=True,
+        short=True,
+        no_charge=True,
+        max_seconds=seconds,
+        reason="preview_explicit_short_no_charge",
+        public_message=f"TOAN AAS sẽ tạo bản nghe thử ngắn tối đa {seconds} giây và không trừ Xu.",
+    )
+
+
+def custom_voice_flow_state(*, ready: bool = False, locked_reason: str = "") -> CustomVoiceFlowState:
+    if ready:
+        return CustomVoiceFlowState(
+            ready=True,
+            locked=False,
+            fallback_available=True,
+            reason="custom_voice_ready",
+            public_message="Voice riêng đã sẵn sàng để tạo audio sau khi xác nhận.",
+        )
+    reason = str(locked_reason or "custom_voice_locked").strip()
+    return CustomVoiceFlowState(
+        ready=False,
+        locked=True,
+        fallback_available=True,
+        reason=reason,
+        public_message=(
+            "Voice riêng đang được chuẩn bị, tạm khóa để kiểm soát chất lượng. TOAN AAS chưa xử lý và chưa trừ Xu. "
+            "Anh/chị có thể dùng giọng nữ/nam mặc định hoặc voice đã lưu."
+        ),
+    )
 
 
 def _duration_seconds(path: Path) -> float:

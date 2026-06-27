@@ -52988,10 +52988,46 @@ def video_b14_saved_voice_profiles(user_id, limit: int = 5) -> list[dict]:
     return [dict(row) for row in rows if voice_profile_can_generate_tts(row)]
 
 
+def voice_core_vault_lookup(user_id, *, source: str = "saved", limit: int = 5, include_inactive: bool = False) -> list[dict]:
+    source = str(source or "saved").strip().lower()
+    try:
+        rows = user_voice_profile_rows(user_id, max(1, int(limit or 5)), 0, include_inactive=include_inactive)
+    except Exception:
+        rows = []
+    if source in {"uploaded", "uploaded_voice"}:
+        rows = [row for row in rows if str(row.get("source_file_id") or row.get("source_file_ref") or "").strip()]
+    entries = []
+    for row in rows:
+        entry = minimax_voice_adapter.voice_vault_entry(row, source="uploaded" if source in {"uploaded", "uploaded_voice"} else "saved")
+        if not entry.ok:
+            continue
+        entries.append({
+            "id": entry.profile_id,
+            "display_name": entry.display_name,
+            "provider_voice_id": entry.provider_voice_id,
+            "source": entry.source,
+            "status": str(row.get("status") or ""),
+        })
+    return entries
+
+
+def video_b14_uploaded_voice_profiles(user_id, limit: int = 5) -> list[dict]:
+    try:
+        rows = user_voice_profile_rows(user_id, max(1, int(limit or 5)), 0, include_inactive=False)
+    except Exception:
+        rows = []
+    return [
+        dict(row)
+        for row in rows
+        if voice_profile_can_generate_tts(row)
+        and str(row.get("source_file_id") or row.get("source_file_ref") or "").strip()
+    ]
+
+
 def video_b14_voice_select_keyboard(user_id, lang: str = "vi") -> InlineKeyboardMarkup:
     rows = []
     for profile in video_b14_saved_voice_profiles(user_id, 5):
-        label = str(profile.get("display_name") or f"Voice #{profile.get('id') or ''}").strip()[:32] or "Voice đã lưu"
+        label = minimax_voice_adapter.friendly_voice_name(profile, f"Voice #{profile.get('id') or ''}")[:32] or "Voice đã lưu"
         rows.append([InlineKeyboardButton(f"📚 {label}", callback_data=f"vproduct|b14_voice_saved_pick|{int(profile.get('id') or 0)}")])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_voice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
@@ -53005,6 +53041,28 @@ def video_b14_voice_resolution(source: str, profile: dict | None = None) -> mini
         default_male_voice_id=default_tts_voice_id("male"),
         default_female_voice_id=default_tts_voice_id("female"),
     )
+
+
+def voice_core_preview_policy(*, explicit: bool = False, max_seconds: int | None = None) -> minimax_voice_adapter.VoicePreviewPolicy:
+    return minimax_voice_adapter.voice_preview_policy(
+        explicit=bool(explicit),
+        no_charge=True,
+        max_seconds=max_seconds or voice_preview_seconds(),
+    )
+
+
+def custom_voice_core_state(readiness: dict | None = None, *, public: bool = True) -> minimax_voice_adapter.CustomVoiceFlowState:
+    data = dict(readiness or get_minimax_voice_clone_readiness())
+    provider_blocked = bool(data.get("provider_permission_blocked"))
+    configured_ready = bool(data.get("ready")) and not provider_blocked
+    public_ready = bool(data.get("public_enabled")) and configured_ready
+    ready = public_ready if public else configured_ready
+    reason = (
+        str(data.get("provider_permission_blocker") or "").strip()
+        or str(data.get("reason") or "").strip()
+        or ("public_custom_voice_locked" if configured_ready and not public_ready and public else "custom_voice_locked")
+    )
+    return minimax_voice_adapter.custom_voice_flow_state(ready=ready, locked_reason=reason)
 
 
 def video_b14_apply_voice_choice(user_id, session: dict, source: str, profile: dict | None = None) -> tuple[dict, dict]:
@@ -55262,10 +55320,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "b14_voice_source":
         source = value if value in {"none", "default_male", "default_female", "uploaded", "saved", "custom"} else "none"
         if source == "custom":
+            state = custom_voice_core_state(public=True)
             session = task3d_session_step(uid, "b14_voice", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(
                 query,
-                "🎙 Tạo voice riêng đang tạm khóa để kiểm soát chất lượng. Anh/chị có thể dùng giọng nam/nữ mặc định hoặc voice đã lưu.",
+                state.public_message or "🎙 Tạo voice riêng đang tạm khóa để kiểm soát chất lượng. Anh/chị có thể dùng giọng nam/nữ mặc định hoặc voice đã lưu.",
                 reply_markup=video_b14_voice_keyboard(lang),
             )
         if source == "saved":
@@ -55285,7 +55344,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 reply_markup=video_b14_voice_select_keyboard(uid, lang),
             )
         if source == "uploaded":
-            profiles = video_b14_saved_voice_profiles(uid, 1)
+            profiles = video_b14_uploaded_voice_profiles(uid, 1)
             profile = profiles[0] if profiles else {}
             session, result = video_b14_apply_voice_choice(uid, session, "uploaded", profile)
             if not result.get("ok"):
@@ -55329,6 +55388,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_voice"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
     if action == "b14_voice_preview":
+        policy = voice_core_preview_policy(explicit=False, max_seconds=voice_preview_seconds())
         gate = provider_gate.evaluate_provider_gate(
             context=provider_gate.PREVIEW_CONFIRMED,
             is_admin=video_b14_is_admin_or_owner(uid),
@@ -55341,7 +55401,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if video_b14_is_admin_or_owner(uid) and gate.allowed:
             message = "OWNER/ADMIN TEST MODE — không trừ Xu. Bản nghe thử thật chỉ chạy bằng lệnh smoke hoặc sau khi bật test rõ ràng."
         else:
-            message = "🔊 Nghe thử đoạn ngắn sẽ được cắt từ video hoàn chỉnh sau khi anh/chị xác nhận tạo video. Hiện tại TOAN AAS chỉ lưu lựa chọn, chưa tạo file thật và chưa trừ Xu."
+            message = policy.public_message or "🔊 Nghe thử đoạn ngắn sẽ được cắt từ video hoàn chỉnh sau khi anh/chị xác nhận tạo video. Hiện tại TOAN AAS chỉ lưu lựa chọn, chưa tạo file thật và chưa trừ Xu."
         return await safe_edit_or_send(
             query,
             message,
@@ -80309,14 +80369,118 @@ async def cmd_tool_test_voice_vault_lookup(update: Update, context: ContextTypes
     uid = update.effective_user.id
     profiles = user_voice_profile_rows(uid, 8, 0, include_inactive=True)
     ready = [profile for profile in profiles if voice_profile_can_generate_tts(profile)]
+    mapped = voice_core_vault_lookup(uid, source="saved", limit=8, include_inactive=True)
     save_tool_test_result("p0_18a_voice_vault_lookup", "PASS", f"profiles={len(profiles)}; ready={len(ready)}; provider_call=no", uid)
-    names = ", ".join(str(profile.get("display_name") or f"#{profile.get('id')}")[:32] for profile in ready[:5]) or "-"
+    names = ", ".join(str(item.get("display_name") or f"#{item.get('id')}")[:32] for item in mapped[:5]) or "-"
     await update.message.reply_text(
         "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
         f"• Tổng voice trong kho: <code>{len(profiles)}</code>\n"
         f"• Voice sẵn sàng: <code>{len(ready)}</code>\n"
+        f"• Provider id mapped: <code>{len(mapped)}</code>\n"
         f"• Tên hiển thị: <code>{html.escape(names)}</code>\n"
         "• Provider call: <code>NO</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_voice_default_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_19a_voice_default_tts"):
+        return
+    uid = update.effective_user.id
+    if "--fake" not in set(context.args or []):
+        save_tool_test_result("p0_19a_voice_default_tts", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_voice_default_tts --fake</code> để test giọng mặc định bằng file giả, không gọi provider và không trừ Xu.", parse_mode="HTML")
+    with tempfile.TemporaryDirectory(prefix="toanaas_p019a_default_voice_") as tmp:
+        workspace = Path(tmp)
+        female = video_b14_voice_resolution("default_female")
+        male = video_b14_voice_resolution("default_male")
+        female_artifact = minimax_voice_adapter.synthesize_text_to_audio(
+            text="Xin chào TOAN AAS, đây là giọng nữ mặc định.",
+            provider_voice_id=female.provider_voice_id,
+            output_path=workspace / "female.mp3",
+            tts_func=p0_18a_fake_tts,
+        )
+        male_artifact = minimax_voice_adapter.synthesize_text_to_audio(
+            text="Xin chào TOAN AAS, đây là giọng nam mặc định.",
+            provider_voice_id=male.provider_voice_id,
+            output_path=workspace / "male.mp3",
+            tts_func=p0_18a_fake_tts,
+        )
+    ok = bool(female.ok and male.ok and female_artifact.ok and male_artifact.ok)
+    status = "PASS" if ok else "FAIL"
+    save_tool_test_result(
+        "p0_19a_voice_default_tts",
+        status,
+        f"female={female.ok}/{female_artifact.size_bytes}; male={male.ok}/{male_artifact.size_bytes}; fake=yes; provider_call=no",
+        uid,
+    )
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Default female mapped: <code>{'YES' if female.ok else 'NO'}</code>\n"
+        f"• Default male mapped: <code>{'YES' if male.ok else 'NO'}</code>\n"
+        f"• Female fake audio bytes: <code>{female_artifact.size_bytes}</code>\n"
+        f"• Male fake audio bytes: <code>{male_artifact.size_bytes}</code>\n"
+        "• Provider call: <code>NO</code>\n"
+        f"• Result: <code>{status}</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_voice_preview_policy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_19a_voice_preview_policy"):
+        return
+    uid = update.effective_user.id
+    if "--fake" not in set(context.args or []):
+        save_tool_test_result("p0_19a_voice_preview_policy", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_voice_preview_policy --fake</code> để test policy nghe thử, không gọi provider và không trừ Xu.", parse_mode="HTML")
+    silent = voice_core_preview_policy(explicit=False, max_seconds=voice_preview_seconds())
+    explicit = voice_core_preview_policy(explicit=True, max_seconds=voice_preview_seconds())
+    gate = provider_gate.evaluate_provider_gate(
+        context=provider_gate.PREVIEW_CONFIRMED,
+        configured=True,
+        public_ready=True,
+        preview_confirmed=False,
+        preview_no_charge=False,
+    )
+    ok = bool(not silent.allowed and explicit.allowed and explicit.no_charge and explicit.short and not gate.allowed)
+    status = "PASS" if ok else "FAIL"
+    save_tool_test_result("p0_19a_voice_preview_policy", status, f"silent={silent.reason}; explicit={explicit.reason}; provider_call=no", uid)
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Silent preview blocked: <code>{'YES' if not silent.allowed and not gate.allowed else 'NO'}</code>\n"
+        f"• Explicit short preview allowed: <code>{'YES' if explicit.allowed and explicit.short else 'NO'}</code>\n"
+        f"• Preview charge: <code>{'NO' if explicit.no_charge else 'YES'}</code>\n"
+        f"• Max seconds: <code>{explicit.max_seconds}</code>\n"
+        "• Provider call: <code>NO</code>\n"
+        f"• Result: <code>{status}</code>",
+        parse_mode="HTML",
+    )
+
+
+async def cmd_tool_test_custom_voice_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await p0_18a_admin_guard(update, "p0_19a_custom_voice_flow"):
+        return
+    uid = update.effective_user.id
+    if "--fake" not in set(context.args or []):
+        save_tool_test_result("p0_19a_custom_voice_flow", "NO_CONFIRM", "missing --fake; no provider call", uid)
+        return await update.message.reply_text("Dùng <code>/tool_test_custom_voice_flow --fake</code> để test trạng thái voice riêng, không gọi provider và không trừ Xu.", parse_mode="HTML")
+    locked = custom_voice_core_state({"ready": False, "public_enabled": False, "reason": "fake_locked"}, public=True)
+    ready = custom_voice_core_state({"ready": True, "public_enabled": True, "reason": "fake_ready"}, public=True)
+    ok = bool(locked.locked and locked.fallback_available and ready.ready and not ready.locked)
+    status = "PASS" if ok else "FAIL"
+    save_tool_test_result(
+        "p0_19a_custom_voice_flow",
+        status,
+        f"locked={locked.locked}; fallback={locked.fallback_available}; ready={ready.ready}; provider_call=no",
+        uid,
+    )
+    await update.message.reply_text(
+        "🧪 <b>OWNER/ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        f"• Locked state clear: <code>{'YES' if locked.locked else 'NO'}</code>\n"
+        f"• Fallback available: <code>{'YES' if locked.fallback_available else 'NO'}</code>\n"
+        f"• Ready state modeled: <code>{'YES' if ready.ready else 'NO'}</code>\n"
+        "• Provider call: <code>NO</code>\n"
+        f"• Result: <code>{status}</code>",
         parse_mode="HTML",
     )
 
@@ -145832,6 +145996,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_test_voice_gate", cmd_tool_test_voice_gate))
     tg_app.add_handler(CommandHandler("tool_test_minimax_adapter", cmd_tool_test_minimax_adapter))
     tg_app.add_handler(CommandHandler("tool_test_voice_vault_lookup", cmd_tool_test_voice_vault_lookup))
+    tg_app.add_handler(CommandHandler("tool_test_voice_default_tts", cmd_tool_test_voice_default_tts))
+    tg_app.add_handler(CommandHandler("tool_test_voice_preview_policy", cmd_tool_test_voice_preview_policy))
+    tg_app.add_handler(CommandHandler("tool_test_custom_voice_flow", cmd_tool_test_custom_voice_flow))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_subtitle_from_storyboard(?:@\w+)?(?:\s|$)"), cmd_tool_test_subtitle_from_storyboard))
     tg_app.add_handler(CommandHandler("tool_test_subtitle_dub_pipeline", cmd_tool_test_subtitle_dub_pipeline))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_subtitle_dub_mux_failure(?:@\w+)?(?:\s|$)"), cmd_tool_test_subtitle_dub_mux_failure))
