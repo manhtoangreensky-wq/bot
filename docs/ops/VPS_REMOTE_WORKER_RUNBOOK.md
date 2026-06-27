@@ -49,6 +49,22 @@ python remote_worker.py --canary --once
 /remote_worker_status
 ```
 
+- Chay W5 admin production canary thu cong truoc khi bat bat ky public worker mode nao:
+
+```text
+/remote_worker_prod_canary --no-charge
+```
+
+```bash
+python remote_worker.py --admin-canary --once
+```
+
+```text
+/remote_worker_prod_canary_status RW-PROD-CANARY-<id>
+/queue_status
+/remote_worker_status
+```
+
 - Chay Telegram admin dry-run:
 
 ```text
@@ -129,6 +145,51 @@ Systemd staging:
 - Co the chay one-shot canary thu cong truoc.
 - W5 moi duoc them controlled production canary neu owner approve.
 
+## W5 admin production canary checklist
+
+W5 la production-like canary dau tien qua normal `video_render` job type, nhung van chi owner/admin. No khong bat public worker, khong claim job khach, khong goi provider mac dinh, khong tru/hoan Xu.
+
+On Railway/Telegram:
+
+```text
+/runtime
+/remote_worker_status
+/remote_worker_prod_canary --no-charge
+```
+
+On VPS:
+
+```bash
+source .venv/bin/activate
+python remote_worker.py --doctor
+python remote_worker.py --ping
+python remote_worker.py --admin-canary --once
+```
+
+Back on Telegram:
+
+```text
+/remote_worker_prod_canary_status RW-PROD-CANARY-<id>
+/queue_status
+/remote_worker_status
+```
+
+Can thay:
+
+- `status=completed`.
+- `result_uploaded=yes`.
+- Queue label: `OWNER/ADMIN WORKER CANARY — không trừ Xu`.
+- `Public worker enabled=NO`.
+- Provider: `no`.
+- No-charge: `yes`.
+
+Warnings:
+
+- W5 is admin/owner only.
+- Do not run public worker mode.
+- Do not set `REMOTE_WORKER_PUBLIC_ENABLED=true` yet.
+- W6/P0.18A se quyet dinh controlled production worker sau live QA.
+
 ## Daily check
 
 ```bash
@@ -165,6 +226,7 @@ Kiem tra:
 - `/tool_test_remote_worker_ping --no-charge` pass truoc khi fake job test.
 - `/tool_test_remote_worker_api --fake-job --no-charge` pass truoc khi worker that xu ly job.
 - `/remote_worker_canary --no-charge` va `python remote_worker.py --canary --once` pass truoc moi rollout production.
+- `/remote_worker_prod_canary --no-charge` va `python remote_worker.py --admin-canary --once` pass truoc moi rollout public worker.
 
 Neu deploy thay doi worker contract, restart VPS worker:
 
@@ -280,9 +342,10 @@ sudo systemctl stop toanaas-worker
 Sau do rotate token hoac sua `/etc/toanaas-worker.env`.
 
 5. Neu worker lap loi ket noi Railway, dung service va kiem tra `BOT_API_URL`, Railway health, firewall/DNS.
-6. Neu canary fail, xem `/remote_worker_canary_status RW-CANARY-<id>` truoc. Ly do an toan thuong gap: `ffmpeg_missing`, bad token / `HTTP 401` / `HTTP 403`, upload failed, job lease expired, hoac no canary job.
-7. Neu worker dang claim job nhung khong heartbeat, stop service va de Railway lease het han/retry theo queue policy. Khong sua SQLite truc tiep tu VPS.
-8. Khi da sua xong:
+6. Neu safe canary fail, xem `/remote_worker_canary_status RW-CANARY-<id>` truoc. Ly do an toan thuong gap: `ffmpeg_missing`, bad token / `HTTP 401` / `HTTP 403`, upload failed, job lease expired, hoac no canary job.
+7. Neu admin prod canary fail, xem `/remote_worker_prod_canary_status RW-PROD-CANARY-<id>` truoc. Ly do an toan thuong gap: `ffmpeg_missing`, output missing, bad token, upload failed, job lease expired.
+8. Neu worker dang claim job nhung khong heartbeat, stop service va de Railway lease het han/retry theo queue policy. Khong sua SQLite truc tiep tu VPS.
+9. Khi da sua xong:
 
 ```bash
 sudo systemctl restart toanaas-worker

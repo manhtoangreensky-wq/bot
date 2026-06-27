@@ -32,8 +32,21 @@ SECRET_KEY_MARKERS = (
 REMOTE_WORKER_CANARY_JOB_TYPE = "remote_worker_canary"
 REMOTE_WORKER_CANARY_SOURCE = "admin_canary"
 REMOTE_WORKER_CANARY_CAPABILITY = "canary"
+REMOTE_WORKER_ADMIN_CANARY_SOURCE = "admin_prod_canary"
+REMOTE_WORKER_ADMIN_CANARY_CAPABILITY = "admin_canary"
+REMOTE_WORKER_ADMIN_CANARY_REF_PREFIX = "RW-PROD-CANARY"
 REMOTE_WORKER_RENDER_CAPABILITIES = ("ffmpeg", "video_postprocess", "local_render_helpers")
-REMOTE_WORKER_CAPABILITIES = (*REMOTE_WORKER_RENDER_CAPABILITIES, REMOTE_WORKER_CANARY_CAPABILITY)
+REMOTE_WORKER_CAPABILITIES = (
+    *REMOTE_WORKER_RENDER_CAPABILITIES,
+    REMOTE_WORKER_CANARY_CAPABILITY,
+    REMOTE_WORKER_ADMIN_CANARY_CAPABILITY,
+)
+REMOTE_WORKER_PRODUCTION_ENABLED_ENV = "REMOTE_WORKER_PRODUCTION_ENABLED"
+REMOTE_WORKER_ADMIN_CANARY_ENABLED_ENV = "REMOTE_WORKER_ADMIN_CANARY_ENABLED"
+REMOTE_WORKER_PUBLIC_ENABLED_ENV = "REMOTE_WORKER_PUBLIC_ENABLED"
+REMOTE_WORKER_MAX_ADMIN_CANARY_ACTIVE_ENV = "REMOTE_WORKER_MAX_ADMIN_CANARY_ACTIVE"
+REMOTE_WORKER_ADMIN_CANARY_DEFAULT_DURATION_SECONDS = 3
+REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL = "OWNER/ADMIN WORKER CANARY — không trừ Xu"
 
 
 def _json_loads(value: Any, fallback: Any = None) -> Any:
@@ -60,8 +73,25 @@ def _safe_bool(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_bool(environ: dict[str, str], name: str, default: bool = False) -> bool:
+    if name not in environ:
+        return bool(default)
+    return _safe_bool(environ.get(name))
+
+
 def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False, separators=(",", ":"))
+
+
+def remote_worker_production_guard_config(environ: dict[str, str] | None = None) -> dict:
+    env = environ or os.environ
+    max_active = _safe_int(env.get(REMOTE_WORKER_MAX_ADMIN_CANARY_ACTIVE_ENV), 1)
+    return {
+        "production_enabled": _env_bool(env, REMOTE_WORKER_PRODUCTION_ENABLED_ENV, False),
+        "admin_canary_enabled": _env_bool(env, REMOTE_WORKER_ADMIN_CANARY_ENABLED_ENV, True),
+        "public_enabled": _env_bool(env, REMOTE_WORKER_PUBLIC_ENABLED_ENV, False),
+        "max_admin_canary_active": max(1, max_active),
+    }
 
 
 def sanitize_worker_id(worker_id: str) -> str:
@@ -143,6 +173,17 @@ def is_remote_worker_canary_job(job: dict | None = None, project: dict | None = 
     return str(asset_pack.get("source") or "") == REMOTE_WORKER_CANARY_SOURCE
 
 
+def is_remote_worker_admin_canary_job(job: dict | None = None, project: dict | None = None) -> bool:
+    job = job or {}
+    project = project or {}
+    if str(job.get("job_type") or video_project_queue.VIDEO_RENDER_JOB_TYPE) != video_project_queue.VIDEO_RENDER_JOB_TYPE:
+        return False
+    asset_pack = _json_loads(project.get("asset_pack_json"), {})
+    return str(asset_pack.get("source") or "") == REMOTE_WORKER_ADMIN_CANARY_SOURCE and _safe_bool(
+        asset_pack.get("worker_admin_canary")
+    )
+
+
 def _canary_safety_flags(project: dict) -> dict:
     asset_pack = _json_loads(project.get("asset_pack_json"), {})
     invoice = _json_loads(project.get("invoice_json"), {})
@@ -153,6 +194,42 @@ def _canary_safety_flags(project: dict) -> dict:
         "public_user": _safe_bool(asset_pack.get("public_user") or invoice.get("public_user")),
         "source": str(asset_pack.get("source") or ""),
     }
+
+
+def _admin_canary_safety_flags(project: dict) -> dict:
+    asset_pack = _json_loads(project.get("asset_pack_json"), {})
+    invoice = _json_loads(project.get("invoice_json"), {})
+    return {
+        "admin_only": _safe_bool(asset_pack.get("admin_only") or invoice.get("admin_only")),
+        "no_charge": _safe_bool(asset_pack.get("no_charge") or invoice.get("no_charge")) or _safe_int(project.get("total_xu_estimated"), 0) == 0,
+        "provider_call": _safe_bool(asset_pack.get("provider_call") or invoice.get("provider_call")),
+        "public_user": _safe_bool(asset_pack.get("public_user") or invoice.get("public_user")),
+        "worker_admin_canary": _safe_bool(asset_pack.get("worker_admin_canary") or invoice.get("worker_admin_canary")),
+        "created_by_admin": _safe_bool(asset_pack.get("created_by_admin") or invoice.get("created_by_admin") or asset_pack.get("owner")),
+        "source": str(asset_pack.get("source") or ""),
+        "duration_seconds": max(1, _safe_int(asset_pack.get("duration_seconds") or invoice.get("duration_seconds"), REMOTE_WORKER_ADMIN_CANARY_DEFAULT_DURATION_SECONDS)),
+        "scene_count": max(1, _safe_int(asset_pack.get("scene_count") or invoice.get("scene_count"), 1)),
+    }
+
+
+def _is_admin_fake_video_job(project: dict) -> bool:
+    asset_pack = _json_loads(project.get("asset_pack_json"), {})
+    if str(asset_pack.get("source") or "") == "admin_fake_job" and _safe_bool(asset_pack.get("no_charge")):
+        return True
+    return str(project.get("profile_id") or "") == "remote_worker_api_admin_test" or "ADMIN TEST MODE" in str(project.get("topic") or "")
+
+
+def _admin_canary_is_safe(project: dict) -> bool:
+    flags = _admin_canary_safety_flags(project)
+    return bool(
+        flags["source"] == REMOTE_WORKER_ADMIN_CANARY_SOURCE
+        and flags["worker_admin_canary"]
+        and flags["admin_only"]
+        and flags["no_charge"]
+        and flags["created_by_admin"]
+        and not flags["provider_call"]
+        and not flags["public_user"]
+    )
 
 
 def _scene_cards_from_project(project: dict, scenes: list[dict]) -> list[dict]:
@@ -241,6 +318,32 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
                 "no_charge": True,
             }
         )
+    if is_remote_worker_admin_canary_job(hydrated_job, project):
+        safety = _admin_canary_safety_flags(project)
+        payload.update(
+            {
+                "admin_canary": True,
+                "worker_admin_canary": True,
+                "admin_only": bool(safety["admin_only"]),
+                "no_charge": bool(safety["no_charge"]),
+                "provider_call": bool(safety["provider_call"]),
+                "public_user": bool(safety["public_user"]),
+                "source": safety["source"],
+                "queue_label": REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL,
+                "expected_duration_seconds": safety["duration_seconds"],
+                "scene_count": safety["scene_count"],
+            }
+        )
+        payload["output_requirements"].update(
+            {
+                "aspect_ratio": "16:9",
+                "admin_canary_mp4": True,
+                "duration_seconds_max": safety["duration_seconds"],
+                "resolution": "320x180",
+                "provider_call": False,
+                "no_charge": True,
+            }
+        )
     return payload
 
 
@@ -324,6 +427,145 @@ def create_remote_worker_canary_job(conn: sqlite3.Connection, *, admin_user_id: 
     project = video_project_queue.update_video_project(conn, project_id, job_id=job_id)
     job = video_project_queue.get_video_render_job(conn, job_id)
     return {"ok": True, "project": project, "job": job, "canary_ref": f"RW-CANARY-{job_id}"}
+
+
+def count_active_remote_worker_admin_canary_jobs(conn: sqlite3.Connection) -> int:
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    row = conn.execute(
+        """SELECT COUNT(*)
+           FROM video_jobs j
+           JOIN video_projects p ON p.project_id=j.project_id
+           WHERE j.job_type=? AND j.status IN ('queued','processing')
+             AND COALESCE(p.asset_pack_json,'') LIKE ?""",
+        (video_project_queue.VIDEO_RENDER_JOB_TYPE, f"%{REMOTE_WORKER_ADMIN_CANARY_SOURCE}%"),
+    ).fetchone()
+    return int(row[0] if row else 0)
+
+
+def create_remote_worker_admin_canary_job(
+    conn: sqlite3.Connection,
+    *,
+    admin_user_id: int | str,
+    profile: str = "simple",
+    duration_seconds: int = REMOTE_WORKER_ADMIN_CANARY_DEFAULT_DURATION_SECONDS,
+    scene_count: int = 1,
+    provider_smoke: bool = False,
+    confirm_provider_cost: bool = False,
+    environ: dict[str, str] | None = None,
+) -> dict:
+    admin_id = _safe_int(admin_user_id, 0)
+    if admin_id <= 0:
+        return {"ok": False, "reason": "admin_user_id_required"}
+    if provider_smoke:
+        if not confirm_provider_cost:
+            return {"ok": False, "reason": "confirm_provider_cost_required"}
+        return {"ok": False, "reason": "provider_smoke_deferred_to_later_phase"}
+    config = remote_worker_production_guard_config(environ)
+    if not config["admin_canary_enabled"]:
+        return {"ok": False, "reason": "admin_canary_disabled"}
+    active = count_active_remote_worker_admin_canary_jobs(conn)
+    if active >= int(config["max_admin_canary_active"]):
+        return {"ok": False, "reason": "max_active_admin_canary_reached", "active": active}
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    now = video_project_queue.now_text()
+    safe_duration = max(1, min(10, _safe_int(duration_seconds, REMOTE_WORKER_ADMIN_CANARY_DEFAULT_DURATION_SECONDS)))
+    safe_scene_count = max(1, min(3, _safe_int(scene_count, 1)))
+    safe_profile = re.sub(r"[^A-Za-z0-9_.:-]+", "-", str(profile or "simple").strip().lower())[:60] or "simple"
+    asset_pack = {
+        "source": REMOTE_WORKER_ADMIN_CANARY_SOURCE,
+        "worker_admin_canary": True,
+        "created_by_admin": True,
+        "owner": True,
+        "admin_only": True,
+        "no_charge": True,
+        "provider_call": False,
+        "public_user": False,
+        "duration_seconds": safe_duration,
+        "scene_count": safe_scene_count,
+        "queue_label": REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL,
+        "renderer": "remote_worker_admin_canary_local_ffmpeg",
+    }
+    invoice = {
+        "total_xu": 0,
+        "worker_admin_canary": True,
+        "created_by_admin": True,
+        "admin_only": True,
+        "no_charge": True,
+        "provider_call": False,
+        "public_user": False,
+        "invoice_disabled": True,
+        "source": REMOTE_WORKER_ADMIN_CANARY_SOURCE,
+        "queue_label": REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL,
+    }
+    project = video_project_queue.create_video_project(
+        conn,
+        user_id=admin_id,
+        profile_id=f"remote_worker_admin_canary_{safe_profile}",
+        topic="OWNER/ADMIN WORKER CANARY - VPS production-like test",
+        ratio="16:9",
+        asset_pack=asset_pack,
+    )
+    project_id = int(project["project_id"])
+    scene_cards = [
+        {
+            "scene_index": 1,
+            "role": "owner_admin_worker_canary",
+            "narration_line": "VPS worker admin production canary.",
+            "subtitle_line": "OWNER/ADMIN WORKER CANARY",
+            "visual_goal": "Tiny local MP4 generated by VPS worker through normal video_render job type.",
+            "provider_prompt": "Do not call provider. Generate local testsrc MP4.",
+        }
+    ][:safe_scene_count]
+    video_project_queue.save_video_project_storyboard(conn, project_id, {"scene_cards": scene_cards})
+    project = video_project_queue.update_video_project(
+        conn,
+        project_id,
+        status="queued_for_worker",
+        asset_pack_json=asset_pack,
+        scene_cards_json=scene_cards,
+        prompt_text="Admin-only VPS production canary. No customer job, no Xu, no provider call.",
+        addon_plan_json={"source": REMOTE_WORKER_ADMIN_CANARY_SOURCE, "provider_call": False, "no_charge": True},
+        creative_control_json={"worker_admin_canary": True, "safe_production_canary": True},
+        quality_tier=0,
+        scene_count=safe_scene_count,
+        invoice_json=invoice,
+        total_xu_estimated=0,
+        is_confirmed=1,
+        confirmed_at=now,
+    )
+    cursor = conn.execute(
+        """INSERT INTO video_jobs
+           (project_id,user_id,job_type,status,priority,attempts,max_attempts,result_json,progress_percent,progress_message,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            project_id,
+            admin_id,
+            video_project_queue.VIDEO_RENDER_JOB_TYPE,
+            "queued",
+            5,
+            0,
+            1,
+            _json_dumps(
+                {
+                    "worker_admin_canary": True,
+                    "admin_only": True,
+                    "no_charge": True,
+                    "provider_call": False,
+                    "public_user": False,
+                    "queue_label": REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL,
+                }
+            ),
+            0,
+            "admin_canary_queued",
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    job_id = int(cursor.lastrowid)
+    project = video_project_queue.update_video_project(conn, project_id, job_id=job_id)
+    job = video_project_queue.get_video_render_job(conn, job_id)
+    return {"ok": True, "project": project, "job": job, "canary_ref": f"{REMOTE_WORKER_ADMIN_CANARY_REF_PREFIX}-{job_id}"}
 
 
 def _requeue_stale_canary_jobs(conn: sqlite3.Connection, *, now: datetime | None = None) -> int:
@@ -418,6 +660,136 @@ def claim_remote_worker_canary_job(
         raise
 
 
+def _claim_video_render_candidate(
+    conn: sqlite3.Connection,
+    *,
+    worker_id: str,
+    lease_seconds: int = 600,
+    now: datetime | None = None,
+    admin_canary_only: bool = False,
+    public_enabled: bool = False,
+) -> dict:
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    video_project_queue.requeue_stale_video_jobs(conn, now=now)
+    current_dt = now or datetime.now()
+    current = video_project_queue.now_text(current_dt)
+    lease_expires = video_project_queue.now_text(current_dt + timedelta(seconds=max(30, int(lease_seconds or 600))))
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            """SELECT j.id,j.project_id,j.user_id,j.job_type,j.status,j.priority,j.attempts,j.max_attempts,j.locked_by,j.locked_at,
+                      j.lease_expires_at,j.last_error,j.result_json,j.created_at,j.updated_at,j.started_at,j.completed_at,
+                      j.progress_percent,j.progress_message,
+                      p.asset_pack_json,p.invoice_json,p.total_xu_estimated,p.profile_id,p.topic
+               FROM video_jobs j
+               JOIN video_projects p ON p.project_id=j.project_id
+               WHERE j.job_type=? AND j.status='queued'
+                 AND COALESCE(p.is_confirmed,0)=1
+                 AND p.status IN ('queued_for_worker','processing')
+               ORDER BY j.priority ASC, j.created_at ASC, j.id ASC
+               LIMIT 25""",
+            (video_project_queue.VIDEO_RENDER_JOB_TYPE,),
+        ).fetchall()
+        chosen: dict | None = None
+        chosen_project: dict | None = None
+        for row in rows:
+            job = {
+                "id": row[0],
+                "project_id": row[1],
+                "user_id": row[2],
+                "job_type": row[3],
+            }
+            project = {
+                "project_id": row[1],
+                "user_id": row[2],
+                "asset_pack_json": row[19],
+                "invoice_json": row[20],
+                "total_xu_estimated": row[21],
+                "profile_id": row[22],
+                "topic": row[23],
+            }
+            if admin_canary_only:
+                if _admin_canary_is_safe(project):
+                    chosen = job
+                    chosen_project = project
+                    break
+                continue
+            if is_remote_worker_admin_canary_job(job, project):
+                continue
+            if _is_admin_fake_video_job(project) or public_enabled:
+                chosen = job
+                chosen_project = project
+                break
+        if not chosen or not chosen_project:
+            conn.commit()
+            return {}
+        progress_message = "admin canary claimed" if admin_canary_only else "claimed"
+        cursor = conn.execute(
+            """UPDATE video_jobs
+               SET status='processing', attempts=COALESCE(attempts,0)+1, locked_by=?, locked_at=?,
+                   lease_expires_at=?, started_at=COALESCE(started_at, ?), updated_at=?,
+                   progress_percent=10, progress_message=?
+               WHERE id=? AND status='queued' AND job_type=?""",
+            (
+                sanitize_worker_id(worker_id),
+                current,
+                lease_expires,
+                current,
+                current,
+                progress_message,
+                int(chosen["id"]),
+                video_project_queue.VIDEO_RENDER_JOB_TYPE,
+            ),
+        )
+        if cursor.rowcount != 1:
+            conn.rollback()
+            return {}
+        conn.execute("UPDATE video_projects SET status='processing', updated_at=? WHERE project_id=?", (current, int(chosen["project_id"])))
+        conn.commit()
+        return video_project_queue.get_video_render_job(conn, int(chosen["id"]))
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+
+
+def claim_remote_worker_admin_canary_job(
+    conn: sqlite3.Connection,
+    *,
+    worker_id: str,
+    lease_seconds: int = 600,
+    now: datetime | None = None,
+) -> dict:
+    return _claim_video_render_candidate(
+        conn,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        now=now,
+        admin_canary_only=True,
+        public_enabled=False,
+    )
+
+
+def claim_remote_worker_render_job(
+    conn: sqlite3.Connection,
+    *,
+    worker_id: str,
+    lease_seconds: int = 600,
+    public_enabled: bool = False,
+    now: datetime | None = None,
+) -> dict:
+    return _claim_video_render_candidate(
+        conn,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        now=now,
+        admin_canary_only=False,
+        public_enabled=public_enabled,
+    )
+
+
 def claim_remote_worker_job(
     conn: sqlite3.Connection,
     *,
@@ -426,6 +798,7 @@ def claim_remote_worker_job(
     max_jobs: int = 1,
     lease_seconds: int = 600,
     canary_only: bool = False,
+    admin_canary_only: bool = False,
 ) -> dict:
     worker = sanitize_worker_id(worker_id)
     requested = {str(item).strip().lower() for item in (capabilities or []) if str(item).strip()}
@@ -439,11 +812,27 @@ def claim_remote_worker_job(
         job = claim_remote_worker_canary_job(conn, worker_id=worker, lease_seconds=lease_seconds)
         hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
         return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "canary_only": True}
+    if admin_canary_only:
+        if requested and REMOTE_WORKER_ADMIN_CANARY_CAPABILITY not in requested:
+            return {"ok": True, "job": None, "reason": "admin_canary_capability_required"}
+        config = remote_worker_production_guard_config()
+        if not config["admin_canary_enabled"]:
+            return {"ok": True, "job": None, "reason": "admin_canary_disabled", "admin_canary_only": True}
+        job = claim_remote_worker_admin_canary_job(conn, worker_id=worker, lease_seconds=lease_seconds)
+        hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
+        return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "admin_canary_only": True}
     if requested and not (requested & set(REMOTE_WORKER_RENDER_CAPABILITIES)):
         return {"ok": True, "job": None, "reason": "capability_not_supported"}
-    job = video_project_queue.claim_next_video_job(conn, worker_id=worker, lease_seconds=lease_seconds)
+    config = remote_worker_production_guard_config()
+    job = claim_remote_worker_render_job(
+        conn,
+        worker_id=worker,
+        lease_seconds=lease_seconds,
+        public_enabled=bool(config["public_enabled"]),
+    )
     hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
-    return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None}
+    reason = "" if hydrated else ("no_job" if config["public_enabled"] else "public_worker_disabled")
+    return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "reason": reason}
 
 
 def heartbeat_remote_worker_job(
@@ -497,6 +886,7 @@ def complete_remote_worker_job(
         return {"ok": False, "reason": "job_not_found"}
     project = video_project_queue.get_video_project(conn, int(job.get("project_id") or 0))
     is_canary = is_remote_worker_canary_job(job, project)
+    is_admin_canary = is_remote_worker_admin_canary_job(job, project)
     if str(job.get("status") or "") == "completed":
         if not worker_owns_job(job, worker):
             return {"ok": False, "reason": "job_already_completed_by_other_worker"}
@@ -513,6 +903,10 @@ def complete_remote_worker_job(
         validation = validate_uploaded_result_file(final_video_path)
         if not validation.get("ok"):
             return {"ok": False, "reason": "canary_result_file_missing"}
+    if is_admin_canary:
+        validation = validate_uploaded_result_file(final_video_path)
+        if not validation.get("ok"):
+            return {"ok": False, "reason": "admin_canary_result_file_missing"}
     payload = dict(result or {})
     if uploaded_file:
         payload["uploaded_file_bytes"] = os.path.getsize(final_video_path)
@@ -524,6 +918,18 @@ def complete_remote_worker_job(
                 "no_charge": True,
                 "provider_call": False,
                 "public_user": False,
+            }
+        )
+    if is_admin_canary:
+        payload.update(
+            {
+                "admin_canary": True,
+                "worker_admin_canary": True,
+                "admin_only": True,
+                "no_charge": True,
+                "provider_call": False,
+                "public_user": False,
+                "queue_label": REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL,
             }
         )
     completed = video_project_queue.complete_video_job(
@@ -581,7 +987,7 @@ def note_remote_worker_canary_delivery(conn: sqlite3.Connection, *, job_id: int,
     if not job:
         return {"ok": False, "reason": "job_not_found"}
     project = video_project_queue.get_video_project(conn, int(job.get("project_id") or 0))
-    if not is_remote_worker_canary_job(job, project):
+    if not (is_remote_worker_canary_job(job, project) or is_remote_worker_admin_canary_job(job, project)):
         return {"ok": False, "reason": "not_canary"}
     payload = _json_loads(job.get("result_json"), {})
     if not isinstance(payload, dict):
@@ -656,6 +1062,112 @@ def get_remote_worker_canary_status(
         "no_charge": True,
         "provider_call": False,
         "public_user": False,
+    }
+
+
+def get_remote_worker_admin_canary_status(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int | str = 0,
+    admin_user_id: int | str | None = None,
+) -> dict:
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    wanted_job_id = _safe_int(job_id, 0)
+    admin_id = _safe_int(admin_user_id, 0) if admin_user_id is not None else 0
+    if wanted_job_id:
+        job = video_project_queue.get_video_render_job(conn, wanted_job_id)
+        if not job:
+            return {"ok": False, "reason": "admin_canary_not_found"}
+        if admin_id and _safe_int(job.get("user_id"), 0) != admin_id:
+            return {"ok": False, "reason": "admin_canary_not_found"}
+    else:
+        params: list[Any] = [video_project_queue.VIDEO_RENDER_JOB_TYPE, f"%{REMOTE_WORKER_ADMIN_CANARY_SOURCE}%"]
+        where_admin = ""
+        if admin_id:
+            where_admin = " AND j.user_id=?"
+            params.append(admin_id)
+        row = conn.execute(
+            f"""SELECT j.id
+                FROM video_jobs j
+                JOIN video_projects p ON p.project_id=j.project_id
+                WHERE j.job_type=? AND COALESCE(p.asset_pack_json,'') LIKE ?{where_admin}
+                ORDER BY j.id DESC LIMIT 1""",
+            params,
+        ).fetchone()
+        if not row:
+            return {"ok": False, "reason": "admin_canary_not_found"}
+        job = video_project_queue.get_video_render_job(conn, int(row[0]))
+    project = video_project_queue.get_video_project(conn, int(job.get("project_id") or 0))
+    if not is_remote_worker_admin_canary_job(job, project):
+        return {"ok": False, "reason": "admin_canary_not_found"}
+    result = _json_loads(job.get("result_json"), {})
+    if not isinstance(result, dict):
+        result = {}
+    flags = _admin_canary_safety_flags(project)
+    final_path = str(project.get("final_video_path") or result.get("final_video_path") or "")
+    uploaded_bytes = _safe_int(result.get("uploaded_file_bytes") or result.get("bytes"), 0)
+    if final_path and uploaded_bytes <= 0:
+        try:
+            uploaded_bytes = os.path.getsize(final_path)
+        except OSError:
+            uploaded_bytes = 0
+    result_uploaded = bool(uploaded_bytes > 0 or final_path or project.get("final_video_file_id"))
+    progress_message = scrub_secret_text(job.get("progress_message") or "")
+    return {
+        "ok": True,
+        "job_id": int(job.get("id") or 0),
+        "canary_ref": f"{REMOTE_WORKER_ADMIN_CANARY_REF_PREFIX}-{int(job.get('id') or 0)}",
+        "status": str(job.get("status") or ""),
+        "stage": progress_message or str(job.get("status") or ""),
+        "worker_id": sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else "",
+        "claimed_at": str(job.get("locked_at") or ""),
+        "last_heartbeat_at": str(job.get("updated_at") or ""),
+        "progress_percent": _safe_int(job.get("progress_percent"), 0),
+        "progress_message": progress_message,
+        "result_uploaded": result_uploaded,
+        "result_file_size": int(uploaded_bytes or 0),
+        "sent_to_admin": bool(result.get("sent_to_admin")),
+        "safe_failure_reason": scrub_secret_text(job.get("last_error") or project.get("error_log") or ""),
+        "admin_only": bool(flags["admin_only"]),
+        "no_charge": bool(flags["no_charge"]),
+        "provider_call": bool(flags["provider_call"]),
+        "public_user": bool(flags["public_user"]),
+        "worker_admin_canary": bool(flags["worker_admin_canary"]),
+        "queue_label": REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL,
+    }
+
+
+def remote_worker_admin_canary_queue_snapshot(conn: sqlite3.Connection) -> dict:
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    rows = conn.execute(
+        """SELECT j.id,j.status,j.locked_by,j.updated_at,j.progress_percent,j.progress_message
+           FROM video_jobs j
+           JOIN video_projects p ON p.project_id=j.project_id
+           WHERE j.job_type=? AND COALESCE(p.asset_pack_json,'') LIKE ?
+           ORDER BY j.id DESC LIMIT 5""",
+        (video_project_queue.VIDEO_RENDER_JOB_TYPE, f"%{REMOTE_WORKER_ADMIN_CANARY_SOURCE}%"),
+    ).fetchall()
+    active = count_active_remote_worker_admin_canary_jobs(conn)
+    items = [
+        {
+            "job_id": int(row[0]),
+            "canary_ref": f"{REMOTE_WORKER_ADMIN_CANARY_REF_PREFIX}-{int(row[0])}",
+            "status": str(row[1] or ""),
+            "worker_id": sanitize_worker_id(str(row[2] or "")) if row[2] else "",
+            "updated_at": str(row[3] or ""),
+            "progress_percent": _safe_int(row[4], 0),
+            "progress_message": scrub_secret_text(row[5] or ""),
+        }
+        for row in rows
+    ]
+    return {
+        "ok": True,
+        "queue_label": REMOTE_WORKER_ADMIN_CANARY_QUEUE_LABEL,
+        "active": active,
+        "last": items[0] if items else {},
+        "items": items,
+        "invoice": False,
+        "wallet": False,
     }
 
 

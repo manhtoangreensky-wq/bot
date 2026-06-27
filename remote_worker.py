@@ -158,8 +158,13 @@ def http_multipart(path: str, fields: dict[str, str], files: dict[str, tuple[str
         return json.loads(raw or "{}")
 
 
-def claim_job(canary_only: bool = False) -> dict | None:
-    capabilities = ["canary", "ffmpeg"] if canary_only else ["ffmpeg", "video_postprocess"]
+def claim_job(canary_only: bool = False, admin_canary_only: bool = False) -> dict | None:
+    if admin_canary_only:
+        capabilities = ["admin_canary", "ffmpeg"]
+    elif canary_only:
+        capabilities = ["canary", "ffmpeg"]
+    else:
+        capabilities = ["ffmpeg", "video_postprocess"]
     payload = {
         "worker_id": WORKER_ID,
         "capabilities": capabilities,
@@ -167,18 +172,28 @@ def claim_job(canary_only: bool = False) -> dict | None:
     }
     if canary_only:
         payload["canary_only"] = True
+    if admin_canary_only:
+        payload["admin_canary_only"] = True
     data = http_json("POST", "/api/v1/worker/claim", payload, timeout=30)
     return data.get("job") if data.get("ok") else None
 
 
-def ping_server(canary: bool = False) -> dict:
+def ping_server(canary: bool = False, admin_canary: bool = False) -> dict:
+    if admin_canary:
+        capabilities = ["admin_canary", "ffmpeg"]
+    elif canary:
+        capabilities = ["canary", "ffmpeg"]
+    else:
+        capabilities = ["ffmpeg", "video_postprocess"]
     payload = {
         "worker_id": WORKER_ID,
-        "capabilities": ["canary", "ffmpeg"] if canary else ["ffmpeg", "video_postprocess"],
+        "capabilities": capabilities,
         "dry_run": True,
     }
     if canary:
         payload["canary_only"] = True
+    if admin_canary:
+        payload["admin_canary_only"] = True
     return http_json("POST", "/api/v1/worker/ping", payload, timeout=20)
 
 
@@ -329,6 +344,42 @@ def render_canary_video(job: dict, work_dir: str) -> str:
     return output_path
 
 
+def render_admin_canary_video(job: dict, work_dir: str) -> str:
+    output_path = os.path.join(work_dir, f"remote_worker_admin_canary_{job.get('job_id') or 'test'}.mp4")
+    ffmpeg = local_ffmpeg_path()
+    ffmpeg_ok = bool(ffmpeg and (os.path.exists(ffmpeg) or shutil.which(ffmpeg)))
+    if not ffmpeg_ok:
+        raise RuntimeError("ffmpeg_missing")
+    duration = max(1, min(10, int(job.get("expected_duration_seconds") or 3)))
+    command = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=320x180:rate=24",
+        "-t",
+        str(duration),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "30",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=180, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(first_line(result.stderr or result.stdout) or "admin_canary_ffmpeg_failed")
+    if not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+        raise RuntimeError("admin_canary_output_empty")
+    return output_path
+
+
 def process_claimed_job(job: dict) -> dict:
     job_id = str(job.get("job_id") or "")
     if not job_id:
@@ -346,6 +397,37 @@ def process_claimed_job(job: dict) -> dict:
             "final_video_name": os.path.basename(final_path),
             "bytes": os.path.getsize(final_path),
         }
+        return complete_job(job_id, result, final_path)
+
+
+def process_admin_canary_job(job: dict) -> dict:
+    job_id = str(job.get("job_id") or "")
+    if not job_id:
+        raise RuntimeError("job_id_missing")
+    if str(job.get("job_type") or "") != "video_render" or not job.get("worker_admin_canary"):
+        raise RuntimeError("admin_canary_job_required")
+    if not job.get("admin_only") or not job.get("no_charge") or job.get("provider_call") or job.get("public_user"):
+        raise RuntimeError("unsafe_admin_canary_metadata")
+    with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:
+        send_heartbeat(job_id, 10, "admin canary claimed")
+        send_heartbeat(job_id, 30, "admin canary preparing")
+        final_path = render_admin_canary_video(job, work_dir)
+        send_heartbeat(job_id, 60, "admin canary rendering")
+        send_heartbeat(job_id, 85, "admin canary uploading")
+        result = {
+            "ok": True,
+            "admin_canary": True,
+            "worker_admin_canary": True,
+            "renderer": "remote_worker_admin_canary_ffmpeg",
+            "final_video_name": os.path.basename(final_path),
+            "bytes": os.path.getsize(final_path),
+            "admin_only": True,
+            "no_charge": True,
+            "provider_call": False,
+            "public_user": False,
+            "queue_label": "OWNER/ADMIN WORKER CANARY - no Xu",
+        }
+        send_heartbeat(job_id, 100, "admin canary completed")
         return complete_job(job_id, result, final_path)
 
 
@@ -375,24 +457,35 @@ def process_canary_job(job: dict) -> dict:
         return complete_job(job_id, result, final_path)
 
 
-def run_once(canary_only: bool = False) -> str:
-    job = claim_job(canary_only=True) if canary_only else claim_job()
+def run_once(canary_only: bool = False, admin_canary_only: bool = False) -> str:
+    if admin_canary_only:
+        job = claim_job(admin_canary_only=True)
+    elif canary_only:
+        job = claim_job(canary_only=True)
+    else:
+        job = claim_job()
     if not job:
         return "idle"
     job_id = str(job.get("job_id") or "")
     try:
-        if canary_only or job.get("canary"):
+        if admin_canary_only or job.get("worker_admin_canary"):
+            process_admin_canary_job(job)
+        elif canary_only or job.get("canary"):
             process_canary_job(job)
         else:
             process_claimed_job(job)
         return "completed"
     except Exception as exc:
         if job_id:
-            fail_job(job_id, f"{type(exc).__name__}:{first_line(str(exc))}", retryable=not bool(canary_only or job.get("canary")))
+            fail_job(
+                job_id,
+                f"{type(exc).__name__}:{first_line(str(exc))}",
+                retryable=not bool(canary_only or admin_canary_only or job.get("canary") or job.get("worker_admin_canary")),
+            )
         return "failed"
 
 
-def run_ping_mode(*, dry_run: bool = False, canary: bool = False) -> int:
+def run_ping_mode(*, dry_run: bool = False, canary: bool = False, admin_canary: bool = False) -> int:
     lines, local_ok = local_doctor_lines()
     for line in lines:
         print(line)
@@ -402,7 +495,12 @@ def run_ping_mode(*, dry_run: bool = False, canary: bool = False) -> int:
             print("claim skipped because dry-run: yes")
         return 1
     try:
-        payload = ping_server(canary=canary) if canary else ping_server()
+        if admin_canary:
+            payload = ping_server(admin_canary=True)
+        elif canary:
+            payload = ping_server(canary=True)
+        else:
+            payload = ping_server()
     except urllib.error.HTTPError as exc:
         print(f"ping: FAIL (HTTP {exc.code})")
         if dry_run:
@@ -434,20 +532,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--once", action="store_true", help="run one polling cycle and exit")
     parser.add_argument("--dry-run", action="store_true", help="ping only; never claim or complete real jobs")
     parser.add_argument("--canary", action="store_true", help="claim only safe remote_worker_canary jobs")
+    parser.add_argument("--admin-canary", action="store_true", help="claim only admin production canary video_render jobs")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    if args.canary and args.admin_canary:
+        print("[remote_worker] choose only one of --canary or --admin-canary")
+        return 2
     if args.doctor:
         return run_doctor()
     if args.ping:
-        return run_ping_mode(dry_run=args.dry_run, canary=args.canary)
+        return run_ping_mode(dry_run=args.dry_run, canary=args.canary, admin_canary=args.admin_canary)
     if args.dry_run:
-        return run_ping_mode(dry_run=True, canary=args.canary)
+        return run_ping_mode(dry_run=True, canary=args.canary, admin_canary=args.admin_canary)
     if args.once:
-        status = run_once(canary_only=args.canary)
-        print(f"[remote_worker] once status={status} canary_only={'yes' if args.canary else 'no'}")
+        status = run_once(canary_only=args.canary, admin_canary_only=args.admin_canary)
+        print(
+            f"[remote_worker] once status={status} "
+            f"canary_only={'yes' if args.canary else 'no'} "
+            f"admin_canary_only={'yes' if args.admin_canary else 'no'}"
+        )
         return 1 if status == "failed" else 0
 
     print("[remote_worker] TOAN AAS Remote Worker starting")
@@ -456,9 +562,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[remote_worker] token_configured={'yes' if bool(LOCAL_WORKER_TOKEN) else 'no'}")
     print(f"[remote_worker] concurrency={WORKER_CONCURRENCY} ffmpeg_max={FFMPEG_MAX_CONCURRENT}")
     print(f"[remote_worker] canary_only={'yes' if args.canary else 'no'}")
+    print(f"[remote_worker] admin_canary_only={'yes' if args.admin_canary else 'no'}")
     while True:
         try:
-            status = run_once(canary_only=args.canary)
+            status = run_once(canary_only=args.canary, admin_canary_only=args.admin_canary)
             if status == "idle":
                 time.sleep(WORKER_POLL_INTERVAL_SECONDS)
         except KeyboardInterrupt:
