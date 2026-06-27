@@ -317,8 +317,8 @@ def test_custom_scene_count_validates_range():
 
 def test_unsupported_multiscene_guard_no_charge():
     ok, text = bot.video_b14_extended_scene_guard(918324, 10)
-    assert ok is False
-    assert "chưa trừ Xu" in text
+    assert ok is True
+    assert text == ""
 
 
 def _invoice_for(scenes: int):
@@ -378,7 +378,8 @@ def test_video_status_no_fake_success():
 
 def test_video_status_queued_worker_message():
     text = bot.video_b14_queue_status_text({"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3}}}, None, bot.ADMIN_ID, "vi")
-    assert "đang chờ worker" in text
+    assert "hệ thống đang xếp lịch dựng video" in text
+    assert "worker" not in text.lower()
 
 
 def test_video_status_owner_no_charge():
