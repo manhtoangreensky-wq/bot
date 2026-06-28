@@ -272,7 +272,7 @@ def test_task2_back_language_to_source():
 def test_task2_back_voice_to_language_or_subtitle_output():
     assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_voice") == "language"
     combo = {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "requested_mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-    assert bot.video_dubbing_back_route(combo, "back_voice") == "output"
+    assert bot.video_dubbing_back_route(combo, "back_voice") == "language"
 
 
 def test_task2_back_speed_to_voice():

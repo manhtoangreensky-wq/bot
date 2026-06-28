@@ -68,7 +68,7 @@ def test_dub_mp4_keyboard_two_columns():
 def test_dub_fallback_keyboard_two_columns():
     markup = bot.subtitle_plus_dub_completed_keyboard("vi", {"final_video_available": "0", "final_audio_available": "1"})
     assert _row_lengths(markup) == [2, 2, 1]
-    assert _labels(markup) == ["🎧 Tải audio", "📄 Tải phụ đề", "🔁 Thử ghép lại", "🎙 Lồng tiếng lại", "🏠 Menu chính"]
+    assert _labels(markup) == ["🎧 Tải audio", "📄 Tải phụ đề", "🔁 Thử ghép lại video", "🎙 Lồng tiếng lại", "🏠 Menu chính"]
 
 
 def test_no_generic_red_error_in_result_callbacks():

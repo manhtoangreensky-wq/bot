@@ -326,7 +326,7 @@ def test_uploaded_video_subtitle_language_no_false_ready(monkeypatch):
     assert state["step"] == "confirm"
     assert state["target_language"] == "English"
     assert "Dịch phụ đề video" in result.text
-    assert "✅ Xuất video phụ đề dịch" in _labels(result.reply_markup)
+    assert "✅ Xác nhận dịch" in _labels(result.reply_markup)
     bot.clear_video_dubbing_pending(uid)
 
 

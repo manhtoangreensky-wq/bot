@@ -58,16 +58,17 @@ def test_subtitle_translate_outputs_final_video_without_dub_or_editor():
 
 def test_confirm_keyboards_hide_preview_for_public_product_flows():
     expected = {
-        bot.VIDEO_SUBTITLE_MODE_CREATE: "✅ Xuất video phụ đề",
-        bot.VIDEO_SUBTITLE_MODE_TRANSLATE: "✅ Xuất video phụ đề dịch",
-        bot.VIDEO_SUBTITLE_MODE_DUB: "✅ Xuất video lồng tiếng",
+        bot.VIDEO_SUBTITLE_MODE_CREATE: "✅ Tạo phụ đề gốc",
+        bot.VIDEO_SUBTITLE_MODE_TRANSLATE: "✅ Xác nhận dịch",
+        bot.VIDEO_SUBTITLE_MODE_DUB: "✅ Xác nhận lồng tiếng",
     }
     for mode, first_label in expected.items():
         markup = bot.video_dubbing_confirm_keyboard("vi", {"mode": mode, "video_processing_mode": mode})
         labels = _labels(markup)
         callbacks = _callbacks(markup)
         assert labels[0] == first_label
-        assert "❌ Hủy" in labels
+        if mode != bot.VIDEO_SUBTITLE_MODE_CREATE:
+            assert "❌ Hủy" in labels
         assert not any("Xem thử" in label or "Nghe thử" in label for label in labels)
         assert callbacks[0] == "videodub|final"
 
@@ -138,7 +139,7 @@ def test_voice_video_sends_audio_fallback_only_when_mp4_missing():
     assert sent == {"documents": 0, "audio": 1, "video": 0}
     assert message.video == []
     assert len(message.audio) == 1
-    assert "chưa ghép được audio vào video" in message.audio[0]["caption"]
+    assert "chưa ghép được thành video hoàn chỉnh" in message.audio[0]["caption"]
 
 
 def test_b12_4_confirm_texts_have_price_and_final_product_contract():
@@ -157,8 +158,8 @@ def test_b12_4_confirm_texts_have_price_and_final_product_contract():
     }, "vi")
 
     assert "Chi phí:" in auto_text and "Xuất video MP4 có phụ đề" in auto_text
-    assert "Chi phí:" in translate_text and "Xuất video MP4 có phụ đề dịch" in translate_text
-    assert "Chi phí:" in dub_text and "Xuất video MP4 lồng tiếng" in dub_text
+    assert "Tổng:" in translate_text and "Xuất video MP4 có phụ đề dịch" in translate_text
+    assert "Tổng:" in dub_text and "Xuất video MP4 lồng tiếng" in dub_text
     assert "xem thử" not in (auto_text + translate_text + dub_text).lower()
 
 

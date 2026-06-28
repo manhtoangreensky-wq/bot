@@ -221,5 +221,6 @@ def test_translation_public_flow_has_upload_language_and_no_provider_words():
     ]).lower()
     for term in ["provider", "api", "suno", "minimax", "key4u", "shopaikey", "env", "http", "raw error", "bot chưa gọi api"]:
         assert term not in text
-    assert "gửi hoặc reply video/audio" in text
+    assert "gửi video" in text or "video đã có phụ đề" in text
+    assert "video/audio" not in text
     assert "ngôn ngữ" in text

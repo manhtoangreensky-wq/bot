@@ -258,7 +258,9 @@ def test_video_ui_task_does_not_touch_voice():
 
 def test_video_ui_task_does_not_touch_asr_subtitle():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert "📝 Tạo phụ đề tự động" in labels
+    assert "🎬 Tạo phụ đề tự động" in labels
+    assert "📄 Dịch file phụ đề" not in labels
+    assert "🧾 Bóc lời thoại" not in labels
     assert "📥 Tải video từ link" not in labels
 
 

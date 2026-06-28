@@ -21,7 +21,7 @@ def test_auto_subtitle_final_confirmation_is_public_clean():
     assert "Tạo phụ đề tự động" in text
     assert "Xuất video MP4 có phụ đề" in text
     assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in text
-    assert labels == ["✅ Xuất video phụ đề", "❌ Hủy", "🏠 Menu chính"]
+    assert labels == ["✅ Tạo phụ đề gốc", "⬅️ Quay lại", "🏠 Menu chính"]
     forbidden = ("tác vụ", "nguồn", "sửa lựa chọn", "đổi giọng", "đổi tốc độ", "admin", "curl")
     ui = _joined(text, bot.video_dubbing_confirm_keyboard("vi", state))
     for term in forbidden:
@@ -42,9 +42,9 @@ def test_auto_dubbing_final_confirmation_is_public_clean():
     labels = _labels(bot.video_dubbing_confirm_keyboard("vi", state))
 
     assert "Lồng tiếng video" in text
-    assert "Ngôn ngữ lồng tiếng: <b>English</b>" in text
+    assert "Ngôn ngữ đích: <b>English</b>" in text
     assert "Tốc độ: <b>0.9</b>" in text
-    assert labels == ["✅ Xuất video lồng tiếng", "🎙 Đổi giọng", "❌ Hủy", "🏠 Menu chính"]
+    assert labels == ["✅ Xác nhận lồng tiếng", "⬅️ Quay lại", "❌ Hủy", "🏠 Menu chính"]
     ui = _joined(text, bot.video_dubbing_confirm_keyboard("vi", state))
     for term in ("tác vụ", "nguồn", "chi phí dự kiến", "sửa lựa chọn", "đổi tốc độ", "admin", "curl"):
         assert term not in ui

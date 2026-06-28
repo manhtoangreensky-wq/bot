@@ -59,6 +59,16 @@ class CaptureQuery:
         self.outputs.append({"kind": "answer", "args": args, "kwargs": kwargs})
         return None
 
+    async def edit_message_text(self, text, parse_mode=None, reply_markup=None, **kwargs):
+        self.outputs.append({
+            "kind": "text",
+            "text": str(text),
+            "parse_mode": parse_mode,
+            "reply_markup": reply_markup,
+            **kwargs,
+        })
+        return SimpleNamespace(text=text, reply_markup=reply_markup)
+
 
 def _update(uid, message):
     return SimpleNamespace(effective_user=SimpleNamespace(id=uid), message=message)
@@ -161,20 +171,10 @@ def test_subtitle_plus_dub_asr_failure_has_clean_retry_buttons(monkeypatch):
     message = CaptureMessage("combo-fail", chat_id=uid)
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace())) is True
-    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
-
-    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid))
-    last = query.outputs[-1]
-    text = last["text"]
-    callbacks = _callbacks(last["reply_markup"])
-    assert "TOAN AAS chưa tạo được phụ đề từ file này" in text
-    assert "Hệ thống chưa trừ Xu" in text
-    assert callbacks == ["videodub|retry_media", "menu|main"]
-    assert "videodub|send_subtitle_file" not in callbacks
-    assert "videodub|enter_dialogue_text" not in callbacks
-    forbidden = ["adapter", "provider", "env", "ffmpeg", "stack", "mode_disabled", "none", "null", "asr"]
-    assert not any(word in text.lower() for word in forbidden)
-    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
+    state = bot.get_video_dubbing_pending(uid)
+    assert state["step"] == "language"
+    assert state["active_flow"] == bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
+    assert "ngôn ngữ" in message.outputs[-1]["text"].lower()
 
 
 def test_translate_output_does_not_export_before_translated_subtitle_ready():
@@ -233,18 +233,18 @@ def test_subtitle_translate_upload_creates_original_subtitle_then_language(monke
 
     state = bot.get_video_dubbing_pending(uid)
     joined = "\n".join(item["text"] for item in message.outputs if item["kind"] == "text")
-    assert state["step"] == "original_subtitle_confirm"
+    assert state["step"] == "language"
     assert not state["subtitle_ref"]
     assert "TOAN AAS đang tạo phụ đề gốc" not in joined
-    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
+    assert "Dịch phụ đề" in message.outputs[-1]["text"]
     assert "videodub|output|srt" not in _callbacks(message.outputs[-1]["reply_markup"])
     assert prepare_calls["count"] == 0
 
-    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid))
+    query = asyncio.run(_press_videodub("videodub|language|English", uid))
     state = bot.get_video_dubbing_pending(uid)
-    assert prepare_calls["count"] == 1
-    assert state["step"] == "language"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in query.outputs[-1]["text"]
+    assert prepare_calls["count"] == 0
+    assert state["step"] == "confirm"
+    assert "Xác nhận dịch phụ đề video" in query.outputs[-1]["text"]
 
 
 def test_subtitle_translate_language_runs_translation_before_export(monkeypatch):
@@ -337,7 +337,7 @@ def test_auto_subtitle_media_outputs_srt_vtt_txt_after_real_create(monkeypatch):
     labels = _labels(message.outputs[-1]["reply_markup"])
     assert state["step"] == "confirm"
     assert not state["subtitle_ref"]
-    assert "✅ Xuất video phụ đề" in labels
+    assert "✅ Tạo phụ đề gốc" in labels
     assert "📄 Tải SRT" not in labels
     assert "📄 Tải VTT" not in labels
     assert "🧾 Tải TXT" not in labels

@@ -156,6 +156,6 @@ def test_dubbing_confirm_shows_voice_text_pricing():
     assert "Phụ đề + Lồng tiếng" in text
     assert "Tác vụ:" not in text
     assert "Xuất video MP4 hoàn chỉnh" in text
-    assert "Chi phí:" in text
+    assert "Tổng cộng:" in text
     assert "Chi phí dự kiến" not in text
-    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in text
+    assert "TOAN AAS chỉ xử lý và trừ Xu sau khi anh/chị xác nhận" in text

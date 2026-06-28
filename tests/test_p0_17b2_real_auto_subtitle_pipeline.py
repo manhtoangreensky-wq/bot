@@ -77,7 +77,7 @@ def test_public_type_guard_when_asr_not_ready(monkeypatch):
     text = query.outputs[-1]["text"]
     markup = query.outputs[-1]["reply_markup"]
     assert "Tạo phụ đề tự động" in text
-    assert "Bot chưa xử lý và chưa trừ Xu" in text
+    assert "miễn phí" in text.lower()
     assert _callbacks(markup) == ["videodub|source_upload", "videodub|back_type", "menu|main"]
     assert bot.get_video_dubbing_pending(uid)["step"] == "source"
 
@@ -259,10 +259,10 @@ def test_subtitle_translate_upload_keeps_product_context(monkeypatch):
     assert state["product_context"] == bot.PRODUCT_CONTEXT_SHOWROOM
     assert state["source_file_ref"] == "translate-video"
     assert state["source_media_type"] == "video"
-    assert state["step"] == "original_subtitle_confirm"
+    assert state["step"] == "language"
     assert not state["subtitle_ref"]
     assert prepare_calls["count"] == 0
-    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
+    assert "Dịch phụ đề" in message.outputs[-1]["text"]
 
 
 def test_subtitle_engine_status_mentions_real_media_pipeline():

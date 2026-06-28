@@ -104,13 +104,13 @@ def test_numbered_video_choice_buttons_align_four_by_four_for_eight():
 def test_video_menu_does_not_touch_subtitle_dub_flow():
     labels = set(_labels(bot.video_dubbing_menu_keyboard("vi", "translation")))
     assert {
-        "📝 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng video",
-        "🎬 Phụ đề + Lồng tiếng",
-        "📄 Dịch file phụ đề",
-        "🧾 Bóc lời thoại",
+        "🎬 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề",
+        "🎙 Lồng tiếng",
+        "🎞 Phụ đề + Lồng tiếng",
     }.issubset(labels)
+    assert "📄 Dịch file phụ đề" not in labels
+    assert "🧾 Bóc lời thoại" not in labels
     assert "📥 Tải video từ link" not in labels
 
 
