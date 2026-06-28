@@ -14,9 +14,15 @@ def test_translation_gateway_has_language_and_video_factory():
     labels = _labels(bot.translation_menu_keyboard("vi"))
     assert "Trung tâm dịch" in text
     assert "🌐 Dịch ngôn ngữ" in labels
-    assert "🎬 Dịch phụ đề, lồng tiếng" in labels
+    assert "🌐 Dịch phụ đề / Video" in labels
+    assert "📄 Dịch file" in labels
+    assert "🎧 Dịch audio" in labels
+    assert "📄 Dịch phụ đề file" in labels
     assert "menu|translation_language_hub" in _callbacks(bot.translation_menu_keyboard("vi"))
     assert "menu|translation_video_factory" in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_document" in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_voice" in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_subtitle_file" in _callbacks(bot.translation_menu_keyboard("vi"))
 
 
 def test_language_translation_menu_restored():
@@ -178,10 +184,10 @@ def test_auto_dubbing_voice_selection_required():
     labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert "👩 Giọng nữ mặc định" in labels
     assert "👨 Giọng nam mặc định" in labels
-    assert "📂 Kho voice" not in labels
-    assert "🎙 Tạo voice riêng" not in labels
+    assert "📚 Kho voice" in labels
+    assert "🎙 Tạo voice riêng" in labels
     admin_labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "entry_surface": "admin_test_mode"}))
-    assert "📂 Kho voice" in admin_labels
+    assert "📚 Kho voice" in admin_labels
     assert "🎙 Tạo voice riêng" in admin_labels
 
 

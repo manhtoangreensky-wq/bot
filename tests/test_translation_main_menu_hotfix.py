@@ -39,6 +39,9 @@ def test_language_entry_is_in_account_and_translation_menu_opens():
     assert callbacks == {
         "menu|translation_language_hub",
         "menu|translation_video_factory",
+        "menu|translation_document",
+        "menu|translation_voice",
+        "menu|translation_subtitle_file",
         "menu|main",
     }
 
@@ -127,7 +130,9 @@ def test_full_translation_hub_has_voice_two_way_live_and_video_branch():
     assert "menu|translation_language_hub" in callbacks
     assert "menu|translation_video_factory" in callbacks
     assert "menu|translation_video_dub_menu" not in callbacks
-    assert "menu|translation_voice" not in callbacks
+    assert "menu|translation_document" in callbacks
+    assert "menu|translation_voice" in callbacks
+    assert "menu|translation_subtitle_file" in callbacks
     assert "videodub|type|subtitle_translate" not in callbacks
 
     _, language_markup = bot.localized_menu_content("translation_language_hub", False, "vi", user_id=123)

@@ -155,7 +155,9 @@ def test_subtitle_plus_dub_creates_original_subtitle_first():
     text = bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}, "vi")
     labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
     assert "xử lý video" in text.lower()
-    assert labels[:2] == ["🎞 Video đã có phụ đề", "🎧 Video chỉ có tiếng"]
+    assert labels[0] == "📤 Gửi video cần xử lý"
+    assert "🎞 Video đã có phụ đề" not in labels
+    assert "🎧 Video chỉ có tiếng" not in labels
 
 
 def test_subtitle_plus_dub_no_confirm_full_before_original_subtitle():
@@ -199,7 +201,7 @@ def test_subtitle_plus_dub_translated_subtitle_ready_buttons():
 
 def test_subtitle_plus_dub_voice_selection_after_subtitle():
     labels = _labels(bot.subtitle_plus_dub_voice_keyboard("vi"))
-    assert labels == ["👩 Nữ mặc định", "👨 Nam mặc định", "🎧 Voice thư viện", "⭐ Voice đã lưu", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["👩 Giọng nữ mặc định", "👨 Giọng nam mặc định", "📚 Kho voice", "🎙 Tạo voice riêng", "⬅️ Quay lại", "🏠 Menu chính"]
 
 
 def test_subtitle_plus_dub_preview_only_short_audio(monkeypatch):

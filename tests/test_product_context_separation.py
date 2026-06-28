@@ -71,7 +71,10 @@ def test_showroom_translation_is_not_video_order_menu():
 
     assert "Trung tâm dịch" in text
     assert "Dịch ngôn ngữ" in labels
-    assert "Dịch phụ đề, lồng tiếng" in labels
+    assert "Dịch phụ đề / Video" in labels
+    assert "Dịch file" in labels
+    assert "Dịch audio" in labels
+    assert "Dịch phụ đề file" in labels
     assert "hóa đơn video" not in text.lower()
     assert "Không thêm" not in labels
     assert "Chọn cho video" not in labels

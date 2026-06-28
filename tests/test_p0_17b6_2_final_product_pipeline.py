@@ -96,7 +96,10 @@ def test_tool_source_contracts():
     assert "videodub|source_recent_subtitle" not in _callbacks(
         bot.video_dubbing_source_keyboard("vi", dub_state)
     )
-    assert "videodub|path|has_subtitle" in _callbacks(bot.video_dubbing_source_keyboard("vi", dub_state))
+    callbacks = _callbacks(bot.video_dubbing_source_keyboard("vi", dub_state))
+    assert "videodub|source_upload" in callbacks
+    assert "videodub|path|has_subtitle" not in callbacks
+    assert "videodub|path|no_subtitle" not in callbacks
     assert bot.video_dubbing_mode_needs_asr_provider(
         bot.VIDEO_SUBTITLE_MODE_TRANSLATE, file_state
     ) is False

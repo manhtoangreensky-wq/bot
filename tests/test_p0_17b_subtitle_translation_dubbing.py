@@ -107,7 +107,8 @@ def test_translation_menu_text_requires_confirm_before_provider(monkeypatch):
     assert pending["source_type"] == "text_confirm"
     assert pending["source_text"] == "xin chao"
     assert "Xác nhận dịch văn bản" in message.outputs[-1]["text"]
-    assert "chưa gọi provider" in message.outputs[-1]["text"]
+    assert "chưa dịch nội dung" in message.outputs[-1]["text"]
+    assert "chưa trừ Xu" in message.outputs[-1]["text"]
 
 
 def test_translation_result_creates_translation_asset(monkeypatch, tmp_path):

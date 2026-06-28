@@ -7899,9 +7899,9 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         callbacks = [button.callback_data for row in result["reply_markup"].inline_keyboard for button in row]
         assert "videodub|link_start" not in callbacks
         if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            assert "videodub|path|has_subtitle" in callbacks
-            assert "videodub|path|no_subtitle" in callbacks
-            continue
+            assert "videodub|source_upload" in callbacks
+            assert "videodub|path|has_subtitle" not in callbacks
+            assert "videodub|path|no_subtitle" not in callbacks
         result = asyncio.run(press("videodub|source_upload", uid))
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == "await_video"
@@ -7922,7 +7922,6 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     assert not dub_state.get("target_language")
 
     message = FakeMessage("video-71004")
-    asyncio.run(press("videodub|path|no_subtitle", 71004))
     update = SimpleNamespace(effective_user=SimpleNamespace(id=71004), message=message)
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(update, SimpleNamespace())) is True
     assert bot.get_video_dubbing_pending(71004)["step"] == "language"
@@ -7934,7 +7933,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     translated_ref = bot.set_video_dubbing_artifact(71004, "translated_subtitle", "1\n00:00:00,000 --> 00:00:02,000\nHello")
     bot.set_video_dubbing_pending(71004, "voice", translated_subtitle_ref=translated_ref)
     asyncio.run(press("videodub|voice|default_female", 71004))
-    assert bot.get_video_dubbing_pending(71004)["step"] in {"voice_speed", "confirm", "dub_confirmation"}
+    assert bot.get_video_dubbing_pending(71004)["step"] in {"confirm", "dub_confirmation"}
 
     upload_cases = [
         (71101, bot.VIDEO_SUBTITLE_MODE_CREATE, {}, "confirm", "videodub|final", "Xác nhận tạo phụ đề gốc"),

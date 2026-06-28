@@ -43,8 +43,8 @@ def test_auto_dubbing_final_confirmation_is_public_clean():
 
     assert "Lồng tiếng video" in text
     assert "Ngôn ngữ đích: <b>English</b>" in text
-    assert "Tốc độ: <b>0.9</b>" in text
-    assert labels == ["✅ Xác nhận lồng tiếng", "⬅️ Quay lại", "❌ Hủy", "🏠 Menu chính"]
+    assert "Tốc độ:" not in text
+    assert labels == ["✅ Xác nhận lồng tiếng", "🎙 Đổi voice", "⬅️ Quay lại", "🏠 Menu chính"]
     ui = _joined(text, bot.video_dubbing_confirm_keyboard("vi", state))
     for term in ("tác vụ", "nguồn", "chi phí dự kiến", "sửa lựa chọn", "đổi tốc độ", "admin", "curl"):
         assert term not in ui

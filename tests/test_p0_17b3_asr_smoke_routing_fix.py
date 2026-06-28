@@ -856,8 +856,9 @@ def test_dub_audio_source_keyboard_offers_recent_subtitle():
     )
 
     labels = " ".join(_button_labels(markup))
-    assert "Video đã có phụ đề" in labels
-    assert "Video chỉ có tiếng" in labels
+    assert "Gửi video cần lồng tiếng" in labels
+    assert "Video đã có phụ đề" not in labels
+    assert "Video chỉ có tiếng" not in labels
     assert "Dùng phụ đề vừa tạo" not in labels
 
 

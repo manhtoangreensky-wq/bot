@@ -99,17 +99,17 @@ def test_product_menu_and_copy_are_clean_two_path():
         assert forbidden not in surfaces
 
 
-def test_translate_and_dub_source_keyboards_have_two_paths():
+def test_translate_and_dub_source_keyboards_are_clean_closed_video_flows():
     translate = bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE})
     dub = bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB})
     combo = bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
 
-    assert _labels(translate)[:3] == ["📤 Gửi video đã có phụ đề", "🎬 Tạo phụ đề tự động", "⬅️ Dịch video"]
-    assert _callbacks(translate)[:3] == ["videodub|source_upload", "videodub|type|subtitle_create", "videodub|back_type"]
-    assert _labels(dub)[:2] == ["🎞 Video đã có phụ đề", "🎧 Video chỉ có tiếng"]
-    assert _callbacks(dub)[:2] == ["videodub|path|has_subtitle", "videodub|path|no_subtitle"]
-    assert _labels(combo)[:2] == ["🎞 Video đã có phụ đề", "🎧 Video chỉ có tiếng"]
-    assert _callbacks(combo)[:2] == ["videodub|path|has_subtitle", "videodub|path|no_subtitle"]
+    assert _labels(translate)[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Dịch video", "🏠 Menu chính"]
+    assert _callbacks(translate)[:3] == ["videodub|source_upload", "videodub|back_type", "menu|main"]
+    assert _labels(dub)[:1] == ["📤 Gửi video cần lồng tiếng"]
+    assert _callbacks(dub)[:1] == ["videodub|source_upload"]
+    assert _labels(combo)[:1] == ["📤 Gửi video cần xử lý"]
+    assert _callbacks(combo)[:1] == ["videodub|source_upload"]
 
 
 def test_upload_video_waits_for_original_subtitle_confirm(monkeypatch):
@@ -272,7 +272,7 @@ def test_saved_voice_selection_uses_provider_voice_id(monkeypatch):
     assert state["voice_kind"] == "saved_voice"
     assert int(state["voice_profile_id"]) == 77
     assert state["voice_id"] == "provider-custom-77"
-    assert state["step"] == "voice_speed"
+    assert state["step"] == "confirm"
 
 
 def test_combo_translation_receipt_can_continue_to_dub():
