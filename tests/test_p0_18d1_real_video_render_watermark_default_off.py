@@ -27,6 +27,7 @@ def _admin_video_job(render_mode="real"):
         "no_charge": True,
         "provider_call": False,
         "public_user": False,
+        "source": remote_worker.REMOTE_WORKER_ADMIN_VIDEO_SOURCE,
         "render_mode": render_mode,
     }
 
@@ -181,6 +182,7 @@ def test_normal_video_flow_does_not_use_test_pattern(monkeypatch, tmp_path):
     draft = bot.get_video_session(uid)["draft"]
     assert draft["asset_pack"]["render_mode"] == "real"
     assert draft["asset_pack"]["test_pattern"] is False
+    assert draft["asset_pack"]["admin_video_delivery"] is False
     assert draft["asset_pack"]["fake_renderer_allowed"] is False
 
 
@@ -299,8 +301,9 @@ def test_status_does_not_call_test_pattern_real_video(monkeypatch):
         }
     }
     text = bot.video_b14_queue_status_text(session, None, bot.ADMIN_ID, "vi")
-    assert "video test kỹ thuật" in text
-    assert "không phải video dựng thật" in text
+    assert bot.VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE in text
+    assert "video test kỹ thuật" not in text
+    assert "không phải video dựng thật" not in text
     assert "hệ thống đã dựng video thật" not in text
 
 
@@ -314,4 +317,5 @@ def test_status_completed_requires_real_render_or_test_label(monkeypatch):
     }
     text = bot.video_b14_queue_status_text(session, None, bot.ADMIN_ID, "vi")
     assert "hệ thống đã dựng video thật" not in text
-    assert "chưa xác minh renderer thật" in text
+    assert "renderer" not in text.lower()
+    assert "TOAN AAS đang kiểm tra file cuối" in text

@@ -83,6 +83,7 @@ REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
 RENDER_MODE_REAL = "real"
 RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
 RENDER_MODE_UNAVAILABLE = "unavailable"
+REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
 
 
 def mask_secret(value: str) -> str:
@@ -272,6 +273,7 @@ def admin_test_pattern_allowed(job: dict | None = None) -> bool:
         return False
     return bool(
         data.get("admin_video_delivery")
+        and str(data.get("source") or "") == REMOTE_WORKER_ADMIN_VIDEO_SOURCE
         and data.get("admin_only")
         and data.get("no_charge")
         and not data.get("provider_call")
@@ -524,6 +526,8 @@ def process_admin_video_job(job: dict) -> dict:
         raise RuntimeError("job_id_missing")
     if str(job.get("job_type") or "") != "video_render" or not job.get("admin_video_delivery"):
         raise RuntimeError("admin_video_job_required")
+    if str(job.get("source") or "") != REMOTE_WORKER_ADMIN_VIDEO_SOURCE:
+        raise RuntimeError("admin_video_route_source_required")
     if not job.get("admin_only") or not job.get("no_charge") or job.get("provider_call") or job.get("public_user"):
         raise RuntimeError("unsafe_admin_video_metadata")
     with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:

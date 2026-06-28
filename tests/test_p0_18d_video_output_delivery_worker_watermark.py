@@ -125,6 +125,7 @@ def test_remote_worker_admin_video_once_claims_only_admin_video(monkeypatch):
                 "no_charge": True,
                 "provider_call": False,
                 "public_user": False,
+                "source": remote_worker.REMOTE_WORKER_ADMIN_VIDEO_SOURCE,
             },
         }
 
