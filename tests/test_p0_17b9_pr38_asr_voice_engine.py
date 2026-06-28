@@ -60,7 +60,7 @@ def test_voice_engine_readiness_uses_tts_contract():
 
 def test_tts_public_guard_and_failure_copy():
     assert bot.tts_provider_guard_text("vi") == (
-        "Giọng đọc AI đang được chuẩn bị. TOAN AAS chưa gọi provider và chưa trừ Xu. "
+        "Giọng đọc AI đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu. "
         "Anh/chị có thể thử lại sau hoặc dùng công cụ khác trước."
     )
     assert bot.tts_failure_text("vi") == (
