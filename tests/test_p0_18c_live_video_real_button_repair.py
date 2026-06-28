@@ -379,13 +379,17 @@ def test_video_status_shows_addons():
     assert "Voice:" in text and "Nhạc:" in text and "Logo:" in text
 
 
-def test_video_status_no_fake_success():
+def test_video_status_no_fake_success(monkeypatch):
+    monkeypatch.setattr(bot, "video_b14_fail_stale_product_job_for_status", lambda _job_id: 0)
+    monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: {})
     text = bot.video_b14_queue_status_text({"draft": {"b14_queue_job": {"id": 1, "status": "completed"}, "b14_invoice": {"scene_count": 3}}}, None, bot.ADMIN_ID, "vi")
     assert "đã có MP4" not in text
     assert "chưa có file thành phẩm" in text
 
 
-def test_video_status_queued_worker_message():
+def test_video_status_queued_worker_message(monkeypatch):
+    monkeypatch.setattr(bot, "video_b14_fail_stale_product_job_for_status", lambda _job_id: 0)
+    monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: {})
     text = bot.video_b14_queue_status_text({"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3}}}, None, bot.ADMIN_ID, "vi")
     assert "hệ thống đang xếp lịch dựng video" in text
     assert "worker" not in text.lower()
