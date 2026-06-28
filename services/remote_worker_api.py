@@ -224,6 +224,7 @@ def _admin_video_safety_flags(project: dict) -> dict:
     asset_pack = _json_loads(project.get("asset_pack_json"), {})
     invoice = _json_loads(project.get("invoice_json"), {})
     source = str(asset_pack.get("source") or invoice.get("source") or "")
+    explicit_admin_video_delivery = source == REMOTE_WORKER_ADMIN_VIDEO_SOURCE
     render_mode = str(asset_pack.get("render_mode") or invoice.get("render_mode") or "").strip().lower().replace("-", "_")
     if render_mode in {"test_pattern", "admin_test"}:
         render_mode = RENDER_MODE_ADMIN_TEST_PATTERN
@@ -233,7 +234,8 @@ def _admin_video_safety_flags(project: dict) -> dict:
         "source": source,
         "render_mode": render_mode,
         "test_pattern": _safe_bool(asset_pack.get("test_pattern") or invoice.get("test_pattern")),
-        "admin_video_delivery": _safe_bool(
+        "admin_video_delivery": explicit_admin_video_delivery
+        and _safe_bool(
             asset_pack.get("admin_video_delivery")
             or invoice.get("admin_video_delivery")
             or asset_pack.get("owner_admin_test_mode")
@@ -354,6 +356,10 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
     )[:8000]
     cleaned_user_prompt = re.sub(r"\s+", " ", str(asset_pack.get("cleaned_user_prompt") or original_user_prompt or "")).strip()[:8000]
     provider_order = asset_pack.get("provider_order") or invoice.get("provider_order") or "shopaikey,key4u"
+    source = str(asset_pack.get("source") or invoice.get("source") or "product_video")
+    admin_only = _safe_bool(asset_pack.get("admin_only") or invoice.get("admin_only"))
+    no_charge = _safe_bool(asset_pack.get("no_charge") or invoice.get("no_charge"))
+    public_user = _safe_bool(asset_pack.get("public_user") or invoice.get("public_user"))
     payload = {
         "job_id": str(hydrated_job.get("id") or hydrated_job.get("job_id") or ""),
         "project_id": str(project.get("project_id") or hydrated_job.get("project_id") or ""),
@@ -380,6 +386,12 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "provider_order": provider_order,
         "render_mode": render_mode,
         "test_pattern": False,
+        "admin_video_delivery": False,
+        "admin_only": bool(admin_only),
+        "no_charge": bool(no_charge),
+        "provider_call": render_mode == RENDER_MODE_REAL,
+        "public_user": bool(public_user),
+        "source": source,
         "output_requirements": {
             "container": "mp4",
             "mime": "video/mp4",
@@ -1038,6 +1050,19 @@ def _normalize_render_mode(value: Any, default: str = RENDER_MODE_REAL) -> str:
     return default
 
 
+def _renderer_has_test_marker(renderer: str) -> bool:
+    value = str(renderer or "").strip().lower()
+    return any(marker in value for marker in ("fake", "test", "testsrc", "test_pattern", "canary"))
+
+
+def _fail_product_fake_output(conn: sqlite3.Connection, job_id: int, reason: str) -> dict:
+    try:
+        video_project_queue.fail_video_job(conn, job_id=int(job_id), error=reason, retry=False)
+    except Exception:
+        pass
+    return {"ok": False, "reason": reason}
+
+
 def complete_remote_worker_job(
     conn: sqlite3.Connection,
     *,
@@ -1068,11 +1093,14 @@ def complete_remote_worker_job(
     project_render_mode = RENDER_MODE_ADMIN_TEST_PATTERN if _is_admin_fake_video_job(project) else (_admin_video_safety_flags(project)["render_mode"] if is_admin_video else RENDER_MODE_REAL)
     render_mode = _normalize_render_mode(payload.get("render_mode"), project_render_mode)
     renderer = str(payload.get("renderer") or "").strip().lower()
-    test_pattern = _safe_bool(payload.get("test_pattern")) or render_mode == RENDER_MODE_ADMIN_TEST_PATTERN or "testsrc" in renderer or "fake" in renderer
+    product_admin_video_leak = _safe_bool(payload.get("admin_video_delivery")) and not is_admin_video
+    test_pattern = _safe_bool(payload.get("test_pattern")) or render_mode == RENDER_MODE_ADMIN_TEST_PATTERN or _renderer_has_test_marker(renderer)
+    if product_admin_video_leak:
+        return _fail_product_fake_output(conn, int(job_id), "admin_video_delivery_not_allowed_for_product_video")
     if test_pattern and not is_admin_video:
-        return {"ok": False, "reason": "test_pattern_not_allowed_for_normal_video"}
+        return _fail_product_fake_output(conn, int(job_id), "test_pattern_not_allowed_for_normal_video")
     if not is_admin_video and render_mode != RENDER_MODE_REAL:
-        return {"ok": False, "reason": "normal_video_requires_real_render_mode"}
+        return _fail_product_fake_output(conn, int(job_id), "normal_video_requires_real_render_mode")
     if is_admin_video and render_mode not in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN}:
         return {"ok": False, "reason": "admin_video_invalid_render_mode"}
     if uploaded_file:

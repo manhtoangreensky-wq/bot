@@ -347,6 +347,7 @@ def test_remote_worker_processes_fake_job(monkeypatch, tmp_path):
         "no_charge": True,
         "provider_call": False,
         "public_user": False,
+        "source": remote_worker.REMOTE_WORKER_ADMIN_VIDEO_SOURCE,
     })
     assert result["ok"] is True
     assert completed["job_id"] == "fake-job"

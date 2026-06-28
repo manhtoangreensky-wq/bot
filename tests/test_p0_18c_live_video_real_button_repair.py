@@ -364,7 +364,8 @@ def test_invoice_shows_discount_amount():
 def test_owner_admin_no_charge_still_applies():
     report = bot.video_b14_live_buttons_regression_report(bot.ADMIN_ID)
     assert report["checks"]["confirm_no_charge"] is True
-    assert "OWNER/ADMIN TEST MODE" in report["status_text"]
+    assert "OWNER/ADMIN TEST MODE" not in report["status_text"]
+    assert "không trừ Xu" not in report["status_text"]
 
 
 def test_video_status_shows_job_stage_progress():
@@ -392,7 +393,8 @@ def test_video_status_queued_worker_message():
 
 def test_video_status_owner_no_charge():
     text = bot.video_b14_queue_status_text({"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3}}}, None, bot.ADMIN_ID, "vi")
-    assert "OWNER/ADMIN TEST MODE" in text
+    assert "OWNER/ADMIN TEST MODE" not in text
+    assert "không trừ Xu" not in text
 
 
 def test_tool_test_live_video_buttons_regression_admin_only(monkeypatch):

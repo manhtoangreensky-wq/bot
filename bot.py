@@ -39600,7 +39600,12 @@ def video_b14_live_buttons_regression_report(user_id: int = 0) -> dict:
     save_video_session(uid, session)
     session = task3d_session_step(uid, "b14_queue_status", provider_called=False, xu_charged=0)
     status_text = video_b14_queue_status_text(session, result, uid, "vi")
-    status_ok = all(marker in status_text for marker in ["Mã xử lý", "Trạng thái", "Tiến độ", "Tùy chọn thêm", "OWNER/ADMIN TEST MODE"]) and safe_int(job.get("id"), 0) > 0
+    forbidden_status_terms = ("OWNER/ADMIN TEST MODE", "ADMIN TEST MODE", "TEST PATTERN", "provider", "worker", "render_mode")
+    status_ok = (
+        all(marker in status_text for marker in ["Mã xử lý", "Trạng thái", "Tiến độ", "Tùy chọn thêm"])
+        and all(term.lower() not in status_text.lower() for term in forbidden_status_terms)
+        and safe_int(job.get("id"), 0) > 0
+    )
     checks = {
         "prompt_video_no_generic_error": prompt_ok,
         "logo_text_position_confirm": logo_ok,
@@ -52175,8 +52180,7 @@ def video_b14_admin_test_label(user_id=0, lang: str = "vi") -> str:
 
 
 def video_b14_with_admin_label(text: str, user_id=0, lang: str = "vi") -> str:
-    label = video_b14_admin_test_label(user_id, lang)
-    return f"{label}\n\n{text}" if label else text
+    return text
 
 
 def video_b14_profile_for_product(product_id: str, user_text: str = ""):
@@ -54165,6 +54169,33 @@ def video_b14_render_mode_from_job(job: dict | None = None, project: dict | None
     return ""
 
 
+VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE = "TOAN AAS chưa dựng được video hoàn chỉnh lần này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+
+
+def video_b14_result_renderer_has_test_marker(renderer: str) -> bool:
+    value = str(renderer or "").strip().lower()
+    return any(marker in value for marker in ("fake", "test", "testsrc", "test_pattern", "canary"))
+
+
+def video_b14_product_result_block_reason(job: dict | None = None, project: dict | None = None) -> str:
+    job = dict(job or {})
+    project = dict(project or {})
+    if remote_worker_api.is_remote_worker_canary_job(job, project) or remote_worker_api.is_remote_worker_admin_canary_job(job, project):
+        return ""
+    if remote_worker_api.is_remote_worker_admin_video_job(job, project):
+        return ""
+    payload = video_b14_job_result_payload(job)
+    render_mode = video_b14_render_mode_from_job(job, project)
+    renderer = str(payload.get("renderer") or "")
+    if bool(payload.get("admin_video_delivery")):
+        return "admin_video_delivery_not_allowed_for_product_video"
+    if bool(payload.get("test_pattern")) or render_mode == "admin_test_pattern":
+        return "test_pattern_not_allowed_for_product_video"
+    if video_b14_result_renderer_has_test_marker(renderer):
+        return "test_renderer_not_allowed_for_product_video"
+    return ""
+
+
 def video_b14_queue_status_text(session: dict | None, result: dict | None = None, user_id=0, lang: str = "vi") -> str:
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
@@ -54217,22 +54248,19 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     error_log = str(project.get("error_log") or job.get("last_error") or "")
     render_mode = video_b14_render_mode_from_job(job, project)
     job_result = video_b14_job_result_payload(job)
-    test_pattern = bool(job_result.get("test_pattern")) or render_mode == "admin_test_pattern"
+    blocked_reason = video_b14_product_result_block_reason(job, project)
     real_renderer_unavailable = "real_video_renderer_unavailable" in error_log
     if real_renderer_unavailable:
         render_mode = "unavailable"
-    if status in {"completed", "success"} and (final_path or final_file_id):
+    if blocked_reason:
+        result_text = VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE
+    elif status in {"completed", "success"} and (final_path or final_file_id):
         if render_mode == "real":
             result_text = "hệ thống đã dựng video thật và sẽ gửi kết quả cuối"
-        elif test_pattern:
-            result_text = "hệ thống đã gửi video test kỹ thuật, không phải video dựng thật"
         else:
-            result_text = "đã có file kết quả nhưng chưa xác minh renderer thật"
+            result_text = "TOAN AAS đang kiểm tra file cuối trước khi gửi thành phẩm"
     elif status in {"failed", "error"}:
-        if real_renderer_unavailable:
-            result_text = "Hệ thống chưa dựng được video thật ở cấu hình này. TOAN AAS chưa trừ Xu. Anh/chị thử lại cấu hình nhẹ hơn hoặc đợi hệ thống render thật được bật."
-        else:
-            result_text = "hệ thống chưa dựng được video. TOAN AAS chưa báo hoàn tất khi chưa có file cuối"
+        result_text = VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE
     elif status in {"queued", "queued_for_worker"}:
         result_text = "đang chuẩn bị xử lý, chưa có file thành phẩm"
     elif status in {"processing", "running"}:
@@ -54241,7 +54269,6 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         result_text = "chưa có file thành phẩm"
     package_label = str(invoice.get("package_label") or video_b14_package_full_label(safe_int(invoice.get("quality_xu"), 200)))
     updated_at = str(job.get("updated_at") or project.get("updated_at") or now_text())
-    xu_line = "OWNER/ADMIN TEST MODE: không trừ Xu" if video_b14_is_admin_or_owner(user_id) else f"Xu: {xu_number(safe_int(draft.get('xu_charged'), safe_int(invoice.get('total_xu'), 0)))} Xu theo chính sách xác nhận"
     voice_label = str(addon_plan.get("voice_label") or video_b14_addon_label("voice", str(addon_plan.get("voice_source") or "none")))
     music_label = video_b14_addon_label("music", str(addon_plan.get("music_source") or "none"))
     subtitle_label = video_b14_addon_label("subtitle", str(addon_plan.get("subtitle_source") or "none"))
@@ -54274,7 +54301,6 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         f"• Cập nhật lần cuối: <code>{html.escape(updated_at)}</code>",
         f"• Thời gian chờ dự kiến: <b>{video_b14_eta_text(eta)}</b>",
         f"• Kết quả: <b>{html.escape(result_text)}</b>",
-        f"• {html.escape(xu_line)}",
     ]
     enabled_stages = []
     if addon_plan.get("voice_enabled") or addon_plan.get("dub_enabled"):
@@ -54361,44 +54387,47 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "provider_order": asset_pack_payload.get("provider_order") or os.getenv("VIDEO_PROVIDER_ORDER") or "shopaikey,key4u",
         "profile_id": profile_id,
         "aspect_ratio": ratio,
+        "source": "product_video",
         "render_mode": "real",
         "test_pattern": False,
+        "admin_video_delivery": False,
+        "owner_admin_test_mode": False,
+        "safe_output_delivery_test": False,
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
+        "provider_call": True,
     })
     invoice.update({
+        "source": "product_video",
         "render_mode": "real",
         "test_pattern": False,
+        "admin_video_delivery": False,
+        "owner_admin_test_mode": False,
+        "safe_output_delivery_test": False,
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
+        "provider_call": True,
     })
     if is_internal:
         asset_pack_payload.update({
-            "source": asset_pack_payload.get("source") or "video_b14_admin_no_charge",
-            "admin_video_delivery": True,
-            "owner_admin_test_mode": True,
             "created_by_admin": True,
             "admin_only": True,
             "admin_no_charge": True,
             "no_charge": True,
-            "provider_call": False,
             "public_user": False,
             "scene_count": invoice["scene_count"],
             "duration_seconds": invoice["duration_seconds"],
         })
         invoice.update({
-            "admin_video_delivery": True,
-            "owner_admin_test_mode": True,
             "created_by_admin": True,
             "admin_only": True,
             "admin_no_charge": True,
             "no_charge": True,
-            "provider_call": False,
             "public_user": False,
             "source": asset_pack_payload.get("source"),
         })
     else:
-        asset_pack_payload.update({"public_user": True, "admin_only": False})
+        asset_pack_payload.update({"public_user": True, "admin_only": False, "no_charge": False})
         invoice.update({"public_user": True, "admin_only": False, "no_charge": False})
     project_id = safe_int(draft.get("b14_project_id"), 0)
     if project_id:
@@ -149109,6 +149138,22 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
     is_admin_video = remote_worker_api.is_remote_worker_admin_video_job(job, project)
     render_mode = video_b14_render_mode_from_job(job, project)
     job_result = video_b14_job_result_payload(job)
+    blocked_reason = video_b14_product_result_block_reason(job, project)
+    if blocked_reason:
+        try:
+            conn = db_connect()
+            try:
+                video_project_queue.fail_video_job(conn, job_id=safe_int(job.get("id") or job.get("job_id"), 0), error=blocked_reason, retry=False)
+            finally:
+                conn.close()
+        except Exception:
+            logger.warning("blocked product video result fail marking skipped")
+        try:
+            await tg_app.bot.send_message(chat_id=int(user_id), text=VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE)
+            return {"sent": False, "reason": blocked_reason, "message_sent": True}
+        except Exception as exc:
+            logger.warning(f"blocked product video notice failed: {type(exc).__name__}")
+            return {"sent": False, "reason": blocked_reason}
     test_pattern = bool(job_result.get("test_pattern")) or render_mode == "admin_test_pattern"
     if is_admin_canary:
         caption = "🧪 VPS Worker Production Canary hoàn tất. File test admin từ VPS/Railway."

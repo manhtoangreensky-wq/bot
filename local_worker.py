@@ -97,6 +97,7 @@ VIDEO_PROJECT_QUEUE_ENABLED = env_flag("VIDEO_PROJECT_QUEUE_ENABLED", "true")
 LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
 RENDER_MODE_REAL = "real"
 RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
+REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
 
 
 def endpoint(path: str) -> str:
@@ -589,6 +590,31 @@ def video_project_render_mode(job: dict | None = None) -> str:
     return RENDER_MODE_REAL
 
 
+def local_admin_test_pattern_allowed(job: dict | None = None) -> bool:
+    data = dict(job or {})
+    project = dict(data.get("project") or {})
+    asset_pack = {}
+    invoice = {}
+    for source_key, target in (("asset_pack_json", "asset"), ("invoice_json", "invoice")):
+        try:
+            parsed = json.loads(str(project.get(source_key) or data.get(source_key) or "{}"))
+        except Exception:
+            parsed = {}
+        if isinstance(parsed, dict) and target == "asset":
+            asset_pack = parsed
+        elif isinstance(parsed, dict):
+            invoice = parsed
+    source = str(data.get("source") or asset_pack.get("source") or invoice.get("source") or "")
+    return bool(
+        source == REMOTE_WORKER_ADMIN_VIDEO_SOURCE
+        and (data.get("admin_video_delivery") or asset_pack.get("admin_video_delivery") or invoice.get("admin_video_delivery"))
+        and (data.get("admin_only") or asset_pack.get("admin_only") or invoice.get("admin_only"))
+        and (data.get("no_charge") or asset_pack.get("no_charge") or invoice.get("no_charge"))
+        and not (data.get("provider_call") or asset_pack.get("provider_call") or invoice.get("provider_call"))
+        and not (data.get("public_user") or asset_pack.get("public_user") or invoice.get("public_user"))
+    )
+
+
 def video_project_addon_plan(job: dict | None = None) -> dict:
     data = dict(job or {})
     project = dict(data.get("project") or {})
@@ -630,6 +656,9 @@ def run_video_render_job(job: dict) -> None:
         addon_plan = video_project_addon_plan(job)
         mode = video_project_render_mode(job)
         if mode == RENDER_MODE_ADMIN_TEST_PATTERN:
+            if not local_admin_test_pattern_allowed(job):
+                update_video_render_job(job_id, "failed", "unsafe_test_pattern_route")
+                return
             if not LOCAL_VIDEO_FAKE_RENDERER_ENABLED:
                 update_video_render_job(job_id, "failed", "admin_test_pattern_renderer_disabled")
                 return
