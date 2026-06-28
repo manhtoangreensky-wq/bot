@@ -1992,21 +1992,19 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         for button in row
     }
     assert "vproduct|open|video_ai_real" in video_callbacks
-    assert "vproduct|open|image_to_video" in video_callbacks
+    assert "vproduct|open|frame_video_local" in video_callbacks
     assert "vproduct|open|self_shot_scene_change" in video_callbacks
-    assert "vproduct|open|multi_scene_film" not in video_callbacks
-    assert "vproduct|open|video_trend" not in video_callbacks
-    assert "videodub|start|video" in video_callbacks
-    assert "menu|video_vault" in video_callbacks
+    assert "vproduct|open|multi_scene_film" in video_callbacks
+    assert "vproduct|open|video_trend" in video_callbacks
     assert 'callback_data="framevideo|start"' in source
     video_labels = {
         button.text
         for row in bot.main_video_keyboard("vi").inline_keyboard
         for button in row
     }
-    assert "🧠 Ý tưởng video" not in video_labels
+    assert "🧠 Ý tưởng video" in video_labels
     assert "📢 Concept quảng cáo" not in video_labels
-    assert "🧩 Prompt video" in video_labels
+    assert "📚 Kho prompt video" in video_labels
     assert "🎥 Prompt / Chuyển động" not in video_labels
     assert "create_media_open_text(query.from_user.id)" in source
     assert "create_media_open_text(uid)" in quick_source
@@ -2649,17 +2647,22 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "💰 Xem giá" not in image_labels
     assert "📞 Liên hệ admin" not in image_labels
     video_buttons = [button for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
-    assert any(button.text == "🎥 Tạo video AI" and button.callback_data == "vproduct|open|video_ai_real" for button in video_buttons)
+    assert any(button.text == "🎬 Video AI chân thật" and button.callback_data == "vproduct|open|video_ai_real" for button in video_buttons)
     assert not any(button.text == "✨ Làm theo từng bước" for button in video_buttons)
-    assert not any(button.callback_data == "vproduct|open|video_trend" for button in video_buttons)
+    assert any(button.text == "🔥 Video theo trend" and button.callback_data == "vproduct|open|video_trend" for button in video_buttons)
     video_labels = [button.text for button in video_buttons]
     assert video_labels == [
-        "🎥 Tạo video AI",
-        "🖼 Ảnh thành video",
-        "🎭 Tự quay / đổi cảnh AI",
-        "🧩 Prompt video",
-        "🌐 Dịch phụ đề / Video",
-        "📂 Kho video",
+        "🔥 Video theo trend",
+        "🧠 Ý tưởng video",
+        "🎬 Storyboard + Prompt",
+        "📚 Kho prompt video",
+        "🎬 Video AI chân thật",
+        "🧩 Kịch bản → Video",
+        "🎞 Ghép ảnh thành video",
+        "🎥 Tự quay & đổi cảnh AI",
+        "🎬 Phim AI nhiều cảnh",
+        "📥 Tải video từ link",
+        "🛠 Chỉnh sửa video local",
         "🏠 Menu chính",
     ]
     assert "🎬 Tạo video nhanh" not in video_labels
@@ -4773,15 +4776,14 @@ def test_storyboard_to_image_sequence_video_flow_v1(monkeypatch):
         for row in bot.main_video_keyboard("vi").inline_keyboard
         for button in row
     }
-    assert "🎥 Tạo video AI" in video_labels
-    assert "🖼 Ảnh thành video" in video_labels
-    assert "🎭 Tự quay / đổi cảnh AI" in video_labels
-    assert "🧩 Prompt video" in video_labels
-    assert "🌐 Dịch phụ đề / Video" in video_labels
-    assert "📂 Kho video" in video_labels
-    assert "🔥 Video theo trend" not in video_labels
-    assert "🧠 Ý tưởng video" not in video_labels
-    assert "🎬 Phim AI nhiều cảnh" not in video_labels
+    assert "🧩 Kịch bản → Video" in video_labels
+    assert "🎞 Ghép ảnh thành video" in video_labels
+    assert "🎬 Video AI chân thật" in video_labels
+    assert "🎥 Tự quay & đổi cảnh AI" in video_labels
+    assert "🎬 Phim AI nhiều cảnh" in video_labels
+    assert "🎬 Storyboard + Prompt" in video_labels
+    assert "🔥 Video theo trend" in video_labels
+    assert "🧠 Ý tưởng video" in video_labels
     assert "📢 Concept quảng cáo" not in video_labels
 
     init_source = source_between(source, "def init_db():", "def get_user_language")
@@ -6736,9 +6738,7 @@ def test_video_upload_ideas_selfscene_longvideo_and_music_ux_v5(monkeypatch):
         for row in bot.video_idea_menu_keyboard("vi").inline_keyboard
         for button in row
     ]
-    assert "🧠 Ý tưởng video" not in video_menu_buttons
-    assert "🧩 Prompt video" in video_menu_buttons
-    assert "📂 Kho video" in video_menu_buttons
+    assert "🧠 Ý tưởng video" in video_menu_buttons
     assert "📢 Concept quảng cáo" not in video_menu_buttons
     assert "📢 Ý tưởng quảng cáo" in idea_buttons
     assert "🔥 Ý tưởng theo xu hướng" not in idea_buttons
@@ -6895,8 +6895,8 @@ def test_video_ux_v6_shared_suggestions_and_navigation():
     assert bot.rotating_suggestions(["a", "b", "c", "d"], 2, 3) == ["c", "d", "a"]
 
     main_rows = bot.main_video_keyboard("vi").inline_keyboard
-    assert [button.callback_data for button in main_rows[-1]] == ["menu|main"]
-    assert len(main_rows[-1]) == 1
+    assert [button.callback_data for button in main_rows[-1]] == ["vproduct|open|video_local_edit", "menu|main"]
+    assert len(main_rows[-1]) == 2
 
     ai_rows = bot.video_ai_true_keyboard("vi").inline_keyboard
     assert [button.callback_data for button in ai_rows[-1]] == ["menu|main_video", "menu|main"]
@@ -7436,12 +7436,10 @@ def test_long_ai_story_video_and_cinematic_storyboard_pack_v1(monkeypatch, tmp_p
     source = bot_source_text()
     labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     callbacks = [button.callback_data for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
-    assert "🎬 Phim AI nhiều cảnh" not in labels
-    assert "🎬 Storyboard + Prompt" not in labels
-    assert "vproduct|open|multi_scene_film" not in callbacks
-    assert "vproduct|open|storyboard_prompt" not in callbacks
-    assert "multi_scene_film" in bot.VIDEO_PRODUCT_REGISTRY
-    assert "storyboard_prompt" in bot.VIDEO_PRODUCT_REGISTRY
+    assert "🎬 Phim AI nhiều cảnh" in labels
+    assert "🎬 Storyboard + Prompt" in labels
+    assert "vproduct|open|multi_scene_film" in callbacks
+    assert "vproduct|open|storyboard_prompt" in callbacks
     assert 'CallbackQueryHandler(handle_storyboard_pack_callback, pattern=r"^storypack\\|")' in source
     assert 'CommandHandler("long_video_status", cmd_long_video_status)' in source
 
@@ -7664,8 +7662,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
 
     main_labels = [button.text for row in bot.main_video_keyboard("vi").inline_keyboard for button in row]
     assert "🌐 Dịch/Lồng tiếng video" not in main_labels
-    assert "📥 Tải video từ link" not in main_labels
-    assert "📂 Kho video" in main_labels
+    assert "📥 Tải video từ link" in main_labels
     assert "🎞 Video mẫu → Video AI" in [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert "🎞 Video mẫu → Video AI" not in main_labels
 
