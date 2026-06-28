@@ -1050,7 +1050,7 @@ class Key4UProvider:
                         audio_bytes = base64.b64decode(audio_value, validate=False)
                 except Exception:
                     audio_bytes = b""
-                if len(audio_bytes) > 512:
+                if len(audio_bytes) > 0:
                     return _result(ok=True, capability="tts", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=audio_bytes, final_url=endpoint)
             return _result(ok=False, capability="tts", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, final_url=endpoint, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:
@@ -1102,7 +1102,7 @@ class Key4UProvider:
                     audio_bytes = bytes.fromhex(audio_value) if re.fullmatch(r"[0-9a-fA-F]+", audio_value) and len(audio_value) % 2 == 0 else base64.b64decode(audio_value, validate=False)
                 except Exception:
                     audio_bytes = b""
-                if len(audio_bytes) > 512:
+                if len(audio_bytes) > 0:
                     return _result(ok=True, capability="voice_tts_fallback", model=selected_model, status="PASS", http_status=response.status_code, latency_ms=latency_ms, output_bytes=audio_bytes)
             return _result(ok=False, capability="voice_tts_fallback", model=selected_model, status="FAIL", http_status=response.status_code, latency_ms=latency_ms, error_class=_classify_http(response.status_code, data), error_message_safe=data)
         except httpx.TimeoutException as exc:

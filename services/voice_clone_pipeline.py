@@ -4,7 +4,10 @@ import asyncio
 import hashlib
 import inspect
 import re
+import shutil
+import subprocess
 import tempfile
+import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -20,6 +23,19 @@ PUBLIC_CUSTOM_VOICE_FAILED = (
     "TOAN AAS chưa tạo được voice hợp lệ từ mẫu này. Anh/chị thử mẫu rõ hơn hoặc dùng giọng nam/nữ mặc định. "
     "TOAN AAS chưa trừ Xu."
 )
+PUBLIC_CUSTOM_VOICE_SAMPLE_TOO_SHORT = (
+    "Mẫu giọng hơi ngắn. Anh/chị gửi mẫu dài hơn một chút, khoảng 10-30 giây, một người nói và ít tạp âm. "
+    "TOAN AAS chưa trừ Xu."
+)
+PUBLIC_CUSTOM_VOICE_UNSUPPORTED_AUDIO = (
+    "TOAN AAS chỉ nhận mẫu giọng mp3, m4a hoặc wav. Anh/chị gửi lại mẫu phù hợp. TOAN AAS chưa trừ Xu."
+)
+PUBLIC_CUSTOM_VOICE_SAMPLE_TOO_LARGE = (
+    "Mẫu giọng đang lớn hơn giới hạn 20MB. Anh/chị gửi mẫu ngắn hơn, khoảng 10-30 giây. TOAN AAS chưa trừ Xu."
+)
+CUSTOM_VOICE_ALLOWED_EXTENSIONS = {".mp3", ".m4a", ".wav"}
+CUSTOM_VOICE_MAX_SAMPLE_BYTES = 20 * 1024 * 1024
+CUSTOM_VOICE_MIN_DETECTABLE_SECONDS = 10.0
 
 
 @dataclass
@@ -177,6 +193,55 @@ def _fake_provider_voice_id(user_id: Any, profile_id: int, display_name: str = "
     return minimax_voice_adapter.normalize_voice_id(f"toanaas-custom-{uid}-{digest}")
 
 
+def _detect_sample_duration_seconds(path: Path) -> float:
+    suffix = path.suffix.lower()
+    if suffix == ".wav":
+        try:
+            with wave.open(str(path), "rb") as wav_file:
+                frame_rate = float(wav_file.getframerate() or 0)
+                if frame_rate > 0:
+                    return float(wav_file.getnframes() or 0) / frame_rate
+        except Exception:
+            return 0.0
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return 0.0
+    try:
+        completed = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return float(str(completed.stdout or "").strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def _sample_validation_error(sample: Path) -> tuple[str, str] | None:
+    if sample.suffix.lower() not in CUSTOM_VOICE_ALLOWED_EXTENSIONS:
+        return "unsupported_audio_extension", PUBLIC_CUSTOM_VOICE_UNSUPPORTED_AUDIO
+    size_bytes = int(sample.stat().st_size or 0)
+    if size_bytes <= 0:
+        return "sample_missing_or_empty", PUBLIC_CUSTOM_VOICE_FAILED
+    if size_bytes > CUSTOM_VOICE_MAX_SAMPLE_BYTES:
+        return "sample_too_large", PUBLIC_CUSTOM_VOICE_SAMPLE_TOO_LARGE
+    duration_seconds = _detect_sample_duration_seconds(sample)
+    if 0 < duration_seconds < CUSTOM_VOICE_MIN_DETECTABLE_SECONDS:
+        return "sample_duration_too_short", PUBLIC_CUSTOM_VOICE_SAMPLE_TOO_SHORT
+    return None
+
+
 async def preflight_custom_voice_create(
     *,
     user_id,
@@ -246,8 +311,12 @@ async def process_custom_voice_create(
     if len(label) < 2:
         return CustomVoiceCreateResult(False, "FAIL", profile_id=pid, error_code="display_name_invalid", safe_public_message=PUBLIC_CUSTOM_VOICE_FAILED)
     sample = Path(str(sample_path or "")).expanduser()
-    if not sample.exists() or not sample.is_file() or int(sample.stat().st_size or 0) <= 0:
+    if not sample.exists() or not sample.is_file():
         return CustomVoiceCreateResult(False, "FAIL", profile_id=pid, error_code="sample_missing_or_empty", safe_public_message=PUBLIC_CUSTOM_VOICE_FAILED)
+    sample_error = _sample_validation_error(sample)
+    if sample_error:
+        error_code, public_message = sample_error
+        return CustomVoiceCreateResult(False, "FAIL", profile_id=pid, error_code=error_code, safe_public_message=public_message, metadata={**metadata, "sample_validation": error_code})
     audio_bytes = sample.read_bytes()
     if fake:
         provider_voice_id = _fake_provider_voice_id(user_id, pid, label)
@@ -285,6 +354,16 @@ async def process_custom_voice_create(
         str(make_provider_voice_id_func(user_id, profile_id=pid) if callable(make_provider_voice_id_func) else "")
         or _fake_provider_voice_id(user_id, pid, label)
     )
+    provider_voice_id_seed = minimax_voice_adapter.normalize_voice_id(provider_voice_id_seed)
+    if not minimax_voice_adapter.validate_provider_voice_id(provider_voice_id_seed) or str(provider_voice_id_seed) == str(pid):
+        return CustomVoiceCreateResult(
+            False,
+            "FAIL",
+            profile_id=pid,
+            error_code="missing_provider_voice_id",
+            safe_public_message=PUBLIC_CUSTOM_VOICE_FAILED,
+            metadata={**metadata, "provider_voice_id_seed_invalid": True},
+        )
     if callable(execute_engine_func):
         async def _gate_runner():
             return {"ok": True, "status": "GATE_ONLY"}
@@ -322,6 +401,9 @@ async def process_custom_voice_create(
                     await _maybe_await(record_attempt_func(status=status, provider=route_name, route=f"{route_name}/clone", upload_status="PASS", clone_status=status, error=detail, updated_by=user_id))
                 continue
             candidate_voice_id = _extract_provider_voice_id(clone_payload)
+            if not candidate_voice_id and str(route_name) == "shopaikey_minimax":
+                candidate_voice_id = provider_voice_id_seed
+            candidate_voice_id = minimax_voice_adapter.normalize_voice_id(candidate_voice_id)
             if not candidate_voice_id or str(candidate_voice_id).strip() == str(pid):
                 route_errors.append(_route_error(route_name, "clone", f"{route_name}/clone", "FAIL", "missing_provider_voice_id", http_status=http_status, payload_fields=["voice_id"]))
                 if callable(record_attempt_func):
@@ -330,7 +412,8 @@ async def process_custom_voice_create(
             provider_name = str(route_name)
             provider_file_id = str(candidate_file_id)
             provider_voice_id = candidate_voice_id
-            demo_audio_ref = str((clone_payload or {}).get("demo_audio") or "")
+            clone_payload_dict = clone_payload if isinstance(clone_payload, dict) else {}
+            demo_audio_ref = str((clone_payload_dict or {}).get("demo_audio") or "")
             preview_bytes = b""
             demo_detail = ""
             if demo_audio_ref and callable(audio_reference_to_bytes_func):
@@ -368,6 +451,7 @@ async def process_custom_voice_create(
             "provider_file_id": provider_file_id,
             "provider_route": provider_name,
             "provider_voice_id": provider_voice_id,
+            "requested_provider_voice_id": provider_voice_id_seed,
             "preview_output_bytes": preview_audio_bytes,
         })
         finalize = {}

@@ -13,12 +13,13 @@ def test_shopaikey_official_tts_url_exact(monkeypatch):
 def test_shopaikey_tts_payload_minimax_official(monkeypatch):
     monkeypatch.setattr(bot, "SHOPAIKEY_TTS_MODEL", "speech-2.6-turbo")
     payload = bot.shopaikey_official_tts_payload("Xin chao", voice_id="voice-1")
-    assert payload == {
-        "model": "speech-2.6-turbo",
-        "text": "Xin chao",
-        "voice_setting": {"voice_id": "voice-1"},
-        "audio_setting": {"format": "mp3"},
-    }
+    assert payload["model"] == "speech-2.6-turbo"
+    assert payload["text"] == "Xin chao"
+    assert payload["voice_setting"] == {"voice_id": "voice-1", "speed": 1.0, "vol": 1, "pitch": 0}
+    assert payload["audio_setting"] == {"sample_rate": 32000, "bitrate": 128000, "format": "mp3", "channel": 1}
+    assert payload["language_boost"] == "auto"
+    assert payload["stream"] is False
+    assert payload["subtitle_enable"] is False
     assert "input" not in payload
     assert "response_format" not in payload
 

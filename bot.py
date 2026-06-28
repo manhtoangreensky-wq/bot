@@ -45752,13 +45752,13 @@ def _decode_minimax_audio_string(value: str) -> tuple[bytes, str]:
     if re.fullmatch(r"[0-9a-fA-F]+", text or "") and len(text) % 2 == 0:
         try:
             data = bytes.fromhex(text)
-            if len(data) > 512:
+            if len(data) > 0:
                 return data, "hex"
         except Exception:
             pass
     try:
         data = base64.b64decode(text, validate=False)
-        if len(data) > 512:
+        if len(data) > 0:
             return data, "base64"
     except Exception:
         pass
@@ -45828,15 +45828,25 @@ def shopaikey_tts_uses_official_minimax(endpoint_path: str = "") -> bool:
 
 def shopaikey_official_tts_payload(text: str, voice_id: str = "", speed: float | str = 1.0) -> dict:
     selected_voice = str(voice_id or SHOPAIKEY_TTS_VOICE or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
+    parsed_speed = float(parse_video_dubbing_voice_speed(speed or "1.0"))
     return {
         "model": SHOPAIKEY_TTS_MODEL or "speech-2.6-turbo",
         "text": str(text or "").strip()[:3500],
         "voice_setting": {
             "voice_id": selected_voice,
+            "speed": parsed_speed,
+            "vol": 1,
+            "pitch": 0,
         },
         "audio_setting": {
+            "sample_rate": 32000,
+            "bitrate": 128000,
             "format": "mp3",
+            "channel": 1,
         },
+        "language_boost": "auto",
+        "stream": False,
+        "subtitle_enable": False,
     }
 
 def shopaikey_legacy_tts_payload(text: str) -> dict:
@@ -46101,27 +46111,12 @@ async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: st
     if not key4u_minimax_tts_configured(require_public=not allow_admin):
         return "MISSING", b"", "KEY4U_ENABLED/KEY4U_API_KEY/KEY4U_TTS_ENDPOINT/KEY4U_TTS_MODEL missing", 0
     provider = key4u_provider_instance()
-    result = await provider.tts(
-        str(text or "")[:3500],
-        model=KEY4U_TTS_MODEL,
-        voice_id=str(voice_id or default_tts_voice_id("male")),
-        speed=float(parse_video_dubbing_voice_speed(voice_speed or "1.0")),
-        timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
-    )
-    status = str(result.get("status") or ("PASS" if result.get("ok") else "FAIL"))
-    http_status = int(result.get("http_status") or 0)
-    audio_bytes = bytes(result.get("output_bytes") or b"")
-    if result.get("ok") and audio_bytes:
-        return "PASS", audio_bytes, f"http={http_status}; bytes={len(audio_bytes)}; route=key4u_minimax", http_status
-    output_url = str(result.get("output_url") or "").strip()
-    if result.get("ok") and output_url:
-        downloaded, detail, download_http = await _download_audio_url_bytes(output_url)
-        if downloaded:
-            return "PASS", downloaded, f"http={http_status}; {detail}; route=key4u_minimax", int(download_http or http_status)
+    selected_voice_id = str(voice_id or default_tts_voice_id("male"))
+    selected_speed = float(parse_video_dubbing_voice_speed(voice_speed or "1.0"))
     fallback = await provider.voice_tts_fallback(
         str(text or "")[:3500],
-        voice_id=str(voice_id or default_tts_voice_id("male")),
-        speed=float(parse_video_dubbing_voice_speed(voice_speed or "1.0")),
+        voice_id=selected_voice_id,
+        speed=selected_speed,
         timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
     )
     fallback_status = str(fallback.get("status") or ("PASS" if fallback.get("ok") else "FAIL"))
@@ -46134,6 +46129,23 @@ async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: st
         downloaded, detail, download_http = await _download_audio_url_bytes(fallback_url)
         if downloaded:
             return "PASS", downloaded, f"http={fallback_http}; {detail}; route=key4u_voice_fallback", int(download_http or fallback_http)
+    result = await provider.tts(
+        str(text or "")[:3500],
+        model=KEY4U_TTS_MODEL,
+        voice_id=str(voice_id or default_tts_voice_id("male")),
+        speed=selected_speed,
+        timeout_seconds=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60),
+    )
+    status = str(result.get("status") or ("PASS" if result.get("ok") else "FAIL"))
+    http_status = int(result.get("http_status") or 0)
+    audio_bytes = bytes(result.get("output_bytes") or b"")
+    if result.get("ok") and audio_bytes:
+        return "PASS", audio_bytes, f"http={http_status}; bytes={len(audio_bytes)}; route=key4u_minimax", http_status
+    output_url = str(result.get("output_url") or "").strip()
+    if result.get("ok") and output_url:
+        downloaded, detail, download_http = await _download_audio_url_bytes(output_url)
+        if downloaded:
+            return "PASS", downloaded, f"http={http_status}; {detail}; route=key4u_minimax", int(download_http or http_status)
     detail = sanitize_provider_error(result.get("error_message_safe") or status)[:240]
     fallback_detail = sanitize_provider_error(fallback.get("error_message_safe") or fallback_status)[:160]
     return status or "FAIL", b"", (detail + (" | voice_fallback=" + fallback_detail if fallback_detail else ""))[:240], http_status
@@ -46395,6 +46407,19 @@ def extract_minimax_returned_voice_id(payload, fallback: str = "") -> str:
     visit(payload)
     return candidates[0] if candidates else fallback_text
 
+def shopaikey_minimax_base_resp_ok(payload) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    base_resp = payload.get("base_resp")
+    if isinstance(base_resp, dict):
+        status_code = str(base_resp.get("status_code") if base_resp.get("status_code") is not None else "").strip()
+        return status_code == "0"
+    if payload.get("status_code") is not None:
+        status = str(payload.get("status_code")).strip().lower()
+    else:
+        status = str(payload.get("status") or "").strip().lower()
+    return status in {"ok", "success", "pass", "0"}
+
 async def shopaikey_minimax_upload_voice_sample(audio_bytes: bytes, filename: str = "voice_sample.mp3", content_type: str = "audio/mpeg") -> tuple[str, str, str, int]:
     if not SHOPAIKEY_API_KEY or not MINIMAX_VOICE_UPLOAD_ENDPOINT:
         return "MISSING", "", "SHOPAIKEY_API_KEY/MINIMAX_VOICE_UPLOAD_ENDPOINT missing", 0
@@ -46421,7 +46446,7 @@ async def shopaikey_minimax_upload_voice_sample(audio_bytes: bytes, filename: st
             or (payload or {}).get("id")
             or ""
         ).strip()
-        if res.status_code < 400 and file_id:
+        if res.status_code < 400 and file_id and shopaikey_minimax_base_resp_ok(payload):
             return "PASS", file_id, f"http={res.status_code}; file_id=yes; bytes={len(audio_bytes)}", int(res.status_code)
         detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}")
         return shopaikey_classify_error(res.status_code, detail), "", detail, int(res.status_code)
@@ -46434,13 +46459,14 @@ async def shopaikey_minimax_voice_clone(file_id: str, voice_id: str) -> tuple[st
     if not SHOPAIKEY_API_KEY or not MINIMAX_VOICE_CLONE_ENDPOINT:
         return "MISSING", {}, "SHOPAIKEY_API_KEY/MINIMAX_VOICE_CLONE_ENDPOINT missing", 0
     file_id_text = str(file_id or "").strip()
-    voice_id_text = re.sub(r"[^A-Za-z0-9-]+", "-", str(voice_id or "").strip())[:128].strip("-")
+    raw_voice_id_text = str(voice_id or "").strip()
+    if re.search(r"[^A-Za-z0-9-]+", raw_voice_id_text):
+        return "FAIL_BAD_REQUEST", {}, "invalid_requested_voice_id", 0
+    voice_id_text = minimax_voice_adapter.normalize_voice_id(raw_voice_id_text)
     if not file_id_text or not voice_id_text:
         return "FAIL_BAD_REQUEST", {}, "missing_file_id_or_voice_id", 0
-    if not re.match(r"^[A-Za-z]", voice_id_text):
-        voice_id_text = f"v{voice_id_text}"
-    if len(voice_id_text) < 8:
-        voice_id_text = (voice_id_text + "-toanaas")[:8].rstrip("-")
+    if not minimax_voice_adapter.validate_provider_voice_id(voice_id_text):
+        return "FAIL_BAD_REQUEST", {}, "invalid_requested_voice_id", 0
     endpoint = join_shopaikey_url(SHOPAIKEY_TTS_BASE_URL, MINIMAX_VOICE_CLONE_ENDPOINT)
     payload = {
         "file_id": int(file_id_text) if file_id_text.isdigit() else file_id_text,
@@ -46459,11 +46485,15 @@ async def shopaikey_minimax_voice_clone(file_id: str, voice_id: str) -> tuple[st
             data = res.json()
         except Exception:
             data = {}
-        base_resp = data.get("base_resp") if isinstance(data, dict) else {}
-        provider_ok = str((base_resp or {}).get("status_code") or "").strip() in {"", "0", "1"}
-        if res.status_code < 400 and provider_ok:
-            returned_voice_id = extract_minimax_returned_voice_id(data, voice_id_text)
-            return "PASS", {"voice_id": returned_voice_id, "demo_audio": str((data or {}).get("demo_audio") or "")}, f"http={res.status_code}; voice_id={returned_voice_id}", int(res.status_code)
+        if res.status_code < 400 and shopaikey_minimax_base_resp_ok(data):
+            returned_voice_id = minimax_voice_adapter.normalize_voice_id(extract_minimax_returned_voice_id(data, ""))
+            provider_voice_id = returned_voice_id if minimax_voice_adapter.validate_provider_voice_id(returned_voice_id) else voice_id_text
+            return "PASS", {
+                "voice_id": provider_voice_id,
+                "provider_voice_id": provider_voice_id,
+                "requested_voice_id": voice_id_text,
+                "demo_audio": str((data or {}).get("demo_audio") or ""),
+            }, f"http={res.status_code}; voice_id={provider_voice_id}", int(res.status_code)
         detail = shopaikey_sanitize_error(res.text[:320] if getattr(res, "text", "") else f"HTTP {res.status_code}")
         return shopaikey_classify_error(res.status_code, detail), {}, detail, int(res.status_code)
     except httpx.TimeoutException as exc:
@@ -85218,7 +85248,7 @@ def voice_clone_product_failure_text(lang: str = "vi", reason: str = "") -> str:
     marker = str(reason or "").strip().lower()
     if music_ui_lang(lang=lang) != "vi":
         if "duration" in marker or "too_short" in marker or "short" in marker:
-            return "The sample is a little short. Please send a clearer 10-30 second sample with little background noise. TOAN AAS has not charged Xu."
+            return "The sample is a little short. Please send a clearer 10-30 second sample with one speaker and little background noise. TOAN AAS has not charged Xu."
         if "temporary" in marker or "not_ready" in marker or "provider_not_ready" in marker:
             return "TOAN AAS cannot create this voice right now. Please try again later or use a default male/female voice. TOAN AAS has not charged Xu."
         return (
@@ -85231,7 +85261,7 @@ def voice_clone_product_failure_text(lang: str = "vi", reason: str = "") -> str:
             "TOAN AAS has not charged Xu."
         )
     if "duration" in marker or "too_short" in marker or "short" in marker:
-        return "Mẫu giọng hơi ngắn. Anh/chị gửi mẫu dài hơn một chút, khoảng 10-30 giây và ít tạp âm. TOAN AAS chưa trừ Xu."
+        return "Mẫu giọng hơi ngắn. Anh/chị gửi mẫu dài hơn một chút, khoảng 10-30 giây, một người nói và ít tạp âm. TOAN AAS chưa trừ Xu."
     if "temporary" in marker or "not_ready" in marker or "provider_not_ready" in marker:
         return "TOAN AAS chưa tạo được voice lúc này. Anh/chị thử lại sau hoặc dùng giọng nam/nữ mặc định. TOAN AAS chưa trừ Xu."
     return (
@@ -87389,7 +87419,9 @@ def voice_clone_provider_route_names(readiness: dict | None = None, *, include_o
     if not admin_access and readiness.get("provider_permission_blocked") and not voice_clone_last_forbidden_provider() and len(names) <= 1:
         return []
     preferred = str(readiness.get("active_custom_voice_route") or "").strip()
-    if preferred in names:
+    if "shopaikey_minimax" in names:
+        names = ["shopaikey_minimax", *[name for name in names if name != "shopaikey_minimax"]]
+    elif preferred in names:
         names = [preferred, *[name for name in names if name != preferred]]
     blocked = "" if admin_access else voice_clone_last_forbidden_provider()
     if blocked in names:
@@ -87778,13 +87810,19 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         if not result.ok:
             fail_status = str(result.error_code or result.status or "CLONE_NOT_READY")
             mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed_" + fail_status.lower(), str(result.admin_debug_summary or fail_status))
+            sample_error_codes = {"sample_missing_or_empty", "sample_too_large", "sample_duration_too_short", "unsupported_audio_extension"}
+            public_failure_text = (
+                str(result.safe_public_message or "").strip()
+                if fail_status in sample_error_codes
+                else voice_clone_product_failure_text(lang, fail_status)
+            )
             if voice_clone_permission_error(fail_status):
                 return await query.message.reply_text(
-                    voice_clone_product_failure_text(lang, fail_status),
+                    public_failure_text,
                     reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
                 )
             return await query.message.reply_text(
-                voice_clone_product_failure_text(lang, fail_status),
+                public_failure_text,
                 reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
             )
         preview_ref = ""
