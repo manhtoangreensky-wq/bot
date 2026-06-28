@@ -91,6 +91,7 @@ from video_product_system import (
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import minimax_voice_adapter, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline
+from services import voice_clone_pipeline
 from services import remote_worker_api, worker_auth
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
@@ -82311,6 +82312,76 @@ def set_music_guided_pending(user_id, action: str, **fields) -> dict:
     USER_PENDING[music_guided_pending_key(user_id)] = payload
     return payload
 
+VOICE_FLOW_ROOT_SCREEN = "voice_hub"
+
+def encode_voice_back_stack(stack: list[str] | tuple[str, ...] | None = None) -> str:
+    values = [str(item or "").strip() for item in (stack or []) if str(item or "").strip()]
+    return json.dumps(values[-12:], ensure_ascii=False, separators=(",", ":"))
+
+def decode_voice_back_stack(value: str | list | tuple | None = None) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(item or "").strip() for item in value if str(item or "").strip()]
+    try:
+        parsed = json.loads(str(value or "[]"))
+        if isinstance(parsed, list):
+            return [str(item or "").strip() for item in parsed if str(item or "").strip()]
+    except Exception:
+        pass
+    return []
+
+def voice_flow_back_action_from_stack(back_stack: list[str] | tuple[str, ...] | None = None, fallback: str = VOICE_FLOW_ROOT_SCREEN) -> str:
+    stack = decode_voice_back_stack(back_stack)
+    return stack[-1] if stack else str(fallback or VOICE_FLOW_ROOT_SCREEN)
+
+def voice_flow_pending_fields(
+    *,
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+    origin: str = "",
+    current_screen: str = "",
+    previous_screen: str = "",
+    return_to: str = "",
+    back_stack: list[str] | tuple[str, ...] | None = None,
+    voice_flow_step: str = "",
+    profile_id: int = 0,
+    voice_sample_file_id: str = "",
+    voice_sample_path: str = "",
+    voice_name: str = "",
+    selected_voice_id: str = "",
+    selected_voice_profile_id: int = 0,
+    **extra,
+) -> dict:
+    current = str(current_screen or voice_flow_step or "").strip()
+    pid = _safe_int(profile_id, 0)
+    selected_pid = _safe_int(selected_voice_profile_id, 0)
+    back_target = str(return_to or voice_flow_back_action_from_stack(back_stack, VOICE_FLOW_ROOT_SCREEN))[:120]
+    data = {
+        "product_context": normalize_product_context(product_context),
+        "origin": str(origin or VOICE_FLOW_ROOT_SCREEN)[:120],
+        "current_screen": current[:120],
+        "previous_screen": str(previous_screen or back_target)[:120],
+        "return_to": back_target,
+        "back_stack": encode_voice_back_stack(list(back_stack or [])),
+        "voice_flow_step": str(voice_flow_step or current)[:120],
+        "profile_id": str(pid) if pid else "",
+        "voice_sample_file_id": str(voice_sample_file_id or "")[:220],
+        "voice_sample_path": str(voice_sample_path or "")[:260],
+        "voice_name": str(voice_name or "")[:120],
+        "selected_voice_id": str(selected_voice_id or "")[:160],
+        "selected_voice_profile_id": str(selected_pid) if selected_pid else "",
+    }
+    for key, value in dict(extra or {}).items():
+        clean_key = str(key or "").strip()[:80]
+        if not clean_key or clean_key in data:
+            continue
+        if isinstance(value, (int, float, bool)) or value is None:
+            data[clean_key] = value
+        else:
+            data[clean_key] = str(value or "")[:500]
+    return data
+
+def set_voice_flow_pending(user_id, action: str, **fields) -> dict:
+    return set_music_guided_pending(user_id, action, **voice_flow_pending_fields(**fields))
+
 def get_music_guided_pending(user_id) -> dict | None:
     payload = USER_PENDING.get(music_guided_pending_key(user_id)) or {}
     if not payload.get("pending_action"):
@@ -82926,25 +82997,37 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
         "speed": speed,
         "provider_hint": str(profile.get("provider") or ""),
     }
-    engine_result = await execute_engine(
-        "voice_saved_tts",
-        {"text": text, **tts_kwargs},
-        {
-            "user_id": user_id,
-            "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
-            "confirm_paid": True,
-            "admin_interactive_confirm": True,
-            "is_paid_job": True,
-            "allow_admin": bool(is_admin_user(user_id)),
-        },
+    async def _voice_saved_tts_executor(clean_text: str, provider_voice_id: str = "", **_kwargs):
+        return await execute_engine(
+            "voice_saved_tts",
+            {"text": clean_text, **tts_kwargs, "voice_id": provider_voice_id},
+            {
+                "user_id": user_id,
+                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                "confirm_paid": True,
+                "admin_interactive_confirm": True,
+                "is_paid_job": True,
+                "allow_admin": bool(is_admin_user(user_id)),
+            },
+        )
+    tts_output_path = str(voice_asset_storage_dir() / f"saved_voice_tts_{user_id}_{profile_id}_{voice_asset_text_hash(text)}.mp3")
+    tts_result = await voice_clone_pipeline.process_voice_tts(
+        user_id=user_id,
+        text=text,
+        selected_voice_option=profile,
+        product_context=PRODUCT_CONTEXT_SHOWROOM,
+        admin_mode=bool(is_admin_user(user_id)),
+        fake=False,
+        output_path=tts_output_path,
+        get_profile_func=get_user_voice_profile,
+        get_default_voice_id_func=default_tts_voice_id,
+        execute_tts_func=_voice_saved_tts_executor,
     )
-    ok = bool(engine_result.get("ok"))
-    audio_bytes = bytes(engine_result.get("output_bytes") or b"")
-    detail = str(engine_result.get("detail") or engine_result.get("status") or "")
-    if not ok or not audio_bytes:
-        logger.info("saved voice tts not ready | user=%s | profile=%s | detail=%s", user_id, profile_id, sanitize_log_text(detail)[:160])
+    audio_bytes = Path(tts_result.audio_path).read_bytes() if tts_result.ok and tts_result.audio_path and Path(tts_result.audio_path).exists() else b""
+    if not tts_result.ok or not audio_bytes:
+        logger.info("saved voice tts not ready | user=%s | profile=%s | detail=%s", user_id, profile_id, sanitize_log_text(tts_result.admin_debug_summary)[:160])
         await message.reply_text(
-            tts_failure_text(lang),
+            tts_result.safe_public_message or tts_failure_text(lang),
             reply_markup=tts_failure_keyboard(lang, PRODUCT_CONTEXT_SHOWROOM),
         )
         return False
@@ -85229,44 +85312,67 @@ def active_voice_profile_count(user_id, exclude_profile_id: int = 0) -> int:
         logger.warning("active_voice_profile_count failed | %s", sanitize_log_text(str(exc))[:220])
         return 0
 
-def successful_custom_voice_creation_count(user_id, exclude_profile_id: int = 0) -> int:
+CUSTOM_VOICE_SUCCESS_SOURCE_TYPES = {"custom_clone", "voice_clone", "custom", "cloned"}
+CUSTOM_VOICE_PROVIDER_NAMES = {"shopaikey_minimax", "key4u_minimax", "fish_audio", "elevenlabs", "minimax_fake", "minimax"}
+
+def voice_profile_is_successful_custom_clone(profile: dict | None) -> bool:
+    row = dict(profile or {})
+    status = str(row.get("status") or "").strip().lower()
+    if status not in VOICE_PROFILE_FINAL_READY_STATUSES:
+        return False
+    provider_voice_id = minimax_voice_adapter.normalize_voice_id(row.get("provider_voice_id"))
+    if (
+        not minimax_voice_adapter.validate_provider_voice_id(provider_voice_id)
+        or str(row.get("id") or "").strip() == provider_voice_id
+    ):
+        return False
+    metadata = voice_profile_metadata(row)
+    source_type = str(metadata.get("source_type") or metadata.get("voice_source_type") or "").strip().lower()
+    if source_type in CUSTOM_VOICE_SUCCESS_SOURCE_TYPES:
+        return True
+    provider = str(row.get("provider") or metadata.get("provider") or "").strip().lower()
+    has_uploaded_sample = bool(str(row.get("source_file_id") or row.get("source_file_ref") or "").strip())
+    if has_uploaded_sample:
+        return True
+    return bool(provider in CUSTOM_VOICE_PROVIDER_NAMES and not int(row.get("is_default") or 0))
+
+def count_successful_custom_voice_profiles(user_id, exclude_profile_id: int = 0) -> int:
     try:
         with db_connect() as conn:
+            conn.row_factory = sqlite3.Row
             params: list[object] = [str(user_id)]
             exclude_sql = ""
             if int(exclude_profile_id or 0) > 0:
                 exclude_sql = " AND id<>?"
                 params.append(int(exclude_profile_id or 0))
-            row = conn.execute(
+            rows = conn.execute(
                 f"""
-                SELECT COUNT(1)
+                SELECT *
                 FROM voice_profiles
                 WHERE user_id=?
+                  AND deleted_at IS NULL
                   AND COALESCE(provider_voice_id, '') <> ''
-                  AND status NOT IN (
-                    'failed', 'error', 'rejected', 'cancelled',
-                    'pending_upload', 'pending_sample_confirm',
-                    'pending_name', 'pending_confirm',
-                    'pending_charge', 'pending_payment',
-                    'failed_clone_permission_forbidden',
-                    'failed_provider_not_ready',
-                    'failed_invalid_voice_draft'
-                  )
+                  AND status IN ('active', 'ready', 'saved')
                 {exclude_sql}
                 """,
                 tuple(params),
-            ).fetchone()
-            return int((row or [0])[0] or 0)
+            ).fetchall()
+            return sum(1 for row in rows if voice_profile_is_successful_custom_clone(dict(row)))
     except Exception as exc:
-        logger.warning("successful_custom_voice_creation_count failed | %s", sanitize_log_text(str(exc))[:220])
-        return active_voice_profile_count(user_id, exclude_profile_id)
+        logger.warning("count_successful_custom_voice_profiles failed | %s", sanitize_log_text(str(exc))[:220])
+        return 0
+
+def successful_custom_voice_creation_count(user_id, exclude_profile_id: int = 0) -> int:
+    return count_successful_custom_voice_profiles(user_id, exclude_profile_id)
 
 def voice_profile_storage_price_xu(user_id, product_context: str = PRODUCT_CONTEXT_SHOWROOM, profile_id: int = 0) -> int:
+    if is_admin_user(user_id):
+        return 0
     legacy_counter = globals().get("active_voice_profile_count")
     if callable(legacy_counter) and getattr(legacy_counter, "__name__", "") != "active_voice_profile_count":
         successful_count = int(legacy_counter(user_id, profile_id) or 0)
     else:
-        successful_count = successful_custom_voice_creation_count(user_id, profile_id)
+        successful_count = count_successful_custom_voice_profiles(user_id, profile_id)
     if VOICE_PROFILE_FIRST_FREE and successful_count < int(VOICE_PROFILE_MAX_FREE_PER_USER or 0):
         return 0
     return int(VOICE_PROFILE_PRICE_XU or 0)
@@ -85336,6 +85442,24 @@ def write_voice_asset_audio_bytes(voice_asset_id: str, audio_bytes: bytes, suffi
         return str(target)
     except Exception as exc:
         logger.warning("voice asset write failed | asset=%s | %s", voice_asset_id, sanitize_log_text(str(exc))[:180])
+        return ""
+
+def write_voice_clone_sample_file(user_id, profile_id: int, audio_bytes: bytes, suffix: str = ".mp3") -> str:
+    data = bytes(audio_bytes or b"")
+    if not data:
+        return ""
+    safe_user = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(user_id or "user"))[:40]
+    safe_profile = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(profile_id or "profile"))[:40]
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    suffix = suffix if str(suffix or "").startswith(".") else f".{suffix or 'mp3'}"
+    try:
+        folder = voice_asset_storage_dir() / "custom_voice_samples"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"sample_{safe_user}_{safe_profile}_{digest}{suffix}"
+        target.write_bytes(data)
+        return str(target)
+    except Exception as exc:
+        logger.warning("voice clone sample write failed | profile=%s | %s", profile_id, sanitize_log_text(str(exc))[:180])
         return ""
 
 def create_voice_asset_record(
@@ -85866,7 +85990,12 @@ VOICE_PROFILE_PREVIEW_STATUSES = VOICE_PROFILE_FINAL_READY_STATUSES | {"preview_
 def voice_profile_can_generate_tts(profile: dict | None) -> bool:
     profile = dict(profile or {})
     status = str(profile.get("status") or "").strip().lower()
-    return bool(status in VOICE_PROFILE_FINAL_READY_STATUSES and str(profile.get("provider_voice_id") or "").strip())
+    provider_voice_id = minimax_voice_adapter.normalize_voice_id(profile.get("provider_voice_id"))
+    return bool(
+        status in VOICE_PROFILE_FINAL_READY_STATUSES
+        and minimax_voice_adapter.validate_provider_voice_id(provider_voice_id)
+        and str(profile.get("id") or "").strip() != provider_voice_id
+    )
 
 def voice_profile_can_preview(profile: dict | None) -> bool:
     profile = dict(profile or {})
@@ -86112,10 +86241,19 @@ def voice_clone_quote_text(profile: dict, lang: str = "vi", product_context: str
     user_id = str(profile.get("user_id") or "")
     profile_id = int(profile.get("id") or 0)
     cost = voice_profile_storage_price_xu(user_id, product_context, profile_id)
+    admin = is_admin_user(user_id)
     if music_ui_lang(lang=lang) != "vi":
+        if admin:
+            return (
+                "🧪 <b>ADMIN TEST MODE - no Xu charge</b>\n\n"
+                "TOAN AAS will try to create a real custom voice after this product confirmation if the provider is configured.\n\n"
+                "• Admin interactive confirmation is enough\n"
+                "• No Xu charge\n"
+                "• If provider fails or returns no valid provider voice id, no ready profile is saved"
+            )
         if cost <= 0:
             return (
-                "🎙 <b>Create custom voice</b>\n\n"
+                "🎁 <b>First custom voice is free</b>\n\n"
                 "TOAN AAS will create a custom voice from your submitted sample.\n\n"
                 "• First custom voice creation: free\n"
                 f"• From the second creation: {int(VOICE_PROFILE_PRICE_XU or 0)} Xu / successful creation\n"
@@ -86129,14 +86267,22 @@ def voice_clone_quote_text(profile: dict, lang: str = "vi", product_context: str
             "• TOAN AAS processes only after you confirm\n"
             "• If the provider blocks clone voice or no valid profile is created, no Xu is charged"
         )
+    if admin:
+        return (
+            "🧪 <b>ADMIN TEST MODE — không trừ Xu</b>\n\n"
+            "TOAN AAS sẽ thử tạo voice thật sau khi admin xác nhận trong flow sản phẩm nếu provider đã cấu hình.\n\n"
+            "• Admin bấm trong flow sản phẩm là đã xác nhận\n"
+            "• Không trừ Xu\n"
+            "• Nếu provider lỗi hoặc không trả provider_voice_id hợp lệ, hệ thống không lưu voice ready"
+        )
     if cost <= 0:
         return (
-            "🎙 <b>Tạo voice riêng</b>\n\n"
+            "🎁 <b>Tạo voice riêng đầu tiên miễn phí</b>\n\n"
             "TOAN AAS sẽ tạo giọng riêng từ mẫu giọng anh/chị đã gửi.\n\n"
-            "• Lần đầu tạo voice riêng: miễn phí\n"
-            f"• Từ lần thứ 2: {int(VOICE_PROFILE_PRICE_XU or 0)} Xu / lần tạo thành công\n"
+            "• Voice riêng đầu tiên: miễn phí\n"
+            f"• Các voice riêng tiếp theo: {int(VOICE_PROFILE_PRICE_XU or 0)} Xu / lần tạo thành công\n"
             "• TOAN AAS chỉ xử lý sau khi anh/chị xác nhận\n"
-            "• Nếu nhà cung cấp tạm chặn clone voice hoặc không tạo được profile hợp lệ, hệ thống sẽ không trừ Xu"
+            "• Nếu nhà cung cấp không tạo được profile hợp lệ, hệ thống sẽ không trừ Xu"
         )
     return (
         "🎙 <b>Tạo voice riêng</b>\n\n"
@@ -86153,9 +86299,13 @@ def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi", product_contex
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     profile = get_voice_profile_by_id(pid)
     cost = voice_profile_storage_price_xu((profile or {}).get("user_id"), ctx, pid) if profile else (0 if VOICE_PROFILE_FIRST_FREE else int(VOICE_PROFILE_PRICE_XU or 0))
-    confirm_label = "✅ Tạo voice riêng miễn phí" if cost <= 0 else f"✅ Tạo voice riêng {cost} Xu"
+    admin = is_admin_user((profile or {}).get("user_id"))
+    if admin:
+        confirm_label = "✅ Tạo voice riêng — Admin test"
+    else:
+        confirm_label = "✅ Tạo voice miễn phí" if cost <= 0 else f"✅ Tạo voice riêng {cost} Xu"
     if not is_vi:
-        confirm_label = "✅ Create custom voice free" if cost <= 0 else f"✅ Create custom voice {cost} Xu"
+        confirm_label = "✅ Create custom voice - Admin test" if admin else ("✅ Create custom voice free" if cost <= 0 else f"✅ Create custom voice {cost} Xu")
     return build_2col_keyboard(
         [
             (confirm_label, cb(f"voice_clone_confirm:{pid}")),
@@ -87032,7 +87182,10 @@ def voice_clone_admin_preview_failure_text(
         f"• route_errors: <code>{route_detail}</code>"
     )
 
-def voice_clone_access_allowed(user_id, readiness: dict | None = None) -> bool:
+def voice_clone_access_allowed(user_id, readiness: dict | None = None, route_attempts: list | None = None, *, admin_access: bool = False) -> bool:
+    readiness = dict(readiness or get_minimax_voice_clone_readiness())
+    if admin_access or is_admin_user(user_id):
+        return bool(readiness.get("ready") and (route_attempts is None or bool(route_attempts)))
     decision = can_user_access_product_engine(
         user_id,
         "voice_clone",
@@ -87046,7 +87199,7 @@ def voice_clone_ready_for_processing(readiness: dict | None = None, route_attemp
     readiness = dict(readiness or get_minimax_voice_clone_readiness())
     if not readiness.get("ready"):
         return False
-    if readiness.get("provider_permission_blocked"):
+    if readiness.get("provider_permission_blocked") and not admin_access:
         return False
     if route_attempts is not None and not route_attempts:
         return False
@@ -87057,7 +87210,7 @@ def voice_clone_ready_for_processing(readiness: dict | None = None, route_attemp
             return False
     return True
 
-def voice_clone_provider_route_names(readiness: dict | None = None, *, include_optional: bool = True) -> list[str]:
+def voice_clone_provider_route_names(readiness: dict | None = None, *, include_optional: bool = True, admin_access: bool = False) -> list[str]:
     readiness = dict(readiness or get_minimax_voice_clone_readiness())
     names = []
     if readiness.get("shopaikey_configured"):
@@ -87068,12 +87221,12 @@ def voice_clone_provider_route_names(readiness: dict | None = None, *, include_o
         names.append("fish_audio")
     if include_optional and readiness.get("elevenlabs_configured"):
         names.append("elevenlabs")
-    if readiness.get("provider_permission_blocked") and not voice_clone_last_forbidden_provider() and len(names) <= 1:
+    if not admin_access and readiness.get("provider_permission_blocked") and not voice_clone_last_forbidden_provider() and len(names) <= 1:
         return []
     preferred = str(readiness.get("active_custom_voice_route") or "").strip()
     if preferred in names:
         names = [preferred, *[name for name in names if name != preferred]]
-    blocked = voice_clone_last_forbidden_provider()
+    blocked = "" if admin_access else voice_clone_last_forbidden_provider()
     if blocked in names:
         unblocked = [name for name in names if name != blocked]
         if unblocked:
@@ -87095,7 +87248,7 @@ def voice_clone_provider_route_attempts(readiness: dict | None = None, *, admin_
         "elevenlabs": (elevenlabs_upload_voice_sample_adapter, elevenlabs_voice_clone_adapter, lambda text, voice_id="", voice_style="": tts_elevenlabs_bytes(text)),
     }
     attempts = []
-    for name in voice_clone_provider_route_names(readiness):
+    for name in voice_clone_provider_route_names(readiness, admin_access=admin_access):
         upload_call, clone_call, tts_call = route_map[name]
         attempts.append((name, upload_call, clone_call, tts_call))
     return attempts
@@ -87137,13 +87290,43 @@ def custom_voice_created_keyboard(profile_id: int, lang: str = "vi", product_con
     ])
 
 
-def custom_voice_failed_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+def voice_clone_admin_product_block_text(
+    readiness: dict | None = None,
+    *,
+    provider_name: str = "",
+    route_errors: list[dict | str] | None = None,
+    error: Exception | str = "",
+    provider_voice_id: str = "",
+) -> str:
+    readiness = dict(readiness or {})
+    route_names = voice_clone_provider_route_names(readiness, admin_access=True)
+    selected_adapter = provider_name or ",".join(route_names) or ",".join(readiness.get("routes") or []) or "none"
+    blocker = voice_clone_admin_blocker(readiness)
+    route_detail = " | ".join(voice_clone_route_error_summary(item, 260) for item in (route_errors or [])[:4]) or "-"
+    fail_category = voice_clone_preview_fail_category(error, readiness, 0, route_errors)
+    return (
+        "🧪 <b>ADMIN TEST MODE — không trừ Xu</b>\n\n"
+        "ADMIN DIAGNOSTIC — custom voice provider chưa sẵn sàng hoặc chưa tạo được voice hợp lệ.\n\n"
+        f"• provider route configured: <code>{'YES' if route_names else 'NO'}</code>\n"
+        f"• selected route: <code>{_engine_safe(selected_adapter, 140)}</code>\n"
+        f"• clone endpoint ready: <code>{_engine_yes_no(readiness.get('ready'))}</code>\n"
+        f"• public gate bypassed: <code>YES</code>\n"
+        f"• provider_voice_id present: <code>{'YES' if minimax_voice_adapter.validate_provider_voice_id(provider_voice_id) else 'NO'}</code>\n"
+        f"• blocker: <code>{_engine_safe(blocker, 180)}</code>\n"
+        f"• fail_category: <code>{_engine_safe(fail_category, 80)}</code>\n"
+        f"• route_errors: <code>{route_detail}</code>"
+    )
+
+
+def custom_voice_failed_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, profile_id: int = 0) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
+    pid = _safe_int(profile_id, 0)
+    retry_action = f"voice_clone_retry_context:{pid}" if pid > 0 else "voice_clone"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔁 Thử lại sau" if is_vi else "🔁 Try again later", callback_data=cb("voice_clone")),
+            InlineKeyboardButton("🔁 Thử lại sau" if is_vi else "🔁 Try again later", callback_data=cb(retry_action)),
             InlineKeyboardButton("🎙 Giọng nữ mặc định" if is_vi else "🎙 Default female", callback_data=cb("voice_default_female")),
         ],
         [
@@ -87285,20 +87468,24 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
     readiness = get_minimax_voice_clone_readiness()
     admin_access = is_admin_user(user_id)
-    route_attempts = voice_clone_provider_route_attempts(readiness, admin_access=admin_access)
-    if readiness.get("provider_permission_blocked") and not route_attempts:
-        mark_voice_profile_activation_failed(
+    preflight = await voice_clone_pipeline.preflight_custom_voice_create(
+        user_id=user_id,
+        profile_id=profile_id,
+        admin_mode=admin_access,
+        readiness=readiness,
+        route_attempts_func=voice_clone_provider_route_attempts,
+        access_allowed_func=voice_clone_access_allowed,
+        ready_for_processing_func=voice_clone_ready_for_processing,
+    )
+    if not preflight.ok:
+        fail_status = str(preflight.error_code or "provider_not_ready")
+        failed_profile = mark_voice_profile_activation_failed(
             user_id,
             profile_id,
             profile,
-            "failed_clone_permission_forbidden",
-            "CLONE_PERMISSION_FORBIDDEN",
+            "failed_clone_permission_forbidden" if voice_clone_permission_error(fail_status) else "failed_provider_not_ready",
+            preflight.admin_debug_summary or fail_status,
         )
-        return await query.message.reply_text(
-            voice_clone_permission_forbidden_public_text(lang),
-            reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
-        )
-    if not voice_clone_access_allowed(user_id, readiness) or not voice_clone_ready_for_processing(readiness, route_attempts, admin_access=admin_access):
         if not load_provider_attempt("voice_clone"):
             save_provider_attempt(
                 "voice_clone",
@@ -87310,13 +87497,22 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
                 },
                 user_id,
             )
-        mark_voice_profile_activation_failed(
-            user_id,
-            profile_id,
-            profile,
-            "failed_provider_not_ready",
-            voice_clone_admin_blocker(readiness),
-        )
+        if admin_access:
+            return await query.message.reply_text(
+                voice_clone_admin_product_block_text(
+                    readiness,
+                    route_errors=[],
+                    error=preflight.admin_debug_summary or fail_status,
+                    provider_voice_id="",
+                ),
+                parse_mode="HTML",
+                reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
+            )
+        if voice_clone_permission_error(fail_status):
+            return await query.message.reply_text(
+                voice_clone_permission_forbidden_public_text(lang),
+                reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
+            )
         return await query.message.reply_text(
             voice_clone_provider_not_ready_public_text(lang),
             reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
@@ -87369,223 +87565,132 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
     metadata["final_cost_xu"] = cost
     metadata["preview_charged_xu"] = 0
     await query.message.reply_text(
+        "🧪 ADMIN TEST MODE — TOAN AAS sẽ thử tạo voice thật nếu provider đã cấu hình. Không trừ Xu."
+        if admin_access else
         "🎙 TOAN AAS đang tạo voice riêng. Vui lòng chờ và không bấm lại nhiều lần."
         if full_generation
         else "🎙 TOAN AAS đang tạo bản nghe thử. Vui lòng chờ và không bấm lại nhiều lần."
     )
     provider_name = ""
-    preview_bytes = b""
+    provider_voice_id = ""
     route_errors = []
     try:
         telegram_file = await context.bot.get_file(str(profile.get("source_file_id") or profile.get("source_file_ref") or ""))
         audio_bytes = bytes(await telegram_file.download_as_bytearray())
-        provider_voice_id = make_minimax_voice_id(user_id, profile_id=profile_id)
+        sample_path = write_voice_clone_sample_file(user_id, profile_id, audio_bytes)
         preview_text = str(guard.get("preview_text") or capped_voice_preview_text(VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT))
-        provider_file_id = ""
-        if not route_attempts:
-            raise RuntimeError("voice_routes_not_ready:" + voice_clone_admin_blocker(readiness))
-        async def _voice_clone_executor_gate():
-            return {"ok": True, "status": "GATE_ONLY"}
-        engine_gate = await execute_engine(
-            "voice_clone",
-            {"runner": _voice_clone_executor_gate, "state": {"profile_id": profile_id}},
-            {
-                "user_id": user_id,
-                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
-                "confirm_paid": True,
-                "admin_interactive_confirm": True,
-                "is_paid_job": bool(admin_access),
-            },
-        )
-        if not engine_gate.get("ok"):
-            raise RuntimeError(engine_gate.get("detail") or engine_gate.get("status") or "voice_clone_engine_blocked")
-        for route_name, upload_call, clone_call, tts_call in route_attempts:
-            status, candidate_file_id, detail, _http = await upload_call(audio_bytes)
-            if status != "PASS" or not candidate_file_id:
-                record_voice_clone_attempt(
-                    status=status,
-                    provider=route_name,
-                    route=f"{route_name}/upload",
-                    upload_status=status,
-                    error=detail,
-                    updated_by=user_id,
-                )
-                route_errors.append(voice_clone_route_error(
-                    route_name,
-                    "upload",
-                    f"{route_name}/upload",
-                    status,
-                    detail,
-                    http_status=_http,
-                    provider_status=status,
-                    payload_fields=["file", "purpose"],
-                ))
-                continue
-            status, clone_payload, detail, _http = await clone_call(candidate_file_id, provider_voice_id)
-            if status != "PASS":
-                record_voice_clone_attempt(
-                    status=status,
-                    provider=route_name,
-                    route=f"{route_name}/clone",
-                    upload_status="PASS",
-                    clone_status=status,
-                    error=detail,
-                    updated_by=user_id,
-                )
-                route_errors.append(voice_clone_route_error(
-                    route_name,
-                    "clone",
-                    f"{route_name}/clone",
-                    status,
-                    detail,
-                    http_status=_http,
-                    provider_status=status,
-                    payload_fields=["file_id", "voice_id", "model", "text", "need_noise_reduction", "need_volume_normalization", "language_boost", "aigc_watermark"],
-                ))
-                continue
-            candidate_voice_id = minimax_voice_adapter.normalize_voice_id(str((clone_payload or {}).get("voice_id") or provider_voice_id))
-            if not minimax_voice_adapter.validate_provider_voice_id(candidate_voice_id):
-                record_voice_clone_attempt(
-                    status="FAIL",
-                    provider=route_name,
-                    route=f"{route_name}/clone",
-                    upload_status="PASS",
-                    clone_status="PASS",
-                    error="missing_provider_voice_id",
-                    updated_by=user_id,
-                )
-                route_errors.append(voice_clone_route_error(
-                    route_name,
-                    "clone",
-                    f"{route_name}/clone",
-                    "FAIL",
-                    "missing_provider_voice_id",
-                    http_status=_http,
-                    provider_status="PASS",
-                    payload_fields=["voice_id"],
-                ))
-                continue
-            candidate_preview = b""
-            demo_audio_ref = str((clone_payload or {}).get("demo_audio") or "")
-            demo_detail = ""
-            if demo_audio_ref:
-                candidate_preview, demo_detail = await minimax_audio_reference_to_bytes(demo_audio_ref)
-            if not candidate_preview:
-                status, candidate_preview, detail, _http = await tts_call(preview_text, voice_id=candidate_voice_id)
-                if status != "PASS" or not candidate_preview:
-                    record_voice_clone_attempt(
-                        status=status,
-                        provider=route_name,
-                        route=f"{route_name}/tts",
-                        upload_status="PASS",
-                        clone_status="PASS",
-                        tts_status=status,
-                        provider_voice_id=candidate_voice_id,
-                        demo_audio=demo_audio_ref,
-                        error=detail,
-                        updated_by=user_id,
-                    )
-                    route_errors.append(voice_clone_route_error(
-                        route_name,
-                        "tts",
-                        f"{route_name}/tts",
-                        status,
-                        f"{detail[:120]}; demo={demo_detail[:80]}",
-                        http_status=_http,
-                        provider_status=status,
-                        output_bytes=len(candidate_preview or b""),
-                        payload_fields=["text", "voice_id", "voice_style"],
-                    ))
-                    candidate_preview = b""
-            provider_file_id = candidate_file_id
-            provider_voice_id = candidate_voice_id
-            preview_bytes = bytes(candidate_preview or b"")
-            provider_name = route_name
-            if demo_audio_ref:
-                metadata["provider_demo_audio_ref"] = demo_audio_ref[:500] if demo_audio_ref.startswith(("http://", "https://")) else "inline_audio"
-                metadata["provider_demo_audio_detail"] = demo_detail[:160]
-            record_voice_clone_attempt(
-                status="PASS",
-                provider=route_name,
-                route=f"{route_name}/upload_clone" + ("_tts" if preview_bytes else ""),
-                upload_status="PASS",
-                clone_status="PASS",
-                tts_status="PASS" if preview_bytes else "SKIPPED",
-                provider_voice_id=provider_voice_id,
-                demo_audio=demo_audio_ref,
-                error="-",
-                updated_by=user_id,
-            )
-            break
-        if not provider_name or not minimax_voice_adapter.validate_provider_voice_id(provider_voice_id):
-            raise RuntimeError("voice_routes_failed:" + " | ".join(voice_clone_route_error_summary(item, 120) for item in route_errors)[:260])
-        preview_ref = ""
-        capped_bytes = b""
-        if preview_bytes:
-            capped_bytes, cap_detail = await cap_voice_preview_audio_bytes(bytes(preview_bytes), VOICE_PREVIEW_MAX_SECONDS)
-            if not capped_bytes:
-                raise RuntimeError(f"voice_preview_cap:{cap_detail[:100]}")
-            audio_file = io.BytesIO(capped_bytes)
-            audio_file.name = f"toan_aas_voice_{profile_id}.mp3"
-            sent = await context.bot.send_audio(
-                chat_id=query.message.chat_id,
-                audio=audio_file,
-                title=str(profile.get("display_name") or "TOAN AAS Voice Preview"),
-                caption=f"🔊 Bản nghe thử giọng “{str(profile.get('display_name') or 'Giọng mới')}”.",
-            )
-            preview_ref = str(getattr(getattr(sent, "audio", None), "file_id", "") or "")
-            if not preview_ref:
-                raise RuntimeError("voice_preview_missing_file_id")
-            create_voice_asset_record(
+        async def _finalize_custom_voice(**kwargs):
+            return finalize_custom_voice_creation(
                 user_id,
-                "voice_clone_preview",
-                ctx,
-                "custom_clone",
-                text=preview_text,
-                duration_seconds=voice_preview_seconds(),
-                output_bytes=len(preview_bytes or b""),
-                file_ref=preview_ref,
-                file_id=preview_ref,
-                status="preview_sent",
-                linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
-                metadata={
-                    "profile_id": profile_id,
-                    "provider": provider_name,
-                    "provider_voice_id": provider_voice_id,
-                    "preview_output_bytes": len(capped_bytes or b""),
-                    "price_xu": cost,
-                    "charge_status": "free_custom_voice_created" if int(cost or 0) <= 0 else "paid_custom_voice_created_pending_finalize",
-                },
+                profile_id,
+                product_context=ctx,
+                **kwargs,
             )
+        result = await voice_clone_pipeline.process_custom_voice_create(
+            user_id=user_id,
+            sample_path=sample_path,
+            display_name=str(profile.get("display_name") or ""),
+            product_context=ctx,
+            profile_id=profile_id,
+            admin_mode=admin_access,
+            no_charge=admin_access,
+            fake=False,
+            preview_text=preview_text,
+            readiness=readiness,
+            output_dir=str(voice_asset_storage_dir()),
+            metadata_updates={
+                "final_cost_xu": cost,
+                "preview_charged_xu": 0,
+                "preview_attempts": int(metadata.get("preview_attempts") or 0) + 1,
+                "preview_key": str(guard.get("preview_key") or ""),
+                "preview_key_pending": "",
+                "preview_generated_at": now_text(),
+                "preview_seconds_max": int(VOICE_PREVIEW_MAX_SECONDS),
+                "preview_text_hash": hashlib.sha256(preview_text.encode("utf-8", errors="ignore")).hexdigest()[:24],
+            },
+            route_attempts_func=voice_clone_provider_route_attempts,
+            access_allowed_func=voice_clone_access_allowed,
+            ready_for_processing_func=voice_clone_ready_for_processing,
+            make_provider_voice_id_func=make_minimax_voice_id,
+            execute_engine_func=execute_engine,
+            audio_reference_to_bytes_func=minimax_audio_reference_to_bytes,
+            cap_preview_audio_func=cap_voice_preview_audio_bytes,
+            record_attempt_func=record_voice_clone_attempt,
+            finalize_profile_func=_finalize_custom_voice,
+            max_preview_seconds=VOICE_PREVIEW_MAX_SECONDS,
+        )
+        provider_name = str(result.provider or "")
+        provider_voice_id = str(result.provider_voice_id or "")
+        provider_file_id = str(result.provider_file_id or "")
+        route_errors = list((result.metadata or {}).get("route_errors") or [])
+        if not result.ok:
+            fail_status = str(result.error_code or result.status or "CLONE_NOT_READY")
+            mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed_" + fail_status.lower(), str(result.admin_debug_summary or fail_status))
+            if admin_access:
+                return await query.message.reply_text(
+                    voice_clone_admin_product_block_text(
+                        readiness,
+                        provider_name=provider_name,
+                        route_errors=route_errors,
+                        error=result.admin_debug_summary or fail_status,
+                        provider_voice_id=provider_voice_id,
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
+                )
+            if voice_clone_permission_error(fail_status):
+                return await query.message.reply_text(
+                    voice_clone_permission_forbidden_public_text(lang),
+                    reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
+                )
+            return await query.message.reply_text(
+                str(result.safe_public_message or "TOAN AAS chưa tạo được voice riêng hợp lệ. TOAN AAS chưa trừ Xu."),
+                reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
+            )
+        preview_ref = ""
+        if result.preview_audio_path and Path(result.preview_audio_path).exists():
+            preview_payload = Path(result.preview_audio_path).read_bytes()
+            if preview_payload:
+                audio_file = io.BytesIO(preview_payload)
+                audio_file.name = f"toan_aas_voice_{profile_id}.mp3"
+                sent = await context.bot.send_audio(
+                    chat_id=query.message.chat_id,
+                    audio=audio_file,
+                    title=str(profile.get("display_name") or "TOAN AAS Voice Preview"),
+                    caption=f"🔊 Bản nghe thử giọng “{str(profile.get('display_name') or 'Giọng mới')}”.",
+                )
+                preview_ref = str(getattr(getattr(sent, "audio", None), "file_id", "") or "")
+                if not preview_ref:
+                    metadata["preview_unavailable_reason"] = "voice_preview_missing_file_id"
+                else:
+                    update_user_voice_profile(user_id, profile_id, preview_audio_ref=preview_ref)
+                    create_voice_asset_record(
+                        user_id,
+                        "voice_clone_preview",
+                        ctx,
+                        "custom_clone",
+                        text=preview_text,
+                        duration_seconds=voice_preview_seconds(),
+                        output_bytes=int(result.preview_audio_bytes or len(preview_payload or b"")),
+                        file_ref=preview_ref,
+                        file_id=preview_ref,
+                        local_path=str(result.preview_audio_path or ""),
+                        status="preview_sent",
+                        linked_video_session_id=voice_asset_video_session_id(user_id, ctx),
+                        metadata={
+                            "profile_id": profile_id,
+                            "provider": provider_name,
+                            "provider_voice_id": provider_voice_id,
+                            "preview_output_bytes": int(result.preview_audio_bytes or len(preview_payload or b"")),
+                            "price_xu": cost,
+                            "charge_status": "free_custom_voice_created" if int(cost or 0) <= 0 else "paid_custom_voice_created_pending_finalize",
+                        },
+                    )
         if preview_ref and not full_generation:
             consume_preview_quota(user_id, "voice_ai", updated_by=user_id)
-        metadata["preview_attempts"] = int(metadata.get("preview_attempts") or 0) + 1
-        metadata["provider_file_id"] = provider_file_id
-        metadata["provider_route"] = provider_name
-        metadata["provider_voice_id"] = provider_voice_id
-        metadata["preview_key"] = str(guard.get("preview_key") or "")
-        metadata["preview_key_pending"] = ""
-        metadata["preview_generated_at"] = now_text()
-        metadata["preview_seconds_max"] = int(VOICE_PREVIEW_MAX_SECONDS)
-        metadata["preview_text_hash"] = hashlib.sha256(preview_text.encode("utf-8", errors="ignore")).hexdigest()[:24]
-        finalize = finalize_custom_voice_creation(
-            user_id,
-            profile_id,
-            provider=provider_name,
-            provider_voice_id=provider_voice_id,
-            provider_file_id=provider_file_id,
-            preview_audio_ref=preview_ref,
-            product_context=ctx,
-            metadata_updates=metadata,
-        )
-        if not finalize.get("ok"):
-            return await query.message.reply_text(
-                str(finalize.get("public_message") or "TOAN AAS chưa tạo được voice riêng hợp lệ. TOAN AAS chưa trừ Xu."),
-                reply_markup=custom_voice_failed_keyboard(lang, ctx),
-            )
-        fresh_profile = finalize.get("profile") or get_user_voice_profile(user_id, profile_id) or {}
-        charged_line = f"\nĐã trừ: {int(finalize.get('charged_xu') or 0)} Xu." if int(finalize.get("charged_xu") or 0) > 0 else ""
-        demo_line = "Bạn có thể nghe demo, đọc thử bằng nội dung riêng, đặt mặc định hoặc dùng cho video." if preview_ref else "Bạn có thể dùng voice này để đọc thử bằng nội dung riêng hoặc đặt làm mặc định."
+        fresh_profile = get_user_voice_profile(user_id, profile_id) or {}
+        charged_line = f"\nĐã trừ: {int(result.charged_xu or 0)} Xu." if int(result.charged_xu or 0) > 0 else ""
+        demo_line = "Bạn có thể nghe demo, đọc thử bằng nội dung riêng, đặt mặc định hoặc dùng cho video." if preview_ref else "Voice đã được lưu. Bản nghe thử chưa tạo được, anh/chị có thể thử đọc text sau."
         return await query.message.reply_text(
             f"✅ Đã tạo voice riêng “{str(profile.get('display_name') or 'Giọng mới')}” và lưu vào Kho voice.\n\n"
             f"{demo_line}{charged_line}",
@@ -87603,13 +87708,37 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
         failed_profile = mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed_" + fail_status.lower(), str(exc))
         if voice_clone_permission_error(exc):
+            if admin_access:
+                return await query.message.reply_text(
+                    voice_clone_admin_product_block_text(
+                        readiness,
+                        provider_name=provider_name,
+                        route_errors=route_errors,
+                        error=exc,
+                        provider_voice_id=provider_voice_id,
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
+                )
             return await query.message.reply_text(
                 voice_clone_permission_forbidden_public_text(lang),
                 reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
             )
+        if admin_access:
+            return await query.message.reply_text(
+                voice_clone_admin_product_block_text(
+                    readiness,
+                    provider_name=provider_name,
+                    route_errors=route_errors,
+                    error=exc,
+                    provider_voice_id=provider_voice_id,
+                ),
+                parse_mode="HTML",
+                reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
+            )
         return await query.message.reply_text(
             "⚙️ TOAN AAS chưa tạo được voice hợp lệ từ mẫu này. Anh/chị thử mẫu rõ hơn hoặc dùng giọng nam/nữ mặc định. TOAN AAS chưa trừ Xu.",
-            reply_markup=custom_voice_failed_keyboard(lang, ctx),
+            reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
         )
 
 async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -88065,7 +88194,17 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "voice_clone":
         await query.answer()
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        set_music_guided_pending(user_id, "voice_clone_intro", product_context=ctx, previous_screen="voice_hub", return_to="voice_hub")
+        set_voice_flow_pending(
+            user_id,
+            "voice_clone_intro",
+            product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_clone_intro",
+            previous_screen="voice_hub",
+            return_to="voice_hub",
+            back_stack=["voice_hub"],
+            voice_flow_step="voice_clone_intro",
+        )
         return await query.message.reply_text(voice_clone_intro_text(lang), parse_mode="HTML", reply_markup=voice_clone_keyboard(lang, ctx))
     if action.startswith("voice_clone_back_upload:"):
         await query.answer()
@@ -88073,14 +88212,18 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         profile = get_user_voice_profile(user_id, profile_id)
         if not profile:
             return await query.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang, ctx))
-        set_music_guided_pending(
+        set_voice_flow_pending(
             user_id,
             "voice_clone_upload",
             profile_id=profile_id,
             consent_at=str(profile.get("consent_at") or now_text()),
             product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_clone_upload",
             previous_screen="voice_clone_intro",
             return_to="voice_clone_intro",
+            back_stack=["voice_hub", "voice_clone_intro"],
+            voice_flow_step="voice_clone_upload",
         )
         return await query.message.reply_text(
             voice_clone_upload_text(lang),
@@ -88092,13 +88235,17 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         if not get_user_voice_profile(user_id, profile_id):
             return await query.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang, ctx))
-        set_music_guided_pending(
+        set_voice_flow_pending(
             user_id,
             "voice_clone_sample_confirm",
             profile_id=profile_id,
             product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_clone_sample_confirm",
             previous_screen="voice_clone_upload",
             return_to="voice_clone_upload",
+            back_stack=["voice_hub", "voice_clone_intro", "voice_clone_upload"],
+            voice_flow_step="voice_clone_sample_confirm",
         )
         return await query.message.reply_text(
             voice_clone_sample_confirmation_text(lang),
@@ -88110,13 +88257,17 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         profile_id = _safe_int(action.split(":", 1)[1], 0)
         if not get_user_voice_profile(user_id, profile_id):
             return await query.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang, ctx))
-        set_music_guided_pending(
+        set_voice_flow_pending(
             user_id,
             "voice_clone_name",
             profile_id=profile_id,
             product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_clone_name",
             previous_screen="voice_clone_sample_confirm",
             return_to="voice_clone_sample_confirm",
+            back_stack=["voice_hub", "voice_clone_intro", "voice_clone_upload", "voice_clone_sample_confirm"],
+            voice_flow_step="voice_clone_name",
         )
         return await query.message.reply_text(
             voice_clone_name_text(lang),
@@ -88125,13 +88276,17 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         )
     if action == "voice_consent":
         await query.answer()
-        set_music_guided_pending(
+        set_voice_flow_pending(
             user_id,
             "voice_clone_upload",
             consent_at=now_text(),
             product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_clone_upload",
             previous_screen="voice_clone_intro",
             return_to="voice_clone_intro",
+            back_stack=["voice_hub", "voice_clone_intro"],
+            voice_flow_step="voice_clone_upload",
         )
         return await query.message.reply_text(
             voice_clone_upload_text(lang),
@@ -88151,13 +88306,35 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "voice_profiles":
         await query.answer()
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        set_music_guided_pending(user_id, "voice_vault_select", product_context=ctx, voice_vault_page=0)
+        set_voice_flow_pending(
+            user_id,
+            "voice_vault_select",
+            product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_vault",
+            previous_screen="voice_hub",
+            return_to="voice_hub",
+            back_stack=["voice_hub"],
+            voice_flow_step="voice_vault_select",
+            voice_vault_page=0,
+        )
         return await query.message.reply_text(user_voice_profiles_summary(user_id, lang, product_context=ctx), parse_mode="HTML", reply_markup=voice_vault_keyboard(user_id, lang, ctx))
     if action.startswith("voice_profiles_page:"):
         await query.answer()
         page = max(0, _safe_int(action.split(":", 1)[1], 0))
         enter_product_context(user_id, ctx, origin_screen="vfinal|voice" if ctx == PRODUCT_CONTEXT_VIDEO_ADDON else "menu|main", product_area="voice")
-        set_music_guided_pending(user_id, "voice_vault_select", product_context=ctx, voice_vault_page=page)
+        set_voice_flow_pending(
+            user_id,
+            "voice_vault_select",
+            product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_vault",
+            previous_screen="voice_hub",
+            return_to="voice_hub",
+            back_stack=["voice_hub"],
+            voice_flow_step="voice_vault_select",
+            voice_vault_page=page,
+        )
         return await query.message.reply_text(
             user_voice_profiles_summary(user_id, lang, product_context=ctx, page=page),
             parse_mode="HTML",
@@ -88411,6 +88588,31 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             f"✅ Đã lưu giọng “{profile.get('display_name') or 'Giọng mới'}” vào Kho voice của bạn."
             + (f"\nĐã trừ: {charged} Xu." if charged > 0 else ""),
             reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx),
+        )
+    if action.startswith("voice_clone_retry_context:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await query.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang, ctx))
+        set_voice_flow_pending(
+            user_id,
+            "voice_clone_confirm",
+            product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_clone_confirm",
+            return_to="voice_clone_name",
+            back_stack=["voice_hub", "voice_clone_intro", "voice_clone_upload", "voice_clone_sample_confirm", "voice_clone_name"],
+            voice_flow_step="voice_clone_confirm",
+            profile_id=profile_id,
+            voice_sample_file_id=str(profile.get("source_file_id") or profile.get("source_file_ref") or ""),
+            voice_name=str(profile.get("display_name") or ""),
+            selected_voice_profile_id=profile_id,
+        )
+        return await query.message.reply_text(
+            voice_clone_quote_text(profile, lang, ctx),
+            parse_mode="HTML",
+            reply_markup=voice_clone_quote_keyboard(profile_id, lang, ctx),
         )
     if action.startswith("voice_clone_confirm:") and not action.startswith("voice_clone_confirmed:"):
         await query.answer()
@@ -91095,7 +91297,18 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
     if action == "voice_vault_select":
         match = re.fullmatch(r"\s*(\d{1,3})\s*", text)
         if not match:
-            set_music_guided_pending(uid, "voice_vault_select", product_context=ctx, voice_vault_page=_safe_int(state.get("voice_vault_page"), 0))
+            set_voice_flow_pending(
+                uid,
+                "voice_vault_select",
+                product_context=ctx,
+                origin=str(state.get("origin") or VOICE_FLOW_ROOT_SCREEN),
+                current_screen="voice_vault",
+                previous_screen="voice_hub",
+                return_to="voice_hub",
+                back_stack=["voice_hub"],
+                voice_flow_step="voice_vault_select",
+                voice_vault_page=_safe_int(state.get("voice_vault_page"), 0),
+            )
             await update.message.reply_text(
                 "⚠️ Hãy nhập số voice trong Kho voice, ví dụ: 1, 2 hoặc 15.",
                 reply_markup=voice_vault_keyboard(uid, lang, ctx, _safe_int(state.get("voice_vault_page"), 0)),
@@ -91104,7 +91317,18 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         code = _safe_int(match.group(1), 0)
         profile = user_voice_profile_by_display_code(uid, code)
         if not profile:
-            set_music_guided_pending(uid, "voice_vault_select", product_context=ctx, voice_vault_page=_safe_int(state.get("voice_vault_page"), 0))
+            set_voice_flow_pending(
+                uid,
+                "voice_vault_select",
+                product_context=ctx,
+                origin=str(state.get("origin") or VOICE_FLOW_ROOT_SCREEN),
+                current_screen="voice_vault",
+                previous_screen="voice_hub",
+                return_to="voice_hub",
+                back_stack=["voice_hub"],
+                voice_flow_step="voice_vault_select",
+                voice_vault_page=_safe_int(state.get("voice_vault_page"), 0),
+            )
             await update.message.reply_text(
                 "⚠️ Không tìm thấy voice theo số này trong Kho voice của bạn.",
                 reply_markup=voice_vault_keyboard(uid, lang, ctx, _safe_int(state.get("voice_vault_page"), 0)),
@@ -91131,13 +91355,18 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             await update.message.reply_text("⚠️ Yêu cầu tạo giọng đã hết hạn.", reply_markup=voice_hub_keyboard(lang, ctx))
             return True
         if received != expected:
-            set_music_guided_pending(
+            set_voice_flow_pending(
                 uid,
                 "voice_clone_sample_confirm",
                 profile_id=profile_id,
                 product_context=ctx,
+                origin=VOICE_FLOW_ROOT_SCREEN,
+                current_screen="voice_clone_sample_confirm",
                 previous_screen="voice_clone_upload",
                 return_to="voice_clone_upload",
+                back_stack=["voice_hub", "voice_clone_intro", "voice_clone_upload"],
+                voice_flow_step="voice_clone_sample_confirm",
+                voice_sample_file_id=str(profile.get("source_file_id") or profile.get("source_file_ref") or ""),
             )
             await update.message.reply_text(
                 "⚠️ Câu xác nhận chưa khớp. Hãy gửi đúng nguyên câu bên dưới:\n\n"
@@ -91150,13 +91379,18 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         metadata["confirmation_sample_text"] = VOICE_CLONE_CONFIRMATION_SAMPLE_TEXT
         metadata["confirmation_sample_at"] = now_text()
         update_user_voice_profile(uid, profile_id, metadata_json=json.dumps(metadata, ensure_ascii=False))
-        set_music_guided_pending(
+        set_voice_flow_pending(
             uid,
             "voice_clone_name",
             profile_id=profile_id,
             product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_clone_name",
             previous_screen="voice_clone_sample_confirm",
             return_to="voice_clone_sample_confirm",
+            back_stack=["voice_hub", "voice_clone_intro", "voice_clone_upload", "voice_clone_sample_confirm"],
+            voice_flow_step="voice_clone_name",
+            voice_sample_file_id=str(profile.get("source_file_id") or profile.get("source_file_ref") or ""),
         )
         await update.message.reply_text(
             voice_clone_name_text(lang),
@@ -91170,13 +91404,18 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
         display_name = re.sub(r"\s+", " ", text).strip()[:80]
         if not profile or len(display_name) < 2:
             if profile and action == "voice_clone_name":
-                set_music_guided_pending(
+                set_voice_flow_pending(
                     uid,
                     "voice_clone_name",
                     profile_id=profile_id,
                     product_context=ctx,
+                    origin=VOICE_FLOW_ROOT_SCREEN,
+                    current_screen="voice_clone_name",
                     previous_screen="voice_clone_sample_confirm",
                     return_to="voice_clone_sample_confirm",
+                    back_stack=["voice_hub", "voice_clone_intro", "voice_clone_upload", "voice_clone_sample_confirm"],
+                    voice_flow_step="voice_clone_name",
+                    voice_sample_file_id=str(profile.get("source_file_id") or profile.get("source_file_ref") or ""),
                 )
             await update.message.reply_text(
                 "⚠️ Tên giọng chưa hợp lệ. Hãy nhập tên từ 2-80 ký tự.",
@@ -91193,6 +91432,21 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             metadata["final_cost_xu"] = voice_profile_storage_price_xu(uid, ctx, profile_id)
             update_user_voice_profile(uid, profile_id, metadata_json=json.dumps(metadata, ensure_ascii=False))
             profile = get_user_voice_profile(uid, profile_id)
+            set_voice_flow_pending(
+                uid,
+                "voice_clone_confirm",
+                profile_id=profile_id,
+                product_context=ctx,
+                origin=VOICE_FLOW_ROOT_SCREEN,
+                current_screen="voice_clone_confirm",
+                previous_screen="voice_clone_name",
+                return_to="voice_clone_name",
+                back_stack=["voice_hub", "voice_clone_intro", "voice_clone_upload", "voice_clone_sample_confirm", "voice_clone_name"],
+                voice_flow_step="voice_clone_confirm",
+                voice_sample_file_id=str((profile or {}).get("source_file_id") or (profile or {}).get("source_file_ref") or ""),
+                voice_name=display_name,
+                selected_voice_profile_id=profile_id,
+            )
             await update.message.reply_text(voice_clone_quote_text(profile, lang, ctx), parse_mode="HTML", reply_markup=voice_clone_quote_keyboard(profile_id, lang, ctx))
         else:
             await update.message.reply_text(
@@ -91629,13 +91883,18 @@ async def handle_music_guided_pending_media(update: Update, context: ContextType
         )
     lang = music_ui_lang(uid)
     if profile_id:
-        set_music_guided_pending(
+        set_voice_flow_pending(
             uid,
             "voice_clone_sample_confirm",
             profile_id=profile_id,
             product_context=ctx,
+            origin=VOICE_FLOW_ROOT_SCREEN,
+            current_screen="voice_clone_sample_confirm",
             previous_screen="voice_clone_upload",
             return_to="voice_clone_upload",
+            back_stack=["voice_hub", "voice_clone_intro", "voice_clone_upload"],
+            voice_flow_step="voice_clone_sample_confirm",
+            voice_sample_file_id=file_id,
         )
         await update.message.reply_text(
             voice_clone_sample_confirmation_text(lang),

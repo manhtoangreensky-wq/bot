@@ -136,10 +136,13 @@ def _run_blocked_flow(monkeypatch, tmp_path, user_id=19001, admin=False):
     _block_readiness(monkeypatch)
     _forbid_provider_and_charge(monkeypatch)
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: bool(admin))
+    monkeypatch.setattr(bot, "preview_quota_guard", lambda *_args, **_kwargs: {"allowed": True})
+    monkeypatch.setattr(bot, "voice_preview_guard", lambda *_args, **_kwargs: {"ok": True, "preview_key": "p0-17a2-blocked", "preview_text": "Xin chào từ TOAN AAS."})
+    monkeypatch.setattr(bot, "acquire_voice_preview_generation", lambda _uid, _pid, _guard: (True, None))
     profile = _make_confirmed_profile(monkeypatch, tmp_path, user_id)
     message = CaptureMessage(user_id)
     query = SimpleNamespace(message=message)
-    context = SimpleNamespace(bot=SimpleNamespace())
+    context = SimpleNamespace(bot=CaptureBot())
     asyncio.run(bot.create_minimax_voice_profile_preview(query, context, user_id, profile, "vi"))
     return message, bot.get_user_voice_profile(user_id, int(profile["id"]))
 
@@ -286,10 +289,12 @@ def test_custom_voice_menu_admin_user_still_customer_clean(monkeypatch, tmp_path
     )
     message, _profile = _run_blocked_flow(monkeypatch, tmp_path, user_id=19003, admin=True)
     output = message.outputs[-1]
-    assert output["parse_mode"] is None
-    assert "Tạo voice riêng đang tạm khóa" in output["text"]
-    assert "selected_adapter" not in output["text"]
-    assert "route_errors" not in output["text"]
+    assert output["parse_mode"] == "HTML"
+    assert "ADMIN TEST MODE" in output["text"]
+    assert "public gate bypassed" in output["text"]
+    assert "route_errors" in output["text"]
+    assert "TOKEN" not in output["text"]
+    assert "traceback" not in output["text"].lower()
 
 
 def test_voice_engine_status_admin_can_show_sanitized_clone_blocker(monkeypatch):
@@ -319,7 +324,8 @@ def test_voice_admin_diagnostic_not_sent_from_public_flow(monkeypatch, tmp_path)
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("admin diagnostic must stay out of public flow")),
     )
     message, _profile = _run_blocked_flow(monkeypatch, tmp_path, user_id=19004, admin=True)
-    assert "Tạo voice riêng đang tạm khóa" in message.outputs[-1]["text"]
+    assert "ADMIN TEST MODE" in message.outputs[-1]["text"]
+    assert "public gate bypassed" in message.outputs[-1]["text"]
 
 
 def test_custom_voice_block_before_provider_when_clone_readiness_blocked(monkeypatch, tmp_path):

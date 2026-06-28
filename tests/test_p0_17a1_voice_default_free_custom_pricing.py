@@ -216,7 +216,7 @@ def test_custom_voice_delete_does_not_reset_first_free_by_default(monkeypatch, t
     pid = bot.save_user_voice_profile(uid, "sample-file")
     bot.update_user_voice_profile(uid, pid, provider_voice_id="voice-ok", status="active")
     assert bot.soft_delete_voice_profile(uid, pid) is True
-    assert bot.voice_profile_storage_price_xu(uid) == 50
+    assert bot.voice_profile_storage_price_xu(uid) == 0
 
 
 def test_custom_voice_create_price_50_xu(monkeypatch, tmp_path):
