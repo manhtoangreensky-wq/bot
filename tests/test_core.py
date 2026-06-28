@@ -8553,7 +8553,7 @@ def test_image_notes_voice_music_guided_flow_v1(monkeypatch):
         assert label not in voice_hub_labels
     assert "🚫 Không thêm giọng" not in voice_hub_labels
     music_hub_labels = [button.text for row in bot.music_hub_keyboard("vi").inline_keyboard for button in row]
-    for label in ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]:
+    for label in ["🎼 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]:
         assert label in music_hub_labels
     for label in ["📝 Tạo prompt nhạc", "✨ Tạo nhạc AI"]:
         assert label not in music_hub_labels

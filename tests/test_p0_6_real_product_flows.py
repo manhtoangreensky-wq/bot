@@ -172,20 +172,14 @@ def test_guided_music_creation_reaches_three_prompt_choices(monkeypatch):
     start = CaptureQuery("music_quick|showroom|ai_music", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(start, user_id), SimpleNamespace()))
     assert "Tạo nhạc nền" in start.outputs[-1]["text"]
-    assert "Video bán hàng" in _joined(start.outputs[-1]["reply_markup"])
+    assert "🎵 Cơ bản — 100 Xu" in _joined(start.outputs[-1]["reply_markup"])
+    assert "🎶 Tiêu chuẩn — 200 Xu" in _joined(start.outputs[-1]["reply_markup"])
+    assert "💎 Cao cấp — 300 Xu" in _joined(start.outputs[-1]["reply_markup"])
 
-    for data in [
-        "music_quick|showroom|music_ai_purpose_sales_video",
-        "music_quick|showroom|music_ai_style_cinematic",
-        "music_quick|showroom|music_ai_mood_cheerful",
-    ]:
-        query = CaptureQuery(data, user_id)
-        asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
-
-    duration = CaptureQuery("music_quick|showroom|music_ai_duration_30s", user_id)
-    asyncio.run(bot.handle_music_quick_callback(_callback_update(duration, user_id), SimpleNamespace()))
-    assert "3 prompt nhạc gợi ý" in duration.outputs[-1]["text"]
-    assert "Chọn gợi ý 1" in _joined(duration.outputs[-1]["reply_markup"])
+    tier = CaptureQuery("music_quick|showroom|music_tier_background:standard", user_id)
+    asyncio.run(bot.handle_music_quick_callback(_callback_update(tier, user_id), SimpleNamespace()))
+    assert "Mô tả nhạc nền" in tier.outputs[-1]["text"]
+    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_product_background_details"
 
 
 def test_video_voice_choice_asks_script_and_saves_to_draft(monkeypatch):
