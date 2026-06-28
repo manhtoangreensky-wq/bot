@@ -17,10 +17,16 @@ def test_translation_gateway_two_buttons():
     markup = bot.translation_menu_keyboard("vi")
     labels = _labels(markup)
     assert "Trung tâm dịch" in text
-    assert markup.inline_keyboard[0][0].text == "🌐 Dịch ngôn ngữ"
-    assert markup.inline_keyboard[0][1].text == "🎬 Dịch phụ đề, lồng tiếng"
+    assert markup.inline_keyboard[0][0].text == "🌐 Dịch phụ đề / Video"
+    assert markup.inline_keyboard[0][1].text == "📄 Dịch file"
+    assert "🎧 Dịch audio" in labels
+    assert "📄 Dịch phụ đề file" in labels
+    assert "🌐 Dịch ngôn ngữ" in labels
     assert "menu|translation_language_hub" in _callbacks(markup)
     assert "menu|translation_video_factory" in _callbacks(markup)
+    assert "menu|translation_document" in _callbacks(markup)
+    assert "menu|translation_voice" in _callbacks(markup)
+    assert "menu|translation_subtitle_file" in _callbacks(markup)
 
 
 def test_language_translation_menu_preserves_existing_tools():
@@ -85,10 +91,10 @@ def test_dubbing_requires_voice_only_in_dubbing():
     labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     for label in ["👩 Giọng nữ mặc định", "👨 Giọng nam mặc định"]:
         assert label in labels
-    assert "📂 Kho voice" not in labels
-    assert "🎙 Tạo voice riêng" not in labels
+    assert "📚 Kho voice" in labels
+    assert "🎙 Tạo voice riêng" in labels
     admin_labels = _labels(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "entry_surface": "admin_test_mode"}))
-    assert "📂 Kho voice" in admin_labels
+    assert "📚 Kho voice" in admin_labels
     assert "🎙 Tạo voice riêng" in admin_labels
 
 
@@ -134,18 +140,19 @@ def test_no_copied_source_menu_inside_product_flows():
     assert "🔗 Tải link" not in create_labels
 
     translate_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
-    assert translate_labels[:3] == ["📤 Gửi video đã có phụ đề", "🎬 Tạo phụ đề tự động", "⬅️ Dịch video"]
+    assert translate_labels[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Dịch video", "🏠 Menu chính"]
     admin_translate_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "entry_surface": "admin_test_mode"}))
     assert admin_translate_labels[:3] == translate_labels[:3]
 
     dub_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
-    assert dub_labels[:2] == [
-        "🎞 Video đã có phụ đề",
-        "🎧 Video chỉ có tiếng",
-    ]
+    assert dub_labels[0] == "📤 Gửi video cần lồng tiếng"
+    assert "🎞 Video đã có phụ đề" not in dub_labels
+    assert "🎧 Video chỉ có tiếng" not in dub_labels
 
     combo_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert combo_labels[:2] == ["🎞 Video đã có phụ đề", "🎧 Video chỉ có tiếng"]
+    assert combo_labels[0] == "📤 Gửi video cần xử lý"
+    assert "🎞 Video đã có phụ đề" not in combo_labels
+    assert "🎧 Video chỉ có tiếng" not in combo_labels
 
 
 def test_auto_subtitle_input_and_output_are_basic_product():

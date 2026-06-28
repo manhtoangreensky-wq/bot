@@ -223,9 +223,11 @@ def test_translate_subtitle_outputs_video_with_translated_subtitle():
     assert sent == {"documents": 0, "audio": 0, "video": 1}
 
 
-def test_dub_menu_has_two_paths():
+def test_dub_menu_is_closed_video_flow():
     labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
-    assert labels[:2] == ["🎞 Video đã có phụ đề", "🎧 Video chỉ có tiếng"]
+    assert labels[0] == "📤 Gửi video cần lồng tiếng"
+    assert "🎞 Video đã có phụ đề" not in labels
+    assert "🎧 Video chỉ có tiếng" not in labels
 
 
 def test_dub_existing_subtitle_path_never_runs_auto_subtitle(monkeypatch):
@@ -305,9 +307,11 @@ def test_dub_partial_result_not_marked_full_success():
     assert not message.outputs[-1]["caption"].startswith("✅")
 
 
-def test_combo_menu_has_two_paths():
+def test_combo_menu_is_closed_video_flow():
     labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert labels[:2] == ["🎞 Video đã có phụ đề", "🎧 Video chỉ có tiếng"]
+    assert labels[0] == "📤 Gửi video cần xử lý"
+    assert "🎞 Video đã có phụ đề" not in labels
+    assert "🎧 Video chỉ có tiếng" not in labels
 
 
 def test_combo_existing_subtitle_translates_then_dubs(monkeypatch):
@@ -413,7 +417,7 @@ def test_back_from_translate_returns_translate_menu():
 
 
 def test_back_from_dub_returns_dub_menu():
-    assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_confirm") == "voice_speed"
+    assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_confirm") == "voice"
 
 
 def test_back_from_combo_returns_combo_menu():

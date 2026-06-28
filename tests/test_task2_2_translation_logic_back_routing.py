@@ -279,8 +279,8 @@ def test_task2_back_speed_to_voice():
     assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_speed") == "voice"
 
 
-def test_task2_back_invoice_to_speed():
-    assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_confirm") == "voice_speed"
+def test_task2_back_invoice_to_voice():
+    assert bot.video_dubbing_back_route({"mode": bot.VIDEO_SUBTITLE_MODE_DUB}, "back_confirm") == "voice"
 
 
 def test_task2_back_preview_to_invoice():

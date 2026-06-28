@@ -132,9 +132,10 @@ def test_dubbing_voice_selection_passes_voice_id_to_minimax(monkeypatch):
     callbacks = _callbacks(bot.video_dubbing_voice_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert "👩 Giọng nữ mặc định" in labels
     assert "👨 Giọng nam mặc định" in labels
-    assert "📂 Kho voice" not in labels
+    assert "📚 Kho voice" in labels
+    assert "🎙 Tạo voice riêng" in labels
     assert "videodub|voice|default_female" in callbacks
-    assert "videodub|voice_saved" not in callbacks
+    assert "videodub|voice_saved" in callbacks
 
     _provider, audio, _detail = asyncio.run(bot.video_dubbing_tts_bytes("xin chao", "giọng nữ", "female-id-1"))
     assert audio == b"audio-bytes"

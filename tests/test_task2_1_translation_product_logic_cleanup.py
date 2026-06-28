@@ -93,10 +93,10 @@ def test_link_import_only_top_level():
 
 def test_no_copied_source_menu_inside_product_flows():
     assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_CREATE))[0] == "📤 Gửi video"
-    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:3] == ["📤 Gửi video đã có phụ đề", "🎬 Tạo phụ đề tự động", "⬅️ Dịch video"]
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Dịch video", "🏠 Menu chính"]
     assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_DUB))[:2] == [
-        "🎞 Video đã có phụ đề",
-        "🎧 Video chỉ có tiếng",
+        "📤 Gửi video cần lồng tiếng",
+        "⬅️ Dịch video",
     ]
 
 
@@ -176,7 +176,7 @@ def test_auto_dubbing_invoice_after_speed():
         },
         "vi",
     )
-    assert "Tốc độ: <b>1.5</b>" in text
+    assert "Tốc độ:" not in text
     assert "Chi phí dự kiến" not in text
 
 
@@ -392,7 +392,7 @@ def test_dubbing_back_invoice_to_speed(monkeypatch):
         video_file_id="video",
     )
     asyncio.run(_press("videodub|back_confirm", uid))
-    assert bot.get_video_dubbing_pending(uid)["step"] == "voice_speed"
+    assert bot.get_video_dubbing_pending(uid)["step"] == "voice"
 
 
 def test_subtitle_dubbing_back_continue_voice_to_subtitle_output(monkeypatch):

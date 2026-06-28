@@ -67,8 +67,7 @@ def test_confirm_keyboards_hide_preview_for_public_product_flows():
         labels = _labels(markup)
         callbacks = _callbacks(markup)
         assert labels[0] == first_label
-        if mode != bot.VIDEO_SUBTITLE_MODE_CREATE:
-            assert "❌ Hủy" in labels
+        assert "❌ Hủy" not in labels
         assert not any("Xem thử" in label or "Nghe thử" in label for label in labels)
         assert callbacks[0] == "videodub|final"
 
