@@ -90,7 +90,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import minimax_voice_adapter, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline
+from services import audio_postprocess, minimax_voice_adapter, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline
 from services import voice_clone_pipeline
 from services import remote_worker_api, worker_auth
 from services import video_asset_intake as video_assets
@@ -83047,6 +83047,7 @@ async def send_standalone_tts_result(
         )
         await message.reply_text(tts_failure_text(lang), reply_markup=tts_failure_keyboard(lang, ctx))
         return False
+    preview_bytes, preview_local_path, preview_boost_metadata = boost_voice_output_for_asset(f"{asset_id}_preview", preview_bytes)
     audio_file = video_dubbing_output_file(preview_bytes, "toan_aas_voice_preview.mp3")
     price = tts_full_price_xu(text, speed)
     duration = estimate_voice_duration_seconds(text, speed)
@@ -83083,6 +83084,7 @@ async def send_standalone_tts_result(
             "preview_seconds": voice_preview_seconds(),
             "preview_output_bytes": len(preview_bytes or b""),
             "full_price_xu": price,
+            **preview_boost_metadata,
         },
         voice_asset_id=asset_id,
     )
@@ -83148,6 +83150,7 @@ async def send_default_free_tts_result(
         logger.info("default free tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
         await message.reply_text(default_free_tts_guard_text(lang), reply_markup=tts_failure_keyboard(lang, ctx))
         return False
+    audio_bytes, local_path, boost_metadata = boost_voice_output_for_asset(asset_id, audio_bytes)
     audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_default_voice.mp3")
     caption = (
         f"✅ Đã tạo file giọng đọc đầy đủ bằng {voice_label}.\n"
@@ -83160,7 +83163,6 @@ async def send_default_free_tts_result(
     else:
         sent = await message.reply_document(document=audio_file, filename="toan_aas_default_voice.mp3", caption=caption)
     sent_file_id = str(getattr(getattr(sent, "audio", None), "file_id", "") or getattr(getattr(sent, "document", None), "file_id", "") or "")
-    local_path = write_voice_asset_audio_bytes(asset_id, audio_bytes)
     create_voice_asset_record(
         user_id,
         "voice_default_free_tts",
@@ -83180,6 +83182,7 @@ async def send_default_free_tts_result(
             "price_xu": 0,
             "charge_status": "free_default_voice",
             "route": "edge_free",
+            **boost_metadata,
         },
         voice_asset_id=asset_id,
     )
@@ -83267,6 +83270,9 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
                 )
                 return False
         charged = int(charge.get("final_cost") or 0) if is_admin_user(user_id) else int(charge.get("final_cost") or price)
+    asset_id = voice_asset_make_id(user_id, "voice_saved_tts", "custom_clone", voice_asset_text_hash(text))
+    local_path = str(tts_result.audio_path or "")
+    boost_metadata = dict(tts_result.metadata or {})
     audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_saved_voice.mp3")
     caption = (
         f"✅ Đã tạo giọng đọc bằng {profile.get('display_name') or 'giọng đã lưu'}.\n"
@@ -83276,8 +83282,6 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
         sent = await message.reply_audio(audio=audio_file, filename="toan_aas_saved_voice.mp3", caption=caption)
     else:
         sent = await message.reply_document(document=audio_file, filename="toan_aas_saved_voice.mp3", caption=caption)
-    asset_id = voice_asset_make_id(user_id, "voice_saved_tts", "custom_clone", voice_asset_text_hash(text))
-    local_path = write_voice_asset_audio_bytes(asset_id, audio_bytes)
     sent_file_id = str(getattr(getattr(sent, "audio", None), "file_id", "") or getattr(getattr(sent, "document", None), "file_id", "") or "")
     create_voice_asset_record(
         user_id,
@@ -83303,6 +83307,7 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
             "min_duration_seconds_rule": f">{int(CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS or 3)}",
             "charge_status": "paid_custom_voice_usage" if charged > 0 else "admin_custom_voice_usage_no_charge",
             "linked_voice_profile_id": profile_id,
+            **boost_metadata,
         },
         voice_asset_id=asset_id,
     )
@@ -85688,6 +85693,37 @@ def write_voice_asset_audio_bytes(voice_asset_id: str, audio_bytes: bytes, suffi
     except Exception as exc:
         logger.warning("voice asset write failed | asset=%s | %s", voice_asset_id, sanitize_log_text(str(exc))[:180])
         return ""
+
+def boost_voice_output_for_asset(voice_asset_id: str, audio_bytes: bytes, suffix: str = ".mp3") -> tuple[bytes, str, dict]:
+    data = bytes(audio_bytes or b"")
+    metadata = {
+        "voice_volume_boosted": False,
+        "voice_volume_factor": 2.0,
+        "voice_volume_fallback_original": True,
+    }
+    if not data:
+        metadata["voice_volume_boost_detail"] = "empty_audio"
+        return b"", "", metadata
+    raw_path = write_voice_asset_audio_bytes(f"{voice_asset_id}_raw", data, suffix)
+    if not raw_path:
+        metadata["voice_volume_boost_detail"] = "write_failed"
+        return data, "", metadata
+    boosted_path = str(audio_postprocess.boosted_output_path(raw_path))
+    result = audio_postprocess.boost_voice_audio(raw_path, boosted_path, volume_factor=2.0, limiter=True)
+    final_path = result.output_path if result.ok and result.output_path and Path(result.output_path).exists() else raw_path
+    try:
+        final_bytes = Path(final_path).read_bytes()
+    except Exception:
+        final_bytes = data
+        final_path = raw_path
+    metadata.update({
+        "voice_volume_boosted": bool(result.boosted),
+        "voice_volume_factor": float(result.factor or 2.0),
+        "voice_volume_fallback_original": bool(result.fallback_original),
+        "voice_volume_boost_detail": sanitize_log_text(result.detail)[:120],
+        "voice_volume_output_bytes": len(final_bytes or b""),
+    })
+    return bytes(final_bytes or data), str(final_path or ""), metadata
 
 def write_voice_clone_sample_file(user_id, profile_id: int, audio_bytes: bytes, suffix: str = ".mp3") -> str:
     data = bytes(audio_bytes or b"")

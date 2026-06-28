@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from services import minimax_voice_adapter
+from services import audio_postprocess, minimax_voice_adapter
 
 
 PUBLIC_CUSTOM_VOICE_NOT_READY = (
@@ -185,6 +185,27 @@ def _preview_output_path(output_dir: str | None, user_id: Any, profile_id: int) 
     base.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(f"{user_id}:{profile_id}".encode("utf-8", errors="ignore")).hexdigest()[:14]
     return base / f"toan_aas_voice_preview_{profile_id}_{digest}.mp3"
+
+
+def _write_boosted_voice_output(raw_bytes: bytes, target_path: Path, metadata: dict[str, Any]) -> tuple[str, int, list[str]]:
+    payload = bytes(raw_bytes or b"")
+    if not payload:
+        return "", 0, []
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path = target_path.with_name(f"{target_path.stem}_raw{target_path.suffix or '.mp3'}")
+    boosted_path = audio_postprocess.boosted_output_path(target_path)
+    raw_path.write_bytes(payload)
+    boost = audio_postprocess.boost_voice_audio(str(raw_path), str(boosted_path), volume_factor=2.0, limiter=True)
+    final_path = Path(boost.output_path) if boost.ok and boost.output_path and Path(boost.output_path).exists() else raw_path
+    final_bytes = int(final_path.stat().st_size if final_path.exists() else len(payload))
+    metadata.update({
+        "voice_volume_boosted": bool(boost.boosted),
+        "voice_volume_factor": float(boost.factor or 2.0),
+        "voice_volume_fallback_original": bool(boost.fallback_original),
+        "voice_volume_boost_detail": _safe_text(boost.detail, 120),
+        "voice_volume_output_bytes": final_bytes,
+    })
+    return str(final_path), final_bytes, [str(raw_path), str(final_path)]
 
 
 def _fake_provider_voice_id(user_id: Any, profile_id: int, display_name: str = "") -> str:
@@ -427,18 +448,14 @@ async def process_custom_voice_create(
                 capped_bytes, cap_detail = await cap_preview_audio_func(bytes(preview_bytes), int(max_preview_seconds or 6))
                 if capped_bytes:
                     preview_path = _preview_output_path(output_dir, user_id, pid)
-                    preview_path.write_bytes(bytes(capped_bytes))
-                    preview_audio_path = str(preview_path)
-                    preview_audio_bytes = len(capped_bytes)
-                    created_files.append(preview_audio_path)
+                    preview_audio_path, preview_audio_bytes, boost_files = _write_boosted_voice_output(bytes(capped_bytes), preview_path, metadata)
+                    created_files.extend(boost_files)
                 else:
                     metadata["preview_unavailable_reason"] = _safe_text(f"voice_preview_cap:{cap_detail}", 160)
             elif preview_bytes:
                 preview_path = _preview_output_path(output_dir, user_id, pid)
-                preview_path.write_bytes(bytes(preview_bytes))
-                preview_audio_path = str(preview_path)
-                preview_audio_bytes = len(preview_bytes)
-                created_files.append(preview_audio_path)
+                preview_audio_path, preview_audio_bytes, boost_files = _write_boosted_voice_output(bytes(preview_bytes), preview_path, metadata)
+                created_files.extend(boost_files)
             else:
                 metadata["preview_unavailable_reason"] = "provider_clone_succeeded_preview_unavailable"
             if callable(record_attempt_func):
@@ -537,9 +554,12 @@ async def process_voice_tts(
     if not payload:
         return VoiceTTSResult(False, provider_voice_id_used=resolution.provider_voice_id, voice_source=resolution.voice_source, provider_called=not fake, safe_public_message=minimax_voice_adapter.PUBLIC_SAFE_TTS_ERROR, admin_debug_summary="audio_empty")
     path = ""
+    metadata: dict[str, Any] = {}
     if output_path:
         target = Path(str(output_path))
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(payload)
-        path = str(target)
-    return VoiceTTSResult(True, audio_path=path, audio_bytes=len(payload), provider_voice_id_used=resolution.provider_voice_id, voice_source=resolution.voice_source, provider_called=not fake, charged_xu=0)
+        path, output_bytes, _boost_files = _write_boosted_voice_output(payload, target, metadata)
+        payload_size = output_bytes or len(payload)
+    else:
+        payload_size = len(payload)
+    return VoiceTTSResult(True, audio_path=path, audio_bytes=payload_size, provider_voice_id_used=resolution.provider_voice_id, voice_source=resolution.voice_source, provider_called=not fake, charged_xu=0, metadata=metadata)
