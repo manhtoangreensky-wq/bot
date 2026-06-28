@@ -61,10 +61,12 @@ def test_translation_dub_studio_simple_menu():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     assert labels == [
         "🎬 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
-        "⬅️ Quay lại",
+        "📄 Dịch file",
+        "🎧 Dịch audio",
+        "⬅️ Trung tâm dịch",
         "🏠 Menu chính",
     ]
 

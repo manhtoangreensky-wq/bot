@@ -32599,7 +32599,10 @@ def set_translation_menu_pending(user_id, source_type: str, **fields) -> None:
     }
     payload.update({
         key: value for key, value in fields.items()
-        if key in {"target_language", "return_action", "source_text", "confirm_token", "source_language", "output_type"}
+        if key in {
+            "target_language", "return_action", "source_text", "confirm_token",
+            "source_language", "output_type", "translation_context", "parent_menu",
+        }
     })
     TRANSLATION_MENU_PENDING[str(user_id)] = payload
 
@@ -32838,25 +32841,29 @@ def translation_pair_language_picker_keyboard(kind: str, mode: str, lang: str = 
 def translation_voice_menu_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) == "vi":
         return (
-            "🎙 <b>Dịch voice/audio</b>\n\n"
+            "🎧 <b>Dịch audio</b>\n\n"
             "1. Chọn ngôn ngữ đích.\n"
-            "2. Gửi hoặc reply voice/audio/video ngắn.\n"
-            "3. TOAN AAS bóc băng rồi dịch transcript nếu STT đang bật.\n\n"
-            "Nếu STT/TTS chưa sẵn sàng, bot báo guard rõ và chưa trừ Xu."
+            "2. Gửi hoặc reply voice/audio cần dịch.\n"
+            "3. TOAN AAS sẽ trả bản dịch theo lựa chọn của anh/chị.\n\n"
+            "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này."
         )
     return (
-        "🎙 <b>Translate voice/audio</b>\n\n"
-        "Choose a target language, then send or reply to a short voice/audio/video. STT/TTS-only parts are guarded and do not charge Xu before confirmation."
+        "🎧 <b>Translate audio</b>\n\n"
+        "Choose a target language, then send or reply to the voice/audio to translate. TOAN AAS has not processed or charged Xu yet."
     )
 
-def translation_voice_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def translation_voice_menu_keyboard(lang: str = "vi", parent: str = "media") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    if str(parent or "") == "media":
+        back = ("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", "menu|translation_video_factory")
+    else:
+        back = ("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub")
     return build_2col_keyboard(
         [
             ("📝 Chỉ text dịch" if is_vi else "📝 Text only", "tr_pick|voice"),
             ("🔊 Text + audio đọc" if is_vi else "🔊 Text + spoken audio", "menu|translation_output_voice"),
         ],
-        nav_back=("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub"),
+        nav_back=back,
         nav_main=True,
         lang=lang,
     )
@@ -58146,15 +58153,8 @@ def translation_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🌐 Dịch phụ đề / Video" if is_vi else "🌐 Video subtitles", callback_data="menu|translation_video_factory"),
-            InlineKeyboardButton("📄 Dịch file" if is_vi else "📄 Translate file", callback_data="menu|translation_document"),
-        ],
-        [
-            InlineKeyboardButton("🎧 Dịch audio" if is_vi else "🎧 Translate audio", callback_data="menu|translation_voice"),
-            InlineKeyboardButton("📄 Dịch phụ đề file" if is_vi else "📄 Translate subtitle file", callback_data="menu|translation_subtitle_file"),
-        ],
-        [
             InlineKeyboardButton("🌐 Dịch ngôn ngữ" if is_vi else "🌐 Language translation", callback_data="menu|translation_language_hub"),
+            InlineKeyboardButton("🎬 Phụ đề / Lồng tiếng" if is_vi else "🎬 Subtitles / dubbing", callback_data="menu|translation_video_factory"),
         ],
         [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="menu|main"),
@@ -58188,11 +58188,8 @@ def translation_language_hub_keyboard(lang: str = "vi", user_id=None) -> InlineK
         ("🔁 Dịch 2 chiều" if is_vi else "🔁 Two-way", "menu|translation_two_way"),
         ("💬 Hội thoại" if is_vi else "💬 Conversation", "menu|translation_live_conversation"),
         ("📝 Văn bản" if is_vi else "📝 Text", "menu|translation_text"),
-        ("📄 Tài liệu" if is_vi else "📄 Document", "menu|translation_document"),
-        ("🎧 Audio" if is_vi else "🎧 Audio", "menu|translation_voice"),
         ("⚙️ Ngôn ngữ" if is_vi else "⚙️ Languages", "menu|translation_language"),
         ("🌐 Dịch tự động" if is_vi else "🌐 Auto translate", "menu|translation_auto_target"),
-        ("🧾 Transcript" if is_vi else "🧾 Transcript", "menu|translation_transcript"),
     ]
     if translation_auto_translate_enabled(user_id):
         buttons.append(("⏹ Tắt dịch tự động" if is_vi else "⏹ Stop auto translate", "menu|translation_stop_session"))
@@ -58203,10 +58200,15 @@ def translation_language_hub_keyboard(lang: str = "vi", user_id=None) -> InlineK
         lang=lang,
     )
 
-def translation_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def translation_input_keyboard(lang: str = "vi", parent: str = "language") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    if str(parent or "") == "media":
+        back = ("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", "menu|translation_video_factory")
+    else:
+        back = ("⬅️ Dịch ngôn ngữ" if is_vi else "⬅️ Language translation", "menu|translation_language_hub")
     return build_2col_keyboard(
         [],
-        nav_back=("⬅️ Dịch ngôn ngữ" if normalize_user_language(lang) == "vi" else "⬅️ Language translation", "menu|translation_language_hub"),
+        nav_back=back,
         nav_main=True,
         lang=lang,
     )
@@ -65830,8 +65832,25 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         return translation_menu_text(lang), translation_menu_keyboard(lang)
     if action == "translation_video_factory":
         if user_id is not None:
-            set_video_dubbing_pending(user_id, "menu", origin="translation")
+            set_video_dubbing_pending(user_id, "menu", origin="translation", translation_context="media_center")
         return video_dubbing_menu_text(lang, "translation"), video_dubbing_menu_keyboard(lang, "translation")
+    if action == "translation_media_file":
+        if user_id is not None:
+            clear_video_dubbing_pending(user_id)
+            set_translation_menu_pending(user_id, "media_file", translation_context="translate_file")
+        text = (
+            "📄 <b>Dịch file</b>\n\n"
+            "Anh/chị gửi file cần dịch. Luồng này chỉ dùng cho file, không dùng cho video hoặc audio.\n\n"
+            "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này."
+            if normalize_user_language(lang) == "vi" else
+            "📄 <b>Translate file</b>\n\nSend the file to translate. This flow is for files only, not video or audio.\n\nTOAN AAS has not processed or charged Xu yet."
+        )
+        return text, translation_input_keyboard(lang, parent="media")
+    if action == "translation_media_audio":
+        if user_id is not None:
+            clear_video_dubbing_pending(user_id)
+            set_translation_menu_pending(user_id, "media_audio", translation_context="translate_audio")
+        return translation_voice_menu_text(lang), translation_voice_menu_keyboard(lang, parent="media")
     if action == "translation_subtitle_file":
         state = {
             "mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
@@ -65911,6 +65930,15 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return translation_menu_text("vi"), translation_menu_keyboard("vi")
     if action == "translation_video_factory":
         return video_dubbing_menu_text("vi", "translation"), video_dubbing_menu_keyboard("vi", "translation")
+    if action == "translation_media_file":
+        return (
+            "📄 <b>Dịch file</b>\n\n"
+            "Anh/chị gửi file cần dịch. Luồng này chỉ dùng cho file, không dùng cho video hoặc audio.\n\n"
+            "TOAN AAS chưa xử lý và chưa trừ Xu ở bước này.",
+            translation_input_keyboard("vi", parent="media"),
+        )
+    if action == "translation_media_audio":
+        return translation_voice_menu_text("vi"), translation_voice_menu_keyboard("vi", parent="media")
     if action == "translation_subtitle_file":
         state = {
             "mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
@@ -141932,10 +141960,66 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ),
     )
 
+async def handle_translation_media_pending_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if not update.effective_user or not update.message:
+        return False
+    uid = update.effective_user.id
+    pending = get_translation_menu_pending(uid)
+    ctx = str((pending or {}).get("translation_context") or "")
+    if ctx not in {"translate_file", "translate_audio"}:
+        return False
+    lang = get_user_language(uid) or "vi"
+    message = update.message
+    document = getattr(message, "document", None)
+    audio = getattr(message, "audio", None)
+    voice = getattr(message, "voice", None)
+    video = getattr(message, "video", None)
+    doc_mime = str(getattr(document, "mime_type", "") or "").lower()
+    doc_name = str(getattr(document, "file_name", "") or "").lower()
+    doc_is_audio = bool(doc_mime.startswith("audio/") or doc_name.endswith((".mp3", ".wav", ".m4a", ".ogg", ".oga", ".aac", ".flac")))
+    doc_is_video = bool(doc_mime.startswith("video/") or doc_name.endswith((".mp4", ".mov", ".mkv", ".webm", ".avi")))
+
+    if ctx == "translate_file":
+        if document and not doc_is_audio and not doc_is_video:
+            info, _source = doc_input_file_info(update)
+            if info:
+                save_translation_request(uid, "file", source_ref=info)
+                clear_translation_menu_pending(uid)
+                await show_translation_picker(update, "file")
+                return True
+        await message.reply_text(
+            "Luồng này chỉ dùng để dịch file. Anh/chị hãy chọn Dịch audio hoặc Phụ đề / Lồng tiếng nếu cần xử lý video hoặc audio.",
+            reply_markup=translation_input_keyboard(lang, parent="media"),
+        )
+        return True
+
+    if ctx == "translate_audio":
+        if video or doc_is_video:
+            await message.reply_text(
+                "Luồng này chỉ dùng để dịch audio. Nếu muốn xử lý video, anh/chị hãy chọn các nút video trong Phụ đề / Lồng tiếng.",
+                reply_markup=translation_voice_menu_keyboard(lang, parent="media"),
+            )
+            return True
+        if audio or voice or doc_is_audio:
+            cache_recent_media_state(update)
+            remember_last_media(update)
+            save_translation_request(uid, "voice")
+            clear_translation_menu_pending(uid)
+            await show_translation_picker(update, "voice")
+            return True
+        await message.reply_text(
+            "Luồng này chỉ dùng để dịch audio. Anh/chị gửi voice hoặc file âm thanh cần dịch.",
+            reply_markup=translation_voice_menu_keyboard(lang, parent="media"),
+        )
+        return True
+    return False
+
 async def handle_document_cache_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_video_dubbing_pending_upload(update, context):
         return
     if await handle_video_product_pending_media(update, context):
+        return
+    if await handle_translation_media_pending_upload(update, context):
         return
     if await handle_translation_studio_lost_state_media(update, context):
         return
@@ -142046,6 +142130,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await handle_pending_admin_tool_test_media(update, context):
         return
     if await handle_video_dubbing_pending_upload(update, context):
+        return
+    if await handle_translation_media_pending_upload(update, context):
         return
     if await handle_translation_studio_lost_state_media(update, context):
         return
@@ -142180,7 +142266,7 @@ def video_dubbing_video_only_upload_guard_text(mode: str = "", lang: str = "vi")
             "This screen only processes videos and returns video results. "
             "Please send a video file to continue. TOAN AAS has not processed anything and has not charged Xu."
         )
-    label = VIDEO_TRANSLATE_MODES.get(normalize_video_translate_mode(mode), "Dịch video")
+    label = VIDEO_TRANSLATE_MODES.get(normalize_video_translate_mode(mode), "Phụ đề / Lồng tiếng")
     return (
         f"🎬 <b>{html.escape(label)}</b>\n\n"
         "Màn này chỉ xử lý video và kết quả chính là video. "
@@ -142194,7 +142280,7 @@ def video_dubbing_video_only_upload_guard_keyboard(lang: str = "vi", mode: str =
     if normalize_video_translate_mode(mode) == VIDEO_SUBTITLE_MODE_TRANSLATE:
         rows.append([InlineKeyboardButton("🎬 Tạo phụ đề tự động" if is_vi else "🎬 Auto subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_CREATE}")])
     rows.append([
-        InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type"),
+        InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="videodub|back_type"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -142421,18 +142507,18 @@ def clear_video_dubbing_pending(user_id) -> bool:
 def video_dubbing_menu_text(lang: str = "vi", origin: str = "video") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "🌐 <b>Video subtitle / dubbing</b>\n\n"
-            "Choose how TOAN AAS should process the video. Each button is its own workflow, and TOAN AAS shows the price and asks for confirmation before processing."
+            "🎬 <b>Subtitles / dubbing</b>\n\n"
+            "Choose the type of content to process."
         )
     return (
-        "🌐 <b>Dịch phụ đề / Video</b>\n\n"
-        "Anh/chị chọn cách xử lý video. Mỗi nút là một quy trình riêng, TOAN AAS sẽ báo giá và hỏi xác nhận trước khi xử lý."
+        "🎬 <b>Phụ đề / Lồng tiếng</b>\n\n"
+        "Anh/chị chọn loại cần xử lý."
     )
 
 def video_dubbing_back_target(origin: str = "video") -> tuple[str, str]:
     origin = str(origin or "").strip().lower()
     if origin == "translation":
-        return "⬅️ Quay lại", "menu|translate"
+        return "⬅️ Trung tâm dịch", "menu|translate"
     if origin == "video_addon":
         return "⬅️ Tùy chọn video", "videodub|return_origin"
     return "⬅️ Quay lại Video", "menu|main_video"
@@ -142490,7 +142576,7 @@ def video_dubbing_public_locked_keyboard(lang: str = "vi") -> InlineKeyboardMark
             InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_TRANSLATE}"),
         ],
         [
-            InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type"),
+            InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="videodub|back_type"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -142540,15 +142626,19 @@ def video_dubbing_menu_keyboard(lang: str = "vi", origin: str = "video") -> Inli
     is_vi = normalize_user_language(lang) == "vi"
     back_label, back_callback = video_dubbing_back_target(origin)
     if not is_vi:
-        back_label = "⬅️ Back to Translation" if str(origin or "").strip().lower() == "translation" else "⬅️ Back to Video"
+        back_label = "⬅️ Translation center" if str(origin or "").strip().lower() == "translation" else "⬅️ Back to Video"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🎬 Tạo phụ đề tự động" if is_vi else "🎬 Auto subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_CREATE}"),
-            InlineKeyboardButton("🌐 Dịch phụ đề" if is_vi else "🌐 Translate subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_TRANSLATE}"),
+            InlineKeyboardButton("🌐 Dịch phụ đề video" if is_vi else "🌐 Translate video subtitles", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_TRANSLATE}"),
         ],
         [
-            InlineKeyboardButton("🎙 Lồng tiếng" if is_vi else "🎙 Dubbing", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_DUB}"),
+            InlineKeyboardButton("🎙 Lồng tiếng video" if is_vi else "🎙 Video dubbing", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_DUB}"),
             InlineKeyboardButton("🎞 Phụ đề + Lồng tiếng" if is_vi else "🎞 Subtitles + dubbing", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"),
+        ],
+        [
+            InlineKeyboardButton("📄 Dịch file" if is_vi else "📄 Translate file", callback_data="menu|translation_media_file"),
+            InlineKeyboardButton("🎧 Dịch audio" if is_vi else "🎧 Translate audio", callback_data="menu|translation_media_audio"),
         ],
         [
             InlineKeyboardButton(back_label, callback_data=back_callback),
@@ -142624,7 +142714,8 @@ def video_dubbing_source_text(state: dict | None = None, lang: str = "vi") -> st
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return (
             "🎞 <b>Phụ đề + Lồng tiếng</b>\n\n"
-            "Anh/chị gửi video cần xử lý. TOAN AAS sẽ xử lý video thành bản hoàn chỉnh có phụ đề đã dịch và giọng lồng tiếng."
+            "Anh/chị chọn video đã có phụ đề hay chưa có phụ đề.\n"
+            "TOAN AAS sẽ xử lý video theo đúng từng bước, báo giá và hỏi xác nhận trước khi xử lý."
         )
     return "📥 <b>Chọn nguồn</b>\n\nGửi file nguồn cho đúng công cụ đã chọn."
 
@@ -142642,7 +142733,7 @@ def video_dubbing_source_keyboard(lang: str = "vi", state: dict | None = None) -
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📤 Gửi video" if is_vi else "📤 Send video", callback_data="videodub|source_upload")],
             [
-                InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type"),
+                InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="videodub|back_type"),
                 InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
             ],
         ])
@@ -142650,14 +142741,17 @@ def video_dubbing_source_keyboard(lang: str = "vi", state: dict | None = None) -
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("📤 Gửi video đã có phụ đề" if is_vi else "📤 Send subtitled video", callback_data="videodub|source_upload")],
             [
-                InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type"),
+                InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="videodub|back_type"),
                 InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
             ],
         ])
     elif mode == VIDEO_SUBTITLE_MODE_DUB:
         items = [("📤 Gửi video cần lồng tiếng" if is_vi else "📤 Send video to dub", "videodub|source_upload")]
     elif mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-        items = [("📤 Gửi video cần xử lý" if is_vi else "📤 Send video", "videodub|source_upload")]
+        items = [
+            ("🎞 Video đã có phụ đề" if is_vi else "🎞 Video with subtitles", f"videodub|path|{VIDEO_DUBBING_FLOW_HAS_SUBTITLE}"),
+            ("🎧 Video chưa có phụ đề" if is_vi else "🎧 Video without subtitles", f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"),
+        ]
     else:
         items = [("📤 Gửi video" if is_vi else "📤 Send video", "videodub|source_upload")]
     if str(state.get("origin") or "") == "video_addon":
@@ -142665,7 +142759,7 @@ def video_dubbing_source_keyboard(lang: str = "vi", state: dict | None = None) -
     return video_v6_keyboard(
         items,
         lang,
-        back=("⬅️ Dịch video" if is_vi else "⬅️ Video translation", "videodub|back_type"),
+        back=("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", "videodub|back_type"),
     )
 
 def video_dubbing_recent_source(user_id) -> dict:
@@ -142870,7 +142964,7 @@ def social_link_import_confirm_text(state: dict | None = None, lang: str = "vi")
 def social_link_import_input_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type")],
+        [InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="videodub|back_type")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -142880,36 +142974,36 @@ def social_link_import_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarku
         [InlineKeyboardButton("✅ Tải video" if is_vi else "✅ Import video", callback_data="videodub|link_confirm")],
         [InlineKeyboardButton("✏️ Gửi link khác" if is_vi else "✏️ Send another link", callback_data="videodub|link_other")],
         [
-            InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type"),
+            InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="videodub|back_type"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
 
 def social_link_import_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "Import from link is not ready. TOAN AAS has not charged Xu. You can send the video/audio file directly."
-    return "Tải video từ link đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu. Bạn có thể gửi video/audio trực tiếp."
+        return "Import from link is not ready. TOAN AAS has not charged Xu. You can send the video file directly."
+    return "Tải video từ link đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu. Bạn có thể gửi video trực tiếp."
 
 def social_link_import_guard_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📎 Gửi video/audio" if is_vi else "📎 Send video/audio", callback_data="videodub|link_upload_direct"),
-            InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type"),
+            InlineKeyboardButton("📎 Gửi video" if is_vi else "📎 Send video", callback_data="videodub|link_upload_direct"),
+            InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="videodub|back_type"),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 def social_link_direct_upload_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "📎 Send the video/audio file directly. TOAN AAS will save it as the source for the video translation tools. No Xu is charged at this step."
-    return "📎 Gửi video/audio trực tiếp vào chat này. TOAN AAS sẽ lưu làm nguồn cho các công cụ dịch video. Bước này chưa trừ Xu."
+        return "📎 Send the video file directly. TOAN AAS will save it as the source for the video translation tools. No Xu is charged at this step."
+    return "📎 Gửi video trực tiếp vào chat này. TOAN AAS sẽ lưu làm nguồn cho các công cụ dịch video. Bước này chưa trừ Xu."
 
 def social_link_import_status_keyboard(job_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Kiểm tra tải video" if is_vi else "🔄 Check import", callback_data=f"videodub|link_status|{int(job_id)}")],
-        [InlineKeyboardButton("⬅️ Dịch video" if is_vi else "⬅️ Video translation", callback_data="videodub|back_type")],
+        [InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data="videodub|back_type")],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -143848,7 +143942,7 @@ def video_dubbing_pricing_keyboard(lang: str = "vi", origin: str = "video") -> I
     is_vi = normalize_user_language(lang) == "vi"
     start_callback = "videodub|start|translation" if str(origin or "").strip().lower() == "translation" else "videodub|start"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 Dịch video" if is_vi else "🎬 Video translation", callback_data=start_callback)],
+        [InlineKeyboardButton("🎬 Phụ đề / Lồng tiếng" if is_vi else "🎬 Subtitles / dubbing", callback_data=start_callback)],
         [InlineKeyboardButton("⬅️ Quay lại bảng giá" if is_vi else "⬅️ Back to pricing", callback_data="pricing|video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -143931,15 +144025,21 @@ def video_dubbing_original_subtitle_confirm_text(state: dict | None = None, lang
         "TOAN AAS chưa xử lý file và chưa trừ Xu ở bước này."
     )
 
-def video_dubbing_original_subtitle_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def video_dubbing_original_subtitle_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
-    return InlineKeyboardMarkup([
+    mode = normalize_video_translate_mode((state or {}).get("mode") or (state or {}).get("video_processing_mode"))
+    rows = [
         [InlineKeyboardButton("✅ Tạo phụ đề gốc" if is_vi else "✅ Create original subtitles", callback_data="videodub|confirm_original_subtitle")],
+    ]
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        rows.append([InlineKeyboardButton("⏭ Bỏ qua" if is_vi else "⏭ Skip", callback_data="videodub|skip_original_subtitle")])
+    rows.append(
         [
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_upload"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-        ],
-    ])
+        ]
+    )
+    return InlineKeyboardMarkup(rows)
 
 def video_dubbing_language_text(state: dict | None = None, lang: str = "vi") -> str:
     mode = normalize_video_translate_mode(
@@ -148011,7 +148111,7 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         await update.message.reply_text(
             video_dubbing_original_subtitle_confirm_text(state, lang),
             parse_mode="HTML",
-            reply_markup=video_dubbing_original_subtitle_confirm_keyboard(lang),
+            reply_markup=video_dubbing_original_subtitle_confirm_keyboard(lang, state),
         )
         return True
     if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE and not subtitle_info:
@@ -148193,7 +148293,7 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         await update.message.reply_text(
             video_dubbing_original_subtitle_confirm_text(state, lang),
             parse_mode="HTML",
-            reply_markup=video_dubbing_original_subtitle_confirm_keyboard(lang),
+            reply_markup=video_dubbing_original_subtitle_confirm_keyboard(lang, state),
         )
         return True
     if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
@@ -148960,6 +149060,18 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, video_dubbing_menu_text(lang, origin), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         state = set_video_dubbing_pending(uid, "await_video")
         return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
+    if action == "skip_original_subtitle":
+        if mode != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            return await safe_edit_or_send(query, video_dubbing_source_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
+        state = set_video_dubbing_pending(
+            uid,
+            "voice",
+            translate_requested="0",
+            target_language="Giữ nguyên ngôn ngữ gốc" if normalize_user_language(lang) == "vi" else "Keep original language",
+            source_language="auto",
+            processing="0",
+        )
+        return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
     if action == "confirm_original_subtitle":
         if not video_dubbing_has_media(state) or video_dubbing_is_subtitle_text_source(state):
             state = set_video_dubbing_pending(uid, "source", processing="0")
@@ -149002,7 +149114,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if not source:
             return await safe_edit_or_send(
                 query,
-                "📂 Chưa có video/audio gần đây trong phiên. Hãy gửi file trực tiếp hoặc dùng Tải video từ link ở menu Dịch video. TOAN AAS chưa trừ Xu.",
+                "📂 Chưa có video gần đây trong phiên. Hãy gửi video trực tiếp trong Phụ đề / Lồng tiếng. TOAN AAS chưa trừ Xu.",
                 reply_markup=video_dubbing_source_keyboard(lang, state),
             )
         state = set_video_dubbing_pending(uid, "source", **source)
@@ -149013,7 +149125,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if not source:
             return await safe_edit_or_send(
                 query,
-                "🕘 Chưa có phụ đề vừa tạo trong phiên này. Hãy gửi video/audio hoặc file SRT/VTT/TXT.",
+                "🕘 Chưa có phụ đề vừa tạo trong phiên này. Hãy gửi video hoặc dùng luồng Dịch file trong Phụ đề / Lồng tiếng.",
                 reply_markup=video_dubbing_source_keyboard(lang, state),
             )
         state = set_video_dubbing_pending(uid, "source", **source)
@@ -150577,6 +150689,8 @@ async def handle_media_cache_only(update: Update, context: ContextTypes.DEFAULT_
     if await handle_video_dubbing_pending_upload(update, context):
         return
     if await handle_video_product_pending_media(update, context):
+        return
+    if await handle_translation_media_pending_upload(update, context):
         return
     if await handle_translation_studio_lost_state_media(update, context):
         return

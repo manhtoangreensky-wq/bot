@@ -7683,8 +7683,8 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     dub_labels = [button.text for row in bot.video_dubbing_menu_keyboard("vi").inline_keyboard for button in row]
     assert {
         "🎬 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
     }.issubset(set(dub_labels))
     assert "📄 Dịch file phụ đề" not in dub_labels
@@ -7899,9 +7899,10 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         callbacks = [button.callback_data for row in result["reply_markup"].inline_keyboard for button in row]
         assert "videodub|link_start" not in callbacks
         if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            assert "videodub|source_upload" in callbacks
-            assert "videodub|path|has_subtitle" not in callbacks
-            assert "videodub|path|no_subtitle" not in callbacks
+            assert "videodub|source_upload" not in callbacks
+            assert "videodub|path|has_subtitle" in callbacks
+            assert "videodub|path|no_subtitle" in callbacks
+            result = asyncio.run(press("videodub|path|no_subtitle", uid))
         result = asyncio.run(press("videodub|source_upload", uid))
         state = bot.get_video_dubbing_pending(uid)
         assert state["step"] == "await_video"

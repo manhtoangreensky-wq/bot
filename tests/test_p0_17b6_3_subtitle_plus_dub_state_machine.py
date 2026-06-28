@@ -155,9 +155,9 @@ def test_subtitle_plus_dub_creates_original_subtitle_first():
     text = bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}, "vi")
     labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
     assert "xử lý video" in text.lower()
-    assert labels[0] == "📤 Gửi video cần xử lý"
-    assert "🎞 Video đã có phụ đề" not in labels
-    assert "🎧 Video chỉ có tiếng" not in labels
+    assert "🎞 Video đã có phụ đề" in labels
+    assert "🎧 Video chưa có phụ đề" in labels
+    assert "📤 Gửi video cần xử lý" not in labels
 
 
 def test_subtitle_plus_dub_no_confirm_full_before_original_subtitle():

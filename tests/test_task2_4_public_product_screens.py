@@ -298,8 +298,8 @@ def test_link_import_not_exposed_in_b6_studio_but_guard_stays_clean():
     assert "videodub|link_start" not in _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
     guard = bot.social_link_import_guard_text("vi")
     labels = _labels(bot.social_link_import_guard_keyboard("vi"))
-    assert guard == "Tải video từ link đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu. Bạn có thể gửi video/audio trực tiếp."
-    assert labels == ["📎 Gửi video/audio", "⬅️ Dịch video", "🏠 Menu chính"]
+    assert guard == "Tải video từ link đang bảo trì/nâng cấp, xin vui lòng thử lại sau. TOAN AAS chưa xử lý và chưa trừ Xu. Bạn có thể gửi video trực tiếp."
+    assert labels == ["📎 Gửi video", "⬅️ Phụ đề / Lồng tiếng", "🏠 Menu chính"]
 
 
 def test_link_import_provider_off_clean_guard(monkeypatch):

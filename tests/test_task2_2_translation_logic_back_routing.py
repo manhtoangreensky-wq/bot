@@ -90,7 +90,11 @@ def test_language_tools_not_deleted():
     assert "menu|translation_two_way" in callbacks
     assert "menu|translation_live_conversation" in callbacks
     assert "menu|translation_text" in callbacks
-    assert "menu|translation_voice" in callbacks
+    assert "menu|translation_voice" not in callbacks
+    _, media_markup = bot.localized_menu_content("translation_video_factory", False, "vi", user_id=822004)
+    media_callbacks = _callbacks(media_markup)
+    assert "menu|translation_media_file" in media_callbacks
+    assert "menu|translation_media_audio" in media_callbacks
 
 
 def test_auto_subtitle_capcut_style_original_language(monkeypatch):
