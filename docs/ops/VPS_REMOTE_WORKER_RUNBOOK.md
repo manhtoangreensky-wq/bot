@@ -73,7 +73,7 @@ python remote_worker.py --admin-canary --once
 ```
 
 - Chi start service sau khi staging/dry-run pass va release owner xac nhan video flow san sang.
-- Van chua route production video jobs cho VPS cho toi khi B14.5 video flow/queue/status on dinh.
+- P0.18D.4 owner-product lane chi claim owner/admin product video. Public product lane van khoa neu `REMOTE_WORKER_PUBLIC_ENABLED` chua bat.
 
 ## W3 staging handshake checklist
 
@@ -100,8 +100,8 @@ python remote_worker.py --dry-run --once
 
 Only after all pass:
 
-- `sudo systemctl start toanaas-worker`
-- Still do not route production jobs until B14.5 video flow/queue/status is stable.
+- `sudo systemctl start toanaas-worker-admin-canary`
+- Do not start public product worker until owner approval and `REMOTE_WORKER_PUBLIC_ENABLED=true`.
 
 ## W4 safe canary checklist
 
@@ -190,11 +190,95 @@ Warnings:
 - Do not set `REMOTE_WORKER_PUBLIC_ENABLED=true` yet.
 - W6/P0.18A se quyet dinh controlled production worker sau live QA.
 
+## P0.18D.4 owner product worker live claim
+
+P0.18D.4 tach service theo lane de tranh tinh trang VPS con heartbeat nhung khong co claim loop dang chay.
+
+Repo path mac dinh:
+
+```bash
+cd /opt/toanaas/bot
+pwd
+git rev-parse HEAD
+git fetch origin
+git pull --ff-only origin main
+.venv/bin/python --version
+test -x .venv/bin/python && echo venv_ok
+```
+
+Env check tren VPS, khong in token:
+
+```bash
+grep -E '^(BOT_API_URL|LOCAL_WORKER_TOKEN|WORKER_ID)=' /etc/toanaas-worker.env | sed 's/=.*/=configured/'
+```
+
+Service lanes:
+
+```text
+toanaas-worker-admin-canary.service        -> python remote_worker.py --admin-canary
+toanaas-worker-owner-product-video.service -> python remote_worker.py --owner-product-video
+toanaas-worker-product-video.service       -> python remote_worker.py --product-video
+toanaas-worker-admin-video.service         -> python remote_worker.py --admin-video
+```
+
+Install or refresh systemd files:
+
+```bash
+cd /opt/toanaas/bot
+sudo bash scripts/vps/install_remote_worker_service.sh
+sudo systemctl daemon-reload
+```
+
+Enable/status/journal owner product worker:
+
+```bash
+sudo systemctl enable --now toanaas-worker-owner-product-video
+sudo systemctl status toanaas-worker-owner-product-video --no-pager -l
+sudo journalctl -u toanaas-worker-owner-product-video -n 100 --no-pager -l
+sudo systemctl restart toanaas-worker-owner-product-video
+```
+
+Enable/status/journal admin canary worker:
+
+```bash
+sudo systemctl enable --now toanaas-worker-admin-canary
+sudo systemctl status toanaas-worker-admin-canary --no-pager -l
+sudo journalctl -u toanaas-worker-admin-canary -n 100 --no-pager -l
+sudo systemctl restart toanaas-worker-admin-canary
+```
+
+Public product worker:
+
+```bash
+sudo systemctl status toanaas-worker-product-video --no-pager -l
+```
+
+Chi `enable --now toanaas-worker-product-video` sau khi owner bat `REMOTE_WORKER_PUBLIC_ENABLED=true` va chap nhan cho VPS claim public product jobs.
+
+Admin delivery/test worker:
+
+```bash
+sudo systemctl status toanaas-worker-admin-video --no-pager -l
+```
+
+Bot Telegram chi co the hien thi runbook/status. Bot khong the chay `systemctl` hoac `journalctl`; cac lenh nay chi chay tren terminal VPS.
+
+Telegram admin checks sau khi service chay:
+
+```text
+/video_worker_status
+/tool_test_video_product_worker_claim --no-charge
+/remote_worker_prod_canary --no-charge
+/remote_worker_prod_canary_status RW-PROD-CANARY-<id>
+```
+
 ## Daily check
 
 ```bash
-sudo systemctl status toanaas-worker -n 80
-sudo journalctl -u toanaas-worker --since "24 hours ago" --no-pager
+sudo systemctl status toanaas-worker-owner-product-video --no-pager -l
+sudo journalctl -u toanaas-worker-owner-product-video --since "24 hours ago" --no-pager -l
+sudo systemctl status toanaas-worker-admin-canary --no-pager -l
+sudo journalctl -u toanaas-worker-admin-canary --since "24 hours ago" --no-pager -l
 sudo bash /opt/toanaas/bot/scripts/vps/remote_worker_doctor.sh
 df -h
 free -h
@@ -231,8 +315,9 @@ Kiem tra:
 Neu deploy thay doi worker contract, restart VPS worker:
 
 ```bash
-sudo systemctl restart toanaas-worker
-sudo journalctl -u toanaas-worker -f
+sudo systemctl restart toanaas-worker-owner-product-video
+sudo systemctl restart toanaas-worker-admin-canary
+sudo journalctl -u toanaas-worker-owner-product-video -f
 ```
 
 ## How to stop worker
@@ -240,19 +325,26 @@ sudo journalctl -u toanaas-worker -f
 Dung ngay worker:
 
 ```bash
-sudo systemctl stop toanaas-worker
+sudo systemctl stop toanaas-worker-owner-product-video
+sudo systemctl stop toanaas-worker-admin-canary
+sudo systemctl stop toanaas-worker-product-video
+sudo systemctl stop toanaas-worker-admin-video
 ```
 
 Chan auto-start sau reboot:
 
 ```bash
-sudo systemctl disable toanaas-worker
+sudo systemctl disable toanaas-worker-owner-product-video
+sudo systemctl disable toanaas-worker-admin-canary
+sudo systemctl disable toanaas-worker-product-video
+sudo systemctl disable toanaas-worker-admin-video
 ```
 
 Kiem tra da stop:
 
 ```bash
-sudo systemctl status toanaas-worker -n 40
+sudo systemctl status toanaas-worker-owner-product-video --no-pager -l
+sudo systemctl status toanaas-worker-admin-canary --no-pager -l
 ```
 
 ## How to rotate token
@@ -260,7 +352,10 @@ sudo systemctl status toanaas-worker -n 40
 1. Stop worker:
 
 ```bash
-sudo systemctl stop toanaas-worker
+sudo systemctl stop toanaas-worker-owner-product-video
+sudo systemctl stop toanaas-worker-admin-canary
+sudo systemctl stop toanaas-worker-product-video
+sudo systemctl stop toanaas-worker-admin-video
 ```
 
 2. Tao token moi tren Railway ENV `LOCAL_WORKER_TOKEN`.
@@ -287,7 +382,8 @@ sudo bash /opt/toanaas/bot/scripts/vps/remote_worker_doctor.sh
 7. Start lai worker khi dry-run pass:
 
 ```bash
-sudo systemctl start toanaas-worker
+sudo systemctl start toanaas-worker-owner-product-video
+sudo systemctl start toanaas-worker-admin-canary
 ```
 
 ## How to inspect logs
@@ -295,19 +391,20 @@ sudo systemctl start toanaas-worker
 Follow log realtime:
 
 ```bash
-sudo journalctl -u toanaas-worker -f
+sudo journalctl -u toanaas-worker-owner-product-video -f
 ```
 
 Xem 200 dong gan nhat:
 
 ```bash
-sudo journalctl -u toanaas-worker -n 200 --no-pager
+sudo journalctl -u toanaas-worker-owner-product-video -n 200 --no-pager -l
+sudo journalctl -u toanaas-worker-admin-canary -n 200 --no-pager -l
 ```
 
 Loc tu lan boot hien tai:
 
 ```bash
-sudo journalctl -u toanaas-worker -b --no-pager
+sudo journalctl -u toanaas-worker-owner-product-video -b --no-pager -l
 ```
 
 Khong paste log cong khai neu co du lieu user, duong dan noi bo, token, provider key, hoac payload nhay cam.
@@ -317,13 +414,15 @@ Khong paste log cong khai neu co du lieu user, duong dan noi bo, token, provider
 1. Kiem tra service:
 
 ```bash
-sudo systemctl status toanaas-worker -n 80
+sudo systemctl status toanaas-worker-owner-product-video --no-pager -l
+sudo systemctl status toanaas-worker-admin-canary --no-pager -l
 ```
 
 2. Kiem tra log:
 
 ```bash
-sudo journalctl -u toanaas-worker -n 200 --no-pager
+sudo journalctl -u toanaas-worker-owner-product-video -n 200 --no-pager -l
+sudo journalctl -u toanaas-worker-admin-canary -n 200 --no-pager -l
 ```
 
 3. Kiem tra disk/tmp:
@@ -336,7 +435,8 @@ du -sh /opt/toanaas/tmp || true
 4. Neu worker lap loi auth:
 
 ```bash
-sudo systemctl stop toanaas-worker
+sudo systemctl stop toanaas-worker-owner-product-video
+sudo systemctl stop toanaas-worker-admin-canary
 ```
 
 Sau do rotate token hoac sua `/etc/toanaas-worker.env`.
@@ -348,7 +448,8 @@ Sau do rotate token hoac sua `/etc/toanaas-worker.env`.
 9. Khi da sua xong:
 
 ```bash
-sudo systemctl restart toanaas-worker
+sudo systemctl restart toanaas-worker-owner-product-video
+sudo systemctl restart toanaas-worker-admin-canary
 ```
 
 ## How to avoid duplicate workers
@@ -359,7 +460,8 @@ sudo systemctl restart toanaas-worker
 
 ```bash
 pgrep -af remote_worker.py || true
-sudo systemctl status toanaas-worker -n 40
+sudo systemctl status toanaas-worker-owner-product-video --no-pager -l
+sudo systemctl status toanaas-worker-admin-canary --no-pager -l
 ```
 
 - Neu clone VPS/image, doi `WORKER_ID` truoc khi start.
@@ -368,7 +470,7 @@ sudo systemctl status toanaas-worker -n 40
 
 Khong start hoac phai stop worker neu:
 
-- Video flow B14.5 not stable.
+- Owner has not approved this worker lane for the current release.
 - `LOCAL_WORKER_TOKEN` missing.
 - `/tool_test_remote_worker_ping --no-charge` fails.
 - `python remote_worker.py --dry-run --once` fails.

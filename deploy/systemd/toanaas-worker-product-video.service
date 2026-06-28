@@ -1,0 +1,14 @@
+[Unit]
+Description=TOAN AAS Public Product Video Worker
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/toanaas/bot
+EnvironmentFile=/etc/toanaas-worker.env
+ExecStart=/opt/toanaas/bot/.venv/bin/python /opt/toanaas/bot/remote_worker.py --product-video
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
