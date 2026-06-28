@@ -30,7 +30,7 @@ def test_voice_menu_compact(monkeypatch):
 
 def test_music_menu_compact():
     assert _rows(bot.music_hub_keyboard("vi")) == [
-        ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời"],
+        ["🎼 Tạo nhạc nền", "🎤 Bài hát có lời"],
         ["📂 Kho nhạc", "🎚 Cắt/ghép nhạc"],
         ["⬅️ Studio âm thanh", "🏠 Menu chính"],
     ]

@@ -262,7 +262,10 @@ def test_public_status_voice_on_only():
     assert "• Custom voice: <code>ON</code>" in text
     assert "• Video generation: <code>unchanged</code>" in text
     assert "• Subtitle/dub: <code>unchanged</code>" in text
-    assert "• Music/Suno: <code>unchanged</code>" in text
+    assert "• Music: <code>ON</code>" in text
+    assert "• AI Music: <code>ON</code>" in text
+    assert "• AI Song: <code>ON</code>" in text
+    assert "• Music Vault: <code>ON</code>" in text
 
 
 def test_no_admin_provider_debug_words_in_voice_product_ui():

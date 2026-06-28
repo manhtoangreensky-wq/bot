@@ -157,7 +157,7 @@ def test_audio_music_menu_simple(monkeypatch):
     labels = _labels(query.outputs[-1]["reply_markup"])
 
     assert "Bạn muốn làm gì?" in query.outputs[-1]["text"]
-    assert labels[:4] == ["🎵 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]
+    assert labels[:4] == ["🎼 Tạo nhạc nền", "🎤 Bài hát có lời", "📂 Kho nhạc", "🎚 Cắt/ghép nhạc"]
     assert "🚫 Không thêm nhạc" not in labels
 
 
@@ -170,7 +170,9 @@ def test_audio_music_create_asks_prompt(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
 
     assert "Tạo nhạc nền" in query.outputs[-1]["text"]
-    assert "Video bán hàng" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "🎵 Cơ bản — 100 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "🎶 Tiêu chuẩn — 200 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "💎 Cao cấp — 300 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
 
 
 def test_no_old_voice_studio_public():

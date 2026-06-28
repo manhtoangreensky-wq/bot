@@ -61,9 +61,11 @@ def test_music_vocal_menu_goes_direct_to_topic_selection(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(update, SimpleNamespace()))
     text = query.message.outputs[-1]["text"]
 
-    assert "🎤 <b>Tạo bài hát có lời</b>" in text
-    assert "Sản phẩm: <b>Bài hát có lời AI</b>" in text
-    assert "Bạn muốn bài hát nói về điều gì" in text
+    assert "🎤 <b>Bài hát có lời</b>" in text
+    assert "Chọn gói muốn tạo" in text
+    assert "🎵 Cơ bản — 100 Xu" in "\n".join(_labels(query.message.outputs[-1]["reply_markup"]))
+    assert "🎶 Tiêu chuẩn — 200 Xu" in "\n".join(_labels(query.message.outputs[-1]["reply_markup"]))
+    assert "💎 Cao cấp — 300 Xu" in "\n".join(_labels(query.message.outputs[-1]["reply_markup"]))
     assert "Bài hát có lời AI: 800 Xu" not in text
     assert "Nghe thử" not in text
 
