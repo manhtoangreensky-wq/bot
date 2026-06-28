@@ -45847,7 +45847,82 @@ def direct_minimax_tts_url() -> str:
         url = f"{url}{separator}GroupId={quote(str(MINIMAX_GROUP_ID or ''), safe='')}"
     return url
 
-def minimax_tts_payload(text: str, voice_id: str = "", voice_style: str = "") -> dict:
+VOICE_TTS_DEFAULT_SPEED = "1.0"
+VOICE_TTS_MIN_SPEED = 0.1
+VOICE_TTS_MAX_SPEED = 2.0
+VOICE_TTS_DEFAULT_VOLUME_PERCENT = 100
+VOICE_TTS_MIN_VOLUME_PERCENT = 0
+VOICE_TTS_MAX_VOLUME_PERCENT = 200
+
+
+def parse_voice_tts_speed_input(value: str | int | float) -> str:
+    raw = str(value if value is not None else "").strip().lower().replace(",", ".")
+    aliases = {
+        "": VOICE_TTS_DEFAULT_SPEED,
+        "default": VOICE_TTS_DEFAULT_SPEED,
+        "normal": VOICE_TTS_DEFAULT_SPEED,
+        "slow": "0.85",
+        "fast": "1.2",
+    }
+    raw = aliases.get(raw, raw)
+    if raw.endswith("x"):
+        raw = raw[:-1].strip()
+    try:
+        number = float(raw)
+    except Exception as exc:
+        raise ValueError("invalid_speed") from exc
+    if number < VOICE_TTS_MIN_SPEED or number > VOICE_TTS_MAX_SPEED:
+        raise ValueError("speed_out_of_range")
+    normalized = f"{number:.2f}".rstrip("0").rstrip(".")
+    return "1.0" if normalized == "1" else normalized
+
+
+def parse_voice_tts_volume_input(value: str | int | float) -> int:
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError("volume_integer_required")
+    raw = str(value if value is not None else "").strip().lower().replace(" ", "")
+    if raw.endswith("%"):
+        raw = raw[:-1].strip()
+    if "." in raw or "," in raw:
+        raise ValueError("volume_integer_required")
+    if not re.fullmatch(r"\d+", raw or ""):
+        raise ValueError("invalid_volume")
+    percent = int(raw)
+    if percent < VOICE_TTS_MIN_VOLUME_PERCENT or percent > VOICE_TTS_MAX_VOLUME_PERCENT:
+        raise ValueError("volume_out_of_range")
+    return percent
+
+
+def voice_tts_speed_value(value: str | int | float | None = None) -> str:
+    try:
+        return parse_voice_tts_speed_input(VOICE_TTS_DEFAULT_SPEED if value is None else value)
+    except Exception:
+        return VOICE_TTS_DEFAULT_SPEED
+
+
+def voice_tts_volume_percent(value: str | int | float | None = None) -> int:
+    try:
+        return parse_voice_tts_volume_input(VOICE_TTS_DEFAULT_VOLUME_PERCENT if value is None else value)
+    except Exception:
+        return VOICE_TTS_DEFAULT_VOLUME_PERCENT
+
+
+def voice_tts_effective_volume_factor(volume_percent: str | int | float | None = None) -> float:
+    percent = voice_tts_volume_percent(volume_percent)
+    return round(2.0 * float(percent) / 100.0, 3)
+
+
+def voice_tts_provider_speed(value: str | int | float | None = None) -> float:
+    return float(parse_voice_tts_speed_input(VOICE_TTS_DEFAULT_SPEED if value is None else value))
+
+
+def voice_tts_edge_rate(value: str | int | float | None = None) -> str:
+    speed = voice_tts_provider_speed(value)
+    percent = int(round((speed - 1.0) * 100))
+    return f"{percent:+d}%"
+
+
+def minimax_tts_payload(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> dict:
     selected_voice = str(voice_id or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
     text_value = str(text or "").strip()[:3500]
     payload = {
@@ -45855,7 +45930,7 @@ def minimax_tts_payload(text: str, voice_id: str = "", voice_style: str = "") ->
         "text": text_value,
         "voice_setting": {
             "voice_id": selected_voice,
-            "speed": 1.0,
+            "speed": voice_tts_provider_speed(voice_speed),
             "vol": 1.0,
             "pitch": 0,
         },
@@ -45956,7 +46031,7 @@ def shopaikey_tts_uses_official_minimax(endpoint_path: str = "") -> bool:
 
 def shopaikey_official_tts_payload(text: str, voice_id: str = "", speed: float | str = 1.0) -> dict:
     selected_voice = str(voice_id or SHOPAIKEY_TTS_VOICE or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
-    parsed_speed = float(parse_video_dubbing_voice_speed(speed or "1.0"))
+    parsed_speed = voice_tts_provider_speed(speed or VOICE_TTS_DEFAULT_SPEED)
     return {
         "model": SHOPAIKEY_TTS_MODEL or "speech-2.6-turbo",
         "text": str(text or "").strip()[:3500],
@@ -46235,12 +46310,12 @@ async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
             return audio_bytes, encoding
     return b"", "empty_demo_audio"
 
-async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = "1.0", allow_admin: bool = False) -> tuple[str, bytes, str, int]:
+async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, allow_admin: bool = False) -> tuple[str, bytes, str, int]:
     if not key4u_minimax_tts_configured(require_public=not allow_admin):
         return "MISSING", b"", "KEY4U_ENABLED/KEY4U_API_KEY/KEY4U_TTS_ENDPOINT/KEY4U_TTS_MODEL missing", 0
     provider = key4u_provider_instance()
     selected_voice_id = str(voice_id or default_tts_voice_id("male"))
-    selected_speed = float(parse_video_dubbing_voice_speed(voice_speed or "1.0"))
+    selected_speed = voice_tts_provider_speed(voice_speed or VOICE_TTS_DEFAULT_SPEED)
     fallback = await provider.voice_tts_fallback(
         str(text or "")[:3500],
         voice_id=selected_voice_id,
@@ -46278,17 +46353,17 @@ async def key4u_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: st
     fallback_detail = sanitize_provider_error(fallback.get("error_message_safe") or fallback_status)[:160]
     return status or "FAIL", b"", (detail + (" | voice_fallback=" + fallback_detail if fallback_detail else ""))[:240], http_status
 
-async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "") -> tuple[str, bytes, str, int]:
+async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
     if not shopaikey_minimax_tts_configured():
         if direct_minimax_tts_configured():
-            return await direct_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style)
+            return await call_direct_minimax_tts_bytes_with_speed(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)
         return "MISSING", b"", "SHOPAIKEY_API_KEY/MINIMAX_TTS_ENDPOINT/MINIMAX_TTS_MODEL missing", 0
     endpoint = shopaikey_tts_final_url(MINIMAX_TTS_ENDPOINT)
     selected_voice = str(voice_id or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
     text_value = str(text or "").strip()[:3500]
     if not text_value:
         return "FAIL_BAD_REQUEST", b"", "empty_text", 0
-    payload = shopaikey_official_tts_payload(text_value, voice_id=selected_voice)
+    payload = shopaikey_official_tts_payload(text_value, voice_id=selected_voice, speed=voice_speed)
     try:
         async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60), follow_redirects=True) as client:
             res = await client.post(
@@ -46316,7 +46391,7 @@ async def shopaikey_minimax_tts_bytes(text: str, voice_id: str = "", voice_style
     except Exception as exc:
         return "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(exc)), 0
 
-async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "") -> tuple[str, bytes, str, int]:
+async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
     if not direct_minimax_tts_configured():
         return "MISSING", b"", "MINIMAX_API_KEY/MINIMAX_GROUP_ID/MINIMAX_TTS_MODEL missing", 0
     selected_voice = str(voice_id or MINIMAX_DEFAULT_VOICE_ID or "male-qn-qingse").strip()
@@ -46324,7 +46399,7 @@ async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: s
     if not text_value:
         return "FAIL_BAD_REQUEST", b"", "empty_text", 0
     endpoint = direct_minimax_tts_url()
-    payload = minimax_tts_payload(text_value, voice_id=selected_voice, voice_style=voice_style)
+    payload = minimax_tts_payload(text_value, voice_id=selected_voice, voice_style=voice_style, voice_speed=voice_speed)
     try:
         async with httpx.AsyncClient(timeout=float(SHOPAIKEY_TTS_TIMEOUT_SECONDS or 60), follow_redirects=True) as client:
             res = await client.post(
@@ -46354,6 +46429,24 @@ async def direct_minimax_tts_bytes(text: str, voice_id: str = "", voice_style: s
         return "FAIL_TIMEOUT", b"", shopaikey_sanitize_error(str(exc)), 0
     except Exception as exc:
         return "FAIL_PROVIDER_ERROR", b"", shopaikey_sanitize_error(str(exc)), 0
+
+async def call_key4u_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, allow_admin: bool = False) -> tuple[str, bytes, str, int]:
+    try:
+        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin)
+    except TypeError:
+        return await key4u_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, allow_admin=allow_admin)
+
+async def call_shopaikey_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
+    try:
+        return await shopaikey_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)
+    except TypeError:
+        return await shopaikey_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style)
+
+async def call_direct_minimax_tts_bytes_with_speed(text: str, voice_id: str = "", voice_style: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
+    try:
+        return await direct_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)
+    except TypeError:
+        return await direct_minimax_tts_bytes(text, voice_id=voice_id, voice_style=voice_style)
 
 def openai_audio_filename(content_type: str = "audio/mpeg") -> str:
     media_type = str(content_type or "audio/mpeg").split(";", 1)[0].strip() or "audio/mpeg"
@@ -80886,7 +80979,7 @@ async def tts_fish_audio_bytes(text: str) -> tuple[str, bytes, str, int]:
     except Exception as e:
         return "FAIL", b"", provider_error_summary(e), 0
 
-async def tts_edge_bytes(text: str, voice_id: str = "") -> tuple[str, bytes, str, int]:
+async def tts_edge_bytes(text: str, voice_id: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED) -> tuple[str, bytes, str, int]:
     if not edge_tts:
         return "MISSING", b"", f"edge-tts package missing: {EDGE_TTS_IMPORT_ERROR or 'import failed'}", 0
     tmp_path = ""
@@ -80894,7 +80987,10 @@ async def tts_edge_bytes(text: str, voice_id: str = "") -> tuple[str, bytes, str
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
             tmp_path = tmp.name
         edge_voice = str(voice_id or "vi-VN-NamMinhNeural").strip()
-        communicate = edge_tts.Communicate(text, edge_voice)
+        try:
+            communicate = edge_tts.Communicate(text, edge_voice, rate=voice_tts_edge_rate(voice_speed))
+        except TypeError:
+            communicate = edge_tts.Communicate(text, edge_voice)
         await communicate.save(tmp_path)
         if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
             with open(tmp_path, "rb") as f:
@@ -80909,6 +81005,13 @@ async def tts_edge_bytes(text: str, voice_id: str = "") -> tuple[str, bytes, str
                 os.remove(tmp_path)
             except Exception:
                 pass
+
+async def call_edge_tts_with_speed(text: str, voice_id: str = "", voice_speed: str = VOICE_TTS_DEFAULT_SPEED, edge_func=None) -> tuple[str, bytes, str, int]:
+    func = edge_func if callable(edge_func) else tts_edge_bytes
+    try:
+        return await func(text, voice_id=voice_id, voice_speed=voice_speed)
+    except TypeError:
+        return await func(text, voice_id=voice_id)
 
 async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -82952,6 +83055,7 @@ def default_voice_confirm_keyboard(gender: str = "neutral", lang: str = "vi", pr
     return build_2col_keyboard(
         [
             ("✅ Tạo giọng đọc" if is_vi else "✅ Create voice audio", cb(f"voice_default_confirm:{gender}")),
+            ("🎚 Tốc độ/âm lượng" if is_vi else "🎚 Speed/volume", cb(f"voice_tts_settings_default:{gender}")),
             ("❌ Hủy" if is_vi else "❌ Cancel", cb("voice_hub")),
             ("⬅️ Giọng đọc" if is_vi else "⬅️ Voice", cb("voice_hub")),
         ],
@@ -82998,13 +83102,178 @@ def saved_voice_tts_confirm_keyboard(profile_id: int, lang: str = "vi", price_xu
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(confirm_label, callback_data=cb(f"voice_profile_generate:{pid}")),
-            InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=cb(f"voice_profile_edit_text:{pid}")),
+            InlineKeyboardButton("🎚 Tốc độ/âm lượng" if is_vi else "🎚 Speed/volume", callback_data=cb(f"voice_tts_settings_saved:{pid}")),
         ],
         [
+            InlineKeyboardButton("✏️ Sửa nội dung" if is_vi else "✏️ Edit content", callback_data=cb(f"voice_profile_edit_text:{pid}")),
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb(f"voice_profile_read:{pid}")),
+        ],
+        [
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
+
+def voice_tts_settings_state(user_id, source: str = "", *, product_context: str = PRODUCT_CONTEXT_SHOWROOM, gender: str = "", profile_id: int = 0, voice_label: str = "", voice_id: str = "", voice_style: str = "") -> dict:
+    result = get_music_guided_result(user_id) or {}
+    speed = voice_tts_speed_value(result.get("tts_speed") or VOICE_TTS_DEFAULT_SPEED)
+    volume = voice_tts_volume_percent(result.get("voice_tts_volume_percent") or VOICE_TTS_DEFAULT_VOLUME_PERCENT)
+    source_value = str(source or result.get("voice_tts_settings_source") or "").strip().lower() or "standalone"
+    result.update({
+        "tts_speed": speed,
+        "voice_tts_volume_percent": volume,
+        "voice_tts_settings_source": source_value,
+        "voice_tts_settings_product_context": normalize_product_context(product_context),
+    })
+    if gender:
+        result["voice_tts_settings_gender"] = default_voice_gender_from_kind(gender)
+    if profile_id:
+        result["voice_tts_settings_profile_id"] = int(profile_id)
+    if voice_label:
+        result["voice_tts_settings_voice_label"] = str(voice_label or "")[:120]
+    if voice_id:
+        result["voice_tts_settings_voice_id"] = str(voice_id or "")[:180]
+    if voice_style:
+        result["voice_tts_settings_voice_style"] = str(voice_style or "")[:180]
+    save_music_guided_result(user_id, result)
+    return result
+
+def voice_tts_speed_display(value: str | int | float | None = None) -> str:
+    speed = voice_tts_speed_value(value)
+    try:
+        number = float(speed)
+    except Exception:
+        number = 1.0
+    if abs(number - 1.0) < 0.001:
+        return "1.0x"
+    return f"{speed}x"
+
+def voice_tts_settings_text(speed: str | int | float | None = None, volume_percent: int | str | None = None, lang: str = "vi") -> str:
+    speed_label = voice_tts_speed_display(speed)
+    volume = voice_tts_volume_percent(volume_percent)
+    if music_ui_lang(lang=lang) != "vi":
+        return (
+            "🎚 <b>Voice audio settings</b>\n\n"
+            f"• Speed: <b>{speed_label}</b>\n"
+            f"• Volume: <b>{volume}%</b>\n\n"
+            "100% keeps the current output loudness. You can create the audio now or enter a new value."
+        )
+    return (
+        "🎚 <b>Tùy chỉnh giọng đọc</b>\n\n"
+        f"• Tốc độ: <b>{speed_label}</b>\n"
+        f"• Âm lượng: <b>{volume}%</b>\n\n"
+        "100% là mức hiện tại. Anh/chị có thể tạo audio ngay hoặc nhập lại thông số."
+    )
+
+def voice_tts_settings_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✏️ Nhập tốc độ" if is_vi else "✏️ Enter speed", callback_data=cb("voice_tts_set_speed")),
+            InlineKeyboardButton("✏️ Nhập âm lượng" if is_vi else "✏️ Enter volume", callback_data=cb("voice_tts_set_volume")),
+        ],
+        [InlineKeyboardButton("✅ Tạo audio" if is_vi else "✅ Create audio", callback_data=cb("voice_tts_create"))],
+        [InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("voice_tts_settings_back"))],
+    ])
+
+def voice_tts_zero_volume_confirm_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "⚠️ Volume 0% will create audio with no sound. Are you sure you want to continue?"
+    return "⚠️ Âm lượng 0% sẽ tạo audio không có tiếng. Anh/chị có chắc muốn tiếp tục không?"
+
+def voice_tts_zero_volume_confirm_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Vẫn tạo audio" if is_vi else "✅ Create silent audio", callback_data=cb("voice_tts_zero_confirm")),
+        InlineKeyboardButton("✏️ Nhập lại âm lượng" if is_vi else "✏️ Re-enter volume", callback_data=cb("voice_tts_set_volume")),
+    ]])
+
+def voice_tts_speed_input_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "✏️ Enter reading speed from 0.1 to 2.0.\nExample: 0.8, 1.0, 1.2."
+    return "✏️ Nhập tốc độ đọc từ 0.1 đến 2.0.\nVí dụ: 0.8, 1.0, 1.2 hoặc 1,2."
+
+def voice_tts_speed_invalid_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "⚠️ Speed is not valid. Please enter a number from 0.1 to 2.0, for example 1.2."
+    return "⚠️ Tốc độ chưa hợp lệ. Anh/chị nhập số từ 0.1 đến 2.0, ví dụ 1.2."
+
+def voice_tts_volume_input_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "✏️ Enter volume from 0 to 200%.\nExample: 80, 100, 150, 200."
+    return "✏️ Nhập âm lượng từ 0 đến 200%.\nVí dụ: 80, 100, 150, 200."
+
+def voice_tts_volume_invalid_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "⚠️ Volume is not valid. Please enter a whole number from 0 to 200, for example 100 or 150."
+    return "⚠️ Âm lượng chưa hợp lệ. Anh/chị nhập số nguyên từ 0 đến 200, ví dụ 100 hoặc 150."
+
+async def show_voice_tts_settings_screen(message, user_id, source: str = "", *, product_context: str = PRODUCT_CONTEXT_SHOWROOM, gender: str = "", profile_id: int = 0, voice_label: str = "", voice_id: str = "", voice_style: str = "", lang: str = "vi"):
+    ctx = normalize_product_context(product_context)
+    result = voice_tts_settings_state(user_id, source, product_context=ctx, gender=gender, profile_id=profile_id, voice_label=voice_label, voice_id=voice_id, voice_style=voice_style)
+    return await message.reply_text(
+        voice_tts_settings_text(result.get("tts_speed"), result.get("voice_tts_volume_percent"), lang),
+        parse_mode="HTML",
+        reply_markup=voice_tts_settings_keyboard(lang, ctx),
+    )
+
+async def voice_tts_return_previous_screen(message, user_id, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM):
+    ctx = normalize_product_context(product_context)
+    result = get_music_guided_result(user_id) or {}
+    source = str(result.get("voice_tts_settings_source") or "").strip().lower()
+    text_value = str(result.get("voice_text") or "").strip()
+    if source == "default":
+        gender = default_voice_gender_from_kind(str(result.get("voice_tts_settings_gender") or result.get("selected_voice_kind") or "neutral"))
+        return await message.reply_text(default_voice_confirm_text(text_value, gender, lang), parse_mode="HTML", reply_markup=default_voice_confirm_keyboard(gender, lang, ctx))
+    if source == "saved":
+        profile_id = _safe_int(result.get("voice_tts_settings_profile_id") or result.get("selected_voice_profile_id"), 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if profile and text_value:
+            return await message.reply_text(saved_voice_tts_confirm_text(profile, text_value, str(result.get("tts_speed") or VOICE_TTS_DEFAULT_SPEED), lang), parse_mode="HTML", reply_markup=saved_voice_tts_confirm_keyboard(profile_id, lang, custom_voice_usage_price_xu(text_value)))
+        return await message.reply_text("⚠️ Nội dung giọng đọc đã hết hạn. Anh/chị nhập lại nội dung nhé.", reply_markup=voice_vault_keyboard(user_id, lang, ctx))
+    return await message.reply_text(
+        voice_tts_ready_text(text_value, lang, str(result.get("tts_speed") or VOICE_TTS_DEFAULT_SPEED)),
+        parse_mode="HTML",
+        reply_markup=voice_tts_choice_keyboard(lang, ctx),
+    )
+
+async def voice_tts_create_from_settings(message, user_id, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, *, zero_confirmed: bool = False):
+    ctx = normalize_product_context(product_context)
+    result = get_music_guided_result(user_id) or {}
+    source = str(result.get("voice_tts_settings_source") or "").strip().lower()
+    text_value = str(result.get("voice_text") or "").strip()
+    speed = voice_tts_speed_value(result.get("tts_speed") or VOICE_TTS_DEFAULT_SPEED)
+    volume = voice_tts_volume_percent(result.get("voice_tts_volume_percent") or VOICE_TTS_DEFAULT_VOLUME_PERCENT)
+    if not text_value:
+        set_music_guided_pending(user_id, "voice_tts_text_input", product_context=ctx)
+        return await message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"))
+    if volume == 0 and not zero_confirmed and not bool(result.get("voice_tts_zero_volume_confirmed")):
+        return await message.reply_text(voice_tts_zero_volume_confirm_text(lang), reply_markup=voice_tts_zero_volume_confirm_keyboard(lang, ctx))
+    if source == "default":
+        gender = default_voice_gender_from_kind(str(result.get("voice_tts_settings_gender") or result.get("selected_voice_kind") or "neutral"))
+        return await send_default_free_tts_result(message, user_id, text_value, gender, speed=speed, volume_percent=volume, lang=lang, product_context=ctx)
+    if source == "saved":
+        profile_id = _safe_int(result.get("voice_tts_settings_profile_id") or result.get("selected_voice_profile_id"), 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        if not profile:
+            return await message.reply_text("⚠️ Không tìm thấy giọng này trong Kho voice của bạn.", reply_markup=voice_vault_keyboard(user_id, lang, ctx))
+        return await send_paid_saved_voice_tts_result(message, user_id, profile, text_value, speed=speed, volume_percent=volume, lang=lang)
+    voice_label = str(result.get("voice_tts_settings_voice_label") or result.get("selected_voice_style") or result.get("selected_voice_id") or "").strip()
+    return await send_standalone_tts_result(
+        message,
+        user_id,
+        text_value,
+        voice_label or "giọng đã chọn",
+        voice_id=str(result.get("voice_tts_settings_voice_id") or result.get("selected_voice_id") or ""),
+        voice_style=str(result.get("voice_tts_settings_voice_style") or result.get("selected_voice_style") or voice_label),
+        speed=speed,
+        volume_percent=volume,
+        lang=lang,
+        product_context=ctx,
+    )
 
 def standalone_tts_guard_text(lang: str = "vi") -> str:
     if music_ui_lang(lang=lang) != "vi":
@@ -83050,26 +83319,28 @@ async def synthesize_standalone_tts_audio(text: str, voice_id: str = "", voice_s
     is_default_female = requested_kind in {"default_female", "female"} or selected_voice == default_tts_voice_id("female")
     is_default_male = requested_kind in {"default_male", "male"} or selected_voice == default_tts_voice_id("male")
     free_default_only = str(provider_hint or "").strip().lower() in {"default_free", "edge_free", "free_default", "edge"}
-    shopaikey_call = lambda: shopaikey_minimax_tts_bytes(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style)
-    key4u_call = lambda: key4u_minimax_tts_bytes(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style, allow_admin=allow_admin)
+    voice_speed = voice_tts_speed_value(speed)
+    shopaikey_call = lambda: call_shopaikey_minimax_tts_bytes_with_speed(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style, voice_speed=voice_speed)
+    key4u_call = lambda: call_key4u_minimax_tts_bytes_with_speed(clean, voice_id=selected_voice or default_tts_voice_id("male"), voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin)
     simple_shopaikey_call = lambda: shopaikey_tts_bytes(clean)
     minimax_candidates = [key4u_call, shopaikey_call] if str(provider_hint or "").startswith("key4u") else [shopaikey_call, key4u_call]
     if free_default_only:
         edge_kind = "female" if is_default_female else "male"
         edge_call = globals().get("tts_" + "edge_bytes")
-        candidates = [lambda: edge_call(clean, default_edge_tts_voice_id(edge_kind)) if callable(edge_call) else ("MISSING", b"", "edge_tts_missing", 0)]
+        candidates = [lambda: call_edge_tts_with_speed(clean, default_edge_tts_voice_id(edge_kind), voice_speed=voice_speed, edge_func=edge_call) if callable(edge_call) else ("MISSING", b"", "edge_tts_missing", 0)]
     elif selected_voice:
         candidates = list(minimax_candidates)
         if is_default_female or is_default_male:
             if shopaikey_tts_public_smoke_ready():
                 candidates.append(simple_shopaikey_call)
             edge_kind = "female" if is_default_female else "male"
-            candidates.append(lambda: tts_edge_bytes(clean, default_edge_tts_voice_id(edge_kind)))
+            edge_voice_runner = tts_edge_bytes
+            candidates.append(lambda: call_edge_tts_with_speed(clean, default_edge_tts_voice_id(edge_kind), voice_speed=voice_speed, edge_func=edge_voice_runner))
     else:
         candidates = list(minimax_candidates)
         if shopaikey_tts_public_smoke_ready():
             candidates.append(simple_shopaikey_call)
-        candidates.append(lambda: video_dubbing_tts_bytes(clean, voice_style=voice_style))
+        candidates.append(lambda: video_dubbing_tts_bytes(clean, voice_style=voice_style, voice_speed=voice_speed))
     last_detail = ""
     for make_call in candidates:
         try:
@@ -83092,10 +83363,13 @@ async def send_standalone_tts_result(
     voice_id: str = "",
     voice_style: str = "",
     speed: str = "normal",
+    volume_percent: int = VOICE_TTS_DEFAULT_VOLUME_PERCENT,
     lang: str = "vi",
     product_context: str = PRODUCT_CONTEXT_SHOWROOM,
 ) -> bool:
     ctx = normalize_product_context(product_context)
+    speed = voice_tts_speed_value(speed)
+    volume_percent = voice_tts_volume_percent(volume_percent)
     if is_default_tts_selection(voice_id, voice_label, voice_id):
         return await send_default_free_tts_result(
             message,
@@ -83103,6 +83377,7 @@ async def send_standalone_tts_result(
             text,
             default_voice_gender_from_kind(voice_id or voice_label),
             speed=speed,
+            volume_percent=volume_percent,
             lang=lang,
             product_context=ctx,
         )
@@ -83185,7 +83460,7 @@ async def send_standalone_tts_result(
         )
         await message.reply_text(tts_failure_text(lang), reply_markup=tts_failure_keyboard(lang, ctx))
         return False
-    preview_bytes, preview_local_path, preview_boost_metadata = boost_voice_output_for_asset(f"{asset_id}_preview", preview_bytes)
+    preview_bytes, preview_local_path, preview_boost_metadata = boost_voice_output_for_asset(f"{asset_id}_preview", preview_bytes, volume_percent=volume_percent)
     audio_file = video_dubbing_output_file(preview_bytes, "toan_aas_voice_preview.mp3")
     price = tts_full_price_xu(text, speed)
     duration = estimate_voice_duration_seconds(text, speed)
@@ -83235,10 +83510,13 @@ async def send_default_free_tts_result(
     text: str,
     gender: str = "neutral",
     speed: str = "normal",
+    volume_percent: int = VOICE_TTS_DEFAULT_VOLUME_PERCENT,
     lang: str = "vi",
     product_context: str = PRODUCT_CONTEXT_SHOWROOM,
 ) -> bool:
     ctx = normalize_product_context(product_context)
+    speed = voice_tts_speed_value(speed)
+    volume_percent = voice_tts_volume_percent(volume_percent)
     gender = default_voice_gender_from_kind(gender)
     voice_label = default_voice_label(gender, lang)
     voice_kind = f"default_{gender}"
@@ -83288,7 +83566,7 @@ async def send_default_free_tts_result(
         logger.info("default free tts not ready | user=%s | detail=%s", user_id, sanitize_log_text(detail)[:160])
         await message.reply_text(default_free_tts_guard_text(lang), reply_markup=tts_failure_keyboard(lang, ctx))
         return False
-    audio_bytes, local_path, boost_metadata = boost_voice_output_for_asset(asset_id, audio_bytes)
+    audio_bytes, local_path, boost_metadata = boost_voice_output_for_asset(asset_id, audio_bytes, volume_percent=volume_percent)
     audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_default_voice.mp3")
     caption = (
         f"✅ Đã tạo file giọng đọc đầy đủ bằng {voice_label}.\n"
@@ -83326,7 +83604,9 @@ async def send_default_free_tts_result(
     )
     return True
 
-async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text: str, speed: str = "normal", lang: str = "vi") -> bool:
+async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text: str, speed: str = "normal", volume_percent: int = VOICE_TTS_DEFAULT_VOLUME_PERCENT, lang: str = "vi") -> bool:
+    speed = voice_tts_speed_value(speed)
+    volume_percent = voice_tts_volume_percent(volume_percent)
     profile_id = int((profile or {}).get("id") or 0)
     if not voice_profile_can_generate_tts(profile):
         await message.reply_text(
@@ -83375,6 +83655,7 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
         get_profile_func=get_user_voice_profile,
         get_default_voice_id_func=default_tts_voice_id,
         execute_tts_func=_voice_saved_tts_executor,
+        volume_percent=volume_percent,
     )
     audio_bytes = Path(tts_result.audio_path).read_bytes() if tts_result.ok and tts_result.audio_path and Path(tts_result.audio_path).exists() else b""
     if not tts_result.ok or not audio_bytes:
@@ -85832,11 +86113,13 @@ def write_voice_asset_audio_bytes(voice_asset_id: str, audio_bytes: bytes, suffi
         logger.warning("voice asset write failed | asset=%s | %s", voice_asset_id, sanitize_log_text(str(exc))[:180])
         return ""
 
-def boost_voice_output_for_asset(voice_asset_id: str, audio_bytes: bytes, suffix: str = ".mp3") -> tuple[bytes, str, dict]:
+def boost_voice_output_for_asset(voice_asset_id: str, audio_bytes: bytes, suffix: str = ".mp3", volume_percent: int = VOICE_TTS_DEFAULT_VOLUME_PERCENT) -> tuple[bytes, str, dict]:
     data = bytes(audio_bytes or b"")
+    effective_factor = voice_tts_effective_volume_factor(volume_percent)
     metadata = {
         "voice_volume_boosted": False,
-        "voice_volume_factor": 2.0,
+        "voice_volume_factor": effective_factor,
+        "voice_volume_percent": voice_tts_volume_percent(volume_percent),
         "voice_volume_fallback_original": True,
     }
     if not data:
@@ -85847,7 +86130,7 @@ def boost_voice_output_for_asset(voice_asset_id: str, audio_bytes: bytes, suffix
         metadata["voice_volume_boost_detail"] = "write_failed"
         return data, "", metadata
     boosted_path = str(audio_postprocess.boosted_output_path(raw_path))
-    result = audio_postprocess.boost_voice_audio(raw_path, boosted_path, volume_factor=2.0, limiter=True)
+    result = audio_postprocess.boost_voice_audio(raw_path, boosted_path, volume_factor=effective_factor, limiter=True)
     final_path = result.output_path if result.ok and result.output_path and Path(result.output_path).exists() else raw_path
     try:
         final_bytes = Path(final_path).read_bytes()
@@ -85856,7 +86139,7 @@ def boost_voice_output_for_asset(voice_asset_id: str, audio_bytes: bytes, suffix
         final_path = raw_path
     metadata.update({
         "voice_volume_boosted": bool(result.boosted),
-        "voice_volume_factor": float(result.factor or 2.0),
+        "voice_volume_factor": float(result.factor if result.factor is not None else effective_factor),
         "voice_volume_fallback_original": bool(result.fallback_original),
         "voice_volume_boost_detail": sanitize_log_text(result.detail)[:120],
         "voice_volume_output_bytes": len(final_bytes or b""),
@@ -88204,6 +88487,62 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             f"✅ Đã chọn tốc độ {label}.\n\nBạn gửi văn bản cần đọc ở tin nhắn tiếp theo nhé.",
             reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"),
         )
+    if action.startswith("voice_tts_settings_default:"):
+        await query.answer()
+        gender = default_voice_gender_from_kind(action.split(":", 1)[1])
+        result = get_music_guided_result(user_id) or {}
+        voice_text = str(result.get("voice_text") or "").strip()
+        if not voice_text:
+            set_music_guided_pending(user_id, "voice_tts_text_input", product_context=ctx)
+            return await query.message.reply_text(voice_text_input_text(lang), parse_mode="HTML", reply_markup=voice_speed_keyboard(lang, ctx, "voice_hub"))
+        return await show_voice_tts_settings_screen(query.message, user_id, "default", product_context=ctx, gender=gender, lang=lang)
+    if action.startswith("voice_tts_settings_saved:"):
+        await query.answer()
+        profile_id = _safe_int(action.split(":", 1)[1], 0)
+        profile = get_user_voice_profile(user_id, profile_id)
+        result = get_music_guided_result(user_id) or {}
+        voice_text = str(result.get("voice_text") or "").strip()
+        if not voice_profile_can_generate_tts(profile):
+            return await query.message.reply_text(voice_profile_not_ready_text(profile, lang), parse_mode="HTML", reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, profile))
+        if not voice_text:
+            set_music_guided_pending(user_id, "voice_profile_read_text", profile_id=profile_id, product_context=ctx)
+            return await query.message.reply_text("📝 Hãy gửi nội dung muốn giọng này đọc. Bước này chưa trừ Xu.", reply_markup=voice_profile_actions_keyboard(profile_id, lang, ctx, profile))
+        return await show_voice_tts_settings_screen(query.message, user_id, "saved", product_context=ctx, profile_id=profile_id, lang=lang)
+    if action == "voice_tts_settings_standalone":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        return await show_voice_tts_settings_screen(
+            query.message,
+            user_id,
+            "standalone",
+            product_context=ctx,
+            voice_label=str(result.get("selected_voice_style") or result.get("selected_voice_id") or "giọng đã chọn"),
+            voice_id=str(result.get("selected_voice_id") or ""),
+            voice_style=str(result.get("selected_voice_style") or ""),
+            lang=lang,
+        )
+    if action == "voice_tts_set_speed":
+        await query.answer()
+        voice_tts_settings_state(user_id, product_context=ctx)
+        set_music_guided_pending(user_id, "voice_tts_speed_input", product_context=ctx)
+        return await query.message.reply_text(voice_tts_speed_input_text(lang), reply_markup=voice_tts_settings_keyboard(lang, ctx))
+    if action == "voice_tts_set_volume":
+        await query.answer()
+        voice_tts_settings_state(user_id, product_context=ctx)
+        set_music_guided_pending(user_id, "voice_tts_volume_input", product_context=ctx)
+        return await query.message.reply_text(voice_tts_volume_input_text(lang), reply_markup=voice_tts_settings_keyboard(lang, ctx))
+    if action == "voice_tts_settings_back":
+        await query.answer()
+        return await voice_tts_return_previous_screen(query.message, user_id, lang, ctx)
+    if action == "voice_tts_create":
+        await query.answer()
+        return await voice_tts_create_from_settings(query.message, user_id, lang, ctx)
+    if action == "voice_tts_zero_confirm":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        result["voice_tts_zero_volume_confirmed"] = True
+        save_music_guided_result(user_id, result)
+        return await voice_tts_create_from_settings(query.message, user_id, lang, ctx, zero_confirmed=True)
     if action == "voice_custom":
         await query.answer()
         current_pending = get_music_guided_pending(user_id) or {}
@@ -88754,7 +89093,8 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             user_id,
             voice_text,
             gender,
-            speed=str(result.get("tts_speed") or "normal"),
+            speed=voice_tts_speed_value(result.get("tts_speed") or VOICE_TTS_DEFAULT_SPEED),
+            volume_percent=voice_tts_volume_percent(result.get("voice_tts_volume_percent") or VOICE_TTS_DEFAULT_VOLUME_PERCENT),
             lang=lang,
             product_context=ctx,
         )
@@ -88881,7 +89221,8 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             user_id,
             profile,
             text_value,
-            speed=str(result.get("tts_speed") or "normal"),
+            speed=voice_tts_speed_value(result.get("tts_speed") or VOICE_TTS_DEFAULT_SPEED),
+            volume_percent=voice_tts_volume_percent(result.get("voice_tts_volume_percent") or VOICE_TTS_DEFAULT_VOLUME_PERCENT),
             lang=lang,
         )
     if action.startswith("voice_profile_download:"):
@@ -89820,17 +90161,15 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                     parse_mode="HTML",
                     reply_markup=default_voice_confirm_keyboard(gender, lang, ctx),
                 )
-            await query.message.reply_text("🎙 TOAN AAS đang tạo file audio bằng giọng đã chọn.")
-            return await send_standalone_tts_result(
+            return await show_voice_tts_settings_screen(
                 query.message,
                 user_id,
-                str(voice_text),
-                selected_voice,
+                "standalone",
+                product_context=ctx,
+                voice_label=selected_voice,
                 voice_id=str(result.get("selected_voice_id") or ""),
                 voice_style=str(result.get("selected_voice_style") or selected_voice),
-                speed=str(result.get("tts_speed") or "normal"),
                 lang=lang,
-                product_context=ctx,
             )
         return await query.message.reply_text(
             voice_tts_ready_text(str(voice_text), lang, str(result.get("tts_speed") or "normal")),
@@ -92044,6 +92383,34 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
             disable_web_page_preview=True,
         )
         return True
+    if action == "voice_tts_speed_input":
+        result = get_music_guided_result(uid) or {}
+        try:
+            speed = parse_voice_tts_speed_input(text)
+        except Exception:
+            await update.message.reply_text(voice_tts_speed_invalid_text(lang), reply_markup=voice_tts_settings_keyboard(lang, ctx))
+            return True
+        result["tts_speed"] = speed
+        save_music_guided_result(uid, result)
+        clear_music_guided_pending(uid)
+        await show_voice_tts_settings_screen(update.message, uid, str(result.get("voice_tts_settings_source") or "standalone"), product_context=ctx, lang=lang)
+        return True
+    if action == "voice_tts_volume_input":
+        result = get_music_guided_result(uid) or {}
+        try:
+            volume = parse_voice_tts_volume_input(text)
+        except Exception:
+            await update.message.reply_text(voice_tts_volume_invalid_text(lang), reply_markup=voice_tts_settings_keyboard(lang, ctx))
+            return True
+        result["voice_tts_volume_percent"] = volume
+        result["voice_tts_zero_volume_confirmed"] = False
+        save_music_guided_result(uid, result)
+        clear_music_guided_pending(uid)
+        if volume == 0:
+            await update.message.reply_text(voice_tts_zero_volume_confirm_text(lang), reply_markup=voice_tts_zero_volume_confirm_keyboard(lang, ctx))
+            return True
+        await show_voice_tts_settings_screen(update.message, uid, str(result.get("voice_tts_settings_source") or "standalone"), product_context=ctx, lang=lang)
+        return True
     if action == "voice_tts_text_input":
         result = get_music_guided_result(uid) or {}
         result.update({"voice_text": text, "tts_speed": str(result.get("tts_speed") or "normal")})
@@ -92122,16 +92489,15 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
                     reply_markup=default_voice_confirm_keyboard(gender, lang, ctx),
                 )
                 return True
-            await send_standalone_tts_result(
+            await show_voice_tts_settings_screen(
                 update.message,
                 uid,
-                text,
-                selected_voice[:120],
+                "standalone",
+                product_context=ctx,
+                voice_label=selected_voice[:120],
                 voice_id=str(result.get("selected_voice_id") or ""),
                 voice_style=str(result.get("selected_voice_style") or selected_voice),
-                speed=str(result.get("tts_speed") or "normal"),
                 lang=lang,
-                product_context=ctx,
             )
             return True
         suggestions = voice_style_suggestions(text, 0, lang)
@@ -142939,11 +143305,11 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
     direct_ready = direct_minimax_tts_configured() if allow_admin else direct_minimax_tts_public_ready()
     shopaikey_fallback_ready = bool(SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY and SHOPAIKEY_DUBBING_TTS_ENDPOINT) if allow_admin else shopaikey_tts_fallback_public_ready()
     if provider in {"auto", "minimax", "key4u_minimax", "minimax_voice"} and key4u_ready:
-        candidates.append(("Key4U MiniMax", lambda value: key4u_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin)))
+        candidates.append(("Key4U MiniMax", lambda value: call_key4u_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed, allow_admin=allow_admin)))
     if provider in {"auto", "minimax", "shopaikey_minimax", "minimax_voice"} and shopaikey_ready:
-        candidates.append(("ShopAIKey MiniMax", lambda value: shopaikey_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style)))
+        candidates.append(("ShopAIKey MiniMax", lambda value: call_shopaikey_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)))
     if provider in {"auto", "minimax", "direct_minimax", "minimax_voice"} and direct_ready:
-        candidates.append(("MiniMax", lambda value: direct_minimax_tts_bytes(value, voice_id=voice_id, voice_style=voice_style)))
+        candidates.append(("MiniMax", lambda value: call_direct_minimax_tts_bytes_with_speed(value, voice_id=voice_id, voice_style=voice_style, voice_speed=voice_speed)))
     if provider in {"auto", "key4u", "openai", "openai_compatible"} and KEY4U_ENABLED and KEY4U_API_KEY and KEY4U_AUDIO_SPEECH_ENDPOINT and (allow_admin or KEY4U_PUBLIC_ENABLED):
         openai_tts_candidates.append((
             "Key4U OpenAI TTS",
@@ -142978,7 +143344,7 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
     if provider in {"auto", "fish", "fish_audio"}:
         candidates.append(("Fish Audio", tts_fish_audio_bytes))
     if provider in {"auto", "edge", "edge_tts"}:
-        candidates.append(("Edge TTS", lambda value: tts_edge_bytes(value, voice_id=voice_id)))
+        candidates.append(("Edge TTS", lambda value: call_edge_tts_with_speed(value, voice_id=voice_id, voice_speed=voice_speed)))
     errors = []
     for label, func in candidates:
         status, audio_bytes, detail, _http_status = await func(text[:3500])

@@ -187,7 +187,16 @@ def _preview_output_path(output_dir: str | None, user_id: Any, profile_id: int) 
     return base / f"toan_aas_voice_preview_{profile_id}_{digest}.mp3"
 
 
-def _write_boosted_voice_output(raw_bytes: bytes, target_path: Path, metadata: dict[str, Any]) -> tuple[str, int, list[str]]:
+def _voice_tts_effective_volume_factor(volume_percent: int | float | str = 100) -> float:
+    try:
+        percent = int(float(str(volume_percent).strip()))
+    except Exception:
+        percent = 100
+    percent = max(0, min(200, percent))
+    return round(2.0 * float(percent) / 100.0, 3)
+
+
+def _write_boosted_voice_output(raw_bytes: bytes, target_path: Path, metadata: dict[str, Any], volume_factor: float = 2.0, volume_percent: int | float | str = 100) -> tuple[str, int, list[str]]:
     payload = bytes(raw_bytes or b"")
     if not payload:
         return "", 0, []
@@ -195,12 +204,13 @@ def _write_boosted_voice_output(raw_bytes: bytes, target_path: Path, metadata: d
     raw_path = target_path.with_name(f"{target_path.stem}_raw{target_path.suffix or '.mp3'}")
     boosted_path = audio_postprocess.boosted_output_path(target_path)
     raw_path.write_bytes(payload)
-    boost = audio_postprocess.boost_voice_audio(str(raw_path), str(boosted_path), volume_factor=2.0, limiter=True)
+    boost = audio_postprocess.boost_voice_audio(str(raw_path), str(boosted_path), volume_factor=volume_factor, limiter=True)
     final_path = Path(boost.output_path) if boost.ok and boost.output_path and Path(boost.output_path).exists() else raw_path
     final_bytes = int(final_path.stat().st_size if final_path.exists() else len(payload))
     metadata.update({
         "voice_volume_boosted": bool(boost.boosted),
-        "voice_volume_factor": float(boost.factor or 2.0),
+        "voice_volume_factor": float(boost.factor if boost.factor is not None else volume_factor),
+        "voice_volume_percent": int(max(0, min(200, int(float(str(volume_percent).strip() or 100))))),
         "voice_volume_fallback_original": bool(boost.fallback_original),
         "voice_volume_boost_detail": _safe_text(boost.detail, 120),
         "voice_volume_output_bytes": final_bytes,
@@ -529,6 +539,7 @@ async def process_voice_tts(
     get_profile_func: Callable[..., dict] | None = None,
     get_default_voice_id_func: Callable[[str], str] | None = None,
     execute_tts_func: Callable[..., Any] | None = None,
+    volume_percent: int | float | str = 100,
 ) -> VoiceTTSResult:
     del product_context
     clean_text = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -558,7 +569,8 @@ async def process_voice_tts(
     if output_path:
         target = Path(str(output_path))
         target.parent.mkdir(parents=True, exist_ok=True)
-        path, output_bytes, _boost_files = _write_boosted_voice_output(payload, target, metadata)
+        volume_factor = _voice_tts_effective_volume_factor(volume_percent)
+        path, output_bytes, _boost_files = _write_boosted_voice_output(payload, target, metadata, volume_factor=volume_factor, volume_percent=volume_percent)
         payload_size = output_bytes or len(payload)
     else:
         payload_size = len(payload)
