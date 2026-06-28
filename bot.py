@@ -52084,35 +52084,35 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     translated = {
         "en": {
-            "video_ai_real": "🎥 Create AI video",
-            "image_to_video": "🖼 Image to video",
-            "self_shot_scene_change": "🎭 Self-shot / scene AI",
-            "prompt_library": "🧩 Video prompt",
-            "subtitle_video": "🌐 Subtitle / video",
-            "video_vault": "📂 Video library",
+            "video_trend": "🔥 Trend video", "video_idea": "🧠 Video ideas",
+            "storyboard_prompt": "🎬 Storyboard + Prompt", "prompt_library": "📚 Video prompt library",
+            "video_ai_real": "🎬 Real AI Video", "script_image_video": "🧩 Script → Images → Video",
+            "image_to_video": "🖼 Image → Video", "frame_video_local": "🎞 Image slideshow video",
+            "self_shot_scene_change": "🎥 Self-shot scene AI", "multi_scene_film": "🎬 Multi-scene AI film",
+            "video_local_edit": "🛠 Local video editor", "video_downloader": "📥 Download video from link",
         },
         "zh": {
-            "video_ai_real": "🎥 创建 AI 视频",
-            "image_to_video": "🖼 图片生成视频",
-            "self_shot_scene_change": "🎭 自拍 / 场景 AI",
-            "prompt_library": "🧩 视频 Prompt",
-            "subtitle_video": "🌐 字幕 / 视频",
-            "video_vault": "📂 视频库",
+            "video_trend": "🔥 Trend 视频", "video_idea": "🧠 视频创意",
+            "storyboard_prompt": "🎬 分镜 + Prompt", "prompt_library": "📚 视频 Prompt 库",
+            "video_ai_real": "🎬 真实 AI 视频", "script_image_video": "🧩 脚本 → 图片 → 视频",
+            "image_to_video": "🖼 图片 → 视频", "frame_video_local": "🎞 图片合成视频",
+            "self_shot_scene_change": "🎥 自拍换场景 AI", "multi_scene_film": "🎬 多场景 AI 影片",
+            "video_local_edit": "🛠 本地视频编辑", "video_downloader": "📥 链接下载视频",
         },
     }
     vi_overrides = {
-        "video_ai_real": "🎥 Tạo video AI",
-        "image_to_video": "🖼 Ảnh thành video",
-        "self_shot_scene_change": "🎭 Tự quay / đổi cảnh AI",
-        "prompt_library": "🧩 Prompt video",
-        "subtitle_video": "🌐 Dịch phụ đề / Video",
-        "video_vault": "📂 Kho video",
+        "storyboard_prompt": "🎬 Storyboard + Prompt",
+        "prompt_library": "📚 Kho prompt video",
+        "script_image_video": "🧩 Kịch bản → Video",
+        "video_downloader": "📥 Tải video từ link",
     }
     menu_rows = (
-        (("video_ai_real", "vproduct|open|video_ai_real"), ("image_to_video", "vproduct|open|image_to_video")),
-        (("self_shot_scene_change", "vproduct|open|self_shot_scene_change"), ("prompt_library", "vpromptlib|start")),
-        (("subtitle_video", "videodub|start|video"), ("video_vault", "menu|video_vault")),
-        (("main_menu", "menu|main"),),
+        (("video_trend", "vproduct|open|video_trend"), ("video_idea", "vproduct|open|video_idea")),
+        (("storyboard_prompt", "vproduct|open|storyboard_prompt"), ("prompt_library", "vpromptlib|start")),
+        (("video_ai_real", "vproduct|open|video_ai_real"), ("script_image_video", "vproduct|open|script_image_video")),
+        (("frame_video_local", "vproduct|open|frame_video_local"), ("self_shot_scene_change", "vproduct|open|self_shot_scene_change")),
+        (("multi_scene_film", "vproduct|open|multi_scene_film"), ("video_downloader", "vdownload|start")),
+        (("video_local_edit", "vproduct|open|video_local_edit"), ("main_menu", "menu|main")),
     )
     rows = []
     for product_ids in menu_rows:
@@ -52127,26 +52127,6 @@ def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             row.append(InlineKeyboardButton(label, callback_data=callback_data))
         rows.append(row)
     return InlineKeyboardMarkup(rows)
-
-
-def video_vault_text(lang: str = "vi") -> str:
-    if normalize_user_language(lang) != "vi":
-        return (
-            "📂 <b>Video library</b>\n\n"
-            "This screen keeps finished videos and processing status. It does not start a new render and does not charge Xu."
-        )
-    return (
-        "📂 <b>Kho video</b>\n\n"
-        "Màn này dùng để xem video đã hoàn tất và trạng thái các video đang xử lý. "
-        "TOAN AAS không bắt đầu dựng video mới và không trừ Xu ở màn này."
-    )
-
-
-def video_vault_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎥 Tạo video mới" if normalize_user_language(lang) == "vi" else "🎥 New video", callback_data="vproduct|open|video_ai_real")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="menu|main_video"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
-    ])
 
 
 def video_prompt_library_text(lang: str = "vi") -> str:
@@ -53627,78 +53607,6 @@ def video_b14_scene_count_for_session(session: dict | None = None, default: int 
     return max(1, min(20, safe_int(draft.get("b14_scene_count") or draft.get("scene_count") or default, default)))
 
 
-def video_b14_scene_mode_for_count(scene_count: int) -> str:
-    return "single" if max(1, safe_int(scene_count, 1)) == 1 else "multi"
-
-
-def video_b14_sync_contract_state(user_id, session: dict | None = None) -> dict:
-    session = dict(session or {})
-    draft = dict(session.get("draft") or {})
-    product_id = str(session.get("product_id") or draft.get("product_id") or "")
-    if not product_id and not any(str(key).startswith("b14_") or str(key).startswith("video_") for key in draft):
-        session["draft"] = draft
-        return session
-    scene_count = video_b14_scene_count_for_session(session, 1 if draft.get("b14_scene_mode") == "single" else 3)
-    scene_mode = str(draft.get("b14_scene_mode") or video_b14_scene_mode_for_count(scene_count))
-    if scene_mode not in {"single", "multi"}:
-        scene_mode = video_b14_scene_mode_for_count(scene_count)
-    duration = scene_count * TASK3D_SCENE_SECONDS
-    addon_plan = dict(draft.get("b14_addon_plan") or {})
-    invoice = dict(draft.get("b14_invoice") or {})
-    contract = {
-        "video_session_id": str(draft.get("video_session_id") or f"video:{int(user_id or 0)}:{safe_int(session.get('created_at_ts'), 0)}"),
-        "video_product_type": product_id,
-        "video_current_step": str(session.get("current_step") or ""),
-        "video_parent_menu": str(session.get("return_to") or draft.get("video_parent_menu") or "menu|main_video"),
-        "video_back_target": str(draft.get("video_back_target") or session.get("previous_step") or ""),
-        "video_prompt": str(session.get("topic") or draft.get("topic") or draft.get("original_user_prompt") or "").strip(),
-        "video_scene_mode": scene_mode,
-        "video_scene_count": scene_count,
-        "video_duration": duration,
-        "video_package": safe_int(draft.get("b14_quality_xu") or invoice.get("quality_xu"), 0),
-        "video_aspect_ratio": str(draft.get("b14_aspect_ratio") or session.get("aspect_ratio") or "9:16"),
-        "video_addon_plan": addon_plan,
-        "video_voice_enabled": bool(addon_plan.get("voice_enabled")),
-        "video_music_enabled": bool(addon_plan.get("music_enabled")),
-        "video_subtitle_enabled": bool(addon_plan.get("subtitle_enabled")),
-        "video_dub_enabled": bool(addon_plan.get("dub_enabled")),
-        "video_logo_enabled": bool(addon_plan.get("logo_enabled")),
-    }
-    draft.update(contract)
-    session.update({
-        "video_session_id": contract["video_session_id"],
-        "video_product_type": contract["video_product_type"],
-        "video_current_step": contract["video_current_step"],
-    })
-    session["draft"] = draft
-    return session
-
-
-def video_b14_scene_mode_text(session: dict | None = None, lang: str = "vi") -> str:
-    draft = dict((session or {}).get("draft") or {})
-    idea = str((session or {}).get("topic") or draft.get("topic") or "ý tưởng đã nhập").strip()
-    return (
-        "🎬 <b>Chọn cách dựng video</b>\n\n"
-        f"• Ý tưởng: {html.escape(idea[:180])}\n"
-        "• <b>1 cảnh</b>: nhanh, phù hợp một shot/ý chính.\n"
-        "• <b>Nhiều cảnh</b>: dựng theo storyboard liền mạch, có thể chọn 3/5/10/20 cảnh.\n\n"
-        "Bước này chỉ chọn cấu trúc video. Chưa xử lý video và chưa trừ Xu."
-    )
-
-
-def video_b14_scene_mode_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🎬 1 cảnh", callback_data="vproduct|b14_scene_mode|single"),
-            InlineKeyboardButton("🎞 Nhiều cảnh", callback_data="vproduct|b14_scene_mode|multi"),
-        ],
-        [
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_storyboard_screen"),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-        ],
-    ])
-
-
 def video_b14_build_storyboard_for_session(user_id, session: dict, *, scene_count: int | None = None):
     draft = dict((session or {}).get("draft") or {})
     product_id = str(session.get("product_id") or "")
@@ -53728,7 +53636,7 @@ def video_b14_build_storyboard_for_session(user_id, session: dict, *, scene_coun
         "xu_charged": 0,
     })
     session["draft"] = draft
-    save_video_session(user_id, video_b14_sync_contract_state(user_id, session))
+    save_video_session(user_id, session)
     return plan
 
 
@@ -53741,7 +53649,6 @@ def video_b14_resize_storyboard_for_session(user_id, session: dict, scene_count:
         draft["b14_scene_count"] = count
         draft["b14_scene_resize_note"] = ""
         session["draft"] = draft
-        session = video_b14_sync_contract_state(user_id, session)
         save_video_session(user_id, session)
         return session, ""
     note = ""
@@ -53783,7 +53690,6 @@ def video_b14_resize_storyboard_for_session(user_id, session: dict, scene_count:
         "xu_charged": 0,
     })
     session["draft"] = draft
-    session = video_b14_sync_contract_state(user_id, session)
     save_video_session(user_id, session)
     return session, note
 
@@ -53861,7 +53767,7 @@ def video_b14_set_addon_plan(user_id, session: dict, **fields) -> dict:
             plan[extra_key] = str(fields.get(extra_key) or "")[:4000]
     draft["b14_addon_plan"] = plan
     session["draft"] = draft
-    return save_video_session(user_id, video_b14_sync_contract_state(user_id, session))
+    return save_video_session(user_id, session)
 
 
 def video_b14_addon_label(kind: str, value: str) -> str:
@@ -54685,14 +54591,7 @@ def video_b14_addon_text(session: dict | None = None, lang: str = "vi") -> str:
     ])
 
 
-def video_b14_addon_back_callback(session: dict | None = None) -> str:
-    draft = dict((session or {}).get("draft") or {})
-    if str(draft.get("b14_addons_return_to") or "") == "invoice":
-        return "vproduct|b14_invoice_screen"
-    return str(draft.get("b14_addons_back_callback") or "vproduct|b14_scene_mode_screen")
-
-
-def video_b14_addon_keyboard(lang: str = "vi", session: dict | None = None) -> InlineKeyboardMarkup:
+def video_b14_addon_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
         [
@@ -54712,7 +54611,7 @@ def video_b14_addon_keyboard(lang: str = "vi", session: dict | None = None) -> I
             InlineKeyboardButton("💥 SFX" if is_vi else "💥 SFX", callback_data="vproduct|b14_addon_sfx"),
         ],
         [InlineKeyboardButton("✅ Xong add-ons" if is_vi else "✅ Done", callback_data="vproduct|b14_addon_done")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=video_b14_addon_back_callback(session)), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_creative_done"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -54952,22 +54851,14 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
             f"• Lồng tiếng: {'bật' if addon_plan.get('dub_enabled') else 'tắt'}{(' · ' + html.escape(dub_target)) if dub_target else ''}",
             f"• Logo: {html.escape(logo_line)}",
         ])
-    lines.extend(["", "Chỉ sau khi bấm xác nhận, TOAN AAS mới đưa video vào hàng chờ xử lý nền. Nếu hệ thống chưa dựng được video hoàn chỉnh, TOAN AAS không báo thành công và xử lý theo hướng không tính Xu cho file lỗi."])
+    lines.extend(["", "Chỉ sau khi bấm xác nhận, TOAN AAS mới trừ Xu và đưa tác vụ vào hàng chờ xử lý nền."])
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
 def video_b14_invoice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm")],
-        [
-            InlineKeyboardButton("🎙 Sửa add-ons", callback_data="vproduct|b14_addons_from_invoice"),
-            InlineKeyboardButton("🎚 Đổi gói", callback_data="vproduct|b14_quality_screen"),
-        ],
-        [
-            InlineKeyboardButton("🎞 Đổi số cảnh", callback_data="vproduct|b14_scene_count_screen"),
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"),
-        ],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -55252,21 +55143,12 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     asset_pack_payload = dict(draft.get("asset_pack") or {})
     original_user_prompt = str((session or {}).get("original_user_prompt") or topic or draft.get("topic") or "").strip()
     cleaned_user_prompt = re.sub(r"\s+", " ", original_user_prompt).strip()
-    scene_count = safe_int(invoice.get("scene_count"), video_b14_scene_count_for_session(session, 1))
-    scene_mode = str(draft.get("b14_scene_mode") or video_b14_scene_mode_for_count(scene_count))
-    if scene_mode not in {"single", "multi"}:
-        scene_mode = video_b14_scene_mode_for_count(scene_count)
     asset_pack_payload.update({
         "original_user_prompt": original_user_prompt,
         "cleaned_user_prompt": cleaned_user_prompt,
         "provider_order": asset_pack_payload.get("provider_order") or os.getenv("VIDEO_PROVIDER_ORDER") or "shopaikey,key4u",
         "profile_id": profile_id,
         "aspect_ratio": ratio,
-        "scene_mode": scene_mode,
-        "video_scene_mode": scene_mode,
-        "video_scene_count": scene_count,
-        "scene_count": scene_count,
-        "duration_seconds": scene_count * TASK3D_SCENE_SECONDS,
         "source": "product_video",
         "render_mode": "real",
         "test_pattern": False,
@@ -55287,9 +55169,6 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
         "provider_call": True,
-        "scene_mode": scene_mode,
-        "video_scene_mode": scene_mode,
-        "video_scene_count": scene_count,
     })
     if is_internal:
         asset_pack_payload.update({
@@ -55298,8 +55177,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "admin_no_charge": True,
             "no_charge": True,
             "public_user": False,
-            "scene_count": scene_count,
-            "duration_seconds": scene_count * TASK3D_SCENE_SECONDS,
+            "scene_count": invoice["scene_count"],
+            "duration_seconds": invoice["duration_seconds"],
         })
         invoice.update({
             "created_by_admin": True,
@@ -55361,10 +55240,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     draft["b14_invoice"] = invoice
     draft["b14_addon_plan"] = addon_plan
     draft["asset_pack"] = asset_pack_payload
-    draft["b14_scene_mode"] = scene_mode
-    draft["b14_scene_count"] = scene_count
     session["draft"] = draft
-    session = video_b14_sync_contract_state(user_id, session)
     save_video_session(user_id, session)
     return update
 
@@ -55749,7 +55625,6 @@ def task3d_session_step(user_id, step: str, **fields) -> dict:
             session[key] = value
         draft[key] = value
     session["draft"] = draft
-    session = video_b14_sync_contract_state(user_id, session)
     return save_video_session(user_id, session)
 
 
@@ -56427,10 +56302,8 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
             return await safe_edit_or_send(target, video_b14_storyboard_preview_text(plan_obj), parse_mode="HTML", reply_markup=video_b14_storyboard_keyboard(lang))
         except Exception:
             return await safe_edit_or_send(target, "🧠 Kế hoạch video đã sẵn sàng. Chưa tạo file thật, chưa trừ Xu.", reply_markup=video_b14_storyboard_keyboard(lang))
-    if step == "b14_scene_mode":
-        return await safe_edit_or_send(target, video_b14_scene_mode_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_mode_keyboard(lang))
     if step == "b14_addons":
-        return await safe_edit_or_send(target, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(target, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if step == "b14_voice":
         return await safe_edit_or_send(target, video_b14_voice_text(session, user_id, lang), parse_mode="HTML", reply_markup=video_b14_voice_keyboard(lang))
     if step == "b14_music":
@@ -56535,7 +56408,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value not in VIDEO_PRODUCT_REGISTRY:
             return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
         clear_video_session(uid)
-        if value in {"frame_video_local"}:
+        if value in {"image_to_video", "frame_video_local"}:
             return await safe_edit_or_send(
                 query,
                 ivf.frame_video_unified_menu_text(lang),
@@ -56560,10 +56433,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             "b14_prompt_video_text",
             "b14_export_pack",
             "storyboard_confirm",
-            "b14_scene_mode",
-            "b14_scene_mode_screen",
             "b14_addons",
-            "b14_addons_from_invoice",
             "b14_addon_voice",
             "b14_addon_music",
             "b14_addon_subtitle",
@@ -56577,13 +56447,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             "b14_logo_clear",
             "b14_logo_upload",
             "b14_addon_sfx",
-            "b14_aspect_screen",
-            "b14_quality_screen",
             "b14_scene_count",
-            "b14_scene_count_screen",
             "b14_scene_custom",
-            "b14_invoice_screen",
-            "b14_confirm",
             "b14_job_status",
         }
         if action in b14_recover_actions:
@@ -56986,43 +56851,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             session = get_video_session(uid)
         if not (session.get("draft") or {}).get("b14_addon_plan"):
             session = video_b14_set_addon_plan(uid, session, **video_b14_default_addon_plan(video_b14_profile_id_for_session(session)))
-        session = task3d_session_step(uid, "b14_scene_mode", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_scene_mode_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_mode_keyboard(lang))
-    if action == "b14_scene_mode_screen":
-        session = task3d_session_step(uid, "b14_scene_mode", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_scene_mode_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_mode_keyboard(lang))
-    if action == "b14_scene_mode":
-        mode = "single" if value == "single" else "multi"
-        count = 1 if mode == "single" else max(3, video_b14_scene_count_for_session(session, 3))
-        session, _resize_note = video_b14_resize_storyboard_for_session(uid, session, count)
-        draft = dict(session.get("draft") or {})
-        draft.update({
-            "b14_scene_mode": mode,
-            "b14_scene_count": count,
-            "b14_scene_count_selected": bool(mode == "single"),
-            "b14_addons_return_to": "flow",
-            "b14_addons_back_callback": "vproduct|b14_scene_mode_screen",
-        })
-        session["draft"] = draft
-        session = save_video_session(uid, video_b14_sync_contract_state(uid, session))
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addons":
-        draft = dict(session.get("draft") or {})
-        draft["b14_addons_return_to"] = "flow"
-        draft.setdefault("b14_addons_back_callback", "vproduct|b14_scene_mode_screen")
-        session["draft"] = draft
-        save_video_session(uid, session)
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
-    if action == "b14_addons_from_invoice":
-        draft = dict(session.get("draft") or {})
-        draft["b14_addons_return_to"] = "invoice"
-        draft["b14_addons_back_callback"] = "vproduct|b14_invoice_screen"
-        session["draft"] = draft
-        save_video_session(uid, session)
-        session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addon_voice":
         if not (session.get("draft") or {}).get("b14_storyboard_plan"):
             video_b14_build_storyboard_for_session(uid, session)
@@ -57125,7 +56958,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         )
     if action == "b14_voice_done":
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_voice_volume":
         session = task3d_session_step(uid, "waiting_voice_volume_percent", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_volume_input_text("voice", lang), parse_mode="HTML", reply_markup=video_b14_volume_input_keyboard("voice", lang))
@@ -57157,7 +56990,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, video_b14_music_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_music_keyboard(lang))
     if action == "b14_music_done":
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_music_volume":
         session = task3d_session_step(uid, "waiting_music_volume_percent", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_volume_input_text("music", lang), parse_mode="HTML", reply_markup=video_b14_volume_input_keyboard("music", lang))
@@ -57170,7 +57003,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, "💥 <b>SFX</b>", parse_mode="HTML", reply_markup=video_b14_choice_keyboard("b14_sfx_set", [("Không SFX", "none"), ("SFX mặc định", "default")], lang))
     if action == "b14_sfx_set":
         session = video_b14_set_addon_plan(uid, session, sfx_enabled=(value == "default"))
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addon_subtitle":
         session = task3d_session_step(uid, "b14_subtitle", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_subtitle_text(session, lang), parse_mode="HTML", reply_markup=video_b14_subtitle_keyboard(lang))
@@ -57235,7 +57068,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         )
     if action == "b14_subtitle_done":
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addon_dub":
         session = task3d_session_step(uid, "b14_dub", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_dub_text(session, lang), parse_mode="HTML", reply_markup=video_b14_dub_keyboard(lang))
@@ -57273,7 +57106,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         )
     if action == "b14_dub_done":
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_addon_logo":
         session = task3d_session_step(uid, "b14_logo", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_logo_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_keyboard(lang))
@@ -57289,7 +57122,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value == "none":
             session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_text="", logo_file_id="", logo_note="")
             session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-            return await safe_edit_or_send(query, "✅ Đã xóa logo/watermark khỏi kế hoạch.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+            return await safe_edit_or_send(query, "✅ Đã xóa logo/watermark khỏi kế hoạch.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
         session = task3d_session_step(uid, "b14_logo_text_wait", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_logo_input_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if action == "b14_logo_position_screen":
@@ -57326,24 +57159,15 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             logo_note="",
         )
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, "✅ Đã lưu logo/watermark chữ.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, "✅ Đã lưu logo/watermark chữ.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_logo_clear":
         session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_text="", logo_file_id="", logo_note="")
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, "✅ Đã xóa logo/watermark khỏi kế hoạch.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
+        return await safe_edit_or_send(query, "✅ Đã xóa logo/watermark khỏi kế hoạch.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_logo_done":
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang, session))
-    if action == "b14_addon_done":
-        draft = dict(session.get("draft") or {})
-        if str(draft.get("b14_addons_return_to") or "") == "invoice":
-            video_b14_prepare_project_for_invoice(uid, session)
-            session = get_video_session(uid)
-            session = task3d_session_step(uid, "b14_invoice", provider_called=False, xu_charged=0)
-            return await safe_edit_or_send(query, video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
-        session = task3d_session_step(uid, "b14_aspect", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, "📐 <b>Chọn tỉ lệ video</b>", parse_mode="HTML", reply_markup=video_b14_aspect_ratio_keyboard(lang))
-    if action == "b14_aspect_screen":
+        return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+    if action in {"b14_addon_done", "b14_aspect_screen"}:
         session = task3d_session_step(uid, "b14_aspect", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, "📐 <b>Chọn tỉ lệ video</b>", parse_mode="HTML", reply_markup=video_b14_aspect_ratio_keyboard(lang))
     if action == "b14_aspect":
@@ -57388,10 +57212,9 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, guard_message, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
         draft = dict(session.get("draft") or {})
         draft["b14_scene_count"] = count
-        draft["b14_scene_mode"] = video_b14_scene_mode_for_count(count)
         draft["b14_scene_count_selected"] = True
         session["draft"] = draft
-        session = save_video_session(uid, video_b14_sync_contract_state(uid, session))
+        session = save_video_session(uid, session)
         session, _resize_note = video_b14_resize_storyboard_for_session(uid, session, count)
         if not (session.get("draft") or {}).get("b14_quality_xu"):
             session = task3d_session_step(uid, "b14_quality", provider_called=False, xu_charged=0)
@@ -57937,10 +57760,9 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
         count = max(1, min(20, requested))
         draft = dict(session.get("draft") or {})
         draft["b14_scene_count"] = count
-        draft["b14_scene_mode"] = video_b14_scene_mode_for_count(count)
         draft["b14_scene_count_selected"] = True
         session["draft"] = draft
-        session = save_video_session(uid, video_b14_sync_contract_state(uid, session))
+        session = save_video_session(uid, session)
         session, resize_note = video_b14_resize_storyboard_for_session(uid, session, count)
         if (session.get("draft") or {}).get("b14_quality_xu"):
             ok, guard_message = video_b14_public_render_guard(uid)
@@ -58912,11 +58734,7 @@ def menu_text_support() -> str:
 def menu_text_main_video() -> str:
     return (
         "🎬 <b>Video TOAN AAS</b>\n\n"
-        "Bạn muốn tạo hoặc xử lý video theo hướng nào?\n\n"
-        "• Planning như ý tưởng, prompt, storyboard, chuyển động, nhạc hoặc giọng đọc là miễn phí.\n"
-        "• Video AI chân thật chỉ xử lý thật và tính Xu sau màn xác nhận.\n"
-        "• Ghép ảnh thành video dùng công cụ xử lý video nội bộ và giữ nguyên giá render hiện tại.\n"
-        "• Phụ đề và lồng tiếng video sẽ hỏi từng bước; nếu công cụ xử lý chưa sẵn sàng bot chỉ lưu kế hoạch và không trừ Xu."
+        "Chọn đúng công cụ video anh/chị muốn dùng."
     )
 
 def video_ai_true_text(lang: str = "vi") -> str:
@@ -65785,19 +65603,11 @@ def menu_text_main_video_i18n(lang: str) -> str:
     if normalize_user_language(lang) == "zh":
         return (
             "🎬 <b>TOAN AAS 视频</b>\n\n"
-            "选择创建或处理视频的方式。\n\n"
-            "• 创意、prompt、storyboard、镜头运动、音乐/voice 规划免费。\n"
-            "• 真实 AI 视频只在确认后处理并计费。\n"
-            "• 图片合成视频使用内部视频处理工具，保留现有渲染价格。\n"
-            "• 翻译/配音按步骤引导；工具未准备好时不扣 Xu。"
+            "请选择要使用的视频工具。"
         )
     return (
         "🎬 <b>TOAN AAS VIDEO</b>\n\n"
-        "Choose how you want to create or process video.\n\n"
-        "• Ideas, prompts, storyboards, motion and audio planning are free.\n"
-        "• Real AI Video only processes and charges Xu after confirmation.\n"
-        "• Image slideshow video uses the internal video processor and keeps existing render pricing.\n"
-        "• Translation/dubbing is guided step by step; no Xu charge when the tool is unavailable."
+        "Choose the video tool you want to use."
     )
 
 def menu_text_main_ai_i18n(lang: str) -> str:
@@ -65987,10 +65797,6 @@ def localized_menu_content(action: str, is_admin: bool, lang: str, user_id=None)
         if user_id is not None:
             go_video_screen(user_id, "video_main", "main_video")
         return menu_text_main_video_i18n(lang), main_video_keyboard(lang)
-    if action == "video_vault":
-        if user_id is not None:
-            go_video_screen(user_id, "video_vault", "main_video")
-        return video_vault_text(lang), video_vault_keyboard(lang)
     if action == "main_ai":
         return menu_text_main_ai_i18n(lang), main_ai_keyboard(lang)
     if action == "main_memory":
@@ -66081,8 +65887,6 @@ def menu_content(action: str, is_admin: bool) -> tuple[str, InlineKeyboardMarkup
         return menu_text_main(is_admin), main_menu_keyboard(is_admin)
     if action == "main_video":
         return menu_text_main_video(), main_video_keyboard()
-    if action == "video_vault":
-        return video_vault_text("vi"), video_vault_keyboard("vi")
     if action == "main_ai":
         return menu_text_main_ai(), main_ai_keyboard()
     if action == "main_memory":

@@ -12,10 +12,10 @@ def _callbacks(markup):
     return [button.callback_data for row in markup.inline_keyboard for button in row if button.callback_data]
 
 
-def test_video_downloader_hidden_from_main_video_menu():
+def test_video_downloader_menu_button_exists():
     markup = bot.main_video_keyboard("vi")
-    assert "📥 Tải video từ link" not in _labels(markup)
-    assert "vdownload|start" not in _callbacks(markup)
+    assert "📥 Tải video từ link" in _labels(markup)
+    assert "vdownload|start" in _callbacks(markup)
 
 
 def test_video_downloader_not_in_translation_studio():

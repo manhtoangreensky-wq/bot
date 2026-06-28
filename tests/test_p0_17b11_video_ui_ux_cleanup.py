@@ -77,10 +77,12 @@ def _press_videoedit(user_id: int, callback: str) -> _FakeQuery:
 
 def test_video_main_menu_two_columns():
     assert _rows(bot.main_video_keyboard("vi")) == [
-        ["🎥 Tạo video AI", "🖼 Ảnh thành video"],
-        ["🎭 Tự quay / đổi cảnh AI", "🧩 Prompt video"],
-        ["🌐 Dịch phụ đề / Video", "📂 Kho video"],
-        ["🏠 Menu chính"],
+        ["🔥 Video theo trend", "🧠 Ý tưởng video"],
+        ["🎬 Storyboard + Prompt", "📚 Kho prompt video"],
+        ["🎬 Video AI chân thật", "🧩 Kịch bản → Video"],
+        ["🎞 Ghép ảnh thành video", "🎥 Tự quay & đổi cảnh AI"],
+        ["🎬 Phim AI nhiều cảnh", "📥 Tải video từ link"],
+        ["🛠 Chỉnh sửa video local", "🏠 Menu chính"],
     ]
 
 
@@ -88,7 +90,7 @@ def test_video_main_menu_no_duplicate_image_to_video():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
     assert "🖼 Ảnh → Video" not in labels
-    assert "vproduct|open|image_to_video" in callbacks
+    assert "vproduct|open|image_to_video" not in callbacks
 
 
 def test_video_main_menu_no_music_voice_sfx():
@@ -105,28 +107,25 @@ def test_video_main_menu_no_prompt_motion():
     assert "vproduct|open|motion_prompt" not in _callbacks(bot.main_video_keyboard("vi"))
 
 
-def test_video_main_menu_has_image_to_video_product():
+def test_video_main_menu_has_merge_image_video():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "🖼 Ảnh thành video" in labels
-    assert "vproduct|open|image_to_video" in callbacks
-    assert "vproduct|open|frame_video_local" not in callbacks
+    assert "🎞 Ghép ảnh thành video" in labels
+    assert "vproduct|open|frame_video_local" in callbacks
 
 
-def test_video_main_menu_has_video_vault_not_downloader():
+def test_video_main_menu_has_downloader():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "📂 Kho video" in labels
-    assert "menu|video_vault" in callbacks
-    assert "📥 Tải video từ link" not in labels
-    assert "vdownload|start" not in callbacks
+    assert "📥 Tải video từ link" in labels
+    assert "vdownload|start" in callbacks
 
 
-def test_video_main_menu_hides_local_edit_public_entry():
+def test_video_main_menu_has_local_edit():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "🛠 Chỉnh sửa video local" not in labels
-    assert "vproduct|open|video_local_edit" not in callbacks
+    assert "🛠 Chỉnh sửa video local" in labels
+    assert "vproduct|open|video_local_edit" in callbacks
 
 
 def test_video_numeric_buttons_1_to_5_single_row():
@@ -218,11 +217,6 @@ def test_video_visible_buttons_do_not_throw_generic_red_error():
             query = _FakeQuery(user_id, callback)
             asyncio.run(bot.handle_video_downloader_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
             assert GENERIC_RED_ERROR not in _last_text(query)
-        elif callback.startswith("videodub|"):
-            assert callback == "videodub|start|video"
-        elif callback == "menu|video_vault":
-            text, _markup = bot.localized_menu_content("video_vault", False, "vi", user_id=user_id)
-            assert GENERIC_RED_ERROR not in text
         else:
             assert callback == "menu|main"
 
@@ -251,14 +245,8 @@ def test_video_back_returns_to_video_menu():
             markup = _last_markup(query)
         elif callback.startswith("vpromptlib|"):
             markup = bot.video_prompt_library_keyboard("vi")
-        elif callback.startswith("vdownload|"):
-            markup = bot.video_downloader_start_keyboard("vi")
-        elif callback.startswith("videodub|"):
-            markup = bot.video_dubbing_menu_keyboard("vi", "video")
-        elif callback == "menu|video_vault":
-            _text, markup = bot.localized_menu_content("video_vault", False, "vi", user_id=1701300)
         else:
-            continue
+            markup = bot.video_downloader_start_keyboard("vi")
         assert "menu|main_video" in _callbacks(markup)
 
 
