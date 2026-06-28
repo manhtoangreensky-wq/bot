@@ -2412,6 +2412,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "🎁 Xem ưu đãi",
         "💳 Nạp Xu",
         "🎁 Gói / Combo",
+        "📥 Tải bảng giá",
+        "📘 Tải hướng dẫn sử dụng",
         "🏠 Menu chính",
     ]
     pricing_callbacks = [button.callback_data for row in bot.pricing_main_keyboard("vi").inline_keyboard for button in row]
@@ -2420,6 +2422,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "pricing|promotions",
         "menu|main_topup",
         "pricing|packages",
+        "pricing|download_pricing",
+        "pricing|download_guide",
         "menu|main",
     ]
     en_pricing_labels = [button.text for row in bot.pricing_main_keyboard("en").inline_keyboard for button in row]

@@ -41,7 +41,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from google import genai
 from google.genai import types
 from openai import OpenAI
@@ -101,6 +101,17 @@ from services import video_prompt_vault
 from services import video_profile_context_engine
 from services import video_prompt_continuity as video_continuity
 from services import video_storyboard_planner as video_storyboard
+from services.pricing_guide_content import (
+    GUIDE_DOWNLOAD_FILENAME,
+    PRICING_DOWNLOAD_FILENAME,
+    all_guide_lines as public_guide_all_lines,
+    all_pricing_lines as public_pricing_all_lines,
+    customer_guide_sections as shared_customer_guide_sections,
+    guide_markdown as public_guide_markdown,
+    lines_to_html_page as public_lines_to_html_page,
+    pricing_lines as public_pricing_lines,
+    pricing_markdown as shared_pricing_markdown,
+)
 from video_multiscene_engine import (
     build_detailed_multiscene_prompt_plan,
     context_bundle_debug_summary,
@@ -50039,6 +50050,7 @@ CUSTOMER_GUIDE_SECTIONS = [
     ),
 ]
 
+CUSTOMER_GUIDE_SECTIONS = shared_customer_guide_sections()
 CUSTOMER_GUIDE_LOOKUP = {key: (idx + 1, title, body) for idx, (key, title, body) in enumerate(CUSTOMER_GUIDE_SECTIONS)}
 
 GUIDE_SECTION_ALIASES = {
@@ -50113,6 +50125,10 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
         }
         rows = action_rows.get(section_key, [])
         if not section_key:
+            rows.append([
+                InlineKeyboardButton("📥 Tải bảng giá", callback_data="pricing|download_pricing"),
+                InlineKeyboardButton("📘 Tải hướng dẫn sử dụng", callback_data="pricing|download_guide"),
+            ])
             public_base = effective_public_base_url()
             if public_base:
                 rows.append([InlineKeyboardButton("📄 Tải bản Word", url=f"{public_base}/download/huong-dan-toan-aas.docx")])
@@ -50120,6 +50136,10 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(rows)
     rows = []
     if not section_key:
+        rows.append([
+            InlineKeyboardButton("📥 Download pricing", callback_data="pricing|download_pricing"),
+            InlineKeyboardButton("📘 Download guide", callback_data="pricing|download_guide"),
+        ])
         public_base = effective_public_base_url()
         if public_base:
             rows.append([InlineKeyboardButton("📄 Download full guide", url=f"{public_base}/download/huong-dan-toan-aas.docx")])
@@ -50157,6 +50177,10 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
 
 def legacy_guide_download_keyboard() -> InlineKeyboardMarkup:
     rows = []
+    rows.append([
+        InlineKeyboardButton("📥 Tải bảng giá", callback_data="pricing|download_pricing"),
+        InlineKeyboardButton("📘 Tải hướng dẫn sử dụng", callback_data="pricing|download_guide"),
+    ])
     public_base = effective_public_base_url()
     if public_base:
         rows.append([
@@ -58346,6 +58370,7 @@ def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🔥 Trend video", callback_data="menu|guide_guided_video"), InlineKeyboardButton("🎵 Video music", callback_data="menu|guide_music_add")],
             [InlineKeyboardButton("💰 Xu & top-up", callback_data="menu|guide_credits"), InlineKeyboardButton("❓ FAQ & refunds", callback_data="menu|guide_faq")],
             [InlineKeyboardButton("👨‍💼 Admin", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+            [InlineKeyboardButton("📥 Download pricing", callback_data="pricing|download_pricing"), InlineKeyboardButton("📘 Download guide", callback_data="pricing|download_guide")],
             [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
@@ -58354,6 +58379,7 @@ def main_guide_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔥 Video trend", callback_data="menu|guide_guided_video"), InlineKeyboardButton("🎵 Nhạc video", callback_data="menu|guide_music_add")],
         [InlineKeyboardButton("💰 Xu & nạp", callback_data="menu|guide_credits"), InlineKeyboardButton("❓ FAQ & hoàn Xu", callback_data="menu|guide_faq")],
         [InlineKeyboardButton("👨‍💼 Admin", callback_data="menu|support"), InlineKeyboardButton("🌐 Hub", url=TOAN_AAS_COMMUNITY_URL)],
+        [InlineKeyboardButton("📥 Tải bảng giá", callback_data="pricing|download_pricing"), InlineKeyboardButton("📘 Tải hướng dẫn sử dụng", callback_data="pricing|download_guide")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -121485,22 +121511,7 @@ async def cmd_pricing_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 def pricing_free_lines() -> list[str]:
-    return [
-        "🆓 <b>MIỄN PHÍ / 0 XU</b>",
-        "",
-        "Các bước dưới đây chỉ tạo prompt/kế hoạch/text hoặc mở menu. TOAN AAS chưa gọi provider nặng và chưa trừ Xu.",
-        "",
-        "• <code>/start</code>, <code>/menu</code>, đổi ngôn ngữ, hướng dẫn, bảng giá.",
-        "• Ghi chú text cơ bản: tạo, xem, sửa, tìm kiếm trong quota lưu trữ.",
-        "• Tạo prompt ảnh, prompt từ ảnh, 3 biến thể prompt, lưu prompt.",
-        "• Ý tưởng video, kịch bản video dài dạng plan/text, storyboard text.",
-        "• Prompt ảnh từng cảnh, prompt video từng cảnh, gợi ý âm thanh dạng text.",
-        "• Gợi ý chuyển động, concept quảng cáo, video theo trend dạng kế hoạch khi chưa tạo thật.",
-        "• Tìm nhạc/SFX/library, nghe thử và chọn nguồn nếu chưa xử lý file/provider.",
-        "• Admin smoke test: không trừ Xu, nhưng provider có thể tốn credit thật.",
-        "",
-        "Nếu bước nào chuyển sang tạo ảnh/video/voice/file thật, bot sẽ hiện màn xác nhận phí trước khi trừ Xu.",
-    ]
+    return public_pricing_lines("free", public_pricing_context())
 
 def pricing_frame_video_lines() -> list[str]:
     examples = [
@@ -121526,37 +121537,19 @@ def pricing_frame_video_lines() -> list[str]:
     return rows
 
 def pricing_voice_lines() -> list[str]:
-    return [
-        "🗣 <b>VOICE / TTS / AUDIO</b>",
-        "",
-        "• Gợi ý voice/nhạc dạng text: <b>0 Xu</b>.",
-        f"• TTS/voice ngắn: từ <b>{VOICE_BASE_COST} Xu</b>.",
-        "• TTS/voice dài: từ <b>80–150 Xu</b>, tùy ký tự/thời lượng/provider.",
-        f"• STT/bóc băng audio ngắn: từ <b>{AUDIO_MIN_COST} Xu</b>.",
-        "• STT/audio dài: tính theo MB/thời lượng.",
-        "• Ghép audio local nếu có sẵn: thấp hoặc miễn phí tùy flow.",
-        "• Tạo nhạc AI/Suno/provider-heavy: admin-only hoặc liên hệ admin cho đến khi provider ổn định.",
-        "",
-        "Nếu provider lỗi/quota/timeout: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
-    ]
+    return public_pricing_lines("voice", public_pricing_context())
+
+def pricing_music_lines() -> list[str]:
+    return public_pricing_lines("music", public_pricing_context())
+
+def pricing_subtitle_lines() -> list[str]:
+    return public_pricing_lines("subtitle", public_pricing_context())
+
+def pricing_guide_lines() -> list[str]:
+    return public_guide_all_lines()
 
 def pricing_docs_lines() -> list[str]:
-    return [
-        "📄 <b>TÀI LIỆU / PDF</b>",
-        "",
-        "Các công cụ tài liệu/PDF local đang miễn phí trong giai đoạn hiện tại.",
-        "",
-        "<b>Giá hiện tại:</b>",
-        "• Ảnh sang PDF: <b>0 Xu</b>",
-        "• PDF sang ảnh: <b>0 Xu</b>",
-        "• PDF sang Word text: <b>0 Xu</b> nếu công cụ local đã bật",
-        "• Nén PDF: <b>0 Xu</b>",
-        "• Tách PDF: <b>0 Xu</b>",
-        "• Gộp PDF: <b>0 Xu</b> nếu workflow đã bật",
-        "• OCR ảnh/PDF: <b>đang thử nghiệm, chỉ mở khi công cụ ổn định</b>",
-        "",
-        "Nếu công cụ đang bảo trì/chưa bật, TOAN AAS báo trước, không gọi xử lý và không trừ Xu.",
-    ]
+    return public_pricing_lines("docs", public_pricing_context())
 
 def pricing_storage_lines() -> list[str]:
     return [
@@ -121620,6 +121613,69 @@ async def cmd_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await reply_html_lines(update, pricing_audit_lines())
 
+def public_pricing_context() -> dict:
+    image_payload = image_tier_pricing_payload()
+    image_lines = []
+    for tier in IMAGE_TIER_ORDER:
+        payload = image_payload.get(tier) or {}
+        if not payload:
+            continue
+        warranty = int(payload.get("retry_warranty_count") or 0)
+        note = "có bảo hành tạo lại theo chính sách gói" if warranty > 0 else "phù hợp nhu cầu cơ bản hoặc tiêu chuẩn"
+        image_lines.append(
+            f"• {html.escape(str(payload.get('label') or tier))}: <b>{int(payload.get('cost') or 0)} Xu</b> — {html.escape(note)}."
+        )
+    video_payload = video_tier_pricing_payload()
+    video_lines = []
+    for tier in VIDEO_TIER_ORDER:
+        payload = video_payload.get(tier) or {}
+        if not payload:
+            continue
+        cost = int(payload.get("cost") or 0)
+        note = "1 cảnh / khoảng 6 giây; màn số cảnh sẽ hiển thị tổng Xu"
+        if tier == "low":
+            note = "gói trải nghiệm để test ý tưởng nhanh hoặc tạo bản nháp ngắn"
+        elif tier == "premium":
+            note = "gói cao cấp; chỉ dùng khi màn sản phẩm đang mở phù hợp"
+        video_lines.append(
+            f"• {html.escape(str(payload.get('label') or tier))}: <b>{cost} Xu</b> — {html.escape(note)}."
+        )
+    doc_lines = [
+        f"• Ảnh sang PDF: <b>{DOC_COSTS.get('image_to_pdf', 0)} Xu</b>.",
+        f"• PDF sang ảnh: <b>{DOC_COSTS.get('pdf_to_images', 0)} Xu</b>.",
+        f"• PDF sang Word text: <b>{DOC_COSTS.get('pdf_to_word_text', 0)} Xu</b> nếu công cụ đang mở.",
+        f"• Nén PDF: <b>{DOC_COSTS.get('compress_pdf', 0)} Xu</b>.",
+        f"• Tách PDF: <b>{DOC_COSTS.get('split_pdf', 0)} Xu</b>.",
+        f"• Gộp PDF: <b>{DOC_COSTS.get('merge_pdf', 0)} Xu</b>.",
+        "• Các công cụ tài liệu đang thử nghiệm vẫn hiển thị rõ giá trước khi xử lý.",
+    ]
+    discount_lines = []
+    if any(int(value or 0) > 0 for value in MEMBER_TOOL_DISCOUNT_POLICY.values()):
+        for tier in ["newbie", "silver", "gold", "platinum", "diamond", "vip"]:
+            discount_lines.append(
+                f"• {tier.title()}: giảm {int(MEMBER_TOOL_DISCOUNT_POLICY.get(tier, 0) or 0)}% Xu cho dịch vụ đủ điều kiện."
+            )
+    else:
+        discount_lines.append("• Chiết khấu thành viên: chưa kích hoạt.")
+    return {
+        "image_price_lines": image_lines,
+        "video_price_lines": video_lines,
+        "document_price_lines": doc_lines,
+        "member_discount_lines": discount_lines,
+    }
+
+def public_pricing_markdown() -> str:
+    return shared_pricing_markdown(public_pricing_context())
+
+async def send_generated_markdown_document(query, filename: str, content: str, caption: str = ""):
+    data = io.BytesIO(content.encode("utf-8"))
+    data.name = filename
+    await query.message.reply_document(
+        document=data,
+        filename=filename,
+        caption=caption or filename,
+    )
+
 def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang == "vi":
@@ -121631,6 +121687,10 @@ def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
                 InlineKeyboardButton("🎁 Gói / Combo", callback_data="pricing|packages"),
+            ],
+            [
+                InlineKeyboardButton("📥 Tải bảng giá", callback_data="pricing|download_pricing"),
+                InlineKeyboardButton("📘 Tải hướng dẫn sử dụng", callback_data="pricing|download_guide"),
             ],
             [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
         ])
@@ -121652,10 +121712,21 @@ def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     labels = {
-        "vi": ("🖼 Hình ảnh", "🎬 Video", "🎞 Ghép ảnh thành video", "🎙 Voice/TTS", "📄 Tài liệu/PDF", "📝 Ghi chú/Lưu trữ", "🎁 Gói/Combo", "👑 Cao cấp", "⬅️ Quay lại", "🏠 Menu chính"),
-        "en": ("🖼 Images", "🎬 Video", "🎞 Frame video", "🎙 Voice/TTS", "📄 Docs/PDF", "📝 Notes/Storage", "🎁 Plans/Combos", "👑 Premium", "⬅️ Back", "🏠 Main menu"),
-        "zh": ("🖼 图片", "🎬 视频", "🎞 图片成片", "🎙 语音/TTS", "📄 文档/PDF", "📝 笔记/存储", "🎁 套餐", "👑 高级", "⬅️ 返回", "🏠 主菜单"),
+        "vi": ("💰 Bảng giá tổng", "🎙 Giọng nói", "🎵 Nhạc AI", "🎬 Video", "🌐 Phụ đề / Lồng tiếng", "🖼 Hình ảnh", "📄 Tài liệu/PDF", "🎁 Miễn phí / Không tính Xu", "🎁 Khuyến mãi / Thành viên", "📘 Hướng dẫn sử dụng", "📥 Tải bảng giá", "📘 Tải hướng dẫn", "📝 Ghi chú/Lưu trữ", "🎁 Gói/Combo", "⬅️ Quay lại", "🏠 Menu chính"),
+        "en": ("🖼 Images", "🎬 Video", "🎞 Frame video", "🎙 Voice", "📄 Docs/PDF", "📝 Notes/Storage", "🎁 Plans/Combos", "👑 Premium", "⬅️ Back", "🏠 Main menu"),
+        "zh": ("🖼 图片", "🎬 视频", "🎞 图片成片", "🎙 语音", "📄 文档/PDF", "📝 笔记/存储", "🎁 套餐", "👑 高级", "⬅️ 返回", "🏠 主菜单"),
     }.get(lang)
+    if lang == "vi":
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(labels[0], callback_data="pricing|total"), InlineKeyboardButton(labels[1], callback_data="pricing|voice")],
+            [InlineKeyboardButton(labels[2], callback_data="pricing|music"), InlineKeyboardButton(labels[3], callback_data="pricing|video")],
+            [InlineKeyboardButton(labels[4], callback_data="pricing|subtitle"), InlineKeyboardButton(labels[5], callback_data="pricing|image")],
+            [InlineKeyboardButton(labels[6], callback_data="pricing|docs"), InlineKeyboardButton(labels[7], callback_data="pricing|free")],
+            [InlineKeyboardButton(labels[8], callback_data="pricing|member"), InlineKeyboardButton(labels[9], callback_data="pricing|guide")],
+            [InlineKeyboardButton(labels[10], callback_data="pricing|download_pricing"), InlineKeyboardButton(labels[11], callback_data="pricing|download_guide")],
+            [InlineKeyboardButton(labels[12], callback_data="pricing|storage"), InlineKeyboardButton(labels[13], callback_data="pricing|package_summary")],
+            [InlineKeyboardButton(labels[14], callback_data="pricing|main"), InlineKeyboardButton(labels[15], callback_data="menu|main")],
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(labels[0], callback_data="pricing|image"), InlineKeyboardButton(labels[1], callback_data="pricing|video")],
         [InlineKeyboardButton(labels[2], callback_data="pricing|frame"), InlineKeyboardButton(labels[3], callback_data="pricing|voice")],
@@ -122028,6 +122099,7 @@ def pricing_package_summary_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 def pricing_main_lines() -> list[str]:
+    return public_pricing_lines("total", public_pricing_context())
     pricing = media_workflow_pricing_payload()
     image_tiers = pricing["image_tiers"]
     video_tiers = pricing["video_tiers"]
@@ -122127,6 +122199,7 @@ def pricing_main_lines() -> list[str]:
     ]
 
 def pricing_image_lines() -> list[str]:
+    return public_pricing_lines("image", public_pricing_context())
     pricing = image_tier_pricing_payload()
     rows = [
         "🖼 <b>GIÁ HÌNH ẢNH AI</b>",
@@ -122146,6 +122219,7 @@ def pricing_image_lines() -> list[str]:
     return rows
 
 def pricing_video_lines() -> list[str]:
+    return public_pricing_lines("video", public_pricing_context())
     pricing = video_tier_pricing_payload()
     rows = [
         "🎬 <b>GIÁ VIDEO AI</b>",
@@ -123088,6 +123162,8 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         return await edit_or_send_pricing_lines(query, billing_gift_code_lines(lang), billing_promotions_keyboard(lang))
     if action == "catalog":
         return await edit_or_send_pricing_lines(query, pricing_catalog_lines(lang), pricing_catalog_keyboard(lang))
+    if action == "total":
+        return await edit_or_send_pricing_lines(query, pricing_main_lines(), pricing_catalog_keyboard(lang))
     if action == "packages":
         return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), pricing_packages_keyboard(lang))
     if action == "package_summary":
@@ -123096,6 +123172,26 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang), pricing_xu_keyboard(lang))
     if action == "free":
         return await edit_or_send_pricing_lines(query, pricing_free_lines(), pricing_detail_keyboard("free", lang))
+    if action == "music":
+        return await edit_or_send_pricing_lines(query, pricing_music_lines(), pricing_detail_keyboard("music", lang))
+    if action == "subtitle":
+        return await edit_or_send_pricing_lines(query, pricing_subtitle_lines(), pricing_detail_keyboard("subtitle", lang))
+    if action == "guide":
+        return await edit_or_send_pricing_lines(query, pricing_guide_lines(), guide_keyboard("", lang))
+    if action == "download_pricing":
+        return await send_generated_markdown_document(
+            query,
+            PRICING_DOWNLOAD_FILENAME,
+            public_pricing_markdown(),
+            "📥 Bảng giá TOAN AAS",
+        )
+    if action == "download_guide":
+        return await send_generated_markdown_document(
+            query,
+            GUIDE_DOWNLOAD_FILENAME,
+            public_guide_markdown(),
+            "📘 Hướng dẫn sử dụng TOAN AAS",
+        )
     if action == "image":
         return await edit_or_send_pricing_lines(query, pricing_image_lines(), pricing_detail_keyboard("image", lang))
     if action == "video":
@@ -123119,7 +123215,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "vip":
         return await edit_or_send_pricing_lines(query, vip_services_lines(), vip_services_keyboard(lang))
     if action == "member":
-        return await edit_or_send_pricing_lines(query, member_policy_lines(lang), member_policy_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, public_pricing_lines("member", public_pricing_context()), member_policy_keyboard(lang))
     if action == "birthday":
         text = (
             "🎂 <b>Cập nhật ngày sinh</b>\n\n"
@@ -153308,6 +153404,33 @@ async def download_customer_guide_docx():
         filename=GUIDE_DOCX_FILE,
     )
 
+def markdown_attachment_response(filename: str, content: str) -> PlainTextResponse:
+    return PlainTextResponse(
+        content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+@fastapi_app.get(f"/download/{PRICING_DOWNLOAD_FILENAME}")
+async def download_pricing_markdown():
+    return markdown_attachment_response(PRICING_DOWNLOAD_FILENAME, public_pricing_markdown())
+
+@fastapi_app.get(f"/download/{GUIDE_DOWNLOAD_FILENAME}")
+async def download_guide_markdown():
+    return markdown_attachment_response(GUIDE_DOWNLOAD_FILENAME, public_guide_markdown())
+
+@fastapi_app.get("/pricing")
+async def public_pricing_page():
+    return HTMLResponse(public_lines_to_html_page("Bảng giá TOAN AAS", public_pricing_all_lines(public_pricing_context())))
+
+@fastapi_app.get("/guide")
+async def public_guide_page():
+    return HTMLResponse(public_lines_to_html_page("Hướng dẫn sử dụng TOAN AAS", public_guide_all_lines()))
+
+@fastapi_app.get("/help")
+async def public_help_page():
+    return HTMLResponse(public_lines_to_html_page("Trợ giúp TOAN AAS", public_guide_all_lines()))
+
 @fastapi_app.get("/download/dieu-khoan-su-dung-toan-aas.pdf")
 async def download_terms_pdf():
     path = find_terms_pdf_path()
@@ -153334,6 +153457,8 @@ async def asset_check():
         "logo": bool(find_asset_path("LOGO.png")),
         "banner": bool(find_asset_path("banner.png")),
         "guide_docx": bool(find_guide_docx_path()),
+        "pricing_md": True,
+        "guide_md": True,
         "terms_pdf": bool(find_terms_pdf_path()),
     }
 
