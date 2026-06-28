@@ -2948,7 +2948,7 @@ def test_frame_video_helper_defaults_and_state():
         job_id = bot.create_frame_video_job(uid, "chat", state, 70, "queued")
         assert bot.frame_video_job_for_user(job_id, uid)["status"] == "queued"
         bot.update_frame_video_job(job_id, status="success")
-        assert "success" in bot.frame_video_job_status_text(bot.frame_video_job_for_user(job_id, uid))
+        assert "hoàn tất" in bot.frame_video_job_status_text(bot.frame_video_job_for_user(job_id, uid))
         assert bot.clear_frame_video_state(uid) is True
         assert bot.get_frame_video_state(uid) == {}
     finally:
