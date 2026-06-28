@@ -39765,11 +39765,34 @@ async def cmd_tool_test_video_delivery_worker(update: Update, context: ContextTy
     return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
+def _diagnostic_message_args(update: Update, context: ContextTypes.DEFAULT_TYPE) -> list[str]:
+    raw_args = getattr(context, "args", None)
+    if raw_args is not None:
+        return [str(item or "").strip() for item in raw_args if str(item or "").strip()]
+    message = getattr(update, "message", None)
+    text = str(getattr(message, "text", "") or "")
+    return [part.strip() for part in text.split()[1:] if part.strip()]
+
+
+async def _reply_product_claim_diagnostic(update: Update, text: str):
+    message = getattr(update, "message", None)
+    if message is None:
+        return None
+    try:
+        return await message.reply_text(text, parse_mode="HTML")
+    except Exception as exc:
+        logger.warning("product video worker claim diagnostic reply failed: %s", type(exc).__name__)
+        plain = html.unescape(str(text or ""))
+        for tag in ("<b>", "</b>", "<code>", "</code>"):
+            plain = plain.replace(tag, "")
+        return await message.reply_text(plain)
+
+
 async def cmd_tool_test_video_product_worker_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
         return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
-    args = [str(item or "").strip() for item in getattr(context, "args", [])]
+    args = _diagnostic_message_args(update, context)
     if "--no-charge" not in args:
         return await update.message.reply_text("Dùng: /tool_test_video_product_worker_claim --no-charge")
     flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
@@ -39799,9 +39822,9 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
         if conn is not None:
             conn.close()
     if not created.get("ok"):
-        return await update.message.reply_text(
+        return await _reply_product_claim_diagnostic(
+            update,
             f"⚠️ <b>Product video worker claim</b>\n\nChưa tạo được job kiểm tra: <code>{html.escape(created.get('reason') or 'create_failed')}</code>. Chưa trừ Xu.",
-            parse_mode="HTML",
         )
     job = dict(created.get("job") or {})
     last = dict(product.get("last") or {})
@@ -39834,7 +39857,7 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
         "VPS product service khi mở public:",
         "<code>python remote_worker.py --product-video --once</code>",
     ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await _reply_product_claim_diagnostic(update, "\n".join(lines))
 
 
 def _video_provider_readiness_lines(readiness: dict | None = None) -> list[str]:
@@ -39848,11 +39871,41 @@ def _video_provider_readiness_lines(readiness: dict | None = None) -> list[str]:
     return lines or ["• none: <code>not configured</code>"]
 
 
+def _video_worker_last_job_note(last: dict) -> str:
+    status = str((last or {}).get("status") or "").strip().lower()
+    worker_id = str((last or {}).get("worker_id") or "").strip()
+    if status in {"failed", "error"}:
+        return "old_failed_job"
+    if status == "queued" and not worker_id:
+        return "waiting_for_owner_product_worker"
+    if status == "processing" and worker_id:
+        return "claimed"
+    return "-"
+
+
+def _video_worker_next_action(status: dict, product: dict, readiness: dict, last: dict) -> str:
+    last_status = str((last or {}).get("status") or "").strip().lower()
+    if not (status or {}).get("worker_api_enabled"):
+        return "Kiểm tra LOCAL_WORKER_TOKEN trên Railway trước."
+    if last_status in {"failed", "error"}:
+        return "Tạo diagnostic mới; không dùng job cũ để QA."
+    if safe_int((product or {}).get("queued"), 0) > 0 and not str((last or {}).get("worker_id") or "").strip():
+        return "Chạy owner-product --once để xem idle reason trên VPS."
+    if not (readiness or {}).get("ok"):
+        return "Kiểm tra provider readiness trước khi test product video thật."
+    return "Chờ worker claim hoặc tạo diagnostic mới nếu cần."
+
+
 def video_worker_status_text(status: dict | None = None, product: dict | None = None, readiness: dict | None = None) -> str:
     status = dict(status or {})
     product = dict(product or {})
     readiness = dict(readiness or {})
     last = dict(product.get("last") or {})
+    last_reason_code = remote_worker_api.safe_worker_reason_code(
+        last.get("safe_failure_reason_code") or last.get("reason_code") or last.get("safe_failure_reason")
+    )
+    last_note = _video_worker_last_job_note(last)
+    next_action = _video_worker_next_action(status, product, readiness, last)
     lines = [
         "🎬 <b>Video Worker Status</b>",
         "",
@@ -39869,7 +39922,9 @@ def video_worker_status_text(status: dict | None = None, product: dict | None = 
         f"• Last status: <code>{html.escape(str(last.get('status') or '-'))}</code>",
         f"• Last worker: <code>{html.escape(str(last.get('worker_id') or '-'))}</code>",
         f"• Last update: <code>{html.escape(vietnam_time_display(last.get('updated_at')))}</code>",
-        f"• Last error: <code>{html.escape(str(last.get('safe_failure_reason') or '-')[:180])}</code>",
+        f"• Last reason code: <code>{html.escape(last_reason_code)}</code>",
+        f"• Last note: <code>{html.escape(last_note)}</code>",
+        f"• Next action: <b>{html.escape(next_action)}</b>",
         "",
         "Provider readiness:",
         *_video_provider_readiness_lines(readiness),
@@ -121258,6 +121313,22 @@ def _format_remote_worker_canary_status(status: dict) -> str:
     )
 
 
+def _remote_worker_prod_canary_next_action(status: dict) -> str:
+    state = str(status.get("status") or "").strip().lower()
+    stage = str(status.get("stage") or "").strip().lower()
+    if stage == "not_claimed_timeout":
+        return "Chạy admin-canary --once trên VPS để xem idle reason."
+    if state == "queued":
+        return "Chờ worker claim hoặc kiểm tra service admin-canary."
+    if state == "claimed":
+        return "Chờ hoàn tất hoặc refresh trạng thái canary."
+    if state == "failed":
+        return "Đọc reason code rồi kiểm tra journal admin-canary."
+    if state == "completed":
+        return "Canary hoàn tất; có thể tạo canary mới khi cần."
+    return "Refresh trạng thái hoặc kiểm tra service admin-canary."
+
+
 def _format_remote_worker_prod_canary_status(status: dict) -> str:
     if not status.get("ok"):
         return "🧪 <b>VPS Worker Production Canary</b>\n\nChưa tìm thấy job admin production canary."
@@ -121266,7 +121337,8 @@ def _format_remote_worker_prod_canary_status(status: dict) -> str:
     provider = "yes" if status.get("provider_call") else "no"
     public = "yes" if status.get("public_user") else "no"
     no_charge = "yes" if status.get("no_charge") else "no"
-    failure = status.get("safe_failure_reason") or "-"
+    reason_code = status.get("reason_code") or status.get("safe_failure_reason_code") or "-"
+    next_action = _remote_worker_prod_canary_next_action(status)
     return "\n".join(
         [
             "🧪 <b>VPS Worker Production Canary Status</b>",
@@ -121285,7 +121357,8 @@ def _format_remote_worker_prod_canary_status(status: dict) -> str:
             f"• No-charge: <code>{no_charge}</code>",
             f"• Public: <code>{public}</code>",
             f"• Provider: <code>{provider}</code>",
-            f"• Failure: <code>{html.escape(failure)}</code>",
+            f"• Reason code: <code>{html.escape(reason_code)}</code>",
+            f"• Next action: <b>{html.escape(next_action)}</b>",
         ]
     )
 

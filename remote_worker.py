@@ -85,6 +85,8 @@ RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
 RENDER_MODE_UNAVAILABLE = "unavailable"
 REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
 REMOTE_WORKER_PRODUCT_VIDEO_SOURCE = "product_video"
+LAST_CLAIM_RESPONSE: dict = {}
+LAST_IDLE_REASON = ""
 
 
 def mask_secret(value: str) -> str:
@@ -196,8 +198,35 @@ def claim_job(
         payload["product_video_only"] = True
     if owner_product_video_only:
         payload["owner_product_video_only"] = True
+    global LAST_CLAIM_RESPONSE
     data = http_json("POST", "/api/v1/worker/claim", payload, timeout=30)
-    return data.get("job") if data.get("ok") else None
+    LAST_CLAIM_RESPONSE = data if isinstance(data, dict) else {}
+    return data.get("job") if isinstance(data, dict) and data.get("ok") else None
+
+
+def claim_idle_reason(
+    *,
+    canary_only: bool = False,
+    admin_canary_only: bool = False,
+    admin_video_only: bool = False,
+    product_video_only: bool = False,
+    owner_product_video_only: bool = False,
+) -> str:
+    response = LAST_CLAIM_RESPONSE if isinstance(LAST_CLAIM_RESPONSE, dict) else {}
+    reason = str(response.get("reason") or "").strip()
+    if reason:
+        return reason
+    if admin_canary_only:
+        return "no_matching_jobs_or_job_already_failed_or_filter_mismatch_or_api_no_job"
+    if owner_product_video_only:
+        return "no_matching_owner_product_jobs_or_public_gate_mismatch_or_api_no_job"
+    if product_video_only:
+        return "no_matching_product_jobs_or_public_gate_mismatch_or_api_no_job"
+    if admin_video_only:
+        return "no_matching_admin_video_jobs_or_job_already_failed_or_filter_mismatch_or_api_no_job"
+    if canary_only:
+        return "no_matching_canary_jobs_or_job_already_failed_or_filter_mismatch_or_api_no_job"
+    return "api_no_job"
 
 
 def ping_server(
@@ -669,6 +698,9 @@ def run_once(
     product_video_only: bool = False,
     owner_product_video_only: bool = False,
 ) -> str:
+    global LAST_CLAIM_RESPONSE, LAST_IDLE_REASON
+    LAST_CLAIM_RESPONSE = {}
+    LAST_IDLE_REASON = ""
     if product_video_only or owner_product_video_only:
         job = claim_job(product_video_only=product_video_only, owner_product_video_only=owner_product_video_only)
     elif admin_video_only:
@@ -680,6 +712,13 @@ def run_once(
     else:
         job = claim_job()
     if not job:
+        LAST_IDLE_REASON = claim_idle_reason(
+            canary_only=canary_only,
+            admin_canary_only=admin_canary_only,
+            admin_video_only=admin_video_only,
+            product_video_only=product_video_only,
+            owner_product_video_only=owner_product_video_only,
+        )
         return "idle"
     job_id = str(job.get("job_id") or "")
     try:
@@ -827,6 +866,8 @@ def main(argv: list[str] | None = None) -> int:
             f"product_video_only={'yes' if args.product_video else 'no'} "
             f"owner_product_video_only={'yes' if args.owner_product_video else 'no'}"
         )
+        if status == "idle":
+            print(f"[remote_worker] once idle_reason={LAST_IDLE_REASON or 'api_no_job'}")
         return 1 if status == "failed" else 0
 
     print("[remote_worker] TOAN AAS Remote Worker starting")

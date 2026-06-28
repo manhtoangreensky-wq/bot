@@ -180,6 +180,60 @@ def scrub_secret_text(value: Any) -> str:
     return text[:500]
 
 
+def safe_worker_reason_code(value: Any, fallback: str = "-") -> str:
+    text = scrub_secret_text(value).strip()
+    if not text or text == "-":
+        return fallback
+    lowered = text.lower()
+    known_codes = (
+        "product_video_worker_unavailable",
+        "real_video_renderer_unavailable",
+        "admin_canary_disabled",
+        "no_admin_canary_job",
+        "no_owner_product_video_job",
+        "no_product_video_job",
+        "public_product_worker_disabled_or_no_owner_job",
+        "capability_not_supported",
+        "product_video_capability_required",
+        "admin_canary_capability_required",
+        "admin_video_capability_required",
+        "ffmpeg_missing",
+        "upload_failed",
+        "lease_expired_requeued",
+    )
+    for code in known_codes:
+        if code in lowered:
+            return code
+    if "runtimeerror" in lowered and "redacted" in lowered:
+        return "runtime_error_redacted"
+    if "httperror" in lowered or "http " in lowered:
+        match = re.search(r"\b(401|403|404|429|500|502|503|504)\b", lowered)
+        return f"http_{match.group(1)}" if match else "http_error"
+    if "urlerror" in lowered or "timeout" in lowered:
+        return "network_or_timeout"
+    cleaned = re.sub(r"[^a-z0-9_.:-]+", "_", lowered).strip("_")
+    return (cleaned[:100] or fallback)
+
+
+def _parse_queue_time(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    for parser in (
+        lambda item: datetime.fromisoformat(item.replace("Z", "+00:00")),
+        lambda item: datetime.strptime(item[:19], "%Y-%m-%d %H:%M:%S"),
+        lambda item: datetime.strptime(item[:19], "%Y-%m-%dT%H:%M:%S"),
+    ):
+        try:
+            parsed = parser(raw)
+            if parsed.tzinfo is not None:
+                parsed = parsed.replace(tzinfo=None)
+            return parsed
+        except Exception:
+            continue
+    return None
+
+
 def is_remote_worker_canary_job(job: dict | None = None, project: dict | None = None) -> bool:
     job = job or {}
     project = project or {}
@@ -1129,7 +1183,12 @@ def claim_remote_worker_job(
             return {"ok": True, "job": None, "reason": "admin_canary_disabled", "admin_canary_only": True}
         job = claim_remote_worker_admin_canary_job(conn, worker_id=worker, lease_seconds=lease_seconds)
         hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
-        return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "admin_canary_only": True}
+        return {
+            "ok": True,
+            "job": build_worker_job_payload(hydrated) if hydrated else None,
+            "admin_canary_only": True,
+            "reason": "" if hydrated else "no_admin_canary_job",
+        }
     if admin_video_only:
         if requested and REMOTE_WORKER_ADMIN_VIDEO_CAPABILITY not in requested:
             return {"ok": True, "job": None, "reason": "admin_video_capability_required"}
@@ -1555,13 +1614,35 @@ def get_remote_worker_admin_canary_status(
             uploaded_bytes = 0
     result_uploaded = bool(uploaded_bytes > 0 or final_path or project.get("final_video_file_id"))
     progress_message = scrub_secret_text(job.get("progress_message") or "")
+    worker_id = sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else ""
+    raw_status = str(job.get("status") or "").strip().lower()
+    failure_reason = scrub_secret_text(job.get("last_error") or project.get("error_log") or "")
+    reason_code = safe_worker_reason_code(failure_reason)
+    created_at = _parse_queue_time(job.get("created_at") or job.get("updated_at"))
+    age_seconds = 0
+    if created_at:
+        age_seconds = max(0, int((datetime.now() - created_at).total_seconds()))
+    if raw_status in {"failed", "error"}:
+        display_status = "failed"
+        stage = reason_code if reason_code != "-" else "failed"
+    elif raw_status in {"completed", "done", "success"}:
+        display_status = "completed"
+        stage = "completed"
+    elif raw_status in {"processing", "running"} or worker_id:
+        display_status = "claimed"
+        progress_stage = progress_message.strip().lower()
+        stage = progress_message if progress_stage and progress_stage not in {"completed", "complete", "done", "success"} else "claimed"
+    else:
+        display_status = "queued"
+        stage = "not_claimed_timeout" if age_seconds >= 120 and not worker_id else "queued"
     return {
         "ok": True,
         "job_id": int(job.get("id") or 0),
         "canary_ref": f"{REMOTE_WORKER_ADMIN_CANARY_REF_PREFIX}-{int(job.get('id') or 0)}",
-        "status": str(job.get("status") or ""),
-        "stage": progress_message or str(job.get("status") or ""),
-        "worker_id": sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else "",
+        "raw_status": raw_status,
+        "status": display_status,
+        "stage": stage,
+        "worker_id": worker_id,
         "claimed_at": str(job.get("locked_at") or ""),
         "last_heartbeat_at": str(job.get("updated_at") or ""),
         "progress_percent": _safe_int(job.get("progress_percent"), 0),
@@ -1569,7 +1650,11 @@ def get_remote_worker_admin_canary_status(
         "result_uploaded": result_uploaded,
         "result_file_size": int(uploaded_bytes or 0),
         "sent_to_admin": bool(result.get("sent_to_admin")),
-        "safe_failure_reason": scrub_secret_text(job.get("last_error") or project.get("error_log") or ""),
+        "safe_failure_reason": failure_reason,
+        "safe_failure_reason_code": reason_code,
+        "reason_code": reason_code,
+        "not_claimed_timeout": bool(stage == "not_claimed_timeout"),
+        "age_seconds": age_seconds,
         "admin_only": bool(flags["admin_only"]),
         "no_charge": bool(flags["no_charge"]),
         "provider_call": bool(flags["provider_call"]),
@@ -1636,6 +1721,8 @@ def remote_worker_product_video_queue_snapshot(conn: sqlite3.Connection) -> dict
         if status == "queued":
             queued += 1
         flags = _product_video_safety_flags(project)
+        failure_reason = scrub_secret_text(row[6] or "")
+        status_lower = status.strip().lower()
         items.append(
             {
                 "job_id": int(row[0]),
@@ -1645,7 +1732,10 @@ def remote_worker_product_video_queue_snapshot(conn: sqlite3.Connection) -> dict
                 "updated_at": str(row[3] or ""),
                 "progress_percent": _safe_int(row[4], 0),
                 "progress_message": scrub_secret_text(row[5] or ""),
-                "safe_failure_reason": scrub_secret_text(row[6] or ""),
+                "safe_failure_reason": failure_reason,
+                "safe_failure_reason_code": safe_worker_reason_code(failure_reason),
+                "reason_code": safe_worker_reason_code(failure_reason),
+                "age_state": "old_failure" if status_lower in {"failed", "error"} else "",
                 "admin_only": bool(flags["admin_only"]),
                 "no_charge": bool(flags["no_charge"]),
                 "public_user": bool(flags["public_user"]),
