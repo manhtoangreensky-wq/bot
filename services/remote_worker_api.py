@@ -29,6 +29,17 @@ SECRET_KEY_MARKERS = (
     "payos",
     "wallet",
 )
+SAFE_DIAGNOSTIC_CODES = (
+    "real_video_renderer_unavailable",
+    "product_video_worker_unavailable",
+    "not_claimed_timeout",
+    "provider_submit_failed",
+    "missing_config",
+    "worker_api_disabled",
+    "claim_route_missing",
+    "no_owner_product_video_job",
+    "no_admin_canary_job",
+)
 REMOTE_WORKER_CANARY_JOB_TYPE = "remote_worker_canary"
 REMOTE_WORKER_CANARY_SOURCE = "admin_canary"
 REMOTE_WORKER_CANARY_CAPABILITY = "canary"
@@ -173,10 +184,17 @@ def strip_secret_fields(value: Any) -> Any:
 
 def scrub_secret_text(value: Any) -> str:
     text = str(value or "").replace("\r", " ").replace("\n", " ")
+    safe_placeholders: dict[str, str] = {}
+    for index, code in enumerate(SAFE_DIAGNOSTIC_CODES):
+        placeholder = f"SAFE_DIAG_CODE_{index}"
+        text = re.sub(re.escape(code), placeholder, text, flags=re.IGNORECASE)
+        safe_placeholders[placeholder] = code
     text = re.sub(r"(?i)(bearer|authorization)\s+[A-Za-z0-9._~+/=-]+", r"\1 <redacted>", text)
     for marker in SECRET_KEY_MARKERS:
         text = re.sub(rf"(?i){re.escape(marker)}[A-Za-z0-9_.:/=+\-]*", f"{marker}=<redacted>", text)
     text = re.sub(r"[A-Za-z0-9_-]{24,}", "<redacted>", text)
+    for placeholder, code in safe_placeholders.items():
+        text = text.replace(placeholder, code)
     return text[:500]
 
 
@@ -232,6 +250,69 @@ def _parse_queue_time(value: Any) -> datetime | None:
         except Exception:
             continue
     return None
+
+def classify_remote_worker_error(value: Any, *, status: str = "", worker_id: str = "") -> dict[str, str]:
+    raw = scrub_secret_text(value)
+    lowered = raw.lower()
+    status_text = str(status or "").strip().lower()
+    if status_text == "failed" and not str(worker_id or "").strip() and not raw:
+        return {
+            "error_type": "worker_not_claimed",
+            "reason_code": "not_claimed_timeout",
+            "stage": "waiting_worker",
+            "raw": "",
+        }
+    if not raw:
+        return {"error_type": "", "reason_code": "", "stage": "", "raw": ""}
+    head = re.split(r"[:;\s]+", raw, maxsplit=1)[0].strip().lower()
+    error_type = re.sub(r"[^a-z0-9_]+", "_", head) or "worker_error"
+    if "runtimeerror" in error_type:
+        error_type = "worker_runtime_error"
+    elif "sqlite" in error_type or "database" in lowered:
+        error_type = "db_error"
+    elif "provider" in lowered or "renderer" in lowered or "submit" in lowered:
+        error_type = "provider_error"
+    elif "ffmpeg" in lowered:
+        error_type = "ffmpeg_error"
+    elif "timeout" in lowered or "unavailable" in lowered:
+        error_type = "worker_runtime_error"
+
+    stage = ""
+    if "not_claimed" in lowered or "worker_unavailable" in lowered:
+        stage = "waiting_worker"
+    elif "provider_submit" in lowered or "submit" in lowered:
+        stage = "provider_submit_failed"
+    elif "real_video_renderer_unavailable" in lowered or "renderer_unavailable" in lowered:
+        stage = "provider_not_ready"
+    elif "config" in lowered or "missing" in lowered:
+        stage = "missing_config"
+    elif "upload" in lowered or "result_file" in lowered:
+        stage = "output_validation_failed"
+    elif "ffmpeg" in lowered:
+        stage = "ffmpeg_failed"
+    elif "diagnostic" in lowered:
+        stage = "diagnostic"
+    elif "<redacted>" in lowered and len(lowered) <= 40:
+        stage = error_type
+    else:
+        stage = error_type
+
+    tail = raw.split(":", 1)[1].strip() if ":" in raw else raw
+    reason = re.sub(r"[^A-Za-z0-9_.:-]+", "_", tail.lower()).strip("_")[:80]
+    if not reason or reason in {"redacted", "redacted_"} or "<redacted>" in reason:
+        reason = stage or error_type
+    return {"error_type": error_type, "reason_code": reason, "stage": stage, "raw": raw}
+
+
+def _result_file_exists(project: dict, result: dict | None = None) -> bool:
+    payload = result if isinstance(result, dict) else {}
+    path = str(project.get("final_video_path") or payload.get("final_video_path") or "")
+    if path:
+        try:
+            return os.path.exists(path) and os.path.getsize(path) > 0
+        except OSError:
+            return False
+    return bool(project.get("final_video_file_id") or _safe_int(payload.get("uploaded_file_bytes") or payload.get("bytes"), 0) > 0)
 
 
 def is_remote_worker_canary_job(job: dict | None = None, project: dict | None = None) -> bool:
@@ -436,6 +517,99 @@ def _product_video_is_claimable(project: dict, *, owner_only: bool = False, publ
     if owner_product:
         return True
     return bool(flags["public_user"] and public_enabled)
+
+
+def explain_admin_canary_claimability(conn: sqlite3.Connection, job_id: int | str) -> dict:
+    wanted = _safe_int(job_id, 0)
+    if wanted <= 0:
+        return {"ok": False, "claimable": False, "reason": "job_id_required"}
+    job = video_project_queue.get_video_render_job(conn, wanted)
+    if not job:
+        return {"ok": False, "claimable": False, "reason": "job_not_found"}
+    project = video_project_queue.get_video_project(conn, int(job.get("project_id") or 0))
+    if not project:
+        return {"ok": False, "claimable": False, "reason": "project_not_found", "job_id": wanted}
+    flags = _admin_canary_safety_flags(project)
+    status = str(job.get("status") or "")
+    project_status = str(project.get("status") or "")
+    reason = ""
+    if str(job.get("job_type") or "") != video_project_queue.VIDEO_RENDER_JOB_TYPE:
+        reason = "job_type_not_video_render"
+    elif status != "queued":
+        reason = f"job_status_{status or 'missing'}"
+    elif _safe_int(project.get("is_confirmed"), 0) != 1:
+        reason = "project_not_confirmed"
+    elif project_status not in {"queued_for_worker", "processing"}:
+        reason = f"project_status_{project_status or 'missing'}"
+    elif not is_remote_worker_admin_canary_job(job, project):
+        reason = "not_admin_canary_payload"
+    elif not _admin_canary_is_safe(project):
+        reason = "admin_canary_safety_mismatch"
+    claimable = not bool(reason)
+    return {
+        "ok": True,
+        "claimable": claimable,
+        "reason": "" if claimable else reason,
+        "job_id": wanted,
+        "project_id": int(project.get("project_id") or 0),
+        "job_status": status,
+        "project_status": project_status,
+        "worker_claimed": bool(job.get("locked_by")),
+        "worker_id": sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else "",
+        "flags": flags,
+    }
+
+
+def explain_product_video_claimability(
+    conn: sqlite3.Connection,
+    job_id: int | str,
+    *,
+    owner_only: bool = False,
+    public_enabled: bool = False,
+) -> dict:
+    wanted = _safe_int(job_id, 0)
+    if wanted <= 0:
+        return {"ok": False, "claimable": False, "reason": "job_id_required"}
+    job = video_project_queue.get_video_render_job(conn, wanted)
+    if not job:
+        return {"ok": False, "claimable": False, "reason": "job_not_found"}
+    project = video_project_queue.get_video_project(conn, int(job.get("project_id") or 0))
+    if not project:
+        return {"ok": False, "claimable": False, "reason": "project_not_found", "job_id": wanted}
+    flags = _product_video_safety_flags(project)
+    status = str(job.get("status") or "")
+    project_status = str(project.get("status") or "")
+    owner_product = bool(flags["admin_only"] and flags["no_charge"] and not flags["public_user"])
+    reason = ""
+    if str(job.get("job_type") or "") != video_project_queue.VIDEO_RENDER_JOB_TYPE:
+        reason = "job_type_not_video_render"
+    elif status != "queued":
+        reason = f"job_status_{status or 'missing'}"
+    elif _safe_int(project.get("is_confirmed"), 0) != 1:
+        reason = "project_not_confirmed"
+    elif project_status not in {"queued_for_worker", "processing"}:
+        reason = f"project_status_{project_status or 'missing'}"
+    elif not is_remote_worker_product_video_job(job, project):
+        reason = "not_product_video_real_payload"
+    elif owner_only and not owner_product:
+        reason = "owner_product_filter_mismatch"
+    elif not owner_only and not owner_product and not (flags["public_user"] and public_enabled):
+        reason = "public_product_worker_disabled_or_no_owner_job"
+    claimable = not bool(reason)
+    return {
+        "ok": True,
+        "claimable": claimable,
+        "reason": "" if claimable else reason,
+        "job_id": wanted,
+        "project_id": int(project.get("project_id") or 0),
+        "job_status": status,
+        "project_status": project_status,
+        "worker_claimed": bool(job.get("locked_by")),
+        "worker_id": sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else "",
+        "owner_only": bool(owner_only),
+        "public_enabled": bool(public_enabled),
+        "flags": flags,
+    }
 
 
 def _scene_cards_from_project(project: dict, scenes: list[dict]) -> list[dict]:
@@ -1545,20 +1719,39 @@ def get_remote_worker_canary_status(
         except OSError:
             uploaded_bytes = 0
     result_uploaded = bool(uploaded_bytes > 0 or final_path or project.get("final_video_file_id"))
+    status = str(job.get("status") or "")
+    worker_id = sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else ""
+    claimed_at = str(job.get("locked_at") or job.get("started_at") or "")
+    worker_had_claim = bool(worker_id or claimed_at or _safe_int(job.get("attempts"), 0) > 0)
+    failure_diag = classify_remote_worker_error(job.get("last_error") or project.get("error_log") or "", status=status, worker_id=worker_id)
+    progress_message = scrub_secret_text(job.get("progress_message") or "")
+    stage = progress_message or status
+    safe_failure = failure_diag["raw"]
+    if status == "failed":
+        if not worker_had_claim and not safe_failure:
+            stage = "waiting_worker"
+            safe_failure = "not_claimed_timeout"
+            failure_diag = classify_remote_worker_error(safe_failure, status=status, worker_id=worker_id)
+        elif failure_diag["stage"]:
+            stage = failure_diag["stage"] or "worker_failed"
     return {
         "ok": True,
         "job_id": int(job.get("id") or 0),
         "canary_ref": f"RW-CANARY-{int(job.get('id') or 0)}",
-        "status": str(job.get("status") or ""),
-        "worker_id": sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else "",
-        "claimed_at": str(job.get("locked_at") or ""),
+        "status": status,
+        "stage": stage,
+        "worker_id": worker_id,
+        "claimed_at": claimed_at,
         "last_heartbeat_at": str(job.get("updated_at") or ""),
         "progress_percent": _safe_int(job.get("progress_percent"), 0),
-        "progress_message": scrub_secret_text(job.get("progress_message") or ""),
+        "progress_message": progress_message,
         "result_uploaded": result_uploaded,
         "result_file_size": int(uploaded_bytes or 0),
         "sent_to_admin": bool(result.get("sent_to_admin")),
-        "safe_failure_reason": scrub_secret_text(job.get("last_error") or project.get("error_log") or ""),
+        "safe_failure_reason": safe_failure,
+        "safe_error_type": failure_diag["error_type"],
+        "safe_reason_code": failure_diag["reason_code"],
+        "result_file_exists": _result_file_exists(project, result),
         "admin_only": True,
         "no_charge": True,
         "provider_call": False,
@@ -1616,15 +1809,26 @@ def get_remote_worker_admin_canary_status(
     progress_message = scrub_secret_text(job.get("progress_message") or "")
     worker_id = sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else ""
     raw_status = str(job.get("status") or "").strip().lower()
-    failure_reason = scrub_secret_text(job.get("last_error") or project.get("error_log") or "")
-    reason_code = safe_worker_reason_code(failure_reason)
+    claimed_at = str(job.get("locked_at") or job.get("started_at") or "")
+    worker_had_claim = bool(worker_id or claimed_at or _safe_int(job.get("attempts"), 0) > 0)
+    safe_failure = scrub_secret_text(job.get("last_error") or project.get("error_log") or "")
+    failure_diag = classify_remote_worker_error(safe_failure, status=raw_status, worker_id=worker_id)
+    reason_code = safe_worker_reason_code(safe_failure)
     created_at = _parse_queue_time(job.get("created_at") or job.get("updated_at"))
     age_seconds = 0
     if created_at:
         age_seconds = max(0, int((datetime.now() - created_at).total_seconds()))
     if raw_status in {"failed", "error"}:
         display_status = "failed"
-        stage = reason_code if reason_code != "-" else "failed"
+        if not worker_had_claim and not safe_failure:
+            stage = "waiting_worker"
+            safe_failure = "not_claimed_timeout"
+            failure_diag = classify_remote_worker_error(safe_failure, status=raw_status, worker_id=worker_id)
+            reason_code = "not_claimed_timeout"
+        elif failure_diag["stage"]:
+            stage = reason_code if reason_code == "runtime_error_redacted" else failure_diag["stage"]
+        else:
+            stage = reason_code if reason_code != "-" else "failed"
     elif raw_status in {"completed", "done", "success"}:
         display_status = "completed"
         stage = "completed"
@@ -1635,6 +1839,10 @@ def get_remote_worker_admin_canary_status(
     else:
         display_status = "queued"
         stage = "not_claimed_timeout" if age_seconds >= 120 and not worker_id else "queued"
+        if stage == "not_claimed_timeout" and not safe_failure:
+            safe_failure = "not_claimed_timeout"
+            failure_diag = classify_remote_worker_error(safe_failure, status=raw_status, worker_id=worker_id)
+            reason_code = "not_claimed_timeout"
     return {
         "ok": True,
         "job_id": int(job.get("id") or 0),
@@ -1643,18 +1851,21 @@ def get_remote_worker_admin_canary_status(
         "status": display_status,
         "stage": stage,
         "worker_id": worker_id,
-        "claimed_at": str(job.get("locked_at") or ""),
+        "claimed_at": claimed_at,
         "last_heartbeat_at": str(job.get("updated_at") or ""),
         "progress_percent": _safe_int(job.get("progress_percent"), 0),
         "progress_message": progress_message,
         "result_uploaded": result_uploaded,
         "result_file_size": int(uploaded_bytes or 0),
         "sent_to_admin": bool(result.get("sent_to_admin")),
-        "safe_failure_reason": failure_reason,
+        "safe_failure_reason": safe_failure,
         "safe_failure_reason_code": reason_code,
         "reason_code": reason_code,
         "not_claimed_timeout": bool(stage == "not_claimed_timeout"),
         "age_seconds": age_seconds,
+        "safe_error_type": failure_diag["error_type"],
+        "safe_reason_code": failure_diag["reason_code"] or reason_code,
+        "result_file_exists": _result_file_exists(project, result),
         "admin_only": bool(flags["admin_only"]),
         "no_charge": bool(flags["no_charge"]),
         "provider_call": bool(flags["provider_call"]),
@@ -1701,7 +1912,8 @@ def remote_worker_admin_canary_queue_snapshot(conn: sqlite3.Connection) -> dict:
 def remote_worker_product_video_queue_snapshot(conn: sqlite3.Connection) -> dict:
     video_project_queue.ensure_video_project_queue_schema(conn)
     rows = conn.execute(
-        """SELECT j.id,j.status,j.locked_by,j.updated_at,j.progress_percent,j.progress_message,j.last_error,j.project_id
+        """SELECT j.id,j.status,j.locked_by,j.updated_at,j.progress_percent,j.progress_message,j.last_error,j.project_id,
+                  j.result_json,p.final_video_path,p.error_log,j.started_at,j.attempts
            FROM video_jobs j
            JOIN video_projects p ON p.project_id=j.project_id
            WHERE j.job_type=? AND COALESCE(p.asset_pack_json,'') LIKE ?
@@ -1721,21 +1933,56 @@ def remote_worker_product_video_queue_snapshot(conn: sqlite3.Connection) -> dict
         if status == "queued":
             queued += 1
         flags = _product_video_safety_flags(project)
-        failure_reason = scrub_secret_text(row[6] or "")
         status_lower = status.strip().lower()
+        worker_id = sanitize_worker_id(str(row[2] or "")) if row[2] else ""
+        worker_had_claim = bool(worker_id or row[11] or _safe_int(row[12], 0) > 0)
+        error_text = scrub_secret_text(row[6] or project.get("error_log") or row[10] or "")
+        failure_diag = classify_remote_worker_error(error_text, status=status, worker_id=worker_id)
+        reason_code = safe_worker_reason_code(error_text)
+        result = _json_loads(row[8], {})
+        if not isinstance(result, dict):
+            result = {}
+        stage = scrub_secret_text(row[5] or "") or status
+        if status == "failed":
+            if not worker_had_claim and not error_text:
+                stage = "waiting_worker"
+                error_text = "not_claimed_timeout"
+                failure_diag = classify_remote_worker_error(error_text, status=status, worker_id=worker_id)
+            elif failure_diag["stage"]:
+                stage = failure_diag["stage"] or "worker_failed"
+        provider_route_attempted = bool(
+            flags["provider_call"]
+            and any(marker in f"{row[5] or ''} {error_text} {row[8] or ''}".lower() for marker in ("provider", "shopaikey", "key4u", "real_video", "submit"))
+        )
+        result_file_exists = _result_file_exists({**project, "final_video_path": row[9] or project.get("final_video_path")}, result)
+        if status == "queued" and not worker_id:
+            next_action = "run_owner_product_video_once"
+        elif failure_diag["stage"] in {"provider_not_ready", "missing_config", "provider_submit_failed"}:
+            next_action = "check_real_provider_config"
+        elif worker_id:
+            next_action = "check_owner_product_video_journal"
+        else:
+            next_action = "create_fresh_diagnostic_job"
         items.append(
             {
                 "job_id": int(row[0]),
                 "project_id": int(row[7]),
                 "status": status,
-                "worker_id": sanitize_worker_id(str(row[2] or "")) if row[2] else "",
+                "stage": stage,
+                "worker_claimed": bool(worker_id),
+                "worker_id": worker_id,
                 "updated_at": str(row[3] or ""),
                 "progress_percent": _safe_int(row[4], 0),
                 "progress_message": scrub_secret_text(row[5] or ""),
-                "safe_failure_reason": failure_reason,
-                "safe_failure_reason_code": safe_worker_reason_code(failure_reason),
-                "reason_code": safe_worker_reason_code(failure_reason),
+                "safe_failure_reason": error_text,
+                "safe_failure_reason_code": reason_code,
+                "reason_code": reason_code,
                 "age_state": "old_failure" if status_lower in {"failed", "error"} else "",
+                "safe_error_type": failure_diag["error_type"],
+                "safe_reason_code": failure_diag["reason_code"] or reason_code,
+                "provider_route_attempted": provider_route_attempted,
+                "result_file_exists": result_file_exists,
+                "next_action": next_action,
                 "admin_only": bool(flags["admin_only"]),
                 "no_charge": bool(flags["no_charge"]),
                 "public_user": bool(flags["public_user"]),
