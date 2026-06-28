@@ -193,12 +193,12 @@ def test_public_user_guarded_before_provider_when_not_ready(monkeypatch, tmp_pat
     message = CaptureMessage(user_id)
     asyncio.run(bot.create_minimax_voice_profile_preview(SimpleNamespace(message=message), SimpleNamespace(bot=CaptureBot()), user_id, profile, "vi"))
 
-    assert "Tạo voice riêng đang tạm khóa" in message.outputs[-1]["text"]
+    assert "TOAN AAS chưa tạo được voice" in message.outputs[-1]["text"]
     assert "chưa trừ Xu" in message.outputs[-1]["text"]
     assert bot.get_user_voice_profile(user_id, int(profile["id"]))["status"] != "ready"
 
 
-def test_admin_blocked_provider_gets_sanitized_diagnostic(monkeypatch, tmp_path):
+def test_admin_blocked_provider_gets_clean_product_copy(monkeypatch, tmp_path):
     _init_voice_db(monkeypatch, tmp_path)
     user_id = 22903
     profile = _make_confirmed_profile(user_id, "Voice admin blocked")
@@ -209,9 +209,11 @@ def test_admin_blocked_provider_gets_sanitized_diagnostic(monkeypatch, tmp_path)
     asyncio.run(bot.create_minimax_voice_profile_preview(SimpleNamespace(message=message), SimpleNamespace(bot=SimpleNamespace()), user_id, profile, "vi"))
 
     text = message.outputs[-1]["text"]
-    assert "ADMIN TEST MODE" in text
-    assert "public gate bypassed" in text
-    assert "provider_voice_id present: <code>NO</code>" in text
+    assert "TOAN AAS chưa tạo được voice" in text
+    assert "ADMIN TEST MODE" not in text
+    assert "public gate bypassed" not in text
+    assert "provider_voice_id" not in text
+    assert "route_errors" not in text
     assert "TOKEN" not in text
 
 
@@ -225,7 +227,7 @@ def test_first_custom_voice_free_for_public_user(monkeypatch, tmp_path):
 
     assert bot.count_successful_custom_voice_profiles(user_id) == 0
     assert bot.voice_profile_storage_price_xu(user_id) == 0
-    assert "đầu tiên miễn phí" in bot.voice_clone_quote_text(_make_confirmed_profile(user_id, "Next voice"), "vi")
+    assert "Voice riêng đầu tiên: miễn phí" in bot.voice_clone_quote_text(_make_confirmed_profile(user_id, "Next voice"), "vi")
 
 
 def test_second_custom_voice_costs_50_xu(monkeypatch, tmp_path):
@@ -246,7 +248,9 @@ def test_admin_custom_voice_always_zero_xu(monkeypatch, tmp_path):
     bot.update_user_voice_profile(user_id, int(first["id"]), status="ready", provider_voice_id="provider-custom-one")
 
     assert bot.voice_profile_storage_price_xu(user_id) == 0
-    assert "ADMIN TEST MODE" in bot.voice_clone_quote_text(_make_confirmed_profile(user_id, "Admin voice"), "vi")
+    text = bot.voice_clone_quote_text(_make_confirmed_profile(user_id, "Admin voice"), "vi")
+    assert "ADMIN TEST MODE" not in text
+    assert f"{bot.VOICE_PROFILE_PRICE_XU} Xu" in text
 
 
 def test_voice_adapter_rejects_local_profile_id_for_saved_voice(monkeypatch, tmp_path):

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import inspect
+
 import bot
 
 
@@ -98,7 +100,7 @@ def test_paid_voice_real_route_or_admin_blocker_only():
 
 
 def test_voice_preview_failure_copy_voice_specific():
-    source = _source_between("async def create_minimax_voice_profile_preview", "async def handle_music_quick_callback")
+    source = inspect.getsource(bot.voice_clone_product_failure_text)
     assert "TOAN AAS chưa tạo được voice hợp lệ" in source
     assert "dùng giọng nam/nữ mặc định" in source
 

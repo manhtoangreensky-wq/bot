@@ -289,10 +289,11 @@ def test_custom_voice_menu_admin_user_still_customer_clean(monkeypatch, tmp_path
     )
     message, _profile = _run_blocked_flow(monkeypatch, tmp_path, user_id=19003, admin=True)
     output = message.outputs[-1]
-    assert output["parse_mode"] == "HTML"
-    assert "ADMIN TEST MODE" in output["text"]
-    assert "public gate bypassed" in output["text"]
-    assert "route_errors" in output["text"]
+    assert "TOAN AAS chưa tạo được voice" in output["text"]
+    assert "ADMIN TEST MODE" not in output["text"]
+    assert "public gate bypassed" not in output["text"]
+    assert "route_errors" not in output["text"]
+    assert "provider_voice_id" not in output["text"]
     assert "TOKEN" not in output["text"]
     assert "traceback" not in output["text"].lower()
 
@@ -324,13 +325,14 @@ def test_voice_admin_diagnostic_not_sent_from_public_flow(monkeypatch, tmp_path)
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("admin diagnostic must stay out of public flow")),
     )
     message, _profile = _run_blocked_flow(monkeypatch, tmp_path, user_id=19004, admin=True)
-    assert "ADMIN TEST MODE" in message.outputs[-1]["text"]
-    assert "public gate bypassed" in message.outputs[-1]["text"]
+    assert "TOAN AAS chưa tạo được voice" in message.outputs[-1]["text"]
+    assert "ADMIN TEST MODE" not in message.outputs[-1]["text"]
+    assert "public gate bypassed" not in message.outputs[-1]["text"]
 
 
 def test_custom_voice_block_before_provider_when_clone_readiness_blocked(monkeypatch, tmp_path):
     message, _profile = _run_blocked_flow(monkeypatch, tmp_path)
-    assert message.outputs[-1]["text"].startswith("Tạo voice riêng đang tạm khóa")
+    assert message.outputs[-1]["text"].startswith("⚙️ TOAN AAS chưa tạo được voice")
 
 
 def test_custom_voice_block_no_provider_call(monkeypatch, tmp_path):
@@ -498,8 +500,8 @@ def test_custom_voice_both_providers_blocked_public_clean_message(monkeypatch, t
         key4u_clone_status="CLONE_PERMISSION_FORBIDDEN",
     )
     text = message.outputs[-1]["text"]
-    assert "Tạo voice riêng đang tạm khóa" in text
-    assert "chưa xử lý và chưa trừ Xu" in text
+    assert "TOAN AAS chưa tạo được voice" in text
+    assert "chưa trừ Xu" in text
     assert profile["status"] == "failed_clone_permission_forbidden"
 
 
