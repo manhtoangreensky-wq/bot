@@ -78,6 +78,8 @@ WORKER_CONCURRENCY = max(1, env_int("WORKER_CONCURRENCY", 1))
 WORKER_TMP_DIR = str(os.environ.get("WORKER_TMP_DIR") or tempfile.gettempdir()).strip()
 FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
 FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_PATH") or "ffmpeg").strip()
+LAST_CLAIM_RESPONSE: dict = {}
+LAST_IDLE_REASON = ""
 LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
 RENDER_MODE_REAL = "real"
@@ -85,8 +87,6 @@ RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
 RENDER_MODE_UNAVAILABLE = "unavailable"
 REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
 REMOTE_WORKER_PRODUCT_VIDEO_SOURCE = "product_video"
-LAST_CLAIM_RESPONSE: dict = {}
-LAST_IDLE_REASON = ""
 
 
 def mask_secret(value: str) -> str:
@@ -173,6 +173,7 @@ def claim_job(
     product_video_only: bool = False,
     owner_product_video_only: bool = False,
 ) -> dict | None:
+    global LAST_CLAIM_RESPONSE
     if product_video_only or owner_product_video_only:
         capabilities = ["product_video", "owner_product_video", "ffmpeg", "video_postprocess"]
     elif admin_video_only:
@@ -199,7 +200,11 @@ def claim_job(
     if owner_product_video_only:
         payload["owner_product_video_only"] = True
     global LAST_CLAIM_RESPONSE
-    data = http_json("POST", "/api/v1/worker/claim", payload, timeout=30)
+    try:
+        data = http_json("POST", "/api/v1/worker/claim", payload, timeout=30)
+    except Exception as exc:
+        LAST_CLAIM_RESPONSE = {"ok": False, "reason": type(exc).__name__}
+        raise
     LAST_CLAIM_RESPONSE = data if isinstance(data, dict) else {}
     return data.get("job") if isinstance(data, dict) and data.get("ok") else None
 
@@ -691,6 +696,39 @@ def process_canary_job(job: dict) -> dict:
         return complete_job(job_id, result, final_path)
 
 
+def claim_mode_label(
+    *,
+    canary_only: bool = False,
+    admin_canary_only: bool = False,
+    admin_video_only: bool = False,
+    product_video_only: bool = False,
+    owner_product_video_only: bool = False,
+) -> str:
+    if owner_product_video_only:
+        return "owner_product_video"
+    if product_video_only:
+        return "product_video"
+    if admin_video_only:
+        return "admin_video"
+    if admin_canary_only:
+        return "admin_canary"
+    if canary_only:
+        return "canary"
+    return "default_video"
+
+
+def last_claim_reason() -> str:
+    response = LAST_CLAIM_RESPONSE if isinstance(LAST_CLAIM_RESPONSE, dict) else {}
+    reason = str(response.get("reason") or "").strip()
+    if reason:
+        return first_line(reason)[:160]
+    if response.get("ok") is False:
+        return "claim_api_not_ok"
+    if response:
+        return "api_returned_no_job"
+    return "no_claim_response"
+
+
 def run_once(
     canary_only: bool = False,
     admin_canary_only: bool = False,
@@ -718,6 +756,13 @@ def run_once(
             admin_video_only=admin_video_only,
             product_video_only=product_video_only,
             owner_product_video_only=owner_product_video_only,
+        )
+        print(
+            "[remote_worker] claim idle "
+            f"mode={claim_mode_label(canary_only=canary_only, admin_canary_only=admin_canary_only, admin_video_only=admin_video_only, product_video_only=product_video_only, owner_product_video_only=owner_product_video_only)} "
+            "route=/api/v1/worker/claim "
+            "status=idle "
+            f"reason={LAST_IDLE_REASON}"
         )
         return "idle"
     job_id = str(job.get("job_id") or "")

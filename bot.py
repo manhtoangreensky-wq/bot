@@ -39796,39 +39796,71 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
     if "--no-charge" not in args:
         return await update.message.reply_text("Dùng: /tool_test_video_product_worker_claim --no-charge")
     flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
+    if not flags.get("worker_api_enabled"):
+        return await update.message.reply_text(
+            "⚠️ <b>Product video worker diagnostic</b>\n\n"
+            "Không tạo job vì worker API chưa sẵn sàng.\n"
+            "• Error: <code>worker_api_disabled</code>\n"
+            "• Trừ Xu: Không",
+            parse_mode="HTML",
+        )
     try:
         from services.video_real_render_connector import real_video_provider_readiness
 
         readiness = real_video_provider_readiness()
     except Exception as exc:
         readiness = {"ok": False, "providers": [], "reason": type(exc).__name__}
-    created = {"ok": False, "reason": "not_started"}
-    product = {"last": {}}
-    conn = None
+    created = {}
+    claimability = {}
     try:
         conn = db_connect()
-        created = remote_worker_api.create_product_video_worker_claim_test_job(conn, admin_user_id=safe_int(uid, 0), scene_count=1, duration_seconds=6)
-        if created.get("ok"):
-            job = dict(created.get("job") or {})
-            try:
-                set_system_setting("remote_worker:last_product_video_job_id", str(job.get("id") or ""), "last product video worker diagnostic job", uid)
-            except Exception:
-                logger.warning("product video diagnostic setting skipped")
-        product = remote_worker_api.remote_worker_product_video_queue_snapshot(conn)
-    except Exception as exc:
-        logger.warning("product video worker claim diagnostic failed: %s", type(exc).__name__)
-        created = {"ok": False, "reason": type(exc).__name__}
-    finally:
-        if conn is not None:
+        try:
+            created = remote_worker_api.create_product_video_worker_claim_test_job(conn, admin_user_id=safe_int(uid, 0), scene_count=1, duration_seconds=6)
+            if created.get("ok"):
+                job_id = safe_int((created.get("job") or {}).get("id") or (created.get("job") or {}).get("job_id"), 0)
+                claimability = remote_worker_api.explain_product_video_claimability(conn, job_id, owner_only=True, public_enabled=False)
+                set_system_setting("remote_worker:last_product_video_job_id", str(job_id or ""), "last product video worker diagnostic job", uid)
+        finally:
             conn.close()
-    if not created.get("ok"):
+    except sqlite3.Error as exc:
+        logger.exception("product video worker diagnostic db_error")
         return await _reply_product_claim_diagnostic(
             update,
-            f"⚠️ <b>Product video worker claim</b>\n\nChưa tạo được job kiểm tra: <code>{html.escape(created.get('reason') or 'create_failed')}</code>. Chưa trừ Xu.",
+            "⚠️ <b>Product video worker diagnostic</b>\n\n"
+            "Chưa tạo được job kiểm tra. Bot chưa trừ Xu.\n"
+            "• Error: <code>db_error</code>\n"
+            "• Next: kiểm tra DB/log Railway.",
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.exception("product video worker diagnostic invalid_payload")
+        return await _reply_product_claim_diagnostic(
+            update,
+            "⚠️ <b>Product video worker diagnostic</b>\n\n"
+            "Payload kiểm tra chưa hợp lệ. Bot chưa trừ Xu.\n"
+            "• Error: <code>invalid_payload</code>",
+        )
+    except Exception as exc:
+        logger.exception("product video worker diagnostic unexpected_error")
+        error_id = hashlib.sha1(f"{type(exc).__name__}:{str(exc)[:80]}".encode("utf-8", errors="ignore")).hexdigest()[:8]
+        return await _reply_product_claim_diagnostic(
+            update,
+            "⚠️ <b>Product video worker diagnostic</b>\n\n"
+            "Chưa tạo được job kiểm tra. Bot chưa trừ Xu.\n"
+            f"• Error: <code>unexpected_error:{html.escape(error_id)}</code>",
+        )
+    if not created.get("ok"):
+        reason = str(created.get("reason") or "create_failed")
+        category = "missing_config" if "config" in reason else ("invalid_payload" if "required" in reason else reason)
+        return await _reply_product_claim_diagnostic(
+            update,
+            f"⚠️ <b>Product video worker diagnostic</b>\n\nChưa tạo được job kiểm tra: <code>{html.escape(category)}</code>. Chưa trừ Xu.",
         )
     job = dict(created.get("job") or {})
-    last = dict(product.get("last") or {})
-    claimed = bool(str(last.get("worker_id") or "").strip() and safe_int(last.get("job_id"), 0) == safe_int(job.get("id"), 0))
+    project = dict(created.get("project") or {})
+    job_id = safe_int(job.get("id") or job.get("job_id"), 0)
+    provider_ready = bool(readiness.get("ok"))
+    claimable = bool(claimability.get("claimable"))
+    claim_reason = str(claimability.get("reason") or ("claimable" if claimable else "claim_route_missing"))
     providers = readiness.get("providers") if isinstance(readiness.get("providers"), list) else []
     provider_lines = []
     for item in providers:
@@ -39836,18 +39868,25 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
     lines = [
         "🧪 <b>Product video worker claim diagnostic</b>",
         "",
-        "Đã tạo job kiểm tra video thật. Lệnh này không tạo MP4, không dùng test pattern, không trừ Xu.",
-        f"• Mã xử lý: <code>{html.escape(str(job.get('id') or '-'))}</code>",
-        f"• Claim product route: <code>{'CLAIMED' if claimed else 'WAITING'}</code>",
-        f"• Last worker: <code>{html.escape(str(last.get('worker_id') or '-'))}</code>",
+        "Đã tạo job product video thật để VPS owner/admin worker claim. Không tạo MP4 tại bot, không dùng test pattern, không trừ Xu.",
+        f"• Mã xử lý: <code>{html.escape(str(job_id or '-'))}</code>",
+        f"• Project: <code>{html.escape(str(project.get('project_id') or '-'))}</code>",
+        "• source: <code>product_video</code>",
+        "• render_mode: <code>real</code>",
+        "• test_pattern: <code>false</code>",
+        "• admin_video_delivery: <code>false</code>",
+        f"• Claimable by --owner-product-video: <code>{'YES' if claimable else 'NO'}</code>",
+        f"• Claim reason: <code>{html.escape(claim_reason)}</code>",
+        "• Job left queued for VPS: <code>YES</code>",
         f"• Worker API token: <code>{'YES' if flags.get('worker_api_enabled') else 'NO'}</code>",
-        f"• Real provider ready: <code>{'YES' if readiness.get('ok') else 'NO'}</code>",
+        f"• Real provider ready: <code>{'YES' if provider_ready else 'NO'}</code>",
+        f"• Updated: <code>{html.escape(vn_now_text())}</code>",
         "",
         "Provider readiness:",
         *(provider_lines or ["• none: <code>not configured</code>"]),
         "",
-        "Đã tạo job kiểm tra video thật nhưng chưa có worker claim. Hãy kiểm tra service `toanaas-worker-owner-product-video` trên VPS."
-        if not claimed else "Worker đã claim job kiểm tra. Theo dõi tiếp bằng /video_worker_status.",
+        "Đã tạo job kiểm tra video thật nhưng chưa có worker claim. Job đã để nguyên trong hàng đợi để VPS claim.",
+        "Nếu VPS vẫn idle, kiểm tra service `toanaas-worker-owner-product-video`.",
         "",
         "VPS owner/admin product service:",
         "<code>systemctl status toanaas-worker-owner-product-video --no-pager -l</code>",
@@ -39920,11 +39959,18 @@ def video_worker_status_text(status: dict | None = None, product: dict | None = 
         f"• Processing: <code>{safe_int(product.get('active'), 0)}</code>",
         f"• Last job: <code>{html.escape(str(last.get('job_id') or '-'))}</code>",
         f"• Last status: <code>{html.escape(str(last.get('status') or '-'))}</code>",
+        f"• Stage: <code>{html.escape(str(last.get('stage') or '-'))}</code>",
+        f"• Worker claimed: <code>{'YES' if last.get('worker_claimed') else 'NO'}</code>",
         f"• Last worker: <code>{html.escape(str(last.get('worker_id') or '-'))}</code>",
         f"• Last update: <code>{html.escape(vietnam_time_display(last.get('updated_at')))}</code>",
         f"• Last reason code: <code>{html.escape(last_reason_code)}</code>",
         f"• Last note: <code>{html.escape(last_note)}</code>",
+        f"• Error: <code>{html.escape(str(last.get('safe_error_type') or '-'))}</code>",
+        f"• Reason: <code>{html.escape(str(last.get('safe_reason_code') or '-'))}</code>",
+        f"• Provider route attempted: <code>{'YES' if last.get('provider_route_attempted') else 'NO'}</code>",
+        f"• Result file exists: <code>{'YES' if last.get('result_file_exists') else 'NO'}</code>",
         f"• Next action: <b>{html.escape(next_action)}</b>",
+        f"• Next diagnostic: <code>{html.escape(str(last.get('next_action') or '-'))}</code>",
         "",
         "Provider readiness:",
         *_video_provider_readiness_lines(readiness),
@@ -121661,12 +121707,14 @@ def _format_remote_worker_canary_status(status: dict) -> str:
     uploaded = "yes" if status.get("result_uploaded") else "no"
     sent = "yes" if status.get("sent_to_admin") else "no"
     failure = status.get("safe_failure_reason") or "-"
+    stage = status.get("stage") or status.get("progress_message") or status.get("status") or "-"
     return "\n".join(
         [
             "🧪 <b>Remote Worker Canary Status</b>",
             "",
             f"• Job: <code>{html.escape(status.get('canary_ref') or '-')}</code>",
             f"• Status: <code>{html.escape(status.get('status') or '-')}</code>",
+            f"• Stage: <code>{html.escape(stage)}</code>",
             f"• Worker: <code>{html.escape(status.get('worker_id') or '-')}</code>",
             f"• Claimed at: <code>{html.escape(vietnam_time_display(status.get('claimed_at')))}</code>",
             f"• Last heartbeat: <code>{html.escape(vietnam_time_display(status.get('last_heartbeat_at')))}</code>",
@@ -121674,6 +121722,7 @@ def _format_remote_worker_canary_status(status: dict) -> str:
             f"• Result uploaded: <code>{uploaded}</code>",
             f"• Result file size: <code>{safe_int(status.get('result_file_size'), 0)}</code>",
             f"• Sent to admin: <code>{sent}</code>",
+            f"• Error: <code>{html.escape(status.get('safe_error_type') or '-')}</code>",
             f"• Failure: <code>{html.escape(failure)}</code>",
         ]
     )
@@ -121704,6 +121753,7 @@ def _format_remote_worker_prod_canary_status(status: dict) -> str:
     public = "yes" if status.get("public_user") else "no"
     no_charge = "yes" if status.get("no_charge") else "no"
     reason_code = status.get("reason_code") or status.get("safe_failure_reason_code") or "-"
+    failure = status.get("safe_failure_reason") or "-"
     next_action = _remote_worker_prod_canary_next_action(status)
     return "\n".join(
         [
@@ -121718,12 +121768,16 @@ def _format_remote_worker_prod_canary_status(status: dict) -> str:
             f"• Last heartbeat: <code>{html.escape(vietnam_time_display(status.get('last_heartbeat_at')))}</code>",
             f"• Progress: <code>{safe_int(status.get('progress_percent'), 0)}%</code> {html.escape(status.get('progress_message') or '')}",
             f"• Result uploaded: <code>{uploaded}</code>",
+            f"• Result file exists: <code>{'yes' if status.get('result_file_exists') else 'no'}</code>",
             f"• Result file size: <code>{safe_int(status.get('result_file_size'), 0)}</code>",
             f"• Telegram sent: <code>{sent}</code>",
             f"• No-charge: <code>{no_charge}</code>",
             f"• Public: <code>{public}</code>",
             f"• Provider: <code>{provider}</code>",
             f"• Reason code: <code>{html.escape(reason_code)}</code>",
+            f"• Error: <code>{html.escape(status.get('safe_error_type') or '-')}</code>",
+            f"• Reason: <code>{html.escape(status.get('safe_reason_code') or '-')}</code>",
+            f"• Failure: <code>{html.escape(failure)}</code>",
             f"• Next action: <b>{html.escape(next_action)}</b>",
         ]
     )
