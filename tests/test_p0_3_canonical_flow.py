@@ -158,8 +158,8 @@ def test_audio_studio_music_prompt_does_not_show_suno_or_provider(monkeypatch):
     text = query.outputs[-1]["text"]
     assert "Tạo nhạc nền" in text
     assert "🎵 Cơ bản — 100 Xu" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
-    assert "🎶 Tiêu chuẩn — 200 Xu" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
-    assert "💎 Cao cấp — 300 Xu" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
+    assert "🎶 Tiêu chuẩn — 150 Xu" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
+    assert "💎 Cao cấp — 200 Xu" in "\n".join(_labels(query.outputs[-1]["reply_markup"]))
     assert "Suno" not in text
     assert "provider" not in text.lower()
     assert "api" not in text.lower()

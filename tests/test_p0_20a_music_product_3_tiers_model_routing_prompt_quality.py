@@ -66,24 +66,24 @@ def test_music_studio_has_instrumental_song_vault_edit():
 def test_music_creation_has_three_tiers_only():
     labels = _labels(bot.music_product_tier_keyboard("background", "vi"))
     tier_labels = [item for item in labels if "Xu" in item]
-    assert tier_labels == ["🎵 Cơ bản — 100 Xu", "🎶 Tiêu chuẩn — 200 Xu", "💎 Cao cấp — 300 Xu"]
+    assert tier_labels == ["🎵 Cơ bản — 100 Xu", "🎶 Tiêu chuẩn — 150 Xu", "💎 Cao cấp — 200 Xu"]
 
 
 def test_music_tier_basic_price_100():
     assert bot.music_product_tier_price_xu("basic") == 100
 
 
-def test_music_tier_standard_price_200():
-    assert bot.music_product_tier_price_xu("standard") == 200
+def test_music_tier_standard_price_150():
+    assert bot.music_product_tier_price_xu("standard", "background") == 150
 
 
-def test_music_tier_premium_price_300():
-    assert bot.music_product_tier_price_xu("premium") == 300
+def test_music_tier_premium_price_200():
+    assert bot.music_product_tier_price_xu("premium", "background") == 200
 
 
 def test_music_tier_maps_to_model_preferences():
     assert bot.select_music_model_for_tier("basic") == "chirp-v3.5"
-    assert bot.select_music_model_for_tier("standard") == "chirp-bluejay"
+    assert bot.select_music_model_for_tier("standard") == "chirp-auk"
     assert bot.select_music_model_for_tier("premium") == "chirp-fenix"
     assert bot.select_music_model_for_tier("premium", supported_models=["chirp-bluejay"], provider_default="chirp-v4") == "chirp-bluejay"
 
@@ -275,7 +275,7 @@ def test_music_no_charge_on_provider_fail(monkeypatch):
 def test_music_admin_shows_price_but_charges_zero(monkeypatch):
     user_id = 120106
     result = _product_result(music_product_tier="music_tier_premium")
-    assert "300 Xu" in bot.music_product_invoice_text(result, "vi")
+    assert "200 Xu" in bot.music_product_invoice_text(result, "vi")
     monkeypatch.setattr(bot, "is_admin_user", lambda uid: True)
     monkeypatch.setattr(bot, "spend_fixed_credit_info", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("admin charged")))
     monkeypatch.setattr(bot, "upsert_music_vault_from_output", lambda **kwargs: {"vault_id": "MV1", "storage_ref": ""})
