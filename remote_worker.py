@@ -84,6 +84,7 @@ RENDER_MODE_REAL = "real"
 RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
 RENDER_MODE_UNAVAILABLE = "unavailable"
 REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
+REMOTE_WORKER_PRODUCT_VIDEO_SOURCE = "product_video"
 
 
 def mask_secret(value: str) -> str:
@@ -163,8 +164,16 @@ def http_multipart(path: str, fields: dict[str, str], files: dict[str, tuple[str
         return json.loads(raw or "{}")
 
 
-def claim_job(canary_only: bool = False, admin_canary_only: bool = False, admin_video_only: bool = False) -> dict | None:
-    if admin_video_only:
+def claim_job(
+    canary_only: bool = False,
+    admin_canary_only: bool = False,
+    admin_video_only: bool = False,
+    product_video_only: bool = False,
+    owner_product_video_only: bool = False,
+) -> dict | None:
+    if product_video_only or owner_product_video_only:
+        capabilities = ["product_video", "owner_product_video", "ffmpeg", "video_postprocess"]
+    elif admin_video_only:
         capabilities = ["admin_video", "ffmpeg"]
     elif admin_canary_only:
         capabilities = ["admin_canary", "ffmpeg"]
@@ -183,12 +192,24 @@ def claim_job(canary_only: bool = False, admin_canary_only: bool = False, admin_
         payload["admin_canary_only"] = True
     if admin_video_only:
         payload["admin_video_only"] = True
+    if product_video_only:
+        payload["product_video_only"] = True
+    if owner_product_video_only:
+        payload["owner_product_video_only"] = True
     data = http_json("POST", "/api/v1/worker/claim", payload, timeout=30)
     return data.get("job") if data.get("ok") else None
 
 
-def ping_server(canary: bool = False, admin_canary: bool = False, admin_video: bool = False) -> dict:
-    if admin_video:
+def ping_server(
+    canary: bool = False,
+    admin_canary: bool = False,
+    admin_video: bool = False,
+    product_video: bool = False,
+    owner_product_video: bool = False,
+) -> dict:
+    if product_video or owner_product_video:
+        capabilities = ["product_video", "owner_product_video", "ffmpeg", "video_postprocess"]
+    elif admin_video:
         capabilities = ["admin_video", "ffmpeg"]
     elif admin_canary:
         capabilities = ["admin_canary", "ffmpeg"]
@@ -207,6 +228,10 @@ def ping_server(canary: bool = False, admin_canary: bool = False, admin_video: b
         payload["admin_canary_only"] = True
     if admin_video:
         payload["admin_video_only"] = True
+    if product_video:
+        payload["product_video_only"] = True
+    if owner_product_video:
+        payload["owner_product_video_only"] = True
     return http_json("POST", "/api/v1/worker/ping", payload, timeout=20)
 
 
@@ -278,6 +303,20 @@ def admin_test_pattern_allowed(job: dict | None = None) -> bool:
         and data.get("no_charge")
         and not data.get("provider_call")
         and not data.get("public_user")
+    )
+
+
+def product_video_job_allowed(job: dict | None = None) -> bool:
+    data = dict(job or {})
+    return bool(
+        str(data.get("job_type") or "") == "video_render"
+        and str(data.get("source") or "") == REMOTE_WORKER_PRODUCT_VIDEO_SOURCE
+        and normalize_render_mode(data) == RENDER_MODE_REAL
+        and not data.get("test_pattern")
+        and not data.get("admin_video_delivery")
+        and not data.get("canary")
+        and not data.get("worker_admin_canary")
+        and data.get("provider_call")
     )
 
 
@@ -623,8 +662,16 @@ def process_canary_job(job: dict) -> dict:
         return complete_job(job_id, result, final_path)
 
 
-def run_once(canary_only: bool = False, admin_canary_only: bool = False, admin_video_only: bool = False) -> str:
-    if admin_video_only:
+def run_once(
+    canary_only: bool = False,
+    admin_canary_only: bool = False,
+    admin_video_only: bool = False,
+    product_video_only: bool = False,
+    owner_product_video_only: bool = False,
+) -> str:
+    if product_video_only or owner_product_video_only:
+        job = claim_job(product_video_only=product_video_only, owner_product_video_only=owner_product_video_only)
+    elif admin_video_only:
         job = claim_job(admin_video_only=True)
     elif admin_canary_only:
         job = claim_job(admin_canary_only=True)
@@ -640,6 +687,10 @@ def run_once(canary_only: bool = False, admin_canary_only: bool = False, admin_v
             process_admin_canary_job(job)
         elif admin_video_only or job.get("admin_video_delivery"):
             process_admin_video_job(job)
+        elif product_video_only or owner_product_video_only:
+            if not product_video_job_allowed(job):
+                raise RuntimeError("product_video_job_required")
+            process_claimed_job(job)
         elif canary_only or job.get("canary"):
             process_canary_job(job)
         else:
@@ -657,15 +708,26 @@ def run_once(canary_only: bool = False, admin_canary_only: bool = False, admin_v
                     or canary_only
                     or admin_canary_only
                     or admin_video_only
+                    or product_video_only
+                    or owner_product_video_only
                     or job.get("canary")
                     or job.get("worker_admin_canary")
                     or job.get("admin_video_delivery")
+                    or job.get("product_video")
                 ),
             )
         return "failed"
 
 
-def run_ping_mode(*, dry_run: bool = False, canary: bool = False, admin_canary: bool = False, admin_video: bool = False) -> int:
+def run_ping_mode(
+    *,
+    dry_run: bool = False,
+    canary: bool = False,
+    admin_canary: bool = False,
+    admin_video: bool = False,
+    product_video: bool = False,
+    owner_product_video: bool = False,
+) -> int:
     lines, local_ok = local_doctor_lines()
     for line in lines:
         print(line)
@@ -675,7 +737,9 @@ def run_ping_mode(*, dry_run: bool = False, canary: bool = False, admin_canary: 
             print("claim skipped because dry-run: yes")
         return 1
     try:
-        if admin_video:
+        if product_video or owner_product_video:
+            payload = ping_server(product_video=product_video, owner_product_video=owner_product_video)
+        elif admin_video:
             payload = ping_server(admin_video=True)
         elif admin_canary:
             payload = ping_server(admin_canary=True)
@@ -716,28 +780,52 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--canary", action="store_true", help="claim only safe remote_worker_canary jobs")
     parser.add_argument("--admin-canary", action="store_true", help="claim only admin production canary video_render jobs")
     parser.add_argument("--admin-video", action="store_true", help="claim only owner/admin no-charge video_render delivery jobs")
+    parser.add_argument("--product-video", action="store_true", help="claim product video real-render jobs")
+    parser.add_argument("--owner-product-video", action="store_true", help="claim only owner/admin no-charge product video real-render jobs")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    special_modes = [bool(args.canary), bool(args.admin_canary), bool(args.admin_video)]
+    special_modes = [bool(args.canary), bool(args.admin_canary), bool(args.admin_video), bool(args.product_video), bool(args.owner_product_video)]
     if sum(1 for item in special_modes if item) > 1:
-        print("[remote_worker] choose only one of --canary, --admin-canary, or --admin-video")
+        print("[remote_worker] choose only one of --canary, --admin-canary, --admin-video, --product-video, or --owner-product-video")
         return 2
     if args.doctor:
         return run_doctor()
     if args.ping:
-        return run_ping_mode(dry_run=args.dry_run, canary=args.canary, admin_canary=args.admin_canary, admin_video=args.admin_video)
+        return run_ping_mode(
+            dry_run=args.dry_run,
+            canary=args.canary,
+            admin_canary=args.admin_canary,
+            admin_video=args.admin_video,
+            product_video=args.product_video,
+            owner_product_video=args.owner_product_video,
+        )
     if args.dry_run:
-        return run_ping_mode(dry_run=True, canary=args.canary, admin_canary=args.admin_canary, admin_video=args.admin_video)
+        return run_ping_mode(
+            dry_run=True,
+            canary=args.canary,
+            admin_canary=args.admin_canary,
+            admin_video=args.admin_video,
+            product_video=args.product_video,
+            owner_product_video=args.owner_product_video,
+        )
     if args.once:
-        status = run_once(canary_only=args.canary, admin_canary_only=args.admin_canary, admin_video_only=args.admin_video)
+        status = run_once(
+            canary_only=args.canary,
+            admin_canary_only=args.admin_canary,
+            admin_video_only=args.admin_video,
+            product_video_only=args.product_video,
+            owner_product_video_only=args.owner_product_video,
+        )
         print(
             f"[remote_worker] once status={status} "
             f"canary_only={'yes' if args.canary else 'no'} "
             f"admin_canary_only={'yes' if args.admin_canary else 'no'} "
-            f"admin_video_only={'yes' if args.admin_video else 'no'}"
+            f"admin_video_only={'yes' if args.admin_video else 'no'} "
+            f"product_video_only={'yes' if args.product_video else 'no'} "
+            f"owner_product_video_only={'yes' if args.owner_product_video else 'no'}"
         )
         return 1 if status == "failed" else 0
 
@@ -749,9 +837,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[remote_worker] canary_only={'yes' if args.canary else 'no'}")
     print(f"[remote_worker] admin_canary_only={'yes' if args.admin_canary else 'no'}")
     print(f"[remote_worker] admin_video_only={'yes' if args.admin_video else 'no'}")
+    print(f"[remote_worker] product_video_only={'yes' if args.product_video else 'no'}")
+    print(f"[remote_worker] owner_product_video_only={'yes' if args.owner_product_video else 'no'}")
     while True:
         try:
-            status = run_once(canary_only=args.canary, admin_canary_only=args.admin_canary, admin_video_only=args.admin_video)
+            status = run_once(
+                canary_only=args.canary,
+                admin_canary_only=args.admin_canary,
+                admin_video_only=args.admin_video,
+                product_video_only=args.product_video,
+                owner_product_video_only=args.owner_product_video,
+            )
             if status == "idle":
                 time.sleep(WORKER_POLL_INTERVAL_SECONDS)
         except KeyboardInterrupt:

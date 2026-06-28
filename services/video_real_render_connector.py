@@ -92,6 +92,48 @@ def _provider_order(job: dict | None = None) -> list[str]:
     return result or ["shopaikey", "key4u"]
 
 
+def real_video_provider_readiness(job: dict | None = None, environ: dict[str, str] | None = None) -> dict:
+    env = environ or os.environ
+    order = _provider_order(job)
+    providers = []
+    shopaikey_url = str(env.get("SHOPAIKEY_VIDEO_URL") or "").strip()
+    if not shopaikey_url:
+        base = str(env.get("SHOPAIKEY_BASE_URL") or "").strip()
+        endpoint = str(env.get("SHOPAIKEY_VIDEO_ENDPOINT") or "/video/generations").strip()
+        shopaikey_url = _join_url(base, endpoint) if base else ""
+    shopaikey_model = str(env.get("SHOPAIKEY_VIDEO_MODEL") or env.get("SHOPAIKEY_VIDEO_MODEL_PRIMARY") or "veo3.1-fast").strip()
+    shopaikey_missing = []
+    if not str(env.get("SHOPAIKEY_API_KEY") or "").strip():
+        shopaikey_missing.append("api_key")
+    if not shopaikey_url:
+        shopaikey_missing.append("video_endpoint")
+    if not shopaikey_model:
+        shopaikey_missing.append("video_model")
+    providers.append({"provider": "shopaikey", "configured": not shopaikey_missing, "missing": shopaikey_missing})
+
+    key4u_missing = []
+    try:
+        from providers.key4u_provider import Key4UProvider
+
+        key4u_configured = bool(Key4UProvider().is_configured())
+    except Exception:
+        key4u_configured = False
+        key4u_missing.append("adapter")
+    if not key4u_configured and "adapter" not in key4u_missing:
+        key4u_missing.append("video_config")
+    providers.append({"provider": "key4u", "configured": key4u_configured, "missing": key4u_missing})
+
+    configured = [item["provider"] for item in providers if item["configured"]]
+    ordered_ready = [provider for provider in order if provider in configured]
+    return {
+        "ok": bool(ordered_ready),
+        "provider_order": order,
+        "configured_providers": configured,
+        "ready_provider_order": ordered_ready,
+        "providers": providers,
+    }
+
+
 def _addon_plan(job: dict | None = None) -> dict:
     job = dict(job or {})
     candidates = [

@@ -39738,6 +39738,129 @@ async def cmd_tool_test_video_delivery_worker(update: Update, context: ContextTy
     return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
+async def cmd_tool_test_video_product_worker_claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text(VIDEO_B14_PUBLIC_UNSTABLE_TOOL_MESSAGE)
+    args = [str(item or "").strip() for item in getattr(context, "args", [])]
+    if "--no-charge" not in args:
+        return await update.message.reply_text("Dùng: /tool_test_video_product_worker_claim --no-charge")
+    flags = worker_auth.worker_api_runtime_flags(LOCAL_WORKER_TOKEN)
+    try:
+        from services.video_real_render_connector import real_video_provider_readiness
+
+        readiness = real_video_provider_readiness()
+    except Exception as exc:
+        readiness = {"ok": False, "providers": [], "reason": type(exc).__name__}
+    conn = db_connect()
+    try:
+        created = remote_worker_api.create_product_video_worker_claim_test_job(conn, admin_user_id=safe_int(uid, 0), scene_count=1, duration_seconds=6)
+        claim = {}
+        failed = {}
+        if created.get("ok"):
+            claim = remote_worker_api.claim_remote_worker_job(
+                conn,
+                worker_id=f"telegram-product-claim-{safe_int(uid, 0)}",
+                capabilities=["owner_product_video", "product_video", "ffmpeg", "video_postprocess"],
+                owner_product_video_only=True,
+            )
+            claimed_job = dict(claim.get("job") or {})
+            if claimed_job:
+                failed = remote_worker_api.fail_remote_worker_job(
+                    conn,
+                    worker_id=f"telegram-product-claim-{safe_int(uid, 0)}",
+                    job_id=safe_int(claimed_job.get("job_id"), 0),
+                    safe_error="diagnostic_product_worker_claim_only_no_render",
+                    retryable=False,
+                )
+                set_system_setting("remote_worker:last_product_video_job_id", str(claimed_job.get("job_id") or ""), "last product video worker diagnostic job", uid)
+    finally:
+        conn.close()
+    if not created.get("ok"):
+        return await update.message.reply_text(
+            f"⚠️ <b>Product video worker claim</b>\n\nChưa tạo được job kiểm tra: <code>{html.escape(created.get('reason') or 'create_failed')}</code>. Chưa trừ Xu.",
+            parse_mode="HTML",
+        )
+    claimed = bool((claim or {}).get("job"))
+    job = dict((claim or {}).get("job") or created.get("job") or {})
+    providers = readiness.get("providers") if isinstance(readiness.get("providers"), list) else []
+    provider_lines = []
+    for item in providers:
+        provider_lines.append(
+            f"• {html.escape(str(item.get('provider') or '-'))}: <code>{'ready' if item.get('configured') else 'missing ' + ','.join(item.get('missing') or [])}</code>"
+        )
+    lines = [
+        "🧪 <b>Product video worker claim diagnostic</b>",
+        "",
+        "Lệnh này chỉ kiểm tra route claim product video thật. Không tạo MP4, không dùng test pattern, không trừ Xu.",
+        f"• Mã xử lý: <code>{html.escape(str(job.get('job_id') or created.get('job', {}).get('id') or '-'))}</code>",
+        f"• Claim product route: <code>{'YES' if claimed else 'NO'}</code>",
+        f"• Worker API token: <code>{'YES' if flags.get('worker_api_enabled') else 'NO'}</code>",
+        f"• Real provider ready: <code>{'YES' if readiness.get('ok') else 'NO'}</code>",
+        f"• Diagnostic closed cleanly: <code>{'YES' if failed.get('ok') else ('NO' if claimed else '-')}</code>",
+        "",
+        "Provider readiness:",
+        *(provider_lines or ["• none: <code>not configured</code>"]),
+        "",
+        "VPS owner/admin product service:",
+        "<code>python remote_worker.py --owner-product-video --once</code>",
+        "",
+        "VPS product service khi mở public:",
+        "<code>python remote_worker.py --product-video --once</code>",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_video_worker_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    try:
+        from services.video_real_render_connector import real_video_provider_readiness
+
+        readiness = real_video_provider_readiness()
+    except Exception as exc:
+        readiness = {"ok": False, "providers": [], "reason": type(exc).__name__}
+    status = remote_worker_status_snapshot()
+    conn = db_connect()
+    try:
+        product = remote_worker_api.remote_worker_product_video_queue_snapshot(conn)
+    finally:
+        conn.close()
+    last = dict(product.get("last") or {})
+    providers = readiness.get("providers") if isinstance(readiness.get("providers"), list) else []
+    provider_lines = []
+    for item in providers:
+        provider_lines.append(
+            f"• {html.escape(str(item.get('provider') or '-'))}: <code>{'ready' if item.get('configured') else 'missing ' + ','.join(item.get('missing') or [])}</code>"
+        )
+    lines = [
+        "🎬 <b>Video Worker Status</b>",
+        "",
+        f"• Worker API enabled: <code>{'YES' if status.get('worker_api_enabled') else 'NO'}</code>",
+        f"• Last heartbeat: <code>{html.escape(status.get('last_remote_worker_heartbeat') or '-')}</code>",
+        f"• Last worker: <code>{html.escape(status.get('last_worker_id') or '-')}</code>",
+        f"• Public product worker: <code>{'YES' if status.get('public_worker_enabled') else 'NO'}</code>",
+        f"• Real provider ready: <code>{'YES' if readiness.get('ok') else 'NO'}</code>",
+        "",
+        "Product queue:",
+        f"• Queued: <code>{safe_int(product.get('queued'), 0)}</code>",
+        f"• Processing: <code>{safe_int(product.get('active'), 0)}</code>",
+        f"• Last job: <code>{html.escape(str(last.get('job_id') or '-'))}</code>",
+        f"• Last status: <code>{html.escape(str(last.get('status') or '-'))}</code>",
+        f"• Last worker: <code>{html.escape(str(last.get('worker_id') or '-'))}</code>",
+        f"• Last error: <code>{html.escape(str(last.get('safe_failure_reason') or '-')[:180])}</code>",
+        "",
+        "Provider readiness:",
+        *(provider_lines or ["• none: <code>not configured</code>"]),
+        "",
+        "Runbook VPS:",
+        "<code>python remote_worker.py --owner-product-video</code>",
+        "<code>python remote_worker.py --product-video</code> khi public worker đã mở.",
+    ]
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
     if not job:
         return "⚠️ Không tìm thấy video multiscene job. TOAN AAS chưa gọi provider mới."
@@ -54226,6 +54349,17 @@ def video_b14_product_result_block_reason(job: dict | None = None, project: dict
     return ""
 
 
+def video_b14_fail_stale_product_job_for_status(job_id: int) -> int:
+    wanted = safe_int(job_id, 0)
+    if wanted <= 0:
+        return 0
+    conn = db_connect()
+    try:
+        return remote_worker_api.fail_stale_product_video_jobs(conn, job_id=wanted)
+    finally:
+        conn.close()
+
+
 def video_b14_queue_status_text(session: dict | None, result: dict | None = None, user_id=0, lang: str = "vi") -> str:
     session = dict(session or {})
     draft = dict(session.get("draft") or {})
@@ -54238,6 +54372,10 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     duration = safe_int(invoice.get("duration_seconds"), scene_count * TASK3D_SCENE_SECONDS)
     eta = video_b14_eta_seconds(scene_count)
     job_id = safe_int(job.get("id") or draft.get("b14_queue_job_id"), 0)
+    try:
+        video_b14_fail_stale_product_job_for_status(job_id)
+    except Exception:
+        pass
     live_job = video_b14_render_job_by_id(job_id)
     if live_job:
         job.update(live_job)
@@ -136840,6 +136978,8 @@ ADMIN_CONTROL_MODULES = {
             ("/remote_worker_canary_status <job_id>", "xem trạng thái canary VPS"),
             ("/remote_worker_prod_canary --no-charge", "tạo admin production canary VPS, không trừ Xu"),
             ("/remote_worker_prod_canary_status <job_id>", "xem trạng thái admin production canary"),
+            ("/video_worker_status", "trạng thái product video worker/provider"),
+            ("/tool_test_video_product_worker_claim --no-charge", "kiểm tra route claim product video thật, không render MP4"),
             ("/shopaikey_status", "ShopAIKey status"),
             ("/shopaikey_usage", "ShopAIKey usage"),
             ("/shopaikey_video_job", "kiểm tra job video"),
@@ -147763,6 +147903,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("remote_worker_canary_status", cmd_remote_worker_canary_status))
     tg_app.add_handler(CommandHandler("remote_worker_prod_canary", cmd_remote_worker_prod_canary))
     tg_app.add_handler(CommandHandler("remote_worker_prod_canary_status", cmd_remote_worker_prod_canary_status))
+    tg_app.add_handler(CommandHandler("video_worker_status", cmd_video_worker_status))
+    tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_video_product_worker_claim(?:@\w+)?(?:\s|$)"), cmd_tool_test_video_product_worker_claim))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
     tg_app.add_handler(CommandHandler("telegram_takeover", cmd_telegram_takeover))
@@ -149153,6 +149295,8 @@ async def api_worker_claim(request: Request):
     canary_only = str(payload.get("canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     admin_canary_only = str(payload.get("admin_canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     admin_video_only = str(payload.get("admin_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+    product_video_only = str(payload.get("product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+    owner_product_video_only = str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
     set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
     set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
     conn = db_connect()
@@ -149166,6 +149310,8 @@ async def api_worker_claim(request: Request):
             canary_only=canary_only,
             admin_canary_only=admin_canary_only,
             admin_video_only=admin_video_only,
+            product_video_only=product_video_only,
+            owner_product_video_only=owner_product_video_only,
         )
     finally:
         conn.close()
