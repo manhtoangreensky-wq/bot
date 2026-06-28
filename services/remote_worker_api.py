@@ -206,6 +206,7 @@ def safe_worker_reason_code(value: Any, fallback: str = "-") -> str:
     known_codes = (
         "product_video_worker_unavailable",
         "real_video_renderer_unavailable",
+        "not_claimed_timeout",
         "admin_canary_disabled",
         "no_admin_canary_job",
         "no_owner_product_video_job",
@@ -224,6 +225,8 @@ def safe_worker_reason_code(value: Any, fallback: str = "-") -> str:
             return code
     if "runtimeerror" in lowered and "redacted" in lowered:
         return "runtime_error_redacted"
+    if lowered.strip("<>:_- ") == "redacted":
+        return "redacted_error"
     if "httperror" in lowered or "http " in lowered:
         match = re.search(r"\b(401|403|404|429|500|502|503|504)\b", lowered)
         return f"http_{match.group(1)}" if match else "http_error"
@@ -439,6 +442,12 @@ def _product_video_safety_flags(project: dict) -> dict:
         "public_user": _safe_bool(asset_pack.get("public_user") or invoice.get("public_user")),
         "fake_renderer_allowed": _safe_bool(asset_pack.get("fake_renderer_allowed") or invoice.get("fake_renderer_allowed")),
         "real_renderer_required": _safe_bool(asset_pack.get("real_renderer_required") or invoice.get("real_renderer_required")),
+        "claim_only_diagnostic": _safe_bool(
+            asset_pack.get("claim_only_diagnostic")
+            or invoice.get("claim_only_diagnostic")
+            or asset_pack.get("diagnostic_claim_only")
+            or invoice.get("diagnostic_claim_only")
+        ),
         "duration_seconds": max(1, _safe_int(asset_pack.get("duration_seconds") or invoice.get("duration_seconds"), 6)),
         "scene_count": max(1, min(20, _safe_int(asset_pack.get("scene_count") or invoice.get("scene_count") or project.get("scene_count"), 1))),
     }
@@ -503,7 +512,7 @@ def is_remote_worker_product_video_job(job: dict | None = None, project: dict | 
         and not flags["test_pattern"]
         and not flags["admin_video_delivery"]
         and not flags["fake_renderer_allowed"]
-        and flags["provider_call"]
+        and (flags["provider_call"] or flags["claim_only_diagnostic"])
     )
 
 
@@ -514,8 +523,6 @@ def _product_video_is_claimable(project: dict, *, owner_only: bool = False, publ
     owner_product = bool(flags["admin_only"] and flags["no_charge"] and not flags["public_user"])
     if owner_only:
         return owner_product
-    if owner_product:
-        return True
     return bool(flags["public_user"] and public_enabled)
 
 
@@ -757,15 +764,18 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         )
     if is_remote_worker_product_video_job(hydrated_job, project):
         safety = _product_video_safety_flags(project)
+        claim_only = bool(safety["claim_only_diagnostic"])
         payload.update(
             {
                 "product_video": True,
+                "claim_only_diagnostic": claim_only,
+                "diagnostic_claim_only": claim_only,
                 "render_mode": RENDER_MODE_REAL,
                 "test_pattern": False,
                 "admin_video_delivery": False,
                 "admin_only": bool(safety["admin_only"]),
                 "no_charge": bool(safety["no_charge"]),
-                "provider_call": True,
+                "provider_call": bool(safety["provider_call"]) and not claim_only,
                 "public_user": bool(safety["public_user"]),
                 "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
                 "expected_duration_seconds": max(1, min(120, safety["duration_seconds"] or scene_count * 6)),
@@ -776,8 +786,9 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             {
                 "product_video_mp4": True,
                 "real_renderer_required": True,
-                "provider_call": True,
-                "final_video_bytes_gt_zero": True,
+                "provider_call": bool(safety["provider_call"]) and not claim_only,
+                "final_video_bytes_gt_zero": not claim_only,
+                "claim_only_diagnostic": claim_only,
             }
         )
     if is_remote_worker_admin_video_job(hydrated_job, project) or _is_admin_fake_video_job(project):
@@ -1324,6 +1335,134 @@ def claim_remote_worker_render_job(
     )
 
 
+def _queued_video_render_candidates(conn: sqlite3.Connection) -> list[tuple[dict, dict]]:
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    rows = conn.execute(
+        """SELECT j.id,j.project_id,j.user_id,j.job_type,
+                  p.asset_pack_json,p.invoice_json,p.total_xu_estimated,p.profile_id,p.topic,p.status
+           FROM video_jobs j
+           JOIN video_projects p ON p.project_id=j.project_id
+           WHERE j.job_type=? AND j.status='queued'
+             AND COALESCE(p.is_confirmed,0)=1
+             AND p.status IN ('queued_for_worker','processing')
+           ORDER BY j.priority ASC, j.created_at ASC, j.id ASC
+           LIMIT 100""",
+        (video_project_queue.VIDEO_RENDER_JOB_TYPE,),
+    ).fetchall()
+    result: list[tuple[dict, dict]] = []
+    for row in rows:
+        job = {"id": row[0], "project_id": row[1], "user_id": row[2], "job_type": row[3]}
+        project = {
+            "project_id": row[1],
+            "user_id": row[2],
+            "asset_pack_json": row[4],
+            "invoice_json": row[5],
+            "total_xu_estimated": row[6],
+            "profile_id": row[7],
+            "topic": row[8],
+            "status": row[9],
+        }
+        result.append((job, project))
+    return result
+
+
+def remote_worker_claim_lane_counts(conn: sqlite3.Connection, *, public_enabled: bool = False) -> dict:
+    counts = {
+        "admin_canary": 0,
+        "owner_product_video": 0,
+        "admin_video": 0,
+        "public_product_video": 0,
+        "public_gate_blocked": 0,
+        "filter_mismatch": 0,
+        "queued_total": 0,
+    }
+    for job, project in _queued_video_render_candidates(conn):
+        counts["queued_total"] += 1
+        if _admin_canary_is_safe(project):
+            counts["admin_canary"] += 1
+            continue
+        if _admin_video_is_safe(project):
+            counts["admin_video"] += 1
+            continue
+        if is_remote_worker_product_video_job(job, project):
+            flags = _product_video_safety_flags(project)
+            owner_product = bool(flags["admin_only"] and flags["no_charge"] and not flags["public_user"])
+            if owner_product:
+                counts["owner_product_video"] += 1
+            elif flags["public_user"] and public_enabled:
+                counts["public_product_video"] += 1
+            elif flags["public_user"] and not public_enabled:
+                counts["public_gate_blocked"] += 1
+            else:
+                counts["filter_mismatch"] += 1
+            continue
+        counts["filter_mismatch"] += 1
+    return counts
+
+
+def _latest_video_claim_summary(conn: sqlite3.Connection, *, source: str, claim_lane: str) -> dict:
+    video_project_queue.ensure_video_project_queue_schema(conn)
+    row = conn.execute(
+        """SELECT j.id,j.project_id,j.status,j.locked_by,j.locked_at,j.updated_at,j.progress_percent,j.progress_message,j.last_error,
+                  p.asset_pack_json,p.invoice_json,p.total_xu_estimated,p.status
+           FROM video_jobs j
+           JOIN video_projects p ON p.project_id=j.project_id
+           WHERE j.job_type=? AND COALESCE(p.asset_pack_json,'') LIKE ?
+           ORDER BY j.id DESC LIMIT 1""",
+        (video_project_queue.VIDEO_RENDER_JOB_TYPE, f"%{source}%"),
+    ).fetchone()
+    if not row:
+        return {"ok": False, "reason": "not_found", "claim_lane": claim_lane}
+    project = {
+        "project_id": row[1],
+        "asset_pack_json": row[9],
+        "invoice_json": row[10],
+        "total_xu_estimated": row[11],
+        "status": row[12],
+    }
+    status = str(row[2] or "").strip().lower()
+    locked_by = sanitize_worker_id(str(row[3] or "")) if row[3] else ""
+    reason_code = safe_worker_reason_code(row[8])
+    flags = _admin_canary_safety_flags(project) if source == REMOTE_WORKER_ADMIN_CANARY_SOURCE else _product_video_safety_flags(project)
+    if source == REMOTE_WORKER_ADMIN_CANARY_SOURCE:
+        claimable = bool(_admin_canary_is_safe(project) and status == "queued")
+    else:
+        claimable = bool(_product_video_is_claimable(project, owner_only=True, public_enabled=False) and status == "queued")
+    mismatch = "-" if claimable else ("not_queued" if status != "queued" else "filter_mismatch")
+    return {
+        "ok": True,
+        "job_id": int(row[0]),
+        "status": status,
+        "worker_id": locked_by,
+        "claimed_at": str(row[4] or ""),
+        "updated_at": str(row[5] or ""),
+        "progress_percent": _safe_int(row[6], 0),
+        "progress_message": scrub_secret_text(row[7] or ""),
+        "reason_code": reason_code,
+        "claim_lane": claim_lane,
+        "claimable": claimable,
+        "not_claimable_reason": mismatch,
+        "flags": strip_secret_fields(flags),
+    }
+
+
+def remote_worker_claim_debug_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    claim_route: str = "",
+    public_enabled: bool | None = None,
+) -> dict:
+    config = remote_worker_production_guard_config()
+    public_gate = bool(config["public_enabled"] if public_enabled is None else public_enabled)
+    return {
+        "claim_route": str(claim_route or ""),
+        "public_worker_enabled": public_gate,
+        "lane_counts": remote_worker_claim_lane_counts(conn, public_enabled=public_gate),
+        "latest_admin_canary": _latest_video_claim_summary(conn, source=REMOTE_WORKER_ADMIN_CANARY_SOURCE, claim_lane="admin_canary"),
+        "latest_product_diagnostic": _latest_video_claim_summary(conn, source=REMOTE_WORKER_PRODUCT_VIDEO_SOURCE, claim_lane="owner_product_video"),
+    }
+
+
 def claim_remote_worker_job(
     conn: sqlite3.Connection,
     *,
@@ -1362,13 +1501,20 @@ def claim_remote_worker_job(
             "job": build_worker_job_payload(hydrated) if hydrated else None,
             "admin_canary_only": True,
             "reason": "" if hydrated else "no_admin_canary_job",
+            "debug": {} if hydrated else remote_worker_claim_debug_snapshot(conn, claim_route="admin_canary"),
         }
     if admin_video_only:
         if requested and REMOTE_WORKER_ADMIN_VIDEO_CAPABILITY not in requested:
             return {"ok": True, "job": None, "reason": "admin_video_capability_required"}
         job = claim_remote_worker_admin_video_job(conn, worker_id=worker, lease_seconds=lease_seconds)
         hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
-        return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "admin_video_only": True, "reason": "" if hydrated else "no_admin_video_job"}
+        return {
+            "ok": True,
+            "job": build_worker_job_payload(hydrated) if hydrated else None,
+            "admin_video_only": True,
+            "reason": "" if hydrated else "no_admin_video_job",
+            "debug": {} if hydrated else remote_worker_claim_debug_snapshot(conn, claim_route="admin_video"),
+        }
     if product_video_only or owner_product_video_only:
         product_caps = {REMOTE_WORKER_PRODUCT_VIDEO_CAPABILITY, REMOTE_WORKER_OWNER_PRODUCT_VIDEO_CAPABILITY}
         if requested and not (requested & product_caps):
@@ -1397,6 +1543,11 @@ def claim_remote_worker_job(
             "product_video_only": bool(product_video_only),
             "owner_product_video_only": bool(owner_product_video_only),
             "reason": reason,
+            "debug": {} if hydrated else remote_worker_claim_debug_snapshot(
+                conn,
+                claim_route="owner_product_video" if owner_product_video_only else "product_video",
+                public_enabled=public_enabled,
+            ),
         }
     if requested and not (requested & set(REMOTE_WORKER_RENDER_CAPABILITIES)):
         return {"ok": True, "job": None, "reason": "capability_not_supported"}
@@ -1409,7 +1560,12 @@ def claim_remote_worker_job(
     )
     hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
     reason = "" if hydrated else ("no_job" if config["public_enabled"] else "public_worker_disabled")
-    return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "reason": reason}
+    return {
+        "ok": True,
+        "job": build_worker_job_payload(hydrated) if hydrated else None,
+        "reason": reason,
+        "debug": {} if hydrated else remote_worker_claim_debug_snapshot(conn, claim_route="default_render", public_enabled=bool(config["public_enabled"])),
+    }
 
 
 def fail_stale_product_video_jobs(
@@ -1450,7 +1606,7 @@ def fail_stale_product_video_jobs(
     for row in rows:
         job = video_project_queue.get_video_render_job(conn, int(row[0]))
         project = video_project_queue.get_video_project(conn, int(row[1]))
-        if not _product_video_is_claimable(project, owner_only=False, public_enabled=True):
+        if not is_remote_worker_product_video_job({"job_type": video_project_queue.VIDEO_RENDER_JOB_TYPE}, project):
             continue
         video_project_queue.fail_video_job(conn, job_id=int(job["id"]), error=reason, retry=False)
         failed += 1
@@ -1546,11 +1702,12 @@ def complete_remote_worker_job(
     renderer = str(payload.get("renderer") or "").strip().lower()
     product_admin_video_leak = _safe_bool(payload.get("admin_video_delivery")) and not is_admin_video
     test_pattern = _safe_bool(payload.get("test_pattern")) or render_mode == RENDER_MODE_ADMIN_TEST_PATTERN or _renderer_has_test_marker(renderer)
-    if product_admin_video_leak:
+    special_safe_job = bool(is_canary or is_admin_canary or is_admin_video)
+    if product_admin_video_leak and not special_safe_job:
         return _fail_product_fake_output(conn, int(job_id), "admin_video_delivery_not_allowed_for_product_video")
-    if test_pattern and not is_admin_video:
+    if test_pattern and not special_safe_job:
         return _fail_product_fake_output(conn, int(job_id), "test_pattern_not_allowed_for_normal_video")
-    if not is_admin_video and render_mode != RENDER_MODE_REAL:
+    if not special_safe_job and render_mode != RENDER_MODE_REAL:
         return _fail_product_fake_output(conn, int(job_id), "normal_video_requires_real_render_mode")
     if is_admin_video and render_mode not in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN}:
         return {"ok": False, "reason": "admin_video_invalid_render_mode"}
@@ -1818,10 +1975,21 @@ def get_remote_worker_admin_canary_status(
     age_seconds = 0
     if created_at:
         age_seconds = max(0, int((datetime.now() - created_at).total_seconds()))
-    if raw_status in {"failed", "error"}:
+    never_claimed = not worker_id and not str(job.get("locked_at") or "").strip()
+    timed_out_without_claim = bool(never_claimed and age_seconds >= 120)
+    if timed_out_without_claim:
+        display_status = "failed"
+        stage = "not_claimed_timeout"
+        reason_code = "not_claimed_timeout"
+    elif raw_status in {"failed", "error"}:
         display_status = "failed"
         if not worker_had_claim and not safe_failure:
             stage = "waiting_worker"
+            safe_failure = "not_claimed_timeout"
+            failure_diag = classify_remote_worker_error(safe_failure, status=raw_status, worker_id=worker_id)
+            reason_code = "not_claimed_timeout"
+        elif not worker_had_claim:
+            stage = "not_claimed_timeout"
             safe_failure = "not_claimed_timeout"
             failure_diag = classify_remote_worker_error(safe_failure, status=raw_status, worker_id=worker_id)
             reason_code = "not_claimed_timeout"
@@ -1853,15 +2021,15 @@ def get_remote_worker_admin_canary_status(
         "worker_id": worker_id,
         "claimed_at": claimed_at,
         "last_heartbeat_at": str(job.get("updated_at") or ""),
-        "progress_percent": _safe_int(job.get("progress_percent"), 0),
-        "progress_message": progress_message,
-        "result_uploaded": result_uploaded,
+        "progress_percent": 0 if timed_out_without_claim else _safe_int(job.get("progress_percent"), 0),
+        "progress_message": "" if timed_out_without_claim else progress_message,
+        "result_uploaded": False if timed_out_without_claim else result_uploaded,
         "result_file_size": int(uploaded_bytes or 0),
         "sent_to_admin": bool(result.get("sent_to_admin")),
         "safe_failure_reason": safe_failure,
         "safe_failure_reason_code": reason_code,
         "reason_code": reason_code,
-        "not_claimed_timeout": bool(stage == "not_claimed_timeout"),
+        "not_claimed_timeout": bool(timed_out_without_claim or reason_code == "not_claimed_timeout"),
         "age_seconds": age_seconds,
         "safe_error_type": failure_diag["error_type"],
         "safe_reason_code": failure_diag["reason_code"] or reason_code,
@@ -2021,7 +2189,9 @@ def create_product_video_worker_claim_test_job(
         "safe_output_delivery_test": False,
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
-        "provider_call": True,
+        "provider_call": False,
+        "claim_only_diagnostic": True,
+        "diagnostic_claim_only": True,
         "admin_only": True,
         "created_by_admin": True,
         "no_charge": True,
@@ -2062,7 +2232,7 @@ def create_product_video_worker_claim_test_job(
         scene_count=count,
         prompt_text=asset_pack["original_user_prompt"],
         invoice_json={**asset_pack, "total_xu": 0},
-        addon_plan_json={"source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE, "provider_call": True, "no_charge": True},
+        addon_plan_json={"source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE, "provider_call": False, "no_charge": True, "claim_only_diagnostic": True},
         total_xu_estimated=0,
     )
     job = video_project_queue.enqueue_video_render_job(conn, project_id=int(project["project_id"]), user_id=admin_id, max_attempts=1)

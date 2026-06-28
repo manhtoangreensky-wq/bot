@@ -309,7 +309,8 @@ def test_product_worker_diagnostic_creates_product_video_real_job(tmp_path):
         assert payload["render_mode"] == "real"
         assert payload["test_pattern"] is False
         assert payload["admin_video_delivery"] is False
-        assert payload["provider_call"] is True
+        assert payload["provider_call"] is False
+        assert payload["claim_only_diagnostic"] is True
         assert payload["no_charge"] is True
     finally:
         conn.close()

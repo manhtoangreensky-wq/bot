@@ -234,6 +234,33 @@ def claim_idle_reason(
     return "api_no_job"
 
 
+def claim_debug_lines() -> list[str]:
+    response = LAST_CLAIM_RESPONSE if isinstance(LAST_CLAIM_RESPONSE, dict) else {}
+    debug = response.get("debug") if isinstance(response.get("debug"), dict) else {}
+    if not debug:
+        return []
+    lines: list[str] = []
+    claim_route = str(debug.get("claim_route") or "").strip()
+    if claim_route:
+        lines.append(f"[remote_worker] once claim_route={claim_route}")
+    if "public_worker_enabled" in debug:
+        lines.append(f"[remote_worker] once public_worker_enabled={'yes' if debug.get('public_worker_enabled') else 'no'}")
+    counts = debug.get("lane_counts") if isinstance(debug.get("lane_counts"), dict) else {}
+    if counts:
+        ordered = ["admin_canary", "owner_product_video", "admin_video", "public_product_video", "public_gate_blocked"]
+        parts = []
+        for key in ordered:
+            if key in counts:
+                parts.append(f"{key}={counts.get(key)}")
+        for key in sorted(k for k in counts if k not in ordered):
+            parts.append(f"{key}={counts.get(key)}")
+        lines.append(f"[remote_worker] once lane_counts {' '.join(parts)}")
+    reason = str(debug.get("not_claimable_reason") or "").strip()
+    if reason:
+        lines.append(f"[remote_worker] once not_claimable_reason={reason}")
+    return lines
+
+
 def ping_server(
     canary: bool = False,
     admin_canary: bool = False,
@@ -350,7 +377,7 @@ def product_video_job_allowed(job: dict | None = None) -> bool:
         and not data.get("admin_video_delivery")
         and not data.get("canary")
         and not data.get("worker_admin_canary")
-        and data.get("provider_call")
+        and (data.get("provider_call") or data.get("claim_only_diagnostic"))
     )
 
 
@@ -555,6 +582,29 @@ def process_claimed_job(job: dict) -> dict:
     job_id = str(job.get("job_id") or "")
     if not job_id:
         raise RuntimeError("job_id_missing")
+    if job.get("claim_only_diagnostic"):
+        if str(job.get("source") or "") != REMOTE_WORKER_PRODUCT_VIDEO_SOURCE:
+            raise RuntimeError("claim_only_product_video_required")
+        if job.get("test_pattern") or job.get("admin_video_delivery") or job.get("provider_call") or job.get("public_user"):
+            raise RuntimeError("unsafe_claim_only_diagnostic_metadata")
+        send_heartbeat(job_id, 20, "product diagnostic claimed")
+        result = {
+            "ok": True,
+            "claim_only_diagnostic": True,
+            "diagnostic_claim_only": True,
+            "renderer": "remote_worker_claim_only",
+            "render_mode": RENDER_MODE_REAL,
+            "test_pattern": False,
+            "admin_video_delivery": False,
+            "bytes": 0,
+            "admin_only": True,
+            "no_charge": True,
+            "provider_call": False,
+            "public_user": False,
+            "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
+        }
+        send_heartbeat(job_id, 100, "product diagnostic claim pass")
+        return complete_job(job_id, result)
     with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:
         send_heartbeat(job_id, 5, "claimed")
         mode = normalize_render_mode(job)
@@ -913,6 +963,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if status == "idle":
             print(f"[remote_worker] once idle_reason={LAST_IDLE_REASON or 'api_no_job'}")
+            for line in claim_debug_lines():
+                print(line)
         return 1 if status == "failed" else 0
 
     print("[remote_worker] TOAN AAS Remote Worker starting")

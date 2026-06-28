@@ -761,7 +761,7 @@ def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: 
     else:
         conn.execute(
             """UPDATE video_jobs
-               SET status='failed', locked_by='', locked_at=NULL, lease_expires_at=NULL,
+               SET status='failed', lease_expires_at=NULL,
                    last_error=?, completed_at=?, updated_at=?
                WHERE id=?""",
             (str(error or "")[:1000], current, current, int(job_id)),
