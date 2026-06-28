@@ -54,7 +54,7 @@ def _copy_original(input_path: Path, output_path: Path, *, detail: str, skipped_
         boosted=False,
         fallback_original=True,
         skipped_double_boost=skipped_double_boost,
-        factor=float(factor or 2.0),
+        factor=float(factor),
         detail=detail,
     )
 
@@ -81,7 +81,11 @@ def boost_voice_audio(
 ) -> AudioBoostResult:
     source = Path(str(input_path or ""))
     target = Path(str(output_path or ""))
-    factor = max(0.1, min(8.0, float(volume_factor or 2.0)))
+    try:
+        requested_factor = float(volume_factor)
+    except Exception:
+        requested_factor = 2.0
+    factor = max(0.0, min(8.0, requested_factor))
     if not source.exists() or not source.is_file() or int(source.stat().st_size or 0) <= 0:
         return AudioBoostResult(False, input_path=str(source), output_path=str(target), factor=factor, detail="input_missing_or_empty")
     if not str(target):
