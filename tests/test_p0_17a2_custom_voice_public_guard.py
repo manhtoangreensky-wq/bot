@@ -475,7 +475,7 @@ def test_custom_voice_fallback_from_shopaikey_to_key4u_when_blocked(monkeypatch,
     assert profile["provider"] == "key4u_minimax"
 
 
-def test_custom_voice_fallback_from_key4u_to_shopaikey_when_blocked(monkeypatch, tmp_path):
+def test_custom_voice_keeps_shopaikey_first_when_key4u_active(monkeypatch, tmp_path):
     calls, _message, profile = _run_routed_flow(
         monkeypatch,
         tmp_path,
@@ -484,7 +484,8 @@ def test_custom_voice_fallback_from_key4u_to_shopaikey_when_blocked(monkeypatch,
         shopaikey_clone_status="PASS",
         key4u_clone_status="CLONE_PERMISSION_FORBIDDEN",
     )
-    assert calls.index("key4u_clone") < calls.index("shopaikey_clone")
+    assert calls.index("shopaikey_clone") < calls.index("shopaikey_tts")
+    assert "key4u_clone" not in calls
     assert "shopaikey_tts" in calls
     assert profile["status"] == "ready"
     assert profile["provider"] == "shopaikey_minimax"
