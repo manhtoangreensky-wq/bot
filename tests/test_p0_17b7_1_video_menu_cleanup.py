@@ -46,16 +46,18 @@ def test_video_menu_hides_prompt_motion_public():
 def test_video_menu_has_prompt_library():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "📚 Kho prompt video" in labels
+    assert "🧩 Prompt video" in labels
     assert "vpromptlib|start" in callbacks
     assert "Kho prompt video" in bot.video_prompt_library_text("vi")
 
 
-def test_video_menu_has_video_downloader():
+def test_video_menu_has_video_vault_not_downloader():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "📥 Tải video từ link" in labels
-    assert "vdownload|start" in callbacks
+    assert "📂 Kho video" in labels
+    assert "menu|video_vault" in callbacks
+    assert "📥 Tải video từ link" not in labels
+    assert "vdownload|start" not in callbacks
 
 
 def test_video_downloader_not_in_translation_dub_studio():
