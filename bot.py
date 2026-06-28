@@ -39552,14 +39552,16 @@ def video_b14_live_buttons_regression_report(user_id: int = 0) -> dict:
     prompt_video = video_b14_prompt_video_text_from_session(session, "vi")
     prompt_ok = "🎥" in prompt_video and "Camera/motion" in prompt_video and "Có lỗi khi xử lý lệnh" not in prompt_video
 
-    pack = video_b14_asset_pack_from_session(session)
-    pack.logo_refs = []
-    video_assets.add_asset(pack, asset_type="logo", file_id="regression-logo", mime_type="image/png", admin=True)
-    session = video_b14_save_asset_pack(uid, session, pack)
-    session = video_b14_set_addon_plan(uid, session, logo_source="uploaded", logo_file_id="regression-logo", logo_enabled=True)
-    session = video_b14_set_addon_plan(uid, session, logo_position="top_right")
+    session = video_b14_set_addon_plan(uid, session, logo_source="text", logo_text="TOAN AAS", logo_enabled=False, logo_file_id="")
+    session = video_b14_set_addon_plan(uid, session, logo_position="top_right", logo_enabled=True)
     logo_plan = video_b14_addon_plan_from_session(session)
-    logo_ok = logo_plan.get("logo_source") == "uploaded" and logo_plan.get("logo_position") == "top_right"
+    logo_ok = (
+        logo_plan.get("logo_source") == "text"
+        and logo_watermark_clean_text(logo_plan.get("logo_text") or "") == "TOAN AAS"
+        and logo_plan.get("logo_position") == "top_right"
+        and logo_plan.get("logo_enabled") is True
+        and not logo_plan.get("logo_file_id")
+    )
 
     session = task3d_session_step(uid, "waiting_video_narration_text", provider_called=False, xu_charged=0)
     narration = "Cảnh 1: Giới thiệu máy xay mini.\nCảnh 2: Xay thử sinh tố.\nCảnh 3: Chốt lợi ích gọn đẹp."
@@ -39601,7 +39603,7 @@ def video_b14_live_buttons_regression_report(user_id: int = 0) -> dict:
     status_ok = all(marker in status_text for marker in ["Mã xử lý", "Trạng thái", "Tiến độ", "Tùy chọn thêm", "OWNER/ADMIN TEST MODE"]) and safe_int(job.get("id"), 0) > 0
     checks = {
         "prompt_video_no_generic_error": prompt_ok,
-        "logo_sent_then_position": logo_ok,
+        "logo_text_position_confirm": logo_ok,
         "voice_text_saved": voice_ok,
         "voice_volume_120": safe_int(voice_plan.get("voice_volume_percent"), 0) == 120,
         "music_volume_10": music_ok,
@@ -39710,9 +39712,10 @@ async def cmd_tool_test_video_delivery_worker(update: Update, context: ContextTy
     except Exception:
         logger.warning("admin video delivery setting skipped")
     lines = [
-        "✅ <b>OWNER/ADMIN TEST MODE — kiểm tra xuất video</b>",
+        "✅ <b>OWNER/ADMIN TEST PATTERN — kiểm tra đường gửi file</b>",
         "",
-        "TOAN AAS đã đưa video test vào hệ thống xử lý nền.",
+        "TOAN AAS đã đưa video test kỹ thuật vào hệ thống xử lý nền.",
+        "Đây là video test kỹ thuật để kiểm tra đường gửi file, không phải video dựng thật.",
         f"• Mã xử lý: <code>{job_id or '-'}</code>",
         f"• Project: <code>{safe_int(project.get('project_id'), 0) or '-'}</code>",
         "• Số cảnh: <code>3</code>",
@@ -39720,11 +39723,12 @@ async def cmd_tool_test_video_delivery_worker(update: Update, context: ContextTy
         "• Trừ Xu: Không",
         "• Public: Không",
         "• Gọi provider: Không",
+        "• Render: <code>ADMIN TEST PATTERN</code>",
         "",
         "Chạy trên VPS:",
         "<code>python remote_worker.py --admin-video --once</code>",
         "",
-        "Kết quả đúng phải là file MP4 thật gửi về Telegram.",
+        "Kết quả đúng chỉ chứng minh đường gửi MP4 hoạt động, không tính là LIVE PASS video thật.",
     ]
     return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -53186,6 +53190,7 @@ def video_b14_default_addon_plan(profile_id: str = "storytelling") -> dict:
         "dub_voice_source": "same_as_voice",
         "logo_enabled": False,
         "logo_source": "none",
+        "logo_text": "",
         "logo_file_id": "",
         "logo_position": str(defaults.get("logo_position") or "bottom_right"),
         "logo_opacity_percent": int(round(float(defaults.get("logo_opacity", 0.82) or 0.82) * 100)),
@@ -53197,6 +53202,16 @@ def video_b14_addon_plan_from_session(session: dict | None = None) -> dict:
     plan = dict(draft.get("b14_addon_plan") or {})
     defaults = video_b14_default_addon_plan(str(draft.get("b14_profile_id") or video_b14_profile_id_for_session(session)))
     defaults.update({key: value for key, value in plan.items() if key in defaults})
+    logo_source = str(defaults.get("logo_source") or "none")
+    if logo_source not in {"none", "text"}:
+        logo_text_value = logo_watermark_clean_text(defaults.get("logo_text") or "")
+        defaults["logo_file_id"] = ""
+        if logo_text_value:
+            defaults["logo_source"] = "text"
+            defaults["logo_text"] = logo_text_value
+        else:
+            defaults["logo_enabled"] = False
+            defaults["logo_source"] = "none"
     for extra_key in ("narration_text", "music_note", "sfx_note", "subtitle_note", "dub_note", "logo_note"):
         if extra_key in plan:
             defaults[extra_key] = str(plan.get(extra_key) or "")
@@ -53248,11 +53263,12 @@ def video_b14_addon_label(kind: str, value: str) -> str:
         },
         "logo": {
             "none": "không dùng",
-            "default_watermark": "Watermark TOAN AAS mặc định",
-            "uploaded": "logo đã gửi",
+            "text": "chữ logo/watermark",
             "top_left": "góc trái trên",
+            "top_center": "giữa phía trên",
             "top_right": "góc phải trên",
             "bottom_left": "góc trái dưới",
+            "bottom_center": "giữa phía dưới",
             "bottom_right": "góc phải dưới",
         },
     }
@@ -53707,17 +53723,20 @@ def video_b14_logo_file_id_from_session(session: dict | None = None) -> str:
 
 def video_b14_logo_text(session: dict | None = None, lang: str = "vi") -> str:
     plan = video_b14_addon_plan_from_session(session)
-    source = str(plan.get("logo_source") or ("uploaded" if plan.get("logo_enabled") else "none"))
+    source = str(plan.get("logo_source") or ("text" if plan.get("logo_enabled") else "none"))
     note = str(plan.get("logo_note") or "").strip()
-    file_ready = bool(video_b14_logo_file_id_from_session(session))
+    logo_text_value = logo_watermark_clean_text(plan.get("logo_text") or "")
+    logo_state = "Bật" if plan.get("logo_enabled") else "Tắt"
+    logo_summary = video_b14_addon_label("logo", source if plan.get("logo_enabled") else "none")
     lines = [
-        "🏷 <b>Logo</b>",
+        "🏷 <b>Logo / Watermark chữ</b>",
         "",
-        f"• Logo: <b>{html.escape(video_b14_addon_label('logo', source))}</b>",
-        f"• File logo: <b>{'đã có' if file_ready else 'chưa có'}</b>",
+        f"• Logo: <b>{logo_state}</b> · {html.escape(logo_summary)}",
+        f"• Chữ hiển thị: <b>{html.escape(logo_text_value or 'chưa nhập')}</b>",
         f"• Vị trí: <b>{html.escape(video_b14_addon_label('logo', str(plan.get('logo_position') or 'bottom_right')))}</b>",
         "",
-        "Anh/chị chọn logo trước, sau đó chọn vị trí. Bước này chỉ lưu kế hoạch, chưa xử lý video và chưa trừ Xu.",
+        "Anh/chị nhập chữ logo/watermark, chọn vị trí rồi xác nhận. Logo hình/ảnh để ở phần tư liệu riêng, không trộn vào nút này.",
+        "Bước này chỉ lưu kế hoạch, chưa xử lý video và chưa trừ Xu.",
     ]
     if note:
         lines.extend(["", html.escape(note)])
@@ -53726,25 +53745,70 @@ def video_b14_logo_text(session: dict | None = None, lang: str = "vi") -> str:
 
 def video_b14_logo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🚫 Không logo/watermark", callback_data="vproduct|b14_logo_source|none"),
-            InlineKeyboardButton("🏷 Watermark TOAN AAS mặc định", callback_data="vproduct|b14_logo_source|default_watermark"),
-        ],
-        [
-            InlineKeyboardButton("📁 Logo đã gửi", callback_data="vproduct|b14_logo_source|uploaded"),
-            InlineKeyboardButton("📤 Gửi logo mới", callback_data="vproduct|b14_logo_upload"),
-        ],
-        [
-            InlineKeyboardButton("↖️ Góc trái trên", callback_data="vproduct|b14_logo_position|top_left"),
-            InlineKeyboardButton("↗️ Góc phải trên", callback_data="vproduct|b14_logo_position|top_right"),
-        ],
-        [
-            InlineKeyboardButton("↙️ Góc trái dưới", callback_data="vproduct|b14_logo_position|bottom_left"),
-            InlineKeyboardButton("↘️ Góc phải dưới", callback_data="vproduct|b14_logo_position|bottom_right"),
-        ],
-        [InlineKeyboardButton("✅ Xong logo", callback_data="vproduct|b14_logo_done")],
+        [InlineKeyboardButton("✍️ Nhập chữ logo/watermark", callback_data="vproduct|b14_logo_text_start")],
+        [InlineKeyboardButton("🧹 Xóa chữ logo/watermark", callback_data="vproduct|b14_logo_clear")],
         [
             InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addons"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_b14_logo_input_text(lang: str = "vi") -> str:
+    return (
+        "✍️ <b>Nhập chữ logo/watermark</b>\n\n"
+        "Gửi dòng chữ muốn đặt lên video.\n"
+        "Ví dụ: <code>TOAN AAS</code>, tên shop, slogan ngắn hoặc tên thương hiệu.\n\n"
+        "Sau khi gửi chữ, TOAN AAS sẽ cho chọn vị trí trên màn hình. Chưa xử lý video và chưa trừ Xu."
+    )
+
+
+def video_b14_logo_position_text(session: dict | None = None, lang: str = "vi") -> str:
+    plan = video_b14_addon_plan_from_session(session)
+    text = logo_watermark_clean_text(plan.get("logo_text") or "")
+    return (
+        "🎯 <b>Chọn vị trí logo/watermark</b>\n\n"
+        f"• Chữ: <b>{html.escape(text or 'chưa nhập')}</b>\n"
+        "Chọn 1 trong 6 vị trí trên màn hình. Bước này chỉ lưu vị trí, chưa xử lý video và chưa trừ Xu."
+    )
+
+
+def video_b14_logo_position_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("↖️ Trái trên", callback_data="vproduct|b14_logo_position|top_left"),
+            InlineKeyboardButton("⬆️ Giữa trên", callback_data="vproduct|b14_logo_position|top_center"),
+            InlineKeyboardButton("↗️ Phải trên", callback_data="vproduct|b14_logo_position|top_right"),
+        ],
+        [
+            InlineKeyboardButton("↙️ Trái dưới", callback_data="vproduct|b14_logo_position|bottom_left"),
+            InlineKeyboardButton("⬇️ Giữa dưới", callback_data="vproduct|b14_logo_position|bottom_center"),
+            InlineKeyboardButton("↘️ Phải dưới", callback_data="vproduct|b14_logo_position|bottom_right"),
+        ],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+
+def video_b14_logo_confirm_text(session: dict | None = None, lang: str = "vi") -> str:
+    plan = video_b14_addon_plan_from_session(session)
+    text = logo_watermark_clean_text(plan.get("logo_text") or "")
+    position = logo_watermark_position_label(str(plan.get("logo_position") or "bottom_right"), lang)
+    return (
+        "✅ <b>Xác nhận logo/watermark chữ</b>\n\n"
+        f"• Chữ: <b>{html.escape(text or 'chưa nhập')}</b>\n"
+        f"• Vị trí: <b>{html.escape(position)}</b>\n\n"
+        "Bấm xác nhận để lưu vào kế hoạch video, sau đó TOAN AAS quay lại màn add-on để anh/chị chọn tiếp mục khác."
+    )
+
+
+def video_b14_logo_confirm_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Xác nhận logo/watermark", callback_data="vproduct|b14_logo_confirm")],
+        [
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_logo_position_screen"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -53757,6 +53821,11 @@ def video_b14_addon_text(session: dict | None = None, lang: str = "vi") -> str:
     voice_label = str(plan.get("voice_label") or video_b14_addon_label("voice", str(plan["voice_source"])))
     subtitle_target = str(plan.get("subtitle_target_language") or "").strip()
     dub_target = str(plan.get("dub_target_language") or plan.get("subtitle_target_language") or "").strip()
+    logo_source = str(plan.get("logo_source") or "none") if plan.get("logo_enabled") else "none"
+    logo_tail = html.escape(video_b14_addon_label("logo", logo_source))
+    if plan.get("logo_enabled"):
+        logo_text_value = logo_watermark_clean_text(plan.get("logo_text") or "")
+        logo_tail = f"{logo_tail} · {html.escape(logo_text_value or 'chưa nhập')} · {html.escape(video_b14_addon_label('logo', str(plan['logo_position'])))}"
     return "\n".join([
         "🎙 <b>Voice / nhạc / phụ đề / logo</b>",
         "",
@@ -53765,7 +53834,7 @@ def video_b14_addon_text(session: dict | None = None, lang: str = "vi") -> str:
         f"• SFX: <b>{yes if plan['sfx_enabled'] else no}</b>",
         f"• Phụ đề: <b>{yes if plan['subtitle_enabled'] else no}</b> · {html.escape(video_b14_addon_label('subtitle', str(plan['subtitle_source'])))}{(' · ' + html.escape(subtitle_target)) if subtitle_target else ''}",
         f"• Lồng tiếng: <b>{yes if plan.get('dub_enabled') else no}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
-        f"• Logo: <b>{yes if plan['logo_enabled'] else no}</b> · {html.escape(video_b14_addon_label('logo', str(plan.get('logo_source') or 'none')))} · {html.escape(video_b14_addon_label('logo', str(plan['logo_position'])))}",
+        f"• Logo: <b>{yes if plan['logo_enabled'] else no}</b> · {logo_tail}",
         "",
         "Bước này chỉ lưu lựa chọn hậu kỳ. Chưa tạo file thật, chưa trừ Xu.",
     ])
@@ -54016,13 +54085,20 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
         voice_label = str(addon_plan.get("voice_label") or video_b14_addon_label("voice", str(addon_plan.get("voice_source") or "none")))
         subtitle_label = video_b14_addon_label("subtitle", str(addon_plan.get("subtitle_source") or "none"))
         dub_target = str(addon_plan.get("dub_target_language") or addon_plan.get("subtitle_target_language") or "").strip()
+        logo_source = str(addon_plan.get("logo_source") or "none") if addon_plan.get("logo_enabled") else "none"
+        logo_line = "Bật"
+        if addon_plan.get("logo_enabled"):
+            logo_text_value = logo_watermark_clean_text(addon_plan.get("logo_text") or "")
+            logo_line = f"Bật · {video_b14_addon_label('logo', logo_source)} · {logo_text_value or 'chưa nhập'} · {video_b14_addon_label('logo', str(addon_plan.get('logo_position') or 'bottom_right'))}"
+        else:
+            logo_line = "Tắt"
         lines.extend([
             "",
             f"• Voice: {'bật' if addon_plan.get('voice_enabled') else 'tắt'} · {html.escape(voice_label)} · {addon_plan.get('voice_volume_percent', 100)}%",
             f"• Nhạc: {'bật' if addon_plan.get('music_enabled') else 'tắt'} · {addon_plan.get('music_volume_percent', 10)}%",
             f"• Phụ đề: {'bật' if addon_plan.get('subtitle_enabled') else 'tắt'} · {html.escape(subtitle_label)}",
             f"• Lồng tiếng: {'bật' if addon_plan.get('dub_enabled') else 'tắt'}{(' · ' + html.escape(dub_target)) if dub_target else ''}",
-            f"• Logo: {'bật' if addon_plan.get('logo_enabled') else 'tắt'}",
+            f"• Logo: {html.escape(logo_line)}",
         ])
     lines.extend(["", "Chỉ sau khi bấm xác nhận, TOAN AAS mới trừ Xu và đưa tác vụ vào hàng chờ xử lý nền."])
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
@@ -54059,6 +54135,34 @@ def video_b14_render_job_by_id(job_id: int) -> dict:
         return {}
     finally:
         db.close()
+
+
+def video_b14_job_result_payload(job: dict | None = None) -> dict:
+    raw = (job or {}).get("result_json")
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        return json.loads(str(raw or "{}"))
+    except Exception:
+        return {}
+
+
+def video_b14_render_mode_from_job(job: dict | None = None, project: dict | None = None) -> str:
+    payload = video_b14_job_result_payload(job)
+    try:
+        invoice = json.loads(str((project or {}).get("invoice_json") or "{}"))
+    except Exception:
+        invoice = {}
+    try:
+        asset_pack = json.loads(str((project or {}).get("asset_pack_json") or "{}"))
+    except Exception:
+        asset_pack = {}
+    mode = str(payload.get("render_mode") or asset_pack.get("render_mode") or invoice.get("render_mode") or "").strip().lower().replace("-", "_")
+    if mode in {"test_pattern", "admin_test"}:
+        return "admin_test_pattern"
+    if mode in {"real", "admin_test_pattern", "unavailable"}:
+        return mode
+    return ""
 
 
 def video_b14_queue_status_text(session: dict | None, result: dict | None = None, user_id=0, lang: str = "vi") -> str:
@@ -54111,10 +54215,24 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     final_path = str(project.get("final_video_path") or job.get("final_video_path") or "")
     final_file_id = str(project.get("final_video_file_id") or job.get("final_video_file_id") or "")
     error_log = str(project.get("error_log") or job.get("last_error") or "")
+    render_mode = video_b14_render_mode_from_job(job, project)
+    job_result = video_b14_job_result_payload(job)
+    test_pattern = bool(job_result.get("test_pattern")) or render_mode == "admin_test_pattern"
+    real_renderer_unavailable = "real_video_renderer_unavailable" in error_log
+    if real_renderer_unavailable:
+        render_mode = "unavailable"
     if status in {"completed", "success"} and (final_path or final_file_id):
-        result_text = "đã có video thành phẩm, TOAN AAS sẽ gửi kết quả cuối"
+        if render_mode == "real":
+            result_text = "hệ thống đã dựng video thật và sẽ gửi kết quả cuối"
+        elif test_pattern:
+            result_text = "hệ thống đã gửi video test kỹ thuật, không phải video dựng thật"
+        else:
+            result_text = "đã có file kết quả nhưng chưa xác minh renderer thật"
     elif status in {"failed", "error"}:
-        result_text = "hệ thống chưa dựng được video. TOAN AAS chưa báo hoàn tất khi chưa có file cuối"
+        if real_renderer_unavailable:
+            result_text = "Hệ thống chưa dựng được video thật ở cấu hình này. TOAN AAS chưa trừ Xu. Anh/chị thử lại cấu hình nhẹ hơn hoặc đợi hệ thống render thật được bật."
+        else:
+            result_text = "hệ thống chưa dựng được video. TOAN AAS chưa báo hoàn tất khi chưa có file cuối"
     elif status in {"queued", "queued_for_worker"}:
         result_text = "đang chuẩn bị xử lý, chưa có file thành phẩm"
     elif status in {"processing", "running"}:
@@ -54129,6 +54247,12 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     subtitle_label = video_b14_addon_label("subtitle", str(addon_plan.get("subtitle_source") or "none"))
     dub_target = str(addon_plan.get("dub_target_language") or addon_plan.get("subtitle_target_language") or "").strip()
     logo_label = video_b14_addon_label("logo", str(addon_plan.get("logo_source") or "none"))
+    logo_status = "Bật" if addon_plan.get("logo_enabled") else "Tắt"
+    logo_line = f"  Logo: <b>{logo_status}</b> · {html.escape(logo_label if addon_plan.get('logo_enabled') else video_b14_addon_label('logo', 'none'))}"
+    if addon_plan.get("logo_enabled"):
+        logo_text_value = logo_watermark_clean_text(addon_plan.get("logo_text") or "")
+        logo_line += f" · {html.escape(logo_text_value or 'chưa nhập')}"
+        logo_line += f" · {html.escape(video_b14_addon_label('logo', str(addon_plan.get('logo_position') or 'bottom_right')))}"
     lines = [
         "📊 <b>Trạng thái video</b>",
         "",
@@ -54146,7 +54270,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         f"  Nhạc: <b>{'bật' if addon_plan.get('music_enabled') else 'tắt'}</b> · {html.escape(music_label)} · {safe_int(addon_plan.get('music_volume_percent'), 10)}%",
         f"  Phụ đề: <b>{'bật' if addon_plan.get('subtitle_enabled') else 'tắt'}</b> · {html.escape(subtitle_label)}",
         f"  Lồng tiếng: <b>{'bật' if addon_plan.get('dub_enabled') else 'tắt'}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
-        f"  Logo: <b>{'bật' if addon_plan.get('logo_enabled') else 'tắt'}</b> · {html.escape(logo_label)}",
+        logo_line,
         f"• Cập nhật lần cuối: <code>{html.escape(updated_at)}</code>",
         f"• Thời gian chờ dự kiến: <b>{video_b14_eta_text(eta)}</b>",
         f"• Kết quả: <b>{html.escape(result_text)}</b>",
@@ -54229,6 +54353,25 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     ratio = str(draft.get("b14_aspect_ratio") or (session or {}).get("aspect_ratio") or "9:16")
     is_internal = video_b14_is_admin_or_owner(user_id)
     asset_pack_payload = dict(draft.get("asset_pack") or {})
+    original_user_prompt = str((session or {}).get("original_user_prompt") or topic or draft.get("topic") or "").strip()
+    cleaned_user_prompt = re.sub(r"\s+", " ", original_user_prompt).strip()
+    asset_pack_payload.update({
+        "original_user_prompt": original_user_prompt,
+        "cleaned_user_prompt": cleaned_user_prompt,
+        "provider_order": asset_pack_payload.get("provider_order") or os.getenv("VIDEO_PROVIDER_ORDER") or "shopaikey,key4u",
+        "profile_id": profile_id,
+        "aspect_ratio": ratio,
+        "render_mode": "real",
+        "test_pattern": False,
+        "fake_renderer_allowed": False,
+        "real_renderer_required": True,
+    })
+    invoice.update({
+        "render_mode": "real",
+        "test_pattern": False,
+        "fake_renderer_allowed": False,
+        "real_renderer_required": True,
+    })
     if is_internal:
         asset_pack_payload.update({
             "source": asset_pack_payload.get("source") or "video_b14_admin_no_charge",
@@ -54293,7 +54436,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         topic=topic,
         ratio=ratio,
         asset_pack_json=asset_pack_payload,
-        prompt_text=str(plan.get("preview_text") or topic or "")[:8000],
+        prompt_text=str(original_user_prompt or plan.get("preview_text") or topic or "")[:8000],
         addon_plan_json=addon_plan,
         creative_control_json=creative_controls,
         quality_tier=invoice["quality_xu"],
@@ -55506,7 +55649,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             "b14_addon_dub",
             "b14_addon_logo",
             "b14_logo_source",
+            "b14_logo_text_start",
             "b14_logo_position",
+            "b14_logo_position_screen",
+            "b14_logo_confirm",
+            "b14_logo_clear",
             "b14_logo_upload",
             "b14_addon_sfx",
             "b14_scene_count",
@@ -56172,76 +56319,60 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "b14_addon_logo":
         session = task3d_session_step(uid, "b14_logo", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_logo_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_keyboard(lang))
-    if action in {"b14_logo_source", "b14_logo_set"}:
-        source = value if value in {"none", "uploaded", "default_watermark"} else "none"
-        if value in {"top_left", "top_right", "bottom_left", "bottom_right"}:
-            session = video_b14_set_addon_plan(
-                uid,
-                session,
-                logo_position=value,
-                logo_note="Đã lưu vị trí logo. Anh/chị chọn logo đã gửi hoặc gửi logo mới để bật logo.",
-            )
-        elif source == "default_watermark":
-            session = video_b14_set_addon_plan(
-                uid,
-                session,
-                logo_enabled=True,
-                logo_source="default_watermark",
-                logo_file_id="",
-                logo_position=str(video_b14_addon_plan_from_session(session).get("logo_position") or "bottom_right"),
-                logo_note="Đã chọn watermark TOAN AAS mặc định. Anh/chị có thể đổi vị trí rồi bấm Xong logo.",
-            )
-        elif source == "uploaded":
-            file_id = video_b14_logo_file_id_from_session(session)
-            if not file_id:
-                session = video_b14_set_addon_plan(
-                    uid,
-                    session,
-                    logo_enabled=False,
-                    logo_source="uploaded",
-                    logo_note="Chưa thấy logo đã gửi. Anh/chị gửi logo mới bằng ảnh hoặc file PNG/JPG.",
-                )
-                session = task3d_session_step(uid, "b14_logo_upload_wait", provider_called=False, xu_charged=0)
-                return await safe_edit_or_send(
-                    query,
-                    "📤 <b>Gửi logo mới</b>\n\nAnh/chị gửi ảnh logo hoặc file PNG/JPG trong tin nhắn tiếp theo. TOAN AAS chỉ lưu vào kế hoạch, chưa xử lý video và chưa trừ Xu.",
-                    parse_mode="HTML",
-                    reply_markup=video_b14_logo_keyboard(lang),
-                )
-            session = video_b14_set_addon_plan(
-                uid,
-                session,
-                logo_enabled=True,
-                logo_source="uploaded",
-                logo_file_id=file_id,
-                logo_note="Đã chọn logo đã gửi. Anh/chị có thể chọn vị trí rồi bấm Xong logo.",
-            )
-        else:
-            session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_file_id="", logo_note="")
-        session = task3d_session_step(uid, "b14_logo", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_logo_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_keyboard(lang))
-    if action == "b14_logo_upload":
-        session = task3d_session_step(uid, "b14_logo_upload_wait", provider_called=False, xu_charged=0)
+    if action in {"b14_logo_text_start", "b14_logo_upload"}:
+        session = task3d_session_step(uid, "b14_logo_text_wait", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(
             query,
-            "📤 <b>Gửi logo mới</b>\n\nAnh/chị gửi ảnh logo hoặc file PNG/JPG trong tin nhắn tiếp theo. TOAN AAS chỉ lưu vào kế hoạch, chưa xử lý video và chưa trừ Xu.",
+            video_b14_logo_input_text(lang),
             parse_mode="HTML",
-            reply_markup=video_b14_logo_keyboard(lang),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
         )
+    if action in {"b14_logo_source", "b14_logo_set"}:
+        if value == "none":
+            session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_text="", logo_file_id="", logo_note="")
+            session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, "✅ Đã xóa logo/watermark khỏi kế hoạch.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+        session = task3d_session_step(uid, "b14_logo_text_wait", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_b14_logo_input_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+    if action == "b14_logo_position_screen":
+        plan = video_b14_addon_plan_from_session(session)
+        if not logo_watermark_clean_text(plan.get("logo_text") or ""):
+            session = task3d_session_step(uid, "b14_logo_text_wait", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, video_b14_logo_input_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+        session = task3d_session_step(uid, "b14_logo_position", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_b14_logo_position_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_position_keyboard(lang))
     if action == "b14_logo_position":
-        position = value if value in {"top_left", "top_right", "bottom_left", "bottom_right"} else "bottom_right"
-        file_id = video_b14_logo_file_id_from_session(session)
-        source = str(video_b14_addon_plan_from_session(session).get("logo_source") or "none")
-        has_default_watermark = source == "default_watermark"
+        position = value if value in {"top_left", "top_center", "top_right", "bottom_left", "bottom_center", "bottom_right"} else "bottom_right"
         session = video_b14_set_addon_plan(
             uid,
             session,
             logo_position=position,
-            logo_enabled=bool(has_default_watermark or (file_id and source == "uploaded")),
-            logo_note="" if has_default_watermark or (file_id and source == "uploaded") else "Đã lưu vị trí logo. Anh/chị chọn watermark mặc định, logo đã gửi hoặc gửi logo mới để bật logo.",
+            logo_source="text",
+            logo_note="Đã chọn vị trí. Anh/chị bấm xác nhận để lưu logo/watermark chữ.",
         )
-        session = task3d_session_step(uid, "b14_logo", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, video_b14_logo_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_keyboard(lang))
+        session = task3d_session_step(uid, "b14_logo_confirm", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_b14_logo_confirm_text(session, lang), parse_mode="HTML", reply_markup=video_b14_logo_confirm_keyboard(lang))
+    if action == "b14_logo_confirm":
+        plan = video_b14_addon_plan_from_session(session)
+        text_value = logo_watermark_clean_text(plan.get("logo_text") or "")
+        if not text_value:
+            session = task3d_session_step(uid, "b14_logo_text_wait", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, video_b14_logo_input_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
+        session = video_b14_set_addon_plan(
+            uid,
+            session,
+            logo_enabled=True,
+            logo_source="text",
+            logo_text=text_value,
+            logo_file_id="",
+            logo_note="",
+        )
+        session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, "✅ Đã lưu logo/watermark chữ.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+    if action == "b14_logo_clear":
+        session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_text="", logo_file_id="", logo_note="")
+        session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, "✅ Đã xóa logo/watermark khỏi kế hoạch.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_logo_done":
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
@@ -56691,6 +56822,28 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
             video_b14_voice_text(session, uid, lang),
             parse_mode="HTML",
             reply_markup=video_b14_voice_keyboard(lang),
+        )
+        return True
+    if str(session.get("current_step") or "") == "b14_logo_text_wait":
+        lang = get_user_language(uid) or "vi"
+        text = logo_watermark_clean_text(update.message.text)
+        if not text:
+            return True
+        session = video_b14_set_addon_plan(
+            uid,
+            session,
+            logo_enabled=False,
+            logo_source="text",
+            logo_text=text,
+            logo_file_id="",
+            logo_position=str(video_b14_addon_plan_from_session(session).get("logo_position") or "bottom_right"),
+            logo_note="Đã nhận chữ logo/watermark. Anh/chị chọn vị trí rồi xác nhận.",
+        )
+        session = task3d_session_step(uid, "b14_logo_position", provider_called=False, xu_charged=0)
+        await update.message.reply_text(
+            video_b14_logo_position_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=video_b14_logo_position_keyboard(lang),
         )
         return True
     if str(session.get("current_step") or "") == "waiting_voice_volume_percent":
@@ -148991,14 +149144,19 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
     is_canary = remote_worker_api.is_remote_worker_canary_job(job, project)
     is_admin_canary = remote_worker_api.is_remote_worker_admin_canary_job(job, project)
     is_admin_video = remote_worker_api.is_remote_worker_admin_video_job(job, project)
+    render_mode = video_b14_render_mode_from_job(job, project)
+    job_result = video_b14_job_result_payload(job)
+    test_pattern = bool(job_result.get("test_pattern")) or render_mode == "admin_test_pattern"
     if is_admin_canary:
         caption = "🧪 VPS Worker Production Canary hoàn tất. File test admin từ VPS/Railway."
     elif is_canary:
         caption = "🧪 Remote Worker Canary hoàn tất. File kết quả test từ VPS/Railway."
-    elif is_admin_video:
-        caption = "✅ OWNER/ADMIN TEST MODE — video đã dựng xong, không trừ Xu."
+    elif is_admin_video and test_pattern:
+        caption = "🧪 ADMIN TEST PATTERN — đây là video test kỹ thuật để kiểm tra đường gửi file, không phải video dựng thật. Không trừ Xu."
+    elif render_mode == "real":
+        caption = "✅ Hệ thống đã dựng video thật. TOAN AAS gửi file kết quả cuối."
     else:
-        caption = "✅ Video đã dựng xong. TOAN AAS gửi file kết quả cuối."
+        return {"sent": False, "reason": "render_mode_not_real"}
     try:
         with open(final_path, "rb") as handle:
             await tg_app.bot.send_video(

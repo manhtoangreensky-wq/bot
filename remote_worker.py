@@ -79,6 +79,10 @@ WORKER_TMP_DIR = str(os.environ.get("WORKER_TMP_DIR") or tempfile.gettempdir()).
 FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
 FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_PATH") or "ffmpeg").strip()
 LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
+REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
+RENDER_MODE_REAL = "real"
+RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
+RENDER_MODE_UNAVAILABLE = "unavailable"
 
 
 def mask_secret(value: str) -> str:
@@ -250,6 +254,29 @@ def first_line(text: str) -> str:
         if clean:
             return clean[:300]
     return ""
+
+
+def normalize_render_mode(job: dict | None = None) -> str:
+    data = dict(job or {})
+    mode = str(data.get("render_mode") or "").strip().lower().replace("-", "_")
+    if mode in {"test_pattern", "admin_test", "admin_test_pattern"}:
+        return RENDER_MODE_ADMIN_TEST_PATTERN
+    if mode == RENDER_MODE_UNAVAILABLE:
+        return RENDER_MODE_UNAVAILABLE
+    return RENDER_MODE_REAL
+
+
+def admin_test_pattern_allowed(job: dict | None = None) -> bool:
+    data = dict(job or {})
+    if normalize_render_mode(data) != RENDER_MODE_ADMIN_TEST_PATTERN:
+        return False
+    return bool(
+        data.get("admin_video_delivery")
+        and data.get("admin_only")
+        and data.get("no_charge")
+        and not data.get("provider_call")
+        and not data.get("public_user")
+    )
 
 
 def local_ffmpeg_path() -> str:
@@ -433,20 +460,58 @@ def render_admin_video_delivery(job: dict, work_dir: str) -> str:
     return output_path
 
 
+def render_real_video(job: dict, work_dir: str) -> str:
+    """Render a normal product video through the real provider connector."""
+    try:
+        from services.video_real_render_connector import RealVideoRenderError, render_real_video_job
+    except Exception as exc:
+        raise RuntimeError(f"{REAL_VIDEO_RENDER_UNAVAILABLE}:connector_import_failed:{type(exc).__name__}") from exc
+    try:
+        result = render_real_video_job(job, work_dir)
+    except RealVideoRenderError as exc:
+        raise RuntimeError(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE) from exc
+    final_path = str(result.get("final_video_path") or "")
+    if not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
+        raise RuntimeError(REAL_VIDEO_RENDER_UNAVAILABLE)
+    return final_path
+
+
 def process_claimed_job(job: dict) -> dict:
     job_id = str(job.get("job_id") or "")
     if not job_id:
         raise RuntimeError("job_id_missing")
     with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:
         send_heartbeat(job_id, 5, "claimed")
-        if not LOCAL_VIDEO_FAKE_RENDERER_ENABLED:
-            raise RuntimeError("video_render_runner_missing")
-        send_heartbeat(job_id, 35, "rendering fake admin test video")
-        final_path = render_fake_video(job, work_dir)
+        mode = normalize_render_mode(job)
+        if mode == RENDER_MODE_ADMIN_TEST_PATTERN:
+            if not admin_test_pattern_allowed(job):
+                raise RuntimeError("unsafe_test_pattern_route")
+            if not LOCAL_VIDEO_FAKE_RENDERER_ENABLED:
+                raise RuntimeError("admin_test_pattern_renderer_disabled")
+            send_heartbeat(job_id, 35, "rendering ADMIN TEST PATTERN")
+            final_path = render_fake_video(job, work_dir)
+            result = {
+                "ok": True,
+                "render_mode": RENDER_MODE_ADMIN_TEST_PATTERN,
+                "test_pattern": True,
+                "renderer": "remote_worker_fake_admin_test",
+                "final_video_name": os.path.basename(final_path),
+                "bytes": os.path.getsize(final_path),
+                "admin_only": True,
+                "no_charge": True,
+                "provider_call": False,
+                "public_user": False,
+                "warning": "ADMIN TEST PATTERN - not real rendered video",
+            }
+            send_heartbeat(job_id, 90, "uploading ADMIN TEST PATTERN")
+            return complete_job(job_id, result, final_path)
+        send_heartbeat(job_id, 35, "rendering real video")
+        final_path = render_real_video(job, work_dir)
         send_heartbeat(job_id, 90, "uploading result")
         result = {
             "ok": True,
-            "renderer": "remote_worker_fake_admin_test",
+            "render_mode": RENDER_MODE_REAL,
+            "renderer": "remote_worker_real_render_route",
             "final_video_name": os.path.basename(final_path),
             "bytes": os.path.getsize(final_path),
         }
@@ -463,22 +528,37 @@ def process_admin_video_job(job: dict) -> dict:
         raise RuntimeError("unsafe_admin_video_metadata")
     with tempfile.TemporaryDirectory(dir=WORKER_TMP_DIR if os.path.isdir(WORKER_TMP_DIR) else None) as work_dir:
         send_heartbeat(job_id, 10, "admin video claimed")
-        send_heartbeat(job_id, 35, "admin video rendering")
-        final_path = render_admin_video_delivery(job, work_dir)
+        mode = normalize_render_mode(job)
+        if mode == RENDER_MODE_ADMIN_TEST_PATTERN:
+            if not admin_test_pattern_allowed(job):
+                raise RuntimeError("unsafe_test_pattern_route")
+            send_heartbeat(job_id, 35, "rendering ADMIN TEST PATTERN")
+            final_path = render_admin_video_delivery(job, work_dir)
+            renderer = "remote_worker_admin_test_pattern_ffmpeg"
+            test_pattern = True
+            queue_label = "OWNER/ADMIN TEST PATTERN - video delivery only, no Xu"
+        else:
+            send_heartbeat(job_id, 35, "admin video real rendering")
+            final_path = render_real_video(job, work_dir)
+            renderer = "remote_worker_real_render_route"
+            test_pattern = False
+            queue_label = "OWNER/ADMIN VIDEO REAL RENDER - no Xu"
         send_heartbeat(job_id, 85, "admin video uploading")
         result = {
             "ok": True,
             "admin_video_delivery": True,
-            "renderer": "remote_worker_admin_video_ffmpeg",
+            "render_mode": RENDER_MODE_ADMIN_TEST_PATTERN if test_pattern else RENDER_MODE_REAL,
+            "test_pattern": bool(test_pattern),
+            "renderer": renderer,
             "final_video_name": os.path.basename(final_path),
             "bytes": os.path.getsize(final_path),
             "admin_only": True,
             "no_charge": True,
             "provider_call": False,
             "public_user": False,
-            "queue_label": "OWNER/ADMIN TEST MODE - video delivery, no Xu",
+            "queue_label": queue_label,
         }
-        send_heartbeat(job_id, 100, "admin video completed")
+        send_heartbeat(job_id, 100, "admin test pattern completed" if test_pattern else "admin real video completed")
         return complete_job(job_id, result, final_path)
 
 
@@ -563,10 +643,20 @@ def run_once(canary_only: bool = False, admin_canary_only: bool = False, admin_v
         return "completed"
     except Exception as exc:
         if job_id:
+            message = first_line(str(exc))
+            unavailable = REAL_VIDEO_RENDER_UNAVAILABLE in message
             fail_job(
                 job_id,
-                f"{type(exc).__name__}:{first_line(str(exc))}",
-                retryable=not bool(canary_only or admin_canary_only or admin_video_only or job.get("canary") or job.get("worker_admin_canary") or job.get("admin_video_delivery")),
+                f"{type(exc).__name__}:{message}",
+                retryable=not bool(
+                    unavailable
+                    or canary_only
+                    or admin_canary_only
+                    or admin_video_only
+                    or job.get("canary")
+                    or job.get("worker_admin_canary")
+                    or job.get("admin_video_delivery")
+                ),
             )
         return "failed"
 

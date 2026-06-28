@@ -920,6 +920,7 @@ class Key4UProvider:
         prompt: str = "6-second jade green TOAN AAS logo reveal, clean tech style, smooth camera movement, no watermark.",
         model: str = "",
         timeout_seconds: float = 60.0,
+        aspect_ratio: str = "16:9",
     ) -> dict[str, Any]:
         selected_model = model or self.config.video_model
         if not self.is_configured():
@@ -928,7 +929,7 @@ class Key4UProvider:
         payload = {
             "model": selected_model,
             "prompt": str(prompt or "")[:1000],
-            "aspect_ratio": "16:9",
+            "aspect_ratio": str(aspect_ratio or "16:9")[:20],
             "enhance_prompt": True,
             "enable_upsample": False,
         }

@@ -26,6 +26,12 @@ from services.multiscene_video_pipeline import (
     process_multiscene_video_pipeline,
     safe_run_ffmpeg,
 )
+from services.video_real_render_connector import (
+    REAL_VIDEO_RENDER_UNAVAILABLE,
+    build_real_scene_renderer,
+    original_prompt_from_job,
+    real_video_llm_func_from_job,
+)
 
 
 def load_dotenv(path: str) -> None:
@@ -89,6 +95,8 @@ LOCAL_FFMPEG_FONT_PATH = str(os.environ.get("LOCAL_FFMPEG_FONT_PATH", r"C:\Windo
 LOCAL_COMFY_ENABLED = env_flag("LOCAL_COMFY_ENABLED", "false")
 VIDEO_PROJECT_QUEUE_ENABLED = env_flag("VIDEO_PROJECT_QUEUE_ENABLED", "true")
 LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
+RENDER_MODE_REAL = "real"
+RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
 
 
 def endpoint(path: str) -> str:
@@ -561,14 +569,53 @@ def video_project_fake_scene_renderer(duration: float = 6.0):
     return _render
 
 
+def video_project_render_mode(job: dict | None = None) -> str:
+    data = dict(job or {})
+    project = dict(data.get("project") or {})
+    asset_pack_json = project.get("asset_pack_json") or data.get("asset_pack_json") or ""
+    try:
+        asset_pack_from_json = json.loads(str(asset_pack_json or "{}"))
+    except Exception:
+        asset_pack_from_json = {}
+    candidates = [
+        data.get("render_mode"),
+        (project.get("asset_pack") or {}).get("render_mode") if isinstance(project.get("asset_pack"), dict) else "",
+        asset_pack_from_json.get("render_mode") if isinstance(asset_pack_from_json, dict) else "",
+    ]
+    for value in candidates:
+        mode = str(value or "").strip().lower().replace("-", "_")
+        if mode in {"admin_test_pattern", "test_pattern", "admin_test"}:
+            return RENDER_MODE_ADMIN_TEST_PATTERN
+    return RENDER_MODE_REAL
+
+
+def video_project_addon_plan(job: dict | None = None) -> dict:
+    data = dict(job or {})
+    project = dict(data.get("project") or {})
+    for candidate in (data.get("addon_plan"), data.get("addon_plan_json"), project.get("addon_plan_json")):
+        if isinstance(candidate, dict):
+            return dict(candidate)
+        try:
+            parsed = json.loads(str(candidate or "{}"))
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
+
+
+def video_project_real_scene_renderer(job: dict | None = None):
+    try:
+        return build_real_scene_renderer(job or {})
+    except Exception as exc:
+        raise RuntimeError(f"{REAL_VIDEO_RENDER_UNAVAILABLE}:connector_failed:{type(exc).__name__}") from exc
+
+
 def run_video_render_job(job: dict) -> None:
     job_id = job.get("id") or job.get("job_id")
     project = job.get("project") or {}
     try:
         if not job_id:
-            return
-        if not LOCAL_VIDEO_FAKE_RENDERER_ENABLED:
-            update_video_render_job(job_id, "failed", "video_render_runner_missing")
             return
         if not TELEGRAM_BOT_TOKEN:
             update_video_render_job(job_id, "failed", "telegram_token_missing_for_delivery")
@@ -579,28 +626,50 @@ def run_video_render_job(job: dict) -> None:
             return
         scene_count = max(1, min(5, int(project.get("scene_count") or len(job.get("scenes") or []) or 3)))
         duration = 6.0
-        prompt = str(project.get("prompt_text") or project.get("topic") or "TOAN AAS video project")[:4000]
+        prompt = original_prompt_from_job(job)[:4000]
+        addon_plan = video_project_addon_plan(job)
+        mode = video_project_render_mode(job)
+        if mode == RENDER_MODE_ADMIN_TEST_PATTERN:
+            if not LOCAL_VIDEO_FAKE_RENDERER_ENABLED:
+                update_video_render_job(job_id, "failed", "admin_test_pattern_renderer_disabled")
+                return
+            render_func = video_project_fake_scene_renderer(duration)
+            send_caption = "ADMIN TEST PATTERN — video test kỹ thuật, không phải video dựng thật."
+            result_mode = RENDER_MODE_ADMIN_TEST_PATTERN
+        else:
+            try:
+                render_func = video_project_real_scene_renderer(job)
+            except RuntimeError as exc:
+                update_video_render_job(job_id, "failed", str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE)
+                return
+            send_caption = "✅ Video đã dựng xong. TOAN AAS gửi file kết quả cuối."
+            result_mode = RENDER_MODE_REAL
         workspace = create_multiscene_workspace(f"video-project-{job_id}")
         result = process_multiscene_video_pipeline(
             user_id=user_id,
             job_id=str(job_id),
             user_prompt=prompt,
             workspace_dir=workspace,
-            render_video_func=video_project_fake_scene_renderer(duration),
+            render_video_func=render_func,
+            llm_func=real_video_llm_func_from_job(job),
             max_scenes=scene_count,
             default_scene_duration=duration,
             aspect_ratio=str(project.get("ratio") or "9:16"),
             enable_voice=False,
-            enable_subtitle=True,
-            enable_logo=False,
+            enable_subtitle=bool(addon_plan.get("subtitle_enabled", True)),
+            enable_logo=bool(addon_plan.get("logo_enabled") and addon_plan.get("logo_text")),
+            logo_text=str(addon_plan.get("logo_text") or ""),
+            logo_position=str(addon_plan.get("logo_position") or "bottom_right"),
         )
         final_path = str(result.get("final_video_path") or "")
         if not result.get("ok") or not final_path:
             raise RuntimeError(str(result.get("error") or result.get("status") or "video_render_failed"))
+        result["render_mode"] = result_mode
+        result["test_pattern"] = result_mode == RENDER_MODE_ADMIN_TEST_PATTERN
         output_file_id = telegram_send_video(
             user_id,
             final_path,
-            "ADMIN TEST MODE — fake renderer. Video này chỉ kiểm tra pipeline ghép cảnh, không phải render AI thật.",
+            send_caption,
         )
         update_video_render_job(job_id, "completed", "video project sent", final_video_path=final_path, final_video_file_id=output_file_id, result=result)
     except subprocess.TimeoutExpired:

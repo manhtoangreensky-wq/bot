@@ -9,7 +9,7 @@ Base: `origin/main` after P0.18B, `5e7cb74`.
 This audit covers only the public/live video planner button path:
 
 - storyboard prompt video preview
-- logo add-on source/position/back flow
+- logo/watermark text add-on input/position/confirm/back flow
 - voice narration text edit
 - voice/music manual volume input
 - scene count and invoice discount
@@ -29,10 +29,9 @@ Not touched: PayOS, wallet/Xu ratio, payment webhook, B13 render/stitch internal
 | Tiep tuc tao video | `vproduct|storyboard_confirm` |
 | Quay lai storyboard | `vproduct|b14_creative_done` / `vproduct|b14_storyboard_screen` |
 | Logo menu | `vproduct|b14_addon_logo` |
-| Logo da gui | `vproduct|b14_logo_source|uploaded` |
-| Gui logo moi | `vproduct|b14_logo_upload` then state `b14_logo_upload_wait` |
-| Logo position buttons | `vproduct|b14_logo_position|top_left|top_right|bottom_left|bottom_right` |
-| Xong logo | `vproduct|b14_logo_done` |
+| Logo/watermark chu | `vproduct|b14_logo_text_start` then state `b14_logo_text_wait` |
+| Chon vi tri chu | `vproduct|b14_logo_position|top_left|top_center|top_right|bottom_left|bottom_center|bottom_right` |
+| Xac nhan logo/watermark | `vproduct|b14_logo_confirm` then returns add-ons |
 | Voice menu | `vproduct|b14_addon_voice` |
 | Sua loi doc | `vproduct|b14_voice_edit` then state `waiting_video_narration_text` |
 | Am luong giong | `vproduct|b14_voice_volume` then state `waiting_voice_volume_percent` |
@@ -46,7 +45,7 @@ Not touched: PayOS, wallet/Xu ratio, payment webhook, B13 render/stitch internal
 ## Root Causes
 
 - Prompt video root cause: the live button used the generic prompt text renderer, which can generate an oversized Telegram edit payload and did not expose a compact per-scene fallback screen. Missing storyboard cases were rebuilt, but the UI still had no safe compact output.
-- Logo root cause: source and position were mixed under `b14_logo_set`; choosing a position also enabled logo, so the UI felt like it forced position before logo source.
+- Logo root cause: add-on mixed text watermark, default watermark, uploaded image logo, and position in one screen. The repaired add-on flow now handles text watermark only: enter text, choose one of six positions, confirm, then return to add-ons. Image logo assets stay outside this add-on screen.
 - Voice text root cause: the edit state was named `b14_voice_edit` and the prompt was too short; production users could not tell they were in a text input state for narration used by voice/subtitle.
 - Volume root cause: voice/music volume opened fixed button menus only. There was no primary manual input state for arbitrary percent values.
 - Scene count root cause: custom scene count reused `b14_scene_custom` and silently clamped values; it did not explain stable 1-5 scene guidance or guard unsupported multi-scene public charging clearly.
@@ -82,10 +81,10 @@ Not touched: PayOS, wallet/Xu ratio, payment webhook, B13 render/stitch internal
 - `test_prompt_video_rebuilds_from_storyboard`
 - `test_prompt_video_missing_session_recovery`
 - `test_prompt_video_back_to_storyboard`
-- `test_logo_sent_selects_source_before_position`
-- `test_logo_position_without_logo_saves_position_and_guides`
-- `test_logo_upload_sets_waiting_state`
-- `test_logo_done_returns_addons`
+- `test_logo_text_button_opens_input`
+- `test_logo_text_saves_then_asks_position`
+- `test_logo_position_requires_confirm`
+- `test_logo_confirm_returns_addons`
 - `test_logo_back_returns_addons`
 - `test_voice_edit_text_sets_waiting_state`
 - `test_voice_edit_text_saves_narration`

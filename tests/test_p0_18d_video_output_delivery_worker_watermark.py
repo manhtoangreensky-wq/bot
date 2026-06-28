@@ -49,7 +49,7 @@ def test_p0_18d_audit_report_exists():
     assert report.is_file()
     text = report.read_text(encoding="utf-8")
     assert "admin-video" in text
-    assert "Watermark TOAN AAS" in text
+    assert "logo/watermark" in text
     assert "Scene 20" in text
 
 
@@ -173,10 +173,10 @@ def test_admin_video_renderer_writes_mp4(monkeypatch, tmp_path):
 def test_watermark_menu_restored():
     callbacks = _callbacks(bot.video_b14_logo_keyboard("vi"))
     labels = [button.text for row in bot.video_b14_logo_keyboard("vi").inline_keyboard for button in row]
-    assert "vproduct|b14_logo_source|default_watermark" in callbacks
-    assert "vproduct|b14_logo_source|uploaded" in callbacks
-    assert any("Không logo/watermark" in label for label in labels)
-    assert any("Watermark TOAN AAS mặc định" in label for label in labels)
+    assert "vproduct|b14_logo_text_start" in callbacks
+    assert "vproduct|b14_logo_source|default_watermark" not in callbacks
+    assert "vproduct|b14_logo_source|uploaded" not in callbacks
+    assert any("Nhập chữ logo/watermark" in label for label in labels)
 
 
 def test_scene_buttons_public_include_10_20_and_20_discount():

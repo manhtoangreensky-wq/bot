@@ -37,7 +37,11 @@ REMOTE_WORKER_ADMIN_CANARY_CAPABILITY = "admin_canary"
 REMOTE_WORKER_ADMIN_CANARY_REF_PREFIX = "RW-PROD-CANARY"
 REMOTE_WORKER_ADMIN_VIDEO_SOURCE = "admin_video_delivery"
 REMOTE_WORKER_ADMIN_VIDEO_CAPABILITY = "admin_video"
-REMOTE_WORKER_ADMIN_VIDEO_QUEUE_LABEL = "OWNER/ADMIN TEST MODE — video delivery, không trừ Xu"
+REMOTE_WORKER_ADMIN_VIDEO_QUEUE_LABEL = "OWNER/ADMIN TEST PATTERN — kiểm tra gửi MP4, không trừ Xu"
+RENDER_MODE_REAL = "real"
+RENDER_MODE_ADMIN_TEST_PATTERN = "admin_test_pattern"
+RENDER_MODE_UNAVAILABLE = "unavailable"
+REAL_RENDER_UNAVAILABLE_REASON = "real_video_renderer_unavailable"
 REMOTE_WORKER_RENDER_CAPABILITIES = ("ffmpeg", "video_postprocess", "local_render_helpers")
 REMOTE_WORKER_CAPABILITIES = (
     *REMOTE_WORKER_RENDER_CAPABILITIES,
@@ -220,8 +224,15 @@ def _admin_video_safety_flags(project: dict) -> dict:
     asset_pack = _json_loads(project.get("asset_pack_json"), {})
     invoice = _json_loads(project.get("invoice_json"), {})
     source = str(asset_pack.get("source") or invoice.get("source") or "")
+    render_mode = str(asset_pack.get("render_mode") or invoice.get("render_mode") or "").strip().lower().replace("-", "_")
+    if render_mode in {"test_pattern", "admin_test"}:
+        render_mode = RENDER_MODE_ADMIN_TEST_PATTERN
+    elif render_mode not in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN, RENDER_MODE_UNAVAILABLE}:
+        render_mode = RENDER_MODE_ADMIN_TEST_PATTERN if source == REMOTE_WORKER_ADMIN_VIDEO_SOURCE else RENDER_MODE_REAL
     return {
         "source": source,
+        "render_mode": render_mode,
+        "test_pattern": _safe_bool(asset_pack.get("test_pattern") or invoice.get("test_pattern")),
         "admin_video_delivery": _safe_bool(
             asset_pack.get("admin_video_delivery")
             or invoice.get("admin_video_delivery")
@@ -321,6 +332,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
     scenes = list(hydrated_job.get("scenes") or [])
     scene_cards = _scene_cards_from_project(project, scenes)
     asset_pack = strip_secret_fields(_json_loads(project.get("asset_pack_json"), {}))
+    invoice = strip_secret_fields(_json_loads(project.get("invoice_json"), {}))
     addon_plan = strip_secret_fields(_json_loads(project.get("addon_plan_json"), {}))
     quality_source = project.get("quality_tier")
     if quality_source in (None, ""):
@@ -328,6 +340,20 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
     quality_tier = _safe_int(quality_source, 200)
     scene_count = max(1, _safe_int(project.get("scene_count") or len(scene_cards) or 1, 1))
     ratio = str(project.get("ratio") or "9:16")
+    render_mode = str(asset_pack.get("render_mode") or invoice.get("render_mode") or RENDER_MODE_REAL).strip().lower().replace("-", "_")
+    if render_mode in {"test_pattern", "admin_test"}:
+        render_mode = RENDER_MODE_ADMIN_TEST_PATTERN
+    if render_mode not in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN, RENDER_MODE_UNAVAILABLE}:
+        render_mode = RENDER_MODE_REAL
+    original_user_prompt = str(
+        asset_pack.get("original_user_prompt")
+        or asset_pack.get("cleaned_user_prompt")
+        or project.get("prompt_text")
+        or project.get("topic")
+        or ""
+    )[:8000]
+    cleaned_user_prompt = re.sub(r"\s+", " ", str(asset_pack.get("cleaned_user_prompt") or original_user_prompt or "")).strip()[:8000]
+    provider_order = asset_pack.get("provider_order") or invoice.get("provider_order") or "shopaikey,key4u"
     payload = {
         "job_id": str(hydrated_job.get("id") or hydrated_job.get("job_id") or ""),
         "project_id": str(project.get("project_id") or hydrated_job.get("project_id") or ""),
@@ -341,13 +367,19 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "profile_id": str(project.get("profile_id") or ""),
         "topic": str(project.get("topic") or "")[:500],
         "prompt_text": str(project.get("prompt_text") or "")[:8000],
+        "original_user_prompt": original_user_prompt,
+        "cleaned_user_prompt": cleaned_user_prompt,
         "scene_cards": scene_cards,
         "asset_pack": asset_pack,
         "addon_plan": addon_plan,
         "quality_tier": quality_tier,
+        "package_xu": quality_tier,
         "scene_count": scene_count,
         "aspect_ratio": ratio,
         "expected_duration_seconds": max(1, scene_count * 6),
+        "provider_order": provider_order,
+        "render_mode": render_mode,
+        "test_pattern": False,
         "output_requirements": {
             "container": "mp4",
             "mime": "video/mp4",
@@ -408,9 +440,12 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         )
     if is_remote_worker_admin_video_job(hydrated_job, project) or _is_admin_fake_video_job(project):
         safety = _admin_video_safety_flags(project)
+        admin_render_mode = RENDER_MODE_ADMIN_TEST_PATTERN if (_is_admin_fake_video_job(project) or safety["test_pattern"]) else (safety["render_mode"] or RENDER_MODE_REAL)
         payload.update(
             {
                 "admin_video_delivery": True,
+                "render_mode": admin_render_mode,
+                "test_pattern": bool(safety["test_pattern"] or admin_render_mode == RENDER_MODE_ADMIN_TEST_PATTERN),
                 "admin_only": True,
                 "no_charge": True,
                 "provider_call": False,
@@ -994,6 +1029,15 @@ def validate_uploaded_result_file(path: str) -> dict:
     return {"ok": True, "bytes": int(size)}
 
 
+def _normalize_render_mode(value: Any, default: str = RENDER_MODE_REAL) -> str:
+    mode = str(value or default or "").strip().lower().replace("-", "_")
+    if mode in {"test_pattern", "admin_test"}:
+        return RENDER_MODE_ADMIN_TEST_PATTERN
+    if mode in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN, RENDER_MODE_UNAVAILABLE}:
+        return mode
+    return default
+
+
 def complete_remote_worker_job(
     conn: sqlite3.Connection,
     *,
@@ -1020,6 +1064,17 @@ def complete_remote_worker_job(
         return {"ok": False, "reason": "job_not_processing", "job": job}
     if not worker_owns_job(job, worker):
         return {"ok": False, "reason": "job_not_owned_by_worker", "job": job}
+    payload = dict(result or {})
+    project_render_mode = RENDER_MODE_ADMIN_TEST_PATTERN if _is_admin_fake_video_job(project) else (_admin_video_safety_flags(project)["render_mode"] if is_admin_video else RENDER_MODE_REAL)
+    render_mode = _normalize_render_mode(payload.get("render_mode"), project_render_mode)
+    renderer = str(payload.get("renderer") or "").strip().lower()
+    test_pattern = _safe_bool(payload.get("test_pattern")) or render_mode == RENDER_MODE_ADMIN_TEST_PATTERN or "testsrc" in renderer or "fake" in renderer
+    if test_pattern and not is_admin_video:
+        return {"ok": False, "reason": "test_pattern_not_allowed_for_normal_video"}
+    if not is_admin_video and render_mode != RENDER_MODE_REAL:
+        return {"ok": False, "reason": "normal_video_requires_real_render_mode"}
+    if is_admin_video and render_mode not in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN}:
+        return {"ok": False, "reason": "admin_video_invalid_render_mode"}
     if uploaded_file:
         validation = validate_uploaded_result_file(final_video_path)
         if not validation.get("ok"):
@@ -1036,7 +1091,8 @@ def complete_remote_worker_job(
         validation = validate_uploaded_result_file(final_video_path)
         if not validation.get("ok"):
             return {"ok": False, "reason": "admin_video_result_file_missing"}
-    payload = dict(result or {})
+    payload["render_mode"] = render_mode
+    payload["test_pattern"] = bool(test_pattern)
     if uploaded_file:
         payload["uploaded_file_bytes"] = os.path.getsize(final_video_path)
     if is_canary:
@@ -1328,6 +1384,8 @@ def create_admin_video_delivery_test_job(
     asset_pack = {
         "source": REMOTE_WORKER_ADMIN_VIDEO_SOURCE,
         "admin_video_delivery": True,
+        "render_mode": RENDER_MODE_ADMIN_TEST_PATTERN,
+        "test_pattern": True,
         "owner_admin_test_mode": True,
         "created_by_admin": True,
         "owner": True,
@@ -1343,6 +1401,8 @@ def create_admin_video_delivery_test_job(
     invoice = {
         "total_xu": 0,
         "admin_video_delivery": True,
+        "render_mode": RENDER_MODE_ADMIN_TEST_PATTERN,
+        "test_pattern": True,
         "owner_admin_test_mode": True,
         "created_by_admin": True,
         "admin_only": True,
@@ -1371,8 +1431,8 @@ def create_admin_video_delivery_test_job(
             "role": "admin_video_delivery",
             "narration_line": f"OWNER/ADMIN TEST MODE cảnh {index}.",
             "subtitle_line": f"OWNER/ADMIN TEST MODE {index}",
-            "visual_goal": "Kiểm tra hệ thống nhận xử lý và xuất MP4 thật.",
-            "provider_prompt": "Do not call provider. Generate a local admin test MP4.",
+            "visual_goal": "Kiểm tra đường gửi file MP4 bằng test pattern kỹ thuật.",
+            "provider_prompt": "Do not call provider. Generate an ADMIN TEST PATTERN local MP4.",
         }
         for index in range(1, safe_scene_count + 1)
     ]
@@ -1383,9 +1443,9 @@ def create_admin_video_delivery_test_job(
         status="draft_invoice",
         asset_pack_json=asset_pack,
         scene_cards_json=scene_cards,
-        prompt_text="OWNER/ADMIN TEST MODE video delivery output test. No customer job, no Xu, no provider call.",
-        addon_plan_json={"source": REMOTE_WORKER_ADMIN_VIDEO_SOURCE, "provider_call": False, "no_charge": True},
-        creative_control_json={"admin_video_delivery": True, "safe_output_delivery_test": True},
+        prompt_text="OWNER/ADMIN TEST PATTERN video delivery output test. No customer job, no Xu, no provider call.",
+        addon_plan_json={"source": REMOTE_WORKER_ADMIN_VIDEO_SOURCE, "provider_call": False, "no_charge": True, "render_mode": RENDER_MODE_ADMIN_TEST_PATTERN, "test_pattern": True},
+        creative_control_json={"admin_video_delivery": True, "safe_output_delivery_test": True, "render_mode": RENDER_MODE_ADMIN_TEST_PATTERN, "test_pattern": True},
         quality_tier=0,
         scene_count=safe_scene_count,
         invoice_json=invoice,

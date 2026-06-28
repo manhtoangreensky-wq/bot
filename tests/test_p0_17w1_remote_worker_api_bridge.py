@@ -339,7 +339,15 @@ def test_remote_worker_processes_fake_job(monkeypatch, tmp_path):
 
     monkeypatch.setattr(remote_worker, "render_fake_video", fake_render)
     monkeypatch.setattr(remote_worker, "complete_job", fake_complete)
-    result = remote_worker.process_claimed_job({"job_id": "fake-job"})
+    result = remote_worker.process_claimed_job({
+        "job_id": "fake-job",
+        "render_mode": "admin_test_pattern",
+        "admin_video_delivery": True,
+        "admin_only": True,
+        "no_charge": True,
+        "provider_call": False,
+        "public_user": False,
+    })
     assert result["ok"] is True
     assert completed["job_id"] == "fake-job"
     assert completed["result"]["bytes"] == 4
@@ -353,7 +361,8 @@ def test_remote_worker_fails_safely(monkeypatch):
     monkeypatch.setattr(remote_worker, "fail_job", lambda *args, **kwargs: failures.append((args, kwargs)) or {"ok": True})
     assert remote_worker.run_once() == "failed"
     assert failures
-    assert "video_render_runner_missing" in failures[0][0][1]
+    assert "shopaikey_video_config_missing" in failures[0][0][1]
+    assert "key4u_video_config_missing" in failures[0][0][1]
 
 
 def test_remote_worker_does_not_require_sqlite_db():
