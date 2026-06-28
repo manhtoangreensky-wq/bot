@@ -212,7 +212,8 @@ def test_key4u_video_submit_payload_and_timeout_are_safe():
     source = repo_file("providers/key4u_provider.py")
     video_block = source_between(source, "async def video_generation", "async def poll_video_task")
     assert "timeout_seconds: float = 60.0" in video_block
-    assert '"aspect_ratio": "16:9"' in video_block
+    assert 'aspect_ratio: str = "16:9"' in video_block
+    assert '"aspect_ratio": str(aspect_ratio or "16:9")[:20]' in video_block
     assert '"enhance_prompt": True' in video_block
     assert '"enable_upsample": False' in video_block
     assert '_timeout_result("video_generate"' in video_block

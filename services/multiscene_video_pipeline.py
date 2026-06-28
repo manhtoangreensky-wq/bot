@@ -262,7 +262,7 @@ def render_scene(
                 error=None,
             )
         except Exception as exc:
-            last_error = type(exc).__name__
+            last_error = str(exc)[:240] or type(exc).__name__
             if attempt >= attempts:
                 break
     return SceneRenderResult(scene_id=scene.scene_id, ok=False, retry_count=attempts - 1, error=last_error or "scene_render_failed")
@@ -348,6 +348,31 @@ def _srt_time(seconds: float) -> str:
     minutes, rem = divmod(rem, 60_000)
     secs, ms = divmod(rem, 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
+
+
+def _drawtext_escape(text: str) -> str:
+    value = re.sub(r"\s+", " ", str(text or "").strip())[:120]
+    return (
+        value.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+        .replace("%", "\\%")
+    )
+
+
+def _drawtext_expr(position: str) -> tuple[str, str]:
+    key = str(position or "bottom_right").lower().replace("-", "_")
+    if key == "top_left":
+        return "24", "24"
+    if key == "top_center":
+        return "(w-text_w)/2", "24"
+    if key == "top_right":
+        return "w-text_w-24", "24"
+    if key == "bottom_left":
+        return "24", "h-text_h-24"
+    if key == "bottom_center":
+        return "(w-text_w)/2", "h-text_h-24"
+    return "w-text_w-24", "h-text_h-24"
 
 
 def build_scene_subtitle(scenes: list[SceneSpec], durations: list[float], output_srt_path: str) -> str:
@@ -442,10 +467,10 @@ def mux_final_multiscene_video(
     bgm_audio_path: str | None = None,
     subtitle_path: str | None = None,
     logo_path: str | None = None,
+    logo_text: str | None = None,
     burn_subtitles: bool = True,
     logo_position: str = "top-right",
 ) -> str:
-    del logo_position
     master = ensure_video_output(master_video_path)
     output = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output), exist_ok=True)
@@ -468,6 +493,16 @@ def mux_final_multiscene_video(
         sub = os.path.abspath(subtitle_path).replace("\\", "\\\\").replace(":", "\\:")
         filters.append(f"[{video_map}]subtitles='{sub}'[vsub]")
         video_map = "vsub"
+    clean_logo_text = _drawtext_escape(logo_text or "")
+    if clean_logo_text:
+        x_expr, y_expr = _drawtext_expr(logo_position)
+        input_label = f"[{video_map}]"
+        filters.append(
+            f"{input_label}drawtext=text='{clean_logo_text}':fontcolor=white:"
+            f"fontsize=36:borderw=2:bordercolor=black@0.65:"
+            f"box=1:boxcolor=black@0.25:boxborderw=10:x={x_expr}:y={y_expr}[vtxt]"
+        )
+        video_map = "vtxt"
     if voice_audio_path and bgm_audio_path:
         filters.append("[1:a]volume=1.0[a1];[2:a]volume=0.10[a2];[a1][a2]amix=inputs=2:duration=first:dropout_transition=2[aout]")
         audio_map = "[aout]"
@@ -511,6 +546,8 @@ def process_multiscene_video_pipeline(
     enable_voice: bool = False,
     enable_subtitle: bool = True,
     enable_logo: bool = False,
+    logo_text: str | None = None,
+    logo_position: str = "bottom_right",
 ) -> dict[str, Any]:
     workspace = os.path.abspath(workspace_dir)
     os.makedirs(workspace, exist_ok=True)
@@ -526,7 +563,8 @@ def process_multiscene_video_pipeline(
         for scene in scenes:
             manifest.status = f"rendering_scene_{scene.scene_id}"
             _write_manifest(manifest)
-            rendered = render_scene(scene, workspace_dir=workspace, render_video_func=render_video_func, retry=1)
+            retry_count = 0 if dict(scene.provider_params or {}).get("real_provider") else 1
+            rendered = render_scene(scene, workspace_dir=workspace, render_video_func=render_video_func, retry=retry_count)
             if not rendered.ok or not rendered.raw_video_path:
                 failed.append(scene.scene_id)
                 manifest.scene_results.append(asdict(rendered))
@@ -543,6 +581,11 @@ def process_multiscene_video_pipeline(
             manifest.scene_results.append(asdict(rendered))
             _write_manifest(manifest)
         if failed:
+            failed_error = ""
+            for item in reversed(manifest.scene_results):
+                failed_error = str(item.get("error") or "")
+                if failed_error:
+                    break
             manifest.status = "error"
             _write_manifest(manifest)
             return {
@@ -556,7 +599,7 @@ def process_multiscene_video_pipeline(
                 "duration_sec": sum(durations),
                 "failed_scenes": failed,
                 "created_files": created_files,
-                "error": "scene_render_failed",
+                "error": failed_error or "scene_render_failed",
             }
         master = stitch_scenes(normalized_paths, os.path.join(workspace, "master_video_only.mp4"))
         created_files.append(master)
@@ -575,12 +618,14 @@ def process_multiscene_video_pipeline(
         final = mux_final_multiscene_video(
             master_video_path=master,
             output_path=os.path.join(workspace, "final_output.mp4"),
-            voice_audio_path=voice_path,
-            bgm_audio_path=bgm_audio_path,
-            subtitle_path=subtitle_path,
-            logo_path=logo_path if enable_logo else None,
-            burn_subtitles=bool(enable_subtitle),
-        )
+        voice_audio_path=voice_path,
+        bgm_audio_path=bgm_audio_path,
+        subtitle_path=subtitle_path,
+        logo_path=logo_path if enable_logo else None,
+        logo_text=logo_text if enable_logo else None,
+        burn_subtitles=bool(enable_subtitle),
+        logo_position=logo_position,
+    )
         created_files.append(final)
         manifest.final_video_path = final
         manifest.status = "completed"

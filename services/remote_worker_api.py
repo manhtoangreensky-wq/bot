@@ -345,6 +345,15 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         render_mode = RENDER_MODE_ADMIN_TEST_PATTERN
     if render_mode not in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN, RENDER_MODE_UNAVAILABLE}:
         render_mode = RENDER_MODE_REAL
+    original_user_prompt = str(
+        asset_pack.get("original_user_prompt")
+        or asset_pack.get("cleaned_user_prompt")
+        or project.get("prompt_text")
+        or project.get("topic")
+        or ""
+    )[:8000]
+    cleaned_user_prompt = re.sub(r"\s+", " ", str(asset_pack.get("cleaned_user_prompt") or original_user_prompt or "")).strip()[:8000]
+    provider_order = asset_pack.get("provider_order") or invoice.get("provider_order") or "shopaikey,key4u"
     payload = {
         "job_id": str(hydrated_job.get("id") or hydrated_job.get("job_id") or ""),
         "project_id": str(project.get("project_id") or hydrated_job.get("project_id") or ""),
@@ -358,13 +367,17 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "profile_id": str(project.get("profile_id") or ""),
         "topic": str(project.get("topic") or "")[:500],
         "prompt_text": str(project.get("prompt_text") or "")[:8000],
+        "original_user_prompt": original_user_prompt,
+        "cleaned_user_prompt": cleaned_user_prompt,
         "scene_cards": scene_cards,
         "asset_pack": asset_pack,
         "addon_plan": addon_plan,
         "quality_tier": quality_tier,
+        "package_xu": quality_tier,
         "scene_count": scene_count,
         "aspect_ratio": ratio,
         "expected_duration_seconds": max(1, scene_count * 6),
+        "provider_order": provider_order,
         "render_mode": render_mode,
         "test_pattern": False,
         "output_requirements": {

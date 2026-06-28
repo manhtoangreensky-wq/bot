@@ -461,14 +461,19 @@ def render_admin_video_delivery(job: dict, work_dir: str) -> str:
 
 
 def render_real_video(job: dict, work_dir: str) -> str:
-    """Reserved hook for the real B13/provider render route.
-
-    The worker must never fall back to testsrc/color bars for normal video jobs.
-    A later real renderer can replace or monkeypatch this function and return a
-    final MP4 path based on storyboard/prompt/assets.
-    """
-    del job, work_dir
-    raise RuntimeError(REAL_VIDEO_RENDER_UNAVAILABLE)
+    """Render a normal product video through the real provider connector."""
+    try:
+        from services.video_real_render_connector import RealVideoRenderError, render_real_video_job
+    except Exception as exc:
+        raise RuntimeError(f"{REAL_VIDEO_RENDER_UNAVAILABLE}:connector_import_failed:{type(exc).__name__}") from exc
+    try:
+        result = render_real_video_job(job, work_dir)
+    except RealVideoRenderError as exc:
+        raise RuntimeError(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE) from exc
+    final_path = str(result.get("final_video_path") or "")
+    if not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
+        raise RuntimeError(REAL_VIDEO_RENDER_UNAVAILABLE)
+    return final_path
 
 
 def process_claimed_job(job: dict) -> dict:

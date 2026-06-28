@@ -361,7 +361,8 @@ def test_remote_worker_fails_safely(monkeypatch):
     monkeypatch.setattr(remote_worker, "fail_job", lambda *args, **kwargs: failures.append((args, kwargs)) or {"ok": True})
     assert remote_worker.run_once() == "failed"
     assert failures
-    assert "real_video_renderer_unavailable" in failures[0][0][1]
+    assert "shopaikey_video_config_missing" in failures[0][0][1]
+    assert "key4u_video_config_missing" in failures[0][0][1]
 
 
 def test_remote_worker_does_not_require_sqlite_db():

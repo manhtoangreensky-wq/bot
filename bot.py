@@ -54353,7 +54353,14 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     ratio = str(draft.get("b14_aspect_ratio") or (session or {}).get("aspect_ratio") or "9:16")
     is_internal = video_b14_is_admin_or_owner(user_id)
     asset_pack_payload = dict(draft.get("asset_pack") or {})
+    original_user_prompt = str((session or {}).get("original_user_prompt") or topic or draft.get("topic") or "").strip()
+    cleaned_user_prompt = re.sub(r"\s+", " ", original_user_prompt).strip()
     asset_pack_payload.update({
+        "original_user_prompt": original_user_prompt,
+        "cleaned_user_prompt": cleaned_user_prompt,
+        "provider_order": asset_pack_payload.get("provider_order") or os.getenv("VIDEO_PROVIDER_ORDER") or "shopaikey,key4u",
+        "profile_id": profile_id,
+        "aspect_ratio": ratio,
         "render_mode": "real",
         "test_pattern": False,
         "fake_renderer_allowed": False,
@@ -54429,7 +54436,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         topic=topic,
         ratio=ratio,
         asset_pack_json=asset_pack_payload,
-        prompt_text=str(plan.get("preview_text") or topic or "")[:8000],
+        prompt_text=str(original_user_prompt or plan.get("preview_text") or topic or "")[:8000],
         addon_plan_json=addon_plan,
         creative_control_json=creative_controls,
         quality_tier=invoice["quality_xu"],
