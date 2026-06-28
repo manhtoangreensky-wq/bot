@@ -5011,6 +5011,7 @@ MUSIC_VAULT_PREFIX = "music_vault:"
 MUSIC_VAULT_INDEX_KEY = "music_vault:index"
 MUSIC_VAULT_MEMORY: dict[str, dict] = {}
 MUSIC_VAULT_MEMORY_INDEX: list[str] = []
+MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS: set[str] = set()
 MUSIC_VAULT_STATUSES = {"generated_unused", "preview_sent", "reserved", "used", "archived", "expired", "blocked"}
 PREVIEW_QUOTA_WINDOW_DAYS = 15
 PREVIEW_QUOTA_PRODUCT_TYPES = ("music_ai", "voice_ai", "video_ai", "subtitle_dub_ai")
@@ -85235,20 +85236,37 @@ MUSIC_PRODUCT_TIER_LABELS_VI = {
 }
 MUSIC_PRODUCT_TIER_BUTTONS_VI = {
     MUSIC_PRODUCT_TIER_BASIC: "🎵 Cơ bản — 100 Xu",
-    MUSIC_PRODUCT_TIER_STANDARD: "🎶 Tiêu chuẩn — 200 Xu",
-    MUSIC_PRODUCT_TIER_PREMIUM: "💎 Cao cấp — 300 Xu",
+    MUSIC_PRODUCT_TIER_STANDARD: "🎶 Tiêu chuẩn — 150 Xu",
+    MUSIC_PRODUCT_TIER_PREMIUM: "💎 Cao cấp — 200 Xu",
+}
+MUSIC_PRODUCT_BACKGROUND_TIER_PRICES = {
+    MUSIC_PRODUCT_TIER_BASIC: 100,
+    MUSIC_PRODUCT_TIER_STANDARD: 150,
+    MUSIC_PRODUCT_TIER_PREMIUM: 200,
+}
+MUSIC_PRODUCT_SONG_TIER_PRICES = {
+    MUSIC_PRODUCT_TIER_BASIC: 200,
+    MUSIC_PRODUCT_TIER_STANDARD: 250,
+    MUSIC_PRODUCT_TIER_PREMIUM: 300,
 }
 MUSIC_PRODUCT_TIER_MODEL_PREFERENCES = {
     MUSIC_PRODUCT_TIER_BASIC: ("chirp-v3.5", "chirp-v4"),
-    MUSIC_PRODUCT_TIER_STANDARD: ("chirp-bluejay", "chirp-crow", "chirp-auk"),
+    MUSIC_PRODUCT_TIER_STANDARD: ("chirp-auk", "chirp-bluejay"),
+    MUSIC_PRODUCT_TIER_PREMIUM: ("chirp-fenix", "chirp-crow"),
+}
+MUSIC_PRODUCT_SONG_TIER_MODEL_PREFERENCES = {
+    MUSIC_PRODUCT_TIER_BASIC: ("chirp-v4", "chirp-auk"),
+    MUSIC_PRODUCT_TIER_STANDARD: ("chirp-bluejay", "chirp-crow"),
     MUSIC_PRODUCT_TIER_PREMIUM: ("chirp-fenix", "chirp-crow", "chirp-bluejay"),
 }
 MUSIC_PRODUCT_MODEL_ALIASES = {
+    "v3.0": "chirp-v3.0",
     "v3.5": "chirp-v3.5",
     "v4": "chirp-v4",
-    "v4.5": "chirp-bluejay",
-    "v4.5+": "chirp-crow",
-    "v5": "chirp-fenix",
+    "v4.0": "chirp-v4",
+    "v4.5": "chirp-auk",
+    "v4.5+": "chirp-bluejay",
+    "v5": "chirp-crow",
     "v5.5": "chirp-fenix",
 }
 MUSIC_PRODUCT_VOCAL_LABELS_VI = {
@@ -85279,8 +85297,13 @@ def normalize_music_product_tier(value: str = "") -> str:
     }
     return aliases.get(raw, MUSIC_PRODUCT_TIER_BASIC)
 
-def music_product_tier_price_xu(tier: str = "") -> int:
-    return int(MUSIC_PRODUCT_TIER_PRICES.get(normalize_music_product_tier(tier), MUSIC_PRODUCT_BASIC_PRICE_XU) or 0)
+def music_product_price_map_for_mode(mode: str = "background") -> dict:
+    return MUSIC_PRODUCT_SONG_TIER_PRICES if normalize_music_product_mode(mode) == "song" else MUSIC_PRODUCT_BACKGROUND_TIER_PRICES
+
+def music_product_tier_price_xu(tier: str = "", mode: str = "background") -> int:
+    tier_key = normalize_music_product_tier(tier)
+    prices = music_product_price_map_for_mode(mode)
+    return int(prices.get(tier_key, prices.get(MUSIC_PRODUCT_TIER_BASIC, MUSIC_PRODUCT_BASIC_PRICE_XU)) or 0)
 
 def music_product_tier_label(tier: str = "", lang: str = "vi") -> str:
     tier_key = normalize_music_product_tier(tier)
@@ -85292,19 +85315,24 @@ def music_product_tier_label(tier: str = "", lang: str = "vi") -> str:
         }.get(tier_key, "Basic")
     return MUSIC_PRODUCT_TIER_LABELS_VI.get(tier_key, "Cơ bản")
 
-def music_product_tier_button_label(tier: str = "", lang: str = "vi") -> str:
+def music_product_tier_button_label(tier: str = "", lang: str = "vi", mode: str = "background") -> str:
     tier_key = normalize_music_product_tier(tier)
-    price = music_product_tier_price_xu(tier_key)
+    price = music_product_tier_price_xu(tier_key, mode)
     if music_ui_lang(lang=lang) != "vi":
         return {
             MUSIC_PRODUCT_TIER_BASIC: f"🎵 Basic — {price} Xu",
             MUSIC_PRODUCT_TIER_STANDARD: f"🎶 Standard — {price} Xu",
             MUSIC_PRODUCT_TIER_PREMIUM: f"💎 Premium — {price} Xu",
         }.get(tier_key, f"🎵 Basic — {price} Xu")
-    fixed = MUSIC_PRODUCT_TIER_BUTTONS_VI.get(tier_key)
+    fixed = MUSIC_PRODUCT_TIER_BUTTONS_VI.get(tier_key) if normalize_music_product_mode(mode) == "background" else ""
     if fixed and str(price) in fixed:
         return fixed
-    return f"{music_product_tier_label(tier_key, lang)} — {price} Xu"
+    icon = {
+        MUSIC_PRODUCT_TIER_BASIC: "🎵",
+        MUSIC_PRODUCT_TIER_STANDARD: "🎶",
+        MUSIC_PRODUCT_TIER_PREMIUM: "💎",
+    }.get(tier_key, "🎵")
+    return f"{icon} {music_product_tier_label(tier_key, lang)} — {price} Xu"
 
 def normalize_music_product_mode(value: str = "") -> str:
     raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
@@ -85328,15 +85356,18 @@ def normalize_music_model_key(value: str = "") -> str:
     raw = str(value or "").strip().lower()
     return MUSIC_PRODUCT_MODEL_ALIASES.get(raw, raw)
 
-def music_model_preferences_for_tier(tier: str = "") -> tuple[str, ...]:
-    return MUSIC_PRODUCT_TIER_MODEL_PREFERENCES.get(normalize_music_product_tier(tier), MUSIC_PRODUCT_TIER_MODEL_PREFERENCES[MUSIC_PRODUCT_TIER_BASIC])
+def music_model_preferences_for_tier(tier: str = "", mode: str = "background") -> tuple[str, ...]:
+    tier_key = normalize_music_product_tier(tier)
+    mapping = MUSIC_PRODUCT_SONG_TIER_MODEL_PREFERENCES if normalize_music_product_mode(mode) == "song" else MUSIC_PRODUCT_TIER_MODEL_PREFERENCES
+    return mapping.get(tier_key, mapping[MUSIC_PRODUCT_TIER_BASIC])
 
 def select_music_model_for_tier(
     tier: str = "",
     supported_models: list[str] | tuple[str, ...] | set[str] | None = None,
     provider_default: str = "",
+    mode: str = "background",
 ) -> str:
-    preferences = tuple(normalize_music_model_key(item) for item in music_model_preferences_for_tier(tier))
+    preferences = tuple(normalize_music_model_key(item) for item in music_model_preferences_for_tier(tier, mode))
     supported = {normalize_music_model_key(item) for item in (supported_models or []) if str(item or "").strip()}
     if supported:
         for item in preferences:
@@ -85353,9 +85384,11 @@ def music_product_selected_model_key(result_or_tier: dict | str | None = None, p
         if selected:
             return normalize_music_model_key(selected)
         tier = str(result_or_tier.get("music_product_tier") or "")
+        mode = music_product_mode_from_result(result_or_tier)
     else:
         tier = str(result_or_tier or "")
-    return select_music_model_for_tier(tier, provider_default=provider_default)
+        mode = "background"
+    return select_music_model_for_tier(tier, provider_default=provider_default, mode=mode)
 
 def music_product_hash_text(value: str = "") -> str:
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:16] if str(value or "").strip() else ""
@@ -85457,10 +85490,15 @@ def build_music_product_prompt(
     description = str(data.get("description") or data.get("selected_prompt") or theme or "").strip()
     lyrics = str(data.get("lyrics") or data.get("song_lyrics") or data.get("provider_lyrics") or "").strip()
     title = music_product_plain_title({**data, "theme": theme or description})
-    selected_model = select_music_model_for_tier(tier, supported_models=supported_models, provider_default=provider_default_model)
+    selected_model = select_music_model_for_tier(tier, supported_models=supported_models, provider_default=provider_default_model, mode=mode)
+    explicit_style_prompt = str(data.get("style_prompt") or data.get("selected_style_prompt") or data.get("provider_style_prompt") or "").strip()
+    tempo = str(data.get("tempo") or "").strip()
+    use_case = str(data.get("use_case") or "").strip()
 
     style_parts = []
     if mode == "song":
+        if explicit_style_prompt:
+            style_parts.append(explicit_style_prompt)
         if theme:
             style_parts.append(f"Theme: {theme}")
         if description and description != theme:
@@ -85469,6 +85507,8 @@ def build_music_product_prompt(
             style_parts.append(f"Genre/style: {genre}")
         if mood:
             style_parts.append(f"Mood: {mood}")
+        if tempo:
+            style_parts.append(f"Tempo: {tempo}")
         if language:
             style_parts.append(f"Language: {language}")
         style_parts.append(f"Target duration: about {duration} seconds")
@@ -85479,12 +85519,18 @@ def build_music_product_prompt(
             base_style = f"{base_style}; {vocal_instruction}" if base_style else vocal_instruction
         provider_lyrics = music_product_duet_lyrics(lyrics) if vocal_mode == "duet" else lyrics
     else:
+        if explicit_style_prompt:
+            style_parts.append(explicit_style_prompt)
         if description:
             style_parts.append(description)
         if genre:
             style_parts.append(f"Genre/style: {genre}")
         if mood:
             style_parts.append(f"Mood: {mood}")
+        if tempo:
+            style_parts.append(f"Tempo: {tempo}")
+        if use_case:
+            style_parts.append(f"Use case: {use_case}")
         style_parts.append(f"Target duration: about {duration} seconds")
         style_parts.append("Instrumental background music only, no vocals, no lyrics, original melody")
         base_style = "; ".join(item for item in style_parts if str(item or "").strip())
@@ -85520,13 +85566,14 @@ def music_product_result_from_input(data: dict | None = None) -> dict:
         "music_product_flow": "p0_20a_3_tier",
         "music_product_mode": mode,
         "music_product_tier": tier,
-        "music_product_price_xu": music_product_tier_price_xu(tier),
+        "music_product_price_xu": music_product_tier_price_xu(tier, mode),
         "music_ai_kind": "lyrics" if mode == "song" else "guided",
         "guided_duration_seconds": duration,
         "guided_duration": f"{duration}s",
         "selected_prompt": built["provider_style_prompt"],
         "description": str(data.get("description") or data.get("theme") or built["provider_style_prompt"]),
         "title": built["provider_title"],
+        "provider_tags": str(data.get("provider_tags") or data.get("genre") or data.get("style") or "").strip(),
     }
     if mode == "song":
         result.update({
@@ -85618,7 +85665,7 @@ def music_product_tier_keyboard(mode: str = "background", lang: str = "vi", prod
     mode_key = normalize_music_product_mode(mode)
     action_prefix = "music_tier_song" if mode_key == "song" else "music_tier_background"
     buttons = [
-        (music_product_tier_button_label(tier, lang), cb(f"{action_prefix}:{tier.rsplit('_', 1)[-1]}"))
+        (music_product_tier_button_label(tier, lang, mode_key), cb(f"{action_prefix}:{tier.rsplit('_', 1)[-1]}"))
         for tier in MUSIC_PRODUCT_TIER_ORDER
     ]
     back = ("⬅️ Studio nhạc" if music_ui_lang(lang=lang) == "vi" else "⬅️ Music Studio", cb("music_hub"))
@@ -85673,6 +85720,320 @@ def music_product_details_input_text(mode: str = "background", tier: str = "", v
         "TOAN AAS chưa xử lý và chưa trừ Xu."
     )
 
+def music_product_sample_idea(mode: str = "background") -> str:
+    if normalize_music_product_mode(mode) == "song":
+        return "Bài hát thương hiệu TOAN AAS, vui tươi, công nghệ AI, tinh thần bứt phá."
+    return "Nhạc nền công nghệ AI, vui tươi, hiện đại, dùng cho video quảng cáo TikTok."
+
+def music_product_idea_input_text(mode: str = "background", tier: str = "", vocal_mode: str = "auto", lang: str = "vi") -> str:
+    mode_key = normalize_music_product_mode(mode)
+    if music_ui_lang(lang=lang) != "vi":
+        title = "Song idea" if mode_key == "song" else "Background music idea"
+        return f"🎼 <b>{title}</b>\n\nSend a short idea. TOAN AAS will prepare 3 polished suggestions before the invoice."
+    if mode_key == "song":
+        return (
+            "🎼 <b>Ý tưởng bài hát</b>\n\n"
+            "Anh/chị mô tả ngắn bài hát muốn tạo.\n"
+            "Ví dụ:\n"
+            "“Bài hát thương hiệu TOAN AAS, vui tươi, công nghệ AI, tinh thần bứt phá.”\n\n"
+            "TOAN AAS sẽ tạo 3 gợi ý hoàn chỉnh để anh/chị chọn."
+        )
+    return (
+        "🎼 <b>Ý tưởng nhạc nền</b>\n\n"
+        "Anh/chị mô tả ngắn nhạc nền muốn tạo.\n"
+        "Ví dụ:\n"
+        "“Nhạc nền công nghệ AI, vui tươi, hiện đại, dùng cho video quảng cáo TikTok.”\n\n"
+        "TOAN AAS sẽ tạo 3 gợi ý nhạc nền để anh/chị chọn."
+    )
+
+def music_product_idea_keyboard(
+    mode: str = "background",
+    lang: str = "vi",
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    mode_key = normalize_music_product_mode(mode)
+    back_action = "music_product_change_vocal" if mode_key == "song" else "music_product_change_tier"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✨ Dùng ý tưởng mẫu TOAN AAS" if is_vi else "✨ Use TOAN AAS sample idea", callback_data=cb("music_product_sample_idea"))],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb(back_action)),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
+def music_product_clean_idea(value: str = "") -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    return text[:420].strip(" ,.;:") or music_product_sample_idea("background")
+
+def music_product_suggestion_offset(result: dict | None = None) -> int:
+    return max(0, _safe_int((result or {}).get("music_suggestion_offset"), 0))
+
+def music_product_public_style_from_parts(*parts: str) -> str:
+    text = "; ".join(str(item or "").strip() for item in parts if str(item or "").strip())
+    return re.sub(r"\s{2,}", " ", text).strip(" ;,")[:900]
+
+def build_music_product_suggestions(
+    *,
+    mode: str = "background",
+    tier: str = "",
+    vocal_mode: str = "auto",
+    idea: str = "",
+    offset: int = 0,
+    lang: str = "vi",
+) -> list[dict]:
+    mode_key = normalize_music_product_mode(mode)
+    tier_key = normalize_music_product_tier(tier)
+    clean_idea = music_product_clean_idea(idea or music_product_sample_idea(mode_key))
+    tier_label = music_product_tier_label(tier_key, lang)
+    seed = int(music_product_hash_text(f"{mode_key}:{tier_key}:{vocal_mode}:{clean_idea}")[:6] or "0", 16)
+    start = (seed + max(0, int(offset or 0))) % 9
+    background_bank = [
+        ("Future Pop", "tươi sáng", "110 BPM", "video quảng cáo TikTok", "sạch, hiện đại, nhịp rõ"),
+        ("Cinematic Tech", "truyền cảm hứng", "92 BPM", "video thương hiệu", "mở rộng, sang trọng, cao trào vừa phải"),
+        ("Tropical House", "vui tươi", "118 BPM", "reels bán hàng", "ấm, dễ nhớ, chuyển cảnh mượt"),
+        ("Lo-fi Corporate", "tin cậy", "86 BPM", "video giới thiệu dịch vụ", "nhẹ, tinh gọn, nền nói chuyện rõ"),
+        ("Electro Pop", "năng lượng", "124 BPM", "short video ra mắt sản phẩm", "bass gọn, synth sáng, hook ngắn"),
+        ("Acoustic Pop", "ấm áp", "96 BPM", "video review", "guitar nhẹ, piano sáng, cảm giác gần gũi"),
+        ("Modern R&B", "sang trọng", "100 BPM", "lookbook sản phẩm", "groove mềm, không lấn lời thoại"),
+        ("Epic Hybrid", "bứt phá", "104 BPM", "video chiến dịch", "trống lớn, synth rộng, kết thúc chắc"),
+        ("Minimal Tech", "tập trung", "108 BPM", "demo phần mềm", "nhịp đều, không rối, nền sạch"),
+    ]
+    song_bank = [
+        ("Pop thương hiệu", "vui tươi", "112 BPM", "verse - pre-chorus - chorus - outro", "giai điệu sáng, hook dễ nhớ"),
+        ("Dance Pop", "bứt phá", "124 BPM", "verse - chorus - bridge - final chorus", "nhịp mạnh, điệp khúc mở"),
+        ("Acoustic Pop", "ấm áp", "92 BPM", "verse - chorus - verse - chorus", "mộc, gần gũi, lời rõ"),
+        ("Future Pop", "hiện đại", "116 BPM", "intro - verse - chorus - outro", "synth sáng, cảm giác công nghệ"),
+        ("R&B Pop", "sang trọng", "98 BPM", "verse - pre-chorus - chorus", "groove mềm, vocal nổi"),
+        ("Rock Pop", "quyết tâm", "132 BPM", "verse - chorus - bridge - chorus", "guitar rõ, năng lượng cao"),
+        ("Ballad Pop", "cảm xúc", "78 BPM", "verse - chorus - bridge - outro", "piano mềm, cao trào vừa"),
+        ("Tropical Pop", "lạc quan", "120 BPM", "verse - chorus - dance break - chorus", "nhẹ, nắng, dễ nghe"),
+        ("Indie Pop", "tự nhiên", "104 BPM", "verse - chorus - verse - chorus", "mộc, sáng, có chất riêng"),
+    ]
+    title_prefix = ["Bứt Phá", "Nhịp Sáng", "Dấu Ấn", "Vươn Xa", "Tỏa Sáng", "Khởi Động", "Niềm Tin", "Chạm Tới", "Lên Sóng"]
+    title_tail = ["TOAN AAS", "Ngày Mới", "AI Việt", "Thương Hiệu", "Tương Lai", "Khách Hàng", "Hành Trình", "Công Nghệ", "Chiến Dịch"]
+    suggestions: list[dict] = []
+    for i in range(3):
+        idx = (start + i) % 9
+        if mode_key == "song":
+            genre, mood, tempo, structure, production = song_bank[idx]
+            vocal = normalize_song_vocal_mode(vocal_mode)
+            vocal_direction = {
+                "male": "Giọng nam chính rõ lời, giàu năng lượng, không dùng giọng nữ.",
+                "female": "Giọng nữ chính rõ lời, sáng, không dùng giọng nam.",
+                "duet": "Song ca nam nữ, chia câu luân phiên, điệp khúc hòa giọng.",
+                "auto": "Giọng hát tự động phù hợp với phong cách bài hát.",
+            }.get(vocal, "Giọng hát tự động phù hợp với phong cách bài hát.")
+            title = f"{title_prefix[idx]} {title_tail[(idx + i) % 9]}"
+            lyric_seed = clean_idea[:110].strip(" .")
+            lyrics = (
+                f"[Verse]\n{lyric_seed} mở ra một ngày mới\n"
+                "Từng nhịp bước đưa niềm tin đi xa\n"
+                f"[Chorus]\n{title}, cùng nhau tỏa sáng\n"
+                "TOAN AAS nâng giấc mơ bay qua giới hạn\n"
+                "[Outro]\nGiữ nhịp tim luôn bứt phá hôm nay"
+            )
+            style_prompt = music_product_public_style_from_parts(
+                genre,
+                mood,
+                tempo,
+                production,
+                vocal_direction,
+                f"Vietnamese original song for: {clean_idea}",
+            )
+            suggestions.append({
+                "id": i + 1,
+                "title": title,
+                "theme": clean_idea,
+                "genre": genre,
+                "style": genre,
+                "mood": mood,
+                "tempo": tempo,
+                "vocal_mode": vocal,
+                "vocal_direction": vocal_direction,
+                "lyrics_structure": structure,
+                "lyrics": lyrics,
+                "lyrics_prompt": lyrics,
+                "style_prompt": style_prompt,
+                "description": f"{tier_label}: {production}. Chủ đề giữ đúng ý tưởng anh/chị đã nhập.",
+                "language": "Vietnamese",
+                "provider_tags": genre,
+            })
+        else:
+            genre, mood, tempo, use_case, production = background_bank[idx]
+            title = f"{title_prefix[idx]} {title_tail[(idx + i + 2) % 9]}"
+            style_prompt = music_product_public_style_from_parts(
+                "instrumental, no vocals, no lyrics, background music",
+                genre,
+                mood,
+                tempo,
+                production,
+                f"use case: {use_case}",
+                f"theme: {clean_idea}",
+            )
+            suggestions.append({
+                "id": i + 1,
+                "title": title,
+                "theme": clean_idea,
+                "genre": genre,
+                "style": genre,
+                "mood": mood,
+                "tempo": tempo,
+                "use_case": use_case,
+                "style_prompt": style_prompt,
+                "description": f"{tier_label}: {production}. Không lời, dùng làm nhạc nền.",
+                "lyrics": "",
+                "lyrics_prompt": "",
+                "language": "",
+                "provider_tags": genre,
+            })
+    return suggestions
+
+def music_product_prepare_suggestions_result(
+    result: dict | None = None,
+    *,
+    idea: str = "",
+    offset: int | None = None,
+    lang: str = "vi",
+) -> dict:
+    current = dict(result or {})
+    mode = music_product_mode_from_result(current)
+    tier = normalize_music_product_tier(current.get("music_product_tier"))
+    vocal_mode = normalize_song_vocal_mode(current.get("song_vocal") or current.get("vocal_mode") or "auto")
+    clean_idea = music_product_clean_idea(idea or current.get("music_user_idea") or music_product_sample_idea(mode))
+    next_offset = music_product_suggestion_offset(current) if offset is None else max(0, int(offset or 0))
+    suggestions = build_music_product_suggestions(
+        mode=mode,
+        tier=tier,
+        vocal_mode=vocal_mode,
+        idea=clean_idea,
+        offset=next_offset,
+        lang=lang,
+    )
+    current.update({
+        "music_product_flow": "p0_20b1_suggestions",
+        "music_product_mode": mode,
+        "music_product_tier": tier,
+        "music_product_price_xu": music_product_tier_price_xu(tier, mode),
+        "music_user_idea": clean_idea,
+        "music_suggestion_offset": next_offset,
+        "music_suggestions": suggestions,
+        "music_selected_suggestion_id": "",
+        "music_selected_title": "",
+        "music_selected_style_prompt": "",
+        "music_selected_lyrics_prompt": "",
+        "music_confirmed": False,
+    })
+    if mode == "song":
+        current.update({"song_vocal": vocal_mode, "vocal_mode": vocal_mode})
+    return current
+
+def music_product_suggestion_by_index(result: dict | None = None, index: int = 1) -> dict:
+    suggestions = list((result or {}).get("music_suggestions") or [])
+    idx = max(1, min(3, _safe_int(index, 1)))
+    if 0 <= idx - 1 < len(suggestions) and isinstance(suggestions[idx - 1], dict):
+        return dict(suggestions[idx - 1])
+    return {}
+
+def music_product_result_from_suggestion(result: dict | None = None, suggestion: dict | None = None) -> dict:
+    current = dict(result or {})
+    item = dict(suggestion or {})
+    mode = music_product_mode_from_result(current)
+    tier = normalize_music_product_tier(current.get("music_product_tier"))
+    vocal_mode = normalize_song_vocal_mode(item.get("vocal_mode") or current.get("song_vocal") or current.get("vocal_mode") or "auto")
+    payload = {
+        **current,
+        **item,
+        "music_product_mode": mode,
+        "music_product_tier": tier,
+        "vocal_mode": vocal_mode,
+        "song_vocal": vocal_mode,
+        "title": str(item.get("title") or current.get("title") or "").strip(),
+        "theme": str(item.get("theme") or current.get("music_user_idea") or "").strip(),
+        "description": str(item.get("description") or item.get("theme") or current.get("music_user_idea") or "").strip(),
+        "lyrics": str(item.get("lyrics") or item.get("lyrics_prompt") or "").strip() if mode == "song" else "",
+        "style_prompt": str(item.get("style_prompt") or "").strip(),
+        "provider_tags": str(item.get("provider_tags") or item.get("genre") or "").strip(),
+    }
+    product_result = music_product_result_from_input(payload)
+    selected_id = str(item.get("id") or current.get("music_selected_suggestion_id") or "")
+    product_result.update({
+        "music_product_flow": "p0_20b1_suggestions",
+        "music_user_idea": str(current.get("music_user_idea") or item.get("theme") or "").strip(),
+        "music_suggestions": list(current.get("music_suggestions") or []),
+        "music_suggestion_offset": music_product_suggestion_offset(current),
+        "music_selected_suggestion_id": selected_id,
+        "music_selected_title": str(item.get("title") or product_result.get("title") or "").strip(),
+        "music_selected_style_prompt": str(item.get("style_prompt") or product_result.get("provider_style_prompt") or "").strip(),
+        "music_selected_lyrics_prompt": str(item.get("lyrics_prompt") or item.get("lyrics") or product_result.get("provider_lyrics") or "").strip(),
+        "music_invoice_id": music_product_hash_text(f"{time.time_ns()}:{selected_id}:{product_result.get('provider_style_prompt')}"),
+        "music_confirmed": False,
+    })
+    return product_result
+
+def music_product_suggestions_text(result: dict | None = None, lang: str = "vi") -> str:
+    current = dict(result or {})
+    mode = music_product_mode_from_result(current)
+    suggestions = list(current.get("music_suggestions") or [])
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    if not is_vi:
+        return "✨ TOAN AAS prepared 3 suggestions. Choose one to see the invoice."
+    if mode == "song":
+        lines = ["✨ <b>TOAN AAS đã chuẩn bị 3 gợi ý bài hát</b>"]
+    else:
+        lines = ["✨ <b>TOAN AAS đã chuẩn bị 3 gợi ý nhạc nền</b>"]
+    for idx, item in enumerate(suggestions[:3], start=1):
+        if mode == "song":
+            lines.extend([
+                "",
+                f"{idx}️⃣ <b>{html.escape(str(item.get('title') or f'Gợi ý {idx}')[:80])}</b>",
+                f"• Chủ đề: {html.escape(str(item.get('theme') or '-')[:160])}",
+                f"• Thể loại: {html.escape(str(item.get('genre') or item.get('style') or '-')[:120])}",
+                f"• Cảm xúc: {html.escape(str(item.get('mood') or '-')[:120])}",
+                f"• Giọng hát: {html.escape(str(item.get('vocal_direction') or music_product_vocal_label(current.get('song_vocal') or 'auto', lang))[:160])}",
+                f"• Mô tả: {html.escape(str(item.get('description') or '-')[:180])}",
+            ])
+        else:
+            lines.extend([
+                "",
+                f"{idx}️⃣ <b>{html.escape(str(item.get('title') or f'Gợi ý {idx}')[:80])}</b>",
+                f"• Thể loại: {html.escape(str(item.get('genre') or item.get('style') or '-')[:120])}",
+                f"• Cảm xúc: {html.escape(str(item.get('mood') or '-')[:120])}",
+                f"• Tempo: {html.escape(str(item.get('tempo') or '-')[:80])}",
+                f"• Mục đích: {html.escape(str(item.get('use_case') or '-')[:140])}",
+                f"• Mô tả: {html.escape(str(item.get('description') or '-')[:180])}",
+            ])
+    return "\n".join(lines)
+
+def music_product_suggestions_keyboard(
+    mode: str = "background",
+    lang: str = "vi",
+    product_context: str = PRODUCT_CONTEXT_SHOWROOM,
+) -> InlineKeyboardMarkup:
+    is_vi = music_ui_lang(lang=lang) == "vi"
+    ctx = normalize_product_context(product_context)
+    cb = lambda action: product_context_callback("music_quick", ctx, action)
+    manual_label = "✏️ Tự nhập/chỉnh lời" if normalize_music_product_mode(mode) == "song" else "✏️ Tự nhập/chỉnh mô tả"
+    if not is_vi:
+        manual_label = "✏️ Custom/edit"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("1️⃣ Chọn gợi ý 1" if is_vi else "1️⃣ Choose 1", callback_data=cb("music_product_select_suggestion:1")),
+            InlineKeyboardButton("2️⃣ Chọn gợi ý 2" if is_vi else "2️⃣ Choose 2", callback_data=cb("music_product_select_suggestion:2")),
+        ],
+        [InlineKeyboardButton("3️⃣ Chọn gợi ý 3" if is_vi else "3️⃣ Choose 3", callback_data=cb("music_product_select_suggestion:3"))],
+        [
+            InlineKeyboardButton("🔄 Đổi gợi ý" if is_vi else "🔄 Regenerate", callback_data=cb("music_product_regenerate_suggestions")),
+            InlineKeyboardButton(manual_label, callback_data=cb("music_product_manual")),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("music_product_back_idea")),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
+    ])
+
 def music_product_invoice_text(result: dict | None = None, lang: str = "vi") -> str:
     result = dict(result or {})
     mode = music_product_mode_from_result(result)
@@ -85680,19 +86041,18 @@ def music_product_invoice_text(result: dict | None = None, lang: str = "vi") -> 
     price = music_result_price_xu(result)
     genre = str(result.get("genre") or result.get("style") or result.get("guided_style") or "-").strip() or "-"
     mood = str(result.get("mood") or result.get("guided_mood") or "-").strip() or "-"
-    duration = music_result_duration_seconds(result)
+    selected_title = str(result.get("music_selected_title") or result.get("title") or result.get("provider_title") or ("Bài hát" if mode == "song" else "Nhạc nền")).strip()
     if music_ui_lang(lang=lang) != "vi":
         return f"💰 Confirm music creation\n• Package: {music_product_tier_label(tier, lang)}\n• Price: {price} Xu\n• Total: {price} Xu\n\nTOAN AAS creates audio and charges Xu only after you confirm."
     if mode == "song":
-        title = str(result.get("title") or result.get("provider_title") or "Bài hát").strip()
         return (
             "💰 <b>Xác nhận tạo bài hát</b>\n"
             f"• Gói: <b>{html.escape(music_product_tier_label(tier, lang))}</b>\n"
             f"• Giá: <b>{price} Xu</b>\n"
-            f"• Tiêu đề: {html.escape(title[:80])}\n"
+            f"• Gợi ý đã chọn: {html.escape(selected_title[:100])}\n"
+            f"• Giọng hát: {html.escape(music_product_vocal_label(result.get('song_vocal') or result.get('vocal_mode') or 'auto', lang))}\n"
             f"• Thể loại: {html.escape(genre[:120])}\n"
             f"• Cảm xúc: {html.escape(mood[:120])}\n"
-            f"• Giọng hát: {html.escape(music_product_vocal_label(result.get('song_vocal') or result.get('vocal_mode') or 'auto', lang))}\n"
             "• Có lời bài hát: Có\n"
             f"• Tổng thanh toán: <b>{price} Xu</b>\n\n"
             "TOAN AAS chỉ tạo bài hát và trừ Xu sau khi anh/chị xác nhận."
@@ -85701,10 +86061,10 @@ def music_product_invoice_text(result: dict | None = None, lang: str = "vi") -> 
         "💰 <b>Xác nhận tạo nhạc nền</b>\n"
         f"• Gói: <b>{html.escape(music_product_tier_label(tier, lang))}</b>\n"
         f"• Giá: <b>{price} Xu</b>\n"
+        f"• Gợi ý đã chọn: {html.escape(selected_title[:100])}\n"
         f"• Thể loại: {html.escape(genre[:120])}\n"
         f"• Cảm xúc: {html.escape(mood[:120])}\n"
-        f"• Thời lượng: {duration} giây\n"
-        "• Lời hát: Không\n"
+        "• Kiểu nhạc: Không lời\n"
         f"• Tổng thanh toán: <b>{price} Xu</b>\n\n"
         "TOAN AAS chỉ tạo nhạc và trừ Xu sau khi anh/chị xác nhận."
     )
@@ -85718,38 +86078,57 @@ def music_product_invoice_keyboard(result: dict | None = None, lang: str = "vi",
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Xác nhận tạo bài hát" if is_vi else "✅ Confirm song", callback_data=cb("music_ai_confirm"))],
             [
-                InlineKeyboardButton("✏️ Sửa lời" if is_vi else "✏️ Edit lyrics", callback_data=cb("music_product_edit_description")),
-                InlineKeyboardButton("🎤 Đổi giọng hát" if is_vi else "🎤 Change vocal", callback_data=cb("music_product_change_vocal")),
+                InlineKeyboardButton("🔄 Đổi gợi ý" if is_vi else "🔄 Regenerate", callback_data=cb("music_product_regenerate_suggestions")),
+                InlineKeyboardButton("✏️ Chỉnh lời" if is_vi else "✏️ Edit lyrics", callback_data=cb("music_product_edit_description")),
             ],
             [
+                InlineKeyboardButton("🎤 Đổi giọng hát" if is_vi else "🎤 Change vocal", callback_data=cb("music_product_change_vocal")),
                 InlineKeyboardButton("🎚 Đổi gói" if is_vi else "🎚 Change package", callback_data=cb("music_product_change_tier")),
-                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("music_product_back_details")),
             ],
-            [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [
+                InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("music_product_back_details")),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+            ],
         ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận tạo nhạc" if is_vi else "✅ Confirm music", callback_data=cb("music_ai_confirm"))],
         [
-            InlineKeyboardButton("✏️ Sửa mô tả" if is_vi else "✏️ Edit brief", callback_data=cb("music_product_edit_description")),
-            InlineKeyboardButton("🎚 Đổi gói" if is_vi else "🎚 Change package", callback_data=cb("music_product_change_tier")),
+            InlineKeyboardButton("🔄 Đổi gợi ý" if is_vi else "🔄 Regenerate", callback_data=cb("music_product_regenerate_suggestions")),
+            InlineKeyboardButton("✏️ Chỉnh mô tả" if is_vi else "✏️ Edit brief", callback_data=cb("music_product_edit_description")),
         ],
         [
+            InlineKeyboardButton("🎚 Đổi gói" if is_vi else "🎚 Change package", callback_data=cb("music_product_change_tier")),
             InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data=cb("music_product_back_details")),
-            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
+
+def music_product_type_label(result: dict | None = None, lang: str = "vi") -> str:
+    mode = music_product_mode_from_result(result or {})
+    if music_ui_lang(lang=lang) != "vi":
+        return "Song with lyrics" if mode == "song" else "Background music"
+    return "Bài hát có lời" if mode == "song" else "Nhạc nền"
+
+def format_music_duration_mmss(seconds) -> str:
+    total = max(0, int(round(float(seconds or 0))))
+    minutes = total // 60
+    secs = total % 60
+    return f"{minutes}:{secs:02d}"
 
 def music_product_success_text(result: dict | None = None, charged_xu: int = 0, lang: str = "vi") -> str:
     result = dict(result or {})
     if music_ui_lang(lang=lang) != "vi":
         return "✅ Music created successfully.\n• Status: Music file sent"
     duration = music_result_duration_seconds(result)
-    vocal = "Không" if music_product_mode_from_result(result) == "background" else music_product_vocal_label(result.get("song_vocal") or "auto", lang)
+    price = music_result_price_xu(result)
+    vocal = "Không lời" if music_product_mode_from_result(result) == "background" else music_product_vocal_label(result.get("song_vocal") or "auto", lang)
     return (
         "✅ <b>Đã tạo nhạc thành công.</b>\n"
+        f"• Loại: {html.escape(music_product_type_label(result, lang))}\n"
         f"• Gói: {html.escape(music_product_tier_label(result.get('music_product_tier'), lang))}\n"
-        f"• Thời lượng: {duration} giây\n"
+        f"• Giá: {price} Xu\n"
         f"• Giọng hát: {html.escape(vocal)}\n"
+        f"• Thời lượng: {format_music_duration_mmss(duration)}\n"
         f"• Đã trừ: {int(charged_xu or 0)} Xu\n"
         "• Trạng thái: Đã gửi file nhạc"
     )
@@ -85822,6 +86201,15 @@ def music_song_length_mode(result: dict | None = None) -> str:
 
 def music_result_duration_seconds(result: dict | None = None) -> int:
     result = dict(result or {})
+    for key in ("music_result_duration_seconds", "music_output_duration_seconds", "actual_duration_seconds", "audio_duration_seconds"):
+        value = result.get(key)
+        if value not in (None, "", 0, "0"):
+            try:
+                parsed = int(round(float(value)))
+                if parsed > 0:
+                    return parsed
+            except Exception:
+                pass
     package_mode = music_song_length_mode(result)
     if package_mode == "half":
         return 60
@@ -85848,7 +86236,7 @@ def music_result_product_kind(result: dict | None = None) -> str:
 def music_result_price_xu(result: dict | None = None) -> int:
     result = dict(result or {})
     if music_product_result_is_3tier(result):
-        return music_product_tier_price_xu(result.get("music_product_tier"))
+        return music_product_tier_price_xu(result.get("music_product_tier"), music_product_mode_from_result(result))
     return music_ai_output_price_xu(music_result_duration_seconds(result), music_result_product_kind(result))
 
 def music_song_length_selection_text(result: dict | None = None, lang: str = "vi") -> str:
@@ -86308,7 +86696,7 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
     provider_style_prompt = str(result.get("provider_style_prompt") or prompt).strip()
     provider_lyrics = str(result.get("provider_lyrics") or "").strip()
     provider_title = str(result.get("provider_title") or result.get("title") or ("TOAN AAS Preview" if preview else "TOAN AAS Music")).strip()
-    provider_tags = str(result.get("guided_style") or result.get("genre") or result.get("style") or result.get("music_ai_kind") or "original").strip()
+    provider_tags = str(result.get("provider_tags") or result.get("guided_style") or result.get("genre") or result.get("style") or result.get("music_ai_kind") or "original").strip()
     providers = dict(readiness.get("providers") or {})
 
     async def submit_key4u() -> dict:
@@ -86712,6 +87100,35 @@ async def send_music_preview_output(query, context, result: dict, lang: str = "v
         logger.warning("music preview send failed | %s", sanitize_log_text(str(exc))[:180])
         return False, {**polled, "status": "PREVIEW_SEND_FAILED"}
 
+def music_product_delivery_lock_key(user_id, result: dict | None = None, job: dict | None = None, audio_bytes: bytes | bytearray | None = None) -> str:
+    result = dict(result or {})
+    job = dict(job or {})
+    for key in ("internal_job_id", "music_job_id", "music_internal_job_id", "provider_task_id", "music_task_id"):
+        value = str(job.get(key) or result.get(key) or "").strip()
+        if value:
+            return f"music-delivery:{value}"
+    sha = music_audio_sha256(audio_bytes)
+    return f"music-delivery:{user_id}:{sha or music_product_hash_text(str(result)[:500])}"
+
+def music_product_audio_has_partial_marker(result: dict | None = None, job: dict | None = None) -> bool:
+    data = {**dict(job or {}), **dict(result or {})}
+    for key in ("is_preview", "preview", "is_partial", "partial", "temporary", "is_temp", "temp_output"):
+        if bool(data.get(key)):
+            return True
+    output_path = os.path.basename(str(data.get("output_path") or data.get("music_result_path") or data.get("local_path") or "")).lower()
+    if output_path and any(token in output_path for token in ("preview", "partial", "tmp", "temp")) and str(data.get("status") or "").lower() != "completed":
+        return True
+    return False
+
+async def music_audio_real_duration_seconds(audio_bytes: bytes | bytearray | None = None, fallback: int = 0) -> int:
+    payload = bytes(audio_bytes or b"")
+    detected = 0.0
+    if payload:
+        detected = await video_dubbing_audio_duration_seconds(payload, ".mp3")
+    if detected and detected > 0:
+        return max(1, int(round(detected)))
+    return max(0, int(fallback or 0))
+
 def music_job_full_already_sent(job: dict | None, audio_bytes: bytes | bytearray | None = None) -> bool:
     job = dict(job or {})
     if not job.get("sent_full_at"):
@@ -86800,6 +87217,20 @@ async def send_music_product_audio_result(
         return {"ok": False, "status": "EMPTY_AUDIO"}
     if current_result.get("music_result_delivered_at") or current_result.get("music_full_sent_at") or music_job_full_already_sent(current_job, payload):
         return {"ok": True, "status": "ALREADY_SENT", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0)}
+    actual_duration = await music_audio_real_duration_seconds(payload, fallback=music_result_duration_seconds(current_result or current_job))
+    if music_product_audio_has_partial_marker(current_result, current_job):
+        return {"ok": False, "status": "FINAL_AUDIO_NOT_READY"}
+    lock_key = music_product_delivery_lock_key(user_id, current_result, current_job, payload)
+    if lock_key in MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS or str(current_result.get("music_result_delivery_lock") or current_job.get("music_delivery_lock") or "").lower() == "sending":
+        return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0)}
+    MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS.add(lock_key)
+    current_result.update({
+        "music_result_delivery_lock": "sending",
+        "music_delivery_lock": "sending",
+        "music_delivery_attempts": int(current_result.get("music_delivery_attempts") or current_job.get("send_attempt_count") or 0) + 1,
+    })
+    if user_id:
+        save_music_guided_result(user_id, current_result)
     audio_file = video_dubbing_output_file(payload, "toan_aas_music.mp3")
     caption = (
         f"✅ Đã tạo {music_confirm_product_label(current_result, lang)}."
@@ -86807,78 +87238,114 @@ async def send_music_product_audio_result(
         else "✅ Đã tạo nhạc thành công."
     )
     try:
-        if getattr(context, "bot", None):
-            sent_message = await context.bot.send_audio(
-                chat_id=message.chat_id,
-                audio=audio_file,
-                filename="toan_aas_music.mp3",
-                caption=caption,
-            )
-        else:
-            sent_message = await message.reply_audio(
-                audio=audio_file,
-                filename="toan_aas_music.mp3",
-                caption=caption,
-            )
-    except Exception as exc:
-        logger.warning("music product send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
-        if current_job:
-            record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
-        return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180)}
+        try:
+            if getattr(context, "bot", None):
+                sent_message = await context.bot.send_audio(
+                    chat_id=message.chat_id,
+                    audio=audio_file,
+                    filename="toan_aas_music.mp3",
+                    caption=caption,
+                )
+            else:
+                sent_message = await message.reply_audio(
+                    audio=audio_file,
+                    filename="toan_aas_music.mp3",
+                    caption=caption,
+                )
+        except Exception as exc:
+            logger.warning("music product send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
+            current_result["music_result_delivery_lock"] = ""
+            current_result["music_delivery_lock"] = ""
+            save_music_guided_result(user_id, current_result)
+            if current_job:
+                record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
+            return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180)}
 
-    charge_result = music_product_charge_after_delivery(user_id, current_result, music_result_price_xu(current_result), current_job)
-    charged = int(charge_result.get("charged_xu") or 0)
-    vault_entry = {}
-    if current_job:
-        current_job["charged_xu"] = charged
-        current_job["pending_charge_xu"] = 0
-        current_job["output_bytes"] = max(int(current_job.get("output_bytes") or 0), len(payload))
-        current_job = record_music_job_full_send(current_job, sent_message, payload, result=current_result, updated_by=updated_by or user_id)
-        vault_entry = get_music_vault_entry(str(current_job.get("vault_id") or "")) if current_job.get("vault_id") else {}
-    else:
-        vault_entry = upsert_music_vault_from_output(
-            audio_bytes=payload,
-            result=current_result,
-            job={
-                "provider": str(current_result.get("music_provider") or ""),
-                "provider_task_id": str(current_result.get("music_task_id") or ""),
-                "user_id": str(user_id),
-                "chat_id": str(getattr(message, "chat_id", "") or ""),
-            },
-            status="used",
-            updated_by=updated_by or user_id,
-        )
-    file_id = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or "")
-    current_result.update({
-        "music_status": "completed",
-        "music_charged_xu": charged,
-        "music_pending_charge_xu": 0,
-        "music_charge_failed": not bool(charge_result.get("ok")),
-        "music_refunded": False,
-        "music_completed_at": now_text(),
-        "music_full_sent_at": now_text(),
-        "music_result_delivered_at": now_text(),
-        "music_result_delivery_lock": "sent",
-        "music_result_file_id": file_id,
-        "music_result_path": str(vault_entry.get("storage_ref") or ""),
-        "music_output_file_id": file_id,
-        "music_output_sha256": music_audio_sha256(payload),
-        "music_vault_id": str(vault_entry.get("vault_id") or current_job.get("vault_id") or current_result.get("music_vault_id") or ""),
-    })
-    if current_job.get("internal_job_id"):
-        current_result["music_job_id"] = str(current_job.get("internal_job_id") or "")
-        current_result["music_internal_job_id"] = str(current_job.get("internal_job_id") or "")
-    save_music_guided_result(user_id, current_result)
-    return {
-        "ok": bool(charge_result.get("ok")),
-        "status": "SENT" if charge_result.get("ok") else "SENT_CHARGE_PENDING",
-        "charged_xu": charged,
-        "result": current_result,
-        "job": current_job,
-        "file_id": file_id,
-    }
+        charge_result = music_product_charge_after_delivery(user_id, current_result, music_result_price_xu(current_result), current_job)
+        charged = int(charge_result.get("charged_xu") or 0)
+        vault_entry = {}
+        if current_job:
+            current_job["charged_xu"] = charged
+            current_job["pending_charge_xu"] = 0
+            current_job["output_bytes"] = max(int(current_job.get("output_bytes") or 0), len(payload))
+            current_job["duration_seconds"] = actual_duration
+            current_job["music_result_duration_seconds"] = actual_duration
+            current_job["music_result_size_bytes"] = len(payload)
+            current_job["music_delivery_lock"] = "sent"
+            current_job["music_delivered_at"] = now_text()
+            current_job["music_charge_amount_xu"] = charged
+            current_job["music_charged_at"] = now_text() if charge_result.get("ok") else ""
+            current_job = record_music_job_full_send(current_job, sent_message, payload, result={**current_result, "music_result_duration_seconds": actual_duration}, updated_by=updated_by or user_id)
+            vault_entry = get_music_vault_entry(str(current_job.get("vault_id") or "")) if current_job.get("vault_id") else {}
+            if current_job.get("internal_job_id"):
+                save_engine_async_job(current_job)
+        else:
+            current_result["music_result_duration_seconds"] = actual_duration
+            vault_entry = upsert_music_vault_from_output(
+                audio_bytes=payload,
+                result=current_result,
+                job={
+                    "provider": str(current_result.get("music_provider") or ""),
+                    "provider_task_id": str(current_result.get("music_task_id") or ""),
+                    "user_id": str(user_id),
+                    "chat_id": str(getattr(message, "chat_id", "") or ""),
+                    "duration_seconds": actual_duration,
+                },
+                status="used",
+                updated_by=updated_by or user_id,
+            )
+        file_id = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or "")
+        delivered_at = now_text()
+        current_result.update({
+            "music_status": "completed",
+            "music_charged_xu": charged,
+            "music_pending_charge_xu": 0,
+            "music_charge_failed": not bool(charge_result.get("ok")),
+            "music_refunded": False,
+            "music_completed_at": delivered_at,
+            "music_full_sent_at": delivered_at,
+            "music_result_delivered_at": delivered_at,
+            "music_delivered_at": delivered_at,
+            "music_result_delivery_lock": "sent",
+            "music_delivery_lock": "sent",
+            "music_delivery_attempts": int(current_result.get("music_delivery_attempts") or current_job.get("send_attempt_count") or 1),
+            "music_result_file_id": file_id,
+            "music_result_path": str(vault_entry.get("storage_ref") or ""),
+            "music_result_duration_seconds": actual_duration,
+            "music_output_duration_seconds": actual_duration,
+            "music_result_size_bytes": len(payload),
+            "music_output_file_id": file_id,
+            "music_output_sha256": music_audio_sha256(payload),
+            "music_charge_amount_xu": charged,
+            "music_charged_at": delivered_at if charge_result.get("ok") else "",
+            "music_vault_id": str(vault_entry.get("vault_id") or current_job.get("vault_id") or current_result.get("music_vault_id") or ""),
+        })
+        if current_job.get("internal_job_id"):
+            current_result["music_job_id"] = str(current_job.get("internal_job_id") or "")
+            current_result["music_internal_job_id"] = str(current_job.get("internal_job_id") or "")
+        save_music_guided_result(user_id, current_result)
+        return {
+            "ok": bool(charge_result.get("ok")),
+            "status": "SENT" if charge_result.get("ok") else "SENT_CHARGE_PENDING",
+            "charged_xu": charged,
+            "result": current_result,
+            "job": current_job,
+            "file_id": file_id,
+        }
+    finally:
+        MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS.discard(lock_key)
 
 async def music_product_auto_deliver_job(query, context, *, user_id, lang: str, product_context: str, result: dict, internal_job_id: str) -> dict:
+    current = dict(result or {})
+    if current.get("music_result_delivered_at") or current.get("music_full_sent_at"):
+        return {
+            "ok": True,
+            "status": "ALREADY_SENT",
+            "duplicate": True,
+            "charged_xu": int(current.get("music_charged_xu") or current.get("music_charge_amount_xu") or 0),
+            "result": current,
+            "job": get_engine_async_job(str(internal_job_id or "")) if internal_job_id else {},
+        }
     if not internal_job_id:
         return {"ok": False, "status": "MISSING_JOB"}
     polled_job = await poll_music_suno_async_job(internal_job_id, updated_by=user_id, download=True)
@@ -90146,32 +90613,58 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action.startswith("music_tier_background:"):
         await query.answer()
         tier = normalize_music_product_tier(action.split(":", 1)[1])
+        existing = get_music_guided_result(user_id) or {}
         result = {
+            **existing,
             "music_product_flow": "p0_20a_3_tier",
             "music_product_mode": "background",
             "music_product_tier": tier,
-            "music_product_price_xu": music_product_tier_price_xu(tier),
+            "music_product_price_xu": music_product_tier_price_xu(tier, "background"),
             "previous_screen": "music_product_tier",
             "return_to": "ai_music",
         }
+        if str(existing.get("music_user_idea") or "").strip():
+            result = music_product_prepare_suggestions_result(result, idea=str(existing.get("music_user_idea") or ""), offset=music_product_suggestion_offset(existing), lang=lang)
+            save_music_guided_result(user_id, result)
+            clear_music_guided_pending(user_id)
+            return await query.message.reply_text(
+                music_product_suggestions_text(result, lang),
+                parse_mode="HTML",
+                reply_markup=music_product_suggestions_keyboard("background", lang, ctx),
+            )
         save_music_guided_result(user_id, result)
-        set_music_guided_pending(user_id, "music_product_background_details", product_context=ctx, previous_screen="music_product_tier", return_to="ai_music")
+        set_music_guided_pending(user_id, "music_product_background_idea", product_context=ctx, previous_screen="music_product_tier", return_to="ai_music")
         return await query.message.reply_text(
-            music_product_details_input_text("background", tier, "auto", lang),
+            music_product_idea_input_text("background", tier, "auto", lang),
             parse_mode="HTML",
-            reply_markup=music_flow_back_keyboard("ai_music", lang, ctx),
+            reply_markup=music_product_idea_keyboard("background", lang, ctx),
         )
     if action.startswith("music_tier_song:"):
         await query.answer()
         tier = normalize_music_product_tier(action.split(":", 1)[1])
+        existing = get_music_guided_result(user_id) or {}
+        raw_existing_vocal = str(existing.get("song_vocal") or existing.get("vocal_mode") or "").strip()
+        vocal_mode = normalize_song_vocal_mode(raw_existing_vocal) if raw_existing_vocal else ""
         result = {
+            **existing,
             "music_product_flow": "p0_20a_3_tier",
             "music_product_mode": "song",
             "music_product_tier": tier,
-            "music_product_price_xu": music_product_tier_price_xu(tier),
+            "music_product_price_xu": music_product_tier_price_xu(tier, "song"),
             "previous_screen": "music_product_tier",
             "return_to": "song_menu",
         }
+        if vocal_mode in {"male", "female", "duet", "auto"}:
+            result.update({"song_vocal": vocal_mode, "vocal_mode": vocal_mode})
+        if str(existing.get("music_user_idea") or "").strip() and vocal_mode in {"male", "female", "duet", "auto"}:
+            result = music_product_prepare_suggestions_result(result, idea=str(existing.get("music_user_idea") or ""), offset=music_product_suggestion_offset(existing), lang=lang)
+            save_music_guided_result(user_id, result)
+            clear_music_guided_pending(user_id)
+            return await query.message.reply_text(
+                music_product_suggestions_text(result, lang),
+                parse_mode="HTML",
+                reply_markup=music_product_suggestions_keyboard("song", lang, ctx),
+            )
         save_music_guided_result(user_id, result)
         clear_music_guided_pending(user_id)
         return await query.message.reply_text(
@@ -90188,18 +90681,27 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "music_product_flow": "p0_20a_3_tier",
             "music_product_mode": "song",
             "music_product_tier": tier,
-            "music_product_price_xu": music_product_tier_price_xu(tier),
+            "music_product_price_xu": music_product_tier_price_xu(tier, "song"),
             "vocal_mode": vocal_mode,
             "song_vocal": vocal_mode,
             "previous_screen": "music_product_vocal",
             "return_to": "music_product_change_vocal",
         })
+        if str(result.get("music_user_idea") or "").strip():
+            result = music_product_prepare_suggestions_result(result, idea=str(result.get("music_user_idea") or ""), offset=music_product_suggestion_offset(result), lang=lang)
+            save_music_guided_result(user_id, result)
+            clear_music_guided_pending(user_id)
+            return await query.message.reply_text(
+                music_product_suggestions_text(result, lang),
+                parse_mode="HTML",
+                reply_markup=music_product_suggestions_keyboard("song", lang, ctx),
+            )
         save_music_guided_result(user_id, result)
-        set_music_guided_pending(user_id, "music_product_song_details", product_context=ctx, previous_screen="music_product_vocal", return_to="music_product_change_vocal")
+        set_music_guided_pending(user_id, "music_product_song_idea", product_context=ctx, previous_screen="music_product_vocal", return_to="music_product_change_vocal")
         return await query.message.reply_text(
-            music_product_details_input_text("song", tier, vocal_mode, lang),
+            music_product_idea_input_text("song", tier, vocal_mode, lang),
             parse_mode="HTML",
-            reply_markup=music_flow_back_keyboard("music_product_change_vocal", lang, ctx),
+            reply_markup=music_product_idea_keyboard("song", lang, ctx),
         )
     if action == "music_product_change_tier":
         await query.answer()
@@ -90219,7 +90721,93 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML",
             reply_markup=music_product_vocal_keyboard(lang, ctx),
         )
-    if action in {"music_product_edit_description", "music_product_back_details"}:
+    if action == "music_product_sample_idea":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        mode = music_product_mode_from_result(result)
+        idea = music_product_sample_idea(mode)
+        result = music_product_prepare_suggestions_result(result, idea=idea, offset=0, lang=lang)
+        save_music_guided_result(user_id, result)
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(
+            music_product_suggestions_text(result, lang),
+            parse_mode="HTML",
+            reply_markup=music_product_suggestions_keyboard(mode, lang, ctx),
+        )
+    if action == "music_product_back_idea":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        mode = music_product_mode_from_result(result)
+        tier = normalize_music_product_tier(result.get("music_product_tier"))
+        vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or "auto")
+        pending_action = "music_product_song_idea" if mode == "song" else "music_product_background_idea"
+        set_music_guided_pending(user_id, pending_action, product_context=ctx, previous_screen="music_product_suggestions", return_to="music_product_back_idea")
+        return await query.message.reply_text(
+            music_product_idea_input_text(mode, tier, vocal_mode, lang),
+            parse_mode="HTML",
+            reply_markup=music_product_idea_keyboard(mode, lang, ctx),
+        )
+    if action == "music_product_regenerate_suggestions":
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        mode = music_product_mode_from_result(result)
+        idea = str(result.get("music_user_idea") or "").strip()
+        if not idea:
+            pending_action = "music_product_song_idea" if mode == "song" else "music_product_background_idea"
+            set_music_guided_pending(user_id, pending_action, product_context=ctx, previous_screen="music_product_suggestions", return_to="music_product_back_idea")
+            return await query.message.reply_text(
+                music_product_idea_input_text(mode, result.get("music_product_tier"), result.get("song_vocal") or "auto", lang),
+                parse_mode="HTML",
+                reply_markup=music_product_idea_keyboard(mode, lang, ctx),
+            )
+        result = music_product_prepare_suggestions_result(result, idea=idea, offset=music_product_suggestion_offset(result) + 3, lang=lang)
+        save_music_guided_result(user_id, result)
+        return await query.message.reply_text(
+            music_product_suggestions_text(result, lang),
+            parse_mode="HTML",
+            reply_markup=music_product_suggestions_keyboard(mode, lang, ctx),
+        )
+    if action.startswith("music_product_select_suggestion:"):
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        mode = music_product_mode_from_result(result)
+        if not result.get("music_suggestions") and str(result.get("music_user_idea") or "").strip():
+            result = music_product_prepare_suggestions_result(result, idea=str(result.get("music_user_idea") or ""), offset=music_product_suggestion_offset(result), lang=lang)
+        suggestion = music_product_suggestion_by_index(result, action.split(":", 1)[1] if ":" in action else 1)
+        if not suggestion:
+            pending_action = "music_product_song_idea" if mode == "song" else "music_product_background_idea"
+            set_music_guided_pending(user_id, pending_action, product_context=ctx, previous_screen="music_product_suggestions", return_to="music_product_back_idea")
+            return await query.message.reply_text(
+                music_product_idea_input_text(mode, result.get("music_product_tier"), result.get("song_vocal") or "auto", lang),
+                parse_mode="HTML",
+                reply_markup=music_product_idea_keyboard(mode, lang, ctx),
+            )
+        product_result = music_product_result_from_suggestion(result, suggestion)
+        save_music_guided_result(user_id, product_result)
+        clear_music_guided_pending(user_id)
+        return await query.message.reply_text(
+            music_product_invoice_text(product_result, lang),
+            parse_mode="HTML",
+            reply_markup=music_product_invoice_keyboard(product_result, lang, ctx),
+        )
+    if action in {"music_product_back_details", "music_product_back_suggestions"}:
+        await query.answer()
+        result = get_music_guided_result(user_id) or {}
+        mode = music_product_mode_from_result(result)
+        if result.get("music_suggestions"):
+            return await query.message.reply_text(
+                music_product_suggestions_text(result, lang),
+                parse_mode="HTML",
+                reply_markup=music_product_suggestions_keyboard(mode, lang, ctx),
+            )
+        pending_action = "music_product_song_idea" if mode == "song" else "music_product_background_idea"
+        set_music_guided_pending(user_id, pending_action, product_context=ctx, previous_screen="music_product_invoice", return_to="music_product_back_idea")
+        return await query.message.reply_text(
+            music_product_idea_input_text(mode, result.get("music_product_tier"), result.get("song_vocal") or "auto", lang),
+            parse_mode="HTML",
+            reply_markup=music_product_idea_keyboard(mode, lang, ctx),
+        )
+    if action in {"music_product_edit_description", "music_product_manual"}:
         await query.answer()
         result = get_music_guided_result(user_id) or {}
         mode = music_product_mode_from_result(result)
@@ -91622,6 +92210,12 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "music_ai_status":
         await query.answer()
         result = get_music_guided_result(user_id) or {}
+        if music_product_result_is_3tier(result) and (result.get("music_result_delivered_at") or result.get("music_full_sent_at")):
+            return await query.message.reply_text(
+                music_product_success_text(result, int(result.get("music_charged_xu") or result.get("music_charge_amount_xu") or 0), lang),
+                parse_mode="HTML",
+                reply_markup=music_product_success_keyboard(lang, ctx),
+            )
         if not result.get("music_task_id"):
             return await query.message.reply_text("⚠️ Chưa có job nhạc đang xử lý.", reply_markup=music_hub_keyboard(lang, ctx))
         internal_job_id = str(result.get("music_internal_job_id") or "").strip()
@@ -93675,6 +94269,35 @@ async def handle_music_guided_pending_text(update: Update, context: ContextTypes
     if not text or text.startswith("/"):
         return False
     clear_music_guided_pending(uid)
+    if action in {"music_product_background_idea", "music_product_song_idea"}:
+        result = get_music_guided_result(uid) or {}
+        mode = "song" if action == "music_product_song_idea" else "background"
+        tier = normalize_music_product_tier(result.get("music_product_tier") or state.get("music_product_tier"))
+        vocal_mode = normalize_song_vocal_mode(result.get("song_vocal") or result.get("vocal_mode") or state.get("vocal_mode") or "auto")
+        blocked = music_copyright_block_reason(text)
+        if blocked:
+            set_music_guided_pending(uid, action, product_context=ctx, previous_screen=str(state.get("previous_screen") or ""), return_to=str(state.get("return_to") or "music_product_back_idea"))
+            await update.message.reply_text(
+                "⛔ Nội dung này có rủi ro bản quyền. Hãy dùng ý tưởng nguyên bản. TOAN AAS chưa xử lý và chưa trừ Xu.",
+                reply_markup=music_product_idea_keyboard(mode, lang, ctx),
+            )
+            return True
+        result.update({
+            "music_product_flow": "p0_20b1_suggestions",
+            "music_product_mode": mode,
+            "music_product_tier": tier,
+            "music_product_price_xu": music_product_tier_price_xu(tier, mode),
+            "vocal_mode": vocal_mode,
+            "song_vocal": vocal_mode if mode == "song" else "",
+        })
+        product_result = music_product_prepare_suggestions_result(result, idea=text, offset=0, lang=lang)
+        save_music_guided_result(uid, product_result)
+        await update.message.reply_text(
+            music_product_suggestions_text(product_result, lang),
+            parse_mode="HTML",
+            reply_markup=music_product_suggestions_keyboard(mode, lang, ctx),
+        )
+        return True
     if action in {"music_product_background_details", "music_product_song_details"}:
         result = get_music_guided_result(uid) or {}
         mode = "song" if action == "music_product_song_details" else "background"

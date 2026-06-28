@@ -213,13 +213,19 @@ def test_showroom_music_create_new_asks_prompt_then_suggestions(monkeypatch):
     asyncio.run(bot.handle_music_quick_callback(_callback_update(query, user_id), SimpleNamespace()))
     assert "Tạo nhạc nền" in query.outputs[-1]["text"]
     assert "🎵 Cơ bản — 100 Xu" in _joined(query.outputs[-1]["reply_markup"])
-    assert "🎶 Tiêu chuẩn — 200 Xu" in _joined(query.outputs[-1]["reply_markup"])
-    assert "💎 Cao cấp — 300 Xu" in _joined(query.outputs[-1]["reply_markup"])
+    assert "🎶 Tiêu chuẩn — 150 Xu" in _joined(query.outputs[-1]["reply_markup"])
+    assert "💎 Cao cấp — 200 Xu" in _joined(query.outputs[-1]["reply_markup"])
 
     tier = CaptureQuery("music_quick|showroom|music_tier_background:standard", user_id)
     asyncio.run(bot.handle_music_quick_callback(_callback_update(tier, user_id), SimpleNamespace()))
-    assert "Mô tả nhạc nền" in tier.outputs[-1]["text"]
-    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_product_background_details"
+    assert "Ý tưởng nhạc nền" in tier.outputs[-1]["text"]
+    assert bot.get_music_guided_pending(user_id)["pending_action"] == "music_product_background_idea"
+
+    message = CaptureMessage("Nhạc nền công nghệ AI vui tươi cho video TikTok", user_id)
+    handled = asyncio.run(bot.handle_music_guided_pending_text(_message_update(message, user_id), SimpleNamespace()))
+    assert handled is True
+    assert "3 gợi ý nhạc nền" in message.outputs[-1]["text"]
+    assert len(bot.get_music_guided_result(user_id)["music_suggestions"]) == 3
 
 
 def test_video_addon_voice_menu_shows_free_and_paid_choices():

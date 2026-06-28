@@ -171,8 +171,8 @@ def test_audio_music_create_asks_prompt(monkeypatch):
 
     assert "Tạo nhạc nền" in query.outputs[-1]["text"]
     assert "🎵 Cơ bản — 100 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
-    assert "🎶 Tiêu chuẩn — 200 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
-    assert "💎 Cao cấp — 300 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "🎶 Tiêu chuẩn — 150 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
+    assert "💎 Cao cấp — 200 Xu" in _joined_markup(query.outputs[-1]["reply_markup"])
 
 
 def test_no_old_voice_studio_public():
