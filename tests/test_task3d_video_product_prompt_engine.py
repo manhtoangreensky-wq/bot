@@ -108,28 +108,24 @@ def _bundle(product_id="storyboard_prompt", shots=9, package_id=""):
 
 def test_video_menu_all_buttons_have_product_registry():
     markup = bot.main_video_keyboard("vi")
-    assert len(markup.inline_keyboard) == 6
-    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 2, 2, 2]
+    assert len(markup.inline_keyboard) == 4
+    assert [len(row) for row in markup.inline_keyboard] == [2, 2, 2, 1]
     callbacks = _callbacks(markup)
     public_product_ids = (
-        "video_trend",
-        "video_idea",
-        "storyboard_prompt",
         "video_ai_real",
-        "script_image_video",
-        "frame_video_local",
+        "image_to_video",
         "self_shot_scene_change",
-        "multi_scene_film",
-        "video_local_edit",
     )
     for product_id in public_product_ids:
         assert product_id in VIDEO_PRODUCT_REGISTRY
         assert f"vproduct|open|{product_id}" in callbacks
-    for hidden_product_id in ("image_to_video", "motion_prompt", "video_reference", "audio_addons"):
+    for hidden_product_id in ("video_trend", "video_idea", "storyboard_prompt", "script_image_video", "frame_video_local", "multi_scene_film", "video_local_edit", "motion_prompt", "video_reference", "audio_addons"):
         assert hidden_product_id in VIDEO_PRODUCT_REGISTRY
         assert f"vproduct|open|{hidden_product_id}" not in callbacks
     assert "vpromptlib|start" in callbacks
-    assert "vdownload|start" in callbacks
+    assert "videodub|start|video" in callbacks
+    assert "menu|video_vault" in callbacks
+    assert "vdownload|start" not in callbacks
     assert callbacks[-1] == "menu|main"
 
 

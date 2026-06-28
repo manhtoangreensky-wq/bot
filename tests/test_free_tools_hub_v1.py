@@ -135,7 +135,9 @@ def test_video_main_button_opens_video_menu():
 
     assert "VIDEO TOAN AAS" in text.upper()
     assert "vproduct|open|video_ai_real" in callbacks
-    assert "vproduct|open|video_trend" in callbacks
+    assert "vproduct|open|video_trend" not in callbacks
+    assert "videodub|start|video" in callbacks
+    assert "menu|video_vault" in callbacks
     assert "menu|main" in callbacks
 
 

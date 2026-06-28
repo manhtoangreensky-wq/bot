@@ -176,12 +176,15 @@ def test_addons_back_to_storyboard():
     _seed(user_id)
     _press(user_id, "vproduct|b14_creative_done")
     query, session = _press(user_id, "vproduct|storyboard_confirm")
+    assert session["current_step"] == "b14_scene_mode"
+    assert "Chọn cách dựng video" in query.edits[-1]["text"]
+    query, session = _press(user_id, "vproduct|b14_scene_mode|multi")
     assert session["current_step"] == "b14_addons"
     assert "Voice / nhạc / phụ đề / logo" in query.edits[-1]["text"]
-    assert "vproduct|b14_creative_done" in _callbacks(query.edits[-1]["reply_markup"])
-    query, session = _press(user_id, "vproduct|b14_creative_done")
-    assert session["current_step"] == "storyboard_preview"
-    assert "Storyboard + prompt" in query.edits[-1]["text"]
+    assert "vproduct|b14_scene_mode_screen" in _callbacks(query.edits[-1]["reply_markup"])
+    query, session = _press(user_id, "vproduct|b14_scene_mode_screen")
+    assert session["current_step"] == "b14_scene_mode"
+    assert "Chọn cách dựng video" in query.edits[-1]["text"]
     bot.clear_video_session(user_id)
 
 

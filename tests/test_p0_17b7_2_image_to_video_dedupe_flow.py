@@ -61,27 +61,30 @@ def test_video_menu_hides_duplicate_image_to_video_button():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
     assert "🖼 Ảnh → Video" not in labels
-    assert "vproduct|open|image_to_video" not in callbacks
+    assert "🖼 Ảnh thành video" in labels
+    assert "vproduct|open|image_to_video" in callbacks
 
 
-def test_video_menu_keeps_merge_images_to_video_button():
+def test_video_menu_hides_legacy_merge_images_button():
     labels = _labels(bot.main_video_keyboard("vi"))
     callbacks = _callbacks(bot.main_video_keyboard("vi"))
-    assert "🎞 Ghép ảnh thành video" in labels
-    assert "vproduct|open|frame_video_local" in callbacks
+    assert "🎞 Ghép ảnh thành video" not in labels
+    assert "vproduct|open|frame_video_local" not in callbacks
 
 
-def test_legacy_image_to_video_callback_redirects_to_merge_flow():
+def test_image_to_video_callback_opens_product_flow():
     user_id = 1702001
     bot.clear_video_session(user_id)
     bot.clear_frame_video_state(user_id)
     query = _run_vproduct(user_id, "vproduct|open|image_to_video")
     text = query.edits[-1][0]
     callbacks = _callbacks(query.edits[-1][1]["reply_markup"])
-    assert "Ghép ảnh thành video" in text
-    assert "Bạn muốn làm video từ ảnh theo cách nào" in text
-    assert "framevideo|start" in callbacks
-    assert "framevideo|ai_first" in callbacks
+    session = bot.get_video_session(user_id)
+    assert session["product_id"] == "image_to_video"
+    assert session["current_step"] == "profile_select"
+    assert "Chọn loại video" in text
+    assert "framevideo|start" not in callbacks
+    assert "framevideo|ai_first" not in callbacks
 
 
 def test_merge_images_menu_has_two_paths():
