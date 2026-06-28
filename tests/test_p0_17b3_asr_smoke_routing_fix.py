@@ -856,7 +856,7 @@ def test_dub_audio_source_keyboard_offers_recent_subtitle():
     )
 
     labels = " ".join(_button_labels(markup))
-    assert "Gửi file phụ đề có sẵn" in labels
+    assert "Từ phụ đề có sẵn" in labels
     assert "Dùng phụ đề vừa tạo" in labels
 
 

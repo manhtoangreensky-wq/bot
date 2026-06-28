@@ -106,10 +106,10 @@ def test_video_menu_does_not_touch_subtitle_dub_flow():
     assert {
         "📝 Tạo phụ đề tự động",
         "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng / Voice video",
+        "🎙 Lồng tiếng video",
         "🎬 Phụ đề + Lồng tiếng",
         "📄 Dịch file phụ đề",
-        "🧾 Transcript / Bóc lời",
+        "🧾 Bóc lời thoại",
     }.issubset(labels)
     assert "📥 Tải video từ link" not in labels
 

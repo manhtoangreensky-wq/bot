@@ -48,8 +48,29 @@ class CaptureMessage:
         self.outputs.append({"kind": "audio", **kwargs})
 
 
+class CaptureQuery:
+    def __init__(self, data, user_id):
+        self.data = data
+        self.from_user = SimpleNamespace(id=user_id)
+        self.message = CaptureMessage(f"query-{user_id}", chat_id=user_id)
+        self.outputs = self.message.outputs
+
+    async def answer(self, *args, **kwargs):
+        self.outputs.append({"kind": "answer", "args": args, "kwargs": kwargs})
+        return None
+
+
 def _update(uid, message):
     return SimpleNamespace(effective_user=SimpleNamespace(id=uid), message=message)
+
+
+async def _press_videodub(data, uid, context=None):
+    query = CaptureQuery(data, uid)
+    await bot.handle_video_dubbing_callback(
+        SimpleNamespace(callback_query=query),
+        context or SimpleNamespace(),
+    )
+    return query
 
 
 def _seed_upload_monkeypatches(monkeypatch):
@@ -140,8 +161,10 @@ def test_subtitle_plus_dub_asr_failure_has_clean_retry_buttons(monkeypatch):
     message = CaptureMessage("combo-fail", chat_id=uid)
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace())) is True
+    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
 
-    last = message.outputs[-1]
+    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid))
+    last = query.outputs[-1]
     text = last["text"]
     callbacks = _callbacks(last["reply_markup"])
     assert "TOAN AAS chưa tạo được phụ đề từ file này" in text
@@ -151,7 +174,7 @@ def test_subtitle_plus_dub_asr_failure_has_clean_retry_buttons(monkeypatch):
     assert "videodub|enter_dialogue_text" not in callbacks
     forbidden = ["adapter", "provider", "env", "ffmpeg", "stack", "mode_disabled", "none", "null", "asr"]
     assert not any(word in text.lower() for word in forbidden)
-    assert bot.get_video_dubbing_pending(uid)["step"] == "failed"
+    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
 
 
 def test_translate_output_does_not_export_before_translated_subtitle_ready():
@@ -182,12 +205,26 @@ def test_subtitle_translate_upload_creates_original_subtitle_then_language(monke
         entry_surface="studio",
     )
     _seed_upload_monkeypatches(monkeypatch)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
 
     prepare_calls = {"count": 0}
 
-    async def fake_prepare(*_args, **_kwargs):
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
         prepare_calls["count"] += 1
-        raise AssertionError("ASR must wait until final confirmation")
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chao"
+        subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(
+            user_id,
+            state.get("step") or "creating_original_subtitle",
+            subtitle_ref=subtitle_ref,
+        )
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chao"}],
+            "detected_language": "vi",
+        }
 
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
     message = CaptureMessage("translate-video", chat_id=uid)
@@ -196,12 +233,18 @@ def test_subtitle_translate_upload_creates_original_subtitle_then_language(monke
 
     state = bot.get_video_dubbing_pending(uid)
     joined = "\n".join(item["text"] for item in message.outputs if item["kind"] == "text")
-    assert state["step"] == "language"
+    assert state["step"] == "original_subtitle_confirm"
     assert not state["subtitle_ref"]
     assert "TOAN AAS đang tạo phụ đề gốc" not in joined
-    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
     assert "videodub|output|srt" not in _callbacks(message.outputs[-1]["reply_markup"])
     assert prepare_calls["count"] == 0
+
+    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid))
+    state = bot.get_video_dubbing_pending(uid)
+    assert prepare_calls["count"] == 1
+    assert state["step"] == "language"
+    assert "Dịch phụ đề sang ngôn ngữ nào" in query.outputs[-1]["text"]
 
 
 def test_subtitle_translate_language_runs_translation_before_export(monkeypatch):

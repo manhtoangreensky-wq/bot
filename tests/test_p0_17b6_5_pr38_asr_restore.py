@@ -76,8 +76,29 @@ class CaptureMessage:
         return SimpleNamespace(text=text, reply_markup=reply_markup)
 
 
+class CaptureQuery:
+    def __init__(self, data, user_id):
+        self.data = data
+        self.from_user = SimpleNamespace(id=user_id)
+        self.message = CaptureMessage(file_id=f"query-{user_id}", kind="audio")
+        self.outputs = self.message.outputs
+
+    async def answer(self, *args, **kwargs):
+        self.outputs.append({"kind": "answer", "args": args, "kwargs": kwargs})
+        return None
+
+
 def _update(uid, message):
     return SimpleNamespace(effective_user=SimpleNamespace(id=uid), message=message)
+
+
+async def _press_videodub(data, uid, context=None):
+    query = CaptureQuery(data, uid)
+    await bot.handle_video_dubbing_callback(
+        SimpleNamespace(callback_query=query),
+        context or SimpleNamespace(),
+    )
+    return query
 
 
 def _seed_upload(monkeypatch):
@@ -194,12 +215,19 @@ def test_pr38_asr_engine_path_is_called_for_subtitle_plus_dub_media(monkeypatch)
 
     state = bot.get_video_dubbing_pending(uid)
     joined = "\n".join(item["text"] for item in message.outputs)
+    assert tg_file.bytearray_called is False
+    assert calls == []
+    assert state["step"] == "original_subtitle_confirm"
+    assert "Tạo phụ đề gốc trước" in joined
+
+    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid, ctx))
+    state = bot.get_video_dubbing_pending(uid)
     assert tg_file.bytearray_called is True
     assert calls
     assert state["step"] == "original_subtitle_ready"
     assert state["source_subtitle_ref"] == state["subtitle_ref"]
-    assert "TOAN AAS đang tạo phụ đề gốc" in joined
-    assert "Đã tạo phụ đề gốc" in message.outputs[-1]["text"]
+    assert "TOAN AAS đang tạo phụ đề gốc" in query.outputs[1]["text"]
+    assert "Đã tạo phụ đề gốc" in query.outputs[-1]["text"]
 
 
 def test_pr38_asr_engine_path_is_called_for_subtitle_translate_media(monkeypatch):
@@ -213,6 +241,8 @@ def test_pr38_asr_engine_path_is_called_for_subtitle_translate_media(monkeypatch
         origin="translation",
     )
     _seed_upload(monkeypatch)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
     calls = []
     _patch_asr(monkeypatch, calls)
     ctx, _tg_file = _ctx_with_file(b"translate-audio")
@@ -222,11 +252,18 @@ def test_pr38_asr_engine_path_is_called_for_subtitle_translate_media(monkeypatch
 
     state = bot.get_video_dubbing_pending(uid)
     assert calls == []
-    assert state["step"] == "language"
+    assert state["step"] == "original_subtitle_confirm"
     assert not state["subtitle_ref"]
     assert not state["source_subtitle_ref"]
-    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
     assert "videodub|output|srt" not in _callbacks(message.outputs[-1]["reply_markup"])
+
+    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid, ctx))
+    state = bot.get_video_dubbing_pending(uid)
+    assert calls
+    assert state["step"] == "language"
+    assert state["source_subtitle_ref"] == state["subtitle_ref"]
+    assert "Dịch phụ đề sang ngôn ngữ nào" in query.outputs[-1]["text"]
 
 
 def test_pr38_asr_engine_path_is_called_for_auto_subtitle_media(monkeypatch):
@@ -240,6 +277,8 @@ def test_pr38_asr_engine_path_is_called_for_auto_subtitle_media(monkeypatch):
         origin="translation",
     )
     _seed_upload(monkeypatch)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
     calls = []
     _patch_asr(monkeypatch, calls)
     ctx, _tg_file = _ctx_with_file(b"subtitle-audio")
@@ -270,6 +309,8 @@ def test_pr38_asr_engine_path_is_called_for_dub_media_before_language(monkeypatc
         origin="translation",
     )
     _seed_upload(monkeypatch)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
     calls = []
     _patch_asr(monkeypatch, calls)
     ctx, _tg_file = _ctx_with_file(b"dub-audio")
@@ -279,11 +320,18 @@ def test_pr38_asr_engine_path_is_called_for_dub_media_before_language(monkeypatc
 
     state = bot.get_video_dubbing_pending(uid)
     assert calls == []
-    assert state["step"] == "language"
+    assert state["step"] == "original_subtitle_confirm"
     assert not state["subtitle_ref"]
     assert not state["source_subtitle_ref"]
     assert "TOAN AAS đang tạo phụ đề gốc" not in message.outputs[0]["text"]
-    assert "lồng tiếng sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
+
+    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid, ctx))
+    state = bot.get_video_dubbing_pending(uid)
+    assert calls
+    assert state["step"] == "language"
+    assert state["source_subtitle_ref"] == state["subtitle_ref"]
+    assert "lồng tiếng sang ngôn ngữ nào" in query.outputs[-1]["text"]
 
 
 def test_non_empty_segments_are_required_before_success(monkeypatch):
@@ -383,7 +431,7 @@ def test_no_charge_before_final_confirm(monkeypatch):
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
     assert calls == []
-    assert bot.get_video_dubbing_pending(uid)["step"] == "language"
+    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
 
 
 def test_public_asr_failure_copy_has_no_provider_terms_b65():

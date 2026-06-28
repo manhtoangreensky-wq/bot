@@ -155,35 +155,48 @@ def test_admin_bypass_voice_video_and_subtitle_plus_dub(monkeypatch):
     monkeypatch.setattr(bot, "PUBLIC_SUBTITLE_DUB_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_DUB_PUBLIC_ENABLED", False)
     monkeypatch.setattr(bot, "VIDEO_SUBTITLE_PLUS_DUB_PUBLIC_ENABLED", False)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
 
-    async def fake_combo(_update, _context, state, _lang):
-        return bot.set_video_dubbing_pending(
-            900205,
-            "original_subtitle_ready",
-            **{key: value for key, value in state.items() if key not in {"step", "current_step", "previous_step", "subtitle_ref"}},
-            subtitle_ref="video_dubbing_artifact:900205:source_subtitle",
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chao"
+        subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(
+            user_id,
+            state.get("step") or "creating_original_subtitle",
+            subtitle_ref=subtitle_ref,
         )
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chao"}],
+            "detected_language": "vi",
+        }
 
-    monkeypatch.setattr(bot, "subtitle_plus_dub_create_original_from_media", fake_combo)
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
 
     uid_voice = 900204
     bot.clear_video_dubbing_pending(uid_voice)
     voice_screen = asyncio.run(_press(monkeypatch, f"videodub|type|{bot.VIDEO_SUBTITLE_MODE_DUB}", uid_voice))
-    assert "ADMIN TEST MODE" in voice_screen["text"]
+    assert "ADMIN TEST MODE" not in voice_screen["text"]
     assert bot.get_video_dubbing_pending(uid_voice)["step"] == "source"
 
     handled = asyncio.run(bot.handle_video_dubbing_pending_upload(_media_update(uid_voice), SimpleNamespace()))
     assert handled is True
+    assert bot.get_video_dubbing_pending(uid_voice)["step"] == "original_subtitle_confirm"
+    asyncio.run(_press(monkeypatch, "videodub|confirm_original_subtitle", uid_voice))
     assert bot.get_video_dubbing_pending(uid_voice)["step"] == "language"
 
     uid_combo = 900205
     bot.clear_video_dubbing_pending(uid_combo)
     combo_screen = asyncio.run(_press(monkeypatch, f"videodub|type|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}", uid_combo))
-    assert "ADMIN TEST MODE" in combo_screen["text"]
+    assert "ADMIN TEST MODE" not in combo_screen["text"]
     assert bot.get_video_dubbing_pending(uid_combo)["step"] == "waiting_media"
 
     handled = asyncio.run(bot.handle_video_dubbing_pending_upload(_media_update(uid_combo), SimpleNamespace()))
     assert handled
+    assert bot.get_video_dubbing_pending(uid_combo)["step"] == "original_subtitle_confirm"
+    asyncio.run(_press(monkeypatch, "videodub|confirm_original_subtitle", uid_combo))
     assert bot.get_video_dubbing_pending(uid_combo)["step"] == "original_subtitle_ready"
 
 
@@ -202,7 +215,8 @@ def test_admin_bypass_custom_voice(monkeypatch):
         source_file_id="tg-video-file",
     )
     result = asyncio.run(_press(monkeypatch, "videodub|voice_create", uid))
-    assert "ADMIN TEST MODE" in result["text"]
+    assert "ADMIN TEST MODE" not in result["text"]
+    assert "tạm giới hạn" not in result["text"].lower()
 
 
 def test_public_translate_upload_language_waits_confirm(monkeypatch):
@@ -213,9 +227,21 @@ def test_public_translate_upload_language_waits_confirm(monkeypatch):
 
     calls = {"prepare": 0, "pipeline": 0}
 
-    async def fail_prepare(*_args, **_kwargs):
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
         calls["prepare"] += 1
-        raise AssertionError("translate upload/language must not process before final confirm")
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chao"
+        subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(
+            user_id,
+            state.get("step") or "creating_original_subtitle",
+            subtitle_ref=subtitle_ref,
+        )
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chao"}],
+            "detected_language": "vi",
+        }
 
     async def fake_execute_engine(_feature, params, _context):
         calls["pipeline"] += 1
@@ -225,7 +251,7 @@ def test_public_translate_upload_language_waits_confirm(monkeypatch):
     async def fake_pipeline(*_args, **_kwargs):
         return {"ok": True, "has_video": True, "has_subtitle": True, "state": {}}
 
-    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fail_prepare)
+    monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
     monkeypatch.setattr(bot, "execute_engine", fake_execute_engine)
     monkeypatch.setattr(bot, "execute_video_dubbing_pipeline", fake_pipeline)
     monkeypatch.setattr(bot, "get_user", lambda _uid: (99999, 0, 0))
@@ -236,12 +262,16 @@ def test_public_translate_upload_language_waits_confirm(monkeypatch):
     handled = asyncio.run(bot.handle_video_dubbing_pending_upload(_media_update(uid), SimpleNamespace()))
     assert handled is True
     assert calls["prepare"] == 0
+    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
+
+    asyncio.run(_press(monkeypatch, "videodub|confirm_original_subtitle", uid))
+    assert calls["prepare"] == 1
     assert bot.get_video_dubbing_pending(uid)["step"] == "language"
 
     language = asyncio.run(_press(monkeypatch, "videodub|language|English", uid))
     assert "Dịch phụ đề video" in language["text"]
     assert "✅ Xuất video phụ đề dịch" in _labels(language["reply_markup"])
-    assert calls["prepare"] == 0
+    assert calls["prepare"] == 1
     assert bot.get_video_dubbing_pending(uid)["step"] == "confirm"
 
     confirm = asyncio.run(_press(monkeypatch, "videodub|final", uid))

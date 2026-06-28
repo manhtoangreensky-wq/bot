@@ -7684,10 +7684,10 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     assert {
         "📝 Tạo phụ đề tự động",
         "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng / Voice video",
+        "🎙 Lồng tiếng video",
         "🎬 Phụ đề + Lồng tiếng",
         "📄 Dịch file phụ đề",
-        "🧾 Transcript / Bóc lời",
+        "🧾 Bóc lời thoại",
     }.issubset(set(dub_labels))
     assert "🔗 Tải video từ link" not in dub_labels
     assert "🎭 Dịch + lồng tiếng" not in dub_labels
@@ -7878,7 +7878,7 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     cases = [
         (71001, bot.VIDEO_SUBTITLE_MODE_CREATE, "Tạo phụ đề tự động"),
         (71002, bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "Dịch phụ đề"),
-        (71003, bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng / Voice video"),
+        (71003, bot.VIDEO_SUBTITLE_MODE_DUB, "Lồng tiếng video"),
         (71004, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "Phụ đề + lồng tiếng"),
     ]
     for uid, mode, expected_text in cases:
@@ -7888,10 +7888,13 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
         assert state["video_processing_mode"] == mode
         if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             assert state["step"] == "waiting_media"
-            assert "gửi video hoặc audio" in result["text"].lower()
+            assert "video/audio" in result["text"].lower()
         else:
             assert state["step"] == "source"
-            assert "gửi video/audio" in result["text"].lower()
+            if mode == bot.VIDEO_SUBTITLE_MODE_CREATE:
+                assert "gửi video/audio" in result["text"].lower()
+            else:
+                assert "video/audio" in result["text"].lower()
         callbacks = [button.callback_data for row in result["reply_markup"].inline_keyboard for button in row]
         assert "videodub|link_start" not in callbacks
         if mode == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -7918,6 +7921,8 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
     message = FakeMessage("video-71004")
     update = SimpleNamespace(effective_user=SimpleNamespace(id=71004), message=message)
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(update, SimpleNamespace())) is True
+    assert bot.get_video_dubbing_pending(71004)["step"] == "original_subtitle_confirm"
+    asyncio.run(press("videodub|confirm_original_subtitle", 71004))
     assert bot.get_video_dubbing_pending(71004)["step"] == "original_subtitle_ready"
     assert bot.get_video_dubbing_pending(71004)["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     asyncio.run(press("videodub|combo_translate", 71004))
@@ -7939,25 +7944,25 @@ def test_video_subtitle_v22_mode_routing_and_upload_confirm(monkeypatch):
             71102,
             bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
             {"target_language": "English", "translate_requested": "1"},
-            "confirm",
-            "videodub|final",
-            "Dịch phụ đề video",
+            "original_subtitle_confirm",
+            "videodub|confirm_original_subtitle",
+            "Tạo phụ đề gốc trước",
         ),
         (
             71103,
             bot.VIDEO_SUBTITLE_MODE_DUB,
             {"target_language": "Tiếng Việt", "voice_style": "Nữ tự nhiên", "voice_speed": "1.0"},
-            "confirm",
-            "videodub|final",
-            "Lồng tiếng video",
+            "original_subtitle_confirm",
+            "videodub|confirm_original_subtitle",
+            "Tạo phụ đề gốc trước",
         ),
         (
             71104,
             bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             {"target_language": "English", "translate_requested": "1"},
-            "original_subtitle_ready",
-            "videodub|combo_translate",
-            "Đã tạo phụ đề gốc",
+            "original_subtitle_confirm",
+            "videodub|confirm_original_subtitle",
+            "Tạo phụ đề gốc trước",
         ),
     ]
     for uid, mode, extra, expected_step, expected_callback, expected_label in upload_cases:

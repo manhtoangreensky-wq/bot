@@ -31,8 +31,29 @@ class CaptureMessage:
         return SimpleNamespace(text=text)
 
 
+class CaptureQuery:
+    def __init__(self, data, user_id):
+        self.data = data
+        self.from_user = SimpleNamespace(id=user_id)
+        self.message = CaptureMessage(f"query-{user_id}")
+        self.outputs = self.message.outputs
+
+    async def answer(self, *args, **kwargs):
+        self.outputs.append({"answer": args, "answer_kwargs": kwargs})
+        return None
+
+
 def _update(uid, message):
     return SimpleNamespace(effective_user=SimpleNamespace(id=uid), message=message)
+
+
+async def _press_videodub(data, uid, context=None):
+    query = CaptureQuery(data, uid)
+    await bot.handle_video_dubbing_callback(
+        SimpleNamespace(callback_query=query),
+        context or SimpleNamespace(),
+    )
+    return query
 
 
 def _prepare_upload(monkeypatch, uid, mode, step="source"):
@@ -44,6 +65,9 @@ def _prepare_upload(monkeypatch, uid, mode, step="source"):
 
 
 def _patch_create_subtitle(monkeypatch):
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
+
     async def fake_prepare(_context, state, user_id, allow_admin=False):
         source = "1\n00:00:00,000 --> 00:00:02,000\nXin chào"
         subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
@@ -136,8 +160,13 @@ def test_task2_upload_video_stays_in_auto_dubbing(monkeypatch):
     state = bot.get_video_dubbing_pending(uid)
     assert state["product"] == "auto_dubbing"
     assert state["source_ref"] == "auto-dubbing"
+    assert state["step"] == "original_subtitle_confirm"
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
+
+    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid))
+    state = bot.get_video_dubbing_pending(uid)
     assert state["step"] == "language"
-    assert "Chọn ngôn ngữ lồng tiếng" in message.outputs[-1]["text"]
+    assert "Chọn ngôn ngữ lồng tiếng" in query.outputs[-1]["text"]
 
 
 def test_task2_upload_video_stays_in_subtitle_plus_dubbing(monkeypatch):
@@ -164,8 +193,13 @@ def test_task2_upload_video_stays_in_subtitle_plus_dubbing(monkeypatch):
     assert state["product"] == "subtitle_plus_dubbing"
     assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert state["source_ref"] == "subtitle-dubbing"
+    assert state["step"] == "original_subtitle_confirm"
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
+
+    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid))
+    state = bot.get_video_dubbing_pending(uid)
     assert state["step"] == "original_subtitle_ready"
-    assert "Đã tạo phụ đề gốc" in message.outputs[-1]["text"]
+    assert "Đã tạo phụ đề gốc" in query.outputs[-1]["text"]
 
 
 def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):

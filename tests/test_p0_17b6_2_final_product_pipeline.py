@@ -62,10 +62,10 @@ def test_translation_dub_studio_simple_menu():
     assert labels == [
         "📝 Tạo phụ đề tự động",
         "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng / Voice video",
+        "🎙 Lồng tiếng video",
         "🎬 Phụ đề + Lồng tiếng",
         "📄 Dịch file phụ đề",
-        "🧾 Transcript / Bóc lời",
+        "🧾 Bóc lời thoại",
         "⬅️ Trung tâm",
         "🏠 Menu chính",
     ]
@@ -117,8 +117,11 @@ def test_subtitle_plus_dub_stepwise_only():
     assert next_state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert next_state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert next_state["step"] == "waiting_media"
-    assert "Tạo phụ đề gốc" in text
+    assert "Chưa có phụ đề" in text
+    assert "Đã có phụ đề" in text
     assert "videodub|final" not in _callbacks(markup)
+    assert "videodub|path|no_subtitle" in _callbacks(markup)
+    assert "videodub|path|has_subtitle" in _callbacks(markup)
     bot.clear_video_dubbing_pending(uid)
 
 
@@ -238,9 +241,9 @@ def test_mux_unavailable_no_fake_mp4():
         subtitle_items=[{"output_type": "srt", "bytes": b"srt", "filename": "result.srt"}],
         video_bytes=b"",
     ))
-    assert result == {"documents": 0, "audio": 1, "video": 0}
+    assert result == {"documents": 1, "audio": 1, "video": 0}
     assert "video" not in [kind for kind, _ in message.outputs]
-    assert "document" not in [kind for kind, _ in message.outputs]
+    assert "document" in [kind for kind, _ in message.outputs]
     assert "text" not in [kind for kind, _ in message.outputs]
 
 

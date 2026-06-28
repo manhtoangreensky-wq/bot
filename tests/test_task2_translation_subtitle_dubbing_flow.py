@@ -49,10 +49,10 @@ def test_video_translation_menu_labels_auto():
     assert labels[:6] == [
         "📝 Tạo phụ đề tự động",
         "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng / Voice video",
+        "🎙 Lồng tiếng video",
         "🎬 Phụ đề + Lồng tiếng",
         "📄 Dịch file phụ đề",
-        "🧾 Transcript / Bóc lời",
+        "🧾 Bóc lời thoại",
     ]
     assert "🔗 Tải video từ link" not in labels
     assert "📂 Media" not in labels
@@ -107,7 +107,7 @@ def test_subtitle_plus_dubbing_export_before_voice(monkeypatch):
     assert state["step"] == "waiting_media"
     assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    assert "Tạo phụ đề gốc" in text
+    assert "tạo phụ đề gốc" in text.lower()
     assert "✅ Xác nhận tạo đầy đủ" not in labels
     assert "📄 Xuất SRT" not in labels
     assert "🗣 Tiếp tục lồng tiếng" not in labels
@@ -134,26 +134,25 @@ def test_no_copied_source_menu_inside_product_flows():
     assert "🔗 Tải link" not in create_labels
 
     translate_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
-    assert translate_labels[0] == "📎 Gửi video/audio"
-    assert "📄 Gửi SRT/VTT/TXT" not in translate_labels
+    assert translate_labels[:2] == ["🎬 Chưa có phụ đề", "📄 Đã có phụ đề"]
     admin_translate_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "entry_surface": "admin_test_mode"}))
-    assert admin_translate_labels[:2] == ["📎 Gửi video/audio", "📄 Gửi SRT/VTT/TXT"]
+    assert admin_translate_labels[:2] == translate_labels[:2]
 
     dub_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert dub_labels[:3] == [
-        "📎 Gửi video/audio để tự bóc lời",
-        "📄 Gửi file phụ đề có sẵn",
+        "🎬 Từ video/audio",
+        "📄 Từ phụ đề có sẵn",
         "🕘 Dùng phụ đề vừa tạo",
     ]
 
     combo_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert combo_labels == ["⬅️ Dịch video", "🏠 Menu chính"]
+    assert combo_labels[:2] == ["🎬 Chưa có phụ đề", "📄 Đã có phụ đề"]
 
 
 def test_auto_subtitle_input_and_output_are_basic_product():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}
     assert "Tạo phụ đề tự động" in bot.video_dubbing_source_text(state, "vi")
-    assert "không dịch và không hỏi voice" in bot.video_dubbing_upload_text(state, "vi")
+    assert "không dịch và không hỏi giọng lồng tiếng" in bot.video_dubbing_upload_text(state, "vi")
     labels = _labels(bot.video_dubbing_output_keyboard("vi", state))
     assert "🗣 Lồng tiếng" not in labels
     assert "🗣 Tiếp tục lồng tiếng" not in labels

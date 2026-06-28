@@ -179,12 +179,26 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
     monkeypatch.setattr(bot, "video_dubbing_capability", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
 
     prepare_calls = {"count": 0}
 
-    async def fake_prepare(*_args, **_kwargs):
+    async def fake_prepare(_context, state, user_id, allow_admin=False):
         prepare_calls["count"] += 1
-        raise AssertionError("ASR must wait until final confirmation")
+        source = "1\n00:00:00,000 --> 00:00:02,000\nXin chao"
+        subtitle_ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", source)
+        saved = bot.set_video_dubbing_pending(
+            user_id,
+            state.get("step") or "creating_original_subtitle",
+            subtitle_ref=subtitle_ref,
+        )
+        return {
+            "state": saved,
+            "source_subtitle": source,
+            "source_segments": [{"start": 0, "end": 2, "text": "Xin chao"}],
+            "detected_language": "vi",
+        }
 
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
 
@@ -201,12 +215,20 @@ def test_standalone_translate_subtitle_asks_upload_then_language(monkeypatch):
 
     assert handled is True
     state = bot.get_video_dubbing_pending(user_id)
-    assert state["step"] == "language"
+    assert state["step"] == "original_subtitle_confirm"
     assert not state["subtitle_ref"]
     assert state["video_file_id"] == "translate-video"
-    assert "Dịch phụ đề sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
     assert prepare_calls["count"] == 0
     _assert_public_clean(message.outputs[-1]["text"])
+
+    confirm = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", user_id))
+    state = bot.get_video_dubbing_pending(user_id)
+    assert state["step"] == "language"
+    assert state["source_subtitle_ref"] == state["subtitle_ref"]
+    assert "Dịch phụ đề sang ngôn ngữ nào" in confirm.outputs[-1]["text"]
+    assert prepare_calls["count"] == 1
+    _assert_public_clean(confirm.outputs[-1]["text"])
 
 
 def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
@@ -215,6 +237,8 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
     monkeypatch.setattr(bot, "get_user_language", lambda _uid: "vi")
     monkeypatch.setattr(bot, "cache_recent_media_state", lambda _update: None)
     monkeypatch.setattr(bot, "remember_last_media", lambda _update: None)
+    monkeypatch.setattr(bot, "video_dubbing_configured_readiness", lambda *_args, **_kwargs: {"missing": []})
+    monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
 
     async def fake_prepare(_context, passed_state, user_id, allow_admin=False):
         assert passed_state["mode"] == bot.VIDEO_SUBTITLE_MODE_CREATE
@@ -242,9 +266,15 @@ def test_standalone_dubbing_asks_upload_then_language_or_voice(monkeypatch):
     )) is True
 
     state = bot.get_video_dubbing_pending(user_id)
-    assert state["step"] == "language"
-    assert "Bạn muốn lồng tiếng sang ngôn ngữ nào" in message.outputs[-1]["text"]
+    assert state["step"] == "original_subtitle_confirm"
+    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
     _assert_public_clean(message.outputs[-1]["text"])
+
+    confirm = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", user_id))
+    state = bot.get_video_dubbing_pending(user_id)
+    assert state["step"] == "language"
+    assert "Bạn muốn lồng tiếng sang ngôn ngữ nào" in confirm.outputs[-1]["text"]
+    _assert_public_clean(confirm.outputs[-1]["text"])
 
 
 def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
@@ -288,8 +318,9 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
         SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=message),
         SimpleNamespace(),
     ))
+    assert bot.get_video_dubbing_pending(user_id)["step"] == "original_subtitle_confirm"
+    asyncio.run(_press_videodub("videodub|confirm_original_subtitle", user_id))
     assert bot.get_video_dubbing_pending(user_id)["step"] == "original_subtitle_ready"
-    assert "Đã tạo phụ đề gốc" in message.outputs[-1]["text"]
 
     asyncio.run(_press_videodub("videodub|combo_translate", user_id))
     lang_query = asyncio.run(_press_videodub("videodub|language|English", user_id))
