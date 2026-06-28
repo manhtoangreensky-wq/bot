@@ -130,10 +130,10 @@ def test_translation_menu_still_visible():
     for label in (
         "📝 Tạo phụ đề tự động",
         "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng / Voice video",
+        "🎙 Lồng tiếng video",
         "🎬 Phụ đề + Lồng tiếng",
         "📄 Dịch file phụ đề",
-        "🧾 Transcript / Bóc lời",
+        "🧾 Bóc lời thoại",
     ):
         assert label in labels
     assert "🔗 Tải video từ link" not in labels

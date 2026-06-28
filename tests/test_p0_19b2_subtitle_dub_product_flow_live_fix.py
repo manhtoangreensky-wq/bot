@@ -50,8 +50,8 @@ def test_subtitle_menu_labels_unchanged():
     markup = bot.video_dubbing_menu_keyboard("vi", "translation")
     assert _label_rows(markup) == [
         ["📝 Tạo phụ đề tự động", "🌐 Dịch phụ đề / video"],
-        ["🎙 Lồng tiếng / Voice video", "🎬 Phụ đề + Lồng tiếng"],
-        ["📄 Dịch file phụ đề", "🧾 Transcript / Bóc lời"],
+        ["🎙 Lồng tiếng video", "🎬 Phụ đề + Lồng tiếng"],
+        ["📄 Dịch file phụ đề", "🧾 Bóc lời thoại"],
         ["⬅️ Trung tâm", "🏠 Menu chính"],
     ]
     assert _callback_rows(markup) == [
@@ -72,20 +72,26 @@ def test_subtitle_keyboard_layout_unchanged():
 def test_translate_subtitle_keyboard_layout_unchanged():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "origin": "translation"}
     markup = bot.video_dubbing_source_keyboard("vi", state)
-    assert _label_rows(markup) == [["📎 Gửi video/audio"], ["⬅️ Dịch video", "🏠 Menu chính"]]
-    assert _callback_rows(markup) == [["videodub|source_upload"], ["videodub|back_type", "menu|main"]]
+    assert _label_rows(markup) == [
+        ["🎬 Chưa có phụ đề", "📄 Đã có phụ đề"],
+        ["⬅️ Dịch video", "🏠 Menu chính"],
+    ]
+    assert _callback_rows(markup) == [
+        ["videodub|path|no_subtitle", "videodub|path|has_subtitle"],
+        ["videodub|back_type", "menu|main"],
+    ]
 
 
 def test_dub_keyboard_layout_unchanged():
     state = {"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "video_processing_mode": bot.VIDEO_SUBTITLE_MODE_DUB, "origin": "translation"}
     markup = bot.video_dubbing_source_keyboard("vi", state)
     assert _label_rows(markup) == [
-        ["📎 Gửi video/audio để tự bóc lời", "📄 Gửi file phụ đề có sẵn"],
+        ["🎬 Từ video/audio", "📄 Từ phụ đề có sẵn"],
         ["🕘 Dùng phụ đề vừa tạo"],
         ["⬅️ Dịch video", "🏠 Menu chính"],
     ]
     assert _callback_rows(markup) == [
-        ["videodub|source_upload", "videodub|source_upload"],
+        ["videodub|path|no_subtitle", "videodub|path|has_subtitle"],
         ["videodub|source_recent_subtitle"],
         ["videodub|back_type", "menu|main"],
     ]
@@ -96,10 +102,10 @@ def test_no_new_public_buttons_added_for_p0_19b2():
     assert labels == [
         "📝 Tạo phụ đề tự động",
         "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng / Voice video",
+        "🎙 Lồng tiếng video",
         "🎬 Phụ đề + Lồng tiếng",
         "📄 Dịch file phụ đề",
-        "🧾 Transcript / Bóc lời",
+        "🧾 Bóc lời thoại",
         "⬅️ Trung tâm",
         "🏠 Menu chính",
     ]

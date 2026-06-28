@@ -120,14 +120,7 @@ def test_subtitle_plus_dub_waiting_media_consumes_video(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_asr_missing_for_state", lambda *_args, **_kwargs: False)
 
     async def fake_prepare(_context, state, user_id, allow_admin=False):
-        ref = bot.set_video_dubbing_artifact(user_id, "source_subtitle", "1\n00:00:00,000 --> 00:00:02,000\nXin chào")
-        saved = bot.set_video_dubbing_pending(user_id, state.get("step") or "creating_original_subtitle", subtitle_ref=ref)
-        return {
-            "state": saved,
-            "source_subtitle": "1\n00:00:00,000 --> 00:00:02,000\nXin chào",
-            "source_segments": [{"start": 0, "end": 2, "text": "Xin chào"}],
-            "detected_language": "vi",
-        }
+        raise AssertionError("upload must wait for original subtitle confirmation")
 
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
     message = CaptureMessage("combo-upload")
@@ -135,11 +128,11 @@ def test_subtitle_plus_dub_waiting_media_consumes_video(monkeypatch):
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), SimpleNamespace())) is True
 
     state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "original_subtitle_ready"
+    assert state["step"] == "original_subtitle_confirm"
     assert state["active_flow"] == bot.VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
     joined = "\n".join(item["text"] for item in message.outputs if item["kind"] == "text")
-    assert "TOAN AAS đang tạo phụ đề gốc" in joined
-    assert "Đã tạo phụ đề gốc" in joined
+    assert "Tạo phụ đề gốc trước" in joined
+    assert "TOAN AAS đang tạo phụ đề gốc" not in joined
     assert "Bạn muốn xử lý video này theo hướng nào" not in joined
 
 
@@ -161,9 +154,9 @@ def test_subtitle_plus_dub_no_generic_video_fallthrough(monkeypatch):
 def test_subtitle_plus_dub_creates_original_subtitle_first():
     text = bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}, "vi")
     labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert "Tạo phụ đề gốc" in text
-    assert "Chọn giọng" in text
-    assert labels == ["⬅️ Dịch video", "🏠 Menu chính"]
+    assert "tạo phụ đề gốc" in text.lower()
+    assert "Chưa có phụ đề" in text
+    assert labels[:2] == ["🎬 Chưa có phụ đề", "📄 Đã có phụ đề"]
 
 
 def test_subtitle_plus_dub_no_confirm_full_before_original_subtitle():
@@ -252,20 +245,21 @@ def test_subtitle_plus_dub_full_requires_confirm(monkeypatch):
     query = asyncio.run(_press(uid, "videodub|combo_full_dub"))
     assert calls["full"] == 1
     assert bot.get_video_dubbing_pending(uid)["step"] == "completed"
-    assert "đã tạo audio lồng tiếng" in query.message.outputs[-1]["text"]
+    assert "đã tạo được audio lồng tiếng" in query.message.outputs[-1]["text"]
+    assert "chưa ghép được audio vào video" in query.message.outputs[-1]["text"]
 
 
 def test_subtitle_plus_dub_outputs_audio_or_video_cleanly():
     audio_state = {"final_audio_available": "1", "final_video_available": "0"}
     video_state = {"final_audio_available": "1", "final_video_available": "1"}
     assert "📹 Tải video" not in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
-    assert "📹 Thử ghép lại" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
+    assert "🔁 Thử ghép lại" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", audio_state))
     assert "📹 Tải video hoàn chỉnh" in _labels(bot.subtitle_plus_dub_completed_keyboard("vi", video_state))
 
 
 def test_subtitle_plus_dub_mux_unavailable_no_fake_mp4():
     text = bot.subtitle_plus_dub_completed_text({}, {"has_audio": True, "has_video": False}, "vi")
-    assert "đã tạo audio lồng tiếng" in text
+    assert "đã tạo được audio lồng tiếng" in text
     assert "MP4" not in text
 
 
