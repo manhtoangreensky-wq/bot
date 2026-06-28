@@ -89,7 +89,9 @@ def test_merge_images_menu_has_two_paths():
     text = ivf.frame_video_unified_menu_text("vi")
     assert "📷 Tôi có ảnh sẵn" in labels
     assert "🖼 Tạo ảnh AI trước" in labels
-    assert "Local Worker + FFmpeg" in text
+    assert "công cụ ghép video của TOAN AAS" in text
+    assert "Local Worker" not in text
+    assert "FFmpeg" not in text
     assert "không gọi AI video" in text
 
 

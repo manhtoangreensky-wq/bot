@@ -52090,15 +52090,17 @@ def video_editor_status_keyboard(job_id: int, lang: str = "vi") -> InlineKeyboar
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("🔄 Kiểm tra trạng thái" if is_vi else "🔄 Check status", callback_data=f"videoedit|status|{int(job_id)}"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ], [
+        InlineKeyboardButton("⬅️ Menu video" if is_vi else "⬅️ Video menu", callback_data="menu|main_video"),
     ]])
 
 
 def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
     status = str((job or {}).get("status") or "unknown").lower()
-    labels = {"queued": "đang chờ worker", "running": "đang xử lý", "succeeded": "hoàn tất", "failed": "thất bại", "cancelled": "đã hủy"}
-    lines = ["🎞 <b>Trạng thái chỉnh video local</b>", "", f"• Job: <code>#{html.escape(str((job or {}).get('id') or '-'))}</code>", f"• Trạng thái: <b>{html.escape(labels.get(status, status))}</b>", "• Phí V1: <b>0 Xu</b>"]
+    labels = {"queued": "đang chờ xử lý", "running": "đang xử lý", "succeeded": "hoàn tất", "failed": "chưa xử lý được", "cancelled": "đã hủy"}
+    lines = ["🎞 <b>Trạng thái chỉnh video local</b>", "", f"• Mã xử lý: <code>#{html.escape(str((job or {}).get('id') or '-'))}</code>", f"• Trạng thái: <b>{html.escape(labels.get(status, 'đang kiểm tra'))}</b>", "• Phí V1: <b>0 Xu</b>"]
     if status == "succeeded":
-        lines.append("• Kết quả: worker đã gửi video tự động vào chat.")
+        lines.append("• Kết quả: hệ thống đã gửi video tự động vào chat.")
     elif status == "failed":
         lines.append("• Kết quả: xử lý chưa thành công. TOAN AAS chưa trừ Xu.")
     else:
@@ -54990,7 +54992,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     draft = dict(session.get("draft") or {})
     addon_plan = dict(draft.get("b14_addon_plan") or {})
     result = dict(result or {})
-    job = dict(result.get("job") or draft.get("b14_queue_job") or {})
+    draft_job = dict(draft.get("b14_queue_job") or {})
+    job = dict(result.get("job") or draft_job or {})
     project = dict(result.get("project") or {})
     invoice = dict(draft.get("b14_invoice") or {})
     scene_count = safe_int(invoice.get("scene_count") or draft.get("b14_scene_count"), 3)
@@ -55003,7 +55006,13 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         pass
     live_job = video_b14_render_job_by_id(job_id)
     if live_job:
-        job.update(live_job)
+        draft_status = str(draft_job.get("status") or "").strip().lower()
+        if draft_status in {"failed", "error"} and not result.get("job"):
+            merged_job = dict(live_job)
+            merged_job.update(job)
+            job = merged_job
+        else:
+            job.update(live_job)
     project_id = safe_int(project.get("project_id") or draft.get("b14_project_id"), 0)
     if project_id and not project:
         try:
@@ -55115,7 +55124,10 @@ def video_b14_queue_status_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton("📊 Kiểm tra trạng thái", callback_data="vproduct|b14_job_status"),
             InlineKeyboardButton("🧾 Xem lại hóa đơn", callback_data="vproduct|b14_invoice_screen"),
         ],
-        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [
+            InlineKeyboardButton("⬅️ Menu video" if normalize_user_language(lang) == "vi" else "⬅️ Video menu", callback_data="menu|main_video"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ],
     ])
 
 
@@ -56438,7 +56450,6 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "open":
         if value not in VIDEO_PRODUCT_REGISTRY:
             return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
-        clear_video_session(uid)
         if value in {"image_to_video", "frame_video_local"}:
             return await safe_edit_or_send(
                 query,
@@ -56446,13 +56457,56 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 parse_mode="HTML",
                 reply_markup=ivf.frame_video_unified_menu_keyboard(lang),
             )
+        if value == "video_ai_real":
+            return await safe_edit_or_send(
+                query,
+                video_ai_true_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_ai_true_keyboard(lang),
+            )
+        if value == "self_shot_scene_change":
+            recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
+            current = get_developing_video_pending(uid) or {}
+            if current.get("flow") == "selfscene":
+                step = str(current.get("step") or "").strip()
+                if step in {"direction", "direction_custom"}:
+                    return await safe_edit_or_send(query, self_scene_start_text(lang, current), parse_mode="HTML", reply_markup=self_scene_input_keyboard(lang, current))
+                if step in {"object", "object_custom"}:
+                    return await safe_edit_or_send(query, self_scene_object_text(current, lang), parse_mode="HTML", reply_markup=self_scene_object_keyboard(lang))
+                if step in {"context", "context_custom"}:
+                    return await safe_edit_or_send(query, self_scene_context_text(current, lang), parse_mode="HTML", reply_markup=self_scene_context_keyboard(lang))
+                if step in {"style", "style_custom"}:
+                    return await safe_edit_or_send(query, self_scene_style_text(current, lang), parse_mode="HTML", reply_markup=self_scene_style_keyboard(lang))
+                if step in {"music", "music_custom"}:
+                    return await safe_edit_or_send(query, self_scene_music_text(current, lang), parse_mode="HTML", reply_markup=self_scene_music_keyboard(lang))
+            if current.get("flow") != "selfscene":
+                set_developing_video_pending(uid, "selfscene", "await_video", input_type="video")
+            go_video_screen(uid, "selfscene:upload", "selfscene")
+            return await safe_edit_or_send(
+                query,
+                self_scene_upload_text(lang, bool(recent.get("file_id") or current.get("source_file_id"))),
+                parse_mode="HTML",
+                reply_markup=self_scene_upload_keyboard(lang, bool(recent.get("file_id") or current.get("source_file_id"))),
+            )
+        if value == "video_local_edit":
+            source = recent_video_editor_source(uid)
+            set_video_editor_pending(uid, "menu", **source)
+            return await safe_edit_or_send(
+                query,
+                video_editor_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=video_editor_menu_keyboard(lang),
+            )
         parent_callback = str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
-        session = task3d_session_step(uid, "profile_select", product_id=value, return_to=parent_callback, provider_called=False, xu_charged=0)
+        current_session = get_video_session(uid)
+        if str(current_session.get("product_id") or "") != str(value):
+            clear_video_session(uid)
+        session = task3d_session_step(uid, "intro", product_id=value, return_to=parent_callback, provider_called=False, xu_charged=0)
         return await safe_edit_or_send(
             query,
-            video_b14_profile_selection_text(session, uid, lang),
+            task3d_product_intro_text(value, lang),
             parse_mode="HTML",
-            reply_markup=video_b14_profile_selection_keyboard(lang),
+            reply_markup=task3d_product_intro_keyboard(value, lang),
         )
     session = get_video_session(uid)
     product_id = str(session.get("product_id") or "")
@@ -96199,12 +96253,22 @@ def frame_video_job_status_text(job: dict) -> str:
     ratio = frame_video_ratio_payload(job.get("ratio") or "9x16")
     duration = frame_video_duration_payload(job.get("duration") or "standard")
     effect = frame_video_effect_payload(job.get("effect") or "fade")
-    detail = str(job.get("detail") or "").strip()
+    status = str(job.get("status") or "").strip().lower()
+    status_label = {
+        "queued": "đang chờ xử lý",
+        "running": "đang ghép video",
+        "succeeded": "hoàn tất",
+        "success": "hoàn tất",
+        "completed": "hoàn tất",
+        "failed": "chưa ghép được",
+        "error": "chưa ghép được",
+        "cancelled": "đã hủy",
+    }.get(status, "đang kiểm tra")
     lines = [
         "🎞 <b>Trạng thái ghép ảnh thành video</b>",
         "",
-        f"• Job: <code>{html.escape(str(job.get('job_id') or '-'))}</code>",
-        f"• Trạng thái: <code>{html.escape(str(job.get('status') or '-'))}</code>",
+        f"• Mã xử lý: <code>{html.escape(str(job.get('job_id') or '-'))}</code>",
+        f"• Trạng thái: <b>{html.escape(status_label)}</b>",
         f"• Số ảnh: <code>{int(job.get('image_count') or 0)}</code>",
         f"• Tỷ lệ: <code>{html.escape(str(ratio.get('label') or '-'))}</code>",
         f"• Thời lượng: <code>{html.escape(str(duration.get('label') or '-'))}</code>",
@@ -96212,14 +96276,17 @@ def frame_video_job_status_text(job: dict) -> str:
         f"• Xu: <code>{str(int(job.get('charged_amount') or 0)) + ' Xu đã trừ' if int(job.get('charged_amount') or 0) > 0 else 'chưa trừ'}</code>",
         f"• Cập nhật: <code>{html.escape(str(job.get('updated_at') or '-'))}</code>",
     ]
-    if detail:
-        lines.append(f"• Ghi chú: <code>{html.escape(detail[:240])}</code>")
+    if status in {"failed", "error"}:
+        lines.append("• Kết quả: TOAN AAS chưa dựng được video hoàn chỉnh lần này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau.")
     return "\n".join(lines)
 
 def frame_video_job_status_keyboard(job_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Kiểm tra trạng thái ghép video", callback_data=f"framevideo|status|{str(job_id or '')}")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+        [
+            InlineKeyboardButton("⬅️ Menu video", callback_data="menu|main_video"),
+            InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
+        ],
     ])
 
 def set_frame_video_state(user_id, state: dict) -> dict:
