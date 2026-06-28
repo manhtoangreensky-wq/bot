@@ -180,7 +180,7 @@ def test_voice_vault_ready_buttons():
         bot.PRODUCT_CONTEXT_SHOWROOM,
         {"id": 7, "status": "ready", "provider_voice_id": "voice-7", "preview_audio_ref": "demo-file"},
     ))
-    for label in ["▶️ Nghe demo", "✍️ Đọc thử", "⭐ Đặt mặc định", "🎬 Dùng cho video", "⬇️ Tải demo"]:
+    for label in ["▶️ Nghe demo", "🎧 Tạo audio", "⭐ Đặt mặc định", "🎬 Dùng cho video", "⬇️ Tải demo"]:
         assert label in labels
 
 
