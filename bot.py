@@ -1206,10 +1206,11 @@ PLAN_CATALOG = {
         "description": "Dành cho team nhỏ, shop hoặc affiliate team cần workflow content + ảnh + voice/audio",
     },
 }
-MONTHLY_STARTER_PRICE_VND = env_int("MONTHLY_STARTER_PRICE_VND", 49000)
-MONTHLY_CREATOR_PRICE_VND = env_int("MONTHLY_CREATOR_PRICE_VND", 99000)
+MONTHLY_STARTER_PRICE_VND = env_int("MONTHLY_STARTER_PRICE_VND", 99000)
+MONTHLY_CREATOR_PRICE_VND = env_int("MONTHLY_CREATOR_PRICE_VND", 199000)
 MONTHLY_SHOP_PRICE_VND = env_int("MONTHLY_SHOP_PRICE_VND", 299000)
 MONTHLY_PRO_PRICE_VND = env_int("MONTHLY_PRO_PRICE_VND", 499000)
+MONTHLY_SMALL_BUSINESS_PRICE_VND = env_int("MONTHLY_SMALL_BUSINESS_PRICE_VND", 999000)
 
 # ─── MANUAL BANK FALLBACK ────────────────────────────────────────────────────
 MANUAL_BANK_NAME      = _env("MANUAL_BANK_NAME", "ACB")
@@ -41197,6 +41198,160 @@ def video_base_cost_xu() -> int:
 def video_combo_pricing_payload() -> list[dict]:
     return [
         {
+            "code": "video_ad_fast_199k",
+            "label": "🎬 Combo Video Quảng Cáo Nhanh",
+            "button_label": "🎬 QC nhanh — 199k",
+            "display_price": "199k",
+            "price_vnd": 199000,
+            "summary": "Làm nhanh một bộ nội dung quảng cáo ngắn cho sản phẩm/dịch vụ.",
+            "audience": "shop nhỏ, affiliate, người cần video bán hàng nhanh",
+            "includes": "1 video ngắn + 1 ảnh tiêu chuẩn + gợi ý nhạc/kịch bản phù hợp",
+            "example": "ra mắt sản phẩm mới, chạy reels/tiktok ngắn",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+            "public": True,
+        },
+        {
+            "code": "product_review_299k",
+            "label": "🛒 Combo Review Sản Phẩm",
+            "button_label": "🛒 Review SP — 299k",
+            "display_price": "299k",
+            "price_vnd": 299000,
+            "summary": "Chuẩn bị nội dung review sản phẩm rõ lợi ích, dễ đăng ngắn.",
+            "audience": "shop, KOC/KOL nhỏ, affiliate sản phẩm",
+            "includes": "1 video tiêu chuẩn + 2 ảnh tiêu chuẩn + 1 bộ ý tưởng/trend",
+            "example": "review mỹ phẩm, đồ gia dụng, khóa học, dịch vụ",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+            "public": True,
+        },
+        {
+            "code": "song_visual_399k",
+            "label": "🎵 Combo Bài Hát + Visual",
+            "button_label": "🎵 Bài hát + Visual",
+            "display_price": "399k",
+            "price_vnd": 399000,
+            "summary": "Dành cho bài hát/nhạc thương hiệu kèm visual; cần admin xác nhận trước khi mở bán tự động.",
+            "audience": "creator, nhãn hàng cần nội dung âm nhạc",
+            "includes": "kịch bản visual + gợi ý ảnh/video đi kèm bài hát",
+            "example": "bài hát sản phẩm, intro thương hiệu, visual ngắn cho chiến dịch",
+            "rank_points": False,
+            "manual": True,
+            "public": True,
+        },
+        {
+            "code": "brand_voice_399k",
+            "label": "🎙 Combo Voice Thương Hiệu",
+            "button_label": "🎙 Voice thương hiệu",
+            "display_price": "399k",
+            "price_vnd": 399000,
+            "summary": "Chuẩn bị bộ giọng đọc/voice thương hiệu; cần xác nhận quyền giọng và phạm vi dùng.",
+            "audience": "shop, cá nhân bán hàng, đội content cần giọng thống nhất",
+            "includes": "kịch bản voice + hướng dẫn giọng đọc + gợi ý dùng trong video",
+            "example": "giọng đọc quảng cáo, voice intro, voice hướng dẫn sản phẩm",
+            "rank_points": False,
+            "manual": True,
+            "public": True,
+        },
+        {
+            "code": "mini_course_video_499k",
+            "label": "📚 Combo Video Khóa Học Mini",
+            "button_label": "📚 Khóa học mini",
+            "display_price": "499k",
+            "price_vnd": 499000,
+            "summary": "Gói dựng nội dung video bài học ngắn; cần chốt phạm vi trước khi bán tự động.",
+            "audience": "người dạy online, chuyên gia, chủ shop cần hướng dẫn khách",
+            "includes": "dàn ý mini-course + gợi ý video/ảnh cho bài học",
+            "example": "3 bài học ngắn, hướng dẫn sử dụng sản phẩm, onboarding khách",
+            "rank_points": False,
+            "manual": True,
+            "public": True,
+        },
+        {
+            "code": "translate_dub_video_499k",
+            "label": "🌍 Combo Dịch + Lồng Tiếng Video",
+            "button_label": "🌍 Dịch + lồng tiếng",
+            "display_price": "499k",
+            "price_vnd": 499000,
+            "summary": "Dành cho video cần dịch/lồng tiếng; chờ xác nhận độ dài/ngôn ngữ trước khi mở thanh toán tự động.",
+            "audience": "người làm nội dung đa ngôn ngữ, shop bán quốc tế",
+            "includes": "tư vấn hướng dịch + phụ đề/lồng tiếng theo phạm vi đã chốt",
+            "example": "dịch video bán hàng từ Việt sang Anh hoặc ngược lại",
+            "rank_points": False,
+            "manual": True,
+            "public": True,
+        },
+        {
+            "code": "campaign_product_699k",
+            "label": "🚀 Combo Chiến Dịch Sản Phẩm",
+            "button_label": "🚀 Chiến dịch SP — 699k",
+            "display_price": "699k",
+            "price_vnd": 699000,
+            "summary": "Một bộ nội dung cho chiến dịch sản phẩm, có concept, ảnh và video.",
+            "audience": "shop, đội bán hàng, affiliate team nhỏ",
+            "includes": "2 video tiêu chuẩn + 3 ảnh chất lượng cao + 2 bộ ý tưởng/trend",
+            "example": "ra mắt sản phẩm, ưu đãi tuần, chiến dịch flash sale",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+            "public": True,
+        },
+        {
+            "code": "content_week_999k",
+            "label": "🧩 Combo Content 1 Tuần",
+            "button_label": "🧩 Content 1 tuần — 999k",
+            "display_price": "999k",
+            "price_vnd": 999000,
+            "summary": "Chuẩn bị nội dung dùng trong một tuần: ảnh, video ngắn và ý tưởng đăng đều.",
+            "audience": "shop hoặc creator cần lịch đăng đều",
+            "includes": "5 video ngắn + 7 ảnh tiêu chuẩn + 3 bộ ý tưởng/trend + gợi ý nhạc",
+            "example": "lịch đăng 7 ngày cho sản phẩm/dịch vụ",
+            "recommended_aspect": "9:16",
+            "rank_points": False,
+            "public": True,
+        },
+        {
+            "code": "music_bg_10_config",
+            "label": "🎼 Combo 10 Nhạc Nền",
+            "button_label": "🎼 10 nhạc nền",
+            "display_price": "theo config",
+            "price_vnd": 0,
+            "summary": "Giá theo cấu hình hiện hành; cần admin xác nhận trước khi bán tự động.",
+            "audience": "creator cần bộ nhạc nền cho nhiều video",
+            "includes": "10 nhạc nền theo phong cách đã thống nhất",
+            "example": "nhạc nền cho series review, vlog, quảng cáo ngắn",
+            "rank_points": False,
+            "manual": True,
+            "public": True,
+        },
+        {
+            "code": "music_song_10_config",
+            "label": "🎤 Combo 10 Bài Hát Có Lời",
+            "button_label": "🎤 10 bài hát có lời",
+            "display_price": "theo config",
+            "price_vnd": 0,
+            "summary": "Giá theo cấu hình hiện hành; cần admin xác nhận trước khi bán tự động.",
+            "audience": "nhãn hàng/creator cần bộ bài hát theo chiến dịch",
+            "includes": "10 bài hát có lời theo brief đã chốt",
+            "example": "bài hát cho sản phẩm, sự kiện, series nội dung",
+            "rank_points": False,
+            "manual": True,
+            "public": True,
+        },
+        {
+            "code": "subtitle_dub_10_config",
+            "label": "🎞 Combo 10 Video Phụ Đề + Lồng Tiếng",
+            "button_label": "🎞 10 video dịch/lồng",
+            "display_price": "theo config",
+            "price_vnd": 0,
+            "summary": "Giá theo cấu hình hiện hành; cần admin xác nhận độ dài/ngôn ngữ trước khi bán tự động.",
+            "audience": "người làm nội dung nhiều video cần bản đa ngôn ngữ",
+            "includes": "10 video phụ đề + lồng tiếng theo phạm vi đã chốt",
+            "example": "dịch/lồng tiếng series video bán hàng hoặc hướng dẫn",
+            "rank_points": False,
+            "manual": True,
+            "public": True,
+        },
+        {
             "code": "tiktok_99k",
             "label": "🎁 Combo Ưu Đãi TikTok",
             "display_price": "99k",
@@ -41204,6 +41359,8 @@ def video_combo_pricing_payload() -> list[dict]:
             "summary": "3 video Phổ Thông, khuyến nghị 9:16.",
             "recommended_aspect": "9:16",
             "rank_points": False,
+            "public": False,
+            "legacy": True,
         },
         {
             "code": "basic_199k",
@@ -41213,6 +41370,8 @@ def video_combo_pricing_payload() -> list[dict]:
             "summary": "Gói thử nội dung/video ngắn cơ bản.",
             "recommended_aspect": "9:16",
             "rank_points": False,
+            "public": False,
+            "legacy": True,
         },
         {
             "code": "standard_299k",
@@ -41222,6 +41381,8 @@ def video_combo_pricing_payload() -> list[dict]:
             "summary": "Gói đều hơn cho nội dung bán hàng/review.",
             "recommended_aspect": "9:16",
             "rank_points": False,
+            "public": False,
+            "legacy": True,
         },
         {
             "code": "posting_499k",
@@ -41231,6 +41392,8 @@ def video_combo_pricing_payload() -> list[dict]:
             "summary": "Phù hợp lịch đăng nhiều nội dung trong tuần.",
             "recommended_aspect": "9:16",
             "rank_points": False,
+            "public": False,
+            "legacy": True,
         },
         {
             "code": "product_ads_699k",
@@ -41240,8 +41403,13 @@ def video_combo_pricing_payload() -> list[dict]:
             "summary": "Ưu tiên concept/storyboard/prompt/video cho sản phẩm.",
             "recommended_aspect": "9:16",
             "rank_points": False,
+            "public": False,
+            "legacy": True,
         },
     ]
+
+def public_video_combo_pricing_payload() -> list[dict]:
+    return [item for item in video_combo_pricing_payload() if item.get("public", True) is not False]
 
 def workflow_trend_analysis_cost_xu() -> int:
     return max(0, int(WORKFLOW_TREND_ANALYSIS_COST_XU or 0))
@@ -41346,58 +41514,143 @@ PACKAGE_ITEM_LABELS = {
 def package_catalog_payload() -> dict:
     return {
         "combos": {
+            "video_ad_fast_199k": {
+                "label": "🎬 Combo Video Quảng Cáo Nhanh — 199k",
+                "items": {"video_common": 1, "image_standard": 1, "music_library": 1},
+                "note": "Làm nhanh một bộ quảng cáo ngắn: 1 video, 1 ảnh và gợi ý nhạc/kịch bản.",
+            },
+            "product_review_299k": {
+                "label": "🛒 Combo Review Sản Phẩm — 299k",
+                "items": {"video_standard": 1, "image_standard": 2, "trend_workflow": 1},
+                "note": "1 video review + 2 ảnh + 1 bộ ý tưởng/trend cho sản phẩm.",
+            },
+            "song_visual_399k": {
+                "label": "🎵 Combo Bài Hát + Visual — 399k",
+                "items": {},
+                "manual": True,
+                "note": "Sắp mở thanh toán tự động; liên hệ admin để chốt phạm vi bài hát/visual.",
+            },
+            "brand_voice_399k": {
+                "label": "🎙 Combo Voice Thương Hiệu — 399k",
+                "items": {},
+                "manual": True,
+                "note": "Sắp mở thanh toán tự động; cần xác nhận quyền giọng và phạm vi sử dụng.",
+            },
+            "mini_course_video_499k": {
+                "label": "📚 Combo Video Khóa Học Mini — 499k",
+                "items": {},
+                "manual": True,
+                "note": "Sắp mở thanh toán tự động; liên hệ admin để chốt số bài và nội dung.",
+            },
+            "translate_dub_video_499k": {
+                "label": "🌍 Combo Dịch + Lồng Tiếng Video — 499k",
+                "items": {},
+                "manual": True,
+                "note": "Sắp mở thanh toán tự động; cần xác nhận độ dài video và ngôn ngữ.",
+            },
+            "campaign_product_699k": {
+                "label": "🚀 Combo Chiến Dịch Sản Phẩm — 699k",
+                "items": {"video_standard": 2, "image_high": 3, "trend_workflow": 2, "music_library": 2},
+                "note": "2 video + 3 ảnh chất lượng cao + 2 bộ ý tưởng/trend cho chiến dịch.",
+            },
+            "content_week_999k": {
+                "label": "🧩 Combo Content 1 Tuần — 999k",
+                "items": {"video_common": 5, "image_standard": 7, "trend_workflow": 3, "music_library": 5},
+                "note": "5 video ngắn + 7 ảnh + 3 bộ ý tưởng/trend + gợi ý nhạc cho lịch đăng tuần.",
+            },
+            "music_bg_10_config": {
+                "label": "🎼 Combo 10 Nhạc Nền — giá theo config",
+                "items": {},
+                "manual": True,
+                "note": "Giá theo cấu hình hiện hành; liên hệ admin để chốt brief trước khi mua.",
+            },
+            "music_song_10_config": {
+                "label": "🎤 Combo 10 Bài Hát Có Lời — giá theo config",
+                "items": {},
+                "manual": True,
+                "note": "Giá theo cấu hình hiện hành; liên hệ admin để chốt brief trước khi mua.",
+            },
+            "subtitle_dub_10_config": {
+                "label": "🎞 Combo 10 Video Phụ Đề + Lồng Tiếng — giá theo config",
+                "items": {},
+                "manual": True,
+                "note": "Giá theo cấu hình hiện hành; cần xác nhận độ dài video và ngôn ngữ.",
+            },
             "tiktok_99k": {
                 "label": "🎁 Combo Ưu Đãi TikTok — 99k",
                 "items": {"video_common": 3},
                 "note": "3 video Phổ Thông; khuyến nghị 9:16.",
+                "public": False,
+                "legacy": True,
             },
             "basic_199k": {
                 "label": "📦 Combo Cơ Bản — 199k",
                 "items": {"video_common": 3, "image_standard": 2},
                 "note": "3 video phổ thông + 2 ảnh tiêu chuẩn.",
+                "public": False,
+                "legacy": True,
             },
             "standard_299k": {
                 "label": "⭐ Combo Tiêu Chuẩn — 299k",
                 "items": {"video_standard": 4, "image_standard": 3, "trend_workflow": 1},
                 "note": "4 video Tiêu Chuẩn + 3 ảnh Standard + 1 workflow ý tưởng/trend.",
+                "public": False,
+                "legacy": True,
             },
             "posting_499k": {
                 "label": "📅 Combo Đăng Đều — 499k",
                 "items": {"video_common": 5, "video_standard": 5},
                 "note": "5 video Phổ Thông + 5 video Tiêu Chuẩn.",
+                "public": False,
+                "legacy": True,
             },
             "product_ads_699k": {
                 "label": "🚀 Combo Quảng Cáo Sản Phẩm — 699k",
                 "items": {"image_high": 5, "video_standard": 3, "video_high": 1, "trend_workflow": 2},
                 "note": "5 ảnh High + 3 video Tiêu Chuẩn + 1 video Cao Cấp + 2 workflow concept/trend.",
+                "public": False,
+                "legacy": True,
             },
             "pro_branding": {
                 "label": "Pro Branding",
                 "items": {},
                 "manual": True,
                 "note": "Manual/admin managed.",
+                "public": False,
+                "legacy": True,
             },
         },
         "monthly": {
             "starter_monthly": {
-                "label": "📆 Starter Monthly",
+                "label": "🟢 Gói Cơ bản — 99k / 30 ngày",
                 "default_days": 30,
                 "items": {"image_standard": 10, "video_common": 3, "trend_workflow": 3},
+                "note": "Dùng đều hằng tháng ở mức cơ bản; phù hợp người mới làm nội dung.",
             },
             "creator_monthly": {
-                "label": "📆 Creator Monthly",
+                "label": "🔵 Gói Nội dung — 199k / 30 ngày",
                 "default_days": 30,
                 "items": {"image_standard": 20, "video_standard": 8, "trend_workflow": 5},
+                "note": "Cho creator/shop cần nội dung đều hơn trong 30 ngày.",
             },
             "shop_monthly": {
-                "label": "📆 Shop Monthly",
+                "label": "🟣 Gói Bán hàng — 299k / 30 ngày",
                 "default_days": 30,
                 "items": {"image_high": 30, "video_standard": 12, "video_high": 3, "trend_workflow": 10},
+                "note": "Cho bán hàng, review, affiliate và chiến dịch nhỏ.",
             },
             "pro_monthly": {
-                "label": "📆 Pro Monthly",
+                "label": "🟠 Gói Chuyên nghiệp — 499k / 30 ngày",
                 "default_days": 30,
                 "items": {"image_high": 50, "video_standard": 20, "video_high": 5, "trend_workflow": 15},
+                "note": "Cho người dùng thường xuyên cần nhiều lượt hơn trong tháng.",
+            },
+            "small_business_monthly": {
+                "label": "🔴 Gói Doanh nghiệp nhỏ — 999k / 30 ngày",
+                "default_days": 30,
+                "items": {},
+                "manual": True,
+                "note": "Sắp mở thanh toán tự động; liên hệ admin để chốt hạn mức theo nhu cầu.",
             },
         },
     }
@@ -41463,6 +41716,7 @@ def package_purchase_price_vnd(package_type: str, code: str) -> int:
         "creator_monthly": MONTHLY_CREATOR_PRICE_VND,
         "shop_monthly": MONTHLY_SHOP_PRICE_VND,
         "pro_monthly": MONTHLY_PRO_PRICE_VND,
+        "small_business_monthly": MONTHLY_SMALL_BUSINESS_PRICE_VND,
     }
     return max(0, int(monthly_prices.get(code) or 0))
 
@@ -41520,7 +41774,7 @@ def package_catalog_text() -> str:
     ]
     for code, entry in (catalog.get("combos") or {}).items():
         items = entry.get("items") or {}
-        item_text = ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in items.items()) or "manual/admin managed"
+        item_text = ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in items.items()) or "liên hệ admin để chốt hạn mức"
         lines.append(f"• <code>{html.escape(code)}</code> — {html.escape(entry.get('label') or code)}: {html.escape(item_text)}")
     lines.extend(["", "<b>Gói tháng</b>"])
     for code, entry in (catalog.get("monthly") or {}).items():
@@ -41534,7 +41788,7 @@ def package_catalog_text() -> str:
     return "\n".join(lines)
 
 def package_items_summary(items: dict) -> str:
-    return ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in (items or {}).items()) or "manual/admin managed"
+    return ", ".join(f"{package_item_display_name(k)} x{int(v or 0)}" for k, v in (items or {}).items()) or "liên hệ admin để chốt hạn mức"
 
 def parse_package_identifier(value: str = "") -> tuple[str, str]:
     raw = str(value or "").strip()
@@ -50083,7 +50337,7 @@ def normalize_guide_section_key(section_key_or_number: str) -> str:
     raw = (section_key_or_number or "").strip().lower()
     return GUIDE_SECTION_ALIASES.get(raw, raw)
 
-def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
+def guide_keyboard(section: str = "", lang: str = "vi", back_callback: str = "menu|main_guide", back_label: str = "") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     section_key = normalize_guide_section_key(section)
     if lang == "vi":
@@ -50132,7 +50386,7 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
             public_base = effective_public_base_url()
             if public_base:
                 rows.append([InlineKeyboardButton("📄 Tải bản Word", url=f"{public_base}/download/huong-dan-toan-aas.docx")])
-        rows.append([InlineKeyboardButton("🔙 Quay lại Hướng dẫn", callback_data="menu|main_guide"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+        rows.append([InlineKeyboardButton(back_label or "🔙 Quay lại Hướng dẫn", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
         return InlineKeyboardMarkup(rows)
     rows = []
     if not section_key:
@@ -50172,7 +50426,7 @@ def guide_keyboard(section: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
         ])
     elif section_key in {"refund", "faq"}:
         rows.append([InlineKeyboardButton("👨‍💼 Support", callback_data="menu|support")])
-    rows.append([InlineKeyboardButton("🔙 Back to guide", callback_data="menu|main_guide"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton(back_label or "🔙 Back to guide", callback_data=back_callback), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def legacy_guide_download_keyboard() -> InlineKeyboardMarkup:
@@ -100185,9 +100439,9 @@ async def cmd_promo_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Launch Bonus không phải promo code",
         "• Mã có thể hết lượt/hết hạn/không đủ điều kiện",
         "",
-        "🎁 <b>Mã quà tặng:</b>",
-        "• Nếu admin gửi mã quà public, dùng <code>/gift MÃ</code> hoặc <code>/nhanqua MÃ</code>",
-        "• Mã sự kiện/private chỉ dùng khi admin cấp riêng theo ID Telegram",
+        "🎟 <b>Mã quà tặng:</b>",
+        "• Chỉ admin quản lý/cấp phát, không hiện public.",
+        "• Khách chỉ cần dùng mã nếu admin đã gửi riêng theo từng trường hợp hỗ trợ.",
         "",
         "<b>Cách dùng:</b>",
         "<code>/promo FIRST30</code>",
@@ -100473,16 +100727,15 @@ async def cmd_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
         detail=normalize_promo_code(context.args[0]) if context.args else "",
     )
     if not context.args:
-        text = (
-            "🎁 <b>Nhận quà TOAN AAS</b>\n\n"
-            "Nếu admin gửi mã quà tặng cho bạn, dùng:\n"
-            "<code>/gift MÃ_ADMIN_GỬI</code>\n"
-            "<code>/nhanqua MÃ_ADMIN_GỬI</code>\n\n"
-            "Mã quà tặng sự kiện/hỗ trợ riêng chỉ dùng khi admin gửi mã cho bạn. "
-            "Không cần tự thử nhiều mã vì hệ thống sẽ không cộng Xu dịch vụ nếu mã chưa được cấp cho ID Telegram của bạn."
-        )
         if is_admin_user(update.effective_user.id):
-            text += "\n\nAdmin cấp BETA cho user bằng: <code>/gift BETA100 USER_ID</code>\nXem request: <code>/gift_request_list</code>"
+            text = admin_gift_code_text()
+        else:
+            text = (
+                "🎁 <b>Nhận quà TOAN AAS</b>\n\n"
+                "Mã quà tặng chỉ do admin cấp phát riêng và không hiện trong menu public.\n"
+                "Nếu anh/chị đã được admin gửi mã, hãy nhập đúng mã theo hướng dẫn đã nhận. "
+                "Không cần tự thử nhiều mã vì hệ thống sẽ không cộng Xu dịch vụ nếu mã chưa được cấp hợp lệ."
+            )
         return await update.message.reply_text(text, parse_mode="HTML")
     code = context.args[0]
     if is_admin_user(update.effective_user.id) and len(context.args) >= 2:
@@ -121333,12 +121586,12 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "Mỗi gói có quyền dùng công cụ cơ bản và một lượng tác vụ thường/VIP phù hợp.",
         "",
         "3. <b>Xu xử lý</b>",
-        "Xu là đơn vị nội bộ dùng cho tác vụ tốn AI/API/server như tạo ảnh AI, tạo nhạc AI, dịch file, xử lý audio/video, ghép nhạc vào video.",
+        "Xu là đơn vị nội bộ dùng cho các tác vụ xử lý như tạo ảnh AI, tạo nhạc AI, dịch file, xử lý audio/video hoặc ghép nhạc vào video.",
         "",
         "4. <b>Dịch vụ VIP</b>",
         "Dịch vụ VIP là tác vụ tốn tài nguyên hơn. Gói càng cao càng có nhiều hạn mức VIP. Vượt hạn mức thì có thể dùng Xu xử lý.",
         "",
-        "Lưu ý: gói tháng không có nghĩa là unlimited mọi tác vụ nặng. Nếu provider lỗi, quota, timeout hoặc xử lý thất bại: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
+        "Lưu ý: gói tháng không có nghĩa là dùng vô hạn mọi tác vụ nặng. Nếu công cụ quá tải hoặc xử lý thất bại: bot không trừ Xu hoặc hoàn Xu nếu đã trừ.",
         "",
         "🟢 <b>Công cụ miễn phí / dùng thử</b>",
         "• <code>/music</code>",
@@ -121382,7 +121635,7 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• Dịch văn bản ngắn dùng thử giới hạn",
         "• Tác vụ VIP/file/audio/video dài cần Xu xử lý",
         "",
-        "<b>Starter — 49.000đ/tháng</b>",
+        "<b>🟢 Gói Cơ bản — 99.000đ / 30 ngày</b>",
         "Dành cho người mới làm content.",
         "• Dùng công cụ cơ bản",
         "• Kho nhạc/SFX/media miễn phí",
@@ -121393,18 +121646,18 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• Tác vụ VIP dùng Xu xử lý hoặc mua thêm",
         "• Phù hợp người mới làm TikTok, Reels, Shorts, bán hàng cá nhân",
         "",
-        "<b>Creator — 99.000đ/tháng</b>",
+        "<b>🔵 Gói Nội dung — 199.000đ / 30 ngày</b>",
         "Dành cho người làm nội dung đều đặn.",
-        "• Bao gồm quyền Starter",
+        "• Bao gồm quyền gói Cơ bản",
         "• Dịch văn bản ngắn miễn phí trong giới hạn chống spam",
         "• Chat AI thường miễn phí trong giới hạn chống spam",
         "• Có 1.300 Xu xử lý/tháng",
         "• Có khoảng 5–8 tác vụ VIP nhỏ/tháng hoặc nhiều tác vụ thường",
         "• Phù hợp affiliate, TikTok Shop, creator cá nhân, shop nhỏ",
         "",
-        "<b>Pro — 199.000đ/tháng</b>",
-        "Dành cho người dùng thường xuyên.",
-        "• Bao gồm quyền Creator",
+        "<b>🟣 Gói Bán hàng — 299.000đ / 30 ngày</b>",
+        "Dành cho người dùng thường xuyên và bán hàng.",
+        "• Bao gồm quyền gói Nội dung",
         "• Dịch văn bản ngắn/dài trong giới hạn gói",
         "• Chat AI thường và một phần chat nâng cao trong giới hạn",
         "• Có 3.000 Xu xử lý/tháng",
@@ -121412,16 +121665,20 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• Ưu tiên xử lý file/audio/video khi công cụ được mở",
         "• Phù hợp shop, affiliate team nhỏ, người làm content mỗi ngày",
         "",
-        "<b>Business — 499.000đ/tháng</b>",
+        "<b>🟠 Gói Chuyên nghiệp — 499.000đ / 30 ngày</b>",
         "Dành cho đội nhóm nhỏ.",
-        "• Bao gồm quyền Pro",
+        "• Bao gồm quyền gói Bán hàng",
         "• Hạn mức cao hơn cho chat/dịch/tác vụ thường",
         "• Có 8.000 Xu xử lý/tháng",
         "• Có nhiều lượt dịch vụ VIP hơn Pro",
         "• Phù hợp chiến dịch nội dung, shop, team affiliate, agency nhỏ",
         "• Ưu tiên xử lý nhiều nội dung hơn theo chính sách đang bật",
         "",
-        "Ghi chú: số lượt VIP chỉ là ước tính vì mỗi công cụ có mức tốn API/server khác nhau. Tác vụ nặng như tạo Video AI chân thật, làm rõ video dài, dịch video dài, tạo nhạc AI/vocal có thể tính Xu riêng cao hơn. Vượt hạn mức gói có thể nạp thêm Xu để dùng tiếp.",
+        "<b>🔴 Gói Doanh nghiệp nhỏ — 999.000đ / 30 ngày</b>",
+        "• Dành cho shop/team cần hạn mức cao hơn.",
+        "• Liên hệ admin để chốt hạn mức phù hợp trước khi mua.",
+        "",
+        "Ghi chú: số lượt chỉ là ước tính theo từng công cụ. Tác vụ nặng như tạo video dài, làm rõ video dài, dịch video dài hoặc tạo nhạc có thể tính Xu riêng cao hơn. Vượt hạn mức gói có thể nạp thêm Xu để dùng tiếp.",
         "",
         "🤖 <b>Chat AI &amp; Dịch thuật theo gói</b>",
         "",
@@ -121429,23 +121686,23 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• Dịch văn bản ngắn dùng thử giới hạn",
         "• Chat AI thường trừ Xu nếu dùng vượt thử nghiệm",
         "",
-        "<b>Starter 49k:</b>",
+        "<b>Cơ bản 99k:</b>",
         "• Dịch văn bản ngắn dùng thử trong giới hạn",
         "• Chat AI thường trừ Xu nhẹ nếu dùng nhiều",
         "• Dịch dài/file/audio/video tính Xu",
         "",
-        "<b>Creator 99k:</b>",
+        "<b>Nội dung 199k:</b>",
         "• Dịch văn bản ngắn miễn phí trong giới hạn chống spam",
         "• Chat AI thường miễn phí trong giới hạn chống spam",
         "• Dịch văn bản dài trừ Xu nhẹ hoặc dùng hạn mức gói",
         "• Voice/audio/file/video là VIP",
         "",
-        "<b>Pro 199k:</b>",
+        "<b>Bán hàng 299k:</b>",
         "• Dịch văn bản ngắn/dài trong giới hạn gói",
         "• Chat AI thường và một phần chat nâng cao trong giới hạn",
         "• Voice/audio/file/video có hạn mức VIP hoặc trừ Xu",
         "",
-        "<b>Business 499k:</b>",
+        "<b>Chuyên nghiệp 499k:</b>",
         "• Hạn mức cao hơn cho chat/dịch/tác vụ thường",
         "• Ưu tiên xử lý nội dung nhiều hơn",
         "• Voice/audio/file/video dùng hạn mức VIP lớn hơn hoặc trừ Xu nếu vượt",
@@ -121484,7 +121741,7 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• <code>/image_to_music_video</code>: từ 150 Xu/video",
         "• <code>/video_music</code>: từ 200 Xu/video",
         "",
-        "Kho nhạc/SFX/media public miễn phí để tìm kiếm, nghe thử, chọn nguồn. TOAN AAS chỉ trừ Xu khi tạo nhạc AI thật, xử lý file, ghép nhạc/video hoặc dùng provider tốn phí.",
+        "Kho nhạc/SFX/media public miễn phí để tìm kiếm, nghe thử, chọn nguồn. TOAN AAS chỉ trừ Xu khi tạo nhạc AI thật, xử lý file hoặc ghép nhạc/video có tính phí.",
         "Nhạc/kho public có license riêng từng nguồn. Người dùng cần kiểm tra quyền thương mại, attribution và điều khoản nền tảng trước khi đăng quảng cáo/kiếm tiền.",
         "",
         "🎬 <b>Content / Video / Image hiện tại</b>",
@@ -121493,21 +121750,21 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         f"• <code>/film tier=series</code>: <b>{VIDEO_SERIES_COST:,} Xu</b>",
         f"• <code>/image_prompt</code>: <b>{IMAGE_PROMPT_PACK_COST} Xu</b>",
         f"• <code>/image_to_video_pack</code>: <b>{IMAGE_TO_VIDEO_PROMPT_COST} Xu</b>",
-        f"• <code>/ai_image</code>: <b>{AI_IMAGE_COST} Xu</b> nếu admin mở provider",
-        f"• <code>/ai_image_edit</code>: <b>{AI_IMAGE_EDIT_COST} Xu</b> nếu admin mở provider",
+        f"• <code>/ai_image</code>: <b>{AI_IMAGE_COST} Xu</b> nếu công cụ được mở",
+        f"• <code>/ai_image_edit</code>: <b>{AI_IMAGE_EDIT_COST} Xu</b> nếu công cụ được mở",
         f"• <code>/growth_ai</code>: <b>{GROWTH_AI_COST} Xu</b>",
         f"• <code>/campaign_report</code>: <b>{CAMPAIGN_REPORT_COST} Xu</b>",
-        "• Các mức này vẫn là giá Xu xử lý tham khảo trong khi gói tháng/subscription chưa tự cấp qua PayOS.",
+        "• Các mức này là giá Xu xử lý tham khảo khi dùng ngoài gói/combo.",
         "",
         "💳 <b>Thanh toán gói tháng</b>",
         "Hiện tại TOAN AAS ưu tiên nạp Xu linh hoạt qua <code>/naptien</code>.",
         "Khi gói tháng được mở chính thức:",
-        "• Khách chọn gói Starter/Creator/Pro/Business.",
+        "• Khách chọn gói Cơ bản/Nội dung/Bán hàng/Chuyên nghiệp/Doanh nghiệp nhỏ.",
         "• PayOS nhận thanh toán thành công.",
         "• Hệ thống tự động cấp gói và hạn mức tương ứng.",
         "• Nếu PayOS hoặc webhook lỗi, admin có thể cấp gói thủ công.",
         "• Admin cũng có thể cấp gói làm quà tặng, khuyến mãi hoặc hỗ trợ khách.",
-        "• Đây là roadmap text, chưa sửa logic PayOS hiện tại.",
+        "• Nếu gói cần admin xác nhận, bot sẽ báo rõ và chưa tạo đơn tự động.",
         "",
         "🔐 <b>Roadmap admin cấp gói thủ công</b>",
         "Các lệnh định hướng sau này, chưa bật code trong task này:",
@@ -121532,7 +121789,7 @@ async def cmd_pricing_legacy_monthly_snapshot(update: Update, context: ContextTy
         "• Quà sinh nhật vẫn là quà bí mật theo hạng, cần lưu ngày sinh tại <code>/birthday</code>.",
         "• Xu dịch vụ nội bộ không rút tiền, không chuyển nhượng.",
         "",
-        "Admin có thể cập nhật hạn mức gói, VIP quota và giá Xu xử lý theo chi phí provider thực tế từng thời điểm.",
+        "Admin có thể cập nhật hạn mức gói và giá Xu xử lý theo chính sách vận hành từng thời điểm.",
     ]
     await reply_html_lines(update, lines)
 
@@ -121825,15 +122082,28 @@ def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
         labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 我的套餐", "⬅️ 套餐", "🏠 主菜单"]
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(labels[0], callback_data="pkgbuy|monthly|starter_monthly"), InlineKeyboardButton(labels[1], callback_data="pkgbuy|monthly|creator_monthly")],
+            [InlineKeyboardButton(labels[2], callback_data="pkgbuy|monthly|shop_monthly"), InlineKeyboardButton(labels[3], callback_data="pkgbuy|monthly|pro_monthly")],
+            [InlineKeyboardButton(labels[4], callback_data="pricing|my_packages"), InlineKeyboardButton(labels[5], callback_data="pricing|main")],
+            [InlineKeyboardButton(labels[6], callback_data="menu|main")],
+        ])
     elif lang == "en":
         labels = ["📆 Starter", "📆 Creator", "📆 Shop", "📆 Pro", "📦 My packages", "⬅️ Plans / Combos", "🏠 Main menu"]
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(labels[0], callback_data="pkgbuy|monthly|starter_monthly"), InlineKeyboardButton(labels[1], callback_data="pkgbuy|monthly|creator_monthly")],
+            [InlineKeyboardButton(labels[2], callback_data="pkgbuy|monthly|shop_monthly"), InlineKeyboardButton(labels[3], callback_data="pkgbuy|monthly|pro_monthly")],
+            [InlineKeyboardButton(labels[4], callback_data="pricing|my_packages"), InlineKeyboardButton(labels[5], callback_data="pricing|main")],
+            [InlineKeyboardButton(labels[6], callback_data="menu|main")],
+        ])
     else:
         labels = [
-            f"🌱 Starter — {package_purchase_display_price('monthly', 'starter_monthly')}",
-            f"🎨 Creator — {package_purchase_display_price('monthly', 'creator_monthly')}",
-            f"🛒 Shop — {package_purchase_display_price('monthly', 'shop_monthly')}",
-            f"🏢 Pro — {package_purchase_display_price('monthly', 'pro_monthly')}",
-            "📦 Gói của tôi", "⬅️ Gói / Combo", "🏠 Menu chính",
+            f"🟢 Cơ bản — {package_purchase_display_price('monthly', 'starter_monthly')}",
+            f"🔵 Nội dung — {package_purchase_display_price('monthly', 'creator_monthly')}",
+            f"🟣 Bán hàng — {package_purchase_display_price('monthly', 'shop_monthly')}",
+            f"🟠 Chuyên nghiệp — {package_purchase_display_price('monthly', 'pro_monthly')}",
+            f"🔴 DN nhỏ — {package_purchase_display_price('monthly', 'small_business_monthly')}",
+            "📦 Gói của tôi", "⬅️ Nạp Xu / Bảng giá", "🏠 Menu chính",
         ]
     return InlineKeyboardMarkup([
         [
@@ -121845,10 +122115,13 @@ def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(labels[3], callback_data="pkgbuy|monthly|pro_monthly"),
         ],
         [
-            InlineKeyboardButton(labels[4], callback_data="pricing|my_packages"),
-            InlineKeyboardButton(labels[5], callback_data="pricing|packages"),
+            InlineKeyboardButton(labels[4], callback_data="pkgbuy|monthly|small_business_monthly"),
         ],
-        [InlineKeyboardButton(labels[6], callback_data="menu|main")],
+        [
+            InlineKeyboardButton(labels[5], callback_data="pricing|my_packages"),
+            InlineKeyboardButton(labels[6], callback_data="pricing|main"),
+        ],
+        [InlineKeyboardButton(labels[7], callback_data="menu|main")],
     ])
 
 def vip_services_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -121965,8 +122238,11 @@ def pricing_hub_lines(lang: str = "vi") -> list[str]:
         "Bạn muốn xem bảng giá, nạp Xu, xem ưu đãi hay mua gói/combo?", "",
         "• Bảng giá: xem giá từng công cụ.",
         "• Ưu đãi: mã khuyến mãi và Launch Bonus cho thanh toán nội địa Việt Nam.",
-        "• Nạp Xu: nạp Xu vào tài khoản.",
-        "• Gói / Combo: mua gói dịch vụ hoặc combo theo nhu cầu.",
+        "• Nạp Xu: tự do, thích dùng công cụ nào thì dùng công cụ đó.",
+        "• Gói tháng: dùng đều mỗi tháng, có hạn mức trong 30 ngày.",
+        "• Combo: mua 1 lần theo mục đích cụ thể, dùng đến hết lượt.",
+        "• Thành viên: hạng khách hàng và chiết khấu riêng, không lẫn với gói/combo.",
+        "• Mã quà tặng: chỉ admin quản lý/cấp phát, không hiện public.",
     ]
 
 def billing_promotions_lines(lang: str = "vi") -> list[str]:
@@ -122044,7 +122320,7 @@ def billing_promotions_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("⬅️ Back", callback_data="pricing|main"), InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎁 Nhập mã ưu đãi", callback_data="pricing|promo_apply"), InlineKeyboardButton("🎟 Mã quà tặng", callback_data="pricing|gift_code")],
+        [InlineKeyboardButton("🎁 Nhập mã ưu đãi", callback_data="pricing|promo_apply")],
         [InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"), InlineKeyboardButton("📋 Bảng giá", callback_data="pricing|catalog")],
         [InlineKeyboardButton("⬅️ Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -122071,17 +122347,54 @@ def billing_promo_apply_lines(lang: str = "vi") -> list[str]:
 def billing_gift_code_lines(lang: str = "vi") -> list[str]:
     lang = normalize_user_language(lang) or "vi"
     if lang == "zh":
-        return ["🎟 <b>礼品码</b>", "", "如 TOAN AAS 向您发送有效礼品码，请使用 <code>/gift CODE</code>。"]
+        return ["🎟 <b>礼品码</b>", "", "礼品码仅由管理员管理和发放，不在公开菜单显示。"]
     if lang == "en":
-        return ["🎟 <b>Gift code</b>", "", "Use <code>/gift CODE</code> if TOAN AAS admin sends you a valid gift code."]
+        return ["🎟 <b>Gift code</b>", "", "Gift codes are managed and issued by admins only. They are not shown in the public menu."]
     return [
-        "🎟 <b>Mã quà tặng</b>",
+        "🎟 <b>Mã quà tặng Admin</b>",
         "",
-        "Nếu admin gửi mã quà tặng, dùng:",
-        "<code>/gift MÃ_QUÀ</code>",
+        "Mã quà tặng chỉ do admin quản lý/cấp phát, không hiện trong menu public.",
+        "Public chỉ thấy <b>🎁 Nhập mã ưu đãi</b> cho mã khuyến mãi nạp tiền.",
         "",
-        "Mã quà tặng là chính sách riêng, không trộn với bonus nạp tiền nội địa.",
+        "<b>Lệnh admin hiện có</b>",
+        "• Tạo mã: <code>/gift_create code=THANK100 xu=100 limit=100 per_user=1 mode=public note=\"Tặng trải nghiệm\"</code>",
+        "• Cấp mã riêng: <code>/gift MÃ USER_ID</code>",
+        "• Danh sách mã: <code>/gift_list</code>",
+        "• Tắt mã: <code>/gift_disable MÃ</code>",
+        "• Request BETA: <code>/gift_request_list</code>",
     ]
+
+def admin_gift_code_text() -> str:
+    return "\n".join(billing_gift_code_lines("vi"))
+
+def admin_gift_code_action_text(action: str = "") -> str:
+    action = str(action or "").strip()
+    if action == "admin_gift_create_help":
+        return (
+            "🎟 <b>Tạo mã quà tặng</b>\n\n"
+            "Dùng lệnh:\n"
+            "<code>/gift_create code=THANK100 xu=100 limit=100 per_user=1 mode=public note=\"Tặng trải nghiệm\"</code>\n\n"
+            "Nếu muốn cấp riêng cho một user, tạo mã trước rồi dùng:\n"
+            "<code>/gift THANK100 USER_ID</code>"
+        )
+    if action == "admin_gift_list_help":
+        return "📋 <b>Danh sách mã quà tặng</b>\n\nDùng lệnh: <code>/gift_list</code>"
+    if action == "admin_gift_disable_help":
+        return "🚫 <b>Tắt mã quà tặng</b>\n\nDùng lệnh: <code>/gift_disable MÃ</code>"
+    if action == "admin_gift_history_help":
+        return (
+            "📊 <b>Lịch sử / request mã quà tặng</b>\n\n"
+            "Dùng lệnh: <code>/gift_request_list</code>\n"
+            "Các giao dịch redeem/cấp mã vẫn được ghi vào audit/usage hiện có."
+        )
+    return admin_gift_code_text()
+
+def admin_gift_code_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎟 Tạo mã quà tặng", callback_data="menu|admin_gift_create_help"), InlineKeyboardButton("📋 Danh sách mã", callback_data="menu|admin_gift_list_help")],
+        [InlineKeyboardButton("🚫 Tắt mã", callback_data="menu|admin_gift_disable_help"), InlineKeyboardButton("📊 Lịch sử dùng mã", callback_data="menu|admin_gift_history_help")],
+        [InlineKeyboardButton("⬅️ Admin tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 def hidden_active_features_audit(lang: str = "vi", entrypoint_labels: list[str] | None = None) -> list[dict]:
     lang = normalize_user_language(lang) or "vi"
@@ -122142,20 +122455,36 @@ def pricing_packages_lines(lang: str = "vi") -> list[str]:
         ]
     return [
         "🎁 <b>Gói / Combo TOAN AAS</b>", "", "Bạn muốn mua loại nào?", "",
-        "• Gói tháng: dùng theo chu kỳ/tháng, phù hợp khách dùng thường xuyên.",
-        "• Combo: mua một bộ dịch vụ theo nhu cầu cụ thể, dùng theo lượt/quyền trong gói.", "",
+        "• GÓI = mua theo tháng, có hạn mức dùng trong 30 ngày.",
+        "• COMBO = mua 1 lần theo mục đích cụ thể, dùng đến hết lượt.",
+        "• NẠP XU = tự do, thích dùng gì dùng đó.",
+        "• MÃ QUÀ TẶNG = chỉ admin quản lý/cấp phát, không hiện public.",
+        "",
         "Gói/Combo không phải nạp Xu thường, không cộng bonus nạp Xu và không tự nâng hạng thành viên.",
         "Sau khi PayOS xác nhận thanh toán, gói/combo sẽ nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt/quyền khi sử dụng.",
     ]
 
 def pricing_package_summary_lines() -> list[str]:
     catalog = package_catalog_payload()
-    rows = ["🎁 <b>GÓI / COMBO</b>", "", "<b>Gói tháng</b>"]
+    rows = [
+        "🎁 <b>GÓI / COMBO</b>",
+        "",
+        "• Gói tháng: dùng đều mỗi tháng, hạn mức 30 ngày.",
+        "• Combo: mua 1 lần theo mục đích cụ thể, dùng đến hết lượt.",
+        "• Nạp Xu: tự do, dùng công cụ nào tính công cụ đó.",
+        "• Mã quà tặng: chỉ admin quản lý/cấp phát.",
+        "",
+        "<b>Gói tháng</b>",
+    ]
     for code, entry in (catalog.get("monthly") or {}).items():
         rows.append(f"• {html.escape(str(entry.get('label') or code))}: <b>{html.escape(package_purchase_display_price('monthly', code))}</b>")
     rows.extend(["", "<b>Combo</b>"])
-    for item in video_combo_pricing_payload():
-        rows.append(f"• {html.escape(str(item.get('label') or item.get('code') or 'Combo'))}: <b>{html.escape(str(item.get('display_price') or '-'))}</b>")
+    for item in public_video_combo_pricing_payload():
+        status = "liên hệ admin" if item.get("manual") else "mua tự động"
+        rows.append(
+            f"• {html.escape(str(item.get('label') or item.get('code') or 'Combo'))}: "
+            f"<b>{html.escape(str(item.get('display_price') or '-'))}</b> — {html.escape(status)}"
+        )
     rows.extend(["", "Để mua, mở <b>Nạp Xu / Bảng giá → Gói / Combo</b>."])
     return rows
 
@@ -122180,7 +122509,7 @@ def pricing_main_lines() -> list[str]:
         if tier != "premium"
     ]
     combo_items = []
-    for item in video_combo_pricing_payload():
+    for item in public_video_combo_pricing_payload():
         price_text = str(item.get("display_price") or f"{int(item.get('price_vnd') or 0):,}đ")
         combo_items.append(
             f"• {html.escape(str(item.get('label') or 'Combo'))} — <b>{html.escape(price_text)}</b> — {html.escape(str(item.get('summary') or ''))}".replace(",", ".")
@@ -122252,7 +122581,7 @@ def pricing_main_lines() -> list[str]:
         "",
         "<b>8. 🎁 Gói / Combo</b>",
         *combo_items,
-        "• Gói tháng Starter/Creator/Shop/Pro là hạn mức dịch vụ theo tháng, tách riêng với hạng thành viên và nạp Xu.",
+        "• Gói tháng Cơ bản/Nội dung/Bán hàng/Chuyên nghiệp/Doanh nghiệp nhỏ là hạn mức 30 ngày, tách riêng với hạng thành viên và nạp Xu.",
         "• Combo/gói tháng sau thanh toán PayOS thành công nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt khi dùng.",
         "",
         "<b>9. 👑 Dịch vụ nâng cao</b>",
@@ -122327,21 +122656,28 @@ def pricing_video_lines() -> list[str]:
     return rows
 
 def pricing_combo_lines() -> list[str]:
-    combos = video_combo_pricing_payload()
+    combos = public_video_combo_pricing_payload()
     rows = [
         "🎁 <b>COMBO TOAN AAS</b>",
         "",
-        "Combo là gói ưu đãi tiết kiệm, không cộng điểm nâng hạng/thưởng nạp và không quy đổi toàn bộ thành Xu tự do.",
+        "Combo = mua 1 lần theo mục đích cụ thể, dùng đến hết lượt.",
+        "Combo không cộng điểm nâng hạng/thưởng nạp và không quy đổi thành Xu tự do.",
+        "Các combo đang có nút thanh toán chỉ dùng quyền/lượt đã cấu hình. Combo cần admin sẽ không có nút thanh toán tự động.",
         "",
     ]
     for item in combos:
         label = str(item.get("label") or "")
         price = str(item.get("display_price") or f"{int(item.get('price_vnd') or 0):,}đ")
-        summary = html.escape(str(item.get("summary") or ""))
-        rows.append(f"• {html.escape(label)} — <b>{html.escape(price)}</b> — {summary}".replace(",", "."))
+        status = "liên hệ admin / sắp mở" if item.get("manual") else "mua tự động"
+        rows.extend([
+            f"• <b>{html.escape(label)}</b> — <b>{html.escape(price)}</b> — {html.escape(status)}".replace(",", "."),
+            f"  Dành cho: {html.escape(str(item.get('audience') or '-'))}",
+            f"  Bao gồm: {html.escape(str(item.get('includes') or item.get('summary') or '-'))}",
+            f"  Ví dụ: {html.escape(str(item.get('example') or '-'))}",
+        ])
     rows.extend([
         "",
-        "Bấm nút combo bên dưới để mua bằng PayOS. Thanh toán thành công sẽ tự lưu lượt vào <b>📦 Gói của tôi</b>.",
+        "Bấm nút combo có giá và đã hỗ trợ để mua. Thanh toán thành công sẽ tự lưu lượt vào <b>📦 Gói của tôi</b>.",
         "Khi dùng ảnh/video/workflow, bot tự gợi ý dùng lượt trong gói và tự trừ lượt nếu bạn chọn.",
         "Combo không phải nạp Xu, không cộng điểm nâng hạng và không chạy bonus nạp.",
     ])
@@ -122363,12 +122699,21 @@ def pricing_detail_keyboard(section: str = "main", lang: str = "vi") -> InlineKe
     return InlineKeyboardMarkup(rows)
 
 def pricing_combo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎬 TikTok — 99k", callback_data="pkgbuy|combo|tiktok_99k"), InlineKeyboardButton("📦 Cơ bản — 199k", callback_data="pkgbuy|combo|basic_199k")],
-        [InlineKeyboardButton("⭐ Tiêu chuẩn — 299k", callback_data="pkgbuy|combo|standard_299k"), InlineKeyboardButton("📅 Đăng đều — 499k", callback_data="pkgbuy|combo|posting_499k")],
-        [InlineKeyboardButton("🚀 Quảng cáo — 699k", callback_data="pkgbuy|combo|product_ads_699k"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
-        [InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pricing|packages"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-    ])
+    rows: list[list[InlineKeyboardButton]] = []
+    pending: list[InlineKeyboardButton] = []
+    for item in public_video_combo_pricing_payload():
+        code = str(item.get("code") or "").strip()
+        label = str(item.get("button_label") or item.get("label") or code)
+        callback = "menu|support" if item.get("manual") or not int(item.get("price_vnd") or 0) else f"pkgbuy|combo|{code}"
+        pending.append(InlineKeyboardButton(label, callback_data=callback))
+        if len(pending) == 2:
+            rows.append(pending)
+            pending = []
+    if pending:
+        rows.append(pending)
+    rows.append([InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")])
+    rows.append([InlineKeyboardButton("⬅️ Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    return InlineKeyboardMarkup(rows)
 
 def my_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
@@ -122425,15 +122770,21 @@ def pricing_plans_lines() -> list[str]:
     catalog = package_catalog_payload().get("monthly") or {}
     def plan_line(code: str) -> str:
         entry = catalog.get(code) or {}
+        status = "liên hệ admin / sắp mở" if entry.get("manual") else "mua tự động"
         return (
             f"• {html.escape(entry.get('label') or code)} — <b>{html.escape(package_purchase_display_price('monthly', code))}</b> "
             f"— {html.escape(package_items_summary(entry.get('items') or {}))} "
-            f"({int(entry.get('default_days') or 30)} ngày)"
+            f"({int(entry.get('default_days') or 30)} ngày) — {html.escape(status)}"
         )
     return [
         "📦 <b>GÓI THÁNG TOAN AAS</b>",
         "",
-        "Gói tháng là hạn mức dịch vụ theo tháng, tách riêng với <b>👑 Thành viên</b> và tách riêng với <b>💳 Nạp Xu</b>.",
+        "GÓI = mua theo tháng, có hạn mức dùng trong 30 ngày.",
+        "COMBO = mua 1 lần theo mục đích cụ thể, dùng đến hết lượt.",
+        "NẠP XU = tự do, thích dùng gì dùng đó.",
+        "MÃ QUÀ TẶNG = chỉ admin quản lý/cấp phát, không hiện public.",
+        "",
+        "Gói tháng là hạn mức dịch vụ theo tháng, tách riêng với <b>👑 Thành viên</b>, <b>💳 Nạp Xu</b> và <b>🎁 Combo</b>.",
         "Khách mua bằng nút bên dưới. PayOS thanh toán thành công thì hạn mức tự lưu vào <b>📦 Gói của tôi</b>.",
         "Khi dùng tạo ảnh/video/workflow, bot tự gợi ý dùng lượt trong gói và tự trừ lượt nếu bạn chọn.",
         "",
@@ -122442,6 +122793,7 @@ def pricing_plans_lines() -> list[str]:
         plan_line("creator_monthly"),
         plan_line("shop_monthly"),
         plan_line("pro_monthly"),
+        plan_line("small_business_monthly"),
         "",
         "<b>Quy tắc</b>",
         "• Gói tháng không phải thành viên, không tự nâng hạng thành viên.",
@@ -122627,8 +122979,10 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
             "• 画面比例：9:16、16:9、1:1、4:5、3:4。",
             "",
             "<b>E. 视频组合包</b>",
-            "• TikTok 99k 组合包：3 个常规视频，建议使用 9:16。",
-            "• 组合包购买不计入会员等级充值累计。",
+            "• 广告短视频组合包：199k。",
+            "• 产品评测组合包：299k。",
+            "• 产品活动组合包：699k。",
+            "• 组合包购买不计入会员等级充值累计，也不会转换为自由 Xu。",
             "",
             "<b>F. 趋势内容与提示词</b>",
             f"• 内容方案：<b>{pricing['workflow_content_total_cost']} Xu</b>",
@@ -122656,8 +123010,10 @@ def pricing_main_lines_i18n(lang: str = "vi") -> list[str]:
         "• Aspect ratios: 9:16, 16:9, 1:1, 4:5, 3:4.",
         "",
         "<b>E. Video combos</b>",
-        "• Combo TikTok 99k: 3 regular videos, recommended 9:16.",
-        "• Combos do not count membership rank/top-up points.",
+        "• Fast ad video combo: 199k.",
+        "• Product review combo: 299k.",
+        "• Product campaign combo: 699k.",
+        "• Combos do not count membership rank/top-up points and do not convert to flexible Xu.",
         "",
         "<b>F. Trend workflow / Prompt</b>",
         f"• Content-only workflow: <b>{pricing['workflow_content_total_cost']} Xu</b>",
@@ -122704,30 +123060,34 @@ def pricing_plans_lines_i18n(lang: str = "vi") -> list[str]:
         return [
             "📦 <b>TOAN AAS 月度套餐</b>",
             "",
-            "月度套餐 = 工具使用权 + 每月处理 Xu + 优先额度。",
-            "不是无限使用，重任务仍按总价格表扣 Xu。",
-            "每个套餐每月只能购买一次。",
+            "月度套餐 = 30 天内按月使用的服务额度。",
+            "Combo = 按具体用途一次性购买，用完为止。",
+            "Xu 充值 = 自由使用，按实际工具扣。",
+            "礼品码 = 仅管理员管理/发放，不显示在公开菜单。",
             "",
-            "• Starter — 49.000đ/月 — 600 Xu/月 — Silver+",
-            "• Creator — 99.000đ/月 — 1.300 Xu/月 — Silver+",
-            "• Pro — 199.000đ/月 — 3.000 Xu/月 — Gold+",
-            "• Business — 499.000đ/月 — 8.000 Xu/月 — Gold+ / admin approve",
+            "• 基础套餐 — 99.000đ / 30 天",
+            "• 内容套餐 — 199.000đ / 30 天",
+            "• 销售套餐 — 299.000đ / 30 天",
+            "• 专业套餐 — 499.000đ / 30 天",
+            "• 小企业套餐 — 999.000đ / 30 天，需联系管理员",
             "",
-            "购买月度套餐的金额不计入会员等级升级累计充值。",
+            "月度套餐与会员等级、Xu 充值和 Combo 分开计算。",
         ]
     return [
         "📦 <b>TOAN AAS Monthly Plans</b>",
         "",
-        "Monthly plan = tool access + monthly processing Xu + priority allowance.",
-        "It is not unlimited; heavy tasks still spend Xu according to the main pricing table.",
-        "Each plan type can be purchased once per month.",
+        "Monthly plan = a 30-day service allowance for regular use.",
+        "Combo = one-time package for a specific need, used until its units run out.",
+        "Top up Xu = flexible balance for any eligible tool.",
+        "Gift code = admin-managed only, not shown in the public menu.",
         "",
-        "• Starter — 49,000 VND/month — 600 Xu/month — Silver+",
-        "• Creator — 99,000 VND/month — 1,300 Xu/month — Silver+",
-        "• Pro — 199,000 VND/month — 3,000 Xu/month — Gold+",
-        "• Business — 499,000 VND/month — 8,000 Xu/month — Gold+ / admin approval",
+        "• Basic — 99,000 VND / 30 days",
+        "• Content — 199,000 VND / 30 days",
+        "• Sales — 299,000 VND / 30 days",
+        "• Professional — 499,000 VND / 30 days",
+        "• Small business — 999,000 VND / 30 days, admin support",
         "",
-        "Monthly plan purchases do not count toward member tier top-up totals.",
+        "Monthly plan purchases are separate from member tier, Xu top-up, and combos.",
     ]
 
 async def cmd_pricing(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -122786,6 +123146,21 @@ def package_purchase_detail_lines(package_type: str, code: str) -> list[str]:
     price = package_purchase_price_vnd(package_type, code)
     price_text = f"{price:,}đ".replace(",", ".") if price > 0 else "liên hệ admin"
     duration_days = int(entry.get("default_days") or 0) if package_type == "monthly" else 0
+    if entry.get("manual"):
+        rows = [
+            f"🎁 <b>{html.escape(kind)}: {html.escape(label)}</b>", "",
+            f"• Giá tham khảo: <b>{html.escape(price_text)}</b>",
+        ]
+        if duration_days:
+            rows.append(f"• Thời hạn dự kiến: <b>{duration_days} ngày</b>")
+        rows.extend([
+            f"• Quyền lợi: {html.escape(package_items_summary(entry.get('items') or {}))}",
+            f"• Ghi chú: {html.escape(str(entry.get('note') or 'Cần admin xác nhận trước khi mở mua tự động.'))}",
+            "",
+            "Trạng thái: <b>sắp mở / cần admin xác nhận</b>.",
+            "Bot chưa tạo đơn, chưa trừ Xu và chưa kích hoạt gói/combo này.",
+        ])
+        return rows
     rows = [
         f"🎁 <b>{html.escape(kind)}: {html.escape(label)}</b>", "",
         f"• Giá: <b>{html.escape(price_text)}</b>" + ("/tháng" if package_type == "monthly" and price > 0 else ""),
@@ -122801,6 +123176,13 @@ def package_purchase_detail_lines(package_type: str, code: str) -> list[str]:
         "Bạn có muốn thanh toán sản phẩm này không?",
     ])
     return rows
+
+def package_purchase_manual_keyboard(package_type: str = "combo") -> InlineKeyboardMarkup:
+    back_action = "pricing|plans" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "pricing|combo"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
+        [InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data=back_action), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 def package_purchase_confirm_keyboard(package_type: str, code: str) -> InlineKeyboardMarkup:
     package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan"} else "combo"
@@ -123118,6 +123500,12 @@ async def handle_package_purchase_callback(update: Update, context: ContextTypes
     entry = package_catalog_entry(code, package_type)
     if not entry:
         return await safe_edit_or_send(query, "⚠️ Gói không hợp lệ. Bot chưa tạo đơn.")
+    if entry.get("manual"):
+        return await edit_or_send_pricing_lines(
+            query,
+            package_purchase_detail_lines(package_type, code),
+            package_purchase_manual_keyboard(package_type),
+        )
     return await edit_or_send_pricing_lines(
         query,
         package_purchase_detail_lines(package_type, code),
@@ -123226,7 +123614,9 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "promo_apply":
         return await edit_or_send_pricing_lines(query, billing_promo_apply_lines(lang), billing_promotions_keyboard(lang))
     if action == "gift_code":
-        return await edit_or_send_pricing_lines(query, billing_gift_code_lines(lang), billing_promotions_keyboard(lang))
+        if query.from_user and is_admin_user(query.from_user.id):
+            return await safe_edit_or_send(query, admin_gift_code_text(), parse_mode="HTML", reply_markup=admin_gift_code_keyboard())
+        return await edit_or_send_pricing_lines(query, billing_promotions_lines(lang), billing_promotions_keyboard(lang))
     if action == "catalog":
         return await edit_or_send_pricing_lines(query, pricing_catalog_lines(lang), pricing_catalog_keyboard(lang))
     if action == "total":
@@ -123244,7 +123634,11 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
     if action == "subtitle":
         return await edit_or_send_pricing_lines(query, pricing_subtitle_lines(), pricing_detail_keyboard("subtitle", lang))
     if action == "guide":
-        return await edit_or_send_pricing_lines(query, pricing_guide_lines(), guide_keyboard("", lang))
+        return await edit_or_send_pricing_lines(
+            query,
+            pricing_guide_lines(),
+            guide_keyboard("", lang, back_callback="pricing|main", back_label="⬅️ Nạp Xu / Bảng giá"),
+        )
     if action == "download_pricing":
         return await send_generated_markdown_document(
             query,
@@ -139007,6 +139401,7 @@ def finance_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📅 Doanh thu tháng", callback_data="menu|finance_revenue_month"), InlineKeyboardButton("📉 Chi phí tháng", callback_data="menu|finance_expense_month")],
         [InlineKeyboardButton("📈 Lãi / Lỗ", callback_data="menu|finance_profit"), InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|finance_export")],
         [InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense"), InlineKeyboardButton("🟢 Miễn/ưu đãi thuế phí", callback_data="menu|finance_compliance")],
+        [InlineKeyboardButton("🎟 Mã quà tặng", callback_data="menu|admin_gift_codes")],
         [InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist"), InlineKeyboardButton("🧾 Báo cáo kế toán", callback_data="menu|finance_tax")],
         [InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|finance_help")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
@@ -140750,6 +141145,11 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "admin_packages_grant_combo": lambda: (admin_packages_help_text("grant_combo"), admin_child_keyboard("admin_packages")),
     "admin_packages_grant_monthly": lambda: (admin_packages_help_text("grant_monthly"), admin_child_keyboard("admin_packages")),
     "admin_packages_user": lambda: (admin_packages_help_text("user"), admin_child_keyboard("admin_packages")),
+    "admin_gift_codes": lambda: (admin_gift_code_text(), admin_gift_code_keyboard()),
+    "admin_gift_create_help": lambda: (admin_gift_code_action_text("admin_gift_create_help"), admin_gift_code_keyboard()),
+    "admin_gift_list_help": lambda: (admin_gift_code_action_text("admin_gift_list_help"), admin_gift_code_keyboard()),
+    "admin_gift_disable_help": lambda: (admin_gift_code_action_text("admin_gift_disable_help"), admin_gift_code_keyboard()),
+    "admin_gift_history_help": lambda: (admin_gift_code_action_text("admin_gift_history_help"), admin_gift_code_keyboard()),
     "admin_provider": lambda: (admin_provider_menu_text_v2(), admin_provider_keyboard_v2()),
     "admin_provider_status": lambda: (admin_provider_status_text_v2(), admin_provider_child_keyboard("admin_provider_status")),
     "admin_provider_test": lambda: (admin_provider_test_text_v2(), admin_provider_child_keyboard("admin_provider_test")),

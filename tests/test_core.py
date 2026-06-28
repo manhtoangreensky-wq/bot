@@ -2441,7 +2441,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Khuyến mãi nạp tiền chỉ áp dụng cho PayOS hoặc chuyển khoản ngân hàng Việt Nam" in promo_text
     assert "ZaloPay/MoMo, USDT và thanh toán quốc tế không áp dụng" in promo_text
     promo_callbacks = [button.callback_data for row in bot.billing_promotions_keyboard("vi").inline_keyboard for button in row]
-    assert promo_callbacks == ["pricing|promo_apply", "pricing|gift_code", "menu|main_topup", "pricing|catalog", "pricing|main", "menu|main"]
+    assert promo_callbacks == ["pricing|promo_apply", "menu|main_topup", "pricing|catalog", "pricing|main", "menu|main"]
     assert bot.hidden_active_features_audit("vi") == []
     assert bot.hidden_active_features_audit("vi", ["📋 Bảng giá", "💳 Nạp Xu"])[0]["code"] == "HIDDEN_ACTIVE_FEATURE"
     catalog_labels = [button.text for row in bot.pricing_catalog_keyboard("vi").inline_keyboard for button in row]
@@ -2470,8 +2470,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video Chuyên Nghiệp: <b>1000 Xu</b>" in video_price_text
     assert "Video Pro Plus: <b>1200 Xu</b>" in video_price_text
     assert "Video Premium: <b>1500 Xu</b>" in video_price_text
-    assert "Combo Ưu Đãi TikTok" in combo_price_text
-    assert "khuyến nghị 9:16" in combo_price_text
+    assert "Combo Video Quảng Cáo Nhanh" in combo_price_text
+    assert "Combo Review Sản Phẩm" in combo_price_text
+    assert "Combo 10 Video Phụ Đề + Lồng Tiếng" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
     assert "công cụ xử lý video nội bộ" in frame_price_text
     assert "Local Worker/FFmpeg" not in frame_price_text
@@ -2495,9 +2496,10 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "key/token/raw provider response" in audit_price_text
     assert 'CommandHandler("pricing_audit", cmd_pricing_audit)' in source
     combo_callbacks = [button.callback_data for row in bot.pricing_combo_keyboard("vi").inline_keyboard for button in row]
-    assert "pkgbuy|combo|tiktok_99k" in combo_callbacks
-    assert "pkgbuy|combo|posting_499k" in combo_callbacks
-    assert "pricing|packages" in combo_callbacks
+    assert "pkgbuy|combo|video_ad_fast_199k" in combo_callbacks
+    assert "pkgbuy|combo|campaign_product_699k" in combo_callbacks
+    assert "pkgbuy|combo|tiktok_99k" not in combo_callbacks
+    assert "pricing|main" in combo_callbacks
     package_hub_callbacks = [button.callback_data for row in bot.pricing_packages_keyboard("vi").inline_keyboard for button in row]
     assert package_hub_callbacks == ["pricing|plans", "pricing|combo", "pricing|my_packages", "pricing|main", "menu|main"]
     xu_text = "\n".join(bot.pricing_xu_lines())
@@ -2509,7 +2511,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     plan_callbacks = [button.callback_data for row in bot.pricing_plans_keyboard("vi").inline_keyboard for button in row]
     assert "pkgbuy|monthly|starter_monthly" in plan_callbacks
     assert "pkgbuy|monthly|pro_monthly" in plan_callbacks
-    assert "pricing|packages" in plan_callbacks
+    assert "pkgbuy|monthly|small_business_monthly" in plan_callbacks
+    assert "pricing|main" in plan_callbacks
     assert "Giá tác vụ dịch tham khảo" not in plan_text
     assert "<code>/translate_voice</code>: từ 30–80 Xu/audio ngắn" not in plan_text
     assert "Music / Audio Factory" not in plan_text
@@ -4077,10 +4080,11 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     plan_text = "\n".join(bot.pricing_plans_lines())
     assert "Gói tháng là hạn mức dịch vụ theo tháng" in plan_text
     assert "PayOS thanh toán thành công thì hạn mức tự lưu vào <b>📦 Gói của tôi</b>" in plan_text
-    assert "📆 Starter Monthly" in plan_text
-    assert "📆 Creator Monthly" in plan_text
-    assert "📆 Shop Monthly" in plan_text
-    assert "📆 Pro Monthly" in plan_text
+    assert "🟢 Gói Cơ bản" in plan_text
+    assert "🔵 Gói Nội dung" in plan_text
+    assert "🟣 Gói Bán hàng" in plan_text
+    assert "🟠 Gói Chuyên nghiệp" in plan_text
+    assert "🔴 Gói Doanh nghiệp nhỏ" in plan_text
     assert "Bot không yêu cầu khách gõ lệnh mua gói" in plan_text
     assert "/buy_plan" not in plan_text
     assert "Tiền mua gói tháng không tính vào tổng nạp" in plan_text
