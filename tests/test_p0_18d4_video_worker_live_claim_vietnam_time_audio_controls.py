@@ -172,7 +172,7 @@ def test_tool_test_video_product_worker_claim_no_generic_error():
     assert "Có lỗi khi xử lý lệnh" not in source
     assert "diagnostic_product_worker_claim_only_no_render" not in source
     assert "toanaas-worker-owner-product-video" in source
-    assert "Đã tạo job kiểm tra video thật nhưng chưa có worker claim" in source
+    assert "Đã tạo job kiểm tra claim product_video" in source
 
 
 def test_product_video_queue_not_stuck_when_worker_missing(tmp_path):

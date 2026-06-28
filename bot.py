@@ -39812,6 +39812,7 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
         readiness = {"ok": False, "providers": [], "reason": type(exc).__name__}
     created = {}
     claimability = {}
+    product = {"last": {}}
     try:
         conn = db_connect()
         try:
@@ -39819,6 +39820,7 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
             if created.get("ok"):
                 job_id = safe_int((created.get("job") or {}).get("id") or (created.get("job") or {}).get("job_id"), 0)
                 claimability = remote_worker_api.explain_product_video_claimability(conn, job_id, owner_only=True, public_enabled=False)
+                product = remote_worker_api.remote_worker_product_video_queue_snapshot(conn)
                 set_system_setting("remote_worker:last_product_video_job_id", str(job_id or ""), "last product video worker diagnostic job", uid)
         finally:
             conn.close()
@@ -39858,6 +39860,8 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
     job = dict(created.get("job") or {})
     project = dict(created.get("project") or {})
     job_id = safe_int(job.get("id") or job.get("job_id"), 0)
+    last = dict(product.get("last") or {})
+    claimed = bool(str(last.get("worker_id") or "").strip() and safe_int(last.get("job_id"), 0) == job_id)
     provider_ready = bool(readiness.get("ok"))
     claimable = bool(claimability.get("claimable"))
     claim_reason = str(claimability.get("reason") or ("claimable" if claimable else "claim_route_missing"))
@@ -39868,16 +39872,20 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
     lines = [
         "🧪 <b>Product video worker claim diagnostic</b>",
         "",
-        "Đã tạo job product video thật để VPS owner/admin worker claim. Không tạo MP4 tại bot, không dùng test pattern, không trừ Xu.",
+        "Đã tạo job kiểm tra claim product_video. Lệnh này không tạo MP4, không dùng test pattern, không gọi provider, không trừ Xu.",
         f"• Mã xử lý: <code>{html.escape(str(job_id or '-'))}</code>",
         f"• Project: <code>{html.escape(str(project.get('project_id') or '-'))}</code>",
         "• source: <code>product_video</code>",
         "• render_mode: <code>real</code>",
         "• test_pattern: <code>false</code>",
         "• admin_video_delivery: <code>false</code>",
+        "• Diagnostic mode: <code>claim_only</code>",
+        "• Provider call: <code>NO</code>",
+        f"• Claim product route: <code>{'CLAIMED' if claimed else 'WAITING'}</code>",
         f"• Claimable by --owner-product-video: <code>{'YES' if claimable else 'NO'}</code>",
         f"• Claim reason: <code>{html.escape(claim_reason)}</code>",
-        "• Job left queued for VPS: <code>YES</code>",
+        f"• Last worker: <code>{html.escape(str(last.get('worker_id') or '-'))}</code>",
+        f"• Job left queued for VPS: <code>{'NO' if claimed else 'YES'}</code>",
         f"• Worker API token: <code>{'YES' if flags.get('worker_api_enabled') else 'NO'}</code>",
         f"• Real provider ready: <code>{'YES' if provider_ready else 'NO'}</code>",
         f"• Updated: <code>{html.escape(vn_now_text())}</code>",
@@ -39885,8 +39893,9 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
         "Provider readiness:",
         *(provider_lines or ["• none: <code>not configured</code>"]),
         "",
-        "Đã tạo job kiểm tra video thật nhưng chưa có worker claim. Job đã để nguyên trong hàng đợi để VPS claim.",
-        "Nếu VPS vẫn idle, kiểm tra service `toanaas-worker-owner-product-video`.",
+        "Worker đã claim job kiểm tra. Theo dõi tiếp bằng /video_worker_status."
+        if claimed else "Đã tạo job kiểm tra video thật nhưng chưa có worker claim. Job đã để nguyên trong hàng đợi để VPS claim.",
+        "Nếu VPS vẫn idle, kiểm tra service `toanaas-worker-owner-product-video`." if not claimed else "",
         "",
         "VPS owner/admin product service:",
         "<code>systemctl status toanaas-worker-owner-product-video --no-pager -l</code>",
@@ -40006,6 +40015,67 @@ async def cmd_video_worker_status(update: Update, context: ContextTypes.DEFAULT_
     finally:
         conn.close()
     return await update.message.reply_text(video_worker_status_text(status, product, readiness), parse_mode="HTML")
+
+
+def _video_worker_claim_debug_item_lines(title: str, item: dict) -> list[str]:
+    if not item.get("ok"):
+        return [f"{title}: <code>{html.escape(str(item.get('reason') or 'not_found'))}</code>"]
+    flags = dict(item.get("flags") or {})
+    return [
+        f"{title}:",
+        f"• Job: <code>{safe_int(item.get('job_id'), 0) or '-'}</code>",
+        f"• Status: <code>{html.escape(str(item.get('status') or '-'))}</code>",
+        f"• Worker: <code>{html.escape(str(item.get('worker_id') or '-'))}</code>",
+        f"• Claimed at: <code>{html.escape(vietnam_time_display(item.get('claimed_at')))}</code>",
+        f"• Expected lane: <code>{html.escape(str(item.get('claim_lane') or '-'))}</code>",
+        f"• Claimable now: <code>{'yes' if item.get('claimable') else 'no'}</code>",
+        f"• Why not claimable: <code>{html.escape(str(item.get('not_claimable_reason') or '-'))}</code>",
+        f"• Reason code: <code>{html.escape(str(item.get('reason_code') or '-'))}</code>",
+        f"• source: <code>{html.escape(str(flags.get('source') or '-'))}</code>",
+        f"• render_mode: <code>{html.escape(str(flags.get('render_mode') or '-'))}</code>",
+        f"• test_pattern: <code>{'yes' if flags.get('test_pattern') else 'no'}</code>",
+        f"• admin_video_delivery: <code>{'yes' if flags.get('admin_video_delivery') else 'no'}</code>",
+        f"• no_charge: <code>{'yes' if flags.get('no_charge') else 'no'}</code>",
+        f"• public_user: <code>{'yes' if flags.get('public_user') else 'no'}</code>",
+        f"• provider_call: <code>{'yes' if flags.get('provider_call') else 'no'}</code>",
+        f"• claim_only_diagnostic: <code>{'yes' if flags.get('claim_only_diagnostic') else 'no'}</code>",
+    ]
+
+
+def video_worker_claim_debug_text(debug: dict) -> str:
+    counts = dict(debug.get("lane_counts") or {})
+    count_line = " ".join(
+        f"{html.escape(str(key))}=<code>{safe_int(value, 0)}</code>"
+        for key, value in counts.items()
+    ) or "-"
+    lines = [
+        "🧭 <b>Video Worker Claim Debug</b>",
+        "",
+        f"• Claim route: <code>{html.escape(str(debug.get('claim_route') or 'manual_debug'))}</code>",
+        f"• Public product worker: <code>{'YES' if debug.get('public_worker_enabled') else 'NO'}</code>",
+        f"• Lane counts: {count_line}",
+        "",
+        *_video_worker_claim_debug_item_lines("Latest admin canary", dict(debug.get("latest_admin_canary") or {})),
+        "",
+        *_video_worker_claim_debug_item_lines("Latest product diagnostic", dict(debug.get("latest_product_diagnostic") or {})),
+        "",
+        "Expected worker modes:",
+        "• admin_canary: <code>python remote_worker.py --admin-canary --once</code>",
+        "• owner_product_video: <code>python remote_worker.py --owner-product-video --once</code>",
+    ]
+    return "\n".join(lines)
+
+
+async def cmd_video_worker_claim_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    conn = db_connect()
+    try:
+        debug = remote_worker_api.remote_worker_claim_debug_snapshot(conn, claim_route="manual_debug")
+    finally:
+        conn.close()
+    return await update.message.reply_text(video_worker_claim_debug_text(debug), parse_mode="HTML")
 
 
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
@@ -138160,6 +138230,7 @@ ADMIN_CONTROL_MODULES = {
             ("/remote_worker_prod_canary --no-charge", "tạo admin production canary VPS, không trừ Xu"),
             ("/remote_worker_prod_canary_status <job_id>", "xem trạng thái admin production canary"),
             ("/video_worker_status", "trạng thái product video worker/provider"),
+            ("/video_worker_claim_debug", "debug lane claim worker video, không lộ secret"),
             ("/tool_test_video_product_worker_claim --no-charge", "kiểm tra route claim product video thật, không render MP4"),
             ("/shopaikey_status", "ShopAIKey status"),
             ("/shopaikey_usage", "ShopAIKey usage"),
@@ -149761,6 +149832,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("remote_worker_prod_canary", cmd_remote_worker_prod_canary))
     tg_app.add_handler(CommandHandler("remote_worker_prod_canary_status", cmd_remote_worker_prod_canary_status))
     tg_app.add_handler(CommandHandler("video_worker_status", cmd_video_worker_status))
+    tg_app.add_handler(CommandHandler("video_worker_claim_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_video_product_worker_claim(?:@\w+)?(?:\s|$)"), cmd_tool_test_video_product_worker_claim))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))

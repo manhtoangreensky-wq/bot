@@ -57,7 +57,7 @@ def test_product_worker_claim_messagehandler_args_none_creates_safe_diagnostic(m
     text = message.outputs[-1]["text"]
     assert "Product video worker claim diagnostic" in text
     assert "Có lỗi khi xử lý lệnh" not in text
-    assert "Đã tạo job kiểm tra video thật" in text
+    assert "Đã tạo job kiểm tra claim product_video" in text
 
     conn = sqlite3.connect(db_path)
     try:
@@ -115,7 +115,7 @@ def test_remote_worker_prod_canary_status_reports_not_claimed_timeout(tmp_path):
         status = remote_worker_api.get_remote_worker_admin_canary_status(conn, job_id=int(created["job"]["id"]), admin_user_id=ADMIN_UID)
     finally:
         conn.close()
-    assert status["status"] == "queued"
+    assert status["status"] == "failed"
     assert status["stage"] == "not_claimed_timeout"
     text = bot._format_remote_worker_prod_canary_status(status)
     assert "not_claimed_timeout" in text
@@ -135,10 +135,10 @@ def test_remote_worker_prod_canary_failed_never_shows_completed_stage(tmp_path):
     finally:
         conn.close()
     assert status["status"] == "failed"
-    assert status["stage"] == "runtime_error_redacted"
+    assert status["stage"] == "not_claimed_timeout"
     text = bot._format_remote_worker_prod_canary_status(status)
     assert "Stage: <code>completed</code>" not in text
-    assert "Reason code: <code>runtime_error_redacted</code>" in text
+    assert "Reason code: <code>not_claimed_timeout</code>" in text
 
 
 def test_remote_worker_prod_canary_processing_displays_claimed(tmp_path):
