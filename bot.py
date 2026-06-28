@@ -85214,6 +85214,36 @@ def voice_clone_provider_not_ready_public_text(lang: str = "vi") -> str:
         return VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI
     return public_product_maintenance_text(lang, "Custom voice")
 
+def voice_clone_product_failure_text(lang: str = "vi", reason: str = "") -> str:
+    marker = str(reason or "").strip().lower()
+    if music_ui_lang(lang=lang) != "vi":
+        if "duration" in marker or "too_short" in marker or "short" in marker:
+            return "The sample is a little short. Please send a clearer 10-30 second sample with little background noise. TOAN AAS has not charged Xu."
+        if "temporary" in marker or "not_ready" in marker or "provider_not_ready" in marker:
+            return "TOAN AAS cannot create this voice right now. Please try again later or use a default male/female voice. TOAN AAS has not charged Xu."
+        return (
+            "⚙️ TOAN AAS could not create a valid voice from this sample.\n\n"
+            "Please try again with a clearer sample:\n"
+            "• About 10-30 seconds\n"
+            "• One speaker, low noise\n"
+            "• No loud background music\n"
+            "• Speak clearly and steadily\n\n"
+            "TOAN AAS has not charged Xu."
+        )
+    if "duration" in marker or "too_short" in marker or "short" in marker:
+        return "Mẫu giọng hơi ngắn. Anh/chị gửi mẫu dài hơn một chút, khoảng 10-30 giây và ít tạp âm. TOAN AAS chưa trừ Xu."
+    if "temporary" in marker or "not_ready" in marker or "provider_not_ready" in marker:
+        return "TOAN AAS chưa tạo được voice lúc này. Anh/chị thử lại sau hoặc dùng giọng nam/nữ mặc định. TOAN AAS chưa trừ Xu."
+    return (
+        "⚙️ TOAN AAS chưa tạo được voice hợp lệ từ mẫu này.\n\n"
+        "Anh/chị thử lại với mẫu giọng rõ hơn:\n"
+        "• Nên dài khoảng 10-30 giây\n"
+        "• Một người nói, ít tạp âm\n"
+        "• Không dùng nhạc nền lớn\n"
+        "• Nói rõ và đều\n\n"
+        "TOAN AAS chưa trừ Xu."
+    )
+
 def voice_clone_admin_guard_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
@@ -85521,6 +85551,9 @@ def successful_custom_voice_creation_count(user_id, exclude_profile_id: int = 0)
 def voice_profile_storage_price_xu(user_id, product_context: str = PRODUCT_CONTEXT_SHOWROOM, profile_id: int = 0) -> int:
     if is_admin_user(user_id):
         return 0
+    return voice_profile_storage_display_price_xu(user_id, product_context, profile_id)
+
+def voice_profile_storage_display_price_xu(user_id, product_context: str = PRODUCT_CONTEXT_SHOWROOM, profile_id: int = 0) -> int:
     legacy_counter = globals().get("active_voice_profile_count")
     if callable(legacy_counter) and getattr(legacy_counter, "__name__", "") != "active_voice_profile_count":
         successful_count = int(legacy_counter(user_id, profile_id) or 0)
@@ -86393,56 +86426,39 @@ def voice_profile_actions_keyboard(profile_id: int, lang: str = "vi", product_co
 def voice_clone_quote_text(profile: dict, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> str:
     user_id = str(profile.get("user_id") or "")
     profile_id = int(profile.get("id") or 0)
-    cost = voice_profile_storage_price_xu(user_id, product_context, profile_id)
-    admin = is_admin_user(user_id)
+    cost = voice_profile_storage_display_price_xu(user_id, product_context, profile_id)
     if music_ui_lang(lang=lang) != "vi":
-        if admin:
-            return (
-                "🧪 <b>ADMIN TEST MODE - no Xu charge</b>\n\n"
-                "TOAN AAS will try to create a real custom voice after this product confirmation if the provider is configured.\n\n"
-                "• Admin interactive confirmation is enough\n"
-                "• No Xu charge\n"
-                "• If provider fails or returns no valid provider voice id, no ready profile is saved"
-            )
         if cost <= 0:
             return (
-                "🎁 <b>First custom voice is free</b>\n\n"
+                "🎙 <b>Create custom voice</b>\n\n"
                 "TOAN AAS will create a custom voice from your submitted sample.\n\n"
                 "• First custom voice creation: free\n"
                 f"• From the second creation: {int(VOICE_PROFILE_PRICE_XU or 0)} Xu / successful creation\n"
                 "• TOAN AAS processes only after you confirm\n"
-                "• If the provider blocks clone voice or no valid profile is created, no Xu is charged"
+                "• If the sample is not clear enough or no valid voice is created, no Xu is charged"
             )
         return (
             "🎙 <b>Create custom voice</b>\n\n"
             "TOAN AAS will create a custom voice from your submitted sample.\n\n"
             f"• Custom voice creation fee: {cost} Xu / successful creation\n"
             "• TOAN AAS processes only after you confirm\n"
-            "• If the provider blocks clone voice or no valid profile is created, no Xu is charged"
-        )
-    if admin:
-        return (
-            "🧪 <b>ADMIN TEST MODE — không trừ Xu</b>\n\n"
-            "TOAN AAS sẽ thử tạo voice thật sau khi admin xác nhận trong flow sản phẩm nếu provider đã cấu hình.\n\n"
-            "• Admin bấm trong flow sản phẩm là đã xác nhận\n"
-            "• Không trừ Xu\n"
-            "• Nếu provider lỗi hoặc không trả provider_voice_id hợp lệ, hệ thống không lưu voice ready"
+            "• If the sample is not clear enough or no valid voice is created, no Xu is charged"
         )
     if cost <= 0:
         return (
-            "🎁 <b>Tạo voice riêng đầu tiên miễn phí</b>\n\n"
+            "🎙 <b>Tạo voice riêng</b>\n\n"
             "TOAN AAS sẽ tạo giọng riêng từ mẫu giọng anh/chị đã gửi.\n\n"
             "• Voice riêng đầu tiên: miễn phí\n"
             f"• Các voice riêng tiếp theo: {int(VOICE_PROFILE_PRICE_XU or 0)} Xu / lần tạo thành công\n"
             "• TOAN AAS chỉ xử lý sau khi anh/chị xác nhận\n"
-            "• Nếu nhà cung cấp không tạo được profile hợp lệ, hệ thống sẽ không trừ Xu"
+            "• Nếu mẫu giọng chưa đủ rõ hoặc chưa tạo được giọng hợp lệ, TOAN AAS sẽ không trừ Xu"
         )
     return (
         "🎙 <b>Tạo voice riêng</b>\n\n"
         "TOAN AAS sẽ tạo giọng riêng từ mẫu giọng anh/chị đã gửi.\n\n"
         f"• Phí tạo voice riêng: {cost} Xu / lần tạo thành công\n"
         "• TOAN AAS chỉ xử lý sau khi anh/chị xác nhận\n"
-        "• Nếu nhà cung cấp tạm chặn clone voice hoặc không tạo được profile hợp lệ, hệ thống sẽ không trừ Xu"
+        "• Nếu mẫu giọng chưa đủ rõ hoặc chưa tạo được giọng hợp lệ, TOAN AAS sẽ không trừ Xu"
     )
 
 def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
@@ -86451,14 +86467,10 @@ def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi", product_contex
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     profile = get_voice_profile_by_id(pid)
-    cost = voice_profile_storage_price_xu((profile or {}).get("user_id"), ctx, pid) if profile else (0 if VOICE_PROFILE_FIRST_FREE else int(VOICE_PROFILE_PRICE_XU or 0))
-    admin = is_admin_user((profile or {}).get("user_id"))
-    if admin:
-        confirm_label = "✅ Tạo voice riêng — Admin test"
-    else:
-        confirm_label = "✅ Tạo voice miễn phí" if cost <= 0 else f"✅ Tạo voice riêng {cost} Xu"
+    cost = voice_profile_storage_display_price_xu((profile or {}).get("user_id"), ctx, pid) if profile else (0 if VOICE_PROFILE_FIRST_FREE else int(VOICE_PROFILE_PRICE_XU or 0))
+    confirm_label = "✅ Tạo voice miễn phí" if cost <= 0 else f"✅ Tạo voice riêng {cost} Xu"
     if not is_vi:
-        confirm_label = "✅ Create custom voice - Admin test" if admin else ("✅ Create custom voice free" if cost <= 0 else f"✅ Create custom voice {cost} Xu")
+        confirm_label = "✅ Create custom voice free" if cost <= 0 else f"✅ Create custom voice {cost} Xu"
     return build_2col_keyboard(
         [
             (confirm_label, cb(f"voice_clone_confirm:{pid}")),
@@ -87479,7 +87491,7 @@ def custom_voice_failed_keyboard(lang: str = "vi", product_context: str = PRODUC
     retry_action = f"voice_clone_retry_context:{pid}" if pid > 0 else "voice_clone"
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔁 Thử lại sau" if is_vi else "🔁 Try again later", callback_data=cb(retry_action)),
+            InlineKeyboardButton("🔁 Thử lại" if is_vi else "🔁 Try again", callback_data=cb(retry_action)),
             InlineKeyboardButton("🎙 Giọng nữ mặc định" if is_vi else "🎙 Default female", callback_data=cb("voice_default_female")),
         ],
         [
@@ -87650,25 +87662,14 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
                 },
                 user_id,
             )
-        if admin_access:
-            return await query.message.reply_text(
-                voice_clone_admin_product_block_text(
-                    readiness,
-                    route_errors=[],
-                    error=preflight.admin_debug_summary or fail_status,
-                    provider_voice_id="",
-                ),
-                parse_mode="HTML",
-                reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
-            )
         if voice_clone_permission_error(fail_status):
             return await query.message.reply_text(
-                voice_clone_permission_forbidden_public_text(lang),
-                reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
+                voice_clone_product_failure_text(lang, fail_status),
+                reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
             )
         return await query.message.reply_text(
-            voice_clone_provider_not_ready_public_text(lang),
-            reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
+            voice_clone_product_failure_text(lang, fail_status),
+            reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
         )
     if not full_generation:
         quota_decision = preview_quota_guard(user_id, "voice_ai")
@@ -87718,8 +87719,6 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
     metadata["final_cost_xu"] = cost
     metadata["preview_charged_xu"] = 0
     await query.message.reply_text(
-        "🧪 ADMIN TEST MODE — TOAN AAS sẽ thử tạo voice thật nếu provider đã cấu hình. Không trừ Xu."
-        if admin_access else
         "🎙 TOAN AAS đang tạo voice riêng. Vui lòng chờ và không bấm lại nhiều lần."
         if full_generation
         else "🎙 TOAN AAS đang tạo bản nghe thử. Vui lòng chờ và không bấm lại nhiều lần."
@@ -87779,25 +87778,13 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         if not result.ok:
             fail_status = str(result.error_code or result.status or "CLONE_NOT_READY")
             mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed_" + fail_status.lower(), str(result.admin_debug_summary or fail_status))
-            if admin_access:
-                return await query.message.reply_text(
-                    voice_clone_admin_product_block_text(
-                        readiness,
-                        provider_name=provider_name,
-                        route_errors=route_errors,
-                        error=result.admin_debug_summary or fail_status,
-                        provider_voice_id=provider_voice_id,
-                    ),
-                    parse_mode="HTML",
-                    reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
-                )
             if voice_clone_permission_error(fail_status):
                 return await query.message.reply_text(
-                    voice_clone_permission_forbidden_public_text(lang),
-                    reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
+                    voice_clone_product_failure_text(lang, fail_status),
+                    reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
                 )
             return await query.message.reply_text(
-                str(result.safe_public_message or "TOAN AAS chưa tạo được voice riêng hợp lệ. TOAN AAS chưa trừ Xu."),
+                voice_clone_product_failure_text(lang, fail_status),
                 reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
             )
         preview_ref = ""
@@ -87861,36 +87848,12 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
         )
         failed_profile = mark_voice_profile_activation_failed(user_id, profile_id, profile, "failed_" + fail_status.lower(), str(exc))
         if voice_clone_permission_error(exc):
-            if admin_access:
-                return await query.message.reply_text(
-                    voice_clone_admin_product_block_text(
-                        readiness,
-                        provider_name=provider_name,
-                        route_errors=route_errors,
-                        error=exc,
-                        provider_voice_id=provider_voice_id,
-                    ),
-                    parse_mode="HTML",
-                    reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
-                )
             return await query.message.reply_text(
-                voice_clone_permission_forbidden_public_text(lang),
-                reply_markup=voice_clone_permission_forbidden_keyboard(lang, ctx),
-            )
-        if admin_access:
-            return await query.message.reply_text(
-                voice_clone_admin_product_block_text(
-                    readiness,
-                    provider_name=provider_name,
-                    route_errors=route_errors,
-                    error=exc,
-                    provider_voice_id=provider_voice_id,
-                ),
-                parse_mode="HTML",
+                voice_clone_product_failure_text(lang, fail_status),
                 reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
             )
         return await query.message.reply_text(
-            "⚙️ TOAN AAS chưa tạo được voice hợp lệ từ mẫu này. Anh/chị thử mẫu rõ hơn hoặc dùng giọng nam/nữ mặc định. TOAN AAS chưa trừ Xu.",
+            voice_clone_product_failure_text(lang, fail_status),
             reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
         )
 

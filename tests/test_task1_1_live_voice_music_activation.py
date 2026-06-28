@@ -169,7 +169,8 @@ def test_voice_failed_not_pending_confirm(monkeypatch):
 
     assert store["status"] == "failed_provider_not_ready"
     assert store["status"] != "pending_confirm"
-    assert bot.VOICE_CLONE_PROVIDER_NOT_READY_PUBLIC_VI in query.message.replies[-1]["text"]
+    assert "TOAN AAS chưa tạo được voice" in query.message.replies[-1]["text"]
+    assert "chưa trừ Xu" in query.message.replies[-1]["text"]
 
 
 def test_voice_vault_ready_buttons():
