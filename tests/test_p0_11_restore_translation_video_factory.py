@@ -34,18 +34,18 @@ def test_language_translation_menu_restored():
 def test_video_factory_menu_from_gateway():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     for label in (
-        "📝 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng video",
-        "🎬 Phụ đề + Lồng tiếng",
-        "📄 Dịch file phụ đề",
-        "🧾 Bóc lời thoại",
+        "🎬 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề",
+        "🎙 Lồng tiếng",
+        "🎞 Phụ đề + Lồng tiếng",
     ):
         assert label in labels
+    assert "📄 Dịch file phụ đề" not in labels
+    assert "🧾 Bóc lời thoại" not in labels
     assert "🔗 Tải video từ link" not in labels
     assert "📂 Media" not in labels
-    assert "📝 Chỉnh phụ đề" not in labels[:6]
-    assert "⬅️ Trung tâm" in labels
+    assert "📝 Chỉnh phụ đề" not in labels
+    assert "⬅️ Quay lại" in labels
 
 
 def test_back_language_menu_to_gateway():
@@ -197,9 +197,9 @@ def test_auto_dubbing_public_confirmation_clean():
     text = bot.video_dubbing_confirm_text({"mode": bot.VIDEO_SUBTITLE_MODE_DUB, "video_duration": 61, "voice_style": "Giọng nữ"}, "vi")
     assert "Lồng tiếng video" in text
     assert "Xuất video MP4 lồng tiếng" in text
-    assert "Chi phí:" in text
+    assert "Tổng:" in text
     assert "Tác vụ:" not in text
-    assert "TOAN AAS chỉ xử lý sau khi anh/chị xác nhận" in text
+    assert "TOAN AAS chỉ xử lý và trừ Xu sau khi anh/chị xác nhận" in text
 
 
 def test_translate_dub_translate_first_then_voice():

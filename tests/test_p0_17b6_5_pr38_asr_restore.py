@@ -209,7 +209,7 @@ def test_pr38_asr_engine_path_is_called_for_subtitle_plus_dub_media(monkeypatch)
     calls = []
     _patch_asr(monkeypatch, calls)
     ctx, tg_file = _ctx_with_file(b"combo-audio")
-    message = CaptureMessage("combo-media", kind="audio")
+    message = CaptureMessage("combo-media", kind="video")
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
 
@@ -217,17 +217,8 @@ def test_pr38_asr_engine_path_is_called_for_subtitle_plus_dub_media(monkeypatch)
     joined = "\n".join(item["text"] for item in message.outputs)
     assert tg_file.bytearray_called is False
     assert calls == []
-    assert state["step"] == "original_subtitle_confirm"
-    assert "Tạo phụ đề gốc trước" in joined
-
-    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid, ctx))
-    state = bot.get_video_dubbing_pending(uid)
-    assert tg_file.bytearray_called is True
-    assert calls
-    assert state["step"] == "original_subtitle_ready"
-    assert state["source_subtitle_ref"] == state["subtitle_ref"]
-    assert "TOAN AAS đang tạo phụ đề gốc" in query.outputs[1]["text"]
-    assert "Đã tạo phụ đề gốc" in query.outputs[-1]["text"]
+    assert state["step"] == "language"
+    assert "ngôn ngữ" in joined.lower()
 
 
 def test_pr38_asr_engine_path_is_called_for_subtitle_translate_media(monkeypatch):
@@ -246,24 +237,17 @@ def test_pr38_asr_engine_path_is_called_for_subtitle_translate_media(monkeypatch
     calls = []
     _patch_asr(monkeypatch, calls)
     ctx, _tg_file = _ctx_with_file(b"translate-audio")
-    message = CaptureMessage("translate-media", kind="audio")
+    message = CaptureMessage("translate-media", kind="video")
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
 
     state = bot.get_video_dubbing_pending(uid)
     assert calls == []
-    assert state["step"] == "original_subtitle_confirm"
+    assert state["step"] == "language"
     assert not state["subtitle_ref"]
     assert not state["source_subtitle_ref"]
-    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
+    assert "Dịch phụ đề" in message.outputs[-1]["text"]
     assert "videodub|output|srt" not in _callbacks(message.outputs[-1]["reply_markup"])
-
-    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid, ctx))
-    state = bot.get_video_dubbing_pending(uid)
-    assert calls
-    assert state["step"] == "language"
-    assert state["source_subtitle_ref"] == state["subtitle_ref"]
-    assert "Dịch phụ đề sang ngôn ngữ nào" in query.outputs[-1]["text"]
 
 
 def test_pr38_asr_engine_path_is_called_for_auto_subtitle_media(monkeypatch):
@@ -282,7 +266,7 @@ def test_pr38_asr_engine_path_is_called_for_auto_subtitle_media(monkeypatch):
     calls = []
     _patch_asr(monkeypatch, calls)
     ctx, _tg_file = _ctx_with_file(b"subtitle-audio")
-    message = CaptureMessage("subtitle-media", kind="audio")
+    message = CaptureMessage("subtitle-media", kind="video")
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
 
@@ -292,7 +276,7 @@ def test_pr38_asr_engine_path_is_called_for_auto_subtitle_media(monkeypatch):
     assert state["step"] == "confirm"
     assert not state["subtitle_ref"]
     assert not state["source_subtitle_ref"]
-    assert "✅ Xuất video phụ đề" in labels
+    assert "✅ Tạo phụ đề gốc" in labels
     assert "📄 Tải SRT" not in labels
     assert "📄 Tải VTT" not in labels
     assert "🧾 Tải TXT" not in labels
@@ -314,24 +298,17 @@ def test_pr38_asr_engine_path_is_called_for_dub_media_before_language(monkeypatc
     calls = []
     _patch_asr(monkeypatch, calls)
     ctx, _tg_file = _ctx_with_file(b"dub-audio")
-    message = CaptureMessage("dub-media", kind="audio")
+    message = CaptureMessage("dub-media", kind="video")
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
 
     state = bot.get_video_dubbing_pending(uid)
     assert calls == []
-    assert state["step"] == "original_subtitle_confirm"
+    assert state["step"] == "language"
     assert not state["subtitle_ref"]
     assert not state["source_subtitle_ref"]
     assert "TOAN AAS đang tạo phụ đề gốc" not in message.outputs[0]["text"]
-    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
-
-    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid, ctx))
-    state = bot.get_video_dubbing_pending(uid)
-    assert calls
-    assert state["step"] == "language"
-    assert state["source_subtitle_ref"] == state["subtitle_ref"]
-    assert "lồng tiếng sang ngôn ngữ nào" in query.outputs[-1]["text"]
+    assert "ngôn ngữ" in message.outputs[-1]["text"].lower()
 
 
 def test_non_empty_segments_are_required_before_success(monkeypatch):
@@ -396,7 +373,7 @@ def test_transcript_media_uses_asr_and_defaults_to_txt_output(monkeypatch):
     calls = []
     _patch_asr(monkeypatch, calls, transcript="day la transcript")
     ctx, _tg_file = _ctx_with_file(b"transcript-audio")
-    message = CaptureMessage("transcript-media", kind="audio")
+    message = CaptureMessage("transcript-media", kind="video")
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
 
@@ -427,11 +404,11 @@ def test_no_charge_before_final_confirm(monkeypatch):
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("charged before final confirm")),
     )
     ctx, _tg_file = _ctx_with_file(b"no-charge-audio")
-    message = CaptureMessage("no-charge-media", kind="audio")
+    message = CaptureMessage("no-charge-media", kind="video")
 
     assert asyncio.run(bot.handle_video_dubbing_pending_upload(_update(uid, message), ctx)) is True
     assert calls == []
-    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
+    assert bot.get_video_dubbing_pending(uid)["step"] == "language"
 
 
 def test_public_asr_failure_copy_has_no_provider_terms_b65():

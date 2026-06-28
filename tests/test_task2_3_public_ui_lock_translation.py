@@ -160,13 +160,8 @@ def test_task2_upload_video_stays_in_auto_dubbing(monkeypatch):
     state = bot.get_video_dubbing_pending(uid)
     assert state["product"] == "auto_dubbing"
     assert state["source_ref"] == "auto-dubbing"
-    assert state["step"] == "original_subtitle_confirm"
-    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
-
-    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid))
-    state = bot.get_video_dubbing_pending(uid)
     assert state["step"] == "language"
-    assert "Chọn ngôn ngữ lồng tiếng" in query.outputs[-1]["text"]
+    assert "ngôn ngữ" in message.outputs[-1]["text"].lower()
 
 
 def test_task2_upload_video_stays_in_subtitle_plus_dubbing(monkeypatch):
@@ -193,13 +188,8 @@ def test_task2_upload_video_stays_in_subtitle_plus_dubbing(monkeypatch):
     assert state["product"] == "subtitle_plus_dubbing"
     assert state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert state["source_ref"] == "subtitle-dubbing"
-    assert state["step"] == "original_subtitle_confirm"
-    assert "Tạo phụ đề gốc trước" in message.outputs[-1]["text"]
-
-    query = asyncio.run(_press_videodub("videodub|confirm_original_subtitle", uid))
-    state = bot.get_video_dubbing_pending(uid)
-    assert state["step"] == "original_subtitle_ready"
-    assert "Đã tạo phụ đề gốc" in query.outputs[-1]["text"]
+    assert state["step"] == "language"
+    assert "ngôn ngữ" in message.outputs[-1]["text"].lower()
 
 
 def test_task2_upload_video_does_not_open_generic_video_menu(monkeypatch):

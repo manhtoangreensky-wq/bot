@@ -60,13 +60,13 @@ def _source_markup(mode):
 
 def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert labels[:6] == [
-        "📝 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng video",
-        "🎬 Phụ đề + Lồng tiếng",
-        "📄 Dịch file phụ đề",
-        "🧾 Bóc lời thoại",
+    assert labels == [
+        "🎬 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề",
+        "🎙 Lồng tiếng",
+        "🎞 Phụ đề + Lồng tiếng",
+        "⬅️ Quay lại",
+        "🏠 Menu chính",
     ]
 
 
@@ -92,19 +92,18 @@ def test_link_import_only_top_level():
 
 
 def test_no_copied_source_menu_inside_product_flows():
-    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_CREATE))[0] == "📎 Gửi video/audio"
-    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:2] == ["🎬 Chưa có phụ đề", "📄 Đã có phụ đề"]
-    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_DUB))[:3] == [
-        "🎬 Từ video/audio",
-        "📄 Từ phụ đề có sẵn",
-        "🕘 Dùng phụ đề vừa tạo",
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_CREATE))[0] == "📤 Gửi video"
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:3] == ["📤 Gửi video đã có phụ đề", "🎬 Tạo phụ đề tự động", "⬅️ Dịch video"]
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_DUB))[:2] == [
+        "🎞 Video đã có phụ đề",
+        "🎧 Video chỉ có tiếng",
     ]
 
 
 def test_auto_subtitle_only_original_language():
     text = bot.video_dubbing_upload_text({"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}, "vi")
-    assert "đúng ngôn ngữ đang nói" in text
-    assert "không dịch" in text
+    assert "phụ đề gốc" in text
+    assert "video" in text.lower()
 
 
 def test_auto_subtitle_no_translation_no_voice():
@@ -219,9 +218,9 @@ def test_subtitle_dubbing_translate_subtitle_first():
         "source_file_id": "video",
     }
     state, text, _markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
-    assert state["step"] == "waiting_media"
+    assert state["step"] == "language"
     assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    assert "tạo phụ đề gốc" in text.lower()
+    assert "ngôn ngữ" in text.lower()
 
 
 def test_subtitle_dubbing_export_before_voice(monkeypatch):
@@ -237,8 +236,8 @@ def test_subtitle_dubbing_export_before_voice(monkeypatch):
     }
     state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
     assert state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    assert state["step"] == "waiting_media"
-    assert "tạo phụ đề gốc" in text.lower()
+    assert state["step"] == "language"
+    assert "ngôn ngữ" in text.lower()
     assert "✅ Xác nhận tạo đầy đủ" not in _labels(markup)
     assert "📄 Xuất SRT" not in _labels(markup)
     assert not any("Giọng nữ" in label for label in _labels(markup))

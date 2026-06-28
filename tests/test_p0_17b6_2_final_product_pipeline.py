@@ -60,13 +60,11 @@ def _callback_update(query):
 def test_translation_dub_studio_simple_menu():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     assert labels == [
-        "📝 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề / video",
-        "🎙 Lồng tiếng video",
-        "🎬 Phụ đề + Lồng tiếng",
-        "📄 Dịch file phụ đề",
-        "🧾 Bóc lời thoại",
-        "⬅️ Trung tâm",
+        "🎬 Tạo phụ đề tự động",
+        "🌐 Dịch phụ đề",
+        "🎙 Lồng tiếng",
+        "🎞 Phụ đề + Lồng tiếng",
+        "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
 
@@ -95,9 +93,10 @@ def test_tool_source_contracts():
     assert "videodub|source_recent_subtitle" not in _callbacks(
         bot.video_dubbing_source_keyboard("vi", transcript_state)
     )
-    assert "videodub|source_recent_subtitle" in _callbacks(
+    assert "videodub|source_recent_subtitle" not in _callbacks(
         bot.video_dubbing_source_keyboard("vi", dub_state)
     )
+    assert "videodub|path|has_subtitle" in _callbacks(bot.video_dubbing_source_keyboard("vi", dub_state))
     assert bot.video_dubbing_mode_needs_asr_provider(
         bot.VIDEO_SUBTITLE_MODE_TRANSLATE, file_state
     ) is False
@@ -116,12 +115,9 @@ def test_subtitle_plus_dub_stepwise_only():
     next_state, text, markup = bot.video_dubbing_next_screen_after_source(uid, state, "vi")
     assert next_state["mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     assert next_state["requested_mode"] == bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
-    assert next_state["step"] == "waiting_media"
-    assert "Chưa có phụ đề" in text
-    assert "Đã có phụ đề" in text
+    assert next_state["step"] == "language"
+    assert "Chọn ngôn ngữ" in text or "ngôn ngữ" in text.lower()
     assert "videodub|final" not in _callbacks(markup)
-    assert "videodub|path|no_subtitle" in _callbacks(markup)
-    assert "videodub|path|has_subtitle" in _callbacks(markup)
     bot.clear_video_dubbing_pending(uid)
 
 

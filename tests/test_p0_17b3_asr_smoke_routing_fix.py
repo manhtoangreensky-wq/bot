@@ -843,7 +843,7 @@ def test_subtitle_file_upload_stays_in_dub_flow(monkeypatch):
     asyncio.run(bot.handle_document_cache_only(update, SimpleNamespace(bot=FakeBot())))
 
     joined = "\n".join(item.get("text", "") for item in update.message.outputs)
-    assert "Chọn ngôn ngữ" in joined or "ngôn ngữ" in joined
+    assert "chỉ xử lý video" in joined
     assert "Dịch file" not in joined
     assert "TOAN AAS đã nhận video" not in joined
     bot.clear_video_dubbing_pending(uid)
@@ -856,8 +856,9 @@ def test_dub_audio_source_keyboard_offers_recent_subtitle():
     )
 
     labels = " ".join(_button_labels(markup))
-    assert "Từ phụ đề có sẵn" in labels
-    assert "Dùng phụ đề vừa tạo" in labels
+    assert "Video đã có phụ đề" in labels
+    assert "Video chỉ có tiếng" in labels
+    assert "Dùng phụ đề vừa tạo" not in labels
 
 
 def test_status_mentions_b4_isolation_flags(monkeypatch):

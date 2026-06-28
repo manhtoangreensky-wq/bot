@@ -119,8 +119,8 @@ def test_auto_subtitle_after_upload_shows_product_confirmation(monkeypatch):
     assert "Tác vụ:" not in text
     assert "Nguồn:" not in text
     assert labels == [
-        "✅ Xuất video phụ đề",
-        "❌ Hủy",
+        "✅ Tạo phụ đề gốc",
+        "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
 
@@ -173,7 +173,7 @@ def test_auto_dubbing_confirmation_has_final_only():
     assert "Nguồn:" not in text
     assert "Chi phí dự kiến" not in text
     assert "Tốc độ: <b>0.9</b>" in text
-    assert labels == ["✅ Xuất video lồng tiếng", "🎙 Đổi giọng", "❌ Hủy", "🏠 Menu chính"]
+    assert labels == ["✅ Xác nhận lồng tiếng", "⬅️ Quay lại", "❌ Hủy", "🏠 Menu chính"]
 
 
 def test_auto_dubbing_provider_off_no_debug_buttons(monkeypatch):
@@ -289,7 +289,7 @@ def test_subtitle_plus_dubbing_confirmation_has_final_only():
     assert "Phụ đề + Lồng tiếng" in text
     assert "Tác vụ:" not in text
     assert "Chi phí dự kiến" not in text
-    assert labels == ["✅ Tạo video hoàn chỉnh", "🎙 Đổi giọng", "❌ Hủy", "🏠 Menu chính"]
+    assert labels == ["✅ Xác nhận xử lý", "⬅️ Quay lại", "❌ Hủy", "🏠 Menu chính"]
 
 
 def test_link_import_not_exposed_in_b6_studio_but_guard_stays_clean():

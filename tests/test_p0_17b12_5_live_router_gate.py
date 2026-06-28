@@ -183,21 +183,18 @@ def test_admin_bypass_voice_video_and_subtitle_plus_dub(monkeypatch):
 
     handled = asyncio.run(bot.handle_video_dubbing_pending_upload(_media_update(uid_voice), SimpleNamespace()))
     assert handled is True
-    assert bot.get_video_dubbing_pending(uid_voice)["step"] == "original_subtitle_confirm"
-    asyncio.run(_press(monkeypatch, "videodub|confirm_original_subtitle", uid_voice))
     assert bot.get_video_dubbing_pending(uid_voice)["step"] == "language"
 
     uid_combo = 900205
     bot.clear_video_dubbing_pending(uid_combo)
     combo_screen = asyncio.run(_press(monkeypatch, f"videodub|type|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}", uid_combo))
     assert "ADMIN TEST MODE" not in combo_screen["text"]
-    assert bot.get_video_dubbing_pending(uid_combo)["step"] == "waiting_media"
+    assert bot.get_video_dubbing_pending(uid_combo)["step"] == "source"
 
+    asyncio.run(_press(monkeypatch, f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}", uid_combo))
     handled = asyncio.run(bot.handle_video_dubbing_pending_upload(_media_update(uid_combo), SimpleNamespace()))
     assert handled
-    assert bot.get_video_dubbing_pending(uid_combo)["step"] == "original_subtitle_confirm"
-    asyncio.run(_press(monkeypatch, "videodub|confirm_original_subtitle", uid_combo))
-    assert bot.get_video_dubbing_pending(uid_combo)["step"] == "original_subtitle_ready"
+    assert bot.get_video_dubbing_pending(uid_combo)["step"] == "language"
 
 
 def test_admin_bypass_custom_voice(monkeypatch):
@@ -262,16 +259,12 @@ def test_public_translate_upload_language_waits_confirm(monkeypatch):
     handled = asyncio.run(bot.handle_video_dubbing_pending_upload(_media_update(uid), SimpleNamespace()))
     assert handled is True
     assert calls["prepare"] == 0
-    assert bot.get_video_dubbing_pending(uid)["step"] == "original_subtitle_confirm"
-
-    asyncio.run(_press(monkeypatch, "videodub|confirm_original_subtitle", uid))
-    assert calls["prepare"] == 1
     assert bot.get_video_dubbing_pending(uid)["step"] == "language"
 
     language = asyncio.run(_press(monkeypatch, "videodub|language|English", uid))
     assert "Dịch phụ đề video" in language["text"]
-    assert "✅ Xuất video phụ đề dịch" in _labels(language["reply_markup"])
-    assert calls["prepare"] == 1
+    assert "✅ Xác nhận dịch" in _labels(language["reply_markup"])
+    assert calls["prepare"] == 0
     assert bot.get_video_dubbing_pending(uid)["step"] == "confirm"
 
     confirm = asyncio.run(_press(monkeypatch, "videodub|final", uid))

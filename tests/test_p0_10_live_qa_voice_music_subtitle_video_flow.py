@@ -168,8 +168,8 @@ def test_subtitle_and_translation_flow_no_voice_selection():
     translate_labels = _labels(bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
     assert "👁 Xem thử" not in subtitle_labels
     assert "👁 Xem thử" not in translate_labels
-    assert "✅ Xuất video phụ đề" in subtitle_labels
-    assert "✅ Xuất video phụ đề dịch" in translate_labels
+    assert "✅ Tạo phụ đề gốc" in subtitle_labels
+    assert "✅ Xác nhận dịch" in translate_labels
     assert "✅ Xác nhận tạo đầy đủ" in _labels(bot.video_dubbing_preview_ready_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_CREATE}))
     assert "✅ Xác nhận tạo đầy đủ" in _labels(bot.video_dubbing_preview_ready_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
     assert not any("giọng" in label.lower() for label in subtitle_labels)
@@ -186,7 +186,7 @@ def test_dubbing_flow_requires_voice_selection_and_clean_guard():
     assert any("Kho voice" in label for label in admin_labels)
     confirm_labels = _labels(bot.video_dubbing_confirm_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     assert "▶️ Nghe thử" not in confirm_labels
-    assert "✅ Xuất video lồng tiếng" in confirm_labels
+    assert "✅ Xác nhận lồng tiếng" in confirm_labels
     assert "✅ Xác nhận tạo đầy đủ" in _labels(bot.video_dubbing_preview_ready_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}))
     guard = bot.video_dubbing_guard_text(bot.VIDEO_SUBTITLE_MODE_DUB, {}, "vi", admin=False)
     assert "Admin blocker" not in guard
