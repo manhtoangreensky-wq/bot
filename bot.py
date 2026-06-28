@@ -142185,6 +142185,8 @@ VIDEO_DUBBING_FLOW_TRANSCRIPT = "transcript_extract"
 VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB = "subtitle_plus_dub"
 VIDEO_DUBBING_FLOW_NO_SUBTITLE = "no_subtitle"
 VIDEO_DUBBING_FLOW_HAS_SUBTITLE = "has_subtitle"
+VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB = "create_then_dub"
+VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB = "direct_dub"
 SUBTITLE_PLUS_DUB_STEPS = {
     "waiting_media",
     "creating_original_subtitle",
@@ -142339,6 +142341,61 @@ def video_dubbing_missing_existing_subtitle_keyboard(lang: str = "vi", mode: str
         ],
     ])
 
+def subtitle_plus_dub_no_subtitle_subpath(state: dict | None = None) -> str:
+    value = str((state or {}).get("combo_subpath") or "").strip()
+    if value in {VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB, VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB}:
+        return value
+    return ""
+
+def subtitle_plus_dub_no_subtitle_menu_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "🎧 <b>Video without subtitles</b>\n\n"
+            "Choose how TOAN AAS should continue with this video."
+        )
+    return (
+        "🎧 <b>Video chưa có phụ đề</b>\n\n"
+        "Anh/chị muốn TOAN AAS xử lý theo hướng nào?"
+    )
+
+def subtitle_plus_dub_no_subtitle_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return video_v6_keyboard(
+        [
+            (
+                "🎬 Tạo phụ đề rồi lồng tiếng" if is_vi else "🎬 Create subtitles, then dub",
+                f"videodub|no_subtitle_flow|{VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB}",
+            ),
+            (
+                "🎙 Lồng tiếng trực tiếp" if is_vi else "🎙 Dub directly",
+                f"videodub|no_subtitle_flow|{VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB}",
+            ),
+        ],
+        lang,
+        back=("⬅️ Phụ đề + Lồng tiếng" if is_vi else "⬅️ Subtitles + dubbing", f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"),
+    )
+
+def subtitle_plus_dub_clean_failure_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return (
+            "TOAN AAS cannot complete this video right now. The system has not charged Xu. "
+            "Please try again later or send another video."
+        )
+    return (
+        "TOAN AAS chưa xử lý được video này lúc này. Hệ thống chưa trừ Xu. "
+        "Anh/chị vui lòng thử lại sau hoặc gửi video khác."
+    )
+
+def subtitle_plus_dub_clean_failure_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📤 Gửi video khác" if is_vi else "📤 Send another video", callback_data="videodub|retry_media"),
+            InlineKeyboardButton("⬅️ Phụ đề + Lồng tiếng" if is_vi else "⬅️ Subtitles + dubbing", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"),
+        ],
+        [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
 def video_only_price_discount_percent(chars: int) -> int:
     chars = max(0, int(chars or 0))
     if chars > 10_000:
@@ -142437,7 +142494,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "source_has_subtitle", "video_has_subtitle", "has_embedded_subtitle",
             "existing_subtitle_detected", "billing_chars", "billable_chars",
             "char_count", "subtitle_chars", "dub_chars", "transcript_chars",
-            "estimated_chars",
+            "estimated_chars", "combo_subpath",
         }:
             state[key] = _short_pending_text(value)
     mode = normalize_video_translate_mode(
@@ -142748,6 +142805,8 @@ def video_dubbing_source_keyboard(lang: str = "vi", state: dict | None = None) -
     elif mode == VIDEO_SUBTITLE_MODE_DUB:
         items = [("📤 Gửi video cần lồng tiếng" if is_vi else "📤 Send video to dub", "videodub|source_upload")]
     elif mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        if str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_NO_SUBTITLE and str(state.get("step") or "") == "no_subtitle_menu":
+            return subtitle_plus_dub_no_subtitle_menu_keyboard(lang)
         items = [
             ("🎞 Video đã có phụ đề" if is_vi else "🎞 Video with subtitles", f"videodub|path|{VIDEO_DUBBING_FLOW_HAS_SUBTITLE}"),
             ("🎧 Video chưa có phụ đề" if is_vi else "🎧 Video without subtitles", f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"),
@@ -143114,7 +143173,7 @@ def subtitle_plus_dub_translation_language_text(lang: str = "vi") -> str:
         return "🌐 <b>Choose subtitle translation language</b>"
     return "🌐 <b>Chọn ngôn ngữ muốn dịch phụ đề</b>"
 
-def subtitle_plus_dub_translation_language_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def subtitle_plus_dub_translation_language_keyboard(lang: str = "vi", back: tuple[str, str] | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return video_v6_keyboard(
         [
@@ -143126,7 +143185,7 @@ def subtitle_plus_dub_translation_language_keyboard(lang: str = "vi") -> InlineK
             ("🌍 Ngôn ngữ khác" if is_vi else "🌍 Other language", "videodub|language_custom"),
         ],
         lang,
-        back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "videodub|combo_back_original"),
+        back=back or ("⬅️ Quay lại" if is_vi else "⬅️ Back", "videodub|combo_back_original"),
     )
 
 def subtitle_plus_dub_translated_ready_text(state: dict | None = None, lang: str = "vi") -> str:
@@ -143154,8 +143213,14 @@ def subtitle_plus_dub_voice_text(state: dict | None = None, lang: str = "vi") ->
         return "🎙 <b>Choose dubbing voice</b>"
     return "🎙 <b>Chọn giọng lồng tiếng</b>"
 
-def subtitle_plus_dub_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+def subtitle_plus_dub_voice_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    state = dict(state or {})
+    back = ("⬅️ Quay lại" if is_vi else "⬅️ Back", "videodub|combo_back_subtitle_ready")
+    if subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB:
+        back = ("⬅️ Ngôn ngữ" if is_vi else "⬅️ Language", "videodub|back_voice")
+    elif str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and not state.get("subtitle_ref"):
+        back = ("⬅️ Ngôn ngữ" if is_vi else "⬅️ Language", "videodub|back_voice")
     return video_v6_keyboard(
         [
             ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", "videodub|voice|default_female"),
@@ -143164,7 +143229,7 @@ def subtitle_plus_dub_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("🎙 Tạo voice riêng" if is_vi else "🎙 Create custom voice", "videodub|voice_library"),
         ],
         lang,
-        back=("⬅️ Quay lại" if is_vi else "⬅️ Back", "videodub|combo_back_subtitle_ready"),
+        back=back,
     )
 
 def subtitle_plus_dub_dub_source_label(state: dict | None = None, lang: str = "vi") -> str:
@@ -143953,8 +144018,21 @@ def video_dubbing_upload_text(state: dict | None = None, lang: str = "vi") -> st
     )
     active_flow = str(state.get("active_flow") or "")
     flow_type = str(state.get("flow_type") or "")
+    combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
     process_label = video_dubbing_process_label(mode, lang)
     if normalize_user_language(lang) != "vi":
+        if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB and flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and combo_subpath:
+            if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
+                return (
+                    "📎 <b>Send a video without subtitles</b>\n\n"
+                    "TOAN AAS will create original subtitles first, then let you choose the translation language and dubbing voice.\n\n"
+                    "No processing and no Xu charged at this step."
+                )
+            return (
+                "📎 <b>Send a video without subtitles</b>\n\n"
+                "TOAN AAS will listen to the speech, translate it and create a dubbed video. Visible subtitles are not required.\n\n"
+                "No processing and no Xu charged at this step."
+            )
         if flow_type == VIDEO_DUBBING_FLOW_HAS_SUBTITLE or active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE:
             input_label = "subtitled video" if video_dubbing_is_video_only_mode(mode) else "SRT/VTT/TXT subtitle file"
         else:
@@ -143973,6 +144051,10 @@ def video_dubbing_upload_text(state: dict | None = None, lang: str = "vi") -> st
         intro = "TOAN AAS chỉ dịch file phụ đề SRT/VTT/TXT và giữ nguyên thời gian hiển thị."
     elif active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
         intro = "TOAN AAS chỉ bóc lời thành file TXT, không dịch và không lồng tiếng."
+    elif active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB and flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
+        intro = "TOAN AAS sẽ tạo phụ đề gốc trước, sau đó cho anh/chị chọn ngôn ngữ dịch và giọng lồng tiếng."
+    elif active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB and flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB:
+        intro = "TOAN AAS sẽ lấy lời thoại, dịch và lồng tiếng để xuất video lồng tiếng. Không cần phụ đề hiển thị."
     if video_dubbing_is_video_only_mode(mode) and active_flow not in {
         VIDEO_DUBBING_FLOW_TRANSCRIPT,
         VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE,
@@ -143994,11 +144076,20 @@ def video_dubbing_upload_text(state: dict | None = None, lang: str = "vi") -> st
 
 def video_dubbing_upload_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
+    state = dict(state or {})
     mode = normalize_video_translate_mode(
-        (state or {}).get("video_processing_mode") or (state or {}).get("mode") or (state or {}).get("process_type")
+        state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
     back_action = "back_upload" if mode else "back_type"
     back_label = "⬅️ Quay lại" if is_vi else "⬅️ Back"
+    if str(state.get("active_flow") or "") == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
+        flow_type = str(state.get("flow_type") or "")
+        if flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and subtitle_plus_dub_no_subtitle_subpath(state):
+            back_action = f"path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"
+            back_label = "⬅️ Video chưa có phụ đề" if is_vi else "⬅️ Video without subtitles"
+        elif flow_type == VIDEO_DUBBING_FLOW_HAS_SUBTITLE:
+            back_action = f"type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"
+            back_label = "⬅️ Phụ đề + Lồng tiếng" if is_vi else "⬅️ Subtitles + dubbing"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(back_label, callback_data=f"videodub|{back_action}"),
@@ -144028,14 +144119,20 @@ def video_dubbing_original_subtitle_confirm_text(state: dict | None = None, lang
 def video_dubbing_original_subtitle_confirm_keyboard(lang: str = "vi", state: dict | None = None) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     mode = normalize_video_translate_mode((state or {}).get("mode") or (state or {}).get("video_processing_mode"))
+    combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
     rows = [
         [InlineKeyboardButton("✅ Tạo phụ đề gốc" if is_vi else "✅ Create original subtitles", callback_data="videodub|confirm_original_subtitle")],
     ]
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         rows.append([InlineKeyboardButton("⏭ Bỏ qua" if is_vi else "⏭ Skip", callback_data="videodub|skip_original_subtitle")])
+    back_label = "⬅️ Quay lại" if is_vi else "⬅️ Back"
+    back_callback = "videodub|back_upload"
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
+        back_label = "⬅️ Video chưa có phụ đề" if is_vi else "⬅️ Video without subtitles"
+        back_callback = f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"
     rows.append(
         [
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|back_upload"),
+            InlineKeyboardButton(back_label, callback_data=back_callback),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ]
     )
@@ -144059,6 +144156,17 @@ def video_dubbing_language_keyboard(lang: str = "vi", state: dict | None = None)
         (state or {}).get("video_processing_mode") or (state or {}).get("mode") or (state or {}).get("process_type")
     )
     if subtitle_plus_dub_is_active(state) and str((state or {}).get("active_flow") or "") == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
+        combo_state = dict(state or {})
+        if subtitle_plus_dub_no_subtitle_subpath(combo_state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB:
+            return subtitle_plus_dub_translation_language_keyboard(
+                lang,
+                back=("⬅️ Video chưa có phụ đề" if is_vi else "⬅️ Video without subtitles", f"videodub|path|{VIDEO_DUBBING_FLOW_NO_SUBTITLE}"),
+            )
+        if str(combo_state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and not combo_state.get("subtitle_ref"):
+            return subtitle_plus_dub_translation_language_keyboard(
+                lang,
+                back=("⬅️ Video đã có phụ đề" if is_vi else "⬅️ Video with subtitles", f"videodub|path|{VIDEO_DUBBING_FLOW_HAS_SUBTITLE}"),
+            )
         return subtitle_plus_dub_translation_language_keyboard(lang)
     items = []
     items.extend([
@@ -144116,7 +144224,7 @@ def video_dubbing_voice_keyboard(lang: str = "vi", state: dict | None = None) ->
         (state or {}).get("video_processing_mode") or (state or {}).get("mode") or (state or {}).get("process_type")
     )
     if subtitle_plus_dub_is_active(state) and str((state or {}).get("active_flow") or "") == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
-        return subtitle_plus_dub_voice_keyboard(lang)
+        return subtitle_plus_dub_voice_keyboard(lang, state)
     back_label = "⬅️ Quay lại ngôn ngữ" if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else "⬅️ Quay lại loại xử lý"
     items = [
         ("👩 Giọng nữ mặc định" if is_vi else "👩 Default female", "videodub|voice|default_female"),
@@ -144401,7 +144509,22 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
     if not standalone_flow and mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         language = html.escape(target or "ngôn ngữ đã chọn")
         voice_label = html.escape(voice or "Nữ mặc định")
+        direct_dub = subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB
         if normalize_user_language(lang) != "vi":
+            if direct_dub:
+                return (
+                    "🎙 <b>Direct video dubbing</b>\n"
+                    "💰 <b>Confirm dubbing</b>\n\n"
+                    "• Video: received\n"
+                    f"• Target language: <b>{language}</b>\n"
+                    f"• Voice: <b>{voice_label}</b>\n"
+                    "• Main result: dubbed MP4\n"
+                    f"• Dialogue characters: <b>{chars}</b>\n"
+                    f"• Translation: <b>{int(invoice.get('translation_xu') or 0)} Xu</b>\n"
+                    f"• Dubbing: <b>{int(invoice.get('voice_xu') or 0)} Xu</b>\n"
+                    f"• Total: <b>{int(invoice.get('total_xu') or 0)} Xu</b>\n\n"
+                    "TOAN AAS only processes and charges Xu after you confirm."
+                )
             return (
                 "🎞 <b>Subtitles + dubbing</b>\n"
                 "💰 <b>Confirm subtitles + dubbing</b>\n\n"
@@ -144415,6 +144538,20 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
                 f"• Discount: <b>{max(int(invoice.get('subtitle_discount_percent') or 0), int(invoice.get('dub_discount_percent') or 0))}%</b>\n"
                 f"• Total: <b>{int(invoice.get('total_xu') or 0)} Xu</b>\n\n"
                 "TOAN AAS only processes and charges Xu after you confirm."
+            )
+        if direct_dub:
+            return (
+                "🎙 <b>Lồng tiếng trực tiếp</b>\n"
+                "💰 <b>Xác nhận lồng tiếng video</b>\n\n"
+                "• Video: đã nhận\n"
+                f"• Ngôn ngữ đích: <b>{language}</b>\n"
+                f"• Giọng: <b>{voice_label}</b>\n"
+                "• Kết quả chính: Xuất video MP4 lồng tiếng\n"
+                f"• Ký tự lời thoại: <b>{chars}</b>\n"
+                f"• Dịch lời thoại: <b>{int(invoice.get('translation_xu') or 0)} Xu</b>\n"
+                f"• Lồng tiếng: <b>{int(invoice.get('voice_xu') or 0)} Xu</b>\n"
+                f"• Tổng cộng: <b>{int(invoice.get('total_xu') or 0)} Xu</b>\n\n"
+                "TOAN AAS chỉ xử lý và trừ Xu sau khi anh/chị xác nhận."
             )
         return (
             "🎞 <b>Phụ đề + Lồng tiếng</b>\n"
@@ -145424,6 +145561,7 @@ async def send_public_subtitle_dub_final_outputs(
     audio_bytes: bytes = b"",
     video_bytes: bytes = b"",
     lang: str = "vi",
+    include_subtitle_outputs: bool = True,
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     requested_mode = normalize_video_translate_mode(requested_mode)
@@ -145443,12 +145581,17 @@ async def send_public_subtitle_dub_final_outputs(
             audio=video_dubbing_output_file(audio_bytes, "toan_aas_dub_audio.mp3"),
             filename="toan_aas_dub_audio.mp3",
             caption=(
-                "TOAN AAS đã tạo được audio/phụ đề, nhưng chưa ghép được thành video hoàn chỉnh.\n\n"
+                "TOAN AAS đã tạo được audio lồng tiếng, nhưng chưa ghép được thành video hoàn chỉnh.\n\n"
+                "Hệ thống gửi audio trước. Anh/chị có thể thử ghép lại video sau."
+                if not include_subtitle_outputs
+                else "TOAN AAS đã tạo được audio/phụ đề, nhưng chưa ghép được thành video hoàn chỉnh.\n\n"
                 "Hệ thống gửi audio trước. Anh/chị có thể thử ghép lại video sau."
             ),
         )
         sent["audio"] = 1
-    if active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
+    if not include_subtitle_outputs:
+        wanted_types = ()
+    elif active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
         wanted_types = ("txt",)
     elif active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE:
         available_type = next(
@@ -146782,11 +146925,7 @@ async def _execute_video_dubbing_pipeline_core(
         return {
             "ok": False,
             "guard": True,
-            "text": (
-                access.get("message")
-                if is_admin_user(uid) and access.get("status") != "blocked_admin_requires_confirm"
-                else video_dubbing_guard_text(mode, state, lang, admin=False)
-            ),
+            "text": subtitle_plus_dub_clean_failure_text(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_text(mode, state, lang, admin=False),
         }
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_uses_custom_voice(state):
         return {"ok": False, "guard": True, "text": video_dubbing_custom_voice_guard_text(lang)}
@@ -147040,6 +147179,10 @@ async def _execute_video_dubbing_pipeline_core(
         )
         dub_video_asset_id = str(dub_video_record.get("asset_id") or dub_video_asset_id)
     try:
+        include_subtitle_outputs = not (
+            mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+            and subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB
+        )
         delivery = await send_public_subtitle_dub_final_outputs(
             query.message,
             mode=mode,
@@ -147050,6 +147193,7 @@ async def _execute_video_dubbing_pipeline_core(
             audio_bytes=audio_bytes,
             video_bytes=video_output,
             lang=lang,
+            include_subtitle_outputs=include_subtitle_outputs,
         )
     except Exception:
         refund_charged_credit(
@@ -147711,6 +147855,7 @@ async def video_dubbing_create_original_subtitle_for_next_step(
         requested_mode=requested or VIDEO_SUBTITLE_MODE_TRANSLATE,
         active_flow=active_flow,
         flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+        combo_subpath=str(state.get("combo_subpath") or ""),
         translate_requested="0",
         processing="1",
         output_type="srt" if requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else "burn",
@@ -147756,6 +147901,7 @@ async def video_dubbing_create_original_subtitle_for_next_step(
         "segment_count": len(segments),
         "subtitle_segment_count": len(segments),
         "flow_type": VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+        "combo_subpath": str(state.get("combo_subpath") or ""),
         "processing": "0",
         "last_ready_step": "original_subtitle_ready",
     }
@@ -147996,7 +148142,7 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
         initial_mode = VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
         media_info = video_reference_media_info(update.message)
-        if incoming_step not in {"waiting_media", "await_video", "await_subtitle_file", "source", "failed", "original_subtitle_confirm"}:
+        if incoming_step not in {"waiting_media", "await_video", "await_subtitle_file", "source", "failed", "original_subtitle_confirm", "no_subtitle_menu"}:
             await update.message.reply_text(
                 "Phiên Phụ đề + Lồng tiếng đang ở bước khác. Anh/chị dùng các nút trên màn hình hiện tại hoặc bấm Menu chính để làm file mới.",
                 reply_markup=subtitle_plus_dub_original_ready_keyboard(lang) if state.get("subtitle_ref") else video_dubbing_source_keyboard(lang, state),
@@ -148018,7 +148164,8 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
             "translated_subtitle_ref": "",
         })
         upload_fields["video_message_id"] = getattr(update.message, "message_id", "")
-        flow_type = str(state.get("flow_type") or VIDEO_DUBBING_FLOW_NO_SUBTITLE)
+        explicit_flow_type = str(state.get("flow_type") or "").strip()
+        flow_type = explicit_flow_type or VIDEO_DUBBING_FLOW_NO_SUBTITLE
         probe_state = {**state, **upload_fields, "flow_type": flow_type}
         if flow_type == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and video_dubbing_has_existing_subtitle_metadata(probe_state) is False:
             state = set_video_dubbing_pending(uid, "await_video", **upload_fields)
@@ -148028,6 +148175,31 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
                 reply_markup=video_dubbing_missing_existing_subtitle_keyboard(lang, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB),
             )
             return True
+        combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
+        if flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
+            state = set_video_dubbing_pending(
+                uid,
+                "original_subtitle_confirm",
+                mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+                combo_subpath=VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB,
+                translate_requested="0",
+                target_language="",
+                output_type="video_subtitle",
+                output_format="video_subtitle",
+                **upload_fields,
+            )
+            await update.message.reply_text(
+                video_dubbing_original_subtitle_confirm_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_original_subtitle_confirm_keyboard(lang, state),
+            )
+            return True
+        output_type = "video" if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB else "video_subtitle"
         state = set_video_dubbing_pending(
             uid,
             "language",
@@ -148037,10 +148209,11 @@ async def handle_video_dubbing_pending_upload(update: Update, context: ContextTy
             requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
             flow_type=flow_type,
+            combo_subpath=combo_subpath,
             translate_requested="1",
             target_language="",
-            output_type="video",
-            output_format="video",
+            output_type=output_type,
+            output_format=output_type,
             **upload_fields,
         )
         await update.message.reply_text(
@@ -148688,6 +148861,23 @@ async def handle_video_dubbing_pending_text(update: Update, context: ContextType
         await update.message.reply_text("✅ Đã lưu độ lệch thời gian vào phụ đề nháp.", reply_markup=subtitle_editor_keyboard(lang))
         return True
     if state.get("step") == "language_custom" and active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
+        if subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB or (
+            str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and not state.get("subtitle_ref")
+        ):
+            state = set_video_dubbing_pending(
+                uid,
+                "voice",
+                target_language=value,
+                selected_language=value,
+                translate_requested="1",
+                processing="0",
+            )
+            await update.message.reply_text(
+                video_dubbing_voice_text(state, lang),
+                parse_mode="HTML",
+                reply_markup=video_dubbing_voice_keyboard(lang, state),
+            )
+            return True
         await subtitle_plus_dub_translate_current_subtitle(update.message, context, uid, state, value, lang)
         return True
     if state.get("step") == "voice_speed" and mode in {
@@ -148793,6 +148983,39 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
         state = set_video_dubbing_pending(user_id, "locked_public", processing="0")
         return state, video_dubbing_public_locked_text(video_dubbing_public_gate_mode(mode, state), lang), video_dubbing_public_locked_keyboard(lang)
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        explicit_flow_type = str(state.get("flow_type") or "").strip()
+        flow_type = explicit_flow_type or VIDEO_DUBBING_FLOW_NO_SUBTITLE
+        combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
+        if flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and explicit_flow_type and not combo_subpath:
+            state = set_video_dubbing_pending(
+                user_id,
+                "no_subtitle_menu",
+                mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+                processing="0",
+            )
+            return state, subtitle_plus_dub_no_subtitle_menu_text(lang), subtitle_plus_dub_no_subtitle_menu_keyboard(lang)
+        if flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE and combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
+            state = set_video_dubbing_pending(
+                user_id,
+                "original_subtitle_confirm",
+                mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+                combo_subpath=VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB,
+                output_type="video_subtitle",
+                output_format="video_subtitle",
+                translate_requested="0",
+            )
+            return state, video_dubbing_original_subtitle_confirm_text(state, lang), video_dubbing_original_subtitle_confirm_keyboard(lang, state)
+        output_type = "video" if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB else "video_subtitle"
         state = set_video_dubbing_pending(
             user_id,
             "language",
@@ -148801,9 +149024,10 @@ def video_dubbing_next_screen_after_source(user_id, state: dict, lang: str = "vi
             video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
             active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
-            flow_type=str(state.get("flow_type") or VIDEO_DUBBING_FLOW_NO_SUBTITLE),
-            output_type="video",
-            output_format="video",
+            flow_type=flow_type,
+            combo_subpath=combo_subpath,
+            output_type=output_type,
+            output_format=output_type,
             translate_requested="1",
         )
         return state, video_dubbing_language_text(state, lang), video_dubbing_language_keyboard(lang, state)
@@ -149034,9 +149258,33 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         flow_type = VIDEO_DUBBING_FLOW_HAS_SUBTITLE if value == VIDEO_DUBBING_FLOW_HAS_SUBTITLE else VIDEO_DUBBING_FLOW_NO_SUBTITLE
         if video_dubbing_is_video_only_mode(mode) and mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
             flow_type = VIDEO_DUBBING_FLOW_HAS_SUBTITLE
+        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and flow_type == VIDEO_DUBBING_FLOW_NO_SUBTITLE:
+            state = set_video_dubbing_pending(
+                uid,
+                "no_subtitle_menu",
+                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+                combo_subpath="",
+                target_language="",
+                voice_style="",
+                voice_id="",
+                voice_kind="",
+                voice_speed="",
+                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+                output_type="",
+                output_format="",
+                translate_requested="0",
+                processing="0",
+            )
+            return await safe_edit_or_send(
+                query,
+                subtitle_plus_dub_no_subtitle_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=subtitle_plus_dub_no_subtitle_menu_keyboard(lang),
+            )
         next_step = "await_video" if video_dubbing_is_video_only_mode(mode) else ("await_subtitle_file" if flow_type == VIDEO_DUBBING_FLOW_HAS_SUBTITLE else "await_video")
         fields = {
             "flow_type": flow_type,
+            "combo_subpath": "",
             "target_language": "",
             "voice_style": "",
             "voice_id": "",
@@ -149047,13 +149295,47 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         }
         if video_dubbing_is_video_only_mode(mode):
             fields["active_flow"] = VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else ("dub_audio" if mode == VIDEO_SUBTITLE_MODE_DUB else "subtitle_translate")
-            fields["output_type"] = "video" if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else "burn"
+            fields["output_type"] = "video_subtitle" if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else ("video" if mode == VIDEO_SUBTITLE_MODE_DUB else "burn")
             fields["output_format"] = fields["output_type"]
         elif flow_type == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
             fields["active_flow"] = VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE
         elif mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             fields["active_flow"] = VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB
         state = set_video_dubbing_pending(uid, next_step, **fields)
+        return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
+    if action == "no_subtitle_flow":
+        if mode != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            return await safe_edit_or_send(query, video_dubbing_menu_text(lang, origin), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
+        combo_subpath = value if value in {VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB, VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB} else ""
+        if not combo_subpath:
+            state = set_video_dubbing_pending(uid, "no_subtitle_menu", processing="0")
+            return await safe_edit_or_send(
+                query,
+                subtitle_plus_dub_no_subtitle_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=subtitle_plus_dub_no_subtitle_menu_keyboard(lang),
+            )
+        output_type = "video" if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB else "video_subtitle"
+        state = set_video_dubbing_pending(
+            uid,
+            "await_video",
+            mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            process_type=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            video_processing_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            requested_mode=VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+            flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+            combo_subpath=combo_subpath,
+            target_language="",
+            voice_style="",
+            voice_id="",
+            voice_kind="",
+            voice_speed="",
+            translate_requested="1" if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB else "0",
+            output_type=output_type,
+            output_format=output_type,
+            processing="0",
+        )
         return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
     if action == "source_upload":
         if not mode:
@@ -149065,13 +149347,18 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, video_dubbing_source_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
         state = set_video_dubbing_pending(
             uid,
-            "voice",
-            translate_requested="0",
-            target_language="Giữ nguyên ngôn ngữ gốc" if normalize_user_language(lang) == "vi" else "Keep original language",
+            "language",
+            active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+            flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+            combo_subpath=VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB,
+            translate_requested="1",
+            target_language="",
             source_language="auto",
+            output_type="video",
+            output_format="video",
             processing="0",
         )
-        return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
+        return await safe_edit_or_send(query, video_dubbing_language_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_language_keyboard(lang, state))
     if action == "confirm_original_subtitle":
         if not video_dubbing_has_media(state) or video_dubbing_is_subtitle_text_source(state):
             state = set_video_dubbing_pending(uid, "source", processing="0")
@@ -149292,10 +149579,18 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 query,
                 subtitle_plus_dub_translation_language_text(lang),
                 parse_mode="HTML",
-                reply_markup=subtitle_plus_dub_translation_language_keyboard(lang),
+                reply_markup=video_dubbing_language_keyboard(lang, state),
             )
         if action == "language_custom":
             set_video_dubbing_pending(uid, "language_custom")
+            if subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB or (
+                str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and not state.get("subtitle_ref")
+            ):
+                return await safe_edit_or_send(
+                    query,
+                    "✍️ Nhập ngôn ngữ đích.",
+                    reply_markup=video_v6_keyboard([], lang, back=("⬅️ Quay lại ngôn ngữ", "videodub|back_language")),
+                )
             return await safe_edit_or_send(
                 query,
                 "✍️ Nhập ngôn ngữ muốn dịch phụ đề.",
@@ -149341,7 +149636,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 query,
                 subtitle_plus_dub_voice_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=subtitle_plus_dub_voice_keyboard(lang),
+                reply_markup=subtitle_plus_dub_voice_keyboard(lang, state),
             )
         if action in {"voice_library", "voice_saved"}:
             state = set_video_dubbing_pending(uid, "choosing_voice")
@@ -149366,21 +149661,49 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 reply_markup=video_dubbing_custom_voice_guard_keyboard(lang),
             )
         if action == "back_voice":
+            if subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB or (
+                str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and not state.get("subtitle_ref")
+            ):
+                state = set_video_dubbing_pending(
+                    uid,
+                    "language",
+                    voice_style="",
+                    voice_id="",
+                    voice_kind="",
+                    voice_speed="",
+                    processing="0",
+                )
+                return await safe_edit_or_send(
+                    query,
+                    video_dubbing_language_text(state, lang),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_language_keyboard(lang, state),
+                )
             state = set_video_dubbing_pending(uid, "choosing_voice", processing="0")
             return await safe_edit_or_send(
                 query,
                 subtitle_plus_dub_voice_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=subtitle_plus_dub_voice_keyboard(lang),
+                reply_markup=subtitle_plus_dub_voice_keyboard(lang, state),
             )
         if action == "voice":
             state = set_video_dubbing_pending(
                 uid,
-                "dub_confirmation",
+                "confirm" if (
+                    subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB
+                    or (str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_HAS_SUBTITLE and not state.get("subtitle_ref"))
+                ) else "dub_confirmation",
                 **video_dubbing_voice_payload(value, None, lang),
                 voice_speed="1.0",
                 processing="0",
             )
+            if str(state.get("step") or "") == "confirm":
+                return await safe_edit_or_send(
+                    query,
+                    video_dubbing_confirm_text(state, lang),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_confirm_keyboard(lang, state),
+                )
             return await safe_edit_or_send(
                 query,
                 subtitle_plus_dub_confirm_text(state, lang),
@@ -149393,7 +149716,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 query,
                 subtitle_plus_dub_voice_text(state, lang),
                 parse_mode="HTML",
-                reply_markup=subtitle_plus_dub_voice_keyboard(lang),
+                reply_markup=subtitle_plus_dub_voice_keyboard(lang, state),
             )
         if action == "combo_preview_dub":
             return await safe_edit_or_send(
@@ -149406,7 +149729,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                 return await safe_edit_or_send(query, "⏳ Yêu cầu trước vẫn đang được xử lý. TOAN AAS không tạo thêm job trùng.")
             if not state.get("voice_style"):
                 state = set_video_dubbing_pending(uid, "choosing_voice")
-                return await safe_edit_or_send(query, subtitle_plus_dub_voice_text(state, lang), parse_mode="HTML", reply_markup=subtitle_plus_dub_voice_keyboard(lang))
+                return await safe_edit_or_send(query, subtitle_plus_dub_voice_text(state, lang), parse_mode="HTML", reply_markup=subtitle_plus_dub_voice_keyboard(lang, state))
             state = set_video_dubbing_pending(
                 uid,
                 "generating_full_dub",
@@ -149444,7 +149767,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             )
         if action == "combo_redub_voice":
             state = set_video_dubbing_pending(uid, "choosing_voice", processing="0", voice_style="", voice_id="", voice_kind="")
-            return await safe_edit_or_send(query, subtitle_plus_dub_voice_text(state, lang), parse_mode="HTML", reply_markup=subtitle_plus_dub_voice_keyboard(lang))
+            return await safe_edit_or_send(query, subtitle_plus_dub_voice_text(state, lang), parse_mode="HTML", reply_markup=subtitle_plus_dub_voice_keyboard(lang, state))
         if action in {"combo_download_final_subtitle", "combo_download_final_audio", "combo_download_final_video", "combo_retry_mux"}:
             if action == "combo_download_final_subtitle":
                 await subtitle_plus_dub_send_subtitle_document(query.message, uid, state, translated=bool(state.get("translated_subtitle_ref")))
@@ -149716,6 +150039,24 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
     if action == "save_config":
         return await safe_edit_or_send(query, "📂 Đã lưu cấu hình mẫu trong phiên hiện tại. TOAN AAS chưa trừ thêm Xu.", reply_markup=video_dubbing_receipt_keyboard(lang, origin, state))
     if action == "back_upload":
+        if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB and str(state.get("flow_type") or "") == VIDEO_DUBBING_FLOW_NO_SUBTITLE and subtitle_plus_dub_no_subtitle_subpath(state):
+            state = set_video_dubbing_pending(
+                uid,
+                "no_subtitle_menu",
+                combo_subpath="",
+                target_language="",
+                voice_style="",
+                voice_id="",
+                voice_kind="",
+                voice_speed="",
+                processing="0",
+            )
+            return await safe_edit_or_send(
+                query,
+                subtitle_plus_dub_no_subtitle_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=subtitle_plus_dub_no_subtitle_menu_keyboard(lang),
+            )
         state = set_video_dubbing_pending(uid, "source")
         return await safe_edit_or_send(query, video_dubbing_source_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
     if action == "download_original_srt":
@@ -150038,8 +150379,8 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             logger.warning("video subtitle/dub pipeline failed | mode=%s | error=%s", mode, type(exc).__name__)
             set_video_dubbing_pending(uid, "confirm", processing="0")
             return await query.message.reply_text(
-                video_dubbing_flow_failure_text(mode, lang),
-                reply_markup=video_dubbing_guard_keyboard(lang, admin=False),
+                subtitle_plus_dub_clean_failure_text(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_flow_failure_text(mode, lang),
+                reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
             )
         if not result.get("ok"):
             set_video_dubbing_pending(uid, "guarded", processing="0")
@@ -150050,9 +150391,9 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     reply_markup=video_dubbing_dialogue_unavailable_keyboard(lang),
                 )
             return await query.message.reply_text(
-                result.get("text") or video_dubbing_guard_text(mode, state, lang, admin=False),
+                result.get("text") or (subtitle_plus_dub_clean_failure_text(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_text(mode, state, lang, admin=False)),
                 parse_mode="HTML",
-                reply_markup=video_dubbing_guard_keyboard(lang, admin=False),
+                reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
             )
         result_state = dict(result.get("state") or {})
         completed_fields = {
