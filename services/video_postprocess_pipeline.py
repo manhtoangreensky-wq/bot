@@ -26,7 +26,9 @@ class VideoPostprocessPlan:
     burn_subtitles: bool = False
     logo_position: str = "bottom_right"
     logo_opacity: float = 0.82
+    voice_speed: float = 1.0
     voice_volume: float = 1.0
+    music_speed: float = 1.0
     music_volume: float = 0.18
     keep_original_audio: bool = False
     replace_original_audio: bool = True
@@ -115,6 +117,27 @@ def _overlay_expr(position: str) -> str:
     return "W-w-24:H-h-24"
 
 
+def _safe_speed(value: float | int | str | None) -> float:
+    try:
+        amount = float(value)
+    except Exception:
+        return 1.0
+    return max(0.1, min(2.0, amount))
+
+
+def _atempo_chain(speed: float) -> str:
+    speed = _safe_speed(speed)
+    if abs(speed - 1.0) < 0.001:
+        return ""
+    factors: list[float] = []
+    remaining = speed
+    while remaining < 0.5:
+        factors.append(0.5)
+        remaining = remaining / 0.5
+    factors.append(remaining)
+    return ",".join(f"atempo={factor:.6g}" for factor in factors)
+
+
 def _existing_file(path: str | None) -> str:
     if not path:
         return ""
@@ -146,12 +169,15 @@ def process_video_postprocess_plan(plan: VideoPostprocessPlan) -> VideoPostproce
         return _copy_source(plan)
 
     source_duration = probe_duration(source)
+    voice_speed = _safe_speed(plan.voice_speed)
+    music_speed = _safe_speed(plan.music_speed)
     voice_duration = probe_duration(voice) if voice else 0.0
-    if voice and source_duration and voice_duration > source_duration + 0.35:
+    adjusted_voice_duration = (voice_duration / voice_speed) if voice and voice_speed else voice_duration
+    if voice and source_duration and adjusted_voice_duration > source_duration + 0.35:
         return VideoPostprocessResult(
             ok=False,
             status="VOICE_LONGER_THAN_VIDEO",
-            detail=f"voice_duration={voice_duration:.2f}; video_duration={source_duration:.2f}",
+            detail=f"voice_duration={adjusted_voice_duration:.2f}; video_duration={source_duration:.2f}",
         )
 
     output = os.path.abspath(plan.output_video_path)
@@ -187,10 +213,12 @@ def process_video_postprocess_plan(plan: VideoPostprocessPlan) -> VideoPostproce
     audio_label = ""
     audio_inputs: list[str] = []
     if voice and voice_idx is not None:
-        filters.append(f"[{voice_idx}:a]volume={max(0.0, float(plan.voice_volume or 0.0)):.3f}[voice]")
+        voice_filters = [_atempo_chain(voice_speed), f"volume={max(0.0, float(plan.voice_volume or 0.0)):.3f}"]
+        filters.append(f"[{voice_idx}:a]{','.join(item for item in voice_filters if item)}[voice]")
         audio_inputs.append("[voice]")
     if music and music_idx is not None:
-        filters.append(f"[{music_idx}:a]volume={max(0.0, float(plan.music_volume or 0.0)):.3f}[music]")
+        music_filters = [_atempo_chain(music_speed), f"volume={max(0.0, float(plan.music_volume or 0.0)):.3f}"]
+        filters.append(f"[{music_idx}:a]{','.join(item for item in music_filters if item)}[music]")
         audio_inputs.append("[music]")
     if len(audio_inputs) == 1:
         audio_label = audio_inputs[0]

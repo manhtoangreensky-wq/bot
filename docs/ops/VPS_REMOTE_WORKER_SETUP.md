@@ -28,7 +28,7 @@ Ghi chu an toan:
 
 - Khong paste `LOCAL_WORKER_TOKEN` vao GitHub, docs public, issue, PR comment, chat log, hoac screenshot.
 - Neu token bi lo, rotate ngay tren Railway, cap nhat `/etc/toanaas-worker.env` tren VPS, roi restart worker.
-- Khong bat worker that neu video flow B14.5 chua on dinh hoac `/tool_test_remote_worker_api --fake-job --no-charge` chua pass.
+- Khong bat public product worker neu video flow va owner approval chua san sang. Owner-product worker chi danh cho owner/admin product QA va chay sau khi `/tool_test_video_product_worker_claim --no-charge` duoc kiem tra.
 
 Runtime check tren Telegram/admin:
 
@@ -146,30 +146,40 @@ Khong commit file `/etc/toanaas-worker.env` hoac token that vao repo.
 
 ## F. Systemd
 
-Service example nam tai:
+P0.18D.4 dung cac lane service rieng de tranh worker heartbeat chay nhung khong claim dung queue:
 
 ```text
-deploy/systemd/toanaas-remote-worker.service.example
+toanaas-worker-admin-canary.service        -> python remote_worker.py --admin-canary
+toanaas-worker-owner-product-video.service -> python remote_worker.py --owner-product-video
+toanaas-worker-product-video.service       -> python remote_worker.py --product-video
+toanaas-worker-admin-video.service         -> python remote_worker.py --admin-video
 ```
 
-Copy sang systemd sau khi da tao env file va cai `.venv`:
+Service templates nam tai:
 
-```bash
-sudo cp /opt/toanaas/bot/deploy/systemd/toanaas-remote-worker.service.example /etc/systemd/system/toanaas-worker.service
-sudo systemctl daemon-reload
-sudo systemctl enable toanaas-worker
+```text
+deploy/systemd/toanaas-worker-admin-canary.service
+deploy/systemd/toanaas-worker-owner-product-video.service
+deploy/systemd/toanaas-worker-product-video.service
+deploy/systemd/toanaas-worker-admin-video.service
 ```
 
-Co the dung installer an toan:
+Co the dung installer an toan de copy va enable ca 4 service:
 
 ```bash
 sudo bash scripts/vps/install_remote_worker_service.sh
 ```
 
-Mac dinh installer chi `enable`, khong auto-start. Neu muon start ro rang sau khi dry-run pass:
+Mac dinh installer chi `enable`, khong auto-start. Neu chi muon cai mot lane:
 
 ```bash
-sudo RUN_START=1 bash scripts/vps/install_remote_worker_service.sh
+sudo SERVICE_NAME=toanaas-worker-owner-product-video.service bash scripts/vps/install_remote_worker_service.sh
+```
+
+Neu muon start ro rang sau khi dry-run pass:
+
+```bash
+sudo RUN_START=1 SERVICE_NAME=toanaas-worker-owner-product-video.service bash scripts/vps/install_remote_worker_service.sh
 ```
 
 ## G. Start/stop/status/logs
@@ -178,11 +188,29 @@ Chi start worker that sau khi Railway `/runtime` dung build va dry-run fake job 
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now toanaas-worker
-sudo systemctl status toanaas-worker -n 80
-sudo journalctl -u toanaas-worker -f
-sudo systemctl restart toanaas-worker
-sudo systemctl stop toanaas-worker
+sudo systemctl enable --now toanaas-worker-owner-product-video
+sudo systemctl status toanaas-worker-owner-product-video --no-pager -l
+sudo journalctl -u toanaas-worker-owner-product-video -n 100 --no-pager -l
+sudo systemctl enable --now toanaas-worker-admin-canary
+sudo systemctl status toanaas-worker-admin-canary --no-pager -l
+sudo journalctl -u toanaas-worker-admin-canary -n 100 --no-pager -l
+sudo systemctl restart toanaas-worker-owner-product-video
+sudo systemctl restart toanaas-worker-admin-canary
+```
+
+`systemctl` va `journalctl` chi chay tren terminal VPS. Bot Telegram khong the chay cac lenh nay.
+
+Kiem tra repo, commit, venv va env tren VPS:
+
+```bash
+cd /opt/toanaas/bot
+pwd
+git rev-parse HEAD
+git fetch origin
+git pull --ff-only origin main
+.venv/bin/python --version
+test -x .venv/bin/python && echo venv_ok
+grep -E '^(BOT_API_URL|LOCAL_WORKER_TOKEN|WORKER_ID)=' /etc/toanaas-worker.env | sed 's/=.*/=configured/'
 ```
 
 Doctor script:
@@ -297,8 +325,8 @@ Yeu cau:
 - `chmod 600 /etc/toanaas-worker.env`.
 - Rotate `LOCAL_WORKER_TOKEN` if leaked.
 - Do not run two workers with the same `WORKER_ID`.
-- Do not start real worker before B14.5 video flow is fixed.
-- Do not route production jobs to VPS until B14.5 video flow/queue/status is stable.
+- Do not start public product worker before owner approval and `REMOTE_WORKER_PUBLIC_ENABLED=true`.
+- Owner-product worker may run only for owner/admin product video jobs after P0.18D.4 code is deployed and checked.
 - W3 dry-run only verifies handshake; it must not process real user video.
 - W4 canary only claims `remote_worker_canary` jobs; it must not process real user video.
 - W5 admin production canary only claims jobs marked `worker_admin_canary=true`; it must not process real user video.

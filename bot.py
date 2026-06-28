@@ -4739,6 +4739,33 @@ def init_db():
 def now_text():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+
+def vietnam_time_display(value, fallback: str = "-") -> str:
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value or "").strip()
+        if not raw:
+            return fallback
+        normalized = raw.replace("Z", "+00:00")
+        dt = None
+        for parser in (
+            lambda item: datetime.fromisoformat(item),
+            lambda item: datetime.strptime(item[:19], "%Y-%m-%d %H:%M:%S"),
+            lambda item: datetime.strptime(item[:19], "%Y-%m-%dT%H:%M:%S"),
+        ):
+            try:
+                dt = parser(normalized)
+                break
+            except Exception:
+                continue
+        if dt is None:
+            return raw
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def ensure_video_project_queue_db(conn=None):
     if conn is not None:
         video_project_queue.ensure_video_project_queue_schema(conn)
@@ -39752,63 +39779,113 @@ async def cmd_tool_test_video_product_worker_claim(update: Update, context: Cont
         readiness = real_video_provider_readiness()
     except Exception as exc:
         readiness = {"ok": False, "providers": [], "reason": type(exc).__name__}
-    conn = db_connect()
+    created = {"ok": False, "reason": "not_started"}
+    product = {"last": {}}
+    conn = None
     try:
+        conn = db_connect()
         created = remote_worker_api.create_product_video_worker_claim_test_job(conn, admin_user_id=safe_int(uid, 0), scene_count=1, duration_seconds=6)
-        claim = {}
-        failed = {}
         if created.get("ok"):
-            claim = remote_worker_api.claim_remote_worker_job(
-                conn,
-                worker_id=f"telegram-product-claim-{safe_int(uid, 0)}",
-                capabilities=["owner_product_video", "product_video", "ffmpeg", "video_postprocess"],
-                owner_product_video_only=True,
-            )
-            claimed_job = dict(claim.get("job") or {})
-            if claimed_job:
-                failed = remote_worker_api.fail_remote_worker_job(
-                    conn,
-                    worker_id=f"telegram-product-claim-{safe_int(uid, 0)}",
-                    job_id=safe_int(claimed_job.get("job_id"), 0),
-                    safe_error="diagnostic_product_worker_claim_only_no_render",
-                    retryable=False,
-                )
-                set_system_setting("remote_worker:last_product_video_job_id", str(claimed_job.get("job_id") or ""), "last product video worker diagnostic job", uid)
+            job = dict(created.get("job") or {})
+            try:
+                set_system_setting("remote_worker:last_product_video_job_id", str(job.get("id") or ""), "last product video worker diagnostic job", uid)
+            except Exception:
+                logger.warning("product video diagnostic setting skipped")
+        product = remote_worker_api.remote_worker_product_video_queue_snapshot(conn)
+    except Exception as exc:
+        logger.warning("product video worker claim diagnostic failed: %s", type(exc).__name__)
+        created = {"ok": False, "reason": type(exc).__name__}
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
     if not created.get("ok"):
         return await update.message.reply_text(
             f"⚠️ <b>Product video worker claim</b>\n\nChưa tạo được job kiểm tra: <code>{html.escape(created.get('reason') or 'create_failed')}</code>. Chưa trừ Xu.",
             parse_mode="HTML",
         )
-    claimed = bool((claim or {}).get("job"))
-    job = dict((claim or {}).get("job") or created.get("job") or {})
+    job = dict(created.get("job") or {})
+    last = dict(product.get("last") or {})
+    claimed = bool(str(last.get("worker_id") or "").strip() and safe_int(last.get("job_id"), 0) == safe_int(job.get("id"), 0))
     providers = readiness.get("providers") if isinstance(readiness.get("providers"), list) else []
     provider_lines = []
     for item in providers:
-        provider_lines.append(
-            f"• {html.escape(str(item.get('provider') or '-'))}: <code>{'ready' if item.get('configured') else 'missing ' + ','.join(item.get('missing') or [])}</code>"
-        )
+        provider_lines.append(f"• {html.escape(str(item.get('provider') or '-'))}: <code>{'ready' if item.get('configured') else 'missing'}</code>")
     lines = [
         "🧪 <b>Product video worker claim diagnostic</b>",
         "",
-        "Lệnh này chỉ kiểm tra route claim product video thật. Không tạo MP4, không dùng test pattern, không trừ Xu.",
-        f"• Mã xử lý: <code>{html.escape(str(job.get('job_id') or created.get('job', {}).get('id') or '-'))}</code>",
-        f"• Claim product route: <code>{'YES' if claimed else 'NO'}</code>",
+        "Đã tạo job kiểm tra video thật. Lệnh này không tạo MP4, không dùng test pattern, không trừ Xu.",
+        f"• Mã xử lý: <code>{html.escape(str(job.get('id') or '-'))}</code>",
+        f"• Claim product route: <code>{'CLAIMED' if claimed else 'WAITING'}</code>",
+        f"• Last worker: <code>{html.escape(str(last.get('worker_id') or '-'))}</code>",
         f"• Worker API token: <code>{'YES' if flags.get('worker_api_enabled') else 'NO'}</code>",
         f"• Real provider ready: <code>{'YES' if readiness.get('ok') else 'NO'}</code>",
-        f"• Diagnostic closed cleanly: <code>{'YES' if failed.get('ok') else ('NO' if claimed else '-')}</code>",
         "",
         "Provider readiness:",
         *(provider_lines or ["• none: <code>not configured</code>"]),
         "",
+        "Đã tạo job kiểm tra video thật nhưng chưa có worker claim. Hãy kiểm tra service `toanaas-worker-owner-product-video` trên VPS."
+        if not claimed else "Worker đã claim job kiểm tra. Theo dõi tiếp bằng /video_worker_status.",
+        "",
         "VPS owner/admin product service:",
+        "<code>systemctl status toanaas-worker-owner-product-video --no-pager -l</code>",
+        "<code>journalctl -u toanaas-worker-owner-product-video -n 100 --no-pager -l</code>",
         "<code>python remote_worker.py --owner-product-video --once</code>",
         "",
         "VPS product service khi mở public:",
         "<code>python remote_worker.py --product-video --once</code>",
     ]
     return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+def _video_provider_readiness_lines(readiness: dict | None = None) -> list[str]:
+    providers = (readiness or {}).get("providers")
+    if not isinstance(providers, list):
+        providers = []
+    lines = []
+    for item in providers:
+        provider = html.escape(str((item or {}).get("provider") or "-"))
+        lines.append(f"• {provider}: <code>{'ready' if (item or {}).get('configured') else 'missing'}</code>")
+    return lines or ["• none: <code>not configured</code>"]
+
+
+def video_worker_status_text(status: dict | None = None, product: dict | None = None, readiness: dict | None = None) -> str:
+    status = dict(status or {})
+    product = dict(product or {})
+    readiness = dict(readiness or {})
+    last = dict(product.get("last") or {})
+    lines = [
+        "🎬 <b>Video Worker Status</b>",
+        "",
+        f"• Worker API enabled: <code>{'YES' if status.get('worker_api_enabled') else 'NO'}</code>",
+        f"• Last heartbeat: <code>{html.escape(vietnam_time_display(status.get('last_remote_worker_heartbeat')))}</code>",
+        f"• Last worker: <code>{html.escape(status.get('last_worker_id') or '-')}</code>",
+        f"• Public product worker: <code>{'YES' if status.get('public_worker_enabled') else 'NO'}</code>",
+        f"• Real provider ready: <code>{'YES' if readiness.get('ok') else 'NO'}</code>",
+        "",
+        "Product queue:",
+        f"• Queued: <code>{safe_int(product.get('queued'), 0)}</code>",
+        f"• Processing: <code>{safe_int(product.get('active'), 0)}</code>",
+        f"• Last job: <code>{html.escape(str(last.get('job_id') or '-'))}</code>",
+        f"• Last status: <code>{html.escape(str(last.get('status') or '-'))}</code>",
+        f"• Last worker: <code>{html.escape(str(last.get('worker_id') or '-'))}</code>",
+        f"• Last update: <code>{html.escape(vietnam_time_display(last.get('updated_at')))}</code>",
+        f"• Last error: <code>{html.escape(str(last.get('safe_failure_reason') or '-')[:180])}</code>",
+        "",
+        "Provider readiness:",
+        *_video_provider_readiness_lines(readiness),
+        "",
+        "VPS services:",
+        "• Admin canary: <code>python remote_worker.py --admin-canary</code>",
+        "• Owner product video: <code>python remote_worker.py --owner-product-video</code>",
+        "• Public product video: <code>python remote_worker.py --product-video</code>",
+        "• Admin delivery/test: <code>python remote_worker.py --admin-video</code>",
+        "",
+        "VPS terminal only:",
+        "<code>systemctl status toanaas-worker-owner-product-video --no-pager -l</code>",
+        "<code>journalctl -u toanaas-worker-owner-product-video -n 100 --no-pager -l</code>",
+        "<code>systemctl status toanaas-worker-admin-canary --no-pager -l</code>",
+    ]
+    return "\n".join(lines)
 
 
 async def cmd_video_worker_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -39827,38 +39904,7 @@ async def cmd_video_worker_status(update: Update, context: ContextTypes.DEFAULT_
         product = remote_worker_api.remote_worker_product_video_queue_snapshot(conn)
     finally:
         conn.close()
-    last = dict(product.get("last") or {})
-    providers = readiness.get("providers") if isinstance(readiness.get("providers"), list) else []
-    provider_lines = []
-    for item in providers:
-        provider_lines.append(
-            f"• {html.escape(str(item.get('provider') or '-'))}: <code>{'ready' if item.get('configured') else 'missing ' + ','.join(item.get('missing') or [])}</code>"
-        )
-    lines = [
-        "🎬 <b>Video Worker Status</b>",
-        "",
-        f"• Worker API enabled: <code>{'YES' if status.get('worker_api_enabled') else 'NO'}</code>",
-        f"• Last heartbeat: <code>{html.escape(status.get('last_remote_worker_heartbeat') or '-')}</code>",
-        f"• Last worker: <code>{html.escape(status.get('last_worker_id') or '-')}</code>",
-        f"• Public product worker: <code>{'YES' if status.get('public_worker_enabled') else 'NO'}</code>",
-        f"• Real provider ready: <code>{'YES' if readiness.get('ok') else 'NO'}</code>",
-        "",
-        "Product queue:",
-        f"• Queued: <code>{safe_int(product.get('queued'), 0)}</code>",
-        f"• Processing: <code>{safe_int(product.get('active'), 0)}</code>",
-        f"• Last job: <code>{html.escape(str(last.get('job_id') or '-'))}</code>",
-        f"• Last status: <code>{html.escape(str(last.get('status') or '-'))}</code>",
-        f"• Last worker: <code>{html.escape(str(last.get('worker_id') or '-'))}</code>",
-        f"• Last error: <code>{html.escape(str(last.get('safe_failure_reason') or '-')[:180])}</code>",
-        "",
-        "Provider readiness:",
-        *(provider_lines or ["• none: <code>not configured</code>"]),
-        "",
-        "Runbook VPS:",
-        "<code>python remote_worker.py --owner-product-video</code>",
-        "<code>python remote_worker.py --product-video</code> khi public worker đã mở.",
-    ]
-    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return await update.message.reply_text(video_worker_status_text(status, product, readiness), parse_mode="HTML")
 
 
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
@@ -53331,11 +53377,15 @@ def video_b14_default_addon_plan(profile_id: str = "storytelling") -> dict:
         "voice_provider_voice_id": default_voice_id,
         "voice_profile_id": 0,
         "voice_label": "Nam mặc định" if voice_enabled else "",
+        "video_voice_speed": VIDEO_AUDIO_DEFAULT_VOICE_SPEED,
+        "voice_speed": VIDEO_AUDIO_DEFAULT_VOICE_SPEED,
         "voice_volume_percent": max(70, min(120, voice_volume or 100)),
         "voice_speed_percent": 100,
         "music_enabled": bool(music_enabled),
         "music_source": "default" if music_enabled else "none",
         "music_id": "",
+        "video_music_speed": VIDEO_AUDIO_DEFAULT_MUSIC_SPEED,
+        "music_speed": VIDEO_AUDIO_DEFAULT_MUSIC_SPEED,
         "music_volume_percent": min(VIDEO_B14_2_MUSIC_VOLUME_OPTIONS, key=lambda item: abs(item - (music_volume or 10))),
         "sfx_enabled": bool(profile.sfx_policy),
         "subtitle_enabled": bool(defaults.get("burn_subtitles", True)),
@@ -53823,6 +53873,217 @@ def video_b14_parse_percent_input(text: str, *, min_value: int, max_value: int) 
     return True, value, ""
 
 
+VIDEO_AUDIO_SPEED_MIN = Decimal("0.1")
+VIDEO_AUDIO_SPEED_MAX = Decimal("2.0")
+VIDEO_AUDIO_DEFAULT_VOICE_SPEED = 1.0
+VIDEO_AUDIO_DEFAULT_MUSIC_SPEED = 1.0
+VIDEO_AUDIO_DEFAULT_VOICE_VOLUME_PERCENT = 100
+VIDEO_AUDIO_DEFAULT_MUSIC_VOLUME_PERCENT = 10
+VIDEO_AUDIO_SPEED_ERROR_VI = "Tốc độ chưa hợp lệ. Anh/chị nhập số từ 0.1 đến 2.0, ví dụ 1.0 hoặc 1.2."
+VIDEO_AUDIO_VOLUME_ERROR_VI = "Âm lượng chưa hợp lệ. Anh/chị nhập từ 0% đến 200%, ví dụ 100% hoặc 150%."
+VIDEO_AUDIO_VOLUME_ZERO_CONFIRM_VI = "Âm lượng 0% sẽ tạo phần âm thanh không có tiếng. Anh/chị có chắc muốn tiếp tục không?"
+
+
+def parse_video_audio_speed(text: str) -> tuple[bool, float, str]:
+    raw = str(text or "").strip().replace(",", ".")
+    if not raw:
+        return False, 0.0, VIDEO_AUDIO_SPEED_ERROR_VI
+    try:
+        value = Decimal(raw)
+    except Exception:
+        return False, 0.0, VIDEO_AUDIO_SPEED_ERROR_VI
+    if value < VIDEO_AUDIO_SPEED_MIN or value > VIDEO_AUDIO_SPEED_MAX:
+        return False, float(value), VIDEO_AUDIO_SPEED_ERROR_VI
+    return True, float(value), ""
+
+
+def parse_video_audio_volume_percent(text: str) -> tuple[bool, int, str]:
+    raw = str(text or "").strip()
+    if not re.fullmatch(r"\d{1,3}\s*%?", raw):
+        return False, 0, VIDEO_AUDIO_VOLUME_ERROR_VI
+    value = safe_int(raw.replace("%", "").strip(), -1)
+    if value < 0 or value > 200:
+        return False, value, VIDEO_AUDIO_VOLUME_ERROR_VI
+    return True, value, ""
+
+
+def video_audio_speed_display(value) -> str:
+    try:
+        amount = float(value)
+    except Exception:
+        amount = 1.0
+    amount = max(float(VIDEO_AUDIO_SPEED_MIN), min(float(VIDEO_AUDIO_SPEED_MAX), amount))
+    if abs(amount - round(amount)) < 0.001:
+        return f"{amount:.1f}"
+    return f"{amount:.2f}".rstrip("0").rstrip(".")
+
+
+def _video_audio_speed_value(value, default: float) -> float:
+    try:
+        amount = float(value)
+    except Exception:
+        return float(default)
+    if amount > 2.0 and amount <= 200.0:
+        amount = amount / 100.0
+    return max(float(VIDEO_AUDIO_SPEED_MIN), min(float(VIDEO_AUDIO_SPEED_MAX), amount))
+
+
+def _video_audio_volume_value(value, default: int) -> int:
+    try:
+        amount = int(float(value))
+    except Exception:
+        return int(default)
+    return max(0, min(200, amount))
+
+
+def video_audio_settings_from_state(state: dict | None = None) -> dict:
+    state = dict(state or {})
+    pending = dict(state.get("pending_payload") or {})
+    finalization = dict(state.get("video_finalization") or pending.get("video_finalization") or {})
+    sources = [state, pending, finalization]
+
+    def first(keys: tuple[str, ...], default):
+        for source in sources:
+            for key in keys:
+                if key in source and source.get(key) not in (None, ""):
+                    return source.get(key)
+        return default
+
+    voice_speed = _video_audio_speed_value(
+        first(("video_voice_speed", "current_video_voice_speed", "voice_speed", "voice_speed_percent"), VIDEO_AUDIO_DEFAULT_VOICE_SPEED),
+        VIDEO_AUDIO_DEFAULT_VOICE_SPEED,
+    )
+    voice_volume = _video_audio_volume_value(
+        first(("video_voice_volume_percent", "current_video_voice_volume_percent", "voice_volume_percent"), VIDEO_AUDIO_DEFAULT_VOICE_VOLUME_PERCENT),
+        VIDEO_AUDIO_DEFAULT_VOICE_VOLUME_PERCENT,
+    )
+    music_speed = _video_audio_speed_value(
+        first(("video_music_speed", "current_video_music_speed", "music_speed", "music_speed_percent"), VIDEO_AUDIO_DEFAULT_MUSIC_SPEED),
+        VIDEO_AUDIO_DEFAULT_MUSIC_SPEED,
+    )
+    music_volume = _video_audio_volume_value(
+        first(("video_music_volume_percent", "current_video_music_volume_percent", "music_volume_percent"), VIDEO_AUDIO_DEFAULT_MUSIC_VOLUME_PERCENT),
+        VIDEO_AUDIO_DEFAULT_MUSIC_VOLUME_PERCENT,
+    )
+    return {
+        "video_voice_speed": voice_speed,
+        "video_voice_volume_percent": voice_volume,
+        "video_music_speed": music_speed,
+        "video_music_volume_percent": music_volume,
+        "voice_speed": voice_speed,
+        "voice_speed_percent": int(round(voice_speed * 100)),
+        "voice_volume_percent": voice_volume,
+        "music_speed": music_speed,
+        "music_speed_percent": int(round(music_speed * 100)),
+        "music_volume_percent": music_volume,
+    }
+
+
+def video_audio_apply_settings_to_state(state: dict | None, settings: dict | None = None) -> dict:
+    state = dict(state or {})
+    settings = video_audio_settings_from_state({**state, **dict(settings or {})})
+    finalization = video_finalization_defaults() if "video_finalization_defaults" in globals() else {}
+    finalization.update(dict(state.get("video_finalization") or {}))
+    finalization.update(settings)
+    state["video_finalization"] = finalization
+    for key, value in settings.items():
+        state[key] = value
+        if key.startswith("video_"):
+            state[f"current_{key}"] = value
+    pending = dict(state.get("pending_payload") or {})
+    if pending:
+        pending.update(settings)
+        pending_finalization = dict(pending.get("video_finalization") or {})
+        pending_finalization.update(settings)
+        pending["video_finalization"] = pending_finalization
+        state["pending_payload"] = pending
+    project = dict(state.get("video_project") or {})
+    if project:
+        project.update(settings)
+        state["video_project"] = project
+    return state
+
+
+def video_audio_set_control(state: dict | None, audio_kind: str, control: str, value) -> dict:
+    settings = video_audio_settings_from_state(state)
+    audio_kind = str(audio_kind or "").strip().lower()
+    control = str(control or "").strip().lower()
+    if audio_kind == "voice" and control == "speed":
+        settings["video_voice_speed"] = float(value)
+        settings["voice_speed"] = float(value)
+        settings["voice_speed_percent"] = int(round(float(value) * 100))
+    elif audio_kind == "voice" and control == "volume":
+        settings["video_voice_volume_percent"] = int(value)
+        settings["voice_volume_percent"] = int(value)
+    elif audio_kind == "music" and control == "speed":
+        settings["video_music_speed"] = float(value)
+        settings["music_speed"] = float(value)
+        settings["music_speed_percent"] = int(round(float(value) * 100))
+    elif audio_kind == "music" and control == "volume":
+        settings["video_music_volume_percent"] = int(value)
+        settings["music_volume_percent"] = int(value)
+    return video_audio_apply_settings_to_state(state, settings)
+
+
+def video_audio_input_text(audio_kind: str, control: str, lang: str = "vi") -> str:
+    audio_kind = str(audio_kind or "").strip().lower()
+    control = str(control or "").strip().lower()
+    is_music = audio_kind == "music"
+    if control == "speed":
+        title = "Tốc độ nhạc nền" if is_music else "Tốc độ giọng đọc"
+        return (
+            f"⏱ <b>{title}</b>\n\n"
+            "Nhập số từ <b>0.1</b> đến <b>2.0</b>.\n"
+            "Ví dụ: <code>0.8</code> chậm hơn, <code>1.0</code> bình thường, <code>1.2</code> nhanh hơn.\n\n"
+            "TOAN AAS chỉ lưu lựa chọn vào video hiện tại, chưa xử lý và chưa trừ Xu."
+        )
+    title = "Âm lượng nhạc nền" if is_music else "Âm lượng giọng đọc"
+    default_value = VIDEO_AUDIO_DEFAULT_MUSIC_VOLUME_PERCENT if is_music else VIDEO_AUDIO_DEFAULT_VOICE_VOLUME_PERCENT
+    return (
+        f"🎚 <b>{title}</b>\n\n"
+        "Nhập từ <b>0%</b> đến <b>200%</b>.\n"
+        f"Mặc định hiện tại: <b>{default_value}%</b>.\n"
+        "Ví dụ: <code>80</code>, <code>100%</code>, <code>150</code>.\n\n"
+        "Nếu nhập 0%, TOAN AAS sẽ hỏi xác nhận thêm một lần."
+    )
+
+
+def video_audio_volume_zero_confirm_keyboard(audio_kind: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    audio_kind = "music" if str(audio_kind or "").strip().lower() == "music" else "voice"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Vẫn tiếp tục", callback_data=f"vfinal|{audio_kind}_volume_zero_confirm"),
+        InlineKeyboardButton("✏️ Nhập lại âm lượng", callback_data=f"vfinal|{audio_kind}_volume_retry"),
+    ], [
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=f"vfinal|{audio_kind}"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+    ]])
+
+
+def video_audio_settings_lines(state: dict | None = None, lang: str = "vi") -> list[str]:
+    settings = video_audio_settings_from_state(state)
+    return [
+        f"• Giọng đọc: tốc độ <b>{html.escape(video_audio_speed_display(settings['video_voice_speed']))}x</b>, âm lượng <b>{settings['video_voice_volume_percent']}%</b>",
+        f"• Nhạc nền: tốc độ <b>{html.escape(video_audio_speed_display(settings['video_music_speed']))}x</b>, âm lượng <b>{settings['video_music_volume_percent']}%</b>",
+    ]
+
+
+def video_audio_invoice_block(state: dict | None = None, lang: str = "vi") -> str:
+    state = dict(state or {})
+    settings = video_audio_settings_from_state(state)
+    pending = dict(state.get("pending_payload") or {})
+    finalization = dict(state.get("video_finalization") or pending.get("video_finalization") or {})
+    voice_choice = str(state.get("current_video_voice_choice") or pending.get("voice_choice") or finalization.get("voice_choice") or "").lower()
+    music_choice = str(state.get("current_video_music_choice") or pending.get("music_choice_key") or pending.get("music_option") or finalization.get("music_choice") or "").lower()
+    voice_selected = bool(finalization.get("voice_enabled")) or voice_choice not in {"", "none", "off", "no"}
+    music_selected = bool(finalization.get("music_enabled")) or music_choice not in {"", "none", "off", "no"}
+    lines = []
+    if voice_selected or settings["video_voice_speed"] != VIDEO_AUDIO_DEFAULT_VOICE_SPEED or settings["video_voice_volume_percent"] != VIDEO_AUDIO_DEFAULT_VOICE_VOLUME_PERCENT:
+        lines.append(f"• Tùy chỉnh giọng: tốc độ {html.escape(video_audio_speed_display(settings['video_voice_speed']))}x, âm lượng {settings['video_voice_volume_percent']}%: <b>0 Xu</b>")
+    if music_selected or settings["video_music_speed"] != VIDEO_AUDIO_DEFAULT_MUSIC_SPEED or settings["video_music_volume_percent"] != VIDEO_AUDIO_DEFAULT_MUSIC_VOLUME_PERCENT:
+        lines.append(f"• Tùy chỉnh nhạc: tốc độ {html.escape(video_audio_speed_display(settings['video_music_speed']))}x, âm lượng {settings['video_music_volume_percent']}%: <b>0 Xu</b>")
+    return "\n".join(lines)
+
+
 def video_b14_music_text(session: dict | None = None, user_id=0, lang: str = "vi") -> str:
     plan = video_b14_addon_plan_from_session(session)
     source = video_b14_addon_label("music", str(plan.get("music_source") or "none"))
@@ -53986,8 +54247,8 @@ def video_b14_addon_text(session: dict | None = None, lang: str = "vi") -> str:
     return "\n".join([
         "🎙 <b>Voice / nhạc / phụ đề / logo</b>",
         "",
-        f"• Voice: <b>{yes if plan['voice_enabled'] else no}</b> · {html.escape(voice_label)} · âm lượng <b>{plan['voice_volume_percent']}%</b>",
-        f"• Nhạc: <b>{yes if plan['music_enabled'] else no}</b> · {html.escape(video_b14_addon_label('music', str(plan['music_source'])))} · âm lượng <b>{plan['music_volume_percent']}%</b>",
+        f"• Voice: <b>{yes if plan['voice_enabled'] else no}</b> · {html.escape(voice_label)} · tốc độ <b>{html.escape(video_audio_speed_display(video_audio_settings_from_state(plan)['video_voice_speed']))}x</b> · âm lượng <b>{video_audio_settings_from_state(plan)['video_voice_volume_percent']}%</b>",
+        f"• Nhạc: <b>{yes if plan['music_enabled'] else no}</b> · {html.escape(video_b14_addon_label('music', str(plan['music_source'])))} · tốc độ <b>{html.escape(video_audio_speed_display(video_audio_settings_from_state(plan)['video_music_speed']))}x</b> · âm lượng <b>{video_audio_settings_from_state(plan)['video_music_volume_percent']}%</b>",
         f"• SFX: <b>{yes if plan['sfx_enabled'] else no}</b>",
         f"• Phụ đề: <b>{yes if plan['subtitle_enabled'] else no}</b> · {html.escape(video_b14_addon_label('subtitle', str(plan['subtitle_source'])))}{(' · ' + html.escape(subtitle_target)) if subtitle_target else ''}",
         f"• Lồng tiếng: <b>{yes if plan.get('dub_enabled') else no}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
@@ -54436,7 +54697,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     else:
         result_text = "chưa có file thành phẩm"
     package_label = str(invoice.get("package_label") or video_b14_package_full_label(safe_int(invoice.get("quality_xu"), 200)))
-    updated_at = str(job.get("updated_at") or project.get("updated_at") or now_text())
+    updated_at = vietnam_time_display(job.get("updated_at") or project.get("updated_at") or now_text())
     voice_label = str(addon_plan.get("voice_label") or video_b14_addon_label("voice", str(addon_plan.get("voice_source") or "none")))
     music_label = video_b14_addon_label("music", str(addon_plan.get("music_source") or "none"))
     subtitle_label = video_b14_addon_label("subtitle", str(addon_plan.get("subtitle_source") or "none"))
@@ -54461,8 +54722,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         f"• Thời lượng dự kiến: <b>{duration}s</b>",
         f"• Gói: <b>{html.escape(package_label)}</b>",
         "• Tùy chọn thêm:",
-        f"  Voice: <b>{'bật' if addon_plan.get('voice_enabled') else 'tắt'}</b> · {html.escape(voice_label)}",
-        f"  Nhạc: <b>{'bật' if addon_plan.get('music_enabled') else 'tắt'}</b> · {html.escape(music_label)} · {safe_int(addon_plan.get('music_volume_percent'), 10)}%",
+        f"  Voice: <b>{'bật' if addon_plan.get('voice_enabled') else 'tắt'}</b> · {html.escape(voice_label)} · tốc độ {html.escape(video_audio_speed_display(video_audio_settings_from_state(addon_plan)['video_voice_speed']))}x · {safe_int(video_audio_settings_from_state(addon_plan)['video_voice_volume_percent'], 100)}%",
+        f"  Nhạc: <b>{'bật' if addon_plan.get('music_enabled') else 'tắt'}</b> · {html.escape(music_label)} · tốc độ {html.escape(video_audio_speed_display(video_audio_settings_from_state(addon_plan)['video_music_speed']))}x · {safe_int(video_audio_settings_from_state(addon_plan)['video_music_volume_percent'], 10)}%",
         f"  Phụ đề: <b>{'bật' if addon_plan.get('subtitle_enabled') else 'tắt'}</b> · {html.escape(subtitle_label)}",
         f"  Lồng tiếng: <b>{'bật' if addon_plan.get('dub_enabled') else 'tắt'}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
         logo_line,
@@ -106609,6 +106870,11 @@ def video_finalization_defaults() -> dict:
         "voice_language": "",
         "voice_style": "natural",
         "voice_profile_id": "",
+        "video_voice_speed": VIDEO_AUDIO_DEFAULT_VOICE_SPEED,
+        "video_voice_volume_percent": VIDEO_AUDIO_DEFAULT_VOICE_VOLUME_PERCENT,
+        "voice_speed": VIDEO_AUDIO_DEFAULT_VOICE_SPEED,
+        "voice_speed_percent": 100,
+        "voice_volume_percent": VIDEO_AUDIO_DEFAULT_VOICE_VOLUME_PERCENT,
         "subtitle_enabled": False,
         "subtitle_mode": "none",
         "subtitle_dub_choice": "none",
@@ -106618,6 +106884,11 @@ def video_finalization_defaults() -> dict:
         "dub_enabled": False,
         "dub_language": "",
         "translation_enabled": False,
+        "video_music_speed": VIDEO_AUDIO_DEFAULT_MUSIC_SPEED,
+        "video_music_volume_percent": VIDEO_AUDIO_DEFAULT_MUSIC_VOLUME_PERCENT,
+        "music_speed": VIDEO_AUDIO_DEFAULT_MUSIC_SPEED,
+        "music_speed_percent": 100,
+        "music_volume_percent": VIDEO_AUDIO_DEFAULT_MUSIC_VOLUME_PERCENT,
         "music_item_count": 0,
         "subtitle_dub_enabled": False,
         "logo_watermark_enabled": False,
@@ -106720,6 +106991,8 @@ def video_finalization_payload(state: dict | None = None) -> dict:
     voice_mode_value = str(finalization.get("voice_mode") or "").strip().lower()
     voice_choice = voice_choice_value if voice_choice_value not in {"", "none"} else (voice_mode_value or "none")
     subtitle_dub_choice = str(finalization.get("subtitle_dub_choice") or "none").strip().lower()
+    audio_settings = video_audio_settings_from_state({"video_finalization": finalization, "source_payload": payload})
+    finalization.update(audio_settings)
     payload.update({
         "video_finalization": finalization,
         "video_finalization_confirmed": bool(finalization.get("finalization_confirmed")),
@@ -106753,11 +107026,21 @@ def video_finalization_payload(state: dict | None = None) -> dict:
         "voice_choice": voice_choice,
         "voice_profile_id": str(finalization.get("voice_profile_id") or "")[:80],
         "voice_style": str(finalization.get("voice_style") or "natural")[:80],
+        "video_voice_speed": audio_settings["video_voice_speed"],
+        "video_voice_volume_percent": audio_settings["video_voice_volume_percent"],
+        "voice_speed": audio_settings["voice_speed"],
+        "voice_speed_percent": audio_settings["voice_speed_percent"],
+        "voice_volume_percent": audio_settings["voice_volume_percent"],
         "voice_text": str(finalization.get("voice_text") or "")[:3000],
         "voice_script": str(finalization.get("voice_script") or finalization.get("voice_text") or "")[:3000],
         "voice_file_id": str(finalization.get("voice_file_id") or "")[:220],
         "subtitle_dub_choice": subtitle_dub_choice,
         "subtitle_text": str(finalization.get("subtitle_text") or "")[:3000],
+        "video_music_speed": audio_settings["video_music_speed"],
+        "video_music_volume_percent": audio_settings["video_music_volume_percent"],
+        "music_speed": audio_settings["music_speed"],
+        "music_speed_percent": audio_settings["music_speed_percent"],
+        "music_volume_percent": audio_settings["music_volume_percent"],
         **logo_watermark_session_fields(
             bool(finalization.get("logo_watermark_enabled")),
             str(finalization.get("logo_watermark_text") or ""),
@@ -106778,7 +107061,13 @@ def set_video_finalization_state(user_id, state: dict) -> dict:
     clean = dict(state or {})
     finalization = video_finalization_defaults()
     finalization.update(dict(clean.get("video_finalization") or {}))
+    audio_settings = video_audio_settings_from_state({**clean, "video_finalization": finalization})
+    finalization.update(audio_settings)
     clean["video_finalization"] = finalization
+    for key, value in audio_settings.items():
+        clean[key] = value
+        if key.startswith("video_"):
+            clean[f"current_{key}"] = value
     clean["pending_action"] = "video_finalization"
     clean.setdefault("step", "menu")
     clean.setdefault("session_id", hashlib.sha256(f"{user_id}:{now_ts}".encode("utf-8")).hexdigest()[:12])
@@ -106803,6 +107092,10 @@ def set_video_finalization_state(user_id, state: dict) -> dict:
             "finalization_step": str(clean.get("step") or "menu")[:80],
             "selected_video_tier": str(clean.get("selected_video_tier") or "")[:40],
             "selected_video_aspect_ratio": str(clean.get("selected_video_aspect_ratio") or "")[:20],
+            "video_voice_speed": audio_settings["video_voice_speed"],
+            "video_voice_volume_percent": audio_settings["video_voice_volume_percent"],
+            "video_music_speed": audio_settings["video_music_speed"],
+            "video_music_volume_percent": audio_settings["video_music_volume_percent"],
         })
         save_video_session(user_id, session)
     except Exception:
@@ -107694,7 +107987,9 @@ def ensure_video_finalization_from_addon_state(user_id, addon_state: dict | None
     finalization = video_finalization_defaults()
     finalization.update(dict(current.get("video_finalization") or {}))
     finalization.update(dict(pending.get("video_finalization") or {}))
+    finalization.update(video_audio_settings_from_state({**addon_state, **current, "video_finalization": finalization, "pending_payload": pending}))
     current["video_finalization"] = finalization
+    current = video_audio_apply_settings_to_state(current, finalization)
     return set_video_finalization_state(user_id, current)
 
 def video_finalization_tier_text(state: dict | None = None, lang: str = "vi") -> str:
@@ -108093,6 +108388,7 @@ def video_finalization_confirm_not_ready_keyboard(state: dict | None = None, lan
     ])
 
 def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -> str:
+    settings = video_audio_settings_from_state(state)
     if normalize_user_language(lang) != "vi":
         return (
             "🎵 <b>Music for this video</b>\n\n"
@@ -108103,6 +108399,7 @@ def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -
             "• No music\n\n"
             "Paid:\n"
             f"• Create new music: +{VIDEO_SUNO_MUSIC_XU} Xu\n\n"
+            f"Current: speed <b>{html.escape(video_audio_speed_display(settings['video_music_speed']))}x</b>, volume <b>{settings['video_music_volume_percent']}%</b>.\n\n"
             "This only saves the current video plan. Processing starts after the final invoice confirmation."
         )
     return (
@@ -108114,6 +108411,7 @@ def video_finalization_music_text(state: dict | None = None, lang: str = "vi") -
         "• Không thêm nhạc\n\n"
         "Có phí:\n"
         f"• Tạo nhạc mới: +{VIDEO_SUNO_MUSIC_XU} Xu\n\n"
+        f"Đang chọn: tốc độ <b>{html.escape(video_audio_speed_display(settings['video_music_speed']))}x</b>, âm lượng <b>{settings['video_music_volume_percent']}%</b>.\n\n"
         "Bước này chỉ lưu kế hoạch video. TOAN AAS chưa xử lý và chưa trừ Xu."
     )
 
@@ -108127,6 +108425,10 @@ def video_finalization_music_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton("📁 Media âm thanh của tôi" if is_vi else "📁 My audio media", callback_data="vfinal|my_media"),
             InlineKeyboardButton((f"🎵 Tạo nhạc mới +{VIDEO_SUNO_MUSIC_XU} Xu" if is_vi else f"🎵 Create new music +{VIDEO_SUNO_MUSIC_XU} Xu"), callback_data="vfinal|music_ai"),
+        ],
+        [
+            InlineKeyboardButton("⏱ Tốc độ nhạc" if is_vi else "⏱ Music speed", callback_data="vfinal|music_speed"),
+            InlineKeyboardButton("🎚 Âm lượng nhạc" if is_vi else "🎚 Music volume", callback_data="vfinal|music_volume"),
         ],
         [
             InlineKeyboardButton("🚫 Không thêm nhạc" if is_vi else "🚫 No music", callback_data="vfinal|music_none"),
@@ -108264,6 +108566,7 @@ def apply_video_finalization_subdub_choice(user_id, action: str) -> dict:
     return get_video_finalization_state(user_id)
 
 def video_finalization_voice_text(state: dict | None = None, lang: str = "vi") -> str:
+    settings = video_audio_settings_from_state(state)
     distinct_defaults = default_tts_voices_distinct()
     default_lines_en = "• Default female voice\n• Default male voice\n" if distinct_defaults else "• Ready default voice\n"
     default_lines_vi = "• Giọng nữ mặc định\n• Giọng nam mặc định\n" if distinct_defaults else "• Giọng mặc định sẵn sàng\n"
@@ -108278,6 +108581,7 @@ def video_finalization_voice_text(state: dict | None = None, lang: str = "vi") -
             "• Use a saved voice profile if available\n\n"
             "Paid:\n"
             f"• Create a custom voice profile: {policy_en}\n\n"
+            f"Current: speed <b>{html.escape(video_audio_speed_display(settings['video_voice_speed']))}x</b>, volume <b>{settings['video_voice_volume_percent']}%</b>.\n\n"
             "Selections only update the current video draft. Processing starts after the final confirmation."
         )
     return (
@@ -108288,6 +108592,7 @@ def video_finalization_voice_text(state: dict | None = None, lang: str = "vi") -
         "• Dùng giọng đã lưu trong Kho voice của bạn nếu có\n\n"
         "Có phí:\n"
         f"• Tạo voice riêng: {policy_vi}\n\n"
+        f"Đang chọn: tốc độ <b>{html.escape(video_audio_speed_display(settings['video_voice_speed']))}x</b>, âm lượng <b>{settings['video_voice_volume_percent']}%</b>.\n\n"
         "Lựa chọn ở đây chỉ cập nhật draft video hiện tại. TOAN AAS chưa xử lý và chưa trừ Xu."
     )
 
@@ -108317,6 +108622,10 @@ def video_finalization_voice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton((f"🧬 Tạo voice riêng free/{int(VOICE_PROFILE_PRICE_XU or 0)} Xu" if is_vi else f"🧬 Custom voice free/{int(VOICE_PROFILE_PRICE_XU or 0)} Xu"), callback_data="vfinal|voice_create"),
             InlineKeyboardButton("▶️ Nghe thử giọng" if is_vi else "▶️ Preview voice", callback_data="vfinal|voice_preview"),
+        ],
+        [
+            InlineKeyboardButton("⏱ Tốc độ giọng" if is_vi else "⏱ Voice speed", callback_data="vfinal|voice_speed"),
+            InlineKeyboardButton("🎚 Âm lượng giọng" if is_vi else "🎚 Voice volume", callback_data="vfinal|voice_volume"),
         ],
         [
             InlineKeyboardButton("⬅️ Tùy chọn video" if is_vi else "⬅️ Video options", callback_data="vfinal|menu"),
@@ -109143,6 +109452,14 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             state["step"] = "music"
             set_video_finalization_state(uid, state)
             return await safe_edit_or_send(query, video_finalization_music_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
+        if current_step in {"await_video_music_speed", "await_video_music_volume"}:
+            state["step"] = "music"
+            set_video_finalization_state(uid, state)
+            return await safe_edit_or_send(query, video_finalization_music_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
+        if current_step in {"await_video_voice_speed", "await_video_voice_volume"}:
+            state["step"] = "voice"
+            set_video_finalization_state(uid, state)
+            return await safe_edit_or_send(query, video_finalization_voice_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_voice_keyboard(lang))
         if current_step in {"await_voice_text", "await_voice_script"}:
             state["step"] = "voice"
             set_video_finalization_state(uid, state)
@@ -109180,6 +109497,41 @@ async def handle_video_finalization_callback(update: Update, context: ContextTyp
             else "📁 <b>My media for this video</b>\n\nThe current package, duration and source file are preserved. Selecting media here only saves the video plan.",
             parse_mode="HTML",
             reply_markup=media_library_quick_keyboard(lang, PRODUCT_CONTEXT_VIDEO_ADDON),
+        )
+    if action in {"voice_speed", "voice_volume", "music_speed", "music_volume"}:
+        audio_kind, control = action.split("_", 1)
+        state["step"] = f"await_video_{audio_kind}_{control}"
+        set_video_finalization_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            video_audio_input_text(audio_kind, control, lang),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=f"vfinal|{audio_kind}"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+            ]]),
+        )
+    if action in {"voice_volume_zero_confirm", "music_volume_zero_confirm"}:
+        audio_kind = action.split("_", 1)[0]
+        state = video_audio_set_control(state, audio_kind, "volume", 0)
+        state["step"] = audio_kind
+        set_video_finalization_state(uid, state)
+        sync_video_audio_controls_to_addon_state(uid, state)
+        if audio_kind == "music":
+            return await safe_edit_or_send(query, video_finalization_music_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
+        return await safe_edit_or_send(query, video_finalization_voice_text(state, lang), parse_mode="HTML", reply_markup=video_finalization_voice_keyboard(lang))
+    if action in {"voice_volume_retry", "music_volume_retry"}:
+        audio_kind = action.split("_", 1)[0]
+        state["step"] = f"await_video_{audio_kind}_volume"
+        set_video_finalization_state(uid, state)
+        return await safe_edit_or_send(
+            query,
+            video_audio_input_text(audio_kind, "volume", lang),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=f"vfinal|{audio_kind}"),
+                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+            ]]),
         )
     if action == "logo":
         state["step"] = "await_logo_watermark"
@@ -109650,6 +110002,58 @@ async def handle_video_finalization_pending_text(update: Update, context: Contex
         set_video_finalization_state(uid, state)
         await video_finalization_continue_after_scene_count(update.message, uid, state, lang)
         return True
+    if step in {"await_video_voice_speed", "await_video_music_speed"}:
+        lang = get_user_language(uid) or "vi"
+        audio_kind = "music" if "music" in step else "voice"
+        ok, value, message = parse_video_audio_speed(text)
+        if not ok:
+            await update.message.reply_text(
+                message,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=f"vfinal|{audio_kind}"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+                ]]),
+            )
+            return True
+        current = video_audio_set_control(state, audio_kind, "speed", value)
+        current["step"] = audio_kind
+        set_video_finalization_state(uid, current)
+        sync_video_audio_controls_to_addon_state(uid, current)
+        if audio_kind == "music":
+            await update.message.reply_text(video_finalization_music_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
+        else:
+            await update.message.reply_text(video_finalization_voice_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_voice_keyboard(lang))
+        return True
+    if step in {"await_video_voice_volume", "await_video_music_volume"}:
+        lang = get_user_language(uid) or "vi"
+        audio_kind = "music" if "music" in step else "voice"
+        ok, value, message = parse_video_audio_volume_percent(text)
+        if not ok:
+            await update.message.reply_text(
+                message,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(ui_text(lang, "common.back"), callback_data=f"vfinal|{audio_kind}"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="vfinal|main"),
+                ]]),
+            )
+            return True
+        if value == 0:
+            state["step"] = f"await_video_{audio_kind}_volume"
+            set_video_finalization_state(uid, state)
+            await update.message.reply_text(
+                VIDEO_AUDIO_VOLUME_ZERO_CONFIRM_VI,
+                reply_markup=video_audio_volume_zero_confirm_keyboard(audio_kind, lang),
+            )
+            return True
+        current = video_audio_set_control(state, audio_kind, "volume", value)
+        current["step"] = audio_kind
+        set_video_finalization_state(uid, current)
+        sync_video_audio_controls_to_addon_state(uid, current)
+        if audio_kind == "music":
+            await update.message.reply_text(video_finalization_music_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_music_keyboard(lang))
+        else:
+            await update.message.reply_text(video_finalization_voice_text(current, lang), parse_mode="HTML", reply_markup=video_finalization_voice_keyboard(lang))
+        return True
     if step == "await_voice_text":
         update_video_finalization(uid, voice_enabled=True, voice_mode="tts", voice_text=text, voice_script=text, dub_enabled=True)
         state = get_video_finalization_state(uid)
@@ -109805,6 +110209,7 @@ def set_video_addon_state(user_id, state: dict) -> dict:
     clean.setdefault("current_video_target_language", "")
     clean.setdefault("current_video_voice_style", "")
     clean.setdefault("current_video_music_option", "")
+    clean = video_audio_apply_settings_to_state(clean)
     clean.setdefault("current_video_script_text", "")
     clean.setdefault("current_video_assets", {})
     clean.setdefault("pending_confirm_token", "")
@@ -109824,6 +110229,10 @@ def set_video_addon_state(user_id, state: dict) -> dict:
         "dubbing_option": clean.get("current_video_dubbing_option"),
         "target_language": clean.get("current_video_target_language"),
         "voice_style": clean.get("current_video_voice_style"),
+        "video_voice_speed": clean.get("video_voice_speed"),
+        "video_voice_volume_percent": clean.get("video_voice_volume_percent"),
+        "video_music_speed": clean.get("video_music_speed"),
+        "video_music_volume_percent": clean.get("video_music_volume_percent"),
     }
     save_video_session(user_id, session)
     return clean
@@ -109849,6 +110258,16 @@ def get_video_addon_state(user_id) -> dict:
 
 def clear_video_addon_state(user_id) -> bool:
     return USER_PENDING.pop(video_addon_pending_key(user_id), None) is not None
+
+
+def sync_video_audio_controls_to_addon_state(user_id, state: dict | None = None) -> dict:
+    addon_state = get_video_addon_state(user_id)
+    if not addon_state:
+        return {}
+    settings = video_audio_settings_from_state(state or addon_state)
+    addon_state = video_audio_apply_settings_to_state(addon_state, settings)
+    return set_video_addon_state(user_id, addon_state)
+
 
 def video_addon_selection_label(subtitle_option: str = "none", dubbing_option: str = "none", translation_enabled: bool = False, lang: str = "vi") -> str:
     subtitle = str(subtitle_option or "none")
@@ -110024,6 +110443,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
         "\n默认配音已保存，但当前版本尚未合成到视频中。\n"
         if voice_guard.get("reason") == "default_voice_saved_not_muxed" else ""
     )
+    audio_invoice_block = video_audio_invoice_block(state, lang)
 
     def paid_lines(default_lines: list[str]) -> str:
         if paid_items:
@@ -110091,6 +110511,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
                 f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
                 f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n"
                 f"{voice_note_en}"
+                f"{(audio_invoice_block + chr(10)) if audio_invoice_block else ''}"
                 f"{warning}\n"
                 "TOAN AAS starts processing and charges Xu only after you press the final confirmation: Create video."
             )
@@ -110110,6 +110531,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
                 "• No music: <b>0 Xu</b>",
                 "• No subtitles: <b>0 Xu</b>",
             ])
+            + (("\n\nFree audio settings:\n" + audio_invoice_block) if audio_invoice_block else "")
             + "\n\n"
             f"Total: <b>{xu_number(total_xu)} Xu</b>\n"
             f"Equivalent: <b>{xu_number(equivalent)} VND</b>\n\n"
@@ -110132,6 +110554,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
             f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n"
             f"{voice_note_vi}"
+            f"{(audio_invoice_block + chr(10)) if audio_invoice_block else ''}"
             f"{warning}\n"
             "TOAN AAS chỉ bắt đầu xử lý và trừ Xu sau khi bạn bấm xác nhận cuối: Xuất video."
         )
@@ -110151,6 +110574,7 @@ def video_quote_invoice_text(quote: dict, state: dict | None = None, lang: str =
             "• Không thêm nhạc: <b>0 Xu</b>",
             "• Không phụ đề: <b>0 Xu</b>",
         ])
+        + (("\n\nTùy chỉnh âm thanh miễn phí:\n" + audio_invoice_block) if audio_invoice_block else "")
         + "\n\n"
         f"Tổng: <b>{xu_number(total_xu)} Xu</b>\n"
         f"Tương đương: <b>{xu_number(equivalent)}đ</b>\n\n"
@@ -110218,6 +110642,10 @@ def video_price_invoice_text(state: dict, lang: str = "vi") -> str:
     paid_lines_vi = lines(order.get("paid_items")) or "• Không có add-on trả phí."
     free_lines_en = lines(order.get("free_items")) or "• No extra free item."
     paid_lines_en = lines(order.get("paid_items")) or "• No paid add-on."
+    audio_invoice_block = video_audio_invoice_block(state, lang)
+    if audio_invoice_block:
+        free_lines_vi = f"{free_lines_vi}\n{audio_invoice_block}"
+        free_lines_en = f"{free_lines_en}\n{audio_invoice_block}"
     discount_lines = lines(order.get("discounts")) if order.get("discounts") else ""
     total_xu = int(order.get("total_xu") or pricing.get("total_xu") or 0)
     equivalent = int(order.get("estimated_vnd") or pricing.get("estimated_vnd") or total_xu * int(XU_TO_VND or 100))
@@ -110902,6 +111330,7 @@ async def start_video_addon_step(query, user_id, pending_payload: dict, tier: st
         pending_payload,
         pending_payload.get("video_finalization") or {},
     )
+    audio_settings = video_audio_settings_from_state(pending_payload)
     paid_addons = list((video_order_create(user_id, tier, pending_payload, {"video_project": project}) or {}).get("paid_items") or [])
     state = set_video_addon_state(user_id, {
         "source": source,
@@ -110922,6 +111351,8 @@ async def start_video_addon_step(query, user_id, pending_payload: dict, tier: st
         "current_video_music_option": str(pending_payload.get("music_option") or pending_payload.get("music_label") or ""),
         "current_video_music_choice": str(pending_payload.get("music_choice_key") or pending_payload.get("music_option") or "none"),
         "current_video_music_item_count": int(pending_payload.get("music_item_count") or 0),
+        "current_video_music_speed": audio_settings["video_music_speed"],
+        "current_video_music_volume_percent": audio_settings["video_music_volume_percent"],
         "current_video_subtitle_option": str(pending_payload.get("subtitle_option") or "none"),
         "current_video_dubbing_option": str(pending_payload.get("dubbing_option") or "none"),
         "current_video_subtitle_dub_choice": str(pending_payload.get("subtitle_dub_choice") or "none"),
@@ -110929,6 +111360,9 @@ async def start_video_addon_step(query, user_id, pending_payload: dict, tier: st
         "current_video_target_language": str(pending_payload.get("target_language") or ""),
         "current_video_voice_choice": str(pending_payload.get("voice_choice") or "none"),
         "current_video_voice_style": str(pending_payload.get("voice_style") or ""),
+        "current_video_voice_speed": audio_settings["video_voice_speed"],
+        "current_video_voice_volume_percent": audio_settings["video_voice_volume_percent"],
+        **audio_settings,
         "current_video_script_text": str(pending_payload.get("original_prompt") or pending_payload.get("prompt") or "")[:2000],
         "current_video_assets": {
             "source_job_id": str(pending_payload.get("source_job_id") or "")[:80],
@@ -110990,6 +111424,7 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
     pricing["discount_xu"] = 0
     state["video_order"] = order
     state["current_video_price_preview"] = pricing
+    audio_settings = video_audio_settings_from_state(state)
     project = dict(state.get("video_project") or {})
     if project:
         project.update({
@@ -110999,6 +111434,7 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
             "translation_enabled": bool(state.get("translation_enabled")),
             "target_language": state.get("current_video_target_language") or "",
             "voice_style": state.get("current_video_voice_style") or "",
+            **audio_settings,
             "price_preview": pricing,
             "status": "awaiting_final_confirmation",
             "updated_at": now_text(),
@@ -111059,6 +111495,7 @@ async def finalize_video_addon_confirmation(query, user_id, state: dict, lang: s
         "target_language": state.get("current_video_target_language") or "",
         "voice_choice": state.get("current_video_voice_choice") or "none",
         "voice_style": state.get("current_video_voice_style") or "",
+        **audio_settings,
         "music_option": state.get("current_video_music_choice") or state.get("current_video_music_option") or "none",
         "music_choice_key": state.get("current_video_music_choice") or state.get("current_video_music_option") or "none",
         "music_item_count": int(state.get("current_video_music_item_count") or 0),
@@ -120810,8 +121247,8 @@ def _format_remote_worker_canary_status(status: dict) -> str:
             f"• Job: <code>{html.escape(status.get('canary_ref') or '-')}</code>",
             f"• Status: <code>{html.escape(status.get('status') or '-')}</code>",
             f"• Worker: <code>{html.escape(status.get('worker_id') or '-')}</code>",
-            f"• Claimed at: <code>{html.escape(status.get('claimed_at') or '-')}</code>",
-            f"• Last heartbeat: <code>{html.escape(status.get('last_heartbeat_at') or '-')}</code>",
+            f"• Claimed at: <code>{html.escape(vietnam_time_display(status.get('claimed_at')))}</code>",
+            f"• Last heartbeat: <code>{html.escape(vietnam_time_display(status.get('last_heartbeat_at')))}</code>",
             f"• Progress: <code>{safe_int(status.get('progress_percent'), 0)}%</code> {html.escape(status.get('progress_message') or '')}",
             f"• Result uploaded: <code>{uploaded}</code>",
             f"• Result file size: <code>{safe_int(status.get('result_file_size'), 0)}</code>",
@@ -120839,8 +121276,8 @@ def _format_remote_worker_prod_canary_status(status: dict) -> str:
             f"• Status: <code>{html.escape(status.get('status') or '-')}</code>",
             f"• Stage: <code>{html.escape(status.get('stage') or '-')}</code>",
             f"• Worker: <code>{html.escape(status.get('worker_id') or '-')}</code>",
-            f"• Claimed at: <code>{html.escape(status.get('claimed_at') or '-')}</code>",
-            f"• Last heartbeat: <code>{html.escape(status.get('last_heartbeat_at') or '-')}</code>",
+            f"• Claimed at: <code>{html.escape(vietnam_time_display(status.get('claimed_at')))}</code>",
+            f"• Last heartbeat: <code>{html.escape(vietnam_time_display(status.get('last_heartbeat_at')))}</code>",
             f"• Progress: <code>{safe_int(status.get('progress_percent'), 0)}%</code> {html.escape(status.get('progress_message') or '')}",
             f"• Result uploaded: <code>{uploaded}</code>",
             f"• Result file size: <code>{safe_int(status.get('result_file_size'), 0)}</code>",
@@ -121178,7 +121615,7 @@ async def cmd_remote_worker_status(update: Update, context: ContextTypes.DEFAULT
         f"• worker_api_enabled: <code>{str(bool(status.get('worker_api_enabled'))).lower()}</code>",
         f"• LOCAL_WORKER_TOKEN configured: <code>{'yes' if status.get('local_worker_token_configured') else 'no'}</code>",
         f"• remote_worker_mode_supported: <code>{str(bool(status.get('remote_worker_mode_supported'))).lower()}</code>",
-        f"• last heartbeat: <code>{html.escape(status.get('last_remote_worker_heartbeat') or '-')}</code>",
+        f"• last heartbeat: <code>{html.escape(vietnam_time_display(status.get('last_remote_worker_heartbeat')))}</code>",
         f"• last worker_id: <code>{html.escape(status.get('last_worker_id') or '-')}</code>",
         f"• worker result upload dir configured: <code>{'yes' if status.get('worker_result_upload_dir_configured') else 'no'}</code>",
         "",
@@ -121186,7 +121623,7 @@ async def cmd_remote_worker_status(update: Update, context: ContextTypes.DEFAULT
         f"• Last canary job: <code>{html.escape(canary.get('canary_ref') or '-')}</code>",
         f"• Last canary status: <code>{html.escape(canary.get('status') or '-')}</code>",
         f"• Last canary worker: <code>{html.escape(canary.get('worker_id') or '-')}</code>",
-        f"• Last canary heartbeat: <code>{html.escape(canary.get('last_heartbeat_at') or '-')}</code>",
+        f"• Last canary heartbeat: <code>{html.escape(vietnam_time_display(canary.get('last_heartbeat_at')))}</code>",
         f"• Last canary result: <code>{'yes' if canary.get('result_uploaded') else 'no'}</code>",
         f"• Production jobs enabled: <code>{'yes' if status.get('production_jobs_enabled') else 'no'}</code>",
         "",
@@ -121195,7 +121632,7 @@ async def cmd_remote_worker_status(update: Update, context: ContextTypes.DEFAULT
         f"• Last job: <code>{html.escape(admin_prod.get('canary_ref') or '-')}</code>",
         f"• Last status: <code>{html.escape(admin_prod.get('status') or '-')}</code>",
         f"• Last worker: <code>{html.escape(admin_prod.get('worker_id') or '-')}</code>",
-        f"• Last heartbeat: <code>{html.escape(admin_prod.get('last_heartbeat_at') or '-')}</code>",
+        f"• Last heartbeat: <code>{html.escape(vietnam_time_display(admin_prod.get('last_heartbeat_at')))}</code>",
         f"• Last result: <code>{'yes' if admin_prod.get('result_uploaded') else 'no'}</code>",
         f"• Public worker enabled: <code>{'YES' if status.get('public_worker_enabled') else 'NO'}</code>",
         f"• Max active admin canary: <code>{safe_int(status.get('max_admin_canary_active'), 1)}</code>",
