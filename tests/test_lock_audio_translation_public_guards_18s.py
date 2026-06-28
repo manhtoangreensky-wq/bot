@@ -129,8 +129,8 @@ def test_translation_menu_still_visible():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     for label in (
         "🎬 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
     ):
         assert label in labels

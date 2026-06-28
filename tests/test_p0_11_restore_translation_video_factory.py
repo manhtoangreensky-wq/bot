@@ -14,15 +14,12 @@ def test_translation_gateway_has_language_and_video_factory():
     labels = _labels(bot.translation_menu_keyboard("vi"))
     assert "Trung tâm dịch" in text
     assert "🌐 Dịch ngôn ngữ" in labels
-    assert "🌐 Dịch phụ đề / Video" in labels
-    assert "📄 Dịch file" in labels
-    assert "🎧 Dịch audio" in labels
-    assert "📄 Dịch phụ đề file" in labels
+    assert "🎬 Phụ đề / Lồng tiếng" in labels
     assert "menu|translation_language_hub" in _callbacks(bot.translation_menu_keyboard("vi"))
     assert "menu|translation_video_factory" in _callbacks(bot.translation_menu_keyboard("vi"))
-    assert "menu|translation_document" in _callbacks(bot.translation_menu_keyboard("vi"))
-    assert "menu|translation_voice" in _callbacks(bot.translation_menu_keyboard("vi"))
-    assert "menu|translation_subtitle_file" in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_document" not in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_voice" not in _callbacks(bot.translation_menu_keyboard("vi"))
+    assert "menu|translation_subtitle_file" not in _callbacks(bot.translation_menu_keyboard("vi"))
 
 
 def test_language_translation_menu_restored():
@@ -30,10 +27,10 @@ def test_language_translation_menu_restored():
     assert "🔁 Dịch 2 chiều" in labels
     assert "💬 Hội thoại" in labels
     assert "📝 Văn bản" in labels
-    assert "📄 Tài liệu" in labels
-    assert "🎧 Audio" in labels
     assert "⚙️ Ngôn ngữ" in labels
     assert "🌐 Dịch tự động" in labels
+    assert "📄 Tài liệu" not in labels
+    assert "🎧 Audio" not in labels
     assert "⬅️ Trung tâm" in labels
 
 
@@ -41,9 +38,11 @@ def test_video_factory_menu_from_gateway():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     for label in (
         "🎬 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
+        "📄 Dịch file",
+        "🎧 Dịch audio",
     ):
         assert label in labels
     assert "📄 Dịch file phụ đề" not in labels
@@ -51,7 +50,7 @@ def test_video_factory_menu_from_gateway():
     assert "🔗 Tải video từ link" not in labels
     assert "📂 Media" not in labels
     assert "📝 Chỉnh phụ đề" not in labels
-    assert "⬅️ Quay lại" in labels
+    assert "⬅️ Trung tâm dịch" in labels
 
 
 def test_back_language_menu_to_gateway():

@@ -62,10 +62,12 @@ def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     assert labels == [
         "🎬 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
-        "⬅️ Quay lại",
+        "📄 Dịch file",
+        "🎧 Dịch audio",
+        "⬅️ Trung tâm dịch",
         "🏠 Menu chính",
     ]
 
@@ -93,10 +95,10 @@ def test_link_import_only_top_level():
 
 def test_no_copied_source_menu_inside_product_flows():
     assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_CREATE))[0] == "📤 Gửi video"
-    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Dịch video", "🏠 Menu chính"]
+    assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_TRANSLATE))[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Phụ đề / Lồng tiếng", "🏠 Menu chính"]
     assert _labels(_source_markup(bot.VIDEO_SUBTITLE_MODE_DUB))[:2] == [
         "📤 Gửi video cần lồng tiếng",
-        "⬅️ Dịch video",
+        "⬅️ Phụ đề / Lồng tiếng",
     ]
 
 

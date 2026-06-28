@@ -17,22 +17,22 @@ def test_translation_gateway_two_buttons():
     markup = bot.translation_menu_keyboard("vi")
     labels = _labels(markup)
     assert "Trung tâm dịch" in text
-    assert markup.inline_keyboard[0][0].text == "🌐 Dịch phụ đề / Video"
-    assert markup.inline_keyboard[0][1].text == "📄 Dịch file"
-    assert "🎧 Dịch audio" in labels
-    assert "📄 Dịch phụ đề file" in labels
+    assert markup.inline_keyboard[0][0].text == "🌐 Dịch ngôn ngữ"
+    assert markup.inline_keyboard[0][1].text == "🎬 Phụ đề / Lồng tiếng"
     assert "🌐 Dịch ngôn ngữ" in labels
     assert "menu|translation_language_hub" in _callbacks(markup)
     assert "menu|translation_video_factory" in _callbacks(markup)
-    assert "menu|translation_document" in _callbacks(markup)
-    assert "menu|translation_voice" in _callbacks(markup)
-    assert "menu|translation_subtitle_file" in _callbacks(markup)
+    assert "menu|translation_document" not in _callbacks(markup)
+    assert "menu|translation_voice" not in _callbacks(markup)
+    assert "menu|translation_subtitle_file" not in _callbacks(markup)
 
 
 def test_language_translation_menu_preserves_existing_tools():
     labels = _labels(bot.translation_language_hub_keyboard("vi"))
-    for label in ["🔁 Dịch 2 chiều", "💬 Hội thoại", "📝 Văn bản", "📄 Tài liệu", "🎧 Audio", "⚙️ Ngôn ngữ", "🌐 Dịch tự động"]:
+    for label in ["🔁 Dịch 2 chiều", "💬 Hội thoại", "📝 Văn bản", "⚙️ Ngôn ngữ", "🌐 Dịch tự động"]:
         assert label in labels
+    assert "📄 Tài liệu" not in labels
+    assert "🎧 Audio" not in labels
     assert "⬅️ Trung tâm" in labels
 
 
@@ -42,11 +42,11 @@ def test_no_language_translation_tools_deleted():
         "menu|translation_two_way",
         "menu|translation_live_conversation",
         "menu|translation_text",
-        "menu|translation_document",
-        "menu|translation_voice",
         "menu|translation_language",
         "menu|translation_auto_target",
     }.issubset(callbacks)
+    assert "menu|translation_document" not in callbacks
+    assert "menu|translation_voice" not in callbacks
     assert "menu|translation_stop_session" not in callbacks
 
 
@@ -54,10 +54,12 @@ def test_video_translation_menu_labels_auto():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     assert labels == [
         "🎬 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
-        "⬅️ Quay lại",
+        "📄 Dịch file",
+        "🎧 Dịch audio",
+        "⬅️ Trung tâm dịch",
         "🏠 Menu chính",
     ]
     assert "🔗 Tải video từ link" not in labels
@@ -140,7 +142,7 @@ def test_no_copied_source_menu_inside_product_flows():
     assert "🔗 Tải link" not in create_labels
 
     translate_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}))
-    assert translate_labels[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Dịch video", "🏠 Menu chính"]
+    assert translate_labels[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Phụ đề / Lồng tiếng", "🏠 Menu chính"]
     admin_translate_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "entry_surface": "admin_test_mode"}))
     assert admin_translate_labels[:3] == translate_labels[:3]
 
@@ -150,9 +152,8 @@ def test_no_copied_source_menu_inside_product_flows():
     assert "🎧 Video chỉ có tiếng" not in dub_labels
 
     combo_labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert combo_labels[0] == "📤 Gửi video cần xử lý"
-    assert "🎞 Video đã có phụ đề" not in combo_labels
-    assert "🎧 Video chỉ có tiếng" not in combo_labels
+    assert "🎞 Video đã có phụ đề" in combo_labels
+    assert "🎧 Video chưa có phụ đề" in combo_labels
 
 
 def test_auto_subtitle_input_and_output_are_basic_product():

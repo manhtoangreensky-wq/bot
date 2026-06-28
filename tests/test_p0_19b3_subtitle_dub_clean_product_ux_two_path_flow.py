@@ -60,8 +60,10 @@ def _update_with_query(query):
 
 def test_product_menu_and_copy_are_clean_two_path():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
-    assert "🎙 Lồng tiếng" in labels
+    assert "🎙 Lồng tiếng video" in labels
     assert "🎞 Phụ đề + Lồng tiếng" in labels
+    assert "📄 Dịch file" in labels
+    assert "🎧 Dịch audio" in labels
     assert "📄 Dịch file phụ đề" not in labels
     assert "🧾 Bóc lời thoại" not in labels
     assert "Voice video" not in "\n".join(labels)
@@ -104,12 +106,14 @@ def test_translate_and_dub_source_keyboards_are_clean_closed_video_flows():
     dub = bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB})
     combo = bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
 
-    assert _labels(translate)[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Dịch video", "🏠 Menu chính"]
+    assert _labels(translate)[:3] == ["📤 Gửi video đã có phụ đề", "⬅️ Phụ đề / Lồng tiếng", "🏠 Menu chính"]
     assert _callbacks(translate)[:3] == ["videodub|source_upload", "videodub|back_type", "menu|main"]
     assert _labels(dub)[:1] == ["📤 Gửi video cần lồng tiếng"]
     assert _callbacks(dub)[:1] == ["videodub|source_upload"]
-    assert _labels(combo)[:1] == ["📤 Gửi video cần xử lý"]
-    assert _callbacks(combo)[:1] == ["videodub|source_upload"]
+    assert "🎞 Video đã có phụ đề" in _labels(combo)
+    assert "🎧 Video chưa có phụ đề" in _labels(combo)
+    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_HAS_SUBTITLE}" in _callbacks(combo)
+    assert f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}" in _callbacks(combo)
 
 
 def test_upload_video_waits_for_original_subtitle_confirm(monkeypatch):

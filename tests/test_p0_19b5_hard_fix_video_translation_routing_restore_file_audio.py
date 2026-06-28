@@ -112,30 +112,32 @@ def _patch_upload_basics(monkeypatch):
 def test_translation_center_restores_file_audio_srt_flows():
     labels = _labels(bot.translation_menu_keyboard("vi"))
     callbacks = _callbacks(bot.translation_menu_keyboard("vi"))
-    assert "🌐 Dịch phụ đề / Video" in labels
-    assert "📄 Dịch file" in labels
-    assert "🎧 Dịch audio" in labels
-    assert "📄 Dịch phụ đề file" in labels
+    assert labels == ["🌐 Dịch ngôn ngữ", "🎬 Phụ đề / Lồng tiếng", "⬅️ Quay lại", "🏠 Menu chính"]
     assert "menu|translation_video_factory" in callbacks
-    assert "menu|translation_document" in callbacks
-    assert "menu|translation_voice" in callbacks
-    assert "menu|translation_subtitle_file" in callbacks
+    center_labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    center_callbacks = _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    assert "📄 Dịch file" in center_labels
+    assert "🎧 Dịch audio" in center_labels
+    assert "menu|translation_media_file" in center_callbacks
+    assert "menu|translation_media_audio" in center_callbacks
 
 
 def test_video_translation_menu_has_exact_four_video_buttons():
     assert _labels(bot.video_dubbing_menu_keyboard("vi", "translation")) == [
         "🎬 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
-        "⬅️ Quay lại",
+        "📄 Dịch file",
+        "🎧 Dịch audio",
+        "⬅️ Trung tâm dịch",
         "🏠 Menu chính",
     ]
 
 
 def test_video_menu_has_no_file_audio_srt_prompt():
-    ui = _ui_text(bot.video_dubbing_menu_text("vi", "translation"), bot.video_dubbing_menu_keyboard("vi", "translation"))
-    for forbidden in ("Dịch file", "Dịch audio", "SRT/VTT/TXT", "file phụ đề", "audio"):
+    ui = _ui_text(bot.translation_menu_text("vi"), bot.translation_menu_keyboard("vi"))
+    for forbidden in ("Dịch phụ đề / Video", "Dịch file", "Dịch audio", "SRT/VTT/TXT", "file phụ đề"):
         assert forbidden not in ui
 
 
@@ -253,15 +255,15 @@ def test_dubbing_partial_copy_not_success():
     assert not message.outputs[-1]["caption"].startswith("✅")
 
 
-def test_combo_closed_flow_no_redundant_has_no_subtitle_first_screen():
+def test_combo_two_path_screen_restored():
     labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
     ui = _ui_text(
         bot.video_dubbing_source_text({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}, "vi"),
         bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}),
     )
-    assert labels[0] == "📤 Gửi video cần xử lý"
-    assert "Video đã có phụ đề" not in ui
-    assert "Video chỉ có tiếng" not in ui
+    assert "🎞 Video đã có phụ đề" in labels
+    assert "🎧 Video chưa có phụ đề" in labels
+    assert "chưa có phụ đề" in ui
 
 
 def test_combo_internal_transcript_after_confirm_only(monkeypatch):
@@ -354,13 +356,12 @@ def test_back_from_each_video_translation_subflow_returns_correct_parent():
 
 
 def test_file_audio_routes_do_not_jump_to_video():
-    callbacks = _callbacks(bot.translation_menu_keyboard("vi"))
-    assert callbacks[callbacks.index("menu|translation_document")] == "menu|translation_document"
-    assert callbacks[callbacks.index("menu|translation_voice")] == "menu|translation_voice"
-    assert callbacks[callbacks.index("menu|translation_subtitle_file")] == "menu|translation_subtitle_file"
-    subtitle_file_text, subtitle_file_markup = bot.localized_menu_content("translation_subtitle_file", False, "vi", user_id=919507)
-    assert "Dịch file phụ đề" in subtitle_file_text
-    assert any("Gửi SRT/VTT/TXT" in label for label in _labels(subtitle_file_markup))
+    callbacks = _callbacks(bot.video_dubbing_menu_keyboard("vi", "translation"))
+    assert "menu|translation_media_file" in callbacks
+    assert "menu|translation_media_audio" in callbacks
+    file_text, file_markup = bot.localized_menu_content("translation_media_file", False, "vi", user_id=919507)
+    assert "Dịch file" in file_text
+    assert "menu|translation_video_factory" in _callbacks(file_markup)
 
 
 def test_video_addon_buttons_return_to_addon_menu(monkeypatch):

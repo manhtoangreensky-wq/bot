@@ -93,16 +93,18 @@ def test_video_translate_main_has_four_video_buttons():
     labels = _labels(bot.video_dubbing_menu_keyboard("vi", "translation"))
     assert labels == [
         "🎬 Tạo phụ đề tự động",
-        "🌐 Dịch phụ đề",
-        "🎙 Lồng tiếng",
+        "🌐 Dịch phụ đề video",
+        "🎙 Lồng tiếng video",
         "🎞 Phụ đề + Lồng tiếng",
-        "⬅️ Quay lại",
+        "📄 Dịch file",
+        "🎧 Dịch audio",
+        "⬅️ Trung tâm dịch",
         "🏠 Menu chính",
     ]
 
 
 def test_video_translate_main_has_no_file_audio_prompt():
-    ui = _ui_text(bot.video_dubbing_menu_text("vi", "translation"), bot.video_dubbing_menu_keyboard("vi", "translation"))
+    ui = _ui_text(bot.translation_menu_text("vi"), bot.translation_menu_keyboard("vi"))
     for forbidden in ["SRT/VTT/TXT", "Dịch file", "Bóc lời thoại", "audio", "âm thanh"]:
         assert forbidden not in ui
 
@@ -307,11 +309,10 @@ def test_dub_partial_result_not_marked_full_success():
     assert not message.outputs[-1]["caption"].startswith("✅")
 
 
-def test_combo_menu_is_closed_video_flow():
+def test_combo_menu_has_two_paths():
     labels = _labels(bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}))
-    assert labels[0] == "📤 Gửi video cần xử lý"
-    assert "🎞 Video đã có phụ đề" not in labels
-    assert "🎧 Video chỉ có tiếng" not in labels
+    assert "🎞 Video đã có phụ đề" in labels
+    assert "🎧 Video chưa có phụ đề" in labels
 
 
 def test_combo_existing_subtitle_translates_then_dubs(monkeypatch):
@@ -426,7 +427,6 @@ def test_back_from_combo_returns_combo_menu():
 
 def test_video_routes_do_not_jump_to_file_audio_flows():
     ui = _ui_text(
-        bot.video_dubbing_menu_keyboard("vi", "translation"),
         bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE}),
         bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_DUB}),
         bot.video_dubbing_source_keyboard("vi", {"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}),

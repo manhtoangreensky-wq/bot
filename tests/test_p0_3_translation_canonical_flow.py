@@ -138,19 +138,16 @@ def test_standalone_translate_menu_no_api_text():
 
     assert "🌐 <b>Trung tâm dịch</b>" in text
     assert labels == [
-        "🌐 Dịch phụ đề / Video",
-        "📄 Dịch file",
-        "🎧 Dịch audio",
-        "📄 Dịch phụ đề file",
         "🌐 Dịch ngôn ngữ",
+        "🎬 Phụ đề / Lồng tiếng",
         "⬅️ Quay lại",
         "🏠 Menu chính",
     ]
     assert "menu|translation_language_hub" in callbacks
     assert "menu|translation_video_factory" in callbacks
-    assert "menu|translation_document" in callbacks
-    assert "menu|translation_voice" in callbacks
-    assert "menu|translation_subtitle_file" in callbacks
+    assert "menu|translation_document" not in callbacks
+    assert "menu|translation_voice" not in callbacks
+    assert "menu|translation_subtitle_file" not in callbacks
     assert not any(callback.startswith(("vfinal|", "videoaddon|")) for callback in callbacks)
     _assert_public_clean("\n".join([text, *labels]))
 
@@ -320,7 +317,7 @@ def test_standalone_subtitle_plus_dubbing_flow(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
 
     asyncio.run(_press_videodub(f"videodub|studio|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}", user_id))
-    asyncio.run(_press_videodub("videodub|source_upload", user_id))
+    asyncio.run(_press_videodub(f"videodub|path|{bot.VIDEO_DUBBING_FLOW_NO_SUBTITLE}", user_id))
     message = CaptureMessage(file_id="combo-video")
     asyncio.run(bot.handle_video_dubbing_pending_upload(
         SimpleNamespace(effective_user=SimpleNamespace(id=user_id), message=message),
