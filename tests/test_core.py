@@ -365,14 +365,14 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert ["🤖 Provider / Worker", "💰 Tài chính"] in admin_nav_rows
     assert ["🏠 Menu chính"] in admin_nav_rows
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
-    for label in ["📊 Tổng quan", "💵 Doanh thu", "📅 Doanh thu tháng", "📉 Chi phí tháng", "📈 Lãi / Lỗ", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📚 Hướng dẫn lệnh"]:
+    for label in ["📊 Tổng quan", "💰 Doanh thu", "🧾 Thuế / VAT", "💸 Chi phí", "📈 Lợi nhuận", "🏦 Vốn & Hòa vốn", "⚠️ Đơn bất thường", "🧮 Sổ điều chỉnh", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📘 Hướng dẫn tài chính"]:
         assert label in finance_labels
     freeze_labels = [button.text for row in bot.freeze_queue_keyboard().inline_keyboard for button in row]
     for label in ["📊 Queue Status", "🧊 Freeze Status", "🖼 Freeze Image", "🎬 Freeze Video", "🎞 Freeze Frame", "🤖 Freeze Provider", "✅ Unfreeze Tool", "🧹 Clear Stale Jobs"]:
         assert label in freeze_labels
-    assert "Thu chi / Báo cáo nội bộ TOAN AAS" in bot.finance_menu_text()
-    assert "🟢 Miễn/ưu đãi thuế phí" in finance_labels
-    assert "không tự nộp thuế" in bot.finance_menu_text()
+    assert "Admin Tài chính TOAN AAS" in bot.finance_menu_text()
+    assert "không sửa giao dịch gốc" in bot.finance_menu_text()
+    assert "sổ điều chỉnh" in bot.finance_menu_text()
     assert "Mục này dùng để kiểm tra hàng đợi job" in bot.freeze_queue_menu_text()
     assert "thao tác nguy hiểm luôn đi qua màn xác nhận" in bot.freeze_queue_menu_text()
     assert "Báo cáo tổng TOAN AAS" in bot.admin_overview_text()
@@ -1260,7 +1260,8 @@ def test_payos_package_purchase_grants_wallet_without_xu_or_rank_points(monkeypa
             plan_name="🎁 Combo Ưu Đãi TikTok — 99k",
             metadata_json=json.dumps(metadata, ensure_ascii=False),
         )
-        processed, desc, info = bot.process_payos_paid_order("900001", 99000)
+        _, invoice_total = bot.payos_invoice_total_for_order("900001", 99000)
+        processed, desc, info = bot.process_payos_paid_order("900001", invoice_total)
         assert processed is True
         assert desc == "package_success"
         assert info["order_type"] == "package_purchase"
@@ -1414,7 +1415,8 @@ def test_storage_addon_menu_and_payos_paid_grants_storage_without_xu(monkeypatch
             plan_xu=0,
             metadata_json=json.dumps(metadata, ensure_ascii=False),
         )
-        processed, desc, info = bot.process_payos_paid_order("920001", 10000)
+        _, invoice_total = bot.payos_invoice_total_for_order("920001", 10000)
+        processed, desc, info = bot.process_payos_paid_order("920001", invoice_total)
         assert processed is True
         assert desc == "storage_addon_success"
         assert info["order_type"] == "storage_addon"
@@ -1443,7 +1445,7 @@ def test_storage_addon_checkout_metadata_and_admin_grant(monkeypatch):
     monkeypatch.setattr(bot, "record_usage_event", lambda *args, **kwargs: None)
 
     async def fake_payos(body):
-        assert body["amount"] == 10000
+        assert body["amount"] == 10800
         assert body["description"] == "AASSTOR50MB"
         return SimpleNamespace(status_code=200), {"code": "00", "data": {"checkoutUrl": "https://pay.example/920002", "paymentLinkId": "link-920002"}}, "", ""
 
@@ -5814,7 +5816,8 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         assert info["value"] == 30
 
         bot.create_order("123456789", user_id, 50000, 500)
-        processed, desc, paid_info = bot.process_payos_paid_order("123456789", 50000)
+        _, invoice_total = bot.payos_invoice_total_for_order("123456789", 50000)
+        processed, desc, paid_info = bot.process_payos_paid_order("123456789", invoice_total)
         assert processed is True
         assert desc == "success"
         assert paid_info["promo_bonus"] == 150
@@ -5824,7 +5827,7 @@ def test_payos_paid_order_applies_first30_once(monkeypatch):
         credits_after_paid, _, _ = bot.get_user(user_id)
         assert credits_after_paid == initial_credits + 680
 
-        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", 50000)
+        processed, desc, _paid_info = bot.process_payos_paid_order("123456789", invoice_total)
         assert processed is False
         assert desc == "already_paid"
         credits_after_replay, _, _ = bot.get_user(user_id)
@@ -5857,7 +5860,8 @@ def test_finance_ledger_revenue_usage_expense_and_year_profit(monkeypatch):
         bot.init_db()
         user_id = "finance-user"
         bot.create_order("fin-10001", user_id, 50000, 500)
-        processed, desc, paid_info = bot.process_payos_paid_order("fin-10001", 50000)
+        _, invoice_total = bot.payos_invoice_total_for_order("fin-10001", 50000)
+        processed, desc, paid_info = bot.process_payos_paid_order("fin-10001", invoice_total)
         assert processed is True
         assert desc == "success"
         assert int(paid_info.get("base_xu") or paid_info.get("xu") or 0) >= 500
@@ -5874,7 +5878,7 @@ def test_finance_ledger_revenue_usage_expense_and_year_profit(monkeypatch):
         finally:
             conn.close()
 
-        processed, desc, _paid_info = bot.process_payos_paid_order("fin-10001", 50000)
+        processed, desc, _paid_info = bot.process_payos_paid_order("fin-10001", invoice_total)
         assert processed is False
         conn = bot.db_connect()
         try:
@@ -5950,8 +5954,9 @@ def test_operations_v1a_tax_prep_and_accounting_exports(monkeypatch):
         "legal_service",
     }
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
-    assert "🟢 Miễn/ưu đãi thuế phí" in finance_labels
-    assert "🧾 Báo cáo kế toán" in finance_labels
+    assert "🧾 Thuế / VAT" in finance_labels
+    assert "📚 Hồ sơ/chứng từ" in finance_labels
+    assert "🧮 Sổ điều chỉnh" in finance_labels
     tax_callbacks = [
         button.callback_data
         for row in bot.tax_accounting_menu_keyboard().inline_keyboard
@@ -6256,7 +6261,8 @@ def test_launch_bonus_once_per_user_package(monkeypatch):
         initial_credits, _, _ = bot.get_user(user_id)
 
         bot.create_order("100001", user_id, 100000, 1000)
-        processed, desc, paid_info = bot.process_payos_paid_order("100001", 100000)
+        _, first_invoice_total = bot.payos_invoice_total_for_order("100001", 100000)
+        processed, desc, paid_info = bot.process_payos_paid_order("100001", first_invoice_total)
         assert processed is True
         assert desc == "success"
         assert paid_info["launch_bonus"] == 50
@@ -6264,7 +6270,8 @@ def test_launch_bonus_once_per_user_package(monkeypatch):
         assert credits_after_first == initial_credits + 1050
 
         bot.create_order("100002", user_id, 100000, 1000)
-        processed, desc, paid_info = bot.process_payos_paid_order("100002", 100000)
+        _, second_invoice_total = bot.payos_invoice_total_for_order("100002", 100000)
+        processed, desc, paid_info = bot.process_payos_paid_order("100002", second_invoice_total)
         assert processed is True
         assert desc == "success"
         assert paid_info["launch_bonus"] == 0
@@ -6477,7 +6484,8 @@ def test_trial_bonus_antispam_is_free_trial_only(monkeypatch):
         user_id = "paid-user"
         initial_credits, _, _ = bot.get_user(user_id)
         bot.create_order("paid-50", user_id, 50000, 500)
-        processed, desc, paid_info = bot.process_payos_paid_order("paid-50", 50000)
+        _, invoice_total = bot.payos_invoice_total_for_order("paid-50", 50000)
+        processed, desc, paid_info = bot.process_payos_paid_order("paid-50", invoice_total)
         assert processed is True
         assert desc == "success"
         assert paid_info["launch_bonus"] == 30
@@ -9497,7 +9505,8 @@ def test_manual_bank_qr_asset_send_and_missing_no_crash(monkeypatch, tmp_path):
 def test_manual_menu_bonus_text_no_zalopay_momo():
     text = bot.manual_payment_menu_text()
     assert "PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR" in text
-    assert "ZaloPay/MoMo: dùng cho thanh toán CNY nếu chuyển được" in text
+    assert "MoMo chỉ dùng cho VND, không dùng cho CNY" in text
+    assert "ZaloPay/MoMo: dùng cho thanh toán CNY nếu chuyển được" not in text
     assert "USD/CNY/USDT không áp dụng ưu đãi cộng Xu" in text
     assert "QR ngân hàng Việt Nam, ZaloPay hoặc MoMo" not in text
 

@@ -249,7 +249,7 @@ def test_admin_user_risk_detail_shows_rolling_sums(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
     _seed_auto_order("detail-roll", "C3R001", 500_000, datetime.now() - timedelta(minutes=10))
     text = bot.payos_risk_user_detail_text("detail-roll")
-    assert "500.000đ" in text
+    assert "540.000đ" in text
     assert "60m" in text and "12h" in text and "24h" in text
 
 
@@ -370,7 +370,7 @@ def test_admin_risk_report_top_users(monkeypatch, tmp_path):
     _seed_auto_order("top-user", "C3T001", 500_000, datetime.now() - timedelta(minutes=10))
     text = bot.payos_risk_report_text()
     assert "top-user" in text
-    assert "500.000đ" in text
+    assert "540.000đ" in text
 
 
 def test_admin_risk_report_no_secrets(monkeypatch, tmp_path):
