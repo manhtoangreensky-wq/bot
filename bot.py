@@ -1837,8 +1837,14 @@ VAT_DEFAULT_ENABLED = True
 VAT_DEFAULT_RATE = 0.08
 VAT_DEFAULT_MODE = "exclusive"
 VAT_DEFAULT_LABEL = "Thuế GTGT"
-VAT_DEFAULT_NOTE = "Thuế GTGT theo quy định hiện hành"
+VAT_DEFAULT_NOTE = "Thuế GTGT theo cấu hình thuế hiện hành của TOAN AAS"
 VAT_SAFE_MAX_RATE = 0.20
+CIT_DEFAULT_ENABLED = True
+CIT_DEFAULT_RATE = 0.20
+CIT_DEFAULT_MODE = "profit_based"
+CIT_DEFAULT_LABEL = "Thuế TNDN"
+CIT_DEFAULT_NOTE = "Thuế TNDN ước tính theo cấu hình quản trị nội bộ"
+CIT_SAFE_MAX_RATE = 0.30
 VAT_PUBLIC_COPY = (
     "Giá thanh toán đã được tách rõ giá trước thuế, thuế GTGT và tổng thanh toán. "
     "Phần thuế không quy đổi thành Xu hoặc lượt sử dụng dịch vụ."
@@ -1848,7 +1854,8 @@ VAT_EXCLUSIVE_COPY = "Thuế GTGT được cộng thêm vào tổng thanh toán 
 FINANCE_ADJUSTMENT_TYPES = {
     "revenue_add", "revenue_subtract", "expense_add", "expense_subtract",
     "tax_add", "tax_subtract", "refund", "capital_add", "capital_withdraw",
-    "provider_cost_adjustment", "manual_correction",
+    "provider_cost_adjustment", "manual_correction", "vat_add", "vat_subtract",
+    "cit_add", "cit_subtract", "tax_manual_correction",
 }
 
 # ─── FREE CHAT CONFIG ─────────────────────────────────────────────────────────
@@ -3492,17 +3499,35 @@ def init_db():
         vat_rate REAL DEFAULT 0.08,
         vat_mode TEXT DEFAULT 'exclusive',
         vat_label TEXT DEFAULT 'Thuế GTGT',
-        vat_note TEXT DEFAULT 'Thuế GTGT theo quy định hiện hành',
+        vat_note TEXT DEFAULT 'Thuế GTGT theo cấu hình thuế hiện hành của TOAN AAS',
         effective_from TEXT DEFAULT '',
         taxable_services TEXT DEFAULT 'all_real_money_payments',
+        cit_enabled INTEGER DEFAULT 1,
+        cit_rate REAL DEFAULT 0.20,
+        cit_mode TEXT DEFAULT 'profit_based',
+        cit_label TEXT DEFAULT 'Thuế TNDN',
+        cit_note TEXT DEFAULT 'Thuế TNDN ước tính theo cấu hình quản trị nội bộ',
+        cit_effective_from TEXT DEFAULT '',
         updated_by_admin_id TEXT DEFAULT '',
         updated_at TEXT,
         created_at TEXT
     )""")
+    finance_tax_columns = _table_columns(c, "finance_tax_settings")
+    for column_name, column_sql in [
+        ("cit_enabled", "cit_enabled INTEGER DEFAULT 1"),
+        ("cit_rate", "cit_rate REAL DEFAULT 0.20"),
+        ("cit_mode", "cit_mode TEXT DEFAULT 'profit_based'"),
+        ("cit_label", "cit_label TEXT DEFAULT 'Thuế TNDN'"),
+        ("cit_note", "cit_note TEXT DEFAULT 'Thuế TNDN ước tính theo cấu hình quản trị nội bộ'"),
+        ("cit_effective_from", "cit_effective_from TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(c, "finance_tax_settings", column_name, column_sql, finance_tax_columns)
     c.execute(
         """INSERT OR IGNORE INTO finance_tax_settings
-        (id, vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from, taxable_services, updated_by_admin_id, updated_at, created_at)
-        VALUES (1,?,?,?,?,?,?,?,?,?,?)""",
+        (id, vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from,
+         taxable_services, cit_enabled, cit_rate, cit_mode, cit_label, cit_note,
+         cit_effective_from, updated_by_admin_id, updated_at, created_at)
+        VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             1 if VAT_DEFAULT_ENABLED else 0,
             float(VAT_DEFAULT_RATE),
@@ -3511,6 +3536,12 @@ def init_db():
             VAT_DEFAULT_NOTE,
             now_text(),
             "all_real_money_payments",
+            1 if CIT_DEFAULT_ENABLED else 0,
+            float(CIT_DEFAULT_RATE),
+            CIT_DEFAULT_MODE,
+            CIT_DEFAULT_LABEL,
+            CIT_DEFAULT_NOTE,
+            now_text(),
             "system",
             now_text(),
             now_text(),
@@ -7699,24 +7730,89 @@ def get_order_payment_link_id(order_code):
 
 def ensure_finance_accounting_tables_conn(conn) -> None:
     now = now_text()
+    conn.execute("""CREATE TABLE IF NOT EXISTS finance_revenue_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT,
+        user_id TEXT,
+        source_type TEXT,
+        source_id TEXT,
+        amount_vnd INTEGER DEFAULT 0,
+        xu_credited INTEGER DEFAULT 0,
+        payment_method TEXT DEFAULT '',
+        status TEXT DEFAULT 'success',
+        note TEXT,
+        created_by_admin_id TEXT DEFAULT '',
+        UNIQUE(source_type, source_id)
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS finance_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT,
+        user_id TEXT,
+        service_type TEXT,
+        job_id TEXT DEFAULT '',
+        xu_spent INTEGER DEFAULT 0,
+        package_id TEXT DEFAULT '',
+        provider TEXT DEFAULT '',
+        provider_cost_estimate_vnd INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'success',
+        note TEXT
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS finance_expense_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        expense_date TEXT,
+        created_at TEXT,
+        amount_vnd INTEGER DEFAULT 0,
+        category TEXT,
+        vendor TEXT,
+        payment_method TEXT DEFAULT '',
+        invoice_status TEXT DEFAULT 'internal_only',
+        is_pre_establishment INTEGER DEFAULT 0,
+        is_recurring INTEGER DEFAULT 0,
+        note TEXT,
+        evidence_folder_or_file_note TEXT DEFAULT '',
+        invoice_file_id TEXT DEFAULT '',
+        receipt_file_id TEXT DEFAULT '',
+        created_by_admin_id TEXT,
+        deleted_at TEXT DEFAULT '',
+        deleted_by_admin_id TEXT DEFAULT '',
+        delete_reason TEXT DEFAULT ''
+    )""")
+    migrate_finance_schema(conn.cursor())
     conn.execute("""CREATE TABLE IF NOT EXISTS finance_tax_settings (
         id INTEGER PRIMARY KEY CHECK (id=1),
         vat_enabled INTEGER DEFAULT 1,
         vat_rate REAL DEFAULT 0.08,
         vat_mode TEXT DEFAULT 'exclusive',
         vat_label TEXT DEFAULT 'Thuế GTGT',
-        vat_note TEXT DEFAULT 'Thuế GTGT theo quy định hiện hành',
+        vat_note TEXT DEFAULT 'Thuế GTGT theo cấu hình thuế hiện hành của TOAN AAS',
         effective_from TEXT DEFAULT '',
         taxable_services TEXT DEFAULT 'all_real_money_payments',
+        cit_enabled INTEGER DEFAULT 1,
+        cit_rate REAL DEFAULT 0.20,
+        cit_mode TEXT DEFAULT 'profit_based',
+        cit_label TEXT DEFAULT 'Thuế TNDN',
+        cit_note TEXT DEFAULT 'Thuế TNDN ước tính theo cấu hình quản trị nội bộ',
+        cit_effective_from TEXT DEFAULT '',
         updated_by_admin_id TEXT DEFAULT '',
         updated_at TEXT,
         created_at TEXT
     )""")
+    tax_columns = _table_columns(conn.cursor(), "finance_tax_settings")
+    for column_name, column_sql in [
+        ("cit_enabled", "cit_enabled INTEGER DEFAULT 1"),
+        ("cit_rate", "cit_rate REAL DEFAULT 0.20"),
+        ("cit_mode", "cit_mode TEXT DEFAULT 'profit_based'"),
+        ("cit_label", "cit_label TEXT DEFAULT 'Thuế TNDN'"),
+        ("cit_note", "cit_note TEXT DEFAULT 'Thuế TNDN ước tính theo cấu hình quản trị nội bộ'"),
+        ("cit_effective_from", "cit_effective_from TEXT DEFAULT ''"),
+    ]:
+        _add_column_if_missing(conn.cursor(), "finance_tax_settings", column_name, column_sql, tax_columns)
     conn.execute(
         """INSERT OR IGNORE INTO finance_tax_settings
         (id, vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from,
-         taxable_services, updated_by_admin_id, updated_at, created_at)
-        VALUES (1,?,?,?,?,?,?,?,?,?,?)""",
+         taxable_services, cit_enabled, cit_rate, cit_mode, cit_label, cit_note,
+         cit_effective_from, updated_by_admin_id, updated_at, created_at)
+        VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             1 if VAT_DEFAULT_ENABLED else 0,
             float(VAT_DEFAULT_RATE),
@@ -7725,6 +7821,12 @@ def ensure_finance_accounting_tables_conn(conn) -> None:
             VAT_DEFAULT_NOTE,
             now,
             "all_real_money_payments",
+            1 if CIT_DEFAULT_ENABLED else 0,
+            float(CIT_DEFAULT_RATE),
+            CIT_DEFAULT_MODE,
+            CIT_DEFAULT_LABEL,
+            CIT_DEFAULT_NOTE,
+            now,
             "system",
             now,
             now,
@@ -7807,8 +7909,9 @@ def finance_tax_config_conn(conn) -> dict:
         conn.execute(
             """INSERT OR IGNORE INTO finance_tax_settings
             (id, vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from,
-             taxable_services, updated_by_admin_id, updated_at, created_at)
-            VALUES (1,?,?,?,?,?,?,?,?,?,?)""",
+             taxable_services, cit_enabled, cit_rate, cit_mode, cit_label, cit_note,
+             cit_effective_from, updated_by_admin_id, updated_at, created_at)
+            VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 1 if VAT_DEFAULT_ENABLED else 0,
                 float(VAT_DEFAULT_RATE),
@@ -7817,6 +7920,12 @@ def finance_tax_config_conn(conn) -> dict:
                 VAT_DEFAULT_NOTE,
                 now_text(),
                 "all_real_money_payments",
+                1 if CIT_DEFAULT_ENABLED else 0,
+                float(CIT_DEFAULT_RATE),
+                CIT_DEFAULT_MODE,
+                CIT_DEFAULT_LABEL,
+                CIT_DEFAULT_NOTE,
+                now_text(),
                 "system",
                 now_text(),
                 now_text(),
@@ -7824,7 +7933,8 @@ def finance_tax_config_conn(conn) -> dict:
         )
         row = conn.execute(
             """SELECT vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from,
-                      taxable_services, updated_by_admin_id, updated_at, created_at
+                      taxable_services, cit_enabled, cit_rate, cit_mode, cit_label, cit_note,
+                      cit_effective_from, updated_by_admin_id, updated_at, created_at
                FROM finance_tax_settings WHERE id=1"""
         ).fetchone()
     except Exception:
@@ -7838,6 +7948,12 @@ def finance_tax_config_conn(conn) -> dict:
             "vat_note": VAT_DEFAULT_NOTE,
             "effective_from": now_text(),
             "taxable_services": "all_real_money_payments",
+            "cit_enabled": CIT_DEFAULT_ENABLED,
+            "cit_rate": float(CIT_DEFAULT_RATE),
+            "cit_mode": CIT_DEFAULT_MODE,
+            "cit_label": CIT_DEFAULT_LABEL,
+            "cit_note": CIT_DEFAULT_NOTE,
+            "cit_effective_from": now_text(),
             "updated_by_admin_id": "system",
             "updated_at": now_text(),
             "created_at": now_text(),
@@ -7850,9 +7966,15 @@ def finance_tax_config_conn(conn) -> dict:
         "vat_note": str(row[4] or VAT_DEFAULT_NOTE),
         "effective_from": str(row[5] or ""),
         "taxable_services": str(row[6] or ""),
-        "updated_by_admin_id": str(row[7] or ""),
-        "updated_at": str(row[8] or ""),
-        "created_at": str(row[9] or ""),
+        "cit_enabled": bool(int(row[7] if row[7] is not None else (1 if CIT_DEFAULT_ENABLED else 0))),
+        "cit_rate": max(0.0, min(float(row[8] or 0), float(CIT_SAFE_MAX_RATE))),
+        "cit_mode": str(row[9] or CIT_DEFAULT_MODE).strip().lower() or CIT_DEFAULT_MODE,
+        "cit_label": str(row[10] or CIT_DEFAULT_LABEL),
+        "cit_note": str(row[11] or CIT_DEFAULT_NOTE),
+        "cit_effective_from": str(row[12] or ""),
+        "updated_by_admin_id": str(row[13] or ""),
+        "updated_at": str(row[14] or ""),
+        "created_at": str(row[15] or ""),
     }
 
 def finance_tax_config() -> dict:
@@ -7916,6 +8038,72 @@ def admin_set_vat_enabled(enabled: bool, admin_id: str = "", note: str = "") -> 
             before=before,
             after={"vat_enabled": bool(enabled)},
             note="VAT enabled/disabled for new invoices only",
+        )
+        conn.commit()
+        return {"ok": True, **finance_tax_config_conn(conn)}
+    finally:
+        conn.close()
+
+def admin_set_global_cit_rate(rate_percent: float, admin_id: str = "", note: str = "") -> dict:
+    try:
+        raw_percent = float(rate_percent)
+    except Exception:
+        return {"ok": False, "reason": "invalid_rate"}
+    if raw_percent < 0 or raw_percent > float(CIT_SAFE_MAX_RATE * 100):
+        return {"ok": False, "reason": "rate_out_of_safe_range"}
+    now = now_text()
+    conn = db_connect()
+    try:
+        before = finance_tax_config_conn(conn)
+        conn.execute(
+            """UPDATE finance_tax_settings
+            SET cit_enabled=1, cit_rate=?, cit_mode=?, cit_note=?, cit_effective_from=?,
+                updated_by_admin_id=?, updated_at=?
+            WHERE id=1""",
+            (
+                raw_percent / 100.0,
+                before.get("cit_mode") or CIT_DEFAULT_MODE,
+                note or before.get("cit_note") or CIT_DEFAULT_NOTE,
+                now,
+                str(admin_id or ""),
+                now,
+            ),
+        )
+        record_audit(
+            conn,
+            admin_id or "admin",
+            "admin",
+            "finance.cit_rate_set",
+            "finance_tax_settings",
+            "1",
+            before=before,
+            after={"cit_rate": raw_percent / 100.0, "cit_enabled": True},
+            note="CIT rate changed for management reports; customer invoices are not charged CIT",
+        )
+        conn.commit()
+        return {"ok": True, **finance_tax_config_conn(conn)}
+    finally:
+        conn.close()
+
+def admin_set_cit_enabled(enabled: bool, admin_id: str = "", note: str = "") -> dict:
+    now = now_text()
+    conn = db_connect()
+    try:
+        before = finance_tax_config_conn(conn)
+        conn.execute(
+            "UPDATE finance_tax_settings SET cit_enabled=?, cit_note=?, updated_by_admin_id=?, updated_at=? WHERE id=1",
+            (1 if enabled else 0, note or before.get("cit_note") or CIT_DEFAULT_NOTE, str(admin_id or ""), now),
+        )
+        record_audit(
+            conn,
+            admin_id or "admin",
+            "admin",
+            "finance.cit_enabled_set",
+            "finance_tax_settings",
+            "1",
+            before=before,
+            after={"cit_enabled": bool(enabled)},
+            note="CIT enabled/disabled for management reports only",
         )
         conn.commit()
         return {"ok": True, **finance_tax_config_conn(conn)}
@@ -8273,7 +8461,7 @@ def create_finance_adjustment(adjustment_type: str, amount_vnd: int, reason: str
             note=clean_reason,
         )
         conn.commit()
-        return {"ok": True, "adjustment_id": adjustment_id, "type": adj_type, "amount_vnd": amount}
+        return {"ok": True, "id": adjustment_id, "adjustment_id": adjustment_id, "type": adj_type, "amount_vnd": amount}
     finally:
         conn.close()
 
@@ -71059,6 +71247,29 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             internal_archive_menu_text(),
             reply_markup=internal_archive_menu_keyboard(),
         )
+    if action in {"finance_vat_on", "finance_vat_off"}:
+        result = admin_set_vat_enabled(action == "finance_vat_on", str(query.from_user.id))
+        return await safe_edit_query_message(
+            query,
+            finance_tax_toggle_result_text("vat", result),
+            reply_markup=finance_tax_child_keyboard(),
+        )
+    if action in {"finance_cit_on", "finance_cit_off"}:
+        result = admin_set_cit_enabled(action == "finance_cit_on", str(query.from_user.id))
+        return await safe_edit_query_message(
+            query,
+            finance_tax_toggle_result_text("cit", result),
+            reply_markup=finance_tax_child_keyboard(),
+        )
+    if action in {"finance_tax_report", "finance_tax_report_month", "finance_tax_report_quarter", "finance_tax_report_year", "finance_cit_report"}:
+        if action == "finance_tax_report_quarter":
+            start_at, end_at, label, _token = tax_quarter_bounds()
+            text = finance_tax_dashboard_text_for_bounds(start_at, end_at, label)
+        elif action == "finance_tax_report_year":
+            text = finance_tax_dashboard_text("", "year")
+        else:
+            text = finance_tax_dashboard_text("", "month")
+        return await safe_edit_query_message(query, text, reply_markup=finance_tax_report_keyboard())
     if action == "finance_tax":
         return await safe_edit_query_message(query, tax_accounting_menu_text(), reply_markup=tax_accounting_menu_keyboard())
     if action == "finance_compliance":
@@ -101491,6 +101702,7 @@ def finance_compliance_status_text() -> str:
 
 def tax_estimate_payload(start_at: str, end_at: str, label: str, admin_id) -> dict:
     finance = finance_summary_payload(start_at, end_at, label)
+    business = finance_business_report_payload(start_at, end_at, label)
     config = get_tax_profile(admin_id)
     estimate = calculate_tax_estimate(finance.get("revenue_success") or 0, config)
     expenses_total = (
@@ -101500,6 +101712,7 @@ def tax_estimate_payload(start_at: str, end_at: str, label: str, admin_id) -> di
     )
     return {
         **finance,
+        **business,
         **estimate,
         "tax_config": config,
         "expenses_total": expenses_total,
@@ -101512,9 +101725,13 @@ def tax_estimate_text(payload: dict) -> str:
         "📊 <b>Thu chi / Báo cáo nội bộ TOAN AAS</b>",
         "",
         f"• Kỳ: <code>{html.escape(str(payload.get('label') or ''))}</code>",
-        f"• Doanh thu: <b>{vnd_text(payload.get('taxable_revenue'))}</b>",
+        f"• Doanh thu trước VAT: <b>{vnd_text(payload.get('revenue_before_tax') or payload.get('taxable_revenue'))}</b>",
+        f"• VAT đã thu: <b>{vnd_text(payload.get('vat_collected'))}</b>",
         f"• Chi phí nội bộ: <b>{vnd_text(payload.get('expenses_total'))}</b>",
-        f"• Lãi/lỗ quản trị: <b>{vnd_text(payload.get('management_profit_before_tax'))}</b>",
+        f"• Lợi nhuận trước TNDN: <b>{vnd_text(payload.get('profit_before_cit') or payload.get('management_profit_before_tax'))}</b>",
+        f"• TNDN ước tính: <b>{vnd_text(payload.get('estimated_cit'))}</b>",
+        f"• Lợi nhuận sau TNDN: <b>{vnd_text(payload.get('profit_after_cit'))}</b>",
+        f"• Tổng dự phòng thuế ước tính: <b>{vnd_text(payload.get('total_tax_reserve_estimate'))}</b>",
     ]
     if not has_data:
         lines.extend(["", "Chưa có dữ liệu cho kỳ này."])
@@ -101585,8 +101802,24 @@ def tax_accounting_csv(kind: str, start_at: str, end_at: str, label: str, admin_
             )
         else:
             payload = tax_estimate_payload(start_at, end_at, label, admin_id)
-            headers = ["period", "revenue_vnd", "internal_expenses_vnd", "management_profit_loss_vnd", "report_scope", "disclaimer"]
-            rows = [[label, payload.get("taxable_revenue"), payload.get("expenses_total"), payload.get("management_profit_before_tax"), "internal_finance_report", TAX_PREP_DISCLAIMER]]
+            headers = [
+                "period", "revenue_before_vat_vnd", "vat_collected_vnd", "internal_expenses_vnd",
+                "profit_before_cit_vnd", "cit_rate", "estimated_cit_vnd", "profit_after_cit_vnd",
+                "total_tax_reserve_estimate_vnd", "report_scope", "disclaimer",
+            ]
+            rows = [[
+                label,
+                payload.get("revenue_before_tax"),
+                payload.get("vat_collected"),
+                payload.get("expenses_total"),
+                payload.get("profit_before_cit"),
+                payload.get("cit_rate"),
+                payload.get("estimated_cit"),
+                payload.get("profit_after_cit"),
+                payload.get("total_tax_reserve_estimate"),
+                "internal_finance_report",
+                TAX_PREP_DISCLAIMER,
+            ]]
         return csv_with_no_data(headers, rows)
     finally:
         conn.close()
@@ -142732,6 +142965,45 @@ def finance_period_keyboard(kind: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
+def finance_child_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_tax_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧾 Cấu hình thuế", callback_data="menu|finance_tax_settings"), InlineKeyboardButton("✏️ Đổi % GTGT", callback_data="menu|finance_vat_rate_help")],
+        [InlineKeyboardButton("✅ Bật GTGT", callback_data="menu|finance_vat_on"), InlineKeyboardButton("⛔ Tắt GTGT", callback_data="menu|finance_vat_off")],
+        [InlineKeyboardButton("✏️ Đổi % TNDN", callback_data="menu|finance_cit_rate_help"), InlineKeyboardButton("📊 Báo cáo TNDN", callback_data="menu|finance_cit_report")],
+        [InlineKeyboardButton("✅ Bật TNDN", callback_data="menu|finance_cit_on"), InlineKeyboardButton("⛔ Tắt TNDN", callback_data="menu|finance_cit_off")],
+        [InlineKeyboardButton("📊 Báo cáo GTGT", callback_data="menu|finance_tax_report"), InlineKeyboardButton("📤 Xuất báo cáo thuế", callback_data="menu|tax_export")],
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_tax_child_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Thuế / VAT / TNDN", callback_data="menu|finance_tax_vat"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_tax_report_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📆 Tháng này", callback_data="menu|finance_tax_report_month"), InlineKeyboardButton("📊 Quý này", callback_data="menu|finance_tax_report_quarter")],
+        [InlineKeyboardButton("📅 Năm nay", callback_data="menu|finance_tax_report_year"), InlineKeyboardButton("📤 Xuất báo cáo thuế", callback_data="menu|tax_export")],
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_adjustments_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Doanh thu", callback_data="menu|finance_adjust_revenue_help"), InlineKeyboardButton("➖ Chi phí", callback_data="menu|finance_adjust_expense_help")],
+        [InlineKeyboardButton("🧾 VAT", callback_data="menu|finance_adjust_vat_help"), InlineKeyboardButton("🏢 TNDN", callback_data="menu|finance_adjust_cit_help")],
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+def finance_adjustment_child_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Sổ điều chỉnh", callback_data="menu|finance_adjustments"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
 def finance_payload_has_data(payload: dict) -> bool:
     return any(int(payload.get(key) or 0) != 0 for key in (
         "revenue_success", "revenue_count", "xu_credited", "expenses_after",
@@ -142919,6 +143191,8 @@ def finance_command_help_text() -> str:
         "• <code>/tax_status</code> / <code>/tax_report [YYYY-MM|YYYY]</code> — báo cáo thu chi nội bộ (tên lệnh cũ được giữ tương thích)\n"
         "• <code>/tax_export [YYYY-MM|YYYY]</code> — xuất 6 file chuẩn bị kế toán\n"
         "• <code>/tax_config key=value</code> — ghi chú cấu hình kế toán cũ, chỉ để tham chiếu\n"
+        "• <code>/vat_rate 8</code>, <code>/vat_on</code>, <code>/vat_off</code> — cấu hình GTGT cho hóa đơn mới\n"
+        "• <code>/cit_rate 20</code>, <code>/cit_on</code>, <code>/cit_off</code> — cấu hình TNDN cho báo cáo nội bộ\n"
         "• <code>/internal_docs</code> — mở kho hồ sơ nội bộ admin-only\n"
         "• <code>/expense_add ...</code> — thêm chi phí vận hành\n"
         "• <code>/expense_add_pre ...</code> — thêm chi phí trước thành lập\n\n"
@@ -142938,10 +143212,15 @@ def finance_invoice_adjustment_sign(adjustment_type: str, bucket: str = "revenue
             return 1
         if adj == "expense_subtract":
             return -1
-    if bucket == "tax":
-        if adj == "tax_add":
+    if bucket in {"tax", "vat"}:
+        if adj in {"tax_add", "vat_add"}:
             return 1
-        if adj == "tax_subtract":
+        if adj in {"tax_subtract", "vat_subtract"}:
+            return -1
+    if bucket == "cit":
+        if adj == "cit_add":
+            return 1
+        if adj == "cit_subtract":
             return -1
     if bucket == "capital":
         if adj == "capital_add":
@@ -142953,6 +143232,7 @@ def finance_invoice_adjustment_sign(adjustment_type: str, bucket: str = "revenue
 def finance_business_report_payload(start_at: str, end_at: str, label: str) -> dict:
     conn = db_connect()
     try:
+        ensure_finance_accounting_tables_conn(conn)
         invoice_row = conn.execute(
             """SELECT COUNT(*), COALESCE(SUM(subtotal_amount_vnd),0), COALESCE(SUM(vat_amount_vnd),0),
                       COALESCE(SUM(total_amount_vnd),0)
@@ -143009,15 +143289,23 @@ def finance_business_report_payload(start_at: str, end_at: str, label: str) -> d
             (start_at, end_at),
             0,
         ) or 0)
+        tax_config = finance_tax_config_conn(conn)
         revenue_adjustment = sum(finance_invoice_adjustment_sign(kind, "revenue") * int(data["amount"]) for kind, data in adjustments.items())
         expense_adjustment = sum(finance_invoice_adjustment_sign(kind, "expense") * int(data["amount"]) for kind, data in adjustments.items())
-        tax_adjustment = sum(finance_invoice_adjustment_sign(kind, "tax") * int(data["amount"]) for kind, data in adjustments.items())
+        vat_adjustment = sum(finance_invoice_adjustment_sign(kind, "vat") * int(data["amount"]) for kind, data in adjustments.items())
+        cit_adjustment = sum(finance_invoice_adjustment_sign(kind, "cit") * int(data["amount"]) for kind, data in adjustments.items())
         revenue_before_tax = int(invoice_row[1] or 0) + int(revenue_adjustment or 0)
-        vat_collected = int(invoice_row[2] or 0) + int(tax_adjustment or 0)
-        cash_in = int(invoice_row[3] or 0) + int(revenue_adjustment or 0) + int(tax_adjustment or 0)
+        vat_collected = int(invoice_row[2] or 0) + int(vat_adjustment or 0)
+        cash_in = int(invoice_row[3] or 0) + int(revenue_adjustment or 0) + int(vat_adjustment or 0)
         expenses = int(expense_row[1] or 0) + int(provider_cost or 0) + int(expense_adjustment or 0)
-        profit_before_tax_reserve = revenue_before_tax - expenses
-        profit_after_tax_reserve = profit_before_tax_reserve - max(0, vat_collected)
+        profit_before_cit = revenue_before_tax - expenses
+        cit_rate = max(0.0, min(float(tax_config.get("cit_rate") or 0), float(CIT_SAFE_MAX_RATE))) if tax_config.get("cit_enabled") else 0.0
+        estimated_cit_base = int(round(max(profit_before_cit, 0) * cit_rate)) if cit_rate > 0 else 0
+        estimated_cit = max(0, estimated_cit_base + int(cit_adjustment or 0))
+        profit_after_cit = profit_before_cit - estimated_cit
+        total_tax_reserve_estimate = max(0, vat_collected) + estimated_cit
+        profit_before_tax_reserve = profit_before_cit
+        profit_after_tax_reserve = profit_after_cit
         capital_total = int(sql_scalar(
             conn,
             """SELECT COALESCE(SUM(CASE WHEN event_type='capital_add' THEN amount_vnd ELSE -amount_vnd END),0)
@@ -143038,6 +143326,15 @@ def finance_business_report_payload(start_at: str, end_at: str, label: str) -> d
             "provider_cost_estimate": provider_cost,
             "profit_before_tax_reserve": profit_before_tax_reserve,
             "profit_after_tax_reserve": profit_after_tax_reserve,
+            "profit_before_cit": profit_before_cit,
+            "estimated_cit_before_adjustments": estimated_cit_base,
+            "cit_adjustment": cit_adjustment,
+            "estimated_cit": estimated_cit,
+            "profit_after_cit": profit_after_cit,
+            "total_tax_reserve_estimate": total_tax_reserve_estimate,
+            "cit_enabled": bool(tax_config.get("cit_enabled")),
+            "cit_rate": cit_rate,
+            "vat_adjustment": vat_adjustment,
             "capital_total": capital_total,
             "monthly_burn": monthly_burn,
             "breakeven_remaining": breakeven_remaining,
@@ -143058,22 +143355,202 @@ def finance_tax_dashboard_text(raw: str = "", default_period: str = "month") -> 
         f"• {html.escape(str(channel or 'unknown'))}: <b>{vnd_text(total)}</b> | VAT <b>{vnd_text(vat)}</b> ({int(count or 0)} đơn)"
         for channel, count, _subtotal, vat, total in payload["by_channel"][:6]
     ] or ["• Chưa có dữ liệu"]
+    type_lines = [
+        f"• {html.escape(str(kind or 'topup'))}: trước VAT <b>{vnd_text(subtotal)}</b> | VAT <b>{vnd_text(vat)}</b> ({int(count or 0)} đơn)"
+        for kind, count, subtotal, vat, _total in payload["by_type"][:6]
+    ] or ["• Chưa có dữ liệu"]
     return "\n".join([
-        "🧾 <b>Thuế / VAT</b>",
+        "🧾 <b>Thuế / VAT / TNDN</b>",
         f"• Kỳ: <code>{html.escape(label)}</code>",
-        f"• VAT đang bật: <code>{'YES' if tax_config.get('vat_enabled') else 'NO'}</code>",
-        f"• Tỷ lệ mặc định: <b>{float(tax_config.get('vat_rate') or 0) * 100:.2f}%</b>",
-        f"• Cách tính: <code>{html.escape(str(tax_config.get('vat_mode') or VAT_DEFAULT_MODE))}</code>",
         "",
+        "<b>A. GTGT / VAT</b>",
+        f"• VAT đang bật: <code>{'YES' if tax_config.get('vat_enabled') else 'NO'}</code>",
+        f"• Tỷ lệ GTGT: <b>{float(tax_config.get('vat_rate') or 0) * 100:.2f}%</b>",
+        f"• Cách tính: <code>{html.escape(str(tax_config.get('vat_mode') or VAT_DEFAULT_MODE))}</code>",
         f"• Doanh thu trước thuế: <b>{vnd_text(payload['revenue_before_tax'])}</b>",
         f"• VAT đã ghi nhận: <b>{vnd_text(payload['vat_collected'])}</b>",
         f"• Tổng tiền khách trả: <b>{vnd_text(payload['cash_in'])}</b>",
+        f"• VAT điều chỉnh: <b>{vnd_text(payload.get('vat_adjustment'))}</b>",
         f"• Số hóa đơn: <b>{payload['invoice_count']}</b>",
         "",
-        "<b>Theo kênh</b>",
+        "<b>VAT theo kênh thanh toán</b>",
         *channel_lines,
         "",
+        "<b>VAT theo loại đơn</b>",
+        *type_lines,
+        "",
+        "<b>B. TNDN / CIT nội bộ</b>",
+        f"• TNDN đang bật: <code>{'YES' if payload.get('cit_enabled') else 'NO'}</code>",
+        f"• Tỷ lệ TNDN: <b>{float(payload.get('cit_rate') or 0) * 100:.2f}%</b>",
+        f"• Chi phí: <b>{vnd_text(payload['expenses'])}</b>",
+        f"• Lợi nhuận trước TNDN: <b>{vnd_text(payload['profit_before_cit'])}</b>",
+        f"• TNDN ước tính: <b>{vnd_text(payload['estimated_cit'])}</b>",
+        f"• Lợi nhuận sau TNDN: <b>{vnd_text(payload['profit_after_cit'])}</b>",
+        f"• TNDN điều chỉnh: <b>{vnd_text(payload.get('cit_adjustment'))}</b>",
+        "",
+        "<b>C. Tổng quan dự phòng thuế</b>",
+        f"• VAT collected: <b>{vnd_text(payload['vat_collected'])}</b>",
+        f"• Estimated CIT: <b>{vnd_text(payload['estimated_cit'])}</b>",
+        f"• Tổng dự phòng thuế ước tính: <b>{vnd_text(payload['total_tax_reserve_estimate'])}</b>",
+        f"• Đơn bất thường cần rà soát: <b>{int(payload.get('anomaly_count') or 0)}</b>",
+        "",
+        "Báo cáo TNDN là ước tính quản trị nội bộ. Khi kê khai thật cần đối chiếu kế toán.",
         "VAT chỉ ghi trên hóa đơn tiền thật. Khi khách dùng Xu/quota, bot không tính VAT lần hai.",
+    ])
+
+def finance_tax_dashboard_text_for_bounds(start_at: str, end_at: str, label: str) -> str:
+    payload = finance_business_report_payload(start_at, end_at, label)
+    tax_config = finance_tax_config()
+    channel_lines = [
+        f"• {html.escape(str(channel or 'unknown'))}: <b>{vnd_text(total)}</b> | VAT <b>{vnd_text(vat)}</b> ({int(count or 0)} đơn)"
+        for channel, count, _subtotal, vat, total in payload["by_channel"][:6]
+    ] or ["• Chưa có dữ liệu"]
+    type_lines = [
+        f"• {html.escape(str(kind or 'topup'))}: trước VAT <b>{vnd_text(subtotal)}</b> | VAT <b>{vnd_text(vat)}</b> ({int(count or 0)} đơn)"
+        for kind, count, subtotal, vat, _total in payload["by_type"][:6]
+    ] or ["• Chưa có dữ liệu"]
+    return "\n".join([
+        "🧾 <b>Thuế / VAT / TNDN</b>",
+        f"• Kỳ: <code>{html.escape(label)}</code>",
+        "",
+        "<b>A. GTGT / VAT</b>",
+        f"• VAT đang bật: <code>{'YES' if tax_config.get('vat_enabled') else 'NO'}</code>",
+        f"• Tỷ lệ GTGT: <b>{float(tax_config.get('vat_rate') or 0) * 100:.2f}%</b>",
+        f"• Cách tính: <code>{html.escape(str(tax_config.get('vat_mode') or VAT_DEFAULT_MODE))}</code>",
+        f"• Doanh thu trước thuế: <b>{vnd_text(payload['revenue_before_tax'])}</b>",
+        f"• VAT đã ghi nhận: <b>{vnd_text(payload['vat_collected'])}</b>",
+        f"• Tổng tiền khách trả: <b>{vnd_text(payload['cash_in'])}</b>",
+        f"• VAT điều chỉnh: <b>{vnd_text(payload.get('vat_adjustment'))}</b>",
+        f"• Số hóa đơn: <b>{payload['invoice_count']}</b>",
+        "",
+        "<b>VAT theo kênh thanh toán</b>",
+        *channel_lines,
+        "",
+        "<b>VAT theo loại đơn</b>",
+        *type_lines,
+        "",
+        "<b>B. TNDN / CIT nội bộ</b>",
+        f"• TNDN đang bật: <code>{'YES' if payload.get('cit_enabled') else 'NO'}</code>",
+        f"• Tỷ lệ TNDN: <b>{float(payload.get('cit_rate') or 0) * 100:.2f}%</b>",
+        f"• Chi phí: <b>{vnd_text(payload['expenses'])}</b>",
+        f"• Lợi nhuận trước TNDN: <b>{vnd_text(payload['profit_before_cit'])}</b>",
+        f"• TNDN ước tính: <b>{vnd_text(payload['estimated_cit'])}</b>",
+        f"• Lợi nhuận sau TNDN: <b>{vnd_text(payload['profit_after_cit'])}</b>",
+        f"• TNDN điều chỉnh: <b>{vnd_text(payload.get('cit_adjustment'))}</b>",
+        "",
+        "<b>C. Tổng quan dự phòng thuế</b>",
+        f"• VAT collected: <b>{vnd_text(payload['vat_collected'])}</b>",
+        f"• Estimated CIT: <b>{vnd_text(payload['estimated_cit'])}</b>",
+        f"• Tổng dự phòng thuế ước tính: <b>{vnd_text(payload['total_tax_reserve_estimate'])}</b>",
+        f"• Đơn bất thường cần rà soát: <b>{int(payload.get('anomaly_count') or 0)}</b>",
+        "",
+        "Báo cáo TNDN là ước tính quản trị nội bộ. Khi kê khai thật cần đối chiếu kế toán.",
+        "VAT chỉ ghi trên hóa đơn tiền thật. Khi khách dùng Xu/quota, bot không tính VAT lần hai.",
+    ])
+
+def finance_tax_settings_text() -> str:
+    config = finance_tax_config()
+    return "\n".join([
+        "🧾 <b>Cấu hình thuế</b>",
+        "",
+        "<b>GTGT / VAT</b>",
+        f"• vat_enabled: <code>{'true' if config.get('vat_enabled') else 'false'}</code>",
+        f"• vat_rate: <b>{float(config.get('vat_rate') or 0) * 100:.2f}%</b>",
+        f"• vat_mode: <code>{html.escape(str(config.get('vat_mode') or VAT_DEFAULT_MODE))}</code>",
+        f"• vat_label: <code>{html.escape(str(config.get('vat_label') or VAT_DEFAULT_LABEL))}</code>",
+        f"• vat_effective_from: <code>{html.escape(str(config.get('effective_from') or '-'))}</code>",
+        "",
+        "<b>TNDN / CIT</b>",
+        f"• cit_enabled: <code>{'true' if config.get('cit_enabled') else 'false'}</code>",
+        f"• cit_rate: <b>{float(config.get('cit_rate') or 0) * 100:.2f}%</b>",
+        f"• cit_mode: <code>{html.escape(str(config.get('cit_mode') or CIT_DEFAULT_MODE))}</code>",
+        f"• cit_label: <code>{html.escape(str(config.get('cit_label') or CIT_DEFAULT_LABEL))}</code>",
+        f"• cit_effective_from: <code>{html.escape(str(config.get('cit_effective_from') or '-'))}</code>",
+        "",
+        f"• updated_by_admin_id: <code>{html.escape(str(config.get('updated_by_admin_id') or '-'))}</code>",
+        f"• updated_at: <code>{html.escape(str(config.get('updated_at') or '-'))}</code>",
+        "",
+        "Đổi thuế chỉ áp dụng cho đơn/báo cáo mới. Đơn cũ giữ snapshot VAT tại thời điểm tạo đơn.",
+    ])
+
+def finance_vat_rate_help_text() -> str:
+    config = finance_tax_config()
+    return "\n".join([
+        "✏️ <b>Đổi % GTGT</b>",
+        "",
+        f"GTGT hiện tại: <b>{float(config.get('vat_rate') or 0) * 100:.2f}%</b>",
+        "Dùng lệnh admin:",
+        "• <code>/vat_rate 8</code>",
+        "• <code>/vat_rate 10</code>",
+        "• <code>/vat_rate 0</code>",
+        "",
+        "Khoảng an toàn hiện tại: 0% đến 20%. Chỉ áp dụng hóa đơn mới; hóa đơn cũ giữ snapshot cũ.",
+    ])
+
+def finance_cit_rate_help_text() -> str:
+    config = finance_tax_config()
+    return "\n".join([
+        "✏️ <b>Đổi % TNDN</b>",
+        "",
+        f"TNDN hiện tại: <b>{float(config.get('cit_rate') or 0) * 100:.2f}%</b>",
+        "Dùng lệnh admin:",
+        "• <code>/cit_rate 20</code>",
+        "• <code>/cit_rate 17</code>",
+        "• <code>/cit_rate 15</code>",
+        "• <code>/cit_rate 0</code>",
+        "",
+        "TNDN chỉ dùng cho báo cáo lợi nhuận sau thuế/dự phòng thuế nội bộ, không cộng thành dòng phí khách trả.",
+    ])
+
+def finance_tax_toggle_result_text(kind: str, result: dict) -> str:
+    if kind == "vat":
+        return (
+            "✅ <b>Đã cập nhật GTGT</b>\n\n"
+            f"• VAT cho hóa đơn mới: <code>{'ON' if result.get('vat_enabled') else 'OFF'}</code>\n"
+            f"• Tỷ lệ: <b>{float(result.get('vat_rate') or 0) * 100:.2f}%</b>\n"
+            "Đơn cũ giữ snapshot VAT cũ."
+        )
+    return (
+        "✅ <b>Đã cập nhật TNDN</b>\n\n"
+        f"• TNDN cho báo cáo nội bộ: <code>{'ON' if result.get('cit_enabled') else 'OFF'}</code>\n"
+        f"• Tỷ lệ: <b>{float(result.get('cit_rate') or 0) * 100:.2f}%</b>\n"
+        "TNDN không được cộng vào hóa đơn khách."
+    )
+
+def finance_adjustment_help_text(kind: str) -> str:
+    examples = {
+        "revenue": [
+            "• <code>/finance_adjust revenue_add 100000 ly_do</code>",
+            "• <code>/finance_adjust revenue_subtract 100000 ly_do</code>",
+            "• <code>/finance_adjust refund 100000 ly_do</code>",
+        ],
+        "expense": [
+            "• <code>/finance_adjust expense_add 100000 ly_do</code>",
+            "• <code>/finance_adjust expense_subtract 100000 ly_do</code>",
+            "• <code>/finance_adjust provider_cost_adjustment 100000 ly_do</code>",
+        ],
+        "vat": [
+            "• <code>/finance_adjust vat_add 100000 ly_do</code>",
+            "• <code>/finance_adjust vat_subtract 100000 ly_do</code>",
+        ],
+        "cit": [
+            "• <code>/finance_adjust cit_add 100000 ly_do</code>",
+            "• <code>/finance_adjust cit_subtract 100000 ly_do</code>",
+            "• <code>/finance_adjust tax_manual_correction 100000 ly_do</code>",
+        ],
+    }
+    title = {
+        "revenue": "➕ Điều chỉnh doanh thu",
+        "expense": "➖ Điều chỉnh chi phí",
+        "vat": "🧾 Điều chỉnh VAT",
+        "cit": "🏢 Điều chỉnh TNDN",
+    }.get(kind, "🧮 Điều chỉnh")
+    return "\n".join([
+        f"{title}",
+        "",
+        "Không sửa giao dịch gốc. Sai thì tạo bút toán điều chỉnh có lý do.",
+        "",
+        *examples.get(kind, examples["revenue"]),
     ])
 
 def finance_profit_dashboard_text(raw: str = "", default_period: str = "month") -> str:
@@ -143084,9 +143561,10 @@ def finance_profit_dashboard_text(raw: str = "", default_period: str = "month") 
         f"• Kỳ: <code>{html.escape(label)}</code>",
         f"• Doanh thu trước thuế: <b>{vnd_text(payload['revenue_before_tax'])}</b>",
         f"• Chi phí + provider estimate: <b>{vnd_text(payload['expenses'])}</b>",
-        f"• VAT dự phòng: <b>{vnd_text(payload['vat_collected'])}</b>",
-        f"• Lãi/lỗ trước VAT reserve: <b>{vnd_text(payload['profit_before_tax_reserve'])}</b>",
-        f"• Lãi/lỗ sau VAT reserve: <b>{vnd_text(payload['profit_after_tax_reserve'])}</b>",
+        f"• VAT đã thu (không tính vào lợi nhuận): <b>{vnd_text(payload['vat_collected'])}</b>",
+        f"• Lợi nhuận trước TNDN: <b>{vnd_text(payload['profit_before_cit'])}</b>",
+        f"• TNDN ước tính ({float(payload.get('cit_rate') or 0) * 100:.2f}%): <b>{vnd_text(payload['estimated_cit'])}</b>",
+        f"• Lợi nhuận sau TNDN: <b>{vnd_text(payload['profit_after_cit'])}</b>",
         "",
         "Số liệu là sổ quản trị nội bộ. Sai sót phải tạo bút toán điều chỉnh, không sửa giao dịch gốc.",
     ])
@@ -143169,14 +143647,21 @@ def finance_admin_guide_text() -> str:
         "1. Doanh thu tiền thật vào <b>finance_invoices</b> với giá trước thuế, VAT, tổng thanh toán.",
         "2. PayOS callback chỉ cấp Xu/gói khi số tiền thanh toán khớp tổng sau VAT.",
         "3. Chi tiêu bằng Xu/quota không tính VAT lần hai.",
-        "4. Sai số, hoàn tiền, chi phí thiếu hoặc vốn mới phải ghi bằng bút toán điều chỉnh.",
-        "5. Không sửa/xóa giao dịch gốc để sau này kiểm tra sổ còn truy vết được.",
+        "4. VAT/GTGT cộng vào hóa đơn khách khi bật; phần VAT không quy đổi thành Xu/lượt dùng.",
+        "5. TNDN/CIT chỉ tính trên lợi nhuận nội bộ để xem lợi nhuận sau thuế và dự phòng thuế.",
+        "6. Đổi % GTGT bằng <code>/vat_rate 8</code>, bật/tắt bằng <code>/vat_on</code> / <code>/vat_off</code>.",
+        "7. Đổi % TNDN bằng <code>/cit_rate 20</code>, bật/tắt bằng <code>/cit_on</code> / <code>/cit_off</code>.",
+        "8. Đổi thuế chỉ áp dụng đơn/báo cáo mới; đơn cũ giữ snapshot VAT cũ.",
+        "9. Xem VAT/TNDN tháng/quý/năm trong mục Thuế / VAT / TNDN hoặc dùng <code>/finance_tax_report</code>.",
+        "10. Sai số, hoàn tiền, chi phí thiếu hoặc vốn mới phải ghi bằng bút toán điều chỉnh.",
+        "11. Không sửa/xóa giao dịch gốc để sau này kiểm tra sổ còn truy vết được.",
         "",
         "Lệnh nhanh:",
         "• <code>/finance_dashboard</code>",
         "• <code>/finance_tax_report</code>",
         "• <code>/finance_adjust revenue_subtract 10000 ly_do</code>",
         "• <code>/vat_rate 8</code>, <code>/vat_on</code>, <code>/vat_off</code>",
+        "• <code>/cit_rate 20</code>, <code>/cit_on</code>, <code>/cit_off</code>",
     ])
 
 def finance_expense_categories_text() -> str:
@@ -143233,7 +143718,7 @@ def tax_estimate_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📆 Tháng này", callback_data="menu|tax_estimate_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|tax_estimate_previous")],
         [InlineKeyboardButton("📊 Quý này", callback_data="menu|tax_estimate_quarter"), InlineKeyboardButton("📅 Tùy chọn kỳ", callback_data="menu|tax_custom_help")],
         [InlineKeyboardButton("📤 Xuất CSV", callback_data="menu|tax_export"), InlineKeyboardButton("📚 Hồ sơ cần chuẩn bị", callback_data="menu|tax_checklist")],
-        [InlineKeyboardButton("🟢 Miễn/ưu đãi", callback_data="menu|finance_compliance"), InlineKeyboardButton("⬅️ Báo cáo nội bộ", callback_data="menu|finance_tax")],
+        [InlineKeyboardButton("🟢 Miễn/ưu đãi", callback_data="menu|finance_compliance"), InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -143241,7 +143726,7 @@ def tax_export_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📆 Tháng này", callback_data="menu|tax_export_month"), InlineKeyboardButton("↩️ Tháng trước", callback_data="menu|tax_export_previous")],
         [InlineKeyboardButton("📊 Quý này", callback_data="menu|tax_export_quarter"), InlineKeyboardButton("📅 Tùy chọn kỳ", callback_data="menu|tax_export_custom_help")],
-        [InlineKeyboardButton("⬅️ Báo cáo nội bộ", callback_data="menu|finance_tax"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def tax_export_menu_text() -> str:
@@ -143272,14 +143757,14 @@ def tax_checklist_text() -> str:
 def tax_checklist_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|tax_export"), InlineKeyboardButton("🏢 Lưu vào hồ sơ nội bộ", callback_data="archive|dept|tax_invoice")],
-        [InlineKeyboardButton("🟢 Miễn/ưu đãi", callback_data="menu|finance_compliance"), InlineKeyboardButton("⬅️ Báo cáo nội bộ", callback_data="menu|finance_tax")],
+        [InlineKeyboardButton("🟢 Miễn/ưu đãi", callback_data="menu|finance_compliance"), InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def finance_compliance_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ Cập nhật trạng thái", callback_data="menu|finance_compliance_update"), InlineKeyboardButton("📎 Lưu căn cứ/chứng từ", callback_data="archive|dept|tax_invoice")],
-        [InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|tax_export"), InlineKeyboardButton("⬅️ Báo cáo nội bộ", callback_data="menu|finance_tax")],
+        [InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|tax_export"), InlineKeyboardButton("⬅️ Tài chính", callback_data="menu|finance")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -144395,10 +144880,49 @@ ADMIN_NAV_PARENT_ACTIONS = {
     "finance": "admin",
     "finance_overview": "finance",
     "finance_revenue": "finance",
+    "finance_revenue_month": "finance",
+    "finance_revenue_this_month": "finance",
+    "finance_revenue_last_month": "finance",
+    "finance_revenue_year": "finance",
+    "finance_revenue_custom_help": "finance",
     "finance_expense_month": "finance",
+    "finance_expense_this_month": "finance",
+    "finance_expense_last_month": "finance",
+    "finance_expense_year": "finance",
+    "finance_expense_categories": "finance",
+    "finance_add_expense": "finance",
     "finance_profit": "finance",
+    "finance_profit_this_month": "finance",
+    "finance_profit_year": "finance",
+    "finance_capital": "finance",
+    "finance_anomalies": "finance",
+    "finance_adjustments": "finance",
+    "finance_adjust_revenue_help": "finance_adjustments",
+    "finance_adjust_expense_help": "finance_adjustments",
+    "finance_adjust_vat_help": "finance_adjustments",
+    "finance_adjust_cit_help": "finance_adjustments",
     "finance_export": "finance",
+    "finance_export_month": "finance",
+    "finance_export_year": "finance",
     "finance_help": "finance",
+    "finance_guide": "finance",
+    "finance_tax_vat": "finance",
+    "finance_tax_settings": "finance_tax_vat",
+    "finance_vat_rate_help": "finance_tax_vat",
+    "finance_cit_rate_help": "finance_tax_vat",
+    "finance_vat_on": "finance_tax_vat",
+    "finance_vat_off": "finance_tax_vat",
+    "finance_cit_on": "finance_tax_vat",
+    "finance_cit_off": "finance_tax_vat",
+    "finance_tax_report": "finance",
+    "finance_tax_report_month": "finance",
+    "finance_tax_report_quarter": "finance",
+    "finance_tax_report_year": "finance",
+    "finance_cit_report": "finance",
+    "tax_estimate": "finance",
+    "tax_export": "finance",
+    "tax_checklist": "finance",
+    "tax_config": "finance_tax_vat",
     "freeze_queue": "admin",
     "freeze_queue_status": "freeze_queue",
     "freeze_status": "freeze_queue",
@@ -144727,7 +145251,7 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "smoke_comfy": lambda: (smoke_action_text("comfy"), smoke_action_keyboard()),
     "smoke_providers": lambda: (smoke_action_text("providers"), smoke_action_keyboard()),
     "smoke_sales_ready": lambda: (smoke_action_text("sales_ready"), smoke_action_keyboard()),
-    "finance_overview": lambda: (finance_overview_text(), finance_admin_keyboard()),
+    "finance_overview": lambda: (finance_overview_text(), finance_child_keyboard()),
     "finance_revenue": lambda: (finance_revenue_text(), finance_period_keyboard("revenue")),
     "finance_revenue_month": lambda: (finance_revenue_month_menu_text(), finance_period_keyboard("revenue")),
     "finance_revenue_this_month": lambda: (finance_revenue_period_text("", "📅 <b>Doanh thu tháng này</b>"), finance_period_keyboard("revenue")),
@@ -144739,19 +145263,26 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "finance_expense_last_month": lambda: (finance_expense_period_text(previous_month_arg(), "↩️ <b>Chi phí tháng trước</b>"), finance_period_keyboard("expense")),
     "finance_expense_year": lambda: (finance_expense_period_text("", "📆 <b>Chi phí năm nay</b>", "year"), finance_period_keyboard("expense")),
     "finance_expense_categories": lambda: (finance_expense_categories_text(), finance_period_keyboard("expense")),
-    "finance_tax_vat": lambda: (finance_tax_dashboard_text(), finance_admin_keyboard()),
+    "finance_tax_vat": lambda: (finance_tax_dashboard_text(), finance_tax_keyboard()),
+    "finance_tax_settings": lambda: (finance_tax_settings_text(), finance_tax_child_keyboard()),
+    "finance_vat_rate_help": lambda: (finance_vat_rate_help_text(), finance_tax_child_keyboard()),
+    "finance_cit_rate_help": lambda: (finance_cit_rate_help_text(), finance_tax_child_keyboard()),
     "finance_profit": lambda: (finance_profit_dashboard_text(), finance_period_keyboard("profit")),
     "finance_profit_this_month": lambda: (finance_profit_period_text("", "📈 <b>Lãi / Lỗ tháng này</b>"), finance_period_keyboard("profit")),
     "finance_profit_year": lambda: (finance_profit_period_text("", "📆 <b>Lãi / Lỗ năm nay</b>", "year"), finance_period_keyboard("profit")),
-    "finance_capital": lambda: (finance_capital_breakeven_text(), finance_admin_keyboard()),
-    "finance_anomalies": lambda: (finance_anomaly_text(), finance_admin_keyboard()),
-    "finance_adjustments": lambda: (finance_adjustments_text(), finance_admin_keyboard()),
-    "finance_guide": lambda: (finance_admin_guide_text(), finance_admin_keyboard()),
+    "finance_capital": lambda: (finance_capital_breakeven_text(), finance_child_keyboard()),
+    "finance_anomalies": lambda: (finance_anomaly_text(), finance_child_keyboard()),
+    "finance_adjustments": lambda: (finance_adjustments_text(), finance_adjustments_keyboard()),
+    "finance_adjust_revenue_help": lambda: (finance_adjustment_help_text("revenue"), finance_adjustment_child_keyboard()),
+    "finance_adjust_expense_help": lambda: (finance_adjustment_help_text("expense"), finance_adjustment_child_keyboard()),
+    "finance_adjust_vat_help": lambda: (finance_adjustment_help_text("vat"), finance_adjustment_child_keyboard()),
+    "finance_adjust_cit_help": lambda: (finance_adjustment_help_text("cit"), finance_adjustment_child_keyboard()),
+    "finance_guide": lambda: (finance_admin_guide_text(), finance_child_keyboard()),
     "finance_export": lambda: (finance_export_menu_text(), finance_period_keyboard("export")),
     "finance_export_month": lambda: (finance_export_instruction_text("month"), finance_period_keyboard("export")),
     "finance_export_year": lambda: (finance_export_instruction_text("year"), finance_period_keyboard("export")),
-    "finance_add_expense": lambda: (finance_add_expense_help_text(), finance_admin_keyboard()),
-    "finance_help": lambda: (finance_command_help_text(), finance_admin_keyboard()),
+    "finance_add_expense": lambda: (finance_add_expense_help_text(), finance_child_keyboard()),
+    "finance_help": lambda: (finance_command_help_text(), finance_child_keyboard()),
     "freeze_queue": lambda: (freeze_queue_menu_text(), freeze_queue_keyboard()),
     "freeze_queue_status": lambda: (freeze_queue_status_text(), queue_status_keyboard()),
     "freeze_status": lambda: (freeze_status_menu_text(), freeze_status_keyboard()),
@@ -144777,12 +145308,12 @@ async def cmd_finance_tax_report(update: Update, context: ContextTypes.DEFAULT_T
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     raw = context.args[0] if context.args else ""
     default_period = "year" if re.fullmatch(r"\d{4}", str(raw or "").strip()) else "month"
-    await update.message.reply_text(finance_tax_dashboard_text(raw, default_period), parse_mode="HTML", reply_markup=finance_admin_keyboard())
+    await update.message.reply_text(finance_tax_dashboard_text(raw, default_period), parse_mode="HTML", reply_markup=finance_tax_report_keyboard())
 
 async def cmd_finance_anomalies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
-    await update.message.reply_text(finance_anomaly_text(), parse_mode="HTML", reply_markup=finance_admin_keyboard())
+    await update.message.reply_text(finance_anomaly_text(), parse_mode="HTML", reply_markup=finance_child_keyboard())
 
 async def cmd_finance_adjust(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -144812,7 +145343,7 @@ async def cmd_finance_adjust(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"• Lý do: {html.escape(reason)}\n\n"
         "Không sửa/xóa giao dịch gốc.",
         parse_mode="HTML",
-        reply_markup=finance_admin_keyboard(),
+        reply_markup=finance_adjustments_keyboard(),
     )
 
 async def cmd_vat_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144832,19 +145363,53 @@ async def cmd_vat_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ Đã cập nhật VAT mặc định cho hóa đơn mới: <b>{float(result.get('vat_rate') or 0) * 100:.2f}%</b>.\n"
         "Hóa đơn cũ giữ snapshot VAT cũ.",
         parse_mode="HTML",
+        reply_markup=finance_tax_child_keyboard(),
     )
 
 async def cmd_vat_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     result = admin_set_vat_enabled(True, str(update.effective_user.id))
-    await update.message.reply_text(f"✅ VAT cho hóa đơn mới: <code>{'ON' if result.get('vat_enabled') else 'OFF'}</code>", parse_mode="HTML")
+    await update.message.reply_text(f"✅ VAT cho hóa đơn mới: <code>{'ON' if result.get('vat_enabled') else 'OFF'}</code>", parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
 
 async def cmd_vat_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     result = admin_set_vat_enabled(False, str(update.effective_user.id))
-    await update.message.reply_text(f"✅ VAT cho hóa đơn mới: <code>{'ON' if result.get('vat_enabled') else 'OFF'}</code>", parse_mode="HTML")
+    await update.message.reply_text(f"✅ VAT cho hóa đơn mới: <code>{'ON' if result.get('vat_enabled') else 'OFF'}</code>", parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
+
+async def cmd_cit_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        config = finance_tax_config()
+        return await update.message.reply_text(
+            f"🏢 TNDN hiện tại: <b>{float(config.get('cit_rate') or 0) * 100:.2f}%</b>\n"
+            "Cú pháp đổi: <code>/cit_rate 20</code>",
+            parse_mode="HTML",
+            reply_markup=finance_tax_child_keyboard(),
+        )
+    result = admin_set_global_cit_rate(float(str(context.args[0]).replace(",", ".")), str(update.effective_user.id))
+    if not result.get("ok"):
+        return await update.message.reply_text(f"⚠️ Không đổi TNDN: <code>{html.escape(str(result.get('reason')))}</code>", parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
+    await update.message.reply_text(
+        f"✅ Đã cập nhật TNDN cho báo cáo nội bộ: <b>{float(result.get('cit_rate') or 0) * 100:.2f}%</b>.\n"
+        "TNDN không cộng vào hóa đơn khách.",
+        parse_mode="HTML",
+        reply_markup=finance_tax_child_keyboard(),
+    )
+
+async def cmd_cit_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    result = admin_set_cit_enabled(True, str(update.effective_user.id))
+    await update.message.reply_text(f"✅ TNDN cho báo cáo nội bộ: <code>{'ON' if result.get('cit_enabled') else 'OFF'}</code>", parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
+
+async def cmd_cit_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    result = admin_set_cit_enabled(False, str(update.effective_user.id))
+    await update.message.reply_text(f"✅ TNDN cho báo cáo nội bộ: <code>{'ON' if result.get('cit_enabled') else 'OFF'}</code>", parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
 
 async def cmd_finance_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -157194,6 +157759,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("vat_rate", cmd_vat_rate))
     tg_app.add_handler(CommandHandler("vat_on", cmd_vat_on))
     tg_app.add_handler(CommandHandler("vat_off", cmd_vat_off))
+    tg_app.add_handler(CommandHandler("cit_rate", cmd_cit_rate))
+    tg_app.add_handler(CommandHandler("cit_on", cmd_cit_on))
+    tg_app.add_handler(CommandHandler("cit_off", cmd_cit_off))
     tg_app.add_handler(CommandHandler("revenue_report", cmd_revenue_report))
     tg_app.add_handler(CommandHandler("expense_report", cmd_expense_report))
     tg_app.add_handler(CommandHandler("profit_report", cmd_profit_report))
