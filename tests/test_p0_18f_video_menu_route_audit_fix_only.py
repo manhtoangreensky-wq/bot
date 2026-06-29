@@ -69,14 +69,14 @@ def _assert_route(user_id: int, callback: str, expected_text: str, expected_call
 def test_video_menu_current_buttons_unchanged():
     assert _labels(bot.main_video_keyboard("vi")) == [
         "🔥 Video theo trend",
-        "🧠 Ý tưởng video",
-        "🎬 Storyboard + Prompt",
-        "📚 Kho prompt video",
         "🎬 Video AI chân thật",
         "🧩 Kịch bản → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
         "🎬 Phim AI nhiều cảnh",
+        "🧠 Ý tưởng video",
+        "🎬 Storyboard + Prompt",
+        "📚 Kho prompt video",
         "📥 Tải video từ link",
         "🛠 Chỉnh sửa video local",
         "🏠 Menu chính",

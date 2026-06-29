@@ -77,11 +77,11 @@ def _press_videoedit(user_id: int, callback: str) -> _FakeQuery:
 
 def test_video_main_menu_two_columns():
     assert _rows(bot.main_video_keyboard("vi")) == [
-        ["🔥 Video theo trend", "🧠 Ý tưởng video"],
-        ["🎬 Storyboard + Prompt", "📚 Kho prompt video"],
-        ["🎬 Video AI chân thật", "🧩 Kịch bản → Video"],
-        ["🎞 Ghép ảnh thành video", "🎥 Tự quay & đổi cảnh AI"],
-        ["🎬 Phim AI nhiều cảnh", "📥 Tải video từ link"],
+        ["🔥 Video theo trend", "🎬 Video AI chân thật"],
+        ["🧩 Kịch bản → Video", "🎞 Ghép ảnh thành video"],
+        ["🎥 Tự quay & đổi cảnh AI", "🎬 Phim AI nhiều cảnh"],
+        ["🧠 Ý tưởng video", "🎬 Storyboard + Prompt"],
+        ["📚 Kho prompt video", "📥 Tải video từ link"],
         ["🛠 Chỉnh sửa video local", "🏠 Menu chính"],
     ]
 

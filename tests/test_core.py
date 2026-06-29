@@ -2662,14 +2662,14 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     video_labels = [button.text for button in video_buttons]
     assert video_labels == [
         "🔥 Video theo trend",
-        "🧠 Ý tưởng video",
-        "🎬 Storyboard + Prompt",
-        "📚 Kho prompt video",
         "🎬 Video AI chân thật",
         "🧩 Kịch bản → Video",
         "🎞 Ghép ảnh thành video",
         "🎥 Tự quay & đổi cảnh AI",
         "🎬 Phim AI nhiều cảnh",
+        "🧠 Ý tưởng video",
+        "🎬 Storyboard + Prompt",
+        "📚 Kho prompt video",
         "📥 Tải video từ link",
         "🛠 Chỉnh sửa video local",
         "🏠 Menu chính",
