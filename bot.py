@@ -73035,6 +73035,7 @@ def subtitle_dub_debug_text(job: dict) -> str:
     if not job:
         return "⚠️ Chưa có subtitle/dub job để debug."
     route = dict(job.get("provider_route") or {})
+    matrix = dict(job.get("gate_matrix") or {})
     def yes_no(value) -> str:
         return "yes" if value else "no"
     def esc(value) -> str:
@@ -73045,10 +73046,23 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• job: <code>{esc(job.get('internal_job_id'))}</code>",
         f"• mode: <code>{esc(job.get('mode'))}</code>",
         f"• status: <code>{esc(job.get('status'))}</code>",
+        f"• stage: <code>{esc(job.get('stage'))}</code>",
+        f"• pipeline attempted: <code>{yes_no(job.get('pipeline_attempted'))}</code>",
         f"• input file path: <code>{esc(job.get('input_file_path'))}</code>",
+        f"• input file id: <code>{esc(job.get('input_file_id'))}</code>",
         f"• input file exists: <code>{yes_no(job.get('input_file_exists'))}</code>",
         f"• file size: <code>{int(job.get('input_file_size') or 0)}</code>",
         f"• duration: <code>{int(job.get('duration_seconds') or 0)}</code>",
+        f"• gate product route allowed: <code>{yes_no(matrix.get('product_route_allowed'))}</code>",
+        f"• gate blackbox enabled: <code>{yes_no(matrix.get('blackbox_enabled'))}</code>",
+        f"• gate ASR enabled: <code>{yes_no(matrix.get('asr_enabled'))}</code>",
+        f"• gate translation enabled: <code>{yes_no(matrix.get('translation_enabled'))}</code>",
+        f"• gate TTS enabled: <code>{yes_no(matrix.get('tts_enabled'))}</code>",
+        f"• gate mux enabled: <code>{yes_no(matrix.get('mux_enabled'))}</code>",
+        f"• gate ffmpeg available: <code>{yes_no(matrix.get('ffmpeg_available'))}</code>",
+        f"• gate reason: <code>{esc(matrix.get('provider_gate_reason'))}</code>",
+        f"• gate technical missing: <code>{esc(', '.join(matrix.get('technical_missing') or []))}</code>",
+        f"• gate public blockers: <code>{esc(', '.join(matrix.get('public_blockers') or []))}</code>",
         f"• extracted audio path: <code>{esc(job.get('extracted_audio_path'))}</code>",
         f"• extracted audio exists: <code>{yes_no(job.get('extracted_audio_exists'))}</code>",
         f"• ASR route called: <code>{yes_no(job.get('asr_route_called'))}</code>",
@@ -73070,6 +73084,35 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• last technical error: <code>{esc(job.get('last_technical_error'))}</code>",
         f"• public-safe error: <code>{esc(job.get('public_safe_error'))}</code>",
     ])
+
+def subtitle_dub_debug_lookup_job(arg: str = "") -> dict:
+    wanted = str(arg or "").strip()
+    if wanted:
+        job = get_engine_async_job(wanted)
+        if job:
+            return dict(job)
+        for candidate in SUBTITLE_DUB_PIPELINE_JOBS.values():
+            merged = {**dict(candidate or {}), **dict((candidate or {}).get("debug_job") or {})}
+            identifiers = {
+                str(merged.get("internal_job_id") or ""),
+                str(merged.get("job_id") or ""),
+                str(merged.get("job_key") or ""),
+            }
+            if wanted in identifiers:
+                return merged
+        return {}
+    jobs = list_engine_async_jobs("subtitle_dub", limit=1)
+    if jobs:
+        return dict(jobs[0])
+    candidates = sorted(
+        (dict(item or {}) for item in SUBTITLE_DUB_PIPELINE_JOBS.values()),
+        key=lambda item: float(item.get("updated_at") or item.get("started_at") or 0),
+        reverse=True,
+    )
+    if not candidates:
+        return {}
+    latest = candidates[0]
+    return {**latest, **dict(latest.get("debug_job") or {})}
 
 async def cmd_subtitle_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -73101,11 +73144,7 @@ async def cmd_subtitle_dub_debug(update: Update, context: ContextTypes.DEFAULT_T
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
-    if not arg:
-        jobs = list_engine_async_jobs("subtitle_dub", limit=1)
-        job = jobs[0] if jobs else {}
-    else:
-        job = get_engine_async_job(arg)
+    job = subtitle_dub_debug_lookup_job(arg)
     return await update.message.reply_text(subtitle_dub_debug_text(job), parse_mode="HTML")
 
 async def cmd_subtitle_dub_last_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -143118,11 +143157,11 @@ def subtitle_plus_dub_clean_failure_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
             "TOAN AAS cannot complete this video right now. The system has not charged Xu. "
-            "Please try again later or send another video."
+            "Please try again later."
         )
     return (
         "TOAN AAS chưa xử lý được video này lúc này. Hệ thống chưa trừ Xu. "
-        "Anh/chị vui lòng thử lại sau hoặc gửi video khác."
+        "Anh/chị vui lòng thử lại sau."
     )
 
 def subtitle_plus_dub_clean_failure_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -146294,6 +146333,229 @@ def write_subtitle_dub_pipeline_artifact(workspace: str, filename: str, data: by
         handle.write(bytes(data))
     return path
 
+def video_dubbing_sync_state_fields(state: dict | None = None, *, exclude: set[str] | None = None) -> dict:
+    skipped = {
+        "step",
+        "current_step",
+        "previous_step",
+        "pending_action",
+        "created_at_ts",
+        *(exclude or set()),
+    }
+    return {
+        key: value for key, value in dict(state or {}).items()
+        if key not in skipped
+        and not str(key).startswith("_pipeline_")
+        and not isinstance(value, (bytes, bytearray))
+    }
+
+async def video_dubbing_save_input_for_pipeline(
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    workspace: str = "",
+) -> dict:
+    state = dict(state or {})
+    result = {
+        "ok": False,
+        "file_id": str(state.get("video_file_id") or state.get("source_file_id") or ""),
+        "path": "",
+        "exists": False,
+        "size": 0,
+        "duration": _safe_int(state.get("video_duration") or state.get("source_duration"), 0),
+        "content_type": str(state.get("source_mime_type") or "video/mp4"),
+        "file_saved": False,
+        "error": "",
+        "detail": "",
+        "source_bytes": b"",
+    }
+    source_bytes = state.get("_pipeline_source_bytes_override")
+    if isinstance(source_bytes, bytearray):
+        source_bytes = bytes(source_bytes)
+    if not isinstance(source_bytes, bytes):
+        source_bytes = b""
+    content_type = str(state.get("_pipeline_source_content_type_override") or result["content_type"])
+    if not source_bytes:
+        if not result["file_id"]:
+            result.update({"error": "RuntimeError", "detail": "missing_video_file_id", "content_type": content_type})
+            return result
+        if not callable(getattr(getattr(context, "bot", None), "get_file", None)):
+            result.update({"ok": True, "detail": "download_context_unavailable", "content_type": content_type})
+            return result
+        try:
+            source_bytes, content_type = await video_dubbing_download_source(context, state)
+        except Exception as exc:
+            result.update({
+                "error": type(exc).__name__,
+                "detail": sanitize_log_text(str(exc))[:180],
+                "content_type": content_type,
+            })
+            return result
+    result.update({
+        "ok": True,
+        "source_bytes": bytes(source_bytes),
+        "content_type": str(content_type or result["content_type"]),
+        "size": len(source_bytes),
+    })
+    if workspace and source_bytes:
+        source_name = os.path.basename(str(state.get("source_file_name") or "source.mp4")) or "source.mp4"
+        try:
+            source_path = write_subtitle_dub_pipeline_artifact(workspace, source_name, source_bytes)
+        except Exception as exc:
+            result.update({"ok": False, "error": type(exc).__name__, "detail": sanitize_log_text(str(exc))[:180]})
+            return result
+        result.update({
+            "path": source_path,
+            "exists": bool(source_path and os.path.exists(source_path)),
+            "file_saved": bool(source_path and os.path.exists(source_path) and os.path.getsize(source_path) > 0),
+        })
+    return result
+
+def video_dubbing_product_gate_matrix(
+    user_id,
+    mode: str,
+    state: dict | None = None,
+    *,
+    access: dict | None = None,
+    input_save: dict | None = None,
+) -> dict:
+    state = dict(state or {})
+    mode = normalize_video_translate_mode(mode)
+    access = dict(access or {})
+    configured = video_dubbing_configured_readiness(mode, state, public=False)
+    readiness = dict(
+        access.get("readiness")
+        or {"reason": configured.get("reason") or "ready", "public_blockers": []}
+    )
+    configured_missing = list(dict.fromkeys(str(item) for item in (configured.get("missing") or []) if str(item or "").strip()))
+    asr_enabled = bool(
+        not video_dubbing_mode_needs_asr_provider(mode, state)
+        or get_asr_adapter_readiness(public=False).get("configured")
+    )
+    translation_enabled = bool(
+        not video_dubbing_needs_translation_provider(mode, state)
+        or video_translation_provider_configured()
+    )
+    tts_enabled = bool(
+        mode not in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+        or video_tts_provider_configured_for_dub()
+    )
+    technical_missing = list(configured_missing)
+    if not asr_enabled and "asr" not in technical_missing:
+        technical_missing.append("asr")
+    if not translation_enabled and "translation" not in technical_missing:
+        technical_missing.append("translation")
+    if not tts_enabled and "tts" not in technical_missing:
+        technical_missing.append("tts")
+    product_config_ready = not bool(technical_missing)
+    gate_reason = ":".join(
+        item for item in (
+            str(access.get("status") or ""),
+            str(access.get("reason") or readiness.get("reason") or configured.get("reason") or ""),
+        )
+        if item
+    )
+    input_save = dict(input_save or {})
+    return {
+        "product_route_allowed": bool(access.get("allowed") or product_config_ready),
+        "product_config_ready": bool(product_config_ready),
+        "blackbox_enabled": bool(product_config_ready),
+        "asr_enabled": bool(asr_enabled),
+        "translation_enabled": bool(translation_enabled),
+        "tts_enabled": bool(tts_enabled),
+        "ffmpeg_available": bool(frame_video_ffmpeg_path()),
+        "mux_enabled": bool(video_dubbing_mux_ready()),
+        "provider_gate_reason": gate_reason or "ready",
+        "technical_missing": technical_missing,
+        "public_blockers": list(readiness.get("public_blockers") or []),
+        "access_status": str(access.get("status") or ""),
+        "access_allowed": bool(access.get("allowed")),
+        "gate_overridden_for_product": bool(not access.get("allowed") and product_config_ready),
+        "input_file_id": str(input_save.get("file_id") or state.get("source_file_id") or state.get("video_file_id") or ""),
+        "input_file_saved": bool(input_save.get("file_saved")),
+        "input_file_exists": bool(input_save.get("exists")),
+        "input_file_size": int(input_save.get("size") or 0),
+        "duration_seconds": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
+    }
+
+def video_dubbing_product_gate_allows_pipeline(access: dict | None, gate_matrix: dict | None) -> bool:
+    gate_matrix = dict(gate_matrix or {})
+    return bool(
+        (access or {}).get("allowed")
+        or (
+            gate_matrix.get("product_config_ready")
+            and not gate_matrix.get("technical_missing")
+        )
+    )
+
+def video_dubbing_product_public_failure_text(mode: str, state: dict | None = None, gate_matrix: dict | None = None, lang: str = "vi") -> str:
+    mode = normalize_video_translate_mode(mode)
+    state = dict(state or {})
+    technical_missing = set(str(item) for item in (dict(gate_matrix or {}).get("technical_missing") or []))
+    if "asr" in technical_missing and video_dubbing_mode_needs_asr_provider(mode, state):
+        return video_dubbing_asr_missing_guard_text(lang)
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return subtitle_plus_dub_clean_failure_text(lang)
+    return video_dubbing_flow_failure_text(mode, lang)
+
+def subtitle_dub_debug_job_payload(
+    *,
+    user_id,
+    chat_id,
+    mode: str,
+    state: dict | None = None,
+    status: str,
+    stage: str,
+    input_save: dict | None = None,
+    gate_matrix: dict | None = None,
+    workspace_artifacts: dict | None = None,
+    detail: str = "",
+    pipeline_attempted: bool = False,
+    provider_route: dict | None = None,
+    charged: int = 0,
+    public_safe_error: str = "",
+) -> dict:
+    state = dict(state or {})
+    input_save = dict(input_save or {})
+    artifacts = dict(workspace_artifacts or {})
+    source_path = str(input_save.get("path") or artifacts.get("source") or "")
+    audio_path = str(artifacts.get("dub_audio") or "")
+    final_path = str(artifacts.get("final_mp4") or "")
+    route = dict(provider_route or {})
+    return {
+        "feature": "subtitle_dub",
+        "user_id": str(user_id or ""),
+        "chat_id": str(chat_id or ""),
+        "internal_job_id": str(state.get("_pipeline_job_id") or ""),
+        "mode": normalize_video_translate_mode(mode),
+        "status": str(status or "failed"),
+        "stage": str(stage or ""),
+        "pipeline_attempted": bool(pipeline_attempted),
+        "input_file_id": str(input_save.get("file_id") or state.get("source_file_id") or state.get("video_file_id") or ""),
+        "input_file_path": source_path,
+        "input_file_exists": bool(source_path and os.path.exists(source_path)),
+        "input_file_size": int(input_save.get("size") or (os.path.getsize(source_path) if source_path and os.path.exists(source_path) else 0)),
+        "duration_seconds": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
+        "extracted_audio_path": str(artifacts.get("audio") or ""),
+        "extracted_audio_exists": bool(artifacts.get("audio") and os.path.exists(str(artifacts.get("audio")))),
+        "asr_route_called": bool(pipeline_attempted and video_dubbing_mode_needs_asr_provider(mode, state)),
+        "transcript_length": 0,
+        "original_srt_path": str((artifacts.get("subtitles") or [""])[0] if isinstance(artifacts.get("subtitles"), list) and artifacts.get("subtitles") else ""),
+        "translated_srt_path": str((artifacts.get("translated_subtitles") or [""])[0] if isinstance(artifacts.get("translated_subtitles"), list) and artifacts.get("translated_subtitles") else ""),
+        "tts_route_called": bool(route.get("tts")),
+        "dubbed_audio_path": audio_path,
+        "dubbed_audio_exists": bool(audio_path and os.path.exists(audio_path)),
+        "mux_render_called": bool(pipeline_attempted and mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}),
+        "final_mp4_path": final_path,
+        "final_mp4_exists": bool(final_path and os.path.exists(final_path)),
+        "final_mp4_size": os.path.getsize(final_path) if final_path and os.path.exists(final_path) else 0,
+        "final_mp4_duration": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
+        "charged_xu": int(charged or 0),
+        "last_technical_error": sanitize_log_text(str(detail or ""))[:220],
+        "public_safe_error": public_safe_error,
+        "provider_route": route,
+        "gate_matrix": dict(gate_matrix or {}),
+    }
+
 def pipeline_final_video_sendable(video_bytes: bytes) -> bool:
     return bool(video_bytes) and len(video_bytes) <= PIPELINE_MAX_TELEGRAM_OUTPUT_MB * 1024 * 1024
 
@@ -147532,6 +147794,12 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
+    source_bytes_override = state.get("_pipeline_source_bytes_override")
+    if isinstance(source_bytes_override, bytearray):
+        source_bytes_override = bytes(source_bytes_override)
+    if not isinstance(source_bytes_override, bytes):
+        source_bytes_override = b""
+    override_content_type = str(state.get("_pipeline_source_content_type_override") or state.get("source_mime_type") or "video/mp4")
     explicit_subtitle_ref = str(state.get("subtitle_ref") or state.get("source_subtitle_ref") or "").strip()
     source_subtitle = get_video_dubbing_artifact(user_id, explicit_subtitle_ref) if explicit_subtitle_ref else ""
     if source_subtitle:
@@ -147541,16 +147809,24 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
             and not video_dubbing_is_subtitle_text_source(state, str(state.get("source_mime_type") or ""))
         )
         if should_keep_media_source:
-            try:
-                source_bytes, content_type = await video_dubbing_download_source(context, state)
-            except Exception:
-                source_bytes = str(source_subtitle).encode("utf-8")
-                content_type = str(state.get("source_mime_type") or "text/plain")
+            if source_bytes_override:
+                source_bytes = source_bytes_override
+                content_type = override_content_type
+            else:
+                try:
+                    source_bytes, content_type = await video_dubbing_download_source(context, state)
+                except Exception:
+                    source_bytes = str(source_subtitle).encode("utf-8")
+                    content_type = str(state.get("source_mime_type") or "text/plain")
         else:
             source_bytes = str(source_subtitle).encode("utf-8")
             content_type = str(state.get("source_mime_type") or "text/plain")
     else:
-        source_bytes, content_type = await video_dubbing_download_source(context, state)
+        if source_bytes_override:
+            source_bytes = source_bytes_override
+            content_type = override_content_type
+        else:
+            source_bytes, content_type = await video_dubbing_download_source(context, state)
     source_info = {}
     if not source_subtitle:
         if video_dubbing_is_subtitle_text_source(state, content_type):
@@ -147582,10 +147858,7 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
             )
             source_subtitle = str(source_info.get("subtitle") or "").strip()
         subtitle_ref = set_video_dubbing_artifact(user_id, "source_subtitle", source_subtitle)
-        sync_fields = {
-            key: value for key, value in state.items()
-            if key not in {"step", "current_step", "previous_step", "pending_action", "created_at_ts", "subtitle_ref", "source_subtitle_ref"}
-        }
+        sync_fields = video_dubbing_sync_state_fields(state, exclude={"subtitle_ref", "source_subtitle_ref"})
         state = set_video_dubbing_pending(
             user_id,
             state.get("step") or "processing",
@@ -147622,10 +147895,7 @@ async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, st
             if not output_subtitle:
                 raise RuntimeError("translation_empty")
             translated_ref = set_video_dubbing_artifact(user_id, "translated_subtitle", output_subtitle)
-            sync_fields = {
-                key: value for key, value in state.items()
-                if key not in {"step", "current_step", "previous_step", "pending_action", "created_at_ts", "translated_subtitle_ref"}
-            }
+            sync_fields = video_dubbing_sync_state_fields(state, exclude={"translated_subtitle_ref"})
             state = set_video_dubbing_pending(user_id, state.get("step") or "processing", **sync_fields, translated_subtitle_ref=translated_ref)
         else:
             output_segments = video_dubbing_segments_from_subtitle(output_subtitle) or output_segments
@@ -147659,21 +147929,6 @@ async def _execute_video_dubbing_pipeline_core(
     mode = normalize_video_translate_mode(
         state.get("video_processing_mode") or state.get("mode") or state.get("process_type")
     )
-    access = video_dubbing_engine_access_decision(
-        uid,
-        mode,
-        state,
-        is_paid_job=bool(is_admin_user(uid)),
-        admin_interactive_confirm=admin_interactive_confirm,
-    )
-    if not access.get("allowed"):
-        return {
-            "ok": False,
-            "guard": True,
-            "text": subtitle_plus_dub_clean_failure_text(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_text(mode, state, lang, admin=False),
-        }
-    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_uses_custom_voice(state):
-        return {"ok": False, "guard": True, "text": video_dubbing_custom_voice_guard_text(lang)}
     state = {**dict(state or {}), "_pipeline_is_admin": bool(is_admin_user(uid))}
     workspace = str(state.get("_pipeline_workspace") or "")
     workspace_artifacts = {
@@ -147684,6 +147939,96 @@ async def _execute_video_dubbing_pipeline_core(
         "dub_audio": "",
         "final_mp4": "",
     }
+    input_save = await video_dubbing_save_input_for_pipeline(context, state, workspace)
+    if input_save.get("ok") and input_save.get("source_bytes"):
+        state = {
+            **state,
+            "_pipeline_source_bytes_override": bytes(input_save.get("source_bytes") or b""),
+            "_pipeline_source_content_type_override": str(input_save.get("content_type") or state.get("source_mime_type") or "video/mp4"),
+            "_pipeline_saved_source_path": str(input_save.get("path") or ""),
+        }
+        workspace_artifacts["source"] = str(input_save.get("path") or "")
+        if str(input_save.get("content_type") or "").lower().startswith("audio/"):
+            workspace_artifacts["audio"] = workspace_artifacts["source"]
+    access = video_dubbing_engine_access_decision(
+        uid,
+        mode,
+        state,
+        is_paid_job=bool(is_admin_user(uid)),
+        admin_interactive_confirm=admin_interactive_confirm,
+    )
+    gate_matrix = video_dubbing_product_gate_matrix(uid, mode, state, access=access, input_save=input_save)
+    public_failure = video_dubbing_product_public_failure_text(mode, state, gate_matrix, lang)
+    chat_id = getattr(getattr(query, "message", None), "chat_id", uid)
+    if not input_save.get("ok"):
+        detail = sanitize_log_text(str(input_save.get("detail") or input_save.get("error") or "input_save_failed"))[:180]
+        debug_job = subtitle_dub_debug_job_payload(
+            user_id=uid,
+            chat_id=chat_id,
+            mode=mode,
+            state=state,
+            status="INPUT_SAVE_FAILED",
+            stage="input_save",
+            input_save=input_save,
+            gate_matrix=gate_matrix,
+            workspace_artifacts=workspace_artifacts,
+            detail=detail,
+            pipeline_attempted=False,
+            public_safe_error=public_failure,
+        )
+        return {
+            "ok": False,
+            "status": "INPUT_SAVE_FAILED",
+            "text": public_failure,
+            "detail": detail,
+            "workspace_artifacts": workspace_artifacts,
+            "input_save": input_save,
+            "gate_matrix": gate_matrix,
+            "debug_job": debug_job,
+        }
+    if not video_dubbing_product_gate_allows_pipeline(access, gate_matrix):
+        detail = sanitize_log_text(str(access.get("reason") or access.get("status") or "gate_blocked"))[:180]
+        debug_job = subtitle_dub_debug_job_payload(
+            user_id=uid,
+            chat_id=chat_id,
+            mode=mode,
+            state=state,
+            status="GATE_BLOCKED_AFTER_INPUT_SAVE",
+            stage="gate",
+            input_save=input_save,
+            gate_matrix=gate_matrix,
+            workspace_artifacts=workspace_artifacts,
+            detail=detail,
+            pipeline_attempted=False,
+            public_safe_error=public_failure,
+        )
+        return {
+            "ok": False,
+            "guard": True,
+            "status": "GATE_BLOCKED_AFTER_INPUT_SAVE",
+            "text": public_failure,
+            "detail": detail,
+            "workspace_artifacts": workspace_artifacts,
+            "input_save": input_save,
+            "gate_matrix": gate_matrix,
+            "debug_job": debug_job,
+        }
+    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_uses_custom_voice(state):
+        debug_job = subtitle_dub_debug_job_payload(
+            user_id=uid,
+            chat_id=chat_id,
+            mode=mode,
+            state=state,
+            status="CUSTOM_VOICE_LOCKED",
+            stage="voice",
+            input_save=input_save,
+            gate_matrix=gate_matrix,
+            workspace_artifacts=workspace_artifacts,
+            detail="custom_voice_locked",
+            pipeline_attempted=False,
+            public_safe_error=video_dubbing_custom_voice_guard_text(lang),
+        )
+        return {"ok": False, "guard": True, "status": "CUSTOM_VOICE_LOCKED", "text": video_dubbing_custom_voice_guard_text(lang), "debug_job": debug_job, "workspace_artifacts": workspace_artifacts, "input_save": input_save, "gate_matrix": gate_matrix}
     pricing = calculate_video_translate_price(
         mode,
         state.get("video_duration") or state.get("source_duration"),
@@ -147734,36 +148079,54 @@ async def _execute_video_dubbing_pipeline_core(
         dub_mux_enabled=video_dubbing_mux_ready(),
         is_admin=is_admin_user(uid),
     )
+    def _failed_product_result(status: str, text: str, detail: str, *, stage: str = "pipeline") -> dict:
+        debug_job = subtitle_dub_debug_job_payload(
+            user_id=uid,
+            chat_id=chat_id,
+            mode=mode,
+            state=state,
+            status=status,
+            stage=stage,
+            input_save=input_save,
+            gate_matrix=gate_matrix,
+            workspace_artifacts=workspace_artifacts,
+            detail=detail,
+            pipeline_attempted=True,
+            provider_route={
+                "asr": str((product_result.get("prepared") or {}).get("asr_provider") or ""),
+                "translation": str((product_result.get("prepared") or {}).get("translation_provider") or ""),
+                "tts": str(product_result.get("tts_provider") or ""),
+                "mux": str(product_result.get("partial_reason") or product_result.get("error_code") or ""),
+            },
+            public_safe_error=text,
+        )
+        return {
+            "ok": False,
+            "status": status,
+            "text": text,
+            "detail": detail,
+            "workspace_artifacts": workspace_artifacts,
+            "input_save": input_save,
+            "gate_matrix": gate_matrix,
+            "debug_job": debug_job,
+            "pipeline_attempted": True,
+        }
+
     if not product_result.get("ok"):
         detail = sanitize_log_text(str(product_result.get("admin_debug_summary") or product_result.get("error_code") or ""))[:160]
         status = str(product_result.get("status") or "NO_OUTPUT_BYTES")
         if status == "DIALOGUE_UNAVAILABLE":
-            return {
-                "ok": False,
-                "status": "DIALOGUE_UNAVAILABLE",
-                "text": video_dubbing_dialogue_unavailable_text(lang),
-                "detail": detail,
-            }
+            return _failed_product_result("DIALOGUE_UNAVAILABLE", video_dubbing_dialogue_unavailable_text(lang), detail, stage="dialogue")
         if status == "SUBTITLE_PREPARE_FAILED":
-            return {
-                "ok": False,
-                "status": "SUBTITLE_PREPARE_FAILED",
-                "text": video_dubbing_flow_failure_text(mode, lang),
-                "detail": detail,
-            }
+            return _failed_product_result("SUBTITLE_PREPARE_FAILED", video_dubbing_flow_failure_text(mode, lang), detail, stage="subtitle")
         if status == "VIDEO_RENDER_FAILED":
-            return {
-                "ok": False,
-                "status": "VIDEO_RENDER_FAILED",
-                "text": "TOAN AAS đã tạo phụ đề nhưng chưa xuất được video phụ đề lúc này. Hệ thống chưa trừ Xu.",
-                "detail": detail,
-            }
+            return _failed_product_result("VIDEO_RENDER_FAILED", "TOAN AAS đã tạo phụ đề nhưng chưa xuất được video phụ đề lúc này. Hệ thống chưa trừ Xu.", detail, stage="video")
         fail_text = (
             "TOAN AAS chưa tạo được audio lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng."
             if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
             else "TOAN AAS chưa tạo được phụ đề từ video này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi file phụ đề nếu có."
         )
-        return {"ok": False, "status": status, "text": fail_text, "detail": detail}
+        return _failed_product_result(status, fail_text, detail, stage="audio" if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else "subtitle")
     prepared = dict(product_result.get("prepared") or {})
     state = dict(product_result.get("state") or state)
     video_bytes = bytes(product_result.get("source_bytes") or b"")
@@ -148003,6 +148366,10 @@ async def _execute_video_dubbing_pipeline_core(
             "final_mp4_duration": duration_seconds,
             "last_technical_error": sanitize_log_text(partial_reason or product_result.get("error_code") or "")[:180],
             "public_safe_error": subtitle_plus_dub_clean_failure_text(lang) if partial_result else "",
+            "stage": "completed" if video_output else ("partial" if partial_result else "output"),
+            "pipeline_attempted": True,
+            "input_file_id": str(input_save.get("file_id") or source_ref or ""),
+            "gate_matrix": gate_matrix,
             "provider_route": {
                 "asr": str(asr_provider or ""),
                 "translation": str(prepared.get("translation_provider") or ""),
@@ -148029,6 +148396,9 @@ async def _execute_video_dubbing_pipeline_core(
         "sent_video": int(delivery.get("video") or 0),
         "normalization_detail": normalization_detail,
         "workspace_artifacts": workspace_artifacts,
+        "input_save": {key: value for key, value in dict(input_save or {}).items() if key != "source_bytes"},
+        "gate_matrix": gate_matrix,
+        "pipeline_attempted": True,
         "provider_route": {
             "asr": str(asr_provider or ""),
             "translation": str(prepared.get("translation_provider") or ""),
@@ -148074,6 +148444,7 @@ async def execute_video_dubbing_pipeline(
         }
     workspace = create_subtitle_dub_pipeline_workspace(job.get("job_id") or "")
     update_subtitle_dub_pipeline_job(job_key, workspace=workspace)
+    result = {}
     try:
         pipeline_state = {
             **dict(state or {}),
@@ -148088,6 +148459,9 @@ async def execute_video_dubbing_pipeline(
             admin_interactive_confirm=admin_interactive_confirm,
         )
         artifacts = dict(result.get("workspace_artifacts") or {})
+        input_save = {key: value for key, value in dict(result.get("input_save") or {}).items() if key != "source_bytes"}
+        debug_job = dict(result.get("debug_job") or {})
+        gate_matrix = dict(result.get("gate_matrix") or debug_job.get("gate_matrix") or {})
         manifest = {
             "job_id": job.get("job_id"),
             "user_id": uid,
@@ -148111,25 +148485,49 @@ async def execute_video_dubbing_pipeline(
             "dub_audio": artifacts.get("dub_audio") or "",
             "final_mp4": artifacts.get("final_mp4") or "",
             "provider_route": dict(result.get("provider_route") or {}),
+            "input_save": input_save,
+            "gate_matrix": gate_matrix,
+            "debug_job": debug_job,
             "delivery": {
                 "documents": int(result.get("sent_documents") or 0),
                 "audio": int(result.get("sent_audio") or 0),
                 "video": int(result.get("sent_video") or 0),
             },
-            "cleanup_status": "pending",
+            "cleanup_status": "pending" if result.get("ok") else "preserved_for_debug",
         }
         write_subtitle_dub_pipeline_manifest(workspace, manifest)
+        update_fields = {
+            **debug_job,
+            "job_id": job.get("job_id"),
+            "workspace": workspace,
+            "manifest": os.path.join(workspace, "manifest.json"),
+            "mode": str(result.get("mode") or state.get("mode") or ""),
+            "input_save": input_save,
+            "gate_matrix": gate_matrix,
+            "provider_route": dict(result.get("provider_route") or debug_job.get("provider_route") or {}),
+            "source": artifacts.get("source") or input_save.get("path") or "",
+            "audio": artifacts.get("audio") or "",
+            "subtitles": list(artifacts.get("subtitles") or []),
+            "translated_subtitles": list(artifacts.get("translated_subtitles") or []),
+            "dub_audio": artifacts.get("dub_audio") or "",
+            "final_mp4": artifacts.get("final_mp4") or "",
+            "pipeline_attempted": bool(result.get("pipeline_attempted") or debug_job.get("pipeline_attempted")),
+        }
+        if not update_fields.get("internal_job_id"):
+            update_fields["internal_job_id"] = str(result.get("internal_job_id") or job.get("job_id") or "")
+        update_fields.pop("status", None)
         if result.get("ok"):
             mark_subtitle_dub_pipeline_output_sent(job_key)
-            update_subtitle_dub_pipeline_job(job_key, status="completed")
+            update_subtitle_dub_pipeline_job(job_key, status="completed", **update_fields)
         else:
-            update_subtitle_dub_pipeline_job(job_key, status="failed")
+            update_subtitle_dub_pipeline_job(job_key, status="failed", **update_fields)
         return result
     except Exception:
         update_subtitle_dub_pipeline_job(job_key, status="failed")
         raise
     finally:
-        cleanup_subtitle_dub_pipeline_workspace(workspace)
+        if result.get("ok"):
+            cleanup_subtitle_dub_pipeline_workspace(workspace)
 
 def subtitle_plus_dub_subtitle_text(user_id, state: dict | None = None, *, translated: bool = False) -> str:
     state = dict(state or {})
@@ -151089,20 +151487,6 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not state.get("voice_speed"):
             state = set_video_dubbing_pending(uid, "confirm", voice_speed="1.0")
         feature = video_dubbing_product_area_for_mode(mode)
-        if video_dubbing_asr_missing_for_state(mode, state, public=not is_admin_user(uid)):
-            set_video_dubbing_pending(
-                uid,
-                "preview_guarded",
-                processing="0",
-                preview_seen=False,
-                preview_guard_acknowledged=True,
-            )
-            return await safe_edit_or_send(
-                query,
-                video_dubbing_asr_missing_guard_text(lang),
-                parse_mode="HTML",
-                reply_markup=video_dubbing_asr_missing_guard_keyboard(lang),
-            )
         access = video_dubbing_engine_access_decision(
             uid,
             mode,
@@ -151110,25 +151494,35 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             is_paid_job=bool(is_admin_user(uid)),
             admin_interactive_confirm=True,
         )
-        if not access.get("allowed"):
-            set_video_dubbing_pending(
-                uid,
-                "preview_guarded",
-                processing="0",
-                preview_seen=False,
-                preview_guard_acknowledged=True,
-            )
-            return await safe_edit_or_send(
-                query,
-                video_dubbing_guard_text(mode, state, lang, admin=False),
-                parse_mode="HTML",
-                reply_markup=(
-                    video_dubbing_asr_missing_guard_keyboard(lang)
-                    if video_dubbing_asr_missing_for_state(mode, state, public=not is_admin_user(uid))
-                    else video_dubbing_guard_keyboard(lang, admin=False)
-                ),
-            )
         if is_preview_action:
+            if video_dubbing_asr_missing_for_state(mode, state, public=not is_admin_user(uid)):
+                set_video_dubbing_pending(
+                    uid,
+                    "preview_guarded",
+                    processing="0",
+                    preview_seen=False,
+                    preview_guard_acknowledged=True,
+                )
+                return await safe_edit_or_send(
+                    query,
+                    video_dubbing_asr_missing_guard_text(lang),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_asr_missing_guard_keyboard(lang),
+                )
+            if not access.get("allowed"):
+                set_video_dubbing_pending(
+                    uid,
+                    "preview_guarded",
+                    processing="0",
+                    preview_seen=False,
+                    preview_guard_acknowledged=True,
+                )
+                return await safe_edit_or_send(
+                    query,
+                    video_dubbing_guard_text(mode, state, lang, admin=False),
+                    parse_mode="HTML",
+                    reply_markup=video_dubbing_guard_keyboard(lang, admin=False),
+                )
             set_video_dubbing_pending(uid, "confirm", processing="0", preview_seen=False, preview_guard_acknowledged=True)
             return await safe_edit_or_send(
                 query,
@@ -151158,6 +151552,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
                     "confirm_paid": True,
                     "admin_interactive_confirm": True,
                     "is_paid_job": True,
+                    "gate_prechecked": True,
                 },
             )
             result = dict(engine_result.get("runner_result") or {})
