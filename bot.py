@@ -47421,6 +47421,12 @@ def shopaikey_stt_public_ready() -> bool:
 def video_dubbing_audio_extract_ready() -> bool:
     return bool(frame_video_ffmpeg_path())
 
+def video_dubbing_mux_ready() -> bool:
+    return bool(frame_video_ffmpeg_path())
+
+def video_dubbing_subtitle_render_ready() -> bool:
+    return bool(frame_video_ffmpeg_path())
+
 def asr_smoke_status() -> str:
     return str(
         preferred_tool_test_result(
@@ -73022,8 +73028,48 @@ def subtitle_dub_job_status_text(job: dict) -> str:
         + f"• SRT blocks: <code>{int(job.get('srt_blocks') or 0)}</code>\n"
         + f"• Audio bytes: <code>{int(job.get('audio_bytes') or 0)}</code>\n"
         + f"• Video bytes: <code>{int(job.get('video_bytes') or 0)}</code>\n"
-        + f"• Mux: <code>{html.escape(str(job.get('mux_status') or ('disabled' if not VIDEO_DUB_MUX_ENABLED else '-')))}</code>"
+        + f"• Mux: <code>{html.escape(str(job.get('mux_status') or ('disabled' if not video_dubbing_mux_ready() else '-')))}</code>"
     )
+
+def subtitle_dub_debug_text(job: dict) -> str:
+    if not job:
+        return "⚠️ Chưa có subtitle/dub job để debug."
+    route = dict(job.get("provider_route") or {})
+    def yes_no(value) -> str:
+        return "yes" if value else "no"
+    def esc(value) -> str:
+        return html.escape(str(value if value not in (None, "") else "-"))
+    return "\n".join([
+        "🛠 <b>SUBTITLE/DUB DEBUG</b>",
+        "",
+        f"• job: <code>{esc(job.get('internal_job_id'))}</code>",
+        f"• mode: <code>{esc(job.get('mode'))}</code>",
+        f"• status: <code>{esc(job.get('status'))}</code>",
+        f"• input file path: <code>{esc(job.get('input_file_path'))}</code>",
+        f"• input file exists: <code>{yes_no(job.get('input_file_exists'))}</code>",
+        f"• file size: <code>{int(job.get('input_file_size') or 0)}</code>",
+        f"• duration: <code>{int(job.get('duration_seconds') or 0)}</code>",
+        f"• extracted audio path: <code>{esc(job.get('extracted_audio_path'))}</code>",
+        f"• extracted audio exists: <code>{yes_no(job.get('extracted_audio_exists'))}</code>",
+        f"• ASR route called: <code>{yes_no(job.get('asr_route_called'))}</code>",
+        f"• transcript length: <code>{int(job.get('transcript_length') or 0)}</code>",
+        f"• original SRT path: <code>{esc(job.get('original_srt_path'))}</code>",
+        f"• translated SRT path: <code>{esc(job.get('translated_srt_path'))}</code>",
+        f"• TTS route called: <code>{yes_no(job.get('tts_route_called'))}</code>",
+        f"• dubbed audio path: <code>{esc(job.get('dubbed_audio_path'))}</code>",
+        f"• dubbed audio exists: <code>{yes_no(job.get('dubbed_audio_exists'))}</code>",
+        f"• mux/render route called: <code>{yes_no(job.get('mux_render_called'))}</code>",
+        f"• final MP4 path: <code>{esc(job.get('final_mp4_path'))}</code>",
+        f"• final MP4 exists: <code>{yes_no(job.get('final_mp4_exists'))}</code>",
+        f"• final MP4 size: <code>{int(job.get('final_mp4_size') or job.get('video_bytes') or 0)}</code>",
+        f"• final MP4 duration: <code>{int(job.get('final_mp4_duration') or job.get('duration_seconds') or 0)}</code>",
+        f"• route ASR: <code>{esc(route.get('asr'))}</code>",
+        f"• route translation: <code>{esc(route.get('translation'))}</code>",
+        f"• route TTS: <code>{esc(route.get('tts'))}</code>",
+        f"• route mux: <code>{esc(route.get('mux') or job.get('mux_status'))}</code>",
+        f"• last technical error: <code>{esc(job.get('last_technical_error'))}</code>",
+        f"• public-safe error: <code>{esc(job.get('public_safe_error'))}</code>",
+    ])
 
 async def cmd_subtitle_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -73050,6 +73096,20 @@ async def cmd_subtitle_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not arg:
         return await cmd_subtitle_jobs(update, context)
     return await update.message.reply_text(subtitle_dub_job_status_text(get_engine_async_job(arg)), parse_mode="HTML")
+
+async def cmd_subtitle_dub_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    if not arg:
+        jobs = list_engine_async_jobs("subtitle_dub", limit=1)
+        job = jobs[0] if jobs else {}
+    else:
+        job = get_engine_async_job(arg)
+    return await update.message.reply_text(subtitle_dub_debug_text(job), parse_mode="HTML")
+
+async def cmd_subtitle_dub_last_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_subtitle_dub_debug(update, context)
 
 async def cmd_dub_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_job(update, context)
@@ -145775,7 +145835,7 @@ def video_dubbing_capability(mode: str, state: dict | None = None, public: bool 
         "asr": str(get_asr_adapter_readiness(public=False).get("adapter") or ""),
         "translation": TRANSLATE_PROVIDER if video_translation_provider_configured() else "",
         "tts": ("minimax" if minimax_tts_configured() else TTS_PROVIDER) if video_tts_provider_configured_for_dub() else "",
-        "mux": "enabled" if VIDEO_DUB_MUX_ENABLED else "not_enabled_audio_output_only",
+        "mux": "enabled" if video_dubbing_mux_ready() else "not_enabled_audio_output_only",
     }
 
 def video_translation_admin_blockers(mode: str, state: dict | None = None, public: bool = True) -> list[str]:
@@ -145796,6 +145856,8 @@ def video_translation_admin_blockers(mode: str, state: dict | None = None, publi
 def video_pipeline_status_payload() -> dict:
     worker = local_worker_status_payload()
     mux_worker_ready = bool(worker.get("connected") and worker.get("ffmpeg_path"))
+    mux_ready = video_dubbing_mux_ready()
+    subtitle_render_ready = video_dubbing_subtitle_render_ready()
     asr_readiness = get_asr_adapter_readiness(public=True)
     return {
         "asr_provider": str(asr_readiness.get("adapter") or "missing"),
@@ -145818,8 +145880,8 @@ def video_pipeline_status_payload() -> dict:
             else ("shopaikey" if SHOPAIKEY_ENABLED and SHOPAIKEY_TTS_ENABLED and SHOPAIKEY_API_KEY else TTS_PROVIDER)
         ) if video_tts_provider_available_for(public=False) else "missing",
         "tts_test": preferred_tool_test_status_text("video_dub", "minimax_tts", "shopaikey_tts", "tts"),
-        "ffmpeg_mux": "ready" if VIDEO_DUB_MUX_ENABLED and mux_worker_ready else ("configured/waiting_worker" if VIDEO_DUB_MUX_ENABLED else "disabled"),
-        "subtitle_burn_in": "ready" if VIDEO_SUBTITLE_BURN_IN_ENABLED and mux_worker_ready else ("configured/waiting_worker" if VIDEO_SUBTITLE_BURN_IN_ENABLED else "disabled"),
+        "ffmpeg_mux": "ready" if mux_ready else ("worker_ready_no_local_ffmpeg" if mux_worker_ready else "disabled"),
+        "subtitle_burn_in": "ready" if subtitle_render_ready else ("worker_ready_no_local_ffmpeg" if mux_worker_ready else "disabled"),
         "local_worker_connected": bool(worker.get("connected")),
         "subtitle_test": preferred_tool_test_status_text("video_subtitle"),
         "dub_test": preferred_tool_test_status_text("video_dub"),
@@ -147031,7 +147093,7 @@ async def build_subtitle_dubbed_video_pipeline(
     final_video = b""
     mux_detail = "not_requested"
     is_video = str(source_content_type or "").lower().startswith("video/")
-    mux_ready = bool(VIDEO_DUB_MUX_ENABLED and frame_video_ffmpeg_path())
+    mux_ready = video_dubbing_mux_ready()
     if is_video and create_dub and mux_ready:
         final_video, mux_detail = await video_dubbing_render_video(
             source_video_bytes,
@@ -147460,13 +147522,11 @@ def video_dubbing_video_render_ready(output_type: str = "", *, audio: bool = Fal
     output_type = str(output_type or "").strip().lower()
     if output_type not in {"burn", "both", "video", "video_subtitle"}:
         return False
-    worker = local_worker_status_payload()
-    worker_ready = bool(worker.get("connected") and worker.get("ffmpeg_path"))
-    if audio and not (VIDEO_DUB_MUX_ENABLED and worker_ready):
+    if audio and not video_dubbing_mux_ready():
         return False
-    if subtitle and not (VIDEO_SUBTITLE_BURN_IN_ENABLED and worker_ready):
+    if subtitle and not video_dubbing_subtitle_render_ready():
         return False
-    return bool(worker_ready)
+    return bool(video_dubbing_mux_ready() or video_dubbing_subtitle_render_ready())
 
 async def video_dubbing_prepare_subtitles(context: ContextTypes.DEFAULT_TYPE, state: dict, user_id, allow_admin: bool = False) -> dict:
     mode = normalize_video_translate_mode(
@@ -147671,7 +147731,7 @@ async def _execute_video_dubbing_pipeline_core(
         render_video=video_dubbing_render_video,
         video_render_ready=lambda output_type: video_dubbing_video_render_ready(output_type, subtitle=True),
         ffmpeg_ready=lambda: bool(frame_video_ffmpeg_path()),
-        dub_mux_enabled=bool(VIDEO_DUB_MUX_ENABLED),
+        dub_mux_enabled=video_dubbing_mux_ready(),
         is_admin=is_admin_user(uid),
     )
     if not product_result.get("ok"):
@@ -147778,14 +147838,19 @@ async def _execute_video_dubbing_pipeline_core(
     duration_seconds = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
     subtitle_asset_ids: list[str] = []
     translation_asset_ids: list[str] = []
+    subtitle_asset_paths: list[str] = []
+    translation_asset_paths: list[str] = []
     dub_asset_id = ""
     dub_video_asset_id = ""
+    dub_path = ""
+    dub_video_path = ""
     for item in subtitle_items:
         data = bytes(item.get("bytes") or b"")
         if not data:
             continue
         asset_id = media_asset_make_id("subtitle", uid, product_context, source_ref, item.get("output_type"), seed=f"{mode}:{item.get('output_type')}:{time.time_ns()}")
         local_path = write_media_asset_bytes("subtitle", asset_id, data, item.get("suffix") or ".srt")
+        subtitle_asset_paths.append(local_path)
         asset = create_subtitle_asset_record(
             user_id=uid,
             product_context=product_context,
@@ -147807,6 +147872,7 @@ async def _execute_video_dubbing_pipeline_core(
         if mode == VIDEO_SUBTITLE_MODE_TRANSLATE or str(state.get("translate_requested") or "") == "1":
             translation_id = media_asset_make_id("translation", uid, product_context, source_ref, item.get("output_type"), seed=f"{mode}:{item.get('output_type')}:{time.time_ns()}")
             translation_path = write_media_asset_bytes("translation", translation_id, data, item.get("suffix") or ".srt")
+            translation_asset_paths.append(translation_path)
             translation = create_translation_asset_record(
                 user_id=uid,
                 product_context=product_context,
@@ -147896,7 +147962,10 @@ async def _execute_video_dubbing_pipeline_core(
     internal_job_id = ""
     try:
         output_size = len(srt_bytes or b"") + len(audio_bytes or b"") + len(video_output or b"")
-        mux_state = "completed" if video_output else ("disabled" if not VIDEO_DUB_MUX_ENABLED else "skipped_or_not_requested")
+        mux_state = "completed" if video_output else ("disabled" if not video_dubbing_mux_ready() else "skipped_or_not_requested")
+        source_path = str(workspace_artifacts.get("source") or "")
+        subtitle_paths = list(subtitle_asset_paths or workspace_artifacts.get("subtitles") or [])
+        translated_paths = list(translation_asset_paths or [])
         job = save_engine_async_job({
             "feature": "subtitle_dub",
             "user_id": str(uid or ""),
@@ -147914,6 +147983,32 @@ async def _execute_video_dubbing_pipeline_core(
             "tts_segments": len(tts_chunks),
             "mux_status": mux_state,
             "charged_xu": charged,
+            "input_file_path": source_path,
+            "input_file_exists": bool(source_path and os.path.exists(source_path)),
+            "input_file_size": len(video_bytes or b""),
+            "duration_seconds": duration_seconds,
+            "extracted_audio_path": "",
+            "extracted_audio_exists": False,
+            "asr_route_called": bool(asr_provider and asr_provider not in {"cached_subtitle", "subtitle_file", "embedded_subtitle"}),
+            "transcript_length": len(output_text or ""),
+            "original_srt_path": str(subtitle_paths[0] if subtitle_paths else ""),
+            "translated_srt_path": str(translated_paths[0] if translated_paths else ""),
+            "tts_route_called": bool(tts_provider),
+            "dubbed_audio_path": dub_path,
+            "dubbed_audio_exists": bool(dub_path and os.path.exists(dub_path)),
+            "mux_render_called": bool(video_output or partial_reason or (audio_bytes and str(content_type or "").lower().startswith("video/"))),
+            "final_mp4_path": dub_video_path,
+            "final_mp4_exists": bool(dub_video_path and os.path.exists(dub_video_path)),
+            "final_mp4_size": len(video_output or b""),
+            "final_mp4_duration": duration_seconds,
+            "last_technical_error": sanitize_log_text(partial_reason or product_result.get("error_code") or "")[:180],
+            "public_safe_error": subtitle_plus_dub_clean_failure_text(lang) if partial_result else "",
+            "provider_route": {
+                "asr": str(asr_provider or ""),
+                "translation": str(prepared.get("translation_provider") or ""),
+                "tts": str(tts_provider or ""),
+                "mux": "ffmpeg" if video_output else mux_state,
+            },
         })
         internal_job_id = str(job.get("internal_job_id") or "")
     except Exception as exc:
@@ -152910,6 +153005,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subtitle_jobs", cmd_subtitle_jobs))
     tg_app.add_handler(CommandHandler("subtitle_job", cmd_subtitle_job))
     tg_app.add_handler(CommandHandler("dub_job", cmd_dub_job))
+    tg_app.add_handler(CommandHandler("subtitle_dub_debug", cmd_subtitle_dub_debug))
+    tg_app.add_handler(CommandHandler("subtitle_dub_last_debug", cmd_subtitle_dub_last_debug))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_provider_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_engine_status", cmd_voice_engine_status))
