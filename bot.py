@@ -145397,12 +145397,18 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     state = state or {}
     result = result or {}
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return subtitle_plus_dub_completed_text(state, result, lang)
     if normalize_user_language(lang) != "vi":
         _filename, caption, _button = video_dubbing_final_video_label(mode, lang)
+        if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} and not result.get("has_video") and result.get("has_subtitle"):
+            caption = "TOAN AAS created the subtitle file. The final subtitled video is not ready yet."
         if mode == VIDEO_SUBTITLE_MODE_DUB and not result.get("has_video") and result.get("has_audio"):
             caption = "TOAN AAS created the dubbed audio, but the final video was not completed yet."
         return f"{caption}\n\nCost: <b>{int(result.get('charged') or 0)} Xu</b>"
     _filename, caption, _button = video_dubbing_final_video_label(mode, lang)
+    if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} and not result.get("has_video") and result.get("has_subtitle"):
+        caption = "TOAN AAS đã tạo file phụ đề. Video có phụ đề chưa hoàn tất nên hệ thống gửi file trước."
     if mode == VIDEO_SUBTITLE_MODE_DUB and not result.get("has_video") and result.get("has_audio"):
         caption = "TOAN AAS đã tạo được audio lồng tiếng, nhưng chưa ghép được thành video hoàn chỉnh."
     return f"{caption}\n\nChi phí: <b>{int(result.get('charged') or 0)} Xu</b>"
@@ -147599,6 +147605,8 @@ async def _execute_video_dubbing_pipeline_core(
     tts_chunks = list(product_result.get("tts_chunks") or [])
     selected_tts_voice_id = str(product_result.get("selected_tts_voice_id") or "")
     video_output = bytes(product_result.get("video_output") or b"")
+    partial_result = bool(product_result.get("partial_result") or product_result.get("partial"))
+    partial_reason = str(product_result.get("partial_reason") or "")
     if workspace:
         source_name = os.path.basename(str(state.get("source_file_name") or "source.bin"))
         workspace_artifacts["source"] = write_subtitle_dub_pipeline_artifact(
@@ -147634,7 +147642,9 @@ async def _execute_video_dubbing_pipeline_core(
         )
     tts_price = int(video_dubbing_tts_price_estimate(mode, output_text=output_text).get("price_xu") or 0)
     final_price_xu = int(pricing.get("total_price_xu") or 0) + tts_price
-    if is_admin_user(uid):
+    if partial_result and not video_output:
+        charged = 0
+    elif is_admin_user(uid):
         charged = 0
     else:
         charge = spend_fixed_credit_info(
@@ -147777,7 +147787,7 @@ async def _execute_video_dubbing_pipeline_core(
             "chat_id": str(getattr(query.message, "chat_id", "") or ""),
             "provider": ",".join(item for item in (asr_provider, tts_provider) if item) or "subtitle_pipeline",
             "provider_task_id": "",
-            "status": "completed",
+            "status": "partial" if partial_result else "completed",
             "progress_text": f"ASR completed; SRT blocks={srt_bytes.decode('utf-8', errors='ignore').count('-->') if srt_bytes else 0}; audio bytes={len(audio_bytes or b'')}; mux={mux_state}",
             "last_provider_status": f"asr={asr_provider or '-'}; tts={tts_provider or '-'}; mux={mux_state}",
             "output_bytes": output_size,
@@ -147801,6 +147811,8 @@ async def _execute_video_dubbing_pipeline_core(
         "has_subtitle": bool(srt_bytes),
         "has_audio": bool(audio_bytes),
         "has_video": bool(video_output),
+        "partial_result": bool(partial_result),
+        "partial_reason": partial_reason,
         "sent_documents": int(delivery.get("documents") or 0),
         "sent_audio": int(delivery.get("audio") or 0),
         "sent_video": int(delivery.get("video") or 0),
@@ -147872,8 +147884,10 @@ async def execute_video_dubbing_pipeline(
             "active_flow": str(state.get("active_flow") or ""),
             "created_at": now_text(),
             "mode": str(result.get("mode") or state.get("mode") or ""),
-            "status": "completed" if result.get("ok") else "failed",
+            "status": "partial" if result.get("partial_result") else ("completed" if result.get("ok") else "failed"),
             "ok": bool(result.get("ok")),
+            "partial_result": bool(result.get("partial_result")),
+            "partial_reason": str(result.get("partial_reason") or ""),
             "output_sent_once": bool(
                 int(result.get("sent_documents") or 0)
                 + int(result.get("sent_audio") or 0)

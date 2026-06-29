@@ -50,6 +50,24 @@ def _default_output_type(mode: str, state: dict, content_type: str) -> str:
     return "srt"
 
 
+def _is_video_source(content_type: str) -> bool:
+    return str(content_type or "").lower().startswith("video/")
+
+
+def _video_output_requested(mode: str, output_type: str, content_type: str) -> bool:
+    if not _is_video_source(content_type):
+        return False
+    output = str(output_type or "").strip().lower()
+    if output in {"burn", "both", "video", "video_subtitle"}:
+        return True
+    return mode in {
+        VIDEO_SUBTITLE_MODE_CREATE,
+        VIDEO_SUBTITLE_MODE_TRANSLATE,
+        VIDEO_SUBTITLE_MODE_DUB,
+        VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    }
+
+
 async def process_subtitle_dub_job(
     *,
     mode: str,
@@ -163,8 +181,11 @@ async def process_subtitle_dub_job(
             }
 
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
+    wants_final_video = _video_output_requested(mode, output_type, content_type)
     video_output = b""
-    if str(content_type or "").lower().startswith("video/"):
+    partial_result = False
+    partial_reason = ""
+    if _is_video_source(content_type):
         if audio_bytes and dub_mux_enabled and ffmpeg_ready():
             try:
                 video_output, _render_detail = await _maybe_await(
@@ -178,6 +199,8 @@ async def process_subtitle_dub_job(
             except Exception as exc:
                 video_output = b""
                 prepared["mux_error"] = type(exc).__name__
+        elif audio_bytes and wants_final_video:
+            prepared["mux_error"] = "mux_unavailable"
         elif wants_subtitle_video and video_render_ready(output_type):
             video_output, _render_detail = await _maybe_await(
                 render_video(
@@ -185,20 +208,10 @@ async def process_subtitle_dub_job(
                     subtitle_bytes=srt_bytes,
                 )
             )
-        if wants_subtitle_video and mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} and not video_output:
-            return {
-                "ok": False,
-                "status": "VIDEO_RENDER_FAILED",
-                "error_code": str(prepared.get("mux_error") or "video_render_empty"),
-                "provider_called": bool(prepared.get("asr_provider") or prepared.get("translation_provider")),
-                "charged": False,
-                "created_files": [],
-                "state": pipeline_state,
-                "prepared": prepared,
-                "srt_text": srt_text,
-                "srt_bytes": srt_bytes,
-                "subtitle_items": subtitle_items,
-            }
+        if wants_final_video and not video_output and (srt_bytes or audio_bytes):
+            partial_result = True
+            partial_reason = str(prepared.get("mux_error") or "video_render_unavailable")
+            prepared["partial_reason"] = partial_reason
 
     if not (srt_bytes or audio_bytes or video_output):
         return {
@@ -214,8 +227,11 @@ async def process_subtitle_dub_job(
 
     return {
         "ok": True,
-        "status": "OK",
-        "result_type": "mp4" if video_output else ("audio_subtitle" if audio_bytes else "subtitle"),
+        "status": "PARTIAL_VIDEO_NOT_READY" if partial_result else "OK",
+        "result_type": "mp4" if video_output else ("partial_audio_subtitle" if audio_bytes and partial_result else ("audio_subtitle" if audio_bytes else "subtitle")),
+        "partial_result": bool(partial_result),
+        "partial_reason": partial_reason,
+        "video_output_requested": bool(wants_final_video),
         "state": pipeline_state,
         "prepared": prepared,
         "source_bytes": source_bytes,
