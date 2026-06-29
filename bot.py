@@ -5230,6 +5230,14 @@ ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS = max(
     ENGINE_ASYNC_PROVIDER_SOFT_TIMEOUT_SECONDS + 60,
     env_int("ENGINE_ASYNC_PROVIDER_PROCESSING_TIMEOUT_SECONDS", 20 * 60),
 )
+PROGRESS_AUTO_REFRESH_ENABLED = env_flag("PROGRESS_AUTO_REFRESH_ENABLED", "true")
+PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS = max(5, env_int("PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS", 20))
+PROGRESS_AUTO_REFRESH_MAX_UPDATES = max(1, env_int("PROGRESS_AUTO_REFRESH_MAX_UPDATES", 20))
+PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL = env_flag("PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL", "true")
+PROGRESS_AUTO_REFRESH_EDIT_ONLY = env_flag("PROGRESS_AUTO_REFRESH_EDIT_ONLY", "true")
+PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT = max(0, env_int("PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT", 5))
+PROGRESS_AUTO_REFRESH_JOBS: dict[str, dict] = {}
+PROGRESS_AUTO_REFRESH_TASKS: dict[str, asyncio.Task] = {}
 ENGINE_ASYNC_JOB_FEATURE_PREFIX = {
     "music_suno": "MUS",
     "music_song": "MUS",
@@ -5945,13 +5953,16 @@ def product_progress_status_keyboard(
     send_callback: str = "",
     back_callback: str = "",
 ) -> InlineKeyboardMarkup:
+    canonical = product_progress_status.normalize_product_type(product_type)
     rows = product_progress_status.product_progress_button_rows(
-        product_type,
+        canonical,
         job_id,
         lang=lang,
         send_callback=send_callback,
         back_callback=back_callback,
     )
+    if canonical in {"music_bg", "music_song"}:
+        rows.insert(1, [("🔎 Kiểm tra/gửi kết quả", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_ai_status"))])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
         for row in rows
@@ -5984,6 +5995,260 @@ def product_progress_status_from_job_text(product_type: str = "", job: dict | No
     )
 
 
+def progress_auto_refresh_key(product_type: str = "", job_id: str = "") -> str:
+    canonical = product_progress_status.normalize_product_type(product_type)
+    safe_job = product_progress_status.product_progress_safe_callback_value(job_id, 40) or "latest"
+    return f"{canonical}:{safe_job}"
+
+
+def progress_auto_refresh_read_status(product_type: str = "", job_id: str = "", user_id=0) -> dict:
+    canonical = product_progress_status.normalize_product_type(product_type)
+    if canonical == "frame_video":
+        return frame_video_job_for_user(job_id, user_id) or dict(FRAME_VIDEO_JOBS.get(str(job_id or "")) or {})
+    return get_engine_async_job(job_id)
+
+
+def progress_auto_refresh_snapshot(product_type: str = "", job_id: str = "", job: dict | None = None, lang: str = "vi") -> dict:
+    canonical = product_progress_status.normalize_product_type(product_type)
+    current = dict(job if job is not None else progress_auto_refresh_read_status(canonical, job_id))
+    state = product_progress_state_from_job(canonical, current)
+    stage = str(state.get("current_stage") or "")
+    percent = int(state.get("percent") or 0)
+    terminal = str(state.get("terminal_state") or "")
+    return {
+        "product_type": canonical,
+        "job_id": str(job_id or current.get("internal_job_id") or current.get("job_id") or current.get("id") or ""),
+        "stage": stage,
+        "percent": percent,
+        "terminal_state": terminal,
+        "text": product_progress_status_from_job_text(canonical, current, job_id, lang),
+    }
+
+
+def progress_auto_refresh_should_edit(record: dict, snapshot: dict) -> bool:
+    terminal = str(snapshot.get("terminal_state") or "")
+    if terminal and terminal != str(record.get("terminal_state") or ""):
+        return True
+    stage = str(snapshot.get("stage") or "")
+    if stage and stage != str(record.get("last_stage") or ""):
+        return True
+    percent = int(snapshot.get("percent") or 0)
+    last_percent = int(record.get("last_percent") or 0)
+    return abs(percent - last_percent) >= int(record.get("min_delta_percent") or PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT)
+
+
+def progress_auto_refresh_register(
+    *,
+    product_type: str,
+    job_id: str,
+    chat_id,
+    message_id,
+    user_id=0,
+    lang: str = "vi",
+    context=None,
+    initial_snapshot: dict | None = None,
+    start_task: bool = True,
+) -> dict:
+    canonical = product_progress_status.normalize_product_type(product_type)
+    if not PROGRESS_AUTO_REFRESH_ENABLED or not job_id or not chat_id or not message_id:
+        return {}
+    snapshot = dict(initial_snapshot or progress_auto_refresh_snapshot(canonical, job_id, lang=lang))
+    key = progress_auto_refresh_key(canonical, job_id)
+    current = dict(PROGRESS_AUTO_REFRESH_JOBS.get(key) or {})
+    record = {
+        **current,
+        "key": key,
+        "product_type": canonical,
+        "job_id": str(job_id or ""),
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "user_id": user_id,
+        "lang": normalize_user_language(lang) or "vi",
+        "enabled": bool(PROGRESS_AUTO_REFRESH_ENABLED),
+        "interval_seconds": int(PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS),
+        "max_updates": int(PROGRESS_AUTO_REFRESH_MAX_UPDATES),
+        "edit_only": bool(PROGRESS_AUTO_REFRESH_EDIT_ONLY),
+        "min_delta_percent": int(PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT),
+        "last_stage": str(snapshot.get("stage") or current.get("last_stage") or ""),
+        "last_percent": int(snapshot.get("percent") or current.get("last_percent") or 0),
+        "terminal_state": str(snapshot.get("terminal_state") or current.get("terminal_state") or ""),
+        "last_update_at": current.get("last_update_at") or now_text(),
+        "update_count": int(current.get("update_count") or 0),
+        "edit_success_count": int(current.get("edit_success_count") or 0),
+        "edit_fail_count": int(current.get("edit_fail_count") or 0),
+        "fallback_used": bool(current.get("fallback_used")),
+        "stopped": bool(snapshot.get("terminal_state")) and bool(PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
+        "stop_reason": "terminal" if snapshot.get("terminal_state") and PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL else "",
+    }
+    PROGRESS_AUTO_REFRESH_JOBS[key] = record
+    if start_task:
+        progress_auto_refresh_start_task(context, key)
+    return dict(record)
+
+
+def progress_auto_refresh_register_message(message, context, *, product_type: str, job_id: str, user_id=0, lang: str = "vi") -> dict:
+    chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
+    message_id = getattr(message, "message_id", None)
+    return progress_auto_refresh_register(
+        product_type=product_type,
+        job_id=job_id,
+        chat_id=chat_id,
+        message_id=message_id,
+        user_id=user_id,
+        lang=lang,
+        context=context,
+    )
+
+
+def progress_auto_refresh_context_can_start(context) -> bool:
+    return bool(getattr(context, "bot", None) or getattr(getattr(context, "application", None), "bot", None))
+
+
+def progress_auto_refresh_start_task(context, key: str) -> bool:
+    record = PROGRESS_AUTO_REFRESH_JOBS.get(str(key or "")) or {}
+    if not record or record.get("stopped"):
+        return False
+    if not progress_auto_refresh_context_can_start(context):
+        return False
+    existing = PROGRESS_AUTO_REFRESH_TASKS.get(str(key or ""))
+    if existing and not existing.done():
+        return True
+    try:
+        application = getattr(context, "application", None)
+        if application and hasattr(application, "create_task"):
+            task = application.create_task(progress_auto_refresh_loop(context, str(key or "")))
+        else:
+            task = asyncio.create_task(progress_auto_refresh_loop(context, str(key or "")))
+        PROGRESS_AUTO_REFRESH_TASKS[str(key or "")] = task
+        return True
+    except RuntimeError:
+        return False
+
+
+async def progress_auto_refresh_loop(context, key: str):
+    while True:
+        record = PROGRESS_AUTO_REFRESH_JOBS.get(str(key or "")) or {}
+        if not record or record.get("stopped"):
+            return
+        await asyncio.sleep(int(record.get("interval_seconds") or PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS))
+        result = await progress_auto_refresh_tick(context, key)
+        if str(result.get("status") or "") in {"missing", "stopped"}:
+            return
+
+
+async def progress_auto_refresh_tick(context, key: str) -> dict:
+    record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(str(key or "")) or {})
+    if not record:
+        return {"status": "missing"}
+    if record.get("stopped"):
+        return {"status": "stopped", "reason": record.get("stop_reason") or ""}
+    if int(record.get("update_count") or 0) >= int(record.get("max_updates") or PROGRESS_AUTO_REFRESH_MAX_UPDATES):
+        record["stopped"] = True
+        record["stop_reason"] = "max_updates"
+        PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {"status": "stopped", "reason": "max_updates"}
+    snapshot = progress_auto_refresh_snapshot(
+        record.get("product_type") or "",
+        record.get("job_id") or "",
+        job=progress_auto_refresh_read_status(record.get("product_type") or "", record.get("job_id") or "", record.get("user_id") or 0),
+        lang=record.get("lang") or "vi",
+    )
+    record["update_count"] = int(record.get("update_count") or 0) + 1
+    terminal = str(snapshot.get("terminal_state") or "")
+    should_edit = progress_auto_refresh_should_edit(record, snapshot)
+    if should_edit:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=record.get("chat_id"),
+                message_id=record.get("message_id"),
+                text=str(snapshot.get("text") or ""),
+                parse_mode="HTML",
+                reply_markup=product_progress_status_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
+            )
+            record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
+            record["last_update_at"] = now_text()
+            record["last_stage"] = str(snapshot.get("stage") or "")
+            record["last_percent"] = int(snapshot.get("percent") or 0)
+            record["terminal_state"] = terminal
+        except Exception as exc:
+            record["edit_fail_count"] = int(record.get("edit_fail_count") or 0) + 1
+            record["last_error"] = sanitize_log_text(str(exc))[:180]
+            if not bool(record.get("edit_only")) and not record.get("fallback_used"):
+                try:
+                    sent = await context.bot.send_message(
+                        chat_id=record.get("chat_id"),
+                        text=str(snapshot.get("text") or ""),
+                        parse_mode="HTML",
+                        reply_markup=product_progress_status_keyboard(record.get("product_type") or "", record.get("job_id") or "", record.get("lang") or "vi"),
+                    )
+                    record["message_id"] = getattr(sent, "message_id", record.get("message_id"))
+                    record["fallback_used"] = True
+                    record["last_update_at"] = now_text()
+                except Exception as send_exc:
+                    record["last_error"] = sanitize_log_text(str(send_exc))[:180]
+    else:
+        record["last_checked_at"] = now_text()
+    if terminal and PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL:
+        record["stopped"] = True
+        record["stop_reason"] = terminal
+        record["terminal_state"] = terminal
+    elif int(record.get("update_count") or 0) >= int(record.get("max_updates") or PROGRESS_AUTO_REFRESH_MAX_UPDATES):
+        record["stopped"] = True
+        record["stop_reason"] = "max_updates"
+    PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+    return {"status": "updated" if should_edit else "skipped", "record": dict(record), "snapshot": snapshot}
+
+
+async def send_product_progress_message(
+    message,
+    context,
+    *,
+    product_type: str,
+    job_id: str,
+    current_stage: str = "",
+    percent: int | None = None,
+    terminal_state: str = "",
+    public_note: str = "",
+    lang: str = "vi",
+    user_id=0,
+):
+    sent = await message.reply_text(
+        product_progress_status_text(product_type, job_id, current_stage, percent, terminal_state, public_note, lang),
+        parse_mode="HTML",
+        reply_markup=product_progress_status_keyboard(product_type, job_id, lang),
+    )
+    progress_auto_refresh_register_message(sent, context, product_type=product_type, job_id=job_id, user_id=user_id, lang=lang)
+    return sent
+
+
+def progress_auto_refresh_status_text(job_id: str = "") -> str:
+    wanted = str(job_id or "").strip()
+    records = [
+        dict(record)
+        for record in PROGRESS_AUTO_REFRESH_JOBS.values()
+        if not wanted or wanted in {str(record.get("job_id") or ""), str(record.get("key") or "")}
+    ]
+    if not records:
+        return "📊 <b>Auto refresh</b>\n\nKhông có bảng trạng thái auto-refresh đang được lưu."
+    lines = ["📊 <b>Auto refresh</b>", ""]
+    for record in records[:10]:
+        lines.extend([
+            f"• product_type: <code>{html.escape(str(record.get('product_type') or '-'))}</code>",
+            f"• job_id: <code>{html.escape(str(record.get('job_id') or '-'))}</code>",
+            f"• enabled: <code>{'yes' if record.get('enabled') else 'no'}</code>",
+            f"• chat_id/message_id: <code>{html.escape(str(record.get('chat_id') or '-'))}/{html.escape(str(record.get('message_id') or '-'))}</code>",
+            f"• last_update_at: <code>{html.escape(str(record.get('last_update_at') or '-'))}</code>",
+            f"• update_count/max: <code>{int(record.get('update_count') or 0)}/{int(record.get('max_updates') or 0)}</code>",
+            f"• terminal_state: <code>{html.escape(str(record.get('terminal_state') or '-'))}</code>",
+            f"• last_percent/stage: <code>{int(record.get('last_percent') or 0)}% / {html.escape(str(record.get('last_stage') or '-'))}</code>",
+            f"• edit_success/fail: <code>{int(record.get('edit_success_count') or 0)}/{int(record.get('edit_fail_count') or 0)}</code>",
+            f"• fallback_used: <code>{'yes' if record.get('fallback_used') else 'no'}</code>",
+            f"• stopped: <code>{'yes' if record.get('stopped') else 'no'} {html.escape(str(record.get('stop_reason') or ''))}</code>",
+            "",
+        ])
+    return "\n".join(lines).strip()
+
+
 def video_product_progress_text(product_type: str, job_id: str = "", stage: str = "rendering_video", percent: int | None = None, lang: str = "vi") -> str:
     return product_progress_status_text(product_type, job_id, stage, percent, lang=lang)
 
@@ -6002,6 +6267,7 @@ def product_progress_matrix_text() -> str:
 
 def product_progress_debug_text(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
     payload = product_progress_status.product_progress_debug_payload(product_type or "multiscene_video", job_id, job)
+    auto = progress_auto_refresh_status_text(job_id)
     return (
         "📊 <b>TOAN AAS progress status</b>\n\n"
         f"• Product: <code>{html.escape(str(payload.get('product_type') or '-'))}</code>\n"
@@ -6009,7 +6275,8 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
         f"• Stage: <code>{html.escape(str(payload.get('current_stage') or '-'))}</code>\n"
         f"• Percent: <code>{int(payload.get('percent') or 0)}%</code>\n"
         f"• Terminal: <code>{html.escape(str(payload.get('terminal_state') or '-'))}</code>\n"
-        f"• Callback: <code>{html.escape(str(payload.get('update_callback') or '-'))}</code>"
+        f"• Callback: <code>{html.escape(str(payload.get('update_callback') or '-'))}</code>\n\n"
+        + auto
     )
 
 
@@ -6027,6 +6294,52 @@ async def cmd_progress_status_debug(update: Update, context: ContextTypes.DEFAUL
     product_type = str(args[1] if len(args) > 1 else "multiscene_video").strip()
     job = get_engine_async_job(job_id) if job_id else {}
     return await update.message.reply_text(product_progress_debug_text(job_id, product_type, job), parse_mode="HTML")
+
+
+async def cmd_progress_auto_refresh_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    args = list(getattr(context, "args", []) or [])
+    job_id = str(args[0] if args else "").strip()
+    return await update.message.reply_text(progress_auto_refresh_status_text(job_id), parse_mode="HTML")
+
+
+def music_job_debug_text(job_id: str = "") -> str:
+    job = get_engine_async_job(job_id) if job_id else {}
+    state = product_progress_state_from_job("music_song" if str((job or {}).get("feature") or "").lower() == "music_song" else "music_bg", job)
+    provider_task_id = str((job or {}).get("provider_task_id") or "")
+    output_bytes = int((job or {}).get("output_bytes") or 0)
+    artifact_state = "ready" if output_bytes > 0 else "not_ready"
+    status = str((job or {}).get("status") or "missing")
+    terminal = str(state.get("terminal_state") or "")
+    blocker = ""
+    if not job:
+        blocker = "missing_job"
+    elif terminal == "failed_no_charge":
+        blocker = str((job or {}).get("error_category") or "failed")
+    elif status in {"submitted", "queued", "processing"} and output_bytes <= 0:
+        blocker = "waiting_for_result"
+    return (
+        "🎵 <b>Music job debug</b>\n\n"
+        f"• music_job_id: <code>{html.escape(str(job_id or '-'))}</code>\n"
+        f"• provider_job_id: <code>{html.escape(mask_provider_task_id(provider_task_id) if provider_task_id else '-')}</code>\n"
+        f"• product_type: <code>{html.escape(str(state.get('product_type') or '-'))}</code>\n"
+        f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
+        f"• percent: <code>{int(state.get('percent') or 0)}%</code>\n"
+        f"• provider_status: <code>{html.escape(sanitize_provider_status_text((job or {}).get('last_provider_status') or status, provider_task_id, 180))}</code>\n"
+        f"• artifact: <code>{artifact_state}; bytes={output_bytes}</code>\n"
+        f"• delivery_state: <code>{html.escape(str((job or {}).get('delivery_state') or (job or {}).get('status') or '-'))}</code>\n"
+        f"• terminal_state: <code>{html.escape(terminal or '-')}</code>\n"
+        f"• blocker: <code>{html.escape(blocker or '-')}</code>"
+    )
+
+
+async def cmd_music_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    args = list(getattr(context, "args", []) or [])
+    job_id = str(args[0] if args else "").strip()
+    return await update.message.reply_text(music_job_debug_text(job_id), parse_mode="HTML")
 
 
 async def cmd_product_job_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6054,12 +6367,21 @@ async def handle_product_progress_callback(update: Update, context: ContextTypes
     if not job and canonical == "frame_video":
         job = frame_video_job_for_user(job_id, query.from_user.id if getattr(query, "from_user", None) else 0)
     text = product_progress_status_from_job_text(canonical, job, job_id, lang)
-    return await safe_edit_or_send(
+    result = await safe_edit_or_send(
         query,
         text,
         parse_mode="HTML",
         reply_markup=product_progress_status_keyboard(canonical, job_id, lang),
     )
+    progress_auto_refresh_register_message(
+        getattr(query, "message", None),
+        context,
+        product_type=canonical,
+        job_id=job_id,
+        user_id=query.from_user.id if getattr(query, "from_user", None) else 0,
+        lang=lang,
+    )
+    return result
 
 def record_api_debug(provider: str, action: str, status: str, http_status: int = 0, detail: str = ""):
     conn = None
@@ -95511,17 +95833,16 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
         )
     product_type = music_product_progress_type(current)
     internal_job_id = str(music_job.get("internal_job_id") or "")
-    return await query.message.reply_text(
-        product_progress_status_text(
-            product_type,
-            internal_job_id,
-            "received_request",
-            5,
-            public_note="Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công.",
-            lang=lang,
-        ),
-        parse_mode="HTML",
-        reply_markup=product_progress_status_keyboard(product_type, internal_job_id, lang),
+    return await send_product_progress_message(
+        query.message,
+        context,
+        product_type=product_type,
+        job_id=internal_job_id,
+        current_stage="received_request",
+        percent=5,
+        public_note="Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công.",
+        lang=lang,
+        user_id=user_id,
     )
 
 async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97348,17 +97669,16 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         save_music_guided_result(user_id, result)
         product_type = music_product_progress_type(result)
         internal_job_id = str(music_job.get("internal_job_id") or "")
-        return await query.message.reply_text(
-            product_progress_status_text(
-                product_type,
-                internal_job_id,
-                "received_request",
-                5,
-                public_note=f"Đã xác nhận tạo {music_confirm_product_label(result, lang)}. TOAN AAS sẽ gửi kết quả khi file sẵn sàng.",
-                lang=lang,
-            ),
-            parse_mode="HTML",
-            reply_markup=product_progress_status_keyboard(product_type, internal_job_id, lang),
+        return await send_product_progress_message(
+            query.message,
+            context,
+            product_type=product_type,
+            job_id=internal_job_id,
+            current_stage="received_request",
+            percent=5,
+            public_note=f"Đã xác nhận tạo {music_confirm_product_label(result, lang)}. TOAN AAS sẽ gửi kết quả khi file sẵn sàng.",
+            lang=lang,
+            user_id=user_id,
         )
     if action == "music_ai_status":
         await query.answer()
@@ -101312,13 +101632,7 @@ def frame_video_job_status_text(job: dict) -> str:
     return "\n".join(lines)
 
 def frame_video_job_status_keyboard(job_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Kiểm tra trạng thái ghép video", callback_data=f"framevideo|status|{str(job_id or '')}")],
-        [
-            InlineKeyboardButton("⬅️ Menu video", callback_data="menu|main_video"),
-            InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main"),
-        ],
-    ])
+    return product_progress_status_keyboard("frame_video", str(job_id or ""), "vi")
 
 def set_frame_video_state(user_id, state: dict) -> dict:
     now_ts = time.time()
@@ -123734,19 +124048,21 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
             set_frame_video_state(uid, state)
             clear_frame_video_state(uid)
             price = frame_video_price_breakdown(state)
-            return await safe_edit_or_send(
+            sent = await safe_edit_or_send(
                 query,
-                "🎞 TOAN AAS đang ghép ảnh thành video cho bạn.\n"
-                "Quá trình này có thể mất vài phút.\n"
-                "Không cần gửi lại lệnh.\n\n"
-                f"Job: {job_id}\n"
-                f"Worker job: {local_job_id}\n"
-                "Auto poll: ON\n"
-                f"Số ảnh: {int(price.get('image_count') or 0)}\n"
-                "Status: waiting_worker",
-                parse_mode=None,
+                product_progress_status_text(
+                    "frame_video",
+                    job_id,
+                    "received_images",
+                    5,
+                    public_note=f"TOAN AAS đang ghép {int(price.get('image_count') or 0)} ảnh thành video. Anh/chị không cần gửi lại lệnh.",
+                    lang=lang,
+                ),
+                parse_mode="HTML",
                 reply_markup=frame_video_job_status_keyboard(job_id),
             )
+            progress_auto_refresh_register_message(sent or query.message, context, product_type="frame_video", job_id=job_id, user_id=uid, lang=lang)
+            return sent
         if not guard.get("ok"):
             reason = str(guard.get("reason") or "blocked")
             set_frame_video_last_error(reason)
@@ -123792,16 +124108,18 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         price = frame_video_price_breakdown(state)
         waiting = await safe_edit_or_send(
             query,
-            "🎞 TOAN AAS đang ghép ảnh thành video cho bạn.\n"
-            "Quá trình này có thể mất vài phút.\n"
-            "Không cần gửi lại lệnh.\n\n"
-            f"Job: {job_id}\n"
-            "Auto poll: OFF\n"
-            f"Số ảnh: {int(price.get('image_count') or 0)}\n"
-            "Status: rendering",
-            parse_mode=None,
+            product_progress_status_text(
+                "frame_video",
+                job_id,
+                "rendering_video",
+                65,
+                public_note=f"TOAN AAS đang ghép {int(price.get('image_count') or 0)} ảnh thành video. Anh/chị không cần gửi lại lệnh.",
+                lang=lang,
+            ),
+            parse_mode="HTML",
             reply_markup=frame_video_job_status_keyboard(job_id),
         )
+        progress_auto_refresh_register_message(waiting or query.message, context, product_type="frame_video", job_id=job_id, user_id=uid, lang=lang)
         with tempfile.TemporaryDirectory() as tmpdir:
             out_path = os.path.join(tmpdir, "toan_aas_frame_video.mp4")
             ok, detail = await render_frame_video_from_state(context, state, out_path, tmpdir)
@@ -160810,7 +161128,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("tool_public_status", cmd_tool_public_status))
     tg_app.add_handler(CommandHandler("progress_status_debug", cmd_progress_status_debug))
     tg_app.add_handler(CommandHandler("progress_status_matrix", cmd_progress_status_matrix))
+    tg_app.add_handler(CommandHandler("progress_auto_refresh_status", cmd_progress_auto_refresh_status))
     tg_app.add_handler(CommandHandler("product_job_status", cmd_product_job_status))
+    tg_app.add_handler(CommandHandler("music_job_debug", cmd_music_job_debug))
     tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
     tg_app.add_handler(CommandHandler("dubbing_help", cmd_dubbing_help))
     tg_app.add_handler(CommandHandler("story_video_factory", cmd_story_video_factory))
