@@ -91,7 +91,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline
 from services import voice_clone_pipeline
 from services import remote_worker_api, worker_auth
 from services import video_asset_intake as video_assets
@@ -5781,12 +5781,12 @@ def music_vault_status_lines(statuses: set[str] | None = None, limit: int = 8) -
 def engine_async_waiting_text(job: dict, *, admin: bool = False) -> str:
     internal_id = str((job or {}).get("internal_job_id") or "-")
     lines = [
-        "✅ Provider đã nhận job thật. TOAN AAS đang xử lý, chưa trừ Xu của khách.",
-        "Trạng thái hiện tại: đang chờ provider.",
-        "Bạn có thể bấm 🔄 Kiểm tra trạng thái.",
+        "✅ TOAN AAS đã nhận lượt xử lý.",
+        "Trạng thái hiện tại: đang chuẩn bị kết quả.",
+        "Anh/chị có thể bấm 🔄 Cập nhật trạng thái.",
     ]
     if admin:
-        lines.append(f"Admin job: <code>{html.escape(internal_id)}</code>")
+        lines.append(f"Mã xử lý: <code>{html.escape(internal_id)}</code>")
     return "\n".join(lines)
 
 def _engine_async_parse_time(value) -> datetime | None:
@@ -5916,6 +5916,150 @@ def engine_async_status_keyboard(internal_job_id: str, kind: str = "music") -> I
     else:
         rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
+
+
+def product_progress_status_text(
+    product_type: str = "",
+    job_id: str = "",
+    current_stage: str = "",
+    percent: int | None = None,
+    terminal_state: str = "",
+    public_note: str = "",
+    lang: str = "vi",
+) -> str:
+    return product_progress_status.render_product_progress_panel(
+        product_type=product_type,
+        job_id=job_id,
+        current_stage=current_stage,
+        percent=percent,
+        terminal_state=terminal_state,
+        public_note=public_note,
+        lang=lang,
+    )
+
+
+def product_progress_status_keyboard(
+    product_type: str = "",
+    job_id: str = "",
+    lang: str = "vi",
+    send_callback: str = "",
+    back_callback: str = "",
+) -> InlineKeyboardMarkup:
+    rows = product_progress_status.product_progress_button_rows(
+        product_type,
+        job_id,
+        lang=lang,
+        send_callback=send_callback,
+        back_callback=back_callback,
+    )
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
+        for row in rows
+    ])
+
+
+def music_product_progress_type(result: dict | None = None) -> str:
+    current = dict(result or {})
+    kind = str(current.get("product_kind") or current.get("music_ai_kind") or music_result_product_kind(current)).strip().lower()
+    if "song" in kind or "lyrics" in kind or current.get("lyrics_enabled") or current.get("lyrics_text"):
+        return "music_song"
+    return "music_bg"
+
+
+def product_progress_state_from_job(product_type: str = "", job: dict | None = None) -> dict:
+    return product_progress_status.product_progress_stage_from_job(product_type, dict(job or {}))
+
+
+def product_progress_status_from_job_text(product_type: str = "", job: dict | None = None, job_id: str = "", lang: str = "vi") -> str:
+    current = dict(job or {})
+    state = product_progress_state_from_job(product_type, current)
+    public_id = job_id or current.get("internal_job_id") or current.get("job_id") or current.get("id") or current.get("provider_task_id") or ""
+    return product_progress_status_text(
+        state.get("product_type") or product_type,
+        str(public_id or ""),
+        str(state.get("current_stage") or ""),
+        int(state.get("percent") or 0),
+        str(state.get("terminal_state") or ""),
+        lang=lang,
+    )
+
+
+def video_product_progress_text(product_type: str, job_id: str = "", stage: str = "rendering_video", percent: int | None = None, lang: str = "vi") -> str:
+    return product_progress_status_text(product_type, job_id, stage, percent, lang=lang)
+
+
+def addon_product_progress_text(product_type: str, job_id: str = "", stage: str = "received_request", percent: int | None = None, lang: str = "vi") -> str:
+    return product_progress_status_text(product_type, job_id, stage, percent, lang=lang)
+
+
+def addon_logo_config_saved_text(lang: str = "vi") -> str:
+    return product_progress_status.addon_config_saved_text(lang)
+
+
+def product_progress_matrix_text() -> str:
+    return "\n".join(product_progress_status.product_progress_matrix_lines())
+
+
+def product_progress_debug_text(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
+    payload = product_progress_status.product_progress_debug_payload(product_type or "multiscene_video", job_id, job)
+    return (
+        "📊 <b>TOAN AAS progress status</b>\n\n"
+        f"• Product: <code>{html.escape(str(payload.get('product_type') or '-'))}</code>\n"
+        f"• Code: <code>{html.escape(str(payload.get('job_code') or '-'))}</code>\n"
+        f"• Stage: <code>{html.escape(str(payload.get('current_stage') or '-'))}</code>\n"
+        f"• Percent: <code>{int(payload.get('percent') or 0)}%</code>\n"
+        f"• Terminal: <code>{html.escape(str(payload.get('terminal_state') or '-'))}</code>\n"
+        f"• Callback: <code>{html.escape(str(payload.get('update_callback') or '-'))}</code>"
+    )
+
+
+async def cmd_progress_status_matrix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(product_progress_matrix_text(), parse_mode="HTML")
+
+
+async def cmd_progress_status_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    args = list(getattr(context, "args", []) or [])
+    job_id = str(args[0] if args else "").strip()
+    product_type = str(args[1] if len(args) > 1 else "multiscene_video").strip()
+    job = get_engine_async_job(job_id) if job_id else {}
+    return await update.message.reply_text(product_progress_debug_text(job_id, product_type, job), parse_mode="HTML")
+
+
+async def cmd_product_job_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    args = list(getattr(context, "args", []) or [])
+    job_id = str(args[0] if args else "").strip()
+    product_type = str(args[1] if len(args) > 1 else "multiscene_video").strip()
+    job = get_engine_async_job(job_id) if job_id else {}
+    text = product_progress_status_from_job_text(product_type, job, job_id, user_ui_lang(update.effective_user.id if update.effective_user else 0))
+    return await update.message.reply_text(text, parse_mode="HTML", reply_markup=product_progress_status_keyboard(product_type, job_id))
+
+
+async def handle_product_progress_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    parts = str(query.data or "").split("|")
+    product_type = parts[2] if len(parts) > 2 else "multiscene_video"
+    job_id = parts[3] if len(parts) > 3 else ""
+    lang = user_ui_lang(query.from_user.id) if getattr(query, "from_user", None) else "vi"
+    canonical = product_progress_status.normalize_product_type(product_type)
+    job = get_engine_async_job(job_id) if job_id and job_id != "latest" else {}
+    if not job and canonical == "frame_video":
+        job = frame_video_job_for_user(job_id, query.from_user.id if getattr(query, "from_user", None) else 0)
+    text = product_progress_status_from_job_text(canonical, job, job_id, lang)
+    return await safe_edit_or_send(
+        query,
+        text,
+        parse_mode="HTML",
+        reply_markup=product_progress_status_keyboard(canonical, job_id, lang),
+    )
 
 def record_api_debug(provider: str, action: str, status: str, http_status: int = 0, detail: str = ""):
     conn = None
@@ -61691,7 +61835,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value == "none":
             session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_text="", logo_file_id="", logo_note="")
             session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-            return await safe_edit_or_send(query, "✅ Đã xóa logo/watermark khỏi kế hoạch.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+            return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
         session = task3d_session_step(uid, "b14_logo_text_wait", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_logo_input_text(lang), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_addon_logo"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
     if action == "b14_logo_position_screen":
@@ -61728,11 +61872,11 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             logo_note="",
         )
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, "✅ Đã lưu logo/watermark chữ.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+        return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_logo_clear":
         session = video_b14_set_addon_plan(uid, session, logo_enabled=False, logo_source="none", logo_text="", logo_file_id="", logo_note="")
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
-        return await safe_edit_or_send(query, "✅ Đã xóa logo/watermark khỏi kế hoạch.\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
+        return await safe_edit_or_send(query, addon_logo_config_saved_text(lang) + "\n\n" + video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
     if action == "b14_logo_done":
         session = task3d_session_step(uid, "b14_addons", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_addon_text(session, lang), parse_mode="HTML", reply_markup=video_b14_addon_keyboard(lang))
@@ -95172,9 +95316,19 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
             parse_mode="HTML",
             reply_markup=music_product_success_keyboard(lang, ctx),
         )
+    product_type = music_product_progress_type(current)
+    internal_job_id = str(music_job.get("internal_job_id") or "")
     return await query.message.reply_text(
-        "⏳ TOAN AAS đang tạo nhạc. Khi có file, bot sẽ gửi kết quả cho anh/chị. TOAN AAS chưa trừ Xu cho đến khi file nhạc được gửi thành công.",
-        reply_markup=music_ai_status_keyboard(lang, ctx),
+        product_progress_status_text(
+            product_type,
+            internal_job_id,
+            "received_request",
+            5,
+            public_note="Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công.",
+            lang=lang,
+        ),
+        parse_mode="HTML",
+        reply_markup=product_progress_status_keyboard(product_type, internal_job_id, lang),
     )
 
 async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96757,7 +96911,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             capped_bytes, _cap_detail = await cap_voice_preview_audio_bytes(bytes(preview_audio), music_preview_seconds())
             if not capped_bytes:
                 return await query.message.reply_text(
-                    "⚠️ Provider đã trả audio nhưng chưa cắt được bản nghe thử. Bản đầy đủ đã lưu metadata trong kho, chưa giao và chưa trừ Xu final.",
+                    "⚠️ File nhạc đã có nhưng chưa cắt được bản nghe thử. Bản đầy đủ chưa giao và chưa trừ Xu final.",
                     reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
                 )
             audio_file = video_dubbing_output_file(bytes(capped_bytes), "toan_aas_music_preview.mp3")
@@ -96789,7 +96943,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         })
         save_music_guided_result(user_id, result)
         return await query.message.reply_text(
-            "▶️ Provider đã nhận job nhạc thật. Khi có kết quả, TOAN AAS chỉ gửi nghe thử 12 giây đầu, bản đầy đủ lưu trong kho và chưa giao/trừ Xu final.",
+            "▶️ TOAN AAS đã nhận lượt tạo nhạc. Khi có kết quả, hệ thống chỉ gửi nghe thử 12 giây đầu, bản đầy đủ chưa giao và chưa trừ Xu final.",
             reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=False, result=result),
         )
     if action == "music_ai_save_vault":
@@ -96808,7 +96962,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=bool(result.get("music_preview_seen")), result=result),
             )
         return await query.message.reply_text(
-            "🗂 Chưa có file nhạc thật để lưu kho. Hãy bấm Nghe thử 12 giây hoặc Kiểm tra kết quả sau khi provider hoàn tất. TOAN AAS không tạo fake vault.",
+            "🗂 Chưa có file nhạc thật để lưu kho. Hãy bấm Nghe thử 12 giây hoặc kiểm tra lại sau khi kết quả sẵn sàng.",
             reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=bool(result.get("music_preview_seen")), result=result),
         )
     if action == "music_ai_confirm":
@@ -96999,20 +97153,19 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             "music_submitted_at": now_text(),
         })
         save_music_guided_result(user_id, result)
-        charge_line = f"Đã trừ: {charged} Xu. " if charged > 0 else "Admin test: chưa trừ Xu khách. "
-        waiting_text = engine_async_waiting_text(music_job, admin=bool(is_admin_user(user_id)))
-        if charged > 0:
-            waiting_text = (
-                "✅ Provider đã nhận job thật. TOAN AAS đang xử lý.\n"
-                f"{charge_line}\n"
-                "Trạng thái hiện tại: đang chờ provider.\n"
-                "Bạn có thể bấm 🔄 Kiểm tra trạng thái."
-            )
+        product_type = music_product_progress_type(result)
+        internal_job_id = str(music_job.get("internal_job_id") or "")
         return await query.message.reply_text(
-            f"✅ Đã xác nhận tạo {music_confirm_product_label(result, lang)}.\n"
-            f"{waiting_text}",
+            product_progress_status_text(
+                product_type,
+                internal_job_id,
+                "received_request",
+                5,
+                public_note=f"Đã xác nhận tạo {music_confirm_product_label(result, lang)}. TOAN AAS sẽ gửi kết quả khi file sẵn sàng.",
+                lang=lang,
+            ),
             parse_mode="HTML",
-            reply_markup=music_ai_status_keyboard(lang, ctx),
+            reply_markup=product_progress_status_keyboard(product_type, internal_job_id, lang),
         )
     if action == "music_ai_status":
         await query.answer()
@@ -97093,16 +97246,23 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                     result["music_refunded"] = True
                 result["music_status"] = "failed"
                 save_music_guided_result(user_id, result)
+                product_type = music_product_progress_type(result)
                 return await query.message.reply_text(
-                    "⚠️ Tạo nhạc chưa thành công. TOAN AAS đã hoàn Xu nếu có phát sinh.\n\n"
-                    + engine_async_status_text(job_snapshot, admin=bool(is_admin_user(user_id))),
+                    product_progress_status_text(
+                        product_type,
+                        internal_job_id,
+                        str((job_snapshot or {}).get("stage") or (job_snapshot or {}).get("status") or "generating_music"),
+                        terminal_state="failed_refunded",
+                        lang=lang,
+                    ),
                     parse_mode="HTML",
                     reply_markup=music_hub_keyboard(lang, ctx),
                 )
+            product_type = music_product_progress_type(result)
             return await query.message.reply_text(
-                engine_async_status_text(job_snapshot, admin=bool(is_admin_user(user_id))),
+                product_progress_status_from_job_text(product_type, job_snapshot, internal_job_id, lang),
                 parse_mode="HTML",
-                reply_markup=music_ai_status_keyboard(lang, ctx),
+                reply_markup=product_progress_status_keyboard(product_type, internal_job_id, lang),
             )
         polled = await poll_music_generation_job(result, updated_by=user_id)
         output_url = str(polled.get("output_url") or "")
@@ -97188,9 +97348,18 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         ):
             result["music_status"] = "missing_download_result"
             save_music_guided_result(user_id, result)
+            product_type = music_product_progress_type(result)
             return await query.message.reply_text(
-                "Provider đã nhận job nhưng chưa có kết quả tải file nhạc. Không trừ Xu.",
-                reply_markup=music_ai_status_keyboard(lang, ctx),
+                product_progress_status_text(
+                    product_type,
+                    str(result.get("music_internal_job_id") or result.get("music_task_id") or ""),
+                    "validating_audio",
+                    85,
+                    public_note="TOAN AAS chưa có file nhạc để gửi. Chưa trừ Xu mới.",
+                    lang=lang,
+                ),
+                parse_mode="HTML",
+                reply_markup=product_progress_status_keyboard(product_type, str(result.get("music_internal_job_id") or ""), lang),
             )
         if any(token in status for token in ("fail", "error", "cancel")):
             charged = int(result.get("music_charged_xu") or 0)
@@ -97200,7 +97369,18 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             result["music_status"] = "failed"
             save_music_guided_result(user_id, result)
             return await query.message.reply_text("⚠️ Tạo nhạc chưa thành công. TOAN AAS đã hoàn Xu nếu có phát sinh.", reply_markup=music_hub_keyboard(lang, ctx))
-        return await query.message.reply_text("⏳ Bản nhạc vẫn đang được xử lý. Bạn chờ thêm một chút rồi kiểm tra lại nhé.", reply_markup=music_ai_status_keyboard(lang, ctx))
+        product_type = music_product_progress_type(result)
+        return await query.message.reply_text(
+            product_progress_status_text(
+                product_type,
+                str(result.get("music_internal_job_id") or result.get("music_task_id") or ""),
+                "generating_song" if product_type == "music_song" else "generating_music",
+                65 if product_type == "music_song" else 60,
+                lang=lang,
+            ),
+            parse_mode="HTML",
+            reply_markup=product_progress_status_keyboard(product_type, str(result.get("music_internal_job_id") or ""), lang),
+        )
     if action.startswith("voice_style_"):
         await query.answer()
         result = get_music_guided_result(user_id) or {}
@@ -100907,34 +101087,35 @@ def frame_video_job_for_user(job_id: str, user_id=0) -> dict:
 def frame_video_job_status_text(job: dict) -> str:
     if not job:
         return "⚠️ Không tìm thấy job ghép video này."
-    ratio = frame_video_ratio_payload(job.get("ratio") or "9x16")
-    duration = frame_video_duration_payload(job.get("duration") or "standard")
-    effect = frame_video_effect_payload(job.get("effect") or "fade")
     status = str(job.get("status") or "").strip().lower()
-    status_label = {
-        "queued": "đang chờ xử lý",
-        "running": "đang ghép video",
-        "succeeded": "hoàn tất",
-        "success": "hoàn tất",
-        "completed": "hoàn tất",
-        "failed": "chưa ghép được",
-        "error": "chưa ghép được",
-        "cancelled": "đã hủy",
-    }.get(status, "đang kiểm tra")
-    lines = [
-        "🎞 <b>Trạng thái ghép ảnh thành video</b>",
-        "",
-        f"• Mã xử lý: <code>{html.escape(str(job.get('job_id') or '-'))}</code>",
-        f"• Trạng thái: <b>{html.escape(status_label)}</b>",
-        f"• Số ảnh: <code>{int(job.get('image_count') or 0)}</code>",
-        f"• Tỷ lệ: <code>{html.escape(str(ratio.get('label') or '-'))}</code>",
-        f"• Thời lượng: <code>{html.escape(str(duration.get('label') or '-'))}</code>",
-        f"• Hiệu ứng: <code>{html.escape(str(effect.get('label') or '-'))}</code>",
-        f"• Xu: <code>{str(int(job.get('charged_amount') or 0)) + ' Xu đã trừ' if int(job.get('charged_amount') or 0) > 0 else 'chưa trừ'}</code>",
-        f"• Cập nhật: <code>{html.escape(str(job.get('updated_at') or '-'))}</code>",
-    ]
+    stage = {
+        "queued": "received_images",
+        "running": "rendering_video",
+        "processing": "rendering_video",
+        "succeeded": "delivered",
+        "success": "delivered",
+        "completed": "delivered",
+        "failed": "rendering_video",
+        "error": "rendering_video",
+        "cancelled": "rendering_video",
+    }.get(status, "preparing_layout")
+    terminal = ""
+    if status in {"succeeded", "success", "completed"}:
+        terminal = "delivered"
+    elif status in {"failed", "error", "cancelled"}:
+        terminal = "failed_no_charge"
+    text = product_progress_status_text(
+        "frame_video",
+        str(job.get("job_id") or ""),
+        stage,
+        int(job.get("progress_percent") or 0) if job.get("progress_percent") is not None else None,
+        terminal,
+    )
+    lines = [text, "", f"• Số ảnh: <code>{int(job.get('image_count') or 0)}</code>"]
     if status in {"failed", "error"}:
-        lines.append("• Kết quả: TOAN AAS chưa dựng được video hoàn chỉnh lần này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau.")
+        lines.append("• Kết quả: TOAN AAS chưa ghép được video hoàn chỉnh lần này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau.")
+    elif status in {"succeeded", "success", "completed"}:
+        lines.append("• Kết quả: video đã hoàn tất.")
     return "\n".join(lines)
 
 def frame_video_job_status_keyboard(job_id: str) -> InlineKeyboardMarkup:
@@ -151808,40 +151989,13 @@ def subdub_progress_stage_payload(stage: str = "") -> dict:
 
 def subdub_progress_text(stage: str = "saved_input", job_id: str = "", lang: str = "vi") -> str:
     payload = subdub_progress_stage_payload(stage)
-    current = payload["stage"]
-    is_vi = normalize_user_language(lang) == "vi"
-    if not is_vi:
-        return (
-            "🎬 <b>TOAN AAS is processing your video</b>\n\n"
-            f"Status: {html.escape(str(payload['status']))}\n"
-            f"Progress: {int(payload['percent'])}%\n"
-            f"Job code: <code>{html.escape(subdub_public_job_code(job_id))}</code>\n\n"
-            "Please do not press the action repeatedly."
-        )
-    step_tokens = [
-        ("received_file", "Nhận video"),
-        ("extracting_audio", "Tách âm thanh"),
-        ("transcribing", "Nhận diện lời thoại"),
-        ("translating", "Dịch nội dung"),
-        ("generating_voice", "Tạo giọng lồng tiếng"),
-        ("muxing_video", "Ghép video"),
-        ("validating_output", "Kiểm tra file"),
-        ("delivering", "Gửi kết quả"),
-    ]
-    current_percent = int(payload["percent"])
-    lines = []
-    for token, label in step_tokens:
-        step_percent = int(SUBDUB_PROGRESS_STAGES[token][0])
-        marker = "✅" if step_percent < current_percent else ("⏳" if token == current else "⬜")
-        lines.append(f"{marker} {label}")
-    return (
-        "🎬 <b>TOAN AAS đang xử lý video</b>\n\n"
-        f"Trạng thái: {html.escape(str(payload['status']))}\n"
-        f"Tiến độ: {current_percent}%\n"
-        f"Mã xử lý: <code>{html.escape(subdub_public_job_code(job_id))}</code>\n\n"
-        "Các bước:\n"
-        + "\n".join(lines)
-        + "\n\nVui lòng không bấm lại nhiều lần."
+    return product_progress_status_text(
+        "subdub",
+        job_id,
+        str(payload.get("stage") or stage or "received_file"),
+        int(payload.get("percent") or 0),
+        "delivered" if str(payload.get("stage") or "") == "delivered" else "",
+        lang=lang,
     )
 
 def subdub_progress_keyboard(job_id: str = "", lang: str = "vi") -> InlineKeyboardMarkup:
@@ -160461,6 +160615,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("provider_status", cmd_provider_status))
     tg_app.add_handler(CommandHandler("system_public_status", cmd_system_public_status))
     tg_app.add_handler(CommandHandler("tool_public_status", cmd_tool_public_status))
+    tg_app.add_handler(CommandHandler("progress_status_debug", cmd_progress_status_debug))
+    tg_app.add_handler(CommandHandler("progress_status_matrix", cmd_progress_status_matrix))
+    tg_app.add_handler(CommandHandler("product_job_status", cmd_product_job_status))
     tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
     tg_app.add_handler(CommandHandler("dubbing_help", cmd_dubbing_help))
     tg_app.add_handler(CommandHandler("story_video_factory", cmd_story_video_factory))
@@ -160617,6 +160774,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_document_cache_only))
     tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     tg_app.add_handler(CallbackQueryHandler(handle_music_quick_callback, pattern=r"^(music_quick|sfx_quick|media_quick)\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_product_progress_callback, pattern=r"^progress\|status\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_media_preview_callback, pattern=r"^(play_sfx|play_music|select_sfx|select_music|open_sfx_source|open_music_source|license_sfx|license_music)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_pixabay_media_callback, pattern=r"^(play_media|select_media)\|\d+$"))
     tg_app.add_handler(CallbackQueryHandler(handle_image_story_callback, pattern=r"^(image_story_aspect\|.+|image_story_render_hint)$"))
