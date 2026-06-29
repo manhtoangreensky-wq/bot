@@ -82,11 +82,11 @@ def test_monthly_packages_rebuilt_current_products():
     text = "\n".join(bot.pricing_plans_lines())
     labels = _labels(bot.pricing_plans_keyboard("vi"))
     for expected in [
-        "🟢 Gói Cơ bản — 99k / 30 ngày",
-        "🔵 Gói Nội dung — 199k / 30 ngày",
-        "🟣 Gói Bán hàng — 299k / 30 ngày",
-        "🟠 Gói Chuyên nghiệp — 499k / 30 ngày",
-        "🔴 Gói Doanh nghiệp nhỏ — 999k / 30 ngày",
+        "🟢 Gói Cơ bản — 98k / 30 ngày",
+        "🔵 Gói Nội dung — 188k / 30 ngày",
+        "🟣 Gói Bán hàng — 388k / 30 ngày",
+        "🟠 Gói Chuyên nghiệp — 588k / 30 ngày",
+        "🔴 Gói Doanh nghiệp nhỏ — 888k / 30 ngày",
     ]:
         assert expected in text
     assert any("Cơ bản" in label for label in labels)
@@ -96,17 +96,16 @@ def test_monthly_packages_rebuilt_current_products():
 def test_combo_packages_rebuilt_by_use_case():
     text = "\n".join(bot.pricing_combo_lines())
     for expected in [
-        "Combo Video Quảng Cáo Nhanh",
+        "Combo Video Quảng Cáo",
         "Combo Review Sản Phẩm",
+        "Combo Ra Mắt Sản Phẩm",
         "Combo Bài Hát + Visual",
         "Combo Voice Thương Hiệu",
-        "Combo Video Khóa Học Mini",
-        "Combo Dịch + Lồng Tiếng Video",
-        "Combo Chiến Dịch Sản Phẩm",
+        "Combo Khóa Học Mini",
+        "Combo Dịch / Lồng Tiếng",
         "Combo Content 1 Tuần",
-        "Combo 10 Nhạc Nền",
-        "Combo 10 Bài Hát Có Lời",
-        "Combo 10 Video Phụ Đề + Lồng Tiếng",
+        "Combo Shop / Affiliate",
+        "Combo Doanh Nghiệp Nhỏ",
     ]:
         assert expected in text
     assert "Combo Ưu Đãi TikTok" not in text

@@ -2472,7 +2472,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video Premium: <b>1500 Xu</b>" in video_price_text
     assert "Combo Video Quảng Cáo Nhanh" in combo_price_text
     assert "Combo Review Sản Phẩm" in combo_price_text
-    assert "Combo 10 Video Phụ Đề + Lồng Tiếng" in combo_price_text
+    assert "Combo Dịch / Lồng Tiếng" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
     assert "công cụ xử lý video nội bộ" in frame_price_text
     assert "Local Worker/FFmpeg" not in frame_price_text
@@ -2496,12 +2496,12 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "key/token/raw provider response" in audit_price_text
     assert 'CommandHandler("pricing_audit", cmd_pricing_audit)' in source
     combo_callbacks = [button.callback_data for row in bot.pricing_combo_keyboard("vi").inline_keyboard for button in row]
-    assert "pkgbuy|combo|video_ad_fast_199k" in combo_callbacks
-    assert "pkgbuy|combo|campaign_product_699k" in combo_callbacks
+    assert "pkgbuy|combo|combo_ad_video_588k" in combo_callbacks
+    assert "pkgbuy|combo|combo_launch_1288k" in combo_callbacks
     assert "pkgbuy|combo|tiktok_99k" not in combo_callbacks
     assert "pricing|main" in combo_callbacks
     package_hub_callbacks = [button.callback_data for row in bot.pricing_packages_keyboard("vi").inline_keyboard for button in row]
-    assert package_hub_callbacks == ["pricing|plans", "pricing|combo", "pricing|my_packages", "pricing|main", "menu|main"]
+    assert package_hub_callbacks == ["pricing|plans", "pricing|combo", "pricing|my_packages", "pricing|need_larger", "pricing|main", "menu|main"]
     xu_text = "\n".join(bot.pricing_xu_lines())
     assert xu_text.count("💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>") == 1
     plan_text = "\n".join(bot.pricing_plans_lines())
