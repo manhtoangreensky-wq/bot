@@ -18,7 +18,7 @@ def _sign(data: dict, key: str = PAYOS_TEST_CHECKSUM_KEY) -> str:
 
 def _webhook_data(
     order_code: str,
-    amount: int = 10000,
+    amount: int = 10800,
     status: str | None = bot.PAYOS_STATUS_PAID,
     payment_link_id: str = "plink-c1",
     transaction_id: str = "tx-c1",
@@ -168,7 +168,7 @@ def test_payos_webhook_invalid_amount_does_not_credit(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.json()["desc"] == "amount_mismatch"
     assert _credits("payos-amount") == before
-    assert _order_status("171005") == bot.PAYOS_STATUS_PENDING
+    assert _order_status("171005") == bot.PAYOS_STATUS_PENDING_ADMIN_REVIEW
 
 
 def test_payos_webhook_currency_mismatch_does_not_credit(monkeypatch, tmp_path):
@@ -185,7 +185,7 @@ def test_payos_webhook_currency_mismatch_does_not_credit(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.json()["desc"] == "currency_mismatch"
     assert _credits("payos-currency") == before
-    assert _order_status("171011") == bot.PAYOS_STATUS_PENDING
+    assert _order_status("171011") == bot.PAYOS_STATUS_PENDING_ADMIN_REVIEW
 
 
 def test_payos_webhook_pending_or_cancelled_does_not_credit(monkeypatch, tmp_path):

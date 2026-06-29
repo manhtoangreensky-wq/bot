@@ -1827,6 +1827,24 @@ PAYOS_STATUS_EXPIRED   = "EXPIRED"
 PAYOS_STATUS_CANCELLED = "CANCELLED"
 PAYOS_STATUS_PENDING_ADMIN_REVIEW = "PENDING_ADMIN_REVIEW"
 
+VAT_DEFAULT_ENABLED = True
+VAT_DEFAULT_RATE = 0.08
+VAT_DEFAULT_MODE = "exclusive"
+VAT_DEFAULT_LABEL = "Thuế GTGT"
+VAT_DEFAULT_NOTE = "Thuế GTGT theo quy định hiện hành"
+VAT_SAFE_MAX_RATE = 0.20
+VAT_PUBLIC_COPY = (
+    "Giá thanh toán đã được tách rõ giá trước thuế, thuế GTGT và tổng thanh toán. "
+    "Phần thuế không quy đổi thành Xu hoặc lượt sử dụng dịch vụ."
+)
+VAT_EXCLUSIVE_COPY = "Thuế GTGT được cộng thêm vào tổng thanh toán theo cấu hình thuế hiện hành của TOAN AAS."
+
+FINANCE_ADJUSTMENT_TYPES = {
+    "revenue_add", "revenue_subtract", "expense_add", "expense_subtract",
+    "tax_add", "tax_subtract", "refund", "capital_add", "capital_withdraw",
+    "provider_cost_adjustment", "manual_correction",
+}
+
 # ─── FREE CHAT CONFIG ─────────────────────────────────────────────────────────
 FREE_CHAT_DAILY   = 20   # lượt chat/ngày cho tài khoản chưa nạp tiền
 CHAT_NORMAL_DAILY_LIMIT = FREE_CHAT_DAILY
@@ -2895,6 +2913,21 @@ def init_db():
         ("package_id", "package_id TEXT DEFAULT ''"),
         ("apply_status", "apply_status TEXT DEFAULT ''"),
         ("apply_error", "apply_error TEXT DEFAULT ''"),
+        ("invoice_type", "invoice_type TEXT DEFAULT ''"),
+        ("payment_channel", "payment_channel TEXT DEFAULT ''"),
+        ("currency", "currency TEXT DEFAULT 'VND'"),
+        ("subtotal_amount_vnd", "subtotal_amount_vnd INTEGER DEFAULT 0"),
+        ("vat_rate", "vat_rate REAL DEFAULT 0"),
+        ("vat_amount_vnd", "vat_amount_vnd INTEGER DEFAULT 0"),
+        ("total_amount_vnd", "total_amount_vnd INTEGER DEFAULT 0"),
+        ("fx_rate", "fx_rate REAL DEFAULT 1"),
+        ("original_amount", "original_amount REAL DEFAULT 0"),
+        ("original_currency", "original_currency TEXT DEFAULT 'VND'"),
+        ("vat_mode", "vat_mode TEXT DEFAULT ''"),
+        ("tax_category", "tax_category TEXT DEFAULT ''"),
+        ("anomaly_reason", "anomaly_reason TEXT DEFAULT ''"),
+        ("approved_by_admin_id", "approved_by_admin_id TEXT DEFAULT ''"),
+        ("granted_at", "granted_at TEXT DEFAULT ''"),
     ]:
         _add_column_if_missing(c, "payos_orders", column_name, column_sql, payos_order_columns)
     c.execute("""CREATE TABLE IF NOT EXISTS user_plans (
@@ -3447,6 +3480,106 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_finance_usage_status ON finance_usage_events(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_finance_expense_date ON finance_expense_events(expense_date)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_finance_expense_category ON finance_expense_events(category)")
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_tax_settings (
+        id INTEGER PRIMARY KEY CHECK (id=1),
+        vat_enabled INTEGER DEFAULT 1,
+        vat_rate REAL DEFAULT 0.08,
+        vat_mode TEXT DEFAULT 'exclusive',
+        vat_label TEXT DEFAULT 'Thuế GTGT',
+        vat_note TEXT DEFAULT 'Thuế GTGT theo quy định hiện hành',
+        effective_from TEXT DEFAULT '',
+        taxable_services TEXT DEFAULT 'all_real_money_payments',
+        updated_by_admin_id TEXT DEFAULT '',
+        updated_at TEXT,
+        created_at TEXT
+    )""")
+    c.execute(
+        """INSERT OR IGNORE INTO finance_tax_settings
+        (id, vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from, taxable_services, updated_by_admin_id, updated_at, created_at)
+        VALUES (1,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            1 if VAT_DEFAULT_ENABLED else 0,
+            float(VAT_DEFAULT_RATE),
+            VAT_DEFAULT_MODE,
+            VAT_DEFAULT_LABEL,
+            VAT_DEFAULT_NOTE,
+            now_text(),
+            "all_real_money_payments",
+            "system",
+            now_text(),
+            now_text(),
+        ),
+    )
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_invoices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT UNIQUE,
+        user_id TEXT DEFAULT '',
+        invoice_type TEXT DEFAULT '',
+        payment_channel TEXT DEFAULT '',
+        currency TEXT DEFAULT 'VND',
+        subtotal_amount_vnd INTEGER DEFAULT 0,
+        vat_rate REAL DEFAULT 0,
+        vat_amount_vnd INTEGER DEFAULT 0,
+        total_amount_vnd INTEGER DEFAULT 0,
+        fx_rate REAL DEFAULT 1,
+        original_amount REAL DEFAULT 0,
+        original_currency TEXT DEFAULT 'VND',
+        vat_mode TEXT DEFAULT 'exclusive',
+        tax_category TEXT DEFAULT 'standard',
+        status TEXT DEFAULT 'pending',
+        payment_provider_order_id TEXT DEFAULT '',
+        created_at TEXT,
+        paid_at TEXT DEFAULT '',
+        granted_at TEXT DEFAULT '',
+        approved_by_admin_id TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        anomaly_reason TEXT DEFAULT '',
+        metadata_json TEXT DEFAULT ''
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        adjustment_type TEXT,
+        amount_vnd INTEGER DEFAULT 0,
+        related_order_id TEXT DEFAULT '',
+        reason TEXT,
+        admin_id TEXT DEFAULT '',
+        created_at TEXT,
+        note TEXT DEFAULT '',
+        attachment_file_id TEXT DEFAULT '',
+        audit_ref TEXT DEFAULT ''
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_capital_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT,
+        amount_vnd INTEGER DEFAULT 0,
+        admin_id TEXT DEFAULT '',
+        created_at TEXT,
+        note TEXT DEFAULT '',
+        related_adjustment_id INTEGER DEFAULT 0
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS finance_anomalies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT DEFAULT '',
+        user_id TEXT DEFAULT '',
+        anomaly_type TEXT DEFAULT '',
+        severity TEXT DEFAULT 'review',
+        status TEXT DEFAULT 'pending',
+        expected_amount_vnd INTEGER DEFAULT 0,
+        actual_amount_vnd INTEGER DEFAULT 0,
+        reason TEXT DEFAULT '',
+        metadata_json TEXT DEFAULT '',
+        created_at TEXT,
+        resolved_at TEXT DEFAULT '',
+        resolved_by_admin_id TEXT DEFAULT '',
+        resolution_note TEXT DEFAULT ''
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_invoices_created ON finance_invoices(created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_invoices_status ON finance_invoices(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_invoices_type_channel ON finance_invoices(invoice_type, payment_channel)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_adjustments_created ON finance_adjustments(created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_adjustments_type ON finance_adjustments(adjustment_type)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_capital_created ON finance_capital_events(created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_finance_anomalies_status ON finance_anomalies(status, created_at)")
     c.execute("""CREATE TABLE IF NOT EXISTS tax_profiles (
         owner_admin_id TEXT PRIMARY KEY,
         business_type TEXT DEFAULT '',
@@ -7488,18 +7621,40 @@ def create_order(
     c = conn.cursor()
     created_at = datetime.now()
     expires_at = created_at + timedelta(minutes=ORDER_TTL_MINUTES)
+    snapshot = build_finance_invoice_snapshot_conn(conn, order_code, user_id, amount, order_type, payment_type, metadata)
+    metadata = invoice_metadata(snapshot, metadata)
+    metadata_json = json.dumps(metadata, ensure_ascii=False)
+    total_amount = int(snapshot.get("total_amount_vnd") or amount or 0)
+    subtotal_amount = int(snapshot.get("subtotal_amount_vnd") or amount or 0)
     package_vnd = int(amount if package_amount_vnd is None else package_amount_vnd)
     c.execute(
         """INSERT INTO payos_orders
         (order_code, user_id, amount, xu, package_amount_vnd, base_xu, launch_bonus_xu,
          order_type, plan_id, plan_name, duration_days, plan_xu, metadata_json,
-         payment_type, package_id, status, created_at, expires_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (str(order_code), str(user_id), amount, xu, package_vnd, int(base_xu or 0), int(launch_bonus_xu or 0),
+         payment_type, package_id, status, created_at, expires_at,
+         invoice_type, payment_channel, currency, subtotal_amount_vnd, vat_rate, vat_amount_vnd,
+         total_amount_vnd, fx_rate, original_amount, original_currency, vat_mode, tax_category)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (str(order_code), str(user_id), total_amount, xu, package_vnd, int(base_xu or 0), int(launch_bonus_xu or 0),
          str(order_type or "topup"), str(plan_id or ""), str(plan_name or ""), int(duration_days or 0), int(plan_xu or 0), str(metadata_json or ""),
          payment_type, package_id, PAYOS_STATUS_PENDING,
          created_at.strftime("%Y-%m-%d %H:%M:%S"), expires_at.strftime("%Y-%m-%d %H:%M:%S"))
+         + (
+             str(snapshot.get("invoice_type") or ""),
+             str(snapshot.get("payment_channel") or ""),
+             str(snapshot.get("currency") or "VND"),
+             subtotal_amount,
+             float(snapshot.get("vat_rate") or 0),
+             int(snapshot.get("vat_amount_vnd") or 0),
+             total_amount,
+             float(snapshot.get("fx_rate") or 1),
+             float(snapshot.get("original_amount") or amount or 0),
+             str(snapshot.get("original_currency") or "VND"),
+             str(snapshot.get("vat_mode") or VAT_DEFAULT_MODE),
+             str(snapshot.get("tax_category") or "standard"),
+         )
     )
+    record_finance_invoice_conn(conn, snapshot, metadata)
     conn.commit()
     conn.close()
 
@@ -7535,6 +7690,586 @@ def get_order_payment_link_id(order_code):
     row = c.fetchone()
     conn.close()
     return row[0] if row and row[0] else ""
+
+def ensure_finance_accounting_tables_conn(conn) -> None:
+    now = now_text()
+    conn.execute("""CREATE TABLE IF NOT EXISTS finance_tax_settings (
+        id INTEGER PRIMARY KEY CHECK (id=1),
+        vat_enabled INTEGER DEFAULT 1,
+        vat_rate REAL DEFAULT 0.08,
+        vat_mode TEXT DEFAULT 'exclusive',
+        vat_label TEXT DEFAULT 'Thuế GTGT',
+        vat_note TEXT DEFAULT 'Thuế GTGT theo quy định hiện hành',
+        effective_from TEXT DEFAULT '',
+        taxable_services TEXT DEFAULT 'all_real_money_payments',
+        updated_by_admin_id TEXT DEFAULT '',
+        updated_at TEXT,
+        created_at TEXT
+    )""")
+    conn.execute(
+        """INSERT OR IGNORE INTO finance_tax_settings
+        (id, vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from,
+         taxable_services, updated_by_admin_id, updated_at, created_at)
+        VALUES (1,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            1 if VAT_DEFAULT_ENABLED else 0,
+            float(VAT_DEFAULT_RATE),
+            VAT_DEFAULT_MODE,
+            VAT_DEFAULT_LABEL,
+            VAT_DEFAULT_NOTE,
+            now,
+            "all_real_money_payments",
+            "system",
+            now,
+            now,
+        ),
+    )
+    conn.execute("""CREATE TABLE IF NOT EXISTS finance_invoices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT UNIQUE,
+        user_id TEXT DEFAULT '',
+        invoice_type TEXT DEFAULT '',
+        payment_channel TEXT DEFAULT '',
+        currency TEXT DEFAULT 'VND',
+        subtotal_amount_vnd INTEGER DEFAULT 0,
+        vat_rate REAL DEFAULT 0,
+        vat_amount_vnd INTEGER DEFAULT 0,
+        total_amount_vnd INTEGER DEFAULT 0,
+        fx_rate REAL DEFAULT 1,
+        original_amount REAL DEFAULT 0,
+        original_currency TEXT DEFAULT 'VND',
+        vat_mode TEXT DEFAULT 'exclusive',
+        tax_category TEXT DEFAULT 'standard',
+        status TEXT DEFAULT 'pending',
+        payment_provider_order_id TEXT DEFAULT '',
+        created_at TEXT,
+        paid_at TEXT DEFAULT '',
+        granted_at TEXT DEFAULT '',
+        approved_by_admin_id TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        anomaly_reason TEXT DEFAULT '',
+        metadata_json TEXT DEFAULT ''
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS finance_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        adjustment_type TEXT,
+        amount_vnd INTEGER DEFAULT 0,
+        related_order_id TEXT DEFAULT '',
+        reason TEXT,
+        admin_id TEXT DEFAULT '',
+        created_at TEXT,
+        note TEXT DEFAULT '',
+        attachment_file_id TEXT DEFAULT '',
+        audit_ref TEXT DEFAULT ''
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS finance_capital_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT,
+        amount_vnd INTEGER DEFAULT 0,
+        admin_id TEXT DEFAULT '',
+        created_at TEXT,
+        note TEXT DEFAULT '',
+        related_adjustment_id INTEGER DEFAULT 0
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS finance_anomalies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT DEFAULT '',
+        user_id TEXT DEFAULT '',
+        anomaly_type TEXT DEFAULT '',
+        severity TEXT DEFAULT 'review',
+        status TEXT DEFAULT 'pending',
+        expected_amount_vnd INTEGER DEFAULT 0,
+        actual_amount_vnd INTEGER DEFAULT 0,
+        reason TEXT DEFAULT '',
+        metadata_json TEXT DEFAULT '',
+        created_at TEXT,
+        resolved_at TEXT DEFAULT '',
+        resolved_by_admin_id TEXT DEFAULT '',
+        resolution_note TEXT DEFAULT ''
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_invoices_created ON finance_invoices(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_invoices_status ON finance_invoices(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_invoices_type_channel ON finance_invoices(invoice_type, payment_channel)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_adjustments_created ON finance_adjustments(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_adjustments_type ON finance_adjustments(adjustment_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_capital_created ON finance_capital_events(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_anomalies_status ON finance_anomalies(status, created_at)")
+
+def finance_tax_config_conn(conn) -> dict:
+    try:
+        ensure_finance_accounting_tables_conn(conn)
+        conn.execute(
+            """INSERT OR IGNORE INTO finance_tax_settings
+            (id, vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from,
+             taxable_services, updated_by_admin_id, updated_at, created_at)
+            VALUES (1,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                1 if VAT_DEFAULT_ENABLED else 0,
+                float(VAT_DEFAULT_RATE),
+                VAT_DEFAULT_MODE,
+                VAT_DEFAULT_LABEL,
+                VAT_DEFAULT_NOTE,
+                now_text(),
+                "all_real_money_payments",
+                "system",
+                now_text(),
+                now_text(),
+            ),
+        )
+        row = conn.execute(
+            """SELECT vat_enabled, vat_rate, vat_mode, vat_label, vat_note, effective_from,
+                      taxable_services, updated_by_admin_id, updated_at, created_at
+               FROM finance_tax_settings WHERE id=1"""
+        ).fetchone()
+    except Exception:
+        row = None
+    if not row:
+        return {
+            "vat_enabled": VAT_DEFAULT_ENABLED,
+            "vat_rate": float(VAT_DEFAULT_RATE),
+            "vat_mode": VAT_DEFAULT_MODE,
+            "vat_label": VAT_DEFAULT_LABEL,
+            "vat_note": VAT_DEFAULT_NOTE,
+            "effective_from": now_text(),
+            "taxable_services": "all_real_money_payments",
+            "updated_by_admin_id": "system",
+            "updated_at": now_text(),
+            "created_at": now_text(),
+        }
+    return {
+        "vat_enabled": bool(int(row[0] or 0)),
+        "vat_rate": max(0.0, min(float(row[1] or 0), float(VAT_SAFE_MAX_RATE))),
+        "vat_mode": str(row[2] or VAT_DEFAULT_MODE).strip().lower() or VAT_DEFAULT_MODE,
+        "vat_label": str(row[3] or VAT_DEFAULT_LABEL),
+        "vat_note": str(row[4] or VAT_DEFAULT_NOTE),
+        "effective_from": str(row[5] or ""),
+        "taxable_services": str(row[6] or ""),
+        "updated_by_admin_id": str(row[7] or ""),
+        "updated_at": str(row[8] or ""),
+        "created_at": str(row[9] or ""),
+    }
+
+def finance_tax_config() -> dict:
+    conn = db_connect()
+    try:
+        return finance_tax_config_conn(conn)
+    finally:
+        conn.close()
+
+def admin_set_global_vat_rate(rate_percent: float, admin_id: str = "", note: str = "") -> dict:
+    try:
+        raw_percent = float(rate_percent)
+    except Exception:
+        return {"ok": False, "reason": "invalid_rate"}
+    if raw_percent < 0 or raw_percent > float(VAT_SAFE_MAX_RATE * 100):
+        return {"ok": False, "reason": "rate_out_of_safe_range"}
+    now = now_text()
+    conn = db_connect()
+    try:
+        before = finance_tax_config_conn(conn)
+        conn.execute(
+            """UPDATE finance_tax_settings
+            SET vat_enabled=1, vat_rate=?, vat_mode=?, vat_note=?, effective_from=?,
+                updated_by_admin_id=?, updated_at=?
+            WHERE id=1""",
+            (raw_percent / 100.0, before.get("vat_mode") or VAT_DEFAULT_MODE, note or before.get("vat_note") or VAT_DEFAULT_NOTE, now, str(admin_id or ""), now),
+        )
+        record_audit(
+            conn,
+            admin_id or "admin",
+            "admin",
+            "finance.vat_rate_set",
+            "finance_tax_settings",
+            "1",
+            before=before,
+            after={"vat_rate": raw_percent / 100.0, "vat_enabled": True},
+            note="VAT rate changed; old invoices keep their stored VAT snapshot",
+        )
+        conn.commit()
+        after = finance_tax_config_conn(conn)
+        return {"ok": True, **after}
+    finally:
+        conn.close()
+
+def admin_set_vat_enabled(enabled: bool, admin_id: str = "", note: str = "") -> dict:
+    now = now_text()
+    conn = db_connect()
+    try:
+        before = finance_tax_config_conn(conn)
+        conn.execute(
+            "UPDATE finance_tax_settings SET vat_enabled=?, vat_note=?, updated_by_admin_id=?, updated_at=? WHERE id=1",
+            (1 if enabled else 0, note or before.get("vat_note") or VAT_DEFAULT_NOTE, str(admin_id or ""), now),
+        )
+        record_audit(
+            conn,
+            admin_id or "admin",
+            "admin",
+            "finance.vat_enabled_set",
+            "finance_tax_settings",
+            "1",
+            before=before,
+            after={"vat_enabled": bool(enabled)},
+            note="VAT enabled/disabled for new invoices only",
+        )
+        conn.commit()
+        return {"ok": True, **finance_tax_config_conn(conn)}
+    finally:
+        conn.close()
+
+def normalize_invoice_type(order_type: str = "", payment_type: str = "", metadata: dict | None = None) -> str:
+    raw = f"{order_type} {payment_type} {json.dumps(metadata or {}, ensure_ascii=False)}".lower()
+    if "package_purchase" in raw and "combo" in raw:
+        return "combo"
+    if "package_purchase" in raw or "monthly_package" in raw:
+        return "package"
+    if "combo" in raw:
+        return "combo"
+    if "plan_purchase" in raw:
+        return "package"
+    if "manual" in raw:
+        return "manual"
+    if "custom" in raw or "order" in raw:
+        return "custom_order"
+    if "storage" in raw:
+        return "custom_order"
+    return "topup"
+
+def normalize_payment_channel(order_type: str = "", payment_type: str = "", metadata: dict | None = None) -> str:
+    metadata = metadata or {}
+    channel = str(metadata.get("payment_channel") or metadata.get("payment_method") or metadata.get("method") or "").strip().lower()
+    if channel:
+        if "momo" in channel:
+            return "momo"
+        if "zalo" in channel:
+            return "zalopay"
+        if "usdt" in channel:
+            return "usdt"
+        if "bank" in channel or "manual" in channel:
+            return "bank_transfer" if "bank" in channel else "manual"
+        return channel[:40]
+    if str(order_type or "").startswith("manual"):
+        return "manual"
+    return "payos"
+
+def payment_currency_from_metadata(metadata: dict | None = None) -> str:
+    currency = str((metadata or {}).get("currency") or (metadata or {}).get("original_currency") or "VND").strip().upper()
+    return currency if currency in {"VND", "USDT", "CNY", "USD"} else "VND"
+
+def calculate_vat_snapshot(subtotal_vnd: int, tax_config: dict | None = None, taxable: bool = True) -> dict:
+    subtotal = max(0, int(subtotal_vnd or 0))
+    config = tax_config or finance_tax_config()
+    enabled = bool(config.get("vat_enabled")) and taxable
+    rate = max(0.0, min(float(config.get("vat_rate") or 0), float(VAT_SAFE_MAX_RATE))) if enabled else 0.0
+    mode = str(config.get("vat_mode") or VAT_DEFAULT_MODE).strip().lower()
+    if mode not in {"exclusive", "inclusive"}:
+        mode = VAT_DEFAULT_MODE
+    if not enabled or rate <= 0:
+        vat = 0
+        total = subtotal
+        before_tax = subtotal
+    elif mode == "inclusive":
+        total = subtotal
+        before_tax = int(round(total / (1.0 + rate)))
+        vat = max(0, total - before_tax)
+    else:
+        before_tax = subtotal
+        vat = int(round(before_tax * rate))
+        total = before_tax + vat
+    return {
+        "vat_enabled": enabled,
+        "vat_rate": rate,
+        "vat_mode": mode,
+        "vat_label": str(config.get("vat_label") or VAT_DEFAULT_LABEL),
+        "vat_note": str(config.get("vat_note") or VAT_DEFAULT_NOTE),
+        "subtotal_amount_vnd": int(before_tax),
+        "vat_amount_vnd": int(vat),
+        "total_amount_vnd": int(total),
+    }
+
+def build_finance_invoice_snapshot_conn(
+    conn,
+    order_code: str,
+    user_id,
+    amount_vnd: int,
+    order_type: str = "topup",
+    payment_type: str = "",
+    metadata: dict | None = None,
+) -> dict:
+    metadata = dict(metadata or {})
+    existing_subtotal = int(metadata.get("subtotal_amount_vnd") or 0)
+    existing_total = int(metadata.get("total_amount_vnd") or 0)
+    invoice_type = normalize_invoice_type(order_type, payment_type, metadata)
+    channel = normalize_payment_channel(order_type, payment_type, metadata)
+    currency = payment_currency_from_metadata(metadata)
+    fx_rate = float(metadata.get("fx_rate") or metadata.get("fixed_rate_vnd") or (foreign_topup_rate_vnd(currency) if currency in {"USD", "CNY"} else 1) or 1)
+    original_amount = float(metadata.get("original_amount") or amount_vnd or 0)
+    if existing_subtotal > 0:
+        subtotal = existing_subtotal
+    elif currency != "VND" and original_amount > 0 and fx_rate > 1:
+        subtotal = int(round(original_amount * fx_rate))
+    else:
+        subtotal = int(amount_vnd or 0)
+    tax_category = str(metadata.get("tax_category") or "standard").strip().lower()
+    taxable = bool(metadata.get("vat_disabled") is not True and tax_category not in {"non_taxable", "vat_exempt"})
+    snapshot = calculate_vat_snapshot(subtotal, finance_tax_config_conn(conn), taxable=taxable)
+    if existing_total > 0 and int(metadata.get("vat_amount_vnd") or 0) >= 0:
+        snapshot["total_amount_vnd"] = existing_total
+        snapshot["vat_amount_vnd"] = int(metadata.get("vat_amount_vnd") or 0)
+        snapshot["subtotal_amount_vnd"] = existing_subtotal or max(0, existing_total - snapshot["vat_amount_vnd"])
+    snapshot.update({
+        "order_id": str(order_code),
+        "user_id": str(user_id or ""),
+        "invoice_type": invoice_type,
+        "payment_channel": channel,
+        "currency": currency,
+        "fx_rate": fx_rate,
+        "original_amount": original_amount,
+        "original_currency": currency,
+        "tax_category": tax_category,
+        "status": str(metadata.get("invoice_status") or PAYOS_STATUS_PENDING).lower(),
+        "payment_provider_order_id": str(metadata.get("payment_provider_order_id") or order_code),
+        "created_at": str(metadata.get("created_at") or now_text()),
+        "note": str(metadata.get("note") or ""),
+    })
+    return snapshot
+
+def invoice_metadata(snapshot: dict, metadata: dict | None = None) -> dict:
+    payload = dict(metadata or {})
+    for key in (
+        "invoice_type", "payment_channel", "currency", "subtotal_amount_vnd",
+        "vat_rate", "vat_amount_vnd", "total_amount_vnd", "fx_rate", "original_amount",
+        "original_currency", "vat_mode", "tax_category",
+    ):
+        payload[key] = snapshot.get(key)
+    payload["vat_label"] = snapshot.get("vat_label") or VAT_DEFAULT_LABEL
+    payload["vat_note"] = snapshot.get("vat_note") or VAT_DEFAULT_NOTE
+    payload["vat_public_copy"] = VAT_PUBLIC_COPY
+    return payload
+
+def record_finance_invoice_conn(conn, snapshot: dict, metadata: dict | None = None) -> None:
+    ensure_finance_accounting_tables_conn(conn)
+    meta = invoice_metadata(snapshot, metadata)
+    conn.execute(
+        """INSERT INTO finance_invoices
+        (order_id, user_id, invoice_type, payment_channel, currency, subtotal_amount_vnd,
+         vat_rate, vat_amount_vnd, total_amount_vnd, fx_rate, original_amount, original_currency,
+         vat_mode, tax_category, status, payment_provider_order_id, created_at, paid_at, granted_at,
+         approved_by_admin_id, note, anomaly_reason, metadata_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(order_id) DO UPDATE SET
+          user_id=excluded.user_id,
+          invoice_type=excluded.invoice_type,
+          payment_channel=excluded.payment_channel,
+          currency=excluded.currency,
+          subtotal_amount_vnd=excluded.subtotal_amount_vnd,
+          vat_rate=excluded.vat_rate,
+          vat_amount_vnd=excluded.vat_amount_vnd,
+          total_amount_vnd=excluded.total_amount_vnd,
+          fx_rate=excluded.fx_rate,
+          original_amount=excluded.original_amount,
+          original_currency=excluded.original_currency,
+          vat_mode=excluded.vat_mode,
+          tax_category=excluded.tax_category,
+          payment_provider_order_id=excluded.payment_provider_order_id,
+          note=excluded.note,
+          metadata_json=excluded.metadata_json""",
+        (
+            str(snapshot.get("order_id") or ""),
+            str(snapshot.get("user_id") or ""),
+            str(snapshot.get("invoice_type") or ""),
+            str(snapshot.get("payment_channel") or ""),
+            str(snapshot.get("currency") or "VND"),
+            int(snapshot.get("subtotal_amount_vnd") or 0),
+            float(snapshot.get("vat_rate") or 0),
+            int(snapshot.get("vat_amount_vnd") or 0),
+            int(snapshot.get("total_amount_vnd") or 0),
+            float(snapshot.get("fx_rate") or 1),
+            float(snapshot.get("original_amount") or 0),
+            str(snapshot.get("original_currency") or "VND"),
+            str(snapshot.get("vat_mode") or VAT_DEFAULT_MODE),
+            str(snapshot.get("tax_category") or "standard"),
+            str(snapshot.get("status") or "pending").lower(),
+            str(snapshot.get("payment_provider_order_id") or ""),
+            str(snapshot.get("created_at") or now_text()),
+            str(snapshot.get("paid_at") or ""),
+            str(snapshot.get("granted_at") or ""),
+            str(snapshot.get("approved_by_admin_id") or ""),
+            sanitize_log_text(str(snapshot.get("note") or ""))[:1000],
+            sanitize_log_text(str(snapshot.get("anomaly_reason") or ""))[:500],
+            json.dumps(meta, ensure_ascii=False),
+        ),
+    )
+
+def update_finance_invoice_status_conn(conn, order_id: str, status: str, paid_at: str = "", granted_at: str = "", anomaly_reason: str = "", approved_by_admin_id: str = "") -> None:
+    ensure_finance_accounting_tables_conn(conn)
+    updates = ["status=?"]
+    params = [str(status or "").lower()]
+    if paid_at:
+        updates.append("paid_at=?")
+        params.append(str(paid_at))
+    if granted_at:
+        updates.append("granted_at=?")
+        params.append(str(granted_at))
+    if anomaly_reason:
+        updates.append("anomaly_reason=?")
+        params.append(str(anomaly_reason)[:500])
+    if approved_by_admin_id:
+        updates.append("approved_by_admin_id=?")
+        params.append(str(approved_by_admin_id)[:80])
+    params.append(str(order_id))
+    conn.execute(f"UPDATE finance_invoices SET {', '.join(updates)} WHERE order_id=?", params)
+
+def finance_invoice_for_order(order_id: str) -> dict:
+    conn = db_connect()
+    try:
+        ensure_finance_accounting_tables_conn(conn)
+        row = conn.execute(
+            """SELECT order_id,user_id,invoice_type,payment_channel,currency,subtotal_amount_vnd,
+                      vat_rate,vat_amount_vnd,total_amount_vnd,fx_rate,original_amount,original_currency,
+                      vat_mode,tax_category,status,created_at,paid_at,granted_at,approved_by_admin_id,
+                      note,anomaly_reason,metadata_json
+               FROM finance_invoices WHERE order_id=? LIMIT 1""",
+            (str(order_id),),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return {}
+    keys = [
+        "order_id", "user_id", "invoice_type", "payment_channel", "currency", "subtotal_amount_vnd",
+        "vat_rate", "vat_amount_vnd", "total_amount_vnd", "fx_rate", "original_amount", "original_currency",
+        "vat_mode", "tax_category", "status", "created_at", "paid_at", "granted_at", "approved_by_admin_id",
+        "note", "anomaly_reason", "metadata_json",
+    ]
+    return dict(zip(keys, row))
+
+def finance_order_subtotal_from_metadata(metadata: dict | None, fallback_total: int = 0) -> int:
+    metadata = metadata or {}
+    if int(metadata.get("subtotal_amount_vnd") or 0) > 0:
+        return int(metadata.get("subtotal_amount_vnd") or 0)
+    total = int(metadata.get("total_amount_vnd") or fallback_total or 0)
+    vat = int(metadata.get("vat_amount_vnd") or 0)
+    return max(0, total - vat)
+
+def finance_tax_lines(snapshot: dict) -> list[str]:
+    rate_percent = float(snapshot.get("vat_rate") or 0) * 100
+    lines = [
+        f"• Giá trước thuế: <b>{vnd_text(snapshot.get('subtotal_amount_vnd'))}</b>",
+        f"• {html.escape(str(snapshot.get('vat_label') or VAT_DEFAULT_LABEL))} ({rate_percent:.2f}%): <b>{vnd_text(snapshot.get('vat_amount_vnd'))}</b>",
+        f"• Tổng thanh toán: <b>{vnd_text(snapshot.get('total_amount_vnd'))}</b>",
+        f"• {html.escape(VAT_PUBLIC_COPY)}",
+    ]
+    if str(snapshot.get("vat_mode") or VAT_DEFAULT_MODE) == "exclusive" and int(snapshot.get("vat_amount_vnd") or 0) > 0:
+        lines.append(f"• {html.escape(VAT_EXCLUSIVE_COPY)}")
+    return lines
+
+def finance_tax_block(snapshot: dict) -> str:
+    if not snapshot:
+        return ""
+    return "\n".join(finance_tax_lines(snapshot))
+
+def payos_invoice_total_for_order(order_code: str, fallback_amount: int = 0) -> tuple[dict, int]:
+    invoice = finance_invoice_for_order(str(order_code))
+    total = int(invoice.get("total_amount_vnd") or fallback_amount or 0)
+    if not invoice:
+        invoice = {
+            "subtotal_amount_vnd": int(fallback_amount or 0),
+            "vat_rate": 0,
+            "vat_amount_vnd": 0,
+            "total_amount_vnd": int(fallback_amount or 0),
+            "vat_label": VAT_DEFAULT_LABEL,
+            "vat_mode": VAT_DEFAULT_MODE,
+        }
+    return invoice, total
+
+def flag_finance_anomaly_conn(
+    conn,
+    order_id: str,
+    user_id: str = "",
+    anomaly_type: str = "",
+    expected_amount_vnd: int = 0,
+    actual_amount_vnd: int = 0,
+    reason: str = "",
+    metadata: dict | None = None,
+    severity: str = "review",
+    mark_order_review: bool = True,
+) -> dict:
+    ensure_finance_accounting_tables_conn(conn)
+    clean_order = str(order_id or "")
+    clean_reason = sanitize_log_text(str(reason or anomaly_type or "review_required"))[:500]
+    conn.execute(
+        """INSERT INTO finance_anomalies
+        (order_id,user_id,anomaly_type,severity,status,expected_amount_vnd,actual_amount_vnd,reason,metadata_json,created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (
+            clean_order,
+            str(user_id or ""),
+            str(anomaly_type or "unknown")[:80],
+            str(severity or "review")[:40],
+            "pending",
+            int(expected_amount_vnd or 0),
+            int(actual_amount_vnd or 0),
+            clean_reason,
+            json.dumps(metadata or {}, ensure_ascii=False),
+            now_text(),
+        ),
+    )
+    if mark_order_review:
+        conn.execute("UPDATE payos_orders SET status=?, anomaly_reason=? WHERE order_code=?", (PAYOS_STATUS_PENDING_ADMIN_REVIEW, clean_reason, clean_order))
+        update_finance_invoice_status_conn(conn, clean_order, "flagged", anomaly_reason=clean_reason)
+    return {"flagged": True, "anomaly_reason": clean_reason}
+
+def create_finance_adjustment(adjustment_type: str, amount_vnd: int, reason: str, admin_id: str = "", related_order_id: str = "", note: str = "", attachment_file_id: str = "") -> dict:
+    adj_type = str(adjustment_type or "").strip().lower()
+    if adj_type not in FINANCE_ADJUSTMENT_TYPES:
+        return {"ok": False, "reason": "invalid_adjustment_type"}
+    clean_reason = sanitize_log_text(str(reason or "")).strip()
+    amount = int(amount_vnd or 0)
+    if amount <= 0:
+        return {"ok": False, "reason": "amount_required"}
+    if not clean_reason:
+        return {"ok": False, "reason": "reason_required"}
+    conn = db_connect()
+    try:
+        ensure_finance_accounting_tables_conn(conn)
+        cur = conn.execute(
+            """INSERT INTO finance_adjustments
+            (adjustment_type, amount_vnd, related_order_id, reason, admin_id, created_at, note, attachment_file_id, audit_ref)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                adj_type,
+                amount,
+                str(related_order_id or "")[:160],
+                clean_reason[:1000],
+                str(admin_id or "")[:80],
+                now_text(),
+                sanitize_log_text(str(note or ""))[:1000],
+                str(attachment_file_id or "")[:300],
+                "",
+            ),
+        )
+        adjustment_id = int(cur.lastrowid or 0)
+        if adj_type in {"capital_add", "capital_withdraw"}:
+            conn.execute(
+                """INSERT INTO finance_capital_events
+                (event_type, amount_vnd, admin_id, created_at, note, related_adjustment_id)
+                VALUES (?,?,?,?,?,?)""",
+                (adj_type, amount, str(admin_id or "")[:80], now_text(), clean_reason[:1000], adjustment_id),
+            )
+        record_audit(
+            conn,
+            admin_id or "admin",
+            "admin",
+            "finance.adjustment_created",
+            "finance_adjustments",
+            str(adjustment_id),
+            after={"type": adj_type, "amount_vnd": amount, "related_order_id": related_order_id},
+            note=clean_reason,
+        )
+        conn.commit()
+        return {"ok": True, "adjustment_id": adjustment_id, "type": adj_type, "amount_vnd": amount}
+    finally:
+        conn.close()
 
 def package_base_xu(amount_vnd: int) -> int:
     try:
@@ -9771,7 +10506,8 @@ def manual_payment_menu_text() -> str:
         "Lưu ý:\n"
         "Ưu đãi nạp lần đầu, Launch Bonus 50k/100k/200k/500k và các ưu đãi cộng Xu chỉ áp dụng cho khách nội địa Việt Nam "
         "nạp VND qua PayOS hoặc QR ngân hàng Việt Nam/ACB/VietQR.\n\n"
-        "ZaloPay/MoMo: dùng cho thanh toán CNY nếu chuyển được. Nếu không thanh toán được, vui lòng dùng USDT TRC20.\n\n"
+        "CNY: nếu chưa có kênh tự động thật, dùng ZaloPay/manual hoặc liên hệ admin để được duyệt thủ công. "
+        "MoMo chỉ dùng cho VND, không dùng cho CNY.\n\n"
         "USD/CNY/USDT không áp dụng ưu đãi cộng Xu. Chiết khấu hạng thành viên vẫn áp dụng nếu đủ điều kiện."
     )
 
@@ -9836,7 +10572,7 @@ def manual_foreign_amount_text(currency: str) -> str:
     method_note = (
         "Phương thức đề xuất: Binance USDT TRC20."
         if currency == "USD" else
-        "Có thể dùng ZaloPay/manual nếu chuyển được; nếu không, dùng USDT TRC20."
+        "Có thể dùng ZaloPay/manual nếu chuyển được; MoMo không dùng cho CNY. Nếu không thanh toán được, dùng USDT TRC20 hoặc liên hệ admin."
     )
     return (
         f"{title}\n\n"
@@ -9886,7 +10622,6 @@ def manual_foreign_preview_keyboard(preview: dict, uid) -> InlineKeyboardMarkup:
     if currency == "CNY":
         rows.append([
             InlineKeyboardButton("💚 ZaloPay/manual", callback_data=f"manual|fxmethod|CNY|{amount}|zalopay_personal|{uid}"),
-            InlineKeyboardButton("💗 MoMo/Túi Thần Tài", callback_data=f"manual|fxmethod|CNY|{amount}|momo_tuithantai|{uid}"),
         ])
         rows.append([
             InlineKeyboardButton("🛍 ZaloPay cửa hàng", callback_data=f"manual|fxmethod|CNY|{amount}|zalopay_merchant|{uid}"),
@@ -9986,12 +10721,26 @@ def manual_payment_method_text(uid, method: str, state: dict | None = None) -> s
         f"• Quy đổi tạm tính: <b>{amount:,}đ</b>\n"
         if foreign_manual else ""
     )
+    tax_note = ""
+    if int(state.get("total_amount_vnd") or 0) > 0 and (
+        int(state.get("vat_amount_vnd") or 0) > 0
+        or int(state.get("subtotal_amount_vnd") or 0) > 0
+    ):
+        tax_note = finance_tax_block({
+            "subtotal_amount_vnd": int(state.get("subtotal_amount_vnd") or amount or 0),
+            "vat_rate": float(state.get("vat_rate") or 0),
+            "vat_amount_vnd": int(state.get("vat_amount_vnd") or 0),
+            "total_amount_vnd": int(state.get("total_amount_vnd") or amount or 0),
+            "vat_label": state.get("vat_label") or VAT_DEFAULT_LABEL,
+            "vat_mode": state.get("vat_mode") or VAT_DEFAULT_MODE,
+        }) + "\n"
     common = (
         f"\n\n👤 ID của bạn: <code>{uid}</code>\n"
         f"📦 Mệnh giá đã chọn: <b>{html.escape(selected)}</b>\n"
         f"💰 Xu dự kiến: <b>{html.escape(expected_xu)}</b>\n"
         f"🧾 Nội dung: <code>{transfer_content}</code>\n\n"
         f"{foreign_rate_note}"
+        f"{tax_note}"
         f"{bonus_note}"
         "• Chiết khấu hạng: vẫn áp dụng khi mua/dùng dịch vụ nếu đủ điều kiện\n\n"
         "Các bước:\n1. Chuyển đúng nội dung.\n2. Chụp bill giao dịch.\n"
@@ -10090,8 +10839,9 @@ def create_manual_pending_deposit(user, state: dict, file_id: str = "", file_uni
     foreign_manual = bool(is_foreign_topup(payment))
     bonus_allowed = bool(is_topup_bonus_allowed(payment))
     amount_vnd = int(payment.get("amount_vnd") or payment.get("amount") or 0)
+    subtotal_amount_vnd = int(payment.get("subtotal_amount_vnd") or max(0, amount_vnd - int(payment.get("vat_amount_vnd") or 0)) or amount_vnd)
     requested_xu = int(payment.get("expected_xu") or payment.get("xu") or 0)
-    base_xu = int(payment.get("base_xu") or (package_base_xu(amount_vnd) if amount_vnd else requested_xu))
+    base_xu = int(payment.get("base_xu") or (package_base_xu(subtotal_amount_vnd) if subtotal_amount_vnd else requested_xu))
     bonus_xu = int(payment.get("bonus_xu") or max(0, requested_xu - base_xu)) if bonus_allowed else 0
     expected_xu = base_xu + bonus_xu
     original_amount = payment.get("original_amount", amount_vnd)
@@ -10126,6 +10876,37 @@ def create_manual_pending_deposit(user, state: dict, file_id: str = "", file_uni
             ),
         )
         deposit_id = int(cursor.lastrowid)
+        invoice_order_id = str(payment.get("order_code") or "").strip()
+        if not invoice_order_id or invoice_order_id.upper() == "MANUAL":
+            invoice_order_id = f"MANUAL-{deposit_id}"
+            conn.execute("UPDATE pending_deposits SET order_code=? WHERE id=?", (invoice_order_id, deposit_id))
+        invoice_meta = {
+            "payment_type": "manual_topup",
+            "payment_channel": method,
+            "method": method,
+            "currency": currency,
+            "original_amount": original_amount,
+            "fx_rate": fixed_rate_vnd,
+            "subtotal_amount_vnd": int(subtotal_amount_vnd or 0),
+            "vat_rate": float(payment.get("vat_rate") or 0),
+            "vat_amount_vnd": int(payment.get("vat_amount_vnd") or max(0, amount_vnd - subtotal_amount_vnd)),
+            "total_amount_vnd": int(amount_vnd or 0),
+            "vat_mode": str(payment.get("vat_mode") or VAT_DEFAULT_MODE),
+            "tax_category": "standard",
+            "invoice_status": "pending_admin_review",
+            "note": f"manual_deposit:{deposit_id}",
+        }
+        invoice_snapshot = build_finance_invoice_snapshot_conn(
+            conn,
+            invoice_order_id,
+            uid,
+            int(subtotal_amount_vnd or amount_vnd or 0),
+            "manual_topup",
+            "manual_topup",
+            invoice_meta,
+        )
+        invoice_snapshot["status"] = "pending_admin_review"
+        record_finance_invoice_conn(conn, invoice_snapshot, invoice_meta)
         conn.commit()
     finally:
         conn.close()
@@ -30147,13 +30928,15 @@ def process_payos_paid_order(
         expected_currency = str(metadata.get("currency") or "VND").strip().upper()
         incoming_currency = str(webhook_currency or "").strip().upper()
         stored_xu = int(xu or 0)
-        calculated_base_xu = package_base_xu(expected_amount)
+        invoice_subtotal_vnd = finance_order_subtotal_from_metadata(metadata, expected_amount)
+        invoice_vat_vnd = int(metadata.get("vat_amount_vnd") or max(0, int(expected_amount or 0) - int(invoice_subtotal_vnd or 0)))
+        calculated_base_xu = package_base_xu(invoice_subtotal_vnd)
         base_xu = calculated_base_xu if calculated_base_xu > 0 else stored_xu
         topup_payment_context = {
             "payment_type": payment_type,
             "method": metadata.get("payment_method") or metadata.get("method") or "payos",
             "currency": metadata.get("currency") or "VND",
-            "amount_vnd": int(amount_vnd or 0),
+            "amount_vnd": int(invoice_subtotal_vnd or 0),
             "package_key": package_id or metadata.get("pkg_key") or "",
             "foreign_manual": bool(metadata.get("foreign_manual") or False),
         }
@@ -30173,10 +30956,25 @@ def process_payos_paid_order(
             "transaction_id": clean_transaction_id,
             "currency": expected_currency,
             "webhook_currency": incoming_currency,
+            "subtotal_amount_vnd": int(invoice_subtotal_vnd or 0),
+            "vat_amount_vnd": int(invoice_vat_vnd or 0),
+            "total_amount_vnd": int(expected_amount or 0),
         }
 
         if status == PAYOS_STATUS_PAID:
-            conn.rollback()
+            flag_finance_anomaly_conn(
+                conn,
+                str(order_code),
+                str(target_id),
+                "duplicate_callback",
+                expected_amount_vnd=int(expected_amount or 0),
+                actual_amount_vnd=int(amount_vnd or 0),
+                reason="PayOS callback received after order was already paid; no double credit/grant.",
+                metadata=metadata,
+                severity="info",
+                mark_order_review=False,
+            )
+            conn.commit()
             if order_type == "package_purchase":
                 info.update({"flagged": True, "flag_reason": "duplicate_callback"})
                 return False, "duplicate_callback", info
@@ -30192,6 +30990,16 @@ def process_payos_paid_order(
             conn.commit()
             return False, "expired", info
         if int(expected_amount) != int(amount_vnd):
+            flag_finance_anomaly_conn(
+                conn,
+                str(order_code),
+                str(target_id),
+                "amount_mismatch",
+                expected_amount_vnd=int(expected_amount or 0),
+                actual_amount_vnd=int(amount_vnd or 0),
+                reason="Paid amount does not match invoice total after VAT.",
+                metadata=metadata,
+            )
             if order_type == "package_purchase":
                 flag = flag_package_order_for_admin_conn(
                     conn,
@@ -30204,9 +31012,19 @@ def process_payos_paid_order(
                 info.update(flag)
                 conn.commit()
                 return False, "package_order_flagged", info
-            conn.rollback()
+            conn.commit()
             return False, "amount_mismatch", info
         if incoming_currency and expected_currency and incoming_currency != expected_currency:
+            flag_finance_anomaly_conn(
+                conn,
+                str(order_code),
+                str(target_id),
+                "currency_mismatch",
+                expected_amount_vnd=int(expected_amount or 0),
+                actual_amount_vnd=int(amount_vnd or 0),
+                reason=f"Webhook currency {incoming_currency} does not match invoice currency {expected_currency}.",
+                metadata=metadata,
+            )
             if order_type == "package_purchase":
                 flag = flag_package_order_for_admin_conn(
                     conn,
@@ -30219,13 +31037,23 @@ def process_payos_paid_order(
                 info.update(flag)
                 conn.commit()
                 return False, "package_order_flagged", info
-            conn.rollback()
+            conn.commit()
             return False, "currency_mismatch", info
 
         if webhook_status and not payos_webhook_is_paid_status(webhook_status):
             conn.rollback()
             return False, "status_not_paid", info
         if incoming_payment_link_id and stored_payment_link_id and incoming_payment_link_id != stored_payment_link_id:
+            flag_finance_anomaly_conn(
+                conn,
+                str(order_code),
+                str(target_id),
+                "payment_link_mismatch",
+                expected_amount_vnd=int(expected_amount or 0),
+                actual_amount_vnd=int(amount_vnd or 0),
+                reason="Webhook paymentLinkId does not match the stored PayOS paymentLinkId.",
+                metadata=metadata,
+            )
             if order_type == "package_purchase":
                 flag = flag_package_order_for_admin_conn(
                     conn,
@@ -30238,7 +31066,7 @@ def process_payos_paid_order(
                 info.update(flag)
                 conn.commit()
                 return False, "package_order_flagged", info
-            conn.rollback()
+            conn.commit()
             return False, "payment_link_mismatch", info
 
         idempotency = reserve_payos_idempotency_conn(
@@ -30307,6 +31135,7 @@ def process_payos_paid_order(
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
+            update_finance_invoice_status_conn(conn, str(order_code), "granted", paid_at=now_text(), granted_at=now_text())
             record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
             mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
             item_summary = package_items_summary(entry.get("items") or {})
@@ -30318,7 +31147,7 @@ def process_payos_paid_order(
                 command="/webhook/payos",
                 status="paid",
                 xu_delta=0,
-                amount_vnd=int(amount_vnd or 0),
+                amount_vnd=int(invoice_subtotal_vnd or 0),
                 provider="payos",
                 detail=f"order={order_code}; package_type={package_type}; package_code={package_code}; counts_for_member_tier=false",
             )
@@ -30327,7 +31156,7 @@ def process_payos_paid_order(
                 target_id,
                 "monthly_plan" if package_type == "monthly" else "combo_purchase",
                 str(order_code),
-                int(amount_vnd or 0),
+                int(invoice_subtotal_vnd or 0),
                 0,
                 "payos",
                 "success",
@@ -30341,14 +31170,14 @@ def process_payos_paid_order(
                 "payos_order",
                 str(order_code),
                 before={"status": status, "amount": expected_amount, "order_type": order_type},
-                after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "package_type": package_type, "package_code": package_code, "amount": amount_vnd},
+                after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "package_type": package_type, "package_code": package_code, "subtotal": invoice_subtotal_vnd, "vat": invoice_vat_vnd, "total": amount_vnd},
                 note="PayOS package paid; saved to package wallet; not counted as top-up",
             )
             emit_event(
                 conn,
                 "package.paid",
                 "payos",
-                {"order_code": str(order_code), "user_id": str(target_id), "amount": int(amount_vnd), "package_type": package_type, "package_code": package_code},
+                {"order_code": str(order_code), "user_id": str(target_id), "amount": int(invoice_subtotal_vnd), "vat": int(invoice_vat_vnd), "total": int(amount_vnd), "package_type": package_type, "package_code": package_code},
                 status="processed",
             )
             info.update({
@@ -30385,6 +31214,7 @@ def process_payos_paid_order(
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
+            update_finance_invoice_status_conn(conn, str(order_code), "granted", paid_at=now_text(), granted_at=now_text())
             record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
             mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
             record_usage_event_conn(
@@ -30395,7 +31225,7 @@ def process_payos_paid_order(
                 command="/webhook/payos",
                 status="paid",
                 xu_delta=0,
-                amount_vnd=int(amount_vnd or 0),
+                amount_vnd=int(invoice_subtotal_vnd or 0),
                 provider="payos",
                 detail=f"order={order_code}; plan={plan_id}; plan_xu={int(plan_xu or 0)}; counts_for_member_tier=false",
             )
@@ -30404,7 +31234,7 @@ def process_payos_paid_order(
                 target_id,
                 "monthly_plan",
                 str(order_code),
-                int(amount_vnd or 0),
+                int(invoice_subtotal_vnd or 0),
                 0,
                 "payos",
                 "success",
@@ -30449,7 +31279,7 @@ def process_payos_paid_order(
                 conn,
                 target_id,
                 addon_mb,
-                amount_vnd=int(amount_vnd or 0),
+                amount_vnd=int(invoice_subtotal_vnd or 0),
                 months=months,
                 order_code=str(order_code),
                 source="payos",
@@ -30463,6 +31293,7 @@ def process_payos_paid_order(
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), str(order_code)),
             )
+            update_finance_invoice_status_conn(conn, str(order_code), "granted", paid_at=now_text(), granted_at=now_text())
             record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
             mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
             record_usage_event_conn(
@@ -30473,7 +31304,7 @@ def process_payos_paid_order(
                 command="/webhook/payos",
                 status="paid",
                 xu_delta=0,
-                amount_vnd=int(amount_vnd or 0),
+                amount_vnd=int(invoice_subtotal_vnd or 0),
                 provider="payos",
                 detail=f"order={order_code}; addon_mb={addon_mb}; months={months}; counts_for_member_tier=false; no_xu=true",
             )
@@ -30482,7 +31313,7 @@ def process_payos_paid_order(
                 target_id,
                 "storage_addon",
                 str(order_code),
-                int(amount_vnd or 0),
+                int(invoice_subtotal_vnd or 0),
                 0,
                 "payos",
                 "success",
@@ -30496,14 +31327,14 @@ def process_payos_paid_order(
                 "payos_order",
                 str(order_code),
                 before={"status": status, "amount": expected_amount, "order_type": order_type},
-                after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "addon_mb": addon_mb, "months": months, "amount": amount_vnd},
+                after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "addon_mb": addon_mb, "months": months, "subtotal": invoice_subtotal_vnd, "vat": invoice_vat_vnd, "total": amount_vnd},
                 note="PayOS storage add-on paid; extends notes/docs quota; not counted as top-up",
             )
             emit_event(
                 conn,
                 "storage_addon.paid",
                 "payos",
-                {"order_code": str(order_code), "user_id": str(target_id), "amount": int(amount_vnd), "addon_mb": addon_mb, "months": months},
+                {"order_code": str(order_code), "user_id": str(target_id), "amount": int(invoice_subtotal_vnd), "vat": int(invoice_vat_vnd), "total": int(amount_vnd), "addon_mb": addon_mb, "months": months},
                 status="processed",
             )
             info.update({
@@ -30534,12 +31365,12 @@ def process_payos_paid_order(
         old_total_paid = member_total_paid_vnd(target_id, conn=conn)
         old_tier = member_tier_by_total_paid(old_total_paid)
         launch_bonus = (
-            redeem_launch_bonus_for_order(conn, target_id, order_code, amount_vnd)
+            redeem_launch_bonus_for_order(conn, target_id, order_code, invoice_subtotal_vnd)
             if launch_bonus_eligible_for_payment(
                 topup_payment_context.get("payment_type"),
                 topup_payment_context.get("method"),
                 topup_payment_context.get("currency"),
-                amount_vnd,
+                invoice_subtotal_vnd,
                 topup_payment_context.get("package_key"),
                 bool(topup_payment_context.get("foreign_manual")),
             )
@@ -30548,22 +31379,23 @@ def process_payos_paid_order(
         total_credit = base_xu + launch_bonus
         c.execute(
             "UPDATE users SET credits = credits + ?, has_deposited=1, total_paid_vnd = COALESCE(total_paid_vnd,0) + ? WHERE user_id=?",
-            (int(total_credit), int(amount_vnd or 0), str(target_id))
+            (int(total_credit), int(invoice_subtotal_vnd or 0), str(target_id))
         )
-        new_total_paid = int(old_total_paid or 0) + int(amount_vnd or 0)
+        new_total_paid = int(old_total_paid or 0) + int(invoice_subtotal_vnd or 0)
         new_tier = member_tier_by_total_paid(new_total_paid)
         c.execute(
             "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
             (PAYOS_STATUS_PAID, now_text(), str(order_code))
         )
+        update_finance_invoice_status_conn(conn, str(order_code), "paid", paid_at=now_text())
         record_payos_processed_conn(conn, order_code, payment_type, "success", effective_payment_link_id)
         mark_payos_idempotency_credited_conn(conn, idempotency_event_key)
-        record_credit_event(conn, target_id, base_xu, "payos_deposit", order_code, f"Nạp PayOS {amount_vnd}đ")
+        record_credit_event(conn, target_id, base_xu, "payos_deposit", order_code, f"Nạp PayOS {invoice_subtotal_vnd}đ trước thuế; VAT {invoice_vat_vnd}đ")
         if launch_bonus > 0:
-            record_credit_event(conn, target_id, launch_bonus, "launch_bonus", order_code, f"Launch Bonus gói {amount_vnd}đ")
-        promo_result = redeem_promo_for_order(conn, target_id, order_code, amount_vnd, base_xu, payment_context=topup_payment_context)
+            record_credit_event(conn, target_id, launch_bonus, "launch_bonus", order_code, f"Launch Bonus gói {invoice_subtotal_vnd}đ trước thuế")
+        promo_result = redeem_promo_for_order(conn, target_id, order_code, invoice_subtotal_vnd, base_xu, payment_context=topup_payment_context)
         promo_bonus = int(promo_result.get("bonus_xu") or 0)
-        update_usage_event_amount_for_ref_conn(conn, target_id, order_code, amount_vnd, "xu_credit")
+        update_usage_event_amount_for_ref_conn(conn, target_id, order_code, invoice_subtotal_vnd, "xu_credit")
         record_usage_event_conn(
             conn,
             target_id,
@@ -30572,7 +31404,7 @@ def process_payos_paid_order(
             command="/webhook/payos",
             status="paid",
             xu_delta=int(base_xu or 0) + int(launch_bonus or 0) + int(promo_bonus or 0),
-            amount_vnd=int(amount_vnd or 0),
+            amount_vnd=int(invoice_subtotal_vnd or 0),
             provider="payos",
             detail=f"order={order_code}; promo={promo_result.get('code') or ''}",
         )
@@ -30581,7 +31413,7 @@ def process_payos_paid_order(
             target_id,
             "payos_topup",
             str(order_code),
-            int(amount_vnd or 0),
+            int(invoice_subtotal_vnd or 0),
             int(base_xu or 0) + int(launch_bonus or 0) + int(promo_bonus or 0),
             "payos",
             "success",
@@ -30591,7 +31423,7 @@ def process_payos_paid_order(
             conn,
             target_id,
             order_code=str(order_code),
-            amount_vnd=int(amount_vnd or 0),
+            amount_vnd=int(invoice_subtotal_vnd or 0),
             base_xu=int(base_xu or 0),
             is_first_deposit=is_first_deposit,
         )
@@ -30620,14 +31452,14 @@ def process_payos_paid_order(
             "payos_order",
             str(order_code),
             before={"status": status, "amount": expected_amount},
-            after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "amount": amount_vnd, "base_xu": base_xu, "launch_bonus": launch_bonus, "promo_bonus": promo_bonus},
+            after={"status": PAYOS_STATUS_PAID, "user_id": target_id, "subtotal": invoice_subtotal_vnd, "vat": invoice_vat_vnd, "total": amount_vnd, "base_xu": base_xu, "launch_bonus": launch_bonus, "promo_bonus": promo_bonus},
             note="PayOS paid order credited",
         )
         emit_event(
             conn,
             "payment.paid",
             "payos",
-            {"order_code": str(order_code), "user_id": str(target_id), "amount": int(amount_vnd), "base_xu": int(base_xu), "launch_bonus": int(launch_bonus or 0), "promo_bonus": int(promo_bonus or 0)},
+            {"order_code": str(order_code), "user_id": str(target_id), "amount": int(invoice_subtotal_vnd), "vat": int(invoice_vat_vnd), "total": int(amount_vnd), "base_xu": int(base_xu), "launch_bonus": int(launch_bonus or 0), "promo_bonus": int(promo_bonus or 0)},
             status="processed",
         )
         conn.commit()
@@ -32059,10 +32891,27 @@ def build_trend_prompt_suggestions(trend: dict) -> list[str]:
 def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key="", method="bank_acb", **details):
     currency = str(details.get("currency") or "VND").strip().upper()
     amount_vnd = int(details.get("amount_vnd") or amount or 0)
+    subtotal_amount_vnd = int(details.get("subtotal_amount_vnd") or details.get("taxable_amount_vnd") or amount_vnd or 0)
+    vat_amount_vnd = int(details.get("vat_amount_vnd") or 0)
+    total_amount_vnd = int(details.get("total_amount_vnd") or amount_vnd or 0)
+    vat_rate = float(details.get("vat_rate") or 0)
+    vat_mode = str(details.get("vat_mode") or VAT_DEFAULT_MODE)
+    vat_label = str(details.get("vat_label") or VAT_DEFAULT_LABEL)
+    if subtotal_amount_vnd > 0 and vat_amount_vnd <= 0 and total_amount_vnd <= subtotal_amount_vnd:
+        try:
+            tax_snapshot = calculate_vat_snapshot(subtotal_amount_vnd, finance_tax_config(), taxable=True)
+            vat_rate = float(tax_snapshot.get("vat_rate") or vat_rate or 0)
+            vat_amount_vnd = int(tax_snapshot.get("vat_amount_vnd") or 0)
+            total_amount_vnd = int(tax_snapshot.get("total_amount_vnd") or subtotal_amount_vnd)
+            vat_mode = str(tax_snapshot.get("vat_mode") or vat_mode)
+            vat_label = str(tax_snapshot.get("vat_label") or vat_label)
+            amount_vnd = total_amount_vnd
+        except Exception:
+            total_amount_vnd = amount_vnd
     base_xu = int(details.get("base_xu") or 0)
     expected_xu = int(details.get("expected_xu") or xu or 0)
-    if currency == "VND" and base_xu <= 0 and amount_vnd > 0:
-        base_xu = package_base_xu(amount_vnd)
+    if currency == "VND" and base_xu <= 0 and subtotal_amount_vnd > 0:
+        base_xu = package_base_xu(subtotal_amount_vnd)
     bonus_xu = int(details.get("bonus_xu") or max(0, expected_xu - base_xu))
     state = {
         "order_code": str(order_code or ""),
@@ -32074,6 +32923,12 @@ def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key="", method
         "original_amount": details.get("original_amount", amount_vnd),
         "fixed_rate_vnd": int(details.get("fixed_rate_vnd") or (1 if currency == "VND" else foreign_topup_rate_vnd(currency))),
         "amount_vnd": amount_vnd,
+        "subtotal_amount_vnd": subtotal_amount_vnd,
+        "vat_rate": vat_rate,
+        "vat_amount_vnd": vat_amount_vnd,
+        "total_amount_vnd": total_amount_vnd,
+        "vat_mode": vat_mode,
+        "vat_label": vat_label,
         "base_xu": base_xu,
         "bonus_xu": bonus_xu,
         "expected_xu": expected_xu,
@@ -33656,15 +34511,30 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
                 order_type="manual_topup",
                 metadata_json=payos_manual_topup_order_metadata("manual_bank_acb_vnd", "VND"),
             )
-            set_manual_bill_state(uid, order_code=order_code, amount=amount, xu=xu, pkg_key=manual_key)
+            invoice, transfer_amount = payos_invoice_total_for_order(order_code, amount)
+            set_manual_bill_state(
+                uid,
+                order_code=order_code,
+                amount=transfer_amount,
+                xu=xu,
+                pkg_key=manual_key,
+                amount_vnd=transfer_amount,
+                subtotal_amount_vnd=int(invoice.get("subtotal_amount_vnd") or amount),
+                vat_rate=float(invoice.get("vat_rate") or 0),
+                vat_amount_vnd=int(invoice.get("vat_amount_vnd") or 0),
+                total_amount_vnd=transfer_amount,
+                vat_mode=str(invoice.get("vat_mode") or VAT_DEFAULT_MODE),
+                vat_label=str(invoice.get("vat_label") or VAT_DEFAULT_LABEL),
+                base_xu=base_xu,
+            )
             await query.edit_message_text(
-                manual_payment_text(uid, amount, xu, order_code, "Bạn đã chọn nạp thủ công."),
+                manual_payment_text(uid, transfer_amount, xu, order_code, "Bạn đã chọn nạp thủ công."),
                 parse_mode="HTML",
             )
             try:
                 await context.bot.send_photo(
                     chat_id=query.message.chat_id,
-                    photo=manual_qr_url(uid, amount, order_code),
+                    photo=manual_qr_url(uid, transfer_amount, order_code),
                     caption="🏦 QR thủ công theo đúng số tiền và nội dung chuyển khoản.",
                     parse_mode="HTML",
                 )
@@ -33738,6 +34608,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
         package_amount_vnd=amount,
         metadata_json=payos_auto_topup_order_metadata(pkg_key, amount, base_xu, launch_preview, xu),
     )
+    invoice, payos_amount = payos_invoice_total_for_order(order_code, amount)
     if flag_on("payment_freeze"):
         update_order_status(order_code, PAYOS_STATUS_CANCELLED)
         await query.edit_message_text(
@@ -33770,7 +34641,7 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     return_url = make_payos_return_url(context)
     payos_body = {
         "orderCode": order_code,
-        "amount": amount,
+        "amount": payos_amount,
         "description": make_payos_description(pkg_key),
         "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url
@@ -33823,14 +34694,14 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
             qr_text = (
                 f"⚡ <b>ĐÃ KHỞI TẠO HÓA ĐƠN QR ĐỘNG SUCCESS</b>\n\n"
                 f"📋 Mệnh giá lựa chọn: <b>{pkg['text']}</b>\n"
-                f"💰 Số tiền cần chuyển: <b>{amount:,}đ</b>\n"
+                f"{finance_tax_block(invoice)}\n"
                 f"🪙 Xu gốc: <b>+{base_xu} Xu</b>\n"
                 f"{launch_preview_line}"
                 f"{total_preview_line}"
                 f"{promo_line}"
                 f"🆔 Mã đơn định danh: <code>{order_code}</code>\n\n"
                 f"⏳ Hóa đơn hết hạn sau <b>{ORDER_TTL_MINUTES} phút</b>.\n\n"
-                f"👉 Nhấn vào nút liên kết dưới đây để nhận diện mã QR thanh toán động. Hệ thống sẽ tự động điền sẵn số tiền và nội dung hóa đơn chính xác!"
+                f"👉 Nhấn vào nút liên kết dưới đây để nhận diện mã QR thanh toán động. Hệ thống sẽ tự động điền sẵn tổng thanh toán và nội dung hóa đơn chính xác!"
             )
             logger.info(f"PayOS create success | order={order_code}")
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 QUÉT MÃ QR THANH TOÁN", url=checkout_url)]])
@@ -104837,10 +105708,11 @@ async def start_storage_addon_purchase(update: Update, context: ContextTypes.DEF
         plan_xu=0,
         metadata_json=json.dumps(metadata, ensure_ascii=False),
     )
+    invoice, payos_amount = payos_invoice_total_for_order(order_code, amount)
     return_url = make_payos_return_url(context)
     payos_body = {
         "orderCode": int(order_code),
-        "amount": int(amount),
+        "amount": int(payos_amount),
         "description": make_payos_storage_description(spec),
         "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
@@ -104860,14 +105732,14 @@ async def start_storage_addon_purchase(update: Update, context: ContextTypes.DEF
                 tool_name="memory_storage",
                 command="/memory_storage_addon",
                 status="pending",
-                amount_vnd=amount,
+                amount_vnd=int(invoice.get("subtotal_amount_vnd") or amount),
                 provider="payos",
                 detail=f"order={order_code}; addon_mb={addon_mb}; counts_for_member_tier=false; no_xu=true",
             )
             return await message.reply_text(
                 "📦 <b>Thanh toán dung lượng lưu trữ</b>\n\n"
                 f"• Gói: <b>{html.escape(label)}</b>\n"
-                f"• Giá: <b>{amount:,}đ</b>\n"
+                f"{finance_tax_block(invoice)}\n"
                 "• Hiệu lực: <b>30 ngày</b>\n"
                 "• Sau khi PayOS xác nhận, bot tự cộng dung lượng vào tài khoản.\n"
                 "• Không cộng Xu, không chạy bonus nạp, không tính điểm nâng hạng.\n\n"
@@ -124735,10 +125607,11 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
         plan_xu=0,
         metadata_json=json.dumps(metadata, ensure_ascii=False),
     )
+    invoice, payos_amount = payos_invoice_total_for_order(order_code, amount)
     return_url = make_payos_return_url(context)
     payos_body = {
         "orderCode": int(order_code),
-        "amount": int(amount),
+        "amount": int(payos_amount),
         "description": package_purchase_description(package_type, code),
         "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
@@ -124758,19 +125631,18 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
                 tool_name="package_wallet",
                 command="/pricing_button",
                 status="pending",
-                amount_vnd=amount,
+                amount_vnd=int(invoice.get("subtotal_amount_vnd") or amount),
                 provider="payos",
                 detail=f"order={order_code}; package_type={package_type}; code={code}; counts_for_member_tier=false",
             )
             kind = package_purchase_kind_label(package_type)
             expires_line = f"• Thời hạn: <b>{duration_days} ngày</b>\n" if duration_days else ""
             discount_line = f"• Giá lẻ: <s>{int(quote.get('retail_vnd') or amount):,}đ</s> | Giảm: <b>{int(quote.get('discount_percent') or 0)}%</b>\n".replace(",", ".")
-            amount_line = f"• Giá thanh toán: <b>{amount:,}đ</b>\n".replace(",", ".")
             return await message.reply_text(
                 f"📦 <b>Thanh toán {html.escape(kind)}</b>\n\n"
                 f"• Tên: <b>{html.escape(label)}</b>\n"
                 f"{discount_line}"
-                f"{amount_line}"
+                f"{finance_tax_block(invoice)}\n"
                 f"{expires_line}"
                 "• Giới hạn: <b>mỗi gói/combo chỉ mua 1 lần trong tháng</b>.\n"
                 f"• Lượt sau khi thanh toán: {html.escape(item_summary)}\n"
@@ -124870,10 +125742,11 @@ async def start_plan_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE
         plan_xu=plan_xu,
         metadata_json=json.dumps(metadata, ensure_ascii=False),
     )
+    invoice, payos_amount = payos_invoice_total_for_order(order_code, amount)
     return_url = make_payos_return_url(context)
     payos_body = {
         "orderCode": int(order_code),
-        "amount": int(amount),
+        "amount": int(payos_amount),
         "description": make_payos_plan_description(plan_id),
         "cancelUrl": make_payos_cancel_url(context),
         "returnUrl": return_url,
@@ -124893,13 +125766,13 @@ async def start_plan_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE
                 tool_name="subscription",
                 command="/buy_plan",
                 status="pending",
-                amount_vnd=amount,
+                amount_vnd=int(invoice.get("subtotal_amount_vnd") or amount),
                 provider="payos",
                 detail=f"order={order_code}; plan={plan_id}; type=plan_purchase",
             )
             return await message.reply_text(
                 f"📦 <b>Thanh toán gói {html.escape(plan['name'])}</b>\n\n"
-                f"• Giá: <b>{amount:,}đ</b>\n"
+                f"{finance_tax_block(invoice)}\n"
                 f"• Thời hạn: <b>{duration_days} ngày</b>\n"
                 f"• Hạn mức: <b>{plan_xu:,} Xu xử lý/tháng</b>\n"
                 f"• Điều kiện: <b>{html.escape(plan_required_tier_label(plan_id))}</b>\n"
@@ -139897,13 +140770,22 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_order_code = str(pending_order[2]) if pending_order and pending_order[2] else ""
         order_amount = int(pending_order[8] or pending_order[3] or 0) if pending_order else 0
         order_base_xu = int(pending_order[9] or 0) if pending_order else 0
+        invoice_row = None
+        if pending_order_code:
+            invoice_row = c.execute(
+                "SELECT subtotal_amount_vnd, vat_amount_vnd, total_amount_vnd FROM finance_invoices WHERE order_id=? LIMIT 1",
+                (pending_order_code,),
+            ).fetchone()
+        order_subtotal_amount = int(invoice_row[0] or order_amount or 0) if invoice_row else int(order_amount or 0)
+        order_vat_amount = int(invoice_row[1] or max(0, order_amount - order_subtotal_amount)) if invoice_row else 0
+        order_total_amount = int(invoice_row[2] or order_amount or 0) if invoice_row else int(order_amount or 0)
         payment_context.update({
             "payment_type": "topup_xu",
-            "amount_vnd": int(order_amount or 0),
+            "amount_vnd": int(order_subtotal_amount or 0),
             "package_key": str(pending_order_code or ""),
         })
-        if order_base_xu <= 0 and order_amount:
-            order_base_xu = package_base_xu(order_amount)
+        if order_base_xu <= 0 and order_subtotal_amount:
+            order_base_xu = package_base_xu(order_subtotal_amount)
         is_first_deposit = bool(first_deposit_before_credit)
         referral_result = {"reward_xu": 0, "status": "none", "referrer_user_id": ""}
         old_total_paid = member_total_paid_vnd(target_id, conn=conn)
@@ -139920,13 +140802,13 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 order_base_xu = int(order_meta[1] or package_base_xu(order_amount))
                 order_launch_xu = int(order_meta[2] or 0)
                 if order_launch_xu <= 0:
-                    credit_info = calculate_package_credit_for_user(target_id, order_amount, conn=conn)
+                    credit_info = calculate_package_credit_for_user(target_id, order_subtotal_amount, conn=conn)
                     order_launch_xu = int(credit_info.get("launch_bonus_xu") or 0)
                     order_base_xu = int(credit_info.get("base_xu") or order_base_xu)
                 launch_recorded = record_launch_bonus_redemption(
                     conn,
                     target_id,
-                    order_amount,
+                    order_subtotal_amount,
                     order_base_xu,
                     order_launch_xu,
                     pending_order_code,
@@ -139936,7 +140818,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 launch_recorded = record_launch_bonus_redemption(
                     conn,
                     target_id,
-                    order_amount,
+                    order_subtotal_amount,
                     order_base_xu,
                     manual_launch_xu,
                     pending_order_code,
@@ -139952,14 +140834,22 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "UPDATE payos_orders SET status=?, paid_at=? WHERE order_code=?",
                 (PAYOS_STATUS_PAID, now_text(), pending_order_code)
             )
-            if order_amount and order_base_xu and topup_bonus_allowed:
-                promo_result = redeem_promo_for_order(conn, target_id, pending_order_code, order_amount, order_base_xu, payment_context=payment_context)
-        if order_amount and (not foreign_manual or member_points_eligible):
+            if order_subtotal_amount and order_base_xu and topup_bonus_allowed:
+                promo_result = redeem_promo_for_order(conn, target_id, pending_order_code, order_subtotal_amount, order_base_xu, payment_context=payment_context)
+        if pending_order_code:
+            update_finance_invoice_status_conn(
+                conn,
+                pending_order_code,
+                "paid",
+                paid_at=now_text(),
+                approved_by_admin_id=str(update.effective_user.id),
+            )
+        if order_subtotal_amount and (not foreign_manual or member_points_eligible):
             c.execute(
                 "UPDATE users SET has_deposited=1, total_paid_vnd=COALESCE(total_paid_vnd,0)+? WHERE user_id=?",
-                (int(order_amount or 0), str(target_id)),
+                (int(order_subtotal_amount or 0), str(target_id)),
             )
-            new_total_paid = int(old_total_paid or 0) + int(order_amount or 0)
+            new_total_paid = int(old_total_paid or 0) + int(order_subtotal_amount or 0)
             tier_up_result = handle_member_tier_up(
                 conn,
                 target_id,
@@ -139976,7 +140866,7 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 conn,
                 target_id,
                 order_code=pending_order_code or f"manual:{target_id}",
-                amount_vnd=int(order_amount or 0),
+                amount_vnd=int(order_subtotal_amount or 0),
                 base_xu=int(order_base_xu or amount or 0),
                 is_first_deposit=is_first_deposit,
             )
@@ -140001,17 +140891,17 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             after={"status": "approved", "deposit_id": int(pending_deposit_id), "user_id": str(target_id), "xu": int(amount), "launch_bonus_recorded": int(launch_recorded or 0), "promo_code": promo_code, "promo_bonus": promo_bonus},
             note="Admin approved manual bill",
         )
-        if int(order_amount or 0) > 0:
+        if int(order_subtotal_amount or 0) > 0:
             record_finance_revenue_event_conn(
                 conn,
                 target_id,
                 "manual_revenue",
                 f"manual_deposit:{pending_deposit_id}",
-                int(order_amount or 0),
+                int(order_subtotal_amount or 0),
                 int(amount or 0) + int(promo_bonus or 0),
                 "bank",
                 "success",
-                f"Manual bill approved; order={pending_order_code}",
+                f"Manual bill approved; order={pending_order_code}; vat={order_vat_amount}; total={order_total_amount}",
                 update.effective_user.id,
             )
         conn.commit()
@@ -140023,12 +140913,12 @@ async def cmd_duyet(update: Update, context: ContextTypes.DEFAULT_TYPE):
             command="/duyet",
             status="approved",
             xu_delta=int(amount or 0),
-            amount_vnd=int(order_amount or 0),
+            amount_vnd=int(order_subtotal_amount or 0),
             provider="manual_qr",
             detail=f"order={pending_order_code}",
         )
-        if pending_order_code and order_amount:
-            update_usage_event_amount_for_ref(target_id, pending_order_code, order_amount, "xu_credit")
+        if pending_order_code and order_subtotal_amount:
+            update_usage_event_amount_for_ref(target_id, pending_order_code, order_subtotal_amount, "xu_credit")
         credits, _, _ = get_user(target_id)
         mismatch_line = ""
         if expected_order_xu and int(amount) != int(expected_order_xu):
@@ -140687,13 +141577,13 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending = None
         if str(lookup_key).isdigit():
             c.execute(
-                "SELECT id, user_id FROM pending_deposits WHERE id=? AND status IN ('pending','pending_admin_review') LIMIT 1",
+                "SELECT id, user_id, order_code FROM pending_deposits WHERE id=? AND status IN ('pending','pending_admin_review') LIMIT 1",
                 (str(lookup_key),),
             )
             pending = c.fetchone()
         if not pending:
             c.execute(
-                "SELECT id, user_id FROM pending_deposits WHERE user_id=? AND status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 1",
+                "SELECT id, user_id, order_code FROM pending_deposits WHERE user_id=? AND status IN ('pending','pending_admin_review') ORDER BY submitted_at DESC LIMIT 1",
                 (str(lookup_key),),
             )
             pending = c.fetchone()
@@ -140705,10 +141595,19 @@ async def cmd_tuchoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         deposit_id = int(pending[0])
         target_id = str(pending[1])
+        pending_order_code = str(pending[2] or "")
         c.execute(
             "UPDATE pending_deposits SET status='rejected', updated_at=? WHERE id=? AND status IN ('pending','pending_admin_review')",
             (now_text(), deposit_id)
         )
+        if pending_order_code:
+            update_finance_invoice_status_conn(
+                conn,
+                pending_order_code,
+                "rejected",
+                anomaly_reason="manual bill rejected by admin",
+                approved_by_admin_id=str(update.effective_user.id),
+            )
         rejected_count = c.rowcount
         record_audit(
             conn,
@@ -140882,24 +141781,23 @@ async def handle_manual_topup_pending_text(update: Update, context: ContextTypes
 
 def finance_admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💵 Doanh thu", callback_data="menu|finance_revenue")],
-        [InlineKeyboardButton("📅 Doanh thu tháng", callback_data="menu|finance_revenue_month"), InlineKeyboardButton("📉 Chi phí tháng", callback_data="menu|finance_expense_month")],
-        [InlineKeyboardButton("📈 Lãi / Lỗ", callback_data="menu|finance_profit"), InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|finance_export")],
-        [InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense"), InlineKeyboardButton("🟢 Miễn/ưu đãi thuế phí", callback_data="menu|finance_compliance")],
-        [InlineKeyboardButton("📦 Đơn gói/combo chờ duyệt", callback_data="menu|admin_package_orders"), InlineKeyboardButton("⚠️ Đơn bất thường", callback_data="menu|admin_package_orders_anomalies")],
-        [InlineKeyboardButton("🎟 Mã quà tặng", callback_data="menu|admin_gift_codes")],
-        [InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist"), InlineKeyboardButton("🧾 Báo cáo kế toán", callback_data="menu|finance_tax")],
-        [InlineKeyboardButton("📚 Hướng dẫn lệnh", callback_data="menu|finance_help")],
+        [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💰 Doanh thu", callback_data="menu|finance_revenue")],
+        [InlineKeyboardButton("🧾 Thuế / VAT", callback_data="menu|finance_tax_vat"), InlineKeyboardButton("💸 Chi phí", callback_data="menu|finance_expense_month")],
+        [InlineKeyboardButton("📈 Lợi nhuận", callback_data="menu|finance_profit"), InlineKeyboardButton("🏦 Vốn & Hòa vốn", callback_data="menu|finance_capital")],
+        [InlineKeyboardButton("📦 Gói / Combo", callback_data="menu|admin_package_orders"), InlineKeyboardButton("⚠️ Đơn bất thường", callback_data="menu|finance_anomalies")],
+        [InlineKeyboardButton("🧮 Sổ điều chỉnh", callback_data="menu|finance_adjustments"), InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense")],
+        [InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|finance_export"), InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist")],
+        [InlineKeyboardButton("📘 Hướng dẫn tài chính", callback_data="menu|finance_guide"), InlineKeyboardButton("🎟 Mã quà tặng", callback_data="menu|admin_gift_codes")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def finance_menu_text() -> str:
     return (
-        "📊 <b>Thu chi / Báo cáo nội bộ TOAN AAS</b>\n\n"
-        "Mục này giúp admin xem nhanh doanh thu, chi phí, lãi/lỗ và xuất báo cáo nội bộ. "
-        "Các nút bên dưới chỉ đọc số liệu hoặc hướng dẫn lệnh hiện có, không tự cộng/trừ Xu và không chạm PayOS.\n"
+        "📊 <b>Admin Tài chính TOAN AAS</b>\n\n"
+        "Mục này là sổ sách công ty mini: doanh thu, VAT, chi phí, lợi nhuận, vốn, hòa vốn, đơn bất thường và sổ điều chỉnh. "
+        "Các nút bên dưới chỉ đọc số liệu hoặc hướng dẫn lệnh; không tự cộng/trừ Xu và không sửa giao dịch gốc.\n"
         f"{html.escape(TAX_PREP_DISCLAIMER)}\n\n"
-        "Nếu mục nào chưa có dữ liệu, bot sẽ hiển thị <b>Chưa có dữ liệu</b>."
+        "Nguyên tắc P0.21E: sai thì tạo bút toán điều chỉnh, không sửa/xóa giao dịch cũ."
     )
 
 def admin_back_keyboard() -> InlineKeyboardMarkup:
@@ -141124,6 +142022,259 @@ def finance_command_help_text() -> str:
         "Category gợi ý: <code>provider_ai</code>, <code>railway_hosting</code>, <code>domain_hosting</code>, "
         "<code>software_subscription</code>, <code>marketing_ads</code>, <code>bank_payment_fee</code>, <code>other</code>."
     )
+
+def finance_invoice_adjustment_sign(adjustment_type: str, bucket: str = "revenue") -> int:
+    adj = str(adjustment_type or "").strip().lower()
+    if bucket == "revenue":
+        if adj == "revenue_add":
+            return 1
+        if adj in {"revenue_subtract", "refund"}:
+            return -1
+    if bucket == "expense":
+        if adj in {"expense_add", "provider_cost_adjustment"}:
+            return 1
+        if adj == "expense_subtract":
+            return -1
+    if bucket == "tax":
+        if adj == "tax_add":
+            return 1
+        if adj == "tax_subtract":
+            return -1
+    if bucket == "capital":
+        if adj == "capital_add":
+            return 1
+        if adj == "capital_withdraw":
+            return -1
+    return 0
+
+def finance_business_report_payload(start_at: str, end_at: str, label: str) -> dict:
+    conn = db_connect()
+    try:
+        invoice_row = conn.execute(
+            """SELECT COUNT(*), COALESCE(SUM(subtotal_amount_vnd),0), COALESCE(SUM(vat_amount_vnd),0),
+                      COALESCE(SUM(total_amount_vnd),0)
+               FROM finance_invoices
+               WHERE status IN ('paid','granted') AND created_at BETWEEN ? AND ?""",
+            (start_at, end_at),
+        ).fetchone() or (0, 0, 0, 0)
+        by_channel = sql_rows(
+            conn,
+            """SELECT COALESCE(payment_channel,''), COUNT(*), COALESCE(SUM(subtotal_amount_vnd),0),
+                      COALESCE(SUM(vat_amount_vnd),0), COALESCE(SUM(total_amount_vnd),0)
+               FROM finance_invoices
+               WHERE status IN ('paid','granted') AND created_at BETWEEN ? AND ?
+               GROUP BY COALESCE(payment_channel,'')
+               ORDER BY SUM(total_amount_vnd) DESC""",
+            (start_at, end_at),
+        )
+        by_type = sql_rows(
+            conn,
+            """SELECT COALESCE(invoice_type,''), COUNT(*), COALESCE(SUM(subtotal_amount_vnd),0),
+                      COALESCE(SUM(vat_amount_vnd),0), COALESCE(SUM(total_amount_vnd),0)
+               FROM finance_invoices
+               WHERE status IN ('paid','granted') AND created_at BETWEEN ? AND ?
+               GROUP BY COALESCE(invoice_type,'')
+               ORDER BY SUM(total_amount_vnd) DESC""",
+            (start_at, end_at),
+        )
+        adjustment_rows = sql_rows(
+            conn,
+            """SELECT adjustment_type, COALESCE(SUM(amount_vnd),0), COUNT(*)
+               FROM finance_adjustments
+               WHERE created_at BETWEEN ? AND ?
+               GROUP BY adjustment_type""",
+            (start_at, end_at),
+        )
+        adjustments = {str(kind): {"amount": int(amount or 0), "count": int(count or 0)} for kind, amount, count in adjustment_rows}
+        expense_row = conn.execute(
+            """SELECT COUNT(*), COALESCE(SUM(amount_vnd),0)
+               FROM finance_expense_events
+               WHERE COALESCE(deleted_at,'')='' AND created_at BETWEEN ? AND ?""",
+            (start_at, end_at),
+        ).fetchone() or (0, 0)
+        provider_cost = int(sql_scalar(
+            conn,
+            """SELECT COALESCE(SUM(provider_cost_estimate_vnd),0)
+               FROM finance_usage_events
+               WHERE created_at BETWEEN ? AND ?""",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        anomaly_count = int(sql_scalar(
+            conn,
+            "SELECT COUNT(*) FROM finance_anomalies WHERE created_at BETWEEN ? AND ? AND status='pending'",
+            (start_at, end_at),
+            0,
+        ) or 0)
+        revenue_adjustment = sum(finance_invoice_adjustment_sign(kind, "revenue") * int(data["amount"]) for kind, data in adjustments.items())
+        expense_adjustment = sum(finance_invoice_adjustment_sign(kind, "expense") * int(data["amount"]) for kind, data in adjustments.items())
+        tax_adjustment = sum(finance_invoice_adjustment_sign(kind, "tax") * int(data["amount"]) for kind, data in adjustments.items())
+        revenue_before_tax = int(invoice_row[1] or 0) + int(revenue_adjustment or 0)
+        vat_collected = int(invoice_row[2] or 0) + int(tax_adjustment or 0)
+        cash_in = int(invoice_row[3] or 0) + int(revenue_adjustment or 0) + int(tax_adjustment or 0)
+        expenses = int(expense_row[1] or 0) + int(provider_cost or 0) + int(expense_adjustment or 0)
+        profit_before_tax_reserve = revenue_before_tax - expenses
+        profit_after_tax_reserve = profit_before_tax_reserve - max(0, vat_collected)
+        capital_total = int(sql_scalar(
+            conn,
+            """SELECT COALESCE(SUM(CASE WHEN event_type='capital_add' THEN amount_vnd ELSE -amount_vnd END),0)
+               FROM finance_capital_events""",
+            default=0,
+        ) or 0)
+        monthly_burn = max(0, expenses)
+        breakeven_remaining = max(0, expenses - revenue_before_tax)
+        return {
+            "label": label,
+            "start_at": start_at,
+            "end_at": end_at,
+            "invoice_count": int(invoice_row[0] or 0),
+            "revenue_before_tax": revenue_before_tax,
+            "vat_collected": vat_collected,
+            "cash_in": cash_in,
+            "expenses": expenses,
+            "provider_cost_estimate": provider_cost,
+            "profit_before_tax_reserve": profit_before_tax_reserve,
+            "profit_after_tax_reserve": profit_after_tax_reserve,
+            "capital_total": capital_total,
+            "monthly_burn": monthly_burn,
+            "breakeven_remaining": breakeven_remaining,
+            "anomaly_count": anomaly_count,
+            "adjustments": adjustments,
+            "by_channel": by_channel,
+            "by_type": by_type,
+            "expense_count": int(expense_row[0] or 0),
+        }
+    finally:
+        conn.close()
+
+def finance_tax_dashboard_text(raw: str = "", default_period: str = "month") -> str:
+    start_at, end_at, label, _kind = finance_period_bounds(raw, default_period)
+    payload = finance_business_report_payload(start_at, end_at, label)
+    tax_config = finance_tax_config()
+    channel_lines = [
+        f"• {html.escape(str(channel or 'unknown'))}: <b>{vnd_text(total)}</b> | VAT <b>{vnd_text(vat)}</b> ({int(count or 0)} đơn)"
+        for channel, count, _subtotal, vat, total in payload["by_channel"][:6]
+    ] or ["• Chưa có dữ liệu"]
+    return "\n".join([
+        "🧾 <b>Thuế / VAT</b>",
+        f"• Kỳ: <code>{html.escape(label)}</code>",
+        f"• VAT đang bật: <code>{'YES' if tax_config.get('vat_enabled') else 'NO'}</code>",
+        f"• Tỷ lệ mặc định: <b>{float(tax_config.get('vat_rate') or 0) * 100:.2f}%</b>",
+        f"• Cách tính: <code>{html.escape(str(tax_config.get('vat_mode') or VAT_DEFAULT_MODE))}</code>",
+        "",
+        f"• Doanh thu trước thuế: <b>{vnd_text(payload['revenue_before_tax'])}</b>",
+        f"• VAT đã ghi nhận: <b>{vnd_text(payload['vat_collected'])}</b>",
+        f"• Tổng tiền khách trả: <b>{vnd_text(payload['cash_in'])}</b>",
+        f"• Số hóa đơn: <b>{payload['invoice_count']}</b>",
+        "",
+        "<b>Theo kênh</b>",
+        *channel_lines,
+        "",
+        "VAT chỉ ghi trên hóa đơn tiền thật. Khi khách dùng Xu/quota, bot không tính VAT lần hai.",
+    ])
+
+def finance_profit_dashboard_text(raw: str = "", default_period: str = "month") -> str:
+    start_at, end_at, label, _kind = finance_period_bounds(raw, default_period)
+    payload = finance_business_report_payload(start_at, end_at, label)
+    return "\n".join([
+        "📈 <b>Lợi nhuận nội bộ</b>",
+        f"• Kỳ: <code>{html.escape(label)}</code>",
+        f"• Doanh thu trước thuế: <b>{vnd_text(payload['revenue_before_tax'])}</b>",
+        f"• Chi phí + provider estimate: <b>{vnd_text(payload['expenses'])}</b>",
+        f"• VAT dự phòng: <b>{vnd_text(payload['vat_collected'])}</b>",
+        f"• Lãi/lỗ trước VAT reserve: <b>{vnd_text(payload['profit_before_tax_reserve'])}</b>",
+        f"• Lãi/lỗ sau VAT reserve: <b>{vnd_text(payload['profit_after_tax_reserve'])}</b>",
+        "",
+        "Số liệu là sổ quản trị nội bộ. Sai sót phải tạo bút toán điều chỉnh, không sửa giao dịch gốc.",
+    ])
+
+def finance_capital_breakeven_text() -> str:
+    month_start, month_end, month_label, _kind = finance_period_bounds("", "month")
+    month = finance_business_report_payload(month_start, month_end, month_label)
+    return "\n".join([
+        "🏦 <b>Vốn & Hòa vốn</b>",
+        f"• Vốn ròng đã ghi nhận: <b>{vnd_text(month['capital_total'])}</b>",
+        f"• Chi phí tháng này: <b>{vnd_text(month['monthly_burn'])}</b>",
+        f"• Doanh thu trước thuế tháng này: <b>{vnd_text(month['revenue_before_tax'])}</b>",
+        f"• Còn thiếu để hòa vốn tháng: <b>{vnd_text(month['breakeven_remaining'])}</b>",
+        "",
+        "Ghi vốn/withdraw bằng bút toán điều chỉnh hoặc lệnh finance_adjust, không sửa số liệu cũ.",
+    ])
+
+def finance_adjustments_text(limit: int = 8) -> str:
+    conn = db_connect()
+    try:
+        rows = sql_rows(
+            conn,
+            """SELECT id, adjustment_type, amount_vnd, related_order_id, reason, admin_id, created_at
+               FROM finance_adjustments ORDER BY id DESC LIMIT ?""",
+            (int(limit),),
+        )
+    finally:
+        conn.close()
+    lines = [
+        "🧮 <b>Sổ điều chỉnh</b>",
+        "",
+        "Nguyên tắc: không sửa/xóa giao dịch gốc. Sai thì tạo bút toán điều chỉnh có lý do.",
+        "Cú pháp: <code>/finance_adjust &lt;type&gt; &lt;amount_vnd&gt; &lt;reason&gt;</code>",
+        "Type: <code>" + ", ".join(sorted(FINANCE_ADJUSTMENT_TYPES)) + "</code>",
+        "",
+    ]
+    if not rows:
+        lines.append("Chưa có bút toán điều chỉnh.")
+    else:
+        for adj_id, kind, amount, order_id, reason, admin_id, created_at in rows:
+            order_part = f" | order <code>{html.escape(str(order_id))}</code>" if order_id else ""
+            lines.append(
+                f"• #{int(adj_id)} <code>{html.escape(str(kind))}</code> <b>{vnd_text(amount)}</b>{order_part} — {html.escape(str(reason or '')[:100])} — {html.escape(str(created_at or '')[:16])}"
+            )
+    return "\n".join(lines)
+
+def finance_anomaly_text(limit: int = 10) -> str:
+    conn = db_connect()
+    try:
+        rows = sql_rows(
+            conn,
+            """SELECT id, order_id, user_id, anomaly_type, expected_amount_vnd, actual_amount_vnd, reason, created_at
+               FROM finance_anomalies WHERE status='pending' ORDER BY id DESC LIMIT ?""",
+            (int(limit),),
+        )
+    finally:
+        conn.close()
+    lines = [
+        "⚠️ <b>Đơn bất thường</b>",
+        "",
+        "Các đơn lệch tiền, lệch currency/paymentLink hoặc callback trùng sẽ vào đây để admin đối soát. Bot không cộng Xu/kích hoạt gói khi đơn bị flag.",
+        "",
+    ]
+    if not rows:
+        lines.append("Không có đơn bất thường đang chờ.")
+    else:
+        for row in rows:
+            anomaly_id, order_id, user_id, kind, expected, actual, reason, created_at = row
+            lines.append(
+                f"• #{int(anomaly_id)} order <code>{html.escape(str(order_id))}</code> user <code>{html.escape(str(user_id))}</code> "
+                f"<code>{html.escape(str(kind))}</code> expected <b>{vnd_text(expected)}</b> actual <b>{vnd_text(actual)}</b> — "
+                f"{html.escape(str(reason or '')[:120])} — {html.escape(str(created_at or '')[:16])}"
+            )
+    return "\n".join(lines)
+
+def finance_admin_guide_text() -> str:
+    return "\n".join([
+        "📘 <b>Hướng dẫn Admin Tài chính</b>",
+        "",
+        "1. Doanh thu tiền thật vào <b>finance_invoices</b> với giá trước thuế, VAT, tổng thanh toán.",
+        "2. PayOS callback chỉ cấp Xu/gói khi số tiền thanh toán khớp tổng sau VAT.",
+        "3. Chi tiêu bằng Xu/quota không tính VAT lần hai.",
+        "4. Sai số, hoàn tiền, chi phí thiếu hoặc vốn mới phải ghi bằng bút toán điều chỉnh.",
+        "5. Không sửa/xóa giao dịch gốc để sau này kiểm tra sổ còn truy vết được.",
+        "",
+        "Lệnh nhanh:",
+        "• <code>/finance_dashboard</code>",
+        "• <code>/finance_tax_report</code>",
+        "• <code>/finance_adjust revenue_subtract 10000 ly_do</code>",
+        "• <code>/vat_rate 8</code>, <code>/vat_on</code>, <code>/vat_off</code>",
+    ])
 
 def finance_expense_categories_text() -> str:
     return (
@@ -142685,9 +143836,14 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "finance_expense_last_month": lambda: (finance_expense_period_text(previous_month_arg(), "↩️ <b>Chi phí tháng trước</b>"), finance_period_keyboard("expense")),
     "finance_expense_year": lambda: (finance_expense_period_text("", "📆 <b>Chi phí năm nay</b>", "year"), finance_period_keyboard("expense")),
     "finance_expense_categories": lambda: (finance_expense_categories_text(), finance_period_keyboard("expense")),
-    "finance_profit": lambda: (finance_profit_menu_text(), finance_period_keyboard("profit")),
+    "finance_tax_vat": lambda: (finance_tax_dashboard_text(), finance_admin_keyboard()),
+    "finance_profit": lambda: (finance_profit_dashboard_text(), finance_period_keyboard("profit")),
     "finance_profit_this_month": lambda: (finance_profit_period_text("", "📈 <b>Lãi / Lỗ tháng này</b>"), finance_period_keyboard("profit")),
     "finance_profit_year": lambda: (finance_profit_period_text("", "📆 <b>Lãi / Lỗ năm nay</b>", "year"), finance_period_keyboard("profit")),
+    "finance_capital": lambda: (finance_capital_breakeven_text(), finance_admin_keyboard()),
+    "finance_anomalies": lambda: (finance_anomaly_text(), finance_admin_keyboard()),
+    "finance_adjustments": lambda: (finance_adjustments_text(), finance_admin_keyboard()),
+    "finance_guide": lambda: (finance_admin_guide_text(), finance_admin_keyboard()),
     "finance_export": lambda: (finance_export_menu_text(), finance_period_keyboard("export")),
     "finance_export_month": lambda: (finance_export_instruction_text("month"), finance_period_keyboard("export")),
     "finance_export_year": lambda: (finance_export_instruction_text("year"), finance_period_keyboard("export")),
@@ -142712,6 +143868,80 @@ for _admin_confirm_key in tuple(ADMIN_CONFIRM_ACTIONS.keys()):
     ADMIN_MENU_PAGE_HANDLERS[f"admin_confirm_ack_{_admin_confirm_key}"] = (
         lambda key=_admin_confirm_key: (admin_confirm_ack_text(key), admin_confirm_ack_keyboard(key))
     )
+
+async def cmd_finance_tax_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    raw = context.args[0] if context.args else ""
+    default_period = "year" if re.fullmatch(r"\d{4}", str(raw or "").strip()) else "month"
+    await update.message.reply_text(finance_tax_dashboard_text(raw, default_period), parse_mode="HTML", reply_markup=finance_admin_keyboard())
+
+async def cmd_finance_anomalies(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(finance_anomaly_text(), parse_mode="HTML", reply_markup=finance_admin_keyboard())
+
+async def cmd_finance_adjust(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if len(context.args or []) < 3:
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/finance_adjust &lt;type&gt; &lt;amount_vnd&gt; &lt;reason&gt;</code>\n"
+            f"Type: <code>{html.escape(', '.join(sorted(FINANCE_ADJUSTMENT_TYPES)))}</code>",
+            parse_mode="HTML",
+        )
+    adjustment_type = str(context.args[0]).strip().lower()
+    amount_raw = re.sub(r"[^0-9]", "", str(context.args[1] or ""))
+    amount = int(amount_raw or 0)
+    reason = " ".join(str(x) for x in context.args[2:]).strip()
+    result = create_finance_adjustment(adjustment_type, amount, reason, admin_id=str(update.effective_user.id))
+    if not result.get("ok"):
+        return await update.message.reply_text(
+            f"⚠️ Không ghi được bút toán: <code>{html.escape(str(result.get('reason') or 'unknown'))}</code>\n"
+            "Không có giao dịch gốc nào bị sửa.",
+            parse_mode="HTML",
+        )
+    await update.message.reply_text(
+        "✅ <b>Đã ghi bút toán điều chỉnh</b>\n\n"
+        f"• ID: <code>#{int(result.get('id') or 0)}</code>\n"
+        f"• Type: <code>{html.escape(adjustment_type)}</code>\n"
+        f"• Số tiền: <b>{vnd_text(amount)}</b>\n"
+        f"• Lý do: {html.escape(reason)}\n\n"
+        "Không sửa/xóa giao dịch gốc.",
+        parse_mode="HTML",
+        reply_markup=finance_admin_keyboard(),
+    )
+
+async def cmd_vat_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    if not context.args:
+        config = finance_tax_config()
+        return await update.message.reply_text(
+            f"🧾 VAT hiện tại: <b>{float(config.get('vat_rate') or 0) * 100:.2f}%</b>\n"
+            "Cú pháp đổi: <code>/vat_rate 8</code>",
+            parse_mode="HTML",
+        )
+    result = admin_set_global_vat_rate(float(str(context.args[0]).replace(",", ".")), str(update.effective_user.id))
+    if not result.get("ok"):
+        return await update.message.reply_text(f"⚠️ Không đổi VAT: <code>{html.escape(str(result.get('reason')))}</code>", parse_mode="HTML")
+    await update.message.reply_text(
+        f"✅ Đã cập nhật VAT mặc định cho hóa đơn mới: <b>{float(result.get('vat_rate') or 0) * 100:.2f}%</b>.\n"
+        "Hóa đơn cũ giữ snapshot VAT cũ.",
+        parse_mode="HTML",
+    )
+
+async def cmd_vat_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    result = admin_set_vat_enabled(True, str(update.effective_user.id))
+    await update.message.reply_text(f"✅ VAT cho hóa đơn mới: <code>{'ON' if result.get('vat_enabled') else 'OFF'}</code>", parse_mode="HTML")
+
+async def cmd_vat_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    result = admin_set_vat_enabled(False, str(update.effective_user.id))
+    await update.message.reply_text(f"✅ VAT cho hóa đơn mới: <code>{'ON' if result.get('vat_enabled') else 'OFF'}</code>", parse_mode="HTML")
 
 async def cmd_finance_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -154880,6 +156110,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("billing_report", cmd_billing_report))
     tg_app.add_handler(CommandHandler("xu_ledger_export", cmd_xu_ledger_export))
     tg_app.add_handler(CommandHandler("finance_dashboard", cmd_finance_dashboard))
+    tg_app.add_handler(CommandHandler("finance_tax_report", cmd_finance_tax_report))
+    tg_app.add_handler(CommandHandler("finance_adjust", cmd_finance_adjust))
+    tg_app.add_handler(CommandHandler("finance_anomalies", cmd_finance_anomalies))
+    tg_app.add_handler(CommandHandler("vat_rate", cmd_vat_rate))
+    tg_app.add_handler(CommandHandler("vat_on", cmd_vat_on))
+    tg_app.add_handler(CommandHandler("vat_off", cmd_vat_off))
     tg_app.add_handler(CommandHandler("revenue_report", cmd_revenue_report))
     tg_app.add_handler(CommandHandler("expense_report", cmd_expense_report))
     tg_app.add_handler(CommandHandler("profit_report", cmd_profit_report))
