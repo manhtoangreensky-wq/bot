@@ -106,7 +106,7 @@ def test_video_route_entry_context_is_saved_per_button():
         assert session.get("video_tool") == route["video_tool"]
         assert session.get("parent_menu") == "video_main"
         assert session.get("return_to") == "menu|main_video"
-        expected_step = "profile_select" if route["video_tool"] == "video_trend" else "tool_home"
+        expected_step = route["first_step"]
         assert session.get("flow_stack") == ["video_main", route["video_tool"], expected_step]
         assert "menu|main_video" in callbacks
         for child in route["expected_children"]:
@@ -121,7 +121,7 @@ def test_video_prompt_and_storyboard_are_prompt_flows_not_auto_render():
     text, markup, session = _press(180101, route["entry_callback"])
     callbacks = _callbacks(markup)
     assert "Storyboard + Prompt" in text
-    assert "vproduct|input_text|storyboard_prompt" in callbacks
+    assert "vproduct|b14_profile|storytelling" in callbacks
     assert "vproduct|b14_confirm" not in callbacks
     assert session.get("video_tool") == "storyboard_prompt"
 
@@ -214,7 +214,8 @@ def test_storyboard_prompt_does_not_jump_profile_flow():
     callbacks = _callbacks(markup)
     assert "Storyboard + Prompt" in text
     assert session.get("video_tool") == "storyboard_prompt"
-    assert not any("b14_profile" in callback for callback in callbacks)
+    assert any("b14_profile" in callback for callback in callbacks)
+    assert session.get("current_step") == "profile_select"
 
 
 def test_storyboard_prompt_back_matrix():
