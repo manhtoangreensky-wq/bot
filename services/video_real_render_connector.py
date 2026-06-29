@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from services.multiscene_video_pipeline import process_multiscene_video_pipeline
+from services.multiscene_video_pipeline import ensure_video_output, process_multiscene_video_pipeline, safe_run_ffmpeg
 
 
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
@@ -185,7 +185,7 @@ def _scene_count(job: dict | None = None) -> int:
     value = job.get("scene_count")
     if not value and isinstance(job.get("project"), dict):
         value = (job.get("project") or {}).get("scene_count")
-    return max(1, min(5, _safe_int(value, 3)))
+    return max(1, min(20, _safe_int(value, 3)))
 
 
 def _aspect_ratio(job: dict | None = None) -> str:
@@ -219,7 +219,11 @@ def real_video_scene_plan(job: dict | None = None) -> dict:
     job = dict(job or {})
     count = _scene_count(job)
     aspect_ratio = _aspect_ratio(job)
-    default_duration = max(1.0, min(8.0, float(_safe_int(job.get("scene_duration") or 6, 6))))
+    total_duration = _safe_int(job.get("expected_duration_seconds") or job.get("duration_seconds"), 0)
+    if total_duration > 0:
+        default_duration = max(1.0, min(8.0, float(total_duration) / max(1, count)))
+    else:
+        default_duration = max(1.0, min(8.0, float(_safe_int(job.get("scene_duration") or 6, 6))))
     original = original_prompt_from_job(job)
     style = _safe_text(job.get("profile_id") or "", 120)
     cards = _scene_cards(job)
@@ -480,32 +484,217 @@ def _logo_enabled(addon_plan: dict) -> bool:
     return bool(addon_plan.get("logo_enabled") and _safe_text(addon_plan.get("logo_text"), 120))
 
 
-def render_real_video_job(job: dict, work_dir: str) -> dict:
+def _local_composer_enabled(job: dict | None = None) -> bool:
+    del job
+    return _env_flag("REAL_VIDEO_LOCAL_COMPOSER_FALLBACK_ENABLED", "1")
+
+
+def _ffmpeg_binary() -> str:
+    configured = str(os.getenv("FFMPEG_PATH") or os.getenv("LOCAL_FFMPEG_PATH") or "").strip()
+    if configured and (os.path.isfile(configured) or shutil.which(configured)):
+        return configured
+    return shutil.which("ffmpeg") or ""
+
+
+def _canvas_size(aspect_ratio: str) -> tuple[int, int]:
+    value = str(aspect_ratio or "9:16").strip()
+    if value == "16:9":
+        return 960, 540
+    if value == "1:1":
+        return 720, 720
+    return 540, 960
+
+
+def _ffmpeg_text(value: Any, limit: int = 320) -> str:
+    text = _safe_text(value, limit)
+    return (
+        text.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+        .replace("%", "\\%")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+    )
+
+
+def _scene_color(scene_id: int) -> str:
+    palette = ("0b1f3a", "163b2f", "40213a", "1f3344", "3b2f16", "24351f")
+    return palette[(max(1, int(scene_id or 1)) - 1) % len(palette)]
+
+
+def _render_local_composer_scene(scene, raw_path: str) -> dict:
+    ffmpeg = _ffmpeg_binary()
+    if not ffmpeg:
+        raise RealVideoRenderError("ffmpeg_missing")
+    scene_id = _safe_int(getattr(scene, "scene_id", 1), 1)
+    duration = max(1.0, min(8.0, float(getattr(scene, "target_duration_sec", 6.0) or 6.0)))
+    width, height = _canvas_size(str(getattr(scene, "aspect_ratio", "") or "9:16"))
+    target = os.path.abspath(raw_path)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    color = _scene_color(scene_id)
+    fade_out = max(0.1, duration - 0.3)
+    primary_filter = (
+        f"scale={width}:{height},"
+        "format=yuv420p,"
+        f"drawbox=x=36:y=36:w=iw-72:h=ih-72:color=white@0.08:t=4,"
+        f"fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out:.3f}:d=0.25"
+    )
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=0x{color}:s={width}x{height}:r=30:d={duration:.3f}",
+        "-vf",
+        primary_filter,
+        "-t",
+        f"{duration:.3f}",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "22",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        target,
+    ]
+    result = safe_run_ffmpeg(cmd, timeout=max(60, int(duration * 30)))
+    if result.returncode != 0:
+        fallback = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=0x{color}:s={width}x{height}:r=30:d={duration:.3f}",
+            "-vf",
+            "format=yuv420p",
+            "-t",
+            f"{duration:.3f}",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "22",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            target,
+        ]
+        result = safe_run_ffmpeg(fallback, timeout=max(60, int(duration * 30)))
+    if result.returncode != 0:
+        raise RealVideoRenderError("local_composer_ffmpeg_failed")
+    return {"ok": True, "provider": "local_scene_composer", "output_path": ensure_video_output(target)}
+
+
+def build_local_scene_composer(job: dict | None = None):
+    del job
+
+    def _render(scene, raw_path: str):
+        return _render_local_composer_scene(scene, raw_path)
+
+    return _render
+
+
+def _default_bgm_path(addon_plan: dict, workspace: str, duration_seconds: float) -> str | None:
+    if not addon_plan.get("music_enabled"):
+        return None
+    source = str(addon_plan.get("music_source") or "none").strip().lower()
+    if source in {"none", "off", "disabled", ""}:
+        return None
+    explicit = str(addon_plan.get("music_path") or addon_plan.get("music_audio_path") or addon_plan.get("bgm_audio_path") or "").strip()
+    if explicit and os.path.isfile(explicit) and os.path.getsize(explicit) > 0:
+        return explicit
+    if source not in {"default", "saved", "vault", "system"}:
+        return None
+    ffmpeg = _ffmpeg_binary()
+    if not ffmpeg:
+        return None
+    os.makedirs(workspace, exist_ok=True)
+    duration = max(1.0, min(180.0, float(duration_seconds or 6.0)))
+    volume = max(0.0, min(1.0, _safe_int(addon_plan.get("music_volume_percent"), 30) / 100.0))
+    output = os.path.join(workspace, "default_bgm.m4a")
+    result = safe_run_ffmpeg(
+        [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=220:sample_rate=44100:duration={duration:.3f}",
+            "-filter:a",
+            f"volume={max(0.01, volume * 0.12):.3f}",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+            output,
+        ],
+        timeout=max(60, int(duration * 2)),
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return ensure_video_output(output)
+    except RuntimeError:
+        return None
+
+
+def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_audio_path: str | None = None) -> dict:
     addon = _addon_plan(job)
-    if addon.get("voice_enabled"):
-        raise RealVideoRenderError("voice_addon_connector_missing")
-    if addon.get("music_enabled") and str(addon.get("music_source") or "none") not in {"none", ""}:
-        raise RealVideoRenderError("music_addon_source_missing")
-    workspace = os.path.abspath(work_dir)
-    result = process_multiscene_video_pipeline(
+    return process_multiscene_video_pipeline(
         user_id=str(job.get("user_id") or ""),
         job_id=str(job.get("job_id") or job.get("id") or int(time.time())),
         user_prompt=original_prompt_from_job(job),
         workspace_dir=workspace,
-        render_video_func=build_real_scene_renderer(job),
+        render_video_func=render_video_func,
         llm_func=real_video_llm_func_from_job(job),
         max_scenes=_scene_count(job),
         default_scene_duration=6.0,
         aspect_ratio=_aspect_ratio(job),
         enable_voice=False,
+        bgm_audio_path=bgm_audio_path,
         enable_subtitle=bool(addon.get("subtitle_enabled", True)),
         enable_logo=_logo_enabled(addon),
         logo_text=str(addon.get("logo_text") or ""),
         logo_position=str(addon.get("logo_position") or "bottom_right"),
     )
+
+
+def render_real_video_job(job: dict, work_dir: str) -> dict:
+    addon = _addon_plan(job)
+    if addon.get("voice_enabled"):
+        raise RealVideoRenderError("voice_addon_connector_missing")
+    workspace = os.path.abspath(work_dir)
+    total_duration = max(1.0, float(_safe_int(job.get("expected_duration_seconds") or _scene_count(job) * 6, _scene_count(job) * 6)))
+    bgm_audio_path = _default_bgm_path(addon, workspace, total_duration)
+    readiness = real_video_provider_readiness(job)
+    is_product_video = bool(str(job.get("source") or "") == "product_video" or job.get("product_video"))
+    result: dict[str, Any] = {}
+    provider_attempted = False
+    if readiness.get("ok") or not is_product_video:
+        provider_attempted = True
+        result = _run_multiscene_render(job, workspace, render_video_func=build_real_scene_renderer(job), bgm_audio_path=bgm_audio_path)
+    if is_product_video and (not result or not result.get("ok")) and _local_composer_enabled(job):
+        local_workspace = os.path.join(workspace, "local_composer")
+        result = _run_multiscene_render(job, local_workspace, render_video_func=build_local_scene_composer(job), bgm_audio_path=bgm_audio_path)
+        result["renderer"] = "local_scene_composer"
+        result["provider_attempted"] = bool(provider_attempted)
+    elif result:
+        result["renderer"] = "real_provider"
+        result["provider_attempted"] = bool(provider_attempted)
     final_path = str(result.get("final_video_path") or "")
     if not result.get("ok") or not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
         raise RealVideoRenderError(str(result.get("error") or REAL_VIDEO_RENDER_UNAVAILABLE))
     result["provider_order"] = _provider_order(job)
+    result["provider_readiness"] = {"ok": bool(readiness.get("ok")), "ready_provider_order": readiness.get("ready_provider_order") or []}
     result["original_user_prompt"] = original_prompt_from_job(job)
     return result

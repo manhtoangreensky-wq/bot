@@ -55031,8 +55031,12 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         status_label = "đang dựng video"
         if progress >= 80:
             stage = "hệ thống đang đóng gói video cuối"
-        elif progress >= 35:
+        elif progress >= 60:
+            stage = "hệ thống đang ghép nhạc, phụ đề và logo"
+        elif progress >= 40:
             stage = "hệ thống đang dựng các cảnh"
+        elif progress >= 20:
+            stage = "hệ thống đã nhận lượt xử lý"
         else:
             stage = "hệ thống đang chuẩn bị dữ liệu dựng"
     elif status in {"completed", "success"}:
@@ -140150,6 +140154,8 @@ ADMIN_CONTROL_MODULES = {
             ("/remote_worker_prod_canary_status <job_id>", "xem trạng thái admin production canary"),
             ("/video_worker_status", "trạng thái product video worker/provider"),
             ("/video_worker_claim_debug", "debug lane claim worker video, không lộ secret"),
+            ("/video_job_debug <job_id>", "debug job video và lane claim, không lộ secret"),
+            ("/video_render_debug <job_id>", "debug render video và artifact, không lộ secret"),
             ("/tool_test_video_product_worker_claim --no-charge", "kiểm tra route claim product video thật, không render MP4"),
             ("/shopaikey_status", "ShopAIKey status"),
             ("/shopaikey_usage", "ShopAIKey usage"),
@@ -151809,6 +151815,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("remote_worker_prod_canary_status", cmd_remote_worker_prod_canary_status))
     tg_app.add_handler(CommandHandler("video_worker_status", cmd_video_worker_status))
     tg_app.add_handler(CommandHandler("video_worker_claim_debug", cmd_video_worker_claim_debug))
+    tg_app.add_handler(CommandHandler("video_job_debug", cmd_video_worker_claim_debug))
+    tg_app.add_handler(CommandHandler("video_render_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_video_product_worker_claim(?:@\w+)?(?:\s|$)"), cmd_tool_test_video_product_worker_claim))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
