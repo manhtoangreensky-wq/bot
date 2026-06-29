@@ -82,29 +82,32 @@ def test_monthly_packages_rebuilt_current_products():
     text = "\n".join(bot.pricing_plans_lines())
     labels = _labels(bot.pricing_plans_keyboard("vi"))
     for expected in [
-        "🟢 Gói Cơ bản — 98k / 30 ngày",
-        "🔵 Gói Nội dung — 188k / 30 ngày",
-        "🟣 Gói Bán hàng — 388k / 30 ngày",
-        "🟠 Gói Chuyên nghiệp — 588k / 30 ngày",
-        "🔴 Gói Doanh nghiệp nhỏ — 888k / 30 ngày",
+        "Gói Ảnh",
+        "Gói Video",
+        "Gói Nhạc",
+        "Gói Voice",
+        "Phụ đề / Lồng tiếng",
+        "Prompt / Workflow",
     ]:
         assert expected in text
-    assert any("Cơ bản" in label for label in labels)
-    assert any("DN nhỏ" in label for label in labels)
+    assert "🖼 Gói Ảnh" in labels
+    assert "🎬 Gói Video" in labels
+    mixed_text = "\n".join(bot.pricing_task_package_group_lines("mixed"))
+    assert "🟢 Gói Cơ bản — 98k / 30 ngày" in mixed_text
+    assert "🔴 Gói Doanh nghiệp nhỏ — 888k / 30 ngày" in mixed_text
 
 
 def test_combo_packages_rebuilt_by_use_case():
     text = "\n".join(bot.pricing_combo_lines())
     for expected in [
-        "Combo Video Quảng Cáo",
-        "Combo Review Sản Phẩm",
+        "Combo Video Quảng Cáo Sản Phẩm Mini",
+        "Combo Affiliate / Review Sản Phẩm",
         "Combo Ra Mắt Sản Phẩm",
-        "Combo Bài Hát + Visual",
-        "Combo Voice Thương Hiệu",
+        "Combo MV Nhạc / Ca Khúc",
         "Combo Khóa Học Mini",
-        "Combo Dịch / Lồng Tiếng",
-        "Combo Content 1 Tuần",
-        "Combo Shop / Affiliate",
+        "Combo Dịch Video Đa Ngôn Ngữ",
+        "Combo Nội Dung Hàng Ngày",
+        "Combo Shop Bán Hàng 30 Ngày",
         "Combo Doanh Nghiệp Nhỏ",
     ]:
         assert expected in text
@@ -122,18 +125,12 @@ def test_package_combo_copy_distinguishes_xu_monthly_combo_member():
 
 def test_combo_buttons_do_not_create_purchase_without_backend_product_id():
     callbacks = _callbacks(bot.pricing_combo_keyboard("vi"))
-    manual_codes = {
-        "song_visual_399k",
-        "brand_voice_399k",
-        "mini_course_video_499k",
-        "translate_dub_video_499k",
-        "music_bg_10_config",
-        "music_song_10_config",
-        "subtitle_dub_10_config",
-    }
+    manual_codes = {"combo_song_visual_888k", "combo_mini_course_1888k", "combo_translate_dub_888k", "combo_custom_order"}
     for code in manual_codes:
-        assert f"pkgbuy|combo|{code}" not in callbacks
-    assert "menu|support" in callbacks
+        assert f"pkgbuy|combo|{code}" in callbacks
+        detail = "\n".join(bot.package_purchase_detail_lines("combo", code))
+        assert "chưa mở checkout tự động" in detail
+        assert "Bot chưa tạo đơn" in detail
 
 
 def test_no_engine_files_touched_for_pricing_combo_task():
