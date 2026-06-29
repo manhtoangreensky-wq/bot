@@ -1702,7 +1702,13 @@ def complete_remote_worker_job(
     renderer = str(payload.get("renderer") or "").strip().lower()
     product_admin_video_leak = _safe_bool(payload.get("admin_video_delivery")) and not is_admin_video
     test_pattern = _safe_bool(payload.get("test_pattern")) or render_mode == RENDER_MODE_ADMIN_TEST_PATTERN or _renderer_has_test_marker(renderer)
-    special_safe_job = bool(is_canary or is_admin_canary or is_admin_video)
+    claim_only_diagnostic = bool(
+        _safe_bool(payload.get("claim_only_diagnostic") or payload.get("diagnostic_claim_only"))
+        and _safe_bool(payload.get("no_charge"))
+        and not _safe_bool(payload.get("provider_call"))
+        and not _safe_bool(payload.get("public_user"))
+    )
+    special_safe_job = bool(is_canary or is_admin_canary or is_admin_video or claim_only_diagnostic)
     if product_admin_video_leak and not special_safe_job:
         return _fail_product_fake_output(conn, int(job_id), "admin_video_delivery_not_allowed_for_product_video")
     if test_pattern and not special_safe_job:
@@ -1727,6 +1733,15 @@ def complete_remote_worker_job(
         validation = validate_uploaded_result_file(final_video_path)
         if not validation.get("ok"):
             return {"ok": False, "reason": "admin_video_result_file_missing"}
+    if not special_safe_job:
+        if final_video_file_id or str(payload.get("final_video_file_id") or "").strip():
+            pass
+        elif final_video_path:
+            validation = validate_uploaded_result_file(final_video_path)
+            if not validation.get("ok"):
+                return {"ok": False, "reason": "product_result_file_missing"}
+        else:
+            return {"ok": False, "reason": "product_result_file_missing"}
     payload["render_mode"] = render_mode
     payload["test_pattern"] = bool(test_pattern)
     if uploaded_file:

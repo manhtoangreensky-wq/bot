@@ -630,15 +630,24 @@ def process_claimed_job(job: dict) -> dict:
             }
             send_heartbeat(job_id, 90, "uploading ADMIN TEST PATTERN")
             return complete_job(job_id, result, final_path)
-        send_heartbeat(job_id, 35, "rendering real video")
+        send_heartbeat(job_id, 20, "preparing product video")
         final_path = render_real_video(job, work_dir)
-        send_heartbeat(job_id, 90, "uploading result")
+        send_heartbeat(job_id, 80, "product video rendered")
+        send_heartbeat(job_id, 95, "uploading result")
         result = {
             "ok": True,
             "render_mode": RENDER_MODE_REAL,
             "renderer": "remote_worker_real_render_route",
             "final_video_name": os.path.basename(final_path),
             "bytes": os.path.getsize(final_path),
+            "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
+            "product_video": True,
+            "test_pattern": False,
+            "admin_video_delivery": False,
+            "provider_call": bool(job.get("provider_call")),
+            "public_user": bool(job.get("public_user")),
+            "admin_only": bool(job.get("admin_only")),
+            "no_charge": bool(job.get("no_charge")),
         }
         return complete_job(job_id, result, final_path)
 
