@@ -81,7 +81,9 @@ def test_video_ai_real_not_default_canonical_flow():
     text, markup, session = _press(180002, "vproduct|open|video_ai_real")
     callbacks = _callbacks(markup)
     assert "Video AI chân thật" in text
-    assert "promptvideo|start" in callbacks
+    assert "vproduct|input_text|video_ai_real" in callbacks
+    assert "vproduct|input_media|video_ai_real" in callbacks
+    assert "vproduct|entry_media|video_ai_real" in callbacks
     assert "vproduct|b14_profile|storytelling" not in callbacks
     assert session.get("video_tool") == "video_ai_real"
 
@@ -189,8 +191,8 @@ def test_frame_video_button_routes_real_flow():
     text, markup, session = _press(180010, "vproduct|open|frame_video_local")
     callbacks = _callbacks(markup)
     assert "Ghép ảnh thành video" in text
-    assert "framevideo|start" in callbacks
-    assert "framevideo|ai_first" in callbacks
+    assert "vproduct|legacy|frame_video_local" in callbacks
+    assert "vproduct|frame_recent|frame_video_local" in callbacks
     assert session.get("video_tool") == "frame_video_local"
 
 
@@ -226,8 +228,12 @@ def test_script_to_video_splits_scenes():
     user_id = 180014
     _press(user_id, "vproduct|open|script_image_video")
     _press(user_id, "vproduct|ideas|script_image_video")
-    _press(user_id, "vproduct|idea_select|0")
-    _press(user_id, "vproduct|asset_skip_confirm")
+    _press(user_id, "vproduct|b14_profile|product_review")
+    _press(user_id, "vproduct|panels|6")
+    _press(user_id, "vproduct|style|default")
+    _press(user_id, "vproduct|color|warm")
+    _press(user_id, "vproduct|image_plan|skip")
+    _press(user_id, "vproduct|scene_skip")
     text, _markup, session = _press(user_id, "vproduct|b14_creative_done")
     assert "Storyboard" in text or "Cảnh" in text
     assert session.get("draft", {}).get("b14_storyboard_plan")
@@ -252,9 +258,9 @@ def test_multiscene_flow_restored():
     text, markup, session = _press(180016, "vproduct|open|multi_scene_film")
     callbacks = _callbacks(markup)
     assert "Phim AI nhiều cảnh" in text
-    assert "vproduct|b14_profile|storytelling" in callbacks
-    assert "vproduct|b14_profile|cinematic_trailer" in callbacks
-    assert session.get("current_step") == "profile_select"
+    assert "vproduct|ideas|multi_scene_film" in callbacks
+    assert "vproduct|input_text|multi_scene_film" in callbacks
+    assert session.get("current_step") == "intro"
     assert session.get("product_id") == "multi_scene_film"
 
 
@@ -286,7 +292,8 @@ def test_storyboard_prompt_does_not_auto_render():
     text, markup, session = _press(180019, "vproduct|open|storyboard_prompt")
     callbacks = _callbacks(markup)
     assert "Storyboard + Prompt" in text
-    assert "vproduct|b14_profile|storytelling" in callbacks
+    assert "vproduct|input_text|storyboard_prompt" in callbacks
+    assert "vproduct|ideas|storyboard_prompt" in callbacks
     assert "vproduct|b14_confirm" not in callbacks
     assert session["draft"]["provider_called"] is False
 

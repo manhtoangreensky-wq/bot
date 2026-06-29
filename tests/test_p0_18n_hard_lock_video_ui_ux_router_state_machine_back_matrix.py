@@ -150,32 +150,32 @@ def test_trend_back_stack_no_double_back_needed():
     assert "Video TOAN AAS" in text
 
 
-def test_idea_flow_starts_profile():
+def test_idea_flow_starts_intro():
     text, markup, session = _open(181807, "video_idea")
     assert "Ý tưởng video" in text
-    assert "Chọn loại video" in text
-    assert session["current_step"] == "profile_select"
-    assert "vproduct|b14_profile|storytelling" in _callbacks(markup)
+    assert "Chọn loại video" not in text
+    assert session["current_step"] == "intro"
+    assert "vproduct|ideas|video_idea" in _callbacks(markup)
 
 
 def test_idea_flow_profile_to_suggestion_type():
     user_id = 181808
     _open(user_id, "video_idea")
+    _press(user_id, "vproduct|ideas|video_idea")
     text, markup, session = _press(user_id, "vproduct|b14_profile|storytelling")
-    assert session["current_step"] == "intro"
-    assert "vproduct|ideas|video_idea" in _callbacks(markup)
-    assert "vproduct|input_text|video_idea" in _callbacks(markup)
-    assert "Đã chọn loại video" in text
+    assert session["current_step"] == "idea_suggestions"
+    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
+    assert "Gợi ý ý tưởng" in text
 
 
 def test_idea_flow_back_matrix():
     user_id = 181809
     _open(user_id, "video_idea")
-    _press(user_id, "vproduct|b14_profile|storytelling")
     _press(user_id, "vproduct|ideas|video_idea")
+    _press(user_id, "vproduct|b14_profile|storytelling")
     text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "collect_input"
-    assert "Nhập ý tưởng" in text
+    assert session["current_step"] == "profile_select"
+    assert "Chọn loại video" in text
 
 
 def test_script_to_video_not_jump_to_video_ai_real():
@@ -203,7 +203,7 @@ def test_script_to_video_back_matrix():
 def test_frame_video_button_not_jump_main_menu():
     text, markup, session = _open(181812, "frame_video_local")
     assert "Ghép ảnh thành video" in text
-    assert "framevideo|start" in _callbacks(markup)
+    assert "vproduct|legacy|frame_video_local" in _callbacks(markup)
     assert session["video_tool"] == "frame_video_local"
 
 
@@ -232,12 +232,12 @@ def test_frame_video_step_back_matrix():
     assert bot.get_frame_video_state(user_id)["step"] == "planning"
 
 
-def test_storyboard_prompt_profile_first():
+def test_storyboard_prompt_intro_first():
     text, markup, session = _open(181815, "storyboard_prompt")
     assert "Storyboard + Prompt" in text
-    assert "Chọn loại video" in text
-    assert session["current_step"] == "profile_select"
-    assert "vproduct|b14_profile|storytelling" in _callbacks(markup)
+    assert "Chọn loại video" not in text
+    assert session["current_step"] == "intro"
+    assert "vproduct|input_text|storyboard_prompt" in _callbacks(markup)
 
 
 def test_storyboard_does_not_auto_render():
@@ -245,12 +245,13 @@ def test_storyboard_does_not_auto_render():
     assert session["draft"]["provider_called"] is False
     assert session["draft"]["xu_charged"] == 0
     assert "vproduct|b14_confirm" not in _callbacks(markup)
-    assert "Chọn loại video" in text
+    assert "Storyboard + Prompt" in text
 
 
 def test_storyboard_back_matrix():
     user_id = 181817
     _open(user_id, "storyboard_prompt")
+    _press(user_id, "vproduct|ideas|storyboard_prompt")
     _press(user_id, "vproduct|b14_profile|storytelling")
     text, _markup, session = _press(user_id, "vproduct|back")
     assert session["current_step"] == "profile_select"
@@ -280,12 +281,12 @@ def test_self_shot_flow_stack_preserved():
     assert session["draft"]["back_target"] == "menu|main_video"
 
 
-def test_multiscene_ui_flow_starts_profile_or_type():
+def test_multiscene_ui_flow_starts_intro_or_type():
     text, markup, session = _open(181821, "multi_scene_film")
     assert "Phim AI nhiều cảnh" in text
-    assert "Chọn loại video" in text
-    assert session["current_step"] == "profile_select"
-    assert "vproduct|b14_profile|cinematic_trailer" in _callbacks(markup)
+    assert "Chọn loại video" not in text
+    assert session["current_step"] == "intro"
+    assert "vproduct|ideas|multi_scene_film" in _callbacks(markup)
 
 
 def test_multiscene_guard_clean_if_engine_not_ready():

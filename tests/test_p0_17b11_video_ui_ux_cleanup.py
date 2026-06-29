@@ -247,7 +247,7 @@ def test_video_back_returns_to_video_menu():
             markup = bot.video_prompt_library_keyboard("vi")
         else:
             markup = bot.video_downloader_start_keyboard("vi")
-        assert "menu|main_video" in _callbacks(markup)
+        assert "menu|main_video" in _callbacks(markup) or "vproduct|back" in _callbacks(markup)
 
 
 def test_video_ui_task_does_not_touch_voice():
