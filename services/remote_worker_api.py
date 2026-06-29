@@ -1662,6 +1662,25 @@ def _renderer_has_test_marker(renderer: str) -> bool:
     return any(marker in value for marker in ("fake", "test", "testsrc", "test_pattern", "canary"))
 
 
+def _renderer_has_placeholder_marker(renderer: str) -> bool:
+    value = str(renderer or "").strip().lower()
+    return any(marker in value for marker in ("local_scene_composer", "local_placeholder", "text_slide", "color_slide", "placeholder"))
+
+
+def _visual_classification(payload: dict) -> str:
+    explicit = str(payload.get("visual_classification") or payload.get("final_classification") or "").strip()
+    if explicit in {"final_ai_video", "partial_simple_video", "failed_no_real_visual"}:
+        return explicit
+    connector = str(payload.get("connector_renderer") or payload.get("renderer") or "")
+    if _safe_bool(payload.get("raw_prompt_burned_into_frame")):
+        return "failed_no_real_visual"
+    if _safe_bool(payload.get("placeholder_detected") or payload.get("placeholder_visual")) or _renderer_has_placeholder_marker(connector):
+        return "partial_simple_video"
+    if _safe_bool(payload.get("provider_attempted")) or str(payload.get("visual_source") or "") in {"provider_mp4", "generated_scene_video", "generated_scene_image", "uploaded_image"}:
+        return "final_ai_video"
+    return ""
+
+
 def _fail_product_fake_output(conn: sqlite3.Connection, job_id: int, reason: str) -> dict:
     try:
         video_project_queue.fail_video_job(conn, job_id=int(job_id), error=reason, retry=False)
@@ -1700,8 +1719,12 @@ def complete_remote_worker_job(
     project_render_mode = RENDER_MODE_ADMIN_TEST_PATTERN if _is_admin_fake_video_job(project) else (_admin_video_safety_flags(project)["render_mode"] if is_admin_video else RENDER_MODE_REAL)
     render_mode = _normalize_render_mode(payload.get("render_mode"), project_render_mode)
     renderer = str(payload.get("renderer") or "").strip().lower()
+    connector_renderer = str(payload.get("connector_renderer") or renderer).strip().lower()
     product_admin_video_leak = _safe_bool(payload.get("admin_video_delivery")) and not is_admin_video
     test_pattern = _safe_bool(payload.get("test_pattern")) or render_mode == RENDER_MODE_ADMIN_TEST_PATTERN or _renderer_has_test_marker(renderer)
+    classification = _visual_classification(payload)
+    placeholder_visual = _safe_bool(payload.get("placeholder_detected") or payload.get("placeholder_visual")) or _renderer_has_placeholder_marker(connector_renderer)
+    raw_prompt_burned = _safe_bool(payload.get("raw_prompt_burned_into_frame"))
     claim_only_diagnostic = bool(
         _safe_bool(payload.get("claim_only_diagnostic") or payload.get("diagnostic_claim_only"))
         and _safe_bool(payload.get("no_charge"))
@@ -1715,6 +1738,14 @@ def complete_remote_worker_job(
         return _fail_product_fake_output(conn, int(job_id), "test_pattern_not_allowed_for_normal_video")
     if not special_safe_job and render_mode != RENDER_MODE_REAL:
         return _fail_product_fake_output(conn, int(job_id), "normal_video_requires_real_render_mode")
+    if not special_safe_job and raw_prompt_burned:
+        return _fail_product_fake_output(conn, int(job_id), "raw_prompt_text_not_allowed_in_product_video")
+    if not special_safe_job and classification == "failed_no_real_visual":
+        return _fail_product_fake_output(conn, int(job_id), "real_ai_visual_required_for_product_video")
+    if not special_safe_job and placeholder_visual:
+        partial_no_charge = classification == "partial_simple_video" and _safe_bool(payload.get("no_charge"))
+        if not partial_no_charge:
+            return _fail_product_fake_output(conn, int(job_id), "placeholder_video_not_final_product_video")
     if is_admin_video and render_mode not in {RENDER_MODE_REAL, RENDER_MODE_ADMIN_TEST_PATTERN}:
         return {"ok": False, "reason": "admin_video_invalid_render_mode"}
     if uploaded_file:
@@ -1744,6 +1775,14 @@ def complete_remote_worker_job(
             return {"ok": False, "reason": "product_result_file_missing"}
     payload["render_mode"] = render_mode
     payload["test_pattern"] = bool(test_pattern)
+    if classification:
+        payload["visual_classification"] = classification
+        payload["final_classification"] = classification
+    if placeholder_visual:
+        payload["placeholder_detected"] = True
+        payload["placeholder_visual"] = True
+    if classification == "partial_simple_video":
+        payload["no_charge"] = True
     if uploaded_file:
         payload["uploaded_file_bytes"] = os.path.getsize(final_video_path)
     if is_canary:

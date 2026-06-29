@@ -132,6 +132,9 @@ def test_p0_18h_job30_payload_voice_music_subtitle_logo_does_not_crash(monkeypat
     assert final_path.is_file()
     assert final_path.stat().st_size > 0
     assert result["renderer"] == "local_scene_composer"
+    assert result["visual_classification"] == "partial_simple_video"
+    assert result["placeholder_detected"] is True
+    assert result["no_charge"] is True
     assert result["partial_addons"] is True
     assert any(item.get("addon") == "voice" and item.get("reason") == "voice_addon_not_available_in_video_composer" for item in result["addon_degrade_notes"])
 
@@ -150,6 +153,7 @@ def test_product_video_live_path_calls_local_composer_fallback(monkeypatch, tmp_
     result = connector.render_real_video_job(_product_job(addon_plan=_job30_addons(voice_enabled=False)), str(tmp_path))
     assert result["ok"] is True
     assert result["renderer"] == "local_scene_composer"
+    assert result["visual_classification"] == "partial_simple_video"
     assert captured["render_video_func"].__name__ == "_render"
 
 
@@ -161,6 +165,8 @@ def test_product_video_fallback_runs_when_provider_unavailable(monkeypatch, tmp_
     assert result["ok"] is True
     assert result["provider_attempted"] is False
     assert result["renderer"] == "local_scene_composer"
+    assert result["visual_classification"] == "partial_simple_video"
+    assert result["no_charge"] is True
 
 
 def test_music_default_missing_does_not_kill_video(monkeypatch, tmp_path):
@@ -171,6 +177,7 @@ def test_music_default_missing_does_not_kill_video(monkeypatch, tmp_path):
     monkeypatch.setattr(connector, "process_multiscene_video_pipeline", lambda **_kwargs: {"ok": True, "final_video_path": str(output), "scene_count": 3})
     result = connector.render_real_video_job(_product_job(addon_plan=_job30_addons(voice_enabled=False, subtitle_enabled=False, logo_enabled=False)), str(tmp_path))
     assert result["ok"] is True
+    assert result["visual_classification"] == "partial_simple_video"
     assert any(item.get("addon") == "music" and item.get("applied") is False for item in result["addon_degrade_notes"])
 
 
@@ -181,6 +188,7 @@ def test_voice_addon_failure_diagnostic_and_safe_handling(monkeypatch, tmp_path)
     monkeypatch.setattr(connector, "process_multiscene_video_pipeline", lambda **_kwargs: {"ok": True, "final_video_path": str(output), "scene_count": 3})
     result = connector.render_real_video_job(_product_job(addon_plan=_job30_addons(music_enabled=False, subtitle_enabled=False, logo_enabled=False)), str(tmp_path))
     assert result["ok"] is True
+    assert result["visual_classification"] == "partial_simple_video"
     assert result["partial_addons"] is True
     assert any(item.get("addon") == "voice" and item.get("applied") is False for item in result["addon_degrade_notes"])
 
@@ -191,6 +199,7 @@ def test_subtitle_from_voice_missing_data_does_not_crash_composer(monkeypatch):
     addon = _job30_addons(voice_enabled=False, music_enabled=False, logo_enabled=False, subtitle_enabled=True, subtitle_source="voice_script")
     result = connector.render_real_video_job(_product_job(addon_plan=addon, expected_duration_seconds=3), _short_workspace("p018h_sub"))
     assert result["ok"] is True
+    assert result["visual_classification"] == "partial_simple_video"
     assert Path(result["final_video_path"]).is_file()
 
 
@@ -201,6 +210,7 @@ def test_logo_overlay_failure_does_not_crash_composer(monkeypatch, tmp_path):
     monkeypatch.setattr(connector, "process_multiscene_video_pipeline", lambda **_kwargs: {"ok": True, "final_video_path": str(output), "scene_count": 3})
     result = connector.render_real_video_job(_product_job(addon_plan=_job30_addons(voice_enabled=False, music_enabled=False, subtitle_enabled=False, logo_text="")), str(tmp_path))
     assert result["ok"] is True
+    assert result["visual_classification"] == "partial_simple_video"
     assert result["logo_requested"] is True
 
 
@@ -220,6 +230,8 @@ def test_artifact_saved_and_exists_before_success(monkeypatch):
     monkeypatch.setattr(remote_worker, "complete_job", fake_complete)
     assert remote_worker.process_claimed_job(_product_job(expected_duration_seconds=3))["ok"] is True
     assert completed["result"]["partial_addons"] is True
+    assert completed["result"]["visual_classification"] == "partial_simple_video"
+    assert completed["result"]["no_charge"] is True
     assert completed["result"]["addon_degrade_notes"]
 
 

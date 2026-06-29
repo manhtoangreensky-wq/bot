@@ -40196,8 +40196,18 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         "Runtime/artifact:",
         f"• ffmpeg available: <code>{'yes' if ffmpeg else 'no'}</code>",
         f"• provider ready: <code>{'yes' if readiness.get('ok') else 'no'}</code>",
+        f"• provider route selected: <code>{'yes' if result.get('provider_route_selected') else 'no'}</code>",
         f"• connector renderer: <code>{html.escape(str(result.get('connector_renderer') or result.get('renderer') or '-'))}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
+        f"• provider task id: <code>{html.escape(','.join(str(item) for item in (result.get('provider_task_ids') or [])) or '-')}</code>",
+        f"• provider status: <code>{html.escape(str(result.get('provider_status') or '-'))}</code>",
+        f"• provider error: <code>{html.escape(str(result.get('provider_error') or '-')[:220])}</code>",
+        f"• fallback used: <code>{'yes' if result.get('fallback_used') else 'no'}</code>",
+        f"• fallback reason: <code>{html.escape(str(result.get('fallback_reason') or '-')[:220])}</code>",
+        f"• visual source: <code>{html.escape(str(result.get('visual_source') or '-'))}</code>",
+        f"• placeholder detected: <code>{'yes' if result.get('placeholder_detected') or result.get('placeholder_visual') else 'no'}</code>",
+        f"• raw prompt burned into frame: <code>{'yes' if result.get('raw_prompt_burned_into_frame') else 'no'}</code>",
+        f"• final classified as: <code>{html.escape(str(result.get('visual_classification') or result.get('final_classification') or '-'))}</code>",
         f"• partial add-ons: <code>{'yes' if result.get('partial_addons') else 'no'}</code>",
         f"• artifact path: <code>{html.escape(final_info['path'] or '-')}</code>",
         f"• artifact exists: <code>{'yes' if final_info['exists'] else 'no'}</code>",
@@ -55317,12 +55327,33 @@ def video_b14_render_mode_from_job(job: dict | None = None, project: dict | None
     return ""
 
 
-VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE = "TOAN AAS chưa dựng được video hoàn chỉnh lần này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE = "TOAN AAS chưa dựng được video AI hoàn chỉnh lần này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau."
+VIDEO_B14_PARTIAL_SIMPLE_MESSAGE = "TOAN AAS đã dựng được bản nháp đơn giản, nhưng chưa tạo được video AI hoàn chỉnh. Hệ thống chưa trừ Xu cho bản này."
 
 
 def video_b14_result_renderer_has_test_marker(renderer: str) -> bool:
     value = str(renderer or "").strip().lower()
     return any(marker in value for marker in ("fake", "test", "testsrc", "test_pattern", "canary"))
+
+
+def video_b14_result_renderer_has_placeholder_marker(renderer: str) -> bool:
+    value = str(renderer or "").strip().lower()
+    return any(marker in value for marker in ("local_scene_composer", "local_placeholder", "text_slide", "color_slide", "placeholder"))
+
+
+def video_b14_result_visual_classification(job: dict | None = None) -> str:
+    payload = video_b14_job_result_payload(job)
+    explicit = str(payload.get("visual_classification") or payload.get("final_classification") or "").strip()
+    if explicit in {"final_ai_video", "partial_simple_video", "failed_no_real_visual"}:
+        return explicit
+    renderer = str(payload.get("connector_renderer") or payload.get("renderer") or "")
+    if payload.get("raw_prompt_burned_into_frame"):
+        return "failed_no_real_visual"
+    if payload.get("placeholder_detected") or payload.get("placeholder_visual") or video_b14_result_renderer_has_placeholder_marker(renderer):
+        return "partial_simple_video"
+    if payload.get("provider_attempted") or str(payload.get("visual_source") or "") in {"provider_mp4", "generated_scene_video", "generated_scene_image", "uploaded_image"}:
+        return "final_ai_video"
+    return ""
 
 
 def video_b14_product_result_block_reason(job: dict | None = None, project: dict | None = None) -> str:
@@ -55335,12 +55366,20 @@ def video_b14_product_result_block_reason(job: dict | None = None, project: dict
     payload = video_b14_job_result_payload(job)
     render_mode = video_b14_render_mode_from_job(job, project)
     renderer = str(payload.get("renderer") or "")
+    connector_renderer = str(payload.get("connector_renderer") or renderer)
+    classification = video_b14_result_visual_classification(job)
     if bool(payload.get("admin_video_delivery")):
         return "admin_video_delivery_not_allowed_for_product_video"
     if bool(payload.get("test_pattern")) or render_mode == "admin_test_pattern":
         return "test_pattern_not_allowed_for_product_video"
     if video_b14_result_renderer_has_test_marker(renderer):
         return "test_renderer_not_allowed_for_product_video"
+    if bool(payload.get("raw_prompt_burned_into_frame")):
+        return "raw_prompt_text_not_allowed_in_product_video"
+    if classification == "failed_no_real_visual":
+        return "real_ai_visual_required_for_product_video"
+    if video_b14_result_renderer_has_placeholder_marker(connector_renderer) and classification != "partial_simple_video":
+        return "placeholder_video_not_final_product_video"
     return ""
 
 
@@ -55423,10 +55462,13 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     render_mode = video_b14_render_mode_from_job(job, project)
     job_result = video_b14_job_result_payload(job)
     blocked_reason = video_b14_product_result_block_reason(job, project)
+    visual_classification = video_b14_result_visual_classification(job)
     real_renderer_unavailable = "real_video_renderer_unavailable" in error_log
     if real_renderer_unavailable:
         render_mode = "unavailable"
-    if blocked_reason:
+    if visual_classification == "partial_simple_video":
+        result_text = VIDEO_B14_PARTIAL_SIMPLE_MESSAGE
+    elif blocked_reason:
         result_text = VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE
     elif status in {"completed", "success"} and (final_path or final_file_id):
         if render_mode == "real":
@@ -154236,6 +154278,7 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
     render_mode = video_b14_render_mode_from_job(job, project)
     job_result = video_b14_job_result_payload(job)
     blocked_reason = video_b14_product_result_block_reason(job, project)
+    visual_classification = video_b14_result_visual_classification(job)
     if blocked_reason:
         try:
             conn = db_connect()
@@ -154258,6 +154301,8 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
         caption = "🧪 Remote Worker Canary hoàn tất. File kết quả test từ VPS/Railway."
     elif is_admin_video and test_pattern:
         caption = "🧪 ADMIN TEST PATTERN — đây là video test kỹ thuật để kiểm tra đường gửi file, không phải video dựng thật. Không trừ Xu."
+    elif visual_classification == "partial_simple_video":
+        caption = "⚠️ " + VIDEO_B14_PARTIAL_SIMPLE_MESSAGE
     elif render_mode == "real":
         caption = "✅ Hệ thống đã dựng video thật. TOAN AAS gửi file kết quả cuối."
     else:
