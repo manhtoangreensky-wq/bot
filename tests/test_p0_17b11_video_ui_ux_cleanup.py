@@ -196,7 +196,7 @@ def test_video_local_edit_compress_requires_upload_not_red_error():
     )
     query = _press_videoedit(user_id, "videoedit|compress")
     text = _last_text(query)
-    assert "Chỉnh sửa video local đang được chuẩn bị" in text
+    assert "TOAN AAS chưa xử lý được tác vụ chỉnh sửa này lúc này" in text
     assert "chưa trừ Xu" in text
     assert GENERIC_RED_ERROR not in text
     assert _callbacks(_last_markup(query)) == ["menu|main_video", "menu|main"]

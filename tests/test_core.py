@@ -2689,7 +2689,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "create_media|quick_video" not in video_ai_callbacks
     assert "menu|hint_image_to_video_pack" not in video_ai_callbacks
     monkeypatch.setattr(bot, "SHOPAIKEY_PUBLIC_VIDEO_ENABLED", False)
-    assert "Video AI chân thật hiện đang được bảo trì" in bot.video_ai_true_text("vi")
+    assert "Video AI chân thật đang được kiểm tra để đảm bảo chất lượng" in bot.video_ai_true_text("vi")
     frame_intro_labels = [button.text for row in bot.video_frame_intro_keyboard("vi").inline_keyboard for button in row]
     assert "📷 Bắt đầu ghép ảnh" in frame_intro_labels
     assert "công cụ xử lý video nội bộ" not in bot.video_frame_intro_text("vi")

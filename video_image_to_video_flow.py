@@ -47,8 +47,34 @@ def frame_video_unified_menu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def frame_video_ai_first_guard_text(lang: str = "vi") -> str:
     if not _is_vi(lang):
-        return "Creating AI images first is being prepared. TOAN AAS has not processed anything and has not charged Xu."
-    return "Tạo ảnh AI trước đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu."
+        return (
+            "🖼 <b>Create AI images first</b>\n\n"
+            "Choose the existing AI image tool, prepare image prompts from the storyboard, or continue with images you already have. "
+            "TOAN AAS only moves to paid generation after a clear confirmation step and has not charged Xu here."
+        )
+    return (
+        "🖼 <b>Tạo ảnh AI trước</b>\n\n"
+        "Anh/chị có thể mở công cụ tạo ảnh AI hiện có, dùng prompt ảnh từ storyboard, hoặc quay lại gửi ảnh sẵn. "
+        "TOAN AAS chỉ tạo ảnh/video thật sau bước xác nhận rõ ràng và chưa trừ Xu ở màn này."
+    )
+
+
+def frame_video_ai_first_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = _is_vi(lang)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🖼 Mở Tạo ảnh AI" if is_vi else "🖼 Open AI image tool", callback_data="menu|main_image"),
+            InlineKeyboardButton("🎬 Storyboard + Prompt" if is_vi else "🎬 Storyboard + Prompt", callback_data="vproduct|open|storyboard_prompt"),
+        ],
+        [
+            InlineKeyboardButton("📷 Tôi có ảnh sẵn" if is_vi else "📷 I have images", callback_data="framevideo|start"),
+            InlineKeyboardButton("📚 Gợi ý bố cục ảnh" if is_vi else "📚 Image layout ideas", callback_data="framevideo|layout"),
+        ],
+        [
+            InlineKeyboardButton("⬅️ Ghép ảnh thành video" if is_vi else "⬅️ Image slideshow video", callback_data="framevideo|hub"),
+            InlineKeyboardButton("🏠 Menu chính" if is_vi else "🏠 Main menu", callback_data="framevideo|main"),
+        ],
+    ])
 
 
 def frame_video_layout_helper_text(lang: str = "vi") -> str:

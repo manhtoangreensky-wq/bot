@@ -54430,12 +54430,12 @@ def video_editor_menu_text(lang: str = "vi") -> str:
         return (
             "🛠 <b>Local Video Editor</b>\n\n"
             "Send a short video to prepare color, crop/ratio, vertical 9:16, text watermark or basic sharpen edits.\n\n"
-            "This screen does not process anything or charge Xu until the tool is ready."
+            "Choose the edit you want. TOAN AAS will ask for the video if needed and confirms before any paid processing."
         )
     return (
         "🛠 <b>Chỉnh sửa video local</b>\n\n"
         "Gửi video ngắn để chuẩn bị cắt, đổi tỉ lệ, làm dọc 9:16, thêm chữ/watermark hoặc tăng nét cơ bản.\n\n"
-        "Màn này chưa xử lý và chưa trừ Xu cho đến khi công cụ sẵn sàng."
+        "Anh/chị chọn thao tác cần làm. TOAN AAS sẽ hỏi video nếu chưa có và chỉ xử lý sau bước xác nhận rõ ràng."
     )
 
 
@@ -54448,11 +54448,13 @@ def video_editor_upload_required_text(lang: str = "vi") -> str:
 def video_editor_public_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "Local video editing is being prepared. TOAN AAS has not processed anything and has not charged Xu. "
+            "🛠 Local video editing\n\n"
+            "TOAN AAS cannot process this edit right now. TOAN AAS has not processed anything and has not charged Xu. "
             "You can return to the video menu or try another tool first."
         )
     return (
-        "Chỉnh sửa video local đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu. "
+        "🛠 Chỉnh sửa video local\n\n"
+        "TOAN AAS chưa xử lý được tác vụ chỉnh sửa này lúc này. Hệ thống chưa trừ Xu. "
         "Anh/chị có thể quay lại menu video hoặc thử công cụ khác trước."
     )
 
@@ -54569,10 +54571,12 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🔥 Trend 视频",
         "entry_callback": "vproduct|open|video_trend",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|trend_today", "vproduct|trend_custom"),
+        "expected_children": ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review", "vproduct|input_text"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
+        "flow_type": "canonical_profile_first",
+        "canonical": True,
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "video_trend",
@@ -54587,6 +54591,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
+        "flow_type": "real_ai_video_guarded",
+        "canonical": False,
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "video_ai_real",
@@ -54823,6 +54829,8 @@ def video_route_matrix_rows() -> list[dict]:
                 "back_target": str(route.get("back_target") or ""),
                 "expected_children": tuple(route.get("expected_children") or ()),
                 "category": str(route.get("category") or ""),
+                "flow_type": str(route.get("flow_type") or ""),
+                "canonical": bool(route.get("canonical")),
                 "invoice_reachable": bool(route.get("invoice_reachable")),
                 "job_reachable": bool(route.get("job_reachable")),
             }
@@ -54900,6 +54908,128 @@ def video_back_audit_text() -> str:
     return "\n".join(lines)
 
 
+VIDEO_FLOW_PLACEHOLDER_TERMS = (
+    "đang được chuẩn bị",
+    "đang được hoàn thiện",
+    "being prepared",
+    "being completed",
+    "chưa xử lý được bước này",
+    "not implemented",
+)
+
+
+def video_placeholder_detect(text: str) -> list[str]:
+    lower = str(text or "").lower()
+    return [term for term in VIDEO_FLOW_PLACEHOLDER_TERMS if term.lower() in lower]
+
+
+def video_placeholder_audit_rows() -> list[dict]:
+    prompt_items = video_prompt_library_search("idea", limit=3)
+    probes = [
+        ("video_trend", "Video theo trend", video_b14_profile_selection_text({"draft": {}}, 0, "vi")),
+        ("frame_video_local", "Ghép ảnh thành video", ivf.frame_video_unified_menu_text("vi")),
+        ("frame_video_ai_first", "Tạo ảnh AI trước", ivf.frame_video_ai_first_guard_text("vi")),
+        ("frame_video_layout", "Gợi ý bố cục ảnh", ivf.frame_video_layout_helper_text("vi")),
+        ("script_image_video", "Kịch bản → Video", task3d_product_intro_text("script_image_video", "vi")),
+        ("multi_scene_film", "Phim AI nhiều cảnh", task3d_product_intro_text("multi_scene_film", "vi")),
+        ("storyboard_prompt", "Storyboard + Prompt", task3d_product_intro_text("storyboard_prompt", "vi")),
+        ("prompt_library", "Kho prompt video", video_prompt_library_text("vi")),
+        ("prompt_library_idea", "Kho prompt video / ý tưởng", video_prompt_library_category_text("idea", prompt_items, "vi")),
+        ("video_local_edit", "Chỉnh sửa video local", video_editor_menu_text("vi")),
+        ("video_ai_real", "Video AI chân thật", video_ai_true_text("vi")),
+    ]
+    rows = []
+    for flow_id, label, text in probes:
+        matches = video_placeholder_detect(text)
+        rows.append({
+            "flow_id": flow_id,
+            "label": label,
+            "is_placeholder": bool(matches),
+            "matches": matches,
+            "forbidden_public_words": video_public_text_forbidden_words(text),
+        })
+    return rows
+
+
+def video_placeholder_audit_payload() -> dict:
+    rows = video_placeholder_audit_rows()
+    return {
+        "ok": all(not row.get("is_placeholder") and not row.get("forbidden_public_words") for row in rows),
+        "rows": rows,
+    }
+
+
+def video_placeholder_audit_text() -> str:
+    payload = video_placeholder_audit_payload()
+    lines = [
+        "🧪 <b>Video Placeholder Audit</b>",
+        "",
+        f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>",
+        "",
+    ]
+    for row in payload.get("rows") or []:
+        status = "PASS" if not row.get("is_placeholder") and not row.get("forbidden_public_words") else "FAIL"
+        matches = ", ".join(row.get("matches") or row.get("forbidden_public_words") or []) or "-"
+        lines.append(
+            f"• {html.escape(str(row.get('label') or ''))}: <b>{status}</b> "
+            f"<code>{html.escape(matches)}</code>"
+        )
+    return "\n".join(lines)
+
+
+def video_flow_audit_rows() -> list[dict]:
+    placeholder_by_tool = {row["flow_id"]: row for row in video_placeholder_audit_rows()}
+    rows = []
+    for row in video_route_matrix_rows():
+        tool_id = str(row.get("video_tool") or "")
+        route = video_public_route_for_tool(tool_id)
+        placeholder = placeholder_by_tool.get(tool_id) or {}
+        if tool_id == "video_trend":
+            placeholder = placeholder_by_tool.get("video_trend") or placeholder
+        rows.append({
+            "button": row.get("label"),
+            "handler": row.get("expected_handler"),
+            "flow_type": str(route.get("flow_type") or row.get("category") or ""),
+            "is_placeholder": bool(placeholder.get("is_placeholder")),
+            "requires_provider": bool(tool_id in {"video_ai_real", "multi_scene_film", "script_image_video", "video_trend", "storyboard_prompt"}),
+            "requires_worker": bool(tool_id in {"frame_video_local", "video_local_edit", "multi_scene_film", "script_image_video", "video_trend"}),
+            "readiness": "route_connected" if row.get("ok") and not placeholder.get("is_placeholder") else "needs_review",
+            "last_blocker": ", ".join(placeholder.get("matches") or placeholder.get("forbidden_public_words") or []),
+            "public_label": row.get("label"),
+            "back_target": row.get("back_target"),
+            "canonical": bool(route.get("canonical")),
+        })
+    return rows
+
+
+def video_flow_audit_payload() -> dict:
+    rows = video_flow_audit_rows()
+    return {
+        "ok": all(row.get("readiness") == "route_connected" for row in rows),
+        "rows": rows,
+    }
+
+
+def video_flow_audit_text() -> str:
+    payload = video_flow_audit_payload()
+    lines = [
+        "🎬 <b>Video Flow Audit</b>",
+        "",
+        f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>",
+        "",
+    ]
+    for row in payload.get("rows") or []:
+        status = "PASS" if row.get("readiness") == "route_connected" else "FAIL"
+        lines.append(
+            f"• {html.escape(str(row.get('public_label') or ''))}: <b>{status}</b>\n"
+            f"  handler: <code>{html.escape(str(row.get('handler') or ''))}</code>\n"
+            f"  flow: <code>{html.escape(str(row.get('flow_type') or '-'))}</code> | canonical: <b>{'YES' if row.get('canonical') else 'NO'}</b>\n"
+            f"  provider/worker: <b>{'YES' if row.get('requires_provider') else 'NO'}</b>/<b>{'YES' if row.get('requires_worker') else 'NO'}</b>\n"
+            f"  back: <code>{html.escape(str(row.get('back_target') or ''))}</code>"
+        )
+    return "\n".join(lines)
+
+
 async def cmd_video_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return await reply_internal_customer_feature(update)
@@ -54916,6 +55046,18 @@ async def cmd_video_back_audit(update: Update, context: ContextTypes.DEFAULT_TYP
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return await reply_internal_customer_feature(update)
     return await update.message.reply_text(video_back_audit_text(), parse_mode="HTML")
+
+
+async def cmd_video_flow_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_flow_audit_text(), parse_mode="HTML")
+
+
+async def cmd_video_placeholder_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_placeholder_audit_text(), parse_mode="HTML")
 
 
 def video_editor_worker_ready() -> bool:
@@ -54973,8 +55115,121 @@ def video_prompt_library_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def video_prompt_library_guard_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
-        return "This section is being completed. TOAN AAS has not processed anything and has not charged Xu."
-    return "Phần này đang được hoàn thiện, TOAN AAS chưa xử lý và chưa trừ Xu."
+        return "TOAN AAS could not open this prompt group right now. No video file has been processed and no Xu has been charged."
+    return "TOAN AAS chưa mở được nhóm prompt này lúc này. Hệ thống chưa xử lý file video và chưa trừ Xu."
+
+
+VIDEO_PROMPT_LIBRARY_CATEGORY_KEYWORDS = {
+    "idea": ("story", "video", "affiliate"),
+    "image": ("image", "keyframe", "product"),
+    "camera": ("camera", "motion", "cinematic"),
+    "ad": ("ad", "affiliate", "product"),
+    "cinematic": ("cinematic", "trailer", "story"),
+    "reels": ("tiktok", "reels", "short"),
+}
+
+
+def video_prompt_library_category_label(action: str, lang: str = "vi") -> str:
+    labels = {
+        "idea": "Prompt từ ý tưởng",
+        "image": "Prompt từ ảnh",
+        "camera": "Chuyển động camera",
+        "ad": "Prompt quảng cáo",
+        "cinematic": "Cinematic",
+        "reels": "TikTok/Reels",
+    }
+    return labels.get(str(action or ""), "Kho prompt video")
+
+
+def video_prompt_library_search(action: str, limit: int = 5) -> list[dict]:
+    seen: set[str] = set()
+    results: list[dict] = []
+    for keyword in VIDEO_PROMPT_LIBRARY_CATEGORY_KEYWORDS.get(str(action or ""), ("video",)):
+        for item in TASK3D_PROMPT_VAULT.search(keyword, limit=limit):
+            prompt_id = str(item.get("prompt_id") or "")
+            if prompt_id and prompt_id not in seen:
+                seen.add(prompt_id)
+                results.append(item)
+            if len(results) >= max(1, int(limit or 5)):
+                return results
+    if not results:
+        for item in TASK3D_PROMPT_VAULT.search("video", limit=limit):
+            prompt_id = str(item.get("prompt_id") or "")
+            if prompt_id and prompt_id not in seen:
+                seen.add(prompt_id)
+                results.append(item)
+    return results[:max(1, int(limit or 5))]
+
+
+def video_prompt_library_find(prompt_id: str) -> dict:
+    needle = str(prompt_id or "").strip()
+    if not needle:
+        return {}
+    try:
+        prompts = TASK3D_PROMPT_VAULT._load().get("prompts") or []
+    except Exception:
+        prompts = []
+    for item in prompts:
+        if str((item or {}).get("prompt_id") or "") == needle and (item or {}).get("enabled", True):
+            return dict(item)
+    return {}
+
+
+def video_prompt_library_public_preview(value: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    replacements = (
+        (r"\bprovider[-_\s]*neutral\b", "tool-neutral"),
+        (r"\bprovider[-_\s]*ready\b", "render-ready"),
+        (r"\bprovider\s+parameters\b", "render settings"),
+        (r"\bprovider\b", "render tool"),
+        (r"\bapi\b", "system"),
+        (r"\bffmpeg\b", "video system"),
+        (r"\blocal_worker\b", "processing system"),
+        (r"\bremote_worker\b", "processing system"),
+    )
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def video_prompt_library_category_text(action: str, items: list[dict] | None = None, lang: str = "vi") -> str:
+    label = video_prompt_library_category_label(action, lang)
+    rows = list(items or [])
+    lines = [
+        f"📚 <b>{html.escape(label)}</b>",
+        "",
+        "Chọn một mẫu prompt để dùng tiếp trong flow video. Bước này chỉ mở kho prompt, chưa tạo file thật và chưa trừ Xu.",
+        "",
+    ]
+    if not rows:
+        lines.append("Chưa có mẫu phù hợp trong kho local. Anh/chị có thể quay lại nhập ý tưởng riêng.")
+        return "\n".join(lines)
+    for idx, item in enumerate(rows[:5], 1):
+        prompt = video_prompt_library_public_preview(str(item.get("prompt_text") or ""))
+        if len(prompt) > 220:
+            prompt = prompt[:217].rstrip() + "..."
+        style = video_prompt_library_public_preview(str(item.get("style") or item.get("category") or "video"))
+        lines.append(f"{idx}. <b>{html.escape(style)}</b>\n<code>{html.escape(prompt)}</code>")
+    return "\n\n".join(lines)
+
+
+def video_prompt_library_category_keyboard(action: str, items: list[dict] | None = None, lang: str = "vi") -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    current_row: list[InlineKeyboardButton] = []
+    for idx, item in enumerate(list(items or [])[:5], 1):
+        if not str(item.get("prompt_id") or "").strip():
+            continue
+        current_row.append(InlineKeyboardButton(str(idx), callback_data=f"vpromptlib|use|{action}|{idx}"))
+        if len(current_row) == 5:
+            rows.append(current_row)
+            current_row = []
+    if current_row:
+        rows.append(current_row)
+    rows.append([
+        InlineKeyboardButton("⬅️ Kho prompt video" if normalize_user_language(lang) == "vi" else "⬅️ Prompt library", callback_data="vpromptlib|start"),
+        InlineKeyboardButton("🏠 Menu chính" if normalize_user_language(lang) == "vi" else "🏠 Main menu", callback_data="menu|main"),
+    ])
+    return InlineKeyboardMarkup(rows)
 
 
 TASK3D_PROMPT_VAULT = PromptVault(Path(__file__).resolve().parent / "docs" / "prompt_vault" / "video_prompts.seed.json")
@@ -55543,8 +55798,13 @@ def video_b14_profile_selection_text(session: dict | None = None, user_id=0, lan
     draft = dict((session or {}).get("draft") or {})
     selected = str(draft.get("b14_profile_id") or "").strip()
     current = f"\n\nĐang chọn: <b>{html.escape(video_b14_profile_button_label(selected))}</b>" if selected else ""
+    product_id = str((session or {}).get("product_id") or draft.get("product_id") or "")
+    product_label = str((VIDEO_PRODUCT_REGISTRY.get(product_id) or {}).get("public_label") or "").strip()
+    heading = "🎬 <b>Chọn loại video</b>"
+    if product_label:
+        heading = f"{html.escape(product_label)}\n\n🎬 <b>Chọn loại video</b>"
     text = (
-        "🎬 <b>Chọn loại video</b>\n\n"
+        f"{heading}\n\n"
         "Chọn đúng loại video trước khi nhập ý tưởng/tư liệu. Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
         f"{current}"
     )
@@ -55739,6 +55999,14 @@ def video_asset_intake_intro_text(lang: str = "vi") -> str:
 def video_asset_intake_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📷 Tôi có ảnh sẵn" if is_vi else "📷 I have images", callback_data="vproduct|asset_wait|subject"),
+            InlineKeyboardButton("🖼 Tạo ảnh AI trước" if is_vi else "🖼 Create AI images first", callback_data="vproduct|asset_create_ai_image"),
+        ],
+        [
+            InlineKeyboardButton("📚 Gợi ý bố cục ảnh" if is_vi else "📚 Image layout ideas", callback_data="vproduct|asset_layout_ideas"),
+            InlineKeyboardButton("🎨 Dùng prompt ảnh từ storyboard" if is_vi else "🎨 Use storyboard image prompts", callback_data="vproduct|asset_storyboard_prompt"),
+        ],
         [
             InlineKeyboardButton("📸 Gửi ảnh nhân vật/sản phẩm" if is_vi else "📸 Character/product refs", callback_data="vproduct|asset_wait|subject"),
             InlineKeyboardButton("🏞 Gửi ảnh bối cảnh" if is_vi else "🏞 Background refs", callback_data="vproduct|asset_wait|background"),
@@ -59276,11 +59544,64 @@ async def handle_video_prompt_library_callback(update: Update, context: ContextT
             parse_mode="HTML",
             reply_markup=video_prompt_library_keyboard(lang),
         )
-    return await safe_edit_or_send(
-        query,
-        video_prompt_library_guard_text(lang),
-        reply_markup=video_prompt_library_keyboard(lang),
-    )
+    if action in VIDEO_PROMPT_LIBRARY_CATEGORY_KEYWORDS:
+        set_video_route_session(uid, "prompt_library", f"category:{action}")
+        items = video_prompt_library_search(action, limit=5)
+        return await safe_edit_or_send(
+            query,
+            video_prompt_library_category_text(action, items, lang),
+            parse_mode="HTML",
+            reply_markup=video_prompt_library_category_keyboard(action, items, lang),
+        )
+    if action == "use":
+        category = parts[2] if len(parts) > 2 else "idea"
+        index = max(1, min(5, safe_int(parts[3] if len(parts) > 3 else 1, 1)))
+        items = video_prompt_library_search(category, limit=5)
+        item = items[index - 1] if index <= len(items) else {}
+        if not item:
+            return await safe_edit_or_send(
+                query,
+                video_prompt_library_guard_text(lang),
+                reply_markup=video_prompt_library_keyboard(lang),
+            )
+        product_id = str(item.get("product_id") or "storyboard_prompt")
+        if product_id not in VIDEO_PRODUCT_REGISTRY:
+            product_id = "storyboard_prompt"
+        prompt_text = str(item.get("prompt_text") or "").strip()
+        route_fields = video_route_session_fields("prompt_library", "use_prompt")
+        session = task3d_session_step(
+            uid,
+            "result",
+            product_id=product_id,
+            topic=prompt_text[:320] or video_prompt_library_category_label(category, lang),
+            input_collected=True,
+            prompt_library_prompt_id=str(item.get("prompt_id") or ""),
+            provider_called=False,
+            xu_charged=0,
+            return_to="menu|main_video",
+            **route_fields,
+        )
+        session.update(route_fields)
+        session["product_id"] = product_id
+        session["return_to"] = "menu|main_video"
+        save_video_session(uid, session)
+        bundle = task3d_build_bundle_from_session(session)
+        session = task3d_session_step(
+            uid,
+            "result",
+            prompt_bundle=bundle,
+            prompt_bundle_id=bundle.get("bundle_id"),
+            free_generation=True,
+            provider_called=False,
+            xu_charged=0,
+        )
+        return await safe_edit_or_send(
+            query,
+            "✅ <b>Đã dùng prompt từ Kho prompt video</b>\n\n" + task3d_result_text(session, lang),
+            parse_mode="HTML",
+            reply_markup=task3d_result_keyboard(product_id, lang),
+        )
+    return await safe_edit_or_send(query, video_prompt_library_text(lang), parse_mode="HTML", reply_markup=video_prompt_library_keyboard(lang))
 
 
 async def handle_video_product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59313,6 +59634,32 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 video_ai_true_text(lang),
                 parse_mode="HTML",
                 reply_markup=video_ai_true_keyboard(lang),
+            )
+        if value == "video_trend":
+            parent_callback = str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
+            current_session = get_video_session(uid)
+            if str(current_session.get("product_id") or "") != str(value):
+                clear_video_session(uid)
+            route_fields = video_route_session_fields(value, "profile_select")
+            session = task3d_session_step(
+                uid,
+                "profile_select",
+                product_id=value,
+                return_to=parent_callback,
+                provider_called=False,
+                xu_charged=0,
+                **route_fields,
+            )
+            session = go_video_screen(uid, f"{value}:profile_select", value, **route_fields)
+            session.update(route_fields)
+            session["product_id"] = value
+            session["return_to"] = parent_callback
+            save_video_session(uid, session)
+            return await safe_edit_or_send(
+                query,
+                video_b14_profile_selection_text(session, uid, lang),
+                parse_mode="HTML",
+                reply_markup=video_b14_profile_selection_keyboard(lang),
             )
         if value == "self_shot_scene_change":
             set_video_route_session(uid, value, "tool_home", product_id=value)
@@ -59497,6 +59844,59 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             video_asset_intake_intro_text(lang),
             parse_mode=None,
             reply_markup=video_asset_intake_keyboard(lang),
+        )
+    if action == "asset_create_ai_image":
+        session = task3d_session_step(uid, "asset_ai_image", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            ivf.frame_video_ai_first_guard_text(lang),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🖼 Mở Tạo ảnh AI" if normalize_user_language(lang) == "vi" else "🖼 Open AI image tool", callback_data="menu|main_image"),
+                    InlineKeyboardButton("🎨 Prompt ảnh storyboard" if normalize_user_language(lang) == "vi" else "🎨 Storyboard image prompts", callback_data="vproduct|asset_storyboard_prompt"),
+                ],
+                [
+                    InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|asset_intro"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ],
+            ]),
+        )
+    if action == "asset_layout_ideas":
+        session = task3d_session_step(uid, "asset_layout_ideas", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            ivf.frame_video_layout_helper_text(lang),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("📷 Tôi có ảnh sẵn" if normalize_user_language(lang) == "vi" else "📷 I have images", callback_data="vproduct|asset_wait|subject"),
+                    InlineKeyboardButton("🖼 Tạo ảnh AI trước" if normalize_user_language(lang) == "vi" else "🖼 Create AI images first", callback_data="vproduct|asset_create_ai_image"),
+                ],
+                [
+                    InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|asset_intro"),
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ],
+            ]),
+        )
+    if action == "asset_storyboard_prompt":
+        if not (session.get("draft") or {}).get("b14_storyboard_plan"):
+            video_b14_build_storyboard_for_session(uid, session)
+            session = get_video_session(uid)
+        session = task3d_session_step(uid, "asset_storyboard_prompt", provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            video_b14_prompt_text_from_session(session, "image"),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🖼 Tạo ảnh AI trước" if normalize_user_language(lang) == "vi" else "🖼 Create AI images first", callback_data="vproduct|asset_create_ai_image"),
+                    InlineKeyboardButton("📸 Quay lại tư liệu" if normalize_user_language(lang) == "vi" else "📸 Back to assets", callback_data="vproduct|asset_intro"),
+                ],
+                [
+                    InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+                ],
+            ]),
         )
     if action == "asset_skip":
         return await safe_edit_or_send(
@@ -61719,13 +62119,13 @@ def video_ai_true_text(lang: str = "vi") -> str:
             "Start from a prompt, image or reference video. TOAN AAS creates the plan first; it only processes and charges Xu after you confirm real generation."
             f"{warning}"
         )
-    warning = "" if enabled else "\n\n🎬 Video AI chân thật hiện đang được bảo trì hoặc chưa mở public. TOAN AAS chưa trừ Xu. Bạn có thể dùng Video theo trend để tạo prompt/kế hoạch trước."
+    warning = "" if enabled else "\n\n🎬 Video AI chân thật đang được kiểm tra để đảm bảo chất lượng. TOAN AAS chưa trừ Xu. Anh/chị có thể dùng Video theo trend hoặc Storyboard + Prompt trước."
     return (
         "🎬 <b>Video AI chân thật</b>\n\n"
         "Tạo video AI ngắn theo prompt, ảnh hoặc video tham khảo.\n\n"
         "Bạn có thể bắt đầu từ prompt, ảnh hoặc video mẫu tham khảo.\n"
         "TOAN AAS luôn tạo prompt/kế hoạch trước; chỉ khi xác nhận tạo file thật mới xử lý và tính Xu.\n\n"
-        "Nếu công cụ tạo video đang bảo trì, bot chỉ lưu kế hoạch và không trừ Xu."
+        "Nếu công cụ tạo video chưa đạt chất lượng, bot chỉ lưu kế hoạch và không trừ Xu."
         f"{warning}"
     )
 
@@ -118503,13 +118903,13 @@ def trend_video_pending_prompt_text(lang: str = "vi") -> str:
             "🔥 <b>Trend Video TOAN AAS</b>\n\n"
             "What product, service or topic do you want to make a trend-based video about?\n\n"
             "Examples: turquoise mini blender, AI content app, affiliate course, new coffee shop.\n\n"
-            "The bot will ask how you want to choose a trend first. It has not called image/video APIs and has not charged Xu."
+            "The bot will ask how you want to choose a trend first. It has not started paid image/video generation and has not charged Xu."
         )
     return (
         "🔥 <b>Video theo trend TOAN AAS</b>\n\n"
         "Bạn muốn làm video theo trend cho sản phẩm/dịch vụ/chủ đề gì?\n\n"
         "Ví dụ: máy xay sinh tố mini màu xanh ngọc, app AI tạo nội dung, khóa học affiliate, quán cà phê mới mở.\n\n"
-        "Bot sẽ hỏi cách lấy trend trước. Bot chưa gọi API ảnh/video và chưa trừ Xu."
+        "Bot sẽ hỏi cách lấy trend trước. Bot chưa bắt đầu tạo ảnh/video thật và chưa trừ Xu."
     )
 
 def trend_video_pending_keyboard(lang: str = "vi", back_callback: str = "trendg|topic_groups") -> InlineKeyboardMarkup:
@@ -118525,13 +118925,13 @@ def trend_guided_topic_group_text(lang: str = "vi") -> str:
             "🔥 <b>Trend video</b>\n\n"
             "Which group is closest to your product/service/topic?\n\n"
             "TOAN AAS will suggest 3 relevant trend-video ideas first. Pick one, refresh the ideas, or enter your own topic.\n\n"
-            "Planning only. No image/video provider call and no Xu deducted."
+            "Planning only. No paid image/video generation and no Xu deducted."
         )
     return (
         "🔥 <b>Video theo trend</b>\n\n"
         "Bạn muốn làm video theo trend cho nhóm nào?\n\n"
         "TOAN AAS sẽ gợi ý 3 chủ đề video trend phù hợp trước. Bạn có thể chọn một gợi ý, đổi gợi ý khác hoặc nhập chủ đề riêng.\n\n"
-        "Bước này chỉ tạo gợi ý/kế hoạch. Bot chưa gọi API ảnh/video và chưa trừ Xu."
+        "Bước này chỉ tạo gợi ý/kế hoạch. Bot chưa bắt đầu tạo ảnh/video thật và chưa trừ Xu."
     )
 
 def trend_guided_topic_group_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -119154,7 +119554,7 @@ def trend_guided_selected_image_prompt_text(state: dict, index: int = 1, lang: s
     prompt = trend_guided_image_prompt_for_index(state, idx, lang)
     title = "Image prompt selected" if normalize_user_language(lang) != "vi" else "Đã chọn prompt ảnh"
     question = "What do you want to do with this image prompt?" if normalize_user_language(lang) != "vi" else "Bạn muốn làm gì với prompt ảnh này?"
-    return f"🖼 <b>{html.escape(title)}</b>\n\n<code>{html.escape(prompt)}</code>\n\n{html.escape(question)}\n\nBot chưa gọi API ảnh/video và chưa trừ Xu." if normalize_user_language(lang) == "vi" else f"🖼 <b>{html.escape(title)}</b>\n\n<code>{html.escape(prompt)}</code>\n\n{html.escape(question)}\n\nThe bot has not called image/video APIs and has not charged Xu."
+    return f"🖼 <b>{html.escape(title)}</b>\n\n<code>{html.escape(prompt)}</code>\n\n{html.escape(question)}\n\nBot chưa bắt đầu tạo ảnh/video thật và chưa trừ Xu." if normalize_user_language(lang) == "vi" else f"🖼 <b>{html.escape(title)}</b>\n\n<code>{html.escape(prompt)}</code>\n\n{html.escape(question)}\n\nThe bot has not started paid image/video generation and has not charged Xu."
 
 def trend_guided_selected_image_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -119223,7 +119623,7 @@ def trend_guided_video_prompts_text(state: dict, lang: str = "vi") -> str:
             "<b>3. 15-second video</b>\n"
             f"<code>{html.escape(prompts[2])}</code>\n\n"
             "This is a safe preview. The full prompt is kept for finalization/render.\n"
-            "The bot has not called the video API and has not charged Xu."
+            "The bot has not started paid video generation and has not charged Xu."
         )
     return (
         "🎞 <b>Chọn 1 prompt video</b>\n\n"
@@ -119235,7 +119635,7 @@ def trend_guided_video_prompts_text(state: dict, lang: str = "vi") -> str:
         "<b>3️⃣ Gợi ý video 15 giây</b>\n"
         f"<code>{html.escape(prompts[2])}</code>\n\n"
         "Đây là bản xem nhanh an toàn. Prompt đầy đủ vẫn được giữ để dùng ở bước hoàn thiện/render.\n"
-        "Bot chưa gọi API video và chưa trừ Xu."
+        "Bot chưa bắt đầu tạo video thật và chưa trừ Xu."
     )
 
 def trend_guided_video_prompt_choices_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -119261,13 +119661,13 @@ def trend_guided_selected_video_prompt_text(state: dict, index: int = 1, lang: s
             "🎞 <b>Video prompt selected</b>\n\n"
             f"<code>{html.escape(preview)}</code>\n\n"
             "This is a safe preview. The full prompt is kept for finalization/render.\n"
-            "The bot has not called the video API and has not charged Xu."
+            "The bot has not started paid video generation and has not charged Xu."
         )
     return (
         "🎞 <b>Đã chọn prompt video</b>\n\n"
         f"<code>{html.escape(preview)}</code>\n\n"
         "Đây là bản xem nhanh an toàn. Prompt đầy đủ vẫn được giữ để dùng ở bước hoàn thiện/render.\n"
-        "Bot chưa gọi API video và chưa trừ Xu."
+        "Bot chưa bắt đầu tạo video thật và chưa trừ Xu."
     )
 
 def trend_guided_selected_video_prompt_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -119294,7 +119694,7 @@ def trend_guided_video_public_off_text(state: dict, lang: str = "vi") -> str:
             f"<code>{html.escape(preview)}</code>\n\n"
             "This is a safe preview. The full prompt is kept for finalization/render.\n"
             "You can continue with music, create a keyframe image, edit the prompt, finish here or return to the main menu.\n"
-            "The bot has not called the video API and has not charged Xu."
+            "The bot has not started paid video generation and has not charged Xu."
         )
     return (
         "🎬 <b>Tạo video thật chưa mở công khai</b>\n\n"
@@ -119302,7 +119702,7 @@ def trend_guided_video_public_off_text(state: dict, lang: str = "vi") -> str:
         f"<code>{html.escape(preview)}</code>\n\n"
         "Đây là bản xem nhanh an toàn. Prompt đầy đủ vẫn được giữ để dùng ở bước hoàn thiện/render.\n"
         "Bạn có thể làm tiếp: chọn nhạc, tạo ảnh khung chính, sửa prompt video, hoàn tất tại prompt video hoặc về menu chính.\n"
-        "Bot chưa gọi API video và chưa trừ Xu."
+        "Bot chưa bắt đầu tạo video thật và chưa trừ Xu."
     )
 
 def trend_guided_video_public_off_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -121258,9 +121658,16 @@ async def handle_frame_video_callback(update: Update, context: ContextTypes.DEFA
         )
 
     if action in {"hub", "menu", "ai_first", "layout"}:
-        text = ivf.frame_video_ai_first_guard_text(lang) if action == "ai_first" else ivf.frame_video_layout_helper_text(lang) if action == "layout" else ivf.frame_video_unified_menu_text(lang)
+        if action == "ai_first":
+            return await safe_edit_or_send(
+                query,
+                ivf.frame_video_ai_first_guard_text(lang),
+                parse_mode="HTML",
+                reply_markup=ivf.frame_video_ai_first_keyboard(lang),
+            )
+        text = ivf.frame_video_layout_helper_text(lang) if action == "layout" else ivf.frame_video_unified_menu_text(lang)
         markup = ivf.frame_video_layout_helper_keyboard(lang) if action == "layout" else ivf.frame_video_unified_menu_keyboard(lang)
-        return await safe_edit_or_send(query, text, parse_mode=None if action == "ai_first" else "HTML", reply_markup=markup)
+        return await safe_edit_or_send(query, text, parse_mode="HTML", reply_markup=markup)
 
     if action == "main":
         clear_frame_video_state(uid)
@@ -147621,8 +148028,8 @@ def video_downloader_guard_text(reason: str = "", lang: str = "vi", detection: d
         messages = {
             "private_or_invalid": "Only valid public video links are supported. TOAN AAS will not download private, paywalled, DRM-protected or login-required content.",
             "unsupported_platform": "This platform or link type is not supported yet.",
-            "disabled": "Download from link is being prepared. TOAN AAS has not processed the link and has not charged Xu.",
-            "adapter_missing": "Download from link is being prepared. TOAN AAS has not processed the link and has not charged Xu.",
+            "disabled": "TOAN AAS cannot download from this link right now.",
+            "adapter_missing": "TOAN AAS cannot download from this link right now.",
             "too_large": f"This file is over the public limit of {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB.",
             "duration_too_long": f"This video is over the public limit of {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} seconds.",
             "cover_unavailable": "This link does not expose a downloadable cover image.",
@@ -147639,8 +148046,8 @@ def video_downloader_guard_text(reason: str = "", lang: str = "vi", detection: d
     messages = {
         "private_or_invalid": "Chỉ xử lý link video công khai hợp lệ. TOAN AAS không tải video riêng tư/paywall/DRM hoặc nội dung cần đăng nhập.",
         "unsupported_platform": "Nền tảng hoặc kiểu link này chưa hỗ trợ.",
-        "disabled": "Tải video từ link đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu.",
-        "adapter_missing": "Tải video từ link đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu.",
+        "disabled": "TOAN AAS chưa tải được link này lúc này.",
+        "adapter_missing": "TOAN AAS chưa tải được link này lúc này.",
         "too_large": f"File vượt giới hạn công khai {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB.",
         "duration_too_long": f"Video vượt giới hạn công khai {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} giây.",
         "cover_unavailable": "Link này chưa có ảnh bìa có thể tải.",
@@ -147666,9 +148073,9 @@ def video_downloader_preview_text(detection: dict, metadata: dict | None = None,
     status_line = "Ready to download when you choose a format." if english_ui else "Sẵn sàng tải khi chọn định dạng."
     if not VIDEO_DOWNLOADER_PUBLIC_ENABLED:
         status_line = (
-            "Download from link is being prepared. TOAN AAS has not processed the link and has not charged Xu."
+            "TOAN AAS cannot download from this link right now. TOAN AAS has not processed the link and has not charged Xu."
             if english_ui else
-            "Tải video từ link đang được chuẩn bị. TOAN AAS chưa xử lý và chưa trừ Xu."
+            "TOAN AAS chưa tải được link này lúc này. TOAN AAS chưa xử lý và chưa trừ Xu."
         )
     elif metadata and not metadata.get("ok"):
         status_line = "Some link details are not ready yet; TOAN AAS will check again before downloading." if english_ui else "Chưa lấy đủ thông tin, TOAN AAS sẽ kiểm tra lại trước khi tải."
@@ -156762,6 +157169,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_route_audit", cmd_video_route_audit))
     tg_app.add_handler(CommandHandler("video_route_matrix", cmd_video_route_matrix))
     tg_app.add_handler(CommandHandler("video_back_audit", cmd_video_back_audit))
+    tg_app.add_handler(CommandHandler("video_flow_audit", cmd_video_flow_audit))
+    tg_app.add_handler(CommandHandler("video_placeholder_audit", cmd_video_placeholder_audit))
     tg_app.add_handler(CommandHandler("video_worker_claim_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(CommandHandler("video_worker_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(CommandHandler("video_job_debug", cmd_video_render_debug))

@@ -165,7 +165,11 @@ def test_merge_images_no_charge_before_confirm(monkeypatch):
 def test_merge_images_ai_first_path_uses_existing_image_core_guarded():
     user_id = 1702008
     query = _run_frame(user_id, "framevideo|ai_first")
-    assert "Tạo ảnh AI trước đang được chuẩn bị" in query.edits[-1][0]
+    assert "Tạo ảnh AI trước" in query.edits[-1][0]
+    callbacks = _callbacks(query.edits[-1][1]["reply_markup"])
+    assert "menu|main_image" in callbacks
+    assert "framevideo|start" in callbacks
+    assert "framevideo|layout" in callbacks
     assert "chưa trừ Xu" in query.edits[-1][0]
 
 
