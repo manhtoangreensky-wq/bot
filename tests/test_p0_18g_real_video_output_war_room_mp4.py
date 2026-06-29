@@ -295,8 +295,9 @@ def test_status_back_returns_video_menu_and_debug_commands_registered():
     callbacks = [button.callback_data for row in bot.video_b14_queue_status_keyboard("vi").inline_keyboard for button in row]
     assert "menu|main_video" in callbacks
     source = Path(bot.__file__).read_text(encoding="utf-8")
-    assert 'CommandHandler("video_job_debug", cmd_video_worker_claim_debug)' in source
-    assert 'CommandHandler("video_render_debug", cmd_video_worker_claim_debug)' in source
+    assert 'CommandHandler("video_job_debug", cmd_video_render_debug)' in source
+    assert 'CommandHandler("video_render_debug", cmd_video_render_debug)' in source
+    assert 'CommandHandler("video_worker_debug", cmd_video_worker_claim_debug)' in source
 
 
 def test_twenty_scenes_path_not_broken_if_supported(monkeypatch, tmp_path):

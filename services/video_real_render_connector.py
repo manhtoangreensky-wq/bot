@@ -484,6 +484,35 @@ def _logo_enabled(addon_plan: dict) -> bool:
     return bool(addon_plan.get("logo_enabled") and _safe_text(addon_plan.get("logo_text"), 120))
 
 
+def _addon_degrade_notes(addon_plan: dict, *, bgm_audio_path: str | None = None) -> list[dict[str, Any]]:
+    notes: list[dict[str, Any]] = []
+    if addon_plan.get("voice_enabled"):
+        notes.append(
+            {
+                "addon": "voice",
+                "requested": True,
+                "applied": False,
+                "reason": "voice_addon_not_available_in_video_composer",
+            }
+        )
+    if addon_plan.get("music_enabled"):
+        source = str(addon_plan.get("music_source") or "none").strip().lower()
+        notes.append(
+            {
+                "addon": "music",
+                "requested": True,
+                "applied": bool(bgm_audio_path),
+                "source": source,
+                "reason": "" if bgm_audio_path else "music_default_missing_or_unavailable",
+            }
+        )
+    if addon_plan.get("subtitle_enabled"):
+        notes.append({"addon": "subtitle", "requested": True, "applied": True, "source": str(addon_plan.get("subtitle_source") or "")})
+    if addon_plan.get("logo_enabled"):
+        notes.append({"addon": "logo", "requested": True, "applied": _logo_enabled(addon_plan), "source": str(addon_plan.get("logo_source") or "text")})
+    return notes
+
+
 def _local_composer_enabled(job: dict | None = None) -> bool:
     del job
     return _env_flag("REAL_VIDEO_LOCAL_COMPOSER_FALLBACK_ENABLED", "1")
@@ -671,11 +700,10 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
 
 def render_real_video_job(job: dict, work_dir: str) -> dict:
     addon = _addon_plan(job)
-    if addon.get("voice_enabled"):
-        raise RealVideoRenderError("voice_addon_connector_missing")
     workspace = os.path.abspath(work_dir)
     total_duration = max(1.0, float(_safe_int(job.get("expected_duration_seconds") or _scene_count(job) * 6, _scene_count(job) * 6)))
     bgm_audio_path = _default_bgm_path(addon, workspace, total_duration)
+    degrade_notes = _addon_degrade_notes(addon, bgm_audio_path=bgm_audio_path)
     readiness = real_video_provider_readiness(job)
     is_product_video = bool(str(job.get("source") or "") == "product_video" or job.get("product_video"))
     result: dict[str, Any] = {}
@@ -697,4 +725,12 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["provider_order"] = _provider_order(job)
     result["provider_readiness"] = {"ok": bool(readiness.get("ok")), "ready_provider_order": readiness.get("ready_provider_order") or []}
     result["original_user_prompt"] = original_prompt_from_job(job)
+    result["addon_degrade_notes"] = degrade_notes
+    result["partial_addons"] = any(item.get("requested") and not item.get("applied") for item in degrade_notes)
+    result["voice_requested"] = bool(addon.get("voice_enabled"))
+    result["music_requested"] = bool(addon.get("music_enabled"))
+    result["subtitle_requested"] = bool(addon.get("subtitle_enabled"))
+    result["logo_requested"] = bool(addon.get("logo_enabled"))
+    if bgm_audio_path:
+        result["bgm_audio_path"] = bgm_audio_path
     return result

@@ -40110,6 +40110,114 @@ async def cmd_video_worker_claim_debug(update: Update, context: ContextTypes.DEF
     return await update.message.reply_text(video_worker_claim_debug_text(debug), parse_mode="HTML")
 
 
+def _video_debug_json(value, fallback=None):
+    if isinstance(value, (dict, list)):
+        return value
+    if value in (None, ""):
+        return {} if fallback is None else fallback
+    try:
+        return json.loads(str(value))
+    except Exception:
+        return {} if fallback is None else fallback
+
+
+def _video_debug_file_info(path: str) -> dict:
+    clean = str(path or "").strip()
+    if not clean:
+        return {"path": "", "exists": False, "size": 0}
+    try:
+        return {"path": clean, "exists": os.path.exists(clean), "size": os.path.getsize(clean) if os.path.exists(clean) else 0}
+    except OSError:
+        return {"path": clean, "exists": False, "size": 0}
+
+
+def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return "⚠️ Dùng: <code>/video_render_debug JOB_ID</code>"
+    conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, jid)
+        project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0)) if job else {}
+        claim_debug = remote_worker_api.explain_product_video_claimability(conn, jid, owner_only=True, public_enabled=False) if job else {}
+    finally:
+        conn.close()
+    if not job:
+        return f"⚠️ Không tìm thấy video job <code>{jid}</code>."
+    asset_pack = _video_debug_json((project or {}).get("asset_pack_json"), {})
+    addon_plan = _video_debug_json((project or {}).get("addon_plan_json"), {})
+    result = _video_debug_json((job or {}).get("result_json"), {})
+    final_info = _video_debug_file_info(str((project or {}).get("final_video_path") or result.get("final_video_path") or ""))
+    try:
+        from services.video_real_render_connector import _ffmpeg_binary, real_video_provider_readiness
+
+        ffmpeg = _ffmpeg_binary()
+        readiness = real_video_provider_readiness({"asset_pack": asset_pack, "addon_plan": addon_plan, "scene_count": (project or {}).get("scene_count")})
+    except Exception as exc:
+        ffmpeg = ""
+        readiness = {"ok": False, "reason": type(exc).__name__}
+    degrade_notes = result.get("addon_degrade_notes") if isinstance(result.get("addon_degrade_notes"), list) else []
+    degrade_line = "; ".join(
+        f"{item.get('addon')} applied={bool(item.get('applied'))} reason={item.get('reason') or '-'}"
+        for item in degrade_notes
+        if isinstance(item, dict)
+    ) or "-"
+    lines = [
+        "🧪 <b>Video Render Debug</b>",
+        "",
+        f"• Mode: <code>{html.escape(mode)}</code>",
+        f"• Runtime commit: <code>{html.escape(str(PUBLIC_VERSION or APP_VERSION or '-'))}</code>",
+        f"• Job: <code>{jid}</code>",
+        f"• Project: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
+        f"• Job type: <code>{html.escape(str((job or {}).get('job_type') or '-'))}</code>",
+        f"• Job status: <code>{html.escape(str((job or {}).get('status') or '-'))}</code>",
+        f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
+        f"• Progress message: <code>{html.escape(str((job or {}).get('progress_message') or '-')[:160])}</code>",
+        f"• Worker: <code>{html.escape(str((job or {}).get('locked_by') or '-'))}</code>",
+        f"• Updated: <code>{html.escape(vietnam_time_display((job or {}).get('updated_at')))}</code>",
+        "",
+        "Payload:",
+        f"• source: <code>{html.escape(str(asset_pack.get('source') or '-'))}</code>",
+        f"• render_mode: <code>{html.escape(str(asset_pack.get('render_mode') or '-'))}</code>",
+        f"• test_pattern: <code>{'yes' if asset_pack.get('test_pattern') else 'no'}</code>",
+        f"• admin_video_delivery: <code>{'yes' if asset_pack.get('admin_video_delivery') else 'no'}</code>",
+        f"• provider_call: <code>{'yes' if asset_pack.get('provider_call') else 'no'}</code>",
+        f"• scenes: <code>{safe_int((project or {}).get('scene_count') or asset_pack.get('scene_count'), 0)}</code>",
+        f"• claimable owner-product: <code>{'yes' if claim_debug.get('claimable') else 'no'}</code>",
+        f"• claim reason: <code>{html.escape(str(claim_debug.get('reason') or '-'))}</code>",
+        "",
+        "Add-ons:",
+        f"• voice: <code>{'on' if addon_plan.get('voice_enabled') else 'off'}</code> source=<code>{html.escape(str(addon_plan.get('voice_source') or '-'))}</code>",
+        f"• music: <code>{'on' if addon_plan.get('music_enabled') else 'off'}</code> source=<code>{html.escape(str(addon_plan.get('music_source') or '-'))}</code>",
+        f"• subtitle: <code>{'on' if addon_plan.get('subtitle_enabled') else 'off'}</code> source=<code>{html.escape(str(addon_plan.get('subtitle_source') or '-'))}</code>",
+        f"• logo: <code>{'on' if addon_plan.get('logo_enabled') else 'off'}</code> source=<code>{html.escape(str(addon_plan.get('logo_source') or 'text'))}</code>",
+        f"• degrade: <code>{html.escape(degrade_line[:500])}</code>",
+        "",
+        "Runtime/artifact:",
+        f"• ffmpeg available: <code>{'yes' if ffmpeg else 'no'}</code>",
+        f"• provider ready: <code>{'yes' if readiness.get('ok') else 'no'}</code>",
+        f"• connector renderer: <code>{html.escape(str(result.get('connector_renderer') or result.get('renderer') or '-'))}</code>",
+        f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
+        f"• partial add-ons: <code>{'yes' if result.get('partial_addons') else 'no'}</code>",
+        f"• artifact path: <code>{html.escape(final_info['path'] or '-')}</code>",
+        f"• artifact exists: <code>{'yes' if final_info['exists'] else 'no'}</code>",
+        f"• artifact size: <code>{safe_int(final_info['size'], 0)}</code>",
+        f"• last error: <code>{html.escape(str((job or {}).get('last_error') or (project or {}).get('error_log') or '-')[:500])}</code>",
+        f"• charged Xu: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
+    ]
+    return "\n".join(lines)
+
+
+async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = _diagnostic_message_args(update, context)
+    job_id = safe_int(args[0] if args else 0, 0)
+    text = video_render_debug_text(job_id, mode=str(getattr(update.message, "text", "") or "").split()[0].lstrip("/") or "render")
+    return await update.message.reply_text(text, parse_mode="HTML")
+
+
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
     if not job:
         return "⚠️ Không tìm thấy video multiscene job. TOAN AAS chưa gọi provider mới."
@@ -140551,6 +140659,8 @@ ADMIN_CONTROL_MODULES = {
             ("/video_worker_claim_debug", "debug lane claim worker video, không lộ secret"),
             ("/video_job_debug <job_id>", "debug job video và lane claim, không lộ secret"),
             ("/video_render_debug <job_id>", "debug render video và artifact, không lộ secret"),
+            ("/video_artifact_debug <job_id>", "debug file MP4/artifact, không lộ secret"),
+            ("/video_worker_debug", "debug worker lane tổng quan, không lộ secret"),
             ("/tool_test_video_product_worker_claim --no-charge", "kiểm tra route claim product video thật, không render MP4"),
             ("/shopaikey_status", "ShopAIKey status"),
             ("/shopaikey_usage", "ShopAIKey usage"),
@@ -152556,8 +152666,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("remote_worker_prod_canary_status", cmd_remote_worker_prod_canary_status))
     tg_app.add_handler(CommandHandler("video_worker_status", cmd_video_worker_status))
     tg_app.add_handler(CommandHandler("video_worker_claim_debug", cmd_video_worker_claim_debug))
-    tg_app.add_handler(CommandHandler("video_job_debug", cmd_video_worker_claim_debug))
-    tg_app.add_handler(CommandHandler("video_render_debug", cmd_video_worker_claim_debug))
+    tg_app.add_handler(CommandHandler("video_worker_debug", cmd_video_worker_claim_debug))
+    tg_app.add_handler(CommandHandler("video_job_debug", cmd_video_render_debug))
+    tg_app.add_handler(CommandHandler("video_render_debug", cmd_video_render_debug))
+    tg_app.add_handler(CommandHandler("video_artifact_debug", cmd_video_render_debug))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_video_product_worker_claim(?:@\w+)?(?:\s|$)"), cmd_tool_test_video_product_worker_claim))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))
