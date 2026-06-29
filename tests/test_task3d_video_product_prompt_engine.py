@@ -1279,9 +1279,11 @@ def test_export_action_guards_if_provider_unavailable(monkeypatch):
     bot.clear_video_addon_state(user_id)
 
 
-def test_no_prompt_vault_added_to_task3d3_public_flow():
-    public_flow_source = inspect.getsource(bot.handle_video_product_callback).lower()
-    assert "prompt_vault" not in public_flow_source
+def test_prompt_vault_save_is_explicit_result_action_only():
+    callbacks = _callbacks(bot.task3d_result_keyboard("storyboard_prompt", "vi"))
+    assert "vproduct|prompt_vault_save" in callbacks
+    intro_callbacks = _callbacks(bot.task3d_product_intro_keyboard("storyboard_prompt", "vi"))
+    assert "vproduct|prompt_vault_save" not in intro_callbacks
 
 
 def test_video_200_creates_provider_job_after_confirm():
@@ -1467,7 +1469,8 @@ def test_video_output_menu_has_prompt_image_video_buttons():
     markup = bot.task3d_result_keyboard("storyboard_prompt", "vi")
     assert [[button.text for button in row] for row in markup.inline_keyboard] == [
         ["🖼 Tạo prompt ảnh", "🎥 Tạo prompt video"],
-        ["📦 Xuất bộ prompt", "🔁 Đổi phong cách"],
+        ["📦 Xuất bộ prompt", "💾 Lưu Kho prompt"],
+        ["🔁 Đổi phong cách"],
         ["🎬 Dùng để tạo video"],
         ["⬅️ Quay lại", "🏠 Menu chính"],
     ]

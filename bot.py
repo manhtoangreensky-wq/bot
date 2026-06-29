@@ -54525,6 +54525,399 @@ def video_editor_job_status_text(job: dict, lang: str = "vi") -> str:
     return "\n".join(lines)
 
 
+VIDEO_PUBLIC_ROUTE_FORBIDDEN_WORDS = (
+    "Admin test",
+    "admin",
+    "test",
+    "local_worker_missing",
+    "component kỹ thuật",
+    "provider",
+    "API",
+    "worker",
+    "FFmpeg",
+    "mux",
+    "adapter",
+    "RuntimeError",
+    "debug",
+    "payload",
+    "code",
+    "blackbox",
+    "local_worker",
+    "cấu hình thật",
+    "thiếu component",
+)
+VIDEO_PUBLIC_CLEAN_FAIL_TEXT = (
+    "TOAN AAS chưa dựng được video hoàn chỉnh lần này. Hệ thống chưa trừ Xu. "
+    "Anh/chị vui lòng thử lại hoặc chọn công cụ khác."
+)
+
+
+VIDEO_PUBLIC_MENU_ROWS = (
+    ("video_trend", "video_ai_real"),
+    ("script_image_video", "frame_video_local"),
+    ("self_shot_scene_change", "multi_scene_film"),
+    ("video_idea", "storyboard_prompt"),
+    ("prompt_library", "video_downloader"),
+    ("video_local_edit", "main_menu"),
+)
+
+
+VIDEO_PUBLIC_ROUTE_MATRIX = {
+    "video_trend": {
+        "label_vi": "🔥 Video theo trend",
+        "label_en": "🔥 Trend video",
+        "label_zh": "🔥 Trend 视频",
+        "entry_callback": "vproduct|open|video_trend",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("vproduct|trend_today", "vproduct|trend_custom"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "video_product",
+        "invoice_reachable": True,
+        "job_reachable": True,
+        "product_id": "video_trend",
+    },
+    "video_ai_real": {
+        "label_vi": "🎬 Video AI chân thật",
+        "label_en": "🎬 Real AI Video",
+        "label_zh": "🎬 真实 AI 视频",
+        "entry_callback": "vproduct|open|video_ai_real",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("promptvideo|start", "imagevideo|start", "videoref|start"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "video_product",
+        "invoice_reachable": True,
+        "job_reachable": True,
+        "product_id": "video_ai_real",
+    },
+    "script_image_video": {
+        "label_vi": "🧩 Kịch bản → Video",
+        "label_en": "🧩 Script → Video",
+        "label_zh": "🧩 脚本 → 视频",
+        "entry_callback": "vproduct|open|script_image_video",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("vproduct|ideas|script_image_video", "vproduct|input_text|script_image_video"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "video_product",
+        "invoice_reachable": True,
+        "job_reachable": True,
+        "product_id": "script_image_video",
+    },
+    "frame_video_local": {
+        "label_vi": "🎞 Ghép ảnh thành video",
+        "label_en": "🎞 Image slideshow video",
+        "label_zh": "🎞 图片合成视频",
+        "entry_callback": "vproduct|open|frame_video_local",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("framevideo|start", "framevideo|ai_first"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "video_product",
+        "invoice_reachable": True,
+        "job_reachable": True,
+        "product_id": "frame_video_local",
+    },
+    "self_shot_scene_change": {
+        "label_vi": "🎥 Tự quay & đổi cảnh AI",
+        "label_en": "🎥 Self-shot scene AI",
+        "label_zh": "🎥 自拍换场景 AI",
+        "entry_callback": "vproduct|open|self_shot_scene_change",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("selfscene|await_video",),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "video_product",
+        "invoice_reachable": True,
+        "job_reachable": True,
+        "product_id": "self_shot_scene_change",
+    },
+    "multi_scene_film": {
+        "label_vi": "🎬 Phim AI nhiều cảnh",
+        "label_en": "🎬 Multi-scene AI film",
+        "label_zh": "🎬 多场景 AI 影片",
+        "entry_callback": "vproduct|open|multi_scene_film",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("vproduct|ideas|multi_scene_film", "vproduct|input_text|multi_scene_film"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "video_product",
+        "invoice_reachable": True,
+        "job_reachable": True,
+        "product_id": "multi_scene_film",
+    },
+    "video_idea": {
+        "label_vi": "🧠 Ý tưởng video",
+        "label_en": "🧠 Video ideas",
+        "label_zh": "🧠 视频创意",
+        "entry_callback": "vproduct|open|video_idea",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("vproduct|ideas|video_idea", "vproduct|input_text|video_idea"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "planning",
+        "invoice_reachable": False,
+        "job_reachable": False,
+        "product_id": "video_idea",
+    },
+    "storyboard_prompt": {
+        "label_vi": "🎬 Storyboard + Prompt",
+        "label_en": "🎬 Storyboard + Prompt",
+        "label_zh": "🎬 分镜 + Prompt",
+        "entry_callback": "vproduct|open|storyboard_prompt",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("vproduct|sample|storyboard_prompt", "vproduct|input_text|storyboard_prompt"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "planning",
+        "invoice_reachable": False,
+        "job_reachable": False,
+        "product_id": "storyboard_prompt",
+    },
+    "prompt_library": {
+        "label_vi": "📚 Kho prompt video",
+        "label_en": "📚 Video prompt library",
+        "label_zh": "📚 视频 Prompt 库",
+        "entry_callback": "vpromptlib|start",
+        "handler": "handle_video_prompt_library_callback",
+        "expected_children": ("vpromptlib|idea", "vpromptlib|image", "vpromptlib|cinematic"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "helper",
+        "invoice_reachable": False,
+        "job_reachable": False,
+        "product_id": "",
+    },
+    "video_downloader": {
+        "label_vi": "📥 Tải video từ link",
+        "label_en": "📥 Download video from link",
+        "label_zh": "📥 链接下载视频",
+        "entry_callback": "vdownload|start",
+        "handler": "handle_video_downloader_callback",
+        "expected_children": (),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "helper",
+        "invoice_reachable": False,
+        "job_reachable": False,
+        "product_id": "",
+    },
+    "video_local_edit": {
+        "label_vi": "🛠 Chỉnh sửa video local",
+        "label_en": "🛠 Local video editor",
+        "label_zh": "🛠 本地视频编辑",
+        "entry_callback": "vproduct|open|video_local_edit",
+        "handler": "handle_video_product_callback",
+        "expected_children": ("videoedit|color", "videoedit|crop"),
+        "parent_menu": "menu|main_video",
+        "back_target": "menu|main_video",
+        "category": "helper",
+        "invoice_reachable": False,
+        "job_reachable": False,
+        "product_id": "video_local_edit",
+    },
+}
+
+
+def video_public_route_for_tool(tool_id: str) -> dict:
+    return dict(VIDEO_PUBLIC_ROUTE_MATRIX.get(str(tool_id or "")) or {})
+
+
+def video_public_route_for_callback(callback: str) -> dict:
+    callback = str(callback or "")
+    for tool_id, route in VIDEO_PUBLIC_ROUTE_MATRIX.items():
+        if str(route.get("entry_callback") or "") == callback:
+            item = dict(route)
+            item["video_tool"] = tool_id
+            return item
+    return {}
+
+
+def video_public_menu_label(tool_id: str, lang: str = "vi") -> str:
+    route = video_public_route_for_tool(tool_id)
+    lang = normalize_user_language(lang) or "vi"
+    if lang == "zh":
+        return str(route.get("label_zh") or route.get("label_vi") or tool_id)
+    if lang != "vi":
+        return str(route.get("label_en") or route.get("label_vi") or tool_id)
+    return str(route.get("label_vi") or tool_id)
+
+
+def video_route_expected_handler(callback: str) -> str:
+    if str(callback or "").startswith("vproduct|"):
+        return "handle_video_product_callback"
+    if str(callback or "").startswith("vpromptlib|"):
+        return "handle_video_prompt_library_callback"
+    if str(callback or "").startswith("vdownload|"):
+        return "handle_video_downloader_callback"
+    return ""
+
+
+def video_public_text_forbidden_words(text: str) -> list[str]:
+    lower = str(text or "").lower()
+    search_lower = re.sub(r"</?code>", " ", lower)
+    found = []
+    for term in VIDEO_PUBLIC_ROUTE_FORBIDDEN_WORDS:
+        normalized = str(term or "").lower()
+        if not normalized:
+            continue
+        if normalized in {"api", "admin", "test", "code"}:
+            if re.search(rf"\b{re.escape(normalized)}\b", search_lower):
+                found.append(term)
+        elif normalized in search_lower:
+            found.append(term)
+    return found
+
+
+def video_route_session_fields(tool_id: str, step: str = "tool_home") -> dict:
+    route = video_public_route_for_tool(tool_id)
+    return {
+        "product_area": "video",
+        "video_tool": str(tool_id or ""),
+        "parent_menu": "video_main",
+        "parent_menu_callback": str(route.get("parent_menu") or "menu|main_video"),
+        "entry_callback": str(route.get("entry_callback") or ""),
+        "back_target": str(route.get("back_target") or "menu|main_video"),
+        "flow_stack": ["video_main", str(tool_id or ""), str(step or "tool_home")],
+    }
+
+
+def set_video_route_session(user_id, tool_id: str, step: str = "tool_home", **fields) -> dict:
+    route_fields = video_route_session_fields(tool_id, step)
+    route_fields.update(fields)
+    session = go_video_screen(user_id, f"{tool_id}:{step}", str(tool_id or ""), **route_fields)
+    session.update(route_fields)
+    current_step = str(session.get("current_step") or "")
+    if current_step != str(step or "tool_home"):
+        session["previous_step"] = current_step
+        session["current_step"] = str(step or "tool_home")
+    product_id = str(route_fields.get("product_id") or video_public_route_for_tool(tool_id).get("product_id") or "")
+    if product_id:
+        session["product_id"] = product_id
+    session["return_to"] = str(route_fields.get("parent_menu_callback") or "menu|main_video")
+    draft = dict(session.get("draft") or {})
+    draft.update(route_fields)
+    session["draft"] = draft
+    return save_video_session(user_id, session)
+
+
+def video_route_matrix_rows() -> list[dict]:
+    rows = []
+    for row_index, row in enumerate(VIDEO_PUBLIC_MENU_ROWS, start=1):
+        for column_index, tool_id in enumerate(row, start=1):
+            if tool_id == "main_menu":
+                continue
+            route = video_public_route_for_tool(tool_id)
+            callback = str(route.get("entry_callback") or "")
+            actual_handler = video_route_expected_handler(callback)
+            row_item = {
+                "row": row_index,
+                "column": column_index,
+                "video_tool": tool_id,
+                "label": video_public_menu_label(tool_id, "vi"),
+                "entry_callback": callback,
+                "expected_handler": str(route.get("handler") or ""),
+                "actual_handler": actual_handler,
+                "parent_menu": str(route.get("parent_menu") or ""),
+                "back_target": str(route.get("back_target") or ""),
+                "expected_children": tuple(route.get("expected_children") or ()),
+                "category": str(route.get("category") or ""),
+                "invoice_reachable": bool(route.get("invoice_reachable")),
+                "job_reachable": bool(route.get("job_reachable")),
+            }
+            row_item["ok"] = bool(
+                row_item["entry_callback"]
+                and row_item["expected_handler"] == row_item["actual_handler"]
+                and row_item["parent_menu"] == "menu|main_video"
+                and row_item["back_target"] == "menu|main_video"
+            )
+            rows.append(row_item)
+    return rows
+
+
+def video_route_audit_payload() -> dict:
+    rows = video_route_matrix_rows()
+    forbidden = video_public_text_forbidden_words(menu_text_main_video())
+    missing_labels = [row["video_tool"] for row in rows if not row["label"]]
+    return {
+        "ok": all(row.get("ok") for row in rows) and not forbidden and not missing_labels,
+        "rows": rows,
+        "forbidden_public_words": forbidden,
+        "missing_labels": missing_labels,
+        "menu_rows": [list(row) for row in VIDEO_PUBLIC_MENU_ROWS],
+    }
+
+
+def video_route_audit_text() -> str:
+    payload = video_route_audit_payload()
+    lines = [
+        "🎬 <b>Video Route Audit</b>",
+        "",
+        f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>",
+        f"Forbidden public words: <b>{html.escape(', '.join(payload.get('forbidden_public_words') or []) or 'none')}</b>",
+        "",
+    ]
+    for row in payload.get("rows") or []:
+        status = "PASS" if row.get("ok") else "FAIL"
+        children = ", ".join(row.get("expected_children") or ()) or "-"
+        lines.append(
+            f"{row.get('row')}.{row.get('column')} {html.escape(str(row.get('label') or ''))} — <b>{status}</b>\n"
+            f"  entry: <code>{html.escape(str(row.get('entry_callback') or ''))}</code>\n"
+            f"  handler: <code>{html.escape(str(row.get('actual_handler') or ''))}</code>\n"
+            f"  parent/back: <code>{html.escape(str(row.get('parent_menu') or ''))}</code> / <code>{html.escape(str(row.get('back_target') or ''))}</code>\n"
+            f"  children: <code>{html.escape(children)}</code>"
+        )
+    return "\n".join(lines)
+
+
+def video_route_matrix_text() -> str:
+    lines = ["🎬 <b>Video Route Matrix</b>", ""]
+    for row in video_route_matrix_rows():
+        lines.append(
+            f"• <b>{html.escape(str(row.get('label') or ''))}</b> "
+            f"(<code>{html.escape(str(row.get('video_tool') or ''))}</code>) → "
+            f"<code>{html.escape(str(row.get('entry_callback') or ''))}</code> | "
+            f"parent <code>{html.escape(str(row.get('parent_menu') or ''))}</code>"
+        )
+    return "\n".join(lines)
+
+
+def video_back_audit_text() -> str:
+    rows = video_route_matrix_rows()
+    ok = all(row.get("back_target") == "menu|main_video" for row in rows)
+    lines = [
+        "⬅️ <b>Video Back Audit</b>",
+        "",
+        f"Status: <b>{'PASS' if ok else 'FAIL'}</b>",
+        "",
+    ]
+    for row in rows:
+        status = "PASS" if row.get("back_target") == "menu|main_video" else "FAIL"
+        lines.append(
+            f"• {html.escape(str(row.get('label') or ''))}: <code>{html.escape(str(row.get('back_target') or ''))}</code> — <b>{status}</b>"
+        )
+    return "\n".join(lines)
+
+
+async def cmd_video_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_route_audit_text(), parse_mode="HTML")
+
+
+async def cmd_video_route_matrix(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_route_matrix_text(), parse_mode="HTML")
+
+
+async def cmd_video_back_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_back_audit_text(), parse_mode="HTML")
+
+
 def video_editor_worker_ready() -> bool:
     status = local_worker_status_payload()
     return bool(status.get("enabled") and status.get("poll_enabled") and status.get("token_configured") and status.get("connected"))
@@ -54532,49 +54925,15 @@ def video_editor_worker_ready() -> bool:
 
 def main_video_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
-    translated = {
-        "en": {
-            "video_trend": "🔥 Trend video", "video_idea": "🧠 Video ideas",
-            "storyboard_prompt": "🎬 Storyboard + Prompt", "prompt_library": "📚 Video prompt library",
-            "video_ai_real": "🎬 Real AI Video", "script_image_video": "🧩 Script → Images → Video",
-            "image_to_video": "🖼 Image → Video", "frame_video_local": "🎞 Image slideshow video",
-            "self_shot_scene_change": "🎥 Self-shot scene AI", "multi_scene_film": "🎬 Multi-scene AI film",
-            "video_local_edit": "🛠 Local video editor", "video_downloader": "📥 Download video from link",
-        },
-        "zh": {
-            "video_trend": "🔥 Trend 视频", "video_idea": "🧠 视频创意",
-            "storyboard_prompt": "🎬 分镜 + Prompt", "prompt_library": "📚 视频 Prompt 库",
-            "video_ai_real": "🎬 真实 AI 视频", "script_image_video": "🧩 脚本 → 图片 → 视频",
-            "image_to_video": "🖼 图片 → 视频", "frame_video_local": "🎞 图片合成视频",
-            "self_shot_scene_change": "🎥 自拍换场景 AI", "multi_scene_film": "🎬 多场景 AI 影片",
-            "video_local_edit": "🛠 本地视频编辑", "video_downloader": "📥 链接下载视频",
-        },
-    }
-    vi_overrides = {
-        "storyboard_prompt": "🎬 Storyboard + Prompt",
-        "prompt_library": "📚 Kho prompt video",
-        "script_image_video": "🧩 Kịch bản → Video",
-        "video_downloader": "📥 Tải video từ link",
-    }
-    menu_rows = (
-        (("video_trend", "vproduct|open|video_trend"), ("video_idea", "vproduct|open|video_idea")),
-        (("storyboard_prompt", "vproduct|open|storyboard_prompt"), ("prompt_library", "vpromptlib|start")),
-        (("video_ai_real", "vproduct|open|video_ai_real"), ("script_image_video", "vproduct|open|script_image_video")),
-        (("frame_video_local", "vproduct|open|frame_video_local"), ("self_shot_scene_change", "vproduct|open|self_shot_scene_change")),
-        (("multi_scene_film", "vproduct|open|multi_scene_film"), ("video_downloader", "vdownload|start")),
-        (("video_local_edit", "vproduct|open|video_local_edit"), ("main_menu", "menu|main")),
-    )
     rows = []
-    for product_ids in menu_rows:
+    for product_ids in VIDEO_PUBLIC_MENU_ROWS:
         row = []
-        for product_id, callback_data in product_ids:
-            if product_id == "main_menu":
+        for tool_id in product_ids:
+            if tool_id == "main_menu":
                 row.append(InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"))
                 continue
-            label = vi_overrides.get(product_id) or VIDEO_PRODUCT_REGISTRY[product_id]["public_label"]
-            if lang != "vi":
-                label = translated.get(lang, translated["en"]).get(product_id, label)
-            row.append(InlineKeyboardButton(label, callback_data=callback_data))
+            route = video_public_route_for_tool(tool_id)
+            row.append(InlineKeyboardButton(video_public_menu_label(tool_id, lang), callback_data=str(route.get("entry_callback") or "")))
         rows.append(row)
     return InlineKeyboardMarkup(rows)
 
@@ -58208,7 +58567,8 @@ def task3d_result_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardM
     is_vi = normalize_user_language(lang) == "vi"
     rows = [
         [InlineKeyboardButton("🖼 Tạo prompt ảnh" if is_vi else "🖼 Image prompts", callback_data="vproduct|prompt_image"), InlineKeyboardButton("🎥 Tạo prompt video" if is_vi else "🎥 Video prompts", callback_data="vproduct|prompt_video")],
-        [InlineKeyboardButton("📦 Xuất bộ prompt" if is_vi else "📦 Export prompts", callback_data="vproduct|export_menu"), InlineKeyboardButton("🔁 Đổi phong cách" if is_vi else "🔁 Change style", callback_data="vproduct|restyle")],
+        [InlineKeyboardButton("📦 Xuất bộ prompt" if is_vi else "📦 Export prompts", callback_data="vproduct|export_menu"), InlineKeyboardButton("💾 Lưu Kho prompt" if is_vi else "💾 Save prompt vault", callback_data="vproduct|prompt_vault_save")],
+        [InlineKeyboardButton("🔁 Đổi phong cách" if is_vi else "🔁 Change style", callback_data="vproduct|restyle")],
     ]
     if VIDEO_PRODUCT_REGISTRY.get(product_id, {}).get("allowed_packages") or product_id in TASK3D_VIDEO_PROMPT_OUTPUT_PRODUCTS:
         render_label = "🎬 Dùng để tạo video"
@@ -58217,6 +58577,39 @@ def task3d_result_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardM
         [InlineKeyboardButton("⬅️ Quay lại" if is_vi else ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
+
+
+def task3d_prompt_vault_item_from_session(session: dict, bundle: dict | None = None, lang: str = "vi") -> dict:
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    bundle = dict(bundle or draft.get("prompt_bundle") or draft.get("prepared_prompt_bundle") or {})
+    product_id = str(session.get("product_id") or draft.get("product_id") or "storyboard_prompt")
+    prompt_text = "\n\n".join(str(item or "") for item in (bundle.get("video_prompts") or bundle.get("image_prompts") or []) if str(item or "").strip())
+    if not prompt_text:
+        prompt_text = str(bundle.get("short_summary") or session.get("topic") or draft.get("topic") or "").strip()
+    style = str(session.get("style") or draft.get("style") or (bundle.get("guided_choices") or {}).get("style") or "default")
+    platform = str(session.get("platform") or draft.get("platform") or "TikTok/Reels")
+    source_id = str(bundle.get("bundle_id") or f"{product_id}_{safe_int(time.time(), 0)}")
+    prompt_id = re.sub(r"[^a-zA-Z0-9_-]+", "-", f"video_{product_id}_{source_id}")[:96].strip("-") or f"video_{product_id}"
+    return {
+        "prompt_id": prompt_id,
+        "category": "video_storyboard_prompt",
+        "product_id": product_id,
+        "platform": platform,
+        "style": style,
+        "language": normalize_user_language(lang) or "vi",
+        "prompt_text": prompt_text[:5000] or "TOAN AAS video prompt",
+        "negative_prompt": str(bundle.get("negative_prompt") or ""),
+        "variables": {
+            "topic": str(session.get("topic") or draft.get("topic") or ""),
+            "scene_count": safe_int(draft.get("scene_count") or draft.get("panel_count"), 0),
+            "source": "video_result",
+        },
+        "source": "toan_aas_video_flow",
+        "license_note": "User-created TOAN AAS planning prompt; reusable by the owner.",
+        "quality_score": 0.85,
+        "enabled": True,
+    }
 
 
 def task3d_result_parent_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -58876,6 +59269,7 @@ async def handle_video_prompt_library_callback(update: Update, context: ContextT
     action = parts[1] if len(parts) > 1 else "start"
     await query.answer()
     if action in {"start", "menu", "back"}:
+        set_video_route_session(uid, "prompt_library", "tool_home")
         return await safe_edit_or_send(
             query,
             video_prompt_library_text(lang),
@@ -58904,6 +59298,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         if value not in VIDEO_PRODUCT_REGISTRY:
             return await safe_edit_or_send(query, "⚠️ Sản phẩm video không hợp lệ. Bot chưa trừ Xu.")
         if value in {"image_to_video", "frame_video_local"}:
+            if value in VIDEO_PUBLIC_ROUTE_MATRIX:
+                set_video_route_session(uid, value, "tool_home", product_id=value)
             return await safe_edit_or_send(
                 query,
                 ivf.frame_video_unified_menu_text(lang),
@@ -58911,6 +59307,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 reply_markup=ivf.frame_video_unified_menu_keyboard(lang),
             )
         if value == "video_ai_real":
+            set_video_route_session(uid, value, "tool_home", product_id=value)
             return await safe_edit_or_send(
                 query,
                 video_ai_true_text(lang),
@@ -58918,6 +59315,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 reply_markup=video_ai_true_keyboard(lang),
             )
         if value == "self_shot_scene_change":
+            set_video_route_session(uid, value, "tool_home", product_id=value)
             recent = get_recent_media_state(LAST_USER_VIDEO, uid) or {}
             current = get_developing_video_pending(uid) or {}
             if current.get("flow") == "selfscene":
@@ -58942,6 +59340,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 reply_markup=self_scene_upload_keyboard(lang, bool(recent.get("file_id") or current.get("source_file_id"))),
             )
         if value == "video_local_edit":
+            set_video_route_session(uid, value, "tool_home", product_id=value)
             source = recent_video_editor_source(uid)
             set_video_editor_pending(uid, "menu", **source)
             return await safe_edit_or_send(
@@ -58954,7 +59353,21 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         current_session = get_video_session(uid)
         if str(current_session.get("product_id") or "") != str(value):
             clear_video_session(uid)
-        session = task3d_session_step(uid, "intro", product_id=value, return_to=parent_callback, provider_called=False, xu_charged=0)
+        route_fields = video_route_session_fields(value, "tool_home") if value in VIDEO_PUBLIC_ROUTE_MATRIX else {}
+        session = task3d_session_step(
+            uid,
+            "intro",
+            product_id=value,
+            return_to=parent_callback,
+            provider_called=False,
+            xu_charged=0,
+            **route_fields,
+        )
+        session = go_video_screen(uid, f"{value}:tool_home", value, **route_fields)
+        session.update(route_fields)
+        session["product_id"] = value
+        session["return_to"] = parent_callback
+        save_video_session(uid, session)
         return await safe_edit_or_send(
             query,
             task3d_product_intro_text(value, lang),
@@ -59136,6 +59549,21 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session["current_step"] = "result"
         session = save_video_session(uid, session)
         return await task3d_render_step(query, uid, session, lang)
+    if action == "prompt_vault_save":
+        draft = dict(session.get("draft") or {})
+        bundle = dict(draft.get("prompt_bundle") or draft.get("prepared_prompt_bundle") or {})
+        if not bundle:
+            bundle = task3d_build_bundle_from_session(session)
+            session = task3d_session_step(uid, "result", prompt_bundle=bundle, prompt_bundle_id=bundle.get("bundle_id"), free_generation=True, provider_called=False, xu_charged=0)
+        item = task3d_prompt_vault_item_from_session(session, bundle, lang)
+        result = TASK3D_PROMPT_VAULT.add(item)
+        if result.get("ok"):
+            message = "✅ Đã lưu vào Kho prompt video. TOAN AAS chưa tạo file thật và chưa trừ Xu."
+        elif result.get("reason") == "duplicate_prompt_id":
+            message = "✅ Bộ prompt này đã có trong Kho prompt video. TOAN AAS chưa tạo file thật và chưa trừ Xu."
+        else:
+            message = "⚠️ Chưa lưu được Kho prompt video lần này. TOAN AAS chưa tạo file thật và chưa trừ Xu."
+        return await safe_edit_or_send(query, message, reply_markup=task3d_result_keyboard(product_id, lang))
     if action in {"trend_today", "trend_more"}:
         draft = dict(session.get("draft") or {})
         offset = safe_int(draft.get("trend_offset"), 0)
@@ -147349,6 +147777,7 @@ async def handle_video_downloader_callback(update: Update, context: ContextTypes
     action = parts[1] if len(parts) > 1 else "start"
     value = parts[2] if len(parts) > 2 else ""
     if action == "start":
+        set_video_route_session(uid, "video_downloader", "tool_home")
         clear_video_downloader_pending(uid)
         set_video_downloader_pending(uid, "await_link")
         return await safe_edit_or_send(
@@ -147358,6 +147787,7 @@ async def handle_video_downloader_callback(update: Update, context: ContextTypes
             reply_markup=video_downloader_start_keyboard(lang),
         )
     if action != "download":
+        set_video_route_session(uid, "video_downloader", "tool_home")
         clear_video_downloader_pending(uid)
         return await safe_edit_or_send(query, video_downloader_start_text(lang), parse_mode="HTML", reply_markup=video_downloader_start_keyboard(lang))
     state = get_video_downloader_pending(uid)
@@ -156329,6 +156759,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("remote_worker_prod_canary", cmd_remote_worker_prod_canary))
     tg_app.add_handler(CommandHandler("remote_worker_prod_canary_status", cmd_remote_worker_prod_canary_status))
     tg_app.add_handler(CommandHandler("video_worker_status", cmd_video_worker_status))
+    tg_app.add_handler(CommandHandler("video_route_audit", cmd_video_route_audit))
+    tg_app.add_handler(CommandHandler("video_route_matrix", cmd_video_route_matrix))
+    tg_app.add_handler(CommandHandler("video_back_audit", cmd_video_back_audit))
     tg_app.add_handler(CommandHandler("video_worker_claim_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(CommandHandler("video_worker_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(CommandHandler("video_job_debug", cmd_video_render_debug))
