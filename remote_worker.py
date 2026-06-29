@@ -638,6 +638,9 @@ def process_claimed_job(job: dict) -> dict:
         final_path = render_real_video(job, work_dir)
         send_heartbeat(job_id, 80, "product video rendered")
         send_heartbeat(job_id, 95, "uploading result")
+        connector_result = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
+        visual_classification = str(connector_result.get("visual_classification") or connector_result.get("final_classification") or "")
+        force_no_charge = bool(visual_classification and visual_classification != "final_ai_video")
         result = {
             "ok": True,
             "render_mode": RENDER_MODE_REAL,
@@ -651,11 +654,22 @@ def process_claimed_job(job: dict) -> dict:
             "provider_call": bool(job.get("provider_call")),
             "public_user": bool(job.get("public_user")),
             "admin_only": bool(job.get("admin_only")),
-            "no_charge": bool(job.get("no_charge")),
-            "connector_renderer": str((LAST_REAL_VIDEO_RENDER_RESULT or {}).get("renderer") or ""),
-            "provider_attempted": bool((LAST_REAL_VIDEO_RENDER_RESULT or {}).get("provider_attempted")),
-            "partial_addons": bool((LAST_REAL_VIDEO_RENDER_RESULT or {}).get("partial_addons")),
-            "addon_degrade_notes": (LAST_REAL_VIDEO_RENDER_RESULT or {}).get("addon_degrade_notes") or [],
+            "no_charge": bool(job.get("no_charge")) or force_no_charge,
+            "connector_renderer": str(connector_result.get("renderer") or ""),
+            "provider_attempted": bool(connector_result.get("provider_attempted")),
+            "provider_route_selected": bool(connector_result.get("provider_route_selected")),
+            "provider_task_ids": connector_result.get("provider_task_ids") or [],
+            "provider_status": str(connector_result.get("provider_status") or ""),
+            "provider_error": str(connector_result.get("provider_error") or ""),
+            "fallback_used": bool(connector_result.get("fallback_used")),
+            "fallback_reason": str(connector_result.get("fallback_reason") or ""),
+            "visual_source": str(connector_result.get("visual_source") or ""),
+            "visual_classification": visual_classification,
+            "final_classification": visual_classification,
+            "placeholder_detected": bool(connector_result.get("placeholder_detected") or connector_result.get("placeholder_visual")),
+            "raw_prompt_burned_into_frame": bool(connector_result.get("raw_prompt_burned_into_frame")),
+            "partial_addons": bool(connector_result.get("partial_addons")),
+            "addon_degrade_notes": connector_result.get("addon_degrade_notes") or [],
         }
         return complete_job(job_id, result, final_path)
 

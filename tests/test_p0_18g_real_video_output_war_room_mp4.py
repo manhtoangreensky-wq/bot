@@ -163,6 +163,8 @@ def test_render_creates_mp4_artifact_3_scenes_with_music_subtitle_logo(monkeypat
     assert final_path.is_file()
     assert final_path.stat().st_size > 0
     assert result["scene_count"] == 3
+    assert result["visual_classification"] == "partial_simple_video"
+    assert result["no_charge"] is True
     assert "test" not in str(result.get("renderer", "")).lower()
     assert "fake" not in str(result.get("renderer", "")).lower()
 
@@ -203,6 +205,8 @@ def test_artifact_exists_before_worker_success(monkeypatch, tmp_path):
     assert completed["result"]["source"] == "product_video"
     assert completed["result"]["test_pattern"] is False
     assert completed["result"]["admin_video_delivery"] is False
+    assert completed["result"]["visual_classification"] == "partial_simple_video"
+    assert completed["result"]["no_charge"] is True
     assert {int(item[1]) for item in heartbeats if len(item) > 1} >= {5, 20, 80, 95}
 
 

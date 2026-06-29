@@ -23,6 +23,24 @@ from services.multiscene_video_pipeline import ensure_video_output, process_mult
 
 
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
+FINAL_AI_VIDEO = "final_ai_video"
+PARTIAL_SIMPLE_VIDEO = "partial_simple_video"
+FAILED_NO_REAL_VISUAL = "failed_no_real_visual"
+LOCAL_PLACEHOLDER_RENDERER = "local_scene_composer"
+PROVIDER_SCENE_RENDERER = "provider_scene_video"
+VISUAL_SOURCE_PROVIDER_MP4 = "provider_mp4"
+VISUAL_SOURCE_LOCAL_PLACEHOLDER = "local_placeholder"
+
+RAW_PROMPT_FRAME_MARKERS = (
+    "chủ thể chính:",
+    "chu the chinh:",
+    "visual:",
+    "prompt:",
+    "provider:",
+    "debug:",
+    "pov trải nghiệm thật: add one subtle visual",
+    "pov trai nghiem that: add one subtle visual",
+)
 
 
 class RealVideoRenderError(RuntimeError):
@@ -61,6 +79,35 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except Exception:
         return int(default)
+
+
+def is_local_placeholder_renderer(renderer: Any) -> bool:
+    value = str(renderer or "").strip().lower()
+    return any(marker in value for marker in ("local_scene_composer", "local_placeholder", "text_slide", "color_slide", "placeholder"))
+
+
+def classify_visual_result(result: dict | None = None) -> str:
+    payload = dict(result or {})
+    explicit = str(payload.get("visual_classification") or payload.get("final_classification") or "").strip()
+    if explicit in {FINAL_AI_VIDEO, PARTIAL_SIMPLE_VIDEO, FAILED_NO_REAL_VISUAL}:
+        return explicit
+    if not payload.get("ok"):
+        return FAILED_NO_REAL_VISUAL
+    renderer = str(payload.get("renderer") or payload.get("connector_renderer") or "").strip().lower()
+    if is_local_placeholder_renderer(renderer) or payload.get("placeholder_detected") or payload.get("placeholder_visual"):
+        return PARTIAL_SIMPLE_VIDEO
+    if payload.get("raw_prompt_burned_into_frame"):
+        return FAILED_NO_REAL_VISUAL
+    if renderer in {"real_provider", PROVIDER_SCENE_RENDERER, "provider_video"} or payload.get("provider_attempted"):
+        return FINAL_AI_VIDEO
+    return FAILED_NO_REAL_VISUAL
+
+
+def _contains_raw_prompt_marker(text: Any) -> bool:
+    value = _safe_text(text, 3000).lower()
+    if not value:
+        return False
+    return any(marker in value for marker in RAW_PROMPT_FRAME_MARKERS)
 
 
 def _provider_order(job: dict | None = None) -> list[str]:
@@ -178,6 +225,30 @@ def _scene_cards(job: dict | None = None) -> list[dict]:
     if isinstance(cards, list):
         return [dict(item or {}) for item in cards if isinstance(item, dict)]
     return []
+
+
+def _has_user_facing_subtitle_text(job: dict | None = None) -> bool:
+    addon = _addon_plan(job)
+    if _safe_text(addon.get("narration_text") or addon.get("script_text") or addon.get("subtitle_text"), 1000):
+        return True
+    for card in _scene_cards(job):
+        if _safe_text(card.get("narration_line") or card.get("script_text") or card.get("subtitle_line"), 1000):
+            return True
+    return False
+
+
+def _subtitle_raw_prompt_burn_detected(job: dict | None, result: dict | None) -> bool:
+    subtitle_path = str((result or {}).get("subtitle_path") or "").strip()
+    if not subtitle_path or not os.path.isfile(subtitle_path):
+        return False
+    try:
+        with open(subtitle_path, "r", encoding="utf-8", errors="ignore") as handle:
+            content = handle.read(6000)
+    except OSError:
+        return False
+    if _contains_raw_prompt_marker(content):
+        return True
+    return False
 
 
 def _scene_count(job: dict | None = None) -> int:
@@ -471,11 +542,21 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
     raise RealVideoRenderError(";".join(errors) or REAL_VIDEO_RENDER_UNAVAILABLE)
 
 
-def build_real_scene_renderer(job: dict | None = None):
+def build_real_scene_renderer(job: dict | None = None, events: list[dict[str, Any]] | None = None):
     provider_order = _provider_order(job)
 
     def _render(scene, raw_path: str):
-        return asyncio.run(_render_scene_async(scene, raw_path, provider_order))
+        result = asyncio.run(_render_scene_async(scene, raw_path, provider_order))
+        if isinstance(events, list) and isinstance(result, dict):
+            events.append(
+                {
+                    "scene_id": _safe_int(getattr(scene, "scene_id", 0), 0),
+                    "provider": str(result.get("provider") or ""),
+                    "task_id": str(result.get("task_id") or "")[:180],
+                    "status": "downloaded" if result.get("ok") else str(result.get("status") or "failed"),
+                }
+            )
+        return result
 
     return _render
 
@@ -679,6 +760,8 @@ def _default_bgm_path(addon_plan: dict, workspace: str, duration_seconds: float)
 
 def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_audio_path: str | None = None) -> dict:
     addon = _addon_plan(job)
+    subtitle_requested = bool(addon.get("subtitle_enabled", True))
+    subtitle_enabled = bool(subtitle_requested and _has_user_facing_subtitle_text(job))
     return process_multiscene_video_pipeline(
         user_id=str(job.get("user_id") or ""),
         job_id=str(job.get("job_id") or job.get("id") or int(time.time())),
@@ -691,7 +774,7 @@ def _run_multiscene_render(job: dict, workspace: str, *, render_video_func, bgm_
         aspect_ratio=_aspect_ratio(job),
         enable_voice=False,
         bgm_audio_path=bgm_audio_path,
-        enable_subtitle=bool(addon.get("subtitle_enabled", True)),
+        enable_subtitle=subtitle_enabled,
         enable_logo=_logo_enabled(addon),
         logo_text=str(addon.get("logo_text") or ""),
         logo_position=str(addon.get("logo_position") or "bottom_right"),
@@ -708,20 +791,56 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     is_product_video = bool(str(job.get("source") or "") == "product_video" or job.get("product_video"))
     result: dict[str, Any] = {}
     provider_attempted = False
+    provider_events: list[dict[str, Any]] = []
+    provider_error = ""
+    fallback_used = False
+    fallback_reason = ""
+    provider_route_selected = bool(readiness.get("ok"))
     if readiness.get("ok") or not is_product_video:
         provider_attempted = True
-        result = _run_multiscene_render(job, workspace, render_video_func=build_real_scene_renderer(job), bgm_audio_path=bgm_audio_path)
+        result = _run_multiscene_render(job, workspace, render_video_func=build_real_scene_renderer(job, provider_events), bgm_audio_path=bgm_audio_path)
+        if not result.get("ok"):
+            provider_error = str(result.get("error") or REAL_VIDEO_RENDER_UNAVAILABLE)
+    elif is_product_video:
+        provider_error = str(readiness.get("reason") or REAL_VIDEO_RENDER_UNAVAILABLE)
     if is_product_video and (not result or not result.get("ok")) and _local_composer_enabled(job):
         local_workspace = os.path.join(workspace, "local_composer")
+        fallback_used = True
+        fallback_reason = provider_error or "provider_unavailable"
         result = _run_multiscene_render(job, local_workspace, render_video_func=build_local_scene_composer(job), bgm_audio_path=bgm_audio_path)
-        result["renderer"] = "local_scene_composer"
+        result["renderer"] = LOCAL_PLACEHOLDER_RENDERER
         result["provider_attempted"] = bool(provider_attempted)
+        result["provider_route_selected"] = bool(provider_route_selected)
+        result["fallback_used"] = True
+        result["fallback_reason"] = fallback_reason
+        result["visual_source"] = VISUAL_SOURCE_LOCAL_PLACEHOLDER
+        result["placeholder_detected"] = True
+        result["placeholder_visual"] = True
+        result["raw_prompt_burned_into_frame"] = _subtitle_raw_prompt_burn_detected(job, result)
+        result["visual_classification"] = PARTIAL_SIMPLE_VIDEO if result.get("ok") and not result["raw_prompt_burned_into_frame"] else FAILED_NO_REAL_VISUAL
+        result["final_classification"] = result["visual_classification"]
+        result["no_charge"] = True
     elif result:
-        result["renderer"] = "real_provider"
+        result["renderer"] = PROVIDER_SCENE_RENDERER
         result["provider_attempted"] = bool(provider_attempted)
+        result["provider_route_selected"] = bool(provider_route_selected)
+        result["fallback_used"] = False
+        result["fallback_reason"] = ""
+        result["provider_events"] = provider_events
+        result["provider_task_ids"] = [item.get("task_id") for item in provider_events if item.get("task_id")]
+        result["provider_status"] = "downloaded" if provider_events else ("attempted" if provider_attempted else "not_attempted")
+        result["provider_error"] = provider_error
+        result["visual_source"] = VISUAL_SOURCE_PROVIDER_MP4
+        result["placeholder_detected"] = False
+        result["placeholder_visual"] = False
+        result["raw_prompt_burned_into_frame"] = _subtitle_raw_prompt_burn_detected(job, result)
+        result["visual_classification"] = FINAL_AI_VIDEO if result.get("ok") and not result["raw_prompt_burned_into_frame"] else FAILED_NO_REAL_VISUAL
+        result["final_classification"] = result["visual_classification"]
     final_path = str(result.get("final_video_path") or "")
     if not result.get("ok") or not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
         raise RealVideoRenderError(str(result.get("error") or REAL_VIDEO_RENDER_UNAVAILABLE))
+    if is_product_video and result.get("visual_classification") == FAILED_NO_REAL_VISUAL:
+        raise RealVideoRenderError(FAILED_NO_REAL_VISUAL)
     result["provider_order"] = _provider_order(job)
     result["provider_readiness"] = {"ok": bool(readiness.get("ok")), "ready_provider_order": readiness.get("ready_provider_order") or []}
     result["original_user_prompt"] = original_prompt_from_job(job)
@@ -730,7 +849,12 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["voice_requested"] = bool(addon.get("voice_enabled"))
     result["music_requested"] = bool(addon.get("music_enabled"))
     result["subtitle_requested"] = bool(addon.get("subtitle_enabled"))
+    result["subtitle_user_facing_source"] = bool(_has_user_facing_subtitle_text(job))
     result["logo_requested"] = bool(addon.get("logo_enabled"))
     if bgm_audio_path:
         result["bgm_audio_path"] = bgm_audio_path
+    result["visual_classification"] = classify_visual_result(result)
+    result["final_classification"] = result["visual_classification"]
+    if result["visual_classification"] != FINAL_AI_VIDEO:
+        result["no_charge"] = True
     return result
