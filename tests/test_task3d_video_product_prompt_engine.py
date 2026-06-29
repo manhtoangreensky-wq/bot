@@ -168,13 +168,14 @@ def test_video_trend_intro_has_custom_topic_button():
 
 def test_video_idea_copy_plain_vietnamese():
     text = bot.task3d_product_intro_text("video_idea", "vi")
-    assert "Bạn nhập sản phẩm" in text
+    assert "nghĩ ý tưởng video" in text
     assert "topic|product" not in text
 
 
 def test_storyboard_copy_plain_vietnamese():
     text = bot.task3d_product_intro_text("storyboard_prompt", "vi")
-    assert "storyboard 6/9/12/16 cảnh" in text
+    assert "Tạo storyboard" in text
+    assert "prompt ảnh" in text
     assert "prompt_pack" not in text
 
 
@@ -382,15 +383,17 @@ def test_video_ai_real_intro_no_motion_button():
     markup = bot.task3d_product_intro_keyboard("video_ai_real", "vi")
     labels = _labels(markup)
     callbacks = _callbacks(markup)
-    for label in ("💡 Gợi ý ý tưởng", "✍️ Nhập prompt", "🔥 Trend hôm nay", "📷 Gửi ảnh tham khảo"):
+    for label in ("📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Trạng thái video"):
         assert label in labels
     assert "🎥 Gợi ý chuyển động" not in labels
-    assert "vproduct|ideas|video_ai_real" in callbacks
+    assert "vproduct|input_text|video_ai_real" in callbacks
+    assert "vproduct|input_media|video_ai_real" in callbacks
+    assert "vproduct|entry_media|video_ai_real" in callbacks
     assert "vproduct|motion_suggest|video_ai_real" not in callbacks
     assert "menu|main_video" in callbacks
     assert [[button.text for button in row] for row in markup.inline_keyboard] == [
-        ["💡 Gợi ý ý tưởng", "✍️ Nhập prompt"],
-        ["🔥 Trend hôm nay", "📷 Gửi ảnh tham khảo"],
+        ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI"],
+        ["🎞 Video mẫu → Video AI", "📊 Trạng thái video"],
         ["⬅️ Menu video", "🏠 Menu chính"],
     ]
 
@@ -492,20 +495,16 @@ def test_final_confirmation_keyboard_exact_two_column_export_options():
 def test_guided_idea_motion_and_scene_skip_are_free_prompt_steps():
     user_id = 993115
     query, session = _press_vproduct(user_id, "video_ai_real", "vproduct|ideas|video_ai_real")
-    assert session["current_step"] == "idea_suggestions"
-    assert "chưa xử lý video và chưa trừ Xu" in query.edits[-1][0]
+    assert session["current_step"] == "profile_select"
+    assert "Chọn loại video" in query.edits[-1][0]
 
-    query = _FakeQuery(user_id, "vproduct|idea_select|0")
-    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
-    session = bot.get_video_session(user_id)
-    assert session["current_step"] == "asset_intake"
-    assert session["draft"]["provider_called"] is not True
-    assert session["draft"].get("xu_charged", 0) == 0
-
-    query = _FakeQuery(user_id, "vproduct|asset_skip_confirm")
+    query = _FakeQuery(user_id, "vproduct|b14_profile|product_review")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
     assert session["current_step"] == "b14_creative_controls"
+    assert session["draft"]["provider_called"] is not True
+    assert session["draft"].get("xu_charged", 0) == 0
+
     query = _FakeQuery(user_id, "vproduct|b14_creative_done")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)

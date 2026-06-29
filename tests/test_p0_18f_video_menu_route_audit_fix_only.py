@@ -58,7 +58,7 @@ def _assert_route(user_id: int, callback: str, expected_text: str, expected_call
     assert expected_text in text
     for expected in expected_callbacks:
         assert expected in callbacks
-    assert "menu|main_video" in callbacks
+    assert "menu|main_video" in callbacks or "vproduct|back" in callbacks
     assert not any(item.startswith(("music_quick|", "sfx_quick|", "videodub|")) for item in callbacks)
     assert "menu|translate" not in callbacks
     assert "menu|main_music" not in callbacks
@@ -87,31 +87,26 @@ def test_video_menu_current_buttons_unchanged():
 def test_video_menu_each_button_routes_to_matching_flow():
     cases = [
         ("vproduct|open|video_trend", "Video theo trend", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review")),
-        ("vproduct|open|video_idea", "Ý tưởng video", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review")),
-        ("vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review")),
+        ("vproduct|open|video_idea", "Ý tưởng video", ("vproduct|ideas|video_idea", "vproduct|input_text|video_idea")),
+        ("vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|ideas|storyboard_prompt", "vproduct|input_text|storyboard_prompt")),
         ("vpromptlib|start", "Kho prompt video", ("vpromptlib|idea", "vpromptlib|image")),
-        ("vproduct|open|video_ai_real", "Video AI chân thật", ("promptvideo|start", "imagevideo|start", "videoref|start")),
+        ("vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|input_text|video_ai_real", "vproduct|input_media|video_ai_real", "vproduct|entry_media|video_ai_real")),
         ("vproduct|open|script_image_video", "Kịch bản", ("vproduct|ideas|script_image_video", "vproduct|input_text|script_image_video")),
-        ("vproduct|open|frame_video_local", "Ghép ảnh thành video", ("framevideo|start", "framevideo|ai_first")),
-        ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("selfscene|await_video",)),
-        ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|cinematic_trailer")),
+        ("vproduct|open|frame_video_local", "Ghép ảnh thành video", ("vproduct|legacy|frame_video_local", "vproduct|frame_recent|frame_video_local")),
+        ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent")),
+        ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|ideas|multi_scene_film", "vproduct|input_text|multi_scene_film")),
         ("vdownload|start", "Tải video từ link", ()),
         ("vproduct|open|video_local_edit", "Chỉnh sửa video local", ("videoedit|color", "videoedit|crop")),
     ]
     for index, (callback, expected_text, expected_callbacks) in enumerate(cases, start=1):
-        _assert_route(918600 + index, callback, expected_text, expected_callbacks, allow_profile=callback in {
-            "vproduct|open|video_trend",
-            "vproduct|open|video_idea",
-            "vproduct|open|storyboard_prompt",
-            "vproduct|open|multi_scene_film",
-        })
+        _assert_route(918600 + index, callback, expected_text, expected_callbacks, allow_profile=callback == "vproduct|open|video_trend")
 
 
 def test_video_menu_back_from_each_flow_returns_video_menu():
     callbacks = [callback for callback in _callbacks(bot.main_video_keyboard("vi")) if callback != "menu|main"]
     for index, callback in enumerate(callbacks, start=1):
         text, markup, _query = _press(918700 + index, callback)
-        assert "menu|main_video" in _callbacks(markup), text
+        assert "menu|main_video" in _callbacks(markup) or "vproduct|back" in _callbacks(markup), text
 
 
 def test_video_menu_no_cross_route_to_translation_voice_music():
@@ -138,8 +133,7 @@ def test_video_idea_route():
         918802,
         "vproduct|open|video_idea",
         "Ý tưởng video",
-        ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review"),
-        allow_profile=True,
+        ("vproduct|ideas|video_idea", "vproduct|input_text|video_idea"),
     )
 
 
@@ -148,8 +142,7 @@ def test_video_storyboard_prompt_route():
         918803,
         "vproduct|open|storyboard_prompt",
         "Storyboard + Prompt",
-        ("vproduct|b14_profile|storytelling",),
-        allow_profile=True,
+        ("vproduct|ideas|storyboard_prompt", "vproduct|input_text|storyboard_prompt"),
     )
 
 
@@ -158,7 +151,7 @@ def test_video_prompt_library_route():
 
 
 def test_realistic_ai_video_route():
-    _assert_route(918805, "vproduct|open|video_ai_real", "Video AI chân thật", ("promptvideo|start", "imagevideo|start", "videoref|start"))
+    _assert_route(918805, "vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|input_text|video_ai_real", "vproduct|input_media|video_ai_real", "vproduct|entry_media|video_ai_real"))
 
 
 def test_script_to_video_route():
@@ -166,14 +159,14 @@ def test_script_to_video_route():
 
 
 def test_image_to_video_route():
-    text, callbacks = _assert_route(918807, "vproduct|open|frame_video_local", "Ghép ảnh thành video", ("framevideo|start", "framevideo|ai_first"))
+    text, callbacks = _assert_route(918807, "vproduct|open|frame_video_local", "Ghép ảnh thành video", ("vproduct|legacy|frame_video_local", "vproduct|frame_recent|frame_video_local"))
     assert "Local Worker" not in text
     assert "FFmpeg" not in text
-    assert "framevideo|start" in callbacks
+    assert "vproduct|legacy|frame_video_local" in callbacks
 
 
 def test_self_shot_scene_change_route():
-    _assert_route(918808, "vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("selfscene|await_video",))
+    _assert_route(918808, "vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent"))
 
 
 def test_multiscene_video_route():
@@ -181,8 +174,7 @@ def test_multiscene_video_route():
         918809,
         "vproduct|open|multi_scene_film",
         "Phim AI nhiều cảnh",
-        ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|cinematic_trailer"),
-        allow_profile=True,
+        ("vproduct|ideas|multi_scene_film", "vproduct|input_text|multi_scene_film"),
     )
 
 
