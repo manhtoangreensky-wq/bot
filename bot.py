@@ -1703,6 +1703,7 @@ SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FAL
 SUBDUB_MIN_VIDEO_OUTPUT_BYTES = max(512, env_int("SUBDUB_MIN_VIDEO_OUTPUT_BYTES", 2048))
 SUBDUB_ADVANCED_STYLE_ENABLED = env_flag("SUBDUB_ADVANCED_STYLE_ENABLED", "false")
 SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING = env_flag("SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING", "true")
+SUBDUB_ALLOW_SILENT_VOICE_FALLBACK = env_flag("SUBDUB_ALLOW_SILENT_VOICE_FALLBACK", "false")
 PIPELINE_TEMP_ROOT = _env("PIPELINE_TEMP_ROOT", os.path.join(tempfile.gettempdir(), "toan_aas_pipeline"))
 PIPELINE_JOB_LOCK_TTL_SECONDS = max(60, env_int("PIPELINE_JOB_LOCK_TTL_SECONDS", 30 * 60))
 DUB_AUDIO_NORMALIZE_ENABLED = env_flag("DUB_AUDIO_NORMALIZE_ENABLED", "true")
@@ -53223,7 +53224,7 @@ def start_public_video_auto_poll(context, job_id: int, chat_id, user_id, task_id
     return enabled
 
 def public_video_submitted_keyboard(task_id: str, lang: str, result: dict, public_user: bool = True) -> InlineKeyboardMarkup:
-    return shopaikey_video_job_check_keyboard(task_id, lang, public_user=public_user)
+    return shopaikey_video_job_check_keyboard(task_id, lang, public_user=public_user, use_public_status_callback=False)
 
 def provider_matrix_lines() -> list[str]:
     registry = provider_registry()
@@ -77876,8 +77877,16 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• TTS route called: <code>{yes_no(job.get('tts_route_called'))}</code>",
         f"• selected voice id: <code>{esc(job.get('selected_tts_voice_id'))}</code>",
         f"• selected voice label: <code>{esc(job.get('selected_voice_label'))}</code>",
+        f"• selected voice gender: <code>{esc(job.get('selected_voice_gender'))}</code>",
+        f"• selected voice raw id: <code>{esc(job.get('selected_voice_id'))}</code>",
+        f"• provider voice id: <code>{esc(job.get('provider_voice_id'))}</code>",
+        f"• tts payload voice id: <code>{esc(job.get('tts_payload_voice_id'))}</code>",
+        f"• fallback used: <code>{yes_no(job.get('fallback_used'))}</code>",
+        f"• fallback reason: <code>{esc(job.get('fallback_reason'))}</code>",
         f"• dubbed audio path: <code>{esc(job.get('dubbed_audio_path'))}</code>",
         f"• dubbed audio exists: <code>{yes_no(job.get('dubbed_audio_exists'))}</code>",
+        f"• generated audio path: <code>{esc(job.get('generated_audio_path'))}</code>",
+        f"• generated audio duration: <code>{esc(job.get('generated_audio_duration'))}</code>",
         f"• mux/render route called: <code>{yes_no(job.get('mux_render_called'))}</code>",
         f"• final MP4 path: <code>{esc(job.get('final_mp4_path'))}</code>",
         f"• final MP4 exists: <code>{yes_no(job.get('final_mp4_exists'))}</code>",
@@ -77892,8 +77901,13 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• fallback render pass: <code>{yes_no(job.get('fallback_render_pass'))}</code>",
         f"• render detail: <code>{esc(job.get('render_detail'))}</code>",
         f"• original audio mode: <code>{esc(job.get('original_audio_mode'))}</code>",
+        f"• direct dub core used: <code>{yes_no(job.get('direct_dub_core_used'))}</code>",
+        f"• output audio source: <code>{esc(job.get('output_audio_source'))}</code>",
         f"• delivery method: <code>{esc(job.get('delivery_method'))}</code>",
         f"• terminal state: <code>{esc(job.get('terminal_state'))}</code>",
+        f"• terminal history: <code>{esc(json.dumps(job.get('terminal_state_history') or [], ensure_ascii=False)[:240])}</code>",
+        f"• public messages sent: <code>{int(job.get('public_messages_sent') or 0)}</code>",
+        f"• delivery attempts: <code>{int(job.get('delivery_attempts') or 0)}</code>",
         f"• output validation: <code>{esc(json.dumps(job.get('output_validation') or {}, ensure_ascii=False)[:240])}</code>",
         f"• route ASR: <code>{esc(route.get('asr'))}</code>",
         f"• route translation: <code>{esc(route.get('translation'))}</code>",
@@ -77987,6 +78001,36 @@ async def cmd_subdub_delivery_debug(update: Update, context: ContextTypes.DEFAUL
 
 async def cmd_subdub_voice_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
+
+async def cmd_subdub_terminal_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_subtitle_dub_debug(update, context)
+
+async def cmd_video_status_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    job = {}
+    if arg:
+        job = shopaikey_job_by_task_id(arg) or (shopaikey_job_by_id(_safe_int(arg, 0)) if _safe_int(arg, 0) else {})
+    if not job:
+        return await update.message.reply_text("Chưa tìm thấy video job. Dùng /video_status_debug <job_id hoặc task_id>.")
+    def esc(value):
+        return html.escape(str(value if value not in (None, "") else "-"))
+    text = "\n".join([
+        "🎬 <b>VIDEO STATUS DEBUG</b>",
+        "",
+        f"• job id: <code>{esc(job.get('id'))}</code>",
+        f"• task id: <code>{esc(job.get('task_id'))}</code>",
+        f"• user id: <code>{esc(job.get('user_id'))}</code>",
+        f"• status: <code>{esc(job.get('status'))}</code>",
+        f"• output sent: <code>{'yes' if int(job.get('result_sent') or 0) else 'no'}</code>",
+        f"• sent at: <code>{esc(job.get('output_sent_at'))}</code>",
+        f"• delivery source: <code>{esc(job.get('output_sent_source'))}</code>",
+        f"• duplicate prevented: <code>{int(job.get('duplicate_prevented_count') or 0)}</code>",
+        f"• output size: <code>{int(job.get('output_bytes') or 0)}</code>",
+        f"• no extra charge on status check: <code>yes</code>",
+    ])
+    return await update.message.reply_text(text, parse_mode="HTML")
 
 async def cmd_subdub_style_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -83691,17 +83735,103 @@ async def cmd_shopaikey_video_job(update: Update, context: ContextTypes.DEFAULT_
     finish_generation_pending_job(uid, tool_type, normalized_prompt, status)
     return
 
-def shopaikey_video_job_check_keyboard(task_id: str, lang: str = "vi", resend: bool = False, public_user: bool = False) -> InlineKeyboardMarkup | None:
+def shopaikey_video_job_check_keyboard(
+    task_id: str,
+    lang: str = "vi",
+    resend: bool = False,
+    public_user: bool = False,
+    use_public_status_callback: bool = True,
+) -> InlineKeyboardMarkup | None:
     safe_task_id = str(task_id or "").strip()
     callback_data = f"shopai_video_job|{safe_task_id}"
     if not safe_task_id or len(callback_data.encode("utf-8")) > 64:
         return None
     status_callback = f"shopai_video_job|status|{safe_task_id}"
-    rows = [[InlineKeyboardButton(ui_text(lang, "video.resend") if resend else ui_text(lang, "video.check_job"), callback_data=callback_data)]]
+    public_status_callback = f"video|status|{safe_task_id}"
+    primary_callback = (
+        callback_data
+        if resend or not use_public_status_callback or len(public_status_callback.encode("utf-8")) > 64
+        else public_status_callback
+    )
+    primary_label = ui_text(lang, "video.resend") if resend else ui_text(lang, "video.check_job")
+    rows = [[InlineKeyboardButton(primary_label, callback_data=primary_callback)]]
     if not public_user and len(status_callback.encode("utf-8")) <= 64:
         rows.append([InlineKeyboardButton("🧾 Xem trạng thái ShopAIKey" if normalize_user_language(lang) == "vi" else "🧾 ShopAIKey status", callback_data=status_callback)])
     rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")])
     return InlineKeyboardMarkup(rows)
+
+async def handle_public_video_status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    uid = query.from_user.id if query.from_user else 0
+    lang = user_ui_lang(uid)
+    parts = str(query.data or "").split("|")
+    task_id = str(parts[2] if len(parts) >= 3 else "").strip()
+    if not task_id:
+        return await query.answer("Không tìm thấy trạng thái xử lý.", show_alert=True)
+    db_job = shopaikey_job_by_task_id(task_id)
+    if not is_admin_user(uid) and (
+        not db_job
+        or str((db_job or {}).get("user_id") or "") != str(uid)
+        or bool(int((db_job or {}).get("admin_only") or 0))
+    ):
+        return await safe_edit_or_send(
+            query,
+            "⚠️ Không tìm thấy yêu cầu video của bạn hoặc yêu cầu đã hết hạn. TOAN AAS chưa tạo yêu cầu mới và chưa trừ thêm Xu.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="shopai_video_job|main")]]),
+        )
+    result = await shopaikey_video_job_status(task_id)
+    status = str(result.get("status") or "FAIL")
+    db_status = shopaikey_db_video_status(status)
+    result_url = str(result.get("result_url") or "")
+    job_id = int((db_job or {}).get("id") or 0)
+    already_sent = bool(int((db_job or {}).get("result_sent") or 0))
+    output_sent = False
+    if result_url and query.message and (not is_admin_user(uid) or bool(int((db_job or {}).get("admin_only") or 0))):
+        send_result = await send_shopaikey_video_result_once(
+            context.bot,
+            query.message.chat_id,
+            task_id,
+            result_url,
+            job_id=job_id,
+            source="public_video_status_panel",
+        )
+        output_sent = bool(send_result.get("sent"))
+        already_sent = bool(already_sent or send_result.get("already_sent") or send_result.get("duplicate_prevented"))
+    if job_id:
+        update_shopaikey_job(
+            job_id=job_id,
+            task_id=task_id,
+            status=db_status,
+            result_url=result_url,
+            result_sent=1 if (output_sent or already_sent) else 0,
+            error_class=result.get("error_class") or "",
+            provider_error_code=result.get("provider_error_code") or "",
+            provider_message=result.get("detail") or "",
+            fail_reason=result.get("fail_reason") or "",
+            poll_count=int((db_job or {}).get("poll_count") or 0) + 1,
+            finished_at=now_text() if db_status in {"SUCCESS", "FAILED", "TIMEOUT"} else "",
+        )
+    latest_job = shopaikey_job_by_id(job_id) if job_id else db_job
+    fail_summary = {}
+    if db_status in {"FAILED", "TIMEOUT"}:
+        fail_summary = finalize_public_video_terminal_failure(latest_job or db_job or {}, result, db_status)
+        latest_job = shopaikey_job_by_id(job_id) if job_id else latest_job
+    return await safe_edit_or_send(
+        query,
+        public_video_status_message(
+            status,
+            progress=str(result.get("progress") or "-"),
+            output_sent=bool(already_sent or output_sent),
+            job=latest_job or db_job or {"task_id": task_id},
+            fail_summary=fail_summary,
+            lang=lang,
+        ),
+        parse_mode="HTML",
+        reply_markup=public_video_status_keyboard(task_id, latest_job or db_job or {}, db_status, lang, output_sent=bool(already_sent or output_sent)),
+    )
 
 async def handle_shopaikey_video_job_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -93965,27 +94095,194 @@ def get_tts_voice_id(kind: str, profile: dict | None = None) -> str:
         return str((profile or {}).get("provider_voice_id") or "").strip()
     return str((profile or {}).get("provider_voice_id") or kind or "").strip()
 
-def resolve_video_dub_tts_voice_id(user_id, state: dict | None = None) -> str:
-    state = dict(state or {})
-    requested = str(state.get("voice_id") or "").strip()
-    kind = str(state.get("voice_kind") or state.get("voice_style") or "").strip().lower()
-    if requested and requested.lower() not in {"saved_voice", "saved", "voice_profile", "cloned_voice", "clone"}:
-        resolved = get_tts_voice_id(requested)
-        if resolved:
-            return resolved
-    if "female" in kind or "nữ" in kind or "nu" in kind:
-        return default_tts_voice_id("female")
-    if "male" in kind or "nam" in kind:
-        return default_tts_voice_id("male")
-    fallback = default_tts_voice_id("female")
-    try:
-        from services.dubbing_pipeline import get_user_voice_id as blackbox_get_user_voice_id
+def subdub_voice_not_ready_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "TOAN AAS could not create the selected dubbing voice. No Xu was charged. Please choose another voice or try again."
+    return "TOAN AAS chưa tạo được giọng lồng tiếng đã chọn. Hệ thống chưa trừ Xu. Anh/chị vui lòng chọn giọng khác hoặc thử lại."
 
-        with db_connect() as conn:
-            return blackbox_get_user_voice_id(str(user_id), conn, requested_voice_id=requested, default_voice_id=fallback)
-    except Exception as exc:
-        logger.warning("resolve_video_dub_tts_voice_id fallback | %s", sanitize_log_text(str(exc))[:160])
-        return fallback
+def subdub_voice_text_normalized(value: str = "") -> str:
+    text = str(value or "").strip().lower()
+    return "".join(
+        char for char in unicodedata.normalize("NFD", text)
+        if unicodedata.category(char) != "Mn"
+    )
+
+def subdub_voice_gender_from_state(state: dict | None = None) -> str:
+    state = dict(state or {})
+    values = [
+        state.get("selected_voice_gender"),
+        state.get("voice_gender"),
+        state.get("gender"),
+        state.get("selected_voice_kind"),
+        state.get("voice_kind"),
+        state.get("voice_style"),
+        state.get("selected_voice_label"),
+        state.get("voice_label"),
+    ]
+    text = subdub_voice_text_normalized(" ".join(str(item or "") for item in values))
+    if "default_female" in text or "female" in text or "giong nu" in text or re.search(r"\bnu\b", text):
+        return "female"
+    if "default_male" in text or re.search(r"\bmale\b", text) or "giong nam" in text or re.search(r"\bnam\b", text):
+        return "male"
+    return ""
+
+def subdub_voice_id_gender_hint(voice_id: str = "") -> str:
+    text = subdub_voice_text_normalized(voice_id)
+    if "female" in text or "shaonv" in text or "woman" in text or "girl" in text or re.search(r"\bnu\b", text):
+        return "female"
+    if "male" in text and "female" not in text:
+        return "male"
+    if "qingse" in text or re.search(r"\bnam\b", text):
+        return "male"
+    return ""
+
+def subdub_voice_gender_conflict(voice_id: str = "", gender: str = "") -> bool:
+    gender = str(gender or "").strip().lower()
+    if gender not in {"female", "male"}:
+        return False
+    selected = str(voice_id or "").strip().lower()
+    if not selected:
+        return True
+    opposite_default = default_tts_voice_id("male" if gender == "female" else "female").strip().lower()
+    if opposite_default and selected == opposite_default:
+        return True
+    hint = subdub_voice_id_gender_hint(selected)
+    return bool(hint and hint != gender)
+
+def subdub_voice_resolution_payload(
+    *,
+    ok: bool,
+    selected_voice_label: str = "",
+    selected_voice_gender: str = "",
+    selected_voice_id: str = "",
+    provider_voice_id: str = "",
+    tts_payload_voice_id: str = "",
+    fallback_used: bool = False,
+    fallback_reason: str = "",
+    reason: str = "",
+) -> dict:
+    return {
+        "ok": bool(ok),
+        "selected_voice_label": str(selected_voice_label or "")[:160],
+        "selected_voice_gender": str(selected_voice_gender or "")[:40],
+        "selected_voice_id": str(selected_voice_id or "")[:180],
+        "provider_voice_id": str(provider_voice_id or "")[:180],
+        "tts_payload_voice_id": str(tts_payload_voice_id or "")[:180],
+        "fallback_used": bool(fallback_used),
+        "fallback_reason": str(fallback_reason or "")[:180],
+        "reason": str(reason or "")[:180],
+    }
+
+def subdub_apply_voice_resolution_to_state(state: dict | None, resolution: dict) -> None:
+    if not isinstance(state, dict):
+        return
+    state["_subdub_voice_resolution"] = dict(resolution or {})
+    state["selected_voice_label"] = str(resolution.get("selected_voice_label") or state.get("voice_style") or "")[:160]
+    state["selected_voice_gender"] = str(resolution.get("selected_voice_gender") or "")[:40]
+    state["selected_voice_id"] = str(resolution.get("selected_voice_id") or state.get("voice_id") or "")[:180]
+    state["provider_voice_id"] = str(resolution.get("provider_voice_id") or "")[:180]
+    state["tts_payload_voice_id"] = str(resolution.get("tts_payload_voice_id") or "")[:180]
+    state["voice_fallback_used"] = bool(resolution.get("fallback_used"))
+    state["voice_fallback_reason"] = str(resolution.get("fallback_reason") or resolution.get("reason") or "")[:180]
+    if resolution.get("ok"):
+        state["selected_tts_voice_id"] = str(resolution.get("provider_voice_id") or "")[:180]
+
+def resolve_video_dub_tts_voice(state_user_id, state: dict | None = None) -> dict:
+    state = state if isinstance(state, dict) else dict(state or {})
+    requested = str(
+        state.get("voice_id")
+        or state.get("selected_voice_id")
+        or state.get("provider_voice_id")
+        or state.get("tts_voice_id")
+        or state.get("selected_tts_voice_id")
+        or ""
+    ).strip()
+    kind = subdub_voice_text_normalized(str(state.get("voice_kind") or state.get("selected_voice_kind") or ""))
+    label = str(state.get("voice_style") or state.get("selected_voice_label") or state.get("voice_label") or "").strip()
+    gender = subdub_voice_gender_from_state(state)
+    profile_id = _safe_int(state.get("voice_profile_id") or state.get("selected_voice_profile_id"), 0)
+    provider_voice_id = ""
+    reason = ""
+    fallback_used = False
+    fallback_reason = ""
+    custom_kind = kind in {"saved_voice", "saved", "voice_profile", "cloned_voice", "clone", "custom_clone", "custom_prompt", "custom"}
+
+    if profile_id and not requested:
+        profile = get_user_voice_profile(state_user_id, profile_id)
+        requested = str((profile or {}).get("provider_voice_id") or "").strip()
+        label = label or str((profile or {}).get("display_name") or "")
+        custom_kind = True
+    if custom_kind:
+        if minimax_voice_adapter.validate_provider_voice_id(requested):
+            provider_voice_id = requested
+        else:
+            reason = "missing_provider_voice_id"
+    elif gender == "female" or kind in {"default_female", "female", "nu", "nu tu nhien"}:
+        provider_voice_id = get_tts_voice_id("default_female")
+        kind = "default_female"
+        gender = "female"
+    elif gender == "male" or kind in {"default_male", "male", "nam", "nam tu nhien"}:
+        provider_voice_id = get_tts_voice_id("default_male")
+        kind = "default_male"
+        gender = "male"
+    elif requested and requested.lower() not in {"saved_voice", "saved", "voice_profile", "cloned_voice", "clone"}:
+        provider_voice_id = get_tts_voice_id(requested)
+    else:
+        provider_voice_id = get_tts_voice_id("default_female")
+        kind = "default_female"
+        gender = "female"
+
+    if not provider_voice_id or not minimax_voice_adapter.validate_provider_voice_id(provider_voice_id):
+        reason = reason or "missing_provider_voice_id"
+        resolution = subdub_voice_resolution_payload(
+            ok=False,
+            selected_voice_label=label,
+            selected_voice_gender=gender,
+            selected_voice_id=requested,
+            reason=reason,
+        )
+        subdub_apply_voice_resolution_to_state(state, resolution)
+        return resolution
+
+    if subdub_voice_gender_conflict(provider_voice_id, gender):
+        reason = "selected_voice_gender_unavailable"
+        if SUBDUB_ALLOW_SILENT_VOICE_FALLBACK:
+            candidate = get_tts_voice_id(gender)
+            if candidate and minimax_voice_adapter.validate_provider_voice_id(candidate) and not subdub_voice_gender_conflict(candidate, gender):
+                fallback_used = True
+                fallback_reason = reason
+                provider_voice_id = candidate
+                reason = ""
+        if reason:
+            resolution = subdub_voice_resolution_payload(
+                ok=False,
+                selected_voice_label=label,
+                selected_voice_gender=gender,
+                selected_voice_id=requested,
+                provider_voice_id=provider_voice_id,
+                fallback_used=False,
+                fallback_reason=reason,
+                reason=reason,
+            )
+            subdub_apply_voice_resolution_to_state(state, resolution)
+            return resolution
+
+    resolution = subdub_voice_resolution_payload(
+        ok=True,
+        selected_voice_label=label,
+        selected_voice_gender=gender,
+        selected_voice_id=requested or kind,
+        provider_voice_id=provider_voice_id,
+        tts_payload_voice_id=provider_voice_id,
+        fallback_used=fallback_used,
+        fallback_reason=fallback_reason,
+    )
+    subdub_apply_voice_resolution_to_state(state, resolution)
+    return resolution
+
+def resolve_video_dub_tts_voice_id(user_id, state: dict | None = None) -> str:
+    resolution = resolve_video_dub_tts_voice(user_id, state)
+    return str(resolution.get("provider_voice_id") or "") if resolution.get("ok") else ""
 
 def default_edge_tts_voice_id(kind: str) -> str:
     normalized = str(kind or "").strip().lower()
@@ -120450,6 +120747,22 @@ def public_video_status_message(status: str, progress: str = "-", output_sent: b
             f"• Trạng thái: <code>{html.escape(safe_status)}</code>\n"
             f"• Video đã gửi: <code>{html.escape(sent_note)}</code>\n\n"
             "Nếu bạn chưa thấy video, hãy bấm kiểm tra trạng thái hoặc liên hệ admin."
+        )
+    progress_value = public_video_safe_progress_label(progress, lang)
+    progress_percent = 65
+    stage = "generating_video"
+    if re.fullmatch(r"\d{1,3}%?", str(progress_value or "")):
+        progress_percent = _safe_int(str(progress_value).rstrip("%"), 65)
+        stage = "validating_video" if progress_percent >= 85 else ("generating_video" if progress_percent >= 60 else "preparing_scene")
+    job_code = str((job or {}).get("task_id") or (job or {}).get("id") or "")
+    if lang_norm == "vi":
+        return product_progress_status_text(
+            "video_ai_real",
+            job_code,
+            stage,
+            progress_percent,
+            public_note="Video sẽ được gửi tự động trong vài phút khi hoàn tất.",
+            lang=lang,
         )
     if lang_norm == "zh":
         sent_note = "已发送" if output_sent else "尚未"
@@ -150341,10 +150654,15 @@ def subtitle_plus_dub_preview_ready_keyboard(lang: str = "vi") -> InlineKeyboard
 
 def subtitle_plus_dub_completed_text(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     result = dict(result or {})
+    sent_count = sum(int(result.get(key) or 0) for key in ("sent_documents", "sent_audio", "sent_video", "sent_video_document"))
     if normalize_user_language(lang) != "vi":
+        if sent_count > 0:
+            return "The result was sent above. You can use the buttons below to download again or create another version."
         if result.get("has_video"):
             return "✅ <b>Dubbing video completed.</b>\n\nTOAN AAS sent the final video. Optional audio/subtitle downloads are available below."
         return "TOAN AAS created the dubbed audio. Video mux did not finish, so the system sent audio first. You can retry mux or download subtitles if needed."
+    if sent_count > 0:
+        return "<b>Kết quả đã gửi phía trên.</b>\n\nAnh/chị có thể dùng các nút bên dưới để tải lại hoặc tạo phiên bản khác."
     if result.get("has_video"):
         return "✅ <b>Đã tạo video phụ đề + lồng tiếng.</b>\n\nTOAN AAS đã gửi video hoàn chỉnh. Audio/phụ đề có thể tải thêm bằng nút bên dưới."
     return (
@@ -151889,13 +152207,18 @@ def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = 
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode") or result.get("mode"))
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return subtitle_plus_dub_completed_text(state, result, lang)
+    sent_count = sum(int(result.get(key) or 0) for key in ("sent_documents", "sent_audio", "sent_video", "sent_video_document"))
     if normalize_user_language(lang) != "vi":
+        if sent_count > 0:
+            return f"The result was sent above.\n\nCost: <b>{int(result.get('charged') or 0)} Xu</b>"
         _filename, caption, _button = video_dubbing_final_video_label(mode, lang)
         if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} and not result.get("has_video") and result.get("has_subtitle"):
             caption = "TOAN AAS created the subtitle file. The final subtitled video is not ready yet."
         if mode == VIDEO_SUBTITLE_MODE_DUB and not result.get("has_video") and result.get("has_audio"):
             caption = "TOAN AAS created the dubbed audio, but the final video was not completed yet."
         return f"{caption}\n\nCost: <b>{int(result.get('charged') or 0)} Xu</b>"
+    if sent_count > 0:
+        return f"Kết quả đã gửi phía trên.\n\nChi phí: <b>{int(result.get('charged') or 0)} Xu</b>"
     _filename, caption, _button = video_dubbing_final_video_label(mode, lang)
     if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE} and not result.get("has_video") and result.get("has_subtitle"):
         caption = "TOAN AAS đã tạo file phụ đề. Video có phụ đề chưa hoàn tất nên hệ thống gửi file trước."
@@ -152490,8 +152813,7 @@ SUBDUB_PROGRESS_STAGES = {
 }
 
 def subdub_public_job_code(job_id: str = "") -> str:
-    raw = re.sub(r"[^A-Za-z0-9]+", "", str(job_id or ""))[:8].upper()
-    return f"#{raw or 'TOANAAS'}"
+    return product_progress_status.product_progress_public_job_code(job_id)
 
 def subdub_progress_stage_payload(stage: str = "") -> dict:
     token = str(stage or "saved_input").strip().lower()
@@ -152645,11 +152967,21 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
 
 def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
+    if "terminal_state_history" in fields and not fields.get("terminal_state_history") and job.get("terminal_state_history"):
+        fields.pop("terminal_state_history", None)
     current_terminal = str(job.get("terminal_state") or "")
     desired_terminal = str(fields.get("terminal_state") or "")
     if current_terminal and desired_terminal and current_terminal != desired_terminal:
         if not subdub_terminal_state_allows_transition(current_terminal, desired_terminal):
             fields = {key: value for key, value in fields.items() if key not in {"terminal_state", "status"}}
+        else:
+            history = list(job.get("terminal_state_history") or [])
+            history.append({"from": current_terminal, "to": desired_terminal, "at": time.time()})
+            fields["terminal_state_history"] = history[-12:]
+    elif desired_terminal and not current_terminal:
+        history = list(job.get("terminal_state_history") or [])
+        history.append({"from": "", "to": desired_terminal, "at": time.time()})
+        fields["terminal_state_history"] = history[-12:]
     job.update(fields)
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
@@ -152658,8 +152990,22 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
 def mark_subtitle_dub_pipeline_output_sent(job_key: str) -> bool:
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
     if not job or job.get("output_sent"):
+        if job:
+            job["duplicate_success_prevented_count"] = int(job.get("duplicate_success_prevented_count") or 0) + 1
+            job["updated_at"] = time.time()
+            SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
+        return False
+    current_terminal = str(job.get("terminal_state") or "")
+    if current_terminal and not subdub_terminal_state_allows_transition(current_terminal, "delivered"):
+        job["duplicate_success_prevented_count"] = int(job.get("duplicate_success_prevented_count") or 0) + 1
+        job["updated_at"] = time.time()
+        SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
         return False
     job["output_sent"] = True
+    history = list(job.get("terminal_state_history") or [])
+    if current_terminal != "delivered":
+        history.append({"from": current_terminal, "to": "delivered", "at": time.time()})
+    job["terminal_state_history"] = history[-12:]
     job["terminal_state"] = "delivered"
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
@@ -152988,6 +153334,7 @@ def subtitle_dub_debug_job_payload(
     attempts = dict(route_attempts or {})
     style = subdub_normalize_style(state)
     render_debug = dict(state.get("_subdub_render_debug") or {})
+    voice_resolution = dict(state.get("_subdub_voice_resolution") or {})
     blocker = video_dubbing_pipeline_blocker(
         input_save=input_save,
         gate_matrix=gate_matrix,
@@ -153017,8 +153364,16 @@ def subtitle_dub_debug_job_payload(
         "tts_route_called": bool(attempts.get("tts") or route.get("tts")),
         "selected_tts_voice_id": str(state.get("selected_tts_voice_id") or state.get("tts_voice_id") or state.get("voice_id") or state.get("selected_voice_id") or ""),
         "selected_voice_label": str(state.get("voice_style") or state.get("voice_label") or state.get("selected_voice_label") or ""),
+        "selected_voice_gender": str(voice_resolution.get("selected_voice_gender") or state.get("selected_voice_gender") or ""),
+        "selected_voice_id": str(voice_resolution.get("selected_voice_id") or state.get("selected_voice_id") or state.get("voice_id") or ""),
+        "provider_voice_id": str(voice_resolution.get("provider_voice_id") or state.get("provider_voice_id") or state.get("selected_tts_voice_id") or ""),
+        "tts_payload_voice_id": str(voice_resolution.get("tts_payload_voice_id") or state.get("tts_payload_voice_id") or state.get("selected_tts_voice_id") or ""),
+        "fallback_used": bool(voice_resolution.get("fallback_used") or state.get("voice_fallback_used")),
+        "fallback_reason": str(voice_resolution.get("fallback_reason") or voice_resolution.get("reason") or state.get("voice_fallback_reason") or ""),
         "dubbed_audio_path": audio_path,
         "dubbed_audio_exists": bool(audio_path and os.path.exists(audio_path)),
+        "generated_audio_path": audio_path,
+        "generated_audio_duration": float(state.get("_subdub_generated_audio_duration") or 0.0),
         "mux_render_called": bool(attempts.get("mux") or final_path),
         "final_mp4_path": final_path,
         "final_mp4_exists": bool(final_path and os.path.exists(final_path)),
@@ -153033,9 +153388,14 @@ def subtitle_dub_debug_job_payload(
         "fallback_render_pass": bool(render_debug.get("fallback_render_pass")),
         "render_detail": sanitize_log_text(str(render_debug.get("render_detail") or ""))[:220],
         "original_audio_mode": str(state.get("original_audio_mode") or state.get("source_audio_mode") or state.get("audio_mix_mode") or ""),
+        "direct_dub_core_used": bool(state.get("_subdub_direct_dub_core_used")),
+        "output_audio_source": str(state.get("_subdub_output_audio_source") or ""),
         "delivery_method": str(state.get("_subdub_delivery_method") or ""),
         "output_validation": dict(state.get("_subdub_output_validation") or {}),
         "terminal_state": str(state.get("_subdub_terminal_state") or ""),
+        "terminal_state_history": list(state.get("terminal_state_history") or []),
+        "public_messages_sent": int(state.get("public_messages_sent") or 0),
+        "delivery_attempts": int(state.get("delivery_attempts") or 0),
         "charged_xu": int(charged or 0),
         "last_technical_error": sanitize_log_text(str(detail or ""))[:220],
         "public_safe_error": public_safe_error,
@@ -155053,22 +155413,6 @@ async def _execute_video_dubbing_pipeline_core(
             "gate_matrix": gate_matrix,
             "debug_job": debug_job,
         }
-    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and video_dubbing_uses_custom_voice(state):
-        debug_job = subtitle_dub_debug_job_payload(
-            user_id=uid,
-            chat_id=chat_id,
-            mode=mode,
-            state=state,
-            status="CUSTOM_VOICE_LOCKED",
-            stage="voice",
-            input_save=input_save,
-            gate_matrix=gate_matrix,
-            workspace_artifacts=workspace_artifacts,
-            detail="custom_voice_locked",
-            pipeline_attempted=False,
-            public_safe_error=video_dubbing_custom_voice_guard_text(lang),
-        )
-        return {"ok": False, "guard": True, "status": "CUSTOM_VOICE_LOCKED", "text": video_dubbing_custom_voice_guard_text(lang), "debug_job": debug_job, "workspace_artifacts": workspace_artifacts, "input_save": input_save, "gate_matrix": gate_matrix}
     pricing = calculate_video_translate_price(
         mode,
         state.get("video_duration") or state.get("source_duration"),
@@ -155125,6 +155469,8 @@ async def _execute_video_dubbing_pipeline_core(
     async def _synthesize_dub_segments_for_blackbox(*args, **kwargs):
         route_attempts["tts"] = True
         await _progress("generating_voice")
+        if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not str(kwargs.get("voice_id") or "").strip():
+            return {"provider": "", "chunks": []}
         return await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
 
     render_supports_validation = True
@@ -155162,6 +155508,27 @@ async def _execute_video_dubbing_pipeline_core(
         await _progress("validating_output")
         return result
 
+    voice_resolution_for_debug: dict = {}
+
+    def _resolve_voice_id_for_blackbox(user_id_arg, service_state: dict) -> str:
+        nonlocal voice_resolution_for_debug
+        resolution = resolve_video_dub_tts_voice(user_id_arg, service_state)
+        legacy_voice_id = str(resolve_video_dub_tts_voice_id(user_id_arg, service_state) or "").strip()
+        if legacy_voice_id and legacy_voice_id != str((resolution or {}).get("provider_voice_id") or ""):
+            resolution = subdub_voice_resolution_payload(
+                ok=True,
+                selected_voice_label=str((service_state or {}).get("voice_style") or (service_state or {}).get("voice_label") or ""),
+                selected_voice_gender=subdub_voice_gender_from_state(service_state),
+                selected_voice_id=str((service_state or {}).get("voice_id") or (service_state or {}).get("selected_voice_id") or ""),
+                provider_voice_id=legacy_voice_id,
+                tts_payload_voice_id=legacy_voice_id,
+                fallback_used=False,
+                fallback_reason="",
+            )
+        voice_resolution_for_debug = dict(resolution or {})
+        subdub_apply_voice_resolution_to_state(state, voice_resolution_for_debug)
+        return str(voice_resolution_for_debug.get("provider_voice_id") or "") if voice_resolution_for_debug.get("ok") else ""
+
     product_result = await subtitle_dub_product_pipeline.process_subtitle_dub_job(
         mode=mode,
         state=state,
@@ -155171,7 +155538,7 @@ async def _execute_video_dubbing_pipeline_core(
         segments_from_text=video_dubbing_segments_from_text,
         segments_from_subtitle=video_dubbing_segments_from_subtitle,
         subtitle_output_items=video_dubbing_subtitle_output_items,
-        resolve_voice_id=resolve_video_dub_tts_voice_id,
+        resolve_voice_id=_resolve_voice_id_for_blackbox,
         parse_voice_speed=parse_video_dubbing_voice_speed,
         synthesize_segments=_synthesize_dub_segments_for_blackbox,
         build_timeline_audio=build_dub_timeline_audio,
@@ -155228,10 +155595,35 @@ async def _execute_video_dubbing_pipeline_core(
     if not product_result.get("ok"):
         detail = sanitize_log_text(str(product_result.get("admin_debug_summary") or product_result.get("error_code") or ""))[:160]
         status = str(product_result.get("status") or "NO_OUTPUT_BYTES")
+        current_voice_resolution = dict(voice_resolution_for_debug or state.get("_subdub_voice_resolution") or {})
+        if (
+            mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+            and current_voice_resolution
+            and not current_voice_resolution.get("ok")
+        ):
+            state["_subdub_voice_resolution"] = current_voice_resolution
+            state["_subdub_terminal_state"] = "failed_no_charge"
+            return _failed_product_result(
+                "VOICE_NOT_READY",
+                subdub_voice_not_ready_text(lang),
+                detail or str(current_voice_resolution.get("reason") or "voice_not_ready"),
+                stage="voice",
+            )
         if status == "DIALOGUE_UNAVAILABLE":
             return _failed_product_result("DIALOGUE_UNAVAILABLE", video_dubbing_dialogue_unavailable_text(lang), detail, stage="dialogue")
         if status == "SUBTITLE_PREPARE_FAILED":
             return _failed_product_result("SUBTITLE_PREPARE_FAILED", video_dubbing_flow_failure_text(mode, lang), detail, stage="subtitle")
+        if status == "VOICE_NOT_READY":
+            voice_state = {
+                **state,
+                **dict(product_result.get("state") or {}),
+                "_subdub_terminal_state": "failed_no_charge",
+            }
+            voice_resolution = dict(product_result.get("voice_resolution") or voice_state.get("_subdub_voice_resolution") or {})
+            if voice_resolution:
+                voice_state["_subdub_voice_resolution"] = voice_resolution
+            state.update(voice_state)
+            return _failed_product_result("VOICE_NOT_READY", subdub_voice_not_ready_text(lang), detail or str(voice_resolution.get("reason") or "voice_not_ready"), stage="voice")
         if status == "VIDEO_RENDER_FAILED":
             return _failed_product_result("VIDEO_RENDER_FAILED", "TOAN AAS đã tạo phụ đề nhưng chưa xuất được video phụ đề lúc này. Hệ thống chưa trừ Xu.", detail, stage="video")
         fail_text = (
@@ -155256,13 +155648,47 @@ async def _execute_video_dubbing_pipeline_core(
     normalization_detail = str(product_result.get("normalization_detail") or "not_requested")
     tts_chunks = list(product_result.get("tts_chunks") or [])
     selected_tts_voice_id = str(product_result.get("selected_tts_voice_id") or "")
+    voice_resolution = dict(product_result.get("voice_resolution") or state.get("_subdub_voice_resolution") or {})
+    tts_payload_voice_id = str(product_result.get("tts_payload_voice_id") or voice_resolution.get("tts_payload_voice_id") or selected_tts_voice_id)
+    generated_audio_duration = max(
+        (
+            float(chunk.get("end") or 0)
+            for chunk in tts_chunks
+            if isinstance(chunk, dict)
+        ),
+        default=0.0,
+    )
+    output_audio_source = str(product_result.get("output_audio_source") or ("generated_tts" if audio_bytes and tts_provider else ""))
     video_output = bytes(product_result.get("video_output") or b"")
     partial_result = bool(product_result.get("partial_result") or product_result.get("partial"))
     partial_reason = str(product_result.get("partial_reason") or "")
+    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and (
+        not audio_bytes
+        or output_audio_source not in {"generated_tts", "mixed"}
+    ):
+        return _failed_product_result(
+            "DUB_AUDIO_NOT_GENERATED",
+            subdub_voice_not_ready_text(lang),
+            "generated_tts_audio_missing",
+            stage="audio",
+        )
     subtitle_style = subdub_normalize_style(state)
     state = {
         **state,
         "selected_tts_voice_id": selected_tts_voice_id,
+        "provider_voice_id": str(voice_resolution.get("provider_voice_id") or selected_tts_voice_id),
+        "tts_payload_voice_id": tts_payload_voice_id,
+        "selected_voice_gender": str(voice_resolution.get("selected_voice_gender") or state.get("selected_voice_gender") or ""),
+        "selected_voice_id": str(voice_resolution.get("selected_voice_id") or state.get("voice_id") or ""),
+        "voice_fallback_used": bool(voice_resolution.get("fallback_used")),
+        "voice_fallback_reason": str(voice_resolution.get("fallback_reason") or voice_resolution.get("reason") or ""),
+        "_subdub_voice_resolution": voice_resolution,
+        "_subdub_generated_audio_duration": generated_audio_duration,
+        "_subdub_output_audio_source": output_audio_source,
+        "_subdub_direct_dub_core_used": bool(
+            product_result.get("direct_dub_core_used")
+            or mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
+        ),
         "subtitle_style_preset": str(subtitle_style.get("preset") or ""),
         "cover_original_subtitle": bool(subtitle_style.get("cover_original")),
         "_subdub_render_debug": dict(render_debug),
@@ -155446,6 +155872,8 @@ async def _execute_video_dubbing_pipeline_core(
             **state,
             "_subdub_delivery_method": str(delivery.get("delivery_method") or ""),
             "_subdub_output_validation": dict(delivery.get("output_validation") or {}),
+            "public_messages_sent": sum(int(delivery.get(key) or 0) for key in ("documents", "audio", "video", "video_document")),
+            "delivery_attempts": 1,
         }
     except Exception:
         refund_charged_credit(
@@ -155531,6 +155959,16 @@ async def _execute_video_dubbing_pipeline_core(
             "final_mp4_duration": duration_seconds,
             "selected_tts_voice_id": selected_tts_voice_id,
             "selected_voice_label": str(state.get("voice_style") or state.get("voice_label") or ""),
+            "selected_voice_gender": str(state.get("selected_voice_gender") or ""),
+            "selected_voice_id": str(state.get("selected_voice_id") or state.get("voice_id") or ""),
+            "provider_voice_id": str(state.get("provider_voice_id") or selected_tts_voice_id),
+            "tts_payload_voice_id": str(state.get("tts_payload_voice_id") or selected_tts_voice_id),
+            "fallback_used": bool(state.get("voice_fallback_used")),
+            "fallback_reason": str(state.get("voice_fallback_reason") or ""),
+            "generated_audio_path": dub_path,
+            "generated_audio_duration": generated_audio_duration,
+            "direct_dub_core_used": bool(state.get("_subdub_direct_dub_core_used")),
+            "output_audio_source": output_audio_source,
             "subtitle_style_preset": str(state.get("subtitle_style_preset") or ""),
             "cover_original_subtitle": bool(state.get("cover_original_subtitle")),
             "original_audio_mode": str(state.get("original_audio_mode") or ""),
@@ -160645,6 +161083,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_render_debug", cmd_subdub_render_debug))
     tg_app.add_handler(CommandHandler("subdub_delivery_debug", cmd_subdub_delivery_debug))
     tg_app.add_handler(CommandHandler("subdub_voice_debug", cmd_subdub_voice_debug))
+    tg_app.add_handler(CommandHandler("subdub_terminal_debug", cmd_subdub_terminal_debug))
+    tg_app.add_handler(CommandHandler("video_status_debug", cmd_video_status_debug))
     tg_app.add_handler(CommandHandler("subdub_style_preview", cmd_subdub_style_preview))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_provider_status", cmd_voice_status))
@@ -161317,6 +161757,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_suggest_music_callback, pattern=r"^suggest_music\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_engine_async_job_callback, pattern=r"^enginejob\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_public_callback, pattern=r"^shopai\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_public_video_status_callback, pattern=r"^video\|status\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_shopaikey_video_job_callback, pattern=r"^shopai_video_job\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_human_support_callback, pattern=r"^support\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_ticket_callback, pattern=r"^ticket\|"))
