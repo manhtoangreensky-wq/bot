@@ -2472,9 +2472,9 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Video Chuyên Nghiệp: <b>1000 Xu</b>" in video_price_text
     assert "Video Pro Plus: <b>1200 Xu</b>" in video_price_text
     assert "Video Premium: <b>1500 Xu</b>" in video_price_text
-    assert "Combo Video Quảng Cáo Nhanh" in combo_price_text
-    assert "Combo Review Sản Phẩm" in combo_price_text
-    assert "Combo Dịch / Lồng Tiếng" in combo_price_text
+    assert "Combo Video Quảng Cáo Sản Phẩm Mini" in combo_price_text
+    assert "Combo Affiliate / Review Sản Phẩm" in combo_price_text
+    assert "Combo Dịch Video Đa Ngôn Ngữ" in combo_price_text
     assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
     assert "công cụ xử lý video nội bộ" in frame_price_text
     assert "Local Worker/FFmpeg" not in frame_price_text
@@ -2503,17 +2503,31 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "pkgbuy|combo|tiktok_99k" not in combo_callbacks
     assert "pricing|main" in combo_callbacks
     package_hub_callbacks = [button.callback_data for row in bot.pricing_packages_keyboard("vi").inline_keyboard for button in row]
-    assert package_hub_callbacks == ["pricing|plans", "pricing|combo", "pricing|my_packages", "pricing|need_larger", "pricing|main", "menu|main"]
+    assert package_hub_callbacks == [
+        "pricing|package_group_image",
+        "pricing|package_group_video",
+        "pricing|package_group_music",
+        "pricing|package_group_voice",
+        "pricing|package_group_subtitle_dub",
+        "pricing|package_group_prompt_workflow",
+        "pricing|combo",
+        "pricing|my_packages",
+        "pricing|need_larger",
+        "pricing|main",
+        "menu|main",
+    ]
     xu_text = "\n".join(bot.pricing_xu_lines())
     assert xu_text.count("💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>") == 1
     plan_text = "\n".join(bot.pricing_plans_lines())
-    assert "Gói tháng là hạn mức dịch vụ theo tháng" in plan_text
+    assert "GÓI = mua số lượng tác vụ lẻ theo từng dòng sản phẩm" in plan_text
     assert "📦 Gói của tôi" in plan_text
     assert "/buy_plan" not in plan_text
     plan_callbacks = [button.callback_data for row in bot.pricing_plans_keyboard("vi").inline_keyboard for button in row]
-    assert "pkgbuy|monthly|starter_monthly" in plan_callbacks
-    assert "pkgbuy|monthly|pro_monthly" in plan_callbacks
-    assert "pkgbuy|monthly|small_business_monthly" in plan_callbacks
+    assert "pricing|package_group_image" in plan_callbacks
+    assert "pricing|package_group_video" in plan_callbacks
+    assert "pricing|package_group_music" in plan_callbacks
+    assert "pricing|package_group_voice" in plan_callbacks
+    assert "pricing|package_group_prompt_workflow" in plan_callbacks
     assert "pricing|main" in plan_callbacks
     assert "Giá tác vụ dịch tham khảo" not in plan_text
     assert "<code>/translate_voice</code>: từ 30–80 Xu/audio ngắn" not in plan_text
@@ -4080,16 +4094,16 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "https://t.me/toanaasbot?start=ref_123456" in bot.referral_account_link_text("123456", "toanaasbot")
 
     plan_text = "\n".join(bot.pricing_plans_lines())
-    assert "Gói tháng là hạn mức dịch vụ theo tháng" in plan_text
+    assert "GÓI = mua số lượng tác vụ lẻ theo từng dòng sản phẩm" in plan_text
     assert "PayOS thanh toán thành công thì hạn mức tự lưu vào <b>📦 Gói của tôi</b>" in plan_text
-    assert "🟢 Gói Cơ bản" in plan_text
-    assert "🔵 Gói Nội dung" in plan_text
-    assert "🟣 Gói Bán hàng" in plan_text
-    assert "🟠 Gói Chuyên nghiệp" in plan_text
-    assert "🔴 Gói Doanh nghiệp nhỏ" in plan_text
-    assert "Bot không yêu cầu khách gõ lệnh mua gói" in plan_text
+    assert "Gói Ảnh" in plan_text
+    assert "Gói Video" in plan_text
+    assert "Gói Nhạc" in plan_text
+    assert "Gói Voice" in plan_text
+    assert "Prompt / Workflow" in plan_text
+    assert "Bấm nhóm bên dưới để xem từng mức gói" in plan_text
     assert "/buy_plan" not in plan_text
-    assert "Tiền mua gói tháng không tính vào tổng nạp" in plan_text
+    assert "Tiền mua gói không tính vào tổng nạp" in plan_text
 
     topic_text = bot.creative_motion_topic_text()
     assert "Bạn muốn làm video về vấn đề gì" in topic_text

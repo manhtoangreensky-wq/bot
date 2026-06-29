@@ -31,8 +31,11 @@ def test_p0_21c_public_monthly_package_prices_use_nice_8_tail(monkeypatch):
         assert catalog["monthly"]["starter_monthly"]["public"] is True
         assert public_monthly
         assert public_combos
-        for entry in list(public_monthly.values()) + list(public_combos.values()):
+        for code, entry in list(public_monthly.items()) + list(public_combos.items()):
             price = int(entry["price_vnd"])
+            if price <= 0:
+                assert entry.get("manual") is True, code
+                continue
             assert price > 0
             assert price % 10000 == 8000
             assert int(entry.get("max_per_month") or 0) == 1
