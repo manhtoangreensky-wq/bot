@@ -80,6 +80,7 @@ FFMPEG_MAX_CONCURRENT = max(1, env_int("FFMPEG_MAX_CONCURRENT", 1))
 FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_PATH") or "ffmpeg").strip()
 LAST_CLAIM_RESPONSE: dict = {}
 LAST_IDLE_REASON = ""
+LAST_REAL_VIDEO_RENDER_RESULT: dict = {}
 LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
 RENDER_MODE_REAL = "real"
@@ -564,12 +565,15 @@ def render_admin_video_delivery(job: dict, work_dir: str) -> str:
 
 def render_real_video(job: dict, work_dir: str) -> str:
     """Render a normal product video through the real provider connector."""
+    global LAST_REAL_VIDEO_RENDER_RESULT
+    LAST_REAL_VIDEO_RENDER_RESULT = {}
     try:
         from services.video_real_render_connector import RealVideoRenderError, render_real_video_job
     except Exception as exc:
         raise RuntimeError(f"{REAL_VIDEO_RENDER_UNAVAILABLE}:connector_import_failed:{type(exc).__name__}") from exc
     try:
         result = render_real_video_job(job, work_dir)
+        LAST_REAL_VIDEO_RENDER_RESULT = dict(result or {})
     except RealVideoRenderError as exc:
         raise RuntimeError(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE) from exc
     final_path = str(result.get("final_video_path") or "")
@@ -648,6 +652,10 @@ def process_claimed_job(job: dict) -> dict:
             "public_user": bool(job.get("public_user")),
             "admin_only": bool(job.get("admin_only")),
             "no_charge": bool(job.get("no_charge")),
+            "connector_renderer": str((LAST_REAL_VIDEO_RENDER_RESULT or {}).get("renderer") or ""),
+            "provider_attempted": bool((LAST_REAL_VIDEO_RENDER_RESULT or {}).get("provider_attempted")),
+            "partial_addons": bool((LAST_REAL_VIDEO_RENDER_RESULT or {}).get("partial_addons")),
+            "addon_degrade_notes": (LAST_REAL_VIDEO_RENDER_RESULT or {}).get("addon_degrade_notes") or [],
         }
         return complete_job(job_id, result, final_path)
 
