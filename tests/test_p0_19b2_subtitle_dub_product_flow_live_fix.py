@@ -195,6 +195,7 @@ def test_product_confirm_calls_blackbox_service(monkeypatch):
         "source_file_name": "sample.mp4",
         "source_mime_type": "video/mp4",
         "media_kind": "video",
+        "_pipeline_source_bytes_override": b"video-bytes",
     }
     result = asyncio.run(bot.execute_video_dubbing_pipeline(FakeQuery(uid), SimpleNamespace(), state, "vi", admin_interactive_confirm=True))
     assert result["ok"] is True

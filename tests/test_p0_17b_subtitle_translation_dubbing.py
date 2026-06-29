@@ -176,18 +176,29 @@ def test_dub_pipeline_default_voice_asset_no_forced_video_render(monkeypatch, tm
             "asr_provider": "stub_asr",
         }
 
-    async def fake_tts(text, voice_style="", voice_id="", voice_speed="1.0", allow_admin=False):
-        assert text == "hello"
-        assert voice_speed == "1.0"
-        return "stub_tts", b"audio-bytes", "ok"
+    async def fake_synthesize(segments, **kwargs):
+        assert segments
+        assert kwargs.get("base_speed") == 1.0
+        return {"provider": "stub_tts", "chunks": [{"start": 0, "end": 2, "audio_bytes": b"audio-bytes"}]}
+
+    async def fake_timeline(chunks, total_duration=0):
+        assert chunks
+        return b"timeline-audio", "timeline"
+
+    async def fake_normalize(audio_bytes):
+        assert audio_bytes == b"timeline-audio"
+        return b"normalized-audio", "normalized"
 
     async def forbidden_render(*_args, **_kwargs):
         raise AssertionError("video render must not run when mux/render is not ready")
 
     monkeypatch.setattr(bot, "video_dubbing_public_processing_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "video_dubbing_prepare_subtitles", fake_prepare)
-    monkeypatch.setattr(bot, "video_dubbing_tts_bytes", fake_tts)
+    monkeypatch.setattr(bot, "synthesize_dub_segment_chunks", fake_synthesize)
+    monkeypatch.setattr(bot, "build_dub_timeline_audio", fake_timeline)
+    monkeypatch.setattr(bot, "normalize_dub_audio_bytes", fake_normalize)
     monkeypatch.setattr(bot, "video_dubbing_render_video", forbidden_render)
+    monkeypatch.setattr(bot, "frame_video_ffmpeg_path", lambda: "")
     monkeypatch.setattr(bot, "local_worker_status_payload", lambda: {"connected": False, "ffmpeg_path": ""})
     monkeypatch.setattr(bot, "get_user", lambda _uid: (99999, 0, 0))
     monkeypatch.setattr(bot, "is_admin_user", lambda _uid: False)
@@ -208,6 +219,8 @@ def test_dub_pipeline_default_voice_asset_no_forced_video_render(monkeypatch, tm
             "voice_kind": "default_female",
             "voice_speed": "1.0",
             "output_type": "video",
+            "source_mime_type": "video/mp4",
+            "_pipeline_source_bytes_override": b"video-bytes",
         },
         "vi",
     ))

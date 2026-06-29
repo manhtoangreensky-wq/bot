@@ -56,6 +56,7 @@ def _video_state(mode, **extra):
         "media_kind": "video",
         "video_duration": "2",
         "source_duration": "2",
+        "_pipeline_source_bytes_override": b"video-bytes",
         **extra,
     }
 

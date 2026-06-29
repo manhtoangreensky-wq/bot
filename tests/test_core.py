@@ -8120,6 +8120,8 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
             "target_language": "English",
             "voice_style": "Nữ tự nhiên",
             "translate_requested": "1",
+            "source_mime_type": "video/mp4",
+            "_pipeline_source_bytes_override": b"video-bytes",
         }
         result = asyncio.run(bot.execute_video_dubbing_pipeline(query, SimpleNamespace(), state, "vi"))
         assert result["ok"] is True
