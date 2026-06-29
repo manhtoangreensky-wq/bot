@@ -59,7 +59,7 @@ def test_p0_21d_package_menu_has_product_groups():
     for expected in ["🖼 Gói Ảnh", "🎬 Gói Video", "🎵 Gói Nhạc", "🎙 Gói Voice", "🌐 Phụ đề / Lồng tiếng", "🧠 Prompt / Workflow"]:
         assert expected in labels
     for group in ["image", "video", "music", "voice", "subtitle_dub", "prompt_workflow"]:
-        assert f"pricing|package_group_{group}" in callbacks
+        assert bot.pkgcombo_group_callback(group) in callbacks
 
 
 def test_p0_21d_image_packages_have_multiple_tiers():
@@ -228,7 +228,7 @@ def test_p0_21d_no_fake_checkout_for_manual_combo():
     assert "chưa mở checkout tự động" in text
     assert "Bot chưa tạo đơn" in text
     callbacks = _callbacks(bot.package_purchase_manual_keyboard("combo", "combo_song_visual_888k"))
-    assert "pricing|need_larger" in callbacks
+    assert "pkgcombo:large_order:combo_detail:combo_song_visual_888k" in callbacks
     assert "menu|support" in callbacks
 
 
