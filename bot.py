@@ -564,7 +564,16 @@ KEY4U_WARN_USD = env_float("KEY4U_WARN_USD", 5.0)
 KEY4U_CRITICAL_USD = env_float("KEY4U_CRITICAL_USD", 2.0)
 KEY4U_FREEZE_USD = env_float("KEY4U_FREEZE_USD", 1.0)
 KEY4U_USAGE_ALERT_ENABLED = env_flag("KEY4U_USAGE_ALERT_ENABLED", "true")
-SUNO_PUBLIC_ENABLED = env_flag("SUNO_PUBLIC_ENABLED", "false")
+MUSIC_PUBLIC_ENABLED = env_flag("MUSIC_PUBLIC_ENABLED", "true")
+MUSIC_INSTRUMENTAL_PUBLIC_ENABLED = env_flag(
+    "MUSIC_INSTRUMENTAL_PUBLIC_ENABLED",
+    "true" if MUSIC_PUBLIC_ENABLED else "false",
+)
+MUSIC_SONG_PUBLIC_ENABLED = env_flag(
+    "MUSIC_SONG_PUBLIC_ENABLED",
+    "true" if MUSIC_PUBLIC_ENABLED else "false",
+)
+SUNO_PUBLIC_ENABLED = env_flag("SUNO_PUBLIC_ENABLED", "true" if MUSIC_PUBLIC_ENABLED else "false")
 SUNO_ADMIN_SMOKE_ENABLED = env_flag("SUNO_ADMIN_SMOKE_ENABLED", "true")
 SUNO_REQUIRE_SMOKE_PASS = env_flag("SUNO_REQUIRE_SMOKE_PASS", "true")
 SUNO_ALLOW_PROCESSING_GATE = env_flag("SUNO_ALLOW_PROCESSING_GATE", "false")
@@ -609,8 +618,10 @@ MINIMAX_VOICE_CLONE_ENDPOINT = _env("MINIMAX_VOICE_CLONE_ENDPOINT", "/tts/minima
 MINIMAX_VOICE_DESIGN_ENDPOINT = _env("MINIMAX_VOICE_DESIGN_ENDPOINT", "/tts/minimax/voice_design")
 MINIMAX_VOICE_LIST_ENDPOINT = _env("MINIMAX_VOICE_LIST_ENDPOINT", "/tts/minimax/voices")
 MINIMAX_ADMIN_SMOKE_ENABLED = env_flag("MINIMAX_ADMIN_SMOKE_ENABLED", "true")
-MINIMAX_VOICE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_PUBLIC_ENABLED", "true")
-MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_CLONE_PUBLIC_ENABLED", "true")
+VOICE_PUBLIC_ENABLED = env_flag("VOICE_PUBLIC_ENABLED", "true")
+VOICE_TTS_PUBLIC_ENABLED = env_flag("VOICE_TTS_PUBLIC_ENABLED", "true" if VOICE_PUBLIC_ENABLED else "false")
+MINIMAX_VOICE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_PUBLIC_ENABLED", "true" if VOICE_TTS_PUBLIC_ENABLED else "false")
+MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = env_flag("MINIMAX_VOICE_CLONE_PUBLIC_ENABLED", "true" if VOICE_PUBLIC_ENABLED else "false")
 VOICE_PREVIEW_FREE_PER_DAY = max(0, env_int("VOICE_PREVIEW_FREE_PER_DAY", 3))
 VOICE_PREVIEW_COOLDOWN_SECONDS = max(0, env_int("VOICE_PREVIEW_COOLDOWN_SECONDS", 45))
 VOICE_PREVIEW_MAX_CHARACTERS = max(40, min(160, env_int("VOICE_PREVIEW_MAX_CHARACTERS", 96)))
@@ -49746,6 +49757,12 @@ def direct_minimax_tts_configured() -> bool:
 def minimax_tts_configured() -> bool:
     return bool(shopaikey_minimax_tts_configured() or key4u_minimax_tts_configured() or direct_minimax_tts_configured())
 
+def voice_tts_product_public_enabled() -> bool:
+    return bool(VOICE_PUBLIC_ENABLED and VOICE_TTS_PUBLIC_ENABLED and MINIMAX_VOICE_PUBLIC_ENABLED)
+
+def voice_clone_product_public_enabled() -> bool:
+    return bool(VOICE_PUBLIC_ENABLED and MINIMAX_VOICE_CLONE_PUBLIC_ENABLED)
+
 def get_tts_provider_readiness(public: bool = False) -> dict:
     require_public = bool(public)
     default_female = default_tts_voice_id("female")
@@ -49838,7 +49855,7 @@ def key4u_minimax_tts_public_ready() -> bool:
     smoke = str(preferred_tool_test_result("minimax_tts_key4u", "minimax_tts", "key4u_tts").get("status") or "").upper()
     return bool(
         key4u_minimax_tts_configured(require_public=True)
-        and MINIMAX_VOICE_PUBLIC_ENABLED
+        and voice_tts_product_public_enabled()
         and (provider_status_is_pass(smoke) or not MINIMAX_REQUIRE_SMOKE_PASS)
     )
 
@@ -49848,7 +49865,7 @@ def shopaikey_minimax_tts_public_ready() -> bool:
         shopaikey_minimax_tts_configured()
         and SHOPAIKEY_ENABLED
         and SHOPAIKEY_TTS_ENABLED
-        and MINIMAX_VOICE_PUBLIC_ENABLED
+        and voice_tts_product_public_enabled()
         and (provider_status_is_pass(smoke) or not MINIMAX_REQUIRE_SMOKE_PASS)
     )
 
@@ -49856,7 +49873,7 @@ def direct_minimax_tts_public_ready() -> bool:
     smoke = str(preferred_tool_test_result("minimax_tts_direct", "minimax_tts").get("status") or "").upper()
     return bool(
         direct_minimax_tts_configured()
-        and MINIMAX_VOICE_PUBLIC_ENABLED
+        and voice_tts_product_public_enabled()
         and (provider_status_is_pass(smoke) or not MINIMAX_REQUIRE_SMOKE_PASS)
     )
 
@@ -76811,9 +76828,16 @@ def get_suno_music_readiness() -> dict:
     preferred_provider = "key4u_suno" if key4u_configured else ("shopaikey_music" if shopaikey_configured else "none")
     preferred_model = KEY4U_SUNO_MODEL if key4u_configured else (SHOPAIKEY_MUSIC_MODEL or "auto")
     preferred_endpoint = KEY4U_SUNO_CREATE_ENDPOINT if key4u_configured else (SHOPAIKEY_MUSIC_ENDPOINT or "")
+    status_endpoint_ready = bool((KEY4U_SUNO_QUERY_ENDPOINT if key4u_configured else SHOPAIKEY_MUSIC_STATUS_ENDPOINT) if configured else False)
     public_ready = bool(configured and SUNO_PUBLIC_ENABLED and full_result_ok and music_pricing_configured())
+    product_public_enabled = bool(configured and music_product_public_enabled_for_feature("music") and music_pricing_configured() and status_endpoint_ready)
     if configured:
-        reason = "ready" if public_ready else "configured_for_admin_smoke; public gate remains closed until smoke/cost pass"
+        if public_ready:
+            reason = "ready"
+        elif product_public_enabled:
+            reason = "ready_for_public_submit; final audio validates before charge"
+        else:
+            reason = "configured_for_admin_smoke; public gate remains closed until config/cost pass"
         missing = []
     else:
         reason = "Missing Key4U Suno or ShopAIKey Music configuration"
@@ -76862,6 +76886,11 @@ def get_suno_music_readiness() -> dict:
         "full_result_ready": full_result_ok,
         "full_result_smoke": fetch_status,
         "full_result_ok": full_result_ok,
+        "product_public_enabled": product_public_enabled,
+        "music_public_enabled": bool(MUSIC_PUBLIC_ENABLED and SUNO_PUBLIC_ENABLED),
+        "instrumental_public_enabled": bool(MUSIC_PUBLIC_ENABLED and MUSIC_INSTRUMENTAL_PUBLIC_ENABLED and SUNO_PUBLIC_ENABLED),
+        "song_public_enabled": bool(MUSIC_PUBLIC_ENABLED and MUSIC_SONG_PUBLIC_ENABLED and SUNO_PUBLIC_ENABLED),
+        "status_endpoint_ready": status_endpoint_ready,
         "latest_completed_job_id": str(latest_completed_job.get("internal_job_id") or ""),
         "latest_completed_output_bytes": int(latest_completed_job.get("output_bytes") or 0),
         "processing_gate_allowed": False,
@@ -76877,6 +76906,27 @@ def music_ai_public_processing_ready(readiness: dict | None = None) -> bool:
         and readiness.get("public_enabled")
         and readiness.get("full_result_ok")
         and readiness.get("cost_gate_ok")
+    )
+
+def music_product_public_enabled_for_feature(feature: str = "music") -> bool:
+    feature_key = normalize_engine_feature(feature)
+    if feature_key in {"music_song", "suno_song", "song"}:
+        return bool(MUSIC_PUBLIC_ENABLED and MUSIC_SONG_PUBLIC_ENABLED and SUNO_PUBLIC_ENABLED)
+    if feature_key in {"music_background", "music_bg", "instrumental", "instrumental_ai", "background"}:
+        return bool(MUSIC_PUBLIC_ENABLED and MUSIC_INSTRUMENTAL_PUBLIC_ENABLED and SUNO_PUBLIC_ENABLED)
+    return bool(MUSIC_PUBLIC_ENABLED and SUNO_PUBLIC_ENABLED and (MUSIC_INSTRUMENTAL_PUBLIC_ENABLED or MUSIC_SONG_PUBLIC_ENABLED))
+
+def music_product_submit_public_ready(readiness: dict | None = None, feature: str = "music") -> bool:
+    item = dict(readiness or get_suno_music_readiness())
+    if "product_public_enabled" in item:
+        public_enabled = bool(item.get("product_public_enabled"))
+    else:
+        public_enabled = bool(item.get("public_enabled"))
+    return bool(
+        item.get("ready")
+        and public_enabled
+        and item.get("cost_gate_ok", music_pricing_configured())
+        and item.get("status_endpoint_ready", item.get("fetch_ready", True))
     )
 
 def music_product_public_ready_flags(readiness: dict | None = None) -> dict:
@@ -76953,7 +77003,8 @@ def get_minimax_voice_readiness() -> dict:
         or direct_voice_ready
         or (key4u_voice_ready and KEY4U_PUBLIC_ENABLED)
     )
-    public_ready = bool(configured and provider_public and MINIMAX_VOICE_PUBLIC_ENABLED and (provider_status_is_pass(smoke) or not MINIMAX_REQUIRE_SMOKE_PASS))
+    product_public_enabled = bool(configured and provider_public and voice_tts_product_public_enabled() and voice_pricing_configured())
+    public_ready = bool(product_public_enabled and (provider_status_is_pass(smoke) or not MINIMAX_REQUIRE_SMOKE_PASS))
     reason = "ready" if configured else "Missing " + ", ".join(missing)
     if configured and not public_ready:
         reason = "configured_for_admin_smoke; public voice gate remains closed until smoke/cost pass"
@@ -76979,6 +77030,9 @@ def get_minimax_voice_readiness() -> dict:
         "group_or_project_id_present": bool(MINIMAX_GROUP_ID),
         "tts_endpoint_ready": bool((MINIMAX_TTS_ENDPOINT and SHOPAIKEY_API_KEY) or (KEY4U_TTS_ENDPOINT and KEY4U_API_KEY) or (MINIMAX_DIRECT_TTS_ENDPOINT and MINIMAX_API_KEY and MINIMAX_GROUP_ID)),
         "clone_endpoint_ready": bool((MINIMAX_VOICE_CLONE_ENDPOINT and SHOPAIKEY_API_KEY) or (KEY4U_MINIMAX_CLONE_ENDPOINT and KEY4U_API_KEY)),
+        "product_public_enabled": product_public_enabled,
+        "voice_public_enabled": bool(VOICE_PUBLIC_ENABLED),
+        "voice_tts_public_enabled": bool(VOICE_TTS_PUBLIC_ENABLED and MINIMAX_VOICE_PUBLIC_ENABLED),
         "minimax_tts_final_url": key4u_minimax_final_url(KEY4U_TTS_ENDPOINT) if KEY4U_TTS_ENDPOINT else "",
         "minimax_clone_upload_final_url": key4u_minimax_final_url(KEY4U_MINIMAX_UPLOAD_ENDPOINT) if KEY4U_MINIMAX_UPLOAD_ENDPOINT else "",
         "minimax_clone_final_url": key4u_minimax_final_url(KEY4U_MINIMAX_CLONE_ENDPOINT) if KEY4U_MINIMAX_CLONE_ENDPOINT else "",
@@ -77090,8 +77144,8 @@ def get_minimax_voice_clone_readiness() -> dict:
     public_ready = bool(
         configured
         and provider_public
-        and MINIMAX_VOICE_PUBLIC_ENABLED
-        and MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
+        and voice_tts_product_public_enabled()
+        and voice_clone_product_public_enabled()
         and (smoke_ok or not MINIMAX_REQUIRE_SMOKE_PASS)
     )
     alternate_clone_ready = bool(fish_configured or elevenlabs_configured)
@@ -79455,16 +79509,22 @@ async def cmd_suno_public_open(update: Update, context: ContextTypes.DEFAULT_TYP
     return await cmd_music_public_open_safe(update, context)
 
 async def cmd_suno_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global SUNO_PUBLIC_ENABLED
+    global MUSIC_PUBLIC_ENABLED, MUSIC_INSTRUMENTAL_PUBLIC_ENABLED, MUSIC_SONG_PUBLIC_ENABLED, SUNO_PUBLIC_ENABLED
     uid = update.effective_user.id
     if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    MUSIC_PUBLIC_ENABLED = False
+    MUSIC_INSTRUMENTAL_PUBLIC_ENABLED = False
+    MUSIC_SONG_PUBLIC_ENABLED = False
     SUNO_PUBLIC_ENABLED = False
+    set_system_setting("music_public_enabled", "0", "Music public closed", uid)
+    set_system_setting("music_instrumental_public_enabled", "0", "Music public closed", uid)
+    set_system_setting("music_song_public_enabled", "0", "Music public closed", uid)
     set_system_setting("suno_public_enabled", "0", "Suno public closed", uid)
     await update.message.reply_text("✅ Đã đóng Suno public. Admin smoke vẫn dùng được nếu cấu hình đủ.")
 
 async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global SUNO_PUBLIC_ENABLED
+    global MUSIC_PUBLIC_ENABLED, MUSIC_INSTRUMENTAL_PUBLIC_ENABLED, MUSIC_SONG_PUBLIC_ENABLED, SUNO_PUBLIC_ENABLED
     uid = update.effective_user.id
     if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
@@ -79484,7 +79544,13 @@ async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAU
     if not music_pricing_configured():
         blockers.append("music pricing/cost gate missing")
     if blockers:
+        MUSIC_PUBLIC_ENABLED = False
+        MUSIC_INSTRUMENTAL_PUBLIC_ENABLED = False
+        MUSIC_SONG_PUBLIC_ENABLED = False
         SUNO_PUBLIC_ENABLED = False
+        set_system_setting("music_public_enabled", "0", "Music public open safe blocked", uid)
+        set_system_setting("music_instrumental_public_enabled", "0", "Music public open safe blocked", uid)
+        set_system_setting("music_song_public_enabled", "0", "Music public open safe blocked", uid)
         set_system_setting("suno_public_enabled", "0", "Music public open safe blocked", uid)
         return await update.message.reply_text(
             "🎼 <b>Không mở Music public.</b>\n\n"
@@ -79495,7 +79561,13 @@ async def cmd_music_public_open_safe(update: Update, context: ContextTypes.DEFAU
             "Không gọi thêm provider và không trừ Xu.",
             parse_mode="HTML",
         )
+    MUSIC_PUBLIC_ENABLED = True
+    MUSIC_INSTRUMENTAL_PUBLIC_ENABLED = True
+    MUSIC_SONG_PUBLIC_ENABLED = True
     SUNO_PUBLIC_ENABLED = True
+    set_system_setting("music_public_enabled", "1", "Music public opened after safe smoke", uid)
+    set_system_setting("music_instrumental_public_enabled", "1", "Music public opened after safe smoke", uid)
+    set_system_setting("music_song_public_enabled", "1", "Music public opened after safe smoke", uid)
     set_system_setting("suno_public_enabled", "1", "Music public opened after safe smoke", uid)
     await update.message.reply_text("✅ Đã mở Music public gate sau khi submit/fetch/download smoke PASS. Chưa claim live pass.")
 
@@ -79558,7 +79630,8 @@ async def cmd_audio_public_status(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def cmd_audio_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED, SUNO_PUBLIC_ENABLED
+    global VOICE_PUBLIC_ENABLED, VOICE_TTS_PUBLIC_ENABLED, MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
+    global MUSIC_PUBLIC_ENABLED, MUSIC_INSTRUMENTAL_PUBLIC_ENABLED, MUSIC_SONG_PUBLIC_ENABLED, SUNO_PUBLIC_ENABLED
     uid = update.effective_user.id
     if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
@@ -79588,11 +79661,21 @@ async def cmd_audio_public_open_safe(update: Update, context: ContextTypes.DEFAU
     if not music_pricing_configured():
         blockers.append("music pricing/cost gate missing")
     if blockers:
+        VOICE_PUBLIC_ENABLED = False
+        VOICE_TTS_PUBLIC_ENABLED = False
         MINIMAX_VOICE_PUBLIC_ENABLED = False
         MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = False
+        MUSIC_PUBLIC_ENABLED = False
+        MUSIC_INSTRUMENTAL_PUBLIC_ENABLED = False
+        MUSIC_SONG_PUBLIC_ENABLED = False
         SUNO_PUBLIC_ENABLED = False
+        set_system_setting("voice_public_enabled", "0", "Audio public open safe blocked", uid)
+        set_system_setting("voice_tts_public_enabled", "0", "Audio public open safe blocked", uid)
         set_system_setting("minimax_voice_public_enabled", "0", "Audio public open safe blocked", uid)
         set_system_setting("minimax_voice_clone_public_enabled", "0", "Audio public open safe blocked", uid)
+        set_system_setting("music_public_enabled", "0", "Audio public open safe blocked", uid)
+        set_system_setting("music_instrumental_public_enabled", "0", "Audio public open safe blocked", uid)
+        set_system_setting("music_song_public_enabled", "0", "Audio public open safe blocked", uid)
         set_system_setting("suno_public_enabled", "0", "Audio public open safe blocked", uid)
         return await update.message.reply_text(
             "🎧 <b>Không mở Audio public.</b>\n\n"
@@ -79602,11 +79685,21 @@ async def cmd_audio_public_open_safe(update: Update, context: ContextTypes.DEFAU
             "Không gọi provider và không trừ Xu.",
             parse_mode="HTML",
         )
+    VOICE_PUBLIC_ENABLED = True
+    VOICE_TTS_PUBLIC_ENABLED = True
     MINIMAX_VOICE_PUBLIC_ENABLED = True
     MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = bool(clone.get("ready") and provider_status_is_pass(clone_smoke))
+    MUSIC_PUBLIC_ENABLED = True
+    MUSIC_INSTRUMENTAL_PUBLIC_ENABLED = True
+    MUSIC_SONG_PUBLIC_ENABLED = True
     SUNO_PUBLIC_ENABLED = True
+    set_system_setting("voice_public_enabled", "1", "Audio public opened after safe smoke", uid)
+    set_system_setting("voice_tts_public_enabled", "1", "Audio public opened after safe smoke", uid)
     set_system_setting("minimax_voice_public_enabled", "1", "Audio public opened after safe smoke", uid)
     set_system_setting("minimax_voice_clone_public_enabled", "1" if MINIMAX_VOICE_CLONE_PUBLIC_ENABLED else "0", "Audio public safe clone gate", uid)
+    set_system_setting("music_public_enabled", "1", "Audio public opened after safe smoke", uid)
+    set_system_setting("music_instrumental_public_enabled", "1", "Audio public opened after safe smoke", uid)
+    set_system_setting("music_song_public_enabled", "1", "Audio public opened after safe smoke", uid)
     set_system_setting("suno_public_enabled", "1", "Audio public opened after safe smoke", uid)
     await update.message.reply_text(
         "✅ Đã mở Audio public gate sau khi voice/music smoke đủ điều kiện.\n"
@@ -79622,7 +79715,7 @@ def voice_pricing_configured() -> bool:
     return int(VOICE_TTS_BASE_CHARS or 0) > 0 and int(VOICE_TTS_BASE_PRICE_XU or 0) >= 0 and int(VOICE_PROFILE_PRICE_XU or 0) >= 0
 
 async def cmd_voice_public_open_safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
+    global VOICE_PUBLIC_ENABLED, VOICE_TTS_PUBLIC_ENABLED, MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
     uid = update.effective_user.id
     if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
@@ -79638,8 +79731,12 @@ async def cmd_voice_public_open_safe(update: Update, context: ContextTypes.DEFAU
     if not voice_pricing_configured():
         blockers.append("voice pricing config missing")
     if blockers:
+        VOICE_PUBLIC_ENABLED = False
+        VOICE_TTS_PUBLIC_ENABLED = False
         MINIMAX_VOICE_PUBLIC_ENABLED = False
         MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = False
+        set_system_setting("voice_public_enabled", "0", "Voice public open safe blocked", uid)
+        set_system_setting("voice_tts_public_enabled", "0", "Voice public open safe blocked", uid)
         set_system_setting("minimax_voice_public_enabled", "0", "Voice public open safe blocked", uid)
         set_system_setting("minimax_voice_clone_public_enabled", "0", "Voice clone public open safe blocked", uid)
         return await update.message.reply_text(
@@ -79650,7 +79747,11 @@ async def cmd_voice_public_open_safe(update: Update, context: ContextTypes.DEFAU
             "Không gọi provider và không trừ Xu.",
             parse_mode="HTML",
         )
+    VOICE_PUBLIC_ENABLED = True
+    VOICE_TTS_PUBLIC_ENABLED = True
     MINIMAX_VOICE_PUBLIC_ENABLED = True
+    set_system_setting("voice_public_enabled", "1", "Default TTS public opened after safe smoke", uid)
+    set_system_setting("voice_tts_public_enabled", "1", "Default TTS public opened after safe smoke", uid)
     set_system_setting("minimax_voice_public_enabled", "1", "Default TTS public opened after safe smoke", uid)
     clone_ready = bool(clone.get("ready") and provider_status_is_pass(clone_smoke))
     MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = bool(clone_ready)
@@ -79662,12 +79763,16 @@ async def cmd_voice_public_open_safe(update: Update, context: ContextTypes.DEFAU
     await update.message.reply_text(msg + "\n\nChưa claim live pass.", parse_mode="HTML")
 
 async def cmd_voice_public_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
+    global VOICE_PUBLIC_ENABLED, VOICE_TTS_PUBLIC_ENABLED, MINIMAX_VOICE_PUBLIC_ENABLED, MINIMAX_VOICE_CLONE_PUBLIC_ENABLED
     uid = update.effective_user.id
     if not is_admin_or_owner(uid):
         return await update.message.reply_text(owner_required_text(uid), parse_mode="HTML")
+    VOICE_PUBLIC_ENABLED = False
+    VOICE_TTS_PUBLIC_ENABLED = False
     MINIMAX_VOICE_PUBLIC_ENABLED = False
     MINIMAX_VOICE_CLONE_PUBLIC_ENABLED = False
+    set_system_setting("voice_public_enabled", "0", "MiniMax voice public closed", uid)
+    set_system_setting("voice_tts_public_enabled", "0", "MiniMax voice public closed", uid)
     set_system_setting("minimax_voice_public_enabled", "0", "MiniMax voice public closed", uid)
     set_system_setting("minimax_voice_clone_public_enabled", "0", "MiniMax voice clone public closed", uid)
     await update.message.reply_text("✅ Đã đóng MiniMax Voice/clone public. Admin smoke vẫn dùng được nếu cấu hình đủ.")
@@ -92548,6 +92653,11 @@ def music_ai_public_guard_text(lang: str = "vi") -> str:
         return "Song creation is being verified. TOAN AAS has not processed the request or charged Xu. Please try again later."
     return ENGINE_ASYNC_PUBLIC_CHECKING_VI
 
+def product_clean_no_charge_failure_text(lang: str = "vi") -> str:
+    if music_ui_lang(lang=lang) != "vi":
+        return "TOAN AAS cannot process this request right now. No Xu was charged. Please try again later or choose another configuration."
+    return "TOAN AAS chưa xử lý được yêu cầu này lúc này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau hoặc chọn cấu hình khác."
+
 def music_ai_guarded_keyboard(lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM, admin: bool = False) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
     ctx = normalize_product_context(product_context)
@@ -92581,7 +92691,9 @@ def music_ai_gate_keyboard(
 
 async def submit_music_generation_job(result: dict, preview: bool = False, admin_smoke: bool = False, updated_by="") -> dict:
     readiness = get_suno_music_readiness()
-    if not music_ai_public_processing_ready(readiness) and not admin_smoke:
+    product_feature = music_engine_feature_for_result(result)
+    public_submit_ready = music_product_submit_public_ready(readiness, product_feature)
+    if not public_submit_ready and not admin_smoke:
         return {"ok": False, "status": "NOT_READY", "detail": ",".join(music_ai_admin_blockers())}
     full_duration = music_result_duration_seconds(result)
     duration = full_duration
@@ -92678,7 +92790,7 @@ async def submit_music_generation_job(result: dict, preview: bool = False, admin
         route_smoke = str(route_info.get("smoke") or "").upper().split(" ", 1)[0]
         if not bool(route_info.get("configured")):
             continue
-        if SUNO_REQUIRE_SMOKE_PASS and route_smoke not in smoke_pass_values and not admin_smoke:
+        if SUNO_REQUIRE_SMOKE_PASS and route_smoke not in smoke_pass_values and not admin_smoke and not public_submit_ready:
             continue
         submitted = await (submit_key4u() if route == "key4u_suno" else submit_shopaikey())
         if submitted.get("ok"):
@@ -96313,7 +96425,7 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
                 reply_markup=music_product_invoice_keyboard(current, lang, ctx),
             )
         return await query.message.reply_text(
-            music_ai_public_guard_text(lang),
+            product_clean_no_charge_failure_text(lang),
             parse_mode="HTML",
             reply_markup=music_product_invoice_keyboard(current, lang, ctx),
         )
@@ -96351,7 +96463,7 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
                 reply_markup=music_product_invoice_keyboard(current, lang, ctx),
             )
         return await query.message.reply_text(
-            "⚙️ Chưa tạo được nhạc lúc này. TOAN AAS chưa trừ Xu, anh/chị thử lại sau nhé.",
+            product_clean_no_charge_failure_text(lang),
             reply_markup=music_product_invoice_keyboard(current, lang, ctx),
         )
     music_task_id = music_provider_result_task_id(submitted) or str(engine_result.get("provider_task_id") or "")
@@ -96389,7 +96501,7 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
         current.update({"music_status": "provider_no_job", "music_pending_charge_xu": 0, "music_charged_xu": 0})
         save_music_guided_result(user_id, current)
         return await query.message.reply_text(
-            "⚙️ Chưa tạo được nhạc lúc này. TOAN AAS chưa trừ Xu, anh/chị thử lại sau nhé.",
+            product_clean_no_charge_failure_text(lang),
             reply_markup=music_product_invoice_keyboard(current, lang, ctx),
         )
     music_job = create_music_suno_async_job(
@@ -114882,8 +114994,11 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
         synth_adapter = globals().get("synthesize_standalone_tts_audio")
         adapter_overridden = callable(synth_adapter) and getattr(synth_adapter, "__name__", "") != "synthesize_standalone_tts_audio"
         fallback_public_ready = bool(
-            adapter_overridden
-            or tts_readiness.get("public_ready")
+            voice_tts_product_public_enabled()
+            and (
+                adapter_overridden
+                or tts_readiness.get("public_ready")
+            )
         )
         configured = bool(
             tts_readiness.get("configured")
@@ -114891,7 +115006,17 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
             or fallback_public_ready
         )
         tts_smoke_pass = provider_status_is_pass(str(item.get("last_tts_smoke") or preferred_tool_test_status_text("minimax_tts", "minimax_tts_key4u", "minimax_tts_shopaikey", "minimax_voice_job")))
-        public_ready = bool(item.get("public_enabled") or fallback_public_ready or (configured and tts_smoke_pass))
+        public_ready = bool(
+            voice_tts_product_public_enabled()
+            and configured
+            and (
+                item.get("product_public_enabled")
+                or fallback_public_ready
+                or item.get("public_enabled")
+                or tts_smoke_pass
+                or not MINIMAX_REQUIRE_SMOKE_PASS
+            )
+        )
         technical_missing = [] if tts_readiness.get("configured") else list(item.get("missing_env") or [])
         if not configured and "tts_provider_missing" not in technical_missing:
             technical_missing.append("tts_provider_missing")
@@ -114928,21 +115053,24 @@ def _product_engine_readiness(product_area: str, action: str = "", state: dict |
         )
     if area in {"music", "music_ai", "music_background", "music_song", "suno", "suno_music", "suno_song"}:
         item = get_suno_music_readiness()
-        public_ready = bool(music_ai_public_processing_ready(item))
+        public_ready = bool(music_product_submit_public_ready(item, area))
         admin_real_test = _state_requests_admin_real_test(state)
         technical_missing = list(item.get("missing_env") or [])
-        if area in {"music_song", "suno_song"}:
-            if not item.get("fetch_ready"):
-                technical_missing.append("music_status_route_missing")
-            if not admin_real_test and not item.get("download_ready"):
-                technical_missing.append("music_download_not_ready")
-            if not admin_real_test and not item.get("full_result_ok"):
-                technical_missing.append("music_full_result_not_ready")
+        status_endpoint_ready = item.get("status_endpoint_ready", item.get("fetch_ready", True))
+        if not status_endpoint_ready:
+            technical_missing.append("music_status_route_missing")
+        legacy_full_result_guard = "product_public_enabled" not in item
+        public_blockers = [] if public_ready else ["public_flag"]
+        if legacy_full_result_guard:
+            if not item.get("download_ready", True):
+                public_blockers.append("music_download_not_ready")
+            if not item.get("full_result_ok", True):
+                public_blockers.append("music_full_result_not_ready")
         return engine_readiness_payload(
             configured=bool(item.get("ready")),
-            public_ready=public_ready,
+            public_ready=public_ready and not bool(technical_missing),
             technical_missing=technical_missing,
-            public_blockers=[] if public_ready else ["public_flag", *([] if item.get("download_ready") else ["music_download_not_ready"]), *([] if item.get("full_result_ok") else ["music_full_result_not_ready"])],
+            public_blockers=public_blockers,
             reason=item.get("reason") or item.get("admin_debug_reason") or "",
             admin_test_ready=bool(item.get("ready") and not technical_missing),
             admin_submit_ready=bool(item.get("ready")),
