@@ -333,6 +333,8 @@ def fail_job(job_id: str, safe_error: str, retryable: bool = True, partial_artif
         "retryable": bool(retryable),
         "partial_artifacts": partial_artifacts or [],
     }
+    if LAST_REAL_VIDEO_RENDER_RESULT:
+        payload["diagnostics"] = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
     return http_json("POST", "/api/v1/worker/fail", payload, timeout=30)
 
 
@@ -568,13 +570,14 @@ def render_real_video(job: dict, work_dir: str) -> str:
     global LAST_REAL_VIDEO_RENDER_RESULT
     LAST_REAL_VIDEO_RENDER_RESULT = {}
     try:
-        from services.video_real_render_connector import RealVideoRenderError, render_real_video_job
+        from services.video_real_render_connector import LAST_RENDER_DIAGNOSTICS, RealVideoRenderError, render_real_video_job
     except Exception as exc:
         raise RuntimeError(f"{REAL_VIDEO_RENDER_UNAVAILABLE}:connector_import_failed:{type(exc).__name__}") from exc
     try:
         result = render_real_video_job(job, work_dir)
         LAST_REAL_VIDEO_RENDER_RESULT = dict(result or {})
     except RealVideoRenderError as exc:
+        LAST_REAL_VIDEO_RENDER_RESULT = dict(getattr(exc, "diagnostics", {}) or LAST_RENDER_DIAGNOSTICS or {})
         raise RuntimeError(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE) from exc
     final_path = str(result.get("final_video_path") or "")
     if not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
@@ -658,9 +661,16 @@ def process_claimed_job(job: dict) -> dict:
             "connector_renderer": str(connector_result.get("renderer") or ""),
             "provider_attempted": bool(connector_result.get("provider_attempted")),
             "provider_route_selected": bool(connector_result.get("provider_route_selected")),
+            "provider_events": connector_result.get("provider_events") or [],
             "provider_task_ids": connector_result.get("provider_task_ids") or [],
+            "provider_video_ids": connector_result.get("provider_video_ids") or [],
+            "provider_models": connector_result.get("provider_models") or [],
+            "provider_modes": connector_result.get("provider_modes") or [],
             "provider_status": str(connector_result.get("provider_status") or ""),
             "provider_error": str(connector_result.get("provider_error") or ""),
+            "chunk_count": connector_result.get("chunk_count") or 0,
+            "downloaded_clip_paths": connector_result.get("downloaded_clip_paths") or [],
+            "stitch_attempted": bool(connector_result.get("stitch_attempted")),
             "fallback_used": bool(connector_result.get("fallback_used")),
             "fallback_reason": str(connector_result.get("fallback_reason") or ""),
             "visual_source": str(connector_result.get("visual_source") or ""),

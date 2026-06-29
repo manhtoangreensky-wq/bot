@@ -40323,7 +40323,13 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• provider route selected: <code>{'yes' if result.get('provider_route_selected') else 'no'}</code>",
         f"• connector renderer: <code>{html.escape(str(result.get('connector_renderer') or result.get('renderer') or '-'))}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
+        f"• provider video id: <code>{html.escape(','.join(str(item) for item in (result.get('provider_video_ids') or [])) or '-')}</code>",
         f"• provider task id: <code>{html.escape(','.join(str(item) for item in (result.get('provider_task_ids') or [])) or '-')}</code>",
+        f"• selected model: <code>{html.escape(','.join(str(item) for item in (result.get('provider_models') or [])) or '-')}</code>",
+        f"• selected mode: <code>{html.escape(','.join(str(item) for item in (result.get('provider_modes') or [])) or '-')}</code>",
+        f"• chunk count: <code>{safe_int(result.get('chunk_count'), 0) or '-'}</code>",
+        f"• download url present: <code>{'yes' if any((item or {}).get('download_url_present') for item in (result.get('provider_events') or []) if isinstance(item, dict)) else 'no'}</code>",
+        f"• stitch attempted: <code>{'yes' if result.get('stitch_attempted') else 'no'}</code>",
         f"• provider status: <code>{html.escape(str(result.get('provider_status') or '-'))}</code>",
         f"• provider error: <code>{html.escape(str(result.get('provider_error') or '-')[:220])}</code>",
         f"• fallback used: <code>{'yes' if result.get('fallback_used') else 'no'}</code>",
@@ -156042,6 +156048,7 @@ async def api_worker_fail(request: Request):
     if not job_id:
         raise HTTPException(status_code=400, detail="job_id required")
     partial_artifacts = payload.get("partial_artifacts") if isinstance(payload.get("partial_artifacts"), list) else []
+    diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
     conn = db_connect()
     try:
         result = remote_worker_api.fail_remote_worker_job(
@@ -156051,6 +156058,7 @@ async def api_worker_fail(request: Request):
             safe_error=str(payload.get("safe_error") or "remote_worker_failed")[:500],
             retryable=bool(payload.get("retryable", True)),
             partial_artifacts=partial_artifacts,
+            diagnostics=diagnostics,
         )
         if not result.get("ok"):
             raise HTTPException(status_code=409, detail=result.get("reason") or "fail_rejected")
