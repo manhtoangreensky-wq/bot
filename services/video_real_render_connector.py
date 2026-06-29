@@ -43,8 +43,21 @@ RAW_PROMPT_FRAME_MARKERS = (
 )
 
 
+LAST_RENDER_DIAGNOSTICS: dict[str, Any] = {}
+
+
 class RealVideoRenderError(RuntimeError):
-    """Safe worker-facing render error."""
+    """Safe worker-facing render error with admin-only diagnostics."""
+
+    def __init__(self, message: str = "", diagnostics: dict[str, Any] | None = None):
+        super().__init__(message or REAL_VIDEO_RENDER_UNAVAILABLE)
+        self.diagnostics = dict(diagnostics or {})
+
+
+def _record_render_diagnostics(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    global LAST_RENDER_DIAGNOSTICS
+    LAST_RENDER_DIAGNOSTICS = dict(payload or {})
+    return LAST_RENDER_DIAGNOSTICS
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -119,7 +132,7 @@ def _provider_order(job: dict | None = None) -> list[str]:
         job.get("provider_order")
         or asset_pack.get("provider_order")
         or os.environ.get("VIDEO_PROVIDER_ORDER")
-        or "shopaikey,key4u"
+        or "shopaikey,key4u,gommo_79ai"
     )
     if isinstance(raw, (list, tuple)):
         values = raw
@@ -132,11 +145,13 @@ def _provider_order(job: dict | None = None) -> list[str]:
             provider = "shopaikey"
         elif provider in {"key4u", "k4u"}:
             provider = "key4u"
+        elif provider in {"gommo", "79ai", "gommo79ai", "gommo_79ai", "go-mmo"}:
+            provider = "gommo_79ai"
         else:
             continue
         if provider not in result:
             result.append(provider)
-    return result or ["shopaikey", "key4u"]
+    return result or ["shopaikey", "key4u", "gommo_79ai"]
 
 
 def real_video_provider_readiness(job: dict | None = None, environ: dict[str, str] | None = None) -> dict:
@@ -169,6 +184,18 @@ def real_video_provider_readiness(job: dict | None = None, environ: dict[str, st
     if not key4u_configured and "adapter" not in key4u_missing:
         key4u_missing.append("video_config")
     providers.append({"provider": "key4u", "configured": key4u_configured, "missing": key4u_missing})
+
+    gommo_missing = []
+    try:
+        from providers.gommo_79ai_provider import Gommo79AIProvider
+
+        gommo_readiness = Gommo79AIProvider(environ=env).readiness()
+        gommo_configured = bool(gommo_readiness.get("ok"))
+        gommo_missing = list(gommo_readiness.get("missing") or [])
+    except Exception:
+        gommo_configured = False
+        gommo_missing = ["adapter"]
+    providers.append({"provider": "gommo_79ai", "configured": gommo_configured, "missing": gommo_missing})
 
     configured = [item["provider"] for item in providers if item["configured"]]
     ordered_ready = [provider for provider in order if provider in configured]
@@ -480,19 +507,108 @@ async def _poll_key4u(task_id: str) -> dict:
     return {"ok": bool(result.get("ok") or output_url), "provider": "key4u", "status": status, "output_url": output_url, "http_status": result.get("http_status") or 0}
 
 
+async def _submit_gommo(prompt: str, aspect_ratio: str, duration_seconds: float = 6.0) -> dict:
+    try:
+        from providers.gommo_79ai_provider import Gommo79AIProvider
+    except Exception as exc:
+        return {"ok": False, "provider": "gommo_79ai", "error": f"gommo_import_failed:{type(exc).__name__}"}
+    provider = Gommo79AIProvider()
+    if not provider.is_ready():
+        return {"ok": False, "provider": "gommo_79ai", "error": "gommo_video_config_missing"}
+    plan = await asyncio.to_thread(
+        provider.pick_video_model,
+        package="basic",
+        scenes=1,
+        duration=max(1, int(round(float(duration_seconds or 6.0)))),
+        aspect_ratio=aspect_ratio,
+        references={},
+    )
+    if not plan.get("ok"):
+        return {"ok": False, "provider": "gommo_79ai", "error": str(plan.get("error") or "gommo_model_unavailable")}
+    result = await asyncio.to_thread(
+        provider.create_video,
+        prompt=_safe_text(prompt, 1800),
+        model=str(plan.get("model") or ""),
+        ratio=str(plan.get("ratio") or aspect_ratio),
+        resolution=str(plan.get("resolution") or "720p"),
+        duration=int(plan.get("duration") or 6),
+        mode=str(plan.get("mode") or "business_fast"),
+        count_tasks=1,
+        references={},
+    )
+    if result.get("ok") and (result.get("video_id") or result.get("task_id")):
+        video_id = str(result.get("video_id") or result.get("task_id") or "").strip()
+        task_id = str(result.get("task_id") or video_id).strip()
+        return {
+            "ok": True,
+            "provider": "gommo_79ai",
+            "video_id": video_id,
+            "task_id": task_id,
+            "status": str(result.get("status") or "IN_PROGRESS"),
+            "download_url": str(result.get("download_url") or ""),
+            "model": str(result.get("model") or plan.get("model") or ""),
+            "mode": str(result.get("mode") or plan.get("mode") or ""),
+            "ratio": str(result.get("ratio") or plan.get("ratio") or aspect_ratio),
+            "resolution": str(result.get("resolution") or plan.get("resolution") or ""),
+            "duration": int(result.get("duration") or plan.get("duration") or 6),
+            "credit_fee": int(result.get("credit_fee") or 0),
+        }
+    return {"ok": False, "provider": "gommo_79ai", "error": str(result.get("error") or "gommo_create_video_failed")}
+
+
+async def _poll_gommo(video_id: str) -> dict:
+    try:
+        from providers.gommo_79ai_provider import Gommo79AIProvider
+    except Exception as exc:
+        return {"ok": False, "provider": "gommo_79ai", "status": "FAILED", "error": f"gommo_import_failed:{type(exc).__name__}"}
+    provider = Gommo79AIProvider()
+    if not provider.is_ready():
+        return {"ok": False, "provider": "gommo_79ai", "status": "FAILED", "error": "gommo_video_config_missing"}
+    result = await asyncio.to_thread(
+        provider.poll_video_until_ready,
+        str(video_id or ""),
+        max_attempts=max(1, _env_int("GOMMO_POLL_MAX_ATTEMPTS", _env_int("REAL_VIDEO_POLL_MAX_ATTEMPTS", 24))),
+        interval_seconds=max(0, _env_int("GOMMO_POLL_INTERVAL_SECONDS", _env_int("REAL_VIDEO_POLL_INTERVAL_SECONDS", 25))),
+        success_url_extra_attempts=max(0, _env_int("GOMMO_SUCCESS_URL_EXTRA_POLLS", 4)),
+    )
+    status = str(result.get("status") or "").upper()
+    if result.get("download_url"):
+        status = "SUCCESS"
+    elif result.get("timeout"):
+        status = "IN_PROGRESS"
+    return {
+        "ok": bool(result.get("ok", True)),
+        "provider": "gommo_79ai",
+        "status": status or "UNKNOWN",
+        "output_url": str(result.get("download_url") or ""),
+        "video_id": str(result.get("video_id") or video_id),
+        "task_id": str(result.get("task_id") or video_id),
+        "model": str(result.get("model") or ""),
+        "mode": str(result.get("mode") or ""),
+        "duration": int(result.get("duration") or 0),
+        "credit_fee": int(result.get("credit_fee") or 0),
+        "error": str(result.get("error") or ("poll_timeout" if result.get("timeout") else "")),
+    }
+
+
 async def _submit_provider(provider: str, prompt: str, aspect_ratio: str) -> dict:
     if provider == "shopaikey":
         return await _submit_shopaikey(prompt, aspect_ratio)
     if provider == "key4u":
         return await _submit_key4u(prompt, aspect_ratio)
+    if provider == "gommo_79ai":
+        return await _submit_gommo(prompt, aspect_ratio)
     return {"ok": False, "provider": provider, "error": "provider_unsupported"}
 
 
-async def _poll_provider(provider: str, task_id: str) -> dict:
+async def _poll_provider(provider: str, task_id: str, submit: dict | None = None) -> dict:
     if provider == "shopaikey":
         return await _poll_shopaikey(task_id)
     if provider == "key4u":
         return await _poll_key4u(task_id)
+    if provider == "gommo_79ai":
+        submit = dict(submit or {})
+        return await _poll_gommo(str(submit.get("video_id") or task_id))
     return {"ok": False, "provider": provider, "status": "FAILED", "error": "provider_unsupported"}
 
 
@@ -523,22 +639,47 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             errors.append(f"{provider}:{submit.get('error') or submit.get('status') or 'submit_failed'}")
             continue
         task_id = str(submit["task_id"])
+        output_url = str(submit.get("download_url") or "").strip()
+        if output_url:
+            return {
+                "ok": True,
+                "provider": provider,
+                "task_id": task_id,
+                "video_id": str(submit.get("video_id") or task_id),
+                "status": "SUCCESS",
+                "output_path": _download_output(output_url, raw_path),
+                "model": str(submit.get("model") or ""),
+                "mode": str(submit.get("mode") or ""),
+                "duration": submit.get("duration") or 0,
+                "download_url_present": True,
+            }
         attempts = max(1, _env_int("REAL_VIDEO_POLL_MAX_ATTEMPTS", 24))
         interval = max(0, _env_int("REAL_VIDEO_POLL_INTERVAL_SECONDS", 25))
         last = {}
         for attempt in range(1, attempts + 1):
             if attempt > 1 and interval:
                 await asyncio.sleep(interval)
-            last = await _poll_provider(provider, task_id)
+            last = await _poll_provider(provider, task_id, submit)
             output_url = str(last.get("output_url") or "").strip()
             status = str(last.get("status") or "").upper()
             if output_url:
-                return {"ok": True, "provider": provider, "task_id": task_id, "output_path": _download_output(output_url, raw_path)}
+                return {
+                    "ok": True,
+                    "provider": provider,
+                    "task_id": str(last.get("task_id") or task_id),
+                    "video_id": str(last.get("video_id") or submit.get("video_id") or task_id),
+                    "status": "SUCCESS",
+                    "output_path": _download_output(output_url, raw_path),
+                    "model": str(last.get("model") or submit.get("model") or ""),
+                    "mode": str(last.get("mode") or submit.get("mode") or ""),
+                    "duration": last.get("duration") or submit.get("duration") or 0,
+                    "download_url_present": True,
+                }
             if status in {"FAILED", "FAIL", "ERROR", "CANCELLED", "CANCELED"}:
-                errors.append(f"{provider}:poll_failed:{status}")
+                errors.append(f"{provider}:poll_failed:{status}:{last.get('error') or ''}")
                 break
         else:
-            errors.append(f"{provider}:poll_timeout")
+            errors.append(f"{provider}:poll_timeout:{task_id}")
     raise RealVideoRenderError(";".join(errors) or REAL_VIDEO_RENDER_UNAVAILABLE)
 
 
@@ -553,7 +694,12 @@ def build_real_scene_renderer(job: dict | None = None, events: list[dict[str, An
                     "scene_id": _safe_int(getattr(scene, "scene_id", 0), 0),
                     "provider": str(result.get("provider") or ""),
                     "task_id": str(result.get("task_id") or "")[:180],
+                    "video_id": str(result.get("video_id") or "")[:180],
                     "status": "downloaded" if result.get("ok") else str(result.get("status") or "failed"),
+                    "model": str(result.get("model") or "")[:120],
+                    "mode": str(result.get("mode") or "")[:80],
+                    "duration": result.get("duration") or 0,
+                    "download_url_present": bool(result.get("download_url_present")),
                 }
             )
         return result
@@ -796,21 +942,94 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     fallback_used = False
     fallback_reason = ""
     provider_route_selected = bool(readiness.get("ok"))
+
+    def _base_diagnostics(payload: dict[str, Any] | None = None, *, error: str = "") -> dict[str, Any]:
+        data = dict(payload or {})
+        if error:
+            data.setdefault("error", error)
+        data["provider_attempted"] = bool(provider_attempted)
+        data["provider_route_selected"] = bool(provider_route_selected)
+        data["fallback_used"] = bool(fallback_used or data.get("fallback_used"))
+        data["fallback_reason"] = str(data.get("fallback_reason") or fallback_reason or "")
+        data["provider_events"] = data.get("provider_events") or provider_events
+        data["provider_task_ids"] = data.get("provider_task_ids") or [item.get("task_id") for item in provider_events if item.get("task_id")]
+        data["provider_video_ids"] = data.get("provider_video_ids") or [item.get("video_id") for item in provider_events if item.get("video_id")]
+        data["provider_models"] = data.get("provider_models") or [item.get("model") for item in provider_events if item.get("model")]
+        data["provider_modes"] = data.get("provider_modes") or [item.get("mode") for item in provider_events if item.get("mode")]
+        data["chunk_count"] = data.get("chunk_count") or _scene_count(job)
+        data["downloaded_clip_paths"] = data.get("downloaded_clip_paths") or list(data.get("created_files") or [])[:80]
+        data["stitch_attempted"] = bool(data.get("master_video_path") or data.get("final_video_path") or data.get("stitch_attempted"))
+        data["provider_status"] = str(
+            data.get("provider_status")
+            or ("downloaded" if provider_events else ("attempted" if provider_attempted else "not_attempted"))
+        )
+        effective_provider_error = str(data.get("provider_error") or provider_error or "")
+        if provider_attempted and not data["provider_task_ids"] and not effective_provider_error:
+            effective_provider_error = str(data.get("error") or data.get("visual_classification") or "provider_attempt_no_artifact")
+        data["provider_error"] = effective_provider_error
+        data["provider_order"] = _provider_order(job)
+        data["provider_readiness"] = {
+            "ok": bool(readiness.get("ok")),
+            "ready_provider_order": readiness.get("ready_provider_order") or [],
+        }
+        data["original_user_prompt"] = original_prompt_from_job(job)
+        data["addon_degrade_notes"] = degrade_notes
+        data["partial_addons"] = any(item.get("requested") and not item.get("applied") for item in degrade_notes)
+        data["voice_requested"] = bool(addon.get("voice_enabled"))
+        data["music_requested"] = bool(addon.get("music_enabled"))
+        data["subtitle_requested"] = bool(addon.get("subtitle_enabled"))
+        data["subtitle_user_facing_source"] = bool(_has_user_facing_subtitle_text(job))
+        data["logo_requested"] = bool(addon.get("logo_enabled"))
+        if bgm_audio_path:
+            data["bgm_audio_path"] = bgm_audio_path
+        return _record_render_diagnostics(data)
+
+    def _raise_render_error(reason: str, payload: dict[str, Any] | None = None) -> None:
+        data = _base_diagnostics(payload, error=reason or REAL_VIDEO_RENDER_UNAVAILABLE)
+        if reason == FAILED_NO_REAL_VISUAL:
+            data["visual_classification"] = FAILED_NO_REAL_VISUAL
+            data["final_classification"] = FAILED_NO_REAL_VISUAL
+        raise RealVideoRenderError(reason or REAL_VIDEO_RENDER_UNAVAILABLE, diagnostics=data)
+
     if readiness.get("ok") or not is_product_video:
         provider_attempted = True
-        result = _run_multiscene_render(job, workspace, render_video_func=build_real_scene_renderer(job, provider_events), bgm_audio_path=bgm_audio_path)
+        try:
+            result = _run_multiscene_render(
+                job,
+                workspace,
+                render_video_func=build_real_scene_renderer(job, provider_events),
+                bgm_audio_path=bgm_audio_path,
+            )
+        except RealVideoRenderError as exc:
+            provider_error = str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE
+            result = dict(getattr(exc, "diagnostics", {}) or {})
+            result["ok"] = False
+            result["error"] = provider_error
+        except Exception as exc:
+            provider_error = f"provider_render_failed:{type(exc).__name__}"
+            result = {"ok": False, "error": provider_error}
         if not result.get("ok"):
-            provider_error = str(result.get("error") or REAL_VIDEO_RENDER_UNAVAILABLE)
+            provider_error = str(result.get("error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE)
     elif is_product_video:
         provider_error = str(readiness.get("reason") or REAL_VIDEO_RENDER_UNAVAILABLE)
     if is_product_video and (not result or not result.get("ok")) and _local_composer_enabled(job):
         local_workspace = os.path.join(workspace, "local_composer")
         fallback_used = True
         fallback_reason = provider_error or "provider_unavailable"
-        result = _run_multiscene_render(job, local_workspace, render_video_func=build_local_scene_composer(job), bgm_audio_path=bgm_audio_path)
+        try:
+            result = _run_multiscene_render(job, local_workspace, render_video_func=build_local_scene_composer(job), bgm_audio_path=bgm_audio_path)
+        except RealVideoRenderError as exc:
+            _raise_render_error(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE, dict(getattr(exc, "diagnostics", {}) or {}))
         result["renderer"] = LOCAL_PLACEHOLDER_RENDERER
         result["provider_attempted"] = bool(provider_attempted)
         result["provider_route_selected"] = bool(provider_route_selected)
+        result["provider_events"] = provider_events
+        result["provider_task_ids"] = [item.get("task_id") for item in provider_events if item.get("task_id")]
+        result["provider_video_ids"] = [item.get("video_id") for item in provider_events if item.get("video_id")]
+        result["provider_models"] = [item.get("model") for item in provider_events if item.get("model")]
+        result["provider_modes"] = [item.get("mode") for item in provider_events if item.get("mode")]
+        result["provider_status"] = "downloaded" if provider_events else ("attempted" if provider_attempted else "not_attempted")
+        result["provider_error"] = provider_error
         result["fallback_used"] = True
         result["fallback_reason"] = fallback_reason
         result["visual_source"] = VISUAL_SOURCE_LOCAL_PLACEHOLDER
@@ -828,6 +1047,9 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["fallback_reason"] = ""
         result["provider_events"] = provider_events
         result["provider_task_ids"] = [item.get("task_id") for item in provider_events if item.get("task_id")]
+        result["provider_video_ids"] = [item.get("video_id") for item in provider_events if item.get("video_id")]
+        result["provider_models"] = [item.get("model") for item in provider_events if item.get("model")]
+        result["provider_modes"] = [item.get("mode") for item in provider_events if item.get("mode")]
         result["provider_status"] = "downloaded" if provider_events else ("attempted" if provider_attempted else "not_attempted")
         result["provider_error"] = provider_error
         result["visual_source"] = VISUAL_SOURCE_PROVIDER_MP4
@@ -838,9 +1060,9 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["final_classification"] = result["visual_classification"]
     final_path = str(result.get("final_video_path") or "")
     if not result.get("ok") or not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
-        raise RealVideoRenderError(str(result.get("error") or REAL_VIDEO_RENDER_UNAVAILABLE))
+        _raise_render_error(str(result.get("error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE), result)
     if is_product_video and result.get("visual_classification") == FAILED_NO_REAL_VISUAL:
-        raise RealVideoRenderError(FAILED_NO_REAL_VISUAL)
+        _raise_render_error(FAILED_NO_REAL_VISUAL, result)
     result["provider_order"] = _provider_order(job)
     result["provider_readiness"] = {"ok": bool(readiness.get("ok")), "ready_provider_order": readiness.get("ready_provider_order") or []}
     result["original_user_prompt"] = original_prompt_from_job(job)
@@ -853,8 +1075,12 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     result["logo_requested"] = bool(addon.get("logo_enabled"))
     if bgm_audio_path:
         result["bgm_audio_path"] = bgm_audio_path
+    result["chunk_count"] = result.get("chunk_count") or _scene_count(job)
+    result["downloaded_clip_paths"] = result.get("downloaded_clip_paths") or list(result.get("created_files") or [])[:80]
+    result["stitch_attempted"] = bool(result.get("master_video_path") or result.get("final_video_path") or result.get("stitch_attempted"))
     result["visual_classification"] = classify_visual_result(result)
     result["final_classification"] = result["visual_classification"]
     if result["visual_classification"] != FINAL_AI_VIDEO:
         result["no_charge"] = True
+    _record_render_diagnostics(result)
     return result

@@ -1837,6 +1837,7 @@ def fail_remote_worker_job(
     safe_error: str = "",
     retryable: bool = True,
     partial_artifacts: list | None = None,
+    diagnostics: dict | None = None,
 ) -> dict:
     worker = sanitize_worker_id(worker_id)
     job = video_project_queue.get_video_render_job(conn, int(job_id))
@@ -1849,6 +1850,16 @@ def fail_remote_worker_job(
     error = str(safe_error or "remote_worker_failed").replace("\n", " ")[:1000]
     if partial_artifacts:
         error = f"{error}; partial_artifacts={len(partial_artifacts)}"[:1000]
+    if isinstance(diagnostics, dict) and diagnostics:
+        existing = _json_loads(job.get("result_json"), {})
+        if not isinstance(existing, dict):
+            existing = {}
+        diagnostic_payload = strip_secret_fields(dict(diagnostics or {}))
+        diagnostic_payload["ok"] = False
+        diagnostic_payload["worker_failed"] = True
+        diagnostic_payload["worker_safe_error"] = scrub_secret_text(error)[:500]
+        existing.update(diagnostic_payload)
+        conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(existing), int(job_id)))
     return video_project_queue.fail_video_job(conn, job_id=int(job_id), error=error, retry=bool(retryable))
 
 
