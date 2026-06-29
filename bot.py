@@ -97,6 +97,7 @@ from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
 from services import video_product_profiles as video_profiles
 from services import video_project_queue
+from services import knowledge_vault, knowledge_vault_sync, vault_importer
 from services import video_prompt_vault
 from services import video_profile_context_engine
 from services import video_prompt_continuity as video_continuity
@@ -961,6 +962,11 @@ MAX_OPERATOR_UPLOAD_MB = int(_env("MAX_OPERATOR_UPLOAD_MB", "200") or "200")
 META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v24.0")
 REFERENCE_VIDEO_DIR = _env("REFERENCE_VIDEO_DIR", r"D:\mybot\video AI tham khảo")
 TOAN_AAS_DOCS_DIR = _env("TOAN_AAS_DOCS_DIR")
+TOAN_AAS_VAULT_STORAGE_DIR = _env("TOAN_AAS_VAULT_STORAGE_DIR", os.path.join("workspace", "knowledge_vault"))
+TOAN_AAS_VAULT_IMPORT_ROOT = _env("TOAN_AAS_VAULT_IMPORT_ROOT", r"D:\toanaas")
+TOAN_AAS_VAULT_VIDEO_REF_DIR = _env("TOAN_AAS_VAULT_VIDEO_REF_DIR", r"D:\toanaas\video AI tham khảo")
+TOAN_AAS_VAULT_MAX_FILES_PER_BATCH = max(1, env_int("TOAN_AAS_VAULT_MAX_FILES_PER_BATCH", 50))
+TOAN_AAS_VAULT_MAX_FILE_SIZE_MB = max(1, env_int("TOAN_AAS_VAULT_MAX_FILE_SIZE_MB", 500))
 LOCAL_WORKER_ENABLED = env_flag("LOCAL_WORKER_ENABLED", "false")
 LOCAL_WORKER_TOKEN = _env("LOCAL_WORKER_TOKEN")
 LOCAL_WORKER_POLL_ENABLED = env_flag("LOCAL_WORKER_POLL_ENABLED", "true")
@@ -123507,6 +123513,467 @@ async def cmd_prompt_vault_export(update: Update, context: ContextTypes.DEFAULT_
     await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename=output.name, caption="Prompt vault export — secrets/customer data excluded.")
 
 
+VAULT_ASSET_LABELS = {
+    "video": "Kho Video",
+    "image": "Kho Ảnh",
+    "keyframe": "Kho Ảnh / keyframe",
+    "thumbnail": "Kho Ảnh / thumbnail",
+    "music": "Kho Nhạc",
+    "sfx": "Kho SFX",
+    "voice": "Kho Voice",
+    "audio": "Kho Audio",
+    "document": "Kho Prompt / workflow",
+}
+
+
+def toan_knowledge_vault():
+    return knowledge_vault.get_vault(TOAN_AAS_VAULT_STORAGE_DIR)
+
+
+def toan_vault_importer():
+    return vault_importer.VaultImporter(toan_knowledge_vault())
+
+
+def toan_vault_ops():
+    return knowledge_vault_sync.KnowledgeVaultOps(toan_knowledge_vault())
+
+
+def vault_json_block(payload: dict | list) -> str:
+    return "<pre>" + html.escape(json.dumps(payload, ensure_ascii=False, indent=2)) + "</pre>"
+
+
+def vault_admin_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🧠 Kho học liệu", callback_data="vault|status"),
+                InlineKeyboardButton("📥 Import học liệu", callback_data="vault|import"),
+            ],
+            [
+                InlineKeyboardButton("📚 Kho Prompt", callback_data="vault|prompts"),
+                InlineKeyboardButton("🎬 Kho Video", callback_data="vault|assets|video"),
+            ],
+            [
+                InlineKeyboardButton("🖼 Kho Ảnh", callback_data="vault|assets|image"),
+                InlineKeyboardButton("🎵 Kho Nhạc/SFX", callback_data="vault|assets|audio"),
+            ],
+            [
+                InlineKeyboardButton("🧾 Nháp cần duyệt", callback_data="vault|review"),
+                InlineKeyboardButton("🔎 Tìm kiếm kho", callback_data="vault|search"),
+            ],
+        ]
+    )
+
+
+def vault_prompt_keyboard(prompt_id: int, *, admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("Dùng prompt này", callback_data=f"vault|use|{int(prompt_id)}")]]
+    if admin:
+        rows.append([InlineKeyboardButton("Duyệt public", callback_data=f"vault|approve_prompt|{int(prompt_id)}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def vault_prompt_list_text(prompts: list[dict], *, title: str = "📚 Kho Prompt") -> str:
+    lines = [f"<b>{html.escape(title)}</b>", ""]
+    if not prompts:
+        lines.append("Chưa có prompt phù hợp hoặc prompt chưa được admin duyệt.")
+        return "\n".join(lines)
+    for prompt in prompts[:10]:
+        tags = ", ".join(prompt.get("style_tags_json") or []) or "-"
+        lines.append(
+            f"• <code>{html.escape(str(prompt.get('id') or '-'))}</code> "
+            f"{html.escape(str(prompt.get('prompt_type') or 'caption'))} · "
+            f"{html.escape(str(prompt.get('category') or '-'))} · {html.escape(tags)}"
+        )
+        preview = str(prompt.get("prompt_text") or "").strip()
+        if preview:
+            lines.append(f"  {html.escape(preview[:220])}")
+    return "\n".join(lines)
+
+
+def vault_asset_list_text(assets: list[dict], *, title: str) -> str:
+    lines = [f"<b>{html.escape(title)}</b>", ""]
+    if not assets:
+        lines.append("Chưa có asset phù hợp.")
+        return "\n".join(lines)
+    for asset in assets[:12]:
+        tags = ", ".join(asset.get("tags_json") or []) or "-"
+        lines.append(
+            f"• <code>{html.escape(str(asset.get('id') or '-'))}</code> "
+            f"{html.escape(str(asset.get('asset_type') or '-'))} · "
+            f"{html.escape(str(asset.get('rights_status') or '-'))} · {html.escape(tags)}"
+        )
+        title_value = str(asset.get("title") or "").strip()
+        if title_value:
+            lines.append(f"  {html.escape(title_value[:220])}")
+    return "\n".join(lines)
+
+
+def vault_media_meta_from_message(message) -> dict:
+    info = classify_user_file_from_message(message)
+    if info:
+        return info
+    media, file_type = message_media_candidate(message)
+    if not media:
+        return {}
+    mime_type = media_content_type(media, file_type)
+    extension = mimetypes.guess_extension(mime_type) or ".bin"
+    file_name = str(getattr(media, "file_name", "") or f"telegram_{file_type}{extension}")
+    return {
+        "file_id": str(getattr(media, "file_id", "") or ""),
+        "file_type": str(file_type or "media"),
+        "kind": str(file_type or "media"),
+        "mime_type": mime_type,
+        "filename": file_name,
+        "file_name": file_name,
+        "file_size": int(getattr(media, "file_size", 0) or 0),
+    }
+
+
+def vault_recent_media_meta(update: Update) -> dict:
+    message = update.message
+    if message and getattr(message, "reply_to_message", None):
+        info = vault_media_meta_from_message(message.reply_to_message)
+        if info:
+            return info
+    info = vault_media_meta_from_message(message)
+    if info:
+        return info
+    uid = update.effective_user.id if update.effective_user else 0
+    for store in (LAST_USER_VIDEO, LAST_USER_IMAGE, LAST_USER_AUDIO):
+        cached = get_recent_media_state(store, uid)
+        if cached:
+            return cached
+    return get_last_user_file(uid)
+
+
+def vault_existing_file_path(value: str) -> Path | None:
+    try:
+        candidate = Path(str(value or "").strip()).expanduser()
+        return candidate if candidate.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+async def vault_import_telegram_meta(context: ContextTypes.DEFAULT_TYPE, meta: dict, *, user_id: int | str = "") -> dict:
+    file_id = str(meta.get("file_id") or "")
+    if not file_id:
+        return {"ok": False, "reason": "telegram_file_missing"}
+    size = int(meta.get("file_size") or 0)
+    max_bytes = TOAN_AAS_VAULT_MAX_FILE_SIZE_MB * 1024 * 1024
+    if size and size > max_bytes:
+        return {"ok": False, "reason": "file_too_large", "max_mb": TOAN_AAS_VAULT_MAX_FILE_SIZE_MB}
+    telegram_file = await context.bot.get_file(file_id)
+    data = bytes(await telegram_file.download_as_bytearray())
+    importer = toan_vault_importer()
+    return importer.import_bytes(
+        data,
+        original_name=str(meta.get("file_name") or meta.get("filename") or "telegram_upload.bin"),
+        source_type="telegram_upload",
+        imported_by_user_id=user_id,
+        rights_status="reference_only",
+        file_id=file_id,
+    )
+
+
+def vault_find_record(kind: str, record_id: int) -> dict | None:
+    payload = toan_knowledge_vault().snapshot()
+    table = {
+        "job": "extraction_jobs",
+        "source": "knowledge_sources",
+        "prompt": "prompt_library",
+        "asset": "media_assets",
+    }.get(kind)
+    if not table:
+        return None
+    return next((item for item in payload.get(table, []) if int(item.get("id") or 0) == int(record_id)), None)
+
+
+async def cmd_vault_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    importer = toan_vault_importer()
+    status = importer.debug_status()
+    await update.message.reply_text(
+        "🧠 <b>Kho học liệu TOAN AAS</b>\n\n"
+        + vault_json_block(status)
+        + "\n\nCommands: /vault_import_folder, /vault_import_file, /vault_export_prompts, /kho_prompt",
+        parse_mode="HTML",
+        reply_markup=vault_admin_keyboard(),
+    )
+
+
+async def cmd_vault_scan_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    folder = " ".join(context.args or []).strip() or TOAN_AAS_VAULT_IMPORT_ROOT
+    summary = toan_vault_importer().scan_folder(
+        folder,
+        max_files=TOAN_AAS_VAULT_MAX_FILES_PER_BATCH,
+        max_file_size_bytes=TOAN_AAS_VAULT_MAX_FILE_SIZE_MB * 1024 * 1024,
+    )
+    await update.message.reply_text("🔎 <b>Vault folder scan</b>\n\n" + vault_json_block(summary), parse_mode="HTML")
+
+
+async def cmd_vault_import_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    folder = " ".join(context.args or []).strip() or TOAN_AAS_VAULT_IMPORT_ROOT
+    summary = toan_vault_importer().import_folder(
+        folder,
+        imported_by_user_id=update.effective_user.id if update.effective_user else "",
+        max_files=TOAN_AAS_VAULT_MAX_FILES_PER_BATCH,
+        max_file_size_bytes=TOAN_AAS_VAULT_MAX_FILE_SIZE_MB * 1024 * 1024,
+        rights_status="reference_only",
+    )
+    public_summary = {key: value for key, value in summary.items() if key != "results"}
+    await update.message.reply_text("📥 <b>Vault folder import</b>\n\n" + vault_json_block(public_summary), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
+async def cmd_vault_import_video_refs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    summary = toan_vault_importer().import_folder(
+        TOAN_AAS_VAULT_VIDEO_REF_DIR,
+        imported_by_user_id=update.effective_user.id if update.effective_user else "",
+        max_files=TOAN_AAS_VAULT_MAX_FILES_PER_BATCH,
+        max_file_size_bytes=TOAN_AAS_VAULT_MAX_FILE_SIZE_MB * 1024 * 1024,
+        rights_status="reference_only",
+    )
+    public_summary = {key: value for key, value in summary.items() if key != "results"}
+    await update.message.reply_text("🎬 <b>Vault video reference import</b>\n\n" + vault_json_block(public_summary), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
+async def cmd_vault_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = " ".join(context.args or []).strip()
+    importer = toan_vault_importer()
+    if raw:
+        candidate = vault_existing_file_path(raw)
+        looks_like_path = bool(re.match(r"^[A-Za-z]:[\\/]", raw) or raw.startswith(("/", "\\", ".")))
+        if candidate:
+            result = importer.import_file(
+                candidate,
+                imported_by_user_id=update.effective_user.id if update.effective_user else "",
+                rights_status="reference_only",
+            )
+        elif looks_like_path:
+            result = {"ok": False, "reason": "local_path_unavailable", "path": raw}
+        else:
+            result = importer.import_bytes(
+                raw.encode("utf-8"),
+                original_name="telegram_prompt.txt",
+                source_type="telegram_text",
+                imported_by_user_id=update.effective_user.id if update.effective_user else "",
+                rights_status="reference_only",
+            )
+    else:
+        meta = vault_recent_media_meta(update)
+        if not meta:
+            return await update.message.reply_text(
+                "Cú pháp: /vault_import_file <local_path hoặc prompt text>\n"
+                "Hoặc reply vào video/ảnh/audio/file rồi gửi /vault_import_file."
+            )
+        result = await vault_import_telegram_meta(context, meta, user_id=update.effective_user.id if update.effective_user else "")
+    await update.message.reply_text("📥 <b>Vault file import</b>\n\n" + vault_json_block(result), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
+async def cmd_vault_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /vault_job_debug <JOB_ID>")
+    record = vault_find_record("job", safe_int(str(context.args[0]).strip(), 0))
+    await update.message.reply_text("🧪 <b>Vault job debug</b>\n\n" + vault_json_block(record or {"ok": False, "reason": "not_found"}), parse_mode="HTML")
+
+
+async def cmd_vault_source_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /vault_source_debug <SOURCE_ID>")
+    source_id = safe_int(str(context.args[0]).strip(), 0)
+    payload = toan_knowledge_vault().snapshot()
+    result = {
+        "source": vault_find_record("source", source_id),
+        "assets": [item for item in payload.get("media_assets", []) if int(item.get("source_id") or 0) == source_id],
+        "prompts": [item for item in payload.get("prompt_library", []) if int(item.get("source_id") or 0) == source_id],
+        "jobs": [item for item in payload.get("extraction_jobs", []) if int(item.get("source_id") or 0) == source_id],
+    }
+    await update.message.reply_text("🧪 <b>Vault source debug</b>\n\n" + vault_json_block(result), parse_mode="HTML")
+
+
+async def cmd_vault_prompt_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /vault_prompt_debug <PROMPT_ID>")
+    record = vault_find_record("prompt", safe_int(str(context.args[0]).strip(), 0))
+    await update.message.reply_text("🧪 <b>Vault prompt debug</b>\n\n" + vault_json_block(record or {"ok": False, "reason": "not_found"}), parse_mode="HTML")
+
+
+async def cmd_vault_export_prompts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    export_format = (context.args[0] if context.args else "markdown").strip().lower()
+    try:
+        output_path = toan_knowledge_vault().export_prompts(export_format, public_only=False)
+    except ValueError:
+        return await update.message.reply_text("Format hỗ trợ: markdown, json, txt.")
+    with output_path.open("rb") as handle:
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=handle,
+            filename=output_path.name,
+            caption="Vault prompt export — chỉ dành cho admin.",
+        )
+
+
+async def cmd_vault_export_index(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    public = any(str(arg).strip().lower() in {"public", "--public"} for arg in (context.args or []))
+    output_path = toan_knowledge_vault().export_index(public=public)
+    with output_path.open("rb") as handle:
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=handle,
+            filename=output_path.name,
+            caption="Vault public index export." if public else "Vault admin index export.",
+        )
+
+
+async def cmd_vault_classify_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result = toan_vault_ops().classify_all()
+    await update.message.reply_text("🏷 <b>Vault classify all</b>\n\n" + vault_json_block(result), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
+async def cmd_vault_sync_index(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sync_dir = " ".join(context.args or []).strip() or os.path.join("workspace", "knowledge_vault_sync")
+    result = toan_vault_ops().sync_index(sync_dir)
+    await update.message.reply_text("🔁 <b>Vault sync index</b>\n\n" + vault_json_block(result), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
+async def cmd_vault_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = [str(arg).strip() for arg in (context.args or []) if str(arg).strip()]
+    include_media = any(arg in {"--include-media", "include_media"} for arg in args)
+    backup_dir = " ".join(arg for arg in args if arg not in {"--include-media", "include_media"}).strip() or os.path.join("backups", "knowledge_vault")
+    result = toan_vault_ops().create_backup(backup_dir, include_media=include_media)
+    await update.message.reply_text("💾 <b>Vault backup</b>\n\n" + vault_json_block(result), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
+async def cmd_vault_add_online_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /vault_add_online_source <url> [title/ghi chú]")
+    url = str(context.args[0]).strip()
+    title = " ".join(context.args[1:]).strip()
+    result = toan_vault_ops().add_online_source(
+        url,
+        title=title,
+        imported_by_user_id=update.effective_user.id if update.effective_user else "",
+        rights_status="reference_only",
+    )
+    await update.message.reply_text("🌐 <b>Vault online source</b>\n\n" + vault_json_block(result), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
+async def cmd_vault_import_online_sources(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        return await update.message.reply_text("Cú pháp: /vault_import_online_sources <url1> <url2> ... hoặc /vault_import_online_sources <file.txt>")
+    raw = [str(arg).strip() for arg in (context.args or []) if str(arg).strip()]
+    source_file = vault_existing_file_path(raw[0]) if len(raw) == 1 else None
+    if source_file:
+        result = toan_vault_ops().import_online_sources_file(
+            source_file,
+            imported_by_user_id=update.effective_user.id if update.effective_user else "",
+            rights_status="reference_only",
+        )
+    else:
+        result = toan_vault_ops().import_online_sources(
+            raw,
+            imported_by_user_id=update.effective_user.id if update.effective_user else "",
+            rights_status="reference_only",
+        )
+    public_summary = {key: value for key, value in result.items() if key != "results"}
+    await update.message.reply_text("🌐 <b>Vault online source batch</b>\n\n" + vault_json_block(public_summary), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
+async def cmd_vault_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    prompts = toan_knowledge_vault().search_prompt(public_only=False, limit=12)
+    drafts = [prompt for prompt in prompts if prompt.get("status") != "approved"]
+    text = vault_prompt_list_text(drafts, title="🧾 Nháp cần duyệt")
+    rows = [[InlineKeyboardButton(f"Duyệt #{prompt['id']}", callback_data=f"vault|approve_prompt|{int(prompt['id'])}")] for prompt in drafts[:8]]
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else vault_admin_keyboard())
+
+
+async def cmd_vault_prompt_library(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    is_admin = bool(update.effective_user and is_admin_user(update.effective_user.id))
+    query = " ".join(context.args or []).strip()
+    prompts = toan_knowledge_vault().search_prompt(query=query, public_only=not is_admin, limit=10)
+    text = vault_prompt_list_text(prompts, title="📚 Kho Prompt TOAN AAS")
+    rows = [[InlineKeyboardButton(f"Dùng prompt #{prompt['id']}", callback_data=f"vault|use|{int(prompt['id'])}")] for prompt in prompts[:8]]
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+
+
+async def handle_knowledge_vault_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else "status"
+    admin = bool(query.from_user and is_admin_user(query.from_user.id))
+    vault = toan_knowledge_vault()
+
+    if action == "use" and len(parts) >= 3:
+        prompt = vault.get_prompt(int(parts[2]), public=not admin)
+        if not prompt:
+            return await query.message.reply_text("Prompt chưa được duyệt public hoặc không tồn tại.")
+        await query.message.reply_text(
+            "📋 <b>Prompt sẵn sàng dùng</b>\n\n<pre>" + html.escape(str(prompt.get("prompt_text") or "")) + "</pre>",
+            parse_mode="HTML",
+        )
+        return
+
+    if not admin:
+        prompts = vault.search_prompt(public_only=True, limit=10)
+        rows = [[InlineKeyboardButton(f"Dùng prompt #{prompt['id']}", callback_data=f"vault|use|{int(prompt['id'])}")] for prompt in prompts[:8]]
+        return await query.edit_message_text(vault_prompt_list_text(prompts, title="📚 Kho Prompt TOAN AAS"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+
+    if action == "approve_prompt" and len(parts) >= 3:
+        prompt = vault.approve_prompt(int(parts[2]), approved_by=query.from_user.id)
+        return await query.edit_message_text(
+            "✅ Đã duyệt prompt.\n\n" + vault_json_block(prompt or {"ok": False, "reason": "not_found"}),
+            parse_mode="HTML",
+            reply_markup=vault_admin_keyboard(),
+        )
+    if action == "approve_asset" and len(parts) >= 3:
+        asset = vault.approve_asset(int(parts[2]), approved_by=query.from_user.id)
+        return await query.edit_message_text(
+            "✅ Đã duyệt asset.\n\n" + vault_json_block(asset or {"ok": False, "reason": "not_found"}),
+            parse_mode="HTML",
+            reply_markup=vault_admin_keyboard(),
+        )
+    if action == "prompts":
+        prompts = vault.search_prompt(public_only=False, limit=10)
+        rows = [[InlineKeyboardButton(f"Dùng prompt #{prompt['id']}", callback_data=f"vault|use|{int(prompt['id'])}")] for prompt in prompts[:8]]
+        return await query.edit_message_text(vault_prompt_list_text(prompts), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else vault_admin_keyboard())
+    if action == "review":
+        prompts = [prompt for prompt in vault.search_prompt(public_only=False, limit=20) if prompt.get("status") != "approved"]
+        rows = [[InlineKeyboardButton(f"Duyệt #{prompt['id']}", callback_data=f"vault|approve_prompt|{int(prompt['id'])}")] for prompt in prompts[:8]]
+        return await query.edit_message_text(vault_prompt_list_text(prompts, title="🧾 Nháp cần duyệt"), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows) if rows else vault_admin_keyboard())
+    if action == "assets":
+        requested = parts[2] if len(parts) > 2 else ""
+        if requested == "audio":
+            assets = []
+            for asset_type in ("music", "sfx", "voice", "audio"):
+                assets.extend(vault.list_assets(asset_type=asset_type, public_only=False, limit=8))
+        else:
+            assets = vault.list_assets(asset_type=requested, public_only=False, limit=12)
+        label = VAULT_ASSET_LABELS.get(requested, "Kho Media")
+        return await query.edit_message_text(vault_asset_list_text(assets, title=label), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+    if action == "search":
+        return await query.edit_message_text(
+            "🔎 Dùng <code>/kho_prompt &lt;từ khóa&gt;</code> để tìm prompt public/admin, hoặc <code>/vault_prompt_debug &lt;id&gt;</code> để xem chi tiết admin.",
+            parse_mode="HTML",
+            reply_markup=vault_admin_keyboard(),
+        )
+    if action == "import":
+        return await query.edit_message_text(
+            "📥 <b>Import học liệu</b>\n\n"
+            "• <code>/vault_import_folder</code> dùng thư mục import mặc định.\n"
+            "• <code>/vault_import_video_refs</code> nhập Kho Video tham khảo.\n"
+            "• Reply video/ảnh/audio/file rồi gửi <code>/vault_import_file</code>.\n"
+            "• Prompt text: <code>/vault_import_file Video prompt: ...</code>\n"
+            "• Online refs: <code>/vault_import_online_sources &lt;url1&gt; &lt;url2&gt;</code>\n"
+            "• Sync/backup: <code>/vault_sync_index</code>, <code>/vault_backup</code>",
+            parse_mode="HTML",
+            reply_markup=vault_admin_keyboard(),
+        )
+
+    status = toan_vault_importer().debug_status()
+    await query.edit_message_text("🧠 <b>Kho học liệu TOAN AAS</b>\n\n" + vault_json_block(status), parse_mode="HTML", reply_markup=vault_admin_keyboard())
+
+
 async def cmd_trend_source_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
@@ -156337,6 +156804,24 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("prompt_vault_add", cmd_prompt_vault_add))
     tg_app.add_handler(CommandHandler("prompt_vault_import", cmd_prompt_vault_add))
     tg_app.add_handler(CommandHandler("prompt_vault_export", cmd_prompt_vault_export))
+    tg_app.add_handler(CommandHandler("vault_status", admin_internal_command(cmd_vault_status)))
+    tg_app.add_handler(CommandHandler("vault_import_folder", admin_internal_command(cmd_vault_import_folder)))
+    tg_app.add_handler(CommandHandler("vault_scan_folder", admin_internal_command(cmd_vault_scan_folder)))
+    tg_app.add_handler(CommandHandler("vault_import_video_refs", admin_internal_command(cmd_vault_import_video_refs)))
+    tg_app.add_handler(CommandHandler("vault_import_file", admin_internal_command(cmd_vault_import_file)))
+    tg_app.add_handler(CommandHandler("vault_job_debug", admin_internal_command(cmd_vault_job_debug)))
+    tg_app.add_handler(CommandHandler("vault_source_debug", admin_internal_command(cmd_vault_source_debug)))
+    tg_app.add_handler(CommandHandler("vault_prompt_debug", admin_internal_command(cmd_vault_prompt_debug)))
+    tg_app.add_handler(CommandHandler("vault_export_prompts", admin_internal_command(cmd_vault_export_prompts)))
+    tg_app.add_handler(CommandHandler("vault_export_index", admin_internal_command(cmd_vault_export_index)))
+    tg_app.add_handler(CommandHandler("vault_classify_all", admin_internal_command(cmd_vault_classify_all)))
+    tg_app.add_handler(CommandHandler("vault_sync_index", admin_internal_command(cmd_vault_sync_index)))
+    tg_app.add_handler(CommandHandler("vault_backup", admin_internal_command(cmd_vault_backup)))
+    tg_app.add_handler(CommandHandler("vault_add_online_source", admin_internal_command(cmd_vault_add_online_source)))
+    tg_app.add_handler(CommandHandler("vault_import_online_sources", admin_internal_command(cmd_vault_import_online_sources)))
+    tg_app.add_handler(CommandHandler("vault_review", admin_internal_command(cmd_vault_review)))
+    tg_app.add_handler(CommandHandler("kho_prompt", cmd_vault_prompt_library))
+    tg_app.add_handler(CommandHandler("vault_prompt", cmd_vault_prompt_library))
     tg_app.add_handler(CommandHandler("trend_source_status", cmd_trend_source_status))
     tg_app.add_handler(CommandHandler("trend_source_refresh", cmd_trend_source_refresh))
     tg_app.add_handler(CommandHandler("trend_source_add", cmd_trend_source_add))
@@ -156579,6 +157064,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_payos_risk_callback, pattern=r"^payrisk\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_canary_callback, pattern=r"^remote_worker_canary_(create|status)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_remote_worker_prod_canary_callback, pattern=r"^remote_worker_prod_canary_(create|status)(\||$)"))
+    tg_app.add_handler(CallbackQueryHandler(handle_knowledge_vault_callback, pattern=r"^vault\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback, pattern=r"^admin_help\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_provider_choice, pattern=r"^prov\|"))
