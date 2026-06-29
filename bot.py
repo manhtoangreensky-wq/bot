@@ -55484,6 +55484,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "category": "video_product",
         "flow_type": "canonical_profile_first",
         "canonical": True,
+        "first_step": "profile_select",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "video_trend",
@@ -55500,6 +55501,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "category": "video_product",
         "flow_type": "real_ai_video_guarded",
         "canonical": False,
+        "first_step": "tool_home",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "video_ai_real",
@@ -55514,6 +55516,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
+        "flow_type": "script_first",
+        "first_step": "intro",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "script_image_video",
@@ -55528,6 +55532,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
+        "flow_type": "local_frame_video",
+        "first_step": "tool_home",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "frame_video_local",
@@ -55542,6 +55548,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
+        "flow_type": "self_shot_scene_change",
+        "first_step": "tool_home",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "self_shot_scene_change",
@@ -55552,10 +55560,12 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🎬 多场景 AI 影片",
         "entry_callback": "vproduct|open|multi_scene_film",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|ideas|multi_scene_film", "vproduct|input_text|multi_scene_film"),
+        "expected_children": ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|cinematic_trailer", "vproduct|input_text"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
+        "flow_type": "profile_first_multiscene_ui",
+        "first_step": "profile_select",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "multi_scene_film",
@@ -55566,10 +55576,12 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🧠 视频创意",
         "entry_callback": "vproduct|open|video_idea",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|ideas|video_idea", "vproduct|input_text|video_idea"),
+        "expected_children": ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review", "vproduct|input_text"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "planning",
+        "flow_type": "profile_first_idea",
+        "first_step": "profile_select",
         "invoice_reachable": False,
         "job_reachable": False,
         "product_id": "video_idea",
@@ -55580,10 +55592,12 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🎬 分镜 + Prompt",
         "entry_callback": "vproduct|open|storyboard_prompt",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|sample|storyboard_prompt", "vproduct|input_text|storyboard_prompt"),
+        "expected_children": ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review", "vproduct|input_text"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "planning",
+        "flow_type": "profile_first_storyboard",
+        "first_step": "profile_select",
         "invoice_reachable": False,
         "job_reachable": False,
         "product_id": "storyboard_prompt",
@@ -55598,6 +55612,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "helper",
+        "flow_type": "prompt_library",
+        "first_step": "tool_home",
         "invoice_reachable": False,
         "job_reachable": False,
         "product_id": "",
@@ -55612,6 +55628,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "helper",
+        "flow_type": "download_link",
+        "first_step": "tool_home",
         "invoice_reachable": False,
         "job_reachable": False,
         "product_id": "",
@@ -55626,6 +55644,8 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "helper",
+        "flow_type": "local_edit",
+        "first_step": "tool_home",
         "invoice_reachable": False,
         "job_reachable": False,
         "product_id": "video_local_edit",
@@ -55635,6 +55655,202 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
 
 def video_public_route_for_tool(tool_id: str) -> dict:
     return dict(VIDEO_PUBLIC_ROUTE_MATRIX.get(str(tool_id or "")) or {})
+
+
+VIDEO_PROFILE_FIRST_PRODUCTS = frozenset({
+    "video_trend",
+    "video_idea",
+    "storyboard_prompt",
+    "multi_scene_film",
+})
+
+VIDEO_BACK_MENU_TARGET = "__video_menu__"
+
+VIDEO_STEP_BACK_MATRIX = {
+    "video_trend": {
+        "profile_select": VIDEO_BACK_MENU_TARGET,
+        "intro": "profile_select",
+        "collect_input": "profile_select",
+        "idea_suggestions": "collect_input",
+        "asset_intake": "idea_suggestions",
+        "asset_ai_image": "asset_intake",
+        "asset_layout_ideas": "asset_intake",
+        "asset_storyboard_prompt": "asset_intake",
+        "b14_creative_controls": "asset_intake",
+        "storyboard_preview": "b14_creative_controls",
+        "b14_addons": "storyboard_preview",
+        "b14_aspect": "b14_addons",
+        "b14_quality": "b14_aspect",
+        "b14_scene_count": "b14_quality",
+        "b14_invoice": "b14_scene_count",
+        "b14_queue_status": "b14_invoice",
+        "result": "storyboard_preview",
+    },
+    "video_idea": {
+        "profile_select": VIDEO_BACK_MENU_TARGET,
+        "intro": "profile_select",
+        "collect_input": "profile_select",
+        "idea_suggestions": "collect_input",
+        "result": "idea_suggestions",
+    },
+    "storyboard_prompt": {
+        "profile_select": VIDEO_BACK_MENU_TARGET,
+        "intro": "profile_select",
+        "collect_input": "profile_select",
+        "platform": "collect_input",
+        "panels": "platform",
+        "style": "panels",
+        "color": "style",
+        "image_plan": "color",
+        "extra_scene": "image_plan",
+        "output_target": "extra_scene",
+        "result": "output_target",
+        "storyboard_preview": "result",
+    },
+    "script_image_video": {
+        "intro": VIDEO_BACK_MENU_TARGET,
+        "collect_input": "intro",
+        "idea_suggestions": "intro",
+        "platform": "collect_input",
+        "panels": "platform",
+        "style": "panels",
+        "color": "style",
+        "image_plan": "color",
+        "extra_scene": "image_plan",
+        "result": "extra_scene",
+        "asset_intake": "result",
+        "storyboard_preview": "asset_intake",
+    },
+    "multi_scene_film": {
+        "profile_select": VIDEO_BACK_MENU_TARGET,
+        "intro": "profile_select",
+        "collect_input": "profile_select",
+        "idea_suggestions": "collect_input",
+        "platform": "collect_input",
+        "panels": "platform",
+        "style": "panels",
+        "color": "style",
+        "pace": "color",
+        "image_plan": "pace",
+        "extra_scene": "image_plan",
+        "result": "extra_scene",
+        "storyboard_preview": "result",
+    },
+    "video_ai_real": {
+        "intro": VIDEO_BACK_MENU_TARGET,
+        "collect_input": "intro",
+        "style": "collect_input",
+        "color": "style",
+        "movement": "color",
+        "result": "movement",
+    },
+}
+
+
+def video_flow_first_step(tool_id: str) -> str:
+    route = video_public_route_for_tool(tool_id)
+    return str(route.get("first_step") or ("profile_select" if str(tool_id or "") in VIDEO_PROFILE_FIRST_PRODUCTS else "tool_home"))
+
+
+def video_session_flow_id(session: dict | None = None) -> str:
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    return str(session.get("video_flow") or session.get("video_tool") or session.get("product_id") or draft.get("video_flow") or draft.get("product_id") or "")
+
+
+def video_context_ready_for_assets(session: dict | None = None) -> bool:
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    return bool(
+        str(session.get("topic") or draft.get("topic") or "").strip()
+        or draft.get("selected_trend_source")
+        or draft.get("prepared_prompt_bundle")
+        or draft.get("prompt_bundle")
+        or draft.get("b14_storyboard_plan")
+        or draft.get("input_collected")
+        or draft.get("suggestion_used")
+        or draft.get("sample_used")
+        or draft.get("media_description")
+    )
+
+
+def video_asset_context_missing(session: dict | None = None) -> bool:
+    product_id = video_session_flow_id(session)
+    return product_id in {
+        "video_trend",
+        "video_idea",
+        "script_image_video",
+        "storyboard_prompt",
+        "multi_scene_film",
+    } and not video_context_ready_for_assets(session)
+
+
+def video_back_matrix_target(session: dict | None = None) -> str:
+    session = dict(session or {})
+    current = str(session.get("current_step") or "")
+    flow = video_session_flow_id(session)
+    draft = dict(session.get("draft") or {})
+    if not current:
+        return VIDEO_BACK_MENU_TARGET
+    if current in {"profile_select", "tool_home"}:
+        return VIDEO_BACK_MENU_TARGET
+    if current.startswith("asset_") and current != "asset_intake":
+        return "asset_intake"
+    if flow == "video_trend" and current == "asset_intake" and (draft.get("selected_trend_source") or draft.get("trend_ideas")):
+        return "trend_ideas"
+    target = str((VIDEO_STEP_BACK_MATRIX.get(flow) or {}).get(current) or "")
+    if target:
+        return target
+    if current == "asset_intake":
+        history = [str(item) for item in (session.get("step_history") or []) if str(item or "")]
+        for candidate in reversed(history):
+            if candidate and candidate not in {"asset_intake", current}:
+                return candidate
+    history = [str(item) for item in (session.get("step_history") or []) if str(item or "")]
+    for candidate in reversed(history):
+        if candidate and candidate != current:
+            return candidate
+    return VIDEO_BACK_MENU_TARGET
+
+
+def video_back_audit_rows_detailed() -> list[dict]:
+    rows: list[dict] = []
+    for tool_id, route in VIDEO_PUBLIC_ROUTE_MATRIX.items():
+        if tool_id == "main_menu":
+            continue
+        first_step = video_flow_first_step(tool_id)
+        flow_id = str(route.get("product_id") or tool_id)
+        step_map = VIDEO_STEP_BACK_MATRIX.get(flow_id) or {}
+        if not step_map and first_step:
+            step_map = {first_step: VIDEO_BACK_MENU_TARGET}
+        for step, expected in step_map.items():
+            if not step:
+                continue
+            sample = {
+                "product_id": flow_id,
+                "video_tool": tool_id,
+                "video_flow": flow_id,
+                "current_step": step,
+                "step_history": ["profile_select", "intro", "collect_input", "idea_suggestions", "asset_intake"],
+                "draft": {
+                    "product_id": flow_id,
+                    "video_tool": tool_id,
+                    "video_flow": flow_id,
+                    "topic": "demo",
+                    "b14_profile_id": "storytelling",
+                    "input_collected": True,
+                },
+            }
+            actual = video_back_matrix_target(sample)
+            rows.append({
+                "video_tool": tool_id,
+                "flow": flow_id,
+                "step": step,
+                "expected": expected,
+                "actual": actual,
+                "ok": actual == expected,
+            })
+    return rows
 
 
 def video_public_route_for_callback(callback: str) -> dict:
@@ -55685,14 +55901,19 @@ def video_public_text_forbidden_words(text: str) -> list[str]:
 
 def video_route_session_fields(tool_id: str, step: str = "tool_home") -> dict:
     route = video_public_route_for_tool(tool_id)
+    flow_id = str(route.get("product_id") or tool_id or "")
+    step = str(step or video_flow_first_step(tool_id) or "tool_home")
     return {
         "product_area": "video",
         "video_tool": str(tool_id or ""),
+        "video_flow": flow_id,
+        "source_button": str(route.get("entry_callback") or ""),
         "parent_menu": "video_main",
         "parent_menu_callback": str(route.get("parent_menu") or "menu|main_video"),
         "entry_callback": str(route.get("entry_callback") or ""),
         "back_target": str(route.get("back_target") or "menu|main_video"),
-        "flow_stack": ["video_main", str(tool_id or ""), str(step or "tool_home")],
+        "first_step": str(route.get("first_step") or video_flow_first_step(tool_id)),
+        "flow_stack": ["video_main", str(tool_id or ""), step],
     }
 
 
@@ -55737,6 +55958,7 @@ def video_route_matrix_rows() -> list[dict]:
                 "expected_children": tuple(route.get("expected_children") or ()),
                 "category": str(route.get("category") or ""),
                 "flow_type": str(route.get("flow_type") or ""),
+                "first_step": str(route.get("first_step") or video_flow_first_step(tool_id)),
                 "canonical": bool(route.get("canonical")),
                 "invoice_reachable": bool(route.get("invoice_reachable")),
                 "job_reachable": bool(route.get("job_reachable")),
@@ -55798,9 +56020,18 @@ def video_route_matrix_text() -> str:
     return "\n".join(lines)
 
 
+def video_back_audit_payload() -> dict:
+    top_rows = video_route_matrix_rows()
+    detail_rows = video_back_audit_rows_detailed()
+    ok = all(row.get("back_target") == "menu|main_video" for row in top_rows) and all(row.get("ok") for row in detail_rows)
+    return {"ok": ok, "rows": top_rows, "detail_rows": detail_rows}
+
+
 def video_back_audit_text() -> str:
-    rows = video_route_matrix_rows()
-    ok = all(row.get("back_target") == "menu|main_video" for row in rows)
+    payload = video_back_audit_payload()
+    rows = payload.get("rows") or []
+    detail_rows = payload.get("detail_rows") or []
+    ok = bool(payload.get("ok"))
     lines = [
         "⬅️ <b>Video Back Audit</b>",
         "",
@@ -55811,6 +56042,14 @@ def video_back_audit_text() -> str:
         status = "PASS" if row.get("back_target") == "menu|main_video" else "FAIL"
         lines.append(
             f"• {html.escape(str(row.get('label') or ''))}: <code>{html.escape(str(row.get('back_target') or ''))}</code> — <b>{status}</b>"
+        )
+    lines.append("")
+    lines.append("<b>Step matrix</b>")
+    for row in detail_rows[:80]:
+        status = "PASS" if row.get("ok") else "FAIL"
+        lines.append(
+            f"• {html.escape(str(row.get('video_tool') or ''))}/{html.escape(str(row.get('step') or ''))}: "
+            f"<code>{html.escape(str(row.get('actual') or ''))}</code> — <b>{status}</b>"
         )
     return "\n".join(lines)
 
@@ -56859,7 +57098,7 @@ def video_b14_idea_suggestions_keyboard(lang: str = "vi") -> InlineKeyboardMarku
             InlineKeyboardButton("🔁 Gợi ý khác", callback_data="vproduct|ideas_refresh"),
         ],
         [
-            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_profile_back"),
+            InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"),
             InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
         ],
     ])
@@ -59643,17 +59882,32 @@ def task3d_output_target_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def task3d_session_step(user_id, step: str, **fields) -> dict:
     session = get_video_session(user_id)
     current = str(session.get("current_step") or "")
+    step = str(step or "")
     history = [str(item) for item in (session.get("step_history") or []) if str(item or "")]
-    if current and current != step and (not history or history[-1] != current):
+    if current and current != step and current != VIDEO_BACK_MENU_TARGET and (not history or history[-1] != current):
         history.append(current)
     session["previous_step"] = current
-    session["current_step"] = str(step or "")
+    session["current_step"] = step
     session["step_history"] = history[-12:]
     draft = dict(session.get("draft") or {})
+    product_id_before = str(session.get("product_id") or draft.get("product_id") or fields.get("product_id") or "")
     for key, value in fields.items():
-        if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to", "selected_scene_count", "estimated_scene_seconds", "estimated_duration_seconds", "duration_mode", "duration_note"}:
+        if key in {"product_id", "topic", "platform", "aspect_ratio", "style", "package_id", "prompt_bundle_id", "source_media_ref", "return_to", "selected_scene_count", "estimated_scene_seconds", "estimated_duration_seconds", "duration_mode", "duration_note", "video_flow", "video_tool", "source_button", "parent_menu", "parent_menu_callback", "back_target", "entry_callback", "first_step"}:
             session[key] = value
         draft[key] = value
+    product_id = str(session.get("product_id") or draft.get("product_id") or product_id_before or "")
+    route_tool = str(session.get("video_tool") or draft.get("video_tool") or product_id or "")
+    if product_id:
+        session.setdefault("video_flow", product_id)
+        draft.setdefault("video_flow", product_id)
+    if route_tool:
+        session.setdefault("video_tool", route_tool)
+        draft.setdefault("video_tool", route_tool)
+    if product_id or route_tool:
+        session.setdefault("parent_menu_callback", "menu|main_video")
+        session.setdefault("back_target", "menu|main_video")
+        session.setdefault("return_to", "menu|main_video")
+        session["flow_stack"] = ["video_main", route_tool or product_id, step or video_flow_first_step(route_tool or product_id)]
     session["draft"] = draft
     return save_video_session(user_id, session)
 
@@ -59662,10 +59916,23 @@ def task3d_back_step(user_id) -> tuple[str, dict]:
     session = get_video_session(user_id)
     history = [str(item) for item in (session.get("step_history") or []) if str(item or "")]
     current = str(session.get("current_step") or "")
-    target = history.pop() if history else "intro"
+    target = video_back_matrix_target(session)
+    if target == VIDEO_BACK_MENU_TARGET:
+        history = []
+    elif history and history[-1] == target:
+        history.pop()
+    else:
+        try:
+            index = len(history) - 1 - list(reversed(history)).index(target)
+            history = history[:index]
+        except ValueError:
+            history = [item for item in history if item != current]
     session["previous_step"] = current
     session["current_step"] = target
     session["step_history"] = history
+    flow_id = video_session_flow_id(session)
+    tool_id = str(session.get("video_tool") or flow_id or "")
+    session["flow_stack"] = ["video_main", tool_id, target]
     return target, save_video_session(user_id, session)
 
 
@@ -60386,6 +60653,18 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
         return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
     if step in {"collect_input", "input_review"}:
         topic = str(session.get("topic") or (session.get("draft") or {}).get("topic") or "")
+        if step == "collect_input" and not topic.strip():
+            prompt = (
+                video_b14_idea_input_text(session, lang)
+                if (session.get("draft") or {}).get("b14_profile_id")
+                else task3d_text_input_prompt(product_id, lang)
+            )
+            return await safe_edit_or_send(
+                target,
+                prompt,
+                parse_mode="HTML" if (session.get("draft") or {}).get("b14_profile_id") else None,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+            )
         return await safe_edit_or_send(
             target,
             f"✍️ <b>Đầu vào sản phẩm</b>\n\nĐã lưu: <code>{html.escape(topic or 'media trong phiên')}</code>\n\nBạn có thể tiếp tục mà không cần gửi lại file/nội dung.",
@@ -60542,7 +60821,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 parse_mode="HTML",
                 reply_markup=video_ai_true_keyboard(lang),
             )
-        if value == "video_trend":
+        if value in VIDEO_PROFILE_FIRST_PRODUCTS:
             parent_callback = str(VIDEO_PRODUCT_REGISTRY[value].get("parent_menu_callback") or "menu|main_video")
             current_session = get_video_session(uid)
             if str(current_session.get("product_id") or "") != str(value):
@@ -60607,7 +60886,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         current_session = get_video_session(uid)
         if str(current_session.get("product_id") or "") != str(value):
             clear_video_session(uid)
-        route_fields = video_route_session_fields(value, "tool_home") if value in VIDEO_PUBLIC_ROUTE_MATRIX else {}
+        first_step = video_flow_first_step(value)
+        route_fields = video_route_session_fields(value, first_step) if value in VIDEO_PUBLIC_ROUTE_MATRIX else {}
         session = task3d_session_step(
             uid,
             "intro",
@@ -60617,7 +60897,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             xu_charged=0,
             **route_fields,
         )
-        session = go_video_screen(uid, f"{value}:tool_home", value, **route_fields)
+        session = go_video_screen(uid, f"{value}:{first_step}", value, **route_fields)
         session.update(route_fields)
         session["product_id"] = value
         session["return_to"] = parent_callback
@@ -60685,6 +60965,22 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await handle_video_reference_callback(update, context)
         if prefix == "videoedit":
             return await handle_video_editor_callback(update, context)
+    if action in {"asset_wait", "asset_class", "asset_scene", "asset_create_ai_image", "asset_layout_ideas", "asset_storyboard_prompt", "asset_done"} and video_asset_context_missing(session):
+        session = task3d_session_step(
+            uid,
+            "collect_input",
+            input_mode="text",
+            input_purpose="primary",
+            asset_blocked_until_context=True,
+            provider_called=False,
+            xu_charged=0,
+        )
+        return await safe_edit_or_send(
+            query,
+            video_b14_idea_input_text(session, lang) if (session.get("draft") or {}).get("b14_profile_id") else task3d_text_input_prompt(product_id, lang),
+            parse_mode="HTML" if (session.get("draft") or {}).get("b14_profile_id") else None,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]),
+        )
     if action == "b14_profiles":
         session = task3d_session_step(uid, "profile_select", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(
@@ -61813,6 +62109,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await safe_edit_or_send(query, video_b14_storyboard_preview_text(plan), parse_mode="HTML", reply_markup=video_b14_storyboard_keyboard(lang))
     if action == "back":
         target_step, session = task3d_back_step(uid)
+        if target_step == VIDEO_BACK_MENU_TARGET:
+            return await safe_edit_or_send(
+                query,
+                menu_text_main_video_i18n(lang),
+                parse_mode="HTML",
+                reply_markup=main_video_keyboard(lang),
+            )
         return await task3d_render_step(query, uid, session, lang)
     return await task3d_render_step(query, uid, session, lang)
 
@@ -100678,7 +100981,7 @@ def frame_video_collect_text(count: int = 0) -> str:
 def frame_video_collect_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xong", callback_data="framevideo|done"), InlineKeyboardButton("❌ Hủy", callback_data="framevideo|cancel")],
-        [InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
+        [InlineKeyboardButton("⬅️ Menu video", callback_data="menu|main_video"), InlineKeyboardButton("🏠 Menu chính", callback_data="framevideo|main")],
     ])
 
 def frame_video_planning_suggestions(state: dict | None = None, lang: str = "vi") -> dict:

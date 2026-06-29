@@ -87,19 +87,24 @@ def test_video_menu_current_buttons_unchanged():
 def test_video_menu_each_button_routes_to_matching_flow():
     cases = [
         ("vproduct|open|video_trend", "Video theo trend", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review")),
-        ("vproduct|open|video_idea", "Ý tưởng video", ("vproduct|ideas|video_idea", "vproduct|input_text|video_idea")),
-        ("vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|sample|storyboard_prompt", "vproduct|input_text|storyboard_prompt")),
+        ("vproduct|open|video_idea", "Ý tưởng video", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review")),
+        ("vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review")),
         ("vpromptlib|start", "Kho prompt video", ("vpromptlib|idea", "vpromptlib|image")),
         ("vproduct|open|video_ai_real", "Video AI chân thật", ("promptvideo|start", "imagevideo|start", "videoref|start")),
         ("vproduct|open|script_image_video", "Kịch bản", ("vproduct|ideas|script_image_video", "vproduct|input_text|script_image_video")),
         ("vproduct|open|frame_video_local", "Ghép ảnh thành video", ("framevideo|start", "framevideo|ai_first")),
         ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("selfscene|await_video",)),
-        ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|ideas|multi_scene_film", "vproduct|input_text|multi_scene_film")),
+        ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|cinematic_trailer")),
         ("vdownload|start", "Tải video từ link", ()),
         ("vproduct|open|video_local_edit", "Chỉnh sửa video local", ("videoedit|color", "videoedit|crop")),
     ]
     for index, (callback, expected_text, expected_callbacks) in enumerate(cases, start=1):
-        _assert_route(918600 + index, callback, expected_text, expected_callbacks, allow_profile=(callback == "vproduct|open|video_trend"))
+        _assert_route(918600 + index, callback, expected_text, expected_callbacks, allow_profile=callback in {
+            "vproduct|open|video_trend",
+            "vproduct|open|video_idea",
+            "vproduct|open|storyboard_prompt",
+            "vproduct|open|multi_scene_film",
+        })
 
 
 def test_video_menu_back_from_each_flow_returns_video_menu():
@@ -129,11 +134,23 @@ def test_video_trend_route():
 
 
 def test_video_idea_route():
-    _assert_route(918802, "vproduct|open|video_idea", "Ý tưởng video", ("vproduct|ideas|video_idea", "vproduct|input_text|video_idea"))
+    _assert_route(
+        918802,
+        "vproduct|open|video_idea",
+        "Ý tưởng video",
+        ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review"),
+        allow_profile=True,
+    )
 
 
 def test_video_storyboard_prompt_route():
-    _assert_route(918803, "vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|sample|storyboard_prompt",))
+    _assert_route(
+        918803,
+        "vproduct|open|storyboard_prompt",
+        "Storyboard + Prompt",
+        ("vproduct|b14_profile|storytelling",),
+        allow_profile=True,
+    )
 
 
 def test_video_prompt_library_route():
@@ -160,7 +177,13 @@ def test_self_shot_scene_change_route():
 
 
 def test_multiscene_video_route():
-    _assert_route(918809, "vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|ideas|multi_scene_film", "vproduct|input_text|multi_scene_film"))
+    _assert_route(
+        918809,
+        "vproduct|open|multi_scene_film",
+        "Phim AI nhiều cảnh",
+        ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|cinematic_trailer"),
+        allow_profile=True,
+    )
 
 
 def test_download_video_link_route():

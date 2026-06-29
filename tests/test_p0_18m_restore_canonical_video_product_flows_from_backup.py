@@ -145,6 +145,8 @@ def test_video_trend_create_ai_image_not_placeholder_when_handler_exists():
     user_id = 180007
     _start_trend(user_id)
     _press(user_id, "vproduct|b14_profile|product_review")
+    _press(user_id, "vproduct|ideas|video_trend")
+    _press(user_id, "vproduct|b14_idea_select|0")
     text, markup, session = _press(user_id, "vproduct|asset_create_ai_image")
     assert "Tạo ảnh AI trước" in text
     assert "đang được chuẩn bị" not in text
@@ -156,6 +158,8 @@ def test_video_trend_my_images_routes_upload():
     user_id = 180008
     _start_trend(user_id)
     _press(user_id, "vproduct|b14_profile|product_review")
+    _press(user_id, "vproduct|ideas|video_trend")
+    _press(user_id, "vproduct|b14_idea_select|0")
     text, markup, session = _press(user_id, "vproduct|asset_wait|subject")
     assert "gửi file" in text.lower()
     assert session.get("draft", {}).get("asset_waiting_for") == "subject"
@@ -166,6 +170,8 @@ def test_video_trend_layout_suggestion_routes():
     user_id = 180009
     _start_trend(user_id)
     _press(user_id, "vproduct|b14_profile|product_review")
+    _press(user_id, "vproduct|ideas|video_trend")
+    _press(user_id, "vproduct|b14_idea_select|0")
     text, markup, session = _press(user_id, "vproduct|asset_layout_ideas")
     assert "Gợi ý bố cục ảnh" in text
     assert "vproduct|asset_wait|subject" in _callbacks(markup)
@@ -246,8 +252,9 @@ def test_multiscene_flow_restored():
     text, markup, session = _press(180016, "vproduct|open|multi_scene_film")
     callbacks = _callbacks(markup)
     assert "Phim AI nhiều cảnh" in text
-    assert "vproduct|ideas|multi_scene_film" in callbacks
-    assert "vproduct|input_text|multi_scene_film" in callbacks
+    assert "vproduct|b14_profile|storytelling" in callbacks
+    assert "vproduct|b14_profile|cinematic_trailer" in callbacks
+    assert session.get("current_step") == "profile_select"
     assert session.get("product_id") == "multi_scene_film"
 
 
@@ -279,7 +286,7 @@ def test_storyboard_prompt_does_not_auto_render():
     text, markup, session = _press(180019, "vproduct|open|storyboard_prompt")
     callbacks = _callbacks(markup)
     assert "Storyboard + Prompt" in text
-    assert "vproduct|input_text|storyboard_prompt" in callbacks
+    assert "vproduct|b14_profile|storytelling" in callbacks
     assert "vproduct|b14_confirm" not in callbacks
     assert session["draft"]["provider_called"] is False
 
