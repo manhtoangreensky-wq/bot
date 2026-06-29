@@ -106,7 +106,8 @@ def test_video_route_entry_context_is_saved_per_button():
         assert session.get("video_tool") == route["video_tool"]
         assert session.get("parent_menu") == "video_main"
         assert session.get("return_to") == "menu|main_video"
-        assert session.get("flow_stack") == ["video_main", route["video_tool"], "tool_home"]
+        expected_step = "profile_select" if route["video_tool"] == "video_trend" else "tool_home"
+        assert session.get("flow_stack") == ["video_main", route["video_tool"], expected_step]
         assert "menu|main_video" in callbacks
         for child in route["expected_children"]:
             assert child in callbacks

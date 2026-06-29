@@ -52,7 +52,7 @@ def _press(user_id: int, callback: str):
     return query.edits[-1]["text"], query.edits[-1]["reply_markup"], query
 
 
-def _assert_route(user_id: int, callback: str, expected_text: str, expected_callbacks: tuple[str, ...]):
+def _assert_route(user_id: int, callback: str, expected_text: str, expected_callbacks: tuple[str, ...], *, allow_profile: bool = False):
     text, markup, _query = _press(user_id, callback)
     callbacks = _callbacks(markup)
     assert expected_text in text
@@ -62,7 +62,8 @@ def _assert_route(user_id: int, callback: str, expected_text: str, expected_call
     assert not any(item.startswith(("music_quick|", "sfx_quick|", "videodub|")) for item in callbacks)
     assert "menu|translate" not in callbacks
     assert "menu|main_music" not in callbacks
-    assert not any(item.startswith("vproduct|b14_profile|") for item in callbacks)
+    if not allow_profile:
+        assert not any(item.startswith("vproduct|b14_profile|") for item in callbacks)
     return text, callbacks
 
 
@@ -85,7 +86,7 @@ def test_video_menu_current_buttons_unchanged():
 
 def test_video_menu_each_button_routes_to_matching_flow():
     cases = [
-        ("vproduct|open|video_trend", "Video theo trend", ("vproduct|trend_today", "vproduct|trend_custom")),
+        ("vproduct|open|video_trend", "Video theo trend", ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review")),
         ("vproduct|open|video_idea", "Ý tưởng video", ("vproduct|ideas|video_idea", "vproduct|input_text|video_idea")),
         ("vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|sample|storyboard_prompt", "vproduct|input_text|storyboard_prompt")),
         ("vpromptlib|start", "Kho prompt video", ("vpromptlib|idea", "vpromptlib|image")),
@@ -98,7 +99,7 @@ def test_video_menu_each_button_routes_to_matching_flow():
         ("vproduct|open|video_local_edit", "Chỉnh sửa video local", ("videoedit|color", "videoedit|crop")),
     ]
     for index, (callback, expected_text, expected_callbacks) in enumerate(cases, start=1):
-        _assert_route(918600 + index, callback, expected_text, expected_callbacks)
+        _assert_route(918600 + index, callback, expected_text, expected_callbacks, allow_profile=(callback == "vproduct|open|video_trend"))
 
 
 def test_video_menu_back_from_each_flow_returns_video_menu():
@@ -118,7 +119,13 @@ def test_video_menu_no_cross_route_to_translation_voice_music():
 
 
 def test_video_trend_route():
-    _assert_route(918801, "vproduct|open|video_trend", "Video theo trend", ("vproduct|trend_today", "vproduct|trend_custom"))
+    _assert_route(
+        918801,
+        "vproduct|open|video_trend",
+        "Video theo trend",
+        ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review"),
+        allow_profile=True,
+    )
 
 
 def test_video_idea_route():
