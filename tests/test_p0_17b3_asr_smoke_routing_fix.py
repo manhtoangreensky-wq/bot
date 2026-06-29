@@ -524,7 +524,7 @@ def test_public_subtitle_plus_dub_outputs_all_assets():
 def test_public_final_mp4_only_when_mux_ready():
     source = inspect.getsource(bot.build_subtitle_dubbed_video_pipeline)
     render_index = source.index("video_dubbing_render_video")
-    mux_gate_index = source.index("VIDEO_DUB_MUX_ENABLED and frame_video_ffmpeg_path()")
+    mux_gate_index = source.index("video_dubbing_mux_ready()")
 
     assert mux_gate_index < render_index
 
