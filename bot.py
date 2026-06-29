@@ -44336,6 +44336,70 @@ def package_purchase_description(package_type: str, code: str) -> str:
     desc = f"{prefix}{safe_code}"[:25]
     return desc or "TOANAASPKG"
 
+def pkgcombo_normalize_group(group: str = "") -> str:
+    raw = str(group or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "subdub": "subtitle_dub",
+        "subtitle": "subtitle_dub",
+        "dub": "subtitle_dub",
+        "prompt": "prompt_workflow",
+        "workflow": "prompt_workflow",
+        "combo_group": "combo",
+        "combos": "combo",
+    }
+    normalized = aliases.get(raw, raw)
+    valid = set(PACKAGE_TASK_GROUP_ORDER) | {"combo"}
+    return normalized if normalized in valid else ""
+
+def package_group_for_code(package_type: str = "combo", code: str = "") -> str:
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
+    if package_type == "combo":
+        return "combo"
+    entry = package_catalog_entry(code, package_type)
+    return pkgcombo_normalize_group((entry or {}).get("group") or "") or "mixed"
+
+def pkgcombo_group_callback(group: str = "") -> str:
+    normalized = pkgcombo_normalize_group(group)
+    if normalized == "combo":
+        return "pkgcombo:group:combo"
+    if normalized:
+        return f"pkgcombo:group:{normalized}"
+    return "pkgcombo:home"
+
+def pkgcombo_detail_callback(package_type: str = "combo", code: str = "") -> str:
+    package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
+    safe_code = str(code or "").strip().lower()
+    if not safe_code:
+        return "pkgcombo:home"
+    return f"pkgcombo:combo_detail:{safe_code}" if package_type == "combo" else f"pkgcombo:detail:{safe_code}"
+
+def pkgcombo_large_order_callback(origin: str = "home", package_type: str = "", code: str = "", group: str = "") -> str:
+    origin = str(origin or "home").strip().lower()
+    if origin == "detail" and code:
+        return f"pkgcombo:large_order:detail:{str(code).strip().lower()}"
+    if origin == "combo_detail" and code:
+        return f"pkgcombo:large_order:combo_detail:{str(code).strip().lower()}"
+    if origin == "group" and group:
+        return f"pkgcombo:large_order:group:{pkgcombo_normalize_group(group) or 'home'}"
+    if origin == "combo_group":
+        return "pkgcombo:large_order:combo_group"
+    return "pkgcombo:large_order:home"
+
+def pkgcombo_large_order_back_callback(origin_parts: list[str] | tuple[str, ...] | None = None) -> str:
+    parts = [str(part or "").strip() for part in (origin_parts or []) if str(part or "").strip()]
+    if not parts:
+        return "pkgcombo:home"
+    origin = parts[0]
+    if origin == "detail" and len(parts) >= 2:
+        return f"pkgcombo:detail:{parts[1]}"
+    if origin == "combo_detail" and len(parts) >= 2:
+        return f"pkgcombo:combo_detail:{parts[1]}"
+    if origin == "group" and len(parts) >= 2:
+        return pkgcombo_group_callback(parts[1])
+    if origin == "combo_group":
+        return "pkgcombo:group:combo"
+    return "pkgcombo:home"
+
 def package_purchase_success_message(info: dict) -> str:
     label = str(info.get("package_label") or info.get("plan_name") or info.get("package_code") or "gói")
     package_type = str(info.get("package_type") or "").strip().lower()
@@ -44356,18 +44420,16 @@ def package_purchase_success_message(info: dict) -> str:
 
 def package_detail_back_callback(package_type: str = "combo", code: str = "") -> str:
     package_type = "monthly" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo"
-    if package_type == "monthly":
-        return "pricing|plans"
-    return "pricing|combo"
+    return pkgcombo_group_callback(package_group_for_code(package_type, code))
 
 def package_purchase_checkout_keyboard(checkout_url: str = "", package_type: str = "combo", code: str = "") -> InlineKeyboardMarkup:
     rows = []
     if checkout_url:
         rows.append([InlineKeyboardButton("💳 Thanh toán PayOS", url=checkout_url)])
     if code:
-        rows.append([InlineKeyboardButton("⬅️ Quay lại chi tiết gói", callback_data=f"pkgbuy|{package_type}|{code}")])
-    rows.append([InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")])
-    rows.append([InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data=package_detail_back_callback(package_type, code))])
+        rows.append([InlineKeyboardButton("⬅️ Quay lại chi tiết gói", callback_data=pkgcombo_detail_callback(package_type, code))])
+    rows.append([InlineKeyboardButton("📦 Gói của tôi", callback_data="pkgcombo:my")])
+    rows.append([InlineKeyboardButton("⬅️ Quay lại nhóm gói", callback_data=package_detail_back_callback(package_type, code))])
     rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
@@ -44441,9 +44503,9 @@ def package_anomaly_public_text() -> str:
         "Hệ thống sẽ thông báo sau khi xử lý xong."
     )
 
-def package_need_larger_keyboard(back_callback: str = "pricing|plans") -> InlineKeyboardMarkup:
+def package_need_larger_keyboard(back_callback: str = "pkgcombo:home", large_callback: str = "pkgcombo:large_order:home") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 Cần gói lớn hơn / Order riêng", callback_data="pricing|need_larger")],
+        [InlineKeyboardButton("📩 Cần gói lớn hơn / Order riêng", callback_data=large_callback)],
         [InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -126081,7 +126143,7 @@ def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
-                InlineKeyboardButton("🎁 Gói / Combo", callback_data="pricing|packages"),
+                InlineKeyboardButton("🎁 Gói / Combo", callback_data="pkgcombo:home"),
             ],
             [
                 InlineKeyboardButton("📥 Tải bảng giá", callback_data="pricing|download_pricing"),
@@ -126099,7 +126161,7 @@ def pricing_main_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             InlineKeyboardButton(labels[1], callback_data="menu|main_topup"),
         ],
         [
-            InlineKeyboardButton(labels[2], callback_data="pricing|packages"),
+            InlineKeyboardButton(labels[2], callback_data="pkgcombo:home"),
             InlineKeyboardButton(labels[3], callback_data="menu|main"),
         ],
     ])
@@ -126119,7 +126181,7 @@ def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton(labels[6], callback_data="pricing|docs"), InlineKeyboardButton(labels[7], callback_data="pricing|free")],
             [InlineKeyboardButton(labels[8], callback_data="pricing|member"), InlineKeyboardButton(labels[9], callback_data="pricing|guide")],
             [InlineKeyboardButton(labels[10], callback_data="pricing|download_pricing"), InlineKeyboardButton(labels[11], callback_data="pricing|download_guide")],
-            [InlineKeyboardButton(labels[12], callback_data="pricing|storage"), InlineKeyboardButton(labels[13], callback_data="pricing|package_summary")],
+            [InlineKeyboardButton(labels[12], callback_data="pricing|storage"), InlineKeyboardButton(labels[13], callback_data="pkgcombo:home")],
             [InlineKeyboardButton(labels[14], callback_data="pricing|main"), InlineKeyboardButton(labels[15], callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
@@ -126133,23 +126195,22 @@ def pricing_catalog_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def pricing_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     labels = {
-        "vi": ("🖼 Gói Ảnh", "🎬 Gói Video", "🎵 Gói Nhạc", "🎙 Gói Voice", "🌐 Phụ đề / Lồng tiếng", "🧠 Prompt / Workflow", "🎁 Combo trọn gói", "📦 Gói của tôi", "📩 Cần gói lớn hơn", "⬅️ Quay lại", "🏠 Menu chính"),
+        "vi": ("🖼 Gói Ảnh", "🎬 Gói Video", "🎵 Gói Nhạc", "🎙 Gói Voice", "🌐 Phụ đề / Lồng tiếng", "🧠 Prompt / Workflow", "🎁 Combo trọn gói", "📦 Gói của tôi", "📩 Cần gói lớn hơn", "ℹ️ Lưu ý", "⬅️ Quay lại", "🏠 Menu chính"),
         "en": ("📦 Monthly plans", "🎁 Finished combos", "📦 My packages", "📩 Custom order", "⬅️ Back", "🏠 Main menu"),
         "zh": ("📦 月度套餐", "🎁 成品组合", "📦 我的套餐", "📩 定制需求", "⬅️ 返回", "🏠 主菜单"),
     }.get(lang)
     if lang == "vi":
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton(labels[0], callback_data="pricing|package_group_image"), InlineKeyboardButton(labels[1], callback_data="pricing|package_group_video")],
-            [InlineKeyboardButton(labels[2], callback_data="pricing|package_group_music"), InlineKeyboardButton(labels[3], callback_data="pricing|package_group_voice")],
-            [InlineKeyboardButton(labels[4], callback_data="pricing|package_group_subtitle_dub")],
-            [InlineKeyboardButton(labels[5], callback_data="pricing|package_group_prompt_workflow")],
-            [InlineKeyboardButton(labels[6], callback_data="pricing|combo"), InlineKeyboardButton(labels[7], callback_data="pricing|my_packages")],
-            [InlineKeyboardButton(labels[8], callback_data="pricing|need_larger")],
-            [InlineKeyboardButton(labels[9], callback_data="pricing|main"), InlineKeyboardButton(labels[10], callback_data="menu|main")],
+            [InlineKeyboardButton(labels[0], callback_data="pkgcombo:group:image"), InlineKeyboardButton(labels[1], callback_data="pkgcombo:group:video")],
+            [InlineKeyboardButton(labels[2], callback_data="pkgcombo:group:music"), InlineKeyboardButton(labels[3], callback_data="pkgcombo:group:voice")],
+            [InlineKeyboardButton(labels[4], callback_data="pkgcombo:group:subtitle_dub"), InlineKeyboardButton(labels[5], callback_data="pkgcombo:group:prompt_workflow")],
+            [InlineKeyboardButton(labels[6], callback_data="pkgcombo:group:combo"), InlineKeyboardButton(labels[7], callback_data="pkgcombo:my")],
+            [InlineKeyboardButton(labels[8], callback_data="pkgcombo:large_order:home"), InlineKeyboardButton(labels[9], callback_data="pkgcombo:notes")],
+            [InlineKeyboardButton(labels[10], callback_data="pricing|main"), InlineKeyboardButton(labels[11], callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(labels[0], callback_data="pricing|plans"), InlineKeyboardButton(labels[1], callback_data="pricing|combo")],
-        [InlineKeyboardButton(labels[2], callback_data="pricing|my_packages"), InlineKeyboardButton(labels[3], callback_data="pricing|need_larger")],
+        [InlineKeyboardButton(labels[0], callback_data="pkgcombo:home"), InlineKeyboardButton(labels[1], callback_data="pkgcombo:group:combo")],
+        [InlineKeyboardButton(labels[2], callback_data="pkgcombo:my"), InlineKeyboardButton(labels[3], callback_data="pkgcombo:large_order:home")],
         [InlineKeyboardButton(labels[4], callback_data="pricing|main"), InlineKeyboardButton(labels[5], callback_data="menu|main")],
     ])
 
@@ -126162,13 +126223,12 @@ def pricing_xu_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 def pricing_plans_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖼 Gói Ảnh", callback_data="pricing|package_group_image"), InlineKeyboardButton("🎬 Gói Video", callback_data="pricing|package_group_video")],
-        [InlineKeyboardButton("🎵 Gói Nhạc", callback_data="pricing|package_group_music"), InlineKeyboardButton("🎙 Gói Voice", callback_data="pricing|package_group_voice")],
-        [InlineKeyboardButton("🌐 Phụ đề / Lồng tiếng", callback_data="pricing|package_group_subtitle_dub")],
-        [InlineKeyboardButton("🧠 Prompt / Workflow", callback_data="pricing|package_group_prompt_workflow")],
-        [InlineKeyboardButton("🧩 Gói Mixed", callback_data="pricing|package_group_mixed"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
-        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pricing|need_larger")],
-        [InlineKeyboardButton("⬅️ Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("🖼 Gói Ảnh", callback_data="pkgcombo:group:image"), InlineKeyboardButton("🎬 Gói Video", callback_data="pkgcombo:group:video")],
+        [InlineKeyboardButton("🎵 Gói Nhạc", callback_data="pkgcombo:group:music"), InlineKeyboardButton("🎙 Gói Voice", callback_data="pkgcombo:group:voice")],
+        [InlineKeyboardButton("🌐 Phụ đề / Lồng tiếng", callback_data="pkgcombo:group:subtitle_dub"), InlineKeyboardButton("🧠 Prompt / Workflow", callback_data="pkgcombo:group:prompt_workflow")],
+        [InlineKeyboardButton("🧩 Gói Mixed", callback_data="pkgcombo:group:mixed"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pkgcombo:my")],
+        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pkgcombo:large_order:home"), InlineKeyboardButton("ℹ️ Lưu ý", callback_data="pkgcombo:notes")],
+        [InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def pricing_legacy_task_group_lines(group: str) -> list[str]:
@@ -126181,9 +126241,9 @@ def pricing_legacy_task_group_lines(group: str) -> list[str]:
 
 def pricing_legacy_task_group_keyboard(group: str, lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Xem gói tháng", callback_data="pricing|plans"), InlineKeyboardButton("🎁 Xem combo", callback_data="pricing|combo")],
-        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pricing|need_larger"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
-        [InlineKeyboardButton("⬅️ Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+        [InlineKeyboardButton("📦 Xem gói tháng", callback_data="pkgcombo:home"), InlineKeyboardButton("🎁 Xem combo", callback_data="pkgcombo:group:combo")],
+        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pkgcombo:large_order:home"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pkgcombo:my")],
+        [InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
 def vip_services_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -126516,17 +126576,39 @@ def pricing_packages_lines(lang: str = "vi") -> list[str]:
             "After PayOS confirms payment, the item appears in My packages. It does not add normal Xu or trigger top-up bonuses.",
         ]
     return [
-        "🎁 <b>Gói / Combo TOAN AAS</b>", "", "Bạn muốn mua loại nào?", "",
-        "• GÓI = mua theo tháng, có hạn mức dùng trong 30 ngày.",
-        "• COMBO = thành phẩm trọn gói theo mục đích cụ thể, dùng đến hết lượt.",
-        "• NẠP XU = tự do, thích dùng gì dùng đó.",
-        "• MÃ QUÀ TẶNG = chỉ admin quản lý/cấp phát, không hiện public.",
+        "🎁 <b>Gói / Combo TOAN AAS</b>",
         "",
-        "Gói/Combo mua qua PayOS khi hệ thống đã tự cấp lượt được; mục cần admin sẽ không có checkout giả.",
-        "Mỗi gói/combo chỉ mua 1 lần/tháng. Cần lớn hơn thì bấm <b>📩 Cần gói lớn hơn</b> để admin duyệt riêng.",
-        "Gói/Combo không phải nạp Xu thường, không cộng bonus nạp Xu và không tự nâng hạng thành viên.",
-        "Sau khi PayOS xác nhận thanh toán, gói/combo sẽ nằm trong <b>📦 Gói của tôi</b> và tự trừ lượt/quyền khi sử dụng.",
+        "Chọn cách mua phù hợp:",
+        "",
+        "📦 <b>Gói tác vụ</b>: mua lượt dùng theo từng loại sản phẩm.",
+        "🎁 <b>Combo trọn gói</b>: mua theo mục đích thành phẩm.",
+        "💰 <b>Nạp Xu</b>: dùng tự do cho mọi công cụ.",
+        "",
+        "Mỗi gói/combo chỉ mua 1 lần/tháng.",
+        "Cần số lượng lớn hơn thì chọn <b>📩 Cần gói lớn hơn</b>.",
     ]
+
+def pricing_pkgcombo_notes_lines(lang: str = "vi") -> list[str]:
+    return [
+        "ℹ️ <b>Lưu ý Gói / Combo</b>",
+        "",
+        "• Gói tác vụ dùng trong 30 ngày.",
+        "• Combo trọn gói dùng theo quyền lợi ghi trong từng combo.",
+        "• Gói/combo không phải nạp Xu thường.",
+        "• Mỗi gói/combo chỉ mua 1 lần/tháng.",
+        "• Tiền mua gói/combo không tính vào tổng nạp để nâng hạng.",
+        "• Gói/combo không cộng bonus nạp Xu và không tự nâng hạng thành viên.",
+        "• Thanh toán qua PayOS khi gói đã hỗ trợ tự cấp quyền.",
+        "• Sau khi PayOS xác nhận, quyền lợi nằm trong 📦 Gói của tôi.",
+        "• Mục cần admin xử lý sẽ không tạo checkout giả.",
+        "• Cần số lượng lớn hơn thì gửi yêu cầu riêng cho admin.",
+    ]
+
+def pricing_pkgcombo_notes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pkgcombo:large_order:notes"), InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home")],
+        [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
 
 def pricing_package_summary_lines() -> list[str]:
     catalog = package_catalog_payload()
@@ -126560,7 +126642,7 @@ def pricing_package_summary_lines() -> list[str]:
 
 def pricing_package_summary_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎁 Mua Gói/Combo", callback_data="pricing|packages"), InlineKeyboardButton("⬅️ Quay lại bảng giá", callback_data="pricing|catalog")],
+        [InlineKeyboardButton("🎁 Mua Gói/Combo", callback_data="pkgcombo:home"), InlineKeyboardButton("⬅️ Quay lại bảng giá", callback_data="pricing|catalog")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -126728,33 +126810,21 @@ def pricing_video_lines() -> list[str]:
 def pricing_combo_lines() -> list[str]:
     combos = public_video_combo_pricing_payload()
     rows = [
-        "🎁 <b>COMBO TRỌN GÓI TOAN AAS</b>",
+        "🎁 <b>Combo trọn gói</b>",
         "",
-        "Combo = gộp nhiều tác vụ để tạo ra một sản phẩm hoàn chỉnh, dùng đến hết lượt.",
-        "Combo không cộng điểm nâng hạng/thưởng nạp và không quy đổi thành Xu tự do.",
-        "Combo có thể mua PayOS khi hệ thống tự cấp lượt được. Combo cần admin sẽ không có checkout giả.",
-        "Mỗi combo chỉ mua 1 lần/tháng. Cần lớn hơn thì bấm <b>📩 Cần gói lớn hơn</b>.",
+        "Chọn combo theo mục đích thành phẩm.",
+        "Chi tiết giá/quyền lợi hiện ở từng combo.",
         "",
     ]
+    if combos:
+        rows.append("Các combo đang có:")
     for item in combos:
-        label = str(item.get("label") or "")
-        price = str(item.get("display_price") or f"{int(item.get('price_vnd') or 0):,}đ")
-        retail = package_vnd_short_text(item.get("retail_vnd") or item.get("price_vnd") or 0)
-        discount = int(item.get("discount_percent") or 0)
-        status = "admin review / không checkout giả" if item.get("manual") else "PayOS tự động"
+        label = str(item.get("label") or item.get("button_label") or item.get("code") or "Combo")
         group_label = package_combo_group_label(item.get("group") or "")
-        rows.extend([
-            f"• <b>{html.escape(label)}</b> — {html.escape(group_label)}",
-            f"  <s>{html.escape(retail)}</s> → <b>{html.escape(price)}</b> — giảm <b>{discount}%</b> — {html.escape(status)}".replace(",", "."),
-            f"  Dành cho: {html.escape(str(item.get('audience') or '-'))}",
-            f"  Thành phần: {html.escape(str(item.get('includes') or item.get('components') or item.get('summary') or '-'))}",
-            f"  Ví dụ: {html.escape(str(item.get('example') or '-'))}",
-        ])
+        rows.append(f"• <b>{html.escape(label)}</b> — {html.escape(group_label)}")
     rows.extend([
         "",
-        "Bấm nút combo có giá và đã hỗ trợ để mua. Thanh toán thành công sẽ tự lưu lượt vào <b>📦 Gói của tôi</b>.",
-        "Khi dùng ảnh/video/workflow, bot tự gợi ý dùng lượt trong gói và tự trừ lượt nếu bạn chọn.",
-        "Combo không phải nạp Xu, không cộng điểm nâng hạng và không chạy bonus nạp.",
+        "Mỗi combo chỉ mua 1 lần/tháng. Cần combo riêng thì bấm <b>📩 Cần gói lớn hơn</b>.",
     ])
     return rows
 
@@ -126763,7 +126833,7 @@ def pricing_detail_keyboard(section: str = "main", lang: str = "vi") -> InlineKe
     if section in {"image", "video"}:
         rows.append([
             InlineKeyboardButton("💳 Nạp Xu", callback_data="menu|main_topup"),
-            InlineKeyboardButton("🎁 Gói / Combo", callback_data="pricing|packages"),
+            InlineKeyboardButton("🎁 Gói / Combo", callback_data="pkgcombo:home"),
         ])
     elif section == "storage":
         rows.append([
@@ -126779,15 +126849,15 @@ def pricing_combo_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     for item in public_video_combo_pricing_payload():
         code = str(item.get("code") or "").strip()
         label = str(item.get("button_label") or item.get("label") or code)
-        callback = f"pkgbuy|combo|{code}" if code else "menu|support"
+        callback = f"pkgcombo:combo_detail:{code}" if code else "menu|support"
         pending.append(InlineKeyboardButton(label, callback_data=callback))
         if len(pending) == 2:
             rows.append(pending)
             pending = []
     if pending:
         rows.append(pending)
-    rows.append([InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pricing|need_larger"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")])
-    rows.append([InlineKeyboardButton("⬅️ Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    rows.append([InlineKeyboardButton("📩 Cần combo riêng", callback_data="pkgcombo:large_order:combo_group"), InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home")])
+    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def my_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -126805,9 +126875,8 @@ def my_packages_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             [InlineKeyboardButton("🏠 Main menu", callback_data="menu|main")],
         ])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Làm mới", callback_data="pricing|my_packages"), InlineKeyboardButton("🎁 Mua Combo", callback_data="pricing|combo")],
-        [InlineKeyboardButton("📦 Mua Gói tháng", callback_data="pricing|plans"), InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pricing|need_larger")],
-        [InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pricing|packages")],
+        [InlineKeyboardButton("🔄 Làm mới", callback_data="pkgcombo:my"), InlineKeyboardButton("🎁 Xem Gói / Combo", callback_data="pkgcombo:home")],
+        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pkgcombo:large_order:my"), InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home")],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -126856,45 +126925,27 @@ def public_task_package_entries(group: str = "") -> list[tuple[str, dict]]:
 
 def pricing_plans_lines() -> list[str]:
     groups = [
-        ("image", "5 gói: Mini, Cơ bản, Bán hàng, Chuyên nghiệp, Doanh nghiệp."),
-        ("video", "5 gói: Mini, Cơ bản, Bán hàng, Chuyên nghiệp, Studio."),
-        ("music", "5 gói: nhạc nền, bài hát có lời, quảng cáo/shop, studio."),
-        ("voice", "5 gói: TTS Mini, Nội dung, Shop, Creator, Pro."),
-        ("subtitle_dub", "5 gói: phụ đề, dịch phụ đề, lồng tiếng, đa ngôn ngữ, studio."),
-        ("prompt_workflow", "4 gói: prompt, storyboard, workflow shop, workflow pro."),
-        ("mixed", "Gói mixed nhỏ cho shop/content creator, giữ tương thích gói PR #113."),
+        ("image", "tạo ảnh, ảnh bán hàng, ảnh chuyên nghiệp."),
+        ("video", "video ngắn, video shop, video studio."),
+        ("music", "nhạc nền, bài hát có lời, nhạc quảng cáo."),
+        ("voice", "TTS, voice shop, voice creator."),
+        ("subtitle_dub", "phụ đề, dịch phụ đề, lồng tiếng."),
+        ("prompt_workflow", "prompt, storyboard, workflow bán hàng."),
+        ("mixed", "gói nhỏ tổng hợp cho shop/content creator."),
     ]
     rows = [
-        "📦 <b>GÓI TÁC VỤ TOAN AAS</b>",
+        "📦 <b>Gói tác vụ TOAN AAS</b>",
         "",
-        "GÓI = mua số lượng tác vụ lẻ theo từng dòng sản phẩm, dùng trong 30 ngày.",
-        "COMBO = mua 1 lần theo mục đích thành phẩm hoàn chỉnh, dùng đến hết lượt.",
-        "NẠP XU = tự do, thích dùng gì dùng đó.",
-        "MÃ QUÀ TẶNG = chỉ admin quản lý/cấp phát, không hiện public.",
+        "Chọn nhóm sản phẩm để xem các mức gói.",
+        "Chi tiết giá/quyền lợi sẽ hiện ở từng gói.",
         "",
-        "Gói tách riêng với <b>👑 Thành viên</b>, <b>💳 Nạp Xu</b> và <b>🎁 Combo thành phẩm</b>.",
-        "Khách mua qua PayOS. PayOS thanh toán thành công thì hạn mức tự lưu vào <b>📦 Gói của tôi</b>.",
-        "Khi công cụ đã hỗ trợ dùng lượt trong gói, bot tự gợi ý và tự trừ lượt nếu bạn chọn.",
-        "Giá lấy theo đơn giá Xu hiện có, áp giảm 10-30%, rồi làm tròn đẹp đuôi 8.",
-        "Gói có chi phí/rủi ro chưa chắc sẽ chuyển admin review, không tạo checkout giả.",
-        "Mỗi gói/combo chỉ mua 1 lần/tháng. Cần lớn hơn thì bấm <b>📩 Cần gói lớn hơn</b> để admin duyệt riêng.",
-        "",
-        "<b>Chọn nhóm gói</b>",
     ]
     for group, summary in groups:
         count = len(public_task_package_entries(group))
         rows.append(f"• <b>{html.escape(package_task_group_label(group))}</b>: {count} mức — {html.escape(summary)}")
     rows.extend([
         "",
-        "<b>Quy tắc</b>",
-        "• Gói không phải thành viên, không tự nâng hạng thành viên.",
-        "• Tiền mua gói không tính vào tổng nạp để nâng hạng.",
-        "• Gói không cộng Xu tự do, không chạy launch bonus/top-up bonus.",
-        "• Hạn mức trong gói không rút tiền, không chuyển nhượng và có thể hết hạn theo kỳ.",
-        "• Vượt hạn mức thì dùng Xu hoặc mua gói/combo khác.",
-        "• Nếu thanh toán gặp sự cố, gói có thể được cấp lại sau khi đối soát hợp lệ.",
-        "",
-        "Bấm nhóm bên dưới để xem từng mức gói.",
+        "Mỗi gói chỉ mua 1 lần/tháng. Nội dung dài nằm ở <b>ℹ️ Lưu ý</b>.",
     ])
     return rows
 
@@ -126903,23 +126954,16 @@ def pricing_task_package_group_lines(group: str) -> list[str]:
     entries = public_task_package_entries(group)
     if not entries:
         return pricing_plans_lines()
+    group_label = package_task_group_label(group)
     rows = [
-        f"{html.escape(package_task_group_label(group))} <b>TOAN AAS</b>",
+        f"{html.escape(group_label)} <b>TOAN AAS</b>",
         "",
-        "Chọn đúng dòng sản phẩm để biết đang mua bao nhiêu tác vụ, tiết kiệm bao nhiêu và dùng vào việc gì.",
-        "Gói nào cần admin review sẽ ghi rõ, không tạo checkout giả.",
-        "",
+        "Chọn gói phù hợp nhu cầu. Chi tiết giá/quyền lợi hiện ở màn từng gói.",
     ]
-    for code, entry in entries:
-        quote = package_price_quote("monthly", code)
-        status = "admin review" if entry.get("manual") else "PayOS tự động"
-        rows.extend([
-            f"• <b>{html.escape(str(entry.get('label') or code))}</b>",
-            f"  Giá lẻ: <s>{html.escape(package_vnd_short_text(quote.get('retail_vnd') or 0))}</s> | Giảm: <b>{int(quote.get('discount_percent') or 0)}%</b> | Thanh toán: <b>{html.escape(package_vnd_short_text(quote.get('price_vnd') or 0))}</b> | {html.escape(status)}",
-            f"  Hạn mức: {html.escape(package_items_summary(entry.get('items') or {}))}",
-            f"  Phù hợp: {html.escape(str(entry.get('audience') or '-'))}",
-            f"  Ví dụ: {html.escape(str(entry.get('example') or '-'))}",
-        ])
+    labels = [str(entry.get("label") or entry.get("button_label") or code) for code, entry in entries]
+    if labels:
+        rows.extend(["", "Các mức đang có:"])
+        rows.extend(f"• {html.escape(label)}" for label in labels)
     rows.extend([
         "",
         "Mỗi gói chỉ mua 1 lần/tháng. Cần lớn hơn thì bấm <b>📩 Cần gói lớn hơn</b>.",
@@ -126931,14 +126975,15 @@ def pricing_task_package_group_keyboard(group: str, lang: str = "vi") -> InlineK
     pending: list[InlineKeyboardButton] = []
     for code, entry in public_task_package_entries(group):
         label = str(entry.get("button_label") or entry.get("label") or code)
-        pending.append(InlineKeyboardButton(label, callback_data=f"pkgbuy|monthly|{code}"))
+        pending.append(InlineKeyboardButton(label, callback_data=f"pkgcombo:detail:{code}"))
         if len(pending) == 2:
             rows.append(pending)
             pending = []
     if pending:
         rows.append(pending)
-    rows.append([InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data="pricing|need_larger"), InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")])
-    rows.append([InlineKeyboardButton("⬅️ Nhóm gói", callback_data="pricing|plans"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
+    normalized_group = pkgcombo_normalize_group(group) or "home"
+    rows.append([InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data=pkgcombo_large_order_callback("group", group=normalized_group)), InlineKeyboardButton("⬅️ Gói / Combo", callback_data="pkgcombo:home")])
+    rows.append([InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")])
     return InlineKeyboardMarkup(rows)
 
 def vip_services_lines() -> list[str]:
@@ -127286,18 +127331,35 @@ def package_purchase_detail_lines(package_type: str, code: str) -> list[str]:
     duration_days = int(entry.get("default_days") or 0) if package_type == "monthly" else 0
     auto_checkout = package_entry_auto_checkout_enabled(entry)
     components = str(entry.get("components") or "").strip()
+    tax_snapshot = calculate_vat_snapshot(price) if price > 0 else {}
+    tax_lines = [
+        f"• Giá trước thuế: <b>{vnd_text(tax_snapshot.get('subtotal_amount_vnd'))}</b>",
+        f"• Thuế GTGT: <b>{vnd_text(tax_snapshot.get('vat_amount_vnd'))}</b>",
+        f"• Tổng thanh toán: <b>{vnd_text(tax_snapshot.get('total_amount_vnd'))}</b>",
+    ] if tax_snapshot else [f"• Giá dự kiến: <b>{html.escape(price_text)}</b>"]
+    benefit_lines = [
+        f"• {html.escape(package_items_summary(entry.get('items') or {}))}",
+    ]
+    if components:
+        benefit_lines.append(f"• Thành phần: {html.escape(components)}")
+    if duration_days:
+        benefit_lines.append(f"• Hạn dùng: <b>{duration_days} ngày</b>")
+    else:
+        benefit_lines.append("• Dùng theo quyền lợi ghi trong combo.")
+    benefit_lines.append("• Mua tối đa: <b>1 lần/tháng</b>")
     if not auto_checkout:
         rows = [
-            f"🎁 <b>{html.escape(kind)}: {html.escape(label)}</b>", "",
+            f"🎁 <b>{html.escape(label)}</b>",
+            "",
+            "<b>Quyền lợi:</b>",
+            *benefit_lines,
+            "",
+            "<b>Giá:</b>",
             f"• Giá lẻ: <s>{html.escape(retail_text)}</s>",
             f"• Chiết khấu: <b>{discount}%</b>",
-            f"• Giá dự kiến: <b>{html.escape(price_text)}</b>",
+            *tax_lines,
         ]
-        if duration_days:
-            rows.append(f"• Thời hạn dự kiến: <b>{duration_days} ngày</b>")
         rows.extend([
-            f"• Quyền lợi: {html.escape(package_items_summary(entry.get('items') or {}))}",
-            f"• Thành phần: {html.escape(components)}" if components else "",
             f"• Ghi chú: {html.escape(str(entry.get('note') or 'Cần admin xác nhận trước khi mở mua tự động.'))}",
             "",
             "Trạng thái: <b>cần admin xác nhận / chưa mở checkout tự động</b>.",
@@ -127305,29 +127367,28 @@ def package_purchase_detail_lines(package_type: str, code: str) -> list[str]:
         ])
         return [line for line in rows if line != ""]
     rows = [
-        f"🎁 <b>{html.escape(kind)}: {html.escape(label)}</b>", "",
+        f"🎁 <b>{html.escape(label)}</b>",
+        "",
+        "<b>Quyền lợi:</b>",
+        *benefit_lines,
+        "",
+        "<b>Giá:</b>",
         f"• Giá lẻ: <s>{html.escape(retail_text)}</s>",
         f"• Chiết khấu: <b>{discount}%</b>",
-        f"• Giá thanh toán: <b>{html.escape(price_text)}</b>",
-    ]
-    if duration_days:
-        rows.append(f"• Thời hạn: <b>{duration_days} ngày</b>")
-    rows.extend([
-        "• Giới hạn: <b>mỗi gói/combo chỉ mua 1 lần trong tháng</b>.",
-        f"• Quyền lợi: {html.escape(package_items_summary(entry.get('items') or {}))}",
-        f"• Thành phần: {html.escape(components)}" if components else "",
-        f"• Phù hợp: {html.escape(str(entry.get('note') or 'Dùng dịch vụ theo lượt/quyền trong gói.'))}", "",
-        "Sau khi PayOS xác nhận thanh toán, gói/combo sẽ nằm trong <b>📦 Gói của tôi</b>.",
-        "Khi dùng công cụ thuộc gói, hệ thống ưu tiên trừ lượt/quyền trong gói nếu còn.", "",
-        "Gói/Combo không phải nạp Xu thường, không cộng bonus nạp Xu và không tự nâng hạng thành viên.", "",
+        *tax_lines,
+        "",
+        f"Phù hợp: {html.escape(str(entry.get('audience') or entry.get('note') or 'Dùng dịch vụ theo lượt/quyền trong gói.'))}",
+        "Sau khi PayOS xác nhận, quyền lợi nằm trong <b>📦 Gói của tôi</b>.",
+        "",
         "Bạn có muốn thanh toán sản phẩm này không?",
-    ])
+    ]
     return [line for line in rows if line != ""]
 
 def package_purchase_manual_keyboard(package_type: str = "combo", code: str = "") -> InlineKeyboardMarkup:
     back_action = package_detail_back_callback(package_type, code)
+    origin = "detail" if str(package_type or "").strip().lower() in {"monthly", "month", "plan", "task", "package"} else "combo_detail"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 Cần gói lớn hơn / Order riêng", callback_data="pricing|need_larger")],
+        [InlineKeyboardButton("📩 Gửi yêu cầu admin", callback_data=pkgcombo_large_order_callback(origin, package_type, code))],
         [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
         [InlineKeyboardButton("🔙 Quay lại", callback_data=back_action), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -127338,6 +127399,7 @@ def package_purchase_confirm_keyboard(package_type: str, code: str) -> InlineKey
     back_action = package_detail_back_callback(package_type, code)
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận thanh toán", callback_data=f"pkgbuy|confirm|{package_type}|{code}"), InlineKeyboardButton("⬅️ Hủy", callback_data=back_action)],
+        [InlineKeyboardButton("📩 Cần gói lớn hơn", callback_data=pkgcombo_large_order_callback("detail" if package_type == "monthly" else "combo_detail", package_type, code))],
         [InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
 
@@ -127348,17 +127410,18 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
     code = str(code or "").strip().lower()
     entry = package_catalog_entry(code, package_type)
     back_action = package_detail_back_callback(package_type, code)
+    large_action = pkgcombo_large_order_callback("detail" if package_type == "monthly" else "combo_detail", package_type, code)
     if not entry or not package_entry_auto_checkout_enabled(entry):
         return await message.reply_text(
             "⚠️ Gói/combo này cần admin hỗ trợ trước khi mở thanh toán tự động.\n\n"
             "Bot chưa tạo đơn, chưa trừ Xu và chưa kích hoạt quyền lợi.",
-            reply_markup=package_need_larger_keyboard(back_action),
+            reply_markup=package_need_larger_keyboard(back_action, large_action),
         )
     get_user(uid, update.effective_user.first_name or update.effective_user.username or "")
     if user_bought_package_this_month(uid, code, package_type):
         return await message.reply_text(
             package_same_month_guard_text(),
-            reply_markup=package_need_larger_keyboard(back_action),
+            reply_markup=package_need_larger_keyboard(back_action, large_action),
         )
     if package_recent_unpaid_invoice_count(uid) >= 3:
         request = create_package_order_request(
@@ -127375,14 +127438,14 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
             + "\n\n"
             + package_order_request_text(request),
             parse_mode="HTML",
-            reply_markup=package_need_larger_keyboard(back_action),
+            reply_markup=package_need_larger_keyboard(back_action, large_action),
         )
     if package_type == "monthly":
         existing = resolve_package_for_user(uid, code)
         if existing and str(existing.get("status") or "") == "active" and not package_expired(existing.get("expires_at") or ""):
             return await message.reply_text(
                 package_same_month_guard_text() + "\n\nBot chưa tạo đơn mới.",
-                reply_markup=package_need_larger_keyboard(back_action),
+                reply_markup=package_need_larger_keyboard(back_action, large_action),
             )
     amount = package_purchase_price_vnd(package_type, code)
     if amount <= 0:
@@ -127391,8 +127454,8 @@ async def start_package_purchase(update: Update, context: ContextTypes.DEFAULT_T
             "Vui lòng bấm Liên hệ admin để được hỗ trợ. Bot chưa tạo đơn, chưa cộng/trừ Xu.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📞 Liên hệ admin", callback_data="menu|support")],
-                [InlineKeyboardButton("📦 Gói của tôi", callback_data="pricing|my_packages")],
-                [InlineKeyboardButton("🔙 Quay lại bảng giá", callback_data="pricing|plans" if package_type == "monthly" else "pricing|combo")],
+                [InlineKeyboardButton("📦 Gói của tôi", callback_data="pkgcombo:my")],
+                [InlineKeyboardButton("🔙 Quay lại", callback_data=back_action)],
             ]),
         )
     if flag_on("emergency_lock") or flag_on("payment_freeze"):
@@ -127687,6 +127750,94 @@ async def handle_package_purchase_callback(update: Update, context: ContextTypes
         package_purchase_confirm_keyboard(package_type, code),
     )
 
+def pkgcombo_large_order_lines(request: dict | None = None) -> list[str]:
+    request_id = int((request or {}).get("request_id") or 0)
+    rows = [
+        "📩 <b>Cần gói lớn hơn</b>",
+        "",
+        "Anh/chị mô tả nhu cầu:",
+        "• Loại sản phẩm cần dùng",
+        "• Số lượng mong muốn",
+        "• Thời gian cần hoàn thành",
+        "• Ngân sách dự kiến nếu có",
+        "",
+        "TOAN AAS sẽ kiểm tra và báo lại.",
+    ]
+    if request_id:
+        rows.extend(["", f"• Mã yêu cầu: <code>{request_id}</code>"])
+    return rows
+
+def pkgcombo_large_order_keyboard(back_callback: str = "pkgcombo:home") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data=back_callback), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
+    ])
+
+async def render_pkgcombo_detail(query, package_type: str, code: str):
+    entry = package_catalog_entry(code, package_type)
+    if not entry:
+        return await safe_edit_or_send(query, "⚠️ Gói không hợp lệ. Bot chưa tạo đơn.", parse_mode="HTML", reply_markup=pricing_packages_keyboard("vi"))
+    keyboard = package_purchase_manual_keyboard(package_type, code) if entry.get("manual") else package_purchase_confirm_keyboard(package_type, code)
+    return await edit_or_send_pricing_lines(query, package_purchase_detail_lines(package_type, code), keyboard)
+
+async def render_pkgcombo_large_order(query, context: ContextTypes.DEFAULT_TYPE, origin_parts: list[str] | None = None):
+    back_callback = pkgcombo_large_order_back_callback(origin_parts)
+    request = create_package_order_request(
+        query.from_user.id if query.from_user else "",
+        username=(query.from_user.username or query.from_user.first_name or "") if query.from_user else "",
+        source="pkgcombo_large_order_button",
+        need_text="User clicked need larger package/custom order.",
+    )
+    return await safe_edit_or_send(
+        query,
+        "\n".join(pkgcombo_large_order_lines(request)),
+        parse_mode="HTML",
+        reply_markup=pkgcombo_large_order_keyboard(back_callback),
+    )
+
+async def handle_pkgcombo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    data = query.data or "pkgcombo:home"
+    parts = data.split(":")
+    action = parts[1] if len(parts) > 1 else "home"
+    lang = get_user_language(query.from_user.id) if query.from_user else "vi"
+    if query.from_user:
+        clear_media_creator_pending_states(query.from_user.id)
+    if action in {"home", "back"}:
+        if action == "back" and len(parts) >= 3:
+            target = parts[2]
+            if target == "group" and len(parts) >= 4:
+                return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(pkgcombo_normalize_group(parts[3])), pricing_task_package_group_keyboard(pkgcombo_normalize_group(parts[3]), lang))
+            if target == "combo_group":
+                return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_combo_keyboard(lang))
+            if target == "detail" and len(parts) >= 4:
+                return await render_pkgcombo_detail(query, "monthly", parts[3])
+            if target == "combo_detail" and len(parts) >= 4:
+                return await render_pkgcombo_detail(query, "combo", parts[3])
+        return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), pricing_packages_keyboard(lang))
+    if action == "notes":
+        return await edit_or_send_pricing_lines(query, pricing_pkgcombo_notes_lines(lang), pricing_pkgcombo_notes_keyboard(lang))
+    if action == "my":
+        return await edit_or_send_pricing_lines(query, [user_package_summary_text(query.from_user.id)], my_packages_keyboard(lang))
+    if action == "group":
+        group = pkgcombo_normalize_group(parts[2] if len(parts) > 2 else "")
+        if group == "combo":
+            return await edit_or_send_pricing_lines(query, pricing_combo_lines(), pricing_combo_keyboard(lang))
+        return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group), pricing_task_package_group_keyboard(group, lang))
+    if action == "detail" and len(parts) >= 3:
+        return await render_pkgcombo_detail(query, "monthly", parts[2])
+    if action == "combo_detail" and len(parts) >= 3:
+        return await render_pkgcombo_detail(query, "combo", parts[2])
+    if action == "pay" and len(parts) >= 3:
+        return await start_package_purchase(update, context, "monthly", parts[2], message=query.message)
+    if action == "combo_pay" and len(parts) >= 3:
+        return await start_package_purchase(update, context, "combo", parts[2], message=query.message)
+    if action == "large_order":
+        return await render_pkgcombo_large_order(query, context, parts[2:])
+    return await edit_or_send_pricing_lines(query, pricing_packages_lines(lang), pricing_packages_keyboard(lang))
+
 async def cmd_admin_grant_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -127804,21 +127955,7 @@ async def handle_pricing_callback(update: Update, context: ContextTypes.DEFAULT_
         group = action.replace("package_group_", "", 1)
         return await edit_or_send_pricing_lines(query, pricing_task_package_group_lines(group), pricing_task_package_group_keyboard(group, lang))
     if action == "need_larger":
-        request = create_package_order_request(
-            query.from_user.id if query.from_user else "",
-            username=(query.from_user.username or query.from_user.first_name or "") if query.from_user else "",
-            source="pricing_need_larger_button",
-            need_text="User clicked need larger package/custom order.",
-        )
-        return await safe_edit_or_send(
-            query,
-            package_order_request_text(request),
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📦 Gói tháng", callback_data="pricing|plans"), InlineKeyboardButton("🎁 Combo thành phẩm", callback_data="pricing|combo")],
-                [InlineKeyboardButton("⬅️ Nạp Xu / Bảng giá", callback_data="pricing|main"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-            ]),
-        )
+        return await render_pkgcombo_large_order(query, context, ["home"])
     if action == "xu":
         return await edit_or_send_pricing_lines(query, pricing_xu_lines_i18n(lang), pricing_xu_keyboard(lang))
     if action == "free":
@@ -158935,6 +159072,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_translation_callback, pattern=r"^tr_(target|more|pick|transcribe)(\||$)"))
     tg_app.add_handler(CallbackQueryHandler(handle_language_callback, pattern=r"^(lang\|[a-z]{2}|lang_more|back_lang)$"))
     tg_app.add_handler(CallbackQueryHandler(handle_package_purchase_callback, pattern=r"^pkgbuy\|"))
+    tg_app.add_handler(CallbackQueryHandler(handle_pkgcombo_callback, pattern=r"^pkgcombo:"))
     tg_app.add_handler(CallbackQueryHandler(handle_pricing_callback, pattern=r"^pricing\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_buy_plan_callback, pattern=r"^buy_plan\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_doc_tool_callback, pattern=r"^docflow\|"))

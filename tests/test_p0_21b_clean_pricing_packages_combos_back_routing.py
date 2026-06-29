@@ -37,13 +37,13 @@ def test_guide_back_routing_matrix():
 
 def test_packages_back_returns_pricing_menu():
     callbacks = _callbacks(bot.pricing_plans_keyboard("vi"))
-    assert "pricing|main" in callbacks
+    assert "pkgcombo:home" in callbacks
     assert "pricing|packages" not in callbacks
 
 
 def test_combo_back_returns_pricing_menu():
     callbacks = _callbacks(bot.pricing_combo_keyboard("vi"))
-    assert "pricing|main" in callbacks
+    assert "pkgcombo:home" in callbacks
     assert "pricing|packages" not in callbacks
 
 
@@ -115,19 +115,19 @@ def test_combo_packages_rebuilt_by_use_case():
 
 
 def test_package_combo_copy_distinguishes_xu_monthly_combo_member():
-    text = "\n".join(bot.pricing_hub_lines("vi") + bot.pricing_packages_lines("vi") + bot.pricing_plans_lines())
+    text = "\n".join(bot.pricing_hub_lines("vi") + bot.pricing_packages_lines("vi") + bot.pricing_pkgcombo_notes_lines("vi"))
     assert "Nạp Xu: tự do" in text
-    assert "GÓI = mua theo tháng" in text
-    assert "COMBO = mua 1 lần" in text
+    assert "Gói tác vụ" in text
+    assert "Combo trọn gói" in text
     assert "Thành viên: hạng khách hàng" in text
-    assert "MÃ QUÀ TẶNG = chỉ admin quản lý/cấp phát" in text
+    assert "Mã quà tặng: chỉ admin quản lý/cấp phát" in text
 
 
 def test_combo_buttons_do_not_create_purchase_without_backend_product_id():
     callbacks = _callbacks(bot.pricing_combo_keyboard("vi"))
     manual_codes = {"combo_song_visual_888k", "combo_mini_course_1888k", "combo_translate_dub_888k", "combo_custom_order"}
     for code in manual_codes:
-        assert f"pkgbuy|combo|{code}" in callbacks
+        assert f"pkgcombo:combo_detail:{code}" in callbacks
         detail = "\n".join(bot.package_purchase_detail_lines("combo", code))
         assert "chưa mở checkout tự động" in detail
         assert "Bot chưa tạo đơn" in detail

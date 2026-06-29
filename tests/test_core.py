@@ -1314,7 +1314,7 @@ def test_package_purchase_selection_requires_confirm_before_checkout(monkeypatch
         for button in row
     ]
     assert "pkgbuy|confirm|combo|tiktok_99k" in detail_callbacks
-    assert "pricing|combo" in detail_callbacks
+    assert "pkgcombo:group:combo" in detail_callbacks
 
     update = SimpleNamespace(callback_query=FakeQuery("pkgbuy|confirm|combo|tiktok_99k"))
     asyncio.run(bot.handle_package_purchase_callback(update, context))
@@ -2423,7 +2423,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
         "pricing|catalog",
         "pricing|promotions",
         "menu|main_topup",
-        "pricing|packages",
+        "pkgcombo:home",
         "pricing|download_pricing",
         "pricing|download_guide",
         "menu|main",
@@ -2453,7 +2453,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "🎬 Video" in catalog_labels
     assert "📄 Tài liệu/PDF" in catalog_labels
     assert "📝 Ghi chú/Lưu trữ" in catalog_labels
-    assert "pricing|package_summary" in catalog_callbacks
+    assert "pkgcombo:home" in catalog_callbacks
     image_price_text = "\n".join(bot.pricing_image_lines())
     video_price_text = "\n".join(bot.pricing_video_lines())
     combo_price_text = "\n".join(bot.pricing_combo_lines())
@@ -2475,7 +2475,8 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "Combo Video Quảng Cáo Sản Phẩm Mini" in combo_price_text
     assert "Combo Affiliate / Review Sản Phẩm" in combo_price_text
     assert "Combo Dịch Video Đa Ngôn Ngữ" in combo_price_text
-    assert "không cộng điểm nâng hạng/thưởng nạp" in combo_price_text
+    pkgcombo_note_text = "\n".join(bot.pricing_pkgcombo_notes_lines("vi"))
+    assert "không cộng bonus nạp Xu" in pkgcombo_note_text
     assert "công cụ xử lý video nội bộ" in frame_price_text
     assert "Local Worker/FFmpeg" not in frame_price_text
     assert "Ảnh sang PDF: <b>0 Xu</b>" in docs_price_text
@@ -2498,37 +2499,39 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "key/token/raw provider response" in audit_price_text
     assert 'CommandHandler("pricing_audit", cmd_pricing_audit)' in source
     combo_callbacks = [button.callback_data for row in bot.pricing_combo_keyboard("vi").inline_keyboard for button in row]
-    assert "pkgbuy|combo|combo_ad_video_588k" in combo_callbacks
-    assert "pkgbuy|combo|combo_launch_1288k" in combo_callbacks
+    assert "pkgcombo:combo_detail:combo_ad_video_588k" in combo_callbacks
+    assert "pkgcombo:combo_detail:combo_launch_1288k" in combo_callbacks
     assert "pkgbuy|combo|tiktok_99k" not in combo_callbacks
-    assert "pricing|main" in combo_callbacks
+    assert "pkgcombo:home" in combo_callbacks
     package_hub_callbacks = [button.callback_data for row in bot.pricing_packages_keyboard("vi").inline_keyboard for button in row]
     assert package_hub_callbacks == [
-        "pricing|package_group_image",
-        "pricing|package_group_video",
-        "pricing|package_group_music",
-        "pricing|package_group_voice",
-        "pricing|package_group_subtitle_dub",
-        "pricing|package_group_prompt_workflow",
-        "pricing|combo",
-        "pricing|my_packages",
-        "pricing|need_larger",
+        "pkgcombo:group:image",
+        "pkgcombo:group:video",
+        "pkgcombo:group:music",
+        "pkgcombo:group:voice",
+        "pkgcombo:group:subtitle_dub",
+        "pkgcombo:group:prompt_workflow",
+        "pkgcombo:group:combo",
+        "pkgcombo:my",
+        "pkgcombo:large_order:home",
+        "pkgcombo:notes",
         "pricing|main",
         "menu|main",
     ]
     xu_text = "\n".join(bot.pricing_xu_lines())
     assert xu_text.count("💰 <b>BẢNG GIÁ XU DỊCH VỤ</b>") == 1
     plan_text = "\n".join(bot.pricing_plans_lines())
-    assert "GÓI = mua số lượng tác vụ lẻ theo từng dòng sản phẩm" in plan_text
-    assert "📦 Gói của tôi" in plan_text
+    assert "Chọn nhóm sản phẩm để xem các mức gói" in plan_text
+    assert "Gói tác vụ dùng trong 30 ngày" in "\n".join(bot.pricing_pkgcombo_notes_lines("vi"))
+    assert "pkgcombo:my" in package_hub_callbacks
     assert "/buy_plan" not in plan_text
     plan_callbacks = [button.callback_data for row in bot.pricing_plans_keyboard("vi").inline_keyboard for button in row]
-    assert "pricing|package_group_image" in plan_callbacks
-    assert "pricing|package_group_video" in plan_callbacks
-    assert "pricing|package_group_music" in plan_callbacks
-    assert "pricing|package_group_voice" in plan_callbacks
-    assert "pricing|package_group_prompt_workflow" in plan_callbacks
-    assert "pricing|main" in plan_callbacks
+    assert "pkgcombo:group:image" in plan_callbacks
+    assert "pkgcombo:group:video" in plan_callbacks
+    assert "pkgcombo:group:music" in plan_callbacks
+    assert "pkgcombo:group:voice" in plan_callbacks
+    assert "pkgcombo:group:prompt_workflow" in plan_callbacks
+    assert "pkgcombo:home" in plan_callbacks
     assert "Giá tác vụ dịch tham khảo" not in plan_text
     assert "<code>/translate_voice</code>: từ 30–80 Xu/audio ngắn" not in plan_text
     assert "Music / Audio Factory" not in plan_text
@@ -4094,16 +4097,18 @@ def test_account_referral_monthly_plan_guard_and_motion_guide(monkeypatch):
     assert "https://t.me/toanaasbot?start=ref_123456" in bot.referral_account_link_text("123456", "toanaasbot")
 
     plan_text = "\n".join(bot.pricing_plans_lines())
-    assert "GÓI = mua số lượng tác vụ lẻ theo từng dòng sản phẩm" in plan_text
-    assert "PayOS thanh toán thành công thì hạn mức tự lưu vào <b>📦 Gói của tôi</b>" in plan_text
+    pkgcombo_note_text = "\n".join(bot.pricing_pkgcombo_notes_lines("vi"))
+    assert "Chọn nhóm sản phẩm để xem các mức gói" in plan_text
+    assert "Gói tác vụ dùng trong 30 ngày" in pkgcombo_note_text
+    assert "Sau khi PayOS xác nhận, quyền lợi nằm trong 📦 Gói của tôi" in pkgcombo_note_text
     assert "Gói Ảnh" in plan_text
     assert "Gói Video" in plan_text
     assert "Gói Nhạc" in plan_text
     assert "Gói Voice" in plan_text
     assert "Prompt / Workflow" in plan_text
-    assert "Bấm nhóm bên dưới để xem từng mức gói" in plan_text
+    assert "Chi tiết giá/quyền lợi sẽ hiện ở từng gói" in plan_text
     assert "/buy_plan" not in plan_text
-    assert "Tiền mua gói không tính vào tổng nạp" in plan_text
+    assert "Tiền mua gói/combo không tính vào tổng nạp" in pkgcombo_note_text
 
     topic_text = bot.creative_motion_topic_text()
     assert "Bạn muốn làm video về vấn đề gì" in topic_text
