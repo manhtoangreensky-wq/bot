@@ -25,6 +25,7 @@ import re
 import unicodedata
 import csv
 import io
+import inspect
 import tempfile
 import mimetypes
 import shutil
@@ -1694,6 +1695,12 @@ PIPELINE_MAX_INPUT_MB_PUBLIC = max(1, env_int("PIPELINE_MAX_INPUT_MB_PUBLIC", 50
 PIPELINE_MAX_DURATION_SECONDS_ADMIN = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_ADMIN", 180))
 PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_PUBLIC", 90))
 PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_MB", 49))
+SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", min(45, PIPELINE_MAX_TELEGRAM_OUTPUT_MB)))
+SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", 48))
+SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
+SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
+SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
+SUBDUB_MIN_VIDEO_OUTPUT_BYTES = max(512, env_int("SUBDUB_MIN_VIDEO_OUTPUT_BYTES", 2048))
 PIPELINE_TEMP_ROOT = _env("PIPELINE_TEMP_ROOT", os.path.join(tempfile.gettempdir(), "toan_aas_pipeline"))
 PIPELINE_JOB_LOCK_TTL_SECONDS = max(60, env_int("PIPELINE_JOB_LOCK_TTL_SECONDS", 30 * 60))
 DUB_AUDIO_NORMALIZE_ENABLED = env_flag("DUB_AUDIO_NORMALIZE_ENABLED", "true")
@@ -76441,6 +76448,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• original SRT path: <code>{esc(job.get('original_srt_path'))}</code>",
         f"• translated SRT path: <code>{esc(job.get('translated_srt_path'))}</code>",
         f"• TTS route called: <code>{yes_no(job.get('tts_route_called'))}</code>",
+        f"• selected voice id: <code>{esc(job.get('selected_tts_voice_id'))}</code>",
+        f"• selected voice label: <code>{esc(job.get('selected_voice_label'))}</code>",
         f"• dubbed audio path: <code>{esc(job.get('dubbed_audio_path'))}</code>",
         f"• dubbed audio exists: <code>{yes_no(job.get('dubbed_audio_exists'))}</code>",
         f"• mux/render route called: <code>{yes_no(job.get('mux_render_called'))}</code>",
@@ -76448,6 +76457,11 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• final MP4 exists: <code>{yes_no(job.get('final_mp4_exists'))}</code>",
         f"• final MP4 size: <code>{int(job.get('final_mp4_size') or job.get('video_bytes') or 0)}</code>",
         f"• final MP4 duration: <code>{int(job.get('final_mp4_duration') or job.get('duration_seconds') or 0)}</code>",
+        f"• subtitle style: <code>{esc(job.get('subtitle_style_preset'))}</code>",
+        f"• cover old subtitle: <code>{yes_no(job.get('cover_original_subtitle'))}</code>",
+        f"• original audio mode: <code>{esc(job.get('original_audio_mode'))}</code>",
+        f"• delivery method: <code>{esc(job.get('delivery_method'))}</code>",
+        f"• output validation: <code>{esc(json.dumps(job.get('output_validation') or {}, ensure_ascii=False)[:240])}</code>",
         f"• route ASR: <code>{esc(route.get('asr'))}</code>",
         f"• route translation: <code>{esc(route.get('translation'))}</code>",
         f"• route TTS: <code>{esc(route.get('tts'))}</code>",
@@ -76525,6 +76539,34 @@ async def cmd_subtitle_dub_debug(update: Update, context: ContextTypes.DEFAULT_T
 
 async def cmd_subtitle_dub_last_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
+
+async def cmd_subdub_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_subtitle_dub_status(update, context)
+
+async def cmd_subdub_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_subtitle_dub_debug(update, context)
+
+async def cmd_subdub_render_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_subtitle_dub_debug(update, context)
+
+async def cmd_subdub_delivery_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_subtitle_dub_debug(update, context)
+
+async def cmd_subdub_voice_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_subtitle_dub_debug(update, context)
+
+async def cmd_subdub_style_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    lines = ["🎨 <b>Subtitle/Dub style presets</b>", ""]
+    for key, preset in subdub_style_presets().items():
+        style = subdub_normalize_style({"subtitle_style_preset": key})
+        lines.append(
+            f"• <code>{html.escape(key)}</code>: {html.escape(str(preset.get('label') or key))} | "
+            f"size=<code>{int(style.get('size') or 0)}</code> | "
+            f"cover=<code>{'yes' if style.get('cover_original') else 'no'}</code>"
+        )
+    return await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 async def cmd_dub_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_job(update, context)
@@ -151302,6 +151344,7 @@ def subtitle_dub_debug_job_payload(
     final_path = str(artifacts.get("final_mp4") or "")
     route = dict(provider_route or {})
     attempts = dict(route_attempts or {})
+    style = subdub_normalize_style(state)
     blocker = video_dubbing_pipeline_blocker(
         input_save=input_save,
         gate_matrix=gate_matrix,
@@ -151329,6 +151372,8 @@ def subtitle_dub_debug_job_payload(
         "original_srt_path": str((artifacts.get("subtitles") or [""])[0] if isinstance(artifacts.get("subtitles"), list) and artifacts.get("subtitles") else ""),
         "translated_srt_path": str((artifacts.get("translated_subtitles") or [""])[0] if isinstance(artifacts.get("translated_subtitles"), list) and artifacts.get("translated_subtitles") else ""),
         "tts_route_called": bool(attempts.get("tts") or route.get("tts")),
+        "selected_tts_voice_id": str(state.get("selected_tts_voice_id") or state.get("tts_voice_id") or state.get("voice_id") or state.get("selected_voice_id") or ""),
+        "selected_voice_label": str(state.get("voice_style") or state.get("voice_label") or state.get("selected_voice_label") or ""),
         "dubbed_audio_path": audio_path,
         "dubbed_audio_exists": bool(audio_path and os.path.exists(audio_path)),
         "mux_render_called": bool(attempts.get("mux") or final_path),
@@ -151336,6 +151381,11 @@ def subtitle_dub_debug_job_payload(
         "final_mp4_exists": bool(final_path and os.path.exists(final_path)),
         "final_mp4_size": os.path.getsize(final_path) if final_path and os.path.exists(final_path) else 0,
         "final_mp4_duration": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
+        "subtitle_style_preset": str(style.get("preset") or ""),
+        "cover_original_subtitle": bool(style.get("cover_original")),
+        "original_audio_mode": str(state.get("original_audio_mode") or state.get("source_audio_mode") or state.get("audio_mix_mode") or ""),
+        "delivery_method": str(state.get("_subdub_delivery_method") or ""),
+        "output_validation": dict(state.get("_subdub_output_validation") or {}),
         "charged_xu": int(charged or 0),
         "last_technical_error": sanitize_log_text(str(detail or ""))[:220],
         "public_safe_error": public_safe_error,
@@ -151345,7 +151395,415 @@ def subtitle_dub_debug_job_payload(
     }
 
 def pipeline_final_video_sendable(video_bytes: bytes) -> bool:
-    return bool(video_bytes) and len(video_bytes) <= PIPELINE_MAX_TELEGRAM_OUTPUT_MB * 1024 * 1024
+    limit_mb = min(int(PIPELINE_MAX_TELEGRAM_OUTPUT_MB or 0), int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB or 0))
+    return bool(video_bytes) and len(video_bytes) <= max(1, limit_mb) * 1024 * 1024
+
+SUBDUB_STYLE_PRESET_ORDER = (
+    "tiktok_clear",
+    "cover_original",
+    "cinematic",
+    "ads",
+    "minimal",
+)
+
+SUBDUB_STYLE_PRESETS = {
+    "tiktok_clear": {
+        "label": "Rõ nét",
+        "font": "Arial",
+        "size": 34,
+        "position": "bottom",
+        "align": "center",
+        "text_color": "#FFFFFF",
+        "outline_color": "#000000",
+        "outline": 3,
+        "shadow": 1,
+        "background": "none",
+        "cover_original": False,
+        "cover_opacity": 0.0,
+        "max_lines": 2,
+        "show_subtitles": True,
+    },
+    "cover_original": {
+        "label": "Che phụ đề cũ",
+        "font": "Arial",
+        "size": 34,
+        "position": "bottom",
+        "align": "center",
+        "text_color": "#FFFFFF",
+        "outline_color": "#000000",
+        "outline": 3,
+        "shadow": 0,
+        "background": "strip",
+        "cover_original": True,
+        "cover_opacity": 0.62,
+        "max_lines": 2,
+        "show_subtitles": True,
+    },
+    "cinematic": {
+        "label": "Điện ảnh",
+        "font": "Arial",
+        "size": 30,
+        "position": "bottom_high",
+        "align": "center",
+        "text_color": "#F4F0E8",
+        "outline_color": "#101010",
+        "outline": 2,
+        "shadow": 1,
+        "background": "soft",
+        "cover_original": False,
+        "cover_opacity": 0.28,
+        "max_lines": 2,
+        "show_subtitles": True,
+    },
+    "ads": {
+        "label": "Nổi bật",
+        "font": "Arial",
+        "size": 38,
+        "position": "middle_low",
+        "align": "center",
+        "text_color": "#FFE45C",
+        "outline_color": "#111111",
+        "outline": 4,
+        "shadow": 1,
+        "background": "strip",
+        "cover_original": False,
+        "cover_opacity": 0.34,
+        "max_lines": 2,
+        "show_subtitles": True,
+    },
+    "minimal": {
+        "label": "Gọn nhẹ",
+        "font": "Arial",
+        "size": 28,
+        "position": "bottom",
+        "align": "center",
+        "text_color": "#FFFFFF",
+        "outline_color": "#202020",
+        "outline": 1,
+        "shadow": 0,
+        "background": "none",
+        "cover_original": False,
+        "cover_opacity": 0.0,
+        "max_lines": 2,
+        "show_subtitles": True,
+    },
+}
+
+def subdub_style_presets() -> dict:
+    return {key: dict(SUBDUB_STYLE_PRESETS[key]) for key in SUBDUB_STYLE_PRESET_ORDER}
+
+def subdub_bool_value(value, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on", "show", "enable", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", "hide", "disable", "disabled", "skip"}:
+        return False
+    return bool(default)
+
+def subdub_clamp_int(value, default: int, low: int, high: int) -> int:
+    try:
+        number = int(float(value))
+    except Exception:
+        number = int(default)
+    return max(low, min(high, number))
+
+def subdub_float_value(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
+    state = dict(style_or_state or {})
+    preset_key = str(
+        state.get("subtitle_style_preset")
+        or state.get("subdub_style_preset")
+        or state.get("subtitle_style")
+        or state.get("subdub_style")
+        or ""
+    ).strip().lower().replace("-", "_")
+    if preset_key not in SUBDUB_STYLE_PRESETS:
+        preset_key = "tiktok_clear"
+    style = dict(SUBDUB_STYLE_PRESETS[preset_key])
+    style["preset"] = preset_key
+    custom = dict(state.get("subtitle_style_options") or state.get("subdub_style_options") or {})
+    for key, value in {**custom, **state}.items():
+        if key in {
+            "font", "subtitle_font", "subdub_font",
+            "size", "subtitle_size", "subdub_size",
+            "position", "subtitle_position", "subdub_position",
+            "align", "subtitle_align", "subdub_align",
+            "text_color", "subtitle_color", "subdub_color",
+            "outline_color", "subtitle_outline_color",
+            "outline", "subtitle_outline",
+            "shadow", "subtitle_shadow",
+            "background", "subtitle_background",
+            "cover_original", "cover_original_subtitle", "cover_old_subtitle",
+            "cover_opacity", "subtitle_cover_opacity",
+            "max_lines", "subtitle_max_lines",
+            "show_subtitles", "burn_subtitle", "display_subtitles",
+        }:
+            normalized_key = key
+            normalized_key = normalized_key.replace("subtitle_", "").replace("subdub_", "")
+            if normalized_key == "color":
+                normalized_key = "text_color"
+            if normalized_key in {"original", "old_subtitle", "cover_original_subtitle", "cover_old_subtitle"}:
+                normalized_key = "cover_original"
+            if normalized_key in {"burn", "display_subtitles"}:
+                normalized_key = "show_subtitles"
+            style[normalized_key] = value
+    style["font"] = re.sub(r"[^A-Za-z0-9 _.-]", "", str(style.get("font") or "Arial")).strip()[:40] or "Arial"
+    style["size"] = subdub_clamp_int(style.get("size"), 34, 18, 64)
+    style["outline"] = subdub_clamp_int(style.get("outline"), 3, 0, 6)
+    style["shadow"] = subdub_clamp_int(style.get("shadow"), 1, 0, 4)
+    style["max_lines"] = subdub_clamp_int(style.get("max_lines"), 2, 1, 3)
+    style["cover_opacity"] = max(0.0, min(0.9, subdub_float_value(style.get("cover_opacity"), 0.0)))
+    style["cover_original"] = subdub_bool_value(style.get("cover_original"), False)
+    style["show_subtitles"] = subdub_bool_value(style.get("show_subtitles"), True)
+    return style
+
+def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
+    colors = {
+        "white": "#FFFFFF",
+        "yellow": "#FFE45C",
+        "blue": "#62B0FF",
+        "green": "#7BE87B",
+        "red": "#FF6B6B",
+        "black": "#000000",
+        "soft_black": "#101010",
+    }
+    text = str(value or default or "#FFFFFF").strip().lower()
+    text = colors.get(text, text)
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", text or ""):
+        text = default if re.fullmatch(r"#[0-9a-fA-F]{6}", str(default or "")) else "#FFFFFF"
+    red = text[1:3]
+    green = text[3:5]
+    blue = text[5:7]
+    return f"&H00{blue}{green}{red}".upper()
+
+def subdub_ass_alignment(position: str = "bottom", align: str = "center") -> tuple[int, int]:
+    position = str(position or "bottom").strip().lower()
+    align = str(align or "center").strip().lower()
+    horizontal = {"left": 1, "center": 2, "right": 3}.get(align, 2)
+    if position in {"top", "upper"}:
+        return horizontal + 6, 36
+    if position in {"center", "middle"}:
+        return horizontal + 3, 48
+    if position in {"middle_low", "center_low"}:
+        return horizontal + 3, 120
+    if position in {"bottom_high", "above_original"}:
+        return horizontal, 110
+    return horizontal, 48
+
+def subdub_parse_srt_timestamp(value: str) -> float:
+    text = str(value or "0").strip().replace(",", ".")
+    try:
+        hours, minutes, seconds = text.split(":", 2)
+        return max(0.0, int(hours) * 3600 + int(minutes) * 60 + float(seconds))
+    except Exception:
+        return 0.0
+
+def subdub_ass_timestamp(seconds: float) -> str:
+    centiseconds = max(0, int(round(float(seconds or 0) * 100)))
+    hours, remainder = divmod(centiseconds, 360000)
+    minutes, remainder = divmod(remainder, 6000)
+    secs, centis = divmod(remainder, 100)
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
+
+def subdub_srt_blocks(srt_text: str) -> list[dict]:
+    text = str(srt_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    blocks: list[dict] = []
+    for raw_block in re.split(r"\n\s*\n", text):
+        lines = [line.strip() for line in raw_block.split("\n") if line.strip()]
+        if not lines:
+            continue
+        if re.fullmatch(r"\d+", lines[0]) and len(lines) > 1:
+            lines = lines[1:]
+        time_index = next((idx for idx, line in enumerate(lines) if "-->" in line), -1)
+        if time_index < 0:
+            continue
+        start_text, end_text = [part.strip().split()[0] for part in lines[time_index].split("-->", 1)]
+        body = "\n".join(lines[time_index + 1:]).strip()
+        if not body:
+            continue
+        start = subdub_parse_srt_timestamp(start_text)
+        end = subdub_parse_srt_timestamp(end_text)
+        if end <= start:
+            end = start + 1.0
+        blocks.append({"start": start, "end": end, "text": body})
+    return blocks
+
+def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
+    lines = [re.sub(r"\s+", " ", line).strip() for line in str(text or "").replace("{", "").replace("}", "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+    return r"\N".join(lines[:max(1, int(max_lines or 2))])
+
+def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
+    style = subdub_normalize_style(style_or_state)
+    blocks = subdub_srt_blocks(srt_text)
+    if not blocks or not style.get("show_subtitles"):
+        return ""
+    alignment, margin_v = subdub_ass_alignment(style.get("position"), style.get("align"))
+    primary = subdub_ass_color(str(style.get("text_color") or "#FFFFFF"))
+    outline = subdub_ass_color(str(style.get("outline_color") or "#000000"), "#000000")
+    header = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        "WrapStyle: 2",
+        "ScaledBorderAndShadow: yes",
+        "PlayResX: 1080",
+        "PlayResY: 1920",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        (
+            "Style: Default,"
+            f"{style.get('font')},{int(style.get('size') or 34)},{primary},&H00FFFFFF,{outline},&H66000000,"
+            f"-1,0,0,0,100,100,0,0,1,{int(style.get('outline') or 0)},{int(style.get('shadow') or 0)},"
+            f"{alignment},54,54,{margin_v},1"
+        ),
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    events = []
+    for block in blocks:
+        escaped = subdub_ass_escape(str(block.get("text") or ""), int(style.get("max_lines") or 2))
+        if escaped:
+            events.append(
+                "Dialogue: 0,"
+                f"{subdub_ass_timestamp(float(block.get('start') or 0))},"
+                f"{subdub_ass_timestamp(float(block.get('end') or 0))},"
+                f"Default,,0,0,0,,{escaped}"
+            )
+    return "\n".join(header + events) + "\n"
+
+def subdub_ffmpeg_filter_path(path: str) -> str:
+    return str(path or "").replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+def subdub_cover_filter(style_or_state: dict | None = None) -> str:
+    style = subdub_normalize_style(style_or_state)
+    background = str(style.get("background") or "none").strip().lower()
+    cover = bool(style.get("cover_original"))
+    if not cover and background not in {"strip", "soft"}:
+        return ""
+    opacity = float(style.get("cover_opacity") or (0.56 if cover else 0.28))
+    opacity = max(0.18, min(0.9, opacity))
+    if cover:
+        return f"drawbox=x=0:y=ih*0.68:w=iw:h=ih*0.25:color=black@{opacity:.2f}:t=fill"
+    if background == "strip":
+        return f"drawbox=x=0:y=ih*0.78:w=iw:h=ih*0.14:color=black@{opacity:.2f}:t=fill"
+    return f"drawbox=x=iw*0.08:y=ih*0.78:w=iw*0.84:h=ih*0.14:color=black@{opacity:.2f}:t=fill"
+
+def subdub_subtitle_filter_for_file(path: str) -> str:
+    return f"subtitles=filename='{subdub_ffmpeg_filter_path(path)}'"
+
+def subdub_original_audio_volume(mode: str = "", keep_original_audio: bool = False) -> float:
+    token = str(mode or "").strip().lower()
+    if keep_original_audio and token in {"", "auto"}:
+        token = "duck"
+    if token in {"keep", "original", "full", "1", "100"}:
+        return 1.0
+    if token in {"duck", "low", "soft", "mix", "25", "0.25"}:
+        return 0.25
+    if token in {"tiny", "10", "0.10", "0.1"}:
+        return 0.10
+    if token in {"default"}:
+        return ORIGINAL_AUDIO_MIX_VOLUME
+    return 0.0
+
+async def subdub_probe_video_bytes(video_bytes: bytes) -> dict:
+    ffprobe = ffprobe_path_for_ffmpeg()
+    if not ffprobe:
+        return {"ok": False, "detail": "ffprobe_unavailable", "duration": 0.0, "has_video": False, "has_audio": False, "size": len(video_bytes or b"")}
+    if not video_bytes:
+        return {"ok": False, "detail": "empty_video", "duration": 0.0, "has_video": False, "has_audio": False, "size": 0}
+    with tempfile.TemporaryDirectory(prefix="toanaas_video_probe_") as tmpdir:
+        path = os.path.join(tmpdir, "probe.mp4")
+        with open(path, "wb") as handle:
+            handle.write(video_bytes)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                ffprobe,
+                "-v", "error",
+                "-print_format", "json",
+                "-show_entries", "format=duration:stream=codec_type",
+                path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            if proc.returncode != 0:
+                detail = (stderr or stdout or b"").decode("utf-8", errors="ignore")[-180:] or f"ffprobe_return_{proc.returncode}"
+                return {"ok": False, "detail": sanitize_log_text(detail), "duration": 0.0, "has_video": False, "has_audio": False, "size": len(video_bytes)}
+            payload = json.loads(stdout.decode("utf-8", errors="ignore") or "{}")
+            streams = list(payload.get("streams") or [])
+            duration = max(0.0, float((payload.get("format") or {}).get("duration") or 0))
+            has_video = any(str(item.get("codec_type") or "") == "video" for item in streams)
+            has_audio = any(str(item.get("codec_type") or "") == "audio" for item in streams)
+            return {"ok": bool(has_video and duration > 0), "detail": "ok", "duration": duration, "has_video": has_video, "has_audio": has_audio, "size": len(video_bytes)}
+        except Exception as exc:
+            return {"ok": False, "detail": sanitize_log_text(type(exc).__name__), "duration": 0.0, "has_video": False, "has_audio": False, "size": len(video_bytes)}
+
+async def subdub_validate_video_output(video_bytes: bytes, *, require_audio: bool = False, min_bytes: int | None = None) -> dict:
+    min_size = int(min_bytes or SUBDUB_MIN_VIDEO_OUTPUT_BYTES or 512)
+    if not video_bytes or len(video_bytes) < min_size:
+        return {"ok": False, "detail": "video_too_small", "size": len(video_bytes or b""), "duration": 0.0, "has_video": False, "has_audio": False}
+    probe = await subdub_probe_video_bytes(video_bytes)
+    if not probe.get("ok"):
+        return {**probe, "ok": False, "detail": str(probe.get("detail") or "video_probe_failed")}
+    if not probe.get("has_video"):
+        return {**probe, "ok": False, "detail": "video_stream_missing"}
+    if float(probe.get("duration") or 0.0) <= 0:
+        return {**probe, "ok": False, "detail": "video_duration_zero"}
+    if require_audio and not probe.get("has_audio"):
+        return {**probe, "ok": False, "detail": "audio_stream_missing"}
+    return {**probe, "ok": True, "detail": "ok"}
+
+async def subdub_compress_video_bytes(video_bytes: bytes, *, require_audio: bool = False) -> tuple[bytes, str]:
+    ffmpeg = frame_video_ffmpeg_path()
+    if not ffmpeg or not video_bytes:
+        return b"", "compress_unavailable"
+    with tempfile.TemporaryDirectory(prefix="toanaas_video_compress_") as tmpdir:
+        source_path = os.path.join(tmpdir, "source.mp4")
+        output_path = os.path.join(tmpdir, "toan_aas_ready.mp4")
+        with open(source_path, "wb") as handle:
+            handle.write(video_bytes)
+        command = [
+            ffmpeg, "-y", "-i", source_path,
+            "-map", "0:v:0", "-map", "0:a?",
+            "-vf", "scale=1280:-2:force_original_aspect_ratio=decrease",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+        ok, detail = await run_ffmpeg_command(command, timeout=300)
+        if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
+            return b"", str(detail or "compress_failed")
+        with open(output_path, "rb") as handle:
+            compressed = handle.read()
+        validation = await subdub_validate_video_output(compressed, require_audio=require_audio)
+        if not validation.get("ok"):
+            return b"", str(validation.get("detail") or "compress_validation_failed")
+        return compressed, "compressed"
+
+def subdub_terminal_state_allows_transition(current: str = "", desired: str = "") -> bool:
+    current = str(current or "").strip().lower()
+    desired = str(desired or "").strip().lower()
+    if current in {"completed", "delivered"} and desired in {"failed", "partial"}:
+        return False
+    if current == "failed" and desired in {"completed", "delivered"}:
+        return False
+    if current == "delivered" and desired == "delivered":
+        return False
+    return True
 
 async def send_public_subtitle_dub_final_outputs(
     message,
@@ -151359,20 +151817,76 @@ async def send_public_subtitle_dub_final_outputs(
     video_bytes: bytes = b"",
     lang: str = "vi",
     include_subtitle_outputs: bool = True,
+    strict_validation: bool = False,
 ) -> dict:
     mode = normalize_video_translate_mode(mode)
     requested_mode = normalize_video_translate_mode(requested_mode)
     is_combined = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+    metadata_enabled = bool(strict_validation)
     sent = {"documents": 0, "audio": 0, "video": 0}
-    if pipeline_final_video_sendable(video_bytes):
+    if video_bytes:
+        if metadata_enabled:
+            sent.update({"video_document": 0, "delivery_method": "", "output_validation": {}})
         filename, caption, _button = video_dubbing_final_video_label(mode, lang)
-        await message.reply_video(
-            video=video_dubbing_output_file(video_bytes, filename),
-            filename=filename,
-            caption=caption,
+        require_audio = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and bool(audio_bytes)
+        validation = (
+            await subdub_validate_video_output(video_bytes, require_audio=require_audio)
+            if strict_validation
+            else {"ok": True, "detail": "not_requested"}
         )
-        sent["video"] = 1
-        return sent
+        if metadata_enabled:
+            sent["output_validation"] = dict(validation or {})
+        send_limit = max(1, int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB or PIPELINE_MAX_TELEGRAM_OUTPUT_MB)) * 1024 * 1024
+        doc_limit = max(1, int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB or PIPELINE_MAX_TELEGRAM_OUTPUT_MB)) * 1024 * 1024
+        compress_threshold = max(1, int(SUBDUB_COMPRESS_IF_OVER_MB or SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB)) * 1024 * 1024
+
+        async def _try_reply_video(payload: bytes, method: str) -> bool:
+            if not payload or len(payload) > send_limit:
+                return False
+            try:
+                await message.reply_video(
+                    video=video_dubbing_output_file(payload, filename),
+                    filename=filename,
+                    caption=caption,
+                )
+                sent["video"] = 1
+                if metadata_enabled:
+                    sent["delivery_method"] = method
+                return True
+            except Exception as exc:
+                logger.warning("subtitle/dub video delivery failed | %s", sanitize_log_text(str(exc))[:160])
+                return False
+
+        async def _try_reply_video_document(payload: bytes, method: str) -> bool:
+            if not SUBDUB_ENABLE_DOCUMENT_FALLBACK or not payload or len(payload) > doc_limit:
+                return False
+            try:
+                await message.reply_document(
+                    document=video_dubbing_output_file(payload, filename),
+                    filename=filename,
+                    caption="✅ Video đã tạo xong. File hơi lớn nên TOAN AAS gửi dưới dạng tệp để anh/chị tải về.",
+                )
+                sent["documents"] += 1
+                if metadata_enabled:
+                    sent["video_document"] = 1
+                    sent["delivery_method"] = method
+                return True
+            except Exception as exc:
+                logger.warning("subtitle/dub video document delivery failed | %s", sanitize_log_text(str(exc))[:160])
+                return False
+
+        if validation.get("ok"):
+            if await _try_reply_video(video_bytes, "video"):
+                return sent
+            compressed = b""
+            if len(video_bytes) >= compress_threshold or len(video_bytes) > send_limit:
+                compressed, _compress_detail = await subdub_compress_video_bytes(video_bytes, require_audio=require_audio)
+                if compressed and await _try_reply_video(compressed, "compressed_video"):
+                    return sent
+            if compressed and await _try_reply_video_document(compressed, "compressed_document"):
+                return sent
+            if await _try_reply_video_document(video_bytes, "document"):
+                return sent
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and audio_bytes:
         await message.reply_audio(
             audio=video_dubbing_output_file(audio_bytes, "toan_aas_dub_audio.mp3"),
@@ -151386,6 +151900,8 @@ async def send_public_subtitle_dub_final_outputs(
             ),
         )
         sent["audio"] = 1
+        if metadata_enabled and "delivery_method" in sent:
+            sent["delivery_method"] = sent.get("delivery_method") or "partial_audio"
     if not include_subtitle_outputs:
         wanted_types = ()
     elif active_flow == VIDEO_DUBBING_FLOW_TRANSCRIPT:
@@ -152029,6 +152545,9 @@ async def video_dubbing_render_video(
     subtitle_bytes: bytes = b"",
     *,
     keep_original_audio: bool = False,
+    subtitle_style: dict | None = None,
+    original_audio_mode: str = "",
+    require_audio: bool | None = None,
 ) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
     if not ffmpeg or not source_bytes:
@@ -152037,6 +152556,7 @@ async def video_dubbing_render_video(
         source_path = os.path.join(tmpdir, "source.mp4")
         audio_path = os.path.join(tmpdir, "dub.mp3")
         subtitle_path = os.path.join(tmpdir, "subtitle.srt")
+        ass_path = os.path.join(tmpdir, "subtitle.ass")
         output_path = os.path.join(tmpdir, "toan_aas_output.mp4")
         with open(source_path, "wb") as handle:
             handle.write(source_bytes)
@@ -152045,20 +152565,32 @@ async def video_dubbing_render_video(
             with open(audio_path, "wb") as handle:
                 handle.write(dubbed_audio)
             command.extend(["-i", audio_path])
-        subtitle_filter = ""
+        video_filters = []
         if subtitle_bytes:
+            style = subdub_normalize_style(subtitle_style)
             with open(subtitle_path, "wb") as handle:
                 handle.write(subtitle_bytes)
-            escaped = subtitle_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-            subtitle_filter = f"subtitles=filename='{escaped}'"
-        if subtitle_filter:
-            command.extend(["-vf", subtitle_filter, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22"])
+            if style.get("show_subtitles"):
+                subtitle_text = subtitle_bytes.decode("utf-8-sig", errors="ignore")
+                ass_text = subdub_generate_ass_from_srt(subtitle_text, style)
+                cover_filter = subdub_cover_filter(style)
+                if cover_filter:
+                    video_filters.append(cover_filter)
+                if ass_text:
+                    with open(ass_path, "wb") as handle:
+                        handle.write(ass_text.encode("utf-8-sig"))
+                    video_filters.append(subdub_subtitle_filter_for_file(ass_path))
+                else:
+                    video_filters.append(subdub_subtitle_filter_for_file(subtitle_path))
+        if video_filters:
+            command.extend(["-vf", ",".join(video_filters), "-c:v", "libx264", "-preset", "veryfast", "-crf", "22"])
         else:
             command.extend(["-c:v", "copy"])
-        if dubbed_audio and keep_original_audio:
+        original_volume = subdub_original_audio_volume(original_audio_mode, keep_original_audio)
+        if dubbed_audio and original_volume > 0:
             command.extend([
                 "-filter_complex",
-                f"[0:a]volume={ORIGINAL_AUDIO_MIX_VOLUME:.3f}[original];"
+                f"[0:a]volume={original_volume:.3f}[original];"
                 "[original][1:a]amix=inputs=2:duration=longest:dropout_transition=0,"
                 "alimiter=limit=0.95[mixed]",
                 "-map", "0:v:0", "-map", "[mixed]", "-c:a", "aac", "-b:a", "160k", "-shortest",
@@ -152072,7 +152604,14 @@ async def video_dubbing_render_video(
         if not ok or not os.path.exists(output_path) or os.path.getsize(output_path) <= 0:
             return b"", str(detail or "video_render_failed")
         with open(output_path, "rb") as handle:
-            return handle.read(), "ffmpeg_video_render"
+            output_bytes = handle.read()
+        validation = await subdub_validate_video_output(
+            output_bytes,
+            require_audio=bool(dubbed_audio) if require_audio is None else bool(require_audio),
+        )
+        if not validation.get("ok"):
+            return b"", str(validation.get("detail") or "video_output_invalid")
+        return output_bytes, "ffmpeg_video_render"
 
 async def build_subtitle_dubbed_video_pipeline(
     source_video_bytes: bytes,
@@ -152866,8 +153405,28 @@ async def _execute_video_dubbing_pipeline_core(
         route_attempts["tts"] = True
         return await synthesize_dub_segment_chunks(*args, allow_admin=is_admin_user(uid), **kwargs)
 
+    render_supports_validation = True
+
     async def _render_video_for_blackbox(*args, **kwargs):
+        nonlocal render_supports_validation
         route_attempts["mux"] = True
+        render_style = subdub_normalize_style(state)
+        audio_mode = str(
+            state.get("original_audio_mode")
+            or state.get("source_audio_mode")
+            or state.get("audio_mix_mode")
+            or ("mute" if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else "keep")
+        )
+        kwargs.setdefault("subtitle_style", render_style)
+        kwargs.setdefault("original_audio_mode", audio_mode)
+        kwargs.setdefault("require_audio", mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB})
+        try:
+            signature = inspect.signature(video_dubbing_render_video)
+            supported = set(signature.parameters)
+            render_supports_validation = {"subtitle_style", "original_audio_mode", "require_audio"}.issubset(supported)
+            kwargs = {key: value for key, value in kwargs.items() if key in supported}
+        except Exception:
+            pass
         return await video_dubbing_render_video(*args, **kwargs)
 
     product_result = await subtitle_dub_product_pipeline.process_subtitle_dub_job(
@@ -152962,6 +153521,19 @@ async def _execute_video_dubbing_pipeline_core(
     video_output = bytes(product_result.get("video_output") or b"")
     partial_result = bool(product_result.get("partial_result") or product_result.get("partial"))
     partial_reason = str(product_result.get("partial_reason") or "")
+    subtitle_style = subdub_normalize_style(state)
+    state = {
+        **state,
+        "selected_tts_voice_id": selected_tts_voice_id,
+        "subtitle_style_preset": str(subtitle_style.get("preset") or ""),
+        "cover_original_subtitle": bool(subtitle_style.get("cover_original")),
+        "original_audio_mode": str(
+            state.get("original_audio_mode")
+            or state.get("source_audio_mode")
+            or state.get("audio_mix_mode")
+            or ("mute" if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} else "keep")
+        ),
+    }
     if workspace:
         source_name = os.path.basename(str(state.get("source_file_name") or "source.bin"))
         workspace_artifacts["source"] = write_subtitle_dub_pipeline_artifact(
@@ -153128,7 +153700,13 @@ async def _execute_video_dubbing_pipeline_core(
             video_bytes=video_output,
             lang=lang,
             include_subtitle_outputs=include_subtitle_outputs,
+            strict_validation=bool(render_supports_validation),
         )
+        state = {
+            **state,
+            "_subdub_delivery_method": str(delivery.get("delivery_method") or ""),
+            "_subdub_output_validation": dict(delivery.get("output_validation") or {}),
+        }
     except Exception:
         refund_charged_credit(
             uid,
@@ -153154,10 +153732,23 @@ async def _execute_video_dubbing_pipeline_core(
             "no_delivered_artifact",
             stage="delivery",
         )
+    delivered_video = int(delivery.get("video") or 0) + int(delivery.get("video_document") or 0) > 0
+    delivery_partial_result = False
+    if video_output and not delivered_video:
+        refund_charged_credit(
+            uid,
+            charged,
+            event_type=f"video_{mode}_video_delivery_partial_refund",
+            note="Subtitle/dub video was not delivered",
+            was_charged=charged > 0,
+        )
+        charged = 0
+        delivery_partial_result = True
+        partial_reason = partial_reason or "video_delivery_unavailable"
     internal_job_id = ""
     try:
         output_size = len(srt_bytes or b"") + len(audio_bytes or b"") + len(video_output or b"")
-        mux_state = "completed" if video_output else ("disabled" if not video_dubbing_mux_ready() else "skipped_or_not_requested")
+        mux_state = "completed" if delivered_video else ("partial_delivery" if video_output else ("disabled" if not video_dubbing_mux_ready() else "skipped_or_not_requested"))
         source_path = str(workspace_artifacts.get("source") or "")
         subtitle_paths = list(subtitle_asset_paths or workspace_artifacts.get("subtitles") or [])
         translated_paths = list(translation_asset_paths or [])
@@ -153167,7 +153758,7 @@ async def _execute_video_dubbing_pipeline_core(
             "chat_id": str(getattr(query.message, "chat_id", "") or ""),
             "provider": ",".join(item for item in (asr_provider, tts_provider) if item) or "subtitle_pipeline",
             "provider_task_id": "",
-            "status": "partial" if partial_result else "completed",
+            "status": "partial" if (partial_result or delivery_partial_result) else "completed",
             "progress_text": f"ASR completed; SRT blocks={srt_bytes.decode('utf-8', errors='ignore').count('-->') if srt_bytes else 0}; audio bytes={len(audio_bytes or b'')}; mux={mux_state}",
             "last_provider_status": f"asr={asr_provider or '-'}; tts={tts_provider or '-'}; mux={mux_state}",
             "output_bytes": output_size,
@@ -153196,9 +153787,16 @@ async def _execute_video_dubbing_pipeline_core(
             "final_mp4_exists": bool(dub_video_path and os.path.exists(dub_video_path)),
             "final_mp4_size": len(video_output or b""),
             "final_mp4_duration": duration_seconds,
+            "selected_tts_voice_id": selected_tts_voice_id,
+            "selected_voice_label": str(state.get("voice_style") or state.get("voice_label") or ""),
+            "subtitle_style_preset": str(state.get("subtitle_style_preset") or ""),
+            "cover_original_subtitle": bool(state.get("cover_original_subtitle")),
+            "original_audio_mode": str(state.get("original_audio_mode") or ""),
+            "delivery_method": str(delivery.get("delivery_method") or ""),
+            "output_validation": dict(delivery.get("output_validation") or {}),
             "last_technical_error": sanitize_log_text(partial_reason or product_result.get("error_code") or "")[:180],
-            "public_safe_error": subtitle_plus_dub_clean_failure_text(lang) if partial_result else "",
-            "stage": "completed" if video_output else ("partial" if partial_result else "output"),
+            "public_safe_error": subtitle_plus_dub_clean_failure_text(lang) if (partial_result or delivery_partial_result) else "",
+            "stage": "completed" if delivered_video else ("partial" if (partial_result or delivery_partial_result) else "output"),
             "pipeline_attempted": True,
             "input_file_id": str(input_save.get("file_id") or source_ref or ""),
             "gate_matrix": gate_matrix,
@@ -153222,11 +153820,16 @@ async def _execute_video_dubbing_pipeline_core(
         "has_subtitle": bool(srt_bytes),
         "has_audio": bool(audio_bytes),
         "has_video": bool(video_output),
+        "video_delivered": bool(delivered_video),
         "partial_result": bool(partial_result),
+        "delivery_partial_result": bool(delivery_partial_result),
         "partial_reason": partial_reason,
         "sent_documents": int(delivery.get("documents") or 0),
         "sent_audio": int(delivery.get("audio") or 0),
         "sent_video": int(delivery.get("video") or 0),
+        "sent_video_document": int(delivery.get("video_document") or 0),
+        "delivery_method": str(delivery.get("delivery_method") or ""),
+        "output_validation": dict(delivery.get("output_validation") or {}),
         "normalization_detail": normalization_detail,
         "workspace_artifacts": workspace_artifacts,
         "input_save": {key: value for key, value in dict(input_save or {}).items() if key != "source_bytes"},
@@ -153302,9 +153905,9 @@ async def execute_video_dubbing_pipeline(
             "active_flow": str(state.get("active_flow") or ""),
             "created_at": now_text(),
             "mode": str(result.get("mode") or state.get("mode") or ""),
-            "status": "partial" if result.get("partial_result") else ("completed" if result.get("ok") else "failed"),
+            "status": "partial" if (result.get("partial_result") or result.get("delivery_partial_result")) else ("completed" if result.get("ok") else "failed"),
             "ok": bool(result.get("ok")),
-            "partial_result": bool(result.get("partial_result")),
+            "partial_result": bool(result.get("partial_result") or result.get("delivery_partial_result")),
             "partial_reason": str(result.get("partial_reason") or ""),
             "output_sent_once": bool(
                 int(result.get("sent_documents") or 0)
@@ -153325,6 +153928,8 @@ async def execute_video_dubbing_pipeline(
                 "documents": int(result.get("sent_documents") or 0),
                 "audio": int(result.get("sent_audio") or 0),
                 "video": int(result.get("sent_video") or 0),
+                "video_document": int(result.get("sent_video_document") or 0),
+                "method": str(result.get("delivery_method") or ""),
             },
             "cleanup_status": "pending" if result.get("ok") else "preserved_for_debug",
         }
@@ -153345,13 +153950,19 @@ async def execute_video_dubbing_pipeline(
             "dub_audio": artifacts.get("dub_audio") or "",
             "final_mp4": artifacts.get("final_mp4") or "",
             "pipeline_attempted": bool(result.get("pipeline_attempted") or debug_job.get("pipeline_attempted")),
+            "delivery_method": str(result.get("delivery_method") or debug_job.get("delivery_method") or ""),
+            "output_validation": dict(result.get("output_validation") or debug_job.get("output_validation") or {}),
         }
         if not update_fields.get("internal_job_id"):
             update_fields["internal_job_id"] = str(result.get("internal_job_id") or job.get("job_id") or "")
         update_fields.pop("status", None)
         if result.get("ok"):
             mark_subtitle_dub_pipeline_output_sent(job_key)
-            update_subtitle_dub_pipeline_job(job_key, status="completed", **update_fields)
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                status="partial" if (result.get("partial_result") or result.get("delivery_partial_result")) else "completed",
+                **update_fields,
+            )
         else:
             update_subtitle_dub_pipeline_job(job_key, status="failed", **update_fields)
             if debug_job:
@@ -158260,6 +158871,12 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("dub_job", cmd_dub_job))
     tg_app.add_handler(CommandHandler("subtitle_dub_debug", cmd_subtitle_dub_debug))
     tg_app.add_handler(CommandHandler("subtitle_dub_last_debug", cmd_subtitle_dub_last_debug))
+    tg_app.add_handler(CommandHandler("subdub_status", cmd_subdub_status))
+    tg_app.add_handler(CommandHandler("subdub_job_debug", cmd_subdub_job_debug))
+    tg_app.add_handler(CommandHandler("subdub_render_debug", cmd_subdub_render_debug))
+    tg_app.add_handler(CommandHandler("subdub_delivery_debug", cmd_subdub_delivery_debug))
+    tg_app.add_handler(CommandHandler("subdub_voice_debug", cmd_subdub_voice_debug))
+    tg_app.add_handler(CommandHandler("subdub_style_preview", cmd_subdub_style_preview))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_provider_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_engine_status", cmd_voice_engine_status))
