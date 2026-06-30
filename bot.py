@@ -153929,16 +153929,26 @@ def video_dubbing_job_progress_keyboard(job_id, lang: str = "vi") -> InlineKeybo
 
 SUBDUB_PROGRESS_STAGES = {
     "received_file": (5, "Nhận video", "Đang nhận file"),
+    "received_video": (10, "Nhận video", "Đã nhận video"),
     "saved_input": (10, "Chuẩn bị file", "Đang chuẩn bị file"),
     "extracting_audio": (20, "Tách âm thanh", "Đang tách âm thanh"),
+    "extracted_audio": (25, "Tách âm thanh", "Đã tách âm thanh"),
     "transcribing": (35, "Nhận diện lời thoại", "Đang nhận diện lời thoại"),
+    "speech_recognized": (40, "Nhận diện lời thoại", "Đã nhận diện lời thoại"),
     "translating": (50, "Dịch nội dung", "Đang dịch nội dung"),
+    "subtitle_ready": (55, "Dịch nội dung", "Đã tạo phụ đề"),
+    "translated": (55, "Dịch nội dung", "Đã dịch nội dung"),
     "generating_voice": (65, "Tạo giọng lồng tiếng", "Đang tạo giọng lồng tiếng"),
+    "dub_audio_ready": (70, "Tạo giọng lồng tiếng", "Đã tạo giọng lồng tiếng"),
     "muxing_video": (80, "Ghép video", "Đang ghép video"),
+    "video_muxed": (85, "Ghép video", "Đã ghép video"),
+    "checking_file": (90, "Kiểm tra file", "Đang kiểm tra file"),
     "validating_output": (90, "Kiểm tra file", "Đang kiểm tra file"),
     "delivering": (95, "Gửi kết quả", "Đang gửi kết quả"),
     "delivered": (100, "Hoàn tất", "Đã gửi kết quả"),
 }
+
+SUBDUB_TERMINAL_STATES = {"delivered", "failed_no_charge", "failed_refunded", "needs_admin_review"}
 
 def subdub_public_job_code(job_id: str = "") -> str:
     return product_progress_status.product_progress_public_job_code(job_id)
@@ -153977,6 +153987,39 @@ def subdub_clean_failure_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return "TOAN AAS could not process this video right now. No Xu was charged. Please try a clearer video or another file."
     return "TOAN AAS chưa xử lý được video này lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị có thể thử video rõ tiếng hơn hoặc gửi video khác."
+
+def subdub_validate_saved_input_for_pipeline(input_save: dict | None = None, state: dict | None = None) -> dict:
+    current = dict(input_save or {})
+    state = dict(state or {})
+    path = str(current.get("path") or "")
+    size = int(current.get("size") or (os.path.getsize(path) if path and os.path.exists(path) else 0))
+    duration = _safe_int(current.get("duration") or state.get("video_duration") or state.get("source_duration"), 0)
+    content_type = str(current.get("content_type") or state.get("source_mime_type") or "").lower()
+    if not current.get("ok"):
+        return {"ok": False, "blocker": str(current.get("detail") or current.get("error") or "input_missing"), "duration": duration, "size": size}
+    if not path or not os.path.exists(path):
+        return {"ok": False, "blocker": "input_missing", "duration": duration, "size": size}
+    if size <= 0:
+        return {"ok": False, "blocker": "input_missing", "duration": duration, "size": size}
+    source_bytes = current.get("source_bytes")
+    has_source_bytes = isinstance(source_bytes, (bytes, bytearray)) and len(source_bytes) > 0
+    if content_type.startswith("video/") and duration <= 0 and not (has_source_bytes or isinstance(state.get("_pipeline_source_bytes_override"), (bytes, bytearray))):
+        return {"ok": False, "blocker": "input_zero_duration", "duration": duration, "size": size}
+    return {"ok": True, "blocker": "", "duration": duration, "size": size}
+
+def subdub_result_terminal_state(result: dict | None = None) -> str:
+    current = dict(result or {})
+    if not current.get("ok"):
+        return "failed_no_charge"
+    if current.get("delivery_partial_result"):
+        return "failed_refunded"
+    if current.get("partial_result"):
+        return "needs_admin_review"
+    return "delivered"
+
+def subdub_terminal_blocks_late_delivery(job: dict | None = None) -> bool:
+    terminal = str((job or {}).get("terminal_state") or "").strip().lower()
+    return terminal in {"delivered", "failed_no_charge", "failed_refunded"}
 
 def subtitle_dub_find_pipeline_job_for_user(user_id, job_id: str = "") -> dict:
     wanted = str(job_id or "").strip()
@@ -154074,6 +154117,8 @@ def acquire_subtitle_dub_pipeline_job(job_key: str, **fields) -> tuple[bool, dic
     if existing and (
         existing.get("status") == "running"
         or (existing.get("status") == "completed" and existing.get("output_sent"))
+        or bool(existing.get("output_sent"))
+        or str(existing.get("terminal_state") or "").strip().lower() in SUBDUB_TERMINAL_STATES
     ):
         existing["duplicate_count"] = int(existing.get("duplicate_count") or 0) + 1
         existing["updated_at"] = time.time()
@@ -154100,7 +154145,7 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
     current_terminal = str(job.get("terminal_state") or "")
     desired_terminal = str(fields.get("terminal_state") or "")
     if current_terminal and desired_terminal and current_terminal != desired_terminal:
-        if not subdub_terminal_state_allows_transition(current_terminal, desired_terminal):
+        if current_terminal in SUBDUB_TERMINAL_STATES or not subdub_terminal_state_allows_transition(current_terminal, desired_terminal):
             fields = {key: value for key, value in fields.items() if key not in {"terminal_state", "status"}}
         else:
             history = list(job.get("terminal_state_history") or [])
@@ -154115,7 +154160,13 @@ def update_subtitle_dub_pipeline_job(job_key: str, **fields) -> dict:
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
     return dict(job)
 
-def mark_subtitle_dub_pipeline_output_sent(job_key: str) -> bool:
+def mark_subtitle_dub_pipeline_output_sent(
+    job_key: str,
+    *,
+    terminal_state: str = "delivered",
+    delivery_message_id: str = "",
+    success_message_id: str = "",
+) -> bool:
     job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(str(job_key or "")) or {})
     if not job or job.get("output_sent"):
         if job:
@@ -154123,18 +154174,30 @@ def mark_subtitle_dub_pipeline_output_sent(job_key: str) -> bool:
             job["updated_at"] = time.time()
             SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
         return False
+    desired_terminal = str(terminal_state or "delivered").strip().lower()
+    if desired_terminal not in SUBDUB_TERMINAL_STATES:
+        desired_terminal = "delivered"
     current_terminal = str(job.get("terminal_state") or "")
-    if current_terminal and not subdub_terminal_state_allows_transition(current_terminal, "delivered"):
+    if current_terminal and not subdub_terminal_state_allows_transition(current_terminal, desired_terminal):
         job["duplicate_success_prevented_count"] = int(job.get("duplicate_success_prevented_count") or 0) + 1
         job["updated_at"] = time.time()
         SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
         return False
     job["output_sent"] = True
+    job["delivery_attempt_count"] = int(job.get("delivery_attempt_count") or 0) + 1
+    job["subdub_delivery_started_at"] = job.get("subdub_delivery_started_at") or time.time()
+    if delivery_message_id:
+        job["subdub_delivery_message_id"] = str(delivery_message_id)
+    if success_message_id:
+        job["subdub_success_message_id"] = str(success_message_id)
+    if desired_terminal == "delivered":
+        job["subdub_delivered_at"] = time.time()
+    job["subdub_terminal_locked_at"] = time.time()
     history = list(job.get("terminal_state_history") or [])
-    if current_terminal != "delivered":
-        history.append({"from": current_terminal, "to": "delivered", "at": time.time()})
+    if current_terminal != desired_terminal:
+        history.append({"from": current_terminal, "to": desired_terminal, "at": time.time()})
     job["terminal_state_history"] = history[-12:]
-    job["terminal_state"] = "delivered"
+    job["terminal_state"] = desired_terminal
     job["updated_at"] = time.time()
     SUBTITLE_DUB_PIPELINE_JOBS[str(job_key or "")] = job
     return True
@@ -154963,6 +155026,8 @@ async def subdub_compress_video_bytes(video_bytes: bytes, *, require_audio: bool
 def subdub_terminal_state_allows_transition(current: str = "", desired: str = "") -> bool:
     current = str(current or "").strip().lower()
     desired = str(desired or "").strip().lower()
+    if current in SUBDUB_TERMINAL_STATES and desired and desired != current:
+        return False
     if current in {"completed", "delivered"} and (desired in {"failed", "partial"} or desired.startswith("failed")):
         return False
     if current.startswith("failed") and desired in {"completed", "delivered"}:
@@ -156468,6 +156533,16 @@ async def _execute_video_dubbing_pipeline_core(
 
     input_save = await video_dubbing_save_input_for_pipeline(context, state, workspace)
     await _progress("saved_input")
+    input_validation = subdub_validate_saved_input_for_pipeline(input_save, state)
+    if input_save.get("ok") and not input_validation.get("ok"):
+        input_save = {
+            **dict(input_save or {}),
+            "ok": False,
+            "error": "RuntimeError",
+            "detail": str(input_validation.get("blocker") or "input_invalid"),
+            "duration": int(input_validation.get("duration") or 0),
+            "size": int(input_validation.get("size") or input_save.get("size") or 0),
+        }
     if input_save.get("ok") and input_save.get("source_bytes"):
         state = {
             **state,
@@ -157042,6 +157117,11 @@ async def _execute_video_dubbing_pipeline_core(
         charged = 0
         delivery_partial_result = True
         partial_reason = partial_reason or "video_delivery_unavailable"
+    result_terminal_state = subdub_result_terminal_state({
+        "ok": True,
+        "partial_result": bool(partial_result),
+        "delivery_partial_result": bool(delivery_partial_result),
+    })
     internal_job_id = ""
     try:
         output_size = len(srt_bytes or b"") + len(audio_bytes or b"") + len(video_output or b"")
@@ -157056,7 +157136,7 @@ async def _execute_video_dubbing_pipeline_core(
             "provider": ",".join(item for item in (asr_provider, tts_provider) if item) or "subtitle_pipeline",
             "provider_task_id": "",
             "status": "partial" if (partial_result or delivery_partial_result) else "completed",
-            "terminal_state": "failed_refunded" if delivery_partial_result else "delivered",
+            "terminal_state": result_terminal_state,
             "progress_text": f"ASR completed; SRT blocks={srt_bytes.decode('utf-8', errors='ignore').count('-->') if srt_bytes else 0}; audio bytes={len(audio_bytes or b'')}; mux={mux_state}",
             "last_provider_status": f"asr={asr_provider or '-'}; tts={tts_provider or '-'}; mux={mux_state}",
             "output_bytes": output_size,
@@ -157138,7 +157218,7 @@ async def _execute_video_dubbing_pipeline_core(
         "sent_video_document": int(delivery.get("video_document") or 0),
         "delivery_method": str(delivery.get("delivery_method") or ""),
         "output_validation": dict(delivery.get("output_validation") or {}),
-        "terminal_state": "failed_refunded" if delivery_partial_result else "delivered",
+        "terminal_state": result_terminal_state,
         "normalization_detail": normalization_detail,
         "workspace_artifacts": workspace_artifacts,
         "input_save": {key: value for key, value in dict(input_save or {}).items() if key != "source_bytes"},
@@ -157268,12 +157348,14 @@ async def execute_video_dubbing_pipeline(
         if not update_fields.get("internal_job_id"):
             update_fields["internal_job_id"] = str(result.get("internal_job_id") or job.get("job_id") or "")
         update_fields.pop("status", None)
+        update_fields.pop("terminal_state", None)
         if result.get("ok"):
-            mark_subtitle_dub_pipeline_output_sent(job_key)
+            result_terminal_state = subdub_result_terminal_state(result)
+            mark_subtitle_dub_pipeline_output_sent(job_key, terminal_state=result_terminal_state)
             update_subtitle_dub_pipeline_job(
                 job_key,
                 status="partial" if (result.get("partial_result") or result.get("delivery_partial_result")) else "completed",
-                terminal_state="failed_refunded" if result.get("delivery_partial_result") else "delivered",
+                terminal_state=result_terminal_state,
                 **update_fields,
             )
         else:
