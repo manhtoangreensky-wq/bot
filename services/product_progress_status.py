@@ -48,7 +48,7 @@ def _stage(key: str, label: str, status: str, percent: int) -> dict[str, Any]:
 PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
     "music_bg": {
         "title": "🎵 TOAN AAS đang tạo nhạc nền",
-        "send_label": "📤 Tạo nhạc khác",
+        "send_label": "📥 Tạo nhạc khác",
         "send_callback": "music_quick|showroom|ai_music",
         "back_label": "⬅️ Studio nhạc",
         "back_callback": "music_quick|showroom|music_hub",
@@ -62,8 +62,8 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         ],
     },
     "music_song": {
-        "title": "🎤 TOAN AAS đang tạo bài hát",
-        "send_label": "📤 Tạo bài hát khác",
+        "title": "🎙 TOAN AAS đang tạo bài hát",
+        "send_label": "📥 Tạo bài hát khác",
         "send_callback": "music_quick|showroom|ai_music",
         "back_label": "⬅️ Studio nhạc",
         "back_callback": "music_quick|showroom|music_hub",
@@ -604,7 +604,10 @@ def render_product_progress_panel(
     ]
     if note:
         body.extend(["", html.escape(note)])
-    body.extend(["", "Vui lòng không bấm lại nhiều lần."])
+    if canonical in {"music_bg", "music_song"}:
+        body.extend(["", "Anh/chị không cần bấm nhiều lần."])
+    else:
+        body.extend(["", "Vui lòng không bấm lại nhiều lần."])
     return "\n".join(body)
 
 

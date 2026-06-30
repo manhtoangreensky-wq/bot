@@ -46,7 +46,7 @@ def _assert_common_panel(text, title):
     assert "Tiến độ:" in text
     assert "Mã xử lý:" in text
     assert "Các bước:" in text
-    assert "Vui lòng không bấm lại nhiều lần." in text
+    assert "Vui lòng không bấm lại nhiều lần." in text or "Anh/chị không cần bấm nhiều lần." in text
 
 
 def _assert_no_public_technical_words(text):
@@ -113,7 +113,7 @@ def test_music_background_uses_progress_panel():
 
 def test_music_song_uses_progress_panel():
     text = bot.product_progress_status_text("music_song", "msong1", "generating_song")
-    _assert_common_panel(text, "🎤 TOAN AAS đang tạo bài hát")
+    _assert_common_panel(text, "🎙 TOAN AAS đang tạo bài hát")
     assert "Tạo bài hát" in text
 
 
