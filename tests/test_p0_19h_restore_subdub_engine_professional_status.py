@@ -70,10 +70,9 @@ def test_p0_19h_restores_p019f_engine_path(monkeypatch):
 
     command_text = " ".join(str(part) for part in calls[0])
     assert output == MP4_BYTES
-    assert "ffmpeg_video_render_basic" in detail
-    assert "subtitle.srt" in command_text
-    assert "subtitle.ass" not in command_text
-    assert "drawbox" not in command_text
+    assert "ffmpeg_video_render_advanced_style" in detail
+    assert "subtitle.ass" in command_text
+    assert "drawbox" in command_text
 
 
 def test_subdub_advanced_style_disabled_still_outputs_mp4(monkeypatch):
@@ -90,7 +89,7 @@ def test_subdub_advanced_style_disabled_still_outputs_mp4(monkeypatch):
     ))
 
     assert output == MP4_BYTES
-    assert "basic" in detail
+    assert "advanced_style" in detail
     assert len(calls) == 1
 
 

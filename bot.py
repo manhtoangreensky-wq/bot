@@ -1713,6 +1713,10 @@ SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "t
 SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
 SUBDUB_MIN_VIDEO_OUTPUT_BYTES = max(512, env_int("SUBDUB_MIN_VIDEO_OUTPUT_BYTES", 2048))
 SUBDUB_ADVANCED_STYLE_ENABLED = env_flag("SUBDUB_ADVANCED_STYLE_ENABLED", "false")
+SUBDUB_HARDSUB_COVER_ENABLED = env_flag("SUBDUB_HARDSUB_COVER_ENABLED", "true")
+SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.9, env_float("SUBDUB_HARDSUB_COVER_OPACITY", 0.60)))
+SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.05, min(0.35, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.18)))
+SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.55, min(0.9, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.76)))
 SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING = env_flag("SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING", "true")
 SUBDUB_ALLOW_SILENT_VOICE_FALLBACK = env_flag("SUBDUB_ALLOW_SILENT_VOICE_FALLBACK", "false")
 PIPELINE_TEMP_ROOT = _env("PIPELINE_TEMP_ROOT", os.path.join(tempfile.gettempdir(), "toan_aas_pipeline"))
@@ -80516,6 +80520,70 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• public-safe error: <code>{esc(job.get('public_safe_error'))}</code>",
     ])
 
+def subdub_voice_debug_text(job: dict) -> str:
+    if not job:
+        return "⚠️ Chưa có SubDub voice job để debug."
+    def esc(value) -> str:
+        return html.escape(str(value if value not in (None, "") else "-"))
+    def yes_no(value) -> str:
+        return "yes" if value else "no"
+    return "\n".join([
+        "🎙 <b>SUBDUB VOICE DEBUG</b>",
+        "",
+        f"• job: <code>{esc(job.get('internal_job_id') or job.get('job_id'))}</code>",
+        f"• mode: <code>{esc(job.get('mode'))}</code>",
+        f"• product type: <code>{esc(job.get('product_type'))}</code>",
+        f"• selected_voice_gender: <code>{esc(job.get('selected_voice_gender'))}</code>",
+        f"• selected_voice_id: <code>{esc(job.get('selected_voice_id'))}</code>",
+        f"• selected_voice_label: <code>{esc(job.get('selected_voice_label'))}</code>",
+        f"• resolved_voice_id: <code>{esc(job.get('resolved_voice_id') or job.get('provider_voice_id'))}</code>",
+        f"• resolved_gender: <code>{esc(job.get('resolved_gender'))}</code>",
+        f"• auto_detected_gender: <code>{esc(job.get('auto_detected_gender'))}</code>",
+        f"• confidence: <code>{esc(job.get('voice_confidence'))}</code>",
+        f"• fallback_used: <code>{yes_no(job.get('fallback_used'))}</code>",
+        f"• fallback_reason: <code>{esc(job.get('fallback_reason'))}</code>",
+        f"• tts_audio_path: <code>{esc(job.get('generated_audio_path') or job.get('dubbed_audio_path'))}</code>",
+        f"• tts_audio_bytes: <code>{int(job.get('audio_bytes') or 0)}</code>",
+        f"• tts_audio_duration: <code>{esc(job.get('generated_audio_duration'))}</code>",
+        f"• blocker: <code>{esc(job.get('voice_blocker') or job.get('pipeline_blocker'))}</code>",
+    ])
+
+def subdub_voice_style_state_fields(
+    *,
+    mode: str = "",
+    state: dict | None = None,
+    voice_resolution: dict | None = None,
+    selected_tts_voice_id: str = "",
+    tts_payload_voice_id: str = "",
+    subtitle_style: dict | None = None,
+) -> dict:
+    current = dict(state or {})
+    voice = dict(voice_resolution or {})
+    style = dict(subtitle_style or subdub_normalize_style(subdub_output_style_state(current, mode)))
+    resolved_voice = str(voice.get("resolved_voice_id") or voice.get("provider_voice_id") or selected_tts_voice_id or "")
+    return {
+        "product_type": subdub_product_type_from_mode(mode, current),
+        "selected_tts_voice_id": str(selected_tts_voice_id or "")[:180],
+        "provider_voice_id": str(voice.get("provider_voice_id") or selected_tts_voice_id or "")[:180],
+        "tts_payload_voice_id": str(tts_payload_voice_id or voice.get("tts_payload_voice_id") or selected_tts_voice_id or "")[:180],
+        "selected_voice_gender": str(voice.get("selected_voice_gender") or current.get("selected_voice_gender") or "")[:40],
+        "selected_voice_id": str(voice.get("selected_voice_id") or current.get("voice_id") or current.get("selected_voice_id") or "")[:180],
+        "resolved_voice_id": resolved_voice[:180],
+        "resolved_gender": str(voice.get("resolved_gender") or current.get("resolved_gender") or "")[:40],
+        "auto_detected_gender": str(voice.get("auto_detected_gender") or current.get("auto_detected_gender") or "")[:40],
+        "voice_confidence": str(voice.get("confidence") or current.get("voice_confidence") or "")[:20],
+        "voice_fallback_used": bool(voice.get("fallback_used")),
+        "voice_fallback_reason": str(voice.get("fallback_reason") or voice.get("reason") or "")[:180],
+        "_subdub_voice_resolution": voice,
+        "subtitle_style_preset": str(style.get("preset") or "")[:80],
+        "subtitle_style_profile": str(style.get("subtitle_style_profile") or "")[:80],
+        "hardsub_cover_enabled": bool(style.get("hardsub_cover_enabled")),
+        "cover_original_subtitle": bool(style.get("cover_original")),
+        "cover_opacity": float(style.get("cover_opacity") or 0.0),
+        "cover_height_ratio": float(style.get("cover_height_ratio") or 0.0),
+        "cover_y_ratio": float(style.get("cover_y_ratio") or 0.0),
+    }
+
 def subtitle_dub_debug_lookup_job(arg: str = "") -> dict:
     wanted = str(arg or "").strip()
     if wanted:
@@ -80599,7 +80667,11 @@ async def cmd_subdub_delivery_debug(update: Update, context: ContextTypes.DEFAUL
     return await cmd_subtitle_dub_debug(update, context)
 
 async def cmd_subdub_voice_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await cmd_subtitle_dub_debug(update, context)
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    job = subtitle_dub_debug_lookup_job(arg)
+    return await update.message.reply_text(subdub_voice_debug_text(job), parse_mode="HTML")
 
 async def cmd_subdub_terminal_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
@@ -97330,17 +97402,36 @@ def subdub_voice_resolution_payload(
     selected_voice_id: str = "",
     provider_voice_id: str = "",
     tts_payload_voice_id: str = "",
+    resolved_voice_id: str = "",
+    resolved_gender: str = "",
+    auto_detected_gender: str = "",
+    confidence: float = 0.0,
+    blocker: str = "",
     fallback_used: bool = False,
     fallback_reason: str = "",
     reason: str = "",
 ) -> dict:
+    selected_gender = str(selected_voice_gender or "").strip().lower()
+    provider_id = str(provider_voice_id or "").strip()
+    resolved_id = str(resolved_voice_id or provider_id).strip()
+    resolved_gender_value = str(resolved_gender or selected_gender or subdub_voice_id_gender_hint(resolved_id)).strip().lower()
+    auto_gender = str(auto_detected_gender or ("" if selected_gender else resolved_gender_value)).strip().lower()
+    try:
+        safe_confidence = float(confidence or (1.0 if selected_gender in {"female", "male"} else 0.0))
+    except Exception:
+        safe_confidence = 0.0
     return {
         "ok": bool(ok),
         "selected_voice_label": str(selected_voice_label or "")[:160],
-        "selected_voice_gender": str(selected_voice_gender or "")[:40],
+        "selected_voice_gender": selected_gender[:40],
         "selected_voice_id": str(selected_voice_id or "")[:180],
-        "provider_voice_id": str(provider_voice_id or "")[:180],
-        "tts_payload_voice_id": str(tts_payload_voice_id or "")[:180],
+        "provider_voice_id": provider_id[:180],
+        "tts_payload_voice_id": str(tts_payload_voice_id or provider_id or "")[:180],
+        "resolved_voice_id": resolved_id[:180],
+        "resolved_gender": resolved_gender_value[:40],
+        "auto_detected_gender": auto_gender[:40],
+        "confidence": max(0.0, min(1.0, safe_confidence)),
+        "blocker": str(blocker or reason or "")[:180],
         "fallback_used": bool(fallback_used),
         "fallback_reason": str(fallback_reason or "")[:180],
         "reason": str(reason or "")[:180],
@@ -97355,6 +97446,10 @@ def subdub_apply_voice_resolution_to_state(state: dict | None, resolution: dict)
     state["selected_voice_id"] = str(resolution.get("selected_voice_id") or state.get("voice_id") or "")[:180]
     state["provider_voice_id"] = str(resolution.get("provider_voice_id") or "")[:180]
     state["tts_payload_voice_id"] = str(resolution.get("tts_payload_voice_id") or "")[:180]
+    state["resolved_voice_id"] = str(resolution.get("resolved_voice_id") or resolution.get("provider_voice_id") or "")[:180]
+    state["resolved_gender"] = str(resolution.get("resolved_gender") or "")[:40]
+    state["auto_detected_gender"] = str(resolution.get("auto_detected_gender") or "")[:40]
+    state["voice_confidence"] = str(resolution.get("confidence") or "")[:20]
     state["voice_fallback_used"] = bool(resolution.get("fallback_used"))
     state["voice_fallback_reason"] = str(resolution.get("fallback_reason") or resolution.get("reason") or "")[:180]
     if resolution.get("ok"):
@@ -152979,6 +153074,62 @@ def video_only_price_line(price: dict) -> str:
     discount = int((price or {}).get("discount_percent") or 0)
     return f"{discount}%" if discount else "không"
 
+SUBDUB_PRODUCT_TYPE_SUBTITLE_ONLY = "subtitle_only"
+SUBDUB_PRODUCT_TYPE_DUB_ONLY = "dub_only"
+SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB = "subtitle_dub"
+SUBDUB_PRODUCT_TYPES = {
+    SUBDUB_PRODUCT_TYPE_SUBTITLE_ONLY,
+    SUBDUB_PRODUCT_TYPE_DUB_ONLY,
+    SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB,
+}
+
+def subdub_product_type_from_mode(mode: str = "", state: dict | None = None) -> str:
+    state = dict(state or {})
+    existing = str(state.get("product_type") or "").strip().lower()
+    if existing in SUBDUB_PRODUCT_TYPES:
+        return existing
+    direct = str(mode or "").strip().lower()
+    if direct in SUBDUB_PRODUCT_TYPES:
+        return direct
+    safe_mode = normalize_video_translate_mode(
+        mode
+        or state.get("video_processing_mode")
+        or state.get("mode")
+        or state.get("process_type")
+    )
+    if safe_mode == VIDEO_SUBTITLE_MODE_DUB:
+        return SUBDUB_PRODUCT_TYPE_DUB_ONLY
+    if safe_mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB
+    return SUBDUB_PRODUCT_TYPE_SUBTITLE_ONLY
+
+def subdub_expected_media_for_product(product_type: str = "") -> str:
+    return "video" if str(product_type or "").strip().lower() in SUBDUB_PRODUCT_TYPES else ""
+
+def subdub_back_stack_for_entry(mode: str = "", origin: str = "translation") -> str:
+    safe_mode = normalize_video_translate_mode(mode)
+    safe_origin = str(origin or "translation").strip().lower()
+    parent = "videodub|start|video_addon" if safe_origin == "video_addon" else "videodub|start|translation"
+    return " > ".join(item for item in (parent, f"videodub|type|{safe_mode}" if safe_mode else "") if item)
+
+def subdub_entry_state_fields(
+    mode: str = "",
+    *,
+    source_entry: str = "",
+    origin: str = "translation",
+    current_step: str = "source",
+) -> dict:
+    safe_mode = normalize_video_translate_mode(mode)
+    product_type = subdub_product_type_from_mode(safe_mode)
+    entry = str(source_entry or safe_mode or product_type).strip()
+    return {
+        "product_type": product_type,
+        "current_step": str(current_step or "source")[:80],
+        "expected_media": subdub_expected_media_for_product(product_type),
+        "source_entry": entry[:120],
+        "back_stack": subdub_back_stack_for_entry(safe_mode, origin),
+    }
+
 def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
     current = USER_PENDING.get(video_dubbing_pending_key(user_id)) or {}
     state = dict(current) if current.get("pending_action") == "video_dubbing" else {}
@@ -153022,7 +153173,16 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             "source_has_subtitle", "video_has_subtitle", "has_embedded_subtitle",
             "existing_subtitle_detected", "billing_chars", "billable_chars",
             "char_count", "subtitle_chars", "dub_chars", "transcript_chars",
-            "estimated_chars", "combo_subpath",
+            "estimated_chars", "combo_subpath", "product_type",
+            "expected_media", "source_entry", "back_stack",
+            "selected_voice_gender", "selected_voice_id", "selected_voice_label",
+            "resolved_voice_id", "resolved_gender", "auto_detected_gender",
+            "voice_confidence", "voice_fallback_reason", "voice_fallback_used",
+            "provider_voice_id", "tts_payload_voice_id", "selected_tts_voice_id",
+            "hardsub_cover_enabled", "subtitle_style_profile",
+            "subtitle_style_preset", "cover_original_subtitle",
+            "cover_opacity", "cover_height_ratio", "cover_y_ratio",
+            "advanced_style_enabled",
         }:
             state[key] = _short_pending_text(value)
     mode = normalize_video_translate_mode(
@@ -153055,6 +153215,14 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             state["product"] = default_product
             active_flow = default_active_flow
         state["active_flow"] = active_flow
+        product_type = subdub_product_type_from_mode(mode, state)
+        state["product_type"] = product_type
+        state["expected_media"] = str(state.get("expected_media") or subdub_expected_media_for_product(product_type))
+        state["source_entry"] = str(state.get("source_entry") or mode)[:120]
+        state["back_stack"] = str(
+            state.get("back_stack")
+            or subdub_back_stack_for_entry(mode, state.get("origin") or "translation")
+        )[:300]
     if not state.get("translation_session_id"):
         state["translation_session_id"] = hashlib.sha256(f"video-task2:{user_id}:{time.time_ns()}".encode("utf-8")).hexdigest()[:20]
     state["source_ref"] = str(state.get("source_ref") or state.get("source_file_id") or state.get("video_file_id") or "")[:300]
@@ -155360,7 +155528,7 @@ def video_dubbing_flow_failure_text(mode: str, lang: str = "vi") -> str:
     if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
     if mode == VIDEO_SUBTITLE_MODE_DUB:
-        return "TOAN AAS chưa tạo được audio lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng."
+        return "TOAN AAS chưa lồng tiếng được video này lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc chọn giọng khác."
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         return "TOAN AAS chưa tạo được video phụ đề + lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng."
     return "TOAN AAS chưa tạo được phụ đề từ video này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi file phụ đề nếu có."
@@ -155974,8 +156142,10 @@ SUBDUB_PROGRESS_STAGES = {
     "translating": (50, "Dịch nội dung", "Đang dịch nội dung"),
     "subtitle_ready": (55, "Dịch nội dung", "Đã tạo phụ đề"),
     "translated": (55, "Dịch nội dung", "Đã dịch nội dung"),
+    "choosing_voice": (60, "Chọn giọng", "Đã chọn giọng"),
     "generating_voice": (65, "Tạo giọng lồng tiếng", "Đang tạo giọng lồng tiếng"),
     "dub_audio_ready": (70, "Tạo giọng lồng tiếng", "Đã tạo giọng lồng tiếng"),
+    "burning_subtitle": (78, "Ghép phụ đề", "Đang ghép phụ đề"),
     "muxing_video": (80, "Ghép video", "Đang ghép video"),
     "video_muxed": (85, "Ghép video", "Đã ghép video"),
     "checking_file": (90, "Kiểm tra file", "Đang kiểm tra file"),
@@ -155985,6 +156155,53 @@ SUBDUB_PROGRESS_STAGES = {
 }
 
 SUBDUB_TERMINAL_STATES = {"delivered", "failed_no_charge", "failed_refunded", "needs_admin_review"}
+
+SUBDUB_PRODUCT_PROGRESS_STAGE_TOKENS = {
+    SUBDUB_PRODUCT_TYPE_SUBTITLE_ONLY: (
+        "received_video",
+        "extracting_audio",
+        "transcribing",
+        "translating",
+        "subtitle_ready",
+        "burning_subtitle",
+        "checking_file",
+        "delivering",
+    ),
+    SUBDUB_PRODUCT_TYPE_DUB_ONLY: (
+        "received_video",
+        "extracting_audio",
+        "transcribing",
+        "translating",
+        "choosing_voice",
+        "generating_voice",
+        "muxing_video",
+        "checking_file",
+        "delivering",
+    ),
+    SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB: (
+        "received_video",
+        "extracting_audio",
+        "transcribing",
+        "translating",
+        "subtitle_ready",
+        "choosing_voice",
+        "generating_voice",
+        "muxing_video",
+        "checking_file",
+        "delivering",
+    ),
+}
+
+def subdub_progress_stage_tokens_for_product(product_type_or_mode: str = "", state: dict | None = None) -> tuple[str, ...]:
+    product_type = subdub_product_type_from_mode(product_type_or_mode, state)
+    return tuple(SUBDUB_PRODUCT_PROGRESS_STAGE_TOKENS.get(product_type) or SUBDUB_PRODUCT_PROGRESS_STAGE_TOKENS[SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB])
+
+def subdub_progress_steps_for_product(product_type_or_mode: str = "", state: dict | None = None) -> list[dict]:
+    product_type = subdub_product_type_from_mode(product_type_or_mode, state)
+    return [
+        {**subdub_progress_stage_payload(token), "product_type": product_type}
+        for token in subdub_progress_stage_tokens_for_product(product_type, state)
+    ]
 
 def subdub_public_job_code(job_id: str = "") -> str:
     return product_progress_status.product_progress_public_job_code(job_id)
@@ -156559,7 +156776,7 @@ def subtitle_dub_debug_job_payload(
     final_path = str(artifacts.get("final_mp4") or "")
     route = dict(provider_route or {})
     attempts = dict(route_attempts or {})
-    style = subdub_normalize_style(state)
+    style = subdub_normalize_style(subdub_output_style_state(state, mode))
     render_debug = dict(state.get("_subdub_render_debug") or {})
     voice_resolution = dict(state.get("_subdub_voice_resolution") or {})
     blocker = video_dubbing_pipeline_blocker(
@@ -156574,6 +156791,7 @@ def subtitle_dub_debug_job_payload(
         "chat_id": str(chat_id or ""),
         "internal_job_id": str(state.get("_pipeline_job_id") or ""),
         "mode": normalize_video_translate_mode(mode),
+        "product_type": subdub_product_type_from_mode(mode, state),
         "status": str(status or "failed"),
         "stage": str(stage or ""),
         "pipeline_attempted": bool(pipeline_attempted),
@@ -156595,6 +156813,11 @@ def subtitle_dub_debug_job_payload(
         "selected_voice_id": str(voice_resolution.get("selected_voice_id") or state.get("selected_voice_id") or state.get("voice_id") or ""),
         "provider_voice_id": str(voice_resolution.get("provider_voice_id") or state.get("provider_voice_id") or state.get("selected_tts_voice_id") or ""),
         "tts_payload_voice_id": str(voice_resolution.get("tts_payload_voice_id") or state.get("tts_payload_voice_id") or state.get("selected_tts_voice_id") or ""),
+        "resolved_voice_id": str(voice_resolution.get("resolved_voice_id") or voice_resolution.get("provider_voice_id") or state.get("provider_voice_id") or state.get("selected_tts_voice_id") or ""),
+        "resolved_gender": str(voice_resolution.get("resolved_gender") or state.get("resolved_gender") or ""),
+        "auto_detected_gender": str(voice_resolution.get("auto_detected_gender") or state.get("auto_detected_gender") or ""),
+        "voice_confidence": float(voice_resolution.get("confidence") or state.get("voice_confidence") or 0.0),
+        "voice_blocker": str(voice_resolution.get("blocker") or voice_resolution.get("reason") or ""),
         "fallback_used": bool(voice_resolution.get("fallback_used") or state.get("voice_fallback_used")),
         "fallback_reason": str(voice_resolution.get("fallback_reason") or voice_resolution.get("reason") or state.get("voice_fallback_reason") or ""),
         "dubbed_audio_path": audio_path,
@@ -156607,7 +156830,11 @@ def subtitle_dub_debug_job_payload(
         "final_mp4_size": os.path.getsize(final_path) if final_path and os.path.exists(final_path) else 0,
         "final_mp4_duration": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "subtitle_style_preset": str(style.get("preset") or ""),
+        "subtitle_style_profile": str(style.get("subtitle_style_profile") or ""),
         "cover_original_subtitle": bool(style.get("cover_original")),
+        "cover_opacity": float(style.get("cover_opacity") or 0.0),
+        "cover_height_ratio": float(style.get("cover_height_ratio") or 0.0),
+        "cover_y_ratio": float(style.get("cover_y_ratio") or 0.0),
         "advanced_style_enabled": bool(render_debug.get("advanced_style_enabled") or subdub_advanced_style_enabled(state)),
         "style_render_attempted": bool(render_debug.get("style_render_attempted")),
         "style_render_pass": bool(render_debug.get("style_render_pass")),
@@ -156731,6 +156958,8 @@ def subdub_style_presets() -> dict:
 
 def subdub_advanced_style_enabled(state: dict | None = None) -> bool:
     state = dict(state or {})
+    if subdub_should_enable_hardsub_cover(state, state.get("mode") or state.get("video_processing_mode") or state.get("process_type")):
+        return True
     requested = state.get("advanced_style_enabled")
     if requested is None:
         requested = state.get("subdub_advanced_style_enabled")
@@ -156750,6 +156979,81 @@ def subdub_bool_value(value, default: bool = False) -> bool:
         return False
     return bool(default)
 
+def subdub_has_subtitle_video_output(state: dict | None = None, mode: str = "") -> bool:
+    state = dict(state or {})
+    product_type = subdub_product_type_from_mode(mode, state)
+    if product_type == SUBDUB_PRODUCT_TYPE_DUB_ONLY:
+        return False
+    output_type = str(state.get("output_type") or state.get("output_format") or "").strip().lower()
+    if output_type in {"audio", "txt"}:
+        return False
+    if output_type in {"", "burn", "both", "video", "video_subtitle", "mp4"}:
+        return True
+    return False
+
+def subdub_translated_subtitle_output_requested(state: dict | None = None, mode: str = "") -> bool:
+    state = dict(state or {})
+    safe_mode = normalize_video_translate_mode(
+        mode
+        or state.get("video_processing_mode")
+        or state.get("mode")
+        or state.get("process_type")
+    )
+    if safe_mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+        return True
+    if str(state.get("translate_requested") or "").strip() == "1":
+        return True
+    return bool(state.get("translated_subtitle_ref") or state.get("final_translation_asset_ids"))
+
+def subdub_should_enable_hardsub_cover(state: dict | None = None, mode: str = "") -> bool:
+    state = dict(state or {})
+    for key in ("hardsub_cover_enabled", "cover_original_subtitle", "cover_original", "cover_old_subtitle"):
+        if key in state and str(state.get(key) or "").strip() != "":
+            return subdub_bool_value(state.get(key), False)
+    preset = str(
+        state.get("subtitle_style_preset")
+        or state.get("subdub_style_preset")
+        or state.get("subtitle_style")
+        or ""
+    ).strip().lower().replace("-", "_")
+    if preset == "cover_original":
+        return True
+    if not SUBDUB_HARDSUB_COVER_ENABLED:
+        return False
+    product_type = subdub_product_type_from_mode(mode, state)
+    if product_type == SUBDUB_PRODUCT_TYPE_DUB_ONLY:
+        return False
+    return bool(
+        subdub_has_subtitle_video_output(state, mode)
+        and subdub_translated_subtitle_output_requested(state, mode)
+    )
+
+def subdub_style_profile_for_state(state: dict | None = None, mode: str = "") -> str:
+    state = dict(state or {})
+    product_type = subdub_product_type_from_mode(mode, state)
+    if product_type == SUBDUB_PRODUCT_TYPE_DUB_ONLY:
+        return "existing_hardsub_cover" if subdub_should_enable_hardsub_cover(state, mode) else "dub_only_no_subtitle"
+    if subdub_should_enable_hardsub_cover(state, mode):
+        return "existing_hardsub_cover"
+    if product_type == SUBDUB_PRODUCT_TYPE_SUBTITLE_DUB:
+        return "subtitle_dub"
+    return "subtitle_only"
+
+def subdub_output_style_state(state: dict | None = None, mode: str = "") -> dict:
+    style_state = dict(state or {})
+    cover_enabled = subdub_should_enable_hardsub_cover(style_state, mode)
+    style_state["subtitle_style_profile"] = subdub_style_profile_for_state(style_state, mode)
+    style_state["hardsub_cover_enabled"] = bool(cover_enabled)
+    if cover_enabled:
+        style_state.setdefault("subtitle_style_preset", "cover_original")
+        style_state["cover_original_subtitle"] = True
+        style_state["cover_original"] = True
+        style_state.setdefault("cover_opacity", SUBDUB_HARDSUB_COVER_OPACITY)
+        style_state.setdefault("cover_height_ratio", SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)
+        style_state.setdefault("cover_y_ratio", SUBDUB_HARDSUB_COVER_Y_RATIO)
+        style_state["advanced_style_enabled"] = True
+    return style_state
+
 def subdub_clamp_int(value, default: int, low: int, high: int) -> int:
     try:
         number = int(float(value))
@@ -156765,6 +157069,10 @@ def subdub_float_value(value, default: float = 0.0) -> float:
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
+    cover_default_enabled = subdub_should_enable_hardsub_cover(
+        state,
+        state.get("mode") or state.get("video_processing_mode") or state.get("process_type"),
+    )
     preset_key = str(
         state.get("subtitle_style_preset")
         or state.get("subdub_style_preset")
@@ -156772,6 +157080,8 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         or state.get("subdub_style")
         or ""
     ).strip().lower().replace("-", "_")
+    if not preset_key and cover_default_enabled:
+        preset_key = "cover_original"
     if preset_key not in SUBDUB_STYLE_PRESETS:
         preset_key = "tiktok_clear"
     style = dict(SUBDUB_STYLE_PRESETS[preset_key])
@@ -156790,8 +157100,11 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
             "background", "subtitle_background",
             "cover_original", "cover_original_subtitle", "cover_old_subtitle",
             "cover_opacity", "subtitle_cover_opacity",
+            "cover_height_ratio", "subtitle_cover_height_ratio",
+            "cover_y_ratio", "subtitle_cover_y_ratio",
             "max_lines", "subtitle_max_lines",
             "show_subtitles", "burn_subtitle", "display_subtitles",
+            "hardsub_cover_enabled", "subtitle_style_profile",
         }:
             normalized_key = key
             normalized_key = normalized_key.replace("subtitle_", "").replace("subdub_", "")
@@ -156802,14 +157115,25 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
             if normalized_key in {"burn", "display_subtitles"}:
                 normalized_key = "show_subtitles"
             style[normalized_key] = value
+    if cover_default_enabled:
+        style["cover_original"] = True
+        style["hardsub_cover_enabled"] = True
+        style["cover_opacity"] = state.get("cover_opacity") or SUBDUB_HARDSUB_COVER_OPACITY
+        style["cover_height_ratio"] = state.get("cover_height_ratio") or SUBDUB_HARDSUB_COVER_HEIGHT_RATIO
+        style["cover_y_ratio"] = state.get("cover_y_ratio") or SUBDUB_HARDSUB_COVER_Y_RATIO
+        style["subtitle_style_profile"] = style.get("subtitle_style_profile") or subdub_style_profile_for_state(state)
     style["font"] = re.sub(r"[^A-Za-z0-9 _.-]", "", str(style.get("font") or "Arial")).strip()[:40] or "Arial"
     style["size"] = subdub_clamp_int(style.get("size"), 34, 18, 64)
     style["outline"] = subdub_clamp_int(style.get("outline"), 3, 0, 6)
     style["shadow"] = subdub_clamp_int(style.get("shadow"), 1, 0, 4)
     style["max_lines"] = subdub_clamp_int(style.get("max_lines"), 2, 1, 3)
     style["cover_opacity"] = max(0.0, min(0.9, subdub_float_value(style.get("cover_opacity"), 0.0)))
+    style["cover_height_ratio"] = max(0.05, min(0.35, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
+    style["cover_y_ratio"] = max(0.55, min(0.9, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
     style["cover_original"] = subdub_bool_value(style.get("cover_original"), False)
+    style["hardsub_cover_enabled"] = subdub_bool_value(style.get("hardsub_cover_enabled"), style["cover_original"])
     style["show_subtitles"] = subdub_bool_value(style.get("show_subtitles"), True)
+    style["subtitle_style_profile"] = str(style.get("subtitle_style_profile") or subdub_style_profile_for_state(state))[:80]
     return style
 
 def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
@@ -156942,7 +157266,9 @@ def subdub_cover_filter(style_or_state: dict | None = None) -> str:
     opacity = float(style.get("cover_opacity") or (0.56 if cover else 0.28))
     opacity = max(0.18, min(0.9, opacity))
     if cover:
-        return f"drawbox=x=0:y=ih*0.68:w=iw:h=ih*0.25:color=black@{opacity:.2f}:t=fill"
+        y_ratio = max(0.55, min(0.9, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
+        height_ratio = max(0.05, min(0.35, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
+        return f"drawbox=x=0:y=ih*{y_ratio:.2f}:w=iw:h=ih*{height_ratio:.2f}:color=black@{opacity:.2f}:t=fill"
     if background == "strip":
         return f"drawbox=x=0:y=ih*0.78:w=iw:h=ih*0.14:color=black@{opacity:.2f}:t=fill"
     return f"drawbox=x=iw*0.08:y=ih*0.78:w=iw*0.84:h=ih*0.14:color=black@{opacity:.2f}:t=fill"
@@ -158707,6 +159033,7 @@ async def _execute_video_dubbing_pipeline_core(
 
     async def _synthesize_dub_segments_for_blackbox(*args, **kwargs):
         route_attempts["tts"] = True
+        await _progress("choosing_voice")
         await _progress("generating_voice")
         if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and not str(kwargs.get("voice_id") or "").strip():
             return {"provider": "", "chunks": []}
@@ -158718,9 +159045,12 @@ async def _execute_video_dubbing_pipeline_core(
         nonlocal render_supports_validation
         route_attempts["mux"] = True
         await _progress("muxing_video")
-        render_style = subdub_normalize_style(state)
-        render_style["advanced_style_enabled"] = subdub_advanced_style_enabled(state)
+        render_state = subdub_output_style_state(state, mode)
+        render_style = subdub_normalize_style(render_state)
+        render_style["advanced_style_enabled"] = subdub_advanced_style_enabled(render_state)
         render_debug["advanced_style_enabled"] = bool(render_style.get("advanced_style_enabled"))
+        render_debug["subtitle_style_profile"] = str(render_style.get("subtitle_style_profile") or "")
+        render_debug["cover_original_subtitle"] = bool(render_style.get("cover_original"))
         audio_mode = str(
             state.get("original_audio_mode")
             or state.get("source_audio_mode")
@@ -158866,7 +159196,7 @@ async def _execute_video_dubbing_pipeline_core(
         if status == "VIDEO_RENDER_FAILED":
             return _failed_product_result("VIDEO_RENDER_FAILED", "TOAN AAS đã tạo phụ đề nhưng chưa xuất được video phụ đề lúc này. Hệ thống chưa trừ Xu.", detail, stage="video")
         fail_text = (
-            "TOAN AAS chưa tạo được audio lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng."
+            video_dubbing_flow_failure_text(mode, lang)
             if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
             else "TOAN AAS chưa tạo được phụ đề từ video này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi file phụ đề nếu có."
         )
@@ -158911,25 +159241,24 @@ async def _execute_video_dubbing_pipeline_core(
             "generated_tts_audio_missing",
             stage="audio",
         )
-    subtitle_style = subdub_normalize_style(state)
+    style_state = subdub_output_style_state(state, mode)
+    subtitle_style = subdub_normalize_style(style_state)
     state = {
         **state,
-        "selected_tts_voice_id": selected_tts_voice_id,
-        "provider_voice_id": str(voice_resolution.get("provider_voice_id") or selected_tts_voice_id),
-        "tts_payload_voice_id": tts_payload_voice_id,
-        "selected_voice_gender": str(voice_resolution.get("selected_voice_gender") or state.get("selected_voice_gender") or ""),
-        "selected_voice_id": str(voice_resolution.get("selected_voice_id") or state.get("voice_id") or ""),
-        "voice_fallback_used": bool(voice_resolution.get("fallback_used")),
-        "voice_fallback_reason": str(voice_resolution.get("fallback_reason") or voice_resolution.get("reason") or ""),
-        "_subdub_voice_resolution": voice_resolution,
+        **subdub_voice_style_state_fields(
+            mode=mode,
+            state=state,
+            voice_resolution=voice_resolution,
+            selected_tts_voice_id=selected_tts_voice_id,
+            tts_payload_voice_id=tts_payload_voice_id,
+            subtitle_style=subtitle_style,
+        ),
         "_subdub_generated_audio_duration": generated_audio_duration,
         "_subdub_output_audio_source": output_audio_source,
         "_subdub_direct_dub_core_used": bool(
             product_result.get("direct_dub_core_used")
             or mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
         ),
-        "subtitle_style_preset": str(subtitle_style.get("preset") or ""),
-        "cover_original_subtitle": bool(subtitle_style.get("cover_original")),
         "_subdub_render_debug": dict(render_debug),
         "original_audio_mode": str(
             state.get("original_audio_mode")
@@ -159177,6 +159506,7 @@ async def _execute_video_dubbing_pipeline_core(
             "last_provider_status": f"asr={asr_provider or '-'}; tts={tts_provider or '-'}; mux={mux_state}",
             "output_bytes": output_size,
             "mode": mode,
+            "product_type": subdub_product_type_from_mode(mode, state),
             "srt_blocks": srt_bytes.decode("utf-8", errors="ignore").count("-->") if srt_bytes else 0,
             "audio_bytes": len(audio_bytes or b""),
             "video_bytes": len(video_output or b""),
@@ -159201,20 +159531,21 @@ async def _execute_video_dubbing_pipeline_core(
             "final_mp4_exists": bool(dub_video_path and os.path.exists(dub_video_path)),
             "final_mp4_size": len(video_output or b""),
             "final_mp4_duration": duration_seconds,
-            "selected_tts_voice_id": selected_tts_voice_id,
+            **subdub_voice_style_state_fields(
+                mode=mode,
+                state=state,
+                voice_resolution=voice_resolution,
+                selected_tts_voice_id=selected_tts_voice_id,
+                tts_payload_voice_id=tts_payload_voice_id,
+                subtitle_style=subtitle_style,
+            ),
             "selected_voice_label": str(state.get("voice_style") or state.get("voice_label") or ""),
-            "selected_voice_gender": str(state.get("selected_voice_gender") or ""),
-            "selected_voice_id": str(state.get("selected_voice_id") or state.get("voice_id") or ""),
-            "provider_voice_id": str(state.get("provider_voice_id") or selected_tts_voice_id),
-            "tts_payload_voice_id": str(state.get("tts_payload_voice_id") or selected_tts_voice_id),
             "fallback_used": bool(state.get("voice_fallback_used")),
             "fallback_reason": str(state.get("voice_fallback_reason") or ""),
             "generated_audio_path": dub_path,
             "generated_audio_duration": generated_audio_duration,
             "direct_dub_core_used": bool(state.get("_subdub_direct_dub_core_used")),
             "output_audio_source": output_audio_source,
-            "subtitle_style_preset": str(state.get("subtitle_style_preset") or ""),
-            "cover_original_subtitle": bool(state.get("cover_original_subtitle")),
             "original_audio_mode": str(state.get("original_audio_mode") or ""),
             "delivery_method": str(delivery.get("delivery_method") or ""),
             "output_validation": dict(delivery.get("output_validation") or {}),
@@ -161240,6 +161571,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             "mode": mode,
             "process_type": mode,
             "video_processing_mode": mode,
+            **subdub_entry_state_fields(mode, source_entry=raw_tool or mode, origin=origin, current_step="source"),
             "source_language": "auto",
             "target_language": "",
             "voice_style": "",

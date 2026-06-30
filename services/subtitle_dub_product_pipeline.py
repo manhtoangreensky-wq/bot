@@ -31,9 +31,16 @@ def _mode_needs_subtitle(mode: str) -> bool:
     return mode in {
         VIDEO_SUBTITLE_MODE_CREATE,
         VIDEO_SUBTITLE_MODE_TRANSLATE,
-        VIDEO_SUBTITLE_MODE_DUB,
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }
+
+
+def _product_type_for_mode(mode: str) -> str:
+    if mode == VIDEO_SUBTITLE_MODE_DUB:
+        return "dub_only"
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return "subtitle_dub"
+    return "subtitle_only"
 
 
 def _default_output_type(mode: str, state: dict, content_type: str) -> str:
@@ -132,6 +139,18 @@ async def process_subtitle_dub_job(
             _safe_int(pipeline_state.get("video_duration") or pipeline_state.get("source_duration"), 0),
         )
         srt_bytes = str(srt_text or "").encode("utf-8")
+        if not srt_text.strip() or "-->" not in srt_text:
+            return {
+                "ok": False,
+                "status": "SUBTITLE_EMPTY",
+                "error_code": "subtitle_empty",
+                "provider_called": bool(prepared.get("asr_provider") or prepared.get("translation_provider")),
+                "charged": False,
+                "created_files": [],
+                "state": pipeline_state,
+                "prepared": prepared,
+                "product_type": _product_type_for_mode(mode),
+            }
     subtitle_items = subtitle_output_items(srt_text, output_type, mode) if srt_bytes else []
 
     tts_provider = ""
@@ -228,6 +247,7 @@ async def process_subtitle_dub_job(
     return {
         "ok": True,
         "status": "PARTIAL_VIDEO_NOT_READY" if partial_result else "OK",
+        "product_type": _product_type_for_mode(mode),
         "result_type": "mp4" if video_output else ("partial_audio_subtitle" if audio_bytes and partial_result else ("audio_subtitle" if audio_bytes else "subtitle")),
         "partial_result": bool(partial_result),
         "partial_reason": partial_reason,
