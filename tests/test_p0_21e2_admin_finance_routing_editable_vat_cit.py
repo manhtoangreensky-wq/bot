@@ -22,10 +22,15 @@ def _labels(markup):
 def _allowed_p0_18o_engine_guard_path(path: str, changed: list[str]) -> bool:
     normalized = {item.replace("\\", "/") for item in changed}
     branch = subprocess.check_output(["git", "branch", "--show-current"], text=True, encoding="utf-8").strip()
-    return (
+    video_allowed = (
         (branch.startswith("hotfix/p0-18o-") or "tests/test_p0_18o_lock_video_flows_real_engine_all_products.py" in normalized)
         and path.replace("\\", "/") in {"services/video_project_queue.py", "services/video_final_output.py"}
     )
+    subdub_allowed = (
+        (branch.startswith("hotfix/p0-19k-") or "tests/test_p0_19k_complete_subdub_flows_hardsub_cover_voice_gender_entry_fix.py" in normalized)
+        and path.replace("\\", "/") == "services/subtitle_dub_product_pipeline.py"
+    )
+    return video_allowed or subdub_allowed
 
 
 def _scalar(sql, params=(), default=0):

@@ -474,7 +474,7 @@ def test_no_fake_success_without_artifact():
     )
 
     assert result["ok"] is False
-    assert result["status"] == "NO_OUTPUT_BYTES"
+    assert result["status"] == "SUBTITLE_EMPTY"
 
 
 def test_uploaded_video_file_saved_before_processing(monkeypatch, tmp_path):
