@@ -13,6 +13,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
+from services import video_final_output
+
 
 PROJECT_STATUSES = (
     "draft_planning",
@@ -87,6 +89,14 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
             job_id INTEGER,
             final_video_file_id TEXT,
             final_video_path TEXT,
+            video_delivery_started_at DATETIME,
+            video_delivered_at DATETIME,
+            video_delivery_message_id TEXT,
+            video_success_message_id TEXT,
+            video_terminal_state TEXT DEFAULT '',
+            video_terminal_locked_at DATETIME,
+            video_artifact_hash TEXT DEFAULT '',
+            delivery_attempt_count INTEGER DEFAULT 0,
             error_log TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -157,6 +167,14 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
         ("job_id", "job_id INTEGER"),
         ("final_video_file_id", "final_video_file_id TEXT"),
         ("final_video_path", "final_video_path TEXT"),
+        ("video_delivery_started_at", "video_delivery_started_at DATETIME"),
+        ("video_delivered_at", "video_delivered_at DATETIME"),
+        ("video_delivery_message_id", "video_delivery_message_id TEXT"),
+        ("video_success_message_id", "video_success_message_id TEXT"),
+        ("video_terminal_state", "video_terminal_state TEXT DEFAULT ''"),
+        ("video_terminal_locked_at", "video_terminal_locked_at DATETIME"),
+        ("video_artifact_hash", "video_artifact_hash TEXT DEFAULT ''"),
+        ("delivery_attempt_count", "delivery_attempt_count INTEGER DEFAULT 0"),
         ("error_log", "error_log TEXT"),
         ("updated_at", "updated_at DATETIME"),
         ("confirmed_at", "confirmed_at DATETIME"),
@@ -239,6 +257,14 @@ def _project_from_row(row: sqlite3.Row | tuple | None) -> dict[str, Any]:
         "job_id",
         "final_video_file_id",
         "final_video_path",
+        "video_delivery_started_at",
+        "video_delivered_at",
+        "video_delivery_message_id",
+        "video_success_message_id",
+        "video_terminal_state",
+        "video_terminal_locked_at",
+        "video_artifact_hash",
+        "delivery_attempt_count",
         "error_log",
         "created_at",
         "updated_at",
@@ -306,7 +332,10 @@ def get_video_project(conn: sqlite3.Connection, project_id: int | None = None, p
             """SELECT project_id,project_uuid,user_id,status,profile_id,topic,ratio,selected_suggestion_json,
                       asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,creative_control_json,
                       quality_tier,scene_count,addons_disabled_by_package,invoice_json,total_xu_estimated,
-                      is_confirmed,job_id,final_video_file_id,final_video_path,error_log,created_at,updated_at,
+                      is_confirmed,job_id,final_video_file_id,final_video_path,
+                      video_delivery_started_at,video_delivered_at,video_delivery_message_id,video_success_message_id,
+                      video_terminal_state,video_terminal_locked_at,video_artifact_hash,delivery_attempt_count,
+                      error_log,created_at,updated_at,
                       confirmed_at,completed_at,cancelled_at
                FROM video_projects WHERE project_id=?""",
             (int(project_id),),
@@ -317,7 +346,10 @@ def get_video_project(conn: sqlite3.Connection, project_id: int | None = None, p
             """SELECT project_id,project_uuid,user_id,status,profile_id,topic,ratio,selected_suggestion_json,
                       asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,creative_control_json,
                       quality_tier,scene_count,addons_disabled_by_package,invoice_json,total_xu_estimated,
-                      is_confirmed,job_id,final_video_file_id,final_video_path,error_log,created_at,updated_at,
+                      is_confirmed,job_id,final_video_file_id,final_video_path,
+                      video_delivery_started_at,video_delivered_at,video_delivery_message_id,video_success_message_id,
+                      video_terminal_state,video_terminal_locked_at,video_artifact_hash,delivery_attempt_count,
+                      error_log,created_at,updated_at,
                       confirmed_at,completed_at,cancelled_at
                FROM video_projects WHERE project_uuid=?""",
             (str(project_uuid),),
@@ -381,6 +413,14 @@ PROJECT_UPDATE_FIELDS = {
     "job_id",
     "final_video_file_id",
     "final_video_path",
+    "video_delivery_started_at",
+    "video_delivered_at",
+    "video_delivery_message_id",
+    "video_success_message_id",
+    "video_terminal_state",
+    "video_terminal_locked_at",
+    "video_artifact_hash",
+    "delivery_attempt_count",
     "error_log",
     "confirmed_at",
     "completed_at",
@@ -441,7 +481,10 @@ def get_active_video_project(conn: sqlite3.Connection, user_id: int) -> dict[str
         """SELECT project_id,project_uuid,user_id,status,profile_id,topic,ratio,selected_suggestion_json,
                   asset_pack_json,story_bible_json,scene_cards_json,prompt_text,addon_plan_json,creative_control_json,
                   quality_tier,scene_count,addons_disabled_by_package,invoice_json,total_xu_estimated,
-                  is_confirmed,job_id,final_video_file_id,final_video_path,error_log,created_at,updated_at,
+                  is_confirmed,job_id,final_video_file_id,final_video_path,
+                  video_delivery_started_at,video_delivered_at,video_delivery_message_id,video_success_message_id,
+                  video_terminal_state,video_terminal_locked_at,video_artifact_hash,delivery_attempt_count,
+                  error_log,created_at,updated_at,
                   confirmed_at,completed_at,cancelled_at
            FROM video_projects
            WHERE user_id=? AND status IN ('draft_planning','draft_assets','draft_prompt','draft_addons','draft_quality','draft_scene_count','draft_invoice','queued_for_worker','processing')
@@ -592,6 +635,7 @@ def confirm_video_project_invoice(
         conn,
         int(project_id),
         status="queued_for_worker",
+        video_terminal_state="final_rendering",
         is_confirmed=1,
         confirmed_at=confirmed_at,
     )
@@ -724,6 +768,56 @@ def complete_video_job(
         payload["final_video_path"] = final_video_path
     if final_video_file_id:
         payload["final_video_file_id"] = final_video_file_id
+    project = get_video_project(conn, int(job["project_id"]))
+    asset_pack = _json_loads(str(project.get("asset_pack_json") or ""), {})
+    product_job = str(asset_pack.get("source") or "") == "product_video" and bool(asset_pack.get("real_renderer_required"))
+    allow_admin_test = bool(asset_pack.get("admin_video_delivery") or asset_pack.get("test_pattern"))
+    claim_only_diagnostic = bool(
+        asset_pack.get("claim_only_diagnostic")
+        or asset_pack.get("diagnostic_claim_only")
+        or payload.get("claim_only_diagnostic")
+        or payload.get("diagnostic_claim_only")
+    )
+    safe_claim_only_diagnostic = bool(
+        claim_only_diagnostic
+        and asset_pack.get("source") == "product_video"
+        and not asset_pack.get("provider_call")
+        and not payload.get("provider_call")
+        and not asset_pack.get("public_user")
+        and not payload.get("public_user")
+        and not asset_pack.get("test_pattern")
+        and not payload.get("test_pattern")
+        and not asset_pack.get("admin_video_delivery")
+        and not payload.get("admin_video_delivery")
+        and (asset_pack.get("no_charge") or asset_pack.get("admin_no_charge") or payload.get("no_charge"))
+    )
+    terminal_state = "needs_admin_review" if safe_claim_only_diagnostic else "final_delivered"
+    if product_job and not safe_claim_only_diagnostic:
+        validation = video_final_output.validate_final_video_output(
+            path=str(final_video_path or payload.get("final_video_path") or ""),
+            result=payload,
+            require_audio=bool((_json_loads(str(project.get("addon_plan_json") or ""), {}) or {}).get("voice_enabled")),
+            allow_admin_test=allow_admin_test,
+        )
+        payload["final_output_validation"] = validation
+        if not validation.get("ok"):
+            payload["terminal_state"] = "failed_no_charge"
+            conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(payload), int(job_id)))
+            conn.commit()
+            return fail_video_job(conn, job_id=int(job_id), error=str(validation.get("reason") or "final_output_invalid"), retry=False)
+        payload.update(
+            {
+                "output_bytes": int(validation.get("bytes") or 0),
+                "output_duration": float(validation.get("duration") or 0),
+                "has_video": bool(validation.get("has_video")),
+                "has_audio": bool(validation.get("has_audio")),
+                "terminal_state": "final_delivered",
+                "visual_classification": payload.get("visual_classification") or "final_ai_video",
+                "final_classification": payload.get("final_classification") or "final_ai_video",
+            }
+        )
+    elif safe_claim_only_diagnostic:
+        payload["terminal_state"] = terminal_state
     conn.execute(
         """UPDATE video_jobs
            SET status='completed', result_json=?, completed_at=?, updated_at=?, lease_expires_at=NULL
@@ -732,9 +826,20 @@ def complete_video_job(
     )
     conn.execute(
         """UPDATE video_projects
-           SET status='completed', final_video_path=?, final_video_file_id=?, completed_at=?, updated_at=?
+           SET status='completed', final_video_path=?, final_video_file_id=?,
+               video_terminal_state=?, video_terminal_locked_at=?,
+               video_artifact_hash=?, completed_at=?, updated_at=?
            WHERE project_id=?""",
-        (str(final_video_path or ""), str(final_video_file_id or ""), current, current, int(job["project_id"])),
+        (
+            str(final_video_path or ""),
+            str(final_video_file_id or ""),
+            terminal_state,
+            current,
+            str(payload.get("video_artifact_hash") or payload.get("artifact_hash") or ""),
+            current,
+            current,
+            int(job["project_id"]),
+        ),
     )
     conn.commit()
     return {"ok": True, "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(job["project_id"]))}
@@ -756,7 +861,7 @@ def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: 
                WHERE id=?""",
             (str(error or "")[:1000], current, int(job_id)),
         )
-        conn.execute("UPDATE video_projects SET status='queued_for_worker', error_log=?, updated_at=? WHERE project_id=?", (str(error or "")[:2000], current, int(job["project_id"])))
+        conn.execute("UPDATE video_projects SET status='queued_for_worker', video_terminal_state='final_rendering', error_log=?, updated_at=? WHERE project_id=?", (str(error or "")[:2000], current, int(job["project_id"])))
         final_status = "queued"
     else:
         conn.execute(
@@ -766,7 +871,7 @@ def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: 
                WHERE id=?""",
             (str(error or "")[:1000], current, current, int(job_id)),
         )
-        conn.execute("UPDATE video_projects SET status='failed', error_log=?, updated_at=? WHERE project_id=?", (str(error or "")[:2000], current, int(job["project_id"])))
+        conn.execute("UPDATE video_projects SET status='failed', video_terminal_state='failed_no_charge', video_terminal_locked_at=?, error_log=?, updated_at=? WHERE project_id=?", (current, str(error or "")[:2000], current, int(job["project_id"])))
         final_status = "failed"
     conn.commit()
     return {"ok": True, "status": final_status, "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(job["project_id"]))}

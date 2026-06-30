@@ -93,7 +93,7 @@ import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline
 from services import voice_clone_pipeline
-from services import remote_worker_api, worker_auth
+from services import remote_worker_api, video_final_output, worker_auth
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
 from services import video_product_profiles as video_profiles
@@ -42140,6 +42140,8 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
     addon_plan = _video_debug_json((project or {}).get("addon_plan_json"), {})
     result = _video_debug_json((job or {}).get("result_json"), {})
     final_info = _video_debug_file_info(str((project or {}).get("final_video_path") or result.get("final_video_path") or ""))
+    product_type = video_final_output.product_type_from_project(project, result)
+    engine_route = video_final_output.route_for_product_type(product_type)
     try:
         from services.video_real_render_connector import _ffmpeg_binary, real_video_provider_readiness
 
@@ -42161,6 +42163,8 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• Runtime commit: <code>{html.escape(str(PUBLIC_VERSION or APP_VERSION or '-'))}</code>",
         f"• Job: <code>{jid}</code>",
         f"• Project: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
+        f"• Product type: <code>{html.escape(product_type)}</code>",
+        f"• Engine adapter: <code>{html.escape(str(engine_route.get('adapter') or '-'))}</code>",
         f"• Job type: <code>{html.escape(str((job or {}).get('job_type') or '-'))}</code>",
         f"• Job status: <code>{html.escape(str((job or {}).get('status') or '-'))}</code>",
         f"• Progress: <code>{safe_int((job or {}).get('progress_percent'), 0)}%</code>",
@@ -42210,6 +42214,9 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• artifact path: <code>{html.escape(final_info['path'] or '-')}</code>",
         f"• artifact exists: <code>{'yes' if final_info['exists'] else 'no'}</code>",
         f"• artifact size: <code>{safe_int(final_info['size'], 0)}</code>",
+        f"• terminal state: <code>{html.escape(str((project or {}).get('video_terminal_state') or result.get('terminal_state') or '-'))}</code>",
+        f"• delivered at: <code>{html.escape(vietnam_time_display((project or {}).get('video_delivered_at')))}</code>",
+        f"• delivery attempts: <code>{safe_int((project or {}).get('delivery_attempt_count'), 0)}</code>",
         f"• last error: <code>{html.escape(str((job or {}).get('last_error') or (project or {}).get('error_log') or '-')[:500])}</code>",
         f"• charged Xu: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
     ]
@@ -57331,6 +57338,94 @@ def video_microflow_audit_text() -> str:
     return "\n".join(lines)
 
 
+VIDEO_FLOW_LOCKED_MENU_ROWS = (
+    ("video_trend", "video_idea"),
+    ("storyboard_prompt", "motion_prompt"),
+    ("video_ai_real", "script_image_video"),
+    ("image_to_video", "frame_video_local"),
+    ("self_shot_scene_change", "multi_scene_film"),
+    ("video_reference", "audio_addons"),
+    ("video_local_edit", "main_menu"),
+)
+
+
+def video_flow_contract_audit_payload() -> dict:
+    menu_ids = [str(button) for row in VIDEO_MENU_ROWS for button in row]
+    locked_ids = [str(button) for row in VIDEO_FLOW_LOCKED_MENU_ROWS for button in row]
+    checks = [
+        {"name": "video_main_menu_locked", "ok": tuple(tuple(str(button) for button in row) for row in VIDEO_MENU_ROWS) == VIDEO_FLOW_LOCKED_MENU_ROWS and menu_ids == locked_ids and all(item in VIDEO_PRODUCT_REGISTRY for item in menu_ids if item != "main_menu")},
+        {"name": "suggestion_contract_p0_18n5", "ok": bool(video_microflow_audit_payload().get("ok"))},
+        {"name": "back_routing_contract", "ok": bool(video_back_audit_payload().get("ok"))},
+        {"name": "route_contract", "ok": bool(video_route_audit_payload().get("ok"))},
+    ]
+    return {"ok": all(item["ok"] for item in checks), "checks": checks, "menu_ids": menu_ids}
+
+
+def video_flow_contract_audit_text() -> str:
+    payload = video_flow_contract_audit_payload()
+    lines = ["🔒 <b>Video Flow Contract Audit</b>", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
+    for check in payload.get("checks") or []:
+        lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
+    return "\n".join(lines)
+
+
+def video_engine_route_audit_payload() -> dict:
+    required = [
+        "video_trend",
+        "video_ai_prompt",
+        "video_ai_image",
+        "video_ai_video_reference",
+        "script_to_video",
+        "image_to_video",
+        "self_shot_scene_change",
+        "multi_scene_film",
+        "video_idea_to_product",
+        "storyboard_prompt",
+        "prompt_vault_to_video",
+        "video_local_edit",
+    ]
+    routes = {key: video_final_output.route_for_product_type(key) for key in required}
+    checks = [
+        {"name": "all_video_products_have_engine_route", "ok": all(bool(routes[key].get("adapter")) for key in required)},
+        {"name": "routes_have_input_requirements", "ok": all(bool(routes[key].get("input_requirements")) for key in required)},
+        {"name": "routes_have_engine_family", "ok": all(bool(routes[key].get("engine_family")) for key in required)},
+        {"name": "no_provider_before_final_confirm_contract", "ok": "b14_confirm" in inspect.getsource(handle_video_product_callback)},
+    ]
+    return {"ok": all(item["ok"] for item in checks), "checks": checks, "routes": routes}
+
+
+def video_engine_route_audit_text() -> str:
+    payload = video_engine_route_audit_payload()
+    lines = ["🧭 <b>Video Engine Route Audit</b>", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
+    for check in payload.get("checks") or []:
+        lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
+    lines.append("")
+    for product_type, route in sorted((payload.get("routes") or {}).items()):
+        lines.append(f"• <code>{html.escape(product_type)}</code>: {html.escape(str(route.get('adapter') or '-'))}")
+    return "\n".join(lines)
+
+
+def video_final_output_audit_payload() -> dict:
+    payload = video_final_output.final_output_audit_payload()
+    checks = list(payload.get("checks") or [])
+    checks.extend(
+        [
+            {"name": "draft_not_final_success", "ok": video_final_output.validate_final_video_output(path="", result={"visual_classification": "partial_simple_video"}).get("reason") == "placeholder_not_final_video"},
+            {"name": "terminal_states_present", "ok": bool(video_final_output.VIDEO_FINAL_STATES)},
+            {"name": "delivery_idempotency_fields_present", "ok": all(field in video_project_queue.PROJECT_UPDATE_FIELDS for field in ("video_delivered_at", "video_success_message_id", "video_terminal_state", "delivery_attempt_count"))},
+        ]
+    )
+    return {"ok": bool(payload.get("ok")) and all(item["ok"] for item in checks), "checks": checks, "routes": payload.get("routes") or {}}
+
+
+def video_final_output_audit_text() -> str:
+    payload = video_final_output_audit_payload()
+    lines = ["✅ <b>Video Final Output Audit</b>", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
+    for check in payload.get("checks") or []:
+        lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
+    return "\n".join(lines)
+
+
 def video_semantics_audit_text() -> str:
     payload = video_semantics_audit_payload()
     lines = [
@@ -57388,6 +57483,24 @@ async def cmd_video_route_matrix(update: Update, context: ContextTypes.DEFAULT_T
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return await reply_internal_customer_feature(update)
     return await update.message.reply_text(video_route_matrix_text(), parse_mode="HTML")
+
+
+async def cmd_video_flow_contract_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_flow_contract_audit_text(), parse_mode="HTML")
+
+
+async def cmd_video_engine_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_engine_route_audit_text(), parse_mode="HTML")
+
+
+async def cmd_video_final_output_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_final_output_audit_text(), parse_mode="HTML")
 
 
 async def cmd_video_back_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61448,6 +61561,37 @@ def video_b14_public_render_guard(user_id=0) -> tuple[bool, str]:
     return True, ""
 
 
+def video_engine_product_type_for_session(session: dict | None = None) -> str:
+    session = dict(session or {})
+    draft = dict(session.get("draft") or {})
+    product_id = str(session.get("product_id") or draft.get("product_id") or "").strip()
+    entry = str(draft.get("entry_choice") or draft.get("input_origin_step") or draft.get("selected_microflow_kind") or "").strip()
+    if product_id == "video_trend":
+        return "video_trend"
+    if product_id == "script_image_video":
+        return "script_to_video"
+    if product_id == "storyboard_prompt":
+        return "storyboard_prompt"
+    if product_id == "frame_video_local":
+        return "image_to_video"
+    if product_id == "self_shot_scene_change":
+        return "self_shot_scene_change"
+    if product_id == "multi_scene_film":
+        return "multi_scene_film"
+    if product_id == "video_idea":
+        return "video_idea_to_product"
+    if product_id == "video_ai_real":
+        if entry in {"ai_image_menu", "awaiting_source_image", "image_prompts"} or draft.get("source_media_ref") or draft.get("source_media_refs"):
+            media_type = str(draft.get("media_type") or "").strip().lower()
+            if media_type == "video" or entry in {"ai_video_menu", "awaiting_reference_video"}:
+                return "video_ai_video_reference"
+            return "video_ai_image"
+        if entry in {"ai_video_menu", "awaiting_reference_video", "video", "reference_video"}:
+            return "video_ai_video_reference"
+        return "video_ai_prompt"
+    return video_final_output.normalize_video_product_type(product_id or "video_ai_prompt")
+
+
 def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     draft = dict((session or {}).get("draft") or {})
     plan = dict(draft.get("b14_storyboard_plan") or {})
@@ -61460,6 +61604,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     topic = str((session or {}).get("topic") or draft.get("topic") or "")
     ratio = str(draft.get("b14_aspect_ratio") or (session or {}).get("aspect_ratio") or "9:16")
     is_internal = video_b14_is_admin_or_owner(user_id)
+    product_type = video_engine_product_type_for_session(session)
+    route = video_final_output.route_for_product_type(product_type)
     asset_pack_payload = dict(draft.get("asset_pack") or {})
     original_user_prompt = str((session or {}).get("original_user_prompt") or topic or draft.get("topic") or "").strip()
     cleaned_user_prompt = re.sub(r"\s+", " ", original_user_prompt).strip()
@@ -61467,6 +61613,10 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "original_user_prompt": original_user_prompt,
         "cleaned_user_prompt": cleaned_user_prompt,
         "provider_order": asset_pack_payload.get("provider_order") or os.getenv("VIDEO_PROVIDER_ORDER") or "shopaikey,key4u",
+        "product_type": product_type,
+        "engine_adapter": route.get("adapter") or "",
+        "engine_family": route.get("engine_family") or "",
+        "input_requirements": list(route.get("input_requirements") or []),
         "profile_id": profile_id,
         "aspect_ratio": ratio,
         "source": "product_video",
@@ -61480,6 +61630,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         "provider_call": True,
     })
     invoice.update({
+        "product_type": product_type,
+        "engine_adapter": route.get("adapter") or "",
         "source": "product_video",
         "render_mode": "real",
         "test_pattern": False,
@@ -163301,6 +163453,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_route_audit", cmd_video_route_audit))
     tg_app.add_handler(CommandHandler("video_route_matrix", cmd_video_route_matrix))
     tg_app.add_handler(CommandHandler("video_back_audit", cmd_video_back_audit))
+    tg_app.add_handler(CommandHandler("video_flow_contract_audit", cmd_video_flow_contract_audit))
+    tg_app.add_handler(CommandHandler("video_engine_route_audit", cmd_video_engine_route_audit))
+    tg_app.add_handler(CommandHandler("video_final_output_audit", cmd_video_final_output_audit))
     tg_app.add_handler(CommandHandler("video_flow_audit", cmd_video_flow_audit))
     tg_app.add_handler(CommandHandler("video_semantics_audit", cmd_video_semantics_audit))
     tg_app.add_handler(CommandHandler("video_callback_audit", cmd_video_callback_audit))
@@ -163310,6 +163465,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_worker_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(CommandHandler("video_job_debug", cmd_video_render_debug))
     tg_app.add_handler(CommandHandler("video_render_debug", cmd_video_render_debug))
+    tg_app.add_handler(CommandHandler("video_delivery_debug", cmd_video_render_debug))
     tg_app.add_handler(CommandHandler("video_artifact_debug", cmd_video_render_debug))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_video_product_worker_claim(?:@\w+)?(?:\s|$)"), cmd_tool_test_video_product_worker_claim))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
