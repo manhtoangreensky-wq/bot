@@ -307,7 +307,7 @@ def test_subtitle_only_progress_no_voice_step():
 
 def test_dub_only_progress_has_voice_step():
     labels = [item["label"] for item in bot.subdub_progress_steps_for_product("dub_only")]
-    assert "Chọn giọng" in labels
+    assert "Chọn giọng lồng tiếng" in labels
     assert "Tạo giọng lồng tiếng" in labels
     assert "Tạo phụ đề" not in labels
 
