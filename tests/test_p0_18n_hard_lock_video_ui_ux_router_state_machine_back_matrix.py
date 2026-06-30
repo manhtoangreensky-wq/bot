@@ -7,8 +7,17 @@ import bot
 class FakeMessage:
     chat_id = 181800
 
+    def __init__(self, text: str = ""):
+        self.text = text
+        self.photo = None
+        self.video = None
+        self.document = None
+        self.replies = []
+
     async def reply_text(self, text, **kwargs):
-        return SimpleNamespace(text=str(text), **kwargs)
+        item = {"text": str(text), **kwargs}
+        self.replies.append(item)
+        return SimpleNamespace(**item)
 
 
 class FakeQuery:
@@ -60,6 +69,16 @@ def _open(user_id: int, product_id: str):
     return _press(user_id, f"vproduct|open|{product_id}")
 
 
+def _send_text(user_id: int, text: str):
+    message = FakeMessage(text)
+    update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=user_id))
+    handled = asyncio.run(bot.handle_video_product_pending_text(update, SimpleNamespace()))
+    assert handled is True
+    assert message.replies
+    reply = message.replies[-1]
+    return reply["text"], reply.get("reply_markup"), bot.get_video_session(user_id)
+
+
 def test_video_menu_layout_preserved():
     assert _rows(bot.main_video_keyboard("vi")) == [
         ["🔥 Video theo trend", "🎬 Video AI chân thật"],
@@ -88,27 +107,31 @@ def test_video_ai_real_not_default():
     assert bot.video_public_route_for_tool("video_trend")["canonical"] is True
 
 
-def test_trend_flow_starts_profile():
+def test_trend_flow_starts_initial_suggestions():
     text, markup, session = _open(181801, "video_trend")
     assert "Video theo trend" in text
-    assert "Chọn loại video" in text
-    assert session["current_step"] == "profile_select"
+    assert "Chọn loại video" not in text
+    assert session["current_step"] == "intro"
     assert session["video_flow"] == "video_trend"
-    assert "vproduct|b14_profile|storytelling" in _callbacks(markup)
+    assert "vproduct|trend_today" in _callbacks(markup)
 
 
 def test_trend_profile_to_idea():
     user_id = 181802
     _open(user_id, "video_trend")
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     text, markup, session = _press(user_id, "vproduct|b14_profile|product_review")
-    assert "Đã chọn loại video" in text
-    assert session["current_step"] == "intro"
-    assert "vproduct|input_text|video_trend" in _callbacks(markup)
+    assert "Gợi ý ý tưởng" in text
+    assert session["current_step"] == "idea_suggestions"
+    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
 
 
 def test_trend_idea_to_suggestions():
     user_id = 181803
     _open(user_id, "video_trend")
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     text, markup, session = _press(user_id, "vproduct|ideas|video_trend")
     assert "Gợi ý ý tưởng" in text
@@ -119,6 +142,8 @@ def test_trend_idea_to_suggestions():
 def test_trend_suggestions_to_assets():
     user_id = 181804
     _open(user_id, "video_trend")
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     _press(user_id, "vproduct|ideas|video_trend")
     text, markup, session = _press(user_id, "vproduct|b14_idea_select|0")
@@ -130,6 +155,8 @@ def test_trend_suggestions_to_assets():
 def test_trend_assets_back_to_suggestions():
     user_id = 181805
     _open(user_id, "video_trend")
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     _press(user_id, "vproduct|ideas|video_trend")
     _press(user_id, "vproduct|b14_idea_select|0")
@@ -141,13 +168,15 @@ def test_trend_assets_back_to_suggestions():
 def test_trend_back_stack_no_double_back_needed():
     user_id = 181806
     _open(user_id, "video_trend")
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     text, _markup, session = _press(user_id, "vproduct|back")
     assert session["current_step"] == "profile_select"
     assert "Chọn loại video" in text
     text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == bot.VIDEO_BACK_MENU_TARGET
-    assert "Video TOAN AAS" in text
+    assert session["current_step"] == "trend_ideas"
+    assert "trend" in text.lower()
 
 
 def test_idea_flow_starts_intro():
@@ -155,13 +184,15 @@ def test_idea_flow_starts_intro():
     assert "Ý tưởng video" in text
     assert "Chọn loại video" not in text
     assert session["current_step"] == "intro"
-    assert "vproduct|ideas|video_idea" in _callbacks(markup)
+    assert "vproduct|idea_quick|video_idea" in _callbacks(markup)
 
 
 def test_idea_flow_profile_to_suggestion_type():
     user_id = 181808
     _open(user_id, "video_idea")
-    _press(user_id, "vproduct|ideas|video_idea")
+    _press(user_id, "vproduct|idea_quick|video_idea")
+    _press(user_id, "vproduct|input_text|video_idea")
+    _send_text(user_id, "ý tưởng video mèo cam")
     text, markup, session = _press(user_id, "vproduct|b14_profile|storytelling")
     assert session["current_step"] == "idea_suggestions"
     assert "vproduct|b14_idea_select|0" in _callbacks(markup)
@@ -171,7 +202,9 @@ def test_idea_flow_profile_to_suggestion_type():
 def test_idea_flow_back_matrix():
     user_id = 181809
     _open(user_id, "video_idea")
-    _press(user_id, "vproduct|ideas|video_idea")
+    _press(user_id, "vproduct|idea_quick|video_idea")
+    _press(user_id, "vproduct|input_text|video_idea")
+    _send_text(user_id, "ý tưởng video mèo cam")
     _press(user_id, "vproduct|b14_profile|storytelling")
     text, _markup, session = _press(user_id, "vproduct|back")
     assert session["current_step"] == "profile_select"
@@ -237,7 +270,7 @@ def test_storyboard_prompt_intro_first():
     assert "Storyboard + Prompt" in text
     assert "Chọn loại video" not in text
     assert session["current_step"] == "intro"
-    assert "vproduct|input_text|storyboard_prompt" in _callbacks(markup)
+    assert "vproduct|storyboard_from_idea|storyboard_prompt" in _callbacks(markup)
 
 
 def test_storyboard_does_not_auto_render():
@@ -251,7 +284,9 @@ def test_storyboard_does_not_auto_render():
 def test_storyboard_back_matrix():
     user_id = 181817
     _open(user_id, "storyboard_prompt")
-    _press(user_id, "vproduct|ideas|storyboard_prompt")
+    _press(user_id, "vproduct|storyboard_from_idea|storyboard_prompt")
+    _press(user_id, "vproduct|input_text|storyboard_prompt")
+    _send_text(user_id, "mèo cam đi công viên")
     _press(user_id, "vproduct|b14_profile|storytelling")
     text, _markup, session = _press(user_id, "vproduct|back")
     assert session["current_step"] == "profile_select"

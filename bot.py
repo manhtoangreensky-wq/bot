@@ -55622,13 +55622,13 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🔥 Trend 视频",
         "entry_callback": "vproduct|open|video_trend",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|b14_profile|storytelling", "vproduct|b14_profile|product_review", "vproduct|input_text"),
+        "expected_children": ("vproduct|trend_today", "vproduct|trend_custom", "vproduct|trend_industry", "vproduct|trend_video_suggest"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
-        "flow_type": "canonical_profile_first",
+        "flow_type": "trend_first",
         "canonical": True,
-        "first_step": "profile_select",
+        "first_step": "intro",
         "invoice_reachable": True,
         "job_reachable": True,
         "product_id": "video_trend",
@@ -55639,7 +55639,14 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🎬 真实 AI 视频",
         "entry_callback": "vproduct|open|video_ai_real",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|input_text|video_ai_real", "vproduct|input_media|video_ai_real", "vproduct|entry_media|video_ai_real"),
+        "expected_children": (
+            "vproduct|input_text|video_ai_real",
+            "vproduct|input_media|video_ai_real",
+            "vproduct|entry_media|video_ai_real",
+            "vproduct|suggest_prompt|video_ai_real",
+            "vproduct|suggest_image|video_ai_real",
+            "vproduct|suggest_video|video_ai_real",
+        ),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
@@ -55656,7 +55663,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🧩 脚本 → 视频",
         "entry_callback": "vproduct|open|script_image_video",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|ideas|script_image_video", "vproduct|input_text|script_image_video"),
+        "expected_children": ("vproduct|script_ideas|script_image_video", "vproduct|input_text|script_image_video", "vproduct|script_industry|script_image_video", "vproduct|script_voice|script_image_video"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
@@ -55672,7 +55679,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🎞 图片合成视频",
         "entry_callback": "vproduct|open|frame_video_local",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|legacy|frame_video_local", "vproduct|frame_recent|frame_video_local", "vproduct|asset_storyboard_prompt"),
+        "expected_children": ("vproduct|legacy|frame_video_local", "vproduct|frame_recent|frame_video_local", "vproduct|asset_storyboard_prompt", "vproduct|frame_suggest_image|frame_video_local"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
@@ -55688,7 +55695,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🎥 自拍换场景 AI",
         "entry_callback": "vproduct|open|self_shot_scene_change",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent"),
+        "expected_children": ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent", "vproduct|selfshot_ideas|self_shot_scene_change"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "video_product",
@@ -55720,7 +55727,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🧠 视频创意",
         "entry_callback": "vproduct|open|video_idea",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|ideas|video_idea", "vproduct|input_text|video_idea", "vproduct|industry|video_idea"),
+        "expected_children": ("vproduct|idea_quick|video_idea", "vproduct|idea_industry|video_idea", "vproduct|input_text|video_idea", "vproduct|idea_trend|video_idea"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "planning",
@@ -55736,7 +55743,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🎬 分镜 + Prompt",
         "entry_callback": "vproduct|open|storyboard_prompt",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|ideas|storyboard_prompt", "vproduct|input_text|storyboard_prompt", "vpromptlib|start"),
+        "expected_children": ("vproduct|storyboard_from_images|storyboard_prompt", "vproduct|storyboard_many_images|storyboard_prompt", "vproduct|storyboard_from_idea|storyboard_prompt", "vpromptlib|start"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "planning",
@@ -55801,9 +55808,7 @@ def video_public_route_for_tool(tool_id: str) -> dict:
     return dict(VIDEO_PUBLIC_ROUTE_MATRIX.get(str(tool_id or "")) or {})
 
 
-VIDEO_PROFILE_FIRST_PRODUCTS = frozenset({
-    "video_trend",
-})
+VIDEO_PROFILE_FIRST_PRODUCTS = frozenset()
 
 VIDEO_INTRO_THEN_PROFILE_PRODUCTS = frozenset({
     "video_ai_real",
@@ -55818,10 +55823,13 @@ VIDEO_BACK_MENU_TARGET = "__video_menu__"
 
 VIDEO_STEP_BACK_MATRIX = {
     "video_trend": {
-        "profile_select": VIDEO_BACK_MENU_TARGET,
-        "intro": "profile_select",
-        "collect_input": "profile_select",
-        "idea_suggestions": "collect_input",
+        "intro": VIDEO_BACK_MENU_TARGET,
+        "collect_input": "intro",
+        "trend_ideas": "intro",
+        "trend_industry": "intro",
+        "trend_video_suggest": "intro",
+        "profile_select": "trend_ideas",
+        "idea_suggestions": "profile_select",
         "asset_intake": "idea_suggestions",
         "asset_ai_image": "asset_intake",
         "asset_layout_ideas": "asset_intake",
@@ -55839,6 +55847,8 @@ VIDEO_STEP_BACK_MATRIX = {
     "video_idea": {
         "intro": VIDEO_BACK_MENU_TARGET,
         "collect_input": "intro",
+        "idea_quick": "intro",
+        "idea_industry": "intro",
         "profile_select": "intro",
         "idea_suggestions": "profile_select",
         "result": "idea_suggestions",
@@ -55846,6 +55856,10 @@ VIDEO_STEP_BACK_MATRIX = {
     "storyboard_prompt": {
         "intro": VIDEO_BACK_MENU_TARGET,
         "collect_input": "intro",
+        "storyboard_images": "intro",
+        "storyboard_many_images": "intro",
+        "storyboard_idea": "intro",
+        "storyboard_to_video": "intro",
         "profile_select": "intro",
         "platform": "collect_input",
         "panels": "profile_select",
@@ -55860,6 +55874,9 @@ VIDEO_STEP_BACK_MATRIX = {
     "script_image_video": {
         "intro": VIDEO_BACK_MENU_TARGET,
         "collect_input": "intro",
+        "script_ideas": "intro",
+        "script_industry": "intro",
+        "script_voice": "intro",
         "profile_select": "collect_input",
         "idea_suggestions": "profile_select",
         "platform": "profile_select",
@@ -55890,6 +55907,9 @@ VIDEO_STEP_BACK_MATRIX = {
     "video_ai_real": {
         "intro": VIDEO_BACK_MENU_TARGET,
         "collect_input": "intro",
+        "suggest_prompt": "intro",
+        "suggest_image": "intro",
+        "suggest_video": "intro",
         "profile_select": "collect_input",
         "b14_creative_controls": "profile_select",
         "style": "profile_select",
@@ -55900,6 +55920,7 @@ VIDEO_STEP_BACK_MATRIX = {
     "self_shot_scene_change": {
         "intro": VIDEO_BACK_MENU_TARGET,
         "collect_input": "intro",
+        "selfshot_ideas": "intro",
         "profile_select": "collect_input",
         "subject": "profile_select",
         "scene_idea": "subject",
@@ -55911,6 +55932,7 @@ VIDEO_STEP_BACK_MATRIX = {
     "frame_video_local": {
         "intro": VIDEO_BACK_MENU_TARGET,
         "collect_input": "intro",
+        "frame_suggest_image": "intro",
         "profile_select": "collect_input",
     },
 }
@@ -55980,6 +56002,8 @@ def video_back_matrix_target(session: dict | None = None) -> str:
         origin = video_profile_origin_step(session)
         if origin:
             return origin
+        if not draft and not session.get("step_history"):
+            return VIDEO_BACK_MENU_TARGET
         target = str((VIDEO_STEP_BACK_MATRIX.get(flow) or {}).get(current) or "")
         return target or VIDEO_BACK_MENU_TARGET
     if current == "tool_home":
@@ -55992,6 +56016,8 @@ def video_back_matrix_target(session: dict | None = None) -> str:
             return input_origin
     if current.startswith("asset_") and current != "asset_intake":
         return "asset_intake"
+    if flow == "video_trend" and current == "asset_intake" and draft.get("suggestion_used"):
+        return "idea_suggestions"
     if flow == "video_trend" and current == "asset_intake" and (draft.get("selected_trend_source") or draft.get("trend_ideas")):
         return "trend_ideas"
     target = str((VIDEO_STEP_BACK_MATRIX.get(flow) or {}).get(current) or "")
@@ -56368,6 +56394,7 @@ def video_flow_audit_rows() -> list[dict]:
         rows.append({
             "button": row.get("label"),
             "handler": row.get("expected_handler"),
+            "semantic_category": VIDEO_PRODUCT_SEMANTICS.get(tool_id, ""),
             "flow_type": str(route.get("flow_type") or row.get("category") or ""),
             "intro_step_exists": bool(str(route.get("first_step") or "") == "intro" or tool_id == "video_trend"),
             "first_step": str(route.get("first_step") or row.get("first_step") or ""),
@@ -56390,11 +56417,75 @@ def video_flow_audit_rows() -> list[dict]:
     return rows
 
 
+def video_semantics_audit_payload() -> dict:
+    trend_route = video_public_route_for_tool("video_trend")
+    ai_callbacks = set(video_public_route_for_tool("video_ai_real").get("expected_children") or ())
+    script_callbacks = set(video_public_route_for_tool("script_image_video").get("expected_children") or ())
+    storyboard_callbacks = set(video_public_route_for_tool("storyboard_prompt").get("expected_children") or ())
+    idea_callbacks = set(video_public_route_for_tool("video_idea").get("expected_children") or ())
+    checks = [
+        {
+            "name": "trend_not_profile_first",
+            "ok": str(trend_route.get("first_step") or "") == "intro" and "video_trend" not in VIDEO_PROFILE_FIRST_PRODUCTS,
+            "detail": "Video theo trend bắt đầu bằng màn gợi ý trend.",
+        },
+        {
+            "name": "video_ai_not_trend_handler",
+            "ok": not any("trend_" in item for item in ai_callbacks),
+            "detail": "Video AI chân thật có prompt/ảnh/video/gợi ý riêng, không dùng flow trend.",
+        },
+        {
+            "name": "video_ai_has_six_entry_paths",
+            "ok": {
+                "vproduct|input_text|video_ai_real",
+                "vproduct|input_media|video_ai_real",
+                "vproduct|entry_media|video_ai_real",
+                "vproduct|suggest_prompt|video_ai_real",
+                "vproduct|suggest_image|video_ai_real",
+                "vproduct|suggest_video|video_ai_real",
+            }.issubset(ai_callbacks),
+            "detail": "Video AI chân thật tách gửi sẵn và gợi ý cho prompt/ảnh/video.",
+        },
+        {
+            "name": "script_not_storyboard",
+            "ok": script_callbacks.isdisjoint(storyboard_callbacks)
+            and any("script_" in item for item in script_callbacks)
+            and any("storyboard_" in item for item in storyboard_callbacks),
+            "detail": "Kịch bản là chữ/thoại/phân cảnh; Storyboard là chuỗi hình/prompt nối tiếp.",
+        },
+        {
+            "name": "idea_quick_industry_distinct",
+            "ok": "vproduct|idea_quick|video_idea" in idea_callbacks
+            and "vproduct|idea_industry|video_idea" in idea_callbacks
+            and "vproduct|idea_quick|video_idea" != "vproduct|idea_industry|video_idea",
+            "detail": "Ý tưởng nhanh và theo sản phẩm/ngành dùng hai callback riêng.",
+        },
+    ]
+    return {"ok": all(item.get("ok") for item in checks), "checks": checks, "semantics": dict(VIDEO_PRODUCT_SEMANTICS)}
+
+
+def video_semantics_audit_text() -> str:
+    payload = video_semantics_audit_payload()
+    lines = [
+        "🧭 <b>Video Semantics Audit</b>",
+        "",
+        f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>",
+        "",
+    ]
+    for check in payload.get("checks") or []:
+        lines.append(
+            f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>\n"
+            f"  {html.escape(str(check.get('detail') or ''))}"
+        )
+    return "\n".join(lines)
+
+
 def video_flow_audit_payload() -> dict:
     rows = video_flow_audit_rows()
     return {
-        "ok": all(row.get("readiness") == "route_connected" for row in rows),
+        "ok": all(row.get("readiness") == "route_connected" for row in rows) and video_semantics_audit_payload().get("ok") is True,
         "rows": rows,
+        "semantics": video_semantics_audit_payload(),
     }
 
 
@@ -56442,6 +56533,12 @@ async def cmd_video_flow_audit(update: Update, context: ContextTypes.DEFAULT_TYP
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return await reply_internal_customer_feature(update)
     return await update.message.reply_text(video_flow_audit_text(), parse_mode="HTML")
+
+
+async def cmd_video_semantics_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_semantics_audit_text(), parse_mode="HTML")
 
 
 async def cmd_video_placeholder_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56767,15 +56864,25 @@ TASK3D_VIDEO_PROMPT_OUTPUT_PRODUCTS = {
     "script_image_video", "image_to_video", "multi_scene_film", "self_shot_scene_change", "video_reference",
 }
 
+VIDEO_PRODUCT_SEMANTICS = {
+    "video_trend": "tìm/gợi ý trend và concept video đang dễ thu hút",
+    "video_ai_real": "tạo video AI từ prompt/ảnh/video tham khảo",
+    "script_image_video": "tạo kịch bản chữ, phân cảnh, lời thoại/narration rồi mới dựng video",
+    "frame_video_local": "ghép nhiều ảnh thành video trình chiếu/câu chuyện",
+    "self_shot_scene_change": "đổi cảnh từ video nguồn, giữ đối tượng ổn định",
+    "multi_scene_film": "lập dàn cảnh và storyboard nhiều cảnh cho phim/video dài hơn",
+    "video_idea": "nghĩ ý tưởng/hook/góc triển khai",
+    "storyboard_prompt": "tạo chuỗi hình ảnh/prompt nối tiếp để kể chuyện bằng hình ảnh",
+    "prompt_library": "kho prompt video",
+    "video_downloader": "tải video từ link",
+    "video_local_edit": "chỉnh sửa video local",
+}
+
 TASK3D_PUBLIC_COPY = {
     "video_trend": (
         "🔥 <b>Video theo trend</b>\n\n"
-        "TOAN AAS sẽ gợi ý các ý tưởng video đang dễ bắt trend, sau đó tạo sẵn hook, kịch bản ngắn, caption và prompt video cho bạn.\n\n"
-        "Bạn có thể:\n"
-        "• Xem trend gợi ý hôm nay\n"
-        "• Nhập sản phẩm/chủ đề của bạn\n"
-        "• Tạo kịch bản/prompt theo trend đã chọn\n\n"
-        "Miễn phí ở bước lên ý tưởng. Chỉ tính Xu nếu bạn chọn tạo video AI ở bước sau."
+        "TOAN AAS sẽ giúp anh/chị tìm hướng video đang dễ thu hút, sau đó mới chọn loại video và triển khai nội dung.\n\n"
+        "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
     ),
     "video_idea": (
         "🧠 <b>Ý tưởng video</b>\n\n"
@@ -56784,8 +56891,9 @@ TASK3D_PUBLIC_COPY = {
     ),
     "storyboard_prompt": (
         "🎞 <b>Storyboard + Prompt</b>\n\n"
-        "Tạo storyboard, prompt ảnh và prompt video để dùng cho các công cụ AI khác hoặc lưu vào kho prompt.\n\n"
-        "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu. Không tự dựng video nếu anh/chị chưa xác nhận."
+        "TOAN AAS sẽ tạo chuỗi cảnh bằng hình ảnh/prompt nối tiếp để kể một câu chuyện hoàn chỉnh.\n\n"
+        "Phù hợp khi anh/chị muốn tạo nhiều ảnh cùng chủ đề rồi ghép/hoạt ảnh thành video.\n\n"
+        "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu. Chỉ khi anh/chị xác nhận tạo file, TOAN AAS mới xử lý."
     ),
     "motion_prompt": (
         "🎥 <b>Prompt / Chuyển động</b>\n\n"
@@ -56809,9 +56917,10 @@ TASK3D_PUBLIC_COPY = {
         "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
     ),
     "script_image_video": (
-        "🧩 <b>Kịch bản → Ảnh → Video</b>\n\n"
-        "Bạn nhập sản phẩm, câu chuyện hoặc ý tưởng. TOAN AAS sẽ tạo kịch bản ngắn, danh sách cảnh, prompt ảnh và prompt video theo từng cảnh.\n\n"
-        "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu. Chỉ khi anh/chị xác nhận tạo video ở bước sau, TOAN AAS mới xử lý và tính Xu."
+        "🧩 <b>Kịch bản → Video</b>\n\n"
+        "TOAN AAS sẽ tạo kịch bản video từ chủ đề, sản phẩm hoặc câu chuyện.\n\n"
+        "Sau đó có thể tách cảnh, tạo prompt ảnh/video và dựng video nếu anh/chị xác nhận.\n\n"
+        "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
     ),
     "self_shot_scene_change": (
         "🎥 <b>Tự quay & đổi cảnh AI</b>\n\n"
@@ -56820,7 +56929,7 @@ TASK3D_PUBLIC_COPY = {
     ),
     "multi_scene_film": (
         "🎬 <b>Phim AI nhiều cảnh</b>\n\n"
-        "Tạo phim/video nhiều cảnh từ ý tưởng hoặc kịch bản. TOAN AAS sẽ lập dàn cảnh, chia cảnh, tạo storyboard và prompt cho từng cảnh.\n\n"
+        "TOAN AAS sẽ lập dàn cảnh, chia cảnh, tạo storyboard và prompt cho từng cảnh để chuẩn bị dựng phim/video dài hơn.\n\n"
         "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
     ),
     "video_reference": (
@@ -56873,6 +56982,104 @@ def task3d_media_input_prompt(product_id: str, lang: str = "vi") -> str:
     return "📷 Gửi 1–4 ảnh. Bot chỉ lưu file trong phiên; chưa xử lý video và chưa trừ Xu."
 
 
+def video_semantic_planning_text(step: str, product_id: str, lang: str = "vi") -> str:
+    step = str(step or "")
+    product_id = str(product_id or "")
+    texts = {
+        "suggest_prompt": (
+            "💡 <b>Gợi ý prompt video</b>\n\n"
+            "Anh/chị gửi ý tưởng ngắn, tên sản phẩm hoặc mục tiêu video. TOAN AAS sẽ gợi ý prompt video rõ chủ thể, bối cảnh, camera, chuyển động và phong cách.\n\n"
+            "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
+        ),
+        "suggest_image": (
+            "🖼 <b>Gợi ý tạo ảnh</b>\n\n"
+            "Anh/chị mô tả sản phẩm/nhân vật/bối cảnh muốn có. TOAN AAS sẽ gợi ý prompt ảnh đầu vào phù hợp trước khi tạo video.\n\n"
+            "Đây là luồng gợi ý ảnh, khác với luồng gửi ảnh có sẵn. Chưa xử lý video và chưa trừ Xu."
+        ),
+        "suggest_video": (
+            "🎬 <b>Gợi ý tạo video</b>\n\n"
+            "TOAN AAS sẽ đề xuất concept video AI, chuyển động camera, nhịp cảnh và phong cách hình ảnh từ ý tưởng của anh/chị.\n\n"
+            "Đây là bước chuẩn bị concept, chưa render và chưa trừ Xu."
+        ),
+        "idea_quick": (
+            "🎲 <b>Gợi ý nhanh</b>\n\n"
+            "TOAN AAS sẽ tự đề xuất vài hook và góc triển khai chung từ ngữ cảnh hiện có. Nếu chưa đủ dữ liệu, anh/chị có thể nhập thêm chủ đề ngắn.\n\n"
+            "Chưa tạo file thật và chưa trừ Xu."
+        ),
+        "idea_industry": (
+            "📦 <b>Ý tưởng theo sản phẩm/ngành</b>\n\n"
+            "Anh/chị nhập sản phẩm, ngành hàng và tệp khách hàng. TOAN AAS sẽ gợi ý ý tưởng sát ngành, khác với gợi ý nhanh chung.\n\n"
+            "Chưa tạo file thật và chưa trừ Xu."
+        ),
+        "script_ideas": (
+            "💡 <b>Gợi ý kịch bản</b>\n\n"
+            "TOAN AAS sẽ gợi ý kịch bản chữ gồm hook, nội dung chính, hành động/cảnh, lời đọc hoặc CTA nếu cần.\n\n"
+            "Kịch bản là phần chữ/câu chuyện, chưa phải storyboard hình ảnh. Chưa tạo file thật và chưa trừ Xu."
+        ),
+        "script_industry": (
+            "📦 <b>Kịch bản theo sản phẩm/ngành</b>\n\n"
+            "Anh/chị nhập sản phẩm/ngành/tệp khách hàng. TOAN AAS sẽ viết kịch bản phù hợp mục tiêu bán hàng, review hoặc giáo dục.\n\n"
+            "Chưa tạo file thật và chưa trừ Xu."
+        ),
+        "script_voice": (
+            "🎙 <b>Kịch bản có lời thoại/voice</b>\n\n"
+            "TOAN AAS sẽ chuẩn bị lời đọc/narration, nhịp thoại và phân cảnh chữ để sau này có thể dùng cho voice hoặc phụ đề.\n\n"
+            "Chưa tạo file thật và chưa trừ Xu."
+        ),
+        "storyboard_images": (
+            "🖼 <b>Storyboard từ ảnh có sẵn</b>\n\n"
+            "Anh/chị gửi nhiều ảnh. TOAN AAS sẽ sắp xếp thành chuỗi khung hình, viết caption/prompt/motion cho từng ảnh để kể một câu chuyện liền mạch.\n\n"
+            "Chưa dựng video và chưa trừ Xu."
+        ),
+        "storyboard_many_images": (
+            "🎨 <b>Gợi ý tạo nhiều ảnh</b>\n\n"
+            "Anh/chị nhập chủ đề. TOAN AAS sẽ gợi ý nhiều prompt ảnh nối tiếp cùng nhân vật/sản phẩm/bối cảnh để tạo một storyboard hoàn chỉnh.\n\n"
+            "Chưa tạo ảnh, chưa dựng video và chưa trừ Xu."
+        ),
+        "storyboard_idea": (
+            "✍️ <b>Tạo storyboard từ ý tưởng</b>\n\n"
+            "Anh/chị nhập ý tưởng/câu chuyện. TOAN AAS sẽ chia thành chuỗi cảnh hình ảnh, prompt ảnh từng cảnh và prompt chuyển động từng cảnh.\n\n"
+            "Chưa dựng video và chưa trừ Xu."
+        ),
+        "storyboard_to_video": (
+            "🎬 <b>Ghép storyboard thành video</b>\n\n"
+            "Bước này dùng khi đã có storyboard hoặc ảnh/prompt theo cảnh. TOAN AAS sẽ chuẩn bị phần ghép sau khi anh/chị xác nhận đầy đủ.\n\n"
+            "Chưa xử lý file thật và chưa trừ Xu."
+        ),
+        "frame_suggest_image": (
+            "🎨 <b>Gợi ý tạo ảnh trước</b>\n\n"
+            "Anh/chị nhập chủ đề hoặc sản phẩm. TOAN AAS sẽ gợi ý bộ ảnh cần có trước khi ghép ảnh thành video.\n\n"
+            "Chưa tạo ảnh, chưa ghép video và chưa trừ Xu."
+        ),
+        "selfshot_ideas": (
+            "💡 <b>Gợi ý hướng đổi cảnh</b>\n\n"
+            "TOAN AAS sẽ gợi ý cách giữ nhân vật/sản phẩm ổn định, đổi bối cảnh, chọn camera và ánh sáng cho video tự quay.\n\n"
+            "Chưa xử lý video và chưa trừ Xu."
+        ),
+        "trend_industry": (
+            "📦 <b>Trend theo sản phẩm/ngành</b>\n\n"
+            "Anh/chị nhập sản phẩm, ngành hàng hoặc tệp khách hàng. TOAN AAS sẽ gợi ý trend phù hợp rồi mới sang chọn loại video.\n\n"
+            "Chưa tạo file thật và chưa trừ Xu."
+        ),
+        "trend_video_suggest": (
+            "🎬 <b>Gợi ý video theo trend</b>\n\n"
+            "TOAN AAS sẽ gợi ý concept video nhanh từ trend/ngữ cảnh hiện có. Nếu chưa có đủ dữ liệu, anh/chị nhập thêm sản phẩm hoặc chủ đề.\n\n"
+            "Chưa tạo file thật và chưa trừ Xu."
+        ),
+    }
+    return texts.get(step, task3d_text_input_prompt(product_id, lang))
+
+
+def video_semantic_planning_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✍️ Nhập nội dung" if normalize_user_language(lang) == "vi" else "✍️ Enter text", callback_data=f"vproduct|input_text|{product_id}"),
+        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"),
+    ], [
+        InlineKeyboardButton("⬅️ Menu video" if normalize_user_language(lang) == "vi" else "⬅️ Video menu", callback_data="menu|main_video"),
+        InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+    ]])
+
+
 def task3d_product_intro_text(product_id: str, lang: str = "vi") -> str:
     product = VIDEO_PRODUCT_REGISTRY.get(str(product_id or "")) or {}
     if not product:
@@ -56894,16 +57101,20 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
     menu_label = "⬅️ Menu video" if is_vi else "⬅️ Video menu"
     rows_by_product = {
         "video_trend": [
-            [("🔥 Xem trend hôm nay", "vproduct|trend_today"), ("✍️ Nhập chủ đề riêng", "vproduct|trend_custom")],
-            [("🔁 Gợi ý trend khác", "vproduct|trend_more"), (menu_label, parent_callback)],
+            [("🔥 Gợi ý trend hot", "vproduct|trend_today"), ("✍️ Tự nhập trend/ý tưởng", "vproduct|trend_custom")],
+            [("📦 Theo sản phẩm/ngành", "vproduct|trend_industry"), ("🎬 Gợi ý video", "vproduct|trend_video_suggest")],
+            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "video_idea": [
-            [("🎲 Gợi ý tự động", "vproduct|ideas|video_idea"), ("✍️ Tự nhập chủ đề", "vproduct|input_text|video_idea")],
-            [("📦 Theo sản phẩm/ngành", "vproduct|industry|video_idea"), (menu_label, parent_callback)],
+            [("🎲 Gợi ý nhanh", "vproduct|idea_quick|video_idea"), ("📦 Theo sản phẩm/ngành", "vproduct|idea_industry|video_idea")],
+            [("✍️ Tự nhập chủ đề", "vproduct|input_text|video_idea"), ("🔥 Theo trend", "vproduct|idea_trend|video_idea")],
+            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "storyboard_prompt": [
-            [("💡 Gợi ý storyboard", "vproduct|ideas|storyboard_prompt"), ("✍️ Nhập ý tưởng/kịch bản", "vproduct|input_text|storyboard_prompt")],
-            [("📚 Dùng prompt có sẵn", "vpromptlib|start"), (menu_label, parent_callback)],
+            [("🖼 Tạo storyboard từ ảnh có sẵn", "vproduct|storyboard_from_images|storyboard_prompt")],
+            [("🎨 Gợi ý tạo nhiều ảnh", "vproduct|storyboard_many_images|storyboard_prompt"), ("✍️ Tạo storyboard từ ý tưởng", "vproduct|storyboard_from_idea|storyboard_prompt")],
+            [("📚 Dùng prompt có sẵn", "vpromptlib|start"), ("🎬 Ghép storyboard thành video", "vproduct|storyboard_to_video|storyboard_prompt")],
+            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "motion_prompt": [
             [("✍️ Mô tả cảnh", "vproduct|input_text|motion_prompt"), ("📷 Gửi ảnh", "vproduct|input_media|motion_prompt")],
@@ -56915,25 +57126,30 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
         ],
         "frame_video_local": [
             [("📎 Gửi ảnh", "vproduct|legacy|frame_video_local"), ("🖼 Dùng ảnh gần nhất", "vproduct|frame_recent|frame_video_local")],
-            [("📚 Dùng ảnh từ storyboard", "vproduct|asset_storyboard_prompt"), (menu_label, parent_callback)],
+            [("📚 Dùng ảnh từ storyboard", "vproduct|asset_storyboard_prompt"), ("🎨 Gợi ý tạo ảnh trước", "vproduct|frame_suggest_image|frame_video_local")],
+            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "video_ai_real": [
             [("📝 Prompt → Video AI", "vproduct|input_text|video_ai_real"), ("🖼 Ảnh → Video AI", "vproduct|input_media|video_ai_real")],
-            [("🎞 Video mẫu → Video AI", "vproduct|entry_media|video_ai_real"), ("📊 Trạng thái video", "menu|hint_video_status")],
+            [("🎞 Video mẫu → Video AI", "vproduct|entry_media|video_ai_real"), ("💡 Gợi ý prompt video", "vproduct|suggest_prompt|video_ai_real")],
+            [("🖼 Gợi ý tạo ảnh", "vproduct|suggest_image|video_ai_real"), ("🎬 Gợi ý tạo video", "vproduct|suggest_video|video_ai_real")],
+            [("📊 Trạng thái video", "menu|hint_video_status")],
             [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "script_image_video": [
-            [("💡 Gợi ý kịch bản", "vproduct|ideas|script_image_video"), ("✍️ Nhập kịch bản", "vproduct|input_text|script_image_video")],
-            [(menu_label, parent_callback)],
+            [("💡 Gợi ý kịch bản", "vproduct|script_ideas|script_image_video"), ("✍️ Nhập chủ đề/kịch bản", "vproduct|input_text|script_image_video")],
+            [("📦 Kịch bản theo sản phẩm/ngành", "vproduct|script_industry|script_image_video"), ("🎙 Kịch bản có lời thoại/voice", "vproduct|script_voice|script_image_video")],
+            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "self_shot_scene_change": [
             [("📎 Tôi sẽ gửi video", "vproduct|selfshot_source|upload"), ("🎬 Dùng video gần nhất", "vproduct|selfshot_source|recent")],
-            [(menu_label, parent_callback)],
+            [("💡 Gợi ý hướng đổi cảnh", "vproduct|selfshot_ideas|self_shot_scene_change")],
+            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "multi_scene_film": [
             [("💡 Gợi ý phim nhiều cảnh", "vproduct|ideas|multi_scene_film"), ("✍️ Nhập ý tưởng/kịch bản", "vproduct|input_text|multi_scene_film")],
-            [("🎭 Chọn phong cách phim", "vproduct|style_first|multi_scene_film")],
-            [(menu_label, parent_callback)],
+            [("🎭 Chọn phong cách phim", "vproduct|style_first|multi_scene_film"), ("📚 Dùng storyboard/prompt có sẵn", "vpromptlib|start")],
+            [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "video_reference": [
             [("📎 Gửi video mẫu", "vproduct|legacy|video_reference"), ("🔗 Gửi link mẫu", "vproduct|input_text|video_reference")],
@@ -60886,6 +61102,19 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
         return await safe_edit_or_send(target, video_b14_queue_status_text(session, None, user_id, lang), parse_mode="HTML", reply_markup=video_b14_queue_status_keyboard(lang))
     if step == "intro":
         return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
+    if step in {
+        "suggest_prompt", "suggest_image", "suggest_video",
+        "idea_quick", "idea_industry",
+        "script_ideas", "script_industry", "script_voice",
+        "storyboard_images", "storyboard_many_images", "storyboard_idea", "storyboard_to_video",
+        "frame_suggest_image", "selfshot_ideas", "trend_industry", "trend_video_suggest",
+    }:
+        return await safe_edit_or_send(
+            target,
+            video_semantic_planning_text(step, product_id, lang),
+            parse_mode="HTML",
+            reply_markup=video_semantic_planning_keyboard(product_id, lang),
+        )
     if step in {"collect_input", "input_review"}:
         topic = str(session.get("topic") or (session.get("draft") or {}).get("topic") or "")
         if step == "collect_input" and not topic.strip():
@@ -61167,6 +61396,54 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await handle_video_reference_callback(update, context)
         if prefix == "videoedit":
             return await handle_video_editor_callback(update, context)
+    semantic_step_actions = {
+        "suggest_prompt": "suggest_prompt",
+        "suggest_image": "suggest_image",
+        "suggest_video": "suggest_video",
+        "idea_quick": "idea_quick",
+        "idea_industry": "idea_industry",
+        "script_ideas": "script_ideas",
+        "script_industry": "script_industry",
+        "script_voice": "script_voice",
+        "storyboard_from_images": "storyboard_images",
+        "storyboard_many_images": "storyboard_many_images",
+        "storyboard_from_idea": "storyboard_idea",
+        "storyboard_to_video": "storyboard_to_video",
+        "frame_suggest_image": "frame_suggest_image",
+        "selfshot_ideas": "selfshot_ideas",
+        "trend_industry": "trend_industry",
+        "trend_video_suggest": "trend_video_suggest",
+    }
+    if action == "idea_trend" and product_id == "video_idea":
+        route_fields = video_route_session_fields("video_trend", "intro")
+        session = task3d_session_step(
+            uid,
+            "intro",
+            product_id="video_trend",
+            return_to="menu|main_video",
+            provider_called=False,
+            xu_charged=0,
+            **route_fields,
+        )
+        session = go_video_screen(uid, "video_trend:intro", "video_trend", **route_fields)
+        session.update(route_fields)
+        session["product_id"] = "video_trend"
+        session["return_to"] = "menu|main_video"
+        save_video_session(uid, session)
+        return await safe_edit_or_send(query, task3d_product_intro_text("video_trend", lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard("video_trend", lang))
+    if action in semantic_step_actions:
+        step = semantic_step_actions[action]
+        if step.startswith("trend_") and product_id != "video_trend":
+            product_id = "video_trend"
+        session = task3d_session_step(
+            uid,
+            step,
+            entry_choice=action,
+            input_origin_step=step,
+            provider_called=False,
+            xu_charged=0,
+        )
+        return await task3d_render_step(query, uid, session, lang)
     if action in {"ideas", "ideas_refresh", "industry", "style_first"} and video_flow_requires_intro_profile(product_id) and not (session.get("draft") or {}).get("b14_profile_id"):
         sample_topic = TASK3D_SAMPLE_TOPICS.get(product_id) or "ý tưởng video ngắn dễ xem"
         session = start_shared_video_profile_step(
@@ -61297,6 +61574,21 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         )
     if action == "b14_profile":
         session = video_b14_set_profile(uid, session, value or "auto", auto=(value == "auto"))
+        if product_id == "video_trend":
+            session = task3d_session_step(
+                uid,
+                "idea_suggestions",
+                profile_next_screen=True,
+                free_generation=True,
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await safe_edit_or_send(
+                query,
+                video_b14_idea_suggestions_text(session, lang),
+                parse_mode="HTML",
+                reply_markup=video_b14_idea_suggestions_keyboard(lang),
+            )
         if video_flow_requires_intro_profile(product_id):
             next_step = video_post_profile_step(product_id, session)
             session = task3d_session_step(
@@ -61488,20 +61780,22 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         selected = ideas[max(0, min(len(ideas) - 1, safe_int(value, 0)))] if ideas else {}
         bundle = task3d_trend_output_from_source(selected)
         topic = str(bundle.get("user_topic") or selected.get("title") or "Video theo trend")
-        session = task3d_session_step(
+        session = start_shared_video_profile_step(
             uid,
-            "asset_intake",
+            product_id,
+            origin_step="trend_ideas",
             topic=topic,
             selected_trend_source=selected,
             prepared_prompt_bundle=bundle,
             input_collected=True,
             free_generation=True,
-            provider_called=False,
-            xu_charged=0,
         )
-        if not (session.get("draft") or {}).get("b14_profile_id"):
-            session = video_b14_set_profile(uid, session, "auto", auto=True)
-        return await safe_edit_or_send(query, video_asset_intake_intro_text(lang), reply_markup=video_asset_intake_keyboard(lang))
+        return await safe_edit_or_send(
+            query,
+            video_b14_profile_selection_text(session, uid, lang),
+            parse_mode="HTML",
+            reply_markup=video_b14_profile_selection_keyboard(lang),
+        )
     if action in {"ideas", "ideas_refresh"}:
         session = task3d_session_step(
             uid,
@@ -62665,6 +62959,8 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
     product_id = str(session.get("product_id") or "")
     input_purpose = str((session.get("draft") or {}).get("input_purpose") or "primary")
     if product_id == "video_trend":
+        draft_for_origin = dict(session.get("draft") or {})
+        current_step = str(draft_for_origin.get("input_origin_step") or session.get("current_step") or "collect_input")
         source = {
             "source_id": "custom_topic",
             "title": "Chủ đề riêng của bạn",
@@ -62684,20 +62980,22 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
             "enabled": True,
         }
         bundle = task3d_trend_output_from_source(source, text)
-        session = task3d_session_step(
+        origin_step = current_step if current_step in {"trend_industry", "trend_video_suggest", "collect_input", "trend_ideas"} else "intro"
+        session = start_shared_video_profile_step(
             uid,
-            "asset_intake",
+            product_id,
+            origin_step=origin_step,
             topic=text,
             selected_trend_source=source,
             prepared_prompt_bundle=bundle,
             input_collected=True,
             free_generation=True,
-            provider_called=False,
-            xu_charged=0,
         )
-        if not (session.get("draft") or {}).get("b14_profile_id"):
-            session = video_b14_set_profile(uid, session, "auto", auto=True)
-        await update.message.reply_text(video_asset_intake_intro_text(get_user_language(uid) or "vi"), reply_markup=video_asset_intake_keyboard(get_user_language(uid) or "vi"))
+        await update.message.reply_text(
+            video_b14_profile_selection_text(session, uid, get_user_language(uid) or "vi"),
+            parse_mode="HTML",
+            reply_markup=video_b14_profile_selection_keyboard(get_user_language(uid) or "vi"),
+        )
         return True
     if input_purpose == "detail" and product_id == "image_to_video":
         session = task3d_advance_guided_flow(uid, session, "detail", media_description=text, detail_skipped=False)
@@ -160088,6 +160386,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_route_matrix", cmd_video_route_matrix))
     tg_app.add_handler(CommandHandler("video_back_audit", cmd_video_back_audit))
     tg_app.add_handler(CommandHandler("video_flow_audit", cmd_video_flow_audit))
+    tg_app.add_handler(CommandHandler("video_semantics_audit", cmd_video_semantics_audit))
     tg_app.add_handler(CommandHandler("video_placeholder_audit", cmd_video_placeholder_audit))
     tg_app.add_handler(CommandHandler("video_worker_claim_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(CommandHandler("video_worker_debug", cmd_video_worker_claim_debug))

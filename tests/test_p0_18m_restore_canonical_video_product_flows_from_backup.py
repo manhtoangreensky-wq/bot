@@ -91,36 +91,37 @@ def test_video_ai_real_not_default_canonical_flow():
 def test_video_trend_is_canonical_flow():
     route = bot.video_public_route_for_tool("video_trend")
     assert route.get("canonical") is True
-    assert route.get("flow_type") == "canonical_profile_first"
+    assert route.get("flow_type") == "trend_first"
 
 
-def test_video_trend_starts_profile_selection():
+def test_video_trend_starts_initial_suggestions():
     text, markup, session = _start_trend(180003)
     callbacks = _callbacks(markup)
     assert "Video theo trend" in text
-    assert "Chọn loại video" in text
-    assert "vproduct|b14_profile|storytelling" in callbacks
-    assert "vproduct|b14_profile|product_review" in callbacks
-    assert session.get("current_step") == "profile_select"
-    assert session.get("flow_stack") == ["video_main", "video_trend", "profile_select"]
+    assert "Chọn loại video" not in text
+    assert "vproduct|trend_today" in callbacks
+    assert "vproduct|trend_custom" in callbacks
+    assert session.get("current_step") == "intro"
+    assert session.get("flow_stack") == ["video_main", "video_trend", "intro"]
 
 
 def test_video_trend_profile_then_topic():
     user_id = 180004
     _start_trend(user_id)
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     text, markup, session = _press(user_id, "vproduct|b14_profile|product_review")
     callbacks = _callbacks(markup)
-    assert "Đã chọn loại video" in text
-    assert "vproduct|input_text|video_trend" in callbacks
-    assert "vproduct|ideas|video_trend" in callbacks
-    text, _markup, session = _press(user_id, "vproduct|input_text|video_trend")
-    assert "Nhập ý tưởng" in text
-    assert session.get("current_step") == "collect_input"
+    assert "Gợi ý ý tưởng" in text
+    assert "vproduct|b14_idea_select|0" in callbacks
+    assert session.get("current_step") == "idea_suggestions"
 
 
 def test_video_trend_generates_suggestions():
     user_id = 180005
     _start_trend(user_id)
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     text, markup, session = _press(user_id, "vproduct|ideas|video_trend")
     callbacks = _callbacks(markup)
@@ -133,6 +134,8 @@ def test_video_trend_generates_suggestions():
 def test_video_trend_suggestion_then_image_choice():
     user_id = 180006
     _start_trend(user_id)
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     _press(user_id, "vproduct|ideas|video_trend")
     text, markup, session = _press(user_id, "vproduct|b14_idea_select|0")
@@ -146,6 +149,8 @@ def test_video_trend_suggestion_then_image_choice():
 def test_video_trend_create_ai_image_not_placeholder_when_handler_exists():
     user_id = 180007
     _start_trend(user_id)
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     _press(user_id, "vproduct|ideas|video_trend")
     _press(user_id, "vproduct|b14_idea_select|0")
@@ -159,6 +164,8 @@ def test_video_trend_create_ai_image_not_placeholder_when_handler_exists():
 def test_video_trend_my_images_routes_upload():
     user_id = 180008
     _start_trend(user_id)
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     _press(user_id, "vproduct|ideas|video_trend")
     _press(user_id, "vproduct|b14_idea_select|0")
@@ -171,6 +178,8 @@ def test_video_trend_my_images_routes_upload():
 def test_video_trend_layout_suggestion_routes():
     user_id = 180009
     _start_trend(user_id)
+    _press(user_id, "vproduct|trend_today")
+    _press(user_id, "vproduct|trend_select|0")
     _press(user_id, "vproduct|b14_profile|product_review")
     _press(user_id, "vproduct|ideas|video_trend")
     _press(user_id, "vproduct|b14_idea_select|0")
@@ -292,8 +301,8 @@ def test_storyboard_prompt_does_not_auto_render():
     text, markup, session = _press(180019, "vproduct|open|storyboard_prompt")
     callbacks = _callbacks(markup)
     assert "Storyboard + Prompt" in text
-    assert "vproduct|input_text|storyboard_prompt" in callbacks
-    assert "vproduct|ideas|storyboard_prompt" in callbacks
+    assert "vproduct|storyboard_from_idea|storyboard_prompt" in callbacks
+    assert "vproduct|storyboard_many_images|storyboard_prompt" in callbacks
     assert "vproduct|b14_confirm" not in callbacks
     assert session["draft"]["provider_called"] is False
 

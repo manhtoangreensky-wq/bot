@@ -121,8 +121,8 @@ def test_video_prompt_and_storyboard_are_prompt_flows_not_auto_render():
     text, markup, session = _press(180101, route["entry_callback"])
     callbacks = _callbacks(markup)
     assert "Storyboard + Prompt" in text
-    assert "vproduct|input_text|storyboard_prompt" in callbacks
-    assert "vproduct|ideas|storyboard_prompt" in callbacks
+    assert "vproduct|storyboard_from_idea|storyboard_prompt" in callbacks
+    assert "vproduct|storyboard_many_images|storyboard_prompt" in callbacks
     assert "vproduct|b14_confirm" not in callbacks
     assert session.get("video_tool") == "storyboard_prompt"
 
@@ -216,7 +216,7 @@ def test_storyboard_prompt_does_not_jump_profile_flow():
     assert "Storyboard + Prompt" in text
     assert session.get("video_tool") == "storyboard_prompt"
     assert not any("b14_profile" in callback for callback in callbacks)
-    assert "vproduct|input_text|storyboard_prompt" in callbacks
+    assert "vproduct|storyboard_from_idea|storyboard_prompt" in callbacks
     assert session.get("current_step") == "intro"
 
 
