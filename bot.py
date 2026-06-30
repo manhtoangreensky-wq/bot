@@ -5248,6 +5248,10 @@ PROGRESS_AUTO_REFRESH_MAX_UPDATES = max(1, env_int("PROGRESS_AUTO_REFRESH_MAX_UP
 PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL = env_flag("PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL", "true")
 PROGRESS_AUTO_REFRESH_EDIT_ONLY = env_flag("PROGRESS_AUTO_REFRESH_EDIT_ONLY", "true")
 PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT = max(0, env_int("PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT", 5))
+MUSIC_AUTO_DELIVERY_ENABLED = env_flag("MUSIC_AUTO_DELIVERY_ENABLED", "true")
+MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS = max(5, env_int("MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS", 20))
+MUSIC_AUTO_DELIVERY_MAX_POLLS = max(1, env_int("MUSIC_AUTO_DELIVERY_MAX_POLLS", 30))
+MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL = env_flag("MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL", "true")
 PROGRESS_AUTO_REFRESH_JOBS: dict[str, dict] = {}
 PROGRESS_AUTO_REFRESH_TASKS: dict[str, asyncio.Task] = {}
 ENGINE_ASYNC_JOB_FEATURE_PREFIX = {
@@ -5348,13 +5352,19 @@ def normalize_engine_async_job(job: dict) -> dict:
     current["internal_job_id"] = str(current.get("internal_job_id") or engine_async_job_id(feature, current.get("user_id"))).strip()
     provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or "").strip()
     output_bytes = int(current.get("output_bytes") or 0)
-    if not provider_task_id and output_bytes <= 0:
+    status = str(current.get("status") or ("completed" if output_bytes > 0 else "submitted")).strip().lower()
+    failed_terminal_without_provider = (
+        status in {"failed", "failed_no_charge", "failed_refunded", "needs_admin_review"}
+        or any(token in status for token in ("fail", "error", "cancel"))
+    )
+    if not provider_task_id and output_bytes <= 0 and not failed_terminal_without_provider:
         raise ValueError("engine async job requires provider_task_id or output_bytes")
     now = now_text()
     current.setdefault("created_at", now)
     current["updated_at"] = now
     current["provider_task_id"] = provider_task_id
-    current["status"] = str(current.get("status") or ("completed" if output_bytes > 0 else "submitted")).strip().lower()
+    current["provider_job_id"] = provider_task_id
+    current["status"] = status
     current["provider"] = str(current.get("provider") or "").strip()
     current["progress_text"] = sanitize_provider_status_text(current.get("progress_text") or "", provider_task_id, 360)
     current["last_provider_status"] = sanitize_provider_status_text(current.get("last_provider_status") or "", provider_task_id, 360)
@@ -5973,8 +5983,6 @@ def product_progress_status_keyboard(
         send_callback=send_callback,
         back_callback=back_callback,
     )
-    if canonical in {"music_bg", "music_song"}:
-        rows.insert(1, [("🔎 Kiểm tra/gửi kết quả", product_context_callback("music_quick", PRODUCT_CONTEXT_SHOWROOM, "music_ai_status"))])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(label, callback_data=callback) for label, callback in row]
         for row in rows
@@ -5989,8 +5997,92 @@ def music_product_progress_type(result: dict | None = None) -> str:
     return "music_bg"
 
 
+def music_job_provider_task_id(job: dict | None = None) -> str:
+    current = dict(job or {})
+    return str(current.get("provider_task_id") or current.get("provider_job_id") or current.get("music_task_id") or "").strip()
+
+
+def music_job_product_type(job: dict | None = None, fallback: str = "music_bg") -> str:
+    current = dict(job or {})
+    explicit = str(current.get("product_type") or current.get("music_product_type") or "").strip().lower()
+    if explicit in {"music_song", "music_bg"}:
+        return explicit
+    mode = str(current.get("music_product_mode") or "").strip().lower()
+    if mode == "song":
+        return "music_song"
+    if mode in {"background", "bg", "instrumental"}:
+        return "music_bg"
+    kind = str(current.get("product_kind") or current.get("music_ai_kind") or "").strip().lower()
+    if "song" in kind or "lyrics" in kind or current.get("lyrics_enabled") or current.get("lyrics_text"):
+        return "music_song"
+    feature = str(current.get("feature") or "").strip().lower()
+    if feature in {"music_song", "suno_song"}:
+        return "music_song"
+    if feature in {"music_background", "music_bg", "music_suno"}:
+        return "music_bg"
+    return fallback if fallback in {"music_song", "music_bg", "music"} else "music_bg"
+
+
+def progress_job_id_is_music(job_id: str = "") -> bool:
+    return bool(re.match(r"^MUS(?!IC)", str(job_id or "").strip().upper()))
+
+
+def resolve_progress_product_type(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
+    current = dict(job or {})
+    requested = str(product_type or "").strip().lower()
+    if requested in {"music", "music_suno", "music_bg", "music_song", "music_background", "background_music", "song", "lyrics_song"}:
+        return music_job_product_type(current, "music_bg" if requested != "music_song" else "music_song")
+    if progress_job_id_is_music(job_id) or str(current.get("internal_job_id") or current.get("job_id") or "").upper().startswith("MUS"):
+        return music_job_product_type(current, "music_bg")
+    return product_progress_status.normalize_product_type(product_type)
+
+
+def music_job_delivery_state(job: dict | None = None) -> str:
+    current = dict(job or {})
+    if current.get("sent_full_at") or current.get("music_delivered_at") or current.get("music_result_delivered_at") or current.get("output_file_id"):
+        return "delivered"
+    lock = str(current.get("music_delivery_lock") or current.get("music_result_delivery_lock") or "").strip().lower()
+    if lock:
+        return lock
+    return str(current.get("delivery_state") or current.get("status") or "-")
+
+
+def music_job_terminal_failed(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    status = str(current.get("status") or current.get("music_status") or "").strip().lower()
+    terminal = str(current.get("terminal_state") or current.get("music_terminal_state") or "").strip().lower()
+    if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
+        return True
+    return any(token in status for token in ("fail", "error", "cancel"))
+
+
+def music_job_delivered(job: dict | None = None) -> bool:
+    return music_job_delivery_state(job) == "delivered" or str((job or {}).get("status") or "").lower() == "delivered"
+
+
+def music_job_artifact_duration_seconds(job: dict | None = None, fallback: int = 0) -> int:
+    current = dict(job or {})
+    for key in ("artifact_duration", "artifact_duration_seconds", "music_result_duration_seconds", "music_output_duration_seconds", "duration_seconds", "audio_duration_seconds"):
+        value = current.get(key)
+        if value not in (None, "", 0, "0"):
+            try:
+                parsed = int(round(float(value)))
+                if parsed > 0:
+                    return parsed
+            except Exception:
+                pass
+    return max(0, int(fallback or 0))
+
+
+def progress_product_type_is_music(product_type: str = "", job_id: str = "") -> bool:
+    canonical = product_progress_status.normalize_product_type(product_type)
+    return canonical in {"music_bg", "music_song"} or progress_job_id_is_music(job_id)
+
+
 def product_progress_state_from_job(product_type: str = "", job: dict | None = None) -> dict:
-    return product_progress_status.product_progress_stage_from_job(product_type, dict(job or {}))
+    current = dict(job or {})
+    resolved = resolve_progress_product_type(current.get("internal_job_id") or current.get("job_id") or "", product_type, current)
+    return product_progress_status.product_progress_stage_from_job(resolved, current)
 
 
 def product_progress_status_from_job_text(product_type: str = "", job: dict | None = None, job_id: str = "", lang: str = "vi") -> str:
@@ -6023,21 +6115,27 @@ def progress_auto_refresh_read_status(product_type: str = "", job_id: str = "", 
 def progress_auto_refresh_snapshot(product_type: str = "", job_id: str = "", job: dict | None = None, lang: str = "vi") -> dict:
     canonical = product_progress_status.normalize_product_type(product_type)
     current = dict(job if job is not None else progress_auto_refresh_read_status(canonical, job_id))
+    canonical = resolve_progress_product_type(job_id, canonical, current)
     state = product_progress_state_from_job(canonical, current)
     stage = str(state.get("current_stage") or "")
     percent = int(state.get("percent") or 0)
     terminal = str(state.get("terminal_state") or "")
+    text = product_progress_status_from_job_text(canonical, current, job_id, lang)
     return {
         "product_type": canonical,
         "job_id": str(job_id or current.get("internal_job_id") or current.get("job_id") or current.get("id") or ""),
         "stage": stage,
         "percent": percent,
         "terminal_state": terminal,
-        "text": product_progress_status_from_job_text(canonical, current, job_id, lang),
+        "text": text,
+        "render_hash": hashlib.sha256(str(text or "").encode("utf-8")).hexdigest(),
     }
 
 
 def progress_auto_refresh_should_edit(record: dict, snapshot: dict) -> bool:
+    render_hash = str(snapshot.get("render_hash") or "")
+    if render_hash and render_hash != str(record.get("last_render_hash") or ""):
+        return True
     terminal = str(snapshot.get("terminal_state") or "")
     if terminal and terminal != str(record.get("terminal_state") or ""):
         return True
@@ -6067,6 +6165,7 @@ def progress_auto_refresh_register(
     snapshot = dict(initial_snapshot or progress_auto_refresh_snapshot(canonical, job_id, lang=lang))
     key = progress_auto_refresh_key(canonical, job_id)
     current = dict(PROGRESS_AUTO_REFRESH_JOBS.get(key) or {})
+    is_music_progress = progress_product_type_is_music(canonical, job_id)
     record = {
         **current,
         "key": key,
@@ -6077,20 +6176,25 @@ def progress_auto_refresh_register(
         "user_id": user_id,
         "lang": normalize_user_language(lang) or "vi",
         "enabled": bool(PROGRESS_AUTO_REFRESH_ENABLED),
-        "interval_seconds": int(PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS),
-        "max_updates": int(PROGRESS_AUTO_REFRESH_MAX_UPDATES),
+        "interval_seconds": int(MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS if is_music_progress else PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS),
+        "max_updates": int(MUSIC_AUTO_DELIVERY_MAX_POLLS if is_music_progress else PROGRESS_AUTO_REFRESH_MAX_UPDATES),
+        "auto_delivery_enabled": bool(MUSIC_AUTO_DELIVERY_ENABLED and is_music_progress),
+        "stop_on_terminal": bool(MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
         "edit_only": bool(PROGRESS_AUTO_REFRESH_EDIT_ONLY),
         "min_delta_percent": int(PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT),
         "last_stage": str(snapshot.get("stage") or current.get("last_stage") or ""),
         "last_percent": int(snapshot.get("percent") or current.get("last_percent") or 0),
+        "current_stage": str(snapshot.get("stage") or current.get("current_stage") or ""),
+        "percent": int(snapshot.get("percent") or current.get("percent") or 0),
         "terminal_state": str(snapshot.get("terminal_state") or current.get("terminal_state") or ""),
+        "last_render_hash": str(snapshot.get("render_hash") or current.get("last_render_hash") or ""),
         "last_update_at": current.get("last_update_at") or now_text(),
         "update_count": int(current.get("update_count") or 0),
         "edit_success_count": int(current.get("edit_success_count") or 0),
         "edit_fail_count": int(current.get("edit_fail_count") or 0),
         "fallback_used": bool(current.get("fallback_used")),
-        "stopped": bool(snapshot.get("terminal_state")) and bool(PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
-        "stop_reason": "terminal" if snapshot.get("terminal_state") and PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL else "",
+        "stopped": bool(snapshot.get("terminal_state")) and bool(MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
+        "stop_reason": "terminal" if snapshot.get("terminal_state") and (MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL) else "",
     }
     PROGRESS_AUTO_REFRESH_JOBS[key] = record
     if start_task:
@@ -6138,14 +6242,129 @@ def progress_auto_refresh_start_task(context, key: str) -> bool:
 
 
 async def progress_auto_refresh_loop(context, key: str):
+    first_tick = True
     while True:
         record = PROGRESS_AUTO_REFRESH_JOBS.get(str(key or "")) or {}
         if not record or record.get("stopped"):
             return
-        await asyncio.sleep(int(record.get("interval_seconds") or PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS))
+        if first_tick and bool(record.get("auto_delivery_enabled")):
+            first_tick = False
+        else:
+            await asyncio.sleep(int(record.get("interval_seconds") or PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS))
         result = await progress_auto_refresh_tick(context, key)
         if str(result.get("status") or "") in {"missing", "stopped"}:
             return
+
+
+async def music_progress_refresh_job_status(job_id: str = "", *, user_id=0, allow_provider_poll: bool = True, updated_by="") -> dict:
+    safe_job_id = str(job_id or "").strip()
+    job = get_engine_async_job(safe_job_id) if safe_job_id else {}
+    if not job:
+        return {}
+    current = dict(job)
+    if music_job_delivered(current) or music_job_terminal_failed(current):
+        return current
+    provider_task_id = music_job_provider_task_id(current)
+    output_bytes = int(current.get("output_bytes") or 0)
+    can_mark_missing = bool(
+        not provider_task_id
+        and output_bytes <= 0
+        and (
+            current.get("provider")
+            or progress_job_id_is_music(safe_job_id)
+            or str(current.get("error_category") or "") == "provider_job_missing"
+        )
+    )
+    if can_mark_missing:
+        current.update({
+            "status": "failed",
+            "terminal_state": "failed_no_charge",
+            "music_terminal_state": "failed_no_charge",
+            "error_category": "provider_job_missing",
+            "progress_percent": min(85, int(current.get("progress_percent") or 85)),
+            "progress_text": "TOAN AAS chưa xử lý được bài nhạc này lúc này. Hệ thống chưa trừ Xu.",
+            "last_provider_status": "not_submitted",
+        })
+        save_engine_async_job(current)
+        return current
+    if not allow_provider_poll or not provider_task_id:
+        return current
+    polled = await poll_music_suno_async_job(safe_job_id, updated_by=updated_by or user_id, download=True)
+    refreshed = dict(polled.get("job") or get_engine_async_job(safe_job_id) or current)
+    audio_bytes = bytes(polled.get("audio_bytes") or b"")
+    if audio_bytes:
+        refreshed["_auto_delivery_audio_bytes"] = audio_bytes
+    return refreshed
+
+
+def music_delivery_audio_bytes_from_job(job: dict | None = None) -> bytes:
+    current = dict(job or {})
+    direct = current.get("_auto_delivery_audio_bytes")
+    if isinstance(direct, (bytes, bytearray)):
+        return bytes(direct)
+    vault_entry = find_music_vault_entry_for_job(current)
+    storage_ref = str(vault_entry.get("storage_ref") or current.get("output_path") or "").strip()
+    if storage_ref and os.path.exists(storage_ref) and os.path.getsize(storage_ref) > 0:
+        try:
+            with open(storage_ref, "rb") as handle:
+                return handle.read()
+        except Exception:
+            return b""
+    return b""
+
+
+def music_progress_message_proxy(context, chat_id):
+    return SimpleNamespace(chat_id=chat_id)
+
+
+async def music_auto_deliver_from_progress_record(context, record: dict, job: dict | None = None) -> dict:
+    current = dict(job or {})
+    if not bool(record.get("auto_delivery_enabled")) or not MUSIC_AUTO_DELIVERY_ENABLED:
+        return current
+    if not current or music_job_delivered(current) or music_job_terminal_failed(current):
+        return current
+    if not getattr(context, "bot", None):
+        current["auto_delivery_blocker"] = "no_bot_context"
+        return current
+    if int(current.get("output_bytes") or 0) <= 0:
+        return current
+    if music_job_artifact_duration_seconds(current) <= 0:
+        return current
+    audio_bytes = music_delivery_audio_bytes_from_job(current)
+    if not audio_bytes:
+        current["auto_delivery_blocker"] = "artifact_bytes_missing"
+        return current
+    user_id = record.get("user_id") or current.get("user_id") or 0
+    result = music_result_for_job_delivery(user_id, current)
+    delivered = await send_music_product_audio_result(
+        music_progress_message_proxy(context, record.get("chat_id") or current.get("chat_id") or user_id),
+        context,
+        user_id=user_id,
+        lang=record.get("lang") or "vi",
+        product_context=PRODUCT_CONTEXT_SHOWROOM,
+        result=result,
+        audio_bytes=audio_bytes,
+        job=current,
+        updated_by=user_id,
+        send_success_message=True,
+    )
+    updated = dict(delivered.get("job") or get_engine_async_job(str(current.get("internal_job_id") or "")) or current)
+    updated["auto_delivery_status"] = str(delivered.get("status") or "")
+    return updated
+
+
+async def progress_auto_refresh_status_for_tick(context, record: dict) -> dict:
+    product_type = str(record.get("product_type") or "")
+    job_id = str(record.get("job_id") or "")
+    if progress_product_type_is_music(product_type, job_id):
+        refreshed = await music_progress_refresh_job_status(
+            job_id,
+            user_id=record.get("user_id") or 0,
+            allow_provider_poll=True,
+            updated_by=record.get("user_id") or 0,
+        )
+        return await music_auto_deliver_from_progress_record(context, record, refreshed)
+    return progress_auto_refresh_read_status(product_type, job_id, record.get("user_id") or 0)
 
 
 async def progress_auto_refresh_tick(context, key: str) -> dict:
@@ -6159,12 +6378,18 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
         record["stop_reason"] = "max_updates"
         PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return {"status": "stopped", "reason": "max_updates"}
+    refreshed_job = await progress_auto_refresh_status_for_tick(context, record)
     snapshot = progress_auto_refresh_snapshot(
         record.get("product_type") or "",
         record.get("job_id") or "",
-        job=progress_auto_refresh_read_status(record.get("product_type") or "", record.get("job_id") or "", record.get("user_id") or 0),
+        job=refreshed_job,
         lang=record.get("lang") or "vi",
     )
+    last_percent = int(record.get("last_percent") or 0)
+    if int(snapshot.get("percent") or 0) < last_percent and not snapshot.get("terminal_state"):
+        snapshot["percent"] = last_percent
+        snapshot["text"] = re.sub(r"Tiến độ:\s*\d+%", f"Tiến độ: {last_percent}%", str(snapshot.get("text") or ""))
+        snapshot["render_hash"] = hashlib.sha256(str(snapshot.get("text") or "").encode("utf-8")).hexdigest()
     record["update_count"] = int(record.get("update_count") or 0) + 1
     terminal = str(snapshot.get("terminal_state") or "")
     should_edit = progress_auto_refresh_should_edit(record, snapshot)
@@ -6181,7 +6406,10 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
             record["last_update_at"] = now_text()
             record["last_stage"] = str(snapshot.get("stage") or "")
             record["last_percent"] = int(snapshot.get("percent") or 0)
+            record["current_stage"] = str(snapshot.get("stage") or "")
+            record["percent"] = int(snapshot.get("percent") or 0)
             record["terminal_state"] = terminal
+            record["last_render_hash"] = str(snapshot.get("render_hash") or "")
         except Exception as exc:
             record["edit_fail_count"] = int(record.get("edit_fail_count") or 0) + 1
             record["last_error"] = sanitize_log_text(str(exc))[:180]
@@ -6196,11 +6424,21 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
                     record["message_id"] = getattr(sent, "message_id", record.get("message_id"))
                     record["fallback_used"] = True
                     record["last_update_at"] = now_text()
+                    record["last_stage"] = str(snapshot.get("stage") or "")
+                    record["last_percent"] = int(snapshot.get("percent") or 0)
+                    record["current_stage"] = str(snapshot.get("stage") or "")
+                    record["percent"] = int(snapshot.get("percent") or 0)
+                    record["terminal_state"] = terminal
+                    record["last_render_hash"] = str(snapshot.get("render_hash") or "")
                 except Exception as send_exc:
                     record["last_error"] = sanitize_log_text(str(send_exc))[:180]
     else:
         record["last_checked_at"] = now_text()
-    if terminal and PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL:
+        record["current_stage"] = str(snapshot.get("stage") or record.get("current_stage") or "")
+        record["percent"] = int(snapshot.get("percent") or record.get("percent") or 0)
+        record["terminal_state"] = terminal or str(record.get("terminal_state") or "")
+        record["last_render_hash"] = str(snapshot.get("render_hash") or record.get("last_render_hash") or "")
+    if terminal and bool(record.get("stop_on_terminal", PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL)):
         record["stopped"] = True
         record["stop_reason"] = terminal
         record["terminal_state"] = terminal
@@ -6241,7 +6479,7 @@ def progress_auto_refresh_status_text(job_id: str = "") -> str:
         if not wanted or wanted in {str(record.get("job_id") or ""), str(record.get("key") or "")}
     ]
     if not records:
-        return "📊 <b>Auto refresh</b>\n\nKhông có bảng trạng thái auto-refresh đang được lưu."
+        return "📊 <b>Auto refresh</b>\n\nKhông có bảng trạng thái auto-refresh đang được lưu.\n• reason: <code>no_registry_after_restart</code>"
     lines = ["📊 <b>Auto refresh</b>", ""]
     for record in records[:10]:
         lines.extend([
@@ -6278,7 +6516,8 @@ def product_progress_matrix_text() -> str:
 
 
 def product_progress_debug_text(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
-    payload = product_progress_status.product_progress_debug_payload(product_type or "multiscene_video", job_id, job)
+    resolved_type = resolve_progress_product_type(job_id, product_type, job)
+    payload = product_progress_status.product_progress_debug_payload(resolved_type, job_id, job)
     auto = progress_auto_refresh_status_text(job_id)
     return (
         "📊 <b>TOAN AAS progress status</b>\n\n"
@@ -6303,7 +6542,7 @@ async def cmd_progress_status_debug(update: Update, context: ContextTypes.DEFAUL
         return
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
-    product_type = str(args[1] if len(args) > 1 else "multiscene_video").strip()
+    product_type = str(args[1] if len(args) > 1 else "").strip()
     job = get_engine_async_job(job_id) if job_id else {}
     return await update.message.reply_text(product_progress_debug_text(job_id, product_type, job), parse_mode="HTML")
 
@@ -6318,10 +6557,12 @@ async def cmd_progress_auto_refresh_status(update: Update, context: ContextTypes
 
 def music_job_debug_text(job_id: str = "") -> str:
     job = get_engine_async_job(job_id) if job_id else {}
-    state = product_progress_state_from_job("music_song" if str((job or {}).get("feature") or "").lower() == "music_song" else "music_bg", job)
-    provider_task_id = str((job or {}).get("provider_task_id") or "")
+    product_type = music_job_product_type(job, "music_bg")
+    state = product_progress_state_from_job(product_type, job)
+    provider_task_id = music_job_provider_task_id(job)
     output_bytes = int((job or {}).get("output_bytes") or 0)
     artifact_state = "ready" if output_bytes > 0 else "not_ready"
+    artifact_duration = music_job_artifact_duration_seconds(job)
     status = str((job or {}).get("status") or "missing")
     terminal = str(state.get("terminal_state") or "")
     blocker = ""
@@ -6329,20 +6570,29 @@ def music_job_debug_text(job_id: str = "") -> str:
         blocker = "missing_job"
     elif terminal == "failed_no_charge":
         blocker = str((job or {}).get("error_category") or "failed")
+    elif not provider_task_id and output_bytes <= 0:
+        blocker = "provider_job_missing"
     elif status in {"submitted", "queued", "processing"} and output_bytes <= 0:
         blocker = "waiting_for_result"
+    duplicate_guard = "delivered" if music_job_delivered(job) else str((job or {}).get("music_delivery_lock") or (job or {}).get("music_result_delivery_lock") or "open")
     return (
         "🎵 <b>Music job debug</b>\n\n"
         f"• music_job_id: <code>{html.escape(str(job_id or '-'))}</code>\n"
+        f"• user_id/chat_id: <code>{html.escape(str((job or {}).get('user_id') or '-'))}/{html.escape(str((job or {}).get('chat_id') or '-'))}</code>\n"
         f"• provider_job_id: <code>{html.escape(mask_provider_task_id(provider_task_id) if provider_task_id else '-')}</code>\n"
         f"• product_type: <code>{html.escape(str(state.get('product_type') or '-'))}</code>\n"
         f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
         f"• percent: <code>{int(state.get('percent') or 0)}%</code>\n"
         f"• provider_status: <code>{html.escape(sanitize_provider_status_text((job or {}).get('last_provider_status') or status, provider_task_id, 180))}</code>\n"
-        f"• artifact: <code>{artifact_state}; bytes={output_bytes}</code>\n"
-        f"• delivery_state: <code>{html.escape(str((job or {}).get('delivery_state') or (job or {}).get('status') or '-'))}</code>\n"
+        f"• artifact_ready: <code>{artifact_state}</code>\n"
+        f"• artifact_bytes: <code>{output_bytes}</code>\n"
+        f"• artifact_duration: <code>{artifact_duration}</code>\n"
+        f"• delivery_state: <code>{html.escape(music_job_delivery_state(job))}</code>\n"
+        f"• delivery_message_id: <code>{html.escape(str((job or {}).get('music_delivery_message_id') or (job or {}).get('delivery_message_id') or '-'))}</code>\n"
+        f"• success_message_id: <code>{html.escape(str((job or {}).get('music_success_message_id') or (job or {}).get('success_message_id') or '-'))}</code>\n"
         f"• terminal_state: <code>{html.escape(terminal or '-')}</code>\n"
-        f"• blocker: <code>{html.escape(blocker or '-')}</code>"
+        f"• blocker: <code>{html.escape(blocker or '-')}</code>\n"
+        f"• duplicate_guard_state: <code>{html.escape(duplicate_guard)}</code>"
     )
 
 
@@ -6359,10 +6609,65 @@ async def cmd_product_job_status(update: Update, context: ContextTypes.DEFAULT_T
         return
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
-    product_type = str(args[1] if len(args) > 1 else "multiscene_video").strip()
+    product_type = str(args[1] if len(args) > 1 else "").strip()
     job = get_engine_async_job(job_id) if job_id else {}
+    product_type = resolve_progress_product_type(job_id, product_type, job)
     text = product_progress_status_from_job_text(product_type, job, job_id, user_ui_lang(update.effective_user.id if update.effective_user else 0))
     return await update.message.reply_text(text, parse_mode="HTML", reply_markup=product_progress_status_keyboard(product_type, job_id))
+
+
+def music_result_for_job_delivery(user_id, job: dict | None = None) -> dict:
+    current_job = dict(job or {})
+    guided = get_music_guided_result(user_id) or {}
+    guided_job_id = str(guided.get("music_internal_job_id") or guided.get("music_job_id") or "").strip()
+    current_job_id = str(current_job.get("internal_job_id") or "").strip()
+    if guided and guided_job_id and guided_job_id == current_job_id:
+        return {**current_job, **guided}
+    return dict(current_job)
+
+
+async def maybe_deliver_music_progress_job(query, context, *, product_type: str, job_id: str, user_id, lang: str) -> dict:
+    current = get_engine_async_job(job_id) if job_id else {}
+    if not current:
+        return {"ok": False, "status": "MISSING_JOB", "job": {}}
+    if music_job_delivered(current):
+        return {"ok": True, "status": "ALREADY_DELIVERED", "duplicate": True, "job": current}
+    if music_job_terminal_failed(current):
+        return {"ok": False, "status": "TERMINAL_FAILED", "job": current}
+    refreshed = await music_progress_refresh_job_status(job_id, user_id=user_id, allow_provider_poll=True, updated_by=user_id)
+    current = dict(refreshed or get_engine_async_job(job_id) or current)
+    if music_job_delivered(current):
+        return {"ok": True, "status": "ALREADY_DELIVERED", "duplicate": True, "job": current}
+    if music_job_terminal_failed(current):
+        return {"ok": False, "status": "TERMINAL_FAILED", "job": current}
+    if int(current.get("output_bytes") or 0) <= 0:
+        return {"ok": False, "status": "ARTIFACT_NOT_READY", "job": current}
+    vault_entry = get_music_vault_entry(str(current.get("vault_id") or "")) if current.get("vault_id") else {}
+    storage_ref = str(vault_entry.get("storage_ref") or current.get("output_path") or "").strip()
+    audio_bytes = b""
+    if storage_ref and os.path.exists(storage_ref) and os.path.getsize(storage_ref) > 0:
+        try:
+            with open(storage_ref, "rb") as handle:
+                audio_bytes = handle.read()
+        except Exception as exc:
+            record_music_job_full_send_error(current, str(exc), updated_by=user_id)
+            return {"ok": False, "status": "ARTIFACT_READ_FAILED", "job": get_engine_async_job(job_id) or current}
+    if not audio_bytes:
+        return {"ok": False, "status": "ARTIFACT_BYTES_MISSING", "job": current}
+    result = music_result_for_job_delivery(user_id, current)
+    delivered = await send_music_product_audio_result(
+        query.message,
+        context,
+        user_id=user_id,
+        lang=lang,
+        product_context=PRODUCT_CONTEXT_SHOWROOM,
+        result=result,
+        audio_bytes=audio_bytes,
+        job=current,
+        updated_by=user_id,
+        send_success_message=True,
+    )
+    return {**delivered, "job": dict(delivered.get("job") or get_engine_async_job(job_id) or current)}
 
 
 async def handle_product_progress_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6376,6 +6681,17 @@ async def handle_product_progress_callback(update: Update, context: ContextTypes
     lang = user_ui_lang(query.from_user.id) if getattr(query, "from_user", None) else "vi"
     canonical = product_progress_status.normalize_product_type(product_type)
     job = get_engine_async_job(job_id) if job_id and job_id != "latest" else {}
+    canonical = resolve_progress_product_type(job_id, canonical, job)
+    if canonical in {"music_bg", "music_song"} and job_id and job_id != "latest":
+        delivered = await maybe_deliver_music_progress_job(
+            query,
+            context,
+            product_type=canonical,
+            job_id=job_id,
+            user_id=query.from_user.id if getattr(query, "from_user", None) else 0,
+            lang=lang,
+        )
+        job = dict(delivered.get("job") or get_engine_async_job(job_id) or job)
     if not job and canonical == "frame_video":
         job = frame_video_job_for_user(job_id, query.from_user.id if getattr(query, "from_user", None) else 0)
     text = product_progress_status_from_job_text(canonical, job, job_id, lang)
@@ -93562,13 +93878,17 @@ def create_music_suno_async_job(
     if not task:
         raise ValueError("music suno async job requires provider task_id")
     payload = dict(result or {})
+    product_type = music_product_progress_type(payload)
     job = save_engine_async_job({
         "feature": "music_suno",
         "user_id": str(user_id or ""),
         "chat_id": str(chat_id or ""),
         "provider": str(provider or ""),
         "provider_task_id": task,
+        "provider_job_id": task,
         "status": status,
+        "product_type": product_type,
+        "music_product_type": product_type,
         "progress_text": "Đã gửi yêu cầu tạo nhạc tới provider.",
         "last_provider_status": status,
         "output_bytes": 0,
@@ -93646,10 +93966,16 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
     job = get_engine_async_job(internal_job_id)
     if not job:
         return {"ok": False, "status": "JOB_NOT_FOUND", "job": {}, "audio_bytes": b""}
+    if music_job_delivered(job):
+        return {"ok": True, "status": "ALREADY_DELIVERED", "job": job, "audio_bytes": b""}
+    if music_job_terminal_failed(job):
+        return {"ok": False, "status": "TERMINAL_FAILED", "job": job, "audio_bytes": b""}
     if not str(job.get("provider_task_id") or "").strip():
         job.update({
             "status": "failed",
-            "error_category": "missing_provider_task_id",
+            "terminal_state": "failed_no_charge",
+            "music_terminal_state": "failed_no_charge",
+            "error_category": "provider_job_missing",
             "progress_text": "Không có provider task id thật; không tạo fake processing.",
         })
         save_engine_async_job(job)
@@ -93682,6 +94008,18 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             updated_by=updated_by,
         )
         if audio_bytes:
+            actual_duration = await music_audio_real_duration_seconds(audio_bytes, fallback=music_result_duration_seconds(job))
+            if actual_duration <= 0:
+                job.update({
+                    "status": "failed",
+                    "terminal_state": "failed_no_charge",
+                    "music_terminal_state": "failed_no_charge",
+                    "progress_text": "File nhạc chưa có thời lượng hợp lệ; không fake success.",
+                    "error_category": "audio_duration_missing",
+                    "last_provider_status": sanitize_provider_status_text(f"http={http_status}; audio_duration_missing", provider_task_id),
+                })
+                save_engine_async_job(job)
+                return {"ok": False, "status": "AUDIO_DURATION_MISSING", "job": job, "output_url": output_url, "audio_bytes": b""}
             vault_entry = upsert_music_vault_from_output(
                 audio_bytes=audio_bytes,
                 result=job,
@@ -93696,6 +94034,9 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
                 "output_path": "",
                 "output_sha256": music_audio_sha256(audio_bytes),
                 "vault_id": str(vault_entry.get("vault_id") or job.get("vault_id") or ""),
+                "artifact_duration_seconds": actual_duration,
+                "duration_seconds": actual_duration,
+                "music_result_duration_seconds": actual_duration,
                 "error_category": "",
                 "completed_at": now_text(),
             })
@@ -93703,6 +94044,8 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             return {"ok": True, "status": "COMPLETED", "job": job, "output_url": output_url, "audio_bytes": audio_bytes}
         job.update({
             "status": "failed",
+            "terminal_state": "failed_no_charge",
+            "music_terminal_state": "failed_no_charge",
             "progress_text": "Có URL kết quả nhưng tải audio thất bại; không fake success.",
             "error_category": "audio_download_failed",
             "last_provider_status": sanitize_provider_status_text(f"http={http_status}; {detail}", provider_task_id),
@@ -93713,6 +94056,8 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         if engine_async_provider_processing_timed_out(job):
             job.update({
                 "status": "timeout_provider_processing",
+                "terminal_state": "failed_no_charge",
+                "music_terminal_state": "failed_no_charge",
                 "progress_text": "Provider xử lý quá lâu, chưa có file nhạc. TOAN AAS chưa trừ Xu.",
                 "error_category": "timeout_provider_processing",
             })
@@ -93731,6 +94076,8 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
     if music_poll_status_is_success_without_url(provider_status):
         job.update({
             "status": "failed",
+            "terminal_state": "failed_no_charge",
+            "music_terminal_state": "failed_no_charge",
             "progress_text": "Provider báo xong nhưng không có audio_url/download_url/file_url hợp lệ.",
             "error_category": "result_url_missing",
         })
@@ -93739,6 +94086,8 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
     if str(provider_status or "").upper() in {"FAIL", "FAILED", "ERROR", "CANCELLED", "CANCELED"} or str(polled.get("status") or "").upper().startswith("FAIL"):
         job.update({
             "status": "failed",
+            "terminal_state": "failed_no_charge",
+            "music_terminal_state": "failed_no_charge",
             "progress_text": "Provider trả lỗi khi xử lý nhạc.",
             "error_category": "provider_failed",
             "last_provider_status": sanitize_provider_status_text(polled.get("detail") or provider_status, provider_task_id),
@@ -93839,13 +94188,13 @@ async def music_audio_real_duration_seconds(audio_bytes: bytes | bytearray | Non
 
 def music_job_full_already_sent(job: dict | None, audio_bytes: bytes | bytearray | None = None) -> bool:
     job = dict(job or {})
-    if not job.get("sent_full_at"):
+    if not (job.get("sent_full_at") or job.get("music_delivered_at") or job.get("music_delivery_message_id")):
         return False
     output_sha = music_audio_sha256(audio_bytes)
     stored_sha = str(job.get("output_sha256") or "").strip()
     if output_sha and stored_sha and output_sha == stored_sha:
         return True
-    return bool(job.get("output_file_id"))
+    return bool(job.get("output_file_id") or job.get("music_delivery_message_id"))
 
 def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: bytes | bytearray | None = None, result: dict | None = None, updated_by="") -> dict:
     current = dict(job or {})
@@ -93853,6 +94202,7 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         return {}
     output_sha = music_audio_sha256(audio_bytes)
     file_id = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or "")
+    message_id = str(getattr(sent_message, "message_id", "") or "")
     vault_entry = upsert_music_vault_from_output(
         audio_bytes=bytes(audio_bytes or b""),
         result=result or current,
@@ -93861,7 +94211,16 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         updated_by=updated_by,
     )
     current.update({
+        "status": "delivered",
+        "terminal_state": "delivered",
+        "music_terminal_state": "delivered",
         "sent_full_at": now_text(),
+        "music_delivered_at": now_text(),
+        "music_delivery_lock": "sent",
+        "delivery_state": "delivered",
+        "music_delivery_message_id": message_id,
+        "delivery_message_id": message_id,
+        "progress_percent": 100,
         "output_file_id": file_id,
         "output_sha256": output_sha or str(current.get("output_sha256") or ""),
         "send_attempt_count": int(current.get("send_attempt_count") or 0) + 1,
@@ -93917,15 +94276,20 @@ async def send_music_product_audio_result(
     audio_bytes: bytes | bytearray,
     job: dict | None = None,
     updated_by="",
+    send_success_message: bool = False,
 ) -> dict:
     current_result = dict(result or {})
     current_job = dict(job or {})
     payload = bytes(audio_bytes or b"")
     if not payload:
         return {"ok": False, "status": "EMPTY_AUDIO"}
+    if music_job_terminal_failed(current_job):
+        return {"ok": False, "status": "TERMINAL_FAILED"}
     if current_result.get("music_result_delivered_at") or current_result.get("music_full_sent_at") or music_job_full_already_sent(current_job, payload):
         return {"ok": True, "status": "ALREADY_SENT", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0)}
     actual_duration = await music_audio_real_duration_seconds(payload, fallback=music_result_duration_seconds(current_result or current_job))
+    if actual_duration <= 0:
+        return {"ok": False, "status": "AUDIO_DURATION_MISSING"}
     if music_product_audio_has_partial_marker(current_result, current_job):
         return {"ok": False, "status": "FINAL_AUDIO_NOT_READY"}
     lock_key = music_product_delivery_lock_key(user_id, current_result, current_job, payload)
@@ -93940,11 +94304,7 @@ async def send_music_product_audio_result(
     if user_id:
         save_music_guided_result(user_id, current_result)
     audio_file = video_dubbing_output_file(payload, "toan_aas_music.mp3")
-    caption = (
-        f"✅ Đã tạo {music_confirm_product_label(current_result, lang)}."
-        if not music_product_result_is_3tier(current_result)
-        else "✅ Đã tạo nhạc thành công."
-    )
+    caption = "🎵 File nhạc TOAN AAS"
     try:
         try:
             if getattr(context, "bot", None):
@@ -93977,12 +94337,16 @@ async def send_music_product_audio_result(
             current_job["pending_charge_xu"] = 0
             current_job["output_bytes"] = max(int(current_job.get("output_bytes") or 0), len(payload))
             current_job["duration_seconds"] = actual_duration
+            current_job["artifact_duration_seconds"] = actual_duration
             current_job["music_result_duration_seconds"] = actual_duration
             current_job["music_result_size_bytes"] = len(payload)
             current_job["music_delivery_lock"] = "sent"
             current_job["music_delivered_at"] = now_text()
             current_job["music_charge_amount_xu"] = charged
             current_job["music_charged_at"] = now_text() if charge_result.get("ok") else ""
+            current_job["music_terminal_state"] = "delivered"
+            current_job["terminal_state"] = "delivered"
+            current_job["delivery_state"] = "delivered"
             current_job = record_music_job_full_send(current_job, sent_message, payload, result={**current_result, "music_result_duration_seconds": actual_duration}, updated_by=updated_by or user_id)
             vault_entry = get_music_vault_entry(str(current_job.get("vault_id") or "")) if current_job.get("vault_id") else {}
             if current_job.get("internal_job_id"):
@@ -94003,6 +94367,7 @@ async def send_music_product_audio_result(
                 updated_by=updated_by or user_id,
             )
         file_id = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or "")
+        delivery_message_id = str(getattr(sent_message, "message_id", "") or "")
         delivered_at = now_text()
         current_result.update({
             "music_status": "completed",
@@ -94023,6 +94388,8 @@ async def send_music_product_audio_result(
             "music_output_duration_seconds": actual_duration,
             "music_result_size_bytes": len(payload),
             "music_output_file_id": file_id,
+            "music_delivery_message_id": delivery_message_id,
+            "delivery_message_id": delivery_message_id,
             "music_output_sha256": music_audio_sha256(payload),
             "music_charge_amount_xu": charged,
             "music_charged_at": delivered_at if charge_result.get("ok") else "",
@@ -94031,6 +94398,37 @@ async def send_music_product_audio_result(
         if current_job.get("internal_job_id"):
             current_result["music_job_id"] = str(current_job.get("internal_job_id") or "")
             current_result["music_internal_job_id"] = str(current_job.get("internal_job_id") or "")
+        success_message_id = str(current_result.get("music_success_message_id") or current_job.get("music_success_message_id") or "")
+        if send_success_message and not success_message_id:
+            try:
+                success_text = music_product_success_text(current_result, charged, lang)
+                if getattr(context, "bot", None):
+                    success_message = await context.bot.send_message(
+                        chat_id=message.chat_id,
+                        text=success_text,
+                        parse_mode="HTML",
+                        reply_markup=music_product_success_keyboard(lang, product_context),
+                    )
+                else:
+                    success_message = await message.reply_text(
+                        success_text,
+                        parse_mode="HTML",
+                        reply_markup=music_product_success_keyboard(lang, product_context),
+                    )
+                success_message_id = str(getattr(success_message, "message_id", "") or "")
+                current_result["music_success_message_id"] = success_message_id
+                current_result["success_message_id"] = success_message_id
+                if current_job:
+                    current_job["music_success_message_id"] = success_message_id
+                    current_job["success_message_id"] = success_message_id
+                    if current_job.get("internal_job_id"):
+                        save_engine_async_job(current_job)
+            except Exception as exc:
+                current_result["music_success_send_error"] = sanitize_provider_status_text(str(exc), "", 180)
+                if current_job:
+                    current_job["music_success_send_error"] = current_result["music_success_send_error"]
+                    if current_job.get("internal_job_id"):
+                        save_engine_async_job(current_job)
         save_music_guided_result(user_id, current_result)
         return {
             "ok": bool(charge_result.get("ok")),
@@ -94039,6 +94437,8 @@ async def send_music_product_audio_result(
             "result": current_result,
             "job": current_job,
             "file_id": file_id,
+            "delivery_message_id": delivery_message_id,
+            "success_message_id": success_message_id,
         }
     finally:
         MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS.discard(lock_key)

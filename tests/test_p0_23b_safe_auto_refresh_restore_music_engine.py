@@ -35,7 +35,8 @@ def _reset_auto_refresh():
 
 def _register_music(monkeypatch, status="submitted", progress=5, product_type="music_bg", job_id="music-job"):
     _reset_auto_refresh()
-    monkeypatch.setattr(bot, "get_engine_async_job", lambda _job_id: {"internal_job_id": job_id, "feature": "music_song" if product_type == "music_song" else "music_suno", "status": status, "progress_percent": progress})
+    monkeypatch.setattr(bot, "get_engine_async_job", lambda _job_id: {"internal_job_id": job_id, "feature": "music_song" if product_type == "music_song" else "music_suno", "provider_task_id": "task-23b", "status": status, "progress_percent": progress})
+    monkeypatch.setattr(bot, "poll_music_suno_async_job", lambda _job_id, **_kwargs: asyncio.sleep(0, result={"ok": False, "status": "PROCESSING", "job": bot.get_engine_async_job(_job_id), "audio_bytes": b""}))
     return bot.progress_auto_refresh_register(
         product_type=product_type,
         job_id=job_id,
@@ -71,14 +72,14 @@ def test_music_generation_confirm_still_uses_locked_engine_path():
     assert "send_music_product_audio_result(" in source
     callbacks = _callbacks(bot.product_progress_status_keyboard("music_song", "MUS123"))
     assert "progress|status|music_song|MUS123" in callbacks
-    assert "music_quick|showroom|music_ai_status" in callbacks
+    assert "music_quick|showroom|music_ai_status" not in callbacks
 
 
 def test_music_song_not_stuck_65_when_provider_completed():
-    snapshot = bot.progress_auto_refresh_snapshot("music_song", "song-job", job={"internal_job_id": "song-job", "feature": "music_song", "status": "completed", "progress_percent": 100})
-    assert snapshot["terminal_state"] == "delivered"
-    assert snapshot["percent"] == 100
-    assert "Đã gửi kết quả" in snapshot["text"]
+    snapshot = bot.progress_auto_refresh_snapshot("music_song", "song-job", job={"internal_job_id": "song-job", "feature": "music_song", "status": "completed", "progress_percent": 100, "output_bytes": 2048})
+    assert snapshot["terminal_state"] == ""
+    assert snapshot["percent"] == 85
+    assert "Kiểm tra file nhạc" in snapshot["text"]
 
 
 def test_music_song_fail_clean_when_provider_failed():
@@ -106,13 +107,12 @@ def test_progress_auto_refresh_reads_status_only(monkeypatch):
     assert "Tiến độ: 60%" in fake.edits[-1]["text"]
 
 
-def test_progress_auto_refresh_does_not_call_provider(monkeypatch):
+def test_progress_auto_refresh_does_not_submit_provider(monkeypatch):
     async def fail_async(*args, **kwargs):
-        raise AssertionError("auto refresh must not call provider")
+        raise AssertionError("auto refresh must not submit provider")
 
     record = _register_music(monkeypatch, status="processing", progress=60)
     monkeypatch.setattr(bot, "execute_engine", fail_async)
-    monkeypatch.setattr(bot, "poll_music_suno_async_job", fail_async)
     asyncio.run(bot.progress_auto_refresh_tick(_ctx(), record["key"]))
 
 
@@ -141,7 +141,7 @@ def test_progress_auto_refresh_edits_existing_message(monkeypatch):
 
 def test_progress_auto_refresh_stops_on_delivered(monkeypatch):
     record = _register_music(monkeypatch, status="submitted", progress=5)
-    monkeypatch.setattr(bot, "get_engine_async_job", lambda _job_id: {"internal_job_id": "music-job", "feature": "music_suno", "status": "completed", "progress_percent": 100})
+    monkeypatch.setattr(bot, "get_engine_async_job", lambda _job_id: {"internal_job_id": "music-job", "feature": "music_suno", "status": "delivered", "progress_percent": 100, "output_bytes": 2048, "sent_full_at": "now"})
     result = asyncio.run(bot.progress_auto_refresh_tick(_ctx(), record["key"]))
     stored = bot.PROGRESS_AUTO_REFRESH_JOBS[record["key"]]
     assert result["status"] == "updated"
@@ -175,7 +175,7 @@ def test_progress_update_button_still_read_only(monkeypatch):
             self.edits.append({"text": text, **kwargs})
             return SimpleNamespace(message_id=12)
 
-    monkeypatch.setattr(bot, "poll_music_suno_async_job", fail_async)
+    monkeypatch.setattr(bot, "poll_music_suno_async_job", lambda _job_id, **_kwargs: asyncio.sleep(0, result={"ok": False, "status": "PROCESSING", "job": bot.get_engine_async_job(_job_id), "audio_bytes": b""}))
     monkeypatch.setattr(bot, "execute_engine", fail_async)
     monkeypatch.setattr(bot, "get_engine_async_job", lambda _job_id: {"internal_job_id": "manual-job", "feature": "music_suno", "status": "processing", "progress_percent": 60})
     query = Query()
