@@ -79,7 +79,7 @@ def test_product_progress_status_update_button_no_reprocess(monkeypatch):
 def test_product_progress_status_delivered_100_percent():
     text = bot.product_progress_status_text("music_song", "done1", "delivered", terminal_state="delivered")
     assert "Tiến độ: 100%" in text
-    assert "Đã gửi kết quả" in text
+    assert "Đã gửi file nhạc" in text
 
 
 def test_product_progress_status_failed_clean_public_copy():

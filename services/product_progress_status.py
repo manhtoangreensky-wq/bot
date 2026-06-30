@@ -222,6 +222,8 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
 
 
 PRODUCT_PROGRESS_ALIASES = {
+    "music": "music_bg",
+    "music_suno": "music_bg",
     "background_music": "music_bg",
     "music_background": "music_bg",
     "instrumental": "music_bg",
@@ -394,6 +396,8 @@ def render_product_progress_panel(
     stage = product_progress_stage(canonical, current_stage)
     progress = product_progress_percent(canonical, stage.get("key"), percent, terminal)
     status_text = product_progress_terminal_label(terminal) or str(stage.get("status") or "")
+    if canonical in {"music_bg", "music_song"} and terminal == "delivered":
+        status_text = "Đã gửi file nhạc"
     status_text = sanitize_public_copy(status_text, "TOAN AAS đang xử lý.")
     note = sanitize_public_copy(public_note, "") if public_note else ""
     current_key = str(stage.get("key") or "")
@@ -462,8 +466,36 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
     canonical = normalize_product_type(product_type)
     status = str(job.get("status") or job.get("music_status") or "").strip().lower()
     progress = job.get("progress_percent")
+    output_bytes = int(job.get("output_bytes") or job.get("music_result_size_bytes") or 0)
+    provider_task_id = str(job.get("provider_task_id") or job.get("provider_job_id") or "").strip()
+    has_delivery = bool(
+        job.get("sent_full_at")
+        or job.get("delivered_at")
+        or job.get("music_delivered_at")
+        or job.get("music_result_delivered_at")
+        or job.get("output_file_id")
+        or job.get("music_output_file_id")
+    )
     terminal = ""
-    if status in {"completed", "complete", "success", "succeeded", "delivered"}:
+    explicit_terminal = str(job.get("terminal_state") or job.get("music_terminal_state") or "").strip().lower()
+    if explicit_terminal in TERMINAL_STATES:
+        terminal = explicit_terminal
+    elif canonical in {"music_bg", "music_song"} and status in {"completed", "complete", "success", "succeeded"} and output_bytes <= 0 and not has_delivery:
+        terminal = "failed_no_charge"
+        status = "failed"
+        progress = max(85, int(progress or 85))
+    elif canonical in {"music_bg", "music_song"} and status in {"completed", "complete", "success", "succeeded"} and output_bytes > 0 and not has_delivery:
+        status = "downloading"
+        progress = min(85, int(progress or 85))
+    elif canonical in {"music_bg", "music_song"} and not provider_task_id and output_bytes <= 0 and (
+        bool(job.get("provider"))
+        or bool(re.match(r"^MUS(?!IC)", str(job.get("internal_job_id") or job.get("job_id") or "").upper()))
+        or str(job.get("error_category") or "") == "provider_job_missing"
+    ) and status in {"submitted", "queued", "processing", "running", "generating", "downloading"}:
+        terminal = "failed_no_charge"
+        status = "failed"
+        progress = max(85, int(progress or 85))
+    elif status in {"completed", "complete", "success", "succeeded", "delivered"}:
         terminal = "delivered"
     elif any(token in status for token in ("fail", "error", "cancel")):
         terminal = "failed_no_charge"
