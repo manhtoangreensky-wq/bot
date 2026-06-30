@@ -10,6 +10,7 @@ import pytest
 import bot
 import remote_worker
 from services import remote_worker_api
+from services import video_final_output
 from services import video_project_queue as queue
 from services import video_real_render_connector as connector
 
@@ -235,13 +236,18 @@ def test_artifact_saved_and_exists_before_success(monkeypatch):
     assert completed["result"]["addon_degrade_notes"]
 
 
-def test_render_output_path_persisted_to_job(tmp_path):
+def test_render_output_path_persisted_to_job(monkeypatch, tmp_path):
     conn = _conn(tmp_path)
     try:
         _project, _job = _seed_job30(conn)
         claim = remote_worker_api.claim_remote_worker_job(conn, worker_id="vps-owner", capabilities=["owner_product_video", "product_video"], owner_product_video_only=True)
         output = tmp_path / "final.mp4"
         output.write_bytes(b"mp4")
+        monkeypatch.setattr(
+            video_final_output,
+            "validate_final_video_output",
+            lambda **_kwargs: {"ok": True, "bytes": output.stat().st_size, "duration": 6.0, "has_video": True, "has_audio": False},
+        )
         completed = remote_worker_api.complete_remote_worker_job(
             conn,
             worker_id="vps-owner",

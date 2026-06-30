@@ -10,6 +10,7 @@ import pytest
 import bot
 import remote_worker
 from services import remote_worker_api
+from services import video_final_output
 from services import video_project_queue as queue
 from services import video_real_render_connector as connector
 
@@ -235,7 +236,7 @@ def test_no_charge_before_artifact_product_complete_requires_mp4(tmp_path):
         conn.close()
 
 
-def test_no_fake_test_pattern_and_delivery_single_mp4(tmp_path):
+def test_no_fake_test_pattern_and_delivery_single_mp4(monkeypatch, tmp_path):
     conn = _conn(tmp_path)
     try:
         _project, _job = _seed_product_job(conn, admin=True, scene_count=1)
@@ -247,6 +248,11 @@ def test_no_fake_test_pattern_and_delivery_single_mp4(tmp_path):
         )
         output = tmp_path / "final.mp4"
         output.write_bytes(b"real mp4 bytes")
+        monkeypatch.setattr(
+            video_final_output,
+            "validate_final_video_output",
+            lambda **_kwargs: {"ok": True, "bytes": output.stat().st_size, "duration": 6.0, "has_video": True, "has_audio": False},
+        )
         completed = remote_worker_api.complete_remote_worker_job(
             conn,
             worker_id="vps-owner-product",

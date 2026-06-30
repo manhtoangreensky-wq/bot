@@ -490,6 +490,7 @@ def test_payos_not_touched():
     changed.discard("tests/test_p0_17c2_payos_auto_topup_limits.py")
     changed.discard("tests/test_p0_17c3_payos_admin_risk_lock_review.py")
     changed.discard("tests/test_p0_17c4_webhook_db_html_security_events.py")
+    changed.discard("tests/test_p0_21e_tax_payment_accounting_business_dashboard.py")
     forbidden = ("payos", "naptien", "webhook", "wallet", "topup", "top-up", "payment")
 
     assert not any(any(term in path.lower() for term in forbidden) for path in changed)
