@@ -5471,6 +5471,7 @@ def mark_music_confirm_submit_blocker(
         "music_terminal_state": "failed_no_charge",
         "error_category": normalized,
         "confirm_submit_blocker": normalized,
+        "confirm_submit_phase": "submit_failed",
         "auto_delivery_blocker": normalized,
         "progress_percent": max(15, int(current.get("progress_percent") or 15)),
         "progress_text": music_confirm_submit_blocker_text(normalized),
@@ -6356,7 +6357,7 @@ def progress_auto_refresh_register(
     return dict(record)
 
 
-def progress_auto_refresh_register_message(message, context, *, product_type: str, job_id: str, user_id=0, lang: str = "vi") -> dict:
+def progress_auto_refresh_register_message(message, context, *, product_type: str, job_id: str, user_id=0, lang: str = "vi", start_task: bool = True) -> dict:
     chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
     message_id = getattr(message, "message_id", None)
     return progress_auto_refresh_register(
@@ -6367,6 +6368,7 @@ def progress_auto_refresh_register_message(message, context, *, product_type: st
         user_id=user_id,
         lang=lang,
         context=context,
+        start_task=start_task,
     )
 
 
@@ -6658,13 +6660,14 @@ async def send_product_progress_message(
     public_note: str = "",
     lang: str = "vi",
     user_id=0,
+    start_task: bool = True,
 ):
     sent = await message.reply_text(
         product_progress_status_text(product_type, job_id, current_stage, percent, terminal_state, public_note, lang),
         parse_mode="HTML",
         reply_markup=product_progress_status_keyboard(product_type, job_id, lang),
     )
-    progress_auto_refresh_register_message(sent, context, product_type=product_type, job_id=job_id, user_id=user_id, lang=lang)
+    progress_auto_refresh_register_message(sent, context, product_type=product_type, job_id=job_id, user_id=user_id, lang=lang, start_task=start_task)
     return sent
 
 
@@ -95290,7 +95293,12 @@ def create_music_pending_submit_job(
         "status": "pending_submit",
         "product_type": product_type,
         "music_product_type": product_type,
+        "current_stage": "received_request",
+        "stage": "received_request",
+        "percent": 5,
         "progress_percent": 5,
+        "terminal_state": "",
+        "music_terminal_state": "",
         "progress_text": "Đã nhận xác nhận tạo nhạc, đang gửi yêu cầu xử lý.",
         "last_provider_status": "provider_submit_not_called",
         "error_category": "",
@@ -95301,6 +95309,8 @@ def create_music_pending_submit_job(
         "output_bytes": 0,
         "charged_xu": 0,
         "pending_charge_xu": int(music_result_price_xu(payload) if music_product_result_is_3tier(payload) else 0),
+        "package_price_xu": int(music_result_price_xu(payload) if music_product_result_is_3tier(payload) else 0),
+        "music_price_xu": int(music_result_price_xu(payload) if music_product_result_is_3tier(payload) else 0),
         "admin_test": bool(admin_test),
         "product_kind": music_result_product_kind(payload),
         "music_product_flow": str(payload.get("music_product_flow") or ""),
@@ -95373,7 +95383,7 @@ def update_music_submit_job_provider_accepted(
         "last_provider_status": sanitize_provider_status_text(payload.get("status") or "PASS_SUBMITTED", task_id, 180),
         "progress_text": "Đã gửi yêu cầu tạo nhạc tới provider.",
         "progress_percent": max(12, int(current.get("progress_percent") or 12)),
-        "confirm_submit_phase": "provider_job_id_saved",
+        "confirm_submit_phase": "submitted",
         "confirm_submit_blocker": "",
         "auto_delivery_blocker": "",
         "provider_submit_ok_at": now_text(),
@@ -99431,6 +99441,48 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
             music_confirm_submit_public_failure_text(lang),
             reply_markup=music_product_invoice_keyboard(current, lang, ctx),
         )
+    product_type = music_product_progress_type(current)
+    sent_progress = await send_product_progress_message(
+        query.message,
+        context,
+        product_type=product_type,
+        job_id=internal_job_id,
+        current_stage="received_request",
+        percent=5,
+        public_note="Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công.",
+        lang=lang,
+        user_id=user_id,
+        start_task=False,
+    )
+    progress_chat_id = getattr(sent_progress, "chat_id", None) or getattr(query.message, "chat_id", "")
+    progress_message_id = getattr(sent_progress, "message_id", "")
+    music_job.update({
+        "progress_chat_id": str(progress_chat_id or ""),
+        "progress_message_id": str(progress_message_id or ""),
+        "progress_registry_saved": True,
+        "progress_registry_key": progress_auto_refresh_key(product_type, internal_job_id),
+        "progress_panel_sent_at": now_text(),
+        "current_stage": "received_request",
+        "stage": "received_request",
+        "percent": 5,
+        "progress_percent": max(5, int(music_job.get("progress_percent") or 5)),
+    })
+    try:
+        music_job = save_engine_async_job(music_job)
+    except Exception as exc:
+        music_job = mark_music_confirm_submit_blocker(music_job, "job_persist_failed", str(exc), updated_by=user_id, persist=False)
+        current.update({"music_status": "job_persist_failed", "music_pending_charge_xu": 0, "music_charged_xu": 0})
+        save_music_guided_result(user_id, current)
+        return await query.message.reply_text(
+            music_confirm_submit_public_failure_text(lang),
+            reply_markup=music_product_invoice_keyboard(current, lang, ctx),
+        )
+    current.update({
+        "music_progress_chat_id": str(progress_chat_id or ""),
+        "music_progress_message_id": str(progress_message_id or ""),
+        "music_progress_registry_key": progress_auto_refresh_key(product_type, internal_job_id),
+    })
+    save_music_guided_result(user_id, current)
     try:
         music_job = update_music_submit_job_provider_started(music_job, updated_by=user_id)
         engine_result = await execute_engine(
@@ -99520,19 +99572,19 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
         "music_result_delivery_lock": "pending",
     })
     save_music_guided_result(user_id, current)
-    product_type = music_product_progress_type(current)
     internal_job_id = str(music_job.get("internal_job_id") or "")
-    return await send_product_progress_message(
-        query.message,
-        context,
+    progress_auto_refresh_register(
         product_type=product_type,
         job_id=internal_job_id,
-        current_stage="received_request",
-        percent=5,
-        public_note="Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công.",
-        lang=lang,
+        chat_id=progress_chat_id,
+        message_id=progress_message_id,
         user_id=user_id,
+        lang=lang,
+        context=context,
+        initial_snapshot=progress_auto_refresh_snapshot(product_type, internal_job_id, job=music_job, lang=lang),
+        start_task=True,
     )
+    return sent_progress
 
 async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
