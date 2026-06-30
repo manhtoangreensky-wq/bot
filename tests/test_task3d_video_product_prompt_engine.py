@@ -391,8 +391,10 @@ def test_video_ai_real_intro_no_motion_button():
     markup = bot.task3d_product_intro_keyboard("video_ai_real", "vi")
     labels = _labels(markup)
     callbacks = _callbacks(markup)
-    for label in ("📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Trạng thái video", "📚 Dùng prompt từ kho"):
+    for label in ("📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Phân tích video"):
         assert label in labels
+    assert "📊 Trạng thái video" not in labels
+    assert "📚 Dùng prompt từ kho" not in labels
     for label in ("💡 Gợi ý prompt video", "🖼 Gợi ý tạo ảnh", "🎬 Gợi ý tạo video"):
         assert label not in labels
     assert "🎥 Gợi ý chuyển động" not in labels
@@ -406,8 +408,7 @@ def test_video_ai_real_intro_no_motion_button():
     assert "menu|main_video" in callbacks
     assert [[button.text for button in row] for row in markup.inline_keyboard] == [
         ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI"],
-        ["🎞 Video mẫu → Video AI", "📊 Trạng thái video"],
-        ["📚 Dùng prompt từ kho"],
+        ["🎞 Video mẫu → Video AI", "📊 Phân tích video"],
         ["⬅️ Menu video", "🏠 Menu chính"],
     ]
 

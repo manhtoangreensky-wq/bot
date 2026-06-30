@@ -56065,7 +56065,7 @@ VIDEO_PUBLIC_ROUTE_MATRIX = {
         "label_zh": "🧠 视频创意",
         "entry_callback": "vproduct|open|video_idea",
         "handler": "handle_video_product_callback",
-        "expected_children": ("vproduct|idea_quick|video_idea", "vproduct|idea_industry|video_idea", "vproduct|input_text|video_idea", "vproduct|idea_trend|video_idea"),
+        "expected_children": ("vproduct|idea_quick|video_idea", "vproduct|input_text|video_idea"),
         "parent_menu": "menu|main_video",
         "back_target": "menu|main_video",
         "category": "planning",
@@ -56187,17 +56187,19 @@ VIDEO_STEP_BACK_MATRIX = {
         "video_idea_manual_topic": "intro",
         "collect_input": "intro",
         "idea_quick": "intro",
-        "idea_industry": "intro",
-        "idea_trend": "intro",
+        "idea_suggestions": "intro",
+        "idea_development_path": "idea_suggestions",
         "profile_select": "intro",
-        "idea_suggestions": "profile_select",
         "result": "idea_suggestions",
     },
     "storyboard_prompt": {
         "intro": VIDEO_BACK_MENU_TARGET,
         "storyboard_upload_images": "intro",
-        "storyboard_suggestion_scene_count": "intro",
-        "storyboard_suggestion_topic": "storyboard_suggestion_scene_count",
+        "storyboard_suggestion_topic": "intro",
+        "storyboard_suggestion_scene_count": "storyboard_suggestion_topic",
+        "storyboard_image_scenes": "storyboard_suggestion_scene_count",
+        "storyboard_final_video_duration": "storyboard_image_scenes",
+        "storyboard_final_video_scenes": "storyboard_final_video_duration",
         "storyboard_manual_input": "intro",
         "collect_input": "intro",
         "storyboard_images": "intro",
@@ -56240,6 +56242,7 @@ VIDEO_STEP_BACK_MATRIX = {
         "intro": VIDEO_BACK_MENU_TARGET,
         "film_manual_topic": "intro",
         "film_story_suggestion_topic": "intro",
+        "film_story_options": "film_story_suggestion_topic",
         "film_script_input": "intro",
         "collect_input": "intro",
         "profile_select": "intro",
@@ -56269,6 +56272,7 @@ VIDEO_STEP_BACK_MATRIX = {
         "suggest_prompt": "ai_prompt_menu",
         "suggest_image": "ai_image_menu",
         "suggest_video": "ai_video_menu",
+        "image_to_video_prompt_set_options": "image_suggestion_topic",
         "profile_select": "collect_input",
         "b14_creative_controls": "profile_select",
         "style": "profile_select",
@@ -56293,8 +56297,9 @@ VIDEO_STEP_BACK_MATRIX = {
     "frame_video_local": {
         "intro": VIDEO_BACK_MENU_TARGET,
         "awaiting_multiple_images": "intro",
-        "image_to_video_image_suggestion_scene_count": "intro",
-        "image_to_video_image_suggestion_topic": "image_to_video_image_suggestion_scene_count",
+        "image_to_video_image_suggestion_topic": "intro",
+        "image_to_video_image_suggestion_scene_count": "image_to_video_image_suggestion_topic",
+        "image_to_video_prompt_set_options": "image_to_video_image_suggestion_scene_count",
         "collect_input": "intro",
         "frame_suggest_image": "intro",
         "profile_select": "awaiting_multiple_images",
@@ -56786,6 +56791,8 @@ def video_flow_audit_rows() -> list[dict]:
 def video_semantics_audit_payload() -> dict:
     trend_route = video_public_route_for_tool("video_trend")
     ai_callbacks = set(video_public_route_for_tool("video_ai_real").get("expected_children") or ())
+    ai_intro_labels = {button.text for row in task3d_product_intro_keyboard("video_ai_real", "vi").inline_keyboard for button in row}
+    ai_intro_callbacks = {button.callback_data for row in task3d_product_intro_keyboard("video_ai_real", "vi").inline_keyboard for button in row if button.callback_data}
     ai_prompt_callbacks = {button.callback_data for row in video_microflow_keyboard("ai_prompt_menu", "video_ai_real", "vi").inline_keyboard for button in row if button.callback_data}
     ai_image_callbacks = {button.callback_data for row in video_microflow_keyboard("ai_image_menu", "video_ai_real", "vi").inline_keyboard for button in row if button.callback_data}
     ai_video_callbacks = {button.callback_data for row in video_microflow_keyboard("ai_video_menu", "video_ai_real", "vi").inline_keyboard for button in row if button.callback_data}
@@ -56823,6 +56830,16 @@ def video_semantics_audit_payload() -> dict:
             "detail": "Video AI chân thật chỉ mở 3 nhánh prompt/ảnh/video mẫu ở màn đầu.",
         },
         {
+            "name": "video_ai_analysis_not_status",
+            "ok": "📊 Phân tích video" in ai_intro_labels and "📊 Trạng thái video" not in ai_intro_labels,
+            "detail": "Video AI chân thật dùng nhãn Phân tích video thay vì Trạng thái video.",
+        },
+        {
+            "name": "no_prompt_vault_inside_video_ai_entry",
+            "ok": "vpromptlib|start" not in ai_intro_callbacks and "📚 Dùng prompt từ kho" not in ai_intro_labels,
+            "detail": "Kho prompt video chỉ ở menu Video chính, không nằm trong flow con.",
+        },
+        {
             "name": "video_ai_suggestions_live_inside_subflows",
             "ok": (
                 "vproduct|suggest_prompt|video_ai_real" in ai_prompt_callbacks
@@ -56839,11 +56856,11 @@ def video_semantics_audit_payload() -> dict:
             "detail": "Kịch bản là chữ/thoại/phân cảnh; Storyboard là chuỗi hình/prompt nối tiếp.",
         },
         {
-            "name": "idea_quick_industry_distinct",
-            "ok": "vproduct|idea_quick|video_idea" in idea_callbacks
-            and "vproduct|idea_industry|video_idea" in idea_callbacks
-            and "vproduct|idea_quick|video_idea" != "vproduct|idea_industry|video_idea",
-            "detail": "Ý tưởng nhanh và theo sản phẩm/ngành dùng hai callback riêng.",
+            "name": "video_idea_only_quick_or_manual",
+            "ok": idea_callbacks == {"vproduct|idea_quick|video_idea", "vproduct|input_text|video_idea"}
+            and "vproduct|idea_industry|video_idea" not in idea_callbacks
+            and "vproduct|idea_trend|video_idea" not in idea_callbacks,
+            "detail": "Ý tưởng video chỉ còn Gợi ý nhanh và Tự nhập chủ đề.",
         },
     ]
     return {"ok": all(item.get("ok") for item in checks), "checks": checks, "semantics": dict(VIDEO_PRODUCT_SEMANTICS)}
@@ -56875,6 +56892,36 @@ def video_callback_audit_payload() -> dict:
 
 
 def video_microflow_audit_payload() -> dict:
+    sample_option_rows = [
+        ("prompt", video_microflow_build_options("prompt", "demo", "video_ai_real", 5)),
+        ("image_prompts", video_microflow_build_options("image_prompts", "demo", "frame_video_local", 4)),
+        ("video", video_microflow_build_options("video", "demo", "video_ai_real", 5)),
+        ("script", video_microflow_build_options("script", "demo", "script_image_video", 5)),
+        ("storyboard", video_microflow_build_options("storyboard", "demo", "storyboard_prompt", 4)),
+        ("selfshot", video_microflow_build_options("selfshot", "demo", "self_shot_scene_change", 5)),
+        ("video_idea", video_microflow_build_options("video_idea", "demo", "video_idea", 5)),
+    ]
+    sample_keyboards = [
+        task3d_product_intro_keyboard(product_id, "vi")
+        for product_id in ("video_ai_real", "video_idea", "storyboard_prompt", "frame_video_local", "script_image_video", "self_shot_scene_change")
+    ] + [
+        video_microflow_options_keyboard(product_id, "vi", options, kind)
+        for kind, options in sample_option_rows
+        for product_id in ("video_ai_real",)
+    ]
+    labels = [
+        button.text
+        for markup in sample_keyboards
+        for row in markup.inline_keyboard
+        for button in row
+    ]
+    callbacks = [
+        button.callback_data
+        for markup in sample_keyboards
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
     checks = [
         {
             "name": "text_steps_registered",
@@ -56910,6 +56957,32 @@ def video_microflow_audit_payload() -> dict:
             "name": "self_shot_requires_source_video",
             "ok": video_back_matrix_target({"product_id": "self_shot_scene_change", "current_step": "profile_select", "draft": {"profile_origin_step": "awaiting_self_shot_video"}}) == "awaiting_self_shot_video",
             "detail": "Self-shot quay lại đúng bước gửi video nguồn.",
+        },
+        {
+            "name": "no_inner_prompt_vault_buttons",
+            "ok": "📚 Dùng prompt từ kho" not in labels and "vpromptlib|start" not in callbacks,
+            "detail": "Flow con không nhét Kho prompt video.",
+        },
+        {
+            "name": "suggestions_have_multiple_selectable_options",
+            "ok": all(len(options) >= (5 if kind == "video_idea" else 3) for kind, options in sample_option_rows),
+            "detail": "Mỗi gợi ý có 3-5 lựa chọn thật, không chỉ một nút Dùng hướng này.",
+        },
+        {
+            "name": "option_keyboard_not_single_use_direction",
+            "ok": all("✅ Dùng hướng này" not in label for label in labels),
+            "detail": "Kết quả gợi ý có nút chọn từng lựa chọn riêng.",
+        },
+        {
+            "name": "storyboard_topic_before_count",
+            "ok": video_back_matrix_target({"product_id": "storyboard_prompt", "current_step": "storyboard_suggestion_scene_count", "draft": {"product_id": "storyboard_prompt"}}) == "storyboard_suggestion_topic",
+            "detail": "Storyboard hỏi chủ đề trước rồi mới hỏi số khung hình/cảnh ảnh.",
+        },
+        {
+            "name": "storyboard_separates_image_and_video_scenes",
+            "ok": bool(video_microflow_build_image_scenes("demo", 4, "cinematic"))
+            and bool(video_microflow_build_final_video_scenes(video_microflow_build_image_scenes("demo", 4, "cinematic"), 5)),
+            "detail": "Code/state phân biệt storyboard_image_scenes và final_video_scenes.",
         },
     ]
     return {"ok": all(check.get("ok") for check in checks) and video_callback_audit_payload().get("ok") is True, "checks": checks, "callbacks": video_callback_audit_payload()}
@@ -57579,6 +57652,30 @@ VIDEO_MICROFLOW_TEXT_INPUT_STEPS = frozenset({
     "video_idea_manual_topic",
 })
 
+VIDEO_MICROFLOW_OPTION_STEPS = frozenset({
+    "suggest_prompt",
+    "suggest_image",
+    "suggest_video",
+    "idea_quick",
+    "idea_suggestions",
+    "script_ideas",
+    "storyboard_image_scenes",
+    "image_to_video_prompt_set_options",
+    "selfshot_ideas",
+    "film_story_options",
+})
+
+VIDEO_MICROFLOW_KIND_EDIT_STEP = {
+    "prompt": "prompt_suggestion_topic",
+    "image_prompts": "image_suggestion_topic",
+    "video": "video_reference_suggestion_topic",
+    "script": "script_suggestion_topic",
+    "storyboard": "storyboard_suggestion_topic",
+    "selfshot": "self_shot_direction_suggestion_topic",
+    "film": "film_story_suggestion_topic",
+    "video_idea": "video_idea_manual_topic",
+}
+
 VIDEO_MICROFLOW_MEDIA_INPUT_STEPS = frozenset({
     "awaiting_source_image",
     "awaiting_multiple_images",
@@ -57600,13 +57697,17 @@ VIDEO_MICROFLOW_REQUIRED_STEPS = {
         "prompt_suggestion_topic",
         "image_suggestion_topic",
         "video_reference_suggestion_topic",
+        "suggest_prompt",
+        "suggest_image",
+        "suggest_video",
+        "image_to_video_prompt_set_options",
     ),
     "script_image_video": ("intro", "awaiting_existing_script", "script_suggestion_topic", "script_manual_topic"),
-    "storyboard_prompt": ("intro", "storyboard_upload_images", "storyboard_suggestion_scene_count", "storyboard_suggestion_topic", "storyboard_manual_input"),
-    "frame_video_local": ("intro", "awaiting_multiple_images", "image_to_video_image_suggestion_scene_count", "image_to_video_image_suggestion_topic"),
-    "self_shot_scene_change": ("intro", "awaiting_self_shot_video", "self_shot_direction_suggestion_topic"),
-    "video_idea": ("intro", "idea_quick", "idea_industry", "video_idea_manual_topic", "idea_trend"),
-    "multi_scene_film": ("intro", "film_manual_topic", "film_story_suggestion_topic", "film_script_input"),
+    "storyboard_prompt": ("intro", "storyboard_upload_images", "storyboard_suggestion_topic", "storyboard_suggestion_scene_count", "storyboard_image_scenes", "storyboard_final_video_duration", "storyboard_final_video_scenes", "storyboard_manual_input"),
+    "frame_video_local": ("intro", "awaiting_multiple_images", "image_to_video_image_suggestion_topic", "image_to_video_image_suggestion_scene_count", "image_to_video_prompt_set_options"),
+    "self_shot_scene_change": ("intro", "awaiting_self_shot_video", "self_shot_direction_suggestion_topic", "selfshot_ideas"),
+    "video_idea": ("intro", "idea_quick", "video_idea_manual_topic", "idea_suggestions", "idea_development_path"),
+    "multi_scene_film": ("intro", "film_manual_topic", "film_story_suggestion_topic", "film_story_options", "film_script_input"),
 }
 
 
@@ -57633,13 +57734,28 @@ def video_microflow_media_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 
 def video_microflow_scene_count_keyboard(kind: str, lang: str = "vi") -> InlineKeyboardMarkup:
+    is_vi = normalize_user_language(lang) == "vi"
+    if str(kind or "") == "storyboard":
+        unit = "khung hình/cảnh ảnh" if is_vi else "image frames"
+    elif str(kind or "") == "image_suggest":
+        unit = "ảnh" if is_vi else "images"
+    else:
+        unit = "cảnh" if is_vi else "scenes"
     rows = [
-        [InlineKeyboardButton("4 cảnh", callback_data=f"vproduct|{kind}_scene_count|4"), InlineKeyboardButton("6 cảnh", callback_data=f"vproduct|{kind}_scene_count|6")],
-        [InlineKeyboardButton("8 cảnh", callback_data=f"vproduct|{kind}_scene_count|8"), InlineKeyboardButton("10 cảnh", callback_data=f"vproduct|{kind}_scene_count|10")],
-        [InlineKeyboardButton("✍️ Nhập số khác" if normalize_user_language(lang) == "vi" else "✍️ Custom", callback_data=f"vproduct|{kind}_scene_count|custom")],
+        [InlineKeyboardButton(f"4 {unit}", callback_data=f"vproduct|{kind}_scene_count|4"), InlineKeyboardButton(f"6 {unit}", callback_data=f"vproduct|{kind}_scene_count|6")],
+        [InlineKeyboardButton(f"8 {unit}", callback_data=f"vproduct|{kind}_scene_count|8"), InlineKeyboardButton(f"10 {unit}", callback_data=f"vproduct|{kind}_scene_count|10")],
+        [InlineKeyboardButton("✍️ Nhập số khác" if is_vi else "✍️ Custom", callback_data=f"vproduct|{kind}_scene_count|custom")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
+
+
+def video_storyboard_duration_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("3 giây/cảnh", callback_data="vproduct|storyboard_video_duration|3"), InlineKeyboardButton("5 giây/cảnh", callback_data="vproduct|storyboard_video_duration|5")],
+        [InlineKeyboardButton("8 giây/cảnh", callback_data="vproduct|storyboard_video_duration|8"), InlineKeyboardButton("✍️ Tự nhập", callback_data="vproduct|storyboard_video_duration|custom")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
 
 
 def video_microflow_text(step: str, product_id: str = "", session: dict | None = None, lang: str = "vi") -> str:
@@ -57673,12 +57789,19 @@ def video_microflow_text(step: str, product_id: str = "", session: dict | None =
         "script_suggestion_topic": "💡 Nhập chủ đề/sản phẩm/mục tiêu. TOAN AAS sẽ gợi ý 3-5 kịch bản gồm hook, nội dung, hành động, lời đọc và CTA.",
         "script_manual_topic": "✍️ Nhập chủ đề kịch bản. TOAN AAS sẽ phát triển thành kịch bản chữ trước, không nhảy sang storyboard.",
         "storyboard_upload_images": f"🖼 Gửi ảnh/storyboard có sẵn. Đã nhận {media_count} ảnh. Anh/chị có thể gửi thêm hoặc bấm Tiếp tục.",
-        "storyboard_suggestion_scene_count": "🎞 Chọn số cảnh/khung hình storyboard muốn TOAN AAS gợi ý trước.",
-        "storyboard_suggestion_topic": "💡 Nhập chủ đề/câu chuyện. TOAN AAS sẽ tạo danh sách cảnh và prompt ảnh nối tiếp theo số cảnh đã chọn.",
+        "storyboard_suggestion_topic": (
+            "💡 Nhập chủ đề/câu chuyện/sản phẩm muốn làm storyboard. "
+            "TOAN AAS sẽ chia thành các khung hình/cảnh ảnh nối tiếp, mỗi khung có prompt tạo ảnh riêng.\n\n"
+            "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
+        ),
+        "storyboard_suggestion_scene_count": (
+            "🎞 Chọn số khung hình/cảnh ảnh storyboard muốn TOAN AAS gợi ý.\n\n"
+            "Đây là số khung hình để tạo ảnh/prompt ảnh trước. Cảnh video cuối sẽ có motion và số giây riêng ở bước sau."
+        ),
         "storyboard_manual_input": "✍️ Nhập storyboard thô hoặc mô tả từng cảnh. TOAN AAS sẽ chuẩn hóa thành chuỗi hình ảnh/prompt nối tiếp.",
         "awaiting_multiple_images": f"📎 Gửi ảnh muốn ghép thành video. Đã nhận {media_count} ảnh. Anh/chị có thể gửi thêm hoặc bấm Tiếp tục.",
-        "image_to_video_image_suggestion_scene_count": "🎨 Chọn số ảnh/cảnh muốn TOAN AAS gợi ý trước khi ghép ảnh thành video.",
-        "image_to_video_image_suggestion_topic": "🎨 Nhập chủ đề/sản phẩm. TOAN AAS sẽ gợi ý bộ prompt ảnh cần tạo trước khi ghép thành video.",
+        "image_to_video_image_suggestion_topic": "🎨 Nhập chủ đề/câu chuyện/sản phẩm. TOAN AAS sẽ hỏi số ảnh rồi gợi ý bộ prompt ảnh cần tạo trước khi ghép thành video.",
+        "image_to_video_image_suggestion_scene_count": "🎨 Chọn số ảnh muốn TOAN AAS gợi ý trước khi ghép thành video. Đây là bộ ảnh/prompt ảnh, chưa xử lý video và chưa trừ Xu.",
         "awaiting_self_shot_video": "🎥 Gửi video tự quay/video nguồn. TOAN AAS cần video nguồn trước khi chọn hướng đổi cảnh.",
         "self_shot_direction_suggestion_topic": "💡 Nhập mô tả video nguồn hoặc mục tiêu đổi cảnh. TOAN AAS sẽ gợi ý 3-5 hướng đổi cảnh.",
         "film_manual_topic": "✍️ Nhập ý tưởng phim/video nhiều cảnh. TOAN AAS sẽ phát triển cốt truyện và dàn cảnh trước.",
@@ -57715,61 +57838,470 @@ def video_microflow_keyboard(step: str, product_id: str = "", lang: str = "vi") 
     return video_microflow_nav_keyboard(lang)
 
 
-def video_microflow_options_text(kind: str, topic: str, product_id: str = "", scene_count: int = 5, lang: str = "vi") -> str:
-    topic = html.escape(str(topic or "ý tưởng video").strip()[:240])
-    kind = str(kind or "")
+def video_microflow_normalize_topic(topic: str) -> str:
+    topic = re.sub(r"\s+", " ", str(topic or "").strip())
+    return (topic or "ý tưởng video").strip()[:240]
+
+
+def video_microflow_build_image_scenes(topic: str, count: int, style: str) -> list[dict]:
+    topic = video_microflow_normalize_topic(topic)
+    count = max(3, min(12, safe_int(count, 5)))
+    scene_notes = [
+        "mở đầu nhận diện chủ thể",
+        "cận chi tiết tạo cảm xúc",
+        "bối cảnh rộng để kể chuyện",
+        "khoảnh khắc hành động chính",
+        "góc nhìn chuyển tiếp",
+        "cao trào hình ảnh",
+        "lợi ích hoặc điểm nhấn",
+        "cảnh kết gợi nhớ",
+        "biến thể cận mặt/cận sản phẩm",
+        "khung hình CTA nhẹ",
+        "ảnh nền cho caption",
+        "ảnh kết thúc sạch",
+    ]
+    scenes = []
+    for index in range(1, count + 1):
+        note = scene_notes[(index - 1) % len(scene_notes)]
+        scenes.append({
+            "index": index,
+            "image_description": f"Khung {index}: {note} cho {topic}.",
+            "image_prompt": (
+                f"{topic}, {note}, {style}, consistent character/product, clean composition, "
+                "clear subject, high detail, no text overlay"
+            ),
+            "continuity_note": "Giữ cùng nhân vật/sản phẩm, màu chủ đạo và bối cảnh liên tục.",
+            "caption": f"Caption ngắn cho khung {index}, có thể dùng hoặc bỏ.",
+        })
+    return scenes
+
+
+def video_microflow_build_final_video_scenes(image_scenes: list[dict], seconds_per_scene: int = 5) -> list[dict]:
+    seconds_per_scene = max(3, min(12, safe_int(seconds_per_scene, 5)))
+    motions = ["push-in nhẹ", "pan ngang chậm", "tilt lên tinh tế", "zoom cận chi tiết", "dolly chuyển cảnh", "slow reveal"]
+    final_scenes = []
+    for index, image_scene in enumerate(list(image_scenes or []), start=1):
+        final_scenes.append({
+            "index": index,
+            "source_image": f"Khung ảnh {index}",
+            "motion": motions[(index - 1) % len(motions)],
+            "duration_seconds": seconds_per_scene,
+            "transition": "cắt mềm" if index == 1 else "match cut / dissolve nhẹ",
+            "caption": str(image_scene.get("caption") or ""),
+        })
+    return final_scenes
+
+
+def video_microflow_build_options(kind: str, topic: str, product_id: str = "", scene_count: int = 5, revision: int = 0) -> list[dict]:
+    kind = str(kind or "prompt")
+    product_id = str(product_id or "")
+    topic = video_microflow_normalize_topic(topic)
+    revision = safe_int(revision, 0)
+    scene_count = max(3, min(12, safe_int(scene_count, 5)))
+    tone_variants = [
+        ("Chân thật dễ tin", "realistic UGC, natural light, friendly pacing"),
+        ("Điện ảnh cảm xúc", "cinematic, soft contrast, intentional camera movement"),
+        ("Quảng cáo rõ lợi ích", "product ad, clean framing, benefit-first storytelling"),
+        ("Nhanh bắt mắt", "short-form social, fast hook, dynamic cuts"),
+        ("Sang trọng tối giản", "luxury minimal, premium lighting, slow reveal"),
+    ]
+    rotated = tone_variants[revision % len(tone_variants):] + tone_variants[:revision % len(tone_variants)]
+    if kind == "prompt":
+        return [
+            {
+                "title": f"Prompt {idx}: {title}",
+                "prompt": f"Tạo video ngắn về {topic}. Mở đầu có hook rõ trong 3 giây, chủ thể xuất hiện ngay, bối cảnh cụ thể, {style}, kết thúc bằng điểm nhớ tự nhiên.",
+                "context": f"Dùng khi muốn biến {topic} thành video AI ngắn có cấu trúc rõ.",
+                "camera": ["close-up mở đầu", "push-in vào chủ thể", "wide shot bối cảnh", "handheld tự nhiên", "slow reveal cao cấp"][idx - 1],
+                "motion": ["chuyển động nhẹ", "nhịp nhanh theo beat", "pan chậm", "camera theo nhân vật", "zoom cận chi tiết"][idx - 1],
+                "style": style,
+                "fit": ["Video AI chân thật", "quảng cáo sản phẩm", "review ngắn", "kể chuyện", "lookbook/visualizer"][idx - 1],
+            }
+            for idx, (title, style) in enumerate(rotated[:5], start=1)
+        ]
+    if kind == "image_prompts":
+        option_count = 3 if product_id == "frame_video_local" else 5
+        options = []
+        for idx, (title, style) in enumerate(rotated[:option_count], start=1):
+            images = video_microflow_build_image_scenes(topic, scene_count if product_id == "frame_video_local" else 3, style)
+            options.append({
+                "title": f"Bộ ảnh {idx}: {title}",
+                "description": f"Hướng ảnh cho {topic}, giữ chủ thể ổn định trước khi tạo/chọn ảnh thật.",
+                "image_prompt": images[0]["image_prompt"],
+                "style": style,
+                "continuity": "Giữ cùng nhân vật/sản phẩm, màu chủ đạo và bố cục xuyên suốt.",
+                "motion_hint": "Sau khi có ảnh, dùng motion nhẹ: push-in, pan, zoom cận chi tiết.",
+                "images": images,
+            })
+        return options
+    if kind == "video":
+        return [
+            {
+                "title": f"Hướng video {idx}: {title}",
+                "concept": f"{topic} được kể bằng một cảnh chính có hook rõ, diễn biến nhanh và kết thúc dễ nhớ.",
+                "shot": ["mở bằng cận chủ thể", "mở bằng hành động", "mở bằng bối cảnh", "mở bằng so sánh", "mở bằng chi tiết bất ngờ"][idx - 1],
+                "camera": ["push-in", "tracking shot", "pan ngang", "handheld UGC", "slow reveal"][idx - 1],
+                "motion": ["chủ thể di chuyển nhẹ", "ánh sáng thay đổi", "camera đi theo hành động", "đổi góc ở nhịp giữa", "kết bằng freeze/hold sạch"][idx - 1],
+                "style": style,
+                "prompt": f"{topic}, {style}, clear subject, natural motion, cinematic short video, no text overlay",
+            }
+            for idx, (title, style) in enumerate(rotated[:5], start=1)
+        ]
+    if kind == "video_idea":
+        paths = [
+            ("Kịch bản → Video", "Kịch bản chữ có hook, phân cảnh và CTA."),
+            ("Storyboard + Prompt", "Chuỗi khung hình/prompt nối tiếp để hình dung từng cảnh."),
+            ("Video AI chân thật", "Prompt/ảnh/video mẫu để tạo video ngắn chân thật."),
+            ("Ghép ảnh thành video", "Bộ ảnh/prompt ảnh rồi ghép thành video."),
+            ("Phim nhiều cảnh", "Cốt truyện nhiều cảnh, phù hợp video dài hơn."),
+        ]
+        return [
+            {
+                "title": f"Ý tưởng {idx}: {title}",
+                "hook": f"3 giây đầu đặt câu hỏi hoặc hình ảnh gây tò mò về {topic}.",
+                "concept": f"Triển khai {topic} theo hướng {title.lower()}, có mở đầu rõ, điểm nhấn giữa video và kết thúc dễ nhớ.",
+                "recommended_flow": flow,
+                "reason": reason,
+            }
+            for idx, ((title, style), (flow, reason)) in enumerate(zip(rotated[:5], paths), start=1)
+        ]
     if kind == "script":
-        title = "💡 <b>Gợi ý kịch bản</b>"
-        rows = [
-            "1. Hook phản vấn → vấn đề → giải pháp → CTA rõ.",
-            "2. Kể chuyện trước/sau → điểm đau → kết quả.",
-            "3. Review tự nhiên → trải nghiệm → lý do tin tưởng.",
+        scripts = []
+        for idx, (title, style) in enumerate(rotated[:5], start=1):
+            scripts.append({
+                "title": f"Kịch bản {idx}: {title}",
+                "hook": f"Mở đầu: Nếu anh/chị đang quan tâm {topic}, đây là góc nhìn nên xem.",
+                "body": f"Nội dung chính: nêu vấn đề, đưa ví dụ gần gũi, cho thấy điểm khác biệt của {topic}.",
+                "scenes": [
+                    "Cảnh 1: hook/cận chủ thể.",
+                    "Cảnh 2: bối cảnh hoặc vấn đề.",
+                    "Cảnh 3: giải pháp/điểm nhấn.",
+                    "Cảnh 4: kết luận/CTA nhẹ.",
+                ],
+                "cta": "Lưu lại hoặc nhắn TOAN AAS để dựng thành video hoàn chỉnh.",
+                "style": style,
+            })
+        return scripts
+    if kind == "storyboard":
+        return [
+            {
+                "title": f"Storyboard {idx}: {title}",
+                "story_angle": f"{topic} được kể bằng chuỗi khung hình có mở đầu, diễn biến và kết thúc.",
+                "image_scenes": video_microflow_build_image_scenes(topic, scene_count, style),
+                "style": style,
+            }
+            for idx, (title, style) in enumerate(rotated[:3], start=1)
         ]
-    elif kind == "storyboard":
-        title = "🎞 <b>Gợi ý storyboard</b>"
-        rows = [f"{i}. Cảnh {i}: khung hình nối tiếp cho {topic}, có prompt ảnh và chuyển động riêng." for i in range(1, max(3, scene_count) + 1)]
-    elif kind == "image_prompts":
-        title = "🎨 <b>Gợi ý bộ ảnh trước khi ghép video</b>"
-        rows = [f"{i}. Ảnh {i}: prompt ảnh nhất quán chủ thể/bối cảnh cho {topic}." for i in range(1, max(3, scene_count) + 1)]
-    elif kind == "selfshot":
-        title = "💡 <b>Gợi ý hướng đổi cảnh</b>"
-        rows = [
-            "1. Giữ người/sản phẩm, đổi sang bối cảnh studio sáng.",
-            "2. Giữ chuyển động chính, đổi sang phố đêm cinematic.",
-            "3. Giữ góc máy, đổi ánh sáng và hậu cảnh cao cấp.",
+    if kind == "selfshot":
+        directions = [
+            ("Giữ người, đổi nền studio", "giữ khuôn mặt/chuyển động chính, đổi sang studio sáng sạch"),
+            ("Giữ sản phẩm, đổi ánh sáng", "giữ sản phẩm ổn định, nâng ánh sáng và hậu cảnh cao cấp"),
+            ("Đổi sang ngoài trời cinematic", "giữ chủ thể, đổi bối cảnh ngoài trời có chiều sâu"),
+            ("Quảng cáo sản phẩm", "giữ cảnh tự quay, thêm góc nhìn quảng cáo tự nhiên"),
+            ("UGC đời thường", "giữ cảm giác quay thật, chỉ làm bối cảnh gọn và đẹp hơn"),
         ]
-    elif kind == "film":
-        title = "💡 <b>Gợi ý cốt truyện nhiều cảnh</b>"
-        rows = [
-            "1. Mở đầu gây tò mò → xung đột nhỏ → chuyển biến → kết thúc gợi nhớ.",
-            "2. Nhân vật chính có mục tiêu rõ → gặp trở ngại → tìm giải pháp.",
-            "3. Câu chuyện sản phẩm theo hành trình trước/sau.",
+        return [
+            {
+                "title": title,
+                "direction": f"{detail} cho {topic}.",
+                "camera": ["giữ góc máy gốc", "ổn định khung hình", "thêm push-in nhẹ", "cắt theo nhịp nói", "giữ handheld tự nhiên"][idx - 1],
+                "style": rotated[(idx - 1) % len(rotated)][1],
+                "needs_source_video": True,
+            }
+            for idx, (title, detail) in enumerate(directions, start=1)
         ]
-    elif kind == "video_idea":
-        title = "🧠 <b>Gợi ý ý tưởng video</b>"
-        rows = [
-            "1. Hook 3 giây đầu + góc kể chuyện gần gũi.",
-            "2. Format review/so sánh/ngạc nhiên dễ xem.",
-            "3. Hướng triển khai thành kịch bản, storyboard hoặc prompt video.",
+    if kind == "film":
+        return [
+            {
+                "title": f"Cốt truyện {idx}: {title}",
+                "hook": f"Mở đầu bằng một tình huống khiến người xem tò mò về {topic}.",
+                "plot": f"Nhân vật/chủ thể có mục tiêu rõ, gặp trở ngại nhỏ, rồi chuyển biến ở nửa sau video.",
+                "scene_arc": "Mở đầu → vấn đề → lựa chọn → cao trào → kết nhớ.",
+                "style": style,
+            }
+            for idx, (title, style) in enumerate(rotated[:5], start=1)
         ]
+    return video_microflow_build_options("prompt", topic, product_id, scene_count, revision)
+
+
+def video_microflow_options_from_session(session: dict | None = None) -> list[dict]:
+    draft = dict((session or {}).get("draft") or {})
+    options = draft.get("microflow_options")
+    return list(options) if isinstance(options, list) else []
+
+
+def video_microflow_selected_option(session: dict | None = None) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    options = video_microflow_options_from_session(session)
+    index = max(0, min(len(options) - 1, safe_int(draft.get("microflow_selected_index"), 0))) if options else 0
+    return dict(options[index]) if options else {}
+
+
+def video_microflow_store_options(user_id, *, product_id: str, step: str, kind: str, topic: str, scene_count: int = 5, revision: int = 0) -> dict:
+    options = video_microflow_build_options(kind, topic, product_id, scene_count, revision)
+    return task3d_session_step(
+        user_id,
+        step,
+        product_id=product_id,
+        topic=topic,
+        microflow_kind=kind,
+        microflow_topic=topic,
+        microflow_options=options,
+        microflow_selected_index=0,
+        microflow_revision=revision,
+        selected_scene_count=scene_count,
+        input_collected=True,
+        free_generation=True,
+        provider_called=False,
+        xu_charged=0,
+    )
+
+
+def video_microflow_option_summary(kind: str, option: dict) -> list[str]:
+    kind = str(kind or "")
+    if kind == "prompt":
+        return [
+            f"Prompt: {option.get('prompt')}",
+            f"Bối cảnh: {option.get('context')}",
+            f"Camera/motion: {option.get('camera')} · {option.get('motion')}",
+            f"Phong cách: {option.get('style')}",
+            f"Phù hợp: {option.get('fit')}",
+        ]
+    if kind == "image_prompts":
+        images = list(option.get("images") or [])
+        lines = [
+            f"Mô tả: {option.get('description')}",
+            f"Prompt ảnh chính: {option.get('image_prompt')}",
+            f"Phong cách: {option.get('style')}",
+            f"Giữ ổn định: {option.get('continuity')}",
+        ]
+        if images:
+            lines.append(f"Bộ này có {len(images)} ảnh/prompt ảnh.")
+        return lines
+    if kind == "video":
+        return [
+            f"Concept: {option.get('concept')}",
+            f"Shot/camera: {option.get('shot')} · {option.get('camera')}",
+            f"Chuyển động: {option.get('motion')}",
+            f"Phong cách: {option.get('style')}",
+            f"Prompt video: {option.get('prompt')}",
+        ]
+    if kind == "video_idea":
+        return [
+            f"Hook: {option.get('hook')}",
+            f"Concept: {option.get('concept')}",
+            f"Nên triển khai bằng: {option.get('recommended_flow')}",
+            f"Lý do: {option.get('reason')}",
+        ]
+    if kind == "script":
+        return [
+            f"Hook: {option.get('hook')}",
+            f"Nội dung: {option.get('body')}",
+            f"Phân cảnh: {' / '.join(str(item) for item in (option.get('scenes') or [])[:4])}",
+            f"CTA: {option.get('cta')}",
+            f"Style: {option.get('style')}",
+        ]
+    if kind == "storyboard":
+        scenes = list(option.get("image_scenes") or [])
+        return [
+            f"Góc kể: {option.get('story_angle')}",
+            f"Số khung hình/cảnh ảnh: {len(scenes)}",
+            f"Khung 1: {(scenes[0] or {}).get('image_description') if scenes else ''}",
+            "Cảnh video cuối sẽ tạo sau khi xác nhận storyboard/ảnh, có motion và số giây riêng.",
+        ]
+    if kind == "selfshot":
+        return [
+            f"Hướng đổi cảnh: {option.get('direction')}",
+            f"Camera: {option.get('camera')}",
+            f"Phong cách: {option.get('style')}",
+            "Nếu chưa có video nguồn, TOAN AAS sẽ yêu cầu gửi video trước khi xử lý.",
+        ]
+    if kind == "film":
+        return [
+            f"Hook: {option.get('hook')}",
+            f"Cốt truyện: {option.get('plot')}",
+            f"Nhịp cảnh: {option.get('scene_arc')}",
+            f"Phong cách: {option.get('style')}",
+        ]
+    return [str(option.get("title") or "Gợi ý")]
+
+
+def video_microflow_title(kind: str) -> str:
+    titles = {
+        "prompt": "💡 <b>Gợi ý prompt video</b>",
+        "image_prompts": "🎨 <b>Gợi ý ảnh/prompt ảnh</b>",
+        "video": "🎞 <b>Gợi ý cách làm video</b>",
+        "video_idea": "🧠 <b>Gợi ý ý tưởng video</b>",
+        "script": "💡 <b>Gợi ý kịch bản</b>",
+        "storyboard": "🎞 <b>Gợi ý storyboard</b>",
+        "selfshot": "💡 <b>Gợi ý hướng đổi cảnh</b>",
+        "film": "💡 <b>Gợi ý cốt truyện nhiều cảnh</b>",
+    }
+    return titles.get(str(kind or ""), "💡 <b>Gợi ý nội dung</b>")
+
+
+def video_microflow_options_text(kind: str, topic: str, product_id: str = "", scene_count: int = 5, lang: str = "vi", options: list[dict] | None = None, selected_index: int | None = None) -> str:
+    kind = str(kind or "")
+    topic_raw = video_microflow_normalize_topic(topic)
+    option_list = list(options) if isinstance(options, list) else video_microflow_build_options(kind, topic_raw, product_id, scene_count)
+    selected = safe_int(selected_index, -1) if selected_index is not None else -1
+    lines = [video_microflow_title(kind), "", f"Chủ đề: <code>{html.escape(topic_raw)}</code>", ""]
+    if kind == "storyboard":
+        lines.append("Các lựa chọn dưới đây là khung hình/cảnh ảnh để tạo ảnh trước. Cảnh video cuối sẽ được tạo sau, có motion và số giây riêng.")
+        lines.append("")
+    for idx, option in enumerate(option_list[:5], start=1):
+        marker = "✅ " if selected == idx - 1 else ""
+        lines.append(f"{marker}{idx}. <b>{html.escape(str(option.get('title') or f'Lựa chọn {idx}'))}</b>")
+        for detail in video_microflow_option_summary(kind, dict(option))[:6]:
+            if detail:
+                lines.append(f"   • {html.escape(str(detail))}")
+        lines.append("")
+    lines.append("Chọn một lựa chọn bằng nút số bên dưới. Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu.")
+    return "\n".join(lines).strip()
+
+
+def video_microflow_select_label(kind: str, index: int) -> str:
+    prefix = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"][index] if 0 <= index < 5 else str(index + 1)
+    verbs = {
+        "prompt": "Dùng prompt",
+        "image_prompts": "Dùng ảnh/prompt",
+        "video": "Dùng hướng",
+        "video_idea": "Dùng ý tưởng",
+        "script": "Dùng kịch bản",
+        "storyboard": "Dùng storyboard",
+        "selfshot": "Dùng hướng",
+        "film": "Dùng cốt truyện",
+    }
+    return f"{prefix} {verbs.get(str(kind or ''), 'Dùng lựa chọn')} {index + 1}"
+
+
+def video_microflow_options_keyboard(product_id: str, lang: str = "vi", options: list[dict] | None = None, kind: str = "") -> InlineKeyboardMarkup:
+    option_count = len(options or [])
+    option_count = option_count if option_count else 3
+    rows: list[list[InlineKeyboardButton]] = []
+    buttons = [
+        InlineKeyboardButton(video_microflow_select_label(kind, idx), callback_data=f"vproduct|microflow_choose|{idx}")
+        for idx in range(min(5, option_count))
+    ]
+    for idx in range(0, len(buttons), 2):
+        rows.append(buttons[idx:idx + 2])
+    if str(kind or "") == "video_idea":
+        refresh_label = "🔄 Đổi ý tưởng"
+        edit_label = "✍️ Tự nhập chủ đề"
+    elif str(kind or "") == "script":
+        refresh_label = "🔄 Đổi kịch bản"
+        edit_label = "✍️ Tự sửa/nhập kịch bản"
+    elif str(kind or "") == "storyboard":
+        refresh_label = "🔄 Gợi ý lại"
+        edit_label = "✍️ Sửa storyboard"
     else:
-        title = "💡 <b>Gợi ý nội dung</b>"
-        rows = [
-            "1. Prompt có chủ thể rõ, bối cảnh cụ thể, ánh sáng và camera.",
-            "2. Concept có mở đầu, diễn biến, chuyển động và cảm xúc.",
-            "3. Hướng dựng giữ đúng ý khách, chưa tạo file thật.",
-        ]
-    lines = [title, "", f"Chủ đề: <code>{topic}</code>", ""]
-    lines.extend(rows)
-    lines.append("")
-    lines.append("Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu.")
+        refresh_label = "🔄 Gợi ý lại"
+        edit_label = "✍️ Tự sửa"
+    rows.extend([
+        [InlineKeyboardButton(refresh_label, callback_data="vproduct|microflow_regenerate"), InlineKeyboardButton(edit_label, callback_data="vproduct|microflow_edit")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def video_idea_development_text(session: dict | None = None, lang: str = "vi") -> str:
+    selected = video_microflow_selected_option(session)
+    title = str(selected.get("title") or (session or {}).get("topic") or "ý tưởng đã chọn")
+    return (
+        "🧠 <b>Phát triển ý tưởng video</b>\n\n"
+        f"Đã chọn: <b>{html.escape(title)}</b>\n\n"
+        "Anh/chị muốn phát triển ý tưởng này theo dạng nào?\n"
+        "TOAN AAS sẽ giữ ý tưởng đã chọn và đưa về đúng flow sản phẩm tương ứng.\n\n"
+        "Bước này chỉ lập kế hoạch, chưa tạo file thật và chưa trừ Xu."
+    )
+
+
+def video_idea_development_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧩 Kịch bản → Video", callback_data="vproduct|idea_develop|script_image_video"), InlineKeyboardButton("🎬 Storyboard + Prompt", callback_data="vproduct|idea_develop|storyboard_prompt")],
+        [InlineKeyboardButton("🎞 Video AI chân thật", callback_data="vproduct|idea_develop|video_ai_real"), InlineKeyboardButton("🖼 Ghép ảnh thành video", callback_data="vproduct|idea_develop|frame_video_local")],
+        [InlineKeyboardButton("🎥 Phim nhiều cảnh", callback_data="vproduct|idea_develop|multi_scene_film")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_storyboard_image_scenes_text(session: dict | None = None, lang: str = "vi") -> str:
+    draft = dict((session or {}).get("draft") or {})
+    scenes = list(draft.get("storyboard_image_scenes") or (video_microflow_selected_option(session).get("image_scenes") or []))
+    topic = html.escape(str(draft.get("microflow_topic") or (session or {}).get("topic") or "storyboard"))
+    lines = [
+        "🎞 <b>Storyboard ảnh/prompt ảnh</b>",
+        "",
+        f"Chủ đề: <code>{topic}</code>",
+        "",
+        "Đây là khung hình/cảnh ảnh để tạo ảnh trước, chưa phải cảnh video cuối.",
+        "",
+    ]
+    for scene in scenes[:12]:
+        lines.extend([
+            f"{safe_int(scene.get('index'), 0)}. <b>{html.escape(str(scene.get('image_description') or 'Khung hình'))}</b>",
+            f"   Prompt ảnh: {html.escape(str(scene.get('image_prompt') or ''))}",
+            f"   Giữ ổn định: {html.escape(str(scene.get('continuity_note') or ''))}",
+        ])
+    lines.extend(["", "Sau khi xác nhận storyboard/ảnh, TOAN AAS mới tạo cảnh video cuối có motion và số giây riêng. Chưa tạo file thật và chưa trừ Xu."])
     return "\n".join(lines)
 
 
-def video_microflow_options_keyboard(product_id: str, lang: str = "vi") -> InlineKeyboardMarkup:
+def video_storyboard_image_scenes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Dùng hướng này", callback_data="vproduct|microflow_use_suggestion"), InlineKeyboardButton("🔄 Đổi gợi ý", callback_data="vproduct|microflow_regenerate")],
-        [InlineKeyboardButton("📚 Dùng prompt từ kho", callback_data="vpromptlib|start"), InlineKeyboardButton("💾 Lưu vào kho prompt", callback_data="vproduct|prompt_vault_save")],
+        [InlineKeyboardButton("✅ Dùng storyboard này", callback_data="vproduct|storyboard_use"), InlineKeyboardButton("🖼 Tạo ảnh cho storyboard", callback_data="vproduct|storyboard_create_images")],
+        [InlineKeyboardButton("🔄 Gợi ý lại", callback_data="vproduct|microflow_regenerate"), InlineKeyboardButton("✍️ Sửa storyboard", callback_data="vproduct|microflow_edit")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_storyboard_final_video_scenes_text(session: dict | None = None, lang: str = "vi") -> str:
+    draft = dict((session or {}).get("draft") or {})
+    final_scenes = list(draft.get("final_video_scenes") or [])
+    lines = [
+        "🎬 <b>Cảnh video cuối</b>",
+        "",
+        "Các cảnh dưới đây dùng ảnh/prompt ảnh đã xác nhận làm nguồn. Mỗi cảnh có motion, thời lượng và chuyển cảnh riêng.",
+        "",
+    ]
+    for scene in final_scenes[:12]:
+        lines.append(
+            f"{safe_int(scene.get('index'), 0)}. {html.escape(str(scene.get('source_image') or 'Ảnh nguồn'))} · "
+            f"{safe_int(scene.get('duration_seconds'), 5)}s · {html.escape(str(scene.get('motion') or 'motion nhẹ'))} · "
+            f"{html.escape(str(scene.get('transition') or 'cắt mềm'))}"
+        )
+    lines.extend(["", "Bước này chỉ lập kế hoạch, chưa render video thật và chưa trừ Xu."])
+    return "\n".join(lines)
+
+
+def video_storyboard_final_video_scenes_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➡️ Tiếp tục chọn loại video", callback_data="vproduct|storyboard_continue_profile")],
+        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+    ])
+
+
+def video_image_prompt_set_text(session: dict | None = None, lang: str = "vi") -> str:
+    draft = dict((session or {}).get("draft") or {})
+    selected = dict(draft.get("selected_image_prompt_set") or video_microflow_selected_option(session))
+    images = list(selected.get("images") or [])
+    lines = [
+        "🎨 <b>Bộ ảnh/prompt ảnh đã chọn</b>",
+        "",
+        f"<b>{html.escape(str(selected.get('title') or 'Bộ ảnh'))}</b>",
+        html.escape(str(selected.get("description") or "")),
+        "",
+    ]
+    for item in images[:12]:
+        lines.append(f"{safe_int(item.get('index'), 0)}. {html.escape(str(item.get('image_prompt') or ''))}")
+    lines.extend(["", "Bước này chỉ lập kế hoạch ảnh đầu vào, chưa tạo ảnh/video thật và chưa trừ Xu."])
+    return "\n".join(lines)
+
+
+def video_image_prompt_set_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Dùng bộ ảnh này", callback_data="vproduct|image_prompt_set_use"), InlineKeyboardButton("🖼 Tạo ảnh", callback_data="vproduct|image_prompt_set_create")],
+        [InlineKeyboardButton("🔄 Gợi ý lại", callback_data="vproduct|microflow_regenerate"), InlineKeyboardButton("✍️ Sửa ý tưởng", callback_data="vproduct|microflow_edit")],
         [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
@@ -57799,8 +58331,7 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
             [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "video_idea": [
-            [("🎲 Gợi ý nhanh", "vproduct|idea_quick|video_idea"), ("📦 Theo sản phẩm/ngành", "vproduct|idea_industry|video_idea")],
-            [("✍️ Tự nhập chủ đề", "vproduct|input_text|video_idea"), ("🔥 Theo trend", "vproduct|idea_trend|video_idea")],
+            [("🎲 Gợi ý nhanh", "vproduct|idea_quick|video_idea"), ("✍️ Tự nhập chủ đề", "vproduct|input_text|video_idea")],
             [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "storyboard_prompt": [
@@ -57823,8 +58354,7 @@ def task3d_product_intro_keyboard(product_id: str, lang: str = "vi") -> InlineKe
         ],
         "video_ai_real": [
             [("📝 Prompt → Video AI", "vproduct|ai_prompt_menu|video_ai_real"), ("🖼 Ảnh → Video AI", "vproduct|ai_image_menu|video_ai_real")],
-            [("🎞 Video mẫu → Video AI", "vproduct|ai_video_menu|video_ai_real"), ("📊 Trạng thái video", "menu|hint_video_status")],
-            [("📚 Dùng prompt từ kho", "vpromptlib|start")],
+            [("🎞 Video mẫu → Video AI", "vproduct|ai_video_menu|video_ai_real"), ("📊 Phân tích video", "menu|hint_video_status")],
             [(menu_label, parent_callback), (ui_text(lang, "common.main_menu"), "menu|main")],
         ],
         "script_image_video": [
@@ -61765,6 +62295,37 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
             return await safe_edit_or_send(target, video_b14_profile_next_text(session, user_id, lang), parse_mode="HTML", reply_markup=video_b14_profile_next_keyboard(product_id, lang))
     if step == "asset_intake":
         return await safe_edit_or_send(target, video_asset_intake_intro_text(lang), parse_mode=None, reply_markup=video_asset_intake_keyboard(lang))
+    draft = dict((session or {}).get("draft") or {})
+    if step in VIDEO_MICROFLOW_OPTION_STEPS and (draft.get("microflow_kind") or product_id == "video_idea" or step != "idea_suggestions"):
+        kind = str(draft.get("microflow_kind") or ("video_idea" if step == "idea_suggestions" else "prompt"))
+        topic = str(draft.get("microflow_topic") or session.get("topic") or "ý tưởng video")
+        scene_count = safe_int(draft.get("selected_scene_count"), 5)
+        options = list(draft.get("microflow_options") or [])
+        if not options:
+            session = video_microflow_store_options(user_id, product_id=product_id, step=step, kind=kind, topic=topic, scene_count=scene_count)
+            draft = dict(session.get("draft") or {})
+            options = list(draft.get("microflow_options") or [])
+        return await safe_edit_or_send(
+            target,
+            video_microflow_options_text(kind, topic, product_id, scene_count, lang, options, safe_int(draft.get("microflow_selected_index"), 0)),
+            parse_mode="HTML",
+            reply_markup=video_microflow_options_keyboard(product_id, lang, options, kind),
+        )
+    if step == "idea_development_path":
+        return await safe_edit_or_send(target, video_idea_development_text(session, lang), parse_mode="HTML", reply_markup=video_idea_development_keyboard(lang))
+    if step == "storyboard_image_scenes":
+        return await safe_edit_or_send(target, video_storyboard_image_scenes_text(session, lang), parse_mode="HTML", reply_markup=video_storyboard_image_scenes_keyboard(lang))
+    if step == "storyboard_final_video_duration":
+        return await safe_edit_or_send(
+            target,
+            "⏱ <b>Chọn số giây cho mỗi cảnh video cuối</b>\n\nTOAN AAS đã có storyboard ảnh/prompt ảnh. Bước này tạo cảnh video cuối có ảnh nguồn, motion, số giây và transition riêng.\n\nChưa render video thật và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=video_storyboard_duration_keyboard(lang),
+        )
+    if step == "storyboard_final_video_scenes":
+        return await safe_edit_or_send(target, video_storyboard_final_video_scenes_text(session, lang), parse_mode="HTML", reply_markup=video_storyboard_final_video_scenes_keyboard(lang))
+    if step == "image_to_video_prompt_set_options":
+        return await safe_edit_or_send(target, video_image_prompt_set_text(session, lang), parse_mode="HTML", reply_markup=video_image_prompt_set_keyboard(lang))
     if step == "idea_suggestions" and (session.get("draft") or {}).get("b14_profile_id"):
         return await safe_edit_or_send(target, video_b14_idea_suggestions_text(session, lang), parse_mode="HTML", reply_markup=video_b14_idea_suggestions_keyboard(lang))
     if step == "b14_creative_controls":
@@ -62112,60 +62673,49 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         "suggest_image": "image_suggestion_topic",
         "suggest_video": "video_reference_suggestion_topic",
         "idea_quick": "idea_quick",
-        "idea_industry": "video_idea_manual_topic",
         "script_existing": "awaiting_existing_script",
         "script_ideas": "script_suggestion_topic",
         "script_manual": "script_manual_topic",
         "script_industry": "script_suggestion_topic",
         "script_voice": "script_suggestion_topic",
         "storyboard_upload": "storyboard_upload_images",
-        "storyboard_suggest": "storyboard_suggestion_scene_count",
+        "storyboard_suggest": "storyboard_suggestion_topic",
         "storyboard_manual": "storyboard_manual_input",
         "storyboard_from_images": "storyboard_upload_images",
-        "storyboard_many_images": "storyboard_suggestion_scene_count",
+        "storyboard_many_images": "storyboard_suggestion_topic",
         "storyboard_from_idea": "storyboard_manual_input",
         "storyboard_to_video": "storyboard_upload_images",
-        "frame_suggest_image": "image_to_video_image_suggestion_scene_count",
+        "frame_suggest_image": "image_to_video_image_suggestion_topic",
         "frame_send_images": "awaiting_multiple_images",
         "selfshot_ideas": "self_shot_direction_suggestion_topic",
         "film_manual": "film_manual_topic",
         "film_story": "film_story_suggestion_topic",
         "film_script": "film_script_input",
     }
-    if action == "idea_trend" and product_id == "video_idea":
-        route_fields = video_route_session_fields("video_trend", "intro")
-        session = task3d_session_step(
-            uid,
-            "intro",
-            product_id="video_trend",
-            return_to="menu|main_video",
-            provider_called=False,
-            xu_charged=0,
-            **route_fields,
-        )
-        session = go_video_screen(uid, "video_trend:intro", "video_trend", **route_fields)
-        session.update(route_fields)
-        session["product_id"] = "video_trend"
-        session["return_to"] = "menu|main_video"
-        save_video_session(uid, session)
-        return await safe_edit_or_send(query, task3d_product_intro_text("video_trend", lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard("video_trend", lang))
     if action in semantic_step_actions:
         step = semantic_step_actions[action]
         if action == "idea_quick" and product_id == "video_idea":
-            session = task3d_session_step(
+            session = video_microflow_store_options(
                 uid,
-                "idea_quick",
-                microflow_kind="video_idea",
-                microflow_topic="ý tưởng video nhanh",
+                product_id="video_idea",
+                step="idea_suggestions",
+                kind="video_idea",
                 topic="ý tưởng video nhanh",
-                provider_called=False,
-                xu_charged=0,
+                scene_count=5,
             )
+            draft = dict(session.get("draft") or {})
             return await safe_edit_or_send(
                 query,
-                video_microflow_options_text("video_idea", "ý tưởng video nhanh", product_id, lang=lang),
+                video_microflow_options_text(
+                    "video_idea",
+                    "ý tưởng video nhanh",
+                    product_id,
+                    lang=lang,
+                    options=list(draft.get("microflow_options") or []),
+                    selected_index=safe_int(draft.get("microflow_selected_index"), 0),
+                ),
                 parse_mode="HTML",
-                reply_markup=video_microflow_options_keyboard(product_id, lang),
+                reply_markup=video_microflow_options_keyboard(product_id, lang, list(draft.get("microflow_options") or []), "video_idea"),
             )
         session = task3d_session_step(
             uid,
@@ -62178,15 +62728,42 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await task3d_render_step(query, uid, session, lang)
     if action in {"storyboard_scene_count", "image_suggest_scene_count"}:
         selected_count = 6 if value == "custom" else max(1, min(20, safe_int(value, 6)))
-        next_step = "storyboard_suggestion_topic" if action == "storyboard_scene_count" else "image_to_video_image_suggestion_topic"
-        session = task3d_session_step(
+        draft = dict(session.get("draft") or {})
+        topic = str(draft.get("microflow_topic") or session.get("topic") or "").strip()
+        if action == "storyboard_scene_count":
+            if not topic:
+                session = task3d_session_step(uid, "storyboard_suggestion_topic", provider_called=False, xu_charged=0)
+                return await task3d_render_step(query, uid, session, lang)
+            session = video_microflow_store_options(
+                uid,
+                product_id="storyboard_prompt",
+                step="storyboard_image_scenes",
+                kind="storyboard",
+                topic=topic,
+                scene_count=selected_count,
+            )
+            selected = video_microflow_selected_option(session)
+            image_scenes = list(selected.get("image_scenes") or video_microflow_build_image_scenes(topic, selected_count, "realistic cinematic"))
+            session = task3d_session_step(uid, "storyboard_image_scenes", storyboard_image_scenes=image_scenes, selected_storyboard=selected, provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, video_storyboard_image_scenes_text(session, lang), parse_mode="HTML", reply_markup=video_storyboard_image_scenes_keyboard(lang))
+        if not topic:
+            session = task3d_session_step(uid, "image_to_video_image_suggestion_topic", provider_called=False, xu_charged=0)
+            return await task3d_render_step(query, uid, session, lang)
+        session = video_microflow_store_options(
             uid,
-            next_step,
-            selected_scene_count=selected_count,
-            provider_called=False,
-            xu_charged=0,
+            product_id="frame_video_local",
+            step="image_to_video_prompt_set_options",
+            kind="image_prompts",
+            topic=topic,
+            scene_count=selected_count,
         )
-        return await task3d_render_step(query, uid, session, lang)
+        draft = dict(session.get("draft") or {})
+        return await safe_edit_or_send(
+            query,
+            video_microflow_options_text("image_prompts", topic, "frame_video_local", selected_count, lang, list(draft.get("microflow_options") or []), safe_int(draft.get("microflow_selected_index"), 0)),
+            parse_mode="HTML",
+            reply_markup=video_microflow_options_keyboard("frame_video_local", lang, list(draft.get("microflow_options") or []), "image_prompts"),
+        )
     if action in {"use_recent_image", "use_recent_video"}:
         if action == "use_recent_image":
             recent = get_recent_media_state(LAST_USER_IMAGE, uid) or {}
@@ -62245,16 +62822,77 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             input_collected=True,
         )
         return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
+    if action == "microflow_choose":
+        draft = dict(session.get("draft") or {})
+        options = list(draft.get("microflow_options") or [])
+        index = max(0, min(len(options) - 1, safe_int(value, 0))) if options else 0
+        kind = str(draft.get("microflow_kind") or "prompt")
+        topic = str(draft.get("microflow_topic") or session.get("topic") or "ý tưởng video")
+        scene_count = safe_int(draft.get("selected_scene_count"), 5)
+        session = task3d_session_step(uid, str(session.get("current_step") or "idea_suggestions"), microflow_selected_index=index, provider_called=False, xu_charged=0)
+        draft = dict(session.get("draft") or {})
+        selected = video_microflow_selected_option(session)
+        if kind == "storyboard":
+            image_scenes = list(selected.get("image_scenes") or [])
+            session = task3d_session_step(uid, "storyboard_image_scenes", selected_storyboard=selected, storyboard_image_scenes=image_scenes, microflow_selected_index=index, provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, video_storyboard_image_scenes_text(session, lang), parse_mode="HTML", reply_markup=video_storyboard_image_scenes_keyboard(lang))
+        if kind == "image_prompts":
+            session = task3d_session_step(uid, "image_to_video_prompt_set_options", selected_image_prompt_set=selected, microflow_selected_index=index, provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, video_image_prompt_set_text(session, lang), parse_mode="HTML", reply_markup=video_image_prompt_set_keyboard(lang))
+        if kind == "video_idea":
+            session = task3d_session_step(uid, "idea_development_path", selected_video_idea=selected, microflow_selected_index=index, topic=str(selected.get("title") or topic), provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, video_idea_development_text(session, lang), parse_mode="HTML", reply_markup=video_idea_development_keyboard(lang))
+        if kind == "selfshot" and not (draft.get("source_media_refs") or draft.get("source_media_ref")):
+            session = task3d_session_step(uid, "awaiting_self_shot_video", selected_direction=selected, topic=str(selected.get("title") or topic), provider_called=False, xu_charged=0)
+            return await task3d_render_step(query, uid, session, lang)
+        field_name = {
+            "prompt": "selected_prompt",
+            "video": "selected_video_direction",
+            "script": "selected_script",
+            "selfshot": "selected_direction",
+            "film": "selected_film_story",
+        }.get(kind, "selected_microflow_option")
+        session = start_shared_video_profile_step(
+            uid,
+            product_id,
+            origin_step=str(session.get("current_step") or "intro"),
+            topic=str(selected.get("title") or topic),
+            selected_microflow_kind=kind,
+            input_collected=True,
+            suggestion_used=True,
+            free_generation=True,
+            **{field_name: selected},
+        )
+        return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
+    if action == "microflow_edit":
+        draft = dict(session.get("draft") or {})
+        kind = str(draft.get("microflow_kind") or "")
+        edit_step = VIDEO_MICROFLOW_KIND_EDIT_STEP.get(kind) or str(draft.get("input_origin_step") or "collect_input")
+        if edit_step not in VIDEO_MICROFLOW_TEXT_INPUT_STEPS:
+            edit_step = "video_idea_manual_topic" if product_id == "video_idea" else "collect_input"
+        session = task3d_session_step(uid, edit_step, input_origin_step=edit_step, provider_called=False, xu_charged=0)
+        return await task3d_render_step(query, uid, session, lang)
     if action == "microflow_regenerate":
         draft = dict(session.get("draft") or {})
         kind = str(draft.get("microflow_kind") or "prompt")
         topic = str(draft.get("microflow_topic") or session.get("topic") or "ý tưởng video")
         scene_count = safe_int(draft.get("selected_scene_count"), 5)
+        revision = safe_int(draft.get("microflow_revision"), 0) + 1
+        session = video_microflow_store_options(
+            uid,
+            product_id=product_id,
+            step=str(session.get("current_step") or "idea_suggestions"),
+            kind=kind,
+            topic=topic,
+            scene_count=scene_count,
+            revision=revision,
+        )
+        draft = dict(session.get("draft") or {})
         return await safe_edit_or_send(
             query,
-            video_microflow_options_text(kind, topic, product_id, scene_count, lang),
+            video_microflow_options_text(kind, topic, product_id, scene_count, lang, list(draft.get("microflow_options") or []), safe_int(draft.get("microflow_selected_index"), 0)),
             parse_mode="HTML",
-            reply_markup=video_microflow_options_keyboard(product_id, lang),
+            reply_markup=video_microflow_options_keyboard(product_id, lang, list(draft.get("microflow_options") or []), kind),
         )
     if action == "microflow_use_suggestion":
         draft = dict(session.get("draft") or {})
@@ -62274,6 +62912,97 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             origin_step=str(session.get("current_step") or "intro"),
             topic=topic,
             selected_microflow_kind=kind,
+            input_collected=True,
+            suggestion_used=True,
+            free_generation=True,
+        )
+        return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
+    if action == "idea_develop" and product_id == "video_idea":
+        selected = video_microflow_selected_option(session)
+        target_product = value if value in VIDEO_PRODUCT_REGISTRY else "video_ai_real"
+        route_fields = video_route_session_fields(target_product, "intro")
+        session = task3d_session_step(
+            uid,
+            "intro",
+            product_id=target_product,
+            topic=str(selected.get("title") or session.get("topic") or "ý tưởng video"),
+            selected_video_idea=selected,
+            preserve_selected_idea=True,
+            provider_called=False,
+            xu_charged=0,
+            **route_fields,
+        )
+        session.update(route_fields)
+        session["product_id"] = target_product
+        session["return_to"] = "menu|main_video"
+        save_video_session(uid, session)
+        return await safe_edit_or_send(query, task3d_product_intro_text(target_product, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(target_product, lang))
+    if action in {"storyboard_use", "storyboard_create_images"} and product_id == "storyboard_prompt":
+        draft = dict(session.get("draft") or {})
+        image_scenes = list(draft.get("storyboard_image_scenes") or video_microflow_selected_option(session).get("image_scenes") or [])
+        if not image_scenes:
+            return await safe_edit_or_send(query, video_microflow_missing_input_text(lang), reply_markup=video_microflow_nav_keyboard(lang))
+        session = task3d_session_step(uid, "storyboard_final_video_duration", storyboard_image_scenes=image_scenes, storyboard_images_confirmed=True, provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(
+            query,
+            "⏱ <b>Chọn số giây cho mỗi cảnh video cuối</b>\n\nTOAN AAS đã có storyboard ảnh/prompt ảnh. Bước này tạo cảnh video cuối có ảnh nguồn, motion, số giây và transition riêng.\n\nChưa render video thật và chưa trừ Xu.",
+            parse_mode="HTML",
+            reply_markup=video_storyboard_duration_keyboard(lang),
+        )
+    if action == "storyboard_video_duration" and product_id == "storyboard_prompt":
+        seconds = 5 if value == "custom" else max(3, min(12, safe_int(value, 5)))
+        draft = dict(session.get("draft") or {})
+        image_scenes = list(draft.get("storyboard_image_scenes") or [])
+        if not image_scenes:
+            session = task3d_session_step(uid, "storyboard_image_scenes", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(query, video_microflow_missing_input_text(lang), reply_markup=video_storyboard_image_scenes_keyboard(lang))
+        final_scenes = video_microflow_build_final_video_scenes(image_scenes, seconds)
+        session = task3d_session_step(uid, "storyboard_final_video_scenes", final_video_scene_seconds=seconds, final_video_scenes=final_scenes, provider_called=False, xu_charged=0)
+        return await safe_edit_or_send(query, video_storyboard_final_video_scenes_text(session, lang), parse_mode="HTML", reply_markup=video_storyboard_final_video_scenes_keyboard(lang))
+    if action == "storyboard_continue_profile" and product_id == "storyboard_prompt":
+        draft = dict(session.get("draft") or {})
+        topic = str(draft.get("microflow_topic") or session.get("topic") or "Storyboard đã xác nhận")
+        session = start_shared_video_profile_step(
+            uid,
+            product_id,
+            origin_step="storyboard_final_video_scenes",
+            topic=topic,
+            storyboard_image_scenes=list(draft.get("storyboard_image_scenes") or []),
+            final_video_scenes=list(draft.get("final_video_scenes") or []),
+            input_collected=True,
+            suggestion_used=True,
+            free_generation=True,
+        )
+        return await safe_edit_or_send(query, video_b14_profile_selection_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_profile_selection_keyboard(lang))
+    if action in {"image_prompt_set_use", "image_prompt_set_create"} and product_id in {"frame_video_local", "video_ai_real"}:
+        draft = dict(session.get("draft") or {})
+        selected = dict(draft.get("selected_image_prompt_set") or video_microflow_selected_option(session))
+        images = list(selected.get("images") or [])
+        if not images:
+            return await safe_edit_or_send(query, video_microflow_missing_input_text(lang), reply_markup=video_microflow_nav_keyboard(lang))
+        if product_id == "video_ai_real":
+            session = task3d_session_step(
+                uid,
+                "awaiting_source_image",
+                selected_image_prompt_set=selected,
+                storyboard_image_scenes=images,
+                input_origin_step="image_to_video_prompt_set_options",
+                provider_called=False,
+                xu_charged=0,
+            )
+            return await safe_edit_or_send(
+                query,
+                "🖼 <b>Đã lưu prompt ảnh</b>\n\nTOAN AAS cần ảnh thật hoặc ảnh đã tạo/xác nhận trước khi chuyển sang video. Anh/chị gửi ảnh theo prompt đã chọn để tiếp tục.\n\nBước này chưa tạo file thật và chưa trừ Xu.",
+                parse_mode="HTML",
+                reply_markup=video_microflow_keyboard("awaiting_source_image", product_id, lang),
+            )
+        session = start_shared_video_profile_step(
+            uid,
+            product_id,
+            origin_step="image_to_video_prompt_set_options",
+            topic=str(draft.get("microflow_topic") or session.get("topic") or "Bộ ảnh/prompt ảnh"),
+            selected_image_prompt_set=selected,
+            storyboard_image_scenes=images,
             input_collected=True,
             suggestion_used=True,
             free_generation=True,
@@ -63897,29 +64626,45 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
             "storyboard_suggestion_topic": ("storyboard_idea", "storyboard", "storyboard_prompt"),
             "image_to_video_image_suggestion_topic": ("frame_suggest_image", "image_prompts", "frame_video_local"),
             "self_shot_direction_suggestion_topic": ("selfshot_ideas", "selfshot", "self_shot_scene_change"),
-            "film_story_suggestion_topic": ("film_story_suggestion_topic", "film", "multi_scene_film"),
+            "film_story_suggestion_topic": ("film_story_options", "film", "multi_scene_film"),
             "video_idea_manual_topic": ("idea_suggestions", "video_idea", "video_idea"),
         }
         if current_step in suggestion_steps:
             next_step, kind, mapped_product = suggestion_steps[current_step]
             scene_count = safe_int((session.get("draft") or {}).get("selected_scene_count"), 5)
-            session = task3d_session_step(
+            if current_step in {"storyboard_suggestion_topic", "image_to_video_image_suggestion_topic"}:
+                count_step = "storyboard_suggestion_scene_count" if current_step == "storyboard_suggestion_topic" else "image_to_video_image_suggestion_scene_count"
+                session = task3d_session_step(
+                    uid,
+                    count_step,
+                    product_id=mapped_product,
+                    topic=text,
+                    microflow_kind=kind,
+                    microflow_topic=text,
+                    input_collected=True,
+                    free_generation=True,
+                    provider_called=False,
+                    xu_charged=0,
+                )
+                await update.message.reply_text(
+                    video_microflow_text(count_step, mapped_product, session, lang),
+                    parse_mode="HTML",
+                    reply_markup=video_microflow_keyboard(count_step, mapped_product, lang),
+                )
+                return True
+            session = video_microflow_store_options(
                 uid,
-                next_step,
                 product_id=mapped_product,
+                step=next_step,
+                kind=kind,
                 topic=text,
-                microflow_kind=kind,
-                microflow_topic=text,
-                selected_scene_count=scene_count,
-                input_collected=True,
-                free_generation=True,
-                provider_called=False,
-                xu_charged=0,
+                scene_count=scene_count,
             )
+            draft = dict(session.get("draft") or {})
             await update.message.reply_text(
-                video_microflow_options_text(kind, text, mapped_product, scene_count, lang),
+                video_microflow_options_text(kind, text, mapped_product, scene_count, lang, list(draft.get("microflow_options") or []), safe_int(draft.get("microflow_selected_index"), 0)),
                 parse_mode="HTML",
-                reply_markup=video_microflow_options_keyboard(mapped_product, lang),
+                reply_markup=video_microflow_options_keyboard(mapped_product, lang, list(draft.get("microflow_options") or []), kind),
             )
             return True
     if str(session.get("current_step") or "") != "collect_input" or str((session.get("draft") or {}).get("input_mode") or "") != "text":
@@ -64235,7 +64980,7 @@ def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📝 Prompt → AI 视频", "promptvideo|start"),
             ("🖼 图片 → AI 视频", "imagevideo|start"),
             ("🎞 参考视频 → AI 视频", "videoref|start"),
-            ("📊 视频状态", "menu|hint_video_status"),
+            ("📊 视频分析", "menu|hint_video_status"),
         ]
         back = "🔙 返回视频菜单"
     elif normalize_user_language(lang) != "vi":
@@ -64243,7 +64988,7 @@ def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📝 Prompt → AI Video", "promptvideo|start"),
             ("🖼 Image → AI Video", "imagevideo|start"),
             ("🎞 Reference video → AI Video", "videoref|start"),
-            ("📊 Video status", "menu|hint_video_status"),
+            ("📊 Video analysis", "menu|hint_video_status"),
         ]
         back = "🔙 Back to Video"
     else:
@@ -64251,7 +64996,7 @@ def video_ai_true_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
             ("📝 Prompt → Video AI", "promptvideo|start"),
             ("🖼 Ảnh → Video AI", "imagevideo|start"),
             ("🎞 Video mẫu → Video AI", "videoref|start"),
-            ("📊 Trạng thái video", "menu|hint_video_status"),
+            ("📊 Phân tích video", "menu|hint_video_status"),
         ]
         back = "🔙 Quay lại Video"
     return video_v6_keyboard(items, lang, back=(back, "menu|main_video"))

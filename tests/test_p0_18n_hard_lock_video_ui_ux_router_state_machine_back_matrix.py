@@ -187,15 +187,13 @@ def test_idea_flow_starts_intro():
     assert "vproduct|idea_quick|video_idea" in _callbacks(markup)
 
 
-def test_idea_flow_profile_to_suggestion_type():
+def test_idea_flow_quick_options_before_development_path():
     user_id = 181808
     _open(user_id, "video_idea")
-    _press(user_id, "vproduct|idea_quick|video_idea")
-    _press(user_id, "vproduct|input_text|video_idea")
-    _send_text(user_id, "ý tưởng video mèo cam")
-    text, markup, session = _press(user_id, "vproduct|b14_profile|storytelling")
+    text, markup, session = _press(user_id, "vproduct|idea_quick|video_idea")
     assert session["current_step"] == "idea_suggestions"
-    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
+    assert "vproduct|microflow_choose|0" in _callbacks(markup)
+    assert "vproduct|microflow_choose|4" in _callbacks(markup)
     assert "Gợi ý ý tưởng" in text
 
 
@@ -203,12 +201,13 @@ def test_idea_flow_back_matrix():
     user_id = 181809
     _open(user_id, "video_idea")
     _press(user_id, "vproduct|idea_quick|video_idea")
-    _press(user_id, "vproduct|input_text|video_idea")
-    _send_text(user_id, "ý tưởng video mèo cam")
-    _press(user_id, "vproduct|b14_profile|storytelling")
+    _press(user_id, "vproduct|microflow_choose|0")
     text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "profile_select"
-    assert "Chọn loại video" in text
+    assert session["current_step"] == "idea_suggestions"
+    assert "Gợi ý ý tưởng" in text
+    text, _markup, session = _press(user_id, "vproduct|back")
+    assert session["current_step"] == "intro"
+    assert "Ý tưởng video" in text
 
 
 def test_script_to_video_not_jump_to_video_ai_real():

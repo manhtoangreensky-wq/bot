@@ -156,12 +156,13 @@ def test_storyboard_semantics_visual_sequence():
     assert "vproduct|script_ideas|script_image_video" not in callbacks
 
 
-def test_idea_quick_and_product_industry_not_same_behavior():
+def test_idea_video_has_only_quick_and_manual_topics():
     markup = bot.task3d_product_intro_keyboard("video_idea", "vi")
     callbacks = _callbacks(markup)
     assert "vproduct|idea_quick|video_idea" in callbacks
-    assert "vproduct|idea_industry|video_idea" in callbacks
-    assert "vproduct|idea_quick|video_idea" != "vproduct|idea_industry|video_idea"
+    assert "vproduct|input_text|video_idea" in callbacks
+    assert "vproduct|idea_industry|video_idea" not in callbacks
+    assert "vproduct|idea_trend|video_idea" not in callbacks
 
 
 def test_image_to_video_starts_with_image_flow():
