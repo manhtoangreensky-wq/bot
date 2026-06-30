@@ -334,7 +334,8 @@ def test_idea_profile_then_idea_list():
     text, markup, session = _press(user_id, "vproduct|b14_profile|storytelling")
     assert session["current_step"] == "idea_suggestions"
     assert "Gợi ý ý tưởng" in text
-    assert "vproduct|b14_idea_select|0" in _callbacks(markup)
+    assert "vproduct|microflow_choose|0" in _callbacks(markup)
+    assert "vproduct|microflow_choose|4" in _callbacks(markup)
 
 
 def test_idea_does_not_jump_assets():

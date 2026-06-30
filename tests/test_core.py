@@ -2698,7 +2698,7 @@ def test_create_media_menu_and_quick_pending_guards(monkeypatch):
     assert "💰 Xem giá" not in video_labels
     assert "📞 Liên hệ admin" not in video_labels
     video_ai_labels = [button.text for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
-    assert video_ai_labels == ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Trạng thái video", "🔙 Quay lại Video", "🏠 Menu chính"]
+    assert video_ai_labels == ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Phân tích video", "🔙 Quay lại Video", "🏠 Menu chính"]
     video_ai_callbacks = [button.callback_data for row in bot.video_ai_true_keyboard("vi").inline_keyboard for button in row]
     assert "promptvideo|start" in video_ai_callbacks
     assert "imagevideo|start" in video_ai_callbacks
