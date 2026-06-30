@@ -127,7 +127,7 @@ def test_music_provider_job_id_saved_after_submit(monkeypatch):
     saved = list(state.store.values())[-1]
     assert saved["provider_task_id"] == "provider-task-23f"
     assert saved["provider_job_id"] == "provider-task-23f"
-    assert saved["confirm_submit_phase"] == "provider_job_id_saved"
+    assert saved["confirm_submit_phase"] == "submitted"
 
 
 def test_music_provider_poll_uses_saved_job_id(monkeypatch):
