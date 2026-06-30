@@ -124,9 +124,10 @@ def test_video_ai_real_suggestion_back_matrix():
     user_id = 182004
     _open(user_id, "video_ai_real")
     _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    text, _markup, session = _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    assert session["current_step"] == "prompt_suggestion_topic"
-    assert "gợi ý prompt" in text.lower()
+    text, markup, session = _press(user_id, "vproduct|suggest_prompt|video_ai_real")
+    assert session["current_step"] == "suggest_prompt"
+    assert len(session["draft"]["microflow_options"]) >= 3
+    assert "vproduct|microflow_choose|0" in _callbacks(markup)
     text, _markup, session = _press(user_id, "vproduct|back")
     assert session["current_step"] == "ai_prompt_menu"
     assert "Prompt" in text

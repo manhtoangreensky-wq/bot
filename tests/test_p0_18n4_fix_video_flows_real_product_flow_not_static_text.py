@@ -112,13 +112,13 @@ def test_prompt_suggestion_returns_at_least_3_selectable_prompts():
     user_id = 184001
     _open(user_id, "video_ai_real")
     _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    text, markup, session = _send_text(user_id, "quảng cáo nước hoa nam")
+    text, markup, session = _press(user_id, "vproduct|suggest_prompt|video_ai_real")
     callbacks = _callbacks(markup)
     assert session["current_step"] == "suggest_prompt"
     assert len(session["draft"]["microflow_options"]) >= 3
     assert "vproduct|microflow_choose|0" in callbacks
     assert "vproduct|microflow_choose|2" in callbacks
+    assert "vproduct|microflow_custom_topic" in callbacks
     assert "✅ Dùng hướng này" not in _labels(markup)
     assert "Dùng prompt từ kho" not in text
 
@@ -128,7 +128,6 @@ def test_prompt_choice_saves_state_and_goes_to_profile():
     _open(user_id, "video_ai_real")
     _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
     _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    _send_text(user_id, "quảng cáo quán cà phê")
     text, _markup, session = _press(user_id, "vproduct|microflow_choose|1")
     assert session["current_step"] == "profile_select"
     assert session["draft"]["selected_prompt"]["title"].startswith("Prompt 2:")
@@ -140,7 +139,6 @@ def test_image_suggestion_requires_image_before_video_ai_profile():
     _open(user_id, "video_ai_real")
     _press(user_id, "vproduct|ai_image_menu|video_ai_real")
     _press(user_id, "vproduct|suggest_image|video_ai_real")
-    _send_text(user_id, "ảnh lookbook áo khoác")
     text, markup, session = _press(user_id, "vproduct|microflow_choose|0")
     assert session["current_step"] == "image_to_video_prompt_set_options"
     assert "Bộ ảnh/prompt ảnh" in text
@@ -154,8 +152,7 @@ def test_video_reference_suggestion_returns_at_least_3_selectable_directions():
     user_id = 184004
     _open(user_id, "video_ai_real")
     _press(user_id, "vproduct|ai_video_menu|video_ai_real")
-    _press(user_id, "vproduct|suggest_video|video_ai_real")
-    text, markup, session = _send_text(user_id, "video mỹ phẩm chân thật")
+    text, markup, session = _press(user_id, "vproduct|suggest_video|video_ai_real")
     assert len(session["draft"]["microflow_options"]) >= 3
     assert "vproduct|microflow_choose|2" in _callbacks(markup)
     assert "Concept:" in text
@@ -164,8 +161,7 @@ def test_video_reference_suggestion_returns_at_least_3_selectable_directions():
 def test_script_suggestion_returns_at_least_3_scripts():
     user_id = 184005
     _open(user_id, "script_image_video")
-    _press(user_id, "vproduct|script_ideas|script_image_video")
-    text, markup, session = _send_text(user_id, "khóa học AI cho người mới")
+    text, markup, session = _press(user_id, "vproduct|script_ideas|script_image_video")
     assert len(session["draft"]["microflow_options"]) >= 3
     assert "vproduct|microflow_choose|0" in _callbacks(markup)
     assert "Kịch bản" in text
@@ -196,14 +192,15 @@ def test_idea_development_path_routes_to_selected_product_flow():
     assert "vproduct|storyboard_suggest|storyboard_prompt" in _callbacks(markup)
 
 
-def test_storyboard_suggestion_asks_topic_before_count():
+def test_storyboard_suggestion_shows_options_before_count():
     user_id = 184008
     _open(user_id, "storyboard_prompt")
     text, markup, session = _press(user_id, "vproduct|storyboard_suggest|storyboard_prompt")
-    assert session["current_step"] == "storyboard_suggestion_topic"
-    assert "Nhập chủ đề" in text
+    assert session["current_step"] == "storyboard_idea"
+    assert "vproduct|microflow_choose|0" in _callbacks(markup)
+    assert "vproduct|microflow_custom_topic" in _callbacks(markup)
     assert not any("khung hình/cảnh ảnh" in label for label in _labels(markup))
-    text, markup, session = _send_text(user_id, "mèo cam đi công viên")
+    text, markup, session = _press(user_id, "vproduct|microflow_choose|0")
     assert session["current_step"] == "storyboard_suggestion_scene_count"
     assert any("khung hình/cảnh ảnh" in label for label in _labels(markup))
 
@@ -212,7 +209,7 @@ def test_storyboard_generates_image_then_final_video_scenes():
     user_id = 184009
     _open(user_id, "storyboard_prompt")
     _press(user_id, "vproduct|storyboard_suggest|storyboard_prompt")
-    _send_text(user_id, "câu chuyện sản phẩm nước hoa")
+    _press(user_id, "vproduct|microflow_choose|0")
     text, markup, session = _press(user_id, "vproduct|storyboard_scene_count|4")
     assert session["current_step"] == "storyboard_image_scenes"
     assert len(session["draft"]["storyboard_image_scenes"]) == 4
@@ -228,21 +225,22 @@ def test_storyboard_generates_image_then_final_video_scenes():
 def test_image_to_video_suggestion_topic_then_image_count_then_prompt_set():
     user_id = 184010
     _open(user_id, "frame_video_local")
-    _press(user_id, "vproduct|frame_suggest_image|frame_video_local")
-    text, markup, session = _send_text(user_id, "bộ ảnh du lịch Đà Lạt")
+    text, markup, session = _press(user_id, "vproduct|frame_suggest_image|frame_video_local")
+    assert session["current_step"] == "frame_suggest_image"
+    assert "vproduct|microflow_choose|0" in _callbacks(markup)
+    text, markup, session = _press(user_id, "vproduct|microflow_choose|0")
     assert session["current_step"] == "image_to_video_image_suggestion_scene_count"
     assert any("ảnh" in label for label in _labels(markup))
     text, markup, session = _press(user_id, "vproduct|image_suggest_scene_count|4")
     assert session["current_step"] == "image_to_video_prompt_set_options"
-    assert len(session["draft"]["microflow_options"]) >= 3
-    assert "vproduct|microflow_choose|0" in _callbacks(markup)
+    assert len(session["draft"]["selected_image_prompt_set"]["images"]) == 4
+    assert "vproduct|image_prompt_set_use" in _callbacks(markup)
 
 
 def test_self_shot_direction_returns_at_least_3_and_requires_source_video():
     user_id = 184011
     _open(user_id, "self_shot_scene_change")
-    _press(user_id, "vproduct|selfshot_ideas|self_shot_scene_change")
-    text, markup, session = _send_text(user_id, "giữ người thật đổi nền studio")
+    text, markup, session = _press(user_id, "vproduct|selfshot_ideas|self_shot_scene_change")
     assert len(session["draft"]["microflow_options"]) >= 3
     text, markup, session = _press(user_id, "vproduct|microflow_choose|0")
     assert session["current_step"] == "awaiting_self_shot_video"
@@ -259,14 +257,14 @@ def test_back_from_prompt_suggestion_to_prompt_submenu():
     assert "Prompt → Video AI" in text
 
 
-def test_back_from_storyboard_count_to_storyboard_topic():
+def test_back_from_storyboard_count_to_storyboard_suggestion_options():
     user_id = 184013
     _open(user_id, "storyboard_prompt")
     _press(user_id, "vproduct|storyboard_suggest|storyboard_prompt")
-    _send_text(user_id, "quảng cáo quán cà phê")
+    _press(user_id, "vproduct|microflow_choose|0")
     text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "storyboard_suggestion_topic"
-    assert "Nhập chủ đề" in text
+    assert session["current_step"] == "storyboard_idea"
+    assert "Gợi ý storyboard" in text
 
 
 def test_back_from_idea_development_path_to_idea_result():
