@@ -1714,10 +1714,10 @@ SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FAL
 SUBDUB_MIN_VIDEO_OUTPUT_BYTES = max(512, env_int("SUBDUB_MIN_VIDEO_OUTPUT_BYTES", 2048))
 SUBDUB_ADVANCED_STYLE_ENABLED = env_flag("SUBDUB_ADVANCED_STYLE_ENABLED", "false")
 SUBDUB_HARDSUB_COVER_ENABLED = env_flag("SUBDUB_HARDSUB_COVER_ENABLED", "true")
-SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.9, env_float("SUBDUB_HARDSUB_COVER_OPACITY", 0.50)))
-SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.10, min(0.13, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.12)))
-SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.84, min(0.88, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.84)))
-SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.03, min(0.08, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.05)))
+SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.9, env_float("SUBDUB_HARDSUB_COVER_OPACITY", 0.45)))
+SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.07, min(0.10, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.10)))
+SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.86, min(0.90, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.86)))
+SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.035, min(0.07, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.045)))
 SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING = env_flag("SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING", "true")
 SUBDUB_ALLOW_SILENT_VOICE_FALLBACK = env_flag("SUBDUB_ALLOW_SILENT_VOICE_FALLBACK", "false")
 PIPELINE_TEMP_ROOT = _env("PIPELINE_TEMP_ROOT", os.path.join(tempfile.gettempdir(), "toan_aas_pipeline"))
@@ -157129,7 +157129,7 @@ SUBDUB_STYLE_PRESETS = {
     "tiktok_clear": {
         "label": "Rõ nét",
         "font": "Arial",
-        "size": 34,
+        "size": 44,
         "position": "bottom",
         "align": "center",
         "text_color": "#FFFFFF",
@@ -157145,23 +157145,23 @@ SUBDUB_STYLE_PRESETS = {
     "cover_original": {
         "label": "Che phụ đề cũ",
         "font": "Arial",
-        "size": 34,
+        "size": 52,
         "position": "bottom",
         "align": "center",
         "text_color": "#FFFFFF",
         "outline_color": "#000000",
-        "outline": 3,
-        "shadow": 0,
-        "background": "strip",
+        "outline": 2,
+        "shadow": 1,
+        "background": "box",
         "cover_original": True,
-        "cover_opacity": 0.62,
+        "cover_opacity": 0.45,
         "max_lines": 2,
         "show_subtitles": True,
     },
     "cinematic": {
         "label": "Điện ảnh",
         "font": "Arial",
-        "size": 30,
+        "size": 44,
         "position": "bottom_high",
         "align": "center",
         "text_color": "#F4F0E8",
@@ -157177,7 +157177,7 @@ SUBDUB_STYLE_PRESETS = {
     "ads": {
         "label": "Nổi bật",
         "font": "Arial",
-        "size": 38,
+        "size": 50,
         "position": "middle_low",
         "align": "center",
         "text_color": "#FFE45C",
@@ -157193,7 +157193,7 @@ SUBDUB_STYLE_PRESETS = {
     "minimal": {
         "label": "Gọn nhẹ",
         "font": "Arial",
-        "size": 28,
+        "size": 40,
         "position": "bottom",
         "align": "center",
         "text_color": "#FFFFFF",
@@ -157323,6 +157323,43 @@ def subdub_float_value(value, default: float = 0.0) -> float:
     except Exception:
         return float(default)
 
+def subdub_style_video_size(state: dict | None = None) -> tuple[int, int]:
+    state = dict(state or {})
+    width = _safe_int(
+        state.get("video_width")
+        or state.get("source_width")
+        or state.get("input_width")
+        or state.get("width"),
+        0,
+    )
+    height = _safe_int(
+        state.get("video_height")
+        or state.get("source_height")
+        or state.get("input_height")
+        or state.get("height"),
+        0,
+    )
+    return max(0, width), max(0, height)
+
+def subdub_responsive_subtitle_size(style: dict, state: dict | None = None, *, explicit: bool = False) -> int:
+    base = subdub_clamp_int((style or {}).get("size"), 48, 34, 64)
+    if explicit:
+        return base
+    width, height = subdub_style_video_size(state)
+    boxed = bool((style or {}).get("cover_original") or (style or {}).get("hardsub_cover_enabled"))
+    if height <= 0:
+        return max(base, 50 if boxed else 44)
+    vertical = bool(width and height >= width * 1.15)
+    if height <= 720:
+        target = 44 if boxed else 40
+    elif height <= 1080:
+        target = 54 if boxed else 48
+    else:
+        target = 54 if vertical else 56
+    if vertical:
+        target = min(54, max(target, 48))
+    return subdub_clamp_int(target, target, 38, 58)
+
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
     cover_default_enabled = subdub_should_enable_hardsub_cover(
@@ -157343,6 +157380,10 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style = dict(SUBDUB_STYLE_PRESETS[preset_key])
     style["preset"] = preset_key
     custom = dict(state.get("subtitle_style_options") or state.get("subdub_style_options") or {})
+    explicit_size = any(
+        key in custom or key in state
+        for key in ("size", "subtitle_size", "subdub_size")
+    )
     for key, value in {**custom, **state}.items():
         if key in {
             "font", "subtitle_font", "subdub_font",
@@ -157354,6 +157395,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
             "outline", "subtitle_outline",
             "shadow", "subtitle_shadow",
             "background", "subtitle_background",
+            "box_background", "subtitle_box_background",
             "cover_original", "cover_original_subtitle", "cover_old_subtitle",
             "cover_opacity", "subtitle_cover_opacity",
             "cover_height_ratio", "subtitle_cover_height_ratio",
@@ -157371,6 +157413,8 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
                 normalized_key = "cover_original"
             if normalized_key in {"burn", "display_subtitles"}:
                 normalized_key = "show_subtitles"
+            if normalized_key == "box_background":
+                normalized_key = "boxed_background"
             style[normalized_key] = value
     if cover_default_enabled:
         style["cover_original"] = True
@@ -157381,17 +157425,21 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["text_margin_bottom_ratio"] = state.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO
         style["subtitle_style_profile"] = style.get("subtitle_style_profile") or subdub_style_profile_for_state(state)
     style["font"] = re.sub(r"[^A-Za-z0-9 _.-]", "", str(style.get("font") or "Arial")).strip()[:40] or "Arial"
-    style["size"] = subdub_clamp_int(style.get("size"), 34, 18, 64)
+    style["size"] = subdub_responsive_subtitle_size(style, state, explicit=explicit_size)
     style["outline"] = subdub_clamp_int(style.get("outline"), 3, 0, 6)
     style["shadow"] = subdub_clamp_int(style.get("shadow"), 1, 0, 4)
     style["max_lines"] = subdub_clamp_int(style.get("max_lines"), 2, 1, 3)
     style["cover_opacity"] = max(0.0, min(0.9, subdub_float_value(style.get("cover_opacity"), 0.0)))
-    style["cover_height_ratio"] = max(0.10, min(0.13, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
-    style["cover_y_ratio"] = max(0.84, min(0.88, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
-    style["text_margin_bottom_ratio"] = max(0.03, min(0.08, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
+    style["cover_height_ratio"] = max(0.07, min(0.10, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
+    style["cover_y_ratio"] = max(0.86, min(0.90, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
+    style["text_margin_bottom_ratio"] = max(0.035, min(0.07, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
     style["cover_original"] = subdub_bool_value(style.get("cover_original"), False)
     style["hardsub_cover_enabled"] = subdub_bool_value(style.get("hardsub_cover_enabled"), style["cover_original"])
     style["show_subtitles"] = subdub_bool_value(style.get("show_subtitles"), True)
+    style["boxed_background"] = subdub_bool_value(
+        style.get("boxed_background"),
+        style["cover_original"] or str(style.get("background") or "").strip().lower() in {"box", "boxed", "soft"},
+    )
     style["subtitle_style_profile"] = str(style.get("subtitle_style_profile") or subdub_style_profile_for_state(state))[:80]
     return style
 
@@ -157413,6 +157461,14 @@ def subdub_ass_color(value: str, default: str = "#FFFFFF") -> str:
     green = text[3:5]
     blue = text[5:7]
     return f"&H00{blue}{green}{red}".upper()
+
+def subdub_ass_back_color(value: str = "#000000", opacity: float = 0.45) -> str:
+    color = subdub_ass_color(value, "#000000")
+    try:
+        alpha = int(round(255 * (1.0 - max(0.0, min(0.9, float(opacity))))))
+    except Exception:
+        alpha = 140
+    return f"&H{alpha:02X}{color[4:]}".upper()
 
 def subdub_ass_alignment(position: str = "bottom", align: str = "center") -> tuple[int, int]:
     position = str(position or "bottom").strip().lower()
@@ -157480,9 +157536,12 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         return ""
     alignment, margin_v = subdub_ass_alignment(style.get("position"), style.get("align"))
     if style.get("cover_original") or style.get("hardsub_cover_enabled"):
-        margin_v = max(36, min(150, int(1920 * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
+        margin_v = max(58, min(118, int(1920 * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
     primary = subdub_ass_color(str(style.get("text_color") or "#FFFFFF"))
     outline = subdub_ass_color(str(style.get("outline_color") or "#000000"), "#000000")
+    boxed = bool(style.get("boxed_background"))
+    border_style = 3 if boxed else 1
+    back_color = subdub_ass_back_color("#000000", float(style.get("cover_opacity") or SUBDUB_HARDSUB_COVER_OPACITY)) if boxed else "&H66000000"
     header = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -157495,8 +157554,8 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
         (
             "Style: Default,"
-            f"{style.get('font')},{int(style.get('size') or 34)},{primary},&H00FFFFFF,{outline},&H66000000,"
-            f"-1,0,0,0,100,100,0,0,1,{int(style.get('outline') or 0)},{int(style.get('shadow') or 0)},"
+            f"{style.get('font')},{int(style.get('size') or 48)},{primary},&H00FFFFFF,{outline},{back_color},"
+            f"-1,0,0,0,100,100,0,0,{border_style},{int(style.get('outline') or 0)},{int(style.get('shadow') or 0)},"
             f"{alignment},54,54,{margin_v},1"
         ),
         "",
@@ -157527,8 +157586,8 @@ def subdub_cover_filter(style_or_state: dict | None = None) -> str:
     opacity = float(style.get("cover_opacity") or (0.56 if cover else 0.28))
     opacity = max(0.18, min(0.9, opacity))
     if cover:
-        y_ratio = max(0.84, min(0.88, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
-        height_ratio = max(0.10, min(0.13, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
+        y_ratio = max(0.86, min(0.90, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
+        height_ratio = max(0.07, min(0.10, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
         return f"drawbox=x=0:y=ih*{y_ratio:.2f}:w=iw:h=ih*{height_ratio:.2f}:color=black@{opacity:.2f}:t=fill"
     if background == "strip":
         return f"drawbox=x=0:y=ih*0.78:w=iw:h=ih*0.14:color=black@{opacity:.2f}:t=fill"

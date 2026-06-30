@@ -231,32 +231,32 @@ def test_generic_subdub_error_suppressed_after_delivered():
 
 def test_hardsub_cover_height_ratio_default_small():
     style = bot.subdub_normalize_style({"subtitle_style_preset": "cover_original"})
-    assert 0.10 <= style["cover_height_ratio"] <= 0.13
+    assert 0.07 <= style["cover_height_ratio"] <= 0.10
 
 
 def test_hardsub_cover_y_ratio_bottom_safe():
     style = bot.subdub_normalize_style({"subtitle_style_preset": "cover_original"})
-    assert 0.84 <= style["cover_y_ratio"] <= 0.88
+    assert 0.86 <= style["cover_y_ratio"] <= 0.90
 
 
 def test_hardsub_cover_not_mid_screen():
     style = bot.subdub_normalize_style({"subtitle_style_preset": "cover_original", "cover_y_ratio": 0.70, "cover_height_ratio": 0.24})
-    assert style["cover_y_ratio"] >= 0.84
-    assert style["cover_height_ratio"] <= 0.13
+    assert style["cover_y_ratio"] >= 0.86
+    assert style["cover_height_ratio"] <= 0.10
 
 
 def test_hardsub_cover_drawbox_or_ass_style_uses_small_bottom_area():
     drawbox = bot.subdub_cover_filter({"subtitle_style_preset": "cover_original"})
     assert "drawbox=" in drawbox
-    assert "y=ih*0.84" in drawbox
-    assert "h=ih*0.12" in drawbox
+    assert "y=ih*0.86" in drawbox
+    assert "h=ih*0.10" in drawbox
 
 
 def test_translated_subtitle_position_over_cover():
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, {"subtitle_style_preset": "cover_original"})
     assert "Style: Default" in ass
     assert "Dialogue: 0" in ass
-    assert ",96,1" in ass or ",95,1" in ass
+    assert ",86,1" in ass or ",87,1" in ass
 
 
 def test_selected_female_voice_resolves_female(monkeypatch):
