@@ -157,13 +157,13 @@ def test_video_public_copy_no_technical_schema_terms():
 
 def test_video_trend_intro_has_today_trends_button():
     labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
-    assert "🔥 Xem trend hôm nay" in labels
+    assert "🔥 Gợi ý trend hot" in labels
     assert "200 Xu" not in " ".join(labels)
 
 
 def test_video_trend_intro_has_custom_topic_button():
     labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
-    assert "✍️ Nhập chủ đề riêng" in labels
+    assert "✍️ Tự nhập trend/ý tưởng" in labels
 
 
 def test_video_idea_copy_plain_vietnamese():
@@ -174,8 +174,8 @@ def test_video_idea_copy_plain_vietnamese():
 
 def test_storyboard_copy_plain_vietnamese():
     text = bot.task3d_product_intro_text("storyboard_prompt", "vi")
-    assert "Tạo storyboard" in text
-    assert "prompt ảnh" in text
+    assert "chuỗi cảnh" in text
+    assert "prompt nối tiếp" in text
     assert "prompt_pack" not in text
 
 
@@ -251,9 +251,17 @@ def test_trend_select_generates_hook_script_storyboard_prompt():
     query = _FakeQuery(user_id, "vproduct|trend_select|0")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
-    assert session["current_step"] == "asset_intake"
+    assert session["current_step"] == "profile_select"
     prepared = session["draft"]["prepared_prompt_bundle"]
     assert prepared["trend_hooks"]
+    query = _FakeQuery(user_id, "vproduct|b14_profile|product_review")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] == "idea_suggestions"
+    query = _FakeQuery(user_id, "vproduct|b14_idea_select|0")
+    asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+    session = bot.get_video_session(user_id)
+    assert session["current_step"] == "asset_intake"
     query = _FakeQuery(user_id, "vproduct|asset_skip_confirm")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
@@ -274,6 +282,7 @@ def test_trend_does_not_charge_or_call_provider():
     query = _FakeQuery(user_id, "vproduct|trend_select|0")
     asyncio.run(bot.handle_video_product_callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
     session = bot.get_video_session(user_id)
+    assert session["current_step"] == "profile_select"
     assert session["draft"]["provider_called"] is False
     assert session["draft"]["xu_charged"] == 0
     bot.clear_video_session(user_id)
@@ -383,17 +392,22 @@ def test_video_ai_real_intro_no_motion_button():
     markup = bot.task3d_product_intro_keyboard("video_ai_real", "vi")
     labels = _labels(markup)
     callbacks = _callbacks(markup)
-    for label in ("📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Trạng thái video"):
+    for label in ("📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "💡 Gợi ý prompt video", "🖼 Gợi ý tạo ảnh", "🎬 Gợi ý tạo video", "📊 Trạng thái video"):
         assert label in labels
     assert "🎥 Gợi ý chuyển động" not in labels
     assert "vproduct|input_text|video_ai_real" in callbacks
     assert "vproduct|input_media|video_ai_real" in callbacks
     assert "vproduct|entry_media|video_ai_real" in callbacks
+    assert "vproduct|suggest_prompt|video_ai_real" in callbacks
+    assert "vproduct|suggest_image|video_ai_real" in callbacks
+    assert "vproduct|suggest_video|video_ai_real" in callbacks
     assert "vproduct|motion_suggest|video_ai_real" not in callbacks
     assert "menu|main_video" in callbacks
     assert [[button.text for button in row] for row in markup.inline_keyboard] == [
         ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI"],
-        ["🎞 Video mẫu → Video AI", "📊 Trạng thái video"],
+        ["🎞 Video mẫu → Video AI", "💡 Gợi ý prompt video"],
+        ["🖼 Gợi ý tạo ảnh", "🎬 Gợi ý tạo video"],
+        ["📊 Trạng thái video"],
         ["⬅️ Menu video", "🏠 Menu chính"],
     ]
 
@@ -474,7 +488,7 @@ def test_optional_skip_continues_to_prompt_output():
 
 def test_existing_trend_flow_preserved_with_optional_guidance():
     labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
-    assert {"🔥 Xem trend hôm nay", "✍️ Nhập chủ đề riêng", "🔁 Gợi ý trend khác"}.issubset(set(labels))
+    assert {"🔥 Gợi ý trend hot", "✍️ Tự nhập trend/ý tưởng", "📦 Theo sản phẩm/ngành", "🎬 Gợi ý video"}.issubset(set(labels))
     assert bot.task3d_guided_steps("video_trend") == ("style", "color", "movement", "result")
 
 
