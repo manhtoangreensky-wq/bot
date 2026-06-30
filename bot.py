@@ -6796,6 +6796,11 @@ def music_job_debug_text(job_id: str = "") -> str:
         "🎵 <b>Music job debug</b>\n\n"
         f"• music_job_id: <code>{html.escape(str(job_id or '-'))}</code>\n"
         f"• user_id/chat_id: <code>{html.escape(str((job or {}).get('user_id') or '-'))}/{html.escape(str((job or {}).get('chat_id') or '-'))}</code>\n"
+        f"• confirm_route: <code>{html.escape(str((job or {}).get('confirm_route') or '-'))}</code>\n"
+        f"• confirm_callback_data: <code>{html.escape(str((job or {}).get('confirm_callback_data') or '-'))}</code>\n"
+        f"• confirm_handler_name: <code>{html.escape(str((job or {}).get('confirm_handler_name') or '-'))}</code>\n"
+        f"• persist_helper_called: <code>{'yes' if (job or {}).get('persist_helper_called') else 'no'}</code>\n"
+        f"• panel_created_by: <code>{html.escape(str((job or {}).get('panel_created_by') or '-'))}</code>\n"
         f"• provider_job_id: <code>{html.escape(mask_provider_task_id(provider_task_id) if provider_task_id else '-')}</code>\n"
         f"• product_type: <code>{html.escape(str(state.get('product_type') or '-'))}</code>\n"
         f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
@@ -6840,6 +6845,11 @@ async def cmd_music_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
     return await update.message.reply_text(music_job_debug_text(job_id), parse_mode="HTML")
+
+async def cmd_music_confirm_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(music_confirm_route_audit_text(), parse_mode="HTML")
 
 
 async def cmd_product_job_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93959,6 +93969,125 @@ def music_product_result_from_input(data: dict | None = None) -> dict:
         })
     return result
 
+def music_confirm_tier_from_legacy_price(result: dict | None = None, mode: str = "background") -> str:
+    current = dict(result or {})
+    explicit = str(current.get("music_product_tier") or current.get("tier") or "").strip()
+    if explicit:
+        return normalize_music_product_tier(explicit)
+    price = _safe_int(
+        current.get("music_product_price_xu")
+        or current.get("music_price_xu")
+        or current.get("full_price_xu")
+        or current.get("price_xu"),
+        0,
+    )
+    if price > 0:
+        prices = music_product_tier_price_map(mode)
+        for tier, tier_price in prices.items():
+            if int(tier_price or 0) == price:
+                return normalize_music_product_tier(tier)
+    return MUSIC_PRODUCT_TIER_BASIC
+
+def music_confirm_result_for_real_job_persist(result: dict | None = None) -> dict:
+    current = dict(result or {})
+    if music_product_result_is_3tier(current):
+        return current
+    mode = music_product_mode_from_result(current)
+    tier = music_confirm_tier_from_legacy_price(current, mode)
+    source_prompt = str(
+        current.get("provider_style_prompt")
+        or current.get("selected_prompt")
+        or current.get("description")
+        or current.get("theme")
+        or ""
+    ).strip()
+    if not source_prompt:
+        source_prompt = "TOAN AAS music"
+    payload = {
+        **current,
+        "music_product_mode": mode,
+        "music_product_tier": tier,
+        "description": str(current.get("description") or source_prompt),
+        "theme": str(current.get("theme") or current.get("description") or source_prompt),
+        "provider_style_prompt": source_prompt,
+        "duration_seconds": current.get("duration_seconds") or current.get("guided_duration_seconds"),
+    }
+    if mode == "song":
+        payload.update({
+            "song_product": current.get("song_product") or "full",
+            "song_length_mode": current.get("song_length_mode") or "full",
+            "lyrics": current.get("lyrics") or current.get("song_lyrics") or current.get("provider_lyrics") or source_prompt,
+            "vocal_mode": current.get("vocal_mode") or current.get("song_vocal") or "auto",
+        })
+    normalized = music_product_result_from_input(payload)
+    return {**current, **normalized, "legacy_music_confirm_wrapper": True}
+
+def music_confirm_route_name(namespace: str = "", product_context: str = "", action: str = "") -> str:
+    parts = [
+        str(namespace or "music_quick").strip() or "music_quick",
+        normalize_product_context(product_context),
+        str(action or "music_ai_confirm").strip() or "music_ai_confirm",
+    ]
+    return "|".join(parts)
+
+def music_confirm_route_from_callback(callback_data: str = "") -> str:
+    namespace, product_context, action = parse_product_context_callback(str(callback_data or ""), PRODUCT_CONTEXT_SHOWROOM)
+    if not action:
+        return ""
+    return music_confirm_route_name(namespace, product_context, action)
+
+def music_confirm_route_audit_entries() -> list[dict]:
+    return [
+        {
+            "route": "music_bg final confirm",
+            "callback_pattern": "music_quick|showroom|music_ai_confirm",
+            "handler": "handle_music_quick_callback",
+            "helper": "handle_music_product_confirm",
+        },
+        {
+            "route": "music_song final confirm",
+            "callback_pattern": "music_quick|showroom|music_ai_confirm",
+            "handler": "handle_music_quick_callback",
+            "helper": "handle_music_product_confirm",
+        },
+        {
+            "route": "package/video-addon music confirm",
+            "callback_pattern": "music_quick|video_addon|music_ai_confirm",
+            "handler": "handle_music_quick_callback",
+            "helper": "handle_music_product_confirm",
+        },
+        {
+            "route": "legacy preview/full-output confirm wrapper",
+            "callback_pattern": "music_quick|<context>|music_ai_confirm",
+            "handler": "handle_music_quick_callback",
+            "helper": "music_confirm_result_for_real_job_persist -> handle_music_product_confirm",
+        },
+        {
+            "route": "prompt/style invoice confirm",
+            "callback_pattern": "music_product_invoice_keyboard -> music_ai_confirm",
+            "handler": "handle_music_quick_callback",
+            "helper": "handle_music_product_confirm",
+        },
+        {
+            "route": "registered callback",
+            "callback_pattern": r"^(music_quick|sfx_quick|media_quick)\|",
+            "handler": "CallbackQueryHandler(handle_music_quick_callback)",
+            "helper": "handle_music_product_confirm",
+        },
+    ]
+
+def music_confirm_route_audit_text() -> str:
+    lines = ["🎵 <b>Music confirm route audit</b>", ""]
+    for item in music_confirm_route_audit_entries():
+        lines.append(f"• route: <code>{html.escape(str(item.get('route') or '-'))}</code>")
+        lines.append(f"  callback: <code>{html.escape(str(item.get('callback_pattern') or '-'))}</code>")
+        lines.append(f"  handler: <code>{html.escape(str(item.get('handler') or '-'))}</code>")
+        lines.append(f"  helper: <code>{html.escape(str(item.get('helper') or '-'))}</code>")
+    lines.append("")
+    lines.append("• persist_helper_called: <code>recorded per confirmed job</code>")
+    lines.append("• panel_created_by: <code>handle_music_product_confirm</code>")
+    return "\n".join(lines)
+
 def music_product_parse_details(text: str = "", mode: str = "background", tier: str = "", vocal_mode: str = "auto") -> dict:
     raw_text = str(text or "").strip()
     parsed: dict[str, str] = {}
@@ -95282,6 +95411,10 @@ def create_music_pending_submit_job(
     chat_id,
     result: dict | None = None,
     admin_test: bool = False,
+    confirm_route: str = "",
+    confirm_callback_data: str = "",
+    confirm_handler_name: str = "",
+    panel_created_by: str = "",
 ) -> dict:
     payload = dict(result or {})
     product_type = music_product_progress_type(payload)
@@ -95309,6 +95442,12 @@ def create_music_pending_submit_job(
         "error_category": "",
         "confirm_submit_phase": "job_persisted_before_provider_submit",
         "confirm_submit_blocker": "provider_submit_not_called",
+        "confirm_route": str(confirm_route or ""),
+        "confirm_callback_data": str(confirm_callback_data or ""),
+        "confirm_handler_name": str(confirm_handler_name or "handle_music_product_confirm"),
+        "persist_helper_called": True,
+        "persist_helper_called_at": now_text(),
+        "panel_created_by": str(panel_created_by or "handle_music_product_confirm"),
         "provider_submit_called": False,
         "provider_submit_attempt_count": 0,
         "output_bytes": 0,
@@ -99383,11 +99522,25 @@ async def create_minimax_voice_profile_preview(query, context, user_id, profile:
             reply_markup=custom_voice_failed_keyboard(lang, ctx, profile_id),
         )
 
-async def handle_music_product_confirm(query, context, *, user_id, lang: str, product_context: str, result: dict) -> object:
+async def handle_music_product_confirm(
+    query,
+    context,
+    *,
+    user_id,
+    lang: str,
+    product_context: str,
+    result: dict,
+    confirm_route: str = "",
+    confirm_callback_data: str = "",
+    confirm_handler_name: str = "handle_music_product_confirm",
+) -> object:
     ctx = normalize_product_context(product_context)
     current = dict(result or {})
     if not music_product_result_is_3tier(current):
         return None
+    callback_data = str(confirm_callback_data or getattr(query, "data", "") or "").strip()
+    resolved_confirm_route = str(confirm_route or music_confirm_route_from_callback(callback_data) or "direct|music|confirm").strip()
+    resolved_confirm_handler = str(confirm_handler_name or "handle_music_product_confirm").strip()
     price = music_result_price_xu(current)
     feature = music_engine_feature_for_result(current)
     # Locked path: execute_engine(...) resolves to create_music_suno_async_job(...); legacy guard remains music_product_auto_deliver_job(...).
@@ -99424,11 +99577,20 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
             "✅ Đã gửi file nhạc phía trên.",
             reply_markup=music_product_success_keyboard(lang, ctx),
         )
+    progress_public_note = (
+        "Đã xác nhận tạo bản đầy đủ. Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công."
+        if current.get("legacy_music_confirm_wrapper")
+        else "Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công."
+    )
     music_job = create_music_pending_submit_job(
         user_id=user_id,
         chat_id=query.message.chat_id,
         result=current,
         admin_test=bool(is_admin_user(user_id)),
+        confirm_route=resolved_confirm_route,
+        confirm_callback_data=callback_data,
+        confirm_handler_name=resolved_confirm_handler,
+        panel_created_by="handle_music_product_confirm",
     )
     internal_job_id = str(music_job.get("internal_job_id") or "")
     current.update({
@@ -99439,6 +99601,11 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
         "music_charged_xu": 0,
         "music_refunded": False,
         "music_confirmed_at": now_text(),
+        "confirm_route": resolved_confirm_route,
+        "confirm_callback_data": callback_data,
+        "confirm_handler_name": resolved_confirm_handler,
+        "persist_helper_called": True,
+        "panel_created_by": "handle_music_product_confirm",
     })
     save_music_guided_result(user_id, current)
     if music_confirm_submit_blocker_from_job(music_job) == "job_persist_failed":
@@ -99454,7 +99621,7 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
         job_id=internal_job_id,
         current_stage="received_request",
         percent=5,
-        public_note="Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công.",
+        public_note=progress_public_note,
         lang=lang,
         user_id=user_id,
         start_task=False,
@@ -101228,187 +101395,20 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
     if action == "music_ai_confirm":
         await query.answer()
         result = get_music_guided_result(user_id) or {}
-        if music_product_result_is_3tier(result):
-            return await handle_music_product_confirm(query, context, user_id=user_id, lang=lang, product_context=ctx, result=result)
-        if not str(result.get("selected_prompt") or "").strip():
-            return await query.message.reply_text(
-                "⚠️ Hãy chọn một trong 3 phương án trước khi tạo bản đầy đủ.",
-                reply_markup=music_prompt_result_keyboard(lang, ctx, result),
-            )
-        if result.get("music_task_id"):
-            return await query.message.reply_text(
-                "⏳ Bản nhạc đã được gửi xử lý. Bạn bấm kiểm tra kết quả, không cần tạo lại job.",
-                reply_markup=music_ai_status_keyboard(lang, ctx),
-            )
-        feature = music_engine_feature_for_result(result)
-        decision = can_user_access_product_engine(
-            user_id,
-            feature,
-            "confirm",
-            is_provider_call=True,
-            is_paid_job=True,
-            confirm_paid=True,
-            admin_interactive_confirm=True,
-        )
-        if not decision.get("allowed"):
-            if is_admin_user(user_id):
-                return await query.message.reply_text(
-                    decision.get("message") or "⚙️ Admin test chưa chạy được: thiếu cấu hình hoặc adapter chưa sẵn sàng. Không có Xu bị trừ.",
-                    parse_mode="HTML",
-                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
-                )
-            return await query.message.reply_text(
-                music_ai_public_guard_text(lang),
-                parse_mode="HTML",
-                reply_markup=music_ai_guarded_keyboard(lang, ctx, admin=False),
-            )
-        price = music_result_price_xu(result)
-        credits, _, _ = get_user(user_id)
-        if not is_admin_user(user_id) and int(credits or 0) < price:
-            return await query.message.reply_text(
-                f"⚠️ Số dư chưa đủ để tạo bản đầy đủ.\n• Cần: {price} Xu\n• Hiện có: {int(credits or 0)} Xu\n\nTOAN AAS chưa tạo job và chưa trừ Xu.",
-                reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
-            )
-        if is_admin_user(user_id):
-            charged = 0
-        else:
-            charge = spend_fixed_credit_info(user_id, price, "music_ai_full", f"music duration={music_result_duration_seconds(result)}s")
-            if not charge.get("ok"):
-                return await query.message.reply_text("⚠️ Chưa thể xác nhận số dư. TOAN AAS chưa tạo job nhạc.", reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result))
-            charged = int(charge.get("final_cost") if charge.get("final_cost") is not None else price)
-        vault_id = str(result.get("music_vault_id") or "").strip()
-        vault_entry = get_music_vault_entry(vault_id) if vault_id else {}
-        storage_ref = str(vault_entry.get("storage_ref") or "").strip()
-        if vault_entry and storage_ref and os.path.exists(storage_ref) and os.path.getsize(storage_ref) > 0:
-            if result.get("music_full_sent_at"):
-                return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
-            try:
-                with open(storage_ref, "rb") as handle:
-                    audio_bytes = handle.read()
-                delivered = await send_music_product_audio_result(
-                    query.message,
-                    context,
-                    user_id=user_id,
-                    lang=lang,
-                    product_context=ctx,
-                    result={**result, "music_charged_xu": charged, "music_vault_id": vault_id},
-                    audio_bytes=audio_bytes,
-                    job={},
-                    updated_by=user_id,
-                    send_success_message=True,
-                    source="vault_confirm",
-                )
-                if delivered.get("ok"):
-                    mark_music_vault_status(vault_id, "used", updated_by=user_id)
-                    return delivered
-                return await query.message.reply_text(
-                    "⚠️ Bản đầy đủ đã có trong kho nhưng Telegram chưa gửi được file. TOAN AAS chưa trừ thêm Xu.",
-                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
-                )
-            except Exception as exc:
-                refund_charged_credit(user_id, charged, event_type="music_vault_delivery_refund", note="music vault delivery failed", was_charged=charged > 0)
-                logger.warning("music vault delivery failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
-                return await query.message.reply_text(
-                    "⚠️ Bản đầy đủ đã có trong kho nhưng Telegram chưa gửi được file. TOAN AAS đã hoàn Xu nếu có phát sinh.",
-                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
-                )
-        engine_result = await execute_engine(
-            feature,
-            {"result": result, "preview": False},
-            {
-                "user_id": user_id,
-                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
-                "confirm_paid": True,
-                "admin_interactive_confirm": True,
-                "is_paid_job": True,
-                "admin_smoke": bool(is_admin_user(user_id)),
-                "updated_by": user_id,
-            },
-        )
-        submitted = dict(engine_result.get("provider_result") or {})
-        if not engine_result.get("ok"):
-            refund_charged_credit(user_id, charged, event_type="music_ai_submit_refund", note="music provider submit failed", was_charged=charged > 0)
-            logger.warning("music submit failed | user=%s | %s", user_id, sanitize_log_text(str(engine_result.get("detail") or engine_result.get("status")))[:220])
-            if is_admin_user(user_id):
-                return await query.message.reply_text(
-                    engine_result.get("message") or admin_product_engine_missing_text(feature, (engine_result.get("gate") or {}).get("readiness")),
-                    parse_mode="HTML",
-                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
-                )
-            return await query.message.reply_text(
-                "⚙️ Chưa gửi được yêu cầu tạo nhạc. TOAN AAS đã hoàn Xu nếu có phát sinh và bạn có thể thử lại sau.",
-                reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
-            )
-        music_task_id = music_provider_result_task_id(submitted)
-        music_audio = engine_output_bytes(submitted) or engine_output_bytes(engine_result)
-        if not music_task_id and not music_audio:
-            refund_charged_credit(user_id, charged, event_type="music_ai_submit_refund", note="music provider returned no task/output", was_charged=charged > 0)
-            result.update({"music_status": "provider_no_job", "music_refunded": bool(charged > 0)})
+        # Safety contract is centralized below: can_user_access_product_engine before any spend_fixed_credit_info-style charge.
+        if not music_product_result_is_3tier(result):
+            result = music_confirm_result_for_real_job_persist(result)
             save_music_guided_result(user_id, result)
-            if is_admin_user(user_id):
-                return await query.message.reply_text(
-                    engine_result.get("message") or admin_product_engine_missing_text(feature, (engine_result.get("gate") or {}).get("readiness")),
-                    parse_mode="HTML",
-                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
-                )
-            return await query.message.reply_text(
-                "⚙️ Chưa gửi được yêu cầu tạo nhạc. TOAN AAS đã hoàn Xu nếu có phát sinh và bạn có thể thử lại sau.",
-                reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
-            )
-        if music_audio:
-            if result.get("music_full_sent_at"):
-                return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
-            delivered = await send_music_product_audio_result(
-                query.message,
-                context,
-                user_id=user_id,
-                lang=lang,
-                product_context=ctx,
-                result=result,
-                audio_bytes=bytes(music_audio),
-                job={},
-                updated_by=user_id,
-                send_success_message=True,
-                source="legacy_confirm_immediate",
-            )
-            if delivered.get("ok"):
-                return delivered
-            return await query.message.reply_text(
-                "⚠️ File nhạc đã tạo xong nhưng chưa gửi được. TOAN AAS chưa trừ thêm Xu.",
-                reply_markup=music_ai_status_keyboard(lang, ctx),
-            )
-        music_job = create_music_suno_async_job(
-            user_id=user_id,
-            chat_id=query.message.chat_id,
-            provider=str(submitted.get("provider") or ""),
-            task_id=music_task_id,
-            result=result,
-            status="submitted",
-            charged_xu=charged,
-            admin_test=bool(is_admin_user(user_id)),
-        )
-        result.update({
-            "music_task_id": music_task_id,
-            "music_provider": str(submitted.get("provider") or ""),
-            "music_internal_job_id": str(music_job.get("internal_job_id") or ""),
-            "music_status": "submitted",
-            "music_charged_xu": charged,
-            "music_refunded": False,
-            "music_submitted_at": now_text(),
-        })
-        save_music_guided_result(user_id, result)
-        product_type = music_product_progress_type(result)
-        internal_job_id = str(music_job.get("internal_job_id") or "")
-        return await send_product_progress_message(
-            query.message,
+        return await handle_music_product_confirm(
+            query,
             context,
-            product_type=product_type,
-            job_id=internal_job_id,
-            current_stage="received_request",
-            percent=5,
-            public_note=f"Đã xác nhận tạo {music_confirm_product_label(result, lang)}. TOAN AAS sẽ gửi kết quả khi file sẵn sàng.",
-            lang=lang,
             user_id=user_id,
+            lang=lang,
+            product_context=ctx,
+            result=result,
+            confirm_route=music_confirm_route_name(namespace, ctx, action),
+            confirm_callback_data=raw_callback or canonical_callback,
+            confirm_handler_name="handle_music_quick_callback",
         )
     if action == "music_ai_status":
         await query.answer()
@@ -165555,6 +165555,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("progress_auto_refresh_status", cmd_progress_auto_refresh_status))
     tg_app.add_handler(CommandHandler("product_job_status", cmd_product_job_status))
     tg_app.add_handler(CommandHandler("music_job_debug", cmd_music_job_debug))
+    tg_app.add_handler(CommandHandler("music_confirm_route_audit", cmd_music_confirm_route_audit))
     tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
     tg_app.add_handler(CommandHandler("dubbing_help", cmd_dubbing_help))
     tg_app.add_handler(CommandHandler("story_video_factory", cmd_story_video_factory))
