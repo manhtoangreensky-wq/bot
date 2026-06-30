@@ -6039,12 +6039,16 @@ def resolve_progress_product_type(job_id: str = "", product_type: str = "", job:
 
 def music_job_delivery_state(job: dict | None = None) -> str:
     current = dict(job or {})
+    terminal = str(current.get("terminal_state") or current.get("music_terminal_state") or "").strip().lower()
+    delivery_state = str(current.get("delivery_state") or "").strip().lower()
+    lock = str(current.get("music_delivery_lock") or current.get("music_result_delivery_lock") or "").strip().lower()
+    if terminal == "delivered" or delivery_state == "delivered" or lock == "sent":
+        return "delivered"
     if current.get("sent_full_at") or current.get("music_delivered_at") or current.get("music_result_delivered_at") or current.get("output_file_id"):
         return "delivered"
-    lock = str(current.get("music_delivery_lock") or current.get("music_result_delivery_lock") or "").strip().lower()
     if lock:
         return lock
-    return str(current.get("delivery_state") or current.get("status") or "-")
+    return str(delivery_state or current.get("status") or "-")
 
 
 def music_job_terminal_failed(job: dict | None = None) -> bool:
@@ -6192,6 +6196,13 @@ def progress_auto_refresh_register(
         "update_count": int(current.get("update_count") or 0),
         "edit_success_count": int(current.get("edit_success_count") or 0),
         "edit_fail_count": int(current.get("edit_fail_count") or 0),
+        "registry_saved": True,
+        "scheduler_mode": str(current.get("scheduler_mode") or ("music_auto_delivery" if is_music_progress else "auto_refresh")),
+        "task_started": bool(current.get("task_started")),
+        "task_alive": bool(current.get("task_alive")),
+        "task_started_at": str(current.get("task_started_at") or ""),
+        "last_tick_at": str(current.get("last_tick_at") or ""),
+        "last_edit_at": str(current.get("last_edit_at") or ""),
         "fallback_used": bool(current.get("fallback_used")),
         "stopped": bool(snapshot.get("terminal_state")) and bool(MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
         "stop_reason": "terminal" if snapshot.get("terminal_state") and (MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL if is_music_progress else PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL) else "",
@@ -6228,6 +6239,9 @@ def progress_auto_refresh_start_task(context, key: str) -> bool:
         return False
     existing = PROGRESS_AUTO_REFRESH_TASKS.get(str(key or ""))
     if existing and not existing.done():
+        record["task_alive"] = True
+        record["task_started"] = True
+        PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return True
     try:
         application = getattr(context, "application", None)
@@ -6236,6 +6250,13 @@ def progress_auto_refresh_start_task(context, key: str) -> bool:
         else:
             task = asyncio.create_task(progress_auto_refresh_loop(context, str(key or "")))
         PROGRESS_AUTO_REFRESH_TASKS[str(key or "")] = task
+        record.update({
+            "task_started": True,
+            "task_alive": True,
+            "task_started_at": now_text(),
+            "scheduler_mode": "application_task" if application and hasattr(application, "create_task") else "asyncio_task",
+        })
+        PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return True
     except RuntimeError:
         return False
@@ -6246,6 +6267,9 @@ async def progress_auto_refresh_loop(context, key: str):
     while True:
         record = PROGRESS_AUTO_REFRESH_JOBS.get(str(key or "")) or {}
         if not record or record.get("stopped"):
+            if record:
+                record["task_alive"] = False
+                PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
             return
         if first_tick and bool(record.get("auto_delivery_enabled")):
             first_tick = False
@@ -6347,6 +6371,7 @@ async def music_auto_deliver_from_progress_record(context, record: dict, job: di
         job=current,
         updated_by=user_id,
         send_success_message=True,
+        source="auto_tick",
     )
     updated = dict(delivered.get("job") or get_engine_async_job(str(current.get("internal_job_id") or "")) or current)
     updated["auto_delivery_status"] = str(delivered.get("status") or "")
@@ -6376,8 +6401,11 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
     if int(record.get("update_count") or 0) >= int(record.get("max_updates") or PROGRESS_AUTO_REFRESH_MAX_UPDATES):
         record["stopped"] = True
         record["stop_reason"] = "max_updates"
+        record["task_alive"] = False
         PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return {"status": "stopped", "reason": "max_updates"}
+    record["last_tick_at"] = now_text()
+    record["task_alive"] = True
     refreshed_job = await progress_auto_refresh_status_for_tick(context, record)
     snapshot = progress_auto_refresh_snapshot(
         record.get("product_type") or "",
@@ -6404,6 +6432,7 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
             )
             record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
             record["last_update_at"] = now_text()
+            record["last_edit_at"] = record["last_update_at"]
             record["last_stage"] = str(snapshot.get("stage") or "")
             record["last_percent"] = int(snapshot.get("percent") or 0)
             record["current_stage"] = str(snapshot.get("stage") or "")
@@ -6424,6 +6453,7 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
                     record["message_id"] = getattr(sent, "message_id", record.get("message_id"))
                     record["fallback_used"] = True
                     record["last_update_at"] = now_text()
+                    record["last_edit_at"] = record["last_update_at"]
                     record["last_stage"] = str(snapshot.get("stage") or "")
                     record["last_percent"] = int(snapshot.get("percent") or 0)
                     record["current_stage"] = str(snapshot.get("stage") or "")
@@ -6442,9 +6472,11 @@ async def progress_auto_refresh_tick(context, key: str) -> dict:
         record["stopped"] = True
         record["stop_reason"] = terminal
         record["terminal_state"] = terminal
+        record["task_alive"] = False
     elif int(record.get("update_count") or 0) >= int(record.get("max_updates") or PROGRESS_AUTO_REFRESH_MAX_UPDATES):
         record["stopped"] = True
         record["stop_reason"] = "max_updates"
+        record["task_alive"] = False
     PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
     return {"status": "updated" if should_edit else "skipped", "record": dict(record), "snapshot": snapshot}
 
@@ -6486,11 +6518,19 @@ def progress_auto_refresh_status_text(job_id: str = "") -> str:
             f"• product_type: <code>{html.escape(str(record.get('product_type') or '-'))}</code>",
             f"• job_id: <code>{html.escape(str(record.get('job_id') or '-'))}</code>",
             f"• enabled: <code>{'yes' if record.get('enabled') else 'no'}</code>",
+            f"• scheduler_mode: <code>{html.escape(str(record.get('scheduler_mode') or '-'))}</code>",
+            f"• registry_saved: <code>{'yes' if record.get('registry_saved') else 'no'}</code>",
+            f"• task_started: <code>{'yes' if record.get('task_started') else 'no'}</code>",
+            f"• task_alive: <code>{'yes' if record.get('task_alive') else 'no'}</code>",
             f"• chat_id/message_id: <code>{html.escape(str(record.get('chat_id') or '-'))}/{html.escape(str(record.get('message_id') or '-'))}</code>",
+            f"• task_started_at: <code>{html.escape(str(record.get('task_started_at') or '-'))}</code>",
+            f"• last_tick_at: <code>{html.escape(str(record.get('last_tick_at') or '-'))}</code>",
             f"• last_update_at: <code>{html.escape(str(record.get('last_update_at') or '-'))}</code>",
+            f"• last_edit_at: <code>{html.escape(str(record.get('last_edit_at') or '-'))}</code>",
             f"• update_count/max: <code>{int(record.get('update_count') or 0)}/{int(record.get('max_updates') or 0)}</code>",
             f"• terminal_state: <code>{html.escape(str(record.get('terminal_state') or '-'))}</code>",
             f"• last_percent/stage: <code>{int(record.get('last_percent') or 0)}% / {html.escape(str(record.get('last_stage') or '-'))}</code>",
+            f"• current_percent/stage: <code>{int(record.get('percent') or 0)}% / {html.escape(str(record.get('current_stage') or '-'))}</code>",
             f"• edit_success/fail: <code>{int(record.get('edit_success_count') or 0)}/{int(record.get('edit_fail_count') or 0)}</code>",
             f"• fallback_used: <code>{'yes' if record.get('fallback_used') else 'no'}</code>",
             f"• stopped: <code>{'yes' if record.get('stopped') else 'no'} {html.escape(str(record.get('stop_reason') or ''))}</code>",
@@ -6575,6 +6615,7 @@ def music_job_debug_text(job_id: str = "") -> str:
     elif status in {"submitted", "queued", "processing"} and output_bytes <= 0:
         blocker = "waiting_for_result"
     duplicate_guard = "delivered" if music_job_delivered(job) else str((job or {}).get("music_delivery_lock") or (job or {}).get("music_result_delivery_lock") or "open")
+    ignored_sources = ",".join(str(item) for item in ((job or {}).get("ignored_duplicate_sources") or [])) or "-"
     return (
         "🎵 <b>Music job debug</b>\n\n"
         f"• music_job_id: <code>{html.escape(str(job_id or '-'))}</code>\n"
@@ -6584,13 +6625,23 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
         f"• percent: <code>{int(state.get('percent') or 0)}%</code>\n"
         f"• provider_status: <code>{html.escape(sanitize_provider_status_text((job or {}).get('last_provider_status') or status, provider_task_id, 180))}</code>\n"
+        f"• artifact_candidates_count: <code>{int((job or {}).get('artifact_candidates_count') or 0)}</code>\n"
+        f"• selected_artifact_id: <code>{html.escape(str((job or {}).get('selected_artifact_id') or (job or {}).get('music_artifact_id') or '-'))}</code>\n"
+        f"• selected_artifact_hash: <code>{html.escape(str((job or {}).get('selected_artifact_hash') or (job or {}).get('music_artifact_hash') or '-'))}</code>\n"
+        f"• selected_artifact_duration: <code>{html.escape(str((job or {}).get('selected_artifact_duration') or (job or {}).get('music_artifact_duration') or artifact_duration or '-'))}</code>\n"
         f"• artifact_ready: <code>{artifact_state}</code>\n"
         f"• artifact_bytes: <code>{output_bytes}</code>\n"
         f"• artifact_duration: <code>{artifact_duration}</code>\n"
         f"• delivery_state: <code>{html.escape(music_job_delivery_state(job))}</code>\n"
+        f"• delivery_lock_state: <code>{html.escape(duplicate_guard)}</code>\n"
+        f"• delivery_source_first: <code>{html.escape(str((job or {}).get('delivery_source_first') or (job or {}).get('music_delivery_path') or '-'))}</code>\n"
+        f"• ignored_duplicate_sources: <code>{html.escape(ignored_sources)}</code>\n"
+        f"• delivery_attempt_count: <code>{int((job or {}).get('delivery_attempt_count') or (job or {}).get('send_attempt_count') or 0)}</code>\n"
+        f"• last_duplicate_blocked_at: <code>{html.escape(str((job or {}).get('last_duplicate_blocked_at') or '-'))}</code>\n"
         f"• delivery_message_id: <code>{html.escape(str((job or {}).get('music_delivery_message_id') or (job or {}).get('delivery_message_id') or '-'))}</code>\n"
         f"• success_message_id: <code>{html.escape(str((job or {}).get('music_success_message_id') or (job or {}).get('success_message_id') or '-'))}</code>\n"
         f"• terminal_state: <code>{html.escape(terminal or '-')}</code>\n"
+        f"• terminal_locked_at: <code>{html.escape(str((job or {}).get('music_terminal_locked_at') or (job or {}).get('terminal_locked_at') or '-'))}</code>\n"
         f"• blocker: <code>{html.escape(blocker or '-')}</code>\n"
         f"• duplicate_guard_state: <code>{html.escape(duplicate_guard)}</code>"
     )
@@ -6666,6 +6717,7 @@ async def maybe_deliver_music_progress_job(query, context, *, product_type: str,
         job=current,
         updated_by=user_id,
         send_success_message=True,
+        source="manual_update",
     )
     return {**delivered, "job": dict(delivered.get("job") or get_engine_async_job(job_id) or current)}
 
@@ -40183,6 +40235,39 @@ def completed_video_job_for_callback_error(update: object) -> dict | None:
         return None
     return job
 
+def completed_music_job_for_callback_error(update: object) -> dict | None:
+    if not isinstance(update, Update) or not update.callback_query:
+        return None
+    callback_data = str(update.callback_query.data or "").strip()
+    user_id = update.effective_user.id if update.effective_user else 0
+    job_ids: list[str] = []
+    if callback_data.startswith("progress|status|"):
+        parts = callback_data.split("|")
+        product_type = parts[2] if len(parts) > 2 else ""
+        job_id = parts[3] if len(parts) > 3 else ""
+        if progress_product_type_is_music(product_type, job_id) and job_id and job_id != "latest":
+            job_ids.append(job_id)
+    if "music_ai_status" in callback_data or callback_data.startswith("music_quick|"):
+        try:
+            guided = get_music_guided_result(user_id) or {}
+        except Exception:
+            guided = {}
+        if music_delivery_should_suppress_public_fail(guided, {}):
+            return guided
+        for key in ("music_internal_job_id", "music_job_id"):
+            value = str(guided.get(key) or "").strip()
+            if value:
+                job_ids.append(value)
+    for job_id in dict.fromkeys(job_ids):
+        job = get_engine_async_job(job_id) if job_id else {}
+        if not job:
+            continue
+        if user_id and str(job.get("user_id") or "") not in {"", str(user_id)}:
+            continue
+        if music_delivery_should_suppress_public_fail({}, job):
+            return job
+    return None
+
 def record_video_post_output_error(exc: Exception | None, job: dict, callback_data: str = "") -> dict:
     trace = sanitize_log_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)) if exc else "post_output_error")[:1200]
     diagnostic = {
@@ -73593,6 +73678,7 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
     if isinstance(update, Update) and update.callback_query:
         callback_data = str(update.callback_query.data or "").strip()
     completed_video_job = completed_video_job_for_callback_error(update)
+    completed_music_job = completed_music_job_for_callback_error(update)
     image_to_pdf_safe_error = (
         message_text.startswith("/image_to_pdf")
         or ('unsupported start tag "yêu"' in error_text.lower())
@@ -73624,6 +73710,14 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
             "suppressed public error after completed video output | job_id=%s | task_id=%s",
             completed_video_job.get("id"),
             sanitize_log_text(str(completed_video_job.get("task_id") or ""))[:180],
+        )
+        return
+
+    if completed_music_job:
+        logger.warning(
+            "suppressed public error after delivered music output | job_id=%s | callback=%s",
+            sanitize_log_text(str(completed_music_job.get("internal_job_id") or completed_music_job.get("music_internal_job_id") or ""))[:80],
+            sanitize_log_text(callback_data)[:120],
         )
         return
 
@@ -94177,6 +94271,196 @@ def music_product_audio_has_partial_marker(result: dict | None = None, job: dict
         return True
     return False
 
+def music_delivery_source_token(source: str = "") -> str:
+    token = re.sub(r"[^a-z0-9_:-]+", "_", str(source or "").strip().lower())
+    return token[:60] or "unknown"
+
+def music_normalized_artifact_url(url: str = "") -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw)
+        path = re.sub(r"/+", "/", parsed.path or "")
+        return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}"
+    except Exception:
+        return raw.split("?", 1)[0].strip()
+
+def music_artifact_candidate_bytes(value) -> bytes:
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if hasattr(value, "getvalue"):
+        try:
+            payload = value.getvalue()
+            if isinstance(payload, (bytes, bytearray)):
+                return bytes(payload)
+        except Exception:
+            return b""
+    return b""
+
+def music_delivery_artifact_candidates(result: dict | None = None, job: dict | None = None, audio_bytes: bytes | bytearray | None = None) -> list[dict]:
+    data = {**dict(job or {}), **dict(result or {})}
+    candidates: list[dict] = []
+    for key in ("music_artifact_candidates", "artifact_candidates", "output_candidates", "music_output_candidates"):
+        value = data.get(key)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    candidates.append(dict(item))
+    direct_payload = music_artifact_candidate_bytes(audio_bytes)
+    if direct_payload:
+        candidates.append({
+            "source": "downloaded_validated_mp3",
+            "role": "downloaded_validated",
+            "audio_bytes": direct_payload,
+            "url": data.get("music_output_url") or data.get("output_url") or data.get("result_url") or "",
+            "artifact_id": data.get("music_artifact_id") or data.get("provider_artifact_id") or "",
+            "duration_seconds": data.get("artifact_duration_seconds") or data.get("music_result_duration_seconds") or data.get("duration_seconds") or 0,
+        })
+    auto_payload = music_artifact_candidate_bytes(data.get("_auto_delivery_audio_bytes"))
+    if auto_payload:
+        candidates.append({
+            "source": "auto_delivery_audio_bytes",
+            "role": "downloaded_validated",
+            "audio_bytes": auto_payload,
+            "url": data.get("music_output_url") or data.get("output_url") or data.get("result_url") or "",
+            "artifact_id": data.get("music_artifact_id") or data.get("provider_artifact_id") or "",
+            "duration_seconds": data.get("artifact_duration_seconds") or data.get("music_result_duration_seconds") or data.get("duration_seconds") or 0,
+        })
+    for path_key in ("music_result_path", "output_path", "local_path", "storage_ref"):
+        local_path = str(data.get(path_key) or "").strip()
+        if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            candidates.append({
+                "source": path_key,
+                "role": "downloaded_validated",
+                "local_path": local_path,
+                "artifact_id": data.get("music_artifact_id") or data.get("provider_artifact_id") or "",
+                "duration_seconds": data.get("artifact_duration_seconds") or data.get("music_result_duration_seconds") or data.get("duration_seconds") or 0,
+            })
+            break
+    return candidates
+
+def music_artifact_candidate_is_preview(candidate: dict | None = None) -> bool:
+    item = dict(candidate or {})
+    text = " ".join(str(item.get(key) or "") for key in ("role", "kind", "type", "source", "status", "name", "local_path", "url")).lower()
+    return any(token in text for token in ("preview", "partial", "temp", "tmp", "sample"))
+
+def music_artifact_candidate_priority(candidate: dict | None = None) -> int:
+    item = dict(candidate or {})
+    if music_artifact_candidate_is_preview(item):
+        return -10000
+    text = " ".join(str(item.get(key) or "") for key in ("role", "kind", "type", "source", "status")).lower()
+    score = 0
+    if any(token in text for token in ("final", "master", "full")):
+        score += 1000
+    if any(token in text for token in ("completed", "complete", "success", "downloaded_validated")):
+        score += 500
+    if item.get("provider_artifact_id") or item.get("artifact_id") or item.get("id"):
+        score += 50
+    if item.get("audio_bytes") or item.get("bytes"):
+        score += 40
+    if item.get("local_path"):
+        score += 30
+    if item.get("url") or item.get("artifact_url") or item.get("output_url"):
+        score += 20
+    try:
+        score += min(10, int(item.get("duration_seconds") or item.get("duration") or 0) // 60)
+    except Exception:
+        pass
+    return score
+
+async def select_music_delivery_artifact(
+    result: dict | None = None,
+    job: dict | None = None,
+    audio_bytes: bytes | bytearray | None = None,
+) -> dict:
+    candidates = music_delivery_artifact_candidates(result, job, audio_bytes)
+    final_candidates = [dict(item) for item in candidates if music_artifact_candidate_priority(item) >= 0]
+    if not final_candidates:
+        return {
+            "ok": False,
+            "status": "FINAL_ARTIFACT_NOT_READY",
+            "artifact_candidates_count": len(candidates),
+        }
+    selected = max(final_candidates, key=music_artifact_candidate_priority)
+    payload = music_artifact_candidate_bytes(selected.get("audio_bytes") or selected.get("bytes"))
+    local_path = str(selected.get("local_path") or selected.get("path") or "").strip()
+    if not payload and local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+        try:
+            with open(local_path, "rb") as handle:
+                payload = handle.read()
+        except Exception:
+            payload = b""
+    url = str(selected.get("url") or selected.get("artifact_url") or selected.get("output_url") or selected.get("download_url") or "").strip()
+    if not payload and url:
+        payload, _detail, _status = await _download_music_audio_url_bytes(url, timeout_seconds=60.0)
+    if not payload:
+        return {
+            "ok": False,
+            "status": "ARTIFACT_BYTES_MISSING",
+            "artifact_candidates_count": len(candidates),
+        }
+    artifact_hash = music_audio_sha256(payload)
+    duration = int(selected.get("duration_seconds") or selected.get("duration") or 0)
+    if duration <= 0:
+        duration = await music_audio_real_duration_seconds(payload, fallback=music_result_duration_seconds({**dict(job or {}), **dict(result or {})}))
+    if duration <= 0:
+        return {
+            "ok": False,
+            "status": "AUDIO_DURATION_MISSING",
+            "artifact_candidates_count": len(candidates),
+            "artifact_hash": artifact_hash,
+        }
+    artifact_id = str(selected.get("provider_artifact_id") or selected.get("artifact_id") or selected.get("id") or "").strip()
+    if not artifact_id:
+        artifact_id = artifact_hash[:24]
+    return {
+        "ok": True,
+        "audio_bytes": payload,
+        "artifact_candidates_count": len(candidates),
+        "selected_artifact_id": artifact_id,
+        "selected_artifact_hash": artifact_hash,
+        "selected_artifact_url": music_normalized_artifact_url(url),
+        "selected_artifact_path": local_path,
+        "selected_artifact_duration": duration,
+        "selected_artifact_bytes": len(payload),
+        "selected_artifact_source": str(selected.get("source") or selected.get("role") or "artifact"),
+    }
+
+def music_delivery_record_duplicate(job: dict | None = None, source: str = "", reason: str = "", result: dict | None = None, updated_by="") -> dict:
+    current = dict(job or {})
+    source_token = music_delivery_source_token(source)
+    ignored = list(current.get("ignored_duplicate_sources") or [])
+    if source_token not in ignored:
+        ignored.append(source_token)
+    now = now_text()
+    current.update({
+        "ignored_duplicate_sources": ignored[-12:],
+        "last_duplicate_blocked_at": now,
+        "last_duplicate_block_reason": str(reason or "duplicate_delivery")[:120],
+    })
+    if current.get("internal_job_id"):
+        save_engine_async_job(current)
+    current_result = dict(result or {})
+    if current_result:
+        result_ignored = list(current_result.get("ignored_duplicate_sources") or [])
+        if source_token not in result_ignored:
+            result_ignored.append(source_token)
+        current_result.update({
+            "ignored_duplicate_sources": result_ignored[-12:],
+            "last_duplicate_blocked_at": now,
+            "last_duplicate_block_reason": str(reason or "duplicate_delivery")[:120],
+        })
+        if current_result.get("user_id"):
+            save_music_guided_result(current_result.get("user_id"), current_result)
+    return current or current_result
+
+def music_delivery_should_suppress_public_fail(result: dict | None = None, job: dict | None = None) -> bool:
+    data = {**dict(job or {}), **dict(result or {})}
+    if music_job_delivered(data):
+        return True
+    return bool(data.get("music_delivery_message_id") or data.get("delivery_message_id") or data.get("music_success_message_id") or data.get("success_message_id"))
+
 async def music_audio_real_duration_seconds(audio_bytes: bytes | bytearray | None = None, fallback: int = 0) -> int:
     payload = bytes(audio_bytes or b"")
     detected = 0.0
@@ -94203,6 +94487,9 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
     output_sha = music_audio_sha256(audio_bytes)
     file_id = str(getattr(getattr(sent_message, "audio", None), "file_id", "") or "")
     message_id = str(getattr(sent_message, "message_id", "") or "")
+    delivered_at = now_text()
+    previous_send_count = int(current.get("send_attempt_count") or 0)
+    previous_delivery_attempt_count = int(current.get("delivery_attempt_count") or 0)
     vault_entry = upsert_music_vault_from_output(
         audio_bytes=bytes(audio_bytes or b""),
         result=result or current,
@@ -94214,16 +94501,20 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "status": "delivered",
         "terminal_state": "delivered",
         "music_terminal_state": "delivered",
-        "sent_full_at": now_text(),
-        "music_delivered_at": now_text(),
+        "sent_full_at": delivered_at,
+        "music_delivered_at": delivered_at,
+        "music_terminal_locked_at": delivered_at,
+        "terminal_locked_at": delivered_at,
         "music_delivery_lock": "sent",
+        "music_result_delivery_lock": "sent",
         "delivery_state": "delivered",
         "music_delivery_message_id": message_id,
         "delivery_message_id": message_id,
         "progress_percent": 100,
         "output_file_id": file_id,
         "output_sha256": output_sha or str(current.get("output_sha256") or ""),
-        "send_attempt_count": int(current.get("send_attempt_count") or 0) + 1,
+        "send_attempt_count": previous_send_count + 1,
+        "delivery_attempt_count": max(previous_delivery_attempt_count, previous_send_count + 1, 1),
         "last_send_error": "",
         "vault_id": str(vault_entry.get("vault_id") or current.get("vault_id") or ""),
     })
@@ -94265,7 +94556,7 @@ def music_product_charge_after_delivery(user_id, result: dict | None = None, pri
     charged = int(charge.get("final_cost") if charge.get("final_cost") is not None else price)
     return {"ok": True, "charged_xu": charged, "charge": charge, "already_charged": False}
 
-async def send_music_product_audio_result(
+async def deliver_music_result_once(
     message,
     context,
     *,
@@ -94277,32 +94568,99 @@ async def send_music_product_audio_result(
     job: dict | None = None,
     updated_by="",
     send_success_message: bool = False,
+    source: str = "unknown",
 ) -> dict:
     current_result = dict(result or {})
     current_job = dict(job or {})
-    payload = bytes(audio_bytes or b"")
-    if not payload:
-        return {"ok": False, "status": "EMPTY_AUDIO"}
+    source_token = music_delivery_source_token(source)
+    current_result["user_id"] = current_result.get("user_id") or user_id
+    job_id = str(
+        current_job.get("internal_job_id")
+        or current_result.get("music_internal_job_id")
+        or current_result.get("music_job_id")
+        or ""
+    ).strip()
+    if job_id:
+        fresh_job = get_engine_async_job(job_id)
+        if fresh_job:
+            current_job = {**current_job, **fresh_job}
     if music_job_terminal_failed(current_job):
-        return {"ok": False, "status": "TERMINAL_FAILED"}
-    if current_result.get("music_result_delivered_at") or current_result.get("music_full_sent_at") or music_job_full_already_sent(current_job, payload):
-        return {"ok": True, "status": "ALREADY_SENT", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0)}
-    actual_duration = await music_audio_real_duration_seconds(payload, fallback=music_result_duration_seconds(current_result or current_job))
-    if actual_duration <= 0:
-        return {"ok": False, "status": "AUDIO_DURATION_MISSING"}
+        return {"ok": False, "status": "TERMINAL_FAILED", "job": current_job}
+    if music_delivery_should_suppress_public_fail(current_result, current_job) or current_result.get("music_result_delivered_at") or current_result.get("music_full_sent_at"):
+        updated_job = music_delivery_record_duplicate(current_job, source_token, "already_delivered", current_result, updated_by=updated_by or user_id)
+        return {
+            "ok": True,
+            "status": "ALREADY_DELIVERED",
+            "duplicate": True,
+            "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0),
+            "result": current_result,
+            "job": updated_job or current_job,
+        }
     if music_product_audio_has_partial_marker(current_result, current_job):
-        return {"ok": False, "status": "FINAL_AUDIO_NOT_READY"}
+        return {"ok": False, "status": "FINAL_AUDIO_NOT_READY", "job": current_job, "result": current_result}
+    if str(current_result.get("music_result_delivery_lock") or current_job.get("music_delivery_lock") or "").lower() == "sending":
+        updated_job = music_delivery_record_duplicate(current_job, source_token, "delivery_locked", current_result, updated_by=updated_by or user_id)
+        return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0), "job": updated_job or current_job, "result": current_result}
+    if audio_bytes is not None and not music_artifact_candidate_bytes(audio_bytes) and not music_delivery_artifact_candidates(current_result, current_job, None):
+        return {"ok": False, "status": "EMPTY_AUDIO", "job": current_job, "result": current_result}
+    artifact = await select_music_delivery_artifact(current_result, current_job, audio_bytes)
+    if not artifact.get("ok"):
+        if current_job:
+            current_job["auto_delivery_blocker"] = str(artifact.get("status") or "artifact_not_ready")
+            current_job["artifact_candidates_count"] = int(artifact.get("artifact_candidates_count") or 0)
+            if current_job.get("internal_job_id"):
+                save_engine_async_job(current_job)
+        return {"ok": False, "status": str(artifact.get("status") or "ARTIFACT_NOT_READY"), "job": current_job, "result": current_result}
+    payload = bytes(artifact.get("audio_bytes") or b"")
+    if not payload:
+        return {"ok": False, "status": "EMPTY_AUDIO", "job": current_job, "result": current_result}
+    actual_duration = int(artifact.get("selected_artifact_duration") or 0)
+    if actual_duration <= 0:
+        return {"ok": False, "status": "AUDIO_DURATION_MISSING", "job": current_job, "result": current_result}
     lock_key = music_product_delivery_lock_key(user_id, current_result, current_job, payload)
-    if lock_key in MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS or str(current_result.get("music_result_delivery_lock") or current_job.get("music_delivery_lock") or "").lower() == "sending":
-        return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0)}
+    if lock_key in MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS:
+        updated_job = music_delivery_record_duplicate(current_job, source_token, "delivery_locked", current_result, updated_by=updated_by or user_id)
+        return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0), "job": updated_job or current_job, "result": current_result}
     MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS.add(lock_key)
+    started_at = now_text()
     current_result.update({
         "music_result_delivery_lock": "sending",
         "music_delivery_lock": "sending",
-        "music_delivery_attempts": int(current_result.get("music_delivery_attempts") or current_job.get("send_attempt_count") or 0) + 1,
+        "music_delivery_started_at": started_at,
+        "music_delivery_path": source_token,
+        "music_delivery_attempts": int(current_result.get("music_delivery_attempts") or current_job.get("delivery_attempt_count") or current_job.get("send_attempt_count") or 0) + 1,
+        "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
+        "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
+        "selected_artifact_duration": int(artifact.get("selected_artifact_duration") or 0),
+        "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
     })
     if user_id:
         save_music_guided_result(user_id, current_result)
+    if current_job:
+        current_job.update({
+            "music_delivery_lock": "sending",
+            "music_result_delivery_lock": "sending",
+            "music_delivery_started_at": started_at,
+            "music_delivery_path": source_token,
+            "music_delivery_lock_key": lock_key,
+            "delivery_source_first": str(current_job.get("delivery_source_first") or source_token),
+            "delivery_attempt_count": int(current_job.get("delivery_attempt_count") or current_job.get("send_attempt_count") or 0) + 1,
+            "music_artifact_id": str(artifact.get("selected_artifact_id") or ""),
+            "music_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
+            "music_artifact_duration": int(artifact.get("selected_artifact_duration") or 0),
+            "music_artifact_url": str(artifact.get("selected_artifact_url") or ""),
+            "output_bytes": max(int(current_job.get("output_bytes") or 0), len(payload)),
+            "duration_seconds": actual_duration,
+            "artifact_duration_seconds": actual_duration,
+            "music_result_duration_seconds": actual_duration,
+            "music_result_size_bytes": len(payload),
+            "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
+            "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
+            "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
+            "selected_artifact_duration": int(artifact.get("selected_artifact_duration") or 0),
+        })
+        if current_job.get("internal_job_id"):
+            save_engine_async_job(current_job)
     audio_file = video_dubbing_output_file(payload, "toan_aas_music.mp3")
     caption = "🎵 File nhạc TOAN AAS"
     try:
@@ -94326,6 +94684,8 @@ async def send_music_product_audio_result(
             current_result["music_delivery_lock"] = ""
             save_music_guided_result(user_id, current_result)
             if current_job:
+                current_job["music_delivery_lock"] = ""
+                current_job["music_result_delivery_lock"] = ""
                 record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
             return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180)}
 
@@ -94348,6 +94708,20 @@ async def send_music_product_audio_result(
             current_job["terminal_state"] = "delivered"
             current_job["delivery_state"] = "delivered"
             current_job = record_music_job_full_send(current_job, sent_message, payload, result={**current_result, "music_result_duration_seconds": actual_duration}, updated_by=updated_by or user_id)
+            current_job.update({
+                "terminal_locked_at": now_text(),
+                "music_terminal_locked_at": now_text(),
+                "music_delivery_path": source_token,
+                "delivery_source_first": str(current_job.get("delivery_source_first") or source_token),
+                "music_artifact_id": str(artifact.get("selected_artifact_id") or ""),
+                "music_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
+                "music_artifact_duration": actual_duration,
+                "music_artifact_url": str(artifact.get("selected_artifact_url") or ""),
+                "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
+                "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
+                "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
+                "selected_artifact_duration": actual_duration,
+            })
             vault_entry = get_music_vault_entry(str(current_job.get("vault_id") or "")) if current_job.get("vault_id") else {}
             if current_job.get("internal_job_id"):
                 save_engine_async_job(current_job)
@@ -94394,6 +94768,20 @@ async def send_music_product_audio_result(
             "music_charge_amount_xu": charged,
             "music_charged_at": delivered_at if charge_result.get("ok") else "",
             "music_vault_id": str(vault_entry.get("vault_id") or current_job.get("vault_id") or current_result.get("music_vault_id") or ""),
+            "music_terminal_state": "delivered",
+            "terminal_state": "delivered",
+            "terminal_locked_at": delivered_at,
+            "music_terminal_locked_at": delivered_at,
+            "music_delivery_path": source_token,
+            "delivery_source_first": str(current_result.get("delivery_source_first") or source_token),
+            "music_artifact_id": str(artifact.get("selected_artifact_id") or ""),
+            "music_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
+            "music_artifact_duration": actual_duration,
+            "music_artifact_url": str(artifact.get("selected_artifact_url") or ""),
+            "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
+            "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
+            "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
+            "selected_artifact_duration": actual_duration,
         })
         if current_job.get("internal_job_id"):
             current_result["music_job_id"] = str(current_job.get("internal_job_id") or "")
@@ -94431,8 +94819,9 @@ async def send_music_product_audio_result(
                         save_engine_async_job(current_job)
         save_music_guided_result(user_id, current_result)
         return {
-            "ok": bool(charge_result.get("ok")),
+            "ok": True,
             "status": "SENT" if charge_result.get("ok") else "SENT_CHARGE_PENDING",
+            "charge_ok": bool(charge_result.get("ok")),
             "charged_xu": charged,
             "result": current_result,
             "job": current_job,
@@ -94442,6 +94831,34 @@ async def send_music_product_audio_result(
         }
     finally:
         MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS.discard(lock_key)
+
+async def send_music_product_audio_result(
+    message,
+    context,
+    *,
+    user_id,
+    lang: str,
+    product_context: str,
+    result: dict,
+    audio_bytes: bytes | bytearray,
+    job: dict | None = None,
+    updated_by="",
+    send_success_message: bool = False,
+    source: str = "compat",
+) -> dict:
+    return await deliver_music_result_once(
+        message,
+        context,
+        user_id=user_id,
+        lang=lang,
+        product_context=product_context,
+        result=result,
+        audio_bytes=audio_bytes,
+        job=job,
+        updated_by=updated_by,
+        send_success_message=send_success_message,
+        source=source,
+    )
 
 async def music_product_auto_deliver_job(query, context, *, user_id, lang: str, product_context: str, result: dict, internal_job_id: str) -> dict:
     current = dict(result or {})
@@ -94470,6 +94887,8 @@ async def music_product_auto_deliver_job(query, context, *, user_id, lang: str, 
             audio_bytes=audio_bytes,
             job=job_snapshot,
             updated_by=user_id,
+            send_success_message=True,
+            source="provider_poll",
         )
         return {**delivered, "polled": polled_job}
     return {"ok": False, "status": str(polled_job.get("status") or "PROCESSING"), "job": job_snapshot, "polled": polled_job}
@@ -97588,13 +98007,11 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
             audio_bytes=bytes(music_audio),
             job={},
             updated_by=user_id,
+            send_success_message=True,
+            source="confirm_immediate",
         )
         if delivered.get("ok"):
-            return await query.message.reply_text(
-                music_product_success_text(delivered.get("result") or current, int(delivered.get("charged_xu") or 0), lang),
-                parse_mode="HTML",
-                reply_markup=music_product_success_keyboard(lang, ctx),
-            )
+            return delivered
         return await query.message.reply_text(
             "⚠️ File nhạc đã tạo xong nhưng chưa gửi hoặc chưa xác nhận được thanh toán. TOAN AAS chưa trừ thêm Xu.",
             reply_markup=music_ai_status_keyboard(lang, ctx),
@@ -97634,12 +98051,7 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
         internal_job_id=str(music_job.get("internal_job_id") or ""),
     )
     if auto.get("ok"):
-        delivered_result = dict(auto.get("result") or get_music_guided_result(user_id) or current)
-        return await query.message.reply_text(
-            music_product_success_text(delivered_result, int(auto.get("charged_xu") or 0), lang),
-            parse_mode="HTML",
-            reply_markup=music_product_success_keyboard(lang, ctx),
-        )
+        return auto
     product_type = music_product_progress_type(current)
     internal_job_id = str(music_job.get("internal_job_id") or "")
     return await send_product_progress_message(
@@ -99348,27 +99760,25 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
             try:
                 with open(storage_ref, "rb") as handle:
                     audio_bytes = handle.read()
-                audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_music.mp3")
-                sent_message = await query.message.reply_audio(
-                    audio=audio_file,
-                    filename="toan_aas_music.mp3",
-                    caption=f"✅ Đã dùng bản đầy đủ từ kho nhạc: {music_confirm_product_label(result, lang)}.",
+                delivered = await send_music_product_audio_result(
+                    query.message,
+                    context,
+                    user_id=user_id,
+                    lang=lang,
+                    product_context=ctx,
+                    result={**result, "music_charged_xu": charged, "music_vault_id": vault_id},
+                    audio_bytes=audio_bytes,
+                    job={},
+                    updated_by=user_id,
+                    send_success_message=True,
+                    source="vault_confirm",
                 )
-                mark_music_vault_status(vault_id, "used", updated_by=user_id)
-                result.update({
-                    "music_status": "completed",
-                    "music_charged_xu": charged,
-                    "music_refunded": False,
-                    "music_completed_at": now_text(),
-                    "music_full_sent_at": now_text(),
-                    "music_output_file_id": str(getattr(getattr(sent_message, "audio", None), "file_id", "") or ""),
-                    "music_output_sha256": music_audio_sha256(audio_bytes),
-                    "music_vault_id": vault_id,
-                })
-                save_music_guided_result(user_id, result)
+                if delivered.get("ok"):
+                    mark_music_vault_status(vault_id, "used", updated_by=user_id)
+                    return delivered
                 return await query.message.reply_text(
-                    f"✅ Đã gửi bản nhạc đầy đủ từ kho phía trên. Đã trừ: {charged} Xu.",
-                    reply_markup=music_hub_keyboard(lang, ctx),
+                    "⚠️ Bản đầy đủ đã có trong kho nhưng Telegram chưa gửi được file. TOAN AAS chưa trừ thêm Xu.",
+                    reply_markup=music_ai_preview_keyboard(lang, ctx, preview_seen=True, result=result),
                 )
             except Exception as exc:
                 refund_charged_credit(user_id, charged, event_type="music_vault_delivery_refund", note="music vault delivery failed", was_charged=charged > 0)
@@ -99423,38 +99833,24 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         if music_audio:
             if result.get("music_full_sent_at"):
                 return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
-            vault_entry = upsert_music_vault_from_output(
-                audio_bytes=bytes(music_audio),
+            delivered = await send_music_product_audio_result(
+                query.message,
+                context,
+                user_id=user_id,
+                lang=lang,
+                product_context=ctx,
                 result=result,
-                job={
-                    "provider": str(submitted.get("provider") or ""),
-                    "provider_task_id": music_task_id,
-                    "user_id": str(user_id),
-                    "chat_id": str(query.message.chat_id),
-                },
-                status="used",
+                audio_bytes=bytes(music_audio),
+                job={},
                 updated_by=user_id,
+                send_success_message=True,
+                source="legacy_confirm_immediate",
             )
-            audio_file = video_dubbing_output_file(bytes(music_audio), "toan_aas_music.mp3")
-            sent_message = await query.message.reply_audio(
-                audio=audio_file,
-                filename="toan_aas_music.mp3",
-                caption=f"✅ Đã tạo {music_confirm_product_label(result, lang)}.",
-            )
-            result.update({
-                "music_status": "completed",
-                "music_charged_xu": charged,
-                "music_refunded": False,
-                "music_completed_at": now_text(),
-                "music_full_sent_at": now_text(),
-                "music_output_file_id": str(getattr(getattr(sent_message, "audio", None), "file_id", "") or ""),
-                "music_output_sha256": music_audio_sha256(music_audio),
-                "music_vault_id": str(vault_entry.get("vault_id") or ""),
-            })
-            save_music_guided_result(user_id, result)
+            if delivered.get("ok"):
+                return delivered
             return await query.message.reply_text(
-                f"✅ Đã gửi {music_confirm_product_label(result, lang)} phía trên. Đã trừ: {charged} Xu.",
-                reply_markup=music_hub_keyboard(lang, ctx),
+                "⚠️ File nhạc đã tạo xong nhưng chưa gửi được. TOAN AAS chưa trừ thêm Xu.",
+                reply_markup=music_ai_status_keyboard(lang, ctx),
             )
         music_job = create_music_suno_async_job(
             user_id=user_id,
@@ -99494,8 +99890,7 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
         result = get_music_guided_result(user_id) or {}
         if music_product_result_is_3tier(result) and (result.get("music_result_delivered_at") or result.get("music_full_sent_at")):
             return await query.message.reply_text(
-                music_product_success_text(result, int(result.get("music_charged_xu") or result.get("music_charge_amount_xu") or 0), lang),
-                parse_mode="HTML",
+                "✅ Đã gửi file nhạc trong tin nhắn phía trên.",
                 reply_markup=music_product_success_keyboard(lang, ctx),
             )
         if not result.get("music_task_id"):
@@ -99536,30 +99931,28 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                         audio_bytes=audio_bytes,
                         job=job_snapshot,
                         updated_by=user_id,
+                        send_success_message=True,
+                        source="legacy_check_result",
                     )
                     if delivered.get("ok"):
-                        return await query.message.reply_text(
-                            music_product_success_text(delivered.get("result") or result, int(delivered.get("charged_xu") or 0), lang),
-                            parse_mode="HTML",
-                            reply_markup=music_product_success_keyboard(lang, ctx),
-                        )
+                        return delivered
                     return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
-                if music_job_full_already_sent(job_snapshot, audio_bytes):
-                    return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
-                try:
-                    audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_music.mp3")
-                    sent_message = await context.bot.send_audio(
-                        chat_id=query.message.chat_id,
-                        audio=audio_file,
-                        filename="toan_aas_music.mp3",
-                        caption=f"✅ Bản nhạc đầy đủ {music_result_duration_seconds(result)} giây của TOAN AAS.",
-                    )
-                    record_music_job_full_send(job_snapshot, sent_message, audio_bytes, result=result, updated_by=user_id)
-                except Exception as exc:
-                    logger.warning("music output send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
-                    record_music_job_full_send_error(job_snapshot, str(exc), updated_by=user_id)
-                    return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
-                return await query.message.reply_text("✅ Đã gửi bản nhạc đầy đủ phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
+                delivered = await send_music_product_audio_result(
+                    query.message,
+                    context,
+                    user_id=user_id,
+                    lang=lang,
+                    product_context=ctx,
+                    result=result,
+                    audio_bytes=audio_bytes,
+                    job=job_snapshot,
+                    updated_by=user_id,
+                    send_success_message=True,
+                    source="legacy_check_result",
+                )
+                if delivered.get("ok"):
+                    return delivered
+                return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
             job_status = str((job_snapshot or {}).get("status") or "").lower()
             if job_status == "failed":
                 charged = int(result.get("music_charged_xu") or 0)
@@ -99622,47 +100015,28 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                     audio_bytes=audio_bytes,
                     job={},
                     updated_by=user_id,
+                    send_success_message=True,
+                    source="legacy_check_result",
                 )
                 if delivered.get("ok"):
-                    return await query.message.reply_text(
-                        music_product_success_text(delivered.get("result") or result, int(delivered.get("charged_xu") or 0), lang),
-                        parse_mode="HTML",
-                        reply_markup=music_product_success_keyboard(lang, ctx),
-                    )
+                    return delivered
                 return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
-            if result.get("music_full_sent_at"):
-                return await query.message.reply_text("✅ Đã gửi bản nhạc phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
-            vault_entry = upsert_music_vault_from_output(
-                audio_bytes=audio_bytes,
+            delivered = await send_music_product_audio_result(
+                query.message,
+                context,
+                user_id=user_id,
+                lang=lang,
+                product_context=ctx,
                 result=result,
-                job={
-                    "provider": str(result.get("music_provider") or ""),
-                    "provider_task_id": str(result.get("music_task_id") or ""),
-                    "user_id": str(user_id),
-                    "chat_id": str(query.message.chat_id),
-                },
-                status="used",
+                audio_bytes=audio_bytes,
+                job={},
                 updated_by=user_id,
+                send_success_message=True,
+                source="legacy_check_result",
             )
-            try:
-                audio_file = video_dubbing_output_file(audio_bytes, "toan_aas_music.mp3")
-                sent_message = await context.bot.send_audio(
-                    chat_id=query.message.chat_id,
-                    audio=audio_file,
-                    filename="toan_aas_music.mp3",
-                    caption=f"✅ Bản nhạc đầy đủ {music_result_duration_seconds(result)} giây của TOAN AAS.",
-                )
-                result.update({
-                    "music_full_sent_at": now_text(),
-                    "music_output_file_id": str(getattr(getattr(sent_message, "audio", None), "file_id", "") or ""),
-                    "music_output_sha256": music_audio_sha256(audio_bytes),
-                    "music_vault_id": str(vault_entry.get("vault_id") or ""),
-                })
-                save_music_guided_result(user_id, result)
-            except Exception as exc:
-                logger.warning("music output send failed | user=%s | %s", user_id, sanitize_log_text(str(exc))[:220])
-                return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
-            return await query.message.reply_text("✅ Đã gửi bản nhạc đầy đủ phía trên.", reply_markup=music_hub_keyboard(lang, ctx))
+            if delivered.get("ok"):
+                return delivered
+            return await query.message.reply_text("⚠️ Nhạc đã xử lý xong nhưng Telegram chưa gửi được file. Bạn bấm kiểm tra lại sau.", reply_markup=music_ai_status_keyboard(lang, ctx))
         status = str(polled.get("status") or "").lower()
         if is_admin_user(user_id) and (
             str(polled.get("status") or "").upper() in {"PASS", "SUCCESS", "COMPLETED", "COMPLETE", "DONE", "PASS_FULL_RESULT", "MISSING_STATUS_ROUTE"}
