@@ -5353,11 +5353,16 @@ def normalize_engine_async_job(job: dict) -> dict:
     provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or "").strip()
     output_bytes = int(current.get("output_bytes") or 0)
     status = str(current.get("status") or ("completed" if output_bytes > 0 else "submitted")).strip().lower()
+    music_pending_submit_without_provider = (
+        feature == "music_suno"
+        and status in {"pending_submit", "submitting"}
+        and str(current.get("confirm_submit_phase") or "").strip()
+    )
     failed_terminal_without_provider = (
         status in {"failed", "failed_no_charge", "failed_refunded", "needs_admin_review"}
         or any(token in status for token in ("fail", "error", "cancel"))
     )
-    if not provider_task_id and output_bytes <= 0 and not failed_terminal_without_provider:
+    if not provider_task_id and output_bytes <= 0 and not failed_terminal_without_provider and not music_pending_submit_without_provider:
         raise ValueError("engine async job requires provider_task_id or output_bytes")
     now = now_text()
     current.setdefault("created_at", now)
@@ -5415,6 +5420,87 @@ def get_engine_async_job(internal_job_id: str) -> dict:
         return value if isinstance(value, dict) else {}
     except Exception:
         return {}
+
+MUSIC_CONFIRM_SUBMIT_BLOCKERS = {
+    "confirm_state_missing",
+    "provider_submit_not_called",
+    "provider_submit_failed",
+    "provider_job_id_missing_after_submit",
+    "job_persist_failed",
+    "scheduler_start_failed",
+    "auto_tick_exception",
+}
+
+def music_confirm_submit_public_failure_text(lang: str = "vi") -> str:
+    return "⚠️ Chưa gửi được yêu cầu tạo nhạc. TOAN AAS chưa xử lý. Hệ thống chưa trừ Xu. Vui lòng thử lại sau."
+
+def music_confirm_submit_blocker_text(blocker: str = "") -> str:
+    normalized = str(blocker or "").strip() or "provider_submit_failed"
+    if normalized == "scheduler_start_failed":
+        return "Đã nhận job nhạc nhưng chưa bật được tự cập nhật. TOAN AAS chưa trừ Xu cho tới khi file gửi thành công."
+    if normalized == "auto_tick_exception":
+        return "Tự cập nhật job nhạc gặp lỗi. TOAN AAS chưa trừ Xu cho tới khi file gửi thành công."
+    return "Chưa gửi được yêu cầu tạo nhạc. TOAN AAS chưa xử lý và chưa trừ Xu."
+
+def mark_music_confirm_submit_blocker(
+    job: dict | None,
+    blocker: str,
+    detail: str = "",
+    *,
+    updated_by="",
+    persist: bool = True,
+) -> dict:
+    current = dict(job or {})
+    job_id = str(current.get("internal_job_id") or "").strip()
+    if not job_id:
+        job_id = engine_async_job_id("music_suno", current.get("user_id") or updated_by)
+        current["internal_job_id"] = job_id
+    normalized = str(blocker or "").strip() or "provider_submit_failed"
+    if normalized not in MUSIC_CONFIRM_SUBMIT_BLOCKERS:
+        normalized = "provider_submit_failed"
+    safe_detail = sanitize_provider_status_text(detail or normalized, str(current.get("provider_task_id") or current.get("provider_job_id") or ""), 240)
+    now = now_text()
+    current.update({
+        "feature": str(current.get("feature") or "music_suno"),
+        "status": "failed",
+        "terminal_state": "failed_no_charge",
+        "music_terminal_state": "failed_no_charge",
+        "error_category": normalized,
+        "confirm_submit_blocker": normalized,
+        "auto_delivery_blocker": normalized,
+        "progress_percent": max(15, int(current.get("progress_percent") or 15)),
+        "progress_text": music_confirm_submit_blocker_text(normalized),
+        "last_provider_status": safe_detail,
+        "pending_charge_xu": 0,
+        "music_charged_xu": 0,
+        "music_refunded": False,
+        "submit_failed_at": now,
+        "confirm_submit_failed_at": now,
+    })
+    if not persist:
+        ENGINE_ASYNC_MEMORY_JOBS[job_id] = dict(current)
+        return current
+    try:
+        return save_engine_async_job(current)
+    except Exception as exc:
+        current.update({
+            "error_category": "job_persist_failed",
+            "confirm_submit_blocker": "job_persist_failed",
+            "auto_delivery_blocker": "job_persist_failed",
+            "last_provider_status": sanitize_provider_status_text(str(exc), "", 240),
+            "submit_failed_at": now_text(),
+            "confirm_submit_failed_at": now_text(),
+        })
+        ENGINE_ASYNC_MEMORY_JOBS[job_id] = dict(current)
+        return current
+
+def music_confirm_submit_blocker_from_job(job: dict | None = None) -> str:
+    current = dict(job or {})
+    for key in ("confirm_submit_blocker", "auto_delivery_blocker", "error_category"):
+        value = str(current.get(key) or "").strip()
+        if value in MUSIC_CONFIRM_SUBMIT_BLOCKERS:
+            return value
+    return ""
 
 def list_engine_async_jobs(feature: str = "", user_id="", limit: int = 5, active_only: bool = False) -> list[dict]:
     if user_id and feature:
@@ -6209,7 +6295,24 @@ def progress_auto_refresh_register(
     }
     PROGRESS_AUTO_REFRESH_JOBS[key] = record
     if start_task:
-        progress_auto_refresh_start_task(context, key)
+        started = False
+        try:
+            started = progress_auto_refresh_start_task(context, key)
+        except Exception as exc:
+            record["scheduler_error"] = sanitize_provider_status_text(str(exc), "", 180)
+        if not started:
+            record.update({
+                "task_started": False,
+                "task_alive": False,
+                "scheduler_mode": "scheduler_failed",
+                "stopped_reason": "scheduler_start_failed",
+                "stop_reason": str(record.get("stop_reason") or "scheduler_start_failed"),
+            })
+            if is_music_progress:
+                job = get_engine_async_job(job_id)
+                if job:
+                    mark_music_confirm_submit_blocker(job, "scheduler_start_failed", record.get("scheduler_error") or "scheduler_start_failed", updated_by=user_id)
+        PROGRESS_AUTO_REFRESH_JOBS[key] = record
     return dict(record)
 
 
@@ -6275,7 +6378,27 @@ async def progress_auto_refresh_loop(context, key: str):
             first_tick = False
         else:
             await asyncio.sleep(int(record.get("interval_seconds") or PROGRESS_AUTO_REFRESH_INTERVAL_SECONDS))
-        result = await progress_auto_refresh_tick(context, key)
+        try:
+            result = await progress_auto_refresh_tick(context, key)
+        except Exception as exc:
+            record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(str(key or "")) or record)
+            record.update({
+                "task_alive": False,
+                "stopped": True,
+                "stop_reason": "auto_tick_exception",
+                "stopped_reason": "auto_tick_exception",
+                "last_tick_at": now_text(),
+                "auto_tick_error": sanitize_provider_status_text(str(exc), "", 180),
+            })
+            PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
+            product_type = str(record.get("product_type") or "")
+            job_id = str(record.get("job_id") or "")
+            if progress_product_type_is_music(product_type, job_id):
+                job = get_engine_async_job(job_id)
+                if job:
+                    mark_music_confirm_submit_blocker(job, "auto_tick_exception", str(exc), updated_by=record.get("user_id") or "")
+            logger.warning("progress auto refresh tick failed | key=%s | %s", sanitize_log_text(str(key or ""))[:120], sanitize_log_text(str(exc))[:220])
+            return
         if str(result.get("status") or "") in {"missing", "stopped"}:
             return
 
@@ -6287,6 +6410,8 @@ async def music_progress_refresh_job_status(job_id: str = "", *, user_id=0, allo
         return {}
     current = dict(job)
     if music_job_delivered(current) or music_job_terminal_failed(current):
+        return current
+    if str(current.get("status") or "").strip().lower() in {"pending_submit", "submitting"}:
         return current
     provider_task_id = music_job_provider_task_id(current)
     output_bytes = int(current.get("output_bytes") or 0)
@@ -6533,6 +6658,7 @@ def progress_auto_refresh_status_text(job_id: str = "") -> str:
             f"• current_percent/stage: <code>{int(record.get('percent') or 0)}% / {html.escape(str(record.get('current_stage') or '-'))}</code>",
             f"• edit_success/fail: <code>{int(record.get('edit_success_count') or 0)}/{int(record.get('edit_fail_count') or 0)}</code>",
             f"• fallback_used: <code>{'yes' if record.get('fallback_used') else 'no'}</code>",
+            f"• stopped_reason: <code>{html.escape(str(record.get('stopped_reason') or record.get('stop_reason') or '-'))}</code>",
             f"• stopped: <code>{'yes' if record.get('stopped') else 'no'} {html.escape(str(record.get('stop_reason') or ''))}</code>",
             "",
         ])
@@ -6606,8 +6732,11 @@ def music_job_debug_text(job_id: str = "") -> str:
     status = str((job or {}).get("status") or "missing")
     terminal = str(state.get("terminal_state") or "")
     blocker = ""
+    confirm_submit_blocker = music_confirm_submit_blocker_from_job(job)
     if not job:
         blocker = "missing_job"
+    elif confirm_submit_blocker:
+        blocker = confirm_submit_blocker
     elif terminal == "failed_no_charge":
         blocker = str((job or {}).get("error_category") or "failed")
     elif not provider_task_id and output_bytes <= 0:
@@ -6642,6 +6771,7 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• success_message_id: <code>{html.escape(str((job or {}).get('music_success_message_id') or (job or {}).get('success_message_id') or '-'))}</code>\n"
         f"• terminal_state: <code>{html.escape(terminal or '-')}</code>\n"
         f"• terminal_locked_at: <code>{html.escape(str((job or {}).get('music_terminal_locked_at') or (job or {}).get('terminal_locked_at') or '-'))}</code>\n"
+        f"• confirm_submit_phase: <code>{html.escape(str((job or {}).get('confirm_submit_phase') or '-'))}</code>\n"
         f"• blocker: <code>{html.escape(blocker or '-')}</code>\n"
         f"• duplicate_guard_state: <code>{html.escape(duplicate_guard)}</code>"
     )
@@ -40236,10 +40366,12 @@ def completed_video_job_for_callback_error(update: object) -> dict | None:
     return job
 
 def completed_music_job_for_callback_error(update: object) -> dict | None:
-    if not isinstance(update, Update) or not update.callback_query:
+    query = getattr(update, "callback_query", None)
+    if not query:
         return None
-    callback_data = str(update.callback_query.data or "").strip()
-    user_id = update.effective_user.id if update.effective_user else 0
+    callback_data = str(getattr(query, "data", "") or "").strip()
+    effective_user = getattr(update, "effective_user", None)
+    user_id = effective_user.id if effective_user else 0
     job_ids: list[str] = []
     if callback_data.startswith("progress|status|"):
         parts = callback_data.split("|")
@@ -40254,6 +40386,8 @@ def completed_music_job_for_callback_error(update: object) -> dict | None:
             guided = {}
         if music_delivery_should_suppress_public_fail(guided, {}):
             return guided
+        if music_confirm_submit_blocker_from_job(guided):
+            return guided
         for key in ("music_internal_job_id", "music_job_id"):
             value = str(guided.get(key) or "").strip()
             if value:
@@ -40264,7 +40398,7 @@ def completed_music_job_for_callback_error(update: object) -> dict | None:
             continue
         if user_id and str(job.get("user_id") or "") not in {"", str(user_id)}:
             continue
-        if music_delivery_should_suppress_public_fail({}, job):
+        if music_delivery_should_suppress_public_fail({}, job) or music_confirm_submit_blocker_from_job(job):
             return job
     return None
 
@@ -74563,9 +74697,10 @@ async def on_telegram_error(update: object, context: ContextTypes.DEFAULT_TYPE):
 
     if completed_music_job:
         logger.warning(
-            "suppressed public error after delivered music output | job_id=%s | callback=%s",
+            "suppressed public error after terminal music callback | job_id=%s | callback=%s | blocker=%s",
             sanitize_log_text(str(completed_music_job.get("internal_job_id") or completed_music_job.get("music_internal_job_id") or ""))[:80],
             sanitize_log_text(callback_data)[:120],
+            sanitize_log_text(music_confirm_submit_blocker_from_job(completed_music_job) or music_job_delivery_state(completed_music_job))[:120],
         )
         return
 
@@ -94860,6 +94995,110 @@ def create_music_suno_async_job(
     })
     return job
 
+def create_music_pending_submit_job(
+    *,
+    user_id,
+    chat_id,
+    result: dict | None = None,
+    admin_test: bool = False,
+) -> dict:
+    payload = dict(result or {})
+    product_type = music_product_progress_type(payload)
+    internal_job_id = engine_async_job_id("music_suno", user_id)
+    pending = {
+        "feature": "music_suno",
+        "internal_job_id": internal_job_id,
+        "user_id": str(user_id or ""),
+        "chat_id": str(chat_id or ""),
+        "provider": "",
+        "provider_task_id": "",
+        "provider_job_id": "",
+        "status": "pending_submit",
+        "product_type": product_type,
+        "music_product_type": product_type,
+        "progress_percent": 5,
+        "progress_text": "Đã nhận xác nhận tạo nhạc, đang gửi yêu cầu xử lý.",
+        "last_provider_status": "provider_submit_not_called",
+        "error_category": "",
+        "confirm_submit_phase": "job_persisted_before_provider_submit",
+        "confirm_submit_blocker": "provider_submit_not_called",
+        "provider_submit_called": False,
+        "provider_submit_attempt_count": 0,
+        "output_bytes": 0,
+        "charged_xu": 0,
+        "pending_charge_xu": int(music_result_price_xu(payload) if music_product_result_is_3tier(payload) else 0),
+        "admin_test": bool(admin_test),
+        "product_kind": music_result_product_kind(payload),
+        "music_product_flow": str(payload.get("music_product_flow") or ""),
+        "music_product_tier": str(payload.get("music_product_tier") or ""),
+        "music_product_mode": str(payload.get("music_product_mode") or ""),
+        "song_vocal": str(payload.get("song_vocal") or payload.get("vocal_mode") or ""),
+        "provider_metadata": dict(payload.get("provider_metadata") or {}),
+        "duration_seconds": music_result_duration_seconds(payload) if payload else 0,
+        "preview_seconds": music_preview_seconds(),
+        "preview_start_seconds": music_preview_start_seconds(),
+        "category": music_vault_category_for_result(payload),
+        "prompt_summary": music_prompt_selection_summary(payload),
+        "safe_prompt": music_vault_safe_prompt(payload),
+        "provider_prompt_sha256": hashlib.sha256(music_provider_prompt_for_result(payload).encode("utf-8")).hexdigest() if payload else "",
+        "sent_preview_at": "",
+        "sent_full_at": "",
+        "output_file_id": "",
+        "output_sha256": "",
+        "send_attempt_count": 0,
+        "last_send_error": "",
+        "vault_id": "",
+        "created_before_provider_submit": True,
+    }
+    try:
+        return save_engine_async_job(pending)
+    except Exception as exc:
+        pending["persist_error"] = sanitize_provider_status_text(str(exc), "", 240)
+        return mark_music_confirm_submit_blocker(pending, "job_persist_failed", str(exc), updated_by=user_id, persist=False)
+
+def update_music_submit_job_provider_started(job: dict | None, *, updated_by="") -> dict:
+    current = dict(job or {})
+    current.update({
+        "status": "submitting",
+        "provider_submit_called": True,
+        "provider_submit_called_at": now_text(),
+        "provider_submit_attempt_count": int(current.get("provider_submit_attempt_count") or 0) + 1,
+        "last_provider_status": "provider_submit_called",
+        "confirm_submit_phase": "provider_submit_called",
+        "confirm_submit_blocker": "",
+        "progress_percent": max(8, int(current.get("progress_percent") or 8)),
+    })
+    return save_engine_async_job(current)
+
+def update_music_submit_job_provider_accepted(
+    job: dict | None,
+    submitted: dict | None = None,
+    *,
+    updated_by="",
+) -> dict:
+    current = dict(job or {})
+    payload = dict(submitted or {})
+    task_id = str(payload.get("task_id") or payload.get("provider_task_id") or payload.get("provider_job_id") or "").strip()
+    provider = str(payload.get("provider") or current.get("provider") or "").strip()
+    if not task_id:
+        return mark_music_confirm_submit_blocker(current, "provider_job_id_missing_after_submit", payload.get("detail") or payload.get("status") or "", updated_by=updated_by)
+    current.update({
+        "provider": provider,
+        "provider_task_id": task_id,
+        "provider_job_id": task_id,
+        "status": "submitted",
+        "last_provider_status": sanitize_provider_status_text(payload.get("status") or "PASS_SUBMITTED", task_id, 180),
+        "progress_text": "Đã gửi yêu cầu tạo nhạc tới provider.",
+        "progress_percent": max(12, int(current.get("progress_percent") or 12)),
+        "confirm_submit_phase": "provider_job_id_saved",
+        "confirm_submit_blocker": "",
+        "auto_delivery_blocker": "",
+        "provider_submit_ok_at": now_text(),
+        "selected_model_key": str(payload.get("selected_model_key") or current.get("selected_model_key") or ""),
+        "pending_charge_xu": int(current.get("pending_charge_xu") or 0),
+    })
+    return save_engine_async_job(current)
+
 def music_suno_poll_state_from_job(job: dict) -> dict:
     return {
         "music_provider": str((job or {}).get("provider") or ""),
@@ -94912,12 +95151,15 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         return {"ok": True, "status": "ALREADY_DELIVERED", "job": job, "audio_bytes": b""}
     if music_job_terminal_failed(job):
         return {"ok": False, "status": "TERMINAL_FAILED", "job": job, "audio_bytes": b""}
+    if str(job.get("status") or "").strip().lower() in {"pending_submit", "submitting"}:
+        return {"ok": False, "status": "PROVIDER_SUBMIT_NOT_READY", "job": job, "audio_bytes": b""}
     if not str(job.get("provider_task_id") or "").strip():
         job.update({
             "status": "failed",
             "terminal_state": "failed_no_charge",
             "music_terminal_state": "failed_no_charge",
-            "error_category": "provider_job_missing",
+            "error_category": music_confirm_submit_blocker_from_job(job) or "provider_job_missing",
+            "confirm_submit_blocker": music_confirm_submit_blocker_from_job(job) or str(job.get("confirm_submit_blocker") or ""),
             "progress_text": "Không có provider task id thật; không tạo fake processing.",
         })
         save_engine_async_job(job)
@@ -98809,30 +99051,60 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
             "✅ Đã gửi file nhạc phía trên.",
             reply_markup=music_product_success_keyboard(lang, ctx),
         )
-    engine_result = await execute_engine(
-        feature,
-        {"result": current, "preview": False, "state": current},
-        {
-            "user_id": user_id,
-            "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
-            "confirm_paid": True,
-            "admin_interactive_confirm": True,
-            "is_paid_job": True,
-            "admin_smoke": bool(is_admin_user(user_id)),
-            "updated_by": user_id,
-        },
+    music_job = create_music_pending_submit_job(
+        user_id=user_id,
+        chat_id=query.message.chat_id,
+        result=current,
+        admin_test=bool(is_admin_user(user_id)),
     )
+    internal_job_id = str(music_job.get("internal_job_id") or "")
+    current.update({
+        "music_internal_job_id": internal_job_id,
+        "music_job_id": internal_job_id,
+        "music_status": "pending_submit",
+        "music_pending_charge_xu": price,
+        "music_charged_xu": 0,
+        "music_refunded": False,
+        "music_confirmed_at": now_text(),
+    })
+    save_music_guided_result(user_id, current)
+    if music_confirm_submit_blocker_from_job(music_job) == "job_persist_failed":
+        return await query.message.reply_text(
+            music_confirm_submit_public_failure_text(lang),
+            reply_markup=music_product_invoice_keyboard(current, lang, ctx),
+        )
+    try:
+        music_job = update_music_submit_job_provider_started(music_job, updated_by=user_id)
+        engine_result = await execute_engine(
+            feature,
+            {"result": current, "preview": False, "state": current},
+            {
+                "user_id": user_id,
+                "entry_source": ENGINE_ENTRY_SOURCE_PRODUCT,
+                "confirm_paid": True,
+                "admin_interactive_confirm": True,
+                "is_paid_job": True,
+                "admin_smoke": bool(is_admin_user(user_id)),
+                "updated_by": user_id,
+            },
+        )
+    except Exception as exc:
+        logger.warning("music product submit exception | user=%s | job=%s | %s", user_id, sanitize_log_text(internal_job_id)[:80], sanitize_log_text(str(exc))[:220])
+        music_job = mark_music_confirm_submit_blocker(music_job, "provider_submit_failed", str(exc), updated_by=user_id)
+        current.update({"music_status": "provider_submit_failed", "music_pending_charge_xu": 0, "music_charged_xu": 0, "music_refunded": False})
+        save_music_guided_result(user_id, current)
+        return await query.message.reply_text(
+            music_confirm_submit_public_failure_text(lang),
+            reply_markup=music_product_invoice_keyboard(current, lang, ctx),
+        )
     submitted = dict(engine_result.get("provider_result") or {})
     if not engine_result.get("ok"):
-        logger.warning("music product submit failed | user=%s | %s", user_id, sanitize_log_text(str(engine_result.get("detail") or engine_result.get("status")))[:220])
-        if is_admin_user(user_id):
-            return await query.message.reply_text(
-                engine_result.get("message") or "⚙️ Chưa tạo được nhạc thật. TOAN AAS chưa trừ Xu.",
-                parse_mode="HTML",
-                reply_markup=music_product_invoice_keyboard(current, lang, ctx),
-            )
+        logger.warning("music product submit failed | user=%s | job=%s | %s", user_id, sanitize_log_text(internal_job_id)[:80], sanitize_log_text(str(engine_result.get("detail") or engine_result.get("status")))[:220])
+        music_job = mark_music_confirm_submit_blocker(music_job, "provider_submit_failed", engine_result.get("detail") or engine_result.get("status") or "", updated_by=user_id)
+        current.update({"music_status": "provider_submit_failed", "music_pending_charge_xu": 0, "music_charged_xu": 0, "music_refunded": False})
+        save_music_guided_result(user_id, current)
         return await query.message.reply_text(
-            product_clean_no_charge_failure_text(lang),
+            music_confirm_submit_public_failure_text(lang),
             reply_markup=music_product_invoice_keyboard(current, lang, ctx),
         )
     music_task_id = music_provider_result_task_id(submitted) or str(engine_result.get("provider_task_id") or "")
@@ -98853,7 +99125,7 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
             product_context=ctx,
             result=current,
             audio_bytes=bytes(music_audio),
-            job={},
+            job=music_job,
             updated_by=user_id,
             send_success_message=True,
             source="confirm_immediate",
@@ -98865,22 +99137,23 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
             reply_markup=music_ai_status_keyboard(lang, ctx),
         )
     if not music_task_id:
+        music_job = mark_music_confirm_submit_blocker(music_job, "provider_job_id_missing_after_submit", submitted.get("detail") or engine_result.get("detail") or engine_result.get("status") or "", updated_by=user_id)
         current.update({"music_status": "provider_no_job", "music_pending_charge_xu": 0, "music_charged_xu": 0})
         save_music_guided_result(user_id, current)
         return await query.message.reply_text(
-            product_clean_no_charge_failure_text(lang),
+            music_confirm_submit_public_failure_text(lang),
             reply_markup=music_product_invoice_keyboard(current, lang, ctx),
         )
-    music_job = create_music_suno_async_job(
-        user_id=user_id,
-        chat_id=query.message.chat_id,
-        provider=str(submitted.get("provider") or ""),
-        task_id=music_task_id,
-        result=current,
-        status="submitted",
-        charged_xu=0,
-        admin_test=bool(is_admin_user(user_id)),
-    )
+    try:
+        music_job = update_music_submit_job_provider_accepted(music_job, submitted, updated_by=user_id)
+    except Exception as exc:
+        music_job = mark_music_confirm_submit_blocker(music_job, "job_persist_failed", str(exc), updated_by=user_id, persist=False)
+        current.update({"music_status": "job_persist_failed", "music_pending_charge_xu": 0, "music_charged_xu": 0})
+        save_music_guided_result(user_id, current)
+        return await query.message.reply_text(
+            music_confirm_submit_public_failure_text(lang),
+            reply_markup=music_product_invoice_keyboard(current, lang, ctx),
+        )
     current.update({
         "music_internal_job_id": str(music_job.get("internal_job_id") or ""),
         "music_job_id": str(music_job.get("internal_job_id") or ""),
@@ -98889,17 +99162,6 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
         "music_result_delivery_lock": "pending",
     })
     save_music_guided_result(user_id, current)
-    auto = await music_product_auto_deliver_job(
-        query,
-        context,
-        user_id=user_id,
-        lang=lang,
-        product_context=ctx,
-        result=current,
-        internal_job_id=str(music_job.get("internal_job_id") or ""),
-    )
-    if auto.get("ok"):
-        return auto
     product_type = music_product_progress_type(current)
     internal_job_id = str(music_job.get("internal_job_id") or "")
     return await send_product_progress_message(
