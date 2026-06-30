@@ -86,15 +86,15 @@ def test_video_menu_current_buttons_unchanged():
 
 def test_video_menu_each_button_routes_to_matching_flow():
     cases = [
-        ("vproduct|open|video_trend", "Video theo trend", ("vproduct|trend_today", "vproduct|trend_custom", "vproduct|trend_industry")),
+        ("vproduct|open|video_trend", "Video theo trend", ("vproduct|trend_today", "vproduct|trend_custom")),
         ("vproduct|open|video_idea", "Ý tưởng video", ("vproduct|idea_quick|video_idea", "vproduct|idea_industry|video_idea", "vproduct|input_text|video_idea")),
-        ("vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|storyboard_from_images|storyboard_prompt", "vproduct|storyboard_many_images|storyboard_prompt", "vproduct|storyboard_from_idea|storyboard_prompt")),
+        ("vproduct|open|storyboard_prompt", "Storyboard + Prompt", ("vproduct|storyboard_upload|storyboard_prompt", "vproduct|storyboard_suggest|storyboard_prompt", "vproduct|storyboard_manual|storyboard_prompt")),
         ("vpromptlib|start", "Kho prompt video", ("vpromptlib|idea", "vpromptlib|image")),
-        ("vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|input_text|video_ai_real", "vproduct|input_media|video_ai_real", "vproduct|entry_media|video_ai_real", "vproduct|suggest_prompt|video_ai_real")),
-        ("vproduct|open|script_image_video", "Kịch bản", ("vproduct|script_ideas|script_image_video", "vproduct|input_text|script_image_video", "vproduct|script_industry|script_image_video")),
-        ("vproduct|open|frame_video_local", "Ghép ảnh thành video", ("vproduct|legacy|frame_video_local", "vproduct|frame_recent|frame_video_local")),
+        ("vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|ai_prompt_menu|video_ai_real", "vproduct|ai_image_menu|video_ai_real", "vproduct|ai_video_menu|video_ai_real")),
+        ("vproduct|open|script_image_video", "Kịch bản", ("vproduct|script_existing|script_image_video", "vproduct|script_ideas|script_image_video", "vproduct|script_manual|script_image_video")),
+        ("vproduct|open|frame_video_local", "Ghép ảnh thành video", ("vproduct|frame_send_images|frame_video_local", "vproduct|frame_recent|frame_video_local")),
         ("vproduct|open|self_shot_scene_change", "Tự quay & đổi cảnh AI", ("vproduct|selfshot_source|upload", "vproduct|selfshot_source|recent")),
-        ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|ideas|multi_scene_film", "vproduct|input_text|multi_scene_film")),
+        ("vproduct|open|multi_scene_film", "Phim AI nhiều cảnh", ("vproduct|film_manual|multi_scene_film", "vproduct|film_story|multi_scene_film")),
         ("vdownload|start", "Tải video từ link", ()),
         ("vproduct|open|video_local_edit", "Chỉnh sửa video local", ("videoedit|color", "videoedit|crop")),
     ]
@@ -123,7 +123,7 @@ def test_video_trend_route():
         918801,
         "vproduct|open|video_trend",
         "Video theo trend",
-        ("vproduct|trend_today", "vproduct|trend_custom", "vproduct|trend_video_suggest"),
+        ("vproduct|trend_today", "vproduct|trend_custom"),
     )
 
 
@@ -141,7 +141,7 @@ def test_video_storyboard_prompt_route():
         918803,
         "vproduct|open|storyboard_prompt",
         "Storyboard + Prompt",
-        ("vproduct|storyboard_from_images|storyboard_prompt", "vproduct|storyboard_many_images|storyboard_prompt", "vproduct|storyboard_from_idea|storyboard_prompt"),
+        ("vproduct|storyboard_upload|storyboard_prompt", "vproduct|storyboard_suggest|storyboard_prompt", "vproduct|storyboard_manual|storyboard_prompt"),
     )
 
 
@@ -150,18 +150,18 @@ def test_video_prompt_library_route():
 
 
 def test_realistic_ai_video_route():
-    _assert_route(918805, "vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|input_text|video_ai_real", "vproduct|input_media|video_ai_real", "vproduct|entry_media|video_ai_real", "vproduct|suggest_prompt|video_ai_real", "vproduct|suggest_image|video_ai_real", "vproduct|suggest_video|video_ai_real"))
+    _assert_route(918805, "vproduct|open|video_ai_real", "Video AI chân thật", ("vproduct|ai_prompt_menu|video_ai_real", "vproduct|ai_image_menu|video_ai_real", "vproduct|ai_video_menu|video_ai_real"))
 
 
 def test_script_to_video_route():
-    _assert_route(918806, "vproduct|open|script_image_video", "Kịch bản", ("vproduct|script_ideas|script_image_video", "vproduct|input_text|script_image_video", "vproduct|script_industry|script_image_video"))
+    _assert_route(918806, "vproduct|open|script_image_video", "Kịch bản", ("vproduct|script_existing|script_image_video", "vproduct|script_ideas|script_image_video", "vproduct|script_manual|script_image_video"))
 
 
 def test_image_to_video_route():
-    text, callbacks = _assert_route(918807, "vproduct|open|frame_video_local", "Ghép ảnh thành video", ("vproduct|legacy|frame_video_local", "vproduct|frame_recent|frame_video_local"))
+    text, callbacks = _assert_route(918807, "vproduct|open|frame_video_local", "Ghép ảnh thành video", ("vproduct|frame_send_images|frame_video_local", "vproduct|frame_recent|frame_video_local"))
     assert "Local Worker" not in text
     assert "FFmpeg" not in text
-    assert "vproduct|legacy|frame_video_local" in callbacks
+    assert "vproduct|frame_send_images|frame_video_local" in callbacks
 
 
 def test_self_shot_scene_change_route():
@@ -173,7 +173,7 @@ def test_multiscene_video_route():
         918809,
         "vproduct|open|multi_scene_film",
         "Phim AI nhiều cảnh",
-        ("vproduct|ideas|multi_scene_film", "vproduct|input_text|multi_scene_film"),
+        ("vproduct|film_manual|multi_scene_film", "vproduct|film_story|multi_scene_film"),
     )
 
 

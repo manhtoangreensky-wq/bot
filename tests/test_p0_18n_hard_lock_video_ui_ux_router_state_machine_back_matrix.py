@@ -227,7 +227,7 @@ def test_script_to_video_scene_split_step():
 def test_script_to_video_back_matrix():
     user_id = 181811
     _open(user_id, "script_image_video")
-    _press(user_id, "vproduct|input_text|script_image_video")
+    _press(user_id, "vproduct|script_manual|script_image_video")
     text, _markup, session = _press(user_id, "vproduct|back")
     assert session["current_step"] == "intro"
     assert "Kịch bản" in text
@@ -236,7 +236,7 @@ def test_script_to_video_back_matrix():
 def test_frame_video_button_not_jump_main_menu():
     text, markup, session = _open(181812, "frame_video_local")
     assert "Ghép ảnh thành video" in text
-    assert "vproduct|legacy|frame_video_local" in _callbacks(markup)
+    assert "vproduct|frame_send_images|frame_video_local" in _callbacks(markup)
     assert session["video_tool"] == "frame_video_local"
 
 
@@ -270,7 +270,7 @@ def test_storyboard_prompt_intro_first():
     assert "Storyboard + Prompt" in text
     assert "Chọn loại video" not in text
     assert session["current_step"] == "intro"
-    assert "vproduct|storyboard_from_idea|storyboard_prompt" in _callbacks(markup)
+    assert "vproduct|storyboard_manual|storyboard_prompt" in _callbacks(markup)
 
 
 def test_storyboard_does_not_auto_render():
@@ -284,8 +284,7 @@ def test_storyboard_does_not_auto_render():
 def test_storyboard_back_matrix():
     user_id = 181817
     _open(user_id, "storyboard_prompt")
-    _press(user_id, "vproduct|storyboard_from_idea|storyboard_prompt")
-    _press(user_id, "vproduct|input_text|storyboard_prompt")
+    _press(user_id, "vproduct|storyboard_manual|storyboard_prompt")
     _send_text(user_id, "mèo cam đi công viên")
     _press(user_id, "vproduct|b14_profile|storytelling")
     text, _markup, session = _press(user_id, "vproduct|back")
@@ -321,7 +320,7 @@ def test_multiscene_ui_flow_starts_intro_or_type():
     assert "Phim AI nhiều cảnh" in text
     assert "Chọn loại video" not in text
     assert session["current_step"] == "intro"
-    assert "vproduct|ideas|multi_scene_film" in _callbacks(markup)
+    assert "vproduct|film_manual|multi_scene_film" in _callbacks(markup)
 
 
 def test_multiscene_guard_clean_if_engine_not_ready():

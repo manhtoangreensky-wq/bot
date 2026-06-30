@@ -86,16 +86,17 @@ def test_trend_profile_back_returns_trend_input():
     session = bot.get_video_session(user_id)
     assert session["current_step"] == "profile_select"
     text, markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] in {"collect_input", "intro"}
-    assert "Video theo trend" in text or "Bạn muốn làm video" in text or "Đầu vào sản phẩm" in text
+    assert session["current_step"] == "trend_manual_input"
+    assert "Nhập trend" in text or "trend" in text.lower()
 
 
 def test_trend_quick_suggestion_and_product_industry_distinct():
     markup = bot.task3d_product_intro_keyboard("video_trend", "vi")
     callbacks = _callbacks(markup)
     assert "vproduct|trend_today" in callbacks
-    assert "vproduct|trend_industry" in callbacks
-    assert "vproduct|trend_video_suggest" in callbacks
+    assert "vproduct|trend_custom" in callbacks
+    assert "vproduct|trend_industry" not in callbacks
+    assert "vproduct|trend_video_suggest" not in callbacks
 
 
 def test_video_ai_real_has_prompt_image_video_and_suggestion_buttons():
@@ -107,24 +108,28 @@ def test_video_ai_real_has_prompt_image_video_and_suggestion_buttons():
     assert "📝 Prompt → Video AI" in labels
     assert "🖼 Ảnh → Video AI" in labels
     assert "🎞 Video mẫu → Video AI" in labels
-    assert "💡 Gợi ý prompt video" in labels
-    assert "🖼 Gợi ý tạo ảnh" in labels
-    assert "🎬 Gợi ý tạo video" in labels
-    assert "vproduct|suggest_prompt|video_ai_real" in callbacks
-    assert "vproduct|suggest_image|video_ai_real" in callbacks
-    assert "vproduct|suggest_video|video_ai_real" in callbacks
+    assert "💡 Gợi ý prompt video" not in labels
+    assert "🖼 Gợi ý tạo ảnh" not in labels
+    assert "🎬 Gợi ý tạo video" not in labels
+    assert "vproduct|ai_prompt_menu|video_ai_real" in callbacks
+    assert "vproduct|ai_image_menu|video_ai_real" in callbacks
+    assert "vproduct|ai_video_menu|video_ai_real" in callbacks
+    assert "vproduct|suggest_prompt|video_ai_real" not in callbacks
+    assert "vproduct|suggest_image|video_ai_real" not in callbacks
+    assert "vproduct|suggest_video|video_ai_real" not in callbacks
     assert not any("trend_" in item for item in callbacks)
 
 
 def test_video_ai_real_suggestion_back_matrix():
     user_id = 182004
     _open(user_id, "video_ai_real")
+    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
     text, _markup, session = _press(user_id, "vproduct|suggest_prompt|video_ai_real")
-    assert session["current_step"] == "suggest_prompt"
-    assert "Gợi ý prompt video" in text
+    assert session["current_step"] == "prompt_suggestion_topic"
+    assert "gợi ý prompt" in text.lower()
     text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "intro"
-    assert "Video AI chân thật" in text
+    assert session["current_step"] == "ai_prompt_menu"
+    assert "Prompt" in text
 
 
 def test_script_to_video_semantics_not_storyboard():
@@ -133,8 +138,8 @@ def test_script_to_video_semantics_not_storyboard():
     callbacks = _callbacks(markup)
     assert "Kịch bản" in text
     assert any("Gợi ý kịch bản" in label for label in labels)
-    assert any("Kịch bản theo sản phẩm/ngành" in label for label in labels)
-    assert any("Kịch bản có lời thoại/voice" in label for label in labels)
+    assert any("Gửi kịch bản có sẵn" in label for label in labels)
+    assert any("Tự nhập chủ đề" in label for label in labels)
     assert "vproduct|script_ideas|script_image_video" in callbacks
     assert "vproduct|storyboard_many_images|storyboard_prompt" not in callbacks
 
@@ -144,11 +149,10 @@ def test_storyboard_semantics_visual_sequence():
     labels = _labels(markup)
     callbacks = _callbacks(markup)
     assert "chuỗi cảnh" in text
-    assert any("Tạo storyboard từ ảnh có sẵn" in label for label in labels)
-    assert any("Gợi ý tạo nhiều ảnh" in label for label in labels)
-    assert any("Tạo storyboard từ ý tưởng" in label for label in labels)
-    assert any("Ghép storyboard thành video" in label for label in labels)
-    assert "vproduct|storyboard_from_images|storyboard_prompt" in callbacks
+    assert any("Gửi ảnh/storyboard có sẵn" in label for label in labels)
+    assert any("Gợi ý storyboard" in label for label in labels)
+    assert any("Tự nhập storyboard" in label for label in labels)
+    assert "vproduct|storyboard_upload|storyboard_prompt" in callbacks
     assert "vproduct|script_ideas|script_image_video" not in callbacks
 
 
@@ -165,7 +169,7 @@ def test_image_to_video_starts_with_image_flow():
     callbacks = _callbacks(markup)
     assert "Ghép ảnh thành video" in text
     assert session["current_step"] == "intro"
-    assert "vproduct|legacy|frame_video_local" in callbacks
+    assert "vproduct|frame_send_images|frame_video_local" in callbacks
     assert "vproduct|frame_suggest_image|frame_video_local" in callbacks
     assert "vproduct|b14_profile|storytelling" not in callbacks
 
