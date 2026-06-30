@@ -8,6 +8,12 @@ VIDEO_SUBTITLE_MODE_CREATE = "subtitle_create"
 VIDEO_SUBTITLE_MODE_TRANSLATE = "subtitle_translate"
 VIDEO_SUBTITLE_MODE_DUB = "dub"
 VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB = "subtitle_plus_dub"
+SUBDUB_SHARED_CORE_MODES = {
+    VIDEO_SUBTITLE_MODE_CREATE,
+    VIDEO_SUBTITLE_MODE_TRANSLATE,
+    VIDEO_SUBTITLE_MODE_DUB,
+    VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+}
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -33,6 +39,10 @@ def _mode_needs_subtitle(mode: str) -> bool:
         VIDEO_SUBTITLE_MODE_TRANSLATE,
         VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     }
+
+
+def subdub_mode_uses_shared_core(mode: str) -> bool:
+    return str(mode or "").strip() in SUBDUB_SHARED_CORE_MODES
 
 
 def _product_type_for_mode(mode: str) -> str:
@@ -99,7 +109,14 @@ async def process_subtitle_dub_job(
     del is_admin
     mode = str(mode or "").strip()
     state = dict(state or {})
+    route_attempts = {
+        "shared_core": subdub_mode_uses_shared_core(mode),
+        "subtitle_prepare": False,
+        "tts": False,
+        "render": False,
+    }
     try:
+        route_attempts["subtitle_prepare"] = True
         prepared = await _maybe_await(prepare_subtitles(state))
     except Exception as exc:
         return {
@@ -110,6 +127,7 @@ async def process_subtitle_dub_job(
             "provider_called": False,
             "charged": False,
             "created_files": [],
+            "route_attempts": route_attempts,
         }
     prepared = dict(prepared or {})
     pipeline_state = dict(prepared.get("state") or state)
@@ -128,6 +146,7 @@ async def process_subtitle_dub_job(
             "provider_called": bool(prepared.get("asr_provider") or prepared.get("translation_provider")),
             "charged": False,
             "created_files": [],
+            "route_attempts": route_attempts,
         }
 
     srt_text = ""
@@ -150,6 +169,7 @@ async def process_subtitle_dub_job(
                 "state": pipeline_state,
                 "prepared": prepared,
                 "product_type": _product_type_for_mode(mode),
+                "route_attempts": route_attempts,
             }
     subtitle_items = subtitle_output_items(srt_text, output_type, mode) if srt_bytes else []
 
@@ -161,7 +181,22 @@ async def process_subtitle_dub_job(
     selected_tts_voice_id = ""
     if _mode_needs_dub(mode):
         selected_tts_voice_id = str(resolve_voice_id(user_id, pipeline_state) or "")
+        if not selected_tts_voice_id:
+            return {
+                "ok": False,
+                "status": "VOICE_NOT_READY",
+                "error_code": "voice_not_ready",
+                "provider_called": bool(prepared.get("asr_provider") or prepared.get("translation_provider")),
+                "charged": False,
+                "created_files": [],
+                "state": pipeline_state,
+                "prepared": prepared,
+                "product_type": _product_type_for_mode(mode),
+                "voice_resolution": dict(pipeline_state.get("_subdub_voice_resolution") or {}),
+                "route_attempts": route_attempts,
+            }
         speed = float(parse_voice_speed(str(pipeline_state.get("voice_speed") or "1.0")))
+        route_attempts["tts"] = True
         segment_tts = await _maybe_await(
             synthesize_segments(
                 output_segments,
@@ -187,6 +222,7 @@ async def process_subtitle_dub_job(
                 "provider_called": True,
                 "charged": False,
                 "created_files": [],
+                "route_attempts": route_attempts,
             }
         audio_bytes, normalization_detail = await _maybe_await(normalize_audio(raw_audio_bytes))
         if not audio_bytes:
@@ -197,6 +233,7 @@ async def process_subtitle_dub_job(
                 "provider_called": True,
                 "charged": False,
                 "created_files": [],
+                "route_attempts": route_attempts,
             }
 
     wants_subtitle_video = output_type in {"burn", "both", "video_subtitle"}
@@ -207,6 +244,7 @@ async def process_subtitle_dub_job(
     if _is_video_source(content_type):
         if audio_bytes and dub_mux_enabled and ffmpeg_ready():
             try:
+                route_attempts["render"] = True
                 video_output, _render_detail = await _maybe_await(
                     render_video(
                         source_bytes,
@@ -221,6 +259,7 @@ async def process_subtitle_dub_job(
         elif audio_bytes and wants_final_video:
             prepared["mux_error"] = "mux_unavailable"
         elif wants_subtitle_video and video_render_ready(output_type):
+            route_attempts["render"] = True
             video_output, _render_detail = await _maybe_await(
                 render_video(
                     source_bytes,
@@ -242,6 +281,7 @@ async def process_subtitle_dub_job(
             "created_files": [],
             "state": pipeline_state,
             "prepared": prepared,
+            "route_attempts": route_attempts,
         }
 
     return {
@@ -278,4 +318,14 @@ async def process_subtitle_dub_job(
         "error_code": "",
         "safe_public_message": "",
         "admin_debug_summary": "",
+        "route_attempts": route_attempts,
+        "shared_core_used": True,
     }
+
+
+async def run_subdub_pipeline(job_id: str = "", mode: str = "", **kwargs: Any) -> dict[str, Any]:
+    result = await process_subtitle_dub_job(mode=mode, **kwargs)
+    result["job_id"] = str(job_id or "")
+    result["mode"] = str(mode or result.get("mode") or "")
+    result["shared_core_used"] = True
+    return result

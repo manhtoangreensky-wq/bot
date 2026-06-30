@@ -8083,7 +8083,7 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
         return "Test TTS", b"audio-bytes", f"voice={voice_style}; voice_id={voice_id}; speed={voice_speed}; chars={len(text)}"
 
     async def fake_render_video(_source, dubbed_audio=b"", subtitle_bytes=b"", keep_original_audio=False):
-        return b"mp4-bytes", "fake_render"
+        return b"\x00\x00\x00\x18ftypmp42-core" + b"x" * 4096, "fake_render"
 
     async def fake_timeline_audio(*_args, **_kwargs):
         return b"timeline-audio", "timeline"
@@ -8103,6 +8103,10 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
     monkeypatch.setattr(bot, "video_dubbing_video_render_ready", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(bot, "build_dub_timeline_audio", fake_timeline_audio)
     monkeypatch.setattr(bot, "normalize_dub_audio_bytes", fake_normalize_audio)
+    monkeypatch.setattr(bot, "resolve_video_dub_tts_voice", lambda _uid, _state: {"ok": True, "provider_voice_id": "default_female", "tts_payload_voice_id": "default_female", "resolved_gender": "female", "fallback_used": False})
+    async def fake_validate_video(_video_bytes, *, require_audio=False, min_bytes=None):
+        return {"ok": True, "detail": "ok", "duration": 2.0, "has_video": True, "has_audio": bool(require_audio), "size": len(_video_bytes or b"")}
+    monkeypatch.setattr(bot, "subdub_validate_video_output", fake_validate_video)
     monkeypatch.setattr(
         bot,
         "spend_fixed_credit_info",

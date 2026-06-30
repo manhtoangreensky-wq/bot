@@ -134,7 +134,7 @@ def test_subdub_panel_buttons_route_to_same_core():
         for button in row
     ]
 
-    assert "subtitle_dub_product_pipeline.process_subtitle_dub_job" in source
+    assert "subtitle_dub_product_pipeline.run_subdub_pipeline" in source
     assert "videodub|subdub_status|job-p019k" in callbacks
     assert f"videodub|type|{bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}" in callbacks
 
@@ -270,8 +270,8 @@ def test_hardsub_cover_drawbox_or_ass_style_present(monkeypatch):
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
     assert "drawbox=" in filter_text
-    assert "y=ih*0.76" in filter_text
-    assert "h=ih*0.18" in filter_text
+    assert "y=ih*0.84" in filter_text
+    assert "h=ih*0.13" in filter_text
     assert "Dialogue: 0" in ass
 
 

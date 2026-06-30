@@ -1714,9 +1714,10 @@ SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FAL
 SUBDUB_MIN_VIDEO_OUTPUT_BYTES = max(512, env_int("SUBDUB_MIN_VIDEO_OUTPUT_BYTES", 2048))
 SUBDUB_ADVANCED_STYLE_ENABLED = env_flag("SUBDUB_ADVANCED_STYLE_ENABLED", "false")
 SUBDUB_HARDSUB_COVER_ENABLED = env_flag("SUBDUB_HARDSUB_COVER_ENABLED", "true")
-SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.9, env_float("SUBDUB_HARDSUB_COVER_OPACITY", 0.60)))
-SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.05, min(0.35, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.18)))
-SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.55, min(0.9, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.76)))
+SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.9, env_float("SUBDUB_HARDSUB_COVER_OPACITY", 0.50)))
+SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.10, min(0.13, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.12)))
+SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.84, min(0.88, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.84)))
+SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.03, min(0.08, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.05)))
 SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING = env_flag("SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING", "true")
 SUBDUB_ALLOW_SILENT_VOICE_FALLBACK = env_flag("SUBDUB_ALLOW_SILENT_VOICE_FALLBACK", "false")
 PIPELINE_TEMP_ROOT = _env("PIPELINE_TEMP_ROOT", os.path.join(tempfile.gettempdir(), "toan_aas_pipeline"))
@@ -155688,13 +155689,11 @@ def video_dubbing_preview_locked_text(lang: str = "vi") -> str:
 
 def video_dubbing_flow_failure_text(mode: str, lang: str = "vi") -> str:
     mode = normalize_video_translate_mode(mode)
+    if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+        return subdub_mode_fail_text(mode, lang)
     if mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
         return "TOAN AAS chưa dịch được phụ đề lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc chọn ngôn ngữ khác."
-    if mode == VIDEO_SUBTITLE_MODE_DUB:
-        return "TOAN AAS chưa lồng tiếng được video này lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc chọn giọng khác."
-    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-        return "TOAN AAS chưa tạo được video phụ đề + lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử lại hoặc đổi giọng."
-    return "TOAN AAS chưa tạo được phụ đề từ video này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi file phụ đề nếu có."
+    return subdub_mode_fail_text(VIDEO_SUBTITLE_MODE_CREATE, lang)
 
 def video_dubbing_receipt_text(state: dict | None = None, result: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
@@ -156303,7 +156302,7 @@ SUBDUB_PROGRESS_STAGES = {
     "transcribing": (35, "Nhận diện lời thoại", "Đang nhận diện lời thoại"),
     "speech_recognized": (40, "Nhận diện lời thoại", "Đã nhận diện lời thoại"),
     "translating": (50, "Dịch nội dung", "Đang dịch nội dung"),
-    "subtitle_ready": (55, "Dịch nội dung", "Đã tạo phụ đề"),
+    "subtitle_ready": (55, "Tạo phụ đề", "Đã tạo phụ đề"),
     "translated": (55, "Dịch nội dung", "Đã dịch nội dung"),
     "choosing_voice": (60, "Chọn giọng", "Đã chọn giọng"),
     "generating_voice": (65, "Tạo giọng lồng tiếng", "Đang tạo giọng lồng tiếng"),
@@ -156404,6 +156403,34 @@ def subdub_clean_failure_text(lang: str = "vi") -> str:
         return "TOAN AAS could not process this video right now. No Xu was charged. Please try a clearer video or another file."
     return "TOAN AAS chưa xử lý được video này lúc này.\nHệ thống chưa trừ Xu.\nAnh/chị có thể thử video rõ tiếng hơn hoặc gửi video khác."
 
+def subdub_mode_success_text(mode: str = "", lang: str = "vi") -> str:
+    mode = normalize_video_translate_mode(mode)
+    if normalize_user_language(lang) != "vi":
+        if mode == VIDEO_SUBTITLE_MODE_DUB:
+            return "✅ The dubbed video is ready."
+        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            return "✅ The subtitle + dubbing video is ready."
+        return "✅ The subtitled video is ready."
+    if mode == VIDEO_SUBTITLE_MODE_DUB:
+        return "✅ Đã tạo video lồng tiếng thành công."
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return "✅ Đã tạo video phụ đề + lồng tiếng thành công."
+    return "✅ Đã tạo video phụ đề thành công."
+
+def subdub_mode_fail_text(mode: str = "", lang: str = "vi") -> str:
+    mode = normalize_video_translate_mode(mode)
+    if normalize_user_language(lang) != "vi":
+        if mode == VIDEO_SUBTITLE_MODE_DUB:
+            return "TOAN AAS could not dub this video right now. No Xu was charged. Please try a clearer video or choose another voice."
+        if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+            return "TOAN AAS could not create the subtitle + dubbing video right now. No Xu was charged. Please try a clearer video or choose another voice."
+        return "TOAN AAS could not create subtitles for this video right now. No Xu was charged. Please try a clearer video or another file."
+    if mode == VIDEO_SUBTITLE_MODE_DUB:
+        return "TOAN AAS chưa lồng tiếng được video này lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc chọn giọng khác."
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+        return "TOAN AAS chưa tạo được video phụ đề + lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc chọn giọng khác."
+    return "TOAN AAS chưa tạo được phụ đề cho video này lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi video khác."
+
 def subdub_validate_saved_input_for_pipeline(input_save: dict | None = None, state: dict | None = None) -> dict:
     current = dict(input_save or {})
     state = dict(state or {})
@@ -156436,6 +156463,67 @@ def subdub_result_terminal_state(result: dict | None = None) -> str:
 def subdub_terminal_blocks_late_delivery(job: dict | None = None) -> bool:
     terminal = str((job or {}).get("terminal_state") or "").strip().lower()
     return terminal in {"delivered", "failed_no_charge", "failed_refunded"}
+
+def subdub_job_blocks_public_fail(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    terminal = str(current.get("terminal_state") or "").strip().lower()
+    if terminal == "delivered" or bool(current.get("output_sent")):
+        return True
+    if current.get("subdub_delivered_at") or current.get("subdub_success_message_id"):
+        return True
+    return False
+
+def subdub_begin_delivery_once(job_key: str) -> bool:
+    key = str(job_key or "")
+    if not key:
+        return True
+    job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
+    if not job:
+        return True
+    if subdub_terminal_blocks_late_delivery(job):
+        job["duplicate_success_prevented_count"] = int(job.get("duplicate_success_prevented_count") or 0) + 1
+        job["updated_at"] = time.time()
+        SUBTITLE_DUB_PIPELINE_JOBS[key] = job
+        return False
+    if job.get("subdub_delivery_started_at"):
+        job["duplicate_delivery_prevented_count"] = int(job.get("duplicate_delivery_prevented_count") or 0) + 1
+        job["updated_at"] = time.time()
+        SUBTITLE_DUB_PIPELINE_JOBS[key] = job
+        return False
+    job["subdub_delivery_started_at"] = time.time()
+    job["delivery_attempt_count"] = int(job.get("delivery_attempt_count") or 0) + 1
+    job["updated_at"] = time.time()
+    SUBTITLE_DUB_PIPELINE_JOBS[key] = job
+    return True
+
+async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason: str = "", lang: str = "vi", reply_markup=None) -> dict:
+    key = str(job_key or "")
+    job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(key) or {})
+    if job and subdub_job_blocks_public_fail(job):
+        job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
+        job["last_ignored_error_reason"] = str(reason or "")[:180]
+        job["updated_at"] = time.time()
+        SUBTITLE_DUB_PIPELINE_JOBS[key] = job
+        return {"sent": False, "suppressed": True, "reason": "terminal_delivered"}
+    if job and str(job.get("terminal_state") or "").strip().lower().startswith("failed"):
+        job["duplicate_fail_prevented_count"] = int(job.get("duplicate_fail_prevented_count") or 0) + 1
+        job["updated_at"] = time.time()
+        SUBTITLE_DUB_PIPELINE_JOBS[key] = job
+        return {"sent": False, "suppressed": True, "reason": "already_failed"}
+    text = subdub_mode_fail_text(mode, lang)
+    message_id = ""
+    if callable(getattr(message, "reply_text", None)):
+        sent_msg = await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
+        message_id = str(getattr(sent_msg, "message_id", "") or "")
+    if key:
+        update_subtitle_dub_pipeline_job(
+            key,
+            status="failed",
+            terminal_state="failed_no_charge",
+            subdub_fail_message_id=message_id,
+            pipeline_blocker=str(reason or "subdub_failed")[:180],
+        )
+    return {"sent": True, "suppressed": False, "reason": reason}
 
 def subtitle_dub_find_pipeline_job_for_user(user_id, job_id: str = "") -> dict:
     wanted = str(job_id or "").strip()
@@ -157214,6 +157302,7 @@ def subdub_output_style_state(state: dict | None = None, mode: str = "") -> dict
         style_state.setdefault("cover_opacity", SUBDUB_HARDSUB_COVER_OPACITY)
         style_state.setdefault("cover_height_ratio", SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)
         style_state.setdefault("cover_y_ratio", SUBDUB_HARDSUB_COVER_Y_RATIO)
+        style_state.setdefault("text_margin_bottom_ratio", SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)
         style_state["advanced_style_enabled"] = True
     return style_state
 
@@ -157265,6 +157354,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
             "cover_opacity", "subtitle_cover_opacity",
             "cover_height_ratio", "subtitle_cover_height_ratio",
             "cover_y_ratio", "subtitle_cover_y_ratio",
+            "text_margin_bottom_ratio", "subtitle_text_margin_bottom_ratio",
             "max_lines", "subtitle_max_lines",
             "show_subtitles", "burn_subtitle", "display_subtitles",
             "hardsub_cover_enabled", "subtitle_style_profile",
@@ -157284,6 +157374,7 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["cover_opacity"] = state.get("cover_opacity") or SUBDUB_HARDSUB_COVER_OPACITY
         style["cover_height_ratio"] = state.get("cover_height_ratio") or SUBDUB_HARDSUB_COVER_HEIGHT_RATIO
         style["cover_y_ratio"] = state.get("cover_y_ratio") or SUBDUB_HARDSUB_COVER_Y_RATIO
+        style["text_margin_bottom_ratio"] = state.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO
         style["subtitle_style_profile"] = style.get("subtitle_style_profile") or subdub_style_profile_for_state(state)
     style["font"] = re.sub(r"[^A-Za-z0-9 _.-]", "", str(style.get("font") or "Arial")).strip()[:40] or "Arial"
     style["size"] = subdub_clamp_int(style.get("size"), 34, 18, 64)
@@ -157291,8 +157382,9 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style["shadow"] = subdub_clamp_int(style.get("shadow"), 1, 0, 4)
     style["max_lines"] = subdub_clamp_int(style.get("max_lines"), 2, 1, 3)
     style["cover_opacity"] = max(0.0, min(0.9, subdub_float_value(style.get("cover_opacity"), 0.0)))
-    style["cover_height_ratio"] = max(0.05, min(0.35, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
-    style["cover_y_ratio"] = max(0.55, min(0.9, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
+    style["cover_height_ratio"] = max(0.10, min(0.13, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
+    style["cover_y_ratio"] = max(0.84, min(0.88, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
+    style["text_margin_bottom_ratio"] = max(0.03, min(0.08, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
     style["cover_original"] = subdub_bool_value(style.get("cover_original"), False)
     style["hardsub_cover_enabled"] = subdub_bool_value(style.get("hardsub_cover_enabled"), style["cover_original"])
     style["show_subtitles"] = subdub_bool_value(style.get("show_subtitles"), True)
@@ -157383,6 +157475,8 @@ def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = No
     if not blocks or not style.get("show_subtitles"):
         return ""
     alignment, margin_v = subdub_ass_alignment(style.get("position"), style.get("align"))
+    if style.get("cover_original") or style.get("hardsub_cover_enabled"):
+        margin_v = max(36, min(150, int(1920 * float(style.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO))))
     primary = subdub_ass_color(str(style.get("text_color") or "#FFFFFF"))
     outline = subdub_ass_color(str(style.get("outline_color") or "#000000"), "#000000")
     header = [
@@ -157429,8 +157523,8 @@ def subdub_cover_filter(style_or_state: dict | None = None) -> str:
     opacity = float(style.get("cover_opacity") or (0.56 if cover else 0.28))
     opacity = max(0.18, min(0.9, opacity))
     if cover:
-        y_ratio = max(0.55, min(0.9, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
-        height_ratio = max(0.05, min(0.35, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
+        y_ratio = max(0.84, min(0.88, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
+        height_ratio = max(0.10, min(0.13, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
         return f"drawbox=x=0:y=ih*{y_ratio:.2f}:w=iw:h=ih*{height_ratio:.2f}:color=black@{opacity:.2f}:t=fill"
     if background == "strip":
         return f"drawbox=x=0:y=ih*0.78:w=iw:h=ih*0.14:color=black@{opacity:.2f}:t=fill"
@@ -157519,6 +157613,20 @@ async def subdub_validate_video_output(video_bytes: bytes, *, require_audio: boo
     if require_audio and not probe.get("has_audio"):
         return {**probe, "ok": False, "detail": "audio_stream_missing"}
     return {**probe, "ok": True, "detail": "ok"}
+
+def subdub_mode_requires_final_video(mode: str = "", state: dict | None = None, content_type: str = "", output_type: str = "") -> bool:
+    state = dict(state or {})
+    mode = normalize_video_translate_mode(mode or state.get("video_processing_mode") or state.get("mode") or state.get("process_type"))
+    if not str(content_type or state.get("source_mime_type") or "").lower().startswith("video/"):
+        return False
+    output = str(output_type or state.get("output_type") or state.get("output_format") or "").strip().lower()
+    if output in {"audio", "srt", "vtt", "txt"}:
+        return False
+    if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+        return True
+    if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE}:
+        return output in {"burn", "both", "video", "video_subtitle", "mp4"}
+    return output in {"burn", "both", "video", "video_subtitle", "mp4"}
 
 async def subdub_compress_video_bytes(video_bytes: bytes, *, require_audio: bool = False) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
@@ -159245,23 +159353,13 @@ async def _execute_video_dubbing_pipeline_core(
     def _resolve_voice_id_for_blackbox(user_id_arg, service_state: dict) -> str:
         nonlocal voice_resolution_for_debug
         resolution = resolve_video_dub_tts_voice(user_id_arg, service_state)
-        legacy_voice_id = str(resolve_video_dub_tts_voice_id(user_id_arg, service_state) or "").strip()
-        if legacy_voice_id and legacy_voice_id != str((resolution or {}).get("provider_voice_id") or ""):
-            resolution = subdub_voice_resolution_payload(
-                ok=True,
-                selected_voice_label=str((service_state or {}).get("voice_style") or (service_state or {}).get("voice_label") or ""),
-                selected_voice_gender=subdub_voice_gender_from_state(service_state),
-                selected_voice_id=str((service_state or {}).get("voice_id") or (service_state or {}).get("selected_voice_id") or ""),
-                provider_voice_id=legacy_voice_id,
-                tts_payload_voice_id=legacy_voice_id,
-                fallback_used=False,
-                fallback_reason="",
-            )
         voice_resolution_for_debug = dict(resolution or {})
         subdub_apply_voice_resolution_to_state(state, voice_resolution_for_debug)
         return str(voice_resolution_for_debug.get("provider_voice_id") or "") if voice_resolution_for_debug.get("ok") else ""
 
-    product_result = await subtitle_dub_product_pipeline.process_subtitle_dub_job(
+    # Compatibility: run_subdub_pipeline delegates to subtitle_dub_product_pipeline.process_subtitle_dub_job.
+    product_result = await subtitle_dub_product_pipeline.run_subdub_pipeline(
+        job_id=str(state.get("_pipeline_job_id") or ""),
         mode=mode,
         state=state,
         user_id=uid,
@@ -159357,7 +159455,7 @@ async def _execute_video_dubbing_pipeline_core(
             state.update(voice_state)
             return _failed_product_result("VOICE_NOT_READY", subdub_voice_not_ready_text(lang), detail or str(voice_resolution.get("reason") or "voice_not_ready"), stage="voice")
         if status == "VIDEO_RENDER_FAILED":
-            return _failed_product_result("VIDEO_RENDER_FAILED", "TOAN AAS đã tạo phụ đề nhưng chưa xuất được video phụ đề lúc này. Hệ thống chưa trừ Xu.", detail, stage="video")
+            return _failed_product_result("VIDEO_RENDER_FAILED", subdub_mode_fail_text(mode, lang), detail, stage="video")
         fail_text = (
             video_dubbing_flow_failure_text(mode, lang)
             if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
@@ -159394,6 +159492,7 @@ async def _execute_video_dubbing_pipeline_core(
     video_output = bytes(product_result.get("video_output") or b"")
     partial_result = bool(product_result.get("partial_result") or product_result.get("partial"))
     partial_reason = str(product_result.get("partial_reason") or "")
+    final_video_required = subdub_mode_requires_final_video(mode, state, content_type, str(product_result.get("output_type") or state.get("output_type") or ""))
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and (
         not audio_bytes
         or output_audio_source not in {"generated_tts", "mixed"}
@@ -159404,6 +159503,25 @@ async def _execute_video_dubbing_pipeline_core(
             "generated_tts_audio_missing",
             stage="audio",
         )
+    if final_video_required and not video_output and not (partial_result and (audio_bytes or srt_bytes or subtitle_items)):
+        return _failed_product_result(
+            "FINAL_VIDEO_NOT_CREATED",
+            subdub_mode_fail_text(mode, lang),
+            partial_reason or str(product_result.get("error_code") or "final_video_missing"),
+            stage="video",
+        )
+    if final_video_required and video_output:
+        validation = await subdub_validate_video_output(
+            video_output,
+            require_audio=mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB},
+        )
+        if not validation.get("ok"):
+            return _failed_product_result(
+                "FINAL_VIDEO_INVALID",
+                subdub_mode_fail_text(mode, lang),
+                str(validation.get("detail") or "final_video_invalid"),
+                stage="video",
+            )
     style_state = subdub_output_style_state(state, mode)
     subtitle_style = subdub_normalize_style(style_state)
     state = {
@@ -159585,6 +159703,30 @@ async def _execute_video_dubbing_pipeline_core(
             mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
             and subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB
         )
+        delivery_job_key = str(state.get("_pipeline_job_key") or "")
+        if delivery_job_key and not subdub_begin_delivery_once(delivery_job_key):
+            existing_delivery_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(delivery_job_key) or {})
+            if subdub_job_blocks_public_fail(existing_delivery_job):
+                return {
+                    "ok": True,
+                    "mode": mode,
+                    "charged": 0,
+                    "already_delivered": True,
+                    "has_subtitle": bool(existing_delivery_job.get("subtitles")),
+                    "has_audio": bool(existing_delivery_job.get("dub_audio")),
+                    "has_video": bool(existing_delivery_job.get("final_mp4")),
+                    "sent_documents": 0,
+                    "sent_audio": 0,
+                    "sent_video": 0,
+                    "sent_video_document": 0,
+                    "terminal_state": "delivered",
+                    "workspace_artifacts": workspace_artifacts,
+                    "input_save": {key: value for key, value in dict(input_save or {}).items() if key != "source_bytes"},
+                    "gate_matrix": gate_matrix,
+                    "pipeline_attempted": True,
+                    "state": state,
+                }
+            return _failed_product_result("DELIVERY_LOCKED", subdub_mode_fail_text(mode, lang), "delivery_locked", stage="delivery")
         await _progress("delivering")
         delivery = await send_public_subtitle_dub_final_outputs(
             query.message,
@@ -159650,6 +159792,8 @@ async def _execute_video_dubbing_pipeline_core(
         "partial_result": bool(partial_result),
         "delivery_partial_result": bool(delivery_partial_result),
     })
+    if str(state.get("_pipeline_job_key") or ""):
+        mark_subtitle_dub_pipeline_output_sent(str(state.get("_pipeline_job_key") or ""), terminal_state=result_terminal_state)
     internal_job_id = ""
     try:
         output_size = len(srt_bytes or b"") + len(audio_bytes or b"") + len(video_output or b"")
@@ -159913,7 +160057,22 @@ async def execute_video_dubbing_pipeline(
                 except Exception as exc:
                     logger.warning("subtitle/dub failure debug save failed | %s", sanitize_log_text(str(exc))[:180])
         return result
-    except Exception:
+    except Exception as exc:
+        current_job = dict(SUBTITLE_DUB_PIPELINE_JOBS.get(job_key) or {})
+        if subdub_job_blocks_public_fail(current_job):
+            update_subtitle_dub_pipeline_job(
+                job_key,
+                ignored_late_error_count=int(current_job.get("ignored_late_error_count") or 0) + 1,
+                last_ignored_error_reason=sanitize_log_text(type(exc).__name__)[:180],
+            )
+            return {
+                "ok": True,
+                "late_error_suppressed": True,
+                "mode": normalize_video_translate_mode(state.get("video_processing_mode") or state.get("mode") or state.get("process_type")),
+                "terminal_state": "delivered",
+                "text": "Kết quả đã được gửi phía trên.",
+                "state": state,
+            }
         update_subtitle_dub_pipeline_job(job_key, status="failed", terminal_state="failed_no_charge")
         raise
     finally:
@@ -162946,6 +163105,7 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             parse_mode="HTML",
             reply_markup=subdub_progress_keyboard("", lang),
         )
+        pipeline_job_key = subtitle_dub_pipeline_job_key(uid, getattr(query.message, "chat_id", uid), state)
         try:
             async def _run_video_dubbing_pipeline():
                 return await execute_video_dubbing_pipeline(
@@ -162973,23 +163133,36 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         except Exception as exc:
             logger.warning("video subtitle/dub pipeline failed | mode=%s | error=%s", mode, type(exc).__name__)
             set_video_dubbing_pending(uid, "confirm", processing="0")
-            return await query.message.reply_text(
-                subtitle_plus_dub_clean_failure_text(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_flow_failure_text(mode, lang),
+            await send_subdub_fail_once(
+                query.message,
+                pipeline_job_key,
+                mode=mode,
+                reason=type(exc).__name__,
+                lang=lang,
                 reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
             )
+            return None
         if not result.get("ok"):
             set_video_dubbing_pending(uid, "guarded", processing="0")
             if str(result.get("status") or "") == "DIALOGUE_UNAVAILABLE":
-                return await query.message.reply_text(
-                    result.get("text") or video_dubbing_dialogue_unavailable_text(lang),
-                    parse_mode="HTML",
+                await send_subdub_fail_once(
+                    query.message,
+                    pipeline_job_key,
+                    mode=mode,
+                    reason=str(result.get("detail") or result.get("status") or "dialogue_unavailable"),
+                    lang=lang,
                     reply_markup=video_dubbing_dialogue_unavailable_keyboard(lang),
                 )
-            return await query.message.reply_text(
-                result.get("text") or (subtitle_plus_dub_clean_failure_text(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_text(mode, state, lang, admin=False)),
-                parse_mode="HTML",
+                return None
+            await send_subdub_fail_once(
+                query.message,
+                pipeline_job_key,
+                mode=mode,
+                reason=str(result.get("detail") or result.get("status") or "subdub_failed"),
+                lang=lang,
                 reply_markup=subtitle_plus_dub_clean_failure_keyboard(lang) if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB else video_dubbing_guard_keyboard(lang, admin=False),
             )
+            return None
         result_state = dict(result.get("state") or {})
         completed_fields = {
             "processing": "0",

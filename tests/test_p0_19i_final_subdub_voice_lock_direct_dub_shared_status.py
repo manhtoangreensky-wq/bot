@@ -149,7 +149,7 @@ def test_subdub_admin_voice_debug_contains_selected_voice(tmp_path):
 def test_direct_dub_uses_same_core_as_subtitle_dub():
     source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
 
-    assert "subtitle_dub_product_pipeline.process_subtitle_dub_job" in source
+    assert "subtitle_dub_product_pipeline.run_subdub_pipeline" in source
     assert "resolve_video_dub_tts_voice" in source
 
 
