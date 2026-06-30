@@ -6042,6 +6042,7 @@ def product_progress_status_text(
     terminal_state: str = "",
     public_note: str = "",
     lang: str = "vi",
+    completed_steps: list[str] | tuple[str, ...] | set[str] | None = None,
 ) -> str:
     return product_progress_status.render_product_progress_panel(
         product_type=product_type,
@@ -6051,6 +6052,7 @@ def product_progress_status_text(
         terminal_state=terminal_state,
         public_note=public_note,
         lang=lang,
+        completed_steps=completed_steps,
     )
 
 
@@ -6081,6 +6083,38 @@ def music_product_progress_type(result: dict | None = None) -> str:
     if "song" in kind or "lyrics" in kind or current.get("lyrics_enabled") or current.get("lyrics_text"):
         return "music_song"
     return "music_bg"
+
+
+def music_result_lifecycle_fields(result: dict | None = None) -> dict:
+    current = dict(result or {})
+    product_type = music_product_progress_type(current)
+    style_prompt = str(
+        current.get("provider_style_prompt")
+        or current.get("style_prompt")
+        or current.get("selected_style_prompt")
+        or current.get("music_selected_style_prompt")
+        or ""
+    ).strip()
+    lyrics = str(
+        current.get("provider_lyrics")
+        or current.get("lyrics")
+        or current.get("song_lyrics")
+        or current.get("lyrics_text")
+        or current.get("music_selected_lyrics_prompt")
+        or ""
+    ).strip()
+    provider_prompt = music_provider_prompt_for_result(current).strip()
+    prompt_ready = bool(style_prompt or provider_prompt or current.get("description") or current.get("genre") or current.get("mood"))
+    return {
+        "provider_style_prompt": style_prompt or provider_prompt,
+        "provider_lyrics": lyrics,
+        "lyrics_prepared": bool(product_type != "music_song" or lyrics),
+        "music_lyrics_prepared": bool(product_type != "music_song" or lyrics),
+        "style_prepared": bool(prompt_ready),
+        "music_style_prepared": bool(prompt_ready),
+        "prompt_prepared": bool(prompt_ready),
+        "music_prompt_prepared": bool(prompt_ready),
+    }
 
 
 def music_job_provider_task_id(job: dict | None = None) -> str:
@@ -6186,6 +6220,7 @@ def product_progress_status_from_job_text(product_type: str = "", job: dict | No
         int(state.get("percent") or 0),
         str(state.get("terminal_state") or ""),
         lang=lang,
+        completed_steps=state.get("completed_steps"),
     )
 
 
@@ -6217,6 +6252,7 @@ def progress_auto_refresh_snapshot(product_type: str = "", job_id: str = "", job
         "stage": stage,
         "percent": percent,
         "terminal_state": terminal,
+        "completed_steps": list(state.get("completed_steps") or []),
         "text": text,
         "render_hash": hashlib.sha256(str(text or "").encode("utf-8")).hexdigest(),
     }
@@ -6725,6 +6761,9 @@ def music_job_debug_text(job_id: str = "") -> str:
     job = get_engine_async_job(job_id) if job_id else {}
     product_type = music_job_product_type(job, "music_bg")
     state = product_progress_state_from_job(product_type, job)
+    lifecycle = dict(state.get("music_lifecycle") or {})
+    auto_record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(progress_auto_refresh_key(product_type, job_id)) or {})
+    completed_steps = ",".join(str(item) for item in (state.get("completed_steps") or [])) or "-"
     provider_task_id = music_job_provider_task_id(job)
     output_bytes = int((job or {}).get("output_bytes") or 0)
     artifact_state = "ready" if output_bytes > 0 else "not_ready"
@@ -6753,6 +6792,16 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• product_type: <code>{html.escape(str(state.get('product_type') or '-'))}</code>\n"
         f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
         f"• percent: <code>{int(state.get('percent') or 0)}%</code>\n"
+        f"• completed_steps: <code>{html.escape(completed_steps)}</code>\n"
+        f"• provider_submit_called: <code>{'yes' if lifecycle.get('provider_submit_called') else 'no'}</code>\n"
+        f"• lyrics_prepared: <code>{'yes' if lifecycle.get('lyrics_prepared') else 'no'}</code>\n"
+        f"• style_prepared: <code>{'yes' if lifecycle.get('style_prepared') else 'no'}</code>\n"
+        f"• provider_completed: <code>{'yes' if lifecycle.get('provider_completed') else 'no'}</code>\n"
+        f"• lifecycle_artifact_ready: <code>{'yes' if lifecycle.get('artifact_ready') else 'no'}</code>\n"
+        f"• audio_validated: <code>{'yes' if lifecycle.get('audio_validated') else 'no'}</code>\n"
+        f"• scheduler_mode: <code>{html.escape(str(auto_record.get('scheduler_mode') or '-'))}</code>\n"
+        f"• task_started: <code>{'yes' if auto_record.get('task_started') else 'no'}</code>\n"
+        f"• last_tick_at: <code>{html.escape(str(auto_record.get('last_tick_at') or '-'))}</code>\n"
         f"• provider_status: <code>{html.escape(sanitize_provider_status_text((job or {}).get('last_provider_status') or status, provider_task_id, 180))}</code>\n"
         f"• artifact_candidates_count: <code>{int((job or {}).get('artifact_candidates_count') or 0)}</code>\n"
         f"• selected_artifact_id: <code>{html.escape(str((job or {}).get('selected_artifact_id') or (job or {}).get('music_artifact_id') or '-'))}</code>\n"
@@ -95156,6 +95205,7 @@ def create_music_pending_submit_job(
 ) -> dict:
     payload = dict(result or {})
     product_type = music_product_progress_type(payload)
+    lifecycle_fields = music_result_lifecycle_fields(payload)
     internal_job_id = engine_async_job_id("music_suno", user_id)
     pending = {
         "feature": "music_suno",
@@ -95186,6 +95236,14 @@ def create_music_pending_submit_job(
         "music_product_mode": str(payload.get("music_product_mode") or ""),
         "song_vocal": str(payload.get("song_vocal") or payload.get("vocal_mode") or ""),
         "provider_metadata": dict(payload.get("provider_metadata") or {}),
+        "provider_style_prompt": str(lifecycle_fields.get("provider_style_prompt") or ""),
+        "provider_lyrics": str(lifecycle_fields.get("provider_lyrics") or ""),
+        "lyrics_prepared": bool(lifecycle_fields.get("lyrics_prepared")),
+        "music_lyrics_prepared": bool(lifecycle_fields.get("music_lyrics_prepared")),
+        "style_prepared": bool(lifecycle_fields.get("style_prepared")),
+        "music_style_prepared": bool(lifecycle_fields.get("music_style_prepared")),
+        "prompt_prepared": bool(lifecycle_fields.get("prompt_prepared")),
+        "music_prompt_prepared": bool(lifecycle_fields.get("music_prompt_prepared")),
         "duration_seconds": music_result_duration_seconds(payload) if payload else 0,
         "preview_seconds": music_preview_seconds(),
         "preview_start_seconds": music_preview_start_seconds(),
@@ -95215,6 +95273,7 @@ def update_music_submit_job_provider_started(job: dict | None, *, updated_by="")
         "provider_submit_called": True,
         "provider_submit_called_at": now_text(),
         "provider_submit_attempt_count": int(current.get("provider_submit_attempt_count") or 0) + 1,
+        "submitted_to_provider_started_at": now_text(),
         "last_provider_status": "provider_submit_called",
         "confirm_submit_phase": "provider_submit_called",
         "confirm_submit_blocker": "",
@@ -95246,6 +95305,8 @@ def update_music_submit_job_provider_accepted(
         "confirm_submit_blocker": "",
         "auto_delivery_blocker": "",
         "provider_submit_ok_at": now_text(),
+        "submitted_to_provider_at": now_text(),
+        "provider_job_id_saved_at": now_text(),
         "selected_model_key": str(payload.get("selected_model_key") or current.get("selected_model_key") or ""),
         "pending_charge_xu": int(current.get("pending_charge_xu") or 0),
     })
@@ -95329,10 +95390,28 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         if not download:
             job["status"] = "downloading"
             job["progress_text"] = "Đã có kết quả, TOAN AAS đang tải file nhạc."
+            job["provider_completed"] = True
+            job["music_provider_completed"] = True
+            job["provider_completed_at"] = str(job.get("provider_completed_at") or now_text())
+            job["artifact_ready"] = True
+            job["music_artifact_ready"] = True
+            job["artifact_ready_at"] = str(job.get("artifact_ready_at") or now_text())
+            job["output_url"] = output_url
+            job["music_output_url"] = output_url
+            job["result_url"] = output_url
             save_engine_async_job(job)
             return {"ok": True, "status": "OUTPUT_URL_READY", "job": job, "output_url": output_url, "audio_bytes": b""}
         job["status"] = "downloading"
         job["progress_text"] = "Đã có kết quả, TOAN AAS đang tải file nhạc."
+        job["provider_completed"] = True
+        job["music_provider_completed"] = True
+        job["provider_completed_at"] = str(job.get("provider_completed_at") or now_text())
+        job["artifact_ready"] = True
+        job["music_artifact_ready"] = True
+        job["artifact_ready_at"] = str(job.get("artifact_ready_at") or now_text())
+        job["output_url"] = output_url
+        job["music_output_url"] = output_url
+        job["result_url"] = output_url
         save_engine_async_job(job)
         audio_bytes, detail, http_status = await _download_music_audio_url_bytes(output_url, timeout_seconds=60.0)
         record_music_provider_attempt(
@@ -95370,6 +95449,13 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
                 "output_path": "",
                 "output_sha256": music_audio_sha256(audio_bytes),
                 "vault_id": str(vault_entry.get("vault_id") or job.get("vault_id") or ""),
+                "artifact_ready": True,
+                "music_artifact_ready": True,
+                "artifact_downloaded_at": now_text(),
+                "artifact_validated": True,
+                "audio_validated": True,
+                "music_audio_validated": True,
+                "audio_validated_at": now_text(),
                 "artifact_duration_seconds": actual_duration,
                 "duration_seconds": actual_duration,
                 "music_result_duration_seconds": actual_duration,
@@ -95406,6 +95492,9 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             "status": "processing",
             "progress_text": progress_text,
             "error_category": "",
+            "provider_processing_started_at": str(job.get("provider_processing_started_at") or now_text()),
+            "provider_completed": False,
+            "music_provider_completed": False,
         })
         save_engine_async_job(job)
         return {"ok": False, "status": "PROCESSING", "job": job, "audio_bytes": b""}
@@ -95434,6 +95523,9 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         "status": "processing",
         "progress_text": "Provider chưa trả file tải về; tiếp tục chờ/poll.",
         "last_provider_status": sanitize_provider_status_text(provider_status or polled.get("detail") or "unknown", provider_task_id),
+        "provider_processing_started_at": str(job.get("provider_processing_started_at") or now_text()),
+        "provider_completed": False,
+        "music_provider_completed": False,
     })
     save_engine_async_job(job)
     return {"ok": False, "status": "PROCESSING", "job": job, "audio_bytes": b""}
@@ -95749,6 +95841,9 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "terminal_locked_at": delivered_at,
         "music_delivery_lock": "sent",
         "music_result_delivery_lock": "sent",
+        "delivery_confirmed": True,
+        "telegram_delivery_confirmed": True,
+        "telegram_delivered_at": delivered_at,
         "delivery_state": "delivered",
         "music_delivery_message_id": message_id,
         "delivery_message_id": message_id,
@@ -95874,6 +95969,11 @@ async def deliver_music_result_once(
         "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
         "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
         "selected_artifact_duration": int(artifact.get("selected_artifact_duration") or 0),
+        "artifact_ready": True,
+        "music_artifact_ready": True,
+        "artifact_validated": True,
+        "audio_validated": True,
+        "music_audio_validated": True,
         "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
     })
     if user_id:
@@ -95896,6 +95996,11 @@ async def deliver_music_result_once(
             "artifact_duration_seconds": actual_duration,
             "music_result_duration_seconds": actual_duration,
             "music_result_size_bytes": len(payload),
+            "artifact_ready": True,
+            "music_artifact_ready": True,
+            "artifact_validated": True,
+            "audio_validated": True,
+            "music_audio_validated": True,
             "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
             "selected_artifact_id": str(artifact.get("selected_artifact_id") or ""),
             "selected_artifact_hash": str(artifact.get("selected_artifact_hash") or ""),
@@ -95948,6 +96053,8 @@ async def deliver_music_result_once(
             current_job["music_charged_at"] = now_text() if charge_result.get("ok") else ""
             current_job["music_terminal_state"] = "delivered"
             current_job["terminal_state"] = "delivered"
+            current_job["delivery_confirmed"] = True
+            current_job["telegram_delivery_confirmed"] = True
             current_job["delivery_state"] = "delivered"
             current_job = record_music_job_full_send(current_job, sent_message, payload, result={**current_result, "music_result_duration_seconds": actual_duration}, updated_by=updated_by or user_id)
             current_job.update({
@@ -95997,6 +96104,9 @@ async def deliver_music_result_once(
             "music_delivered_at": delivered_at,
             "music_result_delivery_lock": "sent",
             "music_delivery_lock": "sent",
+            "delivery_confirmed": True,
+            "telegram_delivery_confirmed": True,
+            "telegram_delivered_at": delivered_at,
             "music_delivery_attempts": int(current_result.get("music_delivery_attempts") or current_job.get("send_attempt_count") or 1),
             "music_result_file_id": file_id,
             "music_result_path": str(vault_entry.get("storage_ref") or ""),
@@ -99170,6 +99280,7 @@ async def handle_music_product_confirm(query, context, *, user_id, lang: str, pr
         return None
     price = music_result_price_xu(current)
     feature = music_engine_feature_for_result(current)
+    # Locked path: execute_engine(...) resolves to create_music_suno_async_job(...); legacy guard remains music_product_auto_deliver_job(...).
     decision = can_user_access_product_engine(
         user_id,
         feature,
