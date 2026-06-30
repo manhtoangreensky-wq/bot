@@ -7,7 +7,7 @@ import bot
 
 
 VIDEO_BYTES = b"\x00\x00\x00\x18ftypmp42-live-video"
-MP4_BYTES = b"\x00\x00\x00\x18ftypmp42-final-video"
+MP4_BYTES = b"\x00\x00\x00\x18ftypmp42-final-video" + b"x" * 4096
 SRT_TEXT = "1\n00:00:00,000 --> 00:00:02,000\nXin chao\n"
 SEGMENTS = [{"index": 1, "start": 0.0, "end": 2.0, "text": "Xin chao"}]
 
@@ -93,7 +93,11 @@ def _patch_engine_ready(monkeypatch, *, admin=False, access_allowed=False, charg
     monkeypatch.setattr(bot, "create_dub_asset_record", lambda **kwargs: {"asset_id": kwargs.get("asset_id")})
     monkeypatch.setattr(bot, "save_engine_async_job", lambda payload: {"internal_job_id": "p019e-job", **payload})
     monkeypatch.setattr(bot, "resolve_video_dub_tts_voice_id", lambda _uid, _state: "default_voice")
+    monkeypatch.setattr(bot, "resolve_video_dub_tts_voice", lambda _uid, _state: {"ok": True, "provider_voice_id": "default_voice", "tts_payload_voice_id": "default_voice", "resolved_gender": "female", "fallback_used": False})
     monkeypatch.setattr(bot, "parse_video_dubbing_voice_speed", lambda _value: 1.0)
+    async def fake_validate(_video_bytes, *, require_audio=False, min_bytes=None):
+        return {"ok": True, "detail": "ok", "duration": 2.0, "has_video": True, "has_audio": bool(require_audio), "size": len(_video_bytes or b"")}
+    monkeypatch.setattr(bot, "subdub_validate_video_output", fake_validate)
     monkeypatch.setattr(
         bot,
         "video_dubbing_engine_access_decision",

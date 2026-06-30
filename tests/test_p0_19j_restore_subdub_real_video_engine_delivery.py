@@ -116,7 +116,7 @@ def test_dub_only_output_must_have_audio_stream(monkeypatch):
 def test_subtitle_dub_uses_real_subdub_core_not_placeholder():
     source = inspect.getsource(bot._execute_video_dubbing_pipeline_core)
 
-    assert "subtitle_dub_product_pipeline.process_subtitle_dub_job" in source
+    assert "subtitle_dub_product_pipeline.run_subdub_pipeline" in source
     assert "placeholder" not in source.lower()
 
 
