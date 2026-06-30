@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 
 from services.multiscene_video_pipeline import ensure_video_output, process_multiscene_video_pipeline, safe_run_ffmpeg
+from services import video_final_output
 
 
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
@@ -27,9 +28,12 @@ FINAL_AI_VIDEO = "final_ai_video"
 PARTIAL_SIMPLE_VIDEO = "partial_simple_video"
 FAILED_NO_REAL_VISUAL = "failed_no_real_visual"
 LOCAL_PLACEHOLDER_RENDERER = "local_scene_composer"
+LOCAL_IMAGE_SEQUENCE_RENDERER = video_final_output.LOCAL_IMAGE_SEQUENCE_RENDERER
 PROVIDER_SCENE_RENDERER = "provider_scene_video"
 VISUAL_SOURCE_PROVIDER_MP4 = "provider_mp4"
 VISUAL_SOURCE_LOCAL_PLACEHOLDER = "local_placeholder"
+VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE = video_final_output.VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE
+LOCAL_IMAGE_SEQUENCE_PRODUCT_TYPES = {"image_to_video", "storyboard_prompt", "script_to_video"}
 
 RAW_PROMPT_FRAME_MARKERS = (
     "chủ thể chính:",
@@ -111,6 +115,8 @@ def classify_visual_result(result: dict | None = None) -> str:
         return PARTIAL_SIMPLE_VIDEO
     if payload.get("raw_prompt_burned_into_frame"):
         return FAILED_NO_REAL_VISUAL
+    if renderer == LOCAL_IMAGE_SEQUENCE_RENDERER or payload.get("visual_source") == VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE:
+        return FINAL_AI_VIDEO
     if renderer in {"real_provider", PROVIDER_SCENE_RENDERER, "provider_video"} or payload.get("provider_attempted"):
         return FINAL_AI_VIDEO
     return FAILED_NO_REAL_VISUAL
@@ -284,6 +290,46 @@ def _scene_count(job: dict | None = None) -> int:
     if not value and isinstance(job.get("project"), dict):
         value = (job.get("project") or {}).get("scene_count")
     return max(1, min(20, _safe_int(value, 3)))
+
+
+def _product_type(job: dict | None = None) -> str:
+    job = dict(job or {})
+    project = dict(job.get("project") or {})
+    if not project and job.get("asset_pack"):
+        project = {"asset_pack_json": job.get("asset_pack")}
+    product_type = video_final_output.product_type_from_project(project, job)
+    return video_final_output.normalize_video_product_type(product_type)
+
+
+def _local_image_sequence_paths(job: dict | None = None) -> list[str]:
+    return video_final_output.extract_local_image_paths(job or {})
+
+
+def _local_image_sequence_allowed(job: dict | None = None, paths: list[str] | None = None) -> bool:
+    if not paths:
+        return False
+    product_type = _product_type(job)
+    if product_type in LOCAL_IMAGE_SEQUENCE_PRODUCT_TYPES:
+        return True
+    route = video_final_output.route_for_product_type(product_type)
+    return str(route.get("engine_family") or "") in {"image_sequence", "storyboard"} and product_type not in {"video_ai_image"}
+
+
+def _local_addon_audio_path(job: dict | None = None) -> str:
+    addon = _addon_plan(job)
+    candidates = [
+        addon.get("music_path"),
+        addon.get("music_audio_path"),
+        addon.get("bgm_audio_path"),
+        addon.get("voice_path"),
+        addon.get("voice_audio_path"),
+        addon.get("audio_path"),
+    ]
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text and os.path.isfile(text) and os.path.getsize(text) > 0:
+            return text
+    return ""
 
 
 def _aspect_ratio(job: dict | None = None) -> str:
@@ -942,6 +988,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     fallback_used = False
     fallback_reason = ""
     provider_route_selected = bool(readiness.get("ok"))
+    local_image_sequence_used = False
 
     def _base_diagnostics(payload: dict[str, Any] | None = None, *, error: str = "") -> dict[str, Any]:
         data = dict(payload or {})
@@ -986,12 +1033,48 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
 
     def _raise_render_error(reason: str, payload: dict[str, Any] | None = None) -> None:
         data = _base_diagnostics(payload, error=reason or REAL_VIDEO_RENDER_UNAVAILABLE)
+        if is_product_video:
+            data["no_charge"] = True
         if reason == FAILED_NO_REAL_VISUAL:
             data["visual_classification"] = FAILED_NO_REAL_VISUAL
             data["final_classification"] = FAILED_NO_REAL_VISUAL
         raise RealVideoRenderError(reason or REAL_VIDEO_RENDER_UNAVAILABLE, diagnostics=data)
 
-    if readiness.get("ok") or not is_product_video:
+    local_image_paths = _local_image_sequence_paths(job) if is_product_video else []
+    if is_product_video and _local_image_sequence_allowed(job, local_image_paths):
+        local_image_sequence_used = True
+        local_workspace = os.path.join(workspace, "local_image_sequence")
+        local_output = os.path.join(local_workspace, "final_output.mp4")
+        result = video_final_output.render_local_image_sequence_video(
+            local_image_paths,
+            local_output,
+            aspect_ratio=_aspect_ratio(job),
+            duration_per_image=max(1.0, min(8.0, total_duration / max(1, len(local_image_paths)))),
+            audio_path=_local_addon_audio_path(job) or bgm_audio_path or "",
+            ffmpeg=_ffmpeg_binary(),
+        )
+        if not result.get("ok"):
+            _raise_render_error(str(result.get("error") or "local_image_sequence_failed"), result)
+        result["renderer"] = LOCAL_IMAGE_SEQUENCE_RENDERER
+        result["provider_attempted"] = False
+        result["provider_route_selected"] = False
+        result["provider_events"] = []
+        result["provider_task_ids"] = []
+        result["provider_video_ids"] = []
+        result["provider_models"] = []
+        result["provider_modes"] = []
+        result["provider_status"] = "not_needed"
+        result["provider_error"] = ""
+        result["fallback_used"] = False
+        result["fallback_reason"] = ""
+        result["visual_source"] = VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE
+        result["placeholder_detected"] = False
+        result["placeholder_visual"] = False
+        result["raw_prompt_burned_into_frame"] = False
+        result["visual_classification"] = FINAL_AI_VIDEO
+        result["final_classification"] = FINAL_AI_VIDEO
+        result["no_charge"] = bool(job.get("no_charge"))
+    elif readiness.get("ok") or not is_product_video:
         provider_attempted = True
         try:
             result = _run_multiscene_render(
@@ -1012,7 +1095,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             provider_error = str(result.get("error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE)
     elif is_product_video:
         provider_error = str(readiness.get("reason") or REAL_VIDEO_RENDER_UNAVAILABLE)
-    if is_product_video and (not result or not result.get("ok")) and _local_composer_enabled(job):
+    if is_product_video and not local_image_sequence_used and (not result or not result.get("ok")) and _local_composer_enabled(job):
         local_workspace = os.path.join(workspace, "local_composer")
         fallback_used = True
         fallback_reason = provider_error or "provider_unavailable"
@@ -1039,7 +1122,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["visual_classification"] = PARTIAL_SIMPLE_VIDEO if result.get("ok") and not result["raw_prompt_burned_into_frame"] else FAILED_NO_REAL_VISUAL
         result["final_classification"] = result["visual_classification"]
         result["no_charge"] = True
-    elif result:
+    elif result and not local_image_sequence_used:
         result["renderer"] = PROVIDER_SCENE_RENDERER
         result["provider_attempted"] = bool(provider_attempted)
         result["provider_route_selected"] = bool(provider_route_selected)
