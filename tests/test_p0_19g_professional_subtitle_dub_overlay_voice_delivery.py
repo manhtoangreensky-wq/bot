@@ -31,7 +31,7 @@ def test_subtitle_style_presets_include_cover_original():
 
     assert "cover_original" in presets
     assert presets["cover_original"]["cover_original"] is True
-    assert presets["cover_original"]["background"] == "strip"
+    assert presets["cover_original"]["background"] == "box"
     assert presets["tiktok_clear"]["show_subtitles"] is True
 
 
@@ -63,8 +63,8 @@ def test_cover_old_subtitle_filter_draws_bottom_strip():
     filter_text = bot.subdub_cover_filter({"subtitle_style_preset": "cover_original"})
 
     assert "drawbox=" in filter_text
-    assert "y=ih*0.84" in filter_text
-    assert "h=ih*0.12" in filter_text
+    assert "y=ih*0.86" in filter_text
+    assert "h=ih*0.10" in filter_text
     assert "color=black@" in filter_text
 
 

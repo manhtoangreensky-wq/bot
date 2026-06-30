@@ -270,8 +270,8 @@ def test_hardsub_cover_drawbox_or_ass_style_present(monkeypatch):
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
     assert "drawbox=" in filter_text
-    assert "y=ih*0.84" in filter_text
-    assert "h=ih*0.13" in filter_text
+    assert "y=ih*0.86" in filter_text
+    assert "h=ih*0.10" in filter_text
     assert "Dialogue: 0" in ass
 
 
