@@ -6400,7 +6400,7 @@ def progress_auto_refresh_start_task(context, key: str) -> bool:
             "task_started": True,
             "task_alive": True,
             "task_started_at": now_text(),
-            "scheduler_mode": "application_task" if application and hasattr(application, "create_task") else "asyncio_task",
+            "scheduler_mode": "job_queue" if application and hasattr(application, "create_task") else "asyncio_task",
         })
         PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return True
@@ -6686,11 +6686,11 @@ def progress_auto_refresh_status_text(job_id: str = "") -> str:
         lines.extend([
             f"• product_type: <code>{html.escape(str(record.get('product_type') or '-'))}</code>",
             f"• job_id: <code>{html.escape(str(record.get('job_id') or '-'))}</code>",
-            f"• enabled: <code>{'yes' if record.get('enabled') else 'no'}</code>",
+            f"• enabled: <code>{'true' if record.get('enabled') else 'false'}</code>",
             f"• scheduler_mode: <code>{html.escape(str(record.get('scheduler_mode') or '-'))}</code>",
-            f"• registry_saved: <code>{'yes' if record.get('registry_saved') else 'no'}</code>",
-            f"• task_started: <code>{'yes' if record.get('task_started') else 'no'}</code>",
-            f"• task_alive: <code>{'yes' if record.get('task_alive') else 'no'}</code>",
+            f"• registry_saved: <code>{'true' if record.get('registry_saved') else 'false'}</code>",
+            f"• task_started: <code>{'true' if record.get('task_started') else 'false'}</code>",
+            f"• task_alive: <code>{'true' if record.get('task_alive') else 'false'}</code>",
             f"• chat_id/message_id: <code>{html.escape(str(record.get('chat_id') or '-'))}/{html.escape(str(record.get('message_id') or '-'))}</code>",
             f"• task_started_at: <code>{html.escape(str(record.get('task_started_at') or '-'))}</code>",
             f"• last_tick_at: <code>{html.escape(str(record.get('last_tick_at') or '-'))}</code>",
@@ -6701,9 +6701,9 @@ def progress_auto_refresh_status_text(job_id: str = "") -> str:
             f"• last_percent/stage: <code>{int(record.get('last_percent') or 0)}% / {html.escape(str(record.get('last_stage') or '-'))}</code>",
             f"• current_percent/stage: <code>{int(record.get('percent') or 0)}% / {html.escape(str(record.get('current_stage') or '-'))}</code>",
             f"• edit_success/fail: <code>{int(record.get('edit_success_count') or 0)}/{int(record.get('edit_fail_count') or 0)}</code>",
-            f"• fallback_used: <code>{'yes' if record.get('fallback_used') else 'no'}</code>",
+            f"• fallback_used: <code>{'true' if record.get('fallback_used') else 'false'}</code>",
             f"• stopped_reason: <code>{html.escape(str(record.get('stopped_reason') or record.get('stop_reason') or '-'))}</code>",
-            f"• stopped: <code>{'yes' if record.get('stopped') else 'no'} {html.escape(str(record.get('stop_reason') or ''))}</code>",
+            f"• stopped: <code>{'true' if record.get('stopped') else 'false'} {html.escape(str(record.get('stop_reason') or ''))}</code>",
             "",
         ])
     return "\n".join(lines).strip()
@@ -6816,6 +6816,9 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• task_started: <code>{'yes' if auto_record.get('task_started') else 'no'}</code>\n"
         f"• last_tick_at: <code>{html.escape(str(auto_record.get('last_tick_at') or '-'))}</code>\n"
         f"• provider_status: <code>{html.escape(sanitize_provider_status_text((job or {}).get('last_provider_status') or status, provider_task_id, 180))}</code>\n"
+        f"• provider_last_poll_at: <code>{html.escape(str((job or {}).get('provider_last_poll_at') or (job or {}).get('last_poll_at') or '-'))}</code>\n"
+        f"• provider_poll_count: <code>{int((job or {}).get('provider_poll_count') or (job or {}).get('poll_count') or 0)}</code>\n"
+        f"• provider_error: <code>{html.escape(sanitize_provider_status_text((job or {}).get('provider_error') or (job or {}).get('last_send_error') or '-', provider_task_id, 180))}</code>\n"
         f"• artifact_candidates_count: <code>{int((job or {}).get('artifact_candidates_count') or 0)}</code>\n"
         f"• selected_artifact_id: <code>{html.escape(str((job or {}).get('selected_artifact_id') or (job or {}).get('music_artifact_id') or '-'))}</code>\n"
         f"• selected_artifact_hash: <code>{html.escape(str((job or {}).get('selected_artifact_hash') or (job or {}).get('music_artifact_hash') or '-'))}</code>\n"
@@ -95608,10 +95611,14 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
     provider_status = str(polled.get("status") or "")
     output_url = str(polled.get("output_url") or "").strip()
     job["poll_count"] = int(job.get("poll_count") or 0) + 1
+    job["provider_poll_count"] = int(job["poll_count"] or 0)
     job["last_poll_at"] = now_text()
+    job["provider_last_poll_at"] = str(job.get("last_poll_at") or "")
     job["next_poll_after"] = engine_async_next_poll_after_text()
     job["parsed_fields"] = suno_result_parsed_fields(polled)
     job["last_provider_status"] = sanitize_provider_status_text(provider_status or polled.get("detail") or "-", provider_task_id)
+    job["provider_status"] = job["last_provider_status"]
+    job["provider_error"] = sanitize_provider_status_text(polled.get("detail") or polled.get("error") or "", provider_task_id, 180)
     if polled.get("ok") and output_url:
         if not download:
             job["status"] = "downloading"
@@ -96165,15 +96172,41 @@ async def deliver_music_result_once(
         updated_job = music_delivery_record_duplicate(current_job, source_token, "delivery_locked", current_result, updated_by=updated_by or user_id)
         return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "charged_xu": int(current_result.get("music_charged_xu") or current_job.get("charged_xu") or 0), "job": updated_job or current_job, "result": current_result}
     if audio_bytes is not None and not music_artifact_candidate_bytes(audio_bytes) and not music_delivery_artifact_candidates(current_result, current_job, None):
+        if current_job and (
+            bool(current_job.get("provider_completed") or current_job.get("music_provider_completed"))
+            or str(current_job.get("status") or "").strip().lower() in {"completed", "complete", "success", "succeeded", "downloading"}
+        ):
+            current_job.update({
+                "status": "failed",
+                "terminal_state": "failed_no_charge",
+                "music_terminal_state": "failed_no_charge",
+                "error_category": "artifact_bytes_missing",
+                "auto_delivery_blocker": "artifact_bytes_missing",
+                "progress_text": "File nhạc chưa có dữ liệu hợp lệ; TOAN AAS chưa trừ Xu.",
+            })
+            if current_job.get("internal_job_id"):
+                save_engine_async_job(current_job)
         return {"ok": False, "status": "EMPTY_AUDIO", "job": current_job, "result": current_result}
     artifact = await select_music_delivery_artifact(current_result, current_job, audio_bytes)
     if not artifact.get("ok"):
+        artifact_status = str(artifact.get("status") or "artifact_not_ready")
         if current_job:
-            current_job["auto_delivery_blocker"] = str(artifact.get("status") or "artifact_not_ready")
+            current_job["auto_delivery_blocker"] = artifact_status
             current_job["artifact_candidates_count"] = int(artifact.get("artifact_candidates_count") or 0)
+            if (
+                bool(current_job.get("provider_completed") or current_job.get("music_provider_completed"))
+                or str(current_job.get("status") or "").strip().lower() in {"completed", "complete", "success", "succeeded", "downloading"}
+            ):
+                current_job.update({
+                    "status": "failed",
+                    "terminal_state": "failed_no_charge",
+                    "music_terminal_state": "failed_no_charge",
+                    "error_category": artifact_status.lower(),
+                    "progress_text": "File nhạc chưa sẵn sàng hợp lệ; TOAN AAS chưa trừ Xu.",
+                })
             if current_job.get("internal_job_id"):
                 save_engine_async_job(current_job)
-        return {"ok": False, "status": str(artifact.get("status") or "ARTIFACT_NOT_READY"), "job": current_job, "result": current_result}
+        return {"ok": False, "status": artifact_status, "job": current_job, "result": current_result}
     payload = bytes(artifact.get("audio_bytes") or b"")
     if not payload:
         return {"ok": False, "status": "EMPTY_AUDIO", "job": current_job, "result": current_result}
@@ -96261,6 +96294,20 @@ async def deliver_music_result_once(
                 current_job["music_result_delivery_lock"] = ""
                 record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
             return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180)}
+
+        delivery_message_id_raw = str(getattr(sent_message, "message_id", "") or "").strip()
+        if not delivery_message_id_raw:
+            current_result["music_result_delivery_lock"] = ""
+            current_result["music_delivery_lock"] = ""
+            current_result["music_delivery_blocker"] = "telegram_message_id_missing"
+            save_music_guided_result(user_id, current_result)
+            if current_job:
+                current_job["music_delivery_lock"] = ""
+                current_job["music_result_delivery_lock"] = ""
+                current_job["delivery_state"] = "send_unconfirmed"
+                current_job["auto_delivery_blocker"] = "telegram_message_id_missing"
+                record_music_job_full_send_error(current_job, "telegram_message_id_missing", updated_by=updated_by or user_id)
+            return {"ok": False, "status": "TELEGRAM_MESSAGE_ID_MISSING", "job": current_job, "result": current_result}
 
         charge_result = music_product_charge_after_delivery(user_id, current_result, music_result_price_xu(current_result), current_job)
         charged = int(charge_result.get("charged_xu") or 0)

@@ -25,7 +25,7 @@ class CaptureMessage:
 
     async def reply_audio(self, audio=None, filename="", caption="", **kwargs):
         self.outputs.append({"kind": "audio", "audio": audio, "filename": filename, "caption": caption, **kwargs})
-        return SimpleNamespace(audio=SimpleNamespace(file_id=f"file-{len(self.outputs)}"))
+        return SimpleNamespace(message_id=len(self.outputs), audio=SimpleNamespace(file_id=f"file-{len(self.outputs)}"))
 
 
 class CaptureQuery:
@@ -376,7 +376,7 @@ def test_music_charge_after_valid_delivery(monkeypatch):
 
     async def tracked_reply_audio(*args, **kwargs):
         order.append("send")
-        return SimpleNamespace(audio=SimpleNamespace(file_id="file-ok"))
+        return SimpleNamespace(message_id=1, audio=SimpleNamespace(file_id="file-ok"))
 
     message.reply_audio = tracked_reply_audio
     delivered = asyncio.run(bot.send_music_product_audio_result(message, SimpleNamespace(), user_id=user_id, lang="vi", product_context=bot.PRODUCT_CONTEXT_SHOWROOM, result=result, audio_bytes=b"real-audio"))
