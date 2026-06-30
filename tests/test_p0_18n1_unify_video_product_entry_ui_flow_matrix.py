@@ -131,23 +131,24 @@ def test_video_profile_picker_shared_12_types():
 def test_profile_back_returns_origin_step():
     user_id = 181901
     _open(user_id, "video_ai_real")
+    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
     _press(user_id, "vproduct|input_text|video_ai_real")
     _send_text(user_id)
     text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "collect_input"
-    assert "Đầu vào sản phẩm" in text or "Nhập prompt" in text or "Nhập ý tưởng" in text
+    assert session["current_step"] == "awaiting_prompt_text"
+    assert "prompt" in text.lower()
     text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "intro"
-    assert "Video AI chân thật" in text
+    assert session["current_step"] == "ai_prompt_menu"
+    assert "Prompt" in text
 
 
 def test_no_flow_jumps_to_main_menu_unless_main_button():
     user_id = 181902
     _open(user_id, "script_image_video")
-    _press(user_id, "vproduct|input_text|script_image_video")
+    _press(user_id, "vproduct|script_manual|script_image_video")
     _send_text(user_id, "kịch bản affiliate mỹ phẩm")
     text, _markup, session = _press(user_id, "vproduct|back")
-    assert session["current_step"] == "collect_input"
+    assert session["current_step"] == "script_manual_topic"
     assert "Menu chính" not in text
 
 
@@ -161,15 +162,16 @@ def test_video_ai_real_intro_first():
     callbacks = _callbacks(markup)
     assert "Video AI chân thật" in text
     assert session["current_step"] == "intro"
-    assert "vproduct|input_text|video_ai_real" in callbacks
-    assert "vproduct|input_media|video_ai_real" in callbacks
-    assert "vproduct|entry_media|video_ai_real" in callbacks
+    assert "vproduct|ai_prompt_menu|video_ai_real" in callbacks
+    assert "vproduct|ai_image_menu|video_ai_real" in callbacks
+    assert "vproduct|ai_video_menu|video_ai_real" in callbacks
     assert "promptvideo|start" not in callbacks
 
 
 def test_video_ai_real_prompt_then_profile():
     user_id = 181904
     _open(user_id, "video_ai_real")
+    _press(user_id, "vproduct|ai_prompt_menu|video_ai_real")
     _press(user_id, "vproduct|input_text|video_ai_real")
     text, markup, session = _send_text(user_id, "prompt quảng cáo nước hoa nam chân thật")
     assert session["current_step"] == "profile_select"
@@ -180,6 +182,7 @@ def test_video_ai_real_prompt_then_profile():
 def test_video_ai_real_image_then_profile():
     user_id = 181905
     _open(user_id, "video_ai_real")
+    _press(user_id, "vproduct|ai_image_menu|video_ai_real")
     _press(user_id, "vproduct|input_media|video_ai_real")
     text, markup, session = _send_media(user_id, kind="photo")
     assert session["current_step"] == "profile_select"
@@ -278,7 +281,9 @@ def test_multiscene_intro_first_not_profile_first():
 def test_multiscene_intro_then_profile():
     user_id = 181916
     _open(user_id, "multi_scene_film")
-    text, markup, session = _press(user_id, "vproduct|ideas|multi_scene_film")
+    text, markup, session = _press(user_id, "vproduct|film_manual|multi_scene_film")
+    assert session["current_step"] == "film_manual_topic"
+    text, markup, session = _send_text(user_id, "phim ngắn về cô gái mở tiệm hoa")
     assert session["current_step"] == "profile_select"
     assert "Chọn loại video" in text
     assert "vproduct|b14_profile|cinematic_trailer" in _callbacks(markup)
@@ -287,7 +292,8 @@ def test_multiscene_intro_then_profile():
 def test_multiscene_profile_then_scene_count_or_outline():
     user_id = 181917
     _open(user_id, "multi_scene_film")
-    _press(user_id, "vproduct|ideas|multi_scene_film")
+    _press(user_id, "vproduct|film_manual|multi_scene_film")
+    _send_text(user_id, "phim ngắn về cô gái mở tiệm hoa")
     text, markup, session = _press(user_id, "vproduct|b14_profile|cinematic_trailer")
     assert session["current_step"] == "panels"
     assert "Chọn số" in text
@@ -297,7 +303,8 @@ def test_multiscene_profile_then_scene_count_or_outline():
 def test_multiscene_engine_not_touched():
     user_id = 181918
     _open(user_id, "multi_scene_film")
-    _press(user_id, "vproduct|ideas|multi_scene_film")
+    _press(user_id, "vproduct|film_manual|multi_scene_film")
+    _send_text(user_id, "phim ngắn về cô gái mở tiệm hoa")
     _press(user_id, "vproduct|b14_profile|cinematic_trailer")
     session = bot.get_video_session(user_id)
     assert session["draft"]["provider_called"] is False
@@ -381,13 +388,13 @@ def test_frame_video_intro_first():
     text, markup, session = _open(181927, "frame_video_local")
     assert "Ghép ảnh thành video" in text
     assert session["current_step"] == "intro"
-    assert "vproduct|legacy|frame_video_local" in _callbacks(markup)
+    assert "vproduct|frame_send_images|frame_video_local" in _callbacks(markup)
 
 
 def test_frame_video_image_collection_then_optional_profile():
     text, markup, session = _open(181928, "frame_video_local")
     callbacks = _callbacks(markup)
-    assert "vproduct|legacy|frame_video_local" in callbacks
+    assert "vproduct|frame_send_images|frame_video_local" in callbacks
     assert "vproduct|frame_recent|frame_video_local" in callbacks
     assert "vproduct|asset_storyboard_prompt" in callbacks
     assert session["video_tool"] == "frame_video_local"

@@ -290,16 +290,15 @@ def test_trend_does_not_charge_or_call_provider():
 
 def test_video_trend_input_button_sets_waiting_topic():
     query, session = _press_vproduct(993104, "video_trend", "vproduct|trend_custom")
-    assert session["current_step"] == "collect_input"
+    assert session["current_step"] == "trend_manual_input"
     assert session["draft"]["input_mode"] == "text"
-    assert "sản phẩm/chủ đề" in query.edits[-1][0]
+    assert "trend" in query.edits[-1][0].lower()
     bot.clear_video_session(993104)
 
 
 def test_video_idea_input_button_sets_waiting_topic():
     query, session = _press_vproduct(993105, "video_idea", "vproduct|input_text|video_idea")
-    assert session["current_step"] == "collect_input"
-    assert session["draft"]["input_mode"] == "text"
+    assert session["current_step"] == "video_idea_manual_topic"
     assert "sản phẩm" in query.edits[-1][0]
     bot.clear_video_session(993105)
 
@@ -392,22 +391,23 @@ def test_video_ai_real_intro_no_motion_button():
     markup = bot.task3d_product_intro_keyboard("video_ai_real", "vi")
     labels = _labels(markup)
     callbacks = _callbacks(markup)
-    for label in ("📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "💡 Gợi ý prompt video", "🖼 Gợi ý tạo ảnh", "🎬 Gợi ý tạo video", "📊 Trạng thái video"):
+    for label in ("📝 Prompt → Video AI", "🖼 Ảnh → Video AI", "🎞 Video mẫu → Video AI", "📊 Trạng thái video", "📚 Dùng prompt từ kho"):
         assert label in labels
+    for label in ("💡 Gợi ý prompt video", "🖼 Gợi ý tạo ảnh", "🎬 Gợi ý tạo video"):
+        assert label not in labels
     assert "🎥 Gợi ý chuyển động" not in labels
-    assert "vproduct|input_text|video_ai_real" in callbacks
-    assert "vproduct|input_media|video_ai_real" in callbacks
-    assert "vproduct|entry_media|video_ai_real" in callbacks
-    assert "vproduct|suggest_prompt|video_ai_real" in callbacks
-    assert "vproduct|suggest_image|video_ai_real" in callbacks
-    assert "vproduct|suggest_video|video_ai_real" in callbacks
+    assert "vproduct|ai_prompt_menu|video_ai_real" in callbacks
+    assert "vproduct|ai_image_menu|video_ai_real" in callbacks
+    assert "vproduct|ai_video_menu|video_ai_real" in callbacks
+    assert "vproduct|suggest_prompt|video_ai_real" not in callbacks
+    assert "vproduct|suggest_image|video_ai_real" not in callbacks
+    assert "vproduct|suggest_video|video_ai_real" not in callbacks
     assert "vproduct|motion_suggest|video_ai_real" not in callbacks
     assert "menu|main_video" in callbacks
     assert [[button.text for button in row] for row in markup.inline_keyboard] == [
         ["📝 Prompt → Video AI", "🖼 Ảnh → Video AI"],
-        ["🎞 Video mẫu → Video AI", "💡 Gợi ý prompt video"],
-        ["🖼 Gợi ý tạo ảnh", "🎬 Gợi ý tạo video"],
-        ["📊 Trạng thái video"],
+        ["🎞 Video mẫu → Video AI", "📊 Trạng thái video"],
+        ["📚 Dùng prompt từ kho"],
         ["⬅️ Menu video", "🏠 Menu chính"],
     ]
 
@@ -488,7 +488,9 @@ def test_optional_skip_continues_to_prompt_output():
 
 def test_existing_trend_flow_preserved_with_optional_guidance():
     labels = _labels(bot.task3d_product_intro_keyboard("video_trend", "vi"))
-    assert {"🔥 Gợi ý trend hot", "✍️ Tự nhập trend/ý tưởng", "📦 Theo sản phẩm/ngành", "🎬 Gợi ý video"}.issubset(set(labels))
+    assert {"🔥 Gợi ý trend hot", "✍️ Tự nhập trend/ý tưởng"}.issubset(set(labels))
+    assert "📦 Theo sản phẩm/ngành" not in labels
+    assert "🎬 Gợi ý video" not in labels
     assert bot.task3d_guided_steps("video_trend") == ("style", "color", "movement", "result")
 
 
