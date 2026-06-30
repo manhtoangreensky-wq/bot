@@ -1676,7 +1676,7 @@ def _visual_classification(payload: dict) -> str:
         return "failed_no_real_visual"
     if _safe_bool(payload.get("placeholder_detected") or payload.get("placeholder_visual")) or _renderer_has_placeholder_marker(connector):
         return "partial_simple_video"
-    if _safe_bool(payload.get("provider_attempted")) or str(payload.get("visual_source") or "") in {"provider_mp4", "generated_scene_video", "generated_scene_image", "uploaded_image"}:
+    if _safe_bool(payload.get("provider_attempted")) or str(payload.get("visual_source") or "") in {"provider_mp4", "generated_scene_video", "generated_scene_image", "uploaded_image", "local_image_sequence"}:
         return "final_ai_video"
     return ""
 
