@@ -56996,6 +56996,10 @@ def video_back_matrix_target(session: dict | None = None) -> str:
             return VIDEO_BACK_MENU_TARGET
         target = str((VIDEO_STEP_BACK_MATRIX.get(flow) or {}).get(current) or "")
         return target or VIDEO_BACK_MENU_TARGET
+    if current == "b14_invoice":
+        invoice_origin = str(draft.get("b14_invoice_return_step") or "").strip()
+        if invoice_origin and invoice_origin != current:
+            return invoice_origin
     if current == "tool_home":
         return VIDEO_BACK_MENU_TARGET
     if current == "intro" and draft.get("profile_next_screen"):
@@ -57627,6 +57631,134 @@ def video_microflow_audit_text() -> str:
     return "\n".join(lines)
 
 
+VIDEO_UI_PUBLIC_FORBIDDEN_TERMS = (
+    "provider",
+    "api",
+    "ffmpeg",
+    "artifact",
+    "callback",
+    "handler",
+    "local_scene_composer",
+    "stacktrace",
+    "runtimeerror",
+    "payload",
+    "debug",
+    "worker",
+    "render_mode",
+    "test pattern",
+    "admin test",
+    "no-charge",
+)
+
+
+def video_ui_keyboard_rows(markup: InlineKeyboardMarkup | None) -> list[list[str]]:
+    return [
+        [str(button.text or "") for button in row]
+        for row in ((markup.inline_keyboard if markup else []) or [])
+    ]
+
+
+def video_ui_forbidden_terms(text: str) -> list[str]:
+    lower = str(text or "").lower()
+    return [term for term in VIDEO_UI_PUBLIC_FORBIDDEN_TERMS if term in lower]
+
+
+def video_ui_audit_payload() -> dict:
+    sample_session = {
+        "product_id": "video_trend",
+        "video_flow": "video_trend",
+        "current_step": "b14_queue_status",
+        "draft": {
+            "b14_invoice": {
+                "scene_count": 3,
+                "duration_seconds": 18,
+                "quality_xu": 300,
+                "package_label": "⭐ 300 Xu — Cơ bản",
+            },
+            "b14_addon_plan": {
+                "subtitle_enabled": True,
+                "subtitle_source": "narration",
+                "logo_enabled": True,
+                "logo_source": "text",
+                "logo_text": "TOAN AAS",
+            },
+            "b14_scene_count": 3,
+        },
+    }
+    status_text = video_b14_queue_status_text(
+        sample_session,
+        {"job": {"id": 37, "status": "queued", "progress_percent": 5}},
+        user_id=0,
+        lang="vi",
+    )
+    status_rows = video_ui_keyboard_rows(video_b14_queue_status_keyboard("vi"))
+    option_rows = video_ui_keyboard_rows(
+        video_microflow_options_keyboard(
+            "video_ai_real",
+            "vi",
+            video_microflow_build_options("prompt", "demo", "video_ai_real", 5),
+            "prompt",
+        )
+    )
+    first_option_row = option_rows[0] if option_rows else []
+    aux_rows = option_rows[1:3] if len(option_rows) >= 3 else []
+    checks = [
+        {
+            "name": "status_panel_compact_public_copy",
+            "ok": (
+                "🎬 <b>Trạng thái tạo video</b>" in status_text
+                and "Mã xử lý:" in status_text
+                and "<b>Thông tin video:</b>" in status_text
+                and "Giai đoạn:" not in status_text
+                and "Tùy chọn thêm:" not in status_text
+                and "Thời gian chờ dự kiến:" not in status_text
+            ),
+        },
+        {"name": "status_panel_no_debug_terms", "ok": not video_ui_forbidden_terms(status_text), "terms": video_ui_forbidden_terms(status_text)},
+        {"name": "refresh_button_label", "ok": bool(status_rows and status_rows[0][:1] == ["🔄 Cập nhật trạng thái"])},
+        {"name": "status_invoice_label", "ok": bool(status_rows and len(status_rows[0]) > 1 and status_rows[0][1] == "🧾 Xem hóa đơn")},
+        {"name": "prompt_options_are_1_to_5_single_row", "ok": first_option_row == ["1", "2", "3", "4", "5"]},
+        {"name": "prompt_option_5_not_alone", "ok": bool(first_option_row and first_option_row[-1] == "5" and len(first_option_row) == 5)},
+        {"name": "no_long_use_prompt_labels", "ok": all(not label.startswith(("1 ", "2 ", "3 ", "4 ", "5 ")) and "Dùng prompt" not in label and "Dùng hướng" not in label for label in first_option_row)},
+        {"name": "aux_buttons_under_options", "ok": aux_rows == [["🔄 Gợi ý lại", "✍️ Nhập chủ đề riêng"], ["⬅️ Quay lại", "🏠 Menu chính"]]},
+        {"name": "missing_origin_fallback_video_menu", "ok": video_back_matrix_target({}) == VIDEO_BACK_MENU_TARGET},
+        {
+            "name": "invoice_from_status_back_returns_status",
+            "ok": video_back_matrix_target({
+                "product_id": "video_trend",
+                "video_flow": "video_trend",
+                "current_step": "b14_invoice",
+                "draft": {"b14_invoice_return_step": "b14_queue_status"},
+            }) == "b14_queue_status",
+        },
+        {
+            "name": "invoice_normal_back_returns_confirm_flow",
+            "ok": video_back_matrix_target({
+                "product_id": "video_trend",
+                "video_flow": "video_trend",
+                "current_step": "b14_invoice",
+                "draft": {},
+            }) == "b14_scene_count",
+        },
+        {"name": "no_BACK_text_in_back_button_label", "ok": all("BACK" not in label for row in (status_rows + option_rows) for label in row)},
+    ]
+    return {
+        "ok": all(check.get("ok") for check in checks),
+        "checks": checks,
+        "status_text": status_text,
+        "status_rows": status_rows,
+        "option_rows": option_rows,
+    }
+
+
+def video_ui_audit_text() -> str:
+    payload = video_ui_audit_payload()
+    lines = ["🎬 <b>Video UI Audit</b>", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
+    for check in payload.get("checks") or []:
+        lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
+    return "\n".join(lines)
+
+
 VIDEO_FLOW_LOCKED_MENU_ROWS = (
     ("video_trend", "video_idea"),
     ("storyboard_prompt", "motion_prompt"),
@@ -57820,6 +57952,12 @@ async def cmd_video_microflow_audit(update: Update, context: ContextTypes.DEFAUL
     if not update.effective_user or not is_admin_user(update.effective_user.id):
         return await reply_internal_customer_feature(update)
     return await update.message.reply_text(video_microflow_audit_text(), parse_mode="HTML")
+
+
+async def cmd_video_ui_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not is_admin_user(update.effective_user.id):
+        return await reply_internal_customer_feature(update)
+    return await update.message.reply_text(video_ui_audit_text(), parse_mode="HTML")
 
 
 async def cmd_video_placeholder_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58483,9 +58621,13 @@ def video_microflow_missing_input_text(lang: str = "vi") -> str:
     return "TOAN AAS does not have enough input for this step yet. Please send the image/video/text again or go back to choose another flow."
 
 
+def video_ui_back_label(lang: str = "vi") -> str:
+    return "⬅️ Quay lại" if normalize_user_language(lang) == "vi" else "⬅️ Back"
+
+
 def video_microflow_nav_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"),
+        InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ]])
 
@@ -58495,7 +58637,7 @@ def video_microflow_media_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Tiếp tục" if is_vi else "✅ Continue", callback_data="vproduct|media_continue")],
         [InlineKeyboardButton("🗑 Xóa ảnh/video cuối" if is_vi else "🗑 Remove last", callback_data="vproduct|media_delete_last")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -58511,7 +58653,7 @@ def video_microflow_scene_count_keyboard(kind: str, lang: str = "vi") -> InlineK
         [InlineKeyboardButton(f"4 {unit}", callback_data=f"vproduct|{kind}_scene_count|4"), InlineKeyboardButton(f"6 {unit}", callback_data=f"vproduct|{kind}_scene_count|6")],
         [InlineKeyboardButton(f"8 {unit}", callback_data=f"vproduct|{kind}_scene_count|8"), InlineKeyboardButton(f"10 {unit}", callback_data=f"vproduct|{kind}_scene_count|10")],
         [InlineKeyboardButton("✍️ Nhập số khác" if is_vi else "✍️ Custom", callback_data=f"vproduct|{kind}_scene_count|custom")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -58520,7 +58662,7 @@ def video_storyboard_duration_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("3 giây/cảnh", callback_data="vproduct|storyboard_video_duration|3"), InlineKeyboardButton("5 giây/cảnh", callback_data="vproduct|storyboard_video_duration|5")],
         [InlineKeyboardButton("8 giây/cảnh", callback_data="vproduct|storyboard_video_duration|8"), InlineKeyboardButton("✍️ Tự nhập", callback_data="vproduct|storyboard_video_duration|custom")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -58592,19 +58734,19 @@ def video_microflow_keyboard(step: str, product_id: str = "", lang: str = "vi") 
     if step == "ai_prompt_menu":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("✍️ Gửi prompt sẵn", callback_data="vproduct|input_text|video_ai_real"), InlineKeyboardButton("💡 Gợi ý prompt", callback_data="vproduct|suggest_prompt|video_ai_real")],
-            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     if step == "ai_image_menu":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🖼 Gửi ảnh sẵn", callback_data="vproduct|input_media|video_ai_real"), InlineKeyboardButton("🎨 Gợi ý tạo ảnh trước", callback_data="vproduct|suggest_image|video_ai_real")],
             [InlineKeyboardButton("🖼 Dùng ảnh gần nhất", callback_data="vproduct|use_recent_image|video_ai_real")],
-            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     if step == "ai_video_menu":
         return InlineKeyboardMarkup([
             [InlineKeyboardButton("🎞 Gửi video mẫu", callback_data="vproduct|entry_media|video_ai_real"), InlineKeyboardButton("💡 Gợi ý cách làm video", callback_data="vproduct|suggest_video|video_ai_real")],
             [InlineKeyboardButton("🎞 Dùng video gần nhất", callback_data="vproduct|use_recent_video|video_ai_real")],
-            [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+            [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ])
     if step in {"storyboard_suggestion_scene_count", "image_to_video_image_suggestion_scene_count"}:
         return video_microflow_scene_count_keyboard("storyboard" if step.startswith("storyboard") else "image_suggest", lang)
@@ -58695,7 +58837,7 @@ def video_microflow_build_options(kind: str, topic: str, product_id: str = "", s
             for idx, (title, style) in enumerate(rotated[:5], start=1)
         ]
     if kind == "image_prompts":
-        option_count = 3 if product_id == "frame_video_local" else 5
+        option_count = 5
         options = []
         for idx, (title, style) in enumerate(rotated[:option_count], start=1):
             images = video_microflow_build_image_scenes(topic, scene_count if product_id == "frame_video_local" else 3, style)
@@ -58765,7 +58907,7 @@ def video_microflow_build_options(kind: str, topic: str, product_id: str = "", s
                 "image_scenes": video_microflow_build_image_scenes(topic, scene_count, style),
                 "style": style,
             }
-            for idx, (title, style) in enumerate(rotated[:3], start=1)
+            for idx, (title, style) in enumerate(rotated[:5], start=1)
         ]
     if kind == "selfshot":
         directions = [
@@ -58936,51 +59078,22 @@ def video_microflow_options_text(kind: str, topic: str, product_id: str = "", sc
 
 
 def video_microflow_select_label(kind: str, index: int) -> str:
-    prefix = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"][index] if 0 <= index < 5 else str(index + 1)
-    verbs = {
-        "prompt": "Dùng prompt",
-        "image_prompts": "Dùng ảnh/prompt",
-        "video": "Dùng hướng",
-        "video_idea": "Dùng ý tưởng",
-        "script": "Dùng kịch bản",
-        "storyboard": "Dùng storyboard",
-        "selfshot": "Dùng hướng",
-        "film": "Dùng cốt truyện",
-    }
-    return f"{prefix} {verbs.get(str(kind or ''), 'Dùng lựa chọn')} {index + 1}"
+    return str(index + 1)
 
 
 def video_microflow_options_keyboard(product_id: str, lang: str = "vi", options: list[dict] | None = None, kind: str = "") -> InlineKeyboardMarkup:
     option_count = len(options or [])
     option_count = option_count if option_count else 3
-    rows: list[list[InlineKeyboardButton]] = []
     buttons = [
         InlineKeyboardButton(video_microflow_select_label(kind, idx), callback_data=f"vproduct|microflow_choose|{idx}")
         for idx in range(min(5, option_count))
     ]
-    for idx in range(0, len(buttons), 2):
-        rows.append(buttons[idx:idx + 2])
-    if str(kind or "") == "video_idea":
-        refresh_label = "🔄 Đổi ý tưởng"
-        edit_label = "✍️ Nhập chủ đề riêng"
-    elif str(kind or "") == "script":
-        refresh_label = "🔄 Đổi kịch bản"
-        edit_label = "✍️ Nhập chủ đề riêng"
-    elif str(kind or "") == "storyboard":
-        refresh_label = "🔄 Đổi storyboard"
-        edit_label = "✍️ Nhập chủ đề riêng"
-    elif str(kind or "") == "image_prompts":
-        refresh_label = "🔄 Đổi bộ ảnh"
-        edit_label = "✍️ Nhập chủ đề riêng"
-    elif str(kind or "") == "selfshot":
-        refresh_label = "🔄 Đổi hướng"
-        edit_label = "✍️ Nhập mô tả riêng"
-    else:
-        refresh_label = "🔄 Gợi ý lại"
-        edit_label = "✍️ Nhập chủ đề riêng"
+    rows: list[list[InlineKeyboardButton]] = [buttons] if buttons else []
+    refresh_label = "🔄 Gợi ý lại"
+    edit_label = "✍️ Nhập chủ đề riêng"
     rows.extend([
         [InlineKeyboardButton(refresh_label, callback_data="vproduct|microflow_regenerate"), InlineKeyboardButton(edit_label, callback_data="vproduct|microflow_custom_topic")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton("⬅️ Quay lại", callback_data="vproduct|back"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -61534,7 +61647,7 @@ def video_b14_invoice_text(session: dict, user_id=0, lang: str = "vi") -> str:
 def video_b14_invoice_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm")],
-        [InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
+        [InlineKeyboardButton(video_ui_back_label(lang), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
 
 
@@ -61694,13 +61807,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     duplicate = bool(result.get("duplicate_prevented") or draft.get("b14_duplicate_prevented"))
     status = str(job.get("status") or project.get("status") or ("queued" if job_id else "draft")).strip().lower() or "draft"
     progress = safe_int(job.get("progress_percent"), 0)
+    stage = "chưa bắt đầu xử lý"
     if status in {"queued", "queued_for_worker"}:
-        status_label = "đang chuẩn bị"
+        status_label = "Đang chuẩn bị"
         stage = "hệ thống đang xếp lịch dựng video"
         if progress <= 0:
             progress = 5 if job_id else 0
     elif status in {"processing", "running"}:
-        status_label = "đang dựng video"
+        status_label = "Đang dựng video"
         if progress >= 80:
             stage = "hệ thống đang đóng gói video cuối"
         elif progress >= 60:
@@ -61712,20 +61826,20 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         else:
             stage = "hệ thống đang chuẩn bị dữ liệu dựng"
     elif status in {"completed", "success"}:
-        status_label = "đã dựng xong"
+        status_label = "Đã dựng xong"
         stage = "hệ thống đang gửi kết quả cuối"
         progress = max(progress, 100)
     elif status in {"failed", "error"}:
         status_label = "chưa dựng được"
         stage = "hệ thống chưa dựng được video"
     else:
-        status_label = "chưa xác nhận"
-        stage = "chưa bắt đầu xử lý"
+        status_label = "Chưa xác nhận"
     final_path = str(project.get("final_video_path") or job.get("final_video_path") or "")
     final_file_id = str(project.get("final_video_file_id") or job.get("final_video_file_id") or "")
     has_final_artifact = bool(final_path or final_file_id)
     if not has_final_artifact and status in {"queued", "queued_for_worker", "processing", "running"} and progress >= 95:
         progress = 85
+        status_label = "Đang kiểm tra file"
         stage = "hệ thống đang kiểm tra file"
     error_log = str(project.get("error_log") or job.get("last_error") or "")
     render_mode = video_b14_render_mode_from_job(job, project)
@@ -61753,59 +61867,84 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     else:
         result_text = "chưa có file thành phẩm"
     package_label = str(invoice.get("package_label") or video_b14_package_full_label(safe_int(invoice.get("quality_xu"), 200)))
-    updated_at = vietnam_time_display(job.get("updated_at") or project.get("updated_at") or now_text())
     voice_label = str(addon_plan.get("voice_label") or video_b14_addon_label("voice", str(addon_plan.get("voice_source") or "none")))
     music_label = video_b14_addon_label("music", str(addon_plan.get("music_source") or "none"))
     subtitle_label = video_b14_addon_label("subtitle", str(addon_plan.get("subtitle_source") or "none"))
     dub_target = str(addon_plan.get("dub_target_language") or addon_plan.get("subtitle_target_language") or "").strip()
     logo_label = video_b14_addon_label("logo", str(addon_plan.get("logo_source") or "none"))
+    postproduction = []
+    if addon_plan.get("voice_enabled") or addon_plan.get("dub_enabled"):
+        postproduction.append("giọng đọc/lồng tiếng")
+    if addon_plan.get("music_enabled"):
+        postproduction.append("nhạc nền")
+    if addon_plan.get("subtitle_enabled"):
+        postproduction.append("phụ đề")
+    postproduction_label = ", ".join(postproduction) if postproduction else "mặc định"
     logo_status = "Bật" if addon_plan.get("logo_enabled") else "Tắt"
-    logo_line = f"  Logo: <b>{logo_status}</b> · {html.escape(logo_label if addon_plan.get('logo_enabled') else video_b14_addon_label('logo', 'none'))}"
+    logo_line = f"{logo_status} · {logo_label if addon_plan.get('logo_enabled') else video_b14_addon_label('logo', 'none')}"
+    logo_public_line = f"• Logo: <b>{logo_status}</b> · {html.escape(logo_label if addon_plan.get('logo_enabled') else video_b14_addon_label('logo', 'none'))}"
     if addon_plan.get("logo_enabled"):
         logo_text_value = logo_watermark_clean_text(addon_plan.get("logo_text") or "")
-        logo_line += f" · {html.escape(logo_text_value or 'chưa nhập')}"
-        logo_line += f" · {html.escape(video_b14_addon_label('logo', str(addon_plan.get('logo_position') or 'bottom_right')))}"
+        logo_line += f" · {logo_text_value or 'chưa nhập'}"
+        logo_line += f" · {video_b14_addon_label('logo', str(addon_plan.get('logo_position') or 'bottom_right'))}"
+        logo_public_line += f" · {html.escape(logo_text_value or 'chưa nhập')}"
+        logo_public_line += f" · {html.escape(video_b14_addon_label('logo', str(addon_plan.get('logo_position') or 'bottom_right')))}"
     lines = [
-        "📊 <b>Trạng thái video</b>",
+        "🎬 <b>Trạng thái tạo video</b>",
         "",
         "✅ <b>Đã xác nhận tạo video</b>" if job_id else "ℹ️ <b>Video chưa xác nhận</b>",
         "",
-        f"• Mã xử lý: <b>{job_id or project_id or '-'}</b>",
-        f"• Trạng thái: <b>{html.escape(status_label)}</b>",
-        f"• Giai đoạn: <b>{html.escape(stage)}</b>",
-        f"• Tiến độ: <b>{max(0, min(100, progress))}%</b>",
+        f"Mã xử lý: <b>#{job_id or project_id or '-'}</b>",
+        f"Gói: <b>{html.escape(package_label)}</b>",
+        f"Tiến độ: <b>{max(0, min(100, progress))}%</b>",
+        f"Trạng thái: <b>{html.escape(status_label)}</b>",
+        "",
+        "<b>Thông tin video:</b>",
         f"• Số cảnh: <b>{scene_count}</b>",
         f"• Thời lượng dự kiến: <b>{duration}s</b>",
-        f"• Gói: <b>{html.escape(package_label)}</b>",
-        "• Tùy chọn thêm:",
+        f"• Hậu kỳ: <b>{html.escape(postproduction_label)}</b>",
+        logo_public_line,
+    ]
+    if duplicate:
+        lines.append("• Ghi chú: video này đã có trong danh sách chờ, TOAN AAS không tạo trùng lần nữa.")
+    lines.append("")
+    lines.append(f"Thời gian chờ dự kiến {video_b14_eta_text(eta)}.")
+    updated_at = vietnam_time_display(job.get("updated_at") or project.get("updated_at") or now_text())
+    lines.extend([
+        "",
+        f"• Giai đoạn <b>{html.escape(stage)}</b>",
+        f"• Cập nhật lần cuối <code>{html.escape(updated_at)}</code>",
+        f"• Kết quả <b>{html.escape(result_text)}</b>",
+        "• Tùy chọn thêm",
         f"  Voice: <b>{'bật' if addon_plan.get('voice_enabled') else 'tắt'}</b> · {html.escape(voice_label)} · tốc độ {html.escape(video_audio_speed_display(video_audio_settings_from_state(addon_plan)['video_voice_speed']))}x · {safe_int(video_audio_settings_from_state(addon_plan)['video_voice_volume_percent'], 100)}%",
         f"  Nhạc: <b>{'bật' if addon_plan.get('music_enabled') else 'tắt'}</b> · {html.escape(music_label)} · tốc độ {html.escape(video_audio_speed_display(video_audio_settings_from_state(addon_plan)['video_music_speed']))}x · {safe_int(video_audio_settings_from_state(addon_plan)['video_music_volume_percent'], 10)}%",
         f"  Phụ đề: <b>{'bật' if addon_plan.get('subtitle_enabled') else 'tắt'}</b> · {html.escape(subtitle_label)}",
         f"  Lồng tiếng: <b>{'bật' if addon_plan.get('dub_enabled') else 'tắt'}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
-        logo_line,
-        f"• Cập nhật lần cuối: <code>{html.escape(updated_at)}</code>",
-        f"• Thời gian chờ dự kiến: <b>{video_b14_eta_text(eta)}</b>",
-        f"• Kết quả: <b>{html.escape(result_text)}</b>",
-    ]
-    enabled_stages = []
-    if addon_plan.get("voice_enabled") or addon_plan.get("dub_enabled"):
-        enabled_stages.append("giọng đọc/lồng tiếng")
-    if addon_plan.get("subtitle_enabled"):
-        enabled_stages.append("phụ đề")
-    if enabled_stages:
-        lines.append(f"• Hậu kỳ đã chọn: <b>{html.escape(', '.join(enabled_stages))}</b>.")
-    if duplicate:
-        lines.append("• Ghi chú: video này đã có trong danh sách chờ, TOAN AAS không tạo trùng lần nữa.")
-    lines.append("")
-    lines.append("Nếu chờ lâu, anh/chị bấm kiểm tra trạng thái để TOAN AAS đọc dữ liệu mới nhất. TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
+        f"  Logo: <b>{logo_status}</b> · {html.escape(logo_label if addon_plan.get('logo_enabled') else video_b14_addon_label('logo', 'none'))}",
+    ])
+    if visual_classification == "partial_simple_video":
+        lines.append(VIDEO_B14_PARTIAL_SIMPLE_MESSAGE)
+        lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
+    elif status in {"failed", "error"} or blocked_reason:
+        lines.append(VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE)
+        lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
+    elif status in {"completed", "success"} and has_final_artifact:
+        lines.append(result_text)
+    elif status in {"completed", "success"}:
+        lines.append(result_text)
+        lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
+    else:
+        lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
+        lines.append("Hệ thống sẽ báo khi có video cuối (MP4).")
+        lines.append("Anh/chị không cần bấm nhiều lần.")
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
 def video_b14_queue_status_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📊 Kiểm tra trạng thái", callback_data="vproduct|b14_job_status"),
-            InlineKeyboardButton("🧾 Xem lại hóa đơn", callback_data="vproduct|b14_invoice_screen"),
+            InlineKeyboardButton("🔄 Cập nhật trạng thái", callback_data="vproduct|b14_job_status"),
+            InlineKeyboardButton("🧾 Xem hóa đơn", callback_data="vproduct|b14_invoice_screen"),
         ],
         [
             InlineKeyboardButton("⬅️ Menu video" if normalize_user_language(lang) == "vi" else "⬅️ Video menu", callback_data="menu|main_video"),
@@ -64823,11 +64962,20 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 return await safe_edit_or_send(query, guard_message, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(ui_text(lang, "common.back"), callback_data="vproduct|b14_scene_count_screen"), InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")]]))
             video_b14_prepare_project_for_invoice(uid, session)
             session = get_video_session(uid)
-            session = task3d_session_step(uid, "b14_invoice", provider_called=False, xu_charged=0)
+            session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
             return await safe_edit_or_send(query, video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
         session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_quality_selected_text(quality, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
     if action == "b14_scene_count_screen":
+        draft = dict(session.get("draft") or {})
+        if str(session.get("current_step") or "") == "b14_invoice" and str(draft.get("b14_invoice_return_step") or "") == "b14_queue_status":
+            session = task3d_session_step(uid, "b14_queue_status", b14_invoice_return_step="", provider_called=False, xu_charged=0)
+            return await safe_edit_or_send(
+                query,
+                video_b14_queue_status_text(session, None, uid, lang),
+                parse_mode="HTML",
+                reply_markup=video_b14_queue_status_keyboard(lang),
+            )
         session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
     if action == "b14_scene_custom":
@@ -64849,7 +64997,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, video_b14_quality_text(lang), parse_mode="HTML", reply_markup=video_b14_quality_keyboard(lang))
         video_b14_prepare_project_for_invoice(uid, session)
         session = get_video_session(uid)
-        session = task3d_session_step(uid, "b14_invoice", provider_called=False, xu_charged=0)
+        session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if action == "b14_confirm":
         draft = dict(session.get("draft") or {})
@@ -64910,7 +65058,13 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
             reply_markup=video_b14_queue_status_keyboard(lang),
         )
     if action == "b14_invoice_screen":
-        session = task3d_session_step(uid, "b14_invoice", provider_called=False, xu_charged=0)
+        session = task3d_session_step(
+            uid,
+            "b14_invoice",
+            b14_invoice_return_step=str(session.get("current_step") or "b14_queue_status"),
+            provider_called=False,
+            xu_charged=0,
+        )
         return await safe_edit_or_send(query, video_b14_invoice_text(session, uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if action == "restyle":
         session = task3d_session_step(uid, "b14_creative_controls", provider_called=False, xu_charged=0)
@@ -65405,7 +65559,7 @@ async def handle_video_product_pending_text(update: Update, context: ContextType
                 await update.message.reply_text(guard_message, parse_mode="HTML")
                 return True
             video_b14_prepare_project_for_invoice(uid, session)
-            session = task3d_session_step(uid, "b14_invoice", provider_called=False, xu_charged=0)
+            session = task3d_session_step(uid, "b14_invoice", b14_invoice_return_step="", provider_called=False, xu_charged=0)
             prefix = (resize_note + "\n\n") if resize_note else ""
             await update.message.reply_text(prefix + video_b14_invoice_text(get_video_session(uid), uid, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
             return True
@@ -164874,6 +165028,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_semantics_audit", cmd_video_semantics_audit))
     tg_app.add_handler(CommandHandler("video_callback_audit", cmd_video_callback_audit))
     tg_app.add_handler(CommandHandler("video_microflow_audit", cmd_video_microflow_audit))
+    tg_app.add_handler(CommandHandler("video_ui_audit", cmd_video_ui_audit))
     tg_app.add_handler(CommandHandler("video_placeholder_audit", cmd_video_placeholder_audit))
     tg_app.add_handler(CommandHandler("video_worker_claim_debug", cmd_video_worker_claim_debug))
     tg_app.add_handler(CommandHandler("video_worker_debug", cmd_video_worker_claim_debug))
