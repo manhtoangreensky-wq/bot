@@ -6452,7 +6452,7 @@ def engine_async_status_keyboard(internal_job_id: str, kind: str = "music") -> I
     callback_data = f"enginejob|{safe_kind}|{safe_id}"
     rows = []
     if safe_id and len(callback_data.encode("utf-8")) <= 64:
-        refresh_label = "🔄 Làm mới" if safe_kind == "multiscene" else "🔄 Kiểm tra trạng thái"
+        refresh_label = "🔄 Cập nhật trạng thái"
         rows.append([InlineKeyboardButton(refresh_label, callback_data=callback_data)])
     if safe_kind == "multiscene" and safe_id:
         retry_callback = f"enginejob|multiscene_retry|{safe_id}"
@@ -8173,10 +8173,41 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
     )
 
 
+def progress_audit_text(title: str, payload: dict) -> str:
+    lines = [f"{html.escape(str(title or 'Progress audit'))}", "", f"Status: <b>{'PASS' if payload.get('ok') else 'FAIL'}</b>", ""]
+    for check in payload.get("checks") or []:
+        lines.append(f"• {html.escape(str(check.get('name') or ''))}: <b>{'PASS' if check.get('ok') else 'FAIL'}</b>")
+    return "\n".join(lines)
+
+
 async def cmd_progress_status_matrix(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id if update.effective_user else 0):
         return
     return await update.message.reply_text(product_progress_matrix_text(), parse_mode="HTML")
+
+
+async def cmd_progress_panel_contract_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(progress_audit_text("🔒 <b>Progress Panel Contract Audit</b>", product_progress_status.progress_panel_contract_audit_payload()), parse_mode="HTML")
+
+
+async def cmd_product_progress_stage_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(progress_audit_text("🧭 <b>Product Progress Stage Audit</b>", product_progress_status.product_progress_stage_audit_payload()), parse_mode="HTML")
+
+
+async def cmd_video_progress_panel_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(progress_audit_text("🎬 <b>Video Progress Panel Audit</b>", product_progress_status.video_progress_panel_audit_payload()), parse_mode="HTML")
+
+
+async def cmd_music_progress_panel_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(progress_audit_text("🎵 <b>Music Progress Panel Audit</b>", product_progress_status.music_progress_panel_audit_payload()), parse_mode="HTML")
 
 
 async def cmd_progress_status_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9638,7 +9669,7 @@ UI_TEXT = {
         "video.public_off_options": "🎬 <b>Hệ thống tạo video đang bảo trì/nâng cấp nhẹ.</b>\n\nHiện tại TOAN AAS vẫn có thể giúp bạn chuẩn bị:\n• Prompt video\n• Hướng chuyển động\n• Storyboard\n• Gợi ý nhạc\n\nKhi xuất video sẵn sàng, bạn sẽ chọn gói và xác nhận giá trước khi tạo.\nTOAN AAS chưa xử lý video và chưa trừ Xu.",
         "video.admin_smoke_warning": "🔐 Admin smoke test: không trừ Xu nội bộ, nhưng provider có thể tốn credit thật. Không cần gửi lại lệnh.",
         "video.quick_admin_prompt": "🎞 <b>Admin quick video smoke test</b>\n\nGửi prompt video ngắn để test provider.\n\n{warning}",
-        "video.check_job": "🔄 Kiểm tra trạng thái video",
+        "video.check_job": "🔄 Cập nhật trạng thái",
         "video.resend": "📤 Gửi lại video",
         "music.genre.cinematic": "🎬 Cinematic cảm xúc",
         "music.genre.luxury": "💎 Sang trọng / cao cấp",
@@ -57209,7 +57240,7 @@ def guide_keyboard(section: str = "", lang: str = "vi", back_callback: str = "me
                 [InlineKeyboardButton("📊 Xem số dư", callback_data="menu|main_profile")],
             ],
             "refund": [
-                [InlineKeyboardButton("🔄 Kiểm tra trạng thái video", callback_data="menu|hint_video_status")],
+                [InlineKeyboardButton("🔄 Cập nhật trạng thái", callback_data="menu|hint_video_status")],
                 [InlineKeyboardButton("👨‍💼 Liên hệ admin", callback_data="menu|support")],
             ],
             "faq": [
@@ -59183,7 +59214,7 @@ def video_editor_ratio_method_keyboard(lang: str = "vi") -> InlineKeyboardMarkup
 def video_editor_status_keyboard(job_id: int, lang: str = "vi") -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🔄 Kiểm tra trạng thái" if is_vi else "🔄 Check status", callback_data=f"videoedit|status|{int(job_id)}"),
+        InlineKeyboardButton("🔄 Cập nhật trạng thái" if is_vi else "🔄 Update status", callback_data=f"videoedit|status|{int(job_id)}"),
         InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
     ], [
         InlineKeyboardButton("⬅️ Menu video" if is_vi else "⬅️ Video menu", callback_data="menu|main_video"),
@@ -64712,6 +64743,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     else:
         lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
         lines.append("Anh/chị không cần bấm nhiều lần.")
+    lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 
 
@@ -64719,7 +64751,7 @@ def video_b14_queue_status_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔄 Cập nhật trạng thái", callback_data="vproduct|b14_job_status"),
-            InlineKeyboardButton("🧾 Xem hóa đơn", callback_data="vproduct|b14_invoice_screen"),
+            InlineKeyboardButton("🧾 Xem lại hóa đơn", callback_data="vproduct|b14_invoice_screen"),
         ],
         [
             InlineKeyboardButton("⬅️ Menu video" if normalize_user_language(lang) == "vi" else "⬅️ Video menu", callback_data="menu|main_video"),
@@ -76807,7 +76839,7 @@ def menu_hint_text(action: str) -> tuple[str, str]:
         "hint_image_tools": ("main_image", "🖼 <b>Hình ảnh TOAN AAS</b>\n\nChọn đúng tác vụ bằng nút trong menu ảnh. Bot chưa gọi API và chưa trừ Xu khi chỉ mở menu."),
         "hint_image_to_video_pack": ("main_video", "🎬 <b>Ảnh → Video AI</b>\n\nVui lòng mở <b>🎬 Video AI chân thật</b> rồi chọn <b>🖼 Ảnh → Video AI</b>. Bot sẽ hướng dẫn gửi ảnh, chọn phong cách, chuyển động và nhạc trước khi tạo video thật.\n\nTOAN AAS chưa gọi API và chưa trừ Xu."),
         "hint_media_factory": ("main_audio", "🎤 <b>Trung tâm Video & Media</b>\n\nCopy lệnh:\n<code>/media_factory</code>\n\nTạo voice, bóc băng và video/content pack tùy công cụ đã bật."),
-        "hint_video_status": ("main_guide", "🔄 <b>Kiểm tra trạng thái video</b>\n\nKhi video được gửi vào queue, bot sẽ gửi kèm nút <b>Kiểm tra trạng thái video</b> trong chính tin nhắn job.\n\nNếu bạn không còn tin nhắn đó, hãy gửi admin ID Telegram và job/task gần nhất để TOAN AAS kiểm tra. Không cần bấm tạo lại nhiều lần khi job đang xử lý."),
+        "hint_video_status": ("main_guide", "🔄 <b>Cập nhật trạng thái</b>\n\nKhi video được gửi vào queue, bot sẽ gửi kèm nút <b>Cập nhật trạng thái</b> trong chính tin nhắn job.\n\nNếu bạn không còn tin nhắn đó, hãy gửi admin ID Telegram và job/task gần nhất để TOAN AAS kiểm tra. Không cần bấm tạo lại nhiều lần khi job đang xử lý."),
         "hint_film_blueprint": ("video_workflow", "🚀 <b>Film Blueprint</b>\n\nCopy lệnh:\n<code>/film_blueprint</code>"),
         "hint_scene_pack": ("video_workflow", "📦 <b>Scene Pack</b>\n\nCopy lệnh:\n<code>/scene_pack job=&lt;JOB_ID&gt; scene=1</code>"),
         "hint_growth_loop": ("video_workflow", "📈 <b>Growth Loop</b>\n\nCopy lệnh:\n<code>/growth_loop</code>"),
@@ -173027,6 +173059,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("grant_combo", cmd_grant_combo))
     tg_app.add_handler(CommandHandler("grant_monthly", cmd_grant_monthly))
     tg_app.add_handler(CommandHandler("package_orders", cmd_package_orders))
+    tg_app.add_handler(CommandHandler("progress_panel_contract_audit", cmd_progress_panel_contract_audit))
+    tg_app.add_handler(CommandHandler("product_progress_stage_audit", cmd_product_progress_stage_audit))
+    tg_app.add_handler(CommandHandler("video_progress_panel_audit", cmd_video_progress_panel_audit))
+    tg_app.add_handler(CommandHandler("music_progress_panel_audit", cmd_music_progress_panel_audit))
     tg_app.add_handler(CommandHandler("package_order_approve", cmd_package_order_approve))
     tg_app.add_handler(CommandHandler("package_order_reject", cmd_package_order_reject))
     tg_app.add_handler(CommandHandler("grant_storage", cmd_grant_storage))

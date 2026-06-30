@@ -21,7 +21,7 @@ def test_public_video_queue_copy_is_clean():
 def test_public_video_submitted_keyboard_hides_shopaikey_status():
     labels = _labels(bot.public_video_submitted_keyboard("task_123", "vi", {"provider_route": "shopaikey"}, public_user=True))
     callbacks = _callbacks(bot.public_video_submitted_keyboard("task_123", "vi", {"provider_route": "shopaikey"}, public_user=True))
-    assert "🔄 Kiểm tra trạng thái video" in labels
+    assert "🔄 Cập nhật trạng thái" in labels
     assert "🏠 Menu chính" in labels
     assert not any("ShopAIKey" in label for label in labels)
     assert callbacks == ["shopai_video_job|task_123", "shopai_video_job|main"]

@@ -311,7 +311,7 @@ def test_product_progress_status_video_render():
     text = product_progress_status.render_product_progress_panel("video_ai_real", "task123", "generating_video", 75, lang="vi")
 
     assert "TOAN AAS đang tạo video" in text
-    assert "Tiến độ: 75%" in text
+    assert "Tiến độ: 60%" in text
     assert "#TASK123" in text
 
 

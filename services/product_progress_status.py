@@ -14,6 +14,8 @@ from typing import Any
 
 
 TERMINAL_STATES = {"delivered", "failed_no_charge", "failed_refunded", "needs_admin_review"}
+VIDEO_PROGRESS_TYPES = {"video_trend", "script_to_video", "frame_video", "multiscene_video", "video_ai_real"}
+PROGRESS_REFRESH_LABEL = "🔄 Cập nhật trạng thái"
 
 PUBLIC_TECHNICAL_WORDS = (
     "provider",
@@ -45,6 +47,31 @@ def _stage(key: str, label: str, status: str, percent: int) -> dict[str, Any]:
     }
 
 
+def _video_steps() -> list[dict[str, Any]]:
+    return [
+        _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu", 5),
+        _stage("preparing_content", "Chuẩn bị nội dung", "Đang chuẩn bị nội dung", 20),
+        _stage("preparing_assets", "Chuẩn bị tài nguyên", "Đang chuẩn bị tài nguyên", 35),
+        _stage("generating_video", "Tạo video", "Đang tạo video", 60),
+        _stage("post_processing", "Ghép hậu kỳ", "Đang ghép hậu kỳ", 75),
+        _stage("validating_output", "Kiểm tra file", "Đang kiểm tra file", 85),
+        _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
+        _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
+    ]
+
+
+def _music_song_steps() -> list[dict[str, Any]]:
+    return [
+        _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu tạo nhạc", 5),
+        _stage("preparing_lyrics", "Chuẩn bị lời bài hát", "Đang chuẩn bị lời bài hát", 20),
+        _stage("preparing_style", "Chuẩn bị phong cách", "Đang chuẩn bị phong cách", 35),
+        _stage("generating_song", "Tạo bài hát", "Đang tạo bài hát", 65),
+        _stage("validating_audio", "Kiểm tra file nhạc", "Đang kiểm tra file nhạc", 85),
+        _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
+        _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
+    ]
+
+
 PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
     "music_bg": {
         "title": "🎵 TOAN AAS đang tạo nhạc nền",
@@ -54,8 +81,9 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "back_callback": "music_quick|showroom|music_hub",
         "steps": [
             _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu tạo nhạc", 5),
-            _stage("preparing_prompt", "Chuẩn bị mô tả nhạc", "Đang chuẩn bị mô tả nhạc", 20),
-            _stage("generating_music", "Tạo nhạc nền", "Đang tạo nhạc nền", 60),
+            _stage("preparing_prompt", "Chuẩn bị nội dung nhạc", "Đang chuẩn bị nội dung nhạc", 20),
+            _stage("preparing_style", "Chuẩn bị phong cách", "Đang chuẩn bị phong cách", 35),
+            _stage("generating_music", "Tạo nhạc nền", "Đang tạo nhạc nền", 65),
             _stage("validating_audio", "Kiểm tra file nhạc", "Đang kiểm tra file nhạc", 85),
             _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
             _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
@@ -67,15 +95,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "send_callback": "music_quick|showroom|ai_music",
         "back_label": "⬅️ Studio nhạc",
         "back_callback": "music_quick|showroom|music_hub",
-        "steps": [
-            _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu tạo bài hát", 5),
-            _stage("preparing_lyrics", "Chuẩn bị lời bài hát", "Đang chuẩn bị lời bài hát", 20),
-            _stage("preparing_style", "Chuẩn bị phong cách", "Đang chuẩn bị phong cách", 35),
-            _stage("generating_song", "Tạo bài hát", "Đang tạo bài hát", 65),
-            _stage("validating_audio", "Kiểm tra file nhạc", "Đang kiểm tra file nhạc", 85),
-            _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
-            _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
-        ],
+        "steps": _music_song_steps(),
     },
     "video_trend": {
         "title": "🎬 TOAN AAS đang xử lý video trend",
@@ -83,15 +103,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "send_callback": "trendg|start",
         "back_label": "⬅️ Menu video",
         "back_callback": "menu|main_video",
-        "steps": [
-            _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu", 5),
-            _stage("building_script", "Lên ý tưởng video", "Đang lên ý tưởng video", 20),
-            _stage("preparing_visuals", "Chuẩn bị cảnh", "Đang chuẩn bị cảnh", 40),
-            _stage("rendering_video", "Dựng video", "Đang dựng video", 65),
-            _stage("validating_video", "Kiểm tra file", "Đang kiểm tra file", 85),
-            _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
-            _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
-        ],
+        "steps": _video_steps(),
     },
     "script_to_video": {
         "title": "🎬 TOAN AAS đang dựng video từ kịch bản",
@@ -99,14 +111,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "send_callback": "vproduct|start_script_to_video",
         "back_label": "⬅️ Menu video",
         "back_callback": "menu|main_video",
-        "steps": [
-            _stage("received_script", "Nhận kịch bản", "Đã nhận kịch bản", 5),
-            _stage("planning_scenes", "Chia cảnh", "Đang chia cảnh", 25),
-            _stage("rendering_scenes", "Dựng cảnh", "Đang dựng cảnh", 60),
-            _stage("validating_video", "Kiểm tra file", "Đang kiểm tra file", 85),
-            _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
-            _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
-        ],
+        "steps": _video_steps(),
     },
     "frame_video": {
         "title": "🎞 TOAN AAS đang ghép ảnh thành video",
@@ -114,14 +119,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "send_callback": "framevideo|start",
         "back_label": "⬅️ Menu video",
         "back_callback": "menu|main_video",
-        "steps": [
-            _stage("received_images", "Nhận ảnh", "Đã nhận ảnh", 5),
-            _stage("preparing_layout", "Chuẩn bị bố cục", "Đang chuẩn bị bố cục", 25),
-            _stage("rendering_video", "Ghép video", "Đang ghép video", 65),
-            _stage("validating_video", "Kiểm tra file", "Đang kiểm tra file", 85),
-            _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
-            _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
-        ],
+        "steps": _video_steps(),
     },
     "multiscene_video": {
         "title": "🎬 TOAN AAS đang dựng video nhiều cảnh",
@@ -129,15 +127,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "send_callback": "vproduct|b14_start",
         "back_label": "⬅️ Menu video",
         "back_callback": "menu|main_video",
-        "steps": [
-            _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu", 5),
-            _stage("planning_scenes", "Lập kế hoạch cảnh", "Đang lập kế hoạch cảnh", 20),
-            _stage("rendering_scenes", "Dựng các cảnh", "Đang dựng các cảnh", 55),
-            _stage("post_processing", "Hoàn thiện video", "Đang hoàn thiện video", 75),
-            _stage("validating_video", "Kiểm tra file", "Đang kiểm tra file", 88),
-            _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
-            _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
-        ],
+        "steps": _video_steps(),
     },
     "video_ai_real": {
         "title": "🎥 TOAN AAS đang tạo video AI",
@@ -145,14 +135,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
         "send_callback": "vproduct|start",
         "back_label": "⬅️ Menu video",
         "back_callback": "menu|main_video",
-        "steps": [
-            _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu", 5),
-            _stage("preparing_scene", "Chuẩn bị cảnh", "Đang chuẩn bị cảnh", 25),
-            _stage("generating_video", "Tạo video", "Đang tạo video", 65),
-            _stage("validating_video", "Kiểm tra file", "Đang kiểm tra file", 85),
-            _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
-            _stage("delivered", "Hoàn tất", "Đã gửi kết quả", 100),
-        ],
+        "steps": _video_steps(),
     },
     "addon_voice": {
         "title": "🎙 TOAN AAS đang tạo giọng đọc cho video",
@@ -211,7 +194,7 @@ PRODUCT_PROGRESS_SPECS: dict[str, dict[str, Any]] = {
             _stage("extracting_audio", "Tách âm thanh", "Đang tách âm thanh", 20),
             _stage("transcribing", "Nhận diện lời thoại", "Đang nhận diện lời thoại", 35),
             _stage("translating", "Dịch nội dung", "Đang dịch nội dung", 50),
-            _stage("generating_voice", "Tạo giọng lồng tiếng", "Đang tạo giọng lồng tiếng", 65),
+            _stage("generating_voice", "Tạo phụ đề / Tạo giọng lồng tiếng", "Đang tạo phụ đề / tạo giọng lồng tiếng", 65),
             _stage("muxing_video", "Ghép video", "Đang ghép video", 80),
             _stage("validating_output", "Kiểm tra file", "Đang kiểm tra file", 90),
             _stage("delivering", "Gửi kết quả", "Đang gửi kết quả", 95),
@@ -261,9 +244,13 @@ STAGE_ALIASES = {
         "success": "delivered",
     },
     "frame_video": {
-        "queued": "received_images",
-        "processing": "rendering_video",
-        "running": "rendering_video",
+        "queued": "received_request",
+        "received_images": "received_request",
+        "preparing_layout": "preparing_content",
+        "rendering_video": "generating_video",
+        "validating_video": "validating_output",
+        "processing": "generating_video",
+        "running": "generating_video",
         "succeeded": "delivered",
         "success": "delivered",
         "completed": "delivered",
@@ -271,8 +258,59 @@ STAGE_ALIASES = {
     "multiscene_video": {
         "queued": "received_request",
         "queued_for_worker": "received_request",
-        "processing": "rendering_scenes",
-        "running": "rendering_scenes",
+        "building_script": "preparing_content",
+        "planning_scenes": "preparing_content",
+        "preparing_visuals": "preparing_assets",
+        "rendering_video": "generating_video",
+        "rendering_scenes": "generating_video",
+        "validating_video": "validating_output",
+        "processing": "generating_video",
+        "running": "generating_video",
+        "post_processing": "post_processing",
+        "completed": "delivered",
+        "success": "delivered",
+    },
+    "video_trend": {
+        "queued": "received_request",
+        "queued_for_worker": "received_request",
+        "building_script": "preparing_content",
+        "planning_scenes": "preparing_content",
+        "preparing_visuals": "preparing_assets",
+        "rendering_video": "generating_video",
+        "rendering_scenes": "generating_video",
+        "validating_video": "validating_output",
+        "processing": "generating_video",
+        "running": "generating_video",
+        "post_processing": "post_processing",
+        "completed": "delivered",
+        "success": "delivered",
+    },
+    "script_to_video": {
+        "queued": "received_request",
+        "queued_for_worker": "received_request",
+        "received_script": "received_request",
+        "planning_scenes": "preparing_content",
+        "preparing_visuals": "preparing_assets",
+        "rendering_scenes": "generating_video",
+        "rendering_video": "generating_video",
+        "validating_video": "validating_output",
+        "processing": "generating_video",
+        "running": "generating_video",
+        "post_processing": "post_processing",
+        "completed": "delivered",
+        "success": "delivered",
+    },
+    "video_ai_real": {
+        "queued": "received_request",
+        "queued_for_worker": "received_request",
+        "preparing_scene": "preparing_content",
+        "preparing_visuals": "preparing_assets",
+        "rendering_video": "generating_video",
+        "rendering_scenes": "generating_video",
+        "validating_video": "validating_output",
+        "processing": "generating_video",
+        "running": "generating_video",
+        "post_processing": "post_processing",
         "completed": "delivered",
         "success": "delivered",
     },
@@ -381,12 +419,16 @@ def product_progress_percent(product_type: str = "", stage: str = "", percent: i
     state = str(terminal_state or "").strip().lower()
     if state == "delivered":
         return 100
+    stage_percent = int(product_progress_stage(product_type, stage).get("percent") or 0)
     if percent is not None:
         try:
-            return max(0, min(100, int(percent)))
+            requested = max(0, min(100, int(percent)))
+            if state in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
+                return min(requested, max(stage_percent, 5))
+            return min(requested, stage_percent)
         except Exception:
             pass
-    return int(product_progress_stage(product_type, stage).get("percent") or 0)
+    return stage_percent
 
 
 def product_progress_single_terminal_state(current_state: str = "", next_state: str = "") -> str:
@@ -563,6 +605,28 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
     }
 
 
+def job_has_final_artifact(job: dict[str, Any] | None = None) -> bool:
+    current = dict(job or {})
+    for key in (
+        "final_video_file_id",
+        "final_video_path",
+        "output_file_id",
+        "video_output_file_id",
+        "music_output_file_id",
+        "output_path",
+        "storage_ref",
+    ):
+        if str(current.get(key) or "").strip():
+            return True
+    for key in ("output_bytes", "uploaded_file_bytes", "music_result_size_bytes", "bytes"):
+        try:
+            if int(current.get(key) or 0) > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def render_product_progress_panel(
     product_type: str = "",
     job_id: str = "",
@@ -579,6 +643,8 @@ def render_product_progress_panel(
     terminal = str(terminal_state or "").strip().lower()
     if terminal == "delivered":
         current_stage = "delivered"
+    elif str(current_stage or "").strip().lower().replace("-", "_") == "delivered":
+        current_stage = "validating_output" if canonical in VIDEO_PROGRESS_TYPES else "validating_audio"
     stage = product_progress_stage(canonical, current_stage)
     progress = product_progress_percent(canonical, stage.get("key"), percent, terminal)
     status_text = product_progress_terminal_label(terminal) or sanitize_public_copy(status_override, "") or str(stage.get("status") or "")
@@ -588,6 +654,8 @@ def render_product_progress_panel(
     note = sanitize_public_copy(public_note, "") if public_note else ""
     current_key = str(stage.get("key") or "")
     steps = list(spec.get("steps") or [])
+    step_keys = [str(item.get("key") or "") for item in steps]
+    current_index = step_keys.index(current_key) if current_key in step_keys else 0
     lines: list[str] = []
     if terminal == "delivered":
         lines = [f"✅ {item['label']}" for item in steps if item.get("key") != "delivered"]
@@ -607,16 +675,15 @@ def render_product_progress_panel(
                 marker = "⬜"
             lines.append(f"{marker} {item['label']}")
     else:
-        current_percent = int(stage.get("percent") or progress)
-        for item in steps:
-            if item.get("key") == "delivered":
+        for index, item in enumerate(steps):
+            item_key = str(item.get("key") or "")
+            if item_key == "delivered":
                 continue
-            item_percent = int(item.get("percent") or 0)
-            if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"} and item.get("key") == current_key:
+            if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"} and item_key == current_key:
                 marker = "⚠️" if terminal != "needs_admin_review" else "⏳"
-            elif item_percent < current_percent:
+            elif index < current_index:
                 marker = "✅"
-            elif item.get("key") == current_key:
+            elif item_key == current_key:
                 marker = "⏳"
             else:
                 marker = "⬜"
@@ -651,7 +718,7 @@ def product_progress_button_rows(
     spec = product_progress_spec(product_type)
     return [
         [
-            ("🔄 Cập nhật trạng thái", product_progress_update_callback(product_type, job_id)),
+            (PROGRESS_REFRESH_LABEL, product_progress_update_callback(product_type, job_id)),
             (str(spec.get("send_label") or "📤 Gửi file khác"), product_progress_safe_callback_data(send_callback or spec.get("send_callback") or "menu|main", 54)),
         ],
         [
@@ -671,6 +738,7 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
     status = str(job.get("status") or job.get("music_status") or "").strip().lower()
     progress = job.get("progress_percent")
     output_bytes = int(job.get("output_bytes") or job.get("music_result_size_bytes") or 0)
+    has_final_artifact = job_has_final_artifact(job)
     provider_task_id = str(job.get("provider_task_id") or job.get("provider_job_id") or "").strip()
     has_delivery = bool(
         job.get("sent_full_at")
@@ -699,6 +767,14 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
         terminal = "failed_no_charge"
         status = "failed"
         progress = max(85, int(progress or 85))
+    elif canonical in VIDEO_PROGRESS_TYPES and status in {"completed", "complete", "success", "succeeded", "delivered"} and not has_final_artifact:
+        terminal = "failed_no_charge"
+        status = "failed"
+        progress = min(85, int(progress or 85))
+    elif canonical in VIDEO_PROGRESS_TYPES and str(job.get("visual_classification") or job.get("final_classification") or "").strip().lower() in {"partial_simple_video", "failed_no_real_visual"}:
+        terminal = "failed_no_charge"
+        status = "failed"
+        progress = min(85, int(progress or 85))
     elif status in {"completed", "complete", "success", "succeeded", "delivered"}:
         terminal = "delivered"
     elif any(token in status for token in ("fail", "error", "cancel")):
@@ -777,12 +853,12 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             stage_key = "generating_song" if status else "received_request"
         elif canonical == "subdub":
             stage_key = "generating_voice" if status else "received_file"
-        elif canonical == "frame_video":
-            stage_key = "rendering_video" if status else "received_images"
-        elif canonical == "multiscene_video":
-            stage_key = "rendering_scenes" if status else "received_request"
+        elif canonical in VIDEO_PROGRESS_TYPES:
+            stage_key = "generating_video" if status else "received_request"
         else:
             stage_key = str(job.get("stage") or job.get("current_stage") or "received_request")
+    if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"} and canonical in {"music_bg", "music_song"}:
+        stage_key = "validating_audio"
     stage = product_progress_stage(canonical, str(job.get("stage") or job.get("current_stage") or stage_key))
     return {
         "product_type": canonical,
@@ -812,3 +888,56 @@ def product_progress_matrix_lines() -> list[str]:
         steps = ", ".join(str(item.get("key") or "") for item in spec.get("steps") or [])
         lines.append(f"• <code>{html.escape(product_type)}</code>: {html.escape(steps)}")
     return lines
+
+
+def _labels_from_rows(rows: list[list[tuple[str, str]]]) -> list[str]:
+    return [str(label or "") for row in rows for label, _callback in row]
+
+
+def progress_panel_contract_audit_payload() -> dict[str, Any]:
+    labels = []
+    for product_type in PRODUCT_PROGRESS_SPECS:
+        labels.extend(_labels_from_rows(product_progress_button_rows(product_type, "audit")))
+    forbidden = ("Kiểm tra trạng thái", "Kiểm tra/gửi kết quả", "Kiểm tra/gửi")
+    checks = [
+        {"name": "refresh_label_locked", "ok": all(PROGRESS_REFRESH_LABEL in _labels_from_rows(product_progress_button_rows(product_type, "audit")) for product_type in PRODUCT_PROGRESS_SPECS)},
+        {"name": "no_kiem_tra_trang_thai_label", "ok": not any("Kiểm tra trạng thái" in label for label in labels)},
+        {"name": "no_check_send_result_label", "ok": not any(any(term in label for term in forbidden[1:]) for label in labels)},
+        {"name": "video_no_95_without_final_artifact", "ok": product_progress_stage_from_job("multiscene_video", {"status": "processing", "progress_percent": 95}).get("percent", 100) < 95},
+        {"name": "draft_not_final_delivered", "ok": product_progress_stage_from_job("multiscene_video", {"status": "completed", "visual_classification": "partial_simple_video"}).get("terminal_state") != "delivered"},
+    ]
+    return {"ok": all(item["ok"] for item in checks), "checks": checks, "labels": labels}
+
+
+def product_progress_stage_audit_payload() -> dict[str, Any]:
+    video_labels = [item["label"] for item in product_progress_spec("multiscene_video").get("steps", []) if item.get("key") != "delivered"]
+    music_labels = [item["label"] for item in product_progress_spec("music_song").get("steps", []) if item.get("key") != "delivered"]
+    subdub_labels = [item["label"] for item in product_progress_spec("subdub").get("steps", []) if item.get("key") != "delivered"]
+    checks = [
+        {"name": "video_stage_contract", "ok": video_labels == ["Nhận yêu cầu", "Chuẩn bị nội dung", "Chuẩn bị tài nguyên", "Tạo video", "Ghép hậu kỳ", "Kiểm tra file", "Gửi kết quả"]},
+        {"name": "music_stage_contract", "ok": music_labels == ["Nhận yêu cầu", "Chuẩn bị lời bài hát", "Chuẩn bị phong cách", "Tạo bài hát", "Kiểm tra file nhạc", "Gửi kết quả"]},
+        {"name": "subdub_stage_contract", "ok": subdub_labels == ["Nhận video", "Tách âm thanh", "Nhận diện lời thoại", "Dịch nội dung", "Tạo phụ đề / Tạo giọng lồng tiếng", "Ghép video", "Kiểm tra file", "Gửi kết quả"]},
+    ]
+    return {"ok": all(item["ok"] for item in checks), "checks": checks}
+
+
+def video_progress_panel_audit_payload() -> dict[str, Any]:
+    processing = render_product_progress_panel("multiscene_video", "VID1", "generating_video", percent=95)
+    draft = render_product_progress_panel("multiscene_video", "VID2", "generating_video", terminal_state="failed_no_charge", public_note="Đã có bản nháp, chưa có video hoàn chỉnh. Bản này chưa trừ Xu.")
+    checks = [
+        {"name": "video_steps_not_green_before_real_state", "ok": "✅ Kiểm tra file" not in processing and "✅ Gửi kết quả" not in processing},
+        {"name": "video_no_95_without_final_or_checking_artifact", "ok": "Tiến độ: 95%" not in processing},
+        {"name": "video_draft_not_rendered_as_final", "ok": "Đã gửi kết quả" not in draft and "chưa có video hoàn chỉnh" in draft},
+    ]
+    return {"ok": all(item["ok"] for item in checks), "checks": checks, "sample": processing}
+
+
+def music_progress_panel_audit_payload() -> dict[str, Any]:
+    submitted = render_product_progress_panel("music_song", "MUS1", "preparing_style", percent=95)
+    failed = product_progress_stage_from_job("music_song", {"status": "submitted", "progress_percent": 95, "provider": "suno", "output_bytes": 0})
+    checks = [
+        {"name": "music_steps_not_green_before_real_state", "ok": "✅ Tạo bài hát" not in submitted and "✅ Kiểm tra file nhạc" not in submitted and "✅ Gửi kết quả" not in submitted},
+        {"name": "music_no_95_before_delivery", "ok": "Tiến độ: 95%" not in submitted},
+        {"name": "music_missing_provider_job_fails_no_charge", "ok": failed.get("terminal_state") == "failed_no_charge"},
+    ]
+    return {"ok": all(item["ok"] for item in checks), "checks": checks, "sample": submitted}

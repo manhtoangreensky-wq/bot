@@ -58,7 +58,7 @@ def _assert_no_public_technical_words(text):
 def test_product_progress_status_renders_common_panel():
     text = bot.product_progress_status_text("music_bg", "a23af65f", "generating_music")
     _assert_common_panel(text, "🎵 TOAN AAS đang tạo nhạc nền")
-    assert "Tiến độ: 60%" in text
+    assert "Tiến độ: 65%" in text
     assert "#A23AF65F" in text
 
 
@@ -143,7 +143,7 @@ def test_music_update_status_does_not_generate_again(monkeypatch):
 def test_video_trend_uses_progress_panel():
     text = bot.video_product_progress_text("video_trend", "trend1", "rendering_video")
     _assert_common_panel(text, "🎬 TOAN AAS đang xử lý video trend")
-    assert "Dựng video" in text
+    assert "Tạo video" in text
 
 
 def test_script_to_video_uses_progress_panel():
