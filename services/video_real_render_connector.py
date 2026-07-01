@@ -22,7 +22,12 @@ import httpx
 from services.multiscene_video_pipeline import ensure_video_output, process_multiscene_video_pipeline, safe_run_ffmpeg
 from services import video_final_output
 from services.video_provider_base import VideoGenerationRequest
-from services.video_provider_router import PUBLIC_NO_VIDEO_PROVIDER_COPY, provider_status_payload, run_provider_generation
+from services.video_provider_router import (
+    PUBLIC_NO_VIDEO_PROVIDER_COPY,
+    capability_options,
+    provider_status_payload,
+    run_provider_generation,
+)
 
 
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
@@ -39,6 +44,25 @@ VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE = video_final_output.VISUAL_SOURCE_LOCAL_IMAG
 VISUAL_SOURCE_LOCAL_SCENE_CARD = video_final_output.VISUAL_SOURCE_LOCAL_SCENE_CARD
 LOCAL_IMAGE_SEQUENCE_PRODUCT_TYPES = {"image_to_video", "storyboard_prompt", "script_to_video"}
 LOCAL_SCENE_CARD_PRODUCT_TYPES = {"script_to_video", "storyboard_prompt", "multi_scene_film"}
+PROVIDER_BRIDGE_RENDERER = "video_provider_bridge"
+PROVIDER_VIDEO_SOURCE = "provider"
+PROVIDER_REQUIRED_PRODUCT_TYPES = {
+    "video_ai_prompt",
+    "prompt_vault_to_video",
+}
+PROVIDER_REQUIRED_CAPABILITIES = {
+    "text_to_video",
+    "image_to_video",
+    "video_to_video",
+    "multi_scene_video",
+    "scene_video",
+    "text_to_video_or_scene_video",
+    "delegates_to_selected_product",
+}
+PROVIDER_CLEAN_FAIL_FALLBACKS = {
+    "clean_fail_provider_capability_missing",
+    "delegate_or_clean_fail",
+}
 
 RAW_PROMPT_FRAME_MARKERS = (
     "chủ thể chính:",
@@ -182,8 +206,55 @@ def real_video_provider_readiness(job: dict | None = None, environ: dict[str, st
         "provider_order": list(status.get("provider_chain") or []),
         "configured_providers": ordered_ready,
         "ready_provider_order": ordered_ready,
+        "first_ready_provider": status.get("first_ready_provider") or (ordered_ready[0] if ordered_ready else ""),
+        "enabled_count": int(status.get("enabled_count") or 0),
+        "configured_count": int(status.get("configured_count") or 0),
+        "enabled_providers": list(status.get("enabled_providers") or []),
+        "missing_env": dict(status.get("missing_env") or {}),
         "providers": providers,
     }
+
+
+def _provider_candidates_for_capability(readiness: dict | None = None, required_capability: str = "") -> list[str]:
+    payload = dict(readiness or {})
+    allowed = set(capability_options(required_capability))
+    candidates: list[str] = []
+    for item in payload.get("providers") or []:
+        if not isinstance(item, dict):
+            continue
+        if not item.get("configured"):
+            continue
+        supported = {str(value) for value in (item.get("capabilities") or [])}
+        if allowed and not (supported & allowed):
+            continue
+        provider_name = str(item.get("provider") or "").strip()
+        if provider_name and provider_name not in candidates:
+            candidates.append(provider_name)
+    if candidates:
+        return candidates
+    ready = [str(item or "").strip() for item in (payload.get("ready_provider_order") or []) if str(item or "").strip()]
+    return ready
+
+
+def _route_requires_provider(
+    product_type: str,
+    required_capability: str,
+    fallback_capability: str,
+    *,
+    provider_ready: bool = False,
+) -> bool:
+    product = video_final_output.normalize_video_product_type(product_type)
+    capability = str(required_capability or "").strip()
+    fallback = str(fallback_capability or "").strip()
+    if product in PROVIDER_REQUIRED_PRODUCT_TYPES:
+        return True
+    if capability not in PROVIDER_REQUIRED_CAPABILITIES:
+        return False
+    if fallback in PROVIDER_CLEAN_FAIL_FALLBACKS:
+        return True
+    if provider_ready and product in {"video_ai_image", "video_ai_video_reference", "self_shot_scene_change"}:
+        return True
+    return False
 
 
 def _addon_plan(job: dict | None = None) -> dict:
@@ -1080,7 +1151,18 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     provider_error = ""
     fallback_used = False
     fallback_reason = ""
-    provider_route_selected = bool(readiness.get("ok"))
+    provider_candidates = _provider_candidates_for_capability(readiness, required_capability)
+    route_requires_provider = bool(
+        is_product_video
+        and _route_requires_provider(
+            product_type,
+            required_capability,
+            fallback_capability,
+            provider_ready=bool(provider_candidates),
+        )
+    )
+    provider_route_selected = bool(provider_candidates) if route_requires_provider else bool(readiness.get("ok"))
+    local_fallback_allowed = not route_requires_provider
     local_image_sequence_used = False
     local_scene_card_used = False
 
@@ -1111,6 +1193,42 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         data["provider_order"] = _provider_order(job)
         data["required_capability"] = required_capability
         data["fallback_capability"] = fallback_capability
+        data["route_requires_provider"] = bool(route_requires_provider)
+        data["local_fallback_allowed"] = bool(local_fallback_allowed)
+        data["provider_router_called"] = bool(route_requires_provider or provider_attempted or data.get("provider_router_called"))
+        data["provider_candidates_count"] = int(data.get("provider_candidates_count") or len(provider_candidates))
+        data["selected_provider"] = str(
+            data.get("selected_provider")
+            or data.get("provider")
+            or (provider_events[0].get("provider") if provider_events else "")
+            or (provider_candidates[0] if provider_candidates else "")
+        )
+        data["provider_selection_blocker"] = str(
+            data.get("provider_selection_blocker")
+            or ("" if provider_candidates else ("provider_capability_missing" if route_requires_provider else ""))
+        )
+        data["provider_submit_called"] = bool(data.get("provider_submit_called") or provider_attempted)
+        data["provider_submit_http_status"] = data.get("provider_submit_http_status") or data.get("provider_http_status") or 0
+        data["provider_task_id_saved"] = bool(data.get("provider_task_id_saved") or data["provider_task_ids"])
+        data["provider_poll_called"] = bool(data.get("provider_poll_called") or provider_attempted)
+        data["provider_result_url_present"] = bool(
+            data.get("provider_result_url_present")
+            or data.get("result_url_present")
+            or any((item or {}).get("download_url_present") for item in provider_events if isinstance(item, dict))
+        )
+        data["base_video_source"] = str(
+            data.get("base_video_source")
+            or (
+                PROVIDER_VIDEO_SOURCE
+                if data.get("visual_source") == VISUAL_SOURCE_PROVIDER_MP4 or data.get("provider_task_ids")
+                else ("placeholder" if data.get("visual_source") == VISUAL_SOURCE_LOCAL_PLACEHOLDER else ("local" if data.get("visual_source") else ""))
+            )
+        )
+        data["visual_source"] = str(data.get("visual_source") or ("provider_pending" if provider_attempted else ""))
+        data["placeholder_detected"] = bool(data.get("placeholder_detected") or False)
+        data["placeholder_visual"] = bool(data.get("placeholder_visual") or False)
+        data["placeholder_forbidden"] = bool(route_requires_provider)
+        data["fallback_policy"] = fallback_capability
         data["provider_readiness"] = {
             "ok": bool(readiness.get("ok")),
             "ready_provider_order": readiness.get("ready_provider_order") or [],
@@ -1152,7 +1270,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         raise RealVideoRenderError(reason or REAL_VIDEO_RENDER_UNAVAILABLE, diagnostics=data)
 
     local_image_paths = _local_image_sequence_paths(job) if is_product_video else []
-    if is_product_video and _local_image_sequence_allowed(job, local_image_paths):
+    if is_product_video and _local_image_sequence_allowed(job, local_image_paths) and local_fallback_allowed:
         local_image_sequence_used = True
         local_workspace = os.path.join(workspace, "local_image_sequence")
         local_output = os.path.join(local_workspace, "final_output.mp4")
@@ -1179,6 +1297,8 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["fallback_used"] = False
         result["fallback_reason"] = ""
         result["visual_source"] = VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE
+        result["base_video_source"] = "local"
+        result["connector_renderer"] = LOCAL_IMAGE_SEQUENCE_RENDERER
         result["placeholder_detected"] = False
         result["placeholder_visual"] = False
         result["raw_prompt_burned_into_frame"] = False
@@ -1225,7 +1345,12 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             provider_error = str(result.get("error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE)
     elif is_product_video:
         provider_error = str(readiness.get("reason") or "provider_capability_missing")
-    if is_product_video and not local_image_sequence_used and (not result or not result.get("ok")) and _local_scene_card_allowed(job):
+    if is_product_video and route_requires_provider and (not result or not result.get("ok")):
+        blocker = str((result or {}).get("blocker") or (result or {}).get("provider_error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE)
+        if blocker == REAL_VIDEO_RENDER_UNAVAILABLE and not provider_candidates:
+            blocker = "provider_capability_missing"
+        _raise_render_error(blocker, result or {"ok": False, "provider_error": blocker, "provider_status": "failed" if provider_attempted else "not_attempted"})
+    if is_product_video and not local_image_sequence_used and (not result or not result.get("ok")) and local_fallback_allowed and _local_scene_card_allowed(job):
         local_scene_card_used = True
         local_workspace = os.path.join(workspace, "local_scene_card")
         fallback_used = True
@@ -1247,13 +1372,15 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["fallback_used"] = True
         result["fallback_reason"] = fallback_reason
         result["visual_source"] = VISUAL_SOURCE_LOCAL_SCENE_CARD
+        result["base_video_source"] = "local"
+        result["connector_renderer"] = LOCAL_SCENE_CARD_RENDERER
         result["placeholder_detected"] = False
         result["placeholder_visual"] = False
         result["raw_prompt_burned_into_frame"] = _subtitle_raw_prompt_burn_detected(job, result)
         result["visual_classification"] = FINAL_AI_VIDEO if result.get("ok") and not result["raw_prompt_burned_into_frame"] else FAILED_NO_REAL_VISUAL
         result["final_classification"] = result["visual_classification"]
         result["no_charge"] = bool(job.get("no_charge"))
-    if is_product_video and not local_image_sequence_used and (not result or not result.get("ok")) and _local_composer_enabled(job):
+    if is_product_video and not local_image_sequence_used and (not result or not result.get("ok")) and local_fallback_allowed and _local_composer_enabled(job):
         local_workspace = os.path.join(workspace, "local_composer")
         fallback_used = True
         fallback_reason = provider_error or "provider_unavailable"
@@ -1274,6 +1401,8 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["fallback_used"] = True
         result["fallback_reason"] = fallback_reason
         result["visual_source"] = VISUAL_SOURCE_LOCAL_PLACEHOLDER
+        result["base_video_source"] = "placeholder"
+        result["connector_renderer"] = LOCAL_PLACEHOLDER_RENDERER
         result["placeholder_detected"] = True
         result["placeholder_visual"] = True
         result["raw_prompt_burned_into_frame"] = _subtitle_raw_prompt_burn_detected(job, result)
@@ -1282,6 +1411,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["no_charge"] = True
     elif result and not local_image_sequence_used and not local_scene_card_used:
         result["renderer"] = PROVIDER_SCENE_RENDERER
+        result["connector_renderer"] = PROVIDER_BRIDGE_RENDERER
         result["provider_attempted"] = bool(provider_attempted)
         result["provider_route_selected"] = bool(provider_route_selected)
         result["fallback_used"] = False
@@ -1294,6 +1424,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["provider_status"] = "downloaded" if provider_events else ("attempted" if provider_attempted else "not_attempted")
         result["provider_error"] = provider_error
         result["visual_source"] = VISUAL_SOURCE_PROVIDER_MP4
+        result["base_video_source"] = PROVIDER_VIDEO_SOURCE
         result["placeholder_detected"] = False
         result["placeholder_visual"] = False
         result["raw_prompt_burned_into_frame"] = _subtitle_raw_prompt_burn_detected(job, result)
@@ -1321,6 +1452,41 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
                 break
     result["provider_order"] = _provider_order(job)
     result["provider_readiness"] = {"ok": bool(readiness.get("ok")), "ready_provider_order": readiness.get("ready_provider_order") or []}
+    result["required_capability"] = required_capability
+    result["fallback_capability"] = fallback_capability
+    result["route_requires_provider"] = bool(route_requires_provider)
+    result["local_fallback_allowed"] = bool(local_fallback_allowed)
+    result["provider_router_called"] = bool(route_requires_provider or provider_attempted or result.get("provider_router_called"))
+    result["provider_candidates_count"] = int(result.get("provider_candidates_count") or len(provider_candidates))
+    result["selected_provider"] = str(
+        result.get("selected_provider")
+        or result.get("provider")
+        or (provider_events[0].get("provider") if provider_events else "")
+        or (provider_candidates[0] if provider_candidates else "")
+    )
+    result["provider_selection_blocker"] = str(
+        result.get("provider_selection_blocker")
+        or ("" if provider_candidates else ("provider_capability_missing" if route_requires_provider else ""))
+    )
+    result["provider_submit_called"] = bool(result.get("provider_submit_called") or provider_attempted)
+    result["provider_submit_http_status"] = result.get("provider_submit_http_status") or result.get("provider_http_status") or 0
+    result["provider_task_id_saved"] = bool(result.get("provider_task_id_saved") or result.get("provider_task_ids"))
+    result["provider_poll_called"] = bool(result.get("provider_poll_called") or provider_attempted)
+    result["provider_result_url_present"] = bool(
+        result.get("provider_result_url_present")
+        or result.get("result_url_present")
+        or any((item or {}).get("download_url_present") for item in provider_events if isinstance(item, dict))
+    )
+    result["base_video_source"] = str(
+        result.get("base_video_source")
+        or (
+            PROVIDER_VIDEO_SOURCE
+            if result.get("visual_source") == VISUAL_SOURCE_PROVIDER_MP4 or result.get("provider_task_ids")
+            else ("placeholder" if result.get("visual_source") == VISUAL_SOURCE_LOCAL_PLACEHOLDER else "local")
+        )
+    )
+    result["placeholder_forbidden"] = bool(route_requires_provider)
+    result["fallback_policy"] = fallback_capability
     result["original_user_prompt"] = original_prompt_from_job(job)
     result["addon_degrade_notes"] = degrade_notes
     result["partial_addons"] = any(item.get("requested") and not item.get("applied") for item in degrade_notes)
