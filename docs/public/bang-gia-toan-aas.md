@@ -2,15 +2,15 @@
 
 TOAN AAS sẽ hiển thị hóa đơn trước khi xử lý. Hệ thống chỉ trừ Xu sau khi anh/chị xác nhận và tác vụ tạo ra kết quả hợp lệ.
 
-• Giọng nói: từ 0.05 Xu / từ.
+• Giọng nói: từ 0.10 Xu / từ.
 • Tạo voice riêng: lần đầu miễn phí, từ lần 2: 50 Xu / voice thành công.
 • Nhạc nền AI: 100 / 150 / 200 Xu.
 • Bài hát có lời: 200 / 250 / 300 Xu.
 • Video AI: theo gói video đang chọn.
 • Tạo phụ đề tự động: miễn phí.
 • Dịch phụ đề: 0.1 Xu / ký tự.
-• Lồng tiếng giọng mặc định: 0.05 Xu / ký tự.
-• Lồng tiếng voice riêng: 0.1 Xu / ký tự.
+• Lồng tiếng giọng mặc định: 0.10 Xu / ký tự.
+• Lồng tiếng voice riêng: 0.20 Xu / ký tự.
 • Hình ảnh: 50 / 150 / 200 / 300 / 400 / 500 / 600 Xu.
 • Tài nguyên tự có của anh/chị: miễn phí nếu hệ thống không cần tạo mới.
 
@@ -40,7 +40,7 @@ A. Tạo voice riêng
 • Nếu tài khoản vận hành được miễn phí nội bộ, phần hiển thị cho khách vẫn giữ cùng cách báo giá.
 
 B. Tạo audio từ voice
-• 0.05 Xu / từ.
+• 0.10 Xu / từ.
 • Nội dung tối thiểu: 20 từ.
 • Tối thiểu thanh toán: 1 Xu.
 • Không giới hạn từ nếu hệ thống cho phép.
@@ -50,8 +50,8 @@ B. Tạo audio từ voice
 • 0% cần xác nhận riêng nếu tạo audio im lặng.
 
 Ví dụ
-• Anh/chị tạo audio 100 từ: 100 × 0.05 = 5 Xu.
-• Anh/chị nhập 20 từ: 20 × 0.05 = 1 Xu. Tổng thanh toán tối thiểu: 1 Xu.
+• Anh/chị tạo audio 100 từ: 100 × 0.10 = 10 Xu, giảm số lượng 10%, tổng còn 9 Xu.
+• Anh/chị nhập 20 từ: 20 × 0.10 = 2 Xu.
 • Anh/chị tạo voice riêng lần đầu: 0 Xu.
 • Anh/chị tạo voice riêng lần thứ 2: 50 Xu nếu tạo thành công.
 
@@ -132,12 +132,12 @@ B. Dịch phụ đề
 • Hệ thống hiển thị rõ số ký tự tính phí trước khi xử lý.
 
 C. Lồng tiếng giọng mặc định
-• 0.05 Xu / ký tự.
+• 0.10 Xu / ký tự.
 • Trên 1.000 ký tự: giảm 10%.
 • Trên 10.000 ký tự: giảm 20%.
 
 D. Lồng tiếng voice riêng
-• 0.1 Xu / ký tự.
+• 0.20 Xu / ký tự.
 • Trên 1.000 ký tự: giảm 10%.
 • Trên 10.000 ký tự: giảm 20%.
 
@@ -146,8 +146,8 @@ Tổng = giá dịch phụ đề + giá lồng tiếng.
 
 Ví dụ
 • Dịch phụ đề 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.
-• Lồng tiếng giọng mặc định 2.000 ký tự: giá gốc 100 Xu, giảm 10%, tổng còn 90 Xu.
-• Lồng tiếng voice riêng 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.
+• Lồng tiếng giọng mặc định 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.
+• Lồng tiếng voice riêng 2.000 ký tự: giá gốc 400 Xu, giảm 10%, tổng còn 360 Xu.
 • Phụ đề + lồng tiếng: 180 Xu + 90 Xu = 270 Xu.
 
 -----

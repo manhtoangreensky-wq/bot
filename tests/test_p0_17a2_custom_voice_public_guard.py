@@ -359,9 +359,9 @@ def test_custom_voice_second_creation_50_preserved(monkeypatch, tmp_path):
     assert bot.voice_profile_storage_price_xu(user_id) == bot.VOICE_PROFILE_PRICE_XU == 50
 
 
-def test_custom_voice_usage_0_1_xu_per_char_preserved():
-    assert bot.custom_voice_usage_price_xu("a" * 11) == 2
-    assert bot.custom_voice_usage_price_xu("a" * 50) == 5
+def test_custom_voice_usage_0_2_xu_per_char_preserved():
+    assert bot.custom_voice_usage_price_xu("a" * 11) == 3
+    assert bot.custom_voice_usage_price_xu("a" * 50) == 10
 
 
 def test_custom_voice_usage_min_rules_preserved():

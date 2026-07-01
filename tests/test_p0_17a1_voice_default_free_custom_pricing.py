@@ -234,13 +234,13 @@ def test_custom_voice_no_charge_before_confirm():
     assert "spend_fixed_credit_info" not in inspect.getsource(bot.default_voice_confirm_text)
 
 
-def test_custom_voice_usage_price_0_1_xu_per_char():
-    assert bot.custom_voice_usage_price_xu("a" * 11) == 2
+def test_custom_voice_usage_price_0_2_xu_per_char():
+    assert bot.custom_voice_usage_price_xu("a" * 11) == 3
 
 
 def test_custom_voice_usage_rounds_up_to_whole_xu():
-    assert bot.custom_voice_usage_price_xu("a" * 50) == 5
-    assert bot.custom_voice_usage_price_xu("a" * 101) == 11
+    assert bot.custom_voice_usage_price_xu("a" * 50) == 10
+    assert bot.custom_voice_usage_price_xu("a" * 101) == 19
 
 
 def test_custom_voice_usage_min_more_than_10_chars():
@@ -371,8 +371,8 @@ def test_custom_voice_usage_asset_records_min_rules(monkeypatch, tmp_path):
 def test_custom_voice_usage_public_copy_shows_chars_and_price():
     text = bot.saved_voice_tts_confirm_text(_active_profile(), "a" * 50, "normal", "vi")
     assert "Số ký tự tính phí" in text
-    assert "Dự kiến trừ: <b>5 Xu</b>" in text
-    assert "0.1 Xu / ký tự" in text
+    assert "Dự kiến trừ: <b>10 Xu</b>" in text
+    assert "0.2 Xu / ký tự" in text
 
 
 def test_voice_engine_status_mentions_default_free_direct(monkeypatch):
@@ -402,9 +402,9 @@ def test_voice_engine_status_mentions_custom_create_50_xu():
     assert "50 Xu / successful creation" in lines
 
 
-def test_voice_engine_status_mentions_custom_usage_0_1_xu_per_char():
+def test_voice_engine_status_mentions_custom_usage_0_2_xu_per_char():
     lines = "\n".join(bot.voice_engine_status_lines())
-    assert "0.1 Xu / character, rounded up" in lines
+    assert "0.2 Xu / character, rounded up" in lines
 
 
 def test_voice_engine_status_mentions_custom_usage_min_rules():

@@ -67,14 +67,15 @@ def test_admin_can_set_global_vat_rate(monkeypatch, tmp_path):
 
 def test_vat_rate_applies_to_new_orders_only(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
+    metadata = json.dumps({"customer_type": "business", "invoice_required": True}, ensure_ascii=False)
 
-    bot.create_order("vat-old", "vat-user", 100_000, 1_000)
+    bot.create_order("vat-old", "vat-user", 100_000, 1_000, metadata_json=metadata)
     old_invoice = bot.finance_invoice_for_order("vat-old")
     assert old_invoice["vat_amount_vnd"] == 8_000
     assert old_invoice["total_amount_vnd"] == 108_000
 
     bot.admin_set_global_vat_rate(10, admin_id="admin-tax")
-    bot.create_order("vat-new", "vat-user", 100_000, 1_000)
+    bot.create_order("vat-new", "vat-user", 100_000, 1_000, metadata_json=metadata)
     new_invoice = bot.finance_invoice_for_order("vat-new")
 
     assert bot.finance_invoice_for_order("vat-old")["vat_amount_vnd"] == 8_000
@@ -111,7 +112,7 @@ def test_vat_exclusive_calculation():
     assert snapshot["total_amount_vnd"] == 108_000
 
 
-def test_topup_adds_vat_to_total_payment_and_wallet_credit_excludes_vat(monkeypatch, tmp_path):
+def test_b2c_topup_keeps_round_total_and_wallet_credit_uses_gross_price(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
 
     user_id = "vat-topup-user"
@@ -120,8 +121,8 @@ def test_topup_adds_vat_to_total_payment_and_wallet_credit_excludes_vat(monkeypa
     invoice, total = bot.payos_invoice_total_for_order("vat-topup", 10_000)
 
     assert invoice["subtotal_amount_vnd"] == 10_000
-    assert invoice["vat_amount_vnd"] == 800
-    assert total == 10_800
+    assert invoice["vat_amount_vnd"] == 0
+    assert total == 10_000
 
     processed, desc, info = bot.process_payos_paid_order("vat-topup", total, webhook_currency="VND", transaction_id="vat-topup-tx")
     after, _, _ = bot.get_user(user_id)
@@ -130,7 +131,7 @@ def test_topup_adds_vat_to_total_payment_and_wallet_credit_excludes_vat(monkeypa
     assert desc == "success"
     assert after - before == bot.package_base_xu(10_000)
     assert info["subtotal_amount_vnd"] == 10_000
-    assert info["vat_amount_vnd"] == 800
+    assert info["vat_amount_vnd"] == 0
     assert bot.finance_invoice_for_order("vat-topup")["status"] == "paid"
 
 
@@ -166,7 +167,7 @@ def test_payment_channels_store_vat_and_momo_hidden_from_cny(monkeypatch, tmp_pa
             100_000,
             "manual_topup",
             "manual_topup",
-            {"payment_channel": "zalopay", "currency": "VND"},
+            {"payment_channel": "zalopay", "currency": "VND", "customer_type": "business", "invoice_required": True},
         )
         usdt = bot.build_finance_invoice_snapshot_conn(
             conn,
@@ -175,7 +176,7 @@ def test_payment_channels_store_vat_and_momo_hidden_from_cny(monkeypatch, tmp_pa
             0,
             "manual_topup",
             "manual_topup",
-            {"payment_channel": "usdt_trc20", "currency": "USDT", "original_amount": 10, "fx_rate": 25_000},
+            {"payment_channel": "usdt_trc20", "currency": "USDT", "original_amount": 10, "fx_rate": 25_000, "customer_type": "business", "invoice_required": True},
         )
     finally:
         conn.close()
@@ -192,20 +193,20 @@ def test_payment_channels_store_vat_and_momo_hidden_from_cny(monkeypatch, tmp_pa
     assert any("USDT" in label for label in labels)
 
 
-def test_payos_callback_validates_total_after_vat_and_flags_anomaly(monkeypatch, tmp_path):
+def test_payos_callback_validates_expected_total_and_flags_anomaly(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
 
     user_id = "vat-mismatch-user"
     before, _, _ = bot.get_user(user_id, "VAT Mismatch")
     bot.create_order("vat-mismatch", user_id, 100_000, 1_000)
 
-    processed, desc, info = bot.process_payos_paid_order("vat-mismatch", 100_000, webhook_currency="VND")
+    processed, desc, info = bot.process_payos_paid_order("vat-mismatch", 99_000, webhook_currency="VND")
     after, _, _ = bot.get_user(user_id)
 
     assert processed is False
     assert desc == "amount_mismatch"
     assert after == before
-    assert info["total_amount_vnd"] == 108_000
+    assert info["total_amount_vnd"] == 100_000
     assert _scalar("SELECT COUNT(*) FROM finance_anomalies WHERE order_id='vat-mismatch'") == 1
     assert _scalar("SELECT status FROM payos_orders WHERE order_code='vat-mismatch'") == bot.PAYOS_STATUS_PENDING_ADMIN_REVIEW
     assert bot.finance_invoice_for_order("vat-mismatch")["status"] == "flagged"
@@ -253,9 +254,9 @@ def test_package_combo_tax_lines_and_quota_excludes_vat(monkeypatch, tmp_path):
     text = bot.finance_tax_block(invoice)
 
     assert invoice["subtotal_amount_vnd"] == 588_000
-    assert invoice["vat_amount_vnd"] == 47_040
-    assert total == 635_040
-    assert "Phần thuế không quy đổi thành Xu hoặc lượt sử dụng dịch vụ" in text
+    assert invoice["vat_amount_vnd"] == 0
+    assert total == 588_000
+    assert "không cộng thuế lẻ" in text
 
     processed, desc, info = bot.process_payos_paid_order("combo-vat", total, webhook_currency="VND", transaction_id="combo-vat-tx")
     assert processed is True
@@ -294,8 +295,8 @@ def test_refund_and_capital_adjustments_feed_reports(monkeypatch, tmp_path):
     report = bot.finance_business_report_payload(start, end, label)
 
     assert report["revenue_before_tax"] == 90_000
-    assert report["vat_collected"] == 9_000
-    assert report["cash_in"] == 99_000
+    assert report["vat_collected"] == 1_000
+    assert report["cash_in"] == 91_000
     assert report["expenses"] >= 20_000
     assert report["profit_before_tax_reserve"] == report["revenue_before_tax"] - report["expenses"]
     assert report["capital_total"] == 500_000
@@ -304,7 +305,7 @@ def test_refund_and_capital_adjustments_feed_reports(monkeypatch, tmp_path):
 def test_admin_finance_menu_and_guide_cover_required_blocks():
     labels = _labels(bot.finance_admin_keyboard())
     callbacks = _callbacks(bot.finance_admin_keyboard())
-    for expected in ["📊 Tổng quan", "💰 Doanh thu", "🧾 Thuế / VAT", "💸 Chi phí", "📈 Lợi nhuận", "🏦 Vốn & Hòa vốn", "🧮 Sổ điều chỉnh", "📘 Hướng dẫn tài chính"]:
+    for expected in ["📊 Tổng quan", "💵 Doanh thu", "🧾 Thuế / VAT", "🧾 Chi phí", "📈 Lợi nhuận", "🏦 Vốn & Hòa vốn", "🧮 Sổ điều chỉnh", "📘 Hướng dẫn tài chính"]:
         assert expected in labels
     for expected in ["menu|finance_tax_vat", "menu|finance_anomalies", "menu|finance_adjustments", "menu|finance_guide"]:
         assert expected in callbacks
@@ -322,7 +323,7 @@ def test_public_tax_copy_not_misleading():
         "total_amount_vnd": 108_000,
         "vat_mode": "exclusive",
     })).lower()
-    assert "giá trước thuế" in text
+    assert "giá dịch vụ" in text
     assert "tổng thanh toán" in text
     assert "không quy đổi thành xu" in text
     for forbidden in ["miễn thuế", "không cần đóng thuế", "né thuế", "thu hộ nhà nước"]:

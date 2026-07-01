@@ -656,7 +656,7 @@ VOICE_TTS_PREVIEW_MAX_SECONDS = max(1, min(6, env_int("VOICE_TTS_PREVIEW_MAX_SEC
 VOICE_TTS_BASE_CHARS = max(1, env_int("VOICE_TTS_BASE_CHARS", 1000))
 VOICE_TTS_BASE_PRICE_XU = max(0, env_int("VOICE_TTS_BASE_PRICE_XU", TTS_BASE_PRICE_XU))
 VOICE_TTS_EXTRA_1000_CHARS_PRICE_XU = max(0, env_int("VOICE_TTS_EXTRA_1000_CHARS_PRICE_XU", TTS_EXTRA_30S_PRICE_XU))
-CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU = max(0.0, env_float("CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU", 0.1))
+CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU = max(0.0, env_float("CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU", 0.2))
 CUSTOM_VOICE_USAGE_MIN_CHARS = max(0, env_int("CUSTOM_VOICE_USAGE_MIN_CHARS", 10))
 CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS = max(0, env_int("CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS", 3))
 LINK_IMPORT_PRICE_XU = max(0, env_int("LINK_IMPORT_PRICE_XU", 10))
@@ -1876,6 +1876,29 @@ VAT_PUBLIC_COPY = (
     "Phần thuế không quy đổi thành Xu hoặc lượt sử dụng dịch vụ."
 )
 VAT_EXCLUSIVE_COPY = "Thuế GTGT được cộng thêm vào tổng thanh toán theo cấu hình thuế hiện hành của TOAN AAS."
+B2C_PRICE_MODE = "GROSS_FIXED"
+B2C_TAX_DISPLAY = "HIDDEN_OR_INCLUDED"
+B2C_TOPUP_VAT_MODE = "INTERNAL_INCLUDED_OR_RESERVE"
+B2C_PUBLIC_TAX_COPY = "Giá đã bao gồm phí hệ thống nếu có. TOAN AAS không cộng thuế lẻ vào giá khách lẻ."
+B2B_PRICE_MODE = "NET_PLUS_VAT"
+B2B_TAX_DISPLAY = "SEPARATE_VAT"
+FINANCE_MARKETING_RESERVE_RATE = 0.30
+FINANCE_COGS_WORST_CASE_RATE = 0.50
+FINANCE_CIT_SCENARIO_RATE = 0.20
+VOLUME_DISCOUNT_CAP_PERCENT = 30
+
+def finance_volume_discount_percent(quantity: int) -> int:
+    qty = max(0, int(quantity or 0))
+    if qty >= 10_000:
+        return min(20, VOLUME_DISCOUNT_CAP_PERCENT)
+    if qty >= 1_000:
+        return min(10, VOLUME_DISCOUNT_CAP_PERCENT)
+    if qty >= 100:
+        return min(10, VOLUME_DISCOUNT_CAP_PERCENT)
+    return 0
+
+def finance_discount_cap_percent(discount_percent: int | float) -> int:
+    return max(0, min(int(discount_percent or 0), int(VOLUME_DISCOUNT_CAP_PERCENT)))
 
 FINANCE_ADJUSTMENT_TYPES = {
     "revenue_add", "revenue_subtract", "expense_add", "expense_subtract",
@@ -9204,6 +9227,88 @@ def payment_currency_from_metadata(metadata: dict | None = None) -> str:
     currency = str((metadata or {}).get("currency") or (metadata or {}).get("original_currency") or "VND").strip().upper()
     return currency if currency in {"VND", "USDT", "CNY", "USD"} else "VND"
 
+def finance_truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "business", "required"}
+
+def finance_internal_vat_rate(tax_config: dict | None = None) -> float:
+    config = tax_config or finance_tax_config()
+    if not bool(config.get("vat_enabled")):
+        return 0.0
+    return max(0.0, min(float(config.get("vat_rate") or 0), float(VAT_SAFE_MAX_RATE)))
+
+def finance_customer_type_from_metadata(metadata: dict | None = None) -> str:
+    metadata = dict(metadata or {})
+    raw = str(
+        metadata.get("customer_type")
+        or metadata.get("invoice_customer_type")
+        or metadata.get("buyer_type")
+        or ""
+    ).strip().lower()
+    business_markers = {
+        "business", "company", "enterprise", "b2b", "organization", "org",
+        "doanh_nghiep", "cong_ty", "công_ty",
+    }
+    if raw in business_markers:
+        return "business"
+    if finance_truthy(metadata.get("invoice_required")) or finance_truthy(metadata.get("b2b_invoice")):
+        return "business"
+    if str(metadata.get("company_name") or metadata.get("tax_code") or metadata.get("mst") or "").strip():
+        return "business"
+    return "individual"
+
+def finance_invoice_tax_policy(
+    invoice_type: str = "",
+    payment_type: str = "",
+    metadata: dict | None = None,
+    tax_config: dict | None = None,
+) -> dict:
+    metadata = dict(metadata or {})
+    customer_type = finance_customer_type_from_metadata(metadata)
+    invoice_required = customer_type == "business" or finance_truthy(metadata.get("invoice_required"))
+    if customer_type == "business":
+        return {
+            "customer_type": "business",
+            "invoice_required": bool(invoice_required),
+            "price_mode": B2B_PRICE_MODE,
+            "tax_display": B2B_TAX_DISPLAY,
+            "customer_vat_surcharge": True,
+            "internal_vat_rate": 0.0,
+            "internal_vat_reserve_vnd": 0,
+            "b2c_topup_vat_mode": "",
+            "company_name": str(metadata.get("company_name") or "")[:180],
+            "tax_code": str(metadata.get("tax_code") or metadata.get("mst") or "")[:80],
+            "invoice_email": str(metadata.get("invoice_email") or metadata.get("email") or "")[:180],
+        }
+    return {
+        "customer_type": "individual",
+        "invoice_required": False,
+        "price_mode": B2C_PRICE_MODE,
+        "tax_display": B2C_TAX_DISPLAY,
+        "customer_vat_surcharge": False,
+        "internal_vat_rate": finance_internal_vat_rate(tax_config),
+        "internal_vat_reserve_vnd": 0,
+        "b2c_topup_vat_mode": B2C_TOPUP_VAT_MODE,
+        "company_name": "",
+        "tax_code": "",
+        "invoice_email": "",
+    }
+
+def b2c_internal_vat_snapshot(gross_vnd: int, tax_config: dict | None = None) -> dict:
+    rate = finance_internal_vat_rate(tax_config)
+    internal_config = dict(tax_config or finance_tax_config())
+    internal_config.update({
+        "vat_enabled": bool(rate > 0),
+        "vat_rate": rate,
+        "vat_mode": "inclusive",
+        "vat_label": internal_config.get("vat_label") or VAT_DEFAULT_LABEL,
+        "vat_note": "Dự phòng GTGT nội bộ cho giá B2C trọn gói",
+    })
+    return calculate_vat_snapshot(gross_vnd, internal_config, taxable=rate > 0)
+
 def calculate_vat_snapshot(subtotal_vnd: int, tax_config: dict | None = None, taxable: bool = True) -> dict:
     subtotal = max(0, int(subtotal_vnd or 0))
     config = tax_config or finance_tax_config()
@@ -9260,11 +9365,24 @@ def build_finance_invoice_snapshot_conn(
         subtotal = int(amount_vnd or 0)
     tax_category = str(metadata.get("tax_category") or "standard").strip().lower()
     taxable = bool(metadata.get("vat_disabled") is not True and tax_category not in {"non_taxable", "vat_exempt"})
-    snapshot = calculate_vat_snapshot(subtotal, finance_tax_config_conn(conn), taxable=taxable)
-    if existing_total > 0 and int(metadata.get("vat_amount_vnd") or 0) >= 0:
-        snapshot["total_amount_vnd"] = existing_total
-        snapshot["vat_amount_vnd"] = int(metadata.get("vat_amount_vnd") or 0)
-        snapshot["subtotal_amount_vnd"] = existing_subtotal or max(0, existing_total - snapshot["vat_amount_vnd"])
+    tax_config = finance_tax_config_conn(conn)
+    policy = finance_invoice_tax_policy(invoice_type, payment_type, metadata, tax_config)
+    if policy.get("customer_type") == "business":
+        snapshot = calculate_vat_snapshot(subtotal, tax_config, taxable=taxable)
+        if existing_total > 0 and int(metadata.get("vat_amount_vnd") or 0) >= 0:
+            snapshot["total_amount_vnd"] = existing_total
+            snapshot["vat_amount_vnd"] = int(metadata.get("vat_amount_vnd") or 0)
+            snapshot["subtotal_amount_vnd"] = existing_subtotal or max(0, existing_total - snapshot["vat_amount_vnd"])
+    else:
+        gross_total = existing_total if existing_total > 0 else subtotal
+        no_public_vat_config = dict(tax_config)
+        no_public_vat_config.update({"vat_enabled": False, "vat_rate": 0.0, "vat_mode": "inclusive"})
+        snapshot = calculate_vat_snapshot(gross_total, no_public_vat_config, taxable=False)
+        snapshot["subtotal_amount_vnd"] = int(gross_total)
+        snapshot["vat_amount_vnd"] = 0
+        snapshot["total_amount_vnd"] = int(gross_total)
+        internal_snapshot = b2c_internal_vat_snapshot(gross_total, tax_config)
+        policy["internal_vat_reserve_vnd"] = int(internal_snapshot.get("vat_amount_vnd") or 0)
     snapshot.update({
         "order_id": str(order_code),
         "user_id": str(user_id or ""),
@@ -9280,6 +9398,11 @@ def build_finance_invoice_snapshot_conn(
         "created_at": str(metadata.get("created_at") or now_text()),
         "note": str(metadata.get("note") or ""),
     })
+    snapshot.update(policy)
+    gross_cash = int(snapshot.get("total_amount_vnd") or 0)
+    internal_reserve = int(snapshot.get("internal_vat_reserve_vnd") or 0)
+    snapshot["gross_cash_received_vnd"] = gross_cash
+    snapshot["net_revenue_estimated_vnd"] = max(0, gross_cash - internal_reserve)
     return snapshot
 
 def invoice_metadata(snapshot: dict, metadata: dict | None = None) -> dict:
@@ -9287,12 +9410,15 @@ def invoice_metadata(snapshot: dict, metadata: dict | None = None) -> dict:
     for key in (
         "invoice_type", "payment_channel", "currency", "subtotal_amount_vnd",
         "vat_rate", "vat_amount_vnd", "total_amount_vnd", "fx_rate", "original_amount",
-        "original_currency", "vat_mode", "tax_category",
+        "original_currency", "vat_mode", "tax_category", "customer_type", "invoice_required",
+        "price_mode", "tax_display", "customer_vat_surcharge", "internal_vat_rate",
+        "internal_vat_reserve_vnd", "gross_cash_received_vnd", "net_revenue_estimated_vnd",
+        "b2c_topup_vat_mode", "company_name", "tax_code", "invoice_email",
     ):
         payload[key] = snapshot.get(key)
     payload["vat_label"] = snapshot.get("vat_label") or VAT_DEFAULT_LABEL
     payload["vat_note"] = snapshot.get("vat_note") or VAT_DEFAULT_NOTE
-    payload["vat_public_copy"] = VAT_PUBLIC_COPY
+    payload["vat_public_copy"] = B2C_PUBLIC_TAX_COPY if snapshot.get("tax_display") == B2C_TAX_DISPLAY else VAT_PUBLIC_COPY
     return payload
 
 def record_finance_invoice_conn(conn, snapshot: dict, metadata: dict | None = None) -> None:
@@ -9390,7 +9516,22 @@ def finance_invoice_for_order(order_id: str) -> dict:
         "vat_mode", "tax_category", "status", "created_at", "paid_at", "granted_at", "approved_by_admin_id",
         "note", "anomaly_reason", "metadata_json",
     ]
-    return dict(zip(keys, row))
+    payload = dict(zip(keys, row))
+    try:
+        meta = json.loads(payload.get("metadata_json") or "{}")
+        if not isinstance(meta, dict):
+            meta = {}
+    except Exception:
+        meta = {}
+    for key in (
+        "customer_type", "invoice_required", "price_mode", "tax_display",
+        "customer_vat_surcharge", "internal_vat_rate", "internal_vat_reserve_vnd",
+        "gross_cash_received_vnd", "net_revenue_estimated_vnd", "b2c_topup_vat_mode",
+        "company_name", "tax_code", "invoice_email", "vat_public_copy",
+    ):
+        if key in meta:
+            payload[key] = meta.get(key)
+    return payload
 
 def finance_order_subtotal_from_metadata(metadata: dict | None, fallback_total: int = 0) -> int:
     metadata = metadata or {}
@@ -9402,8 +9543,20 @@ def finance_order_subtotal_from_metadata(metadata: dict | None, fallback_total: 
 
 def finance_tax_lines(snapshot: dict) -> list[str]:
     rate_percent = float(snapshot.get("vat_rate") or 0) * 100
+    separate_vat = (
+        snapshot.get("tax_display") == B2B_TAX_DISPLAY
+        or snapshot.get("customer_type") == "business"
+        or (int(snapshot.get("vat_amount_vnd") or 0) > 0 and not snapshot.get("tax_display"))
+    )
+    if not separate_vat:
+        total = int(snapshot.get("total_amount_vnd") or snapshot.get("subtotal_amount_vnd") or 0)
+        return [
+            f"• Giá thanh toán: <b>{vnd_text(total)}</b>",
+            f"• Tổng thanh toán: <b>{vnd_text(total)}</b>",
+            f"• {html.escape(B2C_PUBLIC_TAX_COPY)}",
+        ]
     lines = [
-        f"• Giá trước thuế: <b>{vnd_text(snapshot.get('subtotal_amount_vnd'))}</b>",
+        f"• Giá dịch vụ: <b>{vnd_text(snapshot.get('subtotal_amount_vnd'))}</b>",
         f"• {html.escape(str(snapshot.get('vat_label') or VAT_DEFAULT_LABEL))} ({rate_percent:.2f}%): <b>{vnd_text(snapshot.get('vat_amount_vnd'))}</b>",
         f"• Tổng thanh toán: <b>{vnd_text(snapshot.get('total_amount_vnd'))}</b>",
         f"• {html.escape(VAT_PUBLIC_COPY)}",
@@ -32246,7 +32399,7 @@ def process_payos_paid_order(
                 "amount_mismatch",
                 expected_amount_vnd=int(expected_amount or 0),
                 actual_amount_vnd=int(amount_vnd or 0),
-                reason="Paid amount does not match invoice total after VAT.",
+                reason="Paid amount does not match expected invoice total.",
                 metadata=metadata,
             )
             if order_type == "package_purchase":
@@ -34146,7 +34299,8 @@ def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key="", method
     vat_rate = float(details.get("vat_rate") or 0)
     vat_mode = str(details.get("vat_mode") or VAT_DEFAULT_MODE)
     vat_label = str(details.get("vat_label") or VAT_DEFAULT_LABEL)
-    if subtotal_amount_vnd > 0 and vat_amount_vnd <= 0 and total_amount_vnd <= subtotal_amount_vnd:
+    tax_policy = finance_invoice_tax_policy("topup", "manual_topup", details, finance_tax_config())
+    if tax_policy.get("customer_type") == "business" and subtotal_amount_vnd > 0 and vat_amount_vnd <= 0 and total_amount_vnd <= subtotal_amount_vnd:
         try:
             tax_snapshot = calculate_vat_snapshot(subtotal_amount_vnd, finance_tax_config(), taxable=True)
             vat_rate = float(tax_snapshot.get("vat_rate") or vat_rate or 0)
@@ -34178,6 +34332,10 @@ def set_manual_bill_state(uid, order_code="", amount=0, xu=0, pkg_key="", method
         "total_amount_vnd": total_amount_vnd,
         "vat_mode": vat_mode,
         "vat_label": vat_label,
+        "customer_type": tax_policy.get("customer_type"),
+        "price_mode": tax_policy.get("price_mode"),
+        "tax_display": tax_policy.get("tax_display"),
+        "internal_vat_rate": tax_policy.get("internal_vat_rate"),
         "base_xu": base_xu,
         "bonus_xu": bonus_xu,
         "expected_xu": expected_xu,
@@ -44781,7 +44939,7 @@ def package_catalog_video_cost_xu(tier: str, fallback: int) -> int:
         return max(1, int(fallback or 1))
 
 def package_catalog_tts_words_xu(words: int) -> int:
-    price = float(VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU or 0.05)
+    price = float(VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU or 0.10)
     return max(1, int(math.ceil(max(0, int(words or 0)) * price)))
 
 def package_catalog_prompt_workflow_xu() -> int:
@@ -50516,7 +50674,7 @@ VOICE_TTS_DEFAULT_VOLUME_PERCENT = 100
 VOICE_TTS_MIN_VOLUME_PERCENT = 0
 VOICE_TTS_MAX_VOLUME_PERCENT = 200
 VOICE_TTS_PRODUCT_MIN_WORDS = 20
-VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU = 0.05
+VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU = 0.10
 VOICE_TTS_PRODUCT_MIN_CHARGE_XU = 1
 
 
@@ -50594,15 +50752,21 @@ def voice_tts_word_count(text: str) -> int:
 def voice_tts_product_quote(text: str) -> dict:
     words = voice_tts_word_count(text)
     raw_price = round(float(words) * float(VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU), 3)
+    discount_percent = finance_volume_discount_percent(words)
+    discount_xu = raw_price * discount_percent / 100.0
+    discounted_price = raw_price - discount_xu
     total = 0
     if words > 0:
-        total = max(int(VOICE_TTS_PRODUCT_MIN_CHARGE_XU or 1), int(math.ceil(raw_price)))
+        total = max(int(VOICE_TTS_PRODUCT_MIN_CHARGE_XU or 1), int(math.ceil(discounted_price)))
     return {
         "word_count": words,
         "price_per_word_xu": float(VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU),
         "raw_price_xu": raw_price,
+        "discount_percent": finance_discount_cap_percent(discount_percent),
+        "discount_xu": discount_xu,
+        "discount_cap_percent": int(VOLUME_DISCOUNT_CAP_PERCENT),
         "total_xu": total,
-        "rounded": bool(total != raw_price),
+        "rounded": bool(total != discounted_price),
         "min_words": int(VOICE_TTS_PRODUCT_MIN_WORDS),
     }
 
@@ -92772,9 +92936,9 @@ async def send_paid_saved_voice_tts_result(message, user_id, profile: dict, text
             "price_xu": charged,
             "quoted_price_xu": price,
             "billable_words": billable_words,
-            "price_per_word_xu": float(VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU or 0.05),
+            "price_per_word_xu": float(VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU or 0.10),
             "billable_chars": billable_chars,
-            "price_per_char_xu": float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.1),
+            "price_per_char_xu": float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.2),
             "min_chars_rule": f">{int(CUSTOM_VOICE_USAGE_MIN_CHARS or 10)}",
             "min_duration_seconds_rule": f">{int(CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS or 3)}",
             "charge_status": "paid_custom_voice_usage" if charged > 0 else "admin_custom_voice_usage_no_charge",
@@ -97934,11 +98098,35 @@ def voice_tts_billable_chars(text: str) -> int:
 def custom_voice_usage_billable_chars(text: str) -> int:
     return voice_tts_billable_chars(text)
 
-def custom_voice_usage_price_xu(text: str) -> int:
+def custom_voice_usage_price_breakdown(text: str) -> dict:
     chars = custom_voice_usage_billable_chars(text)
     if chars <= 0:
-        return 0
-    return int(math.ceil(chars * float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.0)))
+        return {
+            "chars": 0,
+            "rate_xu": float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.0),
+            "raw_xu": 0.0,
+            "discount_percent": 0,
+            "discount_xu": 0.0,
+            "discount_cap_percent": int(VOLUME_DISCOUNT_CAP_PERCENT),
+            "total_xu": 0,
+        }
+    rate = float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.0)
+    raw = chars * rate
+    discount_percent = finance_volume_discount_percent(chars)
+    discount_xu = raw * discount_percent / 100.0
+    total = int(math.ceil(raw - discount_xu))
+    return {
+        "chars": chars,
+        "rate_xu": rate,
+        "raw_xu": raw,
+        "discount_percent": finance_discount_cap_percent(discount_percent),
+        "discount_xu": discount_xu,
+        "discount_cap_percent": int(VOLUME_DISCOUNT_CAP_PERCENT),
+        "total_xu": total,
+    }
+
+def custom_voice_usage_price_xu(text: str) -> int:
+    return int(custom_voice_usage_price_breakdown(text).get("total_xu") or 0)
 
 def custom_voice_usage_text_too_short(text: str) -> bool:
     return custom_voice_usage_billable_chars(text) <= int(CUSTOM_VOICE_USAGE_MIN_CHARS or 10)
@@ -107703,9 +107891,15 @@ def tax_accounting_csv(kind: str, start_at: str, end_at: str, label: str, admin_
                 """SELECT id,status_type,title,description,effective_from,effective_to,source_note,
                           attachment_file_id,confirmed_by_admin,created_at,updated_at
                    FROM finance_compliance_notes
-                   WHERE updated_at BETWEEN ? AND ? OR created_at BETWEEN ? AND ?
+                   WHERE (
+                       (COALESCE(effective_from,'')<>'' OR COALESCE(effective_to,'')<>'')
+                       AND date(COALESCE(NULLIF(effective_from,''),'0001-01-01')) <= date(?)
+                       AND date(COALESCE(NULLIF(effective_to,''),'9999-12-31')) >= date(?)
+                   )
+                   OR updated_at BETWEEN ? AND ?
+                   OR created_at BETWEEN ? AND ?
                    ORDER BY updated_at,id""",
-                (start_at, end_at, start_at, end_at),
+                (end_at, start_at, start_at, end_at, start_at, end_at),
             )
         else:
             payload = tax_estimate_payload(start_at, end_at, label, admin_id)
@@ -132571,11 +132765,16 @@ def package_purchase_detail_lines(package_type: str, code: str) -> list[str]:
     duration_days = int(entry.get("default_days") or 0) if package_type == "monthly" else 0
     auto_checkout = package_entry_auto_checkout_enabled(entry)
     components = str(entry.get("components") or "").strip()
-    tax_snapshot = calculate_vat_snapshot(price) if price > 0 else {}
+    tax_snapshot = {
+        "subtotal_amount_vnd": price,
+        "vat_amount_vnd": 0,
+        "total_amount_vnd": price,
+        "tax_display": B2C_TAX_DISPLAY,
+    } if price > 0 else {}
     tax_lines = [
-        f"• Giá trước thuế: <b>{vnd_text(tax_snapshot.get('subtotal_amount_vnd'))}</b>",
-        f"• Thuế GTGT: <b>{vnd_text(tax_snapshot.get('vat_amount_vnd'))}</b>",
+        f"• Giá thanh toán: <b>{vnd_text(tax_snapshot.get('total_amount_vnd'))}</b>",
         f"• Tổng thanh toán: <b>{vnd_text(tax_snapshot.get('total_amount_vnd'))}</b>",
+        f"• {html.escape(B2C_PUBLIC_TAX_COPY)}",
     ] if tax_snapshot else [f"• Giá dự kiến: <b>{html.escape(price_text)}</b>"]
     benefit_lines = [
         f"• {html.escape(package_items_summary(entry.get('items') or {}))}",
@@ -148994,12 +149193,12 @@ async def handle_manual_topup_pending_text(update: Update, context: ContextTypes
 
 def finance_admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💰 Doanh thu", callback_data="menu|finance_revenue")],
-        [InlineKeyboardButton("🧾 Thuế / VAT", callback_data="menu|finance_tax_vat"), InlineKeyboardButton("💸 Chi phí", callback_data="menu|finance_expense_month")],
+        [InlineKeyboardButton("📊 Tổng quan", callback_data="menu|finance_overview"), InlineKeyboardButton("💵 Doanh thu", callback_data="menu|finance_revenue")],
+        [InlineKeyboardButton("🧾 Thuế / VAT", callback_data="menu|finance_tax_vat"), InlineKeyboardButton("🧾 Chi phí", callback_data="menu|finance_expense_month")],
         [InlineKeyboardButton("📈 Lợi nhuận", callback_data="menu|finance_profit"), InlineKeyboardButton("🏦 Vốn & Hòa vốn", callback_data="menu|finance_capital")],
-        [InlineKeyboardButton("📦 Gói / Combo", callback_data="menu|admin_package_orders"), InlineKeyboardButton("⚠️ Đơn bất thường", callback_data="menu|finance_anomalies")],
+        [InlineKeyboardButton("🎁 Gói / Combo", callback_data="menu|admin_package_orders"), InlineKeyboardButton("⚠️ Đơn bất thường", callback_data="menu|finance_anomalies")],
         [InlineKeyboardButton("🧮 Sổ điều chỉnh", callback_data="menu|finance_adjustments"), InlineKeyboardButton("➕ Thêm chi phí", callback_data="menu|finance_add_expense")],
-        [InlineKeyboardButton("📤 Xuất báo cáo", callback_data="menu|finance_export"), InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist")],
+        [InlineKeyboardButton("📥 Xuất báo cáo", callback_data="menu|finance_export"), InlineKeyboardButton("📚 Hồ sơ/chứng từ", callback_data="menu|tax_checklist")],
         [InlineKeyboardButton("📘 Hướng dẫn tài chính", callback_data="menu|finance_guide"), InlineKeyboardButton("🎟 Mã quà tặng", callback_data="menu|admin_gift_codes")],
         [InlineKeyboardButton("⬅️ Admin", callback_data="menu|admin"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
     ])
@@ -149050,6 +149249,8 @@ def finance_child_keyboard() -> InlineKeyboardMarkup:
 def finance_tax_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🧾 Cấu hình thuế", callback_data="menu|finance_tax_settings"), InlineKeyboardButton("✏️ Đổi % GTGT", callback_data="menu|finance_vat_rate_help")],
+        [InlineKeyboardButton("📌 Chính sách B2C/B2B", callback_data="menu|finance_policy_status"), InlineKeyboardButton("🧮 Kịch bản 100k", callback_data="menu|finance_tax_scenario")],
+        [InlineKeyboardButton("📦 Provider cost/FCT", callback_data="menu|finance_provider_cost_tax"), InlineKeyboardButton("🧭 Audit menu", callback_data="menu|finance_menu_audit")],
         [InlineKeyboardButton("✅ Bật GTGT", callback_data="menu|finance_vat_on"), InlineKeyboardButton("⛔ Tắt GTGT", callback_data="menu|finance_vat_off")],
         [InlineKeyboardButton("✏️ Đổi % TNDN", callback_data="menu|finance_cit_rate_help"), InlineKeyboardButton("📊 Báo cáo TNDN", callback_data="menu|finance_cit_report")],
         [InlineKeyboardButton("✅ Bật TNDN", callback_data="menu|finance_cit_on"), InlineKeyboardButton("⛔ Tắt TNDN", callback_data="menu|finance_cit_off")],
@@ -149270,6 +149471,11 @@ def finance_command_help_text() -> str:
         "• <code>/tax_config key=value</code> — ghi chú cấu hình kế toán cũ, chỉ để tham chiếu\n"
         "• <code>/vat_rate 8</code>, <code>/vat_on</code>, <code>/vat_off</code> — cấu hình GTGT cho hóa đơn mới\n"
         "• <code>/cit_rate 20</code>, <code>/cit_on</code>, <code>/cit_off</code> — cấu hình TNDN cho báo cáo nội bộ\n"
+        "• <code>/finance_policy_status</code> — chính sách B2C/B2B canonical\n"
+        "• <code>/tax_scenario_report</code> — kịch bản 100.000đ: VAT nội bộ/COGS/marketing/TNDN\n"
+        "• <code>/provider_cost_tax_status</code> — bảng kiểm chi phí provider/FCT\n"
+        "• <code>/pricing_voice_subdub_status</code> — kiểm tra giá Voice/SubDub hiện hành\n"
+        "• <code>/finance_menu_audit</code> — audit route/back menu tài chính\n"
         "• <code>/internal_docs</code> — mở kho hồ sơ nội bộ admin-only\n"
         "• <code>/expense_add ...</code> — thêm chi phí vận hành\n"
         "• <code>/expense_add_pre ...</code> — thêm chi phí trước thành lập\n\n"
@@ -149366,6 +149572,25 @@ def finance_business_report_payload(start_at: str, end_at: str, label: str) -> d
             (start_at, end_at),
             0,
         ) or 0)
+        policy_rows = sql_rows(
+            conn,
+            """SELECT COALESCE(total_amount_vnd,0), COALESCE(metadata_json,'')
+               FROM finance_invoices
+               WHERE status IN ('paid','granted') AND created_at BETWEEN ? AND ?""",
+            (start_at, end_at),
+        )
+        b2c_gross_fixed_revenue = 0
+        internal_vat_reserve = 0
+        for total_amount, meta_text in policy_rows:
+            try:
+                meta = json.loads(meta_text or "{}") if meta_text else {}
+                if not isinstance(meta, dict):
+                    meta = {}
+            except Exception:
+                meta = {}
+            if meta.get("tax_display") == B2C_TAX_DISPLAY or meta.get("price_mode") == B2C_PRICE_MODE:
+                b2c_gross_fixed_revenue += int(total_amount or 0)
+                internal_vat_reserve += int(meta.get("internal_vat_reserve_vnd") or 0)
         tax_config = finance_tax_config_conn(conn)
         revenue_adjustment = sum(finance_invoice_adjustment_sign(kind, "revenue") * int(data["amount"]) for kind, data in adjustments.items())
         expense_adjustment = sum(finance_invoice_adjustment_sign(kind, "expense") * int(data["amount"]) for kind, data in adjustments.items())
@@ -149391,6 +149616,14 @@ def finance_business_report_payload(start_at: str, end_at: str, label: str) -> d
         ) or 0)
         monthly_burn = max(0, expenses)
         breakeven_remaining = max(0, expenses - revenue_before_tax)
+        gross_cash_received = cash_in
+        net_revenue_estimated = max(0, gross_cash_received - internal_vat_reserve)
+        cogs_worst_case_estimated = int(round(net_revenue_estimated * FINANCE_COGS_WORST_CASE_RATE))
+        marketing_reserve_estimated = int(round(net_revenue_estimated * FINANCE_MARKETING_RESERVE_RATE))
+        internal_profit_before_cit = net_revenue_estimated - max(provider_cost, cogs_worst_case_estimated) - marketing_reserve_estimated
+        cit_scenario_rate = FINANCE_CIT_SCENARIO_RATE if bool(tax_config.get("cit_enabled", True)) else 0.0
+        cit_scenario_estimated = int(round(max(internal_profit_before_cit, 0) * cit_scenario_rate))
+        internal_profit_after_cit = internal_profit_before_cit - cit_scenario_estimated
         return {
             "label": label,
             "start_at": start_at,
@@ -149401,6 +149634,21 @@ def finance_business_report_payload(start_at: str, end_at: str, label: str) -> d
             "cash_in": cash_in,
             "expenses": expenses,
             "provider_cost_estimate": provider_cost,
+            "gross_cash_received": gross_cash_received,
+            "b2c_gross_fixed_revenue": b2c_gross_fixed_revenue,
+            "internal_vat_rate": finance_internal_vat_rate(tax_config),
+            "internal_vat_reserve": internal_vat_reserve,
+            "net_revenue_estimated": net_revenue_estimated,
+            "provider_cogs_estimated": provider_cost,
+            "cogs_worst_case_rate": FINANCE_COGS_WORST_CASE_RATE,
+            "cogs_worst_case_estimated": cogs_worst_case_estimated,
+            "marketing_reserve_rate": FINANCE_MARKETING_RESERVE_RATE,
+            "marketing_reserve_estimated": marketing_reserve_estimated,
+            "promo_bonus_cost_estimated": marketing_reserve_estimated,
+            "cit_rate_scenario": cit_scenario_rate,
+            "cit_scenario_estimated": cit_scenario_estimated,
+            "profit_before_cit_internal": internal_profit_before_cit,
+            "profit_after_cit_internal": internal_profit_after_cit,
             "profit_before_tax_reserve": profit_before_tax_reserve,
             "profit_after_tax_reserve": profit_after_tax_reserve,
             "profit_before_cit": profit_before_cit,
@@ -149447,6 +149695,10 @@ def finance_tax_dashboard_text(raw: str = "", default_period: str = "month") -> 
         f"• Doanh thu trước thuế: <b>{vnd_text(payload['revenue_before_tax'])}</b>",
         f"• VAT đã ghi nhận: <b>{vnd_text(payload['vat_collected'])}</b>",
         f"• Tổng tiền khách trả: <b>{vnd_text(payload['cash_in'])}</b>",
+        f"• Chính sách B2C: <code>{B2C_PRICE_MODE}</code> — không cộng VAT lẻ vào nạp Xu/gói/combo.",
+        f"• B2C gross fixed: <b>{vnd_text(payload.get('b2c_gross_fixed_revenue'))}</b>",
+        f"• VAT nội bộ ước tính: <b>{vnd_text(payload.get('internal_vat_reserve'))}</b>",
+        f"• Net revenue ước tính: <b>{vnd_text(payload.get('net_revenue_estimated'))}</b>",
         f"• VAT điều chỉnh: <b>{vnd_text(payload.get('vat_adjustment'))}</b>",
         f"• Số hóa đơn: <b>{payload['invoice_count']}</b>",
         "",
@@ -149460,6 +149712,8 @@ def finance_tax_dashboard_text(raw: str = "", default_period: str = "month") -> 
         f"• TNDN đang bật: <code>{'YES' if payload.get('cit_enabled') else 'NO'}</code>",
         f"• Tỷ lệ TNDN: <b>{float(payload.get('cit_rate') or 0) * 100:.2f}%</b>",
         f"• Chi phí: <b>{vnd_text(payload['expenses'])}</b>",
+        f"• COGS worst-case 50%: <b>{vnd_text(payload.get('cogs_worst_case_estimated'))}</b>",
+        f"• Marketing/promo reserve 30%: <b>{vnd_text(payload.get('marketing_reserve_estimated'))}</b>",
         f"• Lợi nhuận trước TNDN: <b>{vnd_text(payload['profit_before_cit'])}</b>",
         f"• TNDN ước tính: <b>{vnd_text(payload['estimated_cit'])}</b>",
         f"• Lợi nhuận sau TNDN: <b>{vnd_text(payload['profit_after_cit'])}</b>",
@@ -149497,6 +149751,10 @@ def finance_tax_dashboard_text_for_bounds(start_at: str, end_at: str, label: str
         f"• Doanh thu trước thuế: <b>{vnd_text(payload['revenue_before_tax'])}</b>",
         f"• VAT đã ghi nhận: <b>{vnd_text(payload['vat_collected'])}</b>",
         f"• Tổng tiền khách trả: <b>{vnd_text(payload['cash_in'])}</b>",
+        f"• Chính sách B2C: <code>{B2C_PRICE_MODE}</code> — không cộng VAT lẻ vào nạp Xu/gói/combo.",
+        f"• B2C gross fixed: <b>{vnd_text(payload.get('b2c_gross_fixed_revenue'))}</b>",
+        f"• VAT nội bộ ước tính: <b>{vnd_text(payload.get('internal_vat_reserve'))}</b>",
+        f"• Net revenue ước tính: <b>{vnd_text(payload.get('net_revenue_estimated'))}</b>",
         f"• VAT điều chỉnh: <b>{vnd_text(payload.get('vat_adjustment'))}</b>",
         f"• Số hóa đơn: <b>{payload['invoice_count']}</b>",
         "",
@@ -149510,6 +149768,8 @@ def finance_tax_dashboard_text_for_bounds(start_at: str, end_at: str, label: str
         f"• TNDN đang bật: <code>{'YES' if payload.get('cit_enabled') else 'NO'}</code>",
         f"• Tỷ lệ TNDN: <b>{float(payload.get('cit_rate') or 0) * 100:.2f}%</b>",
         f"• Chi phí: <b>{vnd_text(payload['expenses'])}</b>",
+        f"• COGS worst-case 50%: <b>{vnd_text(payload.get('cogs_worst_case_estimated'))}</b>",
+        f"• Marketing/promo reserve 30%: <b>{vnd_text(payload.get('marketing_reserve_estimated'))}</b>",
         f"• Lợi nhuận trước TNDN: <b>{vnd_text(payload['profit_before_cit'])}</b>",
         f"• TNDN ước tính: <b>{vnd_text(payload['estimated_cit'])}</b>",
         f"• Lợi nhuận sau TNDN: <b>{vnd_text(payload['profit_after_cit'])}</b>",
@@ -149548,6 +149808,161 @@ def finance_tax_settings_text() -> str:
         f"• updated_at: <code>{html.escape(str(config.get('updated_at') or '-'))}</code>",
         "",
         "Đổi thuế chỉ áp dụng cho đơn/báo cáo mới. Đơn cũ giữ snapshot VAT tại thời điểm tạo đơn.",
+    ])
+
+def finance_policy_status_text() -> str:
+    config = finance_tax_config()
+    return "\n".join([
+        "📌 <b>Chính sách tài chính canonical</b>",
+        "",
+        "<b>B2C / khách lẻ</b>",
+        f"• Price mode: <code>{B2C_PRICE_MODE}</code>",
+        f"• Tax display: <code>{B2C_TAX_DISPLAY}</code>",
+        "• Nạp Xu / gói / combo: <b>không cộng VAT lẻ</b> vào số tiền khách trả.",
+        "• VAT chỉ dùng để ước tính dự phòng nội bộ theo cấu hình admin.",
+        f"• VAT nội bộ hiện tại: <b>{finance_internal_vat_rate(config) * 100:.2f}%</b>",
+        "",
+        "<b>B2B / doanh nghiệp cần hóa đơn</b>",
+        f"• Price mode: <code>{B2B_PRICE_MODE}</code>",
+        f"• Tax display: <code>{B2B_TAX_DISPLAY}</code>",
+        "• Hiển thị giá dịch vụ + VAT + tổng thanh toán.",
+        "",
+        "<b>TNDN / CIT</b>",
+        f"• TNDN hiện tại: <b>{float(config.get('cit_rate') or 0) * 100:.2f}%</b>",
+        "• TNDN chỉ dùng cho báo cáo lợi nhuận/dự phòng thuế, không cộng vào dòng phí khách trả.",
+        "",
+        "Lệnh nhanh: <code>/finance_policy_status</code>, <code>/tax_scenario_report</code>, <code>/provider_cost_tax_status</code>.",
+    ])
+
+def finance_tax_scenario_report_payload(gross_vnd: int = 100_000, tax_config: dict | None = None) -> dict:
+    gross = max(0, int(gross_vnd or 0))
+    config = tax_config or finance_tax_config()
+    internal_vat = b2c_internal_vat_snapshot(gross, config)
+    vat_reserve = int(internal_vat.get("vat_amount_vnd") or 0)
+    net_revenue = max(0, gross - vat_reserve)
+    cogs = int(round(net_revenue * FINANCE_COGS_WORST_CASE_RATE))
+    marketing = int(round(net_revenue * FINANCE_MARKETING_RESERVE_RATE))
+    profit_before_cit = net_revenue - cogs - marketing
+    cit_rate = FINANCE_CIT_SCENARIO_RATE if bool(config.get("cit_enabled", True)) else 0.0
+    cit = int(round(max(profit_before_cit, 0) * cit_rate))
+    return {
+        "gross_cash_received": gross,
+        "customer_vat_surcharge": 0,
+        "public_total": gross,
+        "internal_vat_rate": finance_internal_vat_rate(config),
+        "internal_vat_reserve": vat_reserve,
+        "net_revenue_estimated": net_revenue,
+        "cogs_worst_case_rate": FINANCE_COGS_WORST_CASE_RATE,
+        "provider_cogs_estimated": cogs,
+        "marketing_reserve_rate": FINANCE_MARKETING_RESERVE_RATE,
+        "promo_bonus_cost_estimated": marketing,
+        "profit_before_cit": profit_before_cit,
+        "cit_rate_scenario": cit_rate,
+        "cit_scenario_estimated": cit,
+        "profit_after_cit": profit_before_cit - cit,
+    }
+
+def finance_tax_scenario_report_text(gross_vnd: int = 100_000) -> str:
+    payload = finance_tax_scenario_report_payload(gross_vnd)
+    return "\n".join([
+        "🧮 <b>Kịch bản thuế nội bộ B2C</b>",
+        "",
+        f"• Khách lẻ trả: <b>{vnd_text(payload['gross_cash_received'])}</b>",
+        f"• VAT cộng thêm public: <b>{vnd_text(payload['customer_vat_surcharge'])}</b>",
+        f"• Tổng public giữ đẹp: <b>{vnd_text(payload['public_total'])}</b>",
+        f"• VAT nội bộ ({payload['internal_vat_rate'] * 100:.2f}% inclusive): <b>{vnd_text(payload['internal_vat_reserve'])}</b>",
+        f"• Net revenue ước tính: <b>{vnd_text(payload['net_revenue_estimated'])}</b>",
+        f"• COGS/API worst-case 50%: <b>{vnd_text(payload['provider_cogs_estimated'])}</b>",
+        f"• Marketing/promo reserve 30%: <b>{vnd_text(payload['promo_bonus_cost_estimated'])}</b>",
+        f"• Lợi nhuận trước TNDN: <b>{vnd_text(payload['profit_before_cit'])}</b>",
+        f"• TNDN scenario 20%: <b>{vnd_text(payload['cit_scenario_estimated'])}</b>",
+        f"• Lợi nhuận sau TNDN: <b>{vnd_text(payload['profit_after_cit'])}</b>",
+        "",
+        "Đây là báo cáo nội bộ. Không cộng TNDN thành phí khách trả.",
+    ])
+
+def provider_cost_tax_status_payload() -> dict:
+    providers = [
+        {
+            "provider": "ShopAIKey",
+            "payment_method": "reseller_vn_or_dashboard",
+            "invoice_available": "review_required",
+            "fct_note": "Theo dõi chứng từ/biên nhận nhà cung cấp, không hard-code thuế nhà thầu.",
+        },
+        {
+            "provider": "Key4U",
+            "payment_method": "dashboard_manual_balance_or_provider_topup",
+            "invoice_available": "review_required",
+            "fct_note": "Ghi chi phí theo bút toán/chứng từ admin; không đăng nhập web ngoài.",
+        },
+        {
+            "provider": "Other AI providers",
+            "payment_method": "card_or_provider_invoice",
+            "invoice_available": "review_required",
+            "fct_note": "Kiểm soát COGS/API trước khi mở scale.",
+        },
+    ]
+    return {
+        "scope": "admin_internal_provider_cost_tax",
+        "providers": providers,
+        "secret_safe": True,
+        "provider_call": False,
+    }
+
+def provider_cost_tax_status_text() -> str:
+    payload = provider_cost_tax_status_payload()
+    lines = [
+        "📦 <b>Provider cost / FCT status</b>",
+        "",
+        "Mục này chỉ là bảng kiểm chi phí và chứng từ nội bộ. Không gọi provider, không hiện key/token.",
+        "",
+    ]
+    for item in payload["providers"]:
+        lines.extend([
+            f"<b>{html.escape(item['provider'])}</b>",
+            f"• Payment: <code>{html.escape(item['payment_method'])}</code>",
+            f"• Invoice/chứng từ: <code>{html.escape(item['invoice_available'])}</code>",
+            f"• FCT note: {html.escape(item['fct_note'])}",
+            "",
+        ])
+    lines.append("Ưu tiên bù hao hụt bằng pricing Voice/SubDub + kiểm soát COGS/API, không đè VAT vào video hoặc nạp Xu B2C.")
+    return "\n".join(lines)
+
+def pricing_voice_subdub_status_text() -> str:
+    return "\n".join([
+        "🎙 <b>Voice/SubDub pricing status</b>",
+        "",
+        f"• Voice TTS: <b>{VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU:g} Xu / từ</b>.",
+        f"• Custom voice usage: <b>{CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU:g} Xu / ký tự</b>.",
+        f"• SubDub lồng tiếng giọng mặc định: <b>{VIDEO_ONLY_DUB_DEFAULT_RATE_XU:g} Xu / ký tự</b>.",
+        f"• SubDub lồng tiếng voice riêng: <b>{VIDEO_ONLY_DUB_CUSTOM_RATE_XU:g} Xu / ký tự</b>.",
+        f"• Discount volume cap: <b>{VOLUME_DISCOUNT_CAP_PERCENT}%</b>.",
+        "• Subtitle-only pricing giữ riêng, không bị nhân đôi nếu không phải voice/dub.",
+        "",
+        "Không gọi engine/provider từ lệnh này.",
+    ])
+
+def finance_menu_audit_text() -> str:
+    finance_callbacks = set()
+    try:
+        for row in finance_admin_keyboard().inline_keyboard:
+            for button in row:
+                if getattr(button, "callback_data", "").startswith("menu|"):
+                    finance_callbacks.add(str(button.callback_data).split("|", 1)[1])
+    except Exception:
+        finance_callbacks = set()
+    missing = sorted(cb for cb in finance_callbacks if cb not in ADMIN_MENU_PAGE_HANDLERS and cb not in {"admin", "main", "admin_package_orders", "admin_gift_codes", "tax_checklist"})
+    return "\n".join([
+        "🧭 <b>Finance menu audit</b>",
+        "",
+        "• admin_finance_entry_handler: <code>menu|admin_finance -> finance_menu_text</code>",
+        "• canonical_finance_screen: <code>YES</code>",
+        "• legacy_finance_routes: <code>admin_finance</code>",
+        "• redirected_legacy_routes: <code>admin_finance -> menu|finance</code>",
+        "• back_routes: <code>finance child -> menu|finance; finance -> menu|admin</code>",
+        f"• missing_routes: <code>{html.escape(', '.join(missing) if missing else 'none')}</code>",
+        "",
+        "Quy tắc: bấm ở khu Tài chính thì quay lại Tài chính; không nhảy sang flow sản phẩm.",
     ])
 
 def finance_vat_rate_help_text() -> str:
@@ -149721,10 +150136,10 @@ def finance_admin_guide_text() -> str:
     return "\n".join([
         "📘 <b>Hướng dẫn Admin Tài chính</b>",
         "",
-        "1. Doanh thu tiền thật vào <b>finance_invoices</b> với giá trước thuế, VAT, tổng thanh toán.",
-        "2. PayOS callback chỉ cấp Xu/gói khi số tiền thanh toán khớp tổng sau VAT.",
+        "1. Doanh thu tiền thật vào <b>finance_invoices</b> với snapshot giá, VAT public nếu có và tổng thanh toán.",
+        "2. PayOS callback chỉ cấp Xu/gói khi số tiền thanh toán khớp tổng thanh toán đã lưu.",
         "3. Chi tiêu bằng Xu/quota không tính VAT lần hai.",
-        "4. VAT/GTGT cộng vào hóa đơn khách khi bật; phần VAT không quy đổi thành Xu/lượt dùng.",
+        "4. Khách lẻ B2C giữ giá trọn gói, không cộng VAT lẻ; B2B cần hóa đơn mới tách VAT riêng.",
         "5. TNDN/CIT chỉ tính trên lợi nhuận nội bộ để xem lợi nhuận sau thuế và dự phòng thuế.",
         "6. Đổi % GTGT bằng <code>/vat_rate 8</code>, bật/tắt bằng <code>/vat_on</code> / <code>/vat_off</code>.",
         "7. Đổi % TNDN bằng <code>/cit_rate 20</code>, bật/tắt bằng <code>/cit_on</code> / <code>/cit_off</code>.",
@@ -149739,6 +150154,8 @@ def finance_admin_guide_text() -> str:
         "• <code>/finance_adjust revenue_subtract 10000 ly_do</code>",
         "• <code>/vat_rate 8</code>, <code>/vat_on</code>, <code>/vat_off</code>",
         "• <code>/cit_rate 20</code>, <code>/cit_on</code>, <code>/cit_off</code>",
+        "• <code>/finance_policy_status</code>, <code>/tax_scenario_report</code>, <code>/provider_cost_tax_status</code>",
+        "• <code>/pricing_voice_subdub_status</code>, <code>/finance_menu_audit</code>",
     ])
 
 def finance_expense_categories_text() -> str:
@@ -150985,6 +151402,10 @@ ADMIN_NAV_PARENT_ACTIONS = {
     "finance_guide": "finance",
     "finance_tax_vat": "finance",
     "finance_tax_settings": "finance_tax_vat",
+    "finance_policy_status": "finance_tax_vat",
+    "finance_tax_scenario": "finance_tax_vat",
+    "finance_provider_cost_tax": "finance_tax_vat",
+    "finance_menu_audit": "finance",
     "finance_vat_rate_help": "finance_tax_vat",
     "finance_cit_rate_help": "finance_tax_vat",
     "finance_vat_on": "finance_tax_vat",
@@ -151280,7 +151701,7 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "admin_security_db": lambda: (admin_module_page_text("security_db"), admin_module_keyboard("security_db")),
     "admin_system_ops": lambda: (admin_module_page_text("system_ops"), admin_module_keyboard("system_ops")),
     "admin_provider_worker": lambda: (admin_module_page_text("provider_worker"), admin_module_keyboard("provider_worker")),
-    "admin_finance": lambda: (admin_module_page_text("finance"), admin_module_keyboard("finance")),
+    "admin_finance": lambda: (finance_menu_text(), finance_admin_keyboard()),
     "admin_support": lambda: (admin_module_page_text("support"), admin_module_keyboard("support")),
     "admin_handbook": lambda: (admin_handbook_menu_text(), admin_handbook_menu_keyboard()),
     "admin_overview": lambda: (admin_overview_text(), finance_admin_keyboard()),
@@ -151342,6 +151763,10 @@ ADMIN_MENU_PAGE_HANDLERS = {
     "finance_expense_categories": lambda: (finance_expense_categories_text(), finance_period_keyboard("expense")),
     "finance_tax_vat": lambda: (finance_tax_dashboard_text(), finance_tax_keyboard()),
     "finance_tax_settings": lambda: (finance_tax_settings_text(), finance_tax_child_keyboard()),
+    "finance_policy_status": lambda: (finance_policy_status_text(), finance_tax_child_keyboard()),
+    "finance_tax_scenario": lambda: (finance_tax_scenario_report_text(), finance_tax_child_keyboard()),
+    "finance_provider_cost_tax": lambda: (provider_cost_tax_status_text(), finance_tax_child_keyboard()),
+    "finance_menu_audit": lambda: (finance_menu_audit_text(), finance_child_keyboard()),
     "finance_vat_rate_help": lambda: (finance_vat_rate_help_text(), finance_tax_child_keyboard()),
     "finance_cit_rate_help": lambda: (finance_cit_rate_help_text(), finance_tax_child_keyboard()),
     "finance_profit": lambda: (finance_profit_dashboard_text(), finance_period_keyboard("profit")),
@@ -151386,6 +151811,34 @@ async def cmd_finance_tax_report(update: Update, context: ContextTypes.DEFAULT_T
     raw = context.args[0] if context.args else ""
     default_period = "year" if re.fullmatch(r"\d{4}", str(raw or "").strip()) else "month"
     await update.message.reply_text(finance_tax_dashboard_text(raw, default_period), parse_mode="HTML", reply_markup=finance_tax_report_keyboard())
+
+async def cmd_finance_policy_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(finance_policy_status_text(), parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
+
+async def cmd_tax_scenario_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    amount = 100_000
+    if context.args:
+        amount = int(re.sub(r"[^0-9]", "", str(context.args[0] or "")) or 100_000)
+    await update.message.reply_text(finance_tax_scenario_report_text(amount), parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
+
+async def cmd_provider_cost_tax_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(provider_cost_tax_status_text(), parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
+
+async def cmd_pricing_voice_subdub_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(pricing_voice_subdub_status_text(), parse_mode="HTML", reply_markup=finance_tax_child_keyboard())
+
+async def cmd_finance_menu_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(finance_menu_audit_text(), parse_mode="HTML", reply_markup=finance_child_keyboard())
 
 async def cmd_finance_anomalies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -153016,8 +153469,8 @@ VIDEO_ONLY_TRANSLATE_MODES = {
     VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
 }
 VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU = 0.1
-VIDEO_ONLY_DUB_DEFAULT_RATE_XU = 0.05
-VIDEO_ONLY_DUB_CUSTOM_RATE_XU = 0.1
+VIDEO_ONLY_DUB_DEFAULT_RATE_XU = 0.10
+VIDEO_ONLY_DUB_CUSTOM_RATE_XU = 0.20
 VIDEO_DUBBING_FLOW_SUBTITLE_FILE_TRANSLATE = "subtitle_file_translate"
 VIDEO_DUBBING_FLOW_TRANSCRIPT = "transcript_extract"
 VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB = "subtitle_plus_dub"
@@ -153235,12 +153688,7 @@ def subtitle_plus_dub_clean_failure_keyboard(lang: str = "vi") -> InlineKeyboard
     ])
 
 def video_only_price_discount_percent(chars: int) -> int:
-    chars = max(0, int(chars or 0))
-    if chars > 10_000:
-        return 20
-    if chars > 1_000:
-        return 10
-    return 0
+    return finance_volume_discount_percent(chars)
 
 def calculate_video_only_char_price(chars: int, rate_xu: float, *, minimum: int = 1) -> dict:
     chars = max(0, int(chars or 0))
@@ -165311,6 +165759,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("xu_ledger_export", cmd_xu_ledger_export))
     tg_app.add_handler(CommandHandler("finance_dashboard", cmd_finance_dashboard))
     tg_app.add_handler(CommandHandler("finance_tax_report", cmd_finance_tax_report))
+    tg_app.add_handler(CommandHandler("finance_policy_status", cmd_finance_policy_status))
+    tg_app.add_handler(CommandHandler("tax_scenario_report", cmd_tax_scenario_report))
+    tg_app.add_handler(CommandHandler("provider_cost_tax_status", cmd_provider_cost_tax_status))
+    tg_app.add_handler(CommandHandler("pricing_voice_subdub_status", cmd_pricing_voice_subdub_status))
+    tg_app.add_handler(CommandHandler("finance_menu_audit", cmd_finance_menu_audit))
     tg_app.add_handler(CommandHandler("finance_adjust", cmd_finance_adjust))
     tg_app.add_handler(CommandHandler("finance_anomalies", cmd_finance_anomalies))
     tg_app.add_handler(CommandHandler("vat_rate", cmd_vat_rate))

@@ -290,8 +290,8 @@ def test_combo_price_summary_total_before_confirm():
     )
     assert "Xác nhận phụ đề + lồng tiếng" in text
     assert "Dịch phụ đề: <b>180 Xu</b>" in text
-    assert "Lồng tiếng: <b>90 Xu</b>" in text
-    assert "Tổng cộng: <b>270 Xu</b>" in text
+    assert "Lồng tiếng: <b>180 Xu</b>" in text
+    assert "Tổng cộng: <b>360 Xu</b>" in text
 
 
 def test_combo_no_provider_before_confirm(monkeypatch):

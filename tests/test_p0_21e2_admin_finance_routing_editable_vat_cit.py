@@ -143,9 +143,10 @@ def test_admin_can_set_global_vat_rate(monkeypatch, tmp_path):
 
 def test_vat_rate_applies_to_new_orders_only(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
-    bot.create_order("vat-old", "u-vat", 100_000, 1_000)
+    metadata = json.dumps({"customer_type": "business", "invoice_required": True}, ensure_ascii=False)
+    bot.create_order("vat-old", "u-vat", 100_000, 1_000, metadata_json=metadata)
     bot.admin_set_global_vat_rate(10, admin_id="admin-tax")
-    bot.create_order("vat-new", "u-vat", 100_000, 1_000)
+    bot.create_order("vat-new", "u-vat", 100_000, 1_000, metadata_json=metadata)
     assert bot.finance_invoice_for_order("vat-old")["vat_amount_vnd"] == 8_000
     assert bot.finance_invoice_for_order("vat-new")["vat_amount_vnd"] == 10_000
 
@@ -170,7 +171,7 @@ def test_topup_adds_vat_to_total_payment(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
     bot.create_order("vat-topup", "u-topup", 10_000, 100)
     _invoice, total = bot.payos_invoice_total_for_order("vat-topup", 10_000)
-    assert total == 10_800
+    assert total == 10_000
 
 
 def test_topup_wallet_credit_excludes_vat(monkeypatch, tmp_path):
@@ -184,7 +185,7 @@ def test_topup_wallet_credit_excludes_vat(monkeypatch, tmp_path):
     assert processed is True
     assert desc == "success"
     assert after - before == bot.package_base_xu(10_000)
-    assert info["vat_amount_vnd"] == 800
+    assert info["vat_amount_vnd"] == 0
 
 
 def test_no_double_vat_when_spending_xu(monkeypatch, tmp_path):
@@ -239,7 +240,7 @@ def test_cit_not_added_to_customer_invoice(monkeypatch, tmp_path):
     bot.admin_set_global_cit_rate(20, admin_id="admin-tax")
     bot.create_order("cit-invoice", "u-cit", 100_000, 1_000)
     invoice = bot.finance_invoice_for_order("cit-invoice")
-    assert invoice["total_amount_vnd"] == 108_000
+    assert invoice["total_amount_vnd"] == 100_000
     assert "cit_rate" not in invoice
     assert "cit_amount_vnd" not in invoice
     assert "tndn" not in json.dumps(invoice.get("metadata_json", ""), ensure_ascii=False).lower()
@@ -348,7 +349,7 @@ def test_payos_uses_total_with_vat(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
     bot.create_order("payos-vat", "u-payos", 100_000, 1_000)
     _invoice, total = bot.payos_invoice_total_for_order("payos-vat", 100_000)
-    assert total == 108_000
+    assert total == 100_000
 
 
 def test_momo_hidden_from_cny_payment(monkeypatch, tmp_path):
@@ -361,7 +362,7 @@ def test_zalopay_payment_adds_vat_if_enabled(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
     conn = bot.db_connect()
     try:
-        snapshot = bot.build_finance_invoice_snapshot_conn(conn, "zalo-vat", "u", 100_000, "manual_topup", "manual_topup", {"payment_channel": "zalopay"})
+        snapshot = bot.build_finance_invoice_snapshot_conn(conn, "zalo-vat", "u", 100_000, "manual_topup", "manual_topup", {"payment_channel": "zalopay", "customer_type": "business", "invoice_required": True})
     finally:
         conn.close()
     assert snapshot["payment_channel"] == "zalopay"
@@ -379,7 +380,7 @@ def test_usdt_payment_adds_vat_on_vnd_equivalent(monkeypatch, tmp_path):
             0,
             "manual_topup",
             "manual_topup",
-            {"payment_channel": "usdt_trc20", "currency": "USDT", "original_amount": 10, "fx_rate": 25_000},
+            {"payment_channel": "usdt_trc20", "currency": "USDT", "original_amount": 10, "fx_rate": 25_000, "customer_type": "business", "invoice_required": True},
         )
     finally:
         conn.close()
@@ -395,7 +396,7 @@ def test_cny_without_handler_goes_admin_order(monkeypatch, tmp_path):
 
 def test_public_payment_confirm_shows_vat_lines():
     text = bot.finance_tax_block({"subtotal_amount_vnd": 100_000, "vat_rate": 0.08, "vat_amount_vnd": 8_000, "total_amount_vnd": 108_000})
-    assert "Giá trước thuế" in text
+    assert "Giá dịch vụ" in text
     assert "Thuế GTGT" in text
     assert "Tổng thanh toán" in text
 
@@ -427,7 +428,8 @@ def test_no_db_destructive():
 
 def test_no_fake_payment_success(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
-    bot.create_order("fake-pay", "u-fake", 100_000, 1_000)
+    metadata_json = json.dumps({"customer_type": "business", "invoice_required": True})
+    bot.create_order("fake-pay", "u-fake", 100_000, 1_000, metadata_json=metadata_json)
     processed, desc, _info = bot.process_payos_paid_order("fake-pay", 100_000, webhook_currency="VND")
     assert processed is False
     assert desc == "amount_mismatch"
@@ -437,7 +439,8 @@ def test_no_quota_grant_on_flagged_order(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
     user_id = "u-flagged"
     before, _, _ = bot.get_user(user_id, "Flagged")
-    bot.create_order("flagged-order", user_id, 100_000, 1_000)
+    metadata_json = json.dumps({"customer_type": "business", "invoice_required": True})
+    bot.create_order("flagged-order", user_id, 100_000, 1_000, metadata_json=metadata_json)
     bot.process_payos_paid_order("flagged-order", 100_000, webhook_currency="VND")
     after, _, _ = bot.get_user(user_id)
     assert after == before

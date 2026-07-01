@@ -196,7 +196,7 @@ def test_translate_subtitle_never_runs_create_original_subtitle(monkeypatch):
 
 def test_translate_subtitle_price_0_1_per_char():
     price = bot.calculate_video_only_char_price(1000, bot.VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU)
-    assert price["total_xu"] == 100
+    assert price["total_xu"] == 90
 
 
 def test_translate_subtitle_discount_over_1000():
@@ -343,8 +343,8 @@ def test_combo_price_summary_adds_subtitle_and_dub():
         "vi",
     )
     assert "Dịch phụ đề: <b>180 Xu</b>" in text
-    assert "Lồng tiếng: <b>90 Xu</b>" in text
-    assert "Tổng cộng: <b>270 Xu</b>" in text
+    assert "Lồng tiếng: <b>180 Xu</b>" in text
+    assert "Tổng cộng: <b>360 Xu</b>" in text
 
 
 def test_combo_outputs_final_mp4_srt_mp3():
@@ -373,20 +373,20 @@ def test_subtitle_price_counts_all_chars():
     assert bot.calculate_video_only_char_price(len("a b c"), bot.VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU)["chars"] == 5
 
 
-def test_dub_default_price_0_05_per_char():
-    assert bot.calculate_video_only_char_price(1000, bot.VIDEO_ONLY_DUB_DEFAULT_RATE_XU)["total_xu"] == 50
+def test_dub_default_price_0_10_per_char():
+    assert bot.calculate_video_only_char_price(1000, bot.VIDEO_ONLY_DUB_DEFAULT_RATE_XU)["total_xu"] == 90
 
 
-def test_dub_custom_price_0_1_per_char():
-    assert bot.calculate_video_only_char_price(1000, bot.VIDEO_ONLY_DUB_CUSTOM_RATE_XU)["total_xu"] == 100
+def test_dub_custom_price_0_20_per_char():
+    assert bot.calculate_video_only_char_price(1000, bot.VIDEO_ONLY_DUB_CUSTOM_RATE_XU)["total_xu"] == 180
 
 
 def test_discount_threshold_1000_10_percent():
-    assert bot.video_only_price_discount_percent(1001) == 10
+    assert bot.video_only_price_discount_percent(1000) == 10
 
 
 def test_discount_threshold_10000_20_percent():
-    assert bot.video_only_price_discount_percent(10001) == 20
+    assert bot.video_only_price_discount_percent(10000) == 20
 
 
 def test_min_charge_1_xu():
