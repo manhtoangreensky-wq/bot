@@ -5274,6 +5274,195 @@ def set_system_setting(key, value, note="", updated_by=""):
         if conn:
             conn.close()
 
+CANONICAL_PRICE_SETTING_PREFIX = "canonical_price_xu:"
+CANONICAL_PRICE_KEYS = (
+    "voice_tts_basic",
+    "voice_tts_long",
+    "voice_clone_custom",
+    "subtitle_translate_video",
+    "auto_subtitle_video",
+    "dub_video",
+    "subtitle_dub_video",
+    "auto_subtitle_then_dub",
+    "video_beta_200",
+    "video_beta_300",
+    "video_beta_400",
+    "video_addon_voice",
+    "video_addon_subtitle",
+    "video_addon_dub",
+    "video_addon_music",
+    "video_addon_logo",
+)
+CANONICAL_DERIVED_PRICE_KEYS = {"subtitle_dub_video", "auto_subtitle_then_dub"}
+CANONICAL_PRICE_KEY_ALIASES = {
+    "voice": "voice_tts_basic",
+    "voice_basic": "voice_tts_basic",
+    "voice_long": "voice_tts_long",
+    "custom_voice": "voice_clone_custom",
+    "voice_clone": "voice_clone_custom",
+    "subtitle": "subtitle_translate_video",
+    "translate_subtitle": "subtitle_translate_video",
+    "auto_subtitle": "auto_subtitle_video",
+    "dub": "dub_video",
+    "dubbing": "dub_video",
+    "subtitle_dub": "subtitle_dub_video",
+    "auto_subtitle_dub": "auto_subtitle_then_dub",
+    "video_200": "video_beta_200",
+    "video_300": "video_beta_300",
+    "video_400": "video_beta_400",
+    "addon_voice": "video_addon_voice",
+    "addon_subtitle": "video_addon_subtitle",
+    "addon_dub": "video_addon_dub",
+    "addon_music": "video_addon_music",
+    "addon_logo": "video_addon_logo",
+}
+CANONICAL_PRICE_LABELS = {
+    "voice_tts_basic": "Giọng nói thường",
+    "voice_tts_long": "Giọng nói dài",
+    "voice_clone_custom": "Voice riêng / custom voice",
+    "subtitle_translate_video": "Dịch phụ đề video",
+    "auto_subtitle_video": "Tạo phụ đề tự động",
+    "dub_video": "Lồng tiếng video",
+    "subtitle_dub_video": "Phụ đề + lồng tiếng",
+    "auto_subtitle_then_dub": "Tạo phụ đề rồi lồng tiếng",
+    "video_beta_200": "Video 200 Xu",
+    "video_beta_300": "Video 300 Xu",
+    "video_beta_400": "Video 400 Xu",
+    "video_addon_voice": "Video add-on voice",
+    "video_addon_subtitle": "Video add-on phụ đề",
+    "video_addon_dub": "Video add-on lồng tiếng",
+    "video_addon_music": "Video add-on nhạc",
+    "video_addon_logo": "Video add-on logo",
+}
+CANONICAL_PRICE_UNITS = {
+    "voice_tts_basic": "Xu/từ",
+    "voice_tts_long": "Xu/từ",
+    "voice_clone_custom": "Xu/ký tự",
+    "subtitle_translate_video": "Xu/ký tự",
+    "auto_subtitle_video": "Xu",
+    "dub_video": "Xu/ký tự",
+    "subtitle_dub_video": "Xu/ký tự",
+    "auto_subtitle_then_dub": "Xu/ký tự",
+    "video_beta_200": "Xu",
+    "video_beta_300": "Xu",
+    "video_beta_400": "Xu",
+    "video_addon_voice": "Xu",
+    "video_addon_subtitle": "Xu",
+    "video_addon_dub": "Xu",
+    "video_addon_music": "Xu",
+    "video_addon_logo": "Xu",
+}
+
+def normalize_canonical_price_key(key: str = "") -> str:
+    value = str(key or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return CANONICAL_PRICE_KEY_ALIASES.get(value, value)
+
+def canonical_price_setting_key(key: str = "") -> str:
+    return CANONICAL_PRICE_SETTING_PREFIX + normalize_canonical_price_key(key)
+
+def canonical_price_number(value, default=0):
+    try:
+        number = Decimal(str(value).strip().replace(",", "."))
+    except Exception:
+        try:
+            number = Decimal(str(default).strip().replace(",", "."))
+        except Exception:
+            number = Decimal("0")
+    if number < 0:
+        number = Decimal("0")
+    if number == number.to_integral_value():
+        return int(number)
+    return float(number)
+
+def canonical_price_defaults() -> dict:
+    subtitle_rate = canonical_price_number(globals().get("VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU", 0.1))
+    auto_subtitle = 0
+    dub_rate = canonical_price_number(globals().get("VIDEO_ONLY_DUB_DEFAULT_RATE_XU", 0.10))
+    return {
+        "voice_tts_basic": canonical_price_number(globals().get("VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU", 0.10)),
+        "voice_tts_long": canonical_price_number(globals().get("VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU", 0.10)),
+        "voice_clone_custom": canonical_price_number(globals().get("CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU", 0.20)),
+        "subtitle_translate_video": subtitle_rate,
+        "auto_subtitle_video": auto_subtitle,
+        "dub_video": dub_rate,
+        "subtitle_dub_video": canonical_price_number(float(subtitle_rate) + float(dub_rate)),
+        "auto_subtitle_then_dub": canonical_price_number(float(auto_subtitle) + float(dub_rate)),
+        "video_beta_200": canonical_price_number(globals().get("VIDEO_LOW_COST_XU", 200)),
+        "video_beta_300": canonical_price_number(globals().get("VIDEO_BASIC_COST_XU", 300)),
+        "video_beta_400": canonical_price_number(globals().get("VIDEO_COMMON_COST_XU", 400)),
+        "video_addon_voice": 0,
+        "video_addon_subtitle": canonical_price_number(globals().get("VIDEO_SUBTITLE_AUTO_BASE_XU", 120)),
+        "video_addon_dub": canonical_price_number(globals().get("VIDEO_DUB_DEFAULT_BASE_XU", 250)),
+        "video_addon_music": canonical_price_number(globals().get("VIDEO_SUNO_MUSIC_XU", 300)),
+        "video_addon_logo": 0,
+    }
+
+def canonical_price_xu(key: str = ""):
+    normalized = normalize_canonical_price_key(key)
+    defaults = canonical_price_defaults()
+    if normalized not in CANONICAL_PRICE_KEYS:
+        return 0
+    if normalized in CANONICAL_DERIVED_PRICE_KEYS:
+        if normalized == "subtitle_dub_video":
+            return canonical_price_number(float(canonical_price_xu("subtitle_translate_video")) + float(canonical_price_xu("dub_video")))
+        if normalized == "auto_subtitle_then_dub":
+            return canonical_price_number(float(canonical_price_xu("auto_subtitle_video")) + float(canonical_price_xu("dub_video")))
+    raw = get_system_setting(canonical_price_setting_key(normalized), "")
+    if str(raw or "").strip():
+        return canonical_price_number(raw, defaults.get(normalized, 0))
+    return defaults.get(normalized, 0)
+
+def canonical_price_table() -> dict:
+    table = {}
+    for key in CANONICAL_PRICE_KEYS:
+        table[key] = {
+            "key": key,
+            "label": CANONICAL_PRICE_LABELS.get(key, key),
+            "price_xu": canonical_price_xu(key),
+            "unit": CANONICAL_PRICE_UNITS.get(key, "Xu"),
+            "source": "derived" if key in CANONICAL_DERIVED_PRICE_KEYS else "canonical_setting_or_default",
+            "editable": key not in CANONICAL_DERIVED_PRICE_KEYS,
+        }
+    return table
+
+def canonical_price_display(key: str = "") -> str:
+    normalized = normalize_canonical_price_key(key)
+    entry = canonical_price_table().get(normalized) or {}
+    price = entry.get("price_xu", 0)
+    unit = str(entry.get("unit") or "Xu").replace("/", " / ")
+    if isinstance(price, float) and not price.is_integer():
+        if normalized == "subtitle_translate_video":
+            value = f"{price:.1f}"
+        elif normalized in {
+            "voice_tts_basic",
+            "voice_tts_long",
+            "voice_clone_custom",
+            "dub_video",
+            "subtitle_dub_video",
+            "auto_subtitle_then_dub",
+        }:
+            value = f"{price:.2f}"
+        else:
+            value = f"{price:g}"
+    else:
+        value = str(int(price or 0))
+    return f"{value} {unit}"
+
+def set_canonical_price_value(key: str, value, updated_by="") -> dict:
+    normalized = normalize_canonical_price_key(key)
+    if normalized not in CANONICAL_PRICE_KEYS:
+        raise ValueError("unknown_price_key")
+    if normalized in CANONICAL_DERIVED_PRICE_KEYS:
+        raise ValueError("derived_price_key")
+    price = canonical_price_number(value)
+    set_system_setting(
+        canonical_price_setting_key(normalized),
+        str(price),
+        note="owner canonical price override",
+        updated_by=str(updated_by or ""),
+    )
+    return canonical_price_table()[normalized]
+
 ENGINE_ASYNC_JOB_PREFIX = "engine_async_job:"
 ENGINE_ASYNC_JOB_INDEX_KEY = "engine_async_job:index"
 ENGINE_ASYNC_JOB_MAX_INDEX = 120
@@ -40542,21 +40731,21 @@ def video_tier_pricing_payload() -> dict:
     return {
         "low": {
             "label": "Video Trải Nghiệm",
-            "cost": media_tier_price(VIDEO_LOW_COST_XU, VIDEO_LOW_PROVIDER_COST_XU, VIDEO_BASE_COST_XU),
+            "cost": int(canonical_price_xu("video_beta_200") or media_tier_price(VIDEO_LOW_COST_XU, VIDEO_LOW_PROVIDER_COST_XU, VIDEO_BASE_COST_XU)),
             "provider_cost": int(VIDEO_LOW_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
             "note": "Gói mồi/test nhanh, không phải gói tốt nhất. Public vẫn phụ thuộc ENV.",
         },
         "basic": {
             "label": "Video Cơ Bản",
-            "cost": media_tier_price(VIDEO_BASIC_COST_XU, VIDEO_BASIC_PROVIDER_COST_XU, VIDEO_BASE_COST_XU),
+            "cost": int(canonical_price_xu("video_beta_300") or media_tier_price(VIDEO_BASIC_COST_XU, VIDEO_BASIC_PROVIDER_COST_XU, VIDEO_BASE_COST_XU)),
             "provider_cost": int(VIDEO_BASIC_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
             "note": "Video ngắn cơ bản, phù hợp test sản phẩm/nội dung đơn giản.",
         },
         "common": {
             "label": "Video Phổ Thông",
-            "cost": media_tier_price(VIDEO_COMMON_COST_XU, VIDEO_COMMON_PROVIDER_COST_XU, VIDEO_BASE_COST_XU),
+            "cost": int(canonical_price_xu("video_beta_400") or media_tier_price(VIDEO_COMMON_COST_XU, VIDEO_COMMON_PROVIDER_COST_XU, VIDEO_BASE_COST_XU)),
             "provider_cost": int(VIDEO_COMMON_PROVIDER_COST_XU or 0),
             "model": SHOPAIKEY_VIDEO_MODEL or "veo3.1-fast",
             "note": "Gói phổ thông cho TikTok/Reels, cân bằng chi phí và chất lượng.",
@@ -40841,7 +41030,7 @@ def video_experience_tier_policy() -> dict:
         "tier": "low",
         "name": "Video trải nghiệm",
         "role": "experience_trial",
-        "base_price_xu": int(VIDEO_LOW_COST_XU or 200),
+        "base_price_xu": int(canonical_price_xu("video_beta_200") or VIDEO_LOW_COST_XU or 200),
         "allow_paid_addons": paid_addons_allowed,
         "allow_free_assets": bool(VIDEO_FREE_ADDONS_ALL_TIERS),
         "allow_extra_duration": False,
@@ -40857,7 +41046,7 @@ def video_experience_tier_policy() -> dict:
             "per_month": int(VIDEO_BETA_200_MAX_USER_MONTH or 30),
         },
         "upsell_to": "basic",
-        "upsell_to_xu": int(VIDEO_BASIC_COST_XU or 300),
+        "upsell_to_xu": int(canonical_price_xu("video_beta_300") or VIDEO_BASIC_COST_XU or 300),
         "same_base_model_upsell": "basic",
     }
 
@@ -40885,22 +41074,28 @@ def video_tier_policy(tier: str = "") -> dict:
     }
 
 def video_addon_pricing_matrix() -> dict:
+    addon_voice = int(canonical_price_xu("video_addon_voice") or 0)
+    addon_subtitle = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_AUTO_BASE_XU)
+    addon_dub = int(canonical_price_xu("video_addon_dub") or VIDEO_DUB_DEFAULT_BASE_XU)
+    addon_music = int(canonical_price_xu("video_addon_music") or VIDEO_SUNO_MUSIC_XU)
+    subtitle_translate = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_TRANSLATE_BASE_XU)
+    translate_dub = int(subtitle_translate + addon_dub)
     return {
         "stock_music_library": {"label": "Nhạc nền từ kho có sẵn", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
         "manual_volume_basic": {"label": "Chỉnh âm lượng cơ bản", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
         "subtitle_from_script": {"label": "Phụ đề từ script/text có sẵn", "price_xu": 0, "unit": "included", "display": "Miễn phí"},
         "burn_subtitle_from_script": {"label": "Gắn phụ đề đơn giản từ script", "price_xu": 0, "unit": "included", "display": "Miễn phí nếu worker/local đủ điều kiện"},
-        "subtitle_auto": {"label": "Tạo phụ đề tự động từ video", "price_xu": VIDEO_SUBTITLE_AUTO_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_SUBTITLE_AUTO_BASE_XU} Xu"},
-        "subtitle_translate": {"label": "Dịch phụ đề 1 ngôn ngữ", "price_xu": VIDEO_SUBTITLE_TRANSLATE_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_SUBTITLE_TRANSLATE_BASE_XU} Xu"},
+        "subtitle_auto": {"label": "Tạo phụ đề tự động từ video", "price_xu": addon_subtitle, "unit": "job<=60s", "display": f"+{addon_subtitle} Xu"},
+        "subtitle_translate": {"label": "Dịch phụ đề 1 ngôn ngữ", "price_xu": subtitle_translate, "unit": "job<=60s", "display": f"+{subtitle_translate} Xu"},
         "subtitle_translate_burn": {"label": "Tạo phụ đề + dịch + burn", "price_xu": VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_SUBTITLE_TRANSLATE_BURN_BASE_XU} Xu"},
-        "dubbing_default": {"label": "Lồng tiếng giọng mặc định", "price_xu": VIDEO_DUB_DEFAULT_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_DUB_DEFAULT_BASE_XU} Xu"},
-        "translate_dub_default": {"label": "Dịch + lồng tiếng giọng mặc định", "price_xu": VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU, "unit": "job<=60s", "display": f"+{VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU} Xu"},
-        "voice_advanced": {"label": "Chọn giọng nâng cao", "price_xu": VIDEO_VOICE_ADVANCED_ADDON_XU, "unit": "job", "display": f"+{VIDEO_VOICE_ADVANCED_ADDON_XU} Xu"},
+        "dubbing_default": {"label": "Lồng tiếng giọng mặc định", "price_xu": addon_dub, "unit": "job<=60s", "display": f"+{addon_dub} Xu"},
+        "translate_dub_default": {"label": "Dịch + lồng tiếng giọng mặc định", "price_xu": translate_dub, "unit": "job<=60s", "display": f"+{translate_dub} Xu"},
+        "voice_advanced": {"label": "Chọn giọng nâng cao", "price_xu": addon_voice, "unit": "job", "display": "Miễn phí" if addon_voice <= 0 else f"+{addon_voice} Xu"},
         "voice_transform": {"label": "Biến đổi giọng theo mẫu có sẵn", "price_xu": VIDEO_VOICE_PRESET_TRANSFORM_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PRESET_TRANSFORM_XU} Xu"},
         "voice_premium_preset": {"label": "Voice preset cao cấp", "price_xu": VIDEO_VOICE_PREMIUM_PRESET_XU, "unit": "job", "display": f"+{VIDEO_VOICE_PREMIUM_PRESET_XU} Xu"},
         "voice_clone_create": {"label": "Upload mẫu giọng / clone voice", "price_xu": int(VOICE_PROFILE_PRICE_XU or 0), "unit": "profile", "display": f"Miễn phí lượt đầu / +{int(VOICE_PROFILE_PRICE_XU or 0)} Xu"},
         "voice_clone_reuse": {"label": "Dùng lại voice clone đã tạo", "price_xu": VIDEO_VOICE_CLONE_REUSE_XU, "unit": "job", "display": f"+{VIDEO_VOICE_CLONE_REUSE_XU} Xu"},
-        "suno_music": {"label": "Tạo nhạc AI", "price_xu": VIDEO_SUNO_MUSIC_XU, "unit": "track", "display": f"+{VIDEO_SUNO_MUSIC_XU} Xu/bài"},
+        "suno_music": {"label": "Tạo nhạc AI", "price_xu": addon_music, "unit": "track", "display": f"+{addon_music} Xu/bài"},
         "suno_variation": {"label": "Tạo biến thể nhạc AI", "price_xu": VIDEO_SUNO_VARIATION_XU, "unit": "variation", "display": f"+{VIDEO_SUNO_VARIATION_XU} Xu/lần"},
         "lyrics_ai": {"label": "Viết lyrics bằng AI", "price_xu": VIDEO_LYRICS_AI_XU, "unit": "job", "display": f"+{VIDEO_LYRICS_AI_XU} Xu"},
         "music_cut_loop": {"label": "Cắt/loop nhạc khớp video", "price_xu": VIDEO_MUSIC_CUT_LOOP_XU, "unit": "job", "display": f"+{VIDEO_MUSIC_CUT_LOOP_XU} Xu"},
@@ -45148,6 +45343,7 @@ def calculate_short_video_quote(
         "extra_scenes_xu": extra_scenes_xu,
         "selected_addons": addon_items,
         "selected_addons_xu": addon_total,
+        "addon_fee_xu": addon_total,
         "total_xu": total,
         "estimated_vnd": total * int(XU_TO_VND or 100),
         "route_to_long_video": False,
@@ -52300,7 +52496,8 @@ def voice_tts_word_count(text: str) -> int:
 
 def voice_tts_product_quote(text: str) -> dict:
     words = voice_tts_word_count(text)
-    raw_price = round(float(words) * float(VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU), 3)
+    price_per_word = float(canonical_price_xu("voice_tts_basic") or VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU or 0.10)
+    raw_price = round(float(words) * price_per_word, 3)
     discount_percent = finance_volume_discount_percent(words)
     discount_xu = raw_price * discount_percent / 100.0
     discounted_price = raw_price - discount_xu
@@ -52309,7 +52506,7 @@ def voice_tts_product_quote(text: str) -> dict:
         total = max(int(VOICE_TTS_PRODUCT_MIN_CHARGE_XU or 1), int(math.ceil(discounted_price)))
     return {
         "word_count": words,
-        "price_per_word_xu": float(VOICE_TTS_PRODUCT_PRICE_PER_WORD_XU),
+        "price_per_word_xu": price_per_word,
         "raw_price_xu": raw_price,
         "discount_percent": finance_discount_cap_percent(discount_percent),
         "discount_xu": discount_xu,
@@ -100969,17 +101166,17 @@ def custom_voice_usage_billable_chars(text: str) -> int:
 
 def custom_voice_usage_price_breakdown(text: str) -> dict:
     chars = custom_voice_usage_billable_chars(text)
+    rate = float(canonical_price_xu("voice_clone_custom") or CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.0)
     if chars <= 0:
         return {
             "chars": 0,
-            "rate_xu": float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.0),
+            "rate_xu": rate,
             "raw_xu": 0.0,
             "discount_percent": 0,
             "discount_xu": 0.0,
             "discount_cap_percent": int(VOLUME_DISCOUNT_CAP_PERCENT),
             "total_xu": 0,
         }
-    rate = float(CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU or 0.0)
     raw = chars * rate
     discount_percent = finance_volume_discount_percent(chars)
     discount_xu = raw * discount_percent / 100.0
@@ -126979,11 +127176,11 @@ def calculate_named_addon_quote(addon_key: str, duration_seconds: int | float | 
     label = key or "none"
     if key in {"subtitle", "subtitle_auto", "create", "create_subtitle"}:
         label = "Tạo phụ đề tự động"
-        base = VIDEO_SUBTITLE_AUTO_BASE_XU
+        base = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_AUTO_BASE_XU)
         extra_block_rate = VIDEO_SUBTITLE_AUTO_EXTRA_BLOCK_XU
     elif key in {"translate", "subtitle_translate", "translate_subtitle"}:
         label = "Dịch phụ đề"
-        base = VIDEO_SUBTITLE_TRANSLATE_BASE_XU
+        base = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_TRANSLATE_BASE_XU)
         extra_block_rate = VIDEO_SUBTITLE_TRANSLATE_EXTRA_BLOCK_XU
     elif key in {"full", "subtitle_translate_burn", "subtitle_full", "translate_burn"}:
         label = "Tạo phụ đề + dịch + burn"
@@ -126991,15 +127188,15 @@ def calculate_named_addon_quote(addon_key: str, duration_seconds: int | float | 
         extra_block_rate = VIDEO_SUBTITLE_FULL_EXTRA_BLOCK_XU
     elif key in {"dub", "dubbing", "dubbing_default"}:
         label = "Lồng tiếng giọng mặc định"
-        base = VIDEO_DUB_DEFAULT_BASE_XU
+        base = int(canonical_price_xu("video_addon_dub") or VIDEO_DUB_DEFAULT_BASE_XU)
         extra_block_rate = VIDEO_DUB_EXTRA_BLOCK_XU
     elif key in {"translate_dub", "translated_dub", "subtitle_plus_dub"}:
         label = "Dịch + lồng tiếng"
-        base = VIDEO_TRANSLATE_DUB_DEFAULT_BASE_XU
+        base = int(canonical_price_xu("video_addon_subtitle") or VIDEO_SUBTITLE_TRANSLATE_BASE_XU) + int(canonical_price_xu("video_addon_dub") or VIDEO_DUB_DEFAULT_BASE_XU)
         extra_block_rate = VIDEO_TRANSLATE_DUB_EXTRA_BLOCK_XU
     elif key in {"suno", "ai_music", "suno_music"}:
         label = "Tạo nhạc AI"
-        base = VIDEO_SUNO_MUSIC_XU
+        base = int(canonical_price_xu("video_addon_music") or VIDEO_SUNO_MUSIC_XU)
         extra_block_rate = 0
     elif key in {"sfx", "sfx_ai"}:
         label = "Tạo sound effect AI"
@@ -134574,8 +134771,23 @@ def pricing_premium_lines() -> list[str]:
 def pricing_audit_lines() -> list[str]:
     pricing = media_workflow_pricing_payload()
     frame_status = frame_video_status_payload()
+    canonical = canonical_price_table()
+    subtitle_total_ok = float(canonical["subtitle_dub_video"]["price_xu"]) == float(canonical["subtitle_translate_video"]["price_xu"]) + float(canonical["dub_video"]["price_xu"])
+    auto_then_dub_ok = float(canonical["auto_subtitle_then_dub"]["price_xu"]) == float(canonical["auto_subtitle_video"]["price_xu"]) + float(canonical["dub_video"]["price_xu"])
     return [
         "🧾 <b>TOAN AAS Pricing Audit V6</b>",
+        "",
+        "<b>Canonical pricing table</b>",
+        f"• Loaded: <code>{'YES' if all(key in canonical for key in CANONICAL_PRICE_KEYS) else 'NO'}</code>",
+        f"• Voice basic: <code>{canonical_price_display('voice_tts_basic')}</code>",
+        f"• Voice custom: <code>{canonical_price_display('voice_clone_custom')}</code>",
+        f"• Subtitle translate: <code>{canonical_price_display('subtitle_translate_video')}</code>",
+        f"• Dub default: <code>{canonical_price_display('dub_video')}</code>",
+        f"• Subtitle + dub total: <code>{canonical_price_display('subtitle_dub_video')}</code> | sum_ok=<code>{'YES' if subtitle_total_ok else 'NO'}</code>",
+        f"• Auto subtitle then dub: <code>{canonical_price_display('auto_subtitle_then_dub')}</code> | sum_ok=<code>{'YES' if auto_then_dub_ok else 'NO'}</code>",
+        f"• Video beta: <code>{canonical_price_display('video_beta_200')}</code> / <code>{canonical_price_display('video_beta_300')}</code> / <code>{canonical_price_display('video_beta_400')}</code>",
+        f"• Discount cap: <code>{VOLUME_DISCOUNT_CAP_PERCENT}%</code>",
+        f"• B2C VAT display: <code>{B2C_TAX_DISPLAY}</code> | CIT customer charge: <code>NO</code>",
         "",
         "<b>Feature | Price | Source | Guard</b>",
         f"• Free/menu/guide/prompt planning | 0 Xu | pricing_free_lines | no provider/no charge",
@@ -134606,7 +134818,100 @@ async def cmd_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
     await reply_html_lines(update, pricing_audit_lines())
 
+def product_price_audit_lines(scope: str = "all") -> list[str]:
+    scope = str(scope or "all").strip().lower()
+    table = canonical_price_table()
+    keys_by_scope = {
+        "voice": ["voice_tts_basic", "voice_tts_long", "voice_clone_custom"],
+        "subdub": ["subtitle_translate_video", "auto_subtitle_video", "dub_video", "subtitle_dub_video", "auto_subtitle_then_dub"],
+        "video": ["video_beta_200", "video_beta_300", "video_beta_400", "video_addon_voice", "video_addon_subtitle", "video_addon_dub", "video_addon_music", "video_addon_logo"],
+    }
+    keys = keys_by_scope.get(scope, list(CANONICAL_PRICE_KEYS))
+    lines = [
+        f"🧾 <b>{'Product' if scope == 'all' else scope.title()} Price Audit</b>",
+        "",
+        f"• Canonical table loaded: <code>{'YES' if all(key in table for key in CANONICAL_PRICE_KEYS) else 'NO'}</code>",
+        f"• B2C public checkout: <code>gross fixed, no VAT/CIT extra</code>",
+        f"• B2B invoice mode: <code>{B2B_PRICE_MODE}</code>",
+        f"• Discount cap: <code>{VOLUME_DISCOUNT_CAP_PERCENT}%</code>",
+        "",
+    ]
+    for key in keys:
+        entry = table.get(key) or {}
+        editable = "editable" if entry.get("editable") else "derived"
+        lines.append(
+            f"• {html.escape(str(entry.get('label') or key))}: <code>{html.escape(canonical_price_display(key))}</code> | {editable}"
+        )
+    if scope in {"all", "subdub"}:
+        lines.extend([
+            "",
+            f"• subtitle_dub_video = subtitle_translate_video + dub_video: <code>{'YES' if float(canonical_price_xu('subtitle_dub_video')) == float(canonical_price_xu('subtitle_translate_video')) + float(canonical_price_xu('dub_video')) else 'NO'}</code>",
+            f"• auto_subtitle_then_dub = auto_subtitle_video + dub_video: <code>{'YES' if float(canonical_price_xu('auto_subtitle_then_dub')) == float(canonical_price_xu('auto_subtitle_video')) + float(canonical_price_xu('dub_video')) else 'NO'}</code>",
+        ])
+    if scope in {"all", "video"}:
+        video_payload = video_tier_pricing_payload()
+        lines.extend([
+            "",
+            f"• Video 200 invoice/table match: <code>{'YES' if int((video_payload.get('low') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_200') or 0) else 'NO'}</code>",
+            f"• Video 300 invoice/table match: <code>{'YES' if int((video_payload.get('basic') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_300') or 0) else 'NO'}</code>",
+            f"• Video 400 invoice/table match: <code>{'YES' if int((video_payload.get('common') or {}).get('cost') or 0) == int(canonical_price_xu('video_beta_400') or 0) else 'NO'}</code>",
+        ])
+    return lines
+
+async def cmd_product_price_audit(update: Update, context: ContextTypes.DEFAULT_TYPE, scope: str = "all"):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await reply_html_lines(update, product_price_audit_lines(scope))
+
+async def cmd_subdub_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_product_price_audit(update, context, "subdub")
+
+async def cmd_video_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_product_price_audit(update, context, "video")
+
+async def cmd_voice_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_product_price_audit(update, context, "voice")
+
+def price_set_help_text() -> str:
+    editable = [key for key in CANONICAL_PRICE_KEYS if key not in CANONICAL_DERIVED_PRICE_KEYS]
+    return (
+        "💰 <b>Owner price_set</b>\n\n"
+        "Cú pháp: <code>/price_set &lt;key&gt; &lt;gia_xu&gt;</code>\n"
+        "Chỉ owner được đổi giá. Admin mặc định chỉ xem audit.\n\n"
+        "Key có thể đổi:\n"
+        + "\n".join(f"• <code>{key}</code>" for key in editable)
+        + "\n\n"
+        "Key cộng tự động, không nhập tay: <code>subtitle_dub_video</code>, <code>auto_subtitle_then_dub</code>.\n"
+        "Giá B2C giữ gross fixed; VAT/TNDN không cộng thêm vào khách lẻ."
+    )
+
+async def cmd_price_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_owner_user(user_id):
+        return await update.message.reply_text("⛔ Chỉ owner được đổi bảng giá. Admin dùng /product_price_audit để xem.")
+    args = list(getattr(context, "args", []) or [])
+    if len(args) < 2:
+        return await update.message.reply_text(price_set_help_text(), parse_mode="HTML")
+    key = normalize_canonical_price_key(args[0])
+    try:
+        entry = set_canonical_price_value(key, args[1], updated_by=str(user_id))
+    except ValueError as exc:
+        if str(exc) == "derived_price_key":
+            return await update.message.reply_text(
+                "⚠️ Key này là giá cộng tự động. Hãy đổi giá thành phần, ví dụ subtitle_translate_video hoặc dub_video.",
+                parse_mode="HTML",
+            )
+        return await update.message.reply_text(price_set_help_text(), parse_mode="HTML")
+    return await update.message.reply_text(
+        "✅ Đã cập nhật bảng giá trung tâm:\n"
+        f"• Key: <code>{html.escape(key)}</code>\n"
+        f"• Giá: <b>{html.escape(canonical_price_display(key))}</b>\n"
+        "Bảng giá, file tải xuống, web pricing và tổng thanh toán sẽ đọc cùng nguồn này.",
+        parse_mode="HTML",
+    )
+
 def public_pricing_context() -> dict:
+    prices = canonical_price_table()
     image_payload = image_tier_pricing_payload()
     image_lines = []
     for tier in IMAGE_TIER_ORDER:
@@ -134633,6 +134938,28 @@ def public_pricing_context() -> dict:
         video_lines.append(
             f"• {html.escape(str(payload.get('label') or tier))}: <b>{cost} Xu</b> — {html.escape(note)}."
         )
+    voice_lines = [
+        "• Voice riêng đầu tiên tạo thành công: miễn phí.",
+        f"• Từ voice riêng thứ 2 trở đi: {int(VOICE_PROFILE_PRICE_XU or 0)} Xu / voice tạo thành công.",
+        f"• Tạo audio từ voice: <b>{html.escape(canonical_price_display('voice_tts_basic'))}</b>.",
+        f"• Giọng nói dài: <b>{html.escape(canonical_price_display('voice_tts_long'))}</b>.",
+        f"• Voice riêng/custom voice: <b>{html.escape(canonical_price_display('voice_clone_custom'))}</b>.",
+    ]
+    subtitle_lines = [
+        "• Tạo phụ đề tự động: <b>Miễn phí</b>.",
+        f"• Dịch phụ đề: <b>{html.escape(canonical_price_display('subtitle_translate_video'))}</b>.",
+        f"• Lồng tiếng giọng mặc định: <b>{html.escape(canonical_price_display('dub_video'))}</b>.",
+        f"• Lồng tiếng voice riêng: <b>{html.escape(canonical_price_display('voice_clone_custom'))}</b>.",
+        f"• Phụ đề + lồng tiếng: <b>{html.escape(canonical_price_display('subtitle_dub_video'))}</b> = dịch phụ đề + lồng tiếng.",
+        f"• Tạo phụ đề rồi lồng tiếng: <b>{html.escape(canonical_price_display('auto_subtitle_then_dub'))}</b> = phụ đề tự động + lồng tiếng.",
+    ]
+    video_addon_lines = [
+        f"• Voice/audio có sẵn: <b>{html.escape(canonical_price_display('video_addon_voice'))}</b>.",
+        f"• Phụ đề video add-on: <b>{html.escape(canonical_price_display('video_addon_subtitle'))}</b>.",
+        f"• Lồng tiếng video add-on: <b>{html.escape(canonical_price_display('video_addon_dub'))}</b>.",
+        f"• Nhạc AI video add-on: <b>{html.escape(canonical_price_display('video_addon_music'))}</b>.",
+        f"• Logo/watermark có sẵn: <b>{html.escape(canonical_price_display('video_addon_logo'))}</b>.",
+    ]
     doc_lines = [
         f"• Ảnh sang PDF: <b>{DOC_COSTS.get('image_to_pdf', 0)} Xu</b>.",
         f"• PDF sang ảnh: <b>{DOC_COSTS.get('pdf_to_images', 0)} Xu</b>.",
@@ -134653,6 +134980,10 @@ def public_pricing_context() -> dict:
     return {
         "image_price_lines": image_lines,
         "video_price_lines": video_lines,
+        "voice_price_lines": voice_lines,
+        "subtitle_price_lines": subtitle_lines,
+        "video_addon_price_lines": video_addon_lines,
+        "canonical_price_keys": list(prices.keys()),
         "document_price_lines": doc_lines,
         "member_discount_lines": discount_lines,
     }
@@ -158712,22 +159043,25 @@ def video_translate_duration_text(duration_seconds) -> str:
     return f"{minutes} phút {seconds} giây" if minutes else f"{seconds} giây"
 
 def video_dubbing_pricing_text(lang: str = "vi") -> str:
+    subtitle_rate = float(canonical_price_xu("subtitle_translate_video") or VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU)
+    dub_rate = float(canonical_price_xu("dub_video") or VIDEO_ONLY_DUB_DEFAULT_RATE_XU)
+    custom_rate = float(canonical_price_xu("voice_clone_custom") or VIDEO_ONLY_DUB_CUSTOM_RATE_XU)
     if normalize_user_language(lang) != "vi":
         return (
             "💰 <b>Video translation/dubbing pricing</b>\n\n"
             "• Auto subtitles: Free\n"
-            f"• Translate video subtitles: {VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU:g} Xu/character\n"
-            f"• Dubbing with default voice: {VIDEO_ONLY_DUB_DEFAULT_RATE_XU:g} Xu/character\n"
-            f"• Dubbing with saved custom voice: {VIDEO_ONLY_DUB_CUSTOM_RATE_XU:g} Xu/character\n"
+            f"• Translate video subtitles: {subtitle_rate:g} Xu/character\n"
+            f"• Dubbing with default voice: {dub_rate:g} Xu/character\n"
+            f"• Dubbing with saved custom voice: {custom_rate:g} Xu/character\n"
             "• Subtitles + dubbing: translation price + dubbing price\n\n"
             "Discount: 10% over 1,000 characters, 20% over 10,000 characters. TOAN AAS asks for confirmation before processing."
         )
     return (
         "💰 <b>Bảng giá phụ đề và lồng tiếng video</b>\n\n"
         "• Tạo phụ đề tự động: <b>Miễn phí</b>\n"
-        f"• Dịch phụ đề video: <b>{VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU:g} Xu/ký tự</b>\n"
-        f"• Lồng tiếng giọng mặc định: <b>{VIDEO_ONLY_DUB_DEFAULT_RATE_XU:g} Xu/ký tự</b>\n"
-        f"• Lồng tiếng voice riêng đã lưu: <b>{VIDEO_ONLY_DUB_CUSTOM_RATE_XU:g} Xu/ký tự</b>\n"
+        f"• Dịch phụ đề video: <b>{subtitle_rate:g} Xu/ký tự</b>\n"
+        f"• Lồng tiếng giọng mặc định: <b>{dub_rate:g} Xu/ký tự</b>\n"
+        f"• Lồng tiếng voice riêng đã lưu: <b>{custom_rate:g} Xu/ký tự</b>\n"
         "• Phụ đề + Lồng tiếng: <b>phí dịch phụ đề + phí lồng tiếng</b>\n\n"
         "Giảm giá: 10% khi trên 1.000 ký tự, 20% khi trên 10.000 ký tự. TOAN AAS luôn hiển thị phí và hỏi xác nhận trước khi xử lý."
     )
@@ -159001,7 +159335,9 @@ def video_dubbing_uses_custom_voice(state: dict | None = None) -> bool:
     return bool(voice_profile_id or (voice_id and voice_kind not in {"default_female", "default_male"}))
 
 def video_dubbing_voice_rate_xu(state: dict | None = None) -> float:
-    return VIDEO_ONLY_DUB_CUSTOM_RATE_XU if video_dubbing_uses_custom_voice(state) else VIDEO_ONLY_DUB_DEFAULT_RATE_XU
+    if video_dubbing_uses_custom_voice(state):
+        return float(canonical_price_xu("voice_clone_custom") or VIDEO_ONLY_DUB_CUSTOM_RATE_XU)
+    return float(canonical_price_xu("dub_video") or VIDEO_ONLY_DUB_DEFAULT_RATE_XU)
 
 def video_dubbing_saved_voice_keyboard(user_id, lang: str = "vi", page: int = 0) -> InlineKeyboardMarkup:
     is_vi = normalize_user_language(lang) == "vi"
@@ -159060,7 +159396,8 @@ def video_dubbing_invoice_breakdown(state: dict | None = None) -> dict:
     state = dict(state or {})
     mode = normalize_video_translate_mode(state.get("mode") or state.get("video_processing_mode"))
     chars = video_dubbing_billing_char_count(state)
-    subtitle_price = calculate_video_only_char_price(chars, VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU)
+    subtitle_rate = float(canonical_price_xu("subtitle_translate_video") or VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU)
+    subtitle_price = calculate_video_only_char_price(chars, subtitle_rate)
     voice_rate = video_dubbing_voice_rate_xu(state)
     dub_price = calculate_video_only_char_price(chars, voice_rate)
     translation_needed = mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
@@ -159071,7 +159408,7 @@ def video_dubbing_invoice_breakdown(state: dict | None = None) -> dict:
         "chars": chars,
         "subtitle_chars": chars,
         "dub_chars": chars,
-        "subtitle_rate_xu": VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU,
+        "subtitle_rate_xu": subtitle_rate,
         "dub_rate_xu": voice_rate,
         "subtitle_discount_percent": int(subtitle_price.get("discount_percent") or 0),
         "dub_discount_percent": int(dub_price.get("discount_percent") or 0),
@@ -159157,6 +159494,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
     price_xu = video_dubbing_estimated_price_xu(state)
     invoice = video_dubbing_invoice_breakdown(state)
     chars = int(invoice.get("chars") or 0)
+    subtitle_rate = float(invoice.get("subtitle_rate_xu") or canonical_price_xu("subtitle_translate_video") or VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU)
     voice_rate = float(invoice.get("dub_rate_xu") or VIDEO_ONLY_DUB_DEFAULT_RATE_XU)
     if not standalone_flow and mode == VIDEO_SUBTITLE_MODE_CREATE:
         if normalize_user_language(lang) != "vi":
@@ -159188,7 +159526,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
                 f"• Target language: <b>{language}</b>\n"
                 "• Main result: MP4 with translated subtitles\n"
                 f"• Billable characters: <b>{chars}</b>\n"
-                f"• Unit price: <b>{VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU:g} Xu / character</b>\n"
+                f"• Unit price: <b>{subtitle_rate:g} Xu / character</b>\n"
                 f"• Discount: <b>{video_only_price_line({'discount_percent': invoice.get('subtitle_discount_percent')})}</b>\n"
                 f"• Total: <b>{int(invoice.get('translation_xu') or 0)} Xu</b>\n\n"
                 "TOAN AAS only processes and charges Xu after you confirm."
@@ -159200,7 +159538,7 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
             f"• Ngôn ngữ đích: <b>{language}</b>\n"
             "• Kết quả chính: Xuất video MP4 có phụ đề dịch\n"
             f"• Số ký tự tính phí: <b>{chars}</b>\n"
-            f"• Đơn giá: <b>{VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU:g} Xu / ký tự</b>\n"
+            f"• Đơn giá: <b>{subtitle_rate:g} Xu / ký tự</b>\n"
             f"• Giảm giá: <b>{video_only_price_line({'discount_percent': invoice.get('subtitle_discount_percent')})}</b>\n"
             f"• Tổng: <b>{int(invoice.get('translation_xu') or 0)} Xu</b>\n\n"
             "TOAN AAS chỉ xử lý và trừ Xu sau khi anh/chị xác nhận."
@@ -169642,6 +169980,11 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("member_policy", cmd_member_policy))
     tg_app.add_handler(CommandHandler("pricing_admin", cmd_pricing_admin))
     tg_app.add_handler(CommandHandler("pricing_audit", cmd_pricing_audit))
+    tg_app.add_handler(CommandHandler("product_price_audit", cmd_product_price_audit))
+    tg_app.add_handler(CommandHandler("subdub_pricing_audit", cmd_subdub_pricing_audit))
+    tg_app.add_handler(CommandHandler("video_pricing_audit", cmd_video_pricing_audit))
+    tg_app.add_handler(CommandHandler("voice_pricing_audit", cmd_voice_pricing_audit))
+    tg_app.add_handler(CommandHandler("price_set", cmd_price_set))
     tg_app.add_handler(CommandHandler("mode",        cmd_mode))
     tg_app.add_handler(CommandHandler("chat_pro_on", cmd_chat_pro_on))
     tg_app.add_handler(CommandHandler("chat_pro_off", cmd_chat_pro_off))
