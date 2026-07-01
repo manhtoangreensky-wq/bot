@@ -37,6 +37,7 @@ def _set_limits(monkeypatch, *, preview=45, document=80, generated=80):
     monkeypatch.setattr(bot, "GENERATED_MEDIA_MAX_MB", generated)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", preview)
     monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", document)
+    monkeypatch.setattr(bot, "SUBDUB_TELEGRAM_OUTPUT_MAX_MB", generated)
     monkeypatch.setattr(bot, "SUBDUB_ENABLE_DOCUMENT_FALLBACK", True)
     monkeypatch.setattr(bot, "subdub_validate_video_output", _valid_video)
 
