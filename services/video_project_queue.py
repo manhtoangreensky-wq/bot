@@ -845,11 +845,80 @@ def complete_video_job(
     return {"ok": True, "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(job["project_id"]))}
 
 
+def note_video_delivery_result(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    sent: bool,
+    delivery_message_id: str = "",
+    success_message_id: str = "",
+    reason: str = "",
+) -> dict[str, Any]:
+    ensure_video_project_queue_schema(conn)
+    job = get_video_render_job(conn, int(job_id))
+    if not job:
+        return {"ok": False, "reason": "job_not_found"}
+    project = get_video_project(conn, int(job.get("project_id") or 0))
+    if not project:
+        return {"ok": False, "reason": "project_not_found", "job": job}
+    already_delivered = bool(project.get("video_delivered_at") or project.get("video_delivery_message_id"))
+    if already_delivered and sent:
+        return {"ok": True, "duplicate_prevented": True, "job": job, "project": project}
+    current = now_text()
+    attempts = int(project.get("delivery_attempt_count") or 0) + 1
+    if sent:
+        conn.execute(
+            """UPDATE video_projects
+               SET video_delivery_started_at=COALESCE(video_delivery_started_at, ?),
+                   video_delivered_at=?,
+                   video_delivery_message_id=?,
+                   video_success_message_id=?,
+                   video_terminal_state='final_delivered',
+                   video_terminal_locked_at=COALESCE(video_terminal_locked_at, ?),
+                   delivery_attempt_count=?,
+                   updated_at=?
+               WHERE project_id=?""",
+            (
+                current,
+                current,
+                str(delivery_message_id or project.get("video_delivery_message_id") or ""),
+                str(success_message_id or delivery_message_id or project.get("video_success_message_id") or ""),
+                current,
+                attempts,
+                current,
+                int(project["project_id"]),
+            ),
+        )
+    else:
+        clean_reason = str(reason or "telegram_delivery_failed").replace("\n", " ")[:500]
+        conn.execute(
+            """UPDATE video_projects
+               SET video_delivery_started_at=COALESCE(video_delivery_started_at, ?),
+                   video_terminal_state='telegram_delivery_failed',
+                   error_log=?,
+                   delivery_attempt_count=?,
+                   updated_at=?
+               WHERE project_id=?""",
+            (
+                current,
+                clean_reason,
+                attempts,
+                current,
+                int(project["project_id"]),
+            ),
+        )
+    conn.commit()
+    return {"ok": True, "sent": bool(sent), "job": get_video_render_job(conn, int(job_id)), "project": get_video_project(conn, int(project["project_id"]))}
+
+
 def fail_video_job(conn: sqlite3.Connection, *, job_id: int, error: str, retry: bool = True) -> dict[str, Any]:
     ensure_video_project_queue_schema(conn)
     job = get_video_render_job(conn, int(job_id))
     if not job:
         return {"ok": False, "reason": "job_not_found"}
+    project = get_video_project(conn, int(job.get("project_id") or 0))
+    if project and (project.get("video_delivered_at") or project.get("video_delivery_message_id")):
+        return {"ok": False, "reason": "late_fail_suppressed_after_delivery", "job": job, "project": project}
     attempts = int(job.get("attempts") or 0)
     max_attempts = int(job.get("max_attempts") or 3)
     current = now_text()

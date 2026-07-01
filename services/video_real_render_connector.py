@@ -29,11 +29,14 @@ PARTIAL_SIMPLE_VIDEO = "partial_simple_video"
 FAILED_NO_REAL_VISUAL = "failed_no_real_visual"
 LOCAL_PLACEHOLDER_RENDERER = "local_scene_composer"
 LOCAL_IMAGE_SEQUENCE_RENDERER = video_final_output.LOCAL_IMAGE_SEQUENCE_RENDERER
+LOCAL_SCENE_CARD_RENDERER = video_final_output.LOCAL_SCENE_CARD_RENDERER
 PROVIDER_SCENE_RENDERER = "provider_scene_video"
 VISUAL_SOURCE_PROVIDER_MP4 = "provider_mp4"
 VISUAL_SOURCE_LOCAL_PLACEHOLDER = "local_placeholder"
 VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE = video_final_output.VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE
+VISUAL_SOURCE_LOCAL_SCENE_CARD = video_final_output.VISUAL_SOURCE_LOCAL_SCENE_CARD
 LOCAL_IMAGE_SEQUENCE_PRODUCT_TYPES = {"image_to_video", "storyboard_prompt", "script_to_video"}
+LOCAL_SCENE_CARD_PRODUCT_TYPES = {"script_to_video", "storyboard_prompt", "multi_scene_film"}
 
 RAW_PROMPT_FRAME_MARKERS = (
     "chủ thể chính:",
@@ -115,7 +118,7 @@ def classify_visual_result(result: dict | None = None) -> str:
         return PARTIAL_SIMPLE_VIDEO
     if payload.get("raw_prompt_burned_into_frame"):
         return FAILED_NO_REAL_VISUAL
-    if renderer == LOCAL_IMAGE_SEQUENCE_RENDERER or payload.get("visual_source") == VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE:
+    if renderer in {LOCAL_IMAGE_SEQUENCE_RENDERER, LOCAL_SCENE_CARD_RENDERER} or payload.get("visual_source") in {VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE, VISUAL_SOURCE_LOCAL_SCENE_CARD}:
         return FINAL_AI_VIDEO
     if renderer in {"real_provider", PROVIDER_SCENE_RENDERER, "provider_video"} or payload.get("provider_attempted"):
         return FINAL_AI_VIDEO
@@ -313,6 +316,16 @@ def _local_image_sequence_allowed(job: dict | None = None, paths: list[str] | No
         return True
     route = video_final_output.route_for_product_type(product_type)
     return str(route.get("engine_family") or "") in {"image_sequence", "storyboard"} and product_type not in {"video_ai_image"}
+
+
+def _local_scene_card_allowed(job: dict | None = None) -> bool:
+    """Allow local final MP4 only for products whose canonical output is scenes."""
+    product_type = _product_type(job)
+    if product_type in LOCAL_SCENE_CARD_PRODUCT_TYPES:
+        return True
+    if product_type == "video_trend":
+        return bool(_scene_cards(job))
+    return False
 
 
 def _local_addon_audio_path(job: dict | None = None) -> str:
@@ -757,7 +770,7 @@ def _logo_enabled(addon_plan: dict) -> bool:
     return bool(addon_plan.get("logo_enabled") and _safe_text(addon_plan.get("logo_text"), 120))
 
 
-def _addon_degrade_notes(addon_plan: dict, *, bgm_audio_path: str | None = None) -> list[dict[str, Any]]:
+def _addon_degrade_notes(addon_plan: dict, *, bgm_audio_path: str | None = None, job: dict | None = None) -> list[dict[str, Any]]:
     notes: list[dict[str, Any]] = []
     if addon_plan.get("voice_enabled"):
         notes.append(
@@ -780,7 +793,16 @@ def _addon_degrade_notes(addon_plan: dict, *, bgm_audio_path: str | None = None)
             }
         )
     if addon_plan.get("subtitle_enabled"):
-        notes.append({"addon": "subtitle", "requested": True, "applied": True, "source": str(addon_plan.get("subtitle_source") or "")})
+        subtitle_source_ready = _has_user_facing_subtitle_text(job)
+        notes.append(
+            {
+                "addon": "subtitle",
+                "requested": True,
+                "applied": bool(subtitle_source_ready),
+                "source": str(addon_plan.get("subtitle_source") or ""),
+                "reason": "" if subtitle_source_ready else "subtitle_source_missing",
+            }
+        )
     if addon_plan.get("logo_enabled"):
         notes.append({"addon": "logo", "requested": True, "applied": _logo_enabled(addon_plan), "source": str(addon_plan.get("logo_source") or "text")})
     return notes
@@ -897,11 +919,104 @@ def _render_local_composer_scene(scene, raw_path: str) -> dict:
     return {"ok": True, "provider": "local_scene_composer", "output_path": ensure_video_output(target)}
 
 
+def _render_local_scene_card_scene(scene, raw_path: str) -> dict:
+    ffmpeg = _ffmpeg_binary()
+    if not ffmpeg:
+        raise RealVideoRenderError("ffmpeg_missing")
+    scene_id = _safe_int(getattr(scene, "scene_id", 1), 1)
+    duration = max(1.0, min(8.0, float(getattr(scene, "target_duration_sec", 6.0) or 6.0)))
+    width, height = _canvas_size(str(getattr(scene, "aspect_ratio", "") or "9:16"))
+    target = os.path.abspath(raw_path)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    palette = (
+        ("10233f", "32d3c8", "f5c542"),
+        ("183428", "9af06a", "60a5fa"),
+        ("321b36", "f472b6", "facc15"),
+        ("1f2a44", "38bdf8", "f97316"),
+        ("2b2615", "f59e0b", "22c55e"),
+        ("1f2f25", "a3e635", "e879f9"),
+    )
+    base, accent, glow = palette[(max(1, scene_id) - 1) % len(palette)]
+    fade_out = max(0.1, duration - 0.3)
+    filter_graph = (
+        "format=yuv420p,"
+        f"drawbox=x=0:y=0:w=iw:h=ih:color=0x{base}@1.0:t=fill,"
+        f"drawbox=x=iw*0.08:y=ih*0.10:w=iw*0.42:h=ih*0.26:color=0x{accent}@0.28:t=fill,"
+        f"drawbox=x=iw*0.18:y=ih*0.46:w=iw*0.62:h=ih*0.12:color=white@0.10:t=fill,"
+        f"drawbox=x=iw*0.52:y=ih*0.64:w=iw*0.34:h=ih*0.20:color=0x{glow}@0.22:t=fill,"
+        "drawbox=x=24:y=24:w=iw-48:h=ih-48:color=white@0.08:t=3,"
+        f"fade=t=in:st=0:d=0.25,fade=t=out:st={fade_out:.3f}:d=0.25"
+    )
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=0x{base}:s={width}x{height}:r=30:d={duration:.3f}",
+        "-vf",
+        filter_graph,
+        "-t",
+        f"{duration:.3f}",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "22",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        target,
+    ]
+    result = safe_run_ffmpeg(cmd, timeout=max(60, int(duration * 30)))
+    if result.returncode != 0:
+        fallback = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=0x{base}:s={width}x{height}:r=30:d={duration:.3f}",
+            "-vf",
+            "format=yuv420p,drawbox=x=24:y=24:w=iw-48:h=ih-48:color=white@0.08:t=3",
+            "-t",
+            f"{duration:.3f}",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "22",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            target,
+        ]
+        result = safe_run_ffmpeg(fallback, timeout=max(60, int(duration * 30)))
+    if result.returncode != 0:
+        raise RealVideoRenderError("local_scene_card_ffmpeg_failed")
+    return {"ok": True, "provider": "local_scene_card", "output_path": ensure_video_output(target)}
+
+
 def build_local_scene_composer(job: dict | None = None):
     del job
 
     def _render(scene, raw_path: str):
         return _render_local_composer_scene(scene, raw_path)
+
+    return _render
+
+
+def build_local_scene_card_renderer(job: dict | None = None):
+    del job
+
+    def _render(scene, raw_path: str):
+        return _render_local_scene_card_scene(scene, raw_path)
 
     return _render
 
@@ -978,7 +1093,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     workspace = os.path.abspath(work_dir)
     total_duration = max(1.0, float(_safe_int(job.get("expected_duration_seconds") or _scene_count(job) * 6, _scene_count(job) * 6)))
     bgm_audio_path = _default_bgm_path(addon, workspace, total_duration)
-    degrade_notes = _addon_degrade_notes(addon, bgm_audio_path=bgm_audio_path)
+    degrade_notes = _addon_degrade_notes(addon, bgm_audio_path=bgm_audio_path, job=job)
     readiness = real_video_provider_readiness(job)
     is_product_video = bool(str(job.get("source") or "") == "product_video" or job.get("product_video"))
     result: dict[str, Any] = {}
@@ -989,6 +1104,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     fallback_reason = ""
     provider_route_selected = bool(readiness.get("ok"))
     local_image_sequence_used = False
+    local_scene_card_used = False
 
     def _base_diagnostics(payload: dict[str, Any] | None = None, *, error: str = "") -> dict[str, Any]:
         data = dict(payload or {})
@@ -1094,7 +1210,35 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         if not result.get("ok"):
             provider_error = str(result.get("error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE)
     elif is_product_video:
-        provider_error = str(readiness.get("reason") or REAL_VIDEO_RENDER_UNAVAILABLE)
+        provider_error = str(readiness.get("reason") or "provider_capability_missing")
+    if is_product_video and not local_image_sequence_used and (not result or not result.get("ok")) and _local_scene_card_allowed(job):
+        local_scene_card_used = True
+        local_workspace = os.path.join(workspace, "local_scene_card")
+        fallback_used = True
+        fallback_reason = provider_error or "provider_unavailable"
+        try:
+            result = _run_multiscene_render(job, local_workspace, render_video_func=build_local_scene_card_renderer(job), bgm_audio_path=bgm_audio_path)
+        except RealVideoRenderError as exc:
+            _raise_render_error(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE, dict(getattr(exc, "diagnostics", {}) or {}))
+        result["renderer"] = LOCAL_SCENE_CARD_RENDERER
+        result["provider_attempted"] = bool(provider_attempted)
+        result["provider_route_selected"] = bool(provider_route_selected)
+        result["provider_events"] = provider_events
+        result["provider_task_ids"] = [item.get("task_id") for item in provider_events if item.get("task_id")]
+        result["provider_video_ids"] = [item.get("video_id") for item in provider_events if item.get("video_id")]
+        result["provider_models"] = [item.get("model") for item in provider_events if item.get("model")]
+        result["provider_modes"] = [item.get("mode") for item in provider_events if item.get("mode")]
+        result["provider_status"] = "downloaded" if provider_events else ("attempted" if provider_attempted else "not_needed")
+        result["provider_error"] = provider_error
+        result["fallback_used"] = True
+        result["fallback_reason"] = fallback_reason
+        result["visual_source"] = VISUAL_SOURCE_LOCAL_SCENE_CARD
+        result["placeholder_detected"] = False
+        result["placeholder_visual"] = False
+        result["raw_prompt_burned_into_frame"] = _subtitle_raw_prompt_burn_detected(job, result)
+        result["visual_classification"] = FINAL_AI_VIDEO if result.get("ok") and not result["raw_prompt_burned_into_frame"] else FAILED_NO_REAL_VISUAL
+        result["final_classification"] = result["visual_classification"]
+        result["no_charge"] = bool(job.get("no_charge"))
     if is_product_video and not local_image_sequence_used and (not result or not result.get("ok")) and _local_composer_enabled(job):
         local_workspace = os.path.join(workspace, "local_composer")
         fallback_used = True
@@ -1122,7 +1266,7 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["visual_classification"] = PARTIAL_SIMPLE_VIDEO if result.get("ok") and not result["raw_prompt_burned_into_frame"] else FAILED_NO_REAL_VISUAL
         result["final_classification"] = result["visual_classification"]
         result["no_charge"] = True
-    elif result and not local_image_sequence_used:
+    elif result and not local_image_sequence_used and not local_scene_card_used:
         result["renderer"] = PROVIDER_SCENE_RENDERER
         result["provider_attempted"] = bool(provider_attempted)
         result["provider_route_selected"] = bool(provider_route_selected)
@@ -1146,6 +1290,21 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         _raise_render_error(str(result.get("error") or provider_error or REAL_VIDEO_RENDER_UNAVAILABLE), result)
     if is_product_video and result.get("visual_classification") == FAILED_NO_REAL_VISUAL:
         _raise_render_error(FAILED_NO_REAL_VISUAL, result)
+    probe = video_final_output.probe_video(final_path)
+    if probe.get("ok"):
+        result["output_bytes"] = int(probe.get("bytes") or 0)
+        result["output_duration"] = float(probe.get("duration") or 0)
+        result["has_video"] = bool(probe.get("has_video"))
+        result["has_audio"] = bool(probe.get("has_audio"))
+        result["validation_status"] = "candidate_mp4_valid"
+    else:
+        result["validation_status"] = str(probe.get("reason") or "candidate_mp4_probe_failed")
+    if addon.get("music_enabled") and not result.get("has_audio"):
+        for note in degrade_notes:
+            if note.get("addon") == "music":
+                note["applied"] = False
+                note["reason"] = "music_mux_missing_audio_stream"
+                break
     result["provider_order"] = _provider_order(job)
     result["provider_readiness"] = {"ok": bool(readiness.get("ok")), "ready_provider_order": readiness.get("ready_provider_order") or []}
     result["original_user_prompt"] = original_prompt_from_job(job)

@@ -640,7 +640,7 @@ def process_claimed_job(job: dict) -> dict:
         send_heartbeat(job_id, 20, "preparing product video")
         final_path = render_real_video(job, work_dir)
         send_heartbeat(job_id, 80, "product video rendered")
-        send_heartbeat(job_id, 95, "uploading result")
+        send_heartbeat(job_id, 88, "checking rendered video")
         connector_result = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
         visual_classification = str(connector_result.get("visual_classification") or connector_result.get("final_classification") or "")
         force_no_charge = bool(visual_classification and visual_classification != "final_ai_video")
@@ -649,7 +649,13 @@ def process_claimed_job(job: dict) -> dict:
             "render_mode": RENDER_MODE_REAL,
             "renderer": "remote_worker_real_render_route",
             "final_video_name": os.path.basename(final_path),
+            "final_video_path": final_path,
             "bytes": os.path.getsize(final_path),
+            "output_bytes": int(connector_result.get("output_bytes") or os.path.getsize(final_path)),
+            "output_duration": connector_result.get("output_duration") or connector_result.get("duration") or connector_result.get("duration_sec") or 0,
+            "has_video": connector_result.get("has_video"),
+            "has_audio": connector_result.get("has_audio"),
+            "validation_status": str(connector_result.get("validation_status") or "worker_candidate_ready"),
             "source": REMOTE_WORKER_PRODUCT_VIDEO_SOURCE,
             "product_video": True,
             "test_pattern": False,
@@ -681,6 +687,7 @@ def process_claimed_job(job: dict) -> dict:
             "partial_addons": bool(connector_result.get("partial_addons")),
             "addon_degrade_notes": connector_result.get("addon_degrade_notes") or [],
         }
+        send_heartbeat(job_id, 90, "uploading final video")
         return complete_job(job_id, result, final_path)
 
 

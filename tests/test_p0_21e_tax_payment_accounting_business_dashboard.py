@@ -35,11 +35,24 @@ def _allowed_p0_18o_engine_guard_path(path: str, changed: list[str]) -> bool:
         (branch.startswith("hotfix/p0-18p-") or "tests/test_p0_18p_connect_real_video_engine_after_final_output_gate.py" in normalized)
         and path.replace("\\", "/") in {"services/video_final_output.py", "services/video_real_render_connector.py"}
     )
+    video_final_delivery_allowed = (
+        (
+            branch.startswith("hotfix/p0-18r-")
+            or "tests/test_p0_18r_real_video_engine_final_mp4_delivery_all_products.py" in normalized
+        )
+        and path.replace("\\", "/")
+        in {
+            "remote_worker.py",
+            "services/video_final_output.py",
+            "services/video_real_render_connector.py",
+            "services/video_project_queue.py",
+        }
+    )
     subdub_allowed = (
         (branch.startswith("hotfix/p0-19k-") or "tests/test_p0_19k_complete_subdub_flows_hardsub_cover_voice_gender_entry_fix.py" in normalized)
         and path.replace("\\", "/") == "services/subtitle_dub_product_pipeline.py"
     )
-    return video_allowed or video_engine_allowed or subdub_allowed
+    return video_allowed or video_engine_allowed or video_final_delivery_allowed or subdub_allowed
 
 
 def _labels(markup):

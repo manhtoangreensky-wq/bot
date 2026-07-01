@@ -19,6 +19,8 @@ from typing import Any
 FINAL_AI_VIDEO = "final_ai_video"
 LOCAL_IMAGE_SEQUENCE_RENDERER = "local_image_sequence_engine"
 VISUAL_SOURCE_LOCAL_IMAGE_SEQUENCE = "local_image_sequence"
+LOCAL_SCENE_CARD_RENDERER = "local_scene_card_engine"
+VISUAL_SOURCE_LOCAL_SCENE_CARD = "local_scene_card"
 SUPPORTED_LOCAL_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".ppm"}
 VIDEO_FINAL_STATES = {
     "draft_ready",
@@ -27,7 +29,20 @@ VIDEO_FINAL_STATES = {
     "failed_no_charge",
     "failed_refunded",
     "needs_admin_review",
+    "telegram_delivery_failed",
 }
+REQUIRED_VIDEO_PRODUCT_TYPES = (
+    "video_trend",
+    "video_ai_prompt",
+    "video_ai_image",
+    "video_ai_video_reference",
+    "script_to_video",
+    "storyboard_prompt",
+    "image_to_video",
+    "self_shot_scene_change",
+    "multi_scene_film",
+    "video_idea_to_product",
+)
 VIDEO_PRODUCT_ENGINE_ROUTES: dict[str, dict[str, Any]] = {
     "video_trend": {
         "adapter": "text_to_video_or_scene_engine",
@@ -93,6 +108,44 @@ VIDEO_PRODUCT_ENGINE_ROUTES: dict[str, dict[str, Any]] = {
         "allow_local": True,
     },
 }
+ENGINE_FAMILY_POLICIES: dict[str, dict[str, Any]] = {
+    "scene_video": {
+        "provider_capability": "text_to_video_or_scene_video",
+        "fallback_capability": "local_scene_card_mp4_when_scene_cards_exist",
+    },
+    "single_video": {
+        "provider_capability": "text_to_video",
+        "fallback_capability": "clean_fail_provider_capability_missing",
+    },
+    "image_video": {
+        "provider_capability": "image_to_video",
+        "fallback_capability": "clean_fail_provider_capability_missing",
+    },
+    "reference_video": {
+        "provider_capability": "video_to_video",
+        "fallback_capability": "clean_fail_provider_capability_missing",
+    },
+    "image_sequence": {
+        "provider_capability": "image_to_video",
+        "fallback_capability": "local_image_sequence_mp4",
+    },
+    "storyboard": {
+        "provider_capability": "scene_video",
+        "fallback_capability": "local_image_sequence_or_scene_card_mp4",
+    },
+    "multiscene": {
+        "provider_capability": "multi_scene_video",
+        "fallback_capability": "local_scene_card_mp4_when_scene_cards_exist",
+    },
+    "delegated": {
+        "provider_capability": "delegates_to_selected_product",
+        "fallback_capability": "delegate_or_clean_fail",
+    },
+    "local_edit": {
+        "provider_capability": "local_ffmpeg_edit",
+        "fallback_capability": "local_ffmpeg_edit",
+    },
+}
 
 
 def json_loads(value: Any, fallback: Any = None) -> Any:
@@ -150,7 +203,18 @@ def route_for_product_type(product_type: str = "") -> dict[str, Any]:
     route = dict(VIDEO_PRODUCT_ENGINE_ROUTES.get(normalized) or {})
     if route:
         route["product_type"] = normalized
+        route["engine_adapter"] = route.get("engine_adapter") or route.get("adapter") or ""
+        policy = ENGINE_FAMILY_POLICIES.get(str(route.get("engine_family") or ""), {})
+        route["provider_capability"] = route.get("provider_capability") or policy.get("provider_capability") or "provider_capability_missing"
+        route["fallback_capability"] = route.get("fallback_capability") or policy.get("fallback_capability") or "clean_fail_provider_capability_missing"
+        route["output_artifact_path"] = route.get("output_artifact_path") or "final_video_path"
+        route["validation_policy"] = route.get("validation_policy") or "valid_mp4_with_video_stream_not_placeholder"
+        route["delivery_policy"] = route.get("delivery_policy") or "deliver_once_after_validation"
     return route
+
+
+def video_product_engine_route_matrix() -> dict[str, dict[str, Any]]:
+    return {key: route_for_product_type(key) for key in REQUIRED_VIDEO_PRODUCT_TYPES}
 
 
 def ffprobe_path(ffmpeg_path: str = "") -> str:
@@ -540,9 +604,12 @@ def validate_final_video_output(
 
 def final_output_audit_payload() -> dict[str, Any]:
     routes = {key: route_for_product_type(key) for key in VIDEO_PRODUCT_ENGINE_ROUTES}
+    required_routes = video_product_engine_route_matrix()
     checks = [
         {"name": "all_products_have_routes", "ok": all(route.get("adapter") for route in routes.values())},
+        {"name": "required_products_have_engine_routes", "ok": all(required_routes.get(key, {}).get("engine_adapter") for key in REQUIRED_VIDEO_PRODUCT_TYPES)},
+        {"name": "required_routes_define_final_contract", "ok": all(required_routes.get(key, {}).get("validation_policy") and required_routes.get(key, {}).get("delivery_policy") for key in REQUIRED_VIDEO_PRODUCT_TYPES)},
         {"name": "final_states_defined", "ok": VIDEO_FINAL_STATES >= {"draft_ready", "final_rendering", "final_delivered", "failed_no_charge", "failed_refunded", "needs_admin_review"}},
         {"name": "placeholder_rejected", "ok": validate_final_video_output(path="", result={"visual_classification": "partial_simple_video"}).get("reason") == "placeholder_not_final_video"},
     ]
-    return {"ok": all(item["ok"] for item in checks), "checks": checks, "routes": routes}
+    return {"ok": all(item["ok"] for item in checks), "checks": checks, "routes": routes, "required_routes": required_routes}
