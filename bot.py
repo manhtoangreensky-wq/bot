@@ -1920,6 +1920,13 @@ FINANCE_ADJUSTMENT_TYPES = {
     "provider_cost_adjustment", "manual_correction", "vat_add", "vat_subtract",
     "cit_add", "cit_subtract", "tax_manual_correction",
 }
+FINANCE_ADJUST_TAX_COMMAND_TYPES = (
+    "vat_add",
+    "vat_subtract",
+    "cit_add",
+    "cit_subtract",
+    "tax_manual_correction",
+)
 
 # ─── FREE CHAT CONFIG ─────────────────────────────────────────────────────────
 FREE_CHAT_DAILY   = 20   # lượt chat/ngày cho tài khoản chưa nạp tiền
@@ -152265,6 +152272,61 @@ def finance_adjustment_help_text(kind: str) -> str:
         examples.get(kind, examples["revenue"]),
     ])
 
+def finance_adjust_allowed_types_text() -> str:
+    return "\n".join(f"• <code>{html.escape(kind)}</code>" for kind in FINANCE_ADJUST_TAX_COMMAND_TYPES)
+
+def finance_adjust_command_help_text(prefix: str = "") -> str:
+    lines = [
+        "🧾 <b>Điều chỉnh thuế / tài chính nội bộ</b>",
+        "",
+        "Lệnh này chỉ tạo bút toán điều chỉnh nội bộ.",
+        "Không sửa giao dịch gốc.",
+        "Không cộng thêm tiền khách B2C.",
+        "Không đổi giá nạp Xu/gói/combo.",
+        "",
+        "Cú pháp:",
+        "<code>/finance_adjust vat_add &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+        "<code>/finance_adjust vat_subtract &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+        "<code>/finance_adjust cit_add &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+        "<code>/finance_adjust cit_subtract &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+        "<code>/finance_adjust tax_manual_correction &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+        "",
+        "Ví dụ:",
+        "<code>/finance_adjust vat_add 100000 dieu_chinh_du_phong_vat_thang_6</code>",
+        "",
+        "Ghi chú:",
+        "- &lt;so_tien_vnd&gt; là số tiền bút toán điều chỉnh nội bộ.",
+        "- Đây không phải thuế suất.",
+        "- Muốn đổi tỷ lệ VAT nội bộ dùng <code>/vat_rate</code>.",
+        "- Muốn đổi tỷ lệ TNDN scenario dùng <code>/cit_rate</code>.",
+    ]
+    clean_prefix = str(prefix or "").strip()
+    if clean_prefix:
+        return clean_prefix + "\n\n" + "\n".join(lines)
+    return "\n".join(lines)
+
+def finance_adjust_validation_text(message: str, *, show_help: bool = False, allowed_types: bool = True) -> str:
+    lines = [f"⚠️ {html.escape(str(message or '').strip() or 'Cú pháp chưa hợp lệ.')}"]
+    if allowed_types:
+        lines.extend(["", "Loại bút toán được hỗ trợ:", finance_adjust_allowed_types_text()])
+    if show_help:
+        lines.extend(["", finance_adjust_command_help_text()])
+    return "\n".join(lines)
+
+def parse_finance_adjust_amount(raw) -> int | None:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return None
+    compact = text.replace("vnđ", "").replace("vnd", "").replace("đ", "")
+    compact = re.sub(r"[\s,._]", "", compact)
+    if not re.fullmatch(r"\d+", compact or ""):
+        return None
+    amount = int(compact or 0)
+    return amount if amount > 0 else None
+
+def finance_adjust_token_looks_amount(raw) -> bool:
+    return parse_finance_adjust_amount(raw) is not None
+
 def finance_profit_dashboard_text(raw: str = "", default_period: str = "month") -> str:
     start_at, end_at, label, _kind = finance_period_bounds(raw, default_period)
     payload = finance_business_report_payload(start_at, end_at, label)
@@ -154069,33 +154131,63 @@ async def cmd_finance_anomalies(update: Update, context: ContextTypes.DEFAULT_TY
 async def cmd_finance_adjust(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
-    if len(context.args or []) < 3:
+    args = list(context.args or [])
+    if not args:
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/finance_adjust &lt;type&gt; &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>\n"
-            "<so_tien_vnd> là số tiền bút toán điều chỉnh nội bộ, không phải thuế suất, không phải số tiền tự động cộng cho khách.\n"
-            "Lệnh này không sửa giao dịch gốc, không cộng thêm tiền khách B2C, không đổi giá nạp Xu/gói/combo.\n"
-            "Muốn đổi tỷ lệ VAT nội bộ dùng <code>/vat_rate</code>; muốn đổi tỷ lệ TNDN scenario dùng <code>/cit_rate</code>.\n"
-            f"Type: <code>{html.escape(', '.join(sorted(FINANCE_ADJUSTMENT_TYPES)))}</code>",
+            finance_adjust_command_help_text(),
             parse_mode="HTML",
         )
-    adjustment_type = str(context.args[0]).strip().lower()
-    amount_raw = re.sub(r"[^0-9]", "", str(context.args[1] or ""))
-    amount = int(amount_raw or 0)
-    reason = " ".join(str(x) for x in context.args[2:]).strip()
-    result = create_finance_adjustment(adjustment_type, amount, reason, admin_id=str(update.effective_user.id))
+    if finance_adjust_token_looks_amount(args[0]):
+        return await update.message.reply_text(
+            finance_adjust_validation_text("Thiếu loại bút toán điều chỉnh.", show_help=len(args) == 1),
+            parse_mode="HTML",
+        )
+    adjustment_type = str(args[0]).strip().lower()
+    if adjustment_type not in FINANCE_ADJUSTMENT_TYPES:
+        return await update.message.reply_text(
+            finance_adjust_validation_text(f"Loại bút toán không hợp lệ: {adjustment_type or '-'}"),
+            parse_mode="HTML",
+        )
+    if len(args) < 2:
+        return await update.message.reply_text(
+            finance_adjust_validation_text("Thiếu số tiền điều chỉnh.", allowed_types=False),
+            parse_mode="HTML",
+        )
+    amount = parse_finance_adjust_amount(args[1])
+    if amount is None:
+        return await update.message.reply_text(
+            finance_adjust_validation_text("Số tiền điều chỉnh không hợp lệ. Vui lòng nhập số VND.", allowed_types=False),
+            parse_mode="HTML",
+        )
+    reason = " ".join(str(x) for x in args[2:]).strip()
+    if not reason:
+        return await update.message.reply_text(
+            finance_adjust_validation_text("Thiếu lý do điều chỉnh.", allowed_types=False),
+            parse_mode="HTML",
+        )
+    try:
+        result = create_finance_adjustment(adjustment_type, amount, reason, admin_id=str(update.effective_user.id))
+    except Exception:
+        logger.exception("finance_adjust command failed")
+        return await update.message.reply_text(
+            "⚠️ Không ghi được bút toán điều chỉnh. Vui lòng kiểm tra lại cú pháp hoặc xem log admin.",
+            parse_mode="HTML",
+        )
     if not result.get("ok"):
         return await update.message.reply_text(
-            f"⚠️ Không ghi được bút toán: <code>{html.escape(str(result.get('reason') or 'unknown'))}</code>\n"
-            "Không có giao dịch gốc nào bị sửa.",
+            "⚠️ Không ghi được bút toán điều chỉnh. Vui lòng kiểm tra lại cú pháp hoặc xem log admin.\n"
+            f"• Lý do: <code>{html.escape(str(result.get('reason') or 'unknown'))}</code>\n"
+            "Muốn đổi tỷ lệ VAT nội bộ dùng <code>/vat_rate</code>; muốn đổi tỷ lệ TNDN scenario dùng <code>/cit_rate</code>.",
             parse_mode="HTML",
         )
     await update.message.reply_text(
-        "✅ <b>Đã ghi bút toán điều chỉnh</b>\n\n"
-        f"• ID: <code>#{int(result.get('id') or 0)}</code>\n"
-        f"• Type: <code>{html.escape(adjustment_type)}</code>\n"
+        "✅ <b>Đã ghi bút toán điều chỉnh nội bộ</b>\n\n"
+        f"• Loại: <code>{html.escape(adjustment_type)}</code>\n"
         f"• Số tiền: <b>{vnd_text(amount)}</b>\n"
-        f"• Lý do: {html.escape(reason)}\n\n"
-        "Không sửa/xóa giao dịch gốc.",
+        f"• Lý do: {html.escape(reason)}\n"
+        f"• Thời gian: <code>{html.escape(now_text())}</code>\n"
+        f"• Admin: <code>{html.escape(str(update.effective_user.id))}</code>\n\n"
+        "Lệnh này không sửa giao dịch gốc, không cộng thêm tiền khách B2C, không đổi giá nạp Xu/gói/combo.",
         parse_mode="HTML",
         reply_markup=finance_adjustments_keyboard(),
     )
