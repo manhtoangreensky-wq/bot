@@ -252,21 +252,26 @@ def test_gommo_upload_image_rejects_empty_data_cleanly():
 
 
 def test_multiscene_3_scenes_creates_3_provider_tasks(monkeypatch, tmp_path):
-    monkeypatch.setattr(connector, "_download_output", lambda _url, path: Path(path).write_bytes(b"mp4") or str(path))
-    submits = []
-    statuses = []
+    calls = []
 
-    async def fake_submit(provider, prompt, aspect_ratio):
-        submits.append((provider, prompt, aspect_ratio))
-        index = len(submits)
-        return {"ok": True, "provider": provider, "video_id": f"vid-{index}", "task_id": f"task-{index}", "status": "IN_PROGRESS", "model": "seedance_20_pro_edit", "mode": "business_fast"}
+    def fake_run_provider_generation(request, *, output_dir, environ=None, sleep_func=None):
+        del environ, sleep_func
+        calls.append(request)
+        index = len(calls)
+        output_path = Path(output_dir) / f"scene-provider-{index}.mp4"
+        output_path.write_bytes(b"mp4")
+        return {
+            "ok": True,
+            "provider": "gommo_79ai",
+            "provider_task_ids": [f"task-{index}"],
+            "provider_video_ids": [f"vid-{index}"],
+            "output_path": str(output_path),
+            "model": "seedance_20_pro_edit",
+            "mode": "business_fast",
+            "result_url_present": True,
+        }
 
-    async def fake_poll(provider, task_id, submit=None):
-        statuses.append((provider, task_id, submit))
-        return {"ok": True, "provider": provider, "status": "SUCCESS", "output_url": f"https://cdn.example/{task_id}.mp4", "task_id": task_id, "video_id": submit["video_id"], "model": "seedance_20_pro_edit", "mode": "business_fast"}
-
-    monkeypatch.setattr(connector, "_submit_provider", fake_submit)
-    monkeypatch.setattr(connector, "_poll_provider", fake_poll)
+    monkeypatch.setattr(connector, "run_provider_generation", fake_run_provider_generation)
     events = []
     renderer = connector.build_real_scene_renderer({"provider_order": ["gommo_79ai"]}, events)
     for index in range(1, 4):
@@ -275,8 +280,7 @@ def test_multiscene_3_scenes_creates_3_provider_tasks(monkeypatch, tmp_path):
             str(tmp_path / f"scene-{index}.mp4"),
         )
         assert result["ok"] is True
-    assert [item[0] for item in submits] == ["gommo_79ai", "gommo_79ai", "gommo_79ai"]
-    assert [item[1] for item in statuses] == ["task-1", "task-2", "task-3"]
+    assert [item.required_capability for item in calls] == ["text_to_video", "text_to_video", "text_to_video"]
     assert [item["task_id"] for item in events] == ["task-1", "task-2", "task-3"]
     assert [item["video_id"] for item in events] == ["vid-1", "vid-2", "vid-3"]
 
@@ -310,4 +314,5 @@ def test_public_error_no_provider_api_words():
 
 def test_default_provider_order_keeps_shopaikey_key4u_before_gommo(monkeypatch):
     monkeypatch.delenv("VIDEO_PROVIDER_ORDER", raising=False)
-    assert connector._provider_order({}) == ["shopaikey", "key4u", "gommo_79ai"]
+    order = connector._provider_order({})
+    assert order[:3] == ["toanaas_video", "key4u_video", "shopaikey_video"]

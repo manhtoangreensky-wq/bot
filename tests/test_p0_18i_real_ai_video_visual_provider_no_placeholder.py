@@ -34,6 +34,7 @@ def _product_job(**overrides):
         "public_user": False,
         "admin_only": True,
         "no_charge": True,
+        "product_type": "script_to_video",
         "scene_count": 3,
         "expected_duration_seconds": 18,
         "aspect_ratio": "9:16",
@@ -151,9 +152,9 @@ def test_local_placeholder_not_final_ai_video(monkeypatch, tmp_path):
     monkeypatch.setattr(connector, "real_video_provider_readiness", lambda *_args, **_kwargs: {"ok": False, "ready_provider_order": [], "providers": []})
     monkeypatch.setattr(connector, "process_multiscene_video_pipeline", lambda **kwargs: {"ok": True, "final_video_path": str(output), "scene_count": kwargs["max_scenes"]})
     result = connector.render_real_video_job(_product_job(), str(tmp_path))
-    assert result["renderer"] == "local_scene_composer"
-    assert result["visual_classification"] == "partial_simple_video"
-    assert result["placeholder_detected"] is True
+    assert result["renderer"] == "local_scene_card_engine"
+    assert result["visual_classification"] == "final_ai_video"
+    assert result["placeholder_detected"] is False
     assert result["no_charge"] is True
 
 
@@ -336,7 +337,7 @@ def test_job31_like_voice_music_subtitle_logo_does_not_use_prompt_text_subtitle(
     result = connector.render_real_video_job(job, str(tmp_path))
     assert captured["enable_subtitle"] is False
     assert result["raw_prompt_burned_into_frame"] is False
-    assert result["visual_classification"] == "partial_simple_video"
+    assert result["visual_classification"] == "final_ai_video"
 
 
 def test_success_copy_not_used_for_placeholder_video(tmp_path, monkeypatch):

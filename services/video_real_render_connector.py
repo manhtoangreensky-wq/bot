@@ -22,7 +22,7 @@ import httpx
 from services.multiscene_video_pipeline import ensure_video_output, process_multiscene_video_pipeline, safe_run_ffmpeg
 from services import video_final_output
 from services.video_provider_base import VideoGenerationRequest
-from services.video_provider_router import provider_status_payload, run_provider_generation
+from services.video_provider_router import PUBLIC_NO_VIDEO_PROVIDER_COPY, provider_status_payload, run_provider_generation
 
 
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
@@ -1070,6 +1070,10 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     degrade_notes = _addon_degrade_notes(addon, bgm_audio_path=bgm_audio_path, job=job)
     readiness = real_video_provider_readiness(job)
     is_product_video = bool(str(job.get("source") or "") == "product_video" or job.get("product_video"))
+    product_type = _product_type(job)
+    product_route = video_final_output.route_for_product_type(product_type)
+    required_capability = str(product_route.get("provider_capability") or "text_to_video")
+    fallback_capability = str(product_route.get("fallback_capability") or "")
     result: dict[str, Any] = {}
     provider_attempted = False
     provider_events: list[dict[str, Any]] = []
@@ -1105,10 +1109,21 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             effective_provider_error = str(data.get("error") or data.get("visual_classification") or "provider_attempt_no_artifact")
         data["provider_error"] = effective_provider_error
         data["provider_order"] = _provider_order(job)
+        data["required_capability"] = required_capability
+        data["fallback_capability"] = fallback_capability
         data["provider_readiness"] = {
             "ok": bool(readiness.get("ok")),
             "ready_provider_order": readiness.get("ready_provider_order") or [],
+            "first_ready_provider": readiness.get("first_ready_provider") or "",
+            "enabled_count": readiness.get("enabled_count") or 0,
+            "configured_count": readiness.get("configured_count") or 0,
+            "enabled_providers": readiness.get("enabled_providers") or [],
+            "configured_providers": readiness.get("configured_providers") or [],
+            "missing_env": readiness.get("missing_env") or {},
         }
+        data["enabled_providers"] = readiness.get("enabled_providers") or []
+        data["configured_providers"] = readiness.get("configured_providers") or []
+        data["missing_env"] = readiness.get("missing_env") or {}
         data["original_user_prompt"] = original_prompt_from_job(job)
         data["addon_degrade_notes"] = degrade_notes
         data["partial_addons"] = any(item.get("requested") and not item.get("applied") for item in degrade_notes)
@@ -1128,6 +1143,12 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         if reason == FAILED_NO_REAL_VISUAL:
             data["visual_classification"] = FAILED_NO_REAL_VISUAL
             data["final_classification"] = FAILED_NO_REAL_VISUAL
+        if reason == "provider_capability_missing":
+            data["blocker"] = "provider_capability_missing"
+            data["provider_error"] = "provider_capability_missing"
+            data["provider_status"] = "not_attempted"
+            data["provider_attempted"] = False
+            data["public_message"] = PUBLIC_NO_VIDEO_PROVIDER_COPY
         raise RealVideoRenderError(reason or REAL_VIDEO_RENDER_UNAVAILABLE, diagnostics=data)
 
     local_image_paths = _local_image_sequence_paths(job) if is_product_video else []
@@ -1164,6 +1185,25 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         result["visual_classification"] = FINAL_AI_VIDEO
         result["final_classification"] = FINAL_AI_VIDEO
         result["no_charge"] = bool(job.get("no_charge"))
+    elif is_product_video and not readiness.get("ok") and fallback_capability in {
+        "clean_fail_provider_capability_missing",
+        "delegate_or_clean_fail",
+    }:
+        provider_error = "provider_capability_missing"
+        _raise_render_error(
+            "provider_capability_missing",
+            {
+                "ok": False,
+                "blocker": "provider_capability_missing",
+                "provider_error": "provider_capability_missing",
+                "provider_status": "not_attempted",
+                "provider_attempted": False,
+                "provider_readiness": readiness,
+                "public_message": PUBLIC_NO_VIDEO_PROVIDER_COPY,
+                "progress_percent": 40,
+                "no_charge": True,
+            },
+        )
     elif readiness.get("ok") or not is_product_video:
         provider_attempted = True
         try:

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
+import subprocess
+import tempfile
 import time
 from typing import Any
 
@@ -22,6 +26,11 @@ from services.video_provider_base import (
 
 
 DEFAULT_VIDEO_PROVIDER_CHAIN = "toanaas_video,key4u_video,shopaikey_video,veo,kling,generic_http"
+VIDEO_STUB_PROVIDER_NAME = "stub_video"
+PUBLIC_NO_VIDEO_PROVIDER_COPY = (
+    "TOAN AAS chưa có máy dựng video phù hợp cho kiểu video này lúc này. "
+    "Hệ thống chưa trừ Xu. Anh/chị có thể thử kiểu video khác hoặc quay lại sau."
+)
 
 
 def _env_flag(env: dict[str, str], name: str, default: str = "0") -> bool:
@@ -58,6 +67,130 @@ def _bearer(value: str) -> str:
     return token if token.lower().startswith(("bearer ", "apikey ", "key ")) else f"Bearer {token}"
 
 
+def _first_env(env: dict[str, str], *names: str) -> str:
+    for name in names:
+        value = str(env.get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _endpoint_alias(env: dict[str, str], direct_name: str, base_name: str, endpoint_name: str, *legacy_names: str) -> str:
+    direct = _first_env(env, direct_name, *legacy_names)
+    if direct:
+        return direct
+    base = str(env.get(base_name) or "").strip()
+    endpoint = str(env.get(endpoint_name) or "").strip()
+    if base and endpoint:
+        return _join_url(base, endpoint)
+    return ""
+
+
+def _runtime_env_name(env: dict[str, str]) -> str:
+    return str(
+        env.get("APP_ENV")
+        or env.get("ENVIRONMENT")
+        or env.get("RAILWAY_ENVIRONMENT")
+        or env.get("TOAN_AAS_ENV")
+        or env.get("PYTHON_ENV")
+        or ""
+    ).strip().lower()
+
+
+def _stub_env_allowed(env: dict[str, str]) -> bool:
+    runtime = _runtime_env_name(env)
+    if runtime in {"development", "dev", "test", "testing", "admin", "local"}:
+        return True
+    return bool(env.get("PYTEST_CURRENT_TEST")) and runtime not in {"production", "prod"}
+
+
+class StubVideoProvider:
+    provider_name = VIDEO_STUB_PROVIDER_NAME
+
+    def __init__(self, environ: dict[str, str] | None = None):
+        self.env = environ or os.environ
+
+    def _enabled(self) -> bool:
+        return _env_flag(dict(self.env), "VIDEO_STUB_PROVIDER_ENABLED", "0")
+
+    def _configured(self) -> bool:
+        return bool(self._enabled() and _stub_env_allowed(dict(self.env)))
+
+    def capabilities(self) -> dict[str, Any]:
+        enabled = self._enabled()
+        allowed = _stub_env_allowed(dict(self.env))
+        missing: list[str] = []
+        if not enabled:
+            missing.append("VIDEO_STUB_PROVIDER_ENABLED")
+        if enabled and not allowed:
+            missing.append("non_production_env")
+        return {
+            "provider": self.provider_name,
+            "enabled": enabled,
+            "configured": bool(enabled and allowed),
+            "missing": missing,
+            "capabilities": ["text_to_video", "image_to_video", "video_to_video", "multi_scene_video", "scene_video"],
+            "endpoint_configured": False,
+            "submit_url_present": False,
+            "poll_url_present": False,
+            "endpoint_present": False,
+            "auth_configured": False,
+            "auth_present": False,
+            "model_configured": False,
+            "model_present": False,
+            "stub_test_only": True,
+            "production_disabled": enabled and not allowed,
+        }
+
+    def submit_video_job(self, request: VideoGenerationRequest):
+        from services.video_provider_base import VideoSubmitResult
+
+        if not self._configured():
+            return VideoSubmitResult(ok=False, provider_name=self.provider_name, error_code="stub_provider_disabled")
+        task_seed = f"{request.job_id}:{request.prompt}:{time.time()}"
+        task_id = "stub-" + hashlib.sha1(task_seed.encode("utf-8", errors="ignore")).hexdigest()[:12]
+        return VideoSubmitResult(ok=True, provider_name=self.provider_name, provider_task_id=task_id, provider_status="succeeded")
+
+    def poll_video_job(self, provider_task_id: str):
+        return VideoPollResult(ok=True, status="succeeded", provider_name=self.provider_name, provider_task_id=provider_task_id)
+
+    def materialize_result(self, poll_result: VideoPollResult, output_name: str) -> VideoArtifactResult:
+        output_dir = os.path.abspath(os.getenv("VIDEO_STUB_PROVIDER_OUTPUT_DIR") or tempfile.gettempdir())
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, f"{output_name or poll_result.provider_task_id or 'stub_video'}.mp4")
+        ffmpeg = shutil.which("ffmpeg") or str(os.getenv("FFMPEG_PATH") or "").strip()
+        if not ffmpeg:
+            return VideoArtifactResult(ok=False, provider_name=self.provider_name, local_path=output_path, error_code="ffmpeg_missing")
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x568:d=1",
+            "-vf",
+            "format=yuv420p",
+            "-movflags",
+            "+faststart",
+            output_path,
+        ]
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        except Exception:
+            return VideoArtifactResult(ok=False, provider_name=self.provider_name, local_path=output_path, error_code="stub_render_failed")
+        size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+        return VideoArtifactResult(
+            ok=bool(size > 0),
+            provider_name=self.provider_name,
+            local_path=output_path,
+            bytes=size,
+            duration=1.0,
+            has_video_stream=True,
+            has_audio_stream=False,
+            error_code="" if size > 0 else "stub_output_empty",
+        )
+
+
 def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter:
     if name == "toanaas_video":
         derived = _with_derived(
@@ -80,13 +213,25 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             environ=derived,
         )
     if name == "shopaikey_video":
-        submit_url = env.get("SHOPAIKEY_VIDEO_URL") or _join_url(env.get("SHOPAIKEY_BASE_URL") or "", env.get("SHOPAIKEY_VIDEO_ENDPOINT") or "/video/generations")
-        poll_url = env.get("SHOPAIKEY_VIDEO_STATUS_ENDPOINT") or (submit_url.rstrip("/") + "/{task_id}" if submit_url else "")
+        submit_url = _endpoint_alias(
+            env,
+            "SHOPAIKEY_VIDEO_SUBMIT_URL",
+            "SHOPAIKEY_BASE_URL",
+            "SHOPAIKEY_VIDEO_ENDPOINT",
+            "SHOPAIKEY_VIDEO_URL",
+        )
+        poll_url = _endpoint_alias(
+            env,
+            "SHOPAIKEY_VIDEO_POLL_URL",
+            "SHOPAIKEY_BASE_URL",
+            "SHOPAIKEY_VIDEO_POLL_ENDPOINT",
+            "SHOPAIKEY_VIDEO_STATUS_ENDPOINT",
+        )
         derived = _with_derived(
             env,
             {
-                "SHOPAIKEY_VIDEO_DERIVED_SUBMIT_URL": submit_url,
-                "SHOPAIKEY_VIDEO_DERIVED_POLL_URL": poll_url,
+                "SHOPAIKEY_VIDEO_SUBMIT_URL": submit_url,
+                "SHOPAIKEY_VIDEO_POLL_URL": poll_url,
                 "SHOPAIKEY_VIDEO_AUTH_HEADER_NAME": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_NAME") or "Authorization",
                 "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE": env.get("SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE") or _bearer(env.get("SHOPAIKEY_API_KEY") or ""),
             },
@@ -94,8 +239,8 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         return GenericHttpVideoProvider(
             provider_name="shopaikey_video",
             enabled_env="SHOPAIKEY_VIDEO_ENABLED",
-            submit_url_env="SHOPAIKEY_VIDEO_DERIVED_SUBMIT_URL",
-            poll_url_env="SHOPAIKEY_VIDEO_DERIVED_POLL_URL",
+            submit_url_env="SHOPAIKEY_VIDEO_SUBMIT_URL",
+            poll_url_env="SHOPAIKEY_VIDEO_POLL_URL",
             auth_header_name_env="SHOPAIKEY_VIDEO_AUTH_HEADER_NAME",
             auth_header_value_env="SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE",
             result_field_env="SHOPAIKEY_VIDEO_RESULT_FIELD",
@@ -104,9 +249,13 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
             environ=derived,
         )
     if name == "key4u_video":
+        submit_url = _endpoint_alias(env, "KEY4U_VIDEO_SUBMIT_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_ENDPOINT")
+        poll_url = _endpoint_alias(env, "KEY4U_VIDEO_POLL_URL", "KEY4U_BASE_URL", "KEY4U_VIDEO_POLL_ENDPOINT")
         derived = _with_derived(
             env,
             {
+                "KEY4U_VIDEO_SUBMIT_URL": submit_url,
+                "KEY4U_VIDEO_POLL_URL": poll_url,
                 "KEY4U_VIDEO_AUTH_HEADER_NAME": env.get("KEY4U_VIDEO_AUTH_HEADER_NAME") or "Authorization",
                 "KEY4U_VIDEO_AUTH_HEADER_VALUE": env.get("KEY4U_VIDEO_AUTH_HEADER_VALUE") or _bearer(env.get("KEY4U_API_KEY") or env.get("KEY4U_TOKEN") or ""),
             },
@@ -129,6 +278,8 @@ def _generic_adapter_for(name: str, env: dict[str, str]) -> VideoProviderAdapter
         return KlingVideoProvider(environ=env)
     if name == "generic_http":
         return GenericHttpVideoProvider(environ=env)
+    if name == VIDEO_STUB_PROVIDER_NAME:
+        return StubVideoProvider(environ=env)
     return DisabledVideoProvider(name, missing=["unknown_provider"])
 
 
@@ -165,24 +316,67 @@ def provider_supports(adapter: VideoProviderAdapter, required_capability: str) -
 
 
 def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, Any]:
-    adapters = load_video_provider_adapters(environ)
+    env = dict(environ or os.environ)
+    adapters = load_video_provider_adapters(env)
+    if VIDEO_STUB_PROVIDER_NAME not in [adapter.provider_name for adapter in adapters]:
+        adapters.append(StubVideoProvider(environ=env))
     providers = []
     for adapter in adapters:
         caps = dict(adapter.capabilities())
+        missing = list(caps.get("missing") or [])
         providers.append(
             {
                 "provider": caps.get("provider") or adapter.provider_name,
                 "enabled": bool(caps.get("enabled")),
                 "configured": bool(caps.get("configured")),
-                "missing": list(caps.get("missing") or []),
+                "missing": missing,
                 "capabilities": list(caps.get("capabilities") or []),
                 "endpoint_configured": bool(caps.get("endpoint_configured")),
+                "endpoint_present": bool(caps.get("endpoint_present") or caps.get("endpoint_configured")),
+                "submit_url_present": bool(caps.get("submit_url_present") or caps.get("endpoint_configured")),
+                "poll_url_present": bool(caps.get("poll_url_present") or caps.get("endpoint_configured")),
                 "model_configured": bool(caps.get("model_configured")),
+                "model_present": bool(caps.get("model_present") or caps.get("model_configured")),
                 "auth_configured": bool(caps.get("auth_configured")),
+                "auth_present": bool(caps.get("auth_present") or caps.get("auth_configured")),
+                "stub_test_only": bool(caps.get("stub_test_only")),
+                "production_disabled": bool(caps.get("production_disabled")),
             }
         )
     ready = [item["provider"] for item in providers if item["configured"]]
-    return {"ok": bool(ready), "provider_chain": configured_provider_chain(environ), "ready_provider_order": ready, "providers": providers}
+    enabled = [item["provider"] for item in providers if item["enabled"]]
+    configured = [item["provider"] for item in providers if item["configured"]]
+    near_ready = [
+        item["provider"]
+        for item in providers
+        if not item["configured"] and (item["endpoint_present"] or item["auth_present"] or item["enabled"])
+    ]
+    missing_env = {item["provider"]: item["missing"] for item in providers if item["missing"]}
+    if ready:
+        reason = "ready"
+    elif not enabled:
+        reason = "chưa bật provider nào"
+    elif not configured:
+        reason = "provider chưa đủ endpoint/auth"
+    else:
+        reason = "provider thiếu capability"
+    return {
+        "ok": bool(ready),
+        "ready": bool(ready),
+        "reason": reason,
+        "summary_reason": reason,
+        "provider_chain": configured_provider_chain(env),
+        "ready_provider_order": ready,
+        "first_ready_provider": ready[0] if ready else "",
+        "enabled_count": len(enabled),
+        "configured_count": len(configured),
+        "enabled_providers": enabled,
+        "configured_providers": configured,
+        "near_ready_providers": near_ready,
+        "missing_env": missing_env,
+        "providers": providers,
+        "public_no_provider_copy": PUBLIC_NO_VIDEO_PROVIDER_COPY,
+    }
 
 
 def select_video_provider(required_capability: str, environ: dict[str, str] | None = None) -> tuple[VideoProviderAdapter | None, dict[str, Any]]:

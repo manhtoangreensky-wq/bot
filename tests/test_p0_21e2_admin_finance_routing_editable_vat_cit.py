@@ -43,11 +43,23 @@ def _allowed_p0_18o_engine_guard_path(path: str, changed: list[str]) -> bool:
             "services/video_project_queue.py",
         }
     )
+    video_provider_config_allowed = (
+        (
+            branch.startswith("hotfix/p0-18s1-")
+            or "tests/test_p0_18s1_video_provider_config_bootstrap_clean_no_provider_ux.py" in normalized
+        )
+        and path.replace("\\", "/")
+        in {
+            "providers/video_generic_http_provider.py",
+            "services/video_provider_router.py",
+            "services/video_real_render_connector.py",
+        }
+    )
     subdub_allowed = (
         (branch.startswith("hotfix/p0-19k-") or "tests/test_p0_19k_complete_subdub_flows_hardsub_cover_voice_gender_entry_fix.py" in normalized)
         and path.replace("\\", "/") == "services/subtitle_dub_product_pipeline.py"
     )
-    return video_allowed or video_engine_allowed or video_final_delivery_allowed or subdub_allowed
+    return video_allowed or video_engine_allowed or video_final_delivery_allowed or video_provider_config_allowed or subdub_allowed
 
 
 def _scalar(sql, params=(), default=0):

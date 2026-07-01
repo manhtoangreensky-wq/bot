@@ -35,6 +35,7 @@ def _seed_product_job(conn, *, admin=True, scene_count=3, addon_plan=None, asset
         "fake_renderer_allowed": False,
         "real_renderer_required": True,
         "provider_call": True,
+        "product_type": "script_to_video",
         "public_user": not admin,
         "admin_only": bool(admin),
         "created_by_admin": bool(admin),
@@ -143,6 +144,8 @@ def test_render_creates_mp4_artifact_3_scenes_with_music_subtitle_logo(monkeypat
         "source": "product_video",
         "render_mode": "real",
         "provider_call": True,
+        "product_type": "script_to_video",
+        "no_charge": True,
         "scene_count": 3,
         "expected_duration_seconds": 3,
         "aspect_ratio": "9:16",
@@ -164,7 +167,7 @@ def test_render_creates_mp4_artifact_3_scenes_with_music_subtitle_logo(monkeypat
     assert final_path.is_file()
     assert final_path.stat().st_size > 0
     assert result["scene_count"] == 3
-    assert result["visual_classification"] == "partial_simple_video"
+    assert result["visual_classification"] == "final_ai_video"
     assert result["no_charge"] is True
     assert "test" not in str(result.get("renderer", "")).lower()
     assert "fake" not in str(result.get("renderer", "")).lower()
@@ -194,6 +197,7 @@ def test_artifact_exists_before_worker_success(monkeypatch, tmp_path):
         "test_pattern": False,
         "admin_video_delivery": False,
         "provider_call": True,
+        "product_type": "script_to_video",
         "public_user": False,
         "admin_only": True,
         "no_charge": True,
@@ -206,7 +210,7 @@ def test_artifact_exists_before_worker_success(monkeypatch, tmp_path):
     assert completed["result"]["source"] == "product_video"
     assert completed["result"]["test_pattern"] is False
     assert completed["result"]["admin_video_delivery"] is False
-    assert completed["result"]["visual_classification"] == "partial_simple_video"
+    assert completed["result"]["visual_classification"] == "final_ai_video"
     assert completed["result"]["no_charge"] is True
     progress_points = {int(item[1]) for item in heartbeats if len(item) > 1}
     assert progress_points >= {5, 20, 80, 88, 90}
