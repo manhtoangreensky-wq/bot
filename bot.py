@@ -93,7 +93,8 @@ import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import voice_clone_pipeline
-from services import remote_worker_api, video_final_output, worker_auth
+from services import remote_worker_api, video_final_output, video_provider_router, worker_auth
+from services.video_provider_base import mask_provider_task_id
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
 from services import video_product_profiles as video_profiles
@@ -43792,8 +43793,8 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• provider route selected: <code>{'yes' if result.get('provider_route_selected') else 'no'}</code>",
         f"• connector renderer: <code>{html.escape(str(result.get('connector_renderer') or result.get('renderer') or '-'))}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
-        f"• provider video id: <code>{html.escape(','.join(str(item) for item in (result.get('provider_video_ids') or [])) or '-')}</code>",
-        f"• provider task id: <code>{html.escape(','.join(str(item) for item in (result.get('provider_task_ids') or [])) or '-')}</code>",
+        f"• provider video id: <code>{html.escape(','.join(mask_provider_task_id(item) for item in (result.get('provider_video_ids') or [])) or '-')}</code>",
+        f"• provider task id: <code>{html.escape(','.join(mask_provider_task_id(item) for item in (result.get('provider_task_ids') or [])) or '-')}</code>",
         f"• selected model: <code>{html.escape(','.join(str(item) for item in (result.get('provider_models') or [])) or '-')}</code>",
         f"• selected mode: <code>{html.escape(','.join(str(item) for item in (result.get('provider_modes') or [])) or '-')}</code>",
         f"• chunk count: <code>{safe_int(result.get('chunk_count'), 0) or '-'}</code>",
@@ -133313,27 +133314,34 @@ async def cmd_trend_source_add(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin. Người dùng public không thấy URL, cURL hoặc lỗi provider.")
-    status = video_provider_task3d_status_payload()
+    status = video_provider_router.provider_status_payload()
     lines = [
-        "🎬 <b>Video Provider Status — Task 3D</b>",
+        "🎬 <b>Video Provider Status</b>",
         "",
-        f"• Selected provider: <code>{html.escape(status['selected_provider'])}</code>",
-        f"• Base URL: <code>{html.escape(status['base_url'] or 'missing endpoint')}</code>",
-        f"• Submit endpoint: <code>{html.escape(status['submit_endpoint'] or 'missing endpoint')}</code>",
-        f"• Fetch/status endpoint: <code>{html.escape(status['fetch_endpoint'] or 'missing endpoint')}</code>",
-        f"• Final submit URL: <code>{html.escape(status['final_submit_url'] or 'missing endpoint')}</code>",
-        f"• Final fetch URL: <code>{html.escape(status['final_fetch_url'] or 'missing endpoint')}</code>",
-        f"• Enabled flags: <code>{html.escape(json.dumps(status['enabled_flags'], ensure_ascii=False))}</code>",
-        f"• Smoke status: <code>{html.escape(status['smoke_status'])}</code>",
-        f"• Cost gate: <code>{html.escape(status['cost_gate'])}</code>",
-        f"• Last job id: <code>{html.escape(status['last_job_id'] or '-')}</code>",
-        f"• Last error: <code>{html.escape(status['last_error_safe'] or '-')}</code>",
-        f"• ShopAIKey route: <code>{html.escape(str((status['routes']['shopaikey'].get('submit') or 'missing endpoint')))} → {html.escape(str((status['routes']['shopaikey'].get('fetch') or 'missing endpoint')))}</code>",
-        f"• Key4U route (admin/alternative): <code>{html.escape(str((status['routes']['key4u'].get('submit') or 'missing endpoint')))} → {html.escape(str((status['routes']['key4u'].get('fetch') or 'missing endpoint')))}</code>",
+        f"• Chain: <code>{html.escape(', '.join(status.get('provider_chain') or []))}</code>",
+        f"• Ready: <code>{html.escape(', '.join(status.get('ready_provider_order') or []) or 'none')}</code>",
         "",
-        "Provider chưa có endpoint sẽ hiện đúng 'missing endpoint'; status không tự nhận PASS khi chưa có file/result.",
+        "Providers:",
     ]
+    for provider in status.get("providers") or []:
+        lines.append(
+            "• "
+            f"<code>{html.escape(str(provider.get('provider') or '-'))}</code> "
+            f"enabled=<code>{'yes' if provider.get('enabled') else 'no'}</code> "
+            f"configured=<code>{'yes' if provider.get('configured') else 'no'}</code> "
+            f"endpoint=<code>{'yes' if provider.get('endpoint_configured') else 'no'}</code> "
+            f"model=<code>{'yes' if provider.get('model_configured') else 'no'}</code> "
+            f"auth=<code>{'yes' if provider.get('auth_configured') else 'no'}</code> "
+            f"caps=<code>{html.escape(','.join(str(item) for item in (provider.get('capabilities') or [])) or '-')}</code> "
+            f"missing=<code>{html.escape(','.join(str(item) for item in (provider.get('missing') or [])) or '-')}</code>"
+        )
+    lines.append("")
+    lines.append("Nếu không có provider phù hợp, video product phải fail sạch với provider_capability_missing và chưa trừ Xu.")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_video_provider_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_video_provider_status(update, context)
 
 async def prepare_remove_bg_from_cached_image(update: Update, context: ContextTypes.DEFAULT_TYPE, info: dict) -> bool:
     uid = update.effective_user.id
@@ -169246,6 +169254,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("media_factory", cmd_media_factory))
     tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
     tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
+    tg_app.add_handler(CommandHandler("video_provider_audit", cmd_video_provider_audit))
     tg_app.add_handler(CommandHandler("video_provider_curl", cmd_video_provider_curl))
     tg_app.add_handler(CommandHandler("prompt_vault_status", cmd_prompt_vault_status))
     tg_app.add_handler(CommandHandler("prompt_vault_refresh", cmd_prompt_vault_refresh))

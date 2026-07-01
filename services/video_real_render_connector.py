@@ -21,6 +21,8 @@ import httpx
 
 from services.multiscene_video_pipeline import ensure_video_output, process_multiscene_video_pipeline, safe_run_ffmpeg
 from services import video_final_output
+from services.video_provider_base import VideoGenerationRequest
+from services.video_provider_router import provider_status_payload, run_provider_generation
 
 
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
@@ -140,8 +142,9 @@ def _provider_order(job: dict | None = None) -> list[str]:
     raw = (
         job.get("provider_order")
         or asset_pack.get("provider_order")
+        or os.environ.get("VIDEO_PROVIDER_CHAIN")
         or os.environ.get("VIDEO_PROVIDER_ORDER")
-        or "shopaikey,key4u,gommo_79ai"
+        or "toanaas_video,key4u_video,shopaikey_video,veo,kling,generic_http"
     )
     if isinstance(raw, (list, tuple)):
         values = raw
@@ -150,68 +153,34 @@ def _provider_order(job: dict | None = None) -> list[str]:
     result = []
     for item in values:
         provider = str(item or "").strip().lower()
-        if provider in {"shopai", "shopaikey"}:
-            provider = "shopaikey"
-        elif provider in {"key4u", "k4u"}:
-            provider = "key4u"
-        elif provider in {"gommo", "79ai", "gommo79ai", "gommo_79ai", "go-mmo"}:
-            provider = "gommo_79ai"
+        if provider in {"shopai", "shopaikey", "shopaikey_video"}:
+            provider = "shopaikey_video"
+        elif provider in {"key4u", "k4u", "key4u_video"}:
+            provider = "key4u_video"
+        elif provider in {"toanaas", "toanaas_video"}:
+            provider = "toanaas_video"
+        elif provider in {"veo", "video_veo"}:
+            provider = "veo"
+        elif provider in {"kling", "video_kling"}:
+            provider = "kling"
+        elif provider in {"generic", "generic_http", "gommo", "79ai", "gommo79ai", "gommo_79ai", "go-mmo"}:
+            provider = "generic_http"
         else:
             continue
         if provider not in result:
             result.append(provider)
-    return result or ["shopaikey", "key4u", "gommo_79ai"]
+    return result or ["toanaas_video", "key4u_video", "shopaikey_video", "veo", "kling", "generic_http"]
 
 
 def real_video_provider_readiness(job: dict | None = None, environ: dict[str, str] | None = None) -> dict:
-    env = environ or os.environ
-    order = _provider_order(job)
-    providers = []
-    shopaikey_url = str(env.get("SHOPAIKEY_VIDEO_URL") or "").strip()
-    if not shopaikey_url:
-        base = str(env.get("SHOPAIKEY_BASE_URL") or "").strip()
-        endpoint = str(env.get("SHOPAIKEY_VIDEO_ENDPOINT") or "/video/generations").strip()
-        shopaikey_url = _join_url(base, endpoint) if base else ""
-    shopaikey_model = str(env.get("SHOPAIKEY_VIDEO_MODEL") or env.get("SHOPAIKEY_VIDEO_MODEL_PRIMARY") or "veo3.1-fast").strip()
-    shopaikey_missing = []
-    if not str(env.get("SHOPAIKEY_API_KEY") or "").strip():
-        shopaikey_missing.append("api_key")
-    if not shopaikey_url:
-        shopaikey_missing.append("video_endpoint")
-    if not shopaikey_model:
-        shopaikey_missing.append("video_model")
-    providers.append({"provider": "shopaikey", "configured": not shopaikey_missing, "missing": shopaikey_missing})
-
-    key4u_missing = []
-    try:
-        from providers.key4u_provider import Key4UProvider
-
-        key4u_configured = bool(Key4UProvider().is_configured())
-    except Exception:
-        key4u_configured = False
-        key4u_missing.append("adapter")
-    if not key4u_configured and "adapter" not in key4u_missing:
-        key4u_missing.append("video_config")
-    providers.append({"provider": "key4u", "configured": key4u_configured, "missing": key4u_missing})
-
-    gommo_missing = []
-    try:
-        from providers.gommo_79ai_provider import Gommo79AIProvider
-
-        gommo_readiness = Gommo79AIProvider(environ=env).readiness()
-        gommo_configured = bool(gommo_readiness.get("ok"))
-        gommo_missing = list(gommo_readiness.get("missing") or [])
-    except Exception:
-        gommo_configured = False
-        gommo_missing = ["adapter"]
-    providers.append({"provider": "gommo_79ai", "configured": gommo_configured, "missing": gommo_missing})
-
-    configured = [item["provider"] for item in providers if item["configured"]]
-    ordered_ready = [provider for provider in order if provider in configured]
+    del job
+    status = provider_status_payload(environ)
+    providers = list(status.get("providers") or [])
+    ordered_ready = list(status.get("ready_provider_order") or [])
     return {
         "ok": bool(ordered_ready),
-        "provider_order": order,
-        "configured_providers": configured,
+        "provider_order": list(status.get("provider_chain") or []),
+        "configured_providers": ordered_ready,
         "ready_provider_order": ordered_ready,
         "providers": providers,
     }
@@ -689,63 +658,68 @@ def _download_output(source: str, destination: str) -> str:
 
 
 async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -> dict:
+    del provider_order
     prompt = _safe_text(getattr(scene, "video_prompt", "") or getattr(scene, "visual_prompt", ""), 1200)
     aspect_ratio = str(getattr(scene, "aspect_ratio", "") or "9:16")
-    errors = []
-    for provider in provider_order:
-        submit = await _submit_provider(provider, prompt, aspect_ratio)
-        if not submit.get("ok") or not submit.get("task_id"):
-            errors.append(f"{provider}:{submit.get('error') or submit.get('status') or 'submit_failed'}")
-            continue
-        task_id = str(submit["task_id"])
-        output_url = str(submit.get("download_url") or "").strip()
-        if output_url:
-            return {
-                "ok": True,
-                "provider": provider,
-                "task_id": task_id,
-                "video_id": str(submit.get("video_id") or task_id),
-                "status": "SUCCESS",
-                "output_path": _download_output(output_url, raw_path),
-                "model": str(submit.get("model") or ""),
-                "mode": str(submit.get("mode") or ""),
-                "duration": submit.get("duration") or 0,
-                "download_url_present": True,
-            }
-        attempts = max(1, _env_int("REAL_VIDEO_POLL_MAX_ATTEMPTS", 24))
-        interval = max(0, _env_int("REAL_VIDEO_POLL_INTERVAL_SECONDS", 25))
-        last = {}
-        for attempt in range(1, attempts + 1):
-            if attempt > 1 and interval:
-                await asyncio.sleep(interval)
-            last = await _poll_provider(provider, task_id, submit)
-            output_url = str(last.get("output_url") or "").strip()
-            status = str(last.get("status") or "").upper()
-            if output_url:
-                return {
-                    "ok": True,
-                    "provider": provider,
-                    "task_id": str(last.get("task_id") or task_id),
-                    "video_id": str(last.get("video_id") or submit.get("video_id") or task_id),
-                    "status": "SUCCESS",
-                    "output_path": _download_output(output_url, raw_path),
-                    "model": str(last.get("model") or submit.get("model") or ""),
-                    "mode": str(last.get("mode") or submit.get("mode") or ""),
-                    "duration": last.get("duration") or submit.get("duration") or 0,
-                    "download_url_present": True,
-                }
-            if status in {"FAILED", "FAIL", "ERROR", "CANCELLED", "CANCELED"}:
-                errors.append(f"{provider}:poll_failed:{status}:{last.get('error') or ''}")
-                break
-        else:
-            errors.append(f"{provider}:poll_timeout:{task_id}")
-    raise RealVideoRenderError(";".join(errors) or REAL_VIDEO_RENDER_UNAVAILABLE)
+    job = getattr(scene, "_toan_aas_job", {}) if hasattr(scene, "_toan_aas_job") else {}
+    product_type = video_final_output.normalize_video_product_type((job or {}).get("product_type") or (job or {}).get("video_flow") or "")
+    route = video_final_output.route_for_product_type(product_type)
+    required_capability = str(route.get("provider_capability") or "text_to_video")
+    request = VideoGenerationRequest(
+        job_id=(
+            str((job or {}).get("id") or (job or {}).get("job_id") or "video_job")
+            + "-"
+            + str(_safe_int(getattr(scene, "scene_id", 0), 0) or 1)
+        ),
+        product_type=product_type or "video_ai_prompt",
+        video_flow_type=str((job or {}).get("video_flow") or product_type or ""),
+        prompt=prompt,
+        negative_prompt=str((job or {}).get("negative_prompt") or ""),
+        scenes=[dict(getattr(scene, "__dict__", {}) or {})],
+        storyboard=_scene_cards(job),
+        image_paths=_local_image_sequence_paths(job),
+        source_video_path=str((job or {}).get("source_video_path") or ""),
+        ratio=aspect_ratio,
+        duration_seconds=float(getattr(scene, "target_duration_sec", 6.0) or 6.0),
+        quality=str((job or {}).get("quality") or ""),
+        style=str((job or {}).get("style") or ""),
+        add_ons=_addon_plan(job),
+        metadata={"scene_id": _safe_int(getattr(scene, "scene_id", 0), 0), "raw_output_path": raw_path},
+        required_capability=required_capability,
+    )
+    output_dir = os.path.dirname(os.path.abspath(raw_path))
+    result = run_provider_generation(request, output_dir=output_dir)
+    if not result.get("ok"):
+        raise RealVideoRenderError(str(result.get("blocker") or result.get("provider_error") or REAL_VIDEO_RENDER_UNAVAILABLE), diagnostics=result)
+    output_path = str(result.get("output_path") or result.get("local_path") or "")
+    if not output_path:
+        raise RealVideoRenderError("provider_result_missing", diagnostics=result)
+    if os.path.abspath(output_path) != os.path.abspath(raw_path):
+        shutil.copyfile(output_path, raw_path)
+        output_path = raw_path
+    return {
+        "ok": True,
+        "provider": str(result.get("provider") or ""),
+        "task_id": str((result.get("provider_task_ids") or [""])[0] or ""),
+        "video_id": str((result.get("provider_video_ids") or [""])[0] or ""),
+        "status": "SUCCESS",
+        "output_path": ensure_video_output(output_path),
+        "model": str(result.get("model") or ""),
+        "mode": str(result.get("mode") or ""),
+        "duration": result.get("duration") or result.get("output_duration") or 0,
+        "download_url_present": bool(result.get("result_url_present")),
+        "artifact_hash": str(result.get("artifact_hash") or ""),
+    }
 
 
 def build_real_scene_renderer(job: dict | None = None, events: list[dict[str, Any]] | None = None):
     provider_order = _provider_order(job)
 
     def _render(scene, raw_path: str):
+        try:
+            setattr(scene, "_toan_aas_job", dict(job or {}))
+        except Exception:
+            pass
         result = asyncio.run(_render_scene_async(scene, raw_path, provider_order))
         if isinstance(events, list) and isinstance(result, dict):
             events.append(
