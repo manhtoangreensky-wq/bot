@@ -118,7 +118,7 @@ def test_prompt_video_without_provider_fails_clean_no_charge(monkeypatch, tmp_pa
     with pytest.raises(connector.RealVideoRenderError) as exc:
         connector.render_real_video_job(_product_job("video_ai_prompt"), str(tmp_path))
 
-    assert str(exc.value) == connector.REAL_VIDEO_RENDER_UNAVAILABLE
+    assert str(exc.value) == "provider_capability_missing"
     assert exc.value.diagnostics["no_charge"] is True
     assert exc.value.diagnostics["provider_attempted"] is False
 

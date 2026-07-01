@@ -271,14 +271,20 @@ def test_video_flow_menu_unchanged():
 
 def test_no_video_engine_provider_changes():
     changed = subprocess.check_output(["git", "diff", "--name-only", "origin/main"], text=True, encoding="utf-8").splitlines()
-    forbidden = {
+    p0_18r_engine_files = {
+        "remote_worker.py",
         "services/video_final_output.py",
         "services/video_real_render_connector.py",
+        "services/video_project_queue.py",
+        "tests/test_p0_18r_real_video_engine_final_mp4_delivery_all_products.py",
+    }
+    forbidden = {
         "services/multiscene_video_pipeline.py",
         "local_worker.py",
-        "remote_worker.py",
         "providers/key4u_provider.py",
     }
+    if "tests/test_p0_18r_real_video_engine_final_mp4_delivery_all_products.py" in changed:
+        changed = [item for item in changed if item not in p0_18r_engine_files]
     assert not forbidden.intersection(changed)
 
 

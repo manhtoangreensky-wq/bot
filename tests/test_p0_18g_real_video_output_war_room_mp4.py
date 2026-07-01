@@ -208,7 +208,9 @@ def test_artifact_exists_before_worker_success(monkeypatch, tmp_path):
     assert completed["result"]["admin_video_delivery"] is False
     assert completed["result"]["visual_classification"] == "partial_simple_video"
     assert completed["result"]["no_charge"] is True
-    assert {int(item[1]) for item in heartbeats if len(item) > 1} >= {5, 20, 80, 95}
+    progress_points = {int(item[1]) for item in heartbeats if len(item) > 1}
+    assert progress_points >= {5, 20, 80, 88, 90}
+    assert 95 not in progress_points
 
 
 def test_no_charge_before_artifact_product_complete_requires_mp4(tmp_path):

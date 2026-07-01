@@ -63072,6 +63072,7 @@ def video_b14_status_step_rows(
     progress: int,
     *,
     has_final_artifact: bool = False,
+    delivery_done: bool = False,
     blocked_reason: str = "",
     visual_classification: str = "",
 ) -> list[tuple[str, str]]:
@@ -63084,7 +63085,7 @@ def video_b14_status_step_rows(
     if status in {"draft", ""}:
         return list(zip(icons, VIDEO_B14_STATUS_STEP_LABELS))
     if status in {"completed", "success"} and has_final_artifact:
-        return list(zip(["✅", "✅", "✅", "✅", "✅"], VIDEO_B14_STATUS_STEP_LABELS))
+        return list(zip(["✅", "✅", "✅", "✅", "✅" if delivery_done else "⏳"], VIDEO_B14_STATUS_STEP_LABELS))
     if failed:
         icons[0] = "✅"
         if progress >= 30 or status in {"processing", "running", "completed", "success"}:
@@ -63115,6 +63116,7 @@ def video_b14_status_steps_text(
     progress: int,
     *,
     has_final_artifact: bool = False,
+    delivery_done: bool = False,
     blocked_reason: str = "",
     visual_classification: str = "",
 ) -> str:
@@ -63122,6 +63124,7 @@ def video_b14_status_steps_text(
         status,
         progress,
         has_final_artifact=has_final_artifact,
+        delivery_done=delivery_done,
         blocked_reason=blocked_reason,
         visual_classification=visual_classification,
     )
@@ -63195,10 +63198,25 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     final_path = str(project.get("final_video_path") or job.get("final_video_path") or "")
     final_file_id = str(project.get("final_video_file_id") or job.get("final_video_file_id") or "")
     has_final_artifact = bool(final_path or final_file_id)
-    if not has_final_artifact and status in {"queued", "queued_for_worker", "processing", "running"} and progress >= 95:
+    legacy_artifact_only_status = bool(has_final_artifact and not project)
+    delivery_done = bool(
+        project.get("video_delivered_at")
+        or project.get("video_delivery_message_id")
+        or project.get("final_video_file_id")
+        or job.get("final_video_file_id")
+        or legacy_artifact_only_status
+    )
+    if not has_final_artifact and progress >= 95:
         progress = 85
-        status_label = "Đang dựng video"
-        stage = "hệ thống đang dựng video"
+        if status in {"failed", "error"}:
+            status_label = "chưa dựng được"
+            stage = "hệ thống chưa dựng được video"
+        elif status in {"completed", "success"}:
+            status_label = "chưa dựng được"
+            stage = "hệ thống chưa có video cuối"
+        else:
+            status_label = "Đang dựng video"
+            stage = "hệ thống đang dựng video"
     error_log = str(project.get("error_log") or job.get("last_error") or "")
     render_mode = video_b14_render_mode_from_job(job, project)
     job_result = video_b14_job_result_payload(job)
@@ -63233,6 +63251,7 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
             status,
             progress,
             has_final_artifact=has_final_artifact,
+            delivery_done=delivery_done,
             blocked_reason=blocked_reason,
             visual_classification=visual_classification,
         ),
@@ -63241,11 +63260,14 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
 
     if visual_classification == "partial_simple_video" or status in {"failed", "error"} or blocked_reason or (status in {"completed", "success"} and not has_final_artifact):
         lines.extend(VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE.splitlines())
-    elif status in {"completed", "success"} and has_final_artifact:
+    elif status in {"completed", "success"} and has_final_artifact and delivery_done:
         lines.extend([
             "✅ Video đã sẵn sàng.",
             "TOAN AAS đã gửi kết quả bên dưới.",
         ])
+    elif status in {"completed", "success"} and has_final_artifact:
+        lines.append("TOAN AAS đang gửi file kết quả cuối.")
+        lines.append("Anh/chị không cần bấm nhiều lần.")
     else:
         lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
         lines.append("Anh/chị không cần bấm nhiều lần.")
@@ -63344,6 +63366,17 @@ def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict
     project = dict(project or {})
     status = str(job.get("status") or project.get("status") or "").strip().lower()
     terminal = str(project.get("video_terminal_state") or "").strip().lower()
+    delivery_done = bool(
+        project.get("video_delivered_at")
+        or project.get("video_delivery_message_id")
+        or project.get("final_video_file_id")
+        or job.get("final_video_file_id")
+        or ((project.get("final_video_path") or job.get("final_video_path")) and not project)
+    )
+    if terminal in {"delivered", "final_delivered"}:
+        return "delivered" if delivery_done else ""
+    if terminal == "telegram_delivery_failed":
+        return terminal
     if terminal in {"delivered", "failed_no_charge", "failed_refunded", "cancelled", "canceled"}:
         return "cancelled" if terminal == "canceled" else terminal
     if status in {"cancelled", "canceled"}:
@@ -63354,17 +63387,18 @@ def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict
     if status in {"failed", "error"} or blocked_reason or visual_classification == "partial_simple_video":
         return "failed_no_charge"
     if status in {"completed", "success"}:
-        return "delivered" if artifact.get("valid") else "failed_no_charge"
+        return "delivered" if artifact.get("valid") and delivery_done else ""
     return ""
 
 
-def video_b14_auto_refresh_stage_from_snapshot(status: str, progress: int, *, terminal_state: str = "", has_final_artifact: bool = False, blocked_reason: str = "", visual_classification: str = "") -> str:
+def video_b14_auto_refresh_stage_from_snapshot(status: str, progress: int, *, terminal_state: str = "", has_final_artifact: bool = False, delivery_done: bool = False, blocked_reason: str = "", visual_classification: str = "") -> str:
     if terminal_state == "delivered":
         return "Gửi kết quả"
     rows = video_b14_status_step_rows(
         status,
         progress,
         has_final_artifact=has_final_artifact,
+        delivery_done=delivery_done,
         blocked_reason=blocked_reason,
         visual_classification=visual_classification,
     )
@@ -63388,6 +63422,12 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
     percent = safe_int(percent_match.group(1) if percent_match else current_job.get("progress_percent"), 0)
     status = str(current_job.get("status") or current_project.get("status") or ("queued" if jid else "draft")).strip().lower()
     artifact = video_b14_auto_refresh_final_artifact_state(current_job, current_project)
+    delivery_done = bool(
+        current_project.get("video_delivered_at")
+        or current_project.get("video_delivery_message_id")
+        or current_project.get("final_video_file_id")
+        or current_job.get("final_video_file_id")
+    )
     blocked_reason = video_b14_product_result_block_reason(current_job, current_project)
     visual_classification = video_b14_result_visual_classification(current_job)
     terminal = video_b14_auto_refresh_terminal_state(current_job, current_project)
@@ -63396,6 +63436,7 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
         percent,
         terminal_state=terminal,
         has_final_artifact=bool(artifact.get("valid")),
+        delivery_done=delivery_done,
         blocked_reason=blocked_reason,
         visual_classification=visual_classification,
     )
@@ -63418,6 +63459,7 @@ def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: 
         "terminal_state": terminal,
         "final_artifact_exists": bool(artifact.get("exists")),
         "final_artifact_valid": bool(artifact.get("valid")),
+        "delivery_done": delivery_done,
         "blocker": blocker,
         "job": current_job,
         "project": current_project,
@@ -169799,6 +169841,19 @@ async def api_worker_complete(request: Request):
                 set_system_setting("remote_worker:last_canary_status", str(job.get("status") or "completed"), "last remote worker canary status", worker_id)
         except Exception:
             logger.warning("remote worker canary complete setting skipped")
+    elif result.get("ok") and not result.get("duplicate"):
+        conn = db_connect()
+        try:
+            video_project_queue.note_video_delivery_result(
+                conn,
+                job_id=job_id,
+                sent=bool(delivery.get("sent")),
+                delivery_message_id=str(delivery.get("telegram_message_id") or ""),
+                success_message_id=str(delivery.get("success_message_id") or delivery.get("telegram_message_id") or ""),
+                reason=str(delivery.get("reason") or delivery.get("delivery_reason") or "telegram_delivery_failed"),
+            )
+        finally:
+            conn.close()
     return {"ok": True, "result": result, "delivery": delivery}
 
 
