@@ -133747,33 +133747,112 @@ async def cmd_trend_source_add(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("<pre>" + html.escape(json.dumps(result, ensure_ascii=False, indent=2)) + "</pre>", parse_mode="HTML")
 
 
-async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin. Người dùng public không thấy URL, cURL hoặc lỗi provider.")
-    status = video_provider_router.provider_status_payload()
+def video_provider_status_text(status: dict | None = None) -> str:
+    status = dict(status or video_provider_router.provider_status_payload())
+    providers = list(status.get("providers") or [])
+    missing_env = dict(status.get("missing_env") or {})
     lines = [
-        "🎬 <b>Video Provider Status</b>",
+        "🎬 <b>Trạng thái nhà cung cấp video</b>",
         "",
-        f"• Chain: <code>{html.escape(', '.join(status.get('provider_chain') or []))}</code>",
-        f"• Ready: <code>{html.escape(', '.join(status.get('ready_provider_order') or []) or 'none')}</code>",
+        f"• Sẵn sàng: <code>{'có' if status.get('ready') or status.get('ok') else 'không'}</code>",
+        f"• Lý do: <code>{html.escape(str(status.get('summary_reason') or status.get('reason') or '-'))}</code>",
+        f"• Provider đầu tiên: <code>{html.escape(str(status.get('first_ready_provider') or '-'))}</code>",
+        f"• Provider đang bật: <code>{int(status.get('enabled_count') or 0)}</code>",
+        f"• Provider đủ cấu hình: <code>{int(status.get('configured_count') or 0)}</code>",
+        f"• Provider gần đủ cấu hình: <code>{html.escape(', '.join(status.get('near_ready_providers') or []) or '-')}</code>",
         "",
-        "Providers:",
+        "Thiếu biến:",
     ]
-    for provider in status.get("providers") or []:
+    if missing_env:
+        for provider_name, missing in missing_env.items():
+            lines.append(f"• <code>{html.escape(str(provider_name))}</code>: <code>{html.escape(', '.join(str(item) for item in missing) or '-')}</code>")
+    else:
+        lines.append("• <code>-</code>")
+    lines.extend(["", "Providers:"])
+    for provider in providers:
         lines.append(
             "• "
             f"<code>{html.escape(str(provider.get('provider') or '-'))}</code> "
             f"enabled=<code>{'yes' if provider.get('enabled') else 'no'}</code> "
             f"configured=<code>{'yes' if provider.get('configured') else 'no'}</code> "
-            f"endpoint=<code>{'yes' if provider.get('endpoint_configured') else 'no'}</code> "
-            f"model=<code>{'yes' if provider.get('model_configured') else 'no'}</code> "
-            f"auth=<code>{'yes' if provider.get('auth_configured') else 'no'}</code> "
+            f"endpoint=<code>{'yes' if provider.get('endpoint_present') else 'no'}</code> "
+            f"submit=<code>{'yes' if provider.get('submit_url_present') else 'no'}</code> "
+            f"poll=<code>{'yes' if provider.get('poll_url_present') else 'no'}</code> "
+            f"auth=<code>{'yes' if provider.get('auth_present') else 'no'}</code> "
+            f"model=<code>{'yes' if provider.get('model_present') else 'no'}</code> "
             f"caps=<code>{html.escape(','.join(str(item) for item in (provider.get('capabilities') or [])) or '-')}</code> "
             f"missing=<code>{html.escape(','.join(str(item) for item in (provider.get('missing') or [])) or '-')}</code>"
         )
     lines.append("")
     lines.append("Nếu không có provider phù hợp, video product phải fail sạch với provider_capability_missing và chưa trừ Xu.")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    return "\n".join(lines)
+
+
+def video_provider_setup_text(status: dict | None = None) -> str:
+    status = dict(status or video_provider_router.provider_status_payload())
+    missing_env = dict(status.get("missing_env") or {})
+    missing_lines = []
+    for provider_name, missing in missing_env.items():
+        missing_lines.append(f"- {provider_name}: {', '.join(str(item) for item in missing) or '-'}")
+    if not missing_lines:
+        missing_lines.append("- -")
+    lines = [
+        "🎬 <b>Cấu hình nhà cung cấp dựng video</b>",
+        "",
+        "Trạng thái:",
+        f"- Sẵn sàng: {'có' if status.get('ready') or status.get('ok') else 'không'}",
+        f"- Provider đang bật: {int(status.get('enabled_count') or 0)}",
+        f"- Provider có endpoint: {int(status.get('configured_count') or 0)}",
+        "- Provider thiếu biến:",
+        *missing_lines,
+        "",
+        "Recommended Railway variables:",
+        "",
+        "A. TOAN AAS generic backend:",
+        "VIDEO_TOANAAS_ENABLED=true",
+        "VIDEO_TOANAAS_SUBMIT_URL=&lt;submit_url&gt;",
+        "VIDEO_TOANAAS_POLL_URL=&lt;poll_url&gt;",
+        "VIDEO_TOANAAS_AUTH_HEADER_NAME=Authorization",
+        "VIDEO_TOANAAS_AUTH_HEADER_VALUE=&lt;token&gt;",
+        "",
+        "B. ShopAIKey video:",
+        "SHOPAIKEY_VIDEO_ENABLED=true",
+        "SHOPAIKEY_VIDEO_SUBMIT_URL=&lt;submit_url&gt;",
+        "SHOPAIKEY_VIDEO_POLL_URL=&lt;poll_url&gt;",
+        "SHOPAIKEY_VIDEO_AUTH_HEADER_NAME=Authorization",
+        "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE=&lt;token&gt;",
+        "",
+        "C. Key4U video:",
+        "KEY4U_VIDEO_ENABLED=true",
+        "KEY4U_VIDEO_SUBMIT_URL=&lt;submit_url&gt;",
+        "KEY4U_VIDEO_POLL_URL=&lt;poll_url&gt;",
+        "KEY4U_VIDEO_AUTH_HEADER_NAME=Authorization",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE=&lt;token&gt;",
+        "",
+        "D. Generic HTTP:",
+        "VIDEO_GENERIC_HTTP_ENABLED=true",
+        "VIDEO_GENERIC_HTTP_SUBMIT_URL=&lt;submit_url&gt;",
+        "VIDEO_GENERIC_HTTP_POLL_URL=&lt;poll_url&gt;",
+        "VIDEO_GENERIC_HTTP_AUTH_HEADER_NAME=Authorization",
+        "VIDEO_GENERIC_HTTP_AUTH_HEADER_VALUE=&lt;token&gt;",
+        "VIDEO_GENERIC_HTTP_RESULT_FIELD=result_url",
+        "",
+        "Ghi chú: lệnh này không hiện token thật và không gọi provider.",
+    ]
+    return "\n".join(lines)
+
+
+async def cmd_video_provider_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    await update.message.reply_text(video_provider_setup_text(), parse_mode="HTML")
+
+
+async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin. Người dùng public không thấy URL, cURL hoặc lỗi provider.")
+    status = video_provider_router.provider_status_payload()
+    await update.message.reply_text(video_provider_status_text(status), parse_mode="HTML")
 
 
 async def cmd_video_provider_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169625,6 +169704,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_factory_flow", cmd_video_factory_flow))
     tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
     tg_app.add_handler(CommandHandler("video_provider_audit", cmd_video_provider_audit))
+    tg_app.add_handler(CommandHandler("video_provider_setup", cmd_video_provider_setup))
     tg_app.add_handler(CommandHandler("video_provider_curl", cmd_video_provider_curl))
     tg_app.add_handler(CommandHandler("prompt_vault_status", cmd_prompt_vault_status))
     tg_app.add_handler(CommandHandler("prompt_vault_refresh", cmd_prompt_vault_refresh))

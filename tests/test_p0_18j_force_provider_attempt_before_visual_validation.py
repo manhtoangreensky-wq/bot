@@ -298,13 +298,10 @@ def test_no_raw_prompt_subtitle_preserved(monkeypatch, tmp_path):
 
 
 def test_no_charge_without_final_ai_video(monkeypatch, tmp_path):
-    output = tmp_path / "partial.mp4"
     monkeypatch.setattr(connector, "real_video_provider_readiness", lambda *_args, **_kwargs: {"ok": False, "ready_provider_order": [], "providers": []})
-    monkeypatch.setattr(
-        connector,
-        "process_multiscene_video_pipeline",
-        lambda **kwargs: {"ok": True, "final_video_path": _write_mp4(output), "scene_count": kwargs["max_scenes"]},
-    )
-    result = connector.render_real_video_job(_product_job(), str(tmp_path))
-    assert result["visual_classification"] == connector.PARTIAL_SIMPLE_VIDEO
-    assert result["no_charge"] is True
+    with pytest.raises(connector.RealVideoRenderError) as exc_info:
+        connector.render_real_video_job(_product_job(), str(tmp_path))
+    diagnostics = exc_info.value.diagnostics
+    assert diagnostics["blocker"] == "provider_capability_missing"
+    assert diagnostics["provider_attempted"] is False
+    assert diagnostics["no_charge"] is True

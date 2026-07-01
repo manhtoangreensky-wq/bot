@@ -110,11 +110,15 @@ class GenericHttpVideoProvider:
     def capabilities(self) -> dict[str, Any]:
         missing = []
         name, value = self._auth_header()
+        submit_url_present = bool(self._submit_url())
+        poll_url_present = bool(self._poll_url())
+        auth_present = bool(name and value)
+        model_present = bool(str(self.env.get(self.model_env) or "").strip())
         if not self._enabled():
             missing.append(self.enabled_env)
-        if not self._submit_url():
+        if not submit_url_present:
             missing.append(self.submit_url_env)
-        if not self._poll_url():
+        if not poll_url_present:
             missing.append(self.poll_url_env)
         if not name:
             missing.append(self.auth_header_name_env)
@@ -126,9 +130,14 @@ class GenericHttpVideoProvider:
             "configured": not missing,
             "missing": missing,
             "capabilities": self._capability_list(),
-            "endpoint_configured": bool(self._submit_url() and self._poll_url()),
-            "model_configured": bool(str(self.env.get(self.model_env) or "").strip()),
-            "auth_configured": bool(name and value),
+            "endpoint_configured": bool(submit_url_present and poll_url_present),
+            "submit_url_present": submit_url_present,
+            "poll_url_present": poll_url_present,
+            "endpoint_present": bool(submit_url_present or poll_url_present),
+            "model_configured": model_present,
+            "model_present": model_present,
+            "auth_configured": auth_present,
+            "auth_present": auth_present,
         }
 
     def _headers(self) -> dict[str, str]:
