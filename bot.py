@@ -6209,6 +6209,82 @@ def progress_product_type_is_music(product_type: str = "", job_id: str = "") -> 
     return canonical in {"music_bg", "music_song"} or progress_job_id_is_music(job_id)
 
 
+MUSIC_PANEL_CREATOR_TRACES: dict[str, dict] = {}
+
+
+def music_panel_missing_job_public_text(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "⚠️ TOAN AAS could not create the music task right now. The system has not charged Xu. Please try again."
+    return "⚠️ TOAN AAS chưa tạo được tác vụ nhạc lúc này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại."
+
+
+def record_music_panel_creator_trace(
+    job_id: str = "",
+    *,
+    product_type: str = "",
+    source: str = "",
+    route: str = "",
+    callback_data: str = "",
+    chat_id="",
+    message_id="",
+    real_job_created_before_panel: bool | None = None,
+    blocked: bool = False,
+    reason: str = "",
+) -> dict:
+    safe_job = str(job_id or "").strip()
+    if not safe_job:
+        return {}
+    current = dict(MUSIC_PANEL_CREATOR_TRACES.get(safe_job) or {})
+    current.update({
+        "job_id": safe_job,
+        "product_type": product_progress_status.normalize_product_type(product_type or current.get("product_type") or "music_bg"),
+        "source": str(source or current.get("source") or ""),
+        "route": str(route or current.get("route") or ""),
+        "callback_data": str(callback_data or current.get("callback_data") or ""),
+        "chat_id": str(chat_id or current.get("chat_id") or ""),
+        "message_id": str(message_id or current.get("message_id") or ""),
+        "blocked": bool(blocked),
+        "reason": str(reason or current.get("reason") or ""),
+        "updated_at": now_text(),
+    })
+    if real_job_created_before_panel is not None:
+        current["real_job_created_before_panel"] = bool(real_job_created_before_panel)
+    MUSIC_PANEL_CREATOR_TRACES[safe_job] = current
+    return dict(current)
+
+
+def music_panel_creator_trace(job_id: str = "") -> dict:
+    return dict(MUSIC_PANEL_CREATOR_TRACES.get(str(job_id or "").strip()) or {})
+
+
+def music_progress_job_lookup_found(job_id: str = "", job: dict | None = None) -> bool:
+    current = dict(job or {})
+    if not current:
+        return False
+    internal = str(current.get("internal_job_id") or current.get("job_id") or "").strip()
+    wanted = str(job_id or "").strip()
+    if wanted and internal and internal != wanted:
+        return False
+    return True
+
+
+def music_progress_panel_job_is_real(job_id: str = "", job: dict | None = None) -> bool:
+    current = dict(job or {})
+    if not music_progress_job_lookup_found(job_id, current):
+        return False
+    if not str(current.get("user_id") or "").strip():
+        return False
+    if not str(current.get("chat_id") or "").strip():
+        return False
+    if not current.get("persist_helper_called") and not current.get("created_before_provider_submit") and not current.get("provider_submit_called") and not music_job_provider_task_id(current):
+        return False
+    return True
+
+
+def music_progress_missing_job_status_text(job_id: str = "", lang: str = "vi") -> str:
+    return music_panel_missing_job_public_text(lang)
+
+
 def product_progress_state_from_job(product_type: str = "", job: dict | None = None) -> dict:
     current = dict(job or {})
     resolved = resolve_progress_product_type(current.get("internal_job_id") or current.get("job_id") or "", product_type, current)
@@ -6217,8 +6293,19 @@ def product_progress_state_from_job(product_type: str = "", job: dict | None = N
 
 def product_progress_status_from_job_text(product_type: str = "", job: dict | None = None, job_id: str = "", lang: str = "vi") -> str:
     current = dict(job or {})
-    state = product_progress_state_from_job(product_type, current)
     public_id = job_id or current.get("internal_job_id") or current.get("job_id") or current.get("id") or current.get("provider_task_id") or ""
+    if progress_product_type_is_music(product_type, public_id) and not music_progress_job_lookup_found(public_id, current):
+        record_music_panel_creator_trace(
+            str(public_id or job_id or ""),
+            product_type=product_type,
+            source="product_progress_status_from_job_text",
+            callback_data=product_progress_status.product_progress_update_callback(product_type, public_id),
+            real_job_created_before_panel=False,
+            blocked=True,
+            reason="missing_real_music_job",
+        )
+        return music_progress_missing_job_status_text(str(public_id or job_id or ""), lang)
+    state = product_progress_state_from_job(product_type, current)
     return product_progress_status_text(
         state.get("product_type") or product_type,
         str(public_id or ""),
@@ -6663,12 +6750,59 @@ async def send_product_progress_message(
     user_id=0,
     start_task: bool = True,
 ):
+    canonical = product_progress_status.normalize_product_type(product_type)
+    if progress_product_type_is_music(canonical, job_id):
+        persisted_job = get_engine_async_job(job_id)
+        if not music_progress_panel_job_is_real(job_id, persisted_job):
+            record_music_panel_creator_trace(
+                job_id,
+                product_type=canonical,
+                source="send_product_progress_message",
+                callback_data=product_progress_status.product_progress_update_callback(canonical, job_id),
+                real_job_created_before_panel=False,
+                blocked=True,
+                reason="missing_real_music_job",
+            )
+            logger.warning("blocked fake music progress panel | product=%s | job=%s", sanitize_log_text(canonical)[:40], sanitize_log_text(str(job_id or ""))[:80])
+            return await message.reply_text(
+                music_panel_missing_job_public_text(lang),
+                parse_mode="HTML",
+            )
     sent = await message.reply_text(
-        product_progress_status_text(product_type, job_id, current_stage, percent, terminal_state, public_note, lang),
+        product_progress_status_text(canonical, job_id, current_stage, percent, terminal_state, public_note, lang),
         parse_mode="HTML",
-        reply_markup=product_progress_status_keyboard(product_type, job_id, lang),
+        reply_markup=product_progress_status_keyboard(canonical, job_id, lang),
     )
-    progress_auto_refresh_register_message(sent, context, product_type=product_type, job_id=job_id, user_id=user_id, lang=lang, start_task=start_task)
+    if progress_product_type_is_music(canonical, job_id):
+        panel_chat_id = getattr(sent, "chat_id", None) or getattr(message, "chat_id", "")
+        panel_message_id = getattr(sent, "message_id", "")
+        trace = record_music_panel_creator_trace(
+            job_id,
+            product_type=canonical,
+            source="send_product_progress_message",
+            route="send_product_progress_message",
+            callback_data=product_progress_status.product_progress_update_callback(canonical, job_id),
+            chat_id=panel_chat_id,
+            message_id=panel_message_id,
+            real_job_created_before_panel=True,
+            blocked=False,
+        )
+        try:
+            persisted_job = get_engine_async_job(job_id)
+            if persisted_job:
+                persisted_job.update({
+                    "panel_created_by": str(persisted_job.get("panel_created_by") or "send_product_progress_message"),
+                    "panel_created_at": str(persisted_job.get("panel_created_at") or trace.get("updated_at") or now_text()),
+                    "panel_chat_id": str(panel_chat_id or ""),
+                    "panel_message_id": str(panel_message_id or ""),
+                    "panel_route": str(persisted_job.get("panel_route") or "send_product_progress_message"),
+                    "panel_callback_data": str(product_progress_status.product_progress_update_callback(canonical, job_id)),
+                    "real_job_created_before_panel": True,
+                })
+                save_engine_async_job(persisted_job)
+        except Exception as exc:
+            logger.warning("music panel trace persist failed | job=%s | %s", sanitize_log_text(str(job_id or ""))[:80], sanitize_log_text(str(exc))[:180])
+    progress_auto_refresh_register_message(sent, context, product_type=canonical, job_id=job_id, user_id=user_id, lang=lang, start_task=start_task)
     return sent
 
 
@@ -6679,6 +6813,25 @@ def progress_auto_refresh_status_text(job_id: str = "") -> str:
         for record in PROGRESS_AUTO_REFRESH_JOBS.values()
         if not wanted or wanted in {str(record.get("job_id") or ""), str(record.get("key") or "")}
     ]
+    if not records and wanted and progress_job_id_is_music(wanted):
+        job = get_engine_async_job(wanted)
+        if job and str(job.get("progress_chat_id") or job.get("panel_chat_id") or "").strip() and str(job.get("progress_message_id") or job.get("panel_message_id") or "").strip():
+            product_type = music_job_product_type(job, "music_bg")
+            restored = progress_auto_refresh_register(
+                product_type=product_type,
+                job_id=wanted,
+                chat_id=str(job.get("progress_chat_id") or job.get("panel_chat_id") or ""),
+                message_id=str(job.get("progress_message_id") or job.get("panel_message_id") or ""),
+                user_id=str(job.get("user_id") or ""),
+                lang="vi",
+                initial_snapshot=progress_auto_refresh_snapshot(product_type, wanted, job=job, lang="vi"),
+                start_task=False,
+            )
+            if restored:
+                restored["scheduler_mode"] = str(restored.get("scheduler_mode") or "restored_read_only")
+                restored["restored_from_job"] = True
+                PROGRESS_AUTO_REFRESH_JOBS[str(restored.get("key") or progress_auto_refresh_key(product_type, wanted))] = dict(restored)
+                records = [dict(restored)]
     if not records:
         return "📊 <b>Auto refresh</b>\n\nKhông có bảng trạng thái auto-refresh đang được lưu.\n• reason: <code>no_registry_after_restart</code>"
     lines = ["📊 <b>Auto refresh</b>", ""]
@@ -6727,6 +6880,21 @@ def product_progress_matrix_text() -> str:
 
 def product_progress_debug_text(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
     resolved_type = resolve_progress_product_type(job_id, product_type, job)
+    if progress_product_type_is_music(resolved_type, job_id) and job_id and not music_progress_job_lookup_found(job_id, job):
+        trace = music_panel_creator_trace(job_id)
+        auto = progress_auto_refresh_status_text(job_id)
+        return (
+            "📊 <b>TOAN AAS progress status</b>\n\n"
+            f"• Product: <code>{html.escape(str(product_progress_status.normalize_product_type(resolved_type) or '-'))}</code>\n"
+            f"• Code: <code>{html.escape(str(product_progress_status.product_progress_public_job_code(job_id) or '-'))}</code>\n"
+            "• lookup_found: <code>no</code>\n"
+            "• synthetic_status_used: <code>no</code>\n"
+            "• warning: <code>progress_status_without_real_music_job</code>\n"
+            f"• source: <code>{html.escape(str(trace.get('source') or 'progress_status_debug_missing_job_guard'))}</code>\n"
+            f"• blocked_reason: <code>{html.escape(str(trace.get('reason') or 'missing_real_music_job'))}</code>\n"
+            f"• Callback: <code>{html.escape(str(product_progress_status.product_progress_update_callback(resolved_type, job_id)))}</code>\n\n"
+            + auto
+        )
     payload = product_progress_status.product_progress_debug_payload(resolved_type, job_id, job)
     auto = progress_auto_refresh_status_text(job_id)
     return (
@@ -6767,7 +6935,9 @@ async def cmd_progress_auto_refresh_status(update: Update, context: ContextTypes
 
 def music_job_debug_text(job_id: str = "") -> str:
     job = get_engine_async_job(job_id) if job_id else {}
-    product_type = music_job_product_type(job, "music_bg")
+    trace = music_panel_creator_trace(job_id)
+    lookup_found = music_progress_job_lookup_found(job_id, job)
+    product_type = music_job_product_type(job, str(trace.get("product_type") or "music_bg"))
     state = product_progress_state_from_job(product_type, job)
     lifecycle = dict(state.get("music_lifecycle") or {})
     auto_record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(progress_auto_refresh_key(product_type, job_id)) or {})
@@ -6795,12 +6965,18 @@ def music_job_debug_text(job_id: str = "") -> str:
     return (
         "🎵 <b>Music job debug</b>\n\n"
         f"• music_job_id: <code>{html.escape(str(job_id or '-'))}</code>\n"
+        f"• lookup_found: <code>{'yes' if lookup_found else 'no'}</code>\n"
         f"• user_id/chat_id: <code>{html.escape(str((job or {}).get('user_id') or '-'))}/{html.escape(str((job or {}).get('chat_id') or '-'))}</code>\n"
         f"• confirm_route: <code>{html.escape(str((job or {}).get('confirm_route') or '-'))}</code>\n"
         f"• confirm_callback_data: <code>{html.escape(str((job or {}).get('confirm_callback_data') or '-'))}</code>\n"
         f"• confirm_handler_name: <code>{html.escape(str((job or {}).get('confirm_handler_name') or '-'))}</code>\n"
         f"• persist_helper_called: <code>{'yes' if (job or {}).get('persist_helper_called') else 'no'}</code>\n"
-        f"• panel_created_by: <code>{html.escape(str((job or {}).get('panel_created_by') or '-'))}</code>\n"
+        f"• panel_created_by: <code>{html.escape(str((job or {}).get('panel_created_by') or trace.get('source') or '-'))}</code>\n"
+        f"• panel_created_at: <code>{html.escape(str((job or {}).get('panel_created_at') or trace.get('updated_at') or '-'))}</code>\n"
+        f"• panel_chat_id/message_id: <code>{html.escape(str((job or {}).get('panel_chat_id') or trace.get('chat_id') or '-'))}/{html.escape(str((job or {}).get('panel_message_id') or trace.get('message_id') or '-'))}</code>\n"
+        f"• panel_route: <code>{html.escape(str((job or {}).get('panel_route') or trace.get('route') or '-'))}</code>\n"
+        f"• panel_callback_data: <code>{html.escape(str((job or {}).get('panel_callback_data') or trace.get('callback_data') or '-'))}</code>\n"
+        f"• real_job_created_before_panel: <code>{'yes' if (job or {}).get('real_job_created_before_panel') or trace.get('real_job_created_before_panel') else 'no'}</code>\n"
         f"• provider_job_id: <code>{html.escape(mask_provider_task_id(provider_task_id) if provider_task_id else '-')}</code>\n"
         f"• product_type: <code>{html.escape(str(state.get('product_type') or '-'))}</code>\n"
         f"• current_stage: <code>{html.escape(str(state.get('current_stage') or '-'))}</code>\n"
@@ -6853,6 +7029,121 @@ async def cmd_music_confirm_route_audit(update: Update, context: ContextTypes.DE
     if not is_admin_user(update.effective_user.id if update.effective_user else 0):
         return
     return await update.message.reply_text(music_confirm_route_audit_text(), parse_mode="HTML")
+
+
+def music_panel_creator_audit_entries() -> list[dict]:
+    return [
+        {
+            "name": "engine_async_job_id(feature=music_suno)",
+            "creates_mus_id": "yes",
+            "sends_panel": "no",
+            "synthetic_status": "no",
+            "persists_real_job": "no",
+            "saves_registry": "no",
+            "provider_submit": "no",
+            "state": "id_generator_only",
+        },
+        {
+            "name": "create_music_pending_submit_job",
+            "creates_mus_id": "yes",
+            "sends_panel": "no",
+            "synthetic_status": "no",
+            "persists_real_job": "yes",
+            "saves_registry": "no",
+            "provider_submit": "no",
+            "state": "real_confirm_helper",
+        },
+        {
+            "name": "handle_music_product_confirm",
+            "creates_mus_id": "via create_music_pending_submit_job",
+            "sends_panel": "yes",
+            "synthetic_status": "no",
+            "persists_real_job": "yes_before_panel",
+            "saves_registry": "yes_after_message_id",
+            "provider_submit": "yes_after_final_confirm",
+            "state": "active_real_path",
+        },
+        {
+            "name": "send_product_progress_message",
+            "creates_mus_id": "no",
+            "sends_panel": "yes_guarded",
+            "synthetic_status": "no",
+            "persists_real_job": "requires_existing_job",
+            "saves_registry": "yes_after_send",
+            "provider_submit": "no",
+            "state": "fake_panel_blocked",
+        },
+        {
+            "name": "handle_product_progress_callback",
+            "creates_mus_id": "no",
+            "sends_panel": "edit_existing_only",
+            "synthetic_status": "blocked_when_missing_job",
+            "persists_real_job": "requires_existing_job",
+            "saves_registry": "only_when_job_exists",
+            "provider_submit": "no",
+            "state": "read_only_status",
+        },
+        {
+            "name": "product_progress_status_from_job_text",
+            "creates_mus_id": "no",
+            "sends_panel": "renderer_only",
+            "synthetic_status": "blocked_for_missing_music_job",
+            "persists_real_job": "no",
+            "saves_registry": "no",
+            "provider_submit": "no",
+            "state": "renderer_guarded",
+        },
+        {
+            "name": "product_progress_debug_text",
+            "creates_mus_id": "no",
+            "sends_panel": "debug_only",
+            "synthetic_status": "flags_missing_music_job",
+            "persists_real_job": "no",
+            "saves_registry": "no",
+            "provider_submit": "no",
+            "state": "read_only_debug",
+        },
+        {
+            "name": "create_music_suno_async_job",
+            "creates_mus_id": "yes",
+            "sends_panel": "no",
+            "synthetic_status": "no",
+            "persists_real_job": "yes_with_provider_job_id",
+            "saves_registry": "no",
+            "provider_submit": "no",
+            "state": "legacy_recovery_or_smoke_persist",
+        },
+    ]
+
+
+def music_panel_creator_audit_text() -> str:
+    lines = ["🎵 <b>Music panel creator audit</b>", ""]
+    for item in music_panel_creator_audit_entries():
+        lines.append(f"• function: <code>{html.escape(str(item.get('name') or '-'))}</code>")
+        lines.append(f"  creates_mus_id: <code>{html.escape(str(item.get('creates_mus_id') or '-'))}</code>")
+        lines.append(f"  sends_panel: <code>{html.escape(str(item.get('sends_panel') or '-'))}</code>")
+        lines.append(f"  synthetic_status: <code>{html.escape(str(item.get('synthetic_status') or '-'))}</code>")
+        lines.append(f"  persists_real_job: <code>{html.escape(str(item.get('persists_real_job') or '-'))}</code>")
+        lines.append(f"  saves_registry: <code>{html.escape(str(item.get('saves_registry') or '-'))}</code>")
+        lines.append(f"  provider_submit: <code>{html.escape(str(item.get('provider_submit') or '-'))}</code>")
+        lines.append(f"  state: <code>{html.escape(str(item.get('state') or '-'))}</code>")
+    if MUSIC_PANEL_CREATOR_TRACES:
+        lines.append("")
+        lines.append("Recent traces:")
+        for job_id, trace in list(MUSIC_PANEL_CREATOR_TRACES.items())[-10:]:
+            lines.append(
+                f"• <code>{html.escape(str(job_id))}</code>: "
+                f"source=<code>{html.escape(str(trace.get('source') or '-'))}</code> "
+                f"blocked=<code>{'yes' if trace.get('blocked') else 'no'}</code> "
+                f"reason=<code>{html.escape(str(trace.get('reason') or '-'))}</code>"
+            )
+    return "\n".join(lines)
+
+
+async def cmd_music_panel_creator_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(music_panel_creator_audit_text(), parse_mode="HTML")
 
 
 async def cmd_product_job_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6944,6 +7235,21 @@ async def handle_product_progress_callback(update: Update, context: ContextTypes
             lang=lang,
         )
         job = dict(delivered.get("job") or get_engine_async_job(job_id) or job)
+        if not music_progress_job_lookup_found(job_id, job):
+            record_music_panel_creator_trace(
+                job_id,
+                product_type=canonical,
+                source="handle_product_progress_callback",
+                callback_data=str(query.data or product_progress_status.product_progress_update_callback(canonical, job_id)),
+                real_job_created_before_panel=False,
+                blocked=True,
+                reason="missing_real_music_job",
+            )
+            return await safe_edit_or_send(
+                query,
+                music_panel_missing_job_public_text(lang),
+                parse_mode="HTML",
+            )
     if not job and canonical == "frame_video":
         job = frame_video_job_for_user(job_id, query.from_user.id if getattr(query, "from_user", None) else 0)
     text = product_progress_status_from_job_text(canonical, job, job_id, lang)
@@ -95605,6 +95911,9 @@ def create_music_pending_submit_job(
         "persist_helper_called": True,
         "persist_helper_called_at": now_text(),
         "panel_created_by": str(panel_created_by or "handle_music_product_confirm"),
+        "panel_route": str(confirm_route or ""),
+        "panel_callback_data": str(product_progress_status.product_progress_update_callback(product_type, internal_job_id)),
+        "real_job_created_before_panel": True,
         "provider_submit_called": False,
         "provider_submit_attempt_count": 0,
         "output_bytes": 0,
@@ -99832,6 +100141,12 @@ async def handle_music_product_confirm(
     music_job.update({
         "progress_chat_id": str(progress_chat_id or ""),
         "progress_message_id": str(progress_message_id or ""),
+        "panel_chat_id": str(progress_chat_id or ""),
+        "panel_message_id": str(progress_message_id or ""),
+        "panel_created_at": str(music_job.get("panel_created_at") or now_text()),
+        "panel_route": str(music_job.get("panel_route") or resolved_confirm_route),
+        "panel_callback_data": str(product_progress_status.product_progress_update_callback(product_type, internal_job_id)),
+        "real_job_created_before_panel": True,
         "progress_registry_saved": True,
         "progress_registry_key": progress_auto_refresh_key(product_type, internal_job_id),
         "progress_panel_sent_at": now_text(),
@@ -101705,6 +102020,21 @@ async def handle_music_quick_callback(update: Update, context: ContextTypes.DEFA
                 parse_mode="HTML",
                 reply_markup=product_progress_status_keyboard(product_type, internal_job_id, lang),
             )
+        record_music_panel_creator_trace(
+            str(result.get("music_task_id") or ""),
+            product_type=music_product_progress_type(result),
+            source="music_ai_status_legacy_recovery",
+            route=str(raw_callback or canonical_callback or ""),
+            callback_data=str(raw_callback or canonical_callback or ""),
+            real_job_created_before_panel=False,
+            blocked=True,
+            reason="legacy_status_missing_internal_job",
+        )
+        return await query.message.reply_text(
+            music_panel_missing_job_public_text(lang),
+            parse_mode="HTML",
+            reply_markup=music_hub_keyboard(lang, ctx),
+        )
         polled = await poll_music_generation_job(result, updated_by=user_id)
         output_url = str(polled.get("output_url") or "")
         if polled.get("ok") and output_url:
@@ -165758,6 +166088,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("product_job_status", cmd_product_job_status))
     tg_app.add_handler(CommandHandler("music_job_debug", cmd_music_job_debug))
     tg_app.add_handler(CommandHandler("music_confirm_route_audit", cmd_music_confirm_route_audit))
+    tg_app.add_handler(CommandHandler("music_panel_creator_audit", cmd_music_panel_creator_audit))
     tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
     tg_app.add_handler(CommandHandler("dubbing_help", cmd_dubbing_help))
     tg_app.add_handler(CommandHandler("story_video_factory", cmd_story_video_factory))
