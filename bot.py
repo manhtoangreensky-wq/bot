@@ -5256,12 +5256,17 @@ PROGRESS_AUTO_REFRESH_MAX_UPDATES = max(1, env_int("PROGRESS_AUTO_REFRESH_MAX_UP
 PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL = env_flag("PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL", "true")
 PROGRESS_AUTO_REFRESH_EDIT_ONLY = env_flag("PROGRESS_AUTO_REFRESH_EDIT_ONLY", "true")
 PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT = max(0, env_int("PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT", 5))
+VIDEO_STATUS_AUTO_REFRESH_ENABLED = env_flag("VIDEO_STATUS_AUTO_REFRESH_ENABLED", "true")
+VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS = max(10, min(20, env_int("VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS", 15)))
+VIDEO_STATUS_AUTO_REFRESH_MAX_UPDATES = max(1, env_int("VIDEO_STATUS_AUTO_REFRESH_MAX_UPDATES", 30))
 MUSIC_AUTO_DELIVERY_ENABLED = env_flag("MUSIC_AUTO_DELIVERY_ENABLED", "true")
 MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS = max(5, env_int("MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS", 20))
 MUSIC_AUTO_DELIVERY_MAX_POLLS = max(1, env_int("MUSIC_AUTO_DELIVERY_MAX_POLLS", 30))
 MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL = env_flag("MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL", "true")
 PROGRESS_AUTO_REFRESH_JOBS: dict[str, dict] = {}
 PROGRESS_AUTO_REFRESH_TASKS: dict[str, asyncio.Task] = {}
+VIDEO_STATUS_AUTO_REFRESH_JOBS: dict[str, dict] = {}
+VIDEO_STATUS_AUTO_REFRESH_TASKS: dict[str, asyncio.Task] = {}
 ENGINE_ASYNC_JOB_FEATURE_PREFIX = {
     "music_suno": "MUS",
     "music_song": "MUS",
@@ -58035,6 +58040,7 @@ def video_ui_audit_payload() -> dict:
         and "⬜ Kiểm tra file" in status_text
         and "⬜ Gửi kết quả" in status_text
     )
+    callback_source = inspect.getsource(handle_video_product_callback)
     checks = [
         {
             "name": "status_panel_compact_public_copy",
@@ -58079,6 +58085,8 @@ def video_ui_audit_payload() -> dict:
         },
         {"name": "no_BACK_text_in_back_button_label", "ok": all("BACK" not in label for row in (status_rows + option_rows) for label in row)},
         {"name": "flow_locked", "ok": bool(status_rows and status_rows[0] == ["🔄 Cập nhật trạng thái", "🧾 Xem hóa đơn"] and first_option_row == ["1", "2", "3", "4", "5"])},
+        {"name": "video_auto_refresh_registered", "ok": "video_b14_send_or_edit_status_panel" in callback_source and "video_b14_auto_refresh_register_message" in inspect.getsource(video_b14_send_or_edit_status_panel)},
+        {"name": "video_auto_refresh_debug_command", "ok": "cmd_video_progress_auto_refresh_status" in globals()},
         {"name": "engine_touched", "ok": True, "value": False},
     ]
     return {
@@ -62338,6 +62346,462 @@ def video_b14_queue_status_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
     ])
 
 
+def video_b14_auto_refresh_key(job_id: int | str = "") -> str:
+    return f"video_b14:{safe_int(job_id, 0) or str(job_id or '').strip() or 'latest'}"
+
+
+def video_b14_auto_refresh_json_field(row: dict | None, key: str, fallback=None):
+    raw = (row or {}).get(key)
+    if isinstance(raw, (dict, list)):
+        return raw
+    if raw in (None, ""):
+        return {} if fallback is None else fallback
+    try:
+        return json.loads(str(raw or "{}"))
+    except Exception:
+        return {} if fallback is None else fallback
+
+
+def video_b14_auto_refresh_final_artifact_state(job: dict | None = None, project: dict | None = None) -> dict:
+    job = dict(job or {})
+    project = dict(project or {})
+    final_file_id = str(project.get("final_video_file_id") or job.get("final_video_file_id") or "").strip()
+    payload = video_b14_job_result_payload(job)
+    final_path = str(project.get("final_video_path") or job.get("final_video_path") or payload.get("final_video_path") or "").strip()
+    exists = bool(final_file_id or final_path)
+    valid = bool(final_file_id)
+    size = 0
+    if final_path:
+        try:
+            size = os.path.getsize(final_path) if os.path.exists(final_path) else 0
+            valid = valid or size > 0
+        except OSError:
+            size = 0
+    return {"exists": exists, "valid": valid, "file_id": final_file_id, "path": final_path, "size": size}
+
+
+def video_b14_auto_refresh_session_from_status(job: dict | None = None, project: dict | None = None, *, user_id=0) -> dict:
+    job = dict(job or {})
+    project = dict(project or {})
+    invoice = video_b14_auto_refresh_json_field(project, "invoice_json", {})
+    addon_plan = video_b14_auto_refresh_json_field(project, "addon_plan_json", {})
+    scene_count = safe_int(project.get("scene_count") or invoice.get("scene_count"), 3)
+    if scene_count and "scene_count" not in invoice:
+        invoice["scene_count"] = scene_count
+    if scene_count and "duration_seconds" not in invoice:
+        invoice["duration_seconds"] = scene_count * TASK3D_SCENE_SECONDS
+    return {
+        "product_id": str(project.get("profile_id") or "multi_scene_film"),
+        "video_flow": str(project.get("profile_id") or "multi_scene_film"),
+        "current_step": "b14_queue_status",
+        "draft": {
+            "b14_queue_job": job,
+            "b14_queue_job_id": safe_int(job.get("id"), 0),
+            "b14_project_id": safe_int(project.get("project_id") or job.get("project_id"), 0),
+            "b14_invoice": invoice,
+            "b14_addon_plan": addon_plan,
+            "b14_scene_count": scene_count,
+        },
+        "user_id": user_id,
+    }
+
+
+def video_b14_auto_refresh_status_bundle(job_id: int | str = "", *, user_id=0, job: dict | None = None, project: dict | None = None) -> dict:
+    jid = safe_int(job_id or (job or {}).get("id"), 0)
+    current_job = dict(job or (video_b14_render_job_by_id(jid) if jid else {}) or {})
+    current_project = dict(project or {})
+    project_id = safe_int(current_project.get("project_id") or current_job.get("project_id"), 0)
+    if project_id and not current_project:
+        try:
+            current_project = get_video_project(project_id)
+        except Exception:
+            current_project = {}
+    session = video_b14_auto_refresh_session_from_status(current_job, current_project, user_id=user_id)
+    return {"job": current_job, "project": current_project, "session": session}
+
+
+def video_b14_auto_refresh_terminal_state(job: dict | None = None, project: dict | None = None) -> str:
+    job = dict(job or {})
+    project = dict(project or {})
+    status = str(job.get("status") or project.get("status") or "").strip().lower()
+    terminal = str(project.get("video_terminal_state") or "").strip().lower()
+    if terminal in {"delivered", "failed_no_charge", "failed_refunded", "cancelled", "canceled"}:
+        return "cancelled" if terminal == "canceled" else terminal
+    if status in {"cancelled", "canceled"}:
+        return "cancelled"
+    blocked_reason = video_b14_product_result_block_reason(job, project)
+    visual_classification = video_b14_result_visual_classification(job)
+    artifact = video_b14_auto_refresh_final_artifact_state(job, project)
+    if status in {"failed", "error"} or blocked_reason or visual_classification == "partial_simple_video":
+        return "failed_no_charge"
+    if status in {"completed", "success"}:
+        return "delivered" if artifact.get("valid") else "failed_no_charge"
+    return ""
+
+
+def video_b14_auto_refresh_stage_from_snapshot(status: str, progress: int, *, terminal_state: str = "", has_final_artifact: bool = False, blocked_reason: str = "", visual_classification: str = "") -> str:
+    if terminal_state == "delivered":
+        return "Gửi kết quả"
+    rows = video_b14_status_step_rows(
+        status,
+        progress,
+        has_final_artifact=has_final_artifact,
+        blocked_reason=blocked_reason,
+        visual_classification=visual_classification,
+    )
+    for icon, label in rows:
+        if icon in {"⏳", "⚠️"}:
+            return label
+    for icon, label in reversed(rows):
+        if icon == "✅":
+            return label
+    return "Nhận yêu cầu"
+
+
+def video_b14_auto_refresh_snapshot(job_id: int | str = "", *, user_id=0, lang: str = "vi", job: dict | None = None, project: dict | None = None, session: dict | None = None, result: dict | None = None) -> dict:
+    bundle = video_b14_auto_refresh_status_bundle(job_id, user_id=user_id, job=job, project=project)
+    current_job = dict((result or {}).get("job") or bundle.get("job") or {})
+    current_project = dict((result or {}).get("project") or bundle.get("project") or {})
+    current_session = dict(session or bundle.get("session") or {})
+    jid = safe_int(current_job.get("id") or job_id or ((current_session.get("draft") or {}).get("b14_queue_job_id")), 0)
+    text = video_b14_queue_status_text(current_session, {"job": current_job, "project": current_project}, user_id, lang)
+    percent_match = re.search(r"Tiến độ:\s*<b>(\d+)%</b>", text)
+    percent = safe_int(percent_match.group(1) if percent_match else current_job.get("progress_percent"), 0)
+    status = str(current_job.get("status") or current_project.get("status") or ("queued" if jid else "draft")).strip().lower()
+    artifact = video_b14_auto_refresh_final_artifact_state(current_job, current_project)
+    blocked_reason = video_b14_product_result_block_reason(current_job, current_project)
+    visual_classification = video_b14_result_visual_classification(current_job)
+    terminal = video_b14_auto_refresh_terminal_state(current_job, current_project)
+    stage = video_b14_auto_refresh_stage_from_snapshot(
+        status,
+        percent,
+        terminal_state=terminal,
+        has_final_artifact=bool(artifact.get("valid")),
+        blocked_reason=blocked_reason,
+        visual_classification=visual_classification,
+    )
+    blocker = ""
+    if not current_job:
+        blocker = "job_missing"
+    elif blocked_reason:
+        blocker = blocked_reason
+    elif terminal == "failed_no_charge":
+        blocker = sanitize_provider_status_text(str(current_job.get("last_error") or current_project.get("error_log") or "failed_no_charge"), "", 180)
+    elif status in {"completed", "success"} and not artifact.get("valid"):
+        blocker = "final_artifact_missing"
+    return {
+        "job_id": str(jid or job_id or ""),
+        "text": text,
+        "render_hash": hashlib.sha256(str(text or "").encode("utf-8")).hexdigest(),
+        "status": status,
+        "stage": stage,
+        "percent": percent,
+        "terminal_state": terminal,
+        "final_artifact_exists": bool(artifact.get("exists")),
+        "final_artifact_valid": bool(artifact.get("valid")),
+        "blocker": blocker,
+        "job": current_job,
+        "project": current_project,
+    }
+
+
+def video_b14_auto_refresh_should_edit(record: dict, snapshot: dict) -> bool:
+    if str(snapshot.get("render_hash") or "") != str(record.get("last_render_hash") or ""):
+        return True
+    if str(snapshot.get("terminal_state") or "") != str(record.get("terminal_state") or ""):
+        return True
+    if str(snapshot.get("stage") or "") != str(record.get("current_stage") or ""):
+        return True
+    return abs(int(snapshot.get("percent") or 0) - int(record.get("percent") or 0)) >= int(record.get("min_delta_percent") or PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT)
+
+
+def video_b14_auto_refresh_context_can_start(context) -> bool:
+    return bool(getattr(context, "bot", None) or getattr(getattr(context, "application", None), "bot", None))
+
+
+def video_b14_auto_refresh_start_task(context, key: str) -> bool:
+    record = VIDEO_STATUS_AUTO_REFRESH_JOBS.get(str(key or "")) or {}
+    if not record or record.get("stopped"):
+        return False
+    if not video_b14_auto_refresh_context_can_start(context):
+        return False
+    existing = VIDEO_STATUS_AUTO_REFRESH_TASKS.get(str(key or ""))
+    if existing and not existing.done():
+        record.update({"task_started": True, "task_alive": True})
+        VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return True
+    try:
+        application = getattr(context, "application", None)
+        if application and hasattr(application, "create_task"):
+            task = application.create_task(video_b14_auto_refresh_loop(context, str(key or "")))
+            scheduler_mode = "application_task"
+        else:
+            task = asyncio.create_task(video_b14_auto_refresh_loop(context, str(key or "")))
+            scheduler_mode = "asyncio_task"
+        VIDEO_STATUS_AUTO_REFRESH_TASKS[str(key or "")] = task
+        record.update({
+            "task_started": True,
+            "task_alive": True,
+            "task_started_at": now_text(),
+            "scheduler_mode": scheduler_mode,
+            "stopped_reason": "",
+        })
+        VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return True
+    except RuntimeError as exc:
+        record.update({
+            "task_started": False,
+            "task_alive": False,
+            "scheduler_mode": "scheduler_failed",
+            "stopped_reason": "scheduler_start_failed",
+            "scheduler_error": sanitize_provider_status_text(str(exc), "", 180),
+        })
+        VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return False
+
+
+def video_b14_auto_refresh_register(
+    *,
+    job_id: int | str,
+    chat_id,
+    message_id,
+    user_id=0,
+    lang: str = "vi",
+    context=None,
+    session: dict | None = None,
+    result: dict | None = None,
+    start_task: bool = True,
+) -> dict:
+    jid = safe_int(job_id, 0)
+    if not VIDEO_STATUS_AUTO_REFRESH_ENABLED or jid <= 0 or not chat_id or not message_id:
+        return {}
+    snapshot = video_b14_auto_refresh_snapshot(jid, user_id=user_id, lang=lang, session=session, result=result)
+    key = video_b14_auto_refresh_key(jid)
+    current = dict(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(key) or {})
+    draft = dict((session or {}).get("draft") or {})
+    record = {
+        **current,
+        "key": key,
+        "job_id": str(jid),
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "callback_data": "vproduct|b14_job_status",
+        "product_type": str((session or {}).get("product_id") or (session or {}).get("video_flow") or "video_b14"),
+        "video_flow_type": str((session or {}).get("video_flow") or (session or {}).get("product_id") or "video_b14"),
+        "project_id": safe_int(draft.get("b14_project_id") or (snapshot.get("project") or {}).get("project_id"), 0),
+        "user_id": user_id,
+        "lang": normalize_user_language(lang) or "vi",
+        "enabled": True,
+        "interval_seconds": int(VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS),
+        "max_updates": int(VIDEO_STATUS_AUTO_REFRESH_MAX_UPDATES),
+        "min_delta_percent": int(PROGRESS_AUTO_REFRESH_MIN_DELTA_PERCENT),
+        "registry_saved": True,
+        "scheduler_mode": str(current.get("scheduler_mode") or "video_status_auto_refresh"),
+        "task_started": bool(current.get("task_started")),
+        "task_alive": bool(current.get("task_alive")),
+        "last_tick_at": str(current.get("last_tick_at") or ""),
+        "last_edit_at": str(current.get("last_edit_at") or ""),
+        "update_count": int(current.get("update_count") or 0),
+        "edit_success_count": int(current.get("edit_success_count") or 0),
+        "edit_fail_count": int(current.get("edit_fail_count") or 0),
+        "current_stage": str(snapshot.get("stage") or ""),
+        "percent": int(snapshot.get("percent") or 0),
+        "terminal_state": str(snapshot.get("terminal_state") or ""),
+        "final_artifact_exists": bool(snapshot.get("final_artifact_exists")),
+        "final_artifact_valid": bool(snapshot.get("final_artifact_valid")),
+        "blocker": str(snapshot.get("blocker") or current.get("blocker") or ""),
+        "last_render_hash": str(snapshot.get("render_hash") or ""),
+        "last_update_at": current.get("last_update_at") or now_text(),
+        "stopped": bool(snapshot.get("terminal_state")) and bool(PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL),
+        "stopped_reason": str(snapshot.get("terminal_state") or "") if snapshot.get("terminal_state") else "",
+    }
+    VIDEO_STATUS_AUTO_REFRESH_JOBS[key] = record
+    if start_task and not record.get("stopped"):
+        started = video_b14_auto_refresh_start_task(context, key)
+        record = dict(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(key) or record)
+        if not started and not record.get("stopped"):
+            record.update({
+                "task_started": False,
+                "task_alive": False,
+                "scheduler_mode": "scheduler_failed",
+                "stopped_reason": "scheduler_start_failed",
+            })
+            VIDEO_STATUS_AUTO_REFRESH_JOBS[key] = record
+    return dict(record)
+
+
+def video_b14_auto_refresh_register_message(message, context, *, session: dict | None = None, result: dict | None = None, user_id=0, lang: str = "vi", start_task: bool = True) -> dict:
+    draft = dict((session or {}).get("draft") or {})
+    job = dict((result or {}).get("job") or draft.get("b14_queue_job") or {})
+    job_id = safe_int(job.get("id") or draft.get("b14_queue_job_id"), 0)
+    chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
+    message_id = getattr(message, "message_id", None)
+    return video_b14_auto_refresh_register(
+        job_id=job_id,
+        chat_id=chat_id,
+        message_id=message_id,
+        user_id=user_id,
+        lang=lang,
+        context=context,
+        session=session,
+        result=result,
+        start_task=start_task,
+    )
+
+
+async def video_b14_auto_refresh_loop(context, key: str):
+    while True:
+        record = dict(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(str(key or "")) or {})
+        if not record or record.get("stopped"):
+            if record:
+                record["task_alive"] = False
+                VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+            return
+        await asyncio.sleep(int(record.get("interval_seconds") or VIDEO_STATUS_AUTO_REFRESH_INTERVAL_SECONDS))
+        try:
+            result = await video_b14_auto_refresh_tick(context, key)
+        except Exception as exc:
+            record = dict(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(str(key or "")) or record)
+            record.update({
+                "task_alive": False,
+                "stopped": True,
+                "scheduler_mode": "scheduler_failed",
+                "stopped_reason": "auto_tick_exception",
+                "blocker": sanitize_provider_status_text(str(exc), "", 180),
+                "last_tick_at": now_text(),
+            })
+            VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+            logger.warning("video status auto refresh tick failed | key=%s | %s", sanitize_log_text(str(key or ""))[:120], sanitize_log_text(str(exc))[:220])
+            return
+        if str(result.get("status") or "") in {"missing", "stopped"}:
+            return
+
+
+async def video_b14_auto_refresh_tick(context, key: str) -> dict:
+    record = dict(VIDEO_STATUS_AUTO_REFRESH_JOBS.get(str(key or "")) or {})
+    if not record:
+        return {"status": "missing"}
+    if record.get("stopped"):
+        return {"status": "stopped", "reason": record.get("stopped_reason") or ""}
+    if int(record.get("update_count") or 0) >= int(record.get("max_updates") or VIDEO_STATUS_AUTO_REFRESH_MAX_UPDATES):
+        record.update({"stopped": True, "task_alive": False, "stopped_reason": "max_updates"})
+        VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+        return {"status": "stopped", "reason": "max_updates"}
+    record["last_tick_at"] = now_text()
+    record["task_alive"] = True
+    snapshot = video_b14_auto_refresh_snapshot(
+        record.get("job_id") or "",
+        user_id=record.get("user_id") or 0,
+        lang=record.get("lang") or "vi",
+    )
+    record["update_count"] = int(record.get("update_count") or 0) + 1
+    should_edit = video_b14_auto_refresh_should_edit(record, snapshot)
+    terminal = str(snapshot.get("terminal_state") or "")
+    if should_edit:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=record.get("chat_id"),
+                message_id=record.get("message_id"),
+                text=str(snapshot.get("text") or ""),
+                parse_mode="HTML",
+                reply_markup=video_b14_queue_status_keyboard(record.get("lang") or "vi"),
+            )
+            record["edit_success_count"] = int(record.get("edit_success_count") or 0) + 1
+            record["last_edit_at"] = now_text()
+            record["last_update_at"] = record["last_edit_at"]
+        except Exception as exc:
+            record["edit_fail_count"] = int(record.get("edit_fail_count") or 0) + 1
+            record["last_error"] = sanitize_log_text(str(exc))[:180]
+            lower = str(exc or "").lower()
+            if any(fragment in lower for fragment in ("message to edit not found", "message not found", "message_id_invalid", "chat not found")):
+                record.update({"stopped": True, "task_alive": False, "stopped_reason": "message_missing"})
+    else:
+        record["last_checked_at"] = now_text()
+    record.update({
+        "current_stage": str(snapshot.get("stage") or record.get("current_stage") or ""),
+        "percent": int(snapshot.get("percent") or record.get("percent") or 0),
+        "terminal_state": terminal or str(record.get("terminal_state") or ""),
+        "final_artifact_exists": bool(snapshot.get("final_artifact_exists")),
+        "final_artifact_valid": bool(snapshot.get("final_artifact_valid")),
+        "blocker": str(snapshot.get("blocker") or ""),
+        "last_render_hash": str(snapshot.get("render_hash") or record.get("last_render_hash") or ""),
+    })
+    if terminal and bool(PROGRESS_AUTO_REFRESH_STOP_ON_TERMINAL):
+        record.update({"stopped": True, "task_alive": False, "stopped_reason": terminal})
+    VIDEO_STATUS_AUTO_REFRESH_JOBS[str(key or "")] = record
+    return {"status": "updated" if should_edit else "skipped", "record": dict(record), "snapshot": snapshot}
+
+
+async def video_b14_send_or_edit_status_panel(query, context, session: dict, result: dict | None, user_id, lang: str):
+    text = video_b14_queue_status_text(session, result, user_id, lang)
+    sent = await safe_edit_or_send(
+        query,
+        text,
+        parse_mode="HTML",
+        reply_markup=video_b14_queue_status_keyboard(lang),
+    )
+    message = sent or getattr(query, "message", None)
+    video_b14_auto_refresh_register_message(message, context, session=session, result=result, user_id=user_id, lang=lang, start_task=True)
+    return sent
+
+
+def video_b14_auto_refresh_status_text(job_id: str = "") -> str:
+    wanted = str(job_id or "").strip()
+    key = video_b14_auto_refresh_key(wanted) if wanted else ""
+    records = [
+        dict(record)
+        for item_key, record in VIDEO_STATUS_AUTO_REFRESH_JOBS.items()
+        if not wanted or wanted in {str(record.get("job_id") or ""), str(item_key or "")}
+    ]
+    if not records and wanted:
+        snapshot = video_b14_auto_refresh_snapshot(wanted)
+        if not (snapshot.get("job") or {}):
+            return (
+                "📊 <b>Video auto-refresh</b>\n\n"
+                f"• job_id: <code>{html.escape(wanted)}</code>\n"
+                "• registry_saved: <code>false</code>\n"
+                "• blocker: <code>job_missing_or_no_registry_after_restart</code>"
+            )
+        return (
+            "📊 <b>Video auto-refresh</b>\n\n"
+            f"• job_id: <code>{html.escape(wanted)}</code>\n"
+            "• registry_saved: <code>false</code>\n"
+            "• scheduler_mode: <code>not_restored</code>\n"
+            "• blocker: <code>no_registry_after_restart</code>\n"
+            f"• current_stage: <code>{html.escape(str(snapshot.get('stage') or '-'))}</code>\n"
+            f"• percent: <code>{int(snapshot.get('percent') or 0)}%</code>\n"
+            f"• terminal_state: <code>{html.escape(str(snapshot.get('terminal_state') or '-'))}</code>\n"
+            f"• final_artifact_exists: <code>{'true' if snapshot.get('final_artifact_exists') else 'false'}</code>\n"
+            f"• final_artifact_valid: <code>{'true' if snapshot.get('final_artifact_valid') else 'false'}</code>"
+        )
+    if not records:
+        return "📊 <b>Video auto-refresh</b>\n\nKhông có bảng trạng thái Video auto-refresh đang được lưu.\n• blocker: <code>no_registry_after_restart</code>"
+    lines = ["📊 <b>Video auto-refresh</b>", ""]
+    for record in records[:10]:
+        lines.extend([
+            f"• job_id: <code>{html.escape(str(record.get('job_id') or '-'))}</code>",
+            f"• chat_id: <code>{html.escape(str(record.get('chat_id') or '-'))}</code>",
+            f"• message_id: <code>{html.escape(str(record.get('message_id') or '-'))}</code>",
+            f"• registry_saved: <code>{'true' if record.get('registry_saved') else 'false'}</code>",
+            f"• task_started: <code>{'true' if record.get('task_started') else 'false'}</code>",
+            f"• task_alive: <code>{'true' if record.get('task_alive') else 'false'}</code>",
+            f"• scheduler_mode: <code>{html.escape(str(record.get('scheduler_mode') or '-'))}</code>",
+            f"• last_tick_at: <code>{html.escape(str(record.get('last_tick_at') or '-'))}</code>",
+            f"• update_count: <code>{int(record.get('update_count') or 0)}</code>",
+            f"• last_edit_at: <code>{html.escape(str(record.get('last_edit_at') or '-'))}</code>",
+            f"• stopped_reason: <code>{html.escape(str(record.get('stopped_reason') or '-'))}</code>",
+            f"• terminal_state: <code>{html.escape(str(record.get('terminal_state') or '-'))}</code>",
+            f"• current_stage: <code>{html.escape(str(record.get('current_stage') or '-'))}</code>",
+            f"• percent: <code>{int(record.get('percent') or 0)}%</code>",
+            f"• final_artifact_exists: <code>{'true' if record.get('final_artifact_exists') else 'false'}</code>",
+            f"• final_artifact_valid: <code>{'true' if record.get('final_artifact_valid') else 'false'}</code>",
+            f"• blocker: <code>{html.escape(str(record.get('blocker') or '-'))}</code>",
+            f"• edit_success/fail: <code>{int(record.get('edit_success_count') or 0)}/{int(record.get('edit_fail_count') or 0)}</code>",
+            "",
+        ])
+    return "\n".join(lines).strip()
+
+
 def video_b14_insufficient_balance_text(current_credits: int, required_credits: int, lang: str = "vi") -> str:
     missing = max(0, int(required_credits or 0) - int(current_credits or 0))
     return (
@@ -63699,7 +64163,7 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi"):
     if step == "b14_invoice":
         return await safe_edit_or_send(target, video_b14_invoice_text(session, user_id, lang), parse_mode="HTML", reply_markup=video_b14_invoice_keyboard(lang))
     if step == "b14_queue_status":
-        return await safe_edit_or_send(target, video_b14_queue_status_text(session, None, user_id, lang), parse_mode="HTML", reply_markup=video_b14_queue_status_keyboard(lang))
+        return await video_b14_send_or_edit_status_panel(target, context, session, None, user_id, lang)
     if step == "intro":
         return await safe_edit_or_send(target, task3d_product_intro_text(product_id, lang), parse_mode="HTML", reply_markup=task3d_product_intro_keyboard(product_id, lang))
     if (
@@ -65355,12 +65819,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         draft = dict(session.get("draft") or {})
         if str(session.get("current_step") or "") == "b14_invoice" and str(draft.get("b14_invoice_return_step") or "") == "b14_queue_status":
             session = task3d_session_step(uid, "b14_queue_status", b14_invoice_return_step="", provider_called=False, xu_charged=0)
-            return await safe_edit_or_send(
-                query,
-                video_b14_queue_status_text(session, None, uid, lang),
-                parse_mode="HTML",
-                reply_markup=video_b14_queue_status_keyboard(lang),
-            )
+            return await video_b14_send_or_edit_status_panel(query, context, session, None, uid, lang)
         session = task3d_session_step(uid, "b14_scene_count", provider_called=False, xu_charged=0)
         return await safe_edit_or_send(query, video_b14_scene_count_text(session, lang), parse_mode="HTML", reply_markup=video_b14_scene_count_keyboard(uid, lang))
     if action == "b14_scene_custom":
@@ -65428,20 +65887,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         session["draft"] = draft
         save_video_session(uid, session)
         session = task3d_session_step(uid, "b14_queue_status", provider_called=False)
-        return await safe_edit_or_send(
-            query,
-            video_b14_queue_status_text(session, result, uid, lang),
-            parse_mode="HTML",
-            reply_markup=video_b14_queue_status_keyboard(lang),
-        )
+        return await video_b14_send_or_edit_status_panel(query, context, session, result, uid, lang)
     if action == "b14_job_status":
         session = task3d_session_step(uid, "b14_queue_status", provider_called=False)
-        return await safe_edit_or_send(
-            query,
-            video_b14_queue_status_text(session, None, uid, lang),
-            parse_mode="HTML",
-            reply_markup=video_b14_queue_status_keyboard(lang),
-        )
+        return await video_b14_send_or_edit_status_panel(query, context, session, None, uid, lang)
     if action == "b14_invoice_screen":
         session = task3d_session_step(
             uid,
@@ -81285,6 +81734,12 @@ async def cmd_subdub_voice_debug(update: Update, context: ContextTypes.DEFAULT_T
 async def cmd_subdub_terminal_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
 
+async def cmd_video_progress_auto_refresh_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    return await update.message.reply_text(video_b14_auto_refresh_status_text(arg), parse_mode="HTML")
+
 async def cmd_video_status_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
@@ -81293,6 +81748,9 @@ async def cmd_video_status_debug(update: Update, context: ContextTypes.DEFAULT_T
     if arg:
         job = shopaikey_job_by_task_id(arg) or (shopaikey_job_by_id(_safe_int(arg, 0)) if _safe_int(arg, 0) else {})
     if not job:
+        video_job = video_b14_render_job_by_id(_safe_int(arg, 0)) if _safe_int(arg, 0) else {}
+        if video_job:
+            return await update.message.reply_text(video_b14_auto_refresh_status_text(arg), parse_mode="HTML")
         return await update.message.reply_text("Chưa tìm thấy video job. Dùng /video_status_debug <job_id hoặc task_id>.")
     def esc(value):
         return html.escape(str(value if value not in (None, "") else "-"))
@@ -165819,6 +166277,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_delivery_debug", cmd_subdub_delivery_debug))
     tg_app.add_handler(CommandHandler("subdub_voice_debug", cmd_subdub_voice_debug))
     tg_app.add_handler(CommandHandler("subdub_terminal_debug", cmd_subdub_terminal_debug))
+    tg_app.add_handler(CommandHandler("video_progress_auto_refresh_status", cmd_video_progress_auto_refresh_status))
     tg_app.add_handler(CommandHandler("video_status_debug", cmd_video_status_debug))
     tg_app.add_handler(CommandHandler("subdub_style_preview", cmd_subdub_style_preview))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
