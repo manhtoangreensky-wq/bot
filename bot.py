@@ -91,7 +91,7 @@ from video_product_system import (
 )
 import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
-from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline
+from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import voice_clone_pipeline
 from services import remote_worker_api, video_final_output, worker_auth
 from services import video_asset_intake as video_assets
@@ -7607,6 +7607,83 @@ async def cmd_progress_auto_refresh_status(update: Update, context: ContextTypes
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
     return await update.message.reply_text(progress_auto_refresh_status_text(job_id), parse_mode="HTML")
+
+
+def workflow_graph_registered_handlers() -> set[str]:
+    return {
+        name
+        for name in workflow_graph_contract.default_high_risk_handlers()
+        if callable(globals().get(name))
+    }
+
+
+def workflow_graph_audit_payload(kind: str = "graph") -> dict:
+    graph = workflow_graph_contract.build_p0_infra1_workflow_graph()
+    kwargs = {"registered_handlers": workflow_graph_registered_handlers()}
+    normalized = str(kind or "graph").strip().lower()
+    if normalized == "route":
+        return workflow_graph_contract.workflow_route_audit(graph, **kwargs)
+    if normalized == "terminal":
+        return workflow_graph_contract.workflow_terminal_audit(graph, **kwargs)
+    if normalized == "callback":
+        return workflow_graph_contract.workflow_callback_audit(graph, **kwargs)
+    return workflow_graph_contract.audit_workflow_graph(graph, **kwargs)
+
+
+def workflow_graph_audit_text(kind: str = "graph") -> str:
+    payload = workflow_graph_audit_payload(kind)
+
+    def esc(value) -> str:
+        if isinstance(value, (list, tuple, set)):
+            value = ", ".join(str(item) for item in value) or "-"
+        return html.escape(str(value if value not in (None, "") else "-"))
+
+    title = {
+        "route": "WORKFLOW ROUTE AUDIT",
+        "terminal": "WORKFLOW TERMINAL AUDIT",
+        "callback": "WORKFLOW CALLBACK AUDIT",
+    }.get(str(kind or "graph").strip().lower(), "WORKFLOW GRAPH AUDIT")
+    return "\n".join([
+        f"🧭 <b>{title}</b>",
+        "",
+        f"• ok: <code>{'yes' if payload.get('ok') else 'no'}</code>",
+        f"• product_area: <code>{esc(payload.get('product_area'))}</code>",
+        f"• mode: <code>{esc(payload.get('mode'))}</code>",
+        f"• node_count: <code>{int(payload.get('node_count') or 0)}</code>",
+        f"• edge_count: <code>{int(payload.get('edge_count') or 0)}</code>",
+        f"• missing_handler: <code>{esc(payload.get('missing_handler'))}</code>",
+        f"• missing_back_target: <code>{esc(payload.get('missing_back_target'))}</code>",
+        f"• invalid_terminal_transition: <code>{esc(payload.get('invalid_terminal_transition'))}</code>",
+        f"• refresh_reprocess_risk: <code>{esc(payload.get('refresh_reprocess_risk'))}</code>",
+        f"• provider_before_confirm_risk: <code>{esc(payload.get('provider_before_confirm_risk'))}</code>",
+        f"• wallet_before_artifact_risk: <code>{esc(payload.get('wallet_before_artifact_risk'))}</code>",
+        f"• mode_copy_mismatch: <code>{esc(payload.get('mode_copy_mismatch'))}</code>",
+        "• runtime: <code>internal_contract_only_no_n8n</code>",
+    ])
+
+
+async def cmd_workflow_graph_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(workflow_graph_audit_text("graph"), parse_mode="HTML")
+
+
+async def cmd_workflow_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(workflow_graph_audit_text("route"), parse_mode="HTML")
+
+
+async def cmd_workflow_terminal_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(workflow_graph_audit_text("terminal"), parse_mode="HTML")
+
+
+async def cmd_workflow_callback_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(workflow_graph_audit_text("callback"), parse_mode="HTML")
 
 
 def music_job_debug_text(job_id: str = "") -> str:
@@ -82586,12 +82663,206 @@ def subdub_voice_debug_text(job: dict) -> str:
         f"• confidence: <code>{esc(job.get('voice_confidence'))}</code>",
         f"• fallback_used: <code>{yes_no(job.get('fallback_used'))}</code>",
         f"• fallback_reason: <code>{esc(job.get('fallback_reason'))}</code>",
+        f"• tts_backend: <code>{esc(job.get('tts_backend') or job.get('voice_backend'))}</code>",
+        f"• voxcpm2_enabled: <code>{yes_no(job.get('voxcpm2_enabled'))}</code>",
+        f"• voxcpm2_lazy_loaded: <code>{yes_no(job.get('voxcpm2_lazy_loaded'))}</code>",
+        f"• voxcpm2_fallback_used: <code>{yes_no(job.get('voxcpm2_fallback_used'))}</code>",
+        f"• voxcpm2_fallback_reason: <code>{esc(job.get('voxcpm2_fallback_reason'))}</code>",
+        f"• voxcpm2_error_code: <code>{esc(job.get('voxcpm2_error_code'))}</code>",
         f"• tts_audio_path: <code>{esc(job.get('generated_audio_path') or job.get('dubbed_audio_path'))}</code>",
         f"• tts_audio_bytes: <code>{int(job.get('audio_bytes') or 0)}</code>",
         f"• tts_audio_duration: <code>{esc(job.get('generated_audio_duration'))}</code>",
         f"• tts_audio_volume_gain: <code>{esc(job.get('tts_audio_volume_gain') or SUBDUB_DUB_VOICE_GAIN)}</code>",
         f"• blocker: <code>{esc(job.get('voice_blocker') or job.get('pipeline_blocker'))}</code>",
     ])
+
+
+VOICE_TTS_BACKEND_CHOICES = ("auto", "paid_provider", "voxcpm2_local")
+
+
+def normalize_voice_tts_backend_choice(value: str = "") -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    if normalized in {"paid", "provider", "paid_provider"}:
+        return "paid_provider"
+    if normalized in {"voxcpm2", "voxcpm2_local", "local"}:
+        return "voxcpm2_local"
+    return "auto"
+
+
+def voice_tts_backend_choice() -> str:
+    return normalize_voice_tts_backend_choice(_env("VOICE_TTS_BACKEND", TTS_PROVIDER or "auto"))
+
+
+def voxcpm2_status_payload() -> dict:
+    try:
+        from providers import voxcpm2_tts_provider
+
+        return voxcpm2_tts_provider.status_from_env()
+    except Exception as exc:
+        return {
+            "enabled": False,
+            "model_available": False,
+            "lazy_loaded": False,
+            "device": "auto",
+            "cache_dir_exists": False,
+            "last_error": type(exc).__name__,
+            "supported_languages": [],
+            "admin_only": True,
+            "queue_active": False,
+        }
+
+
+def tts_backend_status_payload() -> dict:
+    backend = voice_tts_backend_choice()
+    vox = voxcpm2_status_payload()
+    paid_ready = bool(
+        key4u_minimax_tts_public_ready()
+        or shopaikey_minimax_tts_public_ready()
+        or direct_minimax_tts_public_ready()
+        or shopaikey_tts_fallback_public_ready()
+        or ELEVENLABS_API_KEY
+        or FISH_AUDIO_KEY
+    )
+    return {
+        "voice_tts_backend": backend,
+        "tts_provider": str(TTS_PROVIDER or "auto"),
+        "paid_provider_ready": paid_ready,
+        "voxcpm2": vox,
+        "selection_order": ["exact_voice_id", "configured_primary_provider", "voxcpm2_if_enabled", "clean_no_charge_fail"],
+        "startup_safe": True,
+        "public_provider_names_hidden": True,
+    }
+
+
+def _safe_backend_bool(value) -> str:
+    return "yes" if value else "no"
+
+
+def tts_backend_status_text() -> str:
+    payload = tts_backend_status_payload()
+    vox = dict(payload.get("voxcpm2") or {})
+    languages = ", ".join(str(item) for item in (vox.get("supported_languages") or [])) or "-"
+    return "\n".join([
+        "🎙 <b>TTS BACKEND STATUS</b>",
+        "",
+        f"• Voice TTS backend: <code>{html.escape(str(payload.get('voice_tts_backend') or '-'))}</code>",
+        f"• TTS_PROVIDER: <code>{html.escape(str(payload.get('tts_provider') or '-'))}</code>",
+        f"• paid_provider_ready: <code>{_safe_backend_bool(payload.get('paid_provider_ready'))}</code>",
+        f"• VoxCPM2 enabled: <code>{_safe_backend_bool(vox.get('enabled'))}</code>",
+        f"• VoxCPM2 model_available: <code>{_safe_backend_bool(vox.get('model_available'))}</code>",
+        f"• VoxCPM2 lazy_loaded: <code>{_safe_backend_bool(vox.get('lazy_loaded'))}</code>",
+        f"• VoxCPM2 admin_only: <code>{_safe_backend_bool(vox.get('admin_only'))}</code>",
+        f"• supported_languages: <code>{html.escape(languages)}</code>",
+        "• startup_safe: <code>yes</code>",
+        "• public_provider_names_hidden: <code>yes</code>",
+        "• no_charge_before_valid_audio: <code>yes</code>",
+    ])
+
+
+def voxcpm2_status_text() -> str:
+    status = voxcpm2_status_payload()
+    languages = ", ".join(str(item) for item in (status.get("supported_languages") or [])) or "-"
+    return "\n".join([
+        "🎙 <b>VOXCPM2 STATUS</b>",
+        "",
+        f"• enabled: <code>{_safe_backend_bool(status.get('enabled'))}</code>",
+        f"• model_available: <code>{_safe_backend_bool(status.get('model_available'))}</code>",
+        f"• lazy_loaded: <code>{_safe_backend_bool(status.get('lazy_loaded'))}</code>",
+        f"• device: <code>{html.escape(str(status.get('device') or '-'))}</code>",
+        f"• cache_dir exists: <code>{_safe_backend_bool(status.get('cache_dir_exists'))}</code>",
+        f"• last_error: <code>{html.escape(str(status.get('last_error') or '-'))}</code>",
+        f"• supported_languages: <code>{html.escape(languages)}</code>",
+        f"• admin_only: <code>{_safe_backend_bool(status.get('admin_only'))}</code>",
+        f"• queue_active: <code>{_safe_backend_bool(status.get('queue_active'))}</code>",
+        "• secrets: <code>hidden</code>",
+    ])
+
+
+def _gender_from_tts_request(voice_style: str = "", voice_id: str = "") -> str:
+    text = f"{voice_style} {voice_id}".lower()
+    if any(token in text for token in ("female", "nu", "nữ", "girl", "woman", "hoaimy", "shaonv")):
+        return "female"
+    if any(token in text for token in ("male", "nam", "boy", "man", "namminh", "qingse")):
+        return "male"
+    return "neutral"
+
+
+async def call_voxcpm2_tts_bytes(
+    text: str,
+    *,
+    language: str = "vi",
+    gender: str = "",
+    voice_id: str = "",
+    voice_style: str = "",
+    voice_speed: str = "1.0",
+    allow_admin: bool = False,
+) -> tuple[str, bytes, str, int]:
+    try:
+        from providers import voxcpm2_tts_provider
+
+        resolved_gender = gender or _gender_from_tts_request(voice_style, voice_id)
+        speed_value = float(parse_video_dubbing_voice_speed(voice_speed or "1.0"))
+        result, audio = await asyncio.to_thread(
+            voxcpm2_tts_provider.synthesize_to_bytes,
+            text=text,
+            language=language or "vi",
+            gender=resolved_gender,
+            voice_id=voice_id,
+            reference_audio_path="",
+            speed=speed_value,
+            emotion="",
+            output_format="wav",
+            admin=allow_admin,
+        )
+        if result.ok and audio:
+            detail = f"voxcpm2_local;duration={result.duration:g};gender={result.resolved_gender or resolved_gender}"
+            return "PASS", audio, detail, 0
+        return "FAIL", b"", str(result.error_code or "adapter_unavailable"), 0
+    except Exception as exc:
+        return "FAIL", b"", type(exc).__name__, 0
+
+
+async def cmd_tts_backend_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(tts_backend_status_text(), parse_mode="HTML")
+
+
+async def cmd_voxcpm2_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    return await update.message.reply_text(voxcpm2_status_text(), parse_mode="HTML")
+
+
+async def cmd_voxcpm2_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    args = list(getattr(context, "args", []) or [])
+    if len(args) < 3:
+        return await update.message.reply_text("Dùng: /voxcpm2_test_tts <lang> <gender> <text>. Lệnh admin-only, không trừ Xu.")
+    lang = str(args[0] or "vi").strip()[:12] or "vi"
+    gender = str(args[1] or "neutral").strip()[:40] or "neutral"
+    text = " ".join(str(item) for item in args[2:]).strip()[:500]
+    status, audio, detail, _http_status = await call_voxcpm2_tts_bytes(
+        text,
+        language=lang,
+        gender=gender,
+        voice_speed="1.0",
+        allow_admin=True,
+    )
+    if status == "PASS" and audio:
+        audio_file = io.BytesIO(audio)
+        audio_file.name = "toan_aas_voxcpm2_test.wav"
+        await update.message.reply_audio(
+            audio=audio_file,
+            caption=f"VoxCPM2 test PASS. bytes={len(audio)} duration detail={html.escape(detail)}. Không trừ Xu.",
+        )
+        return
+    return await update.message.reply_text(
+        f"VoxCPM2 test chưa chạy được: <code>{html.escape(detail or status)}</code>\nKhông trừ Xu.",
+        parse_mode="HTML",
+    )
+
 
 def subdub_voice_style_state_fields(
     *,
@@ -162179,6 +162450,18 @@ async def video_dubbing_tts_bytes(text: str, voice_style: str = "", voice_id: st
         candidates.append(("ElevenLabs", tts_elevenlabs_bytes))
     if provider in {"auto", "fish", "fish_audio"}:
         candidates.append(("Fish Audio", tts_fish_audio_bytes))
+    if provider in {"auto", "voxcpm2", "voxcpm2_local", "local"} and voice_tts_backend_choice() != "paid_provider":
+        candidates.append((
+            "VoxCPM2 Local",
+            lambda value: call_voxcpm2_tts_bytes(
+                value,
+                language="vi",
+                voice_id=voice_id,
+                voice_style=voice_style,
+                voice_speed=voice_speed,
+                allow_admin=allow_admin,
+            ),
+        ))
     if provider in {"auto", "edge", "edge_tts"}:
         candidates.append(("Edge TTS", lambda value: call_edge_tts_with_speed(value, voice_id=voice_id, voice_speed=voice_speed)))
     errors = []
@@ -168539,6 +168822,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_auto_status", cmd_video_progress_auto_refresh_status))
     tg_app.add_handler(CommandHandler("video_status_debug", cmd_video_status_debug))
     tg_app.add_handler(CommandHandler("subdub_style_preview", cmd_subdub_style_preview))
+    tg_app.add_handler(CommandHandler("tts_backend_status", cmd_tts_backend_status))
+    tg_app.add_handler(CommandHandler("voxcpm2_status", cmd_voxcpm2_status))
+    tg_app.add_handler(CommandHandler("voxcpm2_test_tts", cmd_voxcpm2_test_tts))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_provider_status", cmd_voice_status))
     tg_app.add_handler(CommandHandler("voice_engine_status", cmd_voice_engine_status))
@@ -169027,6 +169313,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("progress_status_debug", cmd_progress_status_debug))
     tg_app.add_handler(CommandHandler("progress_status_matrix", cmd_progress_status_matrix))
     tg_app.add_handler(CommandHandler("progress_auto_refresh_status", cmd_progress_auto_refresh_status))
+    tg_app.add_handler(CommandHandler("workflow_graph_audit", cmd_workflow_graph_audit))
+    tg_app.add_handler(CommandHandler("workflow_route_audit", cmd_workflow_route_audit))
+    tg_app.add_handler(CommandHandler("workflow_terminal_audit", cmd_workflow_terminal_audit))
+    tg_app.add_handler(CommandHandler("workflow_callback_audit", cmd_workflow_callback_audit))
     tg_app.add_handler(CommandHandler("product_job_status", cmd_product_job_status))
     tg_app.add_handler(CommandHandler("music_job_debug", cmd_music_job_debug))
     tg_app.add_handler(CommandHandler("music_delivery_recover", cmd_music_delivery_recover))
