@@ -6431,14 +6431,8 @@ def music_job_materialized_source_present(job: dict | None = None) -> bool:
     if local_path:
         if os.path.exists(local_path):
             return os.path.getsize(local_path) > 0
-        return bool(current.get("vault_id") or current.get("music_vault_id"))
-    return bool(
-        current.get("vault_id")
-        or current.get("music_vault_id")
-        or current.get("output_sha256")
-        or current.get("selected_artifact_hash")
-        or current.get("music_artifact_hash")
-    )
+        return False
+    return False
 
 
 def music_job_artifact_metadata_ready(job: dict | None = None) -> bool:
@@ -6448,9 +6442,7 @@ def music_job_artifact_metadata_ready(job: dict | None = None) -> bool:
         or music_job_local_artifact_path(current)
         or current.get("vault_id")
         or current.get("music_vault_id")
-        or music_job_artifact_duration_value(current) > 0
-        or current.get("provider_completed")
-        or current.get("music_provider_completed")
+        or str(current.get("artifact_state") or current.get("music_artifact_state") or "").strip().lower() in {"metadata_ready", "materializing", "ready"}
     )
 
 
@@ -7036,6 +7028,7 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "artifact_state": "materializing",
         "music_artifact_state": "materializing",
         "artifact_materialization_started_at": now_text(),
+        "artifact_materialization_attempted": True,
         "artifact_materialization_source": str(source or "recovery"),
     })
     if current.get("internal_job_id"):
@@ -7043,12 +7036,17 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
     artifact = await select_music_delivery_artifact(current, current, None)
     if not artifact.get("ok"):
         status = str(artifact.get("status") or "ARTIFACT_MATERIALIZATION_FAILED").upper()
+        download_error = str(artifact.get("download_error_category") or "").strip().lower()
         if status in {"ARTIFACT_ZERO_BYTES", "ARTIFACT_BYTES_MISSING", "EMPTY_AUDIO"}:
             blocker = "artifact_zero_bytes"
         elif status in {"FINAL_ARTIFACT_NOT_READY"}:
             blocker = "artifact_missing"
         elif status in {"AUDIO_DURATION_MISSING"}:
             blocker = "artifact_validation_failed"
+        elif download_error in {"html_error_page", "json_error_page", "invalid_content_type"}:
+            blocker = "artifact_invalid_content_type"
+        elif status in {"ARTIFACT_DOWNLOAD_FAILED"} or download_error in {"result_url_expired", "download_http_failed", "download_failed"}:
+            blocker = "artifact_download_failed"
         else:
             blocker = "artifact_materialization_failed"
         updated = set_music_artifact_blocker(
@@ -7063,6 +7061,11 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "artifact_materialization_status": status,
             "artifact_materialization_failed_at": now_text(),
             "artifact_materialization_url": str(artifact.get("selected_artifact_url") or music_job_result_url(current) or ""),
+            "artifact_download_attempted": bool(music_job_result_url(current) or artifact.get("selected_artifact_url")),
+            "artifact_download_http_status": int(artifact.get("download_http_status") or 0),
+            "artifact_download_content_type": str(artifact.get("download_content_type") or ""),
+            "artifact_downloaded_bytes": int(artifact.get("downloaded_bytes") or 0),
+            "artifact_download_error_category": str(artifact.get("download_error_category") or blocker),
         })
         if updated.get("internal_job_id"):
             save_engine_async_job(updated)
@@ -7096,6 +7099,9 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "status": "completed",
         "terminal_state": "",
         "music_terminal_state": "",
+        "provider_completed": True,
+        "music_provider_completed": True,
+        "provider_completed_at": str(current.get("provider_completed_at") or now_text()),
         "output_bytes": len(payload),
         "music_result_size_bytes": len(payload),
         "output_sha256": artifact_hash,
@@ -7127,6 +7133,12 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "music_result_path": storage_ref or str(current.get("music_result_path") or ""),
         "output_path": storage_ref or str(current.get("output_path") or ""),
         "storage_ref": storage_ref or str(current.get("storage_ref") or ""),
+        "artifact_download_attempted": True,
+        "artifact_download_http_status": int(artifact.get("download_http_status") or 0),
+        "artifact_download_content_type": str(artifact.get("download_content_type") or ""),
+        "artifact_downloaded_bytes": int(artifact.get("downloaded_bytes") or len(payload) or 0),
+        "artifact_download_error_category": "",
+        "artifact_materialized_source": str(artifact.get("selected_artifact_source") or source or "artifact"),
         "primary_blocker": "",
         "artifact_blocker": "",
         "auto_delivery_blocker": "",
@@ -7135,7 +7147,9 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "artifact_materialized_at": now_text(),
     })
     if current.get("internal_job_id"):
-        save_engine_async_job(current)
+        persisted = dict(current)
+        persisted.pop("_auto_delivery_audio_bytes", None)
+        save_engine_async_job(persisted)
     return {"ok": True, "status": "MATERIALIZED", "job": current, "artifact": artifact, "audio_bytes": payload, "recovery_action": "materialize_success"}
 
 
@@ -7237,7 +7251,7 @@ async def music_auto_deliver_from_progress_record(context, record: dict, job: di
         return current
     if not current or music_job_delivered(current):
         return current
-    if music_job_ready_artifact_validated(current):
+    if music_job_ready_artifact_validated(current) or music_job_artifact_metadata_ready(current):
         recovered = await deliver_music_ready_artifact_once(
             str(current.get("internal_job_id") or record.get("job_id") or ""),
             context=context,
@@ -7685,9 +7699,17 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• provider_poll_count: <code>{int((job or {}).get('provider_poll_count') or (job or {}).get('poll_count') or 0)}</code>\n"
         f"• provider_error: <code>{html.escape(sanitize_provider_status_text((job or {}).get('provider_error') or (job or {}).get('last_send_error') or '-', provider_task_id, 180))}</code>\n"
         f"• result_url_present: <code>{'yes' if result_url else 'no'}</code>\n"
+        f"• result_url_label: <code>{html.escape(music_result_url_debug_label(result_url))}</code>\n"
         f"• local_artifact_path: <code>{html.escape(local_artifact_path or '-')}</code>\n"
         f"• artifact_state: <code>{html.escape(artifact_state or '-')}</code>\n"
         f"• artifact_candidates_count: <code>{int((job or {}).get('artifact_candidates_count') or 0)}</code>\n"
+        f"• materialization_attempted: <code>{'yes' if (job or {}).get('artifact_materialization_attempted') or (job or {}).get('artifact_materialization_started_at') else 'no'}</code>\n"
+        f"• materialization_status: <code>{html.escape(str((job or {}).get('artifact_materialization_status') or '-'))}</code>\n"
+        f"• materialized_source: <code>{html.escape(str((job or {}).get('artifact_materialized_source') or (job or {}).get('artifact_materialization_source') or '-'))}</code>\n"
+        f"• download_http_status: <code>{int((job or {}).get('artifact_download_http_status') or 0)}</code>\n"
+        f"• download_content_type: <code>{html.escape(str((job or {}).get('artifact_download_content_type') or '-'))}</code>\n"
+        f"• downloaded_bytes: <code>{int((job or {}).get('artifact_downloaded_bytes') or 0)}</code>\n"
+        f"• download_error_category: <code>{html.escape(str((job or {}).get('artifact_download_error_category') or '-'))}</code>\n"
         f"• selected_artifact_id: <code>{html.escape(str((job or {}).get('selected_artifact_id') or (job or {}).get('music_artifact_id') or '-'))}</code>\n"
         f"• selected_artifact_hash: <code>{html.escape(str((job or {}).get('selected_artifact_hash') or (job or {}).get('music_artifact_hash') or '-'))}</code>\n"
         f"• selected_artifact_duration: <code>{html.escape(str((job or {}).get('selected_artifact_duration') or (job or {}).get('music_artifact_duration') or artifact_duration or '-'))}</code>\n"
@@ -7744,8 +7766,14 @@ def music_delivery_recover_report_text(input_job_id: str = "", result: dict | No
         f"• provider_task_id: <code>{html.escape(mask_provider_task_id(music_job_provider_task_id(job)) if music_job_provider_task_id(job) else '-')}</code>\n"
         f"• provider_status: <code>{html.escape(sanitize_provider_status_text(job.get('last_provider_status') or job.get('status') or '-', music_job_provider_task_id(job), 180))}</code>\n"
         f"• result_url_present: <code>{'yes' if result_url else 'no'}</code>\n"
+        f"• result_url_label: <code>{html.escape(music_result_url_debug_label(result_url))}</code>\n"
         f"• local_artifact_path: <code>{html.escape(local_artifact_path or '-')}</code>\n"
         f"• artifact_state: <code>{html.escape(music_job_artifact_state(job) or '-')}</code>\n"
+        f"• materialization_status: <code>{html.escape(str(job.get('artifact_materialization_status') or '-'))}</code>\n"
+        f"• download_http_status: <code>{int(job.get('artifact_download_http_status') or 0)}</code>\n"
+        f"• download_content_type: <code>{html.escape(str(job.get('artifact_download_content_type') or '-'))}</code>\n"
+        f"• downloaded_bytes: <code>{int(job.get('artifact_downloaded_bytes') or 0)}</code>\n"
+        f"• download_error_category: <code>{html.escape(str(job.get('artifact_download_error_category') or '-'))}</code>\n"
         f"• artifact_ready: <code>{'yes' if music_job_artifact_ready_value(job) else 'no'}</code>\n"
         f"• audio_validated: <code>{'yes' if music_job_audio_validated_value(job) else 'no'}</code>\n"
         f"• artifact_bytes: <code>{artifact_bytes}</code>\n"
@@ -7936,7 +7964,7 @@ async def maybe_deliver_music_progress_job(query, context, *, product_type: str,
         return {"ok": False, "status": "MISSING_JOB", "job": {}}
     if music_job_delivered(current):
         return {"ok": True, "status": "ALREADY_DELIVERED", "duplicate": True, "job": current}
-    if music_job_ready_artifact_validated(current):
+    if music_job_ready_artifact_validated(current) or music_job_artifact_metadata_ready(current):
         return await deliver_music_ready_artifact_once(
             resolved_job_id or job_id,
             context=context,
@@ -7952,7 +7980,7 @@ async def maybe_deliver_music_progress_job(query, context, *, product_type: str,
     current = dict(refreshed or get_engine_async_job(resolved_job_id or job_id) or current)
     if music_job_delivered(current):
         return {"ok": True, "status": "ALREADY_DELIVERED", "duplicate": True, "job": current}
-    if music_job_ready_artifact_validated(current):
+    if music_job_ready_artifact_validated(current) or music_job_artifact_metadata_ready(current):
         return await deliver_music_ready_artifact_once(
             str(current.get("internal_job_id") or resolved_job_id or job_id),
             context=context,
@@ -52160,14 +52188,59 @@ def music_audio_url_has_acceptable_extension(url: str) -> bool:
         path = str(url or "").split("?", 1)[0].lower()
     return path.endswith(SUNO_AUDIO_EXTENSIONS) or "/audio" in path
 
+def music_audio_payload_looks_like_error_page(audio_bytes: bytes | bytearray | None = None) -> str:
+    head = bytes(audio_bytes or b"")[:256].lstrip().lower()
+    if not head:
+        return "empty"
+    if head.startswith((b"<!doctype html", b"<html", b"<head", b"<body")) or b"<html" in head[:120]:
+        return "html_error_page"
+    if head.startswith((b"{", b"[")) and any(token in head[:160] for token in (b"error", b"message", b"status", b"code")):
+        return "json_error_page"
+    return ""
+
+def music_download_detail_field(detail: str = "", field: str = "") -> str:
+    wanted = re.escape(str(field or "").strip())
+    if not wanted:
+        return ""
+    match = re.search(rf"(?:^|;\s*){wanted}=([^;]*)", str(detail or ""), flags=re.IGNORECASE)
+    return str(match.group(1) if match else "").strip()
+
+def music_download_error_category(detail: str = "", http_status: int = 0) -> str:
+    status = int(http_status or 0)
+    lowered = str(detail or "").strip().lower()
+    if status in {401, 403, 404, 410}:
+        return "result_url_expired"
+    if "html_error_page" in lowered:
+        return "html_error_page"
+    if "json_error_page" in lowered:
+        return "json_error_page"
+    if "invalid_content_type" in lowered or "audio_mime_or_extension_missing" in lowered:
+        return "invalid_content_type"
+    if "zero" in lowered or "empty" in lowered:
+        return "artifact_zero_bytes"
+    if status >= 400:
+        return "download_http_failed"
+    return "download_failed" if lowered else ""
+
 async def _download_music_audio_url_bytes(url: str, timeout_seconds: float = 60.0) -> tuple[bytes, str, int]:
     audio_bytes, detail, http_status = await _download_audio_url_bytes(url, timeout_seconds=timeout_seconds)
     if not audio_bytes:
         return b"", detail, http_status
     detail_text = str(detail or "")
-    if music_audio_url_has_acceptable_extension(url) or "content_type=audio/" in detail_text.lower():
+    content_type = music_download_detail_field(detail_text, "content_type").lower()
+    payload_error = music_audio_payload_looks_like_error_page(audio_bytes)
+    if payload_error:
+        return b"", f"{payload_error}; downloaded_bytes={len(audio_bytes)}; {sanitize_provider_status_text(detail_text, '', 180)}", http_status
+    if content_type.startswith(("text/html", "application/json", "text/plain")):
+        return b"", f"invalid_content_type; downloaded_bytes={len(audio_bytes)}; {sanitize_provider_status_text(detail_text, '', 180)}", http_status
+    if (
+        content_type.startswith("audio/")
+        or content_type in {"application/octet-stream", "binary/octet-stream", "application/x-mpegurl", ""}
+        or music_audio_url_has_acceptable_extension(url)
+        or "content_type=audio/" in detail_text.lower()
+    ):
         return audio_bytes, detail, http_status
-    return b"", f"audio_mime_or_extension_missing; {sanitize_provider_status_text(detail_text, '', 180)}", http_status
+    return b"", f"audio_mime_or_extension_missing; downloaded_bytes={len(audio_bytes)}; {sanitize_provider_status_text(detail_text, '', 180)}", http_status
 
 def tool_test_result_audio_bytes_positive(result: dict | None) -> bool:
     current = dict(result or {})
@@ -97874,78 +97947,39 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         job["music_output_url"] = output_url
         job["result_url"] = output_url
         save_engine_async_job(job)
-        audio_bytes, detail, http_status = await _download_music_audio_url_bytes(output_url, timeout_seconds=60.0)
+        materialized = await materialize_music_artifact_for_job(job, updated_by=updated_by, source="provider_poll")
+        materialized_job = dict(materialized.get("job") or job)
+        audio_bytes = bytes(materialized.get("audio_bytes") or b"")
         record_music_provider_attempt(
             provider=str(job.get("provider") or ""),
             task_id=provider_task_id,
             fetch_status=provider_status,
-            download_status="PASS" if audio_bytes else "FAIL_DOWNLOAD",
-            error=detail,
+            download_status="PASS" if materialized.get("ok") else str(materialized.get("status") or "FAIL_DOWNLOAD"),
+            error=str((materialized.get("artifact") or {}).get("download_detail") or materialized.get("status") or ""),
             updated_by=updated_by,
         )
-        if audio_bytes:
-            actual_duration = await music_audio_real_duration_seconds(audio_bytes, fallback=music_result_duration_seconds(job))
-            if actual_duration <= 0:
-                job.update({
-                    "status": "failed",
-                    "terminal_state": "failed_no_charge",
-                    "music_terminal_state": "failed_no_charge",
-                    "progress_text": "File nhạc chưa có thời lượng hợp lệ; không fake success.",
-                    "error_category": "audio_duration_missing",
-                    "last_provider_status": sanitize_provider_status_text(f"http={http_status}; audio_duration_missing", provider_task_id),
-                })
-                save_engine_async_job(job)
-                return {"ok": False, "status": "AUDIO_DURATION_MISSING", "job": job, "output_url": output_url, "audio_bytes": b""}
-            vault_entry = upsert_music_vault_from_output(
-                audio_bytes=audio_bytes,
-                result=job,
-                job=job,
-                status="generated_unused",
-                updated_by=updated_by,
-            )
-            job.update({
-                "status": "completed",
-                "progress_text": "Output nhạc đã tải thành công và bytes > 0.",
-                "output_bytes": len(audio_bytes),
-                "output_path": "",
-                "output_sha256": music_audio_sha256(audio_bytes),
-                "vault_id": str(vault_entry.get("vault_id") or job.get("vault_id") or ""),
-                "artifact_ready": True,
-                "music_artifact_ready": True,
-                "artifact_downloaded_at": now_text(),
-                "artifact_validated": True,
-                "audio_validated": True,
-                "music_audio_validated": True,
-                "audio_validated_at": now_text(),
-                "artifact_duration_seconds": actual_duration,
-                "duration_seconds": actual_duration,
-                "music_result_duration_seconds": actual_duration,
-                "error_category": "",
-                "completed_at": now_text(),
-            })
-            save_engine_async_job(job)
-            return {"ok": True, "status": "COMPLETED", "job": job, "output_url": output_url, "audio_bytes": audio_bytes}
-        job.update({
+        if materialized.get("ok") and audio_bytes:
+            return {"ok": True, "status": "COMPLETED", "job": materialized_job, "output_url": output_url, "audio_bytes": audio_bytes}
+        blocker = music_job_artifact_primary_blocker(materialized_job) or "artifact_materialization_failed"
+        materialized_job.update({
             "status": "failed",
             "terminal_state": "failed_no_charge",
             "music_terminal_state": "failed_no_charge",
-            "progress_text": "Có URL kết quả nhưng tải audio thất bại; không fake success.",
+            "progress_text": "Có URL kết quả nhưng chưa tải được file nhạc hợp lệ. TOAN AAS chưa trừ Xu.",
             "artifact_ready": False,
             "music_artifact_ready": False,
             "artifact_validated": False,
             "audio_validated": False,
             "music_audio_validated": False,
-            "artifact_state": "invalid",
-            "music_artifact_state": "invalid",
-            "primary_blocker": "artifact_materialization_failed",
-            "artifact_blocker": "artifact_materialization_failed",
-            "secondary_blocker": music_job_artifact_secondary_blocker(job),
-            "error_category": "audio_download_failed",
-            "auto_delivery_blocker": "artifact_materialization_failed",
-            "last_provider_status": sanitize_provider_status_text(f"http={http_status}; {detail}", provider_task_id),
+            "primary_blocker": blocker,
+            "artifact_blocker": blocker,
+            "secondary_blocker": music_job_artifact_secondary_blocker(materialized_job),
+            "error_category": blocker,
+            "auto_delivery_blocker": blocker,
+            "last_provider_status": sanitize_provider_status_text(str((materialized.get("artifact") or {}).get("download_detail") or materialized.get("status") or ""), provider_task_id),
         })
-        save_engine_async_job(job)
-        return {"ok": False, "status": "AUDIO_DOWNLOAD_FAILED", "job": job, "output_url": output_url, "audio_bytes": b""}
+        save_engine_async_job(materialized_job)
+        return {"ok": False, "status": str(materialized.get("status") or "ARTIFACT_MATERIALIZATION_FAILED"), "job": materialized_job, "output_url": output_url, "audio_bytes": b""}
     if music_poll_status_is_processing(provider_status):
         if engine_async_provider_processing_timed_out(job):
             job.update({
@@ -98092,6 +98126,18 @@ def music_normalized_artifact_url(url: str = "") -> str:
     except Exception:
         return raw.split("?", 1)[0].strip()
 
+def music_result_url_debug_label(url: str = "") -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return "-"
+    try:
+        parsed = urlparse(raw)
+        host = str(parsed.netloc or "").strip()
+        suffix = os.path.splitext(str(parsed.path or "").split("?", 1)[0])[1].lower()
+        return f"{host or 'url'}{suffix or ''}"
+    except Exception:
+        return "url"
+
 def music_artifact_candidate_bytes(value) -> bytes:
     if isinstance(value, (bytes, bytearray)):
         return bytes(value)
@@ -98212,11 +98258,27 @@ async def select_music_delivery_artifact(
     url = str(selected.get("url") or selected.get("artifact_url") or selected.get("output_url") or selected.get("download_url") or "").strip()
     download_detail = ""
     download_status = 0
+    download_content_type = ""
+    download_error_category = ""
+    downloaded_bytes = 0
     if not payload and url:
         payload, download_detail, download_status = await _download_music_audio_url_bytes(url, timeout_seconds=60.0)
+        download_content_type = music_download_detail_field(download_detail, "content_type")
+        downloaded_bytes = len(payload)
+        if not payload:
+            detail_downloaded = music_download_detail_field(download_detail, "downloaded_bytes")
+            try:
+                downloaded_bytes = int(detail_downloaded or 0)
+            except Exception:
+                downloaded_bytes = 0
+            download_error_category = music_download_error_category(download_detail, download_status)
     if not payload:
         if url:
-            status_name = "ARTIFACT_ZERO_BYTES" if int(download_status or 0) and int(download_status or 0) < 400 else "ARTIFACT_DOWNLOAD_FAILED"
+            if download_error_category in {"", "download_failed"} and int(download_status or 0) and int(download_status or 0) < 400 and int(downloaded_bytes or 0) <= 0:
+                download_error_category = "artifact_zero_bytes"
+            status_name = "ARTIFACT_ZERO_BYTES" if download_error_category == "artifact_zero_bytes" else "ARTIFACT_DOWNLOAD_FAILED"
+            if download_error_category in {"html_error_page", "json_error_page", "invalid_content_type"}:
+                status_name = "ARTIFACT_MATERIALIZATION_FAILED"
             return {
                 "ok": False,
                 "status": status_name,
@@ -98224,6 +98286,9 @@ async def select_music_delivery_artifact(
                 "selected_artifact_url": music_normalized_artifact_url(url),
                 "download_detail": sanitize_provider_status_text(download_detail, "", 180),
                 "download_http_status": int(download_status or 0),
+                "download_content_type": download_content_type,
+                "downloaded_bytes": int(downloaded_bytes or 0),
+                "download_error_category": download_error_category or "download_failed",
             }
         return {
             "ok": False,
@@ -98255,6 +98320,11 @@ async def select_music_delivery_artifact(
         "selected_artifact_duration": duration,
         "selected_artifact_bytes": len(payload),
         "selected_artifact_source": str(selected.get("source") or selected.get("role") or "artifact"),
+        "download_detail": sanitize_provider_status_text(download_detail, "", 180),
+        "download_http_status": int(download_status or 0),
+        "download_content_type": download_content_type,
+        "downloaded_bytes": int(downloaded_bytes or len(payload) or 0),
+        "download_error_category": "",
     }
 
 def music_delivery_record_duplicate(job: dict | None = None, source: str = "", reason: str = "", result: dict | None = None, updated_by="") -> dict:
@@ -98370,7 +98440,9 @@ def record_music_job_full_send_error(job: dict | None, error: str, updated_by=""
     previous_delivery_attempt_count = int(current.get("delivery_attempt_count") or 0)
     current.update({
         "status": str(current.get("status") or "completed"),
-        "delivery_state": "failed",
+        "delivery_state": "retryable",
+        "terminal_state": "telegram_delivery_failed",
+        "music_terminal_state": "telegram_delivery_failed",
         "auto_delivery_blocker": "telegram_delivery_failed",
         "music_delivery_blocker": "telegram_delivery_failed",
         "last_delivery_error_category": "telegram_delivery_failed",
@@ -101990,6 +102062,46 @@ async def handle_music_product_confirm(
         return await query.message.reply_text(
             "✅ Đã gửi file nhạc phía trên.",
             reply_markup=music_product_success_keyboard(lang, ctx),
+        )
+    existing_job_id = str(current.get("music_internal_job_id") or current.get("music_job_id") or "").strip()
+    existing_lookup = get_engine_async_job_lookup(existing_job_id) if existing_job_id else {"job": {}, "resolved_job_id": ""}
+    existing_job = dict(existing_lookup.get("job") or {})
+    if existing_job and (
+        existing_job.get("provider_submit_called")
+        or music_job_provider_task_id(existing_job)
+        or str(existing_job.get("status") or "").strip().lower() not in {"", "pending_submit"}
+    ):
+        resolved_existing_job_id = str(existing_lookup.get("resolved_job_id") or existing_job.get("internal_job_id") or existing_job_id).strip()
+        if music_job_ready_artifact_validated(existing_job) or music_job_artifact_metadata_ready(existing_job):
+            recovered = await deliver_music_ready_artifact_once(
+                resolved_existing_job_id,
+                context=context,
+                message=query.message,
+                chat_id=existing_job.get("chat_id") or query.message.chat_id,
+                user_id=user_id,
+                lang=lang,
+                product_context=ctx,
+                source="duplicate_confirm",
+            )
+            if recovered.get("ok") and not recovered.get("duplicate"):
+                return recovered
+            existing_job = dict(recovered.get("job") or existing_job)
+        product_type = music_product_progress_type(existing_job or current)
+        if existing_job.get("progress_chat_id") and existing_job.get("progress_message_id"):
+            progress_auto_refresh_register(
+                product_type=product_type,
+                job_id=resolved_existing_job_id,
+                chat_id=existing_job.get("progress_chat_id") or existing_job.get("panel_chat_id"),
+                message_id=existing_job.get("progress_message_id") or existing_job.get("panel_message_id"),
+                user_id=user_id,
+                lang=lang,
+                context=context,
+                initial_snapshot=progress_auto_refresh_snapshot(product_type, resolved_existing_job_id, job=existing_job, lang=lang),
+                start_task=not music_job_delivered(existing_job) and not music_job_terminal_failed(existing_job),
+            )
+        return await query.message.reply_text(
+            "TOAN AAS đã nhận yêu cầu này. Anh/chị theo dõi bảng trạng thái phía trên, hệ thống không gửi lại yêu cầu tạo nhạc.",
+            reply_markup=product_progress_status_keyboard(product_type, resolved_existing_job_id, lang),
         )
     progress_public_note = (
         "Đã xác nhận tạo bản đầy đủ. Khi file sẵn sàng, TOAN AAS sẽ gửi kết quả cho anh/chị. Xu chỉ được xác nhận khi file gửi thành công."

@@ -80,8 +80,12 @@ def test_suno_poll_completed_downloads_audio_bytes(monkeypatch):
     async def fake_download(_url, timeout_seconds=60.0):
         return b"real-audio-bytes", "http=200; bytes=16; content_type=audio/mpeg", 200
 
+    async def fake_duration(*_args, **_kwargs):
+        return 120
+
     monkeypatch.setattr(bot, "poll_music_generation_job", fake_poll)
     monkeypatch.setattr(bot, "_download_music_audio_url_bytes", fake_download)
+    monkeypatch.setattr(bot, "music_audio_real_duration_seconds", fake_duration)
 
     result = asyncio.run(bot.poll_music_suno_async_job("MUS-UNIT16A", download=True))
 
@@ -122,8 +126,8 @@ def test_suno_poll_download_fail_sanitized(monkeypatch):
 
     result = asyncio.run(bot.poll_music_suno_async_job("MUS-UNIT16A", download=True))
 
-    assert result["status"] == "AUDIO_DOWNLOAD_FAILED"
-    assert saved["error_category"] == "audio_download_failed"
+    assert result["status"] == "ARTIFACT_DOWNLOAD_FAILED"
+    assert saved["error_category"] == "artifact_download_failed"
     assert "very-secret" not in saved["last_provider_status"]
     assert "token=abc123" not in saved["last_provider_status"]
     assert "private.example" not in saved["last_provider_status"]
@@ -224,8 +228,12 @@ def test_suno_timeout_can_still_be_polled_admin(monkeypatch):
     async def fake_download(_url, timeout_seconds=60.0):
         return b"late-real-audio", "http=200; bytes=15; content_type=audio/mpeg", 200
 
+    async def fake_duration(*_args, **_kwargs):
+        return 120
+
     monkeypatch.setattr(bot, "poll_music_generation_job", fake_poll)
     monkeypatch.setattr(bot, "_download_music_audio_url_bytes", fake_download)
+    monkeypatch.setattr(bot, "music_audio_real_duration_seconds", fake_duration)
 
     result = asyncio.run(bot.poll_music_suno_async_job("MUS-UNIT16A", download=True))
 
