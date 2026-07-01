@@ -111,21 +111,21 @@ def test_tao_audio_counts_words_not_characters():
     assert bot.voice_tts_word_count("Xin chao, TOAN AAS! Tao audio duoc khong?") == 8
 
 
-def test_tao_audio_price_0_05_xu_per_word():
-    assert bot.voice_tts_product_quote(_words(20))["total_xu"] == 1
-    assert bot.voice_tts_product_quote(_words(100))["total_xu"] == 5
-    assert bot.voice_tts_product_quote(_words(1000))["total_xu"] == 50
+def test_tao_audio_price_0_10_xu_per_word():
+    assert bot.voice_tts_product_quote(_words(20))["total_xu"] == 2
+    assert bot.voice_tts_product_quote(_words(100))["total_xu"] == 9
+    assert bot.voice_tts_product_quote(_words(1000))["total_xu"] == 90
 
 
 def test_tao_audio_minimum_charge_1_xu():
     quote = bot.voice_tts_product_quote(_words(1))
-    assert quote["raw_price_xu"] == 0.05
+    assert quote["raw_price_xu"] == 0.1
     assert quote["total_xu"] == 1
 
 
 def test_tao_audio_rounds_up_if_wallet_integer():
-    assert bot.voice_tts_product_quote(_words(30))["raw_price_xu"] == 1.5
-    assert bot.voice_tts_product_quote(_words(30))["total_xu"] == 2
+    assert bot.voice_tts_product_quote(_words(30))["raw_price_xu"] == 3.0
+    assert bot.voice_tts_product_quote(_words(30))["total_xu"] == 3
 
 
 def test_tao_audio_shows_price_summary_before_provider_call(monkeypatch):
@@ -143,8 +143,8 @@ def test_tao_audio_shows_price_summary_before_provider_call(monkeypatch):
     text = message.outputs[-1]["text"]
     assert "Xác nhận tạo audio" in text
     assert "• Nội dung: <b>30 từ</b>" in text
-    assert "• Đơn giá: <b>0.05 Xu / từ</b>" in text
-    assert "• Tổng thanh toán: <b>2 Xu</b>" in text
+    assert "• Đơn giá: <b>0.1 Xu / từ</b>" in text
+    assert "• Tổng thanh toán: <b>3 Xu</b>" in text
 
 
 def test_tao_audio_no_provider_before_confirm(monkeypatch):
@@ -208,8 +208,8 @@ def test_tao_audio_success_shows_total_and_charged_xu(monkeypatch, tmp_path):
     caption = message.outputs[-1]["caption"]
     assert "✅ Đã tạo audio." in caption
     assert "• Số từ: 20" in caption
-    assert "• Tổng giá: 1 Xu" in caption
-    assert "• Đã trừ: 1 Xu" in caption
+    assert "• Tổng giá: 2 Xu" in caption
+    assert "• Đã trừ: 2 Xu" in caption
 
 
 def test_admin_tao_audio_shows_same_price_but_no_charge_internal(monkeypatch, tmp_path):
@@ -232,7 +232,7 @@ def test_admin_tao_audio_shows_same_price_but_no_charge_internal(monkeypatch, tm
     ok = asyncio.run(bot.send_paid_saved_voice_tts_result(message, 190708, _profile(), _words(20), speed="1.0", volume_percent=100, lang="vi"))
     assert ok is True
     caption = message.outputs[-1]["caption"]
-    assert "• Tổng giá: 1 Xu" in caption
+    assert "• Tổng giá: 2 Xu" in caption
     assert "• Đã trừ: 0 Xu" in caption
     assert "ADMIN" not in caption
 

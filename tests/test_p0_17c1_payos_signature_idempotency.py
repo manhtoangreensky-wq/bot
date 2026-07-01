@@ -18,7 +18,7 @@ def _sign(data: dict, key: str = PAYOS_TEST_CHECKSUM_KEY) -> str:
 
 def _webhook_data(
     order_code: str,
-    amount: int = 10800,
+    amount: int = 10000,
     status: str | None = bot.PAYOS_STATUS_PAID,
     payment_link_id: str = "plink-c1",
     transaction_id: str = "tx-c1",

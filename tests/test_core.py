@@ -365,7 +365,7 @@ def test_admin_menu_contains_grouped_operator_and_system():
     assert ["🤖 Provider / Worker", "💰 Tài chính"] in admin_nav_rows
     assert ["🏠 Menu chính"] in admin_nav_rows
     finance_labels = [button.text for row in bot.finance_admin_keyboard().inline_keyboard for button in row]
-    for label in ["📊 Tổng quan", "💰 Doanh thu", "🧾 Thuế / VAT", "💸 Chi phí", "📈 Lợi nhuận", "🏦 Vốn & Hòa vốn", "⚠️ Đơn bất thường", "🧮 Sổ điều chỉnh", "📤 Xuất báo cáo", "➕ Thêm chi phí", "📘 Hướng dẫn tài chính"]:
+    for label in ["📊 Tổng quan", "💵 Doanh thu", "🧾 Thuế / VAT", "🧾 Chi phí", "📈 Lợi nhuận", "🏦 Vốn & Hòa vốn", "⚠️ Đơn bất thường", "🧮 Sổ điều chỉnh", "📥 Xuất báo cáo", "➕ Thêm chi phí", "📘 Hướng dẫn tài chính"]:
         assert label in finance_labels
     freeze_labels = [button.text for row in bot.freeze_queue_keyboard().inline_keyboard for button in row]
     for label in ["📊 Queue Status", "🧊 Freeze Status", "🖼 Freeze Image", "🎬 Freeze Video", "🎞 Freeze Frame", "🤖 Freeze Provider", "✅ Unfreeze Tool", "🧹 Clear Stale Jobs"]:
@@ -1445,7 +1445,7 @@ def test_storage_addon_checkout_metadata_and_admin_grant(monkeypatch):
     monkeypatch.setattr(bot, "record_usage_event", lambda *args, **kwargs: None)
 
     async def fake_payos(body):
-        assert body["amount"] == 10800
+        assert body["amount"] == 10000
         assert body["description"] == "AASSTOR50MB"
         return SimpleNamespace(status_code=200), {"code": "00", "data": {"checkoutUrl": "https://pay.example/920002", "paymentLinkId": "link-920002"}}, "", ""
 
@@ -7769,7 +7769,7 @@ def test_video_ai_system_v81_reference_dubbing_marketing_and_free_planning(monke
     }
     assert bot.calculate_video_translate_price("subtitle", 0)["total_price_xu"] == 20
     pricing_text = bot.video_dubbing_pricing_text("vi")
-    for marker in ["0.1 Xu/ký tự", "0.05 Xu/ký tự", "Giảm giá: 10%", "20% khi trên 10.000", "hỏi xác nhận trước khi xử lý"]:
+    for marker in ["0.1 Xu/ký tự", "0.2 Xu/ký tự", "Giảm giá: 10%", "20% khi trên 10.000", "hỏi xác nhận trước khi xử lý"]:
         assert marker in pricing_text
     assert "API" not in pricing_text
     assert "provider" not in pricing_text.lower()

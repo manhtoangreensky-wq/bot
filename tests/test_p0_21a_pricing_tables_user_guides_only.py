@@ -62,9 +62,9 @@ def test_voice_pricing_copy_first_voice_free_second_50():
     assert "Từ voice riêng thứ 2 trở đi: 50 Xu" in text
 
 
-def test_voice_tts_pricing_copy_005_xu_per_word_min_20():
+def test_voice_tts_pricing_copy_010_xu_per_word_min_20():
     text = "\n".join(bot.pricing_voice_lines())
-    assert "0.05 Xu / từ" in text
+    assert "0.10 Xu / từ" in text
     assert "Nội dung tối thiểu: 20 từ" in text
     assert "Tối thiểu thanh toán: 1 Xu" in text
 
@@ -97,16 +97,16 @@ def test_subtitle_translate_copy_01_xu_per_char():
     assert "0.1 Xu / ký tự" in text
 
 
-def test_dub_default_copy_005_xu_per_char():
+def test_dub_default_copy_010_xu_per_char():
     text = "\n".join(bot.pricing_subtitle_lines())
     assert "Lồng tiếng giọng mặc định" in text
-    assert "0.05 Xu / ký tự" in text
+    assert "0.10 Xu / ký tự" in text
 
 
-def test_dub_custom_copy_01_xu_per_char():
+def test_dub_custom_copy_020_xu_per_char():
     text = "\n".join(bot.pricing_subtitle_lines())
     assert "Lồng tiếng voice riêng" in text
-    assert "0.1 Xu / ký tự" in text
+    assert "0.20 Xu / ký tự" in text
 
 
 def test_discount_copy_1000_10000_chars():
@@ -136,7 +136,7 @@ def test_free_resource_copy():
 def test_guides_include_examples_each_product():
     text = _guide_text()
     for expected in [
-        "Ví dụ: 100 từ = 5 Xu",
+        "Ví dụ: 100 từ = 10 Xu",
         "Ví dụ: chọn Nhạc nền Tiêu chuẩn = 150 Xu",
         "Ví dụ: gói Cơ bản 300 Xu",
         "Ví dụ: 2.000 ký tự = 200 Xu",
@@ -179,7 +179,7 @@ def test_pricing_download_file_contains_voice_music_video_subtitle_image():
 
 def test_guide_download_file_contains_examples():
     text = (REPO_ROOT / "docs" / "public" / pricing_content.GUIDE_DOWNLOAD_FILENAME).read_text(encoding="utf-8")
-    for expected in ["Ví dụ: 100 từ = 5 Xu", "Ví dụ: gói Cơ bản 300 Xu", "Ví dụ: chọn gói ảnh 200 Xu"]:
+    for expected in ["Ví dụ: 100 từ = 10 Xu", "Ví dụ: gói Cơ bản 300 Xu", "Ví dụ: chọn gói ảnh 200 Xu"]:
         assert expected in text
 
 
@@ -201,7 +201,7 @@ def test_website_pricing_content_exists_if_web_routes_in_repo():
     index = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
     assert "/pricing" in routes
     assert "/pricing" in index
-    assert "Giọng nói: audio từ voice 0.05 Xu/từ" in index
+    assert "Giọng nói: audio từ voice 0.10 Xu/từ" in index
     assert "Bảng giá video: 200, 300, 400, 500, 600, 800, 1000, 1200 và 1500 Xu" in index
     assert f"/download/{pricing_content.PRICING_DOWNLOAD_FILENAME}" in index
 

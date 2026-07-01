@@ -187,7 +187,7 @@ def test_showroom_saved_voice_profile_asks_text_then_confirm(monkeypatch):
     assert handled is True
     assert result["selected_voice_profile_id"] == 77
     assert "Dùng voice riêng để đọc văn bản" in message.outputs[-1]["text"]
-    assert "0.1 Xu / ký tự" in message.outputs[-1]["text"]
+    assert "0.2 Xu / ký tự" in message.outputs[-1]["text"]
     assert "music_quick|showroom|voice_profile_generate:77" in _callbacks(message.outputs[-1]["reply_markup"])
     assert touched.get("last_used_at")
 
