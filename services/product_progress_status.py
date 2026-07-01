@@ -311,7 +311,25 @@ def product_progress_stage(product_type: str = "", stage: str = "") -> dict[str,
     return _stage("received_request", "Nhận yêu cầu", "Đã nhận yêu cầu", 5)
 
 
+def canonical_music_job_id(job_id: str = "") -> str:
+    raw = str(job_id or "").strip().upper()
+    if raw.startswith("#"):
+        raw = raw[1:].strip()
+    raw = re.sub(r"[^A-Z0-9-]+", "", raw)
+    if raw.startswith("MUS-"):
+        raw = "MUS" + raw[4:]
+    if not raw.startswith("MUS") or raw.startswith("MUSIC"):
+        return ""
+    payload = re.sub(r"[^A-Z0-9]+", "", raw[3:])
+    if not payload:
+        return ""
+    return "MUS" + payload
+
+
 def product_progress_public_job_code(job_id: str = "") -> str:
+    music_id = canonical_music_job_id(job_id)
+    if music_id:
+        return "#" + music_id
     raw = re.sub(r"[^A-Za-z0-9]+", "", str(job_id or "")).upper()
     if not raw:
         raw = hashlib.sha256(b"TOAN_AAS").hexdigest()[:8].upper()
@@ -328,7 +346,7 @@ def product_progress_safe_callback_data(value: str = "", limit: int = 54) -> str
 
 def product_progress_update_callback(product_type: str = "", job_id: str = "") -> str:
     safe_type = product_progress_safe_callback_value(normalize_product_type(product_type), 20)
-    safe_job = product_progress_safe_callback_value(job_id, 28) or "latest"
+    safe_job = canonical_music_job_id(job_id) or product_progress_safe_callback_value(job_id, 28) or "latest"
     callback = f"progress|status|{safe_type}|{safe_job}"
     return callback[:64]
 
