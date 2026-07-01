@@ -58654,7 +58654,7 @@ def video_ui_audit_payload() -> dict:
         {"name": "no_BACK_text_in_back_button_label", "ok": all("BACK" not in label for row in (status_rows + option_rows) for label in row)},
         {"name": "flow_locked", "ok": bool(status_rows and status_rows[0] == ["🔄 Cập nhật trạng thái", "🧾 Xem hóa đơn"] and first_option_row == ["1", "2", "3", "4", "5"])},
         {"name": "video_auto_refresh_registered", "ok": "video_b14_send_or_edit_status_panel" in callback_source and "video_b14_auto_refresh_register_message" in inspect.getsource(video_b14_send_or_edit_status_panel)},
-        {"name": "video_auto_refresh_debug_command", "ok": "cmd_video_progress_auto_refresh_status" in globals()},
+        {"name": "video_auto_status_command", "ok": 'CommandHandler("video_auto_status", cmd_video_progress_auto_refresh_status)' in inspect.getsource(lifespan), "value": "/video_auto_status"},
         {"name": "engine_touched", "ok": True, "value": False},
     ]
     return {
@@ -167366,7 +167366,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_back_route_audit", cmd_subdub_back_route_audit))
     tg_app.add_handler(CommandHandler("subdub_render_style_audit", cmd_subdub_render_style_audit))
     tg_app.add_handler(CommandHandler("subdub_terminal_debug", cmd_subdub_terminal_debug))
-    tg_app.add_handler(CommandHandler("video_progress_auto_refresh_status", cmd_video_progress_auto_refresh_status))
+    tg_app.add_handler(CommandHandler("video_auto_status", cmd_video_progress_auto_refresh_status))
     tg_app.add_handler(CommandHandler("video_status_debug", cmd_video_status_debug))
     tg_app.add_handler(CommandHandler("subdub_style_preview", cmd_subdub_style_preview))
     tg_app.add_handler(CommandHandler("voice_status", cmd_voice_status))
