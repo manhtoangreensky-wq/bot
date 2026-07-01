@@ -5344,10 +5344,64 @@ def sanitize_provider_status_text(value, provider_task_id: str = "", limit: int 
     text = re.sub(r"(?i)(api[_-]?key|token|secret)=?[A-Za-z0-9._:-]+", r"\1=***", text)
     return text[: max(20, int(limit or 260))]
 
+def canonical_music_job_id(raw: str = "") -> str:
+    return product_progress_status.canonical_music_job_id(raw)
+
+
+def legacy_music_job_id(raw: str = "") -> str:
+    canonical = canonical_music_job_id(raw)
+    if not canonical:
+        return ""
+    return f"MUS-{canonical[3:]}"
+
+
+def normalized_music_job_input(raw: str = "") -> str:
+    value = str(raw or "").strip().upper()
+    if value.startswith("#"):
+        value = value[1:].strip()
+    return re.sub(r"[^A-Z0-9-]+", "", value)
+
+
+def music_job_lookup_aliases(raw: str = "") -> list[str]:
+    raw_clean = str(raw or "").strip()
+    if raw_clean.startswith("#"):
+        raw_clean = raw_clean[1:].strip()
+    normalized = normalized_music_job_input(raw)
+    canonical = canonical_music_job_id(normalized or raw)
+    legacy = legacy_music_job_id(canonical or normalized or raw)
+    aliases: list[str] = []
+    for candidate in (raw_clean, normalized, legacy, canonical):
+        if candidate and candidate not in aliases:
+            aliases.append(candidate)
+    return aliases
+
+
+def music_job_lookup_identity(raw: str = "", resolved_job_id: str = "", lookup_found: bool = False) -> dict:
+    input_job_id = str(raw or "").strip()
+    normalized = normalized_music_job_input(input_job_id)
+    canonical = canonical_music_job_id(normalized or input_job_id)
+    legacy = legacy_music_job_id(canonical or normalized or input_job_id)
+    return {
+        "input_job_id": input_job_id,
+        "normalized_no_hash": normalized,
+        "canonical_job_id": canonical,
+        "legacy_job_id": legacy,
+        "resolved_job_id": str(resolved_job_id or ""),
+        "lookup_found": bool(lookup_found),
+    }
+
+
+def music_public_display_job_id(raw: str = "") -> str:
+    normalized = canonical_music_job_id(raw)
+    return f"#{normalized}" if normalized else product_progress_status.product_progress_public_job_code(raw)
+
+
 def engine_async_job_id(feature: str, user_id="") -> str:
     feature_key = str(feature or "").strip().lower()
     prefix = ENGINE_ASYNC_JOB_FEATURE_PREFIX.get(feature_key, "JOB")
     nonce = hashlib.sha256(f"{feature_key}:{user_id}:{time.time_ns()}:{random.random()}".encode("utf-8")).hexdigest()[:8].upper()
+    if prefix == "MUS":
+        return f"{prefix}{nonce}"
     return f"{prefix}-{nonce}"
 
 def normalize_engine_async_job(job: dict) -> dict:
@@ -5355,6 +5409,8 @@ def normalize_engine_async_job(job: dict) -> dict:
     feature = str(current.get("feature") or "").strip().lower()
     current["feature"] = feature
     current["internal_job_id"] = str(current.get("internal_job_id") or engine_async_job_id(feature, current.get("user_id"))).strip()
+    if feature == "music_suno":
+        current["internal_job_id"] = canonical_music_job_id(current.get("internal_job_id")) or engine_async_job_id(feature, current.get("user_id"))
     provider_task_id = str(current.get("provider_task_id") or current.get("provider_job_id") or "").strip()
     output_bytes = int(current.get("output_bytes") or 0)
     status = str(current.get("status") or ("completed" if output_bytes > 0 else "submitted")).strip().lower()
@@ -5416,15 +5472,40 @@ def save_engine_async_job(job: dict) -> dict:
     return current
 
 def get_engine_async_job(internal_job_id: str) -> dict:
-    raw = get_system_setting(_engine_async_job_key(internal_job_id), "")
-    if not raw:
-        memory = ENGINE_ASYNC_MEMORY_JOBS.get(str(internal_job_id or "").strip())
-        return dict(memory or {})
-    try:
-        value = json.loads(raw or "{}")
-        return value if isinstance(value, dict) else {}
-    except Exception:
-        return {}
+    raw_id = str(internal_job_id or "").strip()
+    lookup_ids = music_job_lookup_aliases(raw_id) or [raw_id]
+    for lookup_id in lookup_ids:
+        raw = get_system_setting(_engine_async_job_key(lookup_id), "")
+        if raw:
+            try:
+                value = json.loads(raw or "{}")
+                return value if isinstance(value, dict) else {}
+            except Exception:
+                return {}
+        memory = ENGINE_ASYNC_MEMORY_JOBS.get(str(lookup_id or "").strip())
+        if memory:
+            return dict(memory or {})
+    return {}
+
+
+def get_engine_async_job_lookup(internal_job_id: str) -> dict:
+    raw_id = str(internal_job_id or "").strip()
+    aliases = music_job_lookup_aliases(raw_id) or [raw_id]
+    for lookup_id in aliases:
+        job = get_engine_async_job(lookup_id)
+        if job:
+            resolved = str(job.get("internal_job_id") or job.get("job_id") or lookup_id or "").strip()
+            return {
+                "job": dict(job),
+                "resolved_job_id": resolved,
+                **music_job_lookup_identity(raw_id, resolved, True),
+                "aliases": aliases,
+            }
+    return {
+        "job": {},
+        **music_job_lookup_identity(raw_id, "", False),
+        "aliases": aliases,
+    }
 
 MUSIC_CONFIRM_SUBMIT_BLOCKERS = {
     "confirm_state_missing",
@@ -5465,6 +5546,39 @@ def mark_music_confirm_submit_blocker(
         normalized = "provider_submit_failed"
     safe_detail = sanitize_provider_status_text(detail or normalized, str(current.get("provider_task_id") or current.get("provider_job_id") or ""), 240)
     now = now_text()
+    if normalized == "scheduler_start_failed":
+        current.update({
+            "feature": str(current.get("feature") or "music_suno"),
+            "status": str(current.get("status") or ("completed" if int(current.get("output_bytes") or 0) > 0 else "submitted")),
+            "terminal_state": "",
+            "music_terminal_state": "",
+            "confirm_submit_blocker": normalized,
+            "confirm_submit_phase": str(current.get("confirm_submit_phase") or "submitted"),
+            "auto_delivery_blocker": normalized,
+            "scheduler_mode": "scheduler_failed",
+            "task_started": False,
+            "task_alive": False,
+            "progress_percent": max(int(current.get("progress_percent") or 0), 12),
+            "progress_text": music_confirm_submit_blocker_text(normalized),
+            "last_provider_status": safe_detail,
+            "scheduler_failed_at": now,
+        })
+        if str(current.get("error_category") or "") in {"", "scheduler_start_failed"}:
+            current["error_category"] = ""
+        if not persist:
+            ENGINE_ASYNC_MEMORY_JOBS[job_id] = dict(current)
+            return current
+        try:
+            return save_engine_async_job(current)
+        except Exception as exc:
+            current.update({
+                "error_category": "job_persist_failed",
+                "confirm_submit_blocker": "job_persist_failed",
+                "auto_delivery_blocker": "job_persist_failed",
+                "last_provider_status": sanitize_provider_status_text(str(exc), "", 240),
+            })
+            ENGINE_ASYNC_MEMORY_JOBS[job_id] = dict(current)
+            return current
     current.update({
         "feature": str(current.get("feature") or "music_suno"),
         "status": "failed",
@@ -6150,7 +6264,7 @@ def music_job_product_type(job: dict | None = None, fallback: str = "music_bg") 
 
 
 def progress_job_id_is_music(job_id: str = "") -> bool:
-    return bool(re.match(r"^MUS(?!IC)", str(job_id or "").strip().upper()))
+    return bool(canonical_music_job_id(job_id))
 
 
 def resolve_progress_product_type(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
@@ -6158,7 +6272,7 @@ def resolve_progress_product_type(job_id: str = "", product_type: str = "", job:
     requested = str(product_type or "").strip().lower()
     if requested in {"music", "music_suno", "music_bg", "music_song", "music_background", "background_music", "song", "lyrics_song"}:
         return music_job_product_type(current, "music_bg" if requested != "music_song" else "music_song")
-    if progress_job_id_is_music(job_id) or str(current.get("internal_job_id") or current.get("job_id") or "").upper().startswith("MUS"):
+    if progress_job_id_is_music(job_id) or canonical_music_job_id(current.get("internal_job_id") or current.get("job_id") or ""):
         return music_job_product_type(current, "music_bg")
     return product_progress_status.normalize_product_type(product_type)
 
@@ -6177,8 +6291,70 @@ def music_job_delivery_state(job: dict | None = None) -> str:
     return str(delivery_state or current.get("status") or "-")
 
 
+def music_job_artifact_ready_value(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    ready = current.get("artifact_ready")
+    music_ready = current.get("music_artifact_ready")
+    ready_text = str(ready if ready is not None else music_ready if music_ready is not None else "").strip().lower()
+    return bool(ready is True or music_ready is True or ready_text in {"1", "true", "yes", "ready", "completed", "complete"})
+
+
+def music_job_audio_validated_value(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    validated = current.get("audio_validated")
+    music_validated = current.get("music_audio_validated")
+    artifact_validated = current.get("artifact_validated")
+    text = str(validated if validated is not None else music_validated if music_validated is not None else artifact_validated if artifact_validated is not None else "").strip().lower()
+    return bool(validated is True or music_validated is True or artifact_validated is True or text in {"1", "true", "yes", "validated", "ready"})
+
+
+def music_job_artifact_duration_value(job: dict | None = None) -> int:
+    current = dict(job or {})
+    for key in ("artifact_duration", "artifact_duration_seconds", "music_result_duration_seconds", "music_output_duration_seconds", "duration_seconds", "audio_duration_seconds"):
+        value = current.get(key)
+        if value not in (None, "", 0, "0"):
+            try:
+                parsed = int(round(float(value)))
+                if parsed > 0:
+                    return parsed
+            except Exception:
+                continue
+    return 0
+
+
+def music_job_ready_artifact_validated(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    return bool(
+        music_job_artifact_ready_value(current)
+        and music_job_audio_validated_value(current)
+        and int(current.get("output_bytes") or current.get("music_result_size_bytes") or 0) > 0
+        and music_job_artifact_duration_value(current) > 0
+    )
+
+
+def music_job_scheduler_failure_blocker(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    return any(str(current.get(key) or "").strip() == "scheduler_start_failed" for key in ("confirm_submit_blocker", "auto_delivery_blocker", "error_category", "stopped_reason", "stop_reason"))
+
+
+def music_job_scheduler_artifact_recoverable(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    if not current or music_job_delivered(current):
+        return False
+    terminal = str(current.get("terminal_state") or current.get("music_terminal_state") or "").strip().lower()
+    delivery_state = str(current.get("delivery_state") or "").strip().lower()
+    return bool(
+        music_job_scheduler_failure_blocker(current)
+        and music_job_ready_artifact_validated(current)
+        and (terminal in {"", "failed_no_charge"} or delivery_state in {"", "failed", "retryable"})
+        and not (current.get("music_delivery_message_id") or current.get("delivery_message_id"))
+    )
+
+
 def music_job_terminal_failed(job: dict | None = None) -> bool:
     current = dict(job or {})
+    if music_job_scheduler_artifact_recoverable(current):
+        return False
     status = str(current.get("status") or current.get("music_status") or "").strip().lower()
     terminal = str(current.get("terminal_state") or current.get("music_terminal_state") or "").strip().lower()
     if terminal in {"failed_no_charge", "failed_refunded", "needs_admin_review"}:
@@ -6231,12 +6407,30 @@ def record_music_panel_creator_trace(
     blocked: bool = False,
     reason: str = "",
 ) -> dict:
-    safe_job = str(job_id or "").strip()
+    input_job_id = str(job_id or "").strip()
+    normalized_job_id = canonical_music_job_id(input_job_id)
+    safe_job = normalized_job_id or input_job_id
     if not safe_job:
         return {}
     current = dict(MUSIC_PANEL_CREATOR_TRACES.get(safe_job) or {})
+    displayed_job_id = music_public_display_job_id(safe_job)
+    callback_job_id = normalized_job_id or product_progress_status.product_progress_safe_callback_value(safe_job, 40)
+    input_clean = re.sub(r"[^A-Za-z0-9]+", "", input_job_id.lstrip("#")).upper()
+    id_mismatch = bool(normalized_job_id and input_clean and input_clean != normalized_job_id)
+    mismatch_reason = ""
+    if id_mismatch and input_job_id.strip().upper().lstrip("#").startswith("MUS-"):
+        mismatch_reason = "mus_hyphen_normalized"
+    elif id_mismatch:
+        mismatch_reason = "music_id_normalized"
     current.update({
         "job_id": safe_job,
+        "input_job_id": input_job_id,
+        "displayed_job_id": displayed_job_id,
+        "normalized_job_id": normalized_job_id or safe_job,
+        "internal_job_id": normalized_job_id or safe_job,
+        "callback_job_id": callback_job_id,
+        "id_mismatch": id_mismatch,
+        "id_mismatch_reason": mismatch_reason,
         "product_type": product_progress_status.normalize_product_type(product_type or current.get("product_type") or "music_bg"),
         "source": str(source or current.get("source") or ""),
         "route": str(route or current.get("route") or ""),
@@ -6254,16 +6448,18 @@ def record_music_panel_creator_trace(
 
 
 def music_panel_creator_trace(job_id: str = "") -> dict:
-    return dict(MUSIC_PANEL_CREATOR_TRACES.get(str(job_id or "").strip()) or {})
+    raw = str(job_id or "").strip()
+    normalized = canonical_music_job_id(raw)
+    return dict(MUSIC_PANEL_CREATOR_TRACES.get(normalized or raw) or {})
 
 
 def music_progress_job_lookup_found(job_id: str = "", job: dict | None = None) -> bool:
     current = dict(job or {})
     if not current:
         return False
-    internal = str(current.get("internal_job_id") or current.get("job_id") or "").strip()
-    wanted = str(job_id or "").strip()
-    if wanted and internal and internal != wanted:
+    internal = canonical_music_job_id(current.get("internal_job_id") or current.get("job_id") or "") or str(current.get("internal_job_id") or current.get("job_id") or "").strip()
+    wanted = canonical_music_job_id(job_id) or str(job_id or "").strip()
+    if wanted and internal and internal != wanted and internal.upper() != wanted.upper():
         return False
     return True
 
@@ -6294,6 +6490,8 @@ def product_progress_state_from_job(product_type: str = "", job: dict | None = N
 def product_progress_status_from_job_text(product_type: str = "", job: dict | None = None, job_id: str = "", lang: str = "vi") -> str:
     current = dict(job or {})
     public_id = job_id or current.get("internal_job_id") or current.get("job_id") or current.get("id") or current.get("provider_task_id") or ""
+    if progress_product_type_is_music(product_type, public_id):
+        public_id = canonical_music_job_id(public_id) or str(public_id or "")
     if progress_product_type_is_music(product_type, public_id) and not music_progress_job_lookup_found(public_id, current):
         record_music_panel_creator_trace(
             str(public_id or job_id or ""),
@@ -6302,7 +6500,7 @@ def product_progress_status_from_job_text(product_type: str = "", job: dict | No
             callback_data=product_progress_status.product_progress_update_callback(product_type, public_id),
             real_job_created_before_panel=False,
             blocked=True,
-            reason="missing_real_music_job",
+            reason="missing_real_music_job_before_panel",
         )
         return music_progress_missing_job_status_text(str(public_id or job_id or ""), lang)
     state = product_progress_state_from_job(product_type, current)
@@ -6539,7 +6737,11 @@ async def music_progress_refresh_job_status(job_id: str = "", *, user_id=0, allo
     if not job:
         return {}
     current = dict(job)
-    if music_job_delivered(current) or music_job_terminal_failed(current):
+    if music_job_delivered(current):
+        return current
+    if music_job_ready_artifact_validated(current):
+        return current
+    if music_job_terminal_failed(current):
         return current
     if str(current.get("status") or "").strip().lower() in {"pending_submit", "submitting"}:
         return current
@@ -6596,11 +6798,103 @@ def music_progress_message_proxy(context, chat_id):
     return SimpleNamespace(chat_id=chat_id)
 
 
+async def deliver_music_ready_artifact_once(
+    job_id: str = "",
+    *,
+    context=None,
+    message=None,
+    chat_id=None,
+    user_id=0,
+    lang: str = "vi",
+    product_context: str = "showroom",
+    source: str = "recovery",
+) -> dict:
+    lookup = get_engine_async_job_lookup(job_id)
+    current = dict(lookup.get("job") or {})
+    if not current:
+        return {"ok": False, "status": "MISSING_JOB", **lookup}
+    resolved_job_id = str(lookup.get("resolved_job_id") or current.get("internal_job_id") or current.get("job_id") or job_id or "").strip()
+    if music_job_delivered(current):
+        return {"ok": True, "status": "ALREADY_DELIVERED", "duplicate": True, "job": current, **lookup}
+    if music_job_terminal_failed(current) and not music_job_scheduler_artifact_recoverable(current):
+        return {"ok": False, "status": "TERMINAL_FAILED", "job": current, **lookup}
+    if not music_job_ready_artifact_validated(current):
+        blocker = "artifact_not_ready"
+        if not music_job_artifact_ready_value(current):
+            blocker = "artifact_not_ready"
+        elif not music_job_audio_validated_value(current):
+            blocker = "audio_not_validated"
+        elif int(current.get("output_bytes") or current.get("music_result_size_bytes") or 0) <= 0:
+            blocker = "artifact_bytes_missing"
+        elif music_job_artifact_duration_value(current) <= 0:
+            blocker = "artifact_duration_missing"
+        current["auto_delivery_blocker"] = blocker
+        if resolved_job_id:
+            save_engine_async_job(current)
+        return {"ok": False, "status": blocker.upper(), "job": current, **lookup}
+    if str(current.get("music_delivery_lock") or current.get("music_result_delivery_lock") or "").strip().lower() == "sending":
+        updated = music_delivery_record_duplicate(current, source, "delivery_locked", current, updated_by=user_id or current.get("user_id") or "")
+        return {"ok": True, "status": "DELIVERY_LOCKED", "duplicate": True, "job": updated or current, **lookup}
+    delivery_chat_id = chat_id or current.get("chat_id") or current.get("user_id") or user_id
+    delivery_user_id = current.get("user_id") or user_id or delivery_chat_id or 0
+    if not delivery_chat_id:
+        current["auto_delivery_blocker"] = "telegram_chat_id_missing"
+        if resolved_job_id:
+            save_engine_async_job(current)
+        return {"ok": False, "status": "TELEGRAM_CHAT_ID_MISSING", "job": current, **lookup}
+    audio_bytes = music_delivery_audio_bytes_from_job(current)
+    delivery_message = music_progress_message_proxy(context, delivery_chat_id)
+    if not getattr(context, "bot", None) and message is not None and str(getattr(message, "chat_id", "") or "") == str(delivery_chat_id):
+        delivery_message = message
+    result = music_result_for_job_delivery(delivery_user_id, current)
+    delivered = await send_music_product_audio_result(
+        delivery_message,
+        context or SimpleNamespace(),
+        user_id=delivery_user_id,
+        lang=lang,
+        product_context=product_context,
+        result=result,
+        audio_bytes=audio_bytes,
+        job=current,
+        updated_by=user_id or delivery_user_id,
+        send_success_message=True,
+        source=source,
+    )
+    updated_job = dict(delivered.get("job") or get_engine_async_job(resolved_job_id) or current)
+    if delivered.get("ok") and str(delivered.get("delivery_message_id") or updated_job.get("delivery_message_id") or updated_job.get("music_delivery_message_id") or "").strip():
+        updated_job.update({
+            "terminal_state": "delivered",
+            "music_terminal_state": "delivered",
+            "delivery_state": "delivered",
+            "auto_delivery_blocker": "",
+            "confirm_submit_blocker": "",
+            "music_delivery_blocker": "",
+        })
+        if str(updated_job.get("error_category") or "") in {"scheduler_start_failed", "telegram_delivery_failed", ""}:
+            updated_job["error_category"] = ""
+        if updated_job.get("internal_job_id"):
+            save_engine_async_job(updated_job)
+        delivered["job"] = updated_job
+    return {**delivered, **lookup, "resolved_job_id": resolved_job_id, "job": updated_job}
+
+
 async def music_auto_deliver_from_progress_record(context, record: dict, job: dict | None = None) -> dict:
     current = dict(job or {})
     if not bool(record.get("auto_delivery_enabled")) or not MUSIC_AUTO_DELIVERY_ENABLED:
         return current
-    if not current or music_job_delivered(current) or music_job_terminal_failed(current):
+    if not current or music_job_delivered(current):
+        return current
+    if music_job_ready_artifact_validated(current):
+        recovered = await deliver_music_ready_artifact_once(
+            str(current.get("internal_job_id") or record.get("job_id") or ""),
+            context=context,
+            chat_id=record.get("chat_id") or current.get("chat_id"),
+            user_id=record.get("user_id") or current.get("user_id") or 0,
+            lang=record.get("lang") or "vi",
+            source="auto_tick",
+        )
+        return dict(recovered.get("job") or current)
+    if music_job_terminal_failed(current):
         return current
     if not getattr(context, "bot", None):
         current["auto_delivery_blocker"] = "no_bot_context"
@@ -6751,44 +7045,52 @@ async def send_product_progress_message(
     start_task: bool = True,
 ):
     canonical = product_progress_status.normalize_product_type(product_type)
-    if progress_product_type_is_music(canonical, job_id):
-        persisted_job = get_engine_async_job(job_id)
-        if not music_progress_panel_job_is_real(job_id, persisted_job):
+    normalized_job_id = canonical_music_job_id(job_id) if progress_product_type_is_music(canonical, job_id) else str(job_id or "")
+    panel_job_id = normalized_job_id or str(job_id or "")
+    if progress_product_type_is_music(canonical, panel_job_id):
+        persisted_job = get_engine_async_job(job_id) or get_engine_async_job(panel_job_id)
+        if not music_progress_panel_job_is_real(panel_job_id, persisted_job):
             record_music_panel_creator_trace(
                 job_id,
                 product_type=canonical,
                 source="send_product_progress_message",
-                callback_data=product_progress_status.product_progress_update_callback(canonical, job_id),
+                callback_data=product_progress_status.product_progress_update_callback(canonical, panel_job_id),
                 real_job_created_before_panel=False,
                 blocked=True,
-                reason="missing_real_music_job",
+                reason="missing_real_music_job_before_panel",
             )
-            logger.warning("blocked fake music progress panel | product=%s | job=%s", sanitize_log_text(canonical)[:40], sanitize_log_text(str(job_id or ""))[:80])
-            return await message.reply_text(
+            logger.warning("blocked fake music progress panel | product=%s | input_job=%s | normalized_job=%s", sanitize_log_text(canonical)[:40], sanitize_log_text(str(job_id or ""))[:80], sanitize_log_text(str(panel_job_id or ""))[:80])
+            sent = await message.reply_text(
                 music_panel_missing_job_public_text(lang),
                 parse_mode="HTML",
             )
+            try:
+                setattr(sent, "music_panel_blocked", True)
+                setattr(sent, "blocked_reason", "missing_real_music_job_before_panel")
+            except Exception:
+                pass
+            return sent
     sent = await message.reply_text(
-        product_progress_status_text(canonical, job_id, current_stage, percent, terminal_state, public_note, lang),
+        product_progress_status_text(canonical, panel_job_id, current_stage, percent, terminal_state, public_note, lang),
         parse_mode="HTML",
-        reply_markup=product_progress_status_keyboard(canonical, job_id, lang),
+        reply_markup=product_progress_status_keyboard(canonical, panel_job_id, lang),
     )
-    if progress_product_type_is_music(canonical, job_id):
+    if progress_product_type_is_music(canonical, panel_job_id):
         panel_chat_id = getattr(sent, "chat_id", None) or getattr(message, "chat_id", "")
         panel_message_id = getattr(sent, "message_id", "")
         trace = record_music_panel_creator_trace(
-            job_id,
+            panel_job_id,
             product_type=canonical,
             source="send_product_progress_message",
             route="send_product_progress_message",
-            callback_data=product_progress_status.product_progress_update_callback(canonical, job_id),
+            callback_data=product_progress_status.product_progress_update_callback(canonical, panel_job_id),
             chat_id=panel_chat_id,
             message_id=panel_message_id,
             real_job_created_before_panel=True,
             blocked=False,
         )
         try:
-            persisted_job = get_engine_async_job(job_id)
+            persisted_job = get_engine_async_job(job_id) or get_engine_async_job(panel_job_id)
             if persisted_job:
                 persisted_job.update({
                     "panel_created_by": str(persisted_job.get("panel_created_by") or "send_product_progress_message"),
@@ -6796,22 +7098,28 @@ async def send_product_progress_message(
                     "panel_chat_id": str(panel_chat_id or ""),
                     "panel_message_id": str(panel_message_id or ""),
                     "panel_route": str(persisted_job.get("panel_route") or "send_product_progress_message"),
-                    "panel_callback_data": str(product_progress_status.product_progress_update_callback(canonical, job_id)),
+                    "panel_callback_data": str(product_progress_status.product_progress_update_callback(canonical, panel_job_id)),
                     "real_job_created_before_panel": True,
                 })
                 save_engine_async_job(persisted_job)
         except Exception as exc:
-            logger.warning("music panel trace persist failed | job=%s | %s", sanitize_log_text(str(job_id or ""))[:80], sanitize_log_text(str(exc))[:180])
-    progress_auto_refresh_register_message(sent, context, product_type=canonical, job_id=job_id, user_id=user_id, lang=lang, start_task=start_task)
+            logger.warning("music panel trace persist failed | job=%s | %s", sanitize_log_text(str(panel_job_id or ""))[:80], sanitize_log_text(str(exc))[:180])
+    progress_auto_refresh_register_message(sent, context, product_type=canonical, job_id=panel_job_id, user_id=user_id, lang=lang, start_task=start_task)
     return sent
 
 
 def progress_auto_refresh_status_text(job_id: str = "") -> str:
-    wanted = str(job_id or "").strip()
+    input_job_id = str(job_id or "").strip()
+    wanted = canonical_music_job_id(input_job_id) or input_job_id
+    wanted_aliases = set(music_job_lookup_aliases(input_job_id) or [])
+    if wanted:
+        wanted_aliases.add(wanted)
+    if input_job_id:
+        wanted_aliases.add(input_job_id)
     records = [
         dict(record)
         for record in PROGRESS_AUTO_REFRESH_JOBS.values()
-        if not wanted or wanted in {str(record.get("job_id") or ""), str(record.get("key") or "")}
+        if not wanted or bool(wanted_aliases.intersection(set(music_job_lookup_aliases(str(record.get("job_id") or "")) or []) | {str(record.get("job_id") or ""), str(record.get("key") or "")}))
     ]
     if not records and wanted and progress_job_id_is_music(wanted):
         job = get_engine_async_job(wanted)
@@ -6879,6 +7187,9 @@ def product_progress_matrix_text() -> str:
 
 
 def product_progress_debug_text(job_id: str = "", product_type: str = "", job: dict | None = None) -> str:
+    input_job_id = str(job_id or "").strip()
+    if progress_product_type_is_music(product_type, job_id):
+        job_id = canonical_music_job_id(job_id) or str(job_id or "")
     resolved_type = resolve_progress_product_type(job_id, product_type, job)
     if progress_product_type_is_music(resolved_type, job_id) and job_id and not music_progress_job_lookup_found(job_id, job):
         trace = music_panel_creator_trace(job_id)
@@ -6887,6 +7198,9 @@ def product_progress_debug_text(job_id: str = "", product_type: str = "", job: d
             "📊 <b>TOAN AAS progress status</b>\n\n"
             f"• Product: <code>{html.escape(str(product_progress_status.normalize_product_type(resolved_type) or '-'))}</code>\n"
             f"• Code: <code>{html.escape(str(product_progress_status.product_progress_public_job_code(job_id) or '-'))}</code>\n"
+            f"• input_job_id: <code>{html.escape(str(input_job_id or '-'))}</code>\n"
+            f"• normalized_job_id: <code>{html.escape(str(canonical_music_job_id(job_id) or job_id or '-'))}</code>\n"
+            f"• displayed_job_id: <code>{html.escape(music_public_display_job_id(job_id) if job_id else '-')}</code>\n"
             "• lookup_found: <code>no</code>\n"
             "• synthetic_status_used: <code>no</code>\n"
             "• warning: <code>progress_status_without_real_music_job</code>\n"
@@ -6921,6 +7235,8 @@ async def cmd_progress_status_debug(update: Update, context: ContextTypes.DEFAUL
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
     product_type = str(args[1] if len(args) > 1 else "").strip()
+    if progress_product_type_is_music(product_type, job_id):
+        job_id = canonical_music_job_id(job_id) or job_id
     job = get_engine_async_job(job_id) if job_id else {}
     return await update.message.reply_text(product_progress_debug_text(job_id, product_type, job), parse_mode="HTML")
 
@@ -6934,9 +7250,13 @@ async def cmd_progress_auto_refresh_status(update: Update, context: ContextTypes
 
 
 def music_job_debug_text(job_id: str = "") -> str:
-    job = get_engine_async_job(job_id) if job_id else {}
-    trace = music_panel_creator_trace(job_id)
-    lookup_found = music_progress_job_lookup_found(job_id, job)
+    input_job_id = str(job_id or "").strip()
+    lookup = get_engine_async_job_lookup(input_job_id) if input_job_id else {"job": {}, **music_job_lookup_identity(input_job_id, "", False)}
+    job_id = str(lookup.get("canonical_job_id") or canonical_music_job_id(input_job_id) or input_job_id)
+    resolved_job_id = str(lookup.get("resolved_job_id") or "")
+    job = dict(lookup.get("job") or {})
+    trace = music_panel_creator_trace(input_job_id or job_id)
+    lookup_found = bool(lookup.get("lookup_found")) and music_progress_job_lookup_found(job_id, job)
     product_type = music_job_product_type(job, str(trace.get("product_type") or "music_bg"))
     state = product_progress_state_from_job(product_type, job)
     lifecycle = dict(state.get("music_lifecycle") or {})
@@ -6965,6 +7285,13 @@ def music_job_debug_text(job_id: str = "") -> str:
     return (
         "🎵 <b>Music job debug</b>\n\n"
         f"• music_job_id: <code>{html.escape(str(job_id or '-'))}</code>\n"
+        f"• displayed_job_id: <code>{html.escape(music_public_display_job_id(job_id) if job_id else '-')}</code>\n"
+        f"• input_job_id: <code>{html.escape(str(input_job_id or '-'))}</code>\n"
+        f"• resolved_job_id: <code>{html.escape(str(resolved_job_id or '-'))}</code>\n"
+        f"• canonical_job_id: <code>{html.escape(str(lookup.get('canonical_job_id') or '-'))}</code>\n"
+        f"• legacy_job_id: <code>{html.escape(str(lookup.get('legacy_job_id') or '-'))}</code>\n"
+        f"• id_mismatch: <code>{'yes' if trace.get('id_mismatch') else 'no'}</code>\n"
+        f"• id_mismatch_reason: <code>{html.escape(str(trace.get('id_mismatch_reason') or '-'))}</code>\n"
         f"• lookup_found: <code>{'yes' if lookup_found else 'no'}</code>\n"
         f"• user_id/chat_id: <code>{html.escape(str((job or {}).get('user_id') or '-'))}/{html.escape(str((job or {}).get('chat_id') or '-'))}</code>\n"
         f"• confirm_route: <code>{html.escape(str((job or {}).get('confirm_route') or '-'))}</code>\n"
@@ -7024,6 +7351,50 @@ async def cmd_music_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
     return await update.message.reply_text(music_job_debug_text(job_id), parse_mode="HTML")
+
+
+def music_delivery_recover_report_text(input_job_id: str = "", result: dict | None = None) -> str:
+    data = dict(result or {})
+    job = dict(data.get("job") or {})
+    artifact_bytes = int(job.get("output_bytes") or job.get("music_result_size_bytes") or 0)
+    artifact_duration = music_job_artifact_duration_value(job)
+    delivery_message_id = str(data.get("delivery_message_id") or job.get("delivery_message_id") or job.get("music_delivery_message_id") or "")
+    blocker = str(job.get("auto_delivery_blocker") or job.get("music_delivery_blocker") or job.get("confirm_submit_blocker") or job.get("error_category") or data.get("status") or "-")
+    attempted = str(data.get("status") or "").upper() not in {"MISSING_JOB", "ALREADY_DELIVERED", "ARTIFACT_NOT_READY", "AUDIO_NOT_VALIDATED", "ARTIFACT_BYTES_MISSING", "ARTIFACT_DURATION_MISSING", "TERMINAL_FAILED"}
+    return (
+        "🎵 <b>Music delivery recovery</b>\n\n"
+        f"• input_job_id: <code>{html.escape(str(input_job_id or '-'))}</code>\n"
+        f"• lookup_found: <code>{'yes' if data.get('lookup_found') else 'no'}</code>\n"
+        f"• resolved_job_id: <code>{html.escape(str(data.get('resolved_job_id') or '-'))}</code>\n"
+        f"• canonical_job_id: <code>{html.escape(str(data.get('canonical_job_id') or '-'))}</code>\n"
+        f"• legacy_job_id: <code>{html.escape(str(data.get('legacy_job_id') or '-'))}</code>\n"
+        f"• artifact_ready: <code>{'ready' if music_job_artifact_ready_value(job) else 'no'}</code>\n"
+        f"• audio_validated: <code>{'yes' if music_job_audio_validated_value(job) else 'no'}</code>\n"
+        f"• artifact_bytes: <code>{artifact_bytes}</code>\n"
+        f"• artifact_duration: <code>{artifact_duration}</code>\n"
+        f"• delivery_attempted: <code>{'yes' if attempted else 'no'}</code>\n"
+        f"• delivery_message_id: <code>{html.escape(delivery_message_id or '-')}</code>\n"
+        f"• terminal_state: <code>{html.escape(str(job.get('terminal_state') or job.get('music_terminal_state') or '-'))}</code>\n"
+        f"• blocker: <code>{html.escape(blocker or '-')}</code>"
+    )
+
+
+async def cmd_music_delivery_recover(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    args = list(getattr(context, "args", []) or [])
+    job_id = str(args[0] if args else "").strip()
+    if not job_id:
+        return await update.message.reply_text("Dùng: /music_delivery_recover <MUS_ID>")
+    result = await deliver_music_ready_artifact_once(
+        job_id,
+        context=context,
+        message=update.message,
+        user_id=update.effective_user.id if update.effective_user else 0,
+        lang=user_ui_lang(update.effective_user.id if update.effective_user else 0),
+        source="admin_recover",
+    )
+    return await update.message.reply_text(music_delivery_recover_report_text(job_id, result), parse_mode="HTML")
 
 async def cmd_music_confirm_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id if update.effective_user else 0):
@@ -7131,11 +7502,16 @@ def music_panel_creator_audit_text() -> str:
         lines.append("")
         lines.append("Recent traces:")
         for job_id, trace in list(MUSIC_PANEL_CREATOR_TRACES.items())[-10:]:
+            lookup_job = get_engine_async_job(str(trace.get("normalized_job_id") or job_id or ""))
             lines.append(
-                f"• <code>{html.escape(str(job_id))}</code>: "
+                f"• displayed=<code>{html.escape(str(trace.get('displayed_job_id') or music_public_display_job_id(str(job_id))))}</code> "
+                f"internal=<code>{html.escape(str(trace.get('internal_job_id') or job_id))}</code> "
+                f"normalized=<code>{html.escape(str(trace.get('normalized_job_id') or job_id))}</code> "
                 f"source=<code>{html.escape(str(trace.get('source') or '-'))}</code> "
                 f"blocked=<code>{'yes' if trace.get('blocked') else 'no'}</code> "
-                f"reason=<code>{html.escape(str(trace.get('reason') or '-'))}</code>"
+                f"reason=<code>{html.escape(str(trace.get('reason') or '-'))}</code> "
+                f"lookup_found=<code>{'yes' if music_progress_job_lookup_found(str(trace.get('normalized_job_id') or job_id), lookup_job) else 'no'}</code> "
+                f"real_job_created_before_panel=<code>{'yes' if trace.get('real_job_created_before_panel') else 'no'}</code>"
             )
     return "\n".join(lines)
 
@@ -7152,6 +7528,8 @@ async def cmd_product_job_status(update: Update, context: ContextTypes.DEFAULT_T
     args = list(getattr(context, "args", []) or [])
     job_id = str(args[0] if args else "").strip()
     product_type = str(args[1] if len(args) > 1 else "").strip()
+    if progress_product_type_is_music(product_type, job_id):
+        job_id = canonical_music_job_id(job_id) or job_id
     job = get_engine_async_job(job_id) if job_id else {}
     product_type = resolve_progress_product_type(job_id, product_type, job)
     text = product_progress_status_from_job_text(product_type, job, job_id, user_ui_lang(update.effective_user.id if update.effective_user else 0))
@@ -7169,17 +7547,39 @@ def music_result_for_job_delivery(user_id, job: dict | None = None) -> dict:
 
 
 async def maybe_deliver_music_progress_job(query, context, *, product_type: str, job_id: str, user_id, lang: str) -> dict:
-    current = get_engine_async_job(job_id) if job_id else {}
+    lookup = get_engine_async_job_lookup(job_id) if job_id else {"job": {}, "resolved_job_id": ""}
+    current = dict(lookup.get("job") or {})
+    resolved_job_id = str(lookup.get("resolved_job_id") or job_id or "").strip()
     if not current:
         return {"ok": False, "status": "MISSING_JOB", "job": {}}
     if music_job_delivered(current):
         return {"ok": True, "status": "ALREADY_DELIVERED", "duplicate": True, "job": current}
+    if music_job_ready_artifact_validated(current):
+        return await deliver_music_ready_artifact_once(
+            resolved_job_id or job_id,
+            context=context,
+            message=getattr(query, "message", None),
+            chat_id=current.get("chat_id") or getattr(getattr(query, "message", None), "chat_id", None),
+            user_id=user_id,
+            lang=lang,
+            source="manual_status_update",
+        )
     if music_job_terminal_failed(current):
         return {"ok": False, "status": "TERMINAL_FAILED", "job": current}
-    refreshed = await music_progress_refresh_job_status(job_id, user_id=user_id, allow_provider_poll=True, updated_by=user_id)
-    current = dict(refreshed or get_engine_async_job(job_id) or current)
+    refreshed = await music_progress_refresh_job_status(resolved_job_id or job_id, user_id=user_id, allow_provider_poll=True, updated_by=user_id)
+    current = dict(refreshed or get_engine_async_job(resolved_job_id or job_id) or current)
     if music_job_delivered(current):
         return {"ok": True, "status": "ALREADY_DELIVERED", "duplicate": True, "job": current}
+    if music_job_ready_artifact_validated(current):
+        return await deliver_music_ready_artifact_once(
+            str(current.get("internal_job_id") or resolved_job_id or job_id),
+            context=context,
+            message=getattr(query, "message", None),
+            chat_id=current.get("chat_id") or getattr(getattr(query, "message", None), "chat_id", None),
+            user_id=user_id,
+            lang=lang,
+            source="manual_status_update",
+        )
     if music_job_terminal_failed(current):
         return {"ok": False, "status": "TERMINAL_FAILED", "job": current}
     if int(current.get("output_bytes") or 0) <= 0:
@@ -96549,6 +96949,10 @@ def record_music_job_full_send(job: dict | None, sent_message, audio_bytes: byte
         "send_attempt_count": previous_send_count + 1,
         "delivery_attempt_count": max(previous_delivery_attempt_count, previous_send_count + 1, 1),
         "last_send_error": "",
+        "error_category": "",
+        "confirm_submit_blocker": "",
+        "auto_delivery_blocker": "",
+        "music_delivery_blocker": "",
         "vault_id": str(vault_entry.get("vault_id") or current.get("vault_id") or ""),
     })
     if current.get("internal_job_id"):
@@ -96561,10 +96965,26 @@ def record_music_job_full_send_error(job: dict | None, error: str, updated_by=""
     current = dict(job or {})
     if not current:
         return {}
+    scheduler_recoverable = music_job_scheduler_artifact_recoverable(current)
+    previous_send_count = int(current.get("send_attempt_count") or 0)
+    previous_delivery_attempt_count = int(current.get("delivery_attempt_count") or 0)
     current.update({
-        "send_attempt_count": int(current.get("send_attempt_count") or 0) + 1,
+        "status": str(current.get("status") or "completed"),
+        "delivery_state": "failed",
+        "auto_delivery_blocker": "telegram_delivery_failed",
+        "music_delivery_blocker": "telegram_delivery_failed",
+        "last_delivery_error_category": "telegram_delivery_failed",
+        "music_delivery_lock": "",
+        "music_result_delivery_lock": "",
+        "send_attempt_count": previous_send_count + 1,
+        "delivery_attempt_count": max(previous_delivery_attempt_count, previous_send_count + 1, 1),
         "last_send_error": sanitize_provider_status_text(error, current.get("provider_task_id") or "", 220),
     })
+    if scheduler_recoverable:
+        current["terminal_state"] = ""
+        current["music_terminal_state"] = ""
+        if str(current.get("error_category") or "") == "scheduler_start_failed":
+            current["error_category"] = ""
     if current.get("internal_job_id"):
         save_engine_async_job(current)
     return current
@@ -96755,8 +97175,8 @@ async def deliver_music_result_once(
             if current_job:
                 current_job["music_delivery_lock"] = ""
                 current_job["music_result_delivery_lock"] = ""
-                record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
-            return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180)}
+                current_job = record_music_job_full_send_error(current_job, str(exc), updated_by=updated_by or user_id)
+            return {"ok": False, "status": "SEND_FAILED", "detail": sanitize_provider_status_text(str(exc), "", 180), "job": current_job, "result": current_result}
 
         delivery_message_id_raw = str(getattr(sent_message, "message_id", "") or "").strip()
         if not delivery_message_id_raw:
@@ -166087,6 +166507,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("progress_auto_refresh_status", cmd_progress_auto_refresh_status))
     tg_app.add_handler(CommandHandler("product_job_status", cmd_product_job_status))
     tg_app.add_handler(CommandHandler("music_job_debug", cmd_music_job_debug))
+    tg_app.add_handler(CommandHandler("music_delivery_recover", cmd_music_delivery_recover))
     tg_app.add_handler(CommandHandler("music_confirm_route_audit", cmd_music_confirm_route_audit))
     tg_app.add_handler(CommandHandler("music_panel_creator_audit", cmd_music_panel_creator_audit))
     tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
