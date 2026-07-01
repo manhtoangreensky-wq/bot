@@ -406,7 +406,7 @@ def test_status_shows_voice_subtitle_stage():
             "b14_addon_plan": {"voice_enabled": True, "subtitle_enabled": True, "dub_enabled": True},
         }
     }, None, 0, "vi")
-    assert "giọng đọc/lồng tiếng" in text
+    assert "Voice, lồng tiếng" in text
     assert "phụ đề" in text
 
 

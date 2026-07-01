@@ -247,7 +247,7 @@ def test_product_result_no_renderer_provider_worker_words(monkeypatch):
         }
     }
     text = bot.video_b14_queue_status_text(session, None, ADMIN_UID, "vi")
-    assert "hệ thống đã dựng video thật" in text
+    assert "✅ Video đã sẵn sàng." in text
     for forbidden in ("renderer", "provider", "worker", "render_mode"):
         assert forbidden not in text.lower()
 

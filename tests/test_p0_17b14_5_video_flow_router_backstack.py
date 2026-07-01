@@ -188,8 +188,8 @@ def test_final_status_text_has_eta_and_buttons():
     }
     text = bot.video_b14_queue_status_text(session, None, 0, "vi")
     callbacks = _callbacks(bot.video_b14_queue_status_keyboard("vi"))
-    assert "Thời gian chờ dự kiến" in text
-    assert "MP4" in text
+    assert "<b>Tiến trình:</b>" in text
+    assert "Thời gian chờ dự kiến" not in text
     assert "vproduct|b14_job_status" in callbacks
     assert "vproduct|b14_invoice_screen" in callbacks
 

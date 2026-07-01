@@ -288,7 +288,8 @@ def test_status_progress_real_stages_and_clean_public_failure(monkeypatch):
     monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: {})
     session = {"draft": {"b14_queue_job": {"id": 55, "status": "processing", "progress_percent": 60}, "b14_invoice": {"scene_count": 3}}}
     text = bot.video_b14_queue_status_text(session, None, ADMIN_UID, "vi")
-    assert "hệ thống đang ghép nhạc, phụ đề và logo" in text
+    assert "✅ Chuẩn bị dựng" in text
+    assert "⏳ Dựng video" in text
     failed = {
         "draft": {
             "b14_queue_job": {"id": 56, "status": "failed", "progress_percent": 35, "last_error": "provider worker render_mode test_pattern traceback"},

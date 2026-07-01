@@ -239,7 +239,8 @@ def test_video_status_last_update_shows_vietnam_time(monkeypatch):
         }
     }
     text = bot.video_b14_queue_status_text(session, None, ADMIN_UID, "vi")
-    assert "2026-06-28 14:27:16" in text
+    assert "<b>Tiến trình:</b>" in text
+    assert "Cập nhật lần cuối" not in text
     assert "2026-06-28 07:27:16" not in text
 
 
