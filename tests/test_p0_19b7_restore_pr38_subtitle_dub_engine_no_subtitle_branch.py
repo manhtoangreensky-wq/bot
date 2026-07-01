@@ -28,17 +28,17 @@ class CaptureMessage:
     async def reply_audio(self, **kwargs):
         item = {"audio": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919801, audio=SimpleNamespace(file_id="audio-file"))
 
     async def reply_document(self, **kwargs):
         item = {"document": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919802, document=SimpleNamespace(file_id="doc-file"))
 
     async def reply_video(self, **kwargs):
         item = {"video": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919803, video=SimpleNamespace(file_id="video-file"))
 
 
 class CaptureQuery:
@@ -231,7 +231,9 @@ def test_direct_dub_partial_audio_does_not_send_subtitle_document():
             lang="vi",
         )
     )
-    assert sent == {"documents": 0, "audio": 1, "video": 0}
+    assert sent["documents"] == 0
+    assert sent["audio"] == 1
+    assert sent["video"] == 0
     assert not any(item.get("document") for item in message.outputs)
 
 

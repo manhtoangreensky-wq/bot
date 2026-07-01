@@ -13,15 +13,19 @@ class CaptureMessage:
 
     async def reply_video(self, **kwargs):
         self.calls.append(("video", kwargs))
+        return SimpleNamespace(message_id=len(self.calls), video=SimpleNamespace(file_id=f"video-{len(self.calls)}"))
 
     async def reply_document(self, **kwargs):
         self.calls.append(("document", kwargs))
+        return SimpleNamespace(message_id=len(self.calls), document=SimpleNamespace(file_id=f"document-{len(self.calls)}"))
 
     async def reply_audio(self, **kwargs):
         self.calls.append(("audio", kwargs))
+        return SimpleNamespace(message_id=len(self.calls), audio=SimpleNamespace(file_id=f"audio-{len(self.calls)}"))
 
     async def reply_text(self, text, **kwargs):
         self.calls.append(("text", {"text": text, **kwargs}))
+        return SimpleNamespace(message_id=len(self.calls))
 
 
 def _saved_input(tmp_path, *, duration=2, size=1024, content_type="video/mp4"):

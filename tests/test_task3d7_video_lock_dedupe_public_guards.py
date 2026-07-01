@@ -70,7 +70,7 @@ class _TelegramBot:
         self.video_calls += 1
         if self.video_fails:
             raise RuntimeError("telegram URL fetch failed")
-        return SimpleNamespace(video=SimpleNamespace(file_id="telegram_file_1"))
+        return SimpleNamespace(message_id=321, video=SimpleNamespace(file_id="telegram_file_1"))
 
     async def send_message(self, **kwargs):
         self.message_calls += 1

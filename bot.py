@@ -1706,8 +1706,11 @@ PIPELINE_MAX_INPUT_MB_PUBLIC = max(1, env_int("PIPELINE_MAX_INPUT_MB_PUBLIC", 50
 PIPELINE_MAX_DURATION_SECONDS_ADMIN = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_ADMIN", 180))
 PIPELINE_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("PIPELINE_MAX_DURATION_SECONDS_PUBLIC", 90))
 PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_MB", 49))
-SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", min(45, PIPELINE_MAX_TELEGRAM_OUTPUT_MB)))
-SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", 48))
+TELEGRAM_VIDEO_PREVIEW_MAX_MB = max(1, env_int("TELEGRAM_VIDEO_PREVIEW_MAX_MB", 45))
+TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("TELEGRAM_DOCUMENT_MAX_MB", PIPELINE_MAX_TELEGRAM_OUTPUT_MB))
+GENERATED_MEDIA_MAX_MB = max(1, env_int("GENERATED_MEDIA_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
+SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", TELEGRAM_VIDEO_PREVIEW_MAX_MB))
+SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
 SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
 SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
@@ -40923,17 +40926,20 @@ async def send_multiscene_blackbox_final_once(bot_client, chat_id, job: dict, re
     multiscene_blackbox.ensure_video_output(final_path)
     if not bot_client or not chat_id:
         return {"sent": False, "reason": "telegram_target_missing"}
-    with open(final_path, "rb") as handle:
-        message = await bot_client.send_video(
-            chat_id=chat_id,
-            video=handle,
-            caption="✅ Video nhiều cảnh đã hoàn tất. TOAN AAS chỉ gửi video cuối cùng.",
-            supports_streaming=True,
-        )
-    file_id = ""
-    if getattr(message, "video", None):
-        file_id = str(getattr(message.video, "file_id", "") or "")
-    return {"sent": True, "output_file_id": file_id}
+    delivery = await send_generated_video_path_for_delivery(
+        bot_client,
+        chat_id,
+        final_path,
+        filename="toan_aas_multiscene.mp4",
+        caption="✅ Video nhiều cảnh đã hoàn tất. TOAN AAS chỉ gửi video cuối cùng.",
+    )
+    return {
+        "sent": bool(delivery.get("sent")),
+        "output_file_id": str(delivery.get("file_id") or ""),
+        "delivery_method": str(delivery.get("delivery_method") or ""),
+        "telegram_message_id": str(delivery.get("telegram_message_id") or ""),
+        "reason": str(delivery.get("delivery_reason") or ""),
+    }
 
 async def run_multiscene_blackbox_job(order_or_session: dict, *, wait_for_completion: bool = False, render_video_func=None, sender=None) -> dict:
     order = dict(order_or_session or {})
@@ -41294,28 +41300,18 @@ async def send_multiscene_video_result_once(bot_client, chat_id, job: dict, outp
     )
     if not claim.get("claimed"):
         return {**claim, "sent": False}
-    file_id = ""
     try:
-        if os.path.getsize(output_path) > 49 * 1024 * 1024:
-            with open(output_path, "rb") as handle:
-                message = await bot_client.send_document(
-                    chat_id=chat_id,
-                    document=handle,
-                    filename=f"TOAN_AAS_{parent_task_id}.mp4",
-                    caption="Video TOAN AAS đã tạo xong",
-                )
-            if getattr(message, "document", None):
-                file_id = str(getattr(message.document, "file_id", "") or "")
-        else:
-            with open(output_path, "rb") as handle:
-                message = await bot_client.send_video(
-                    chat_id=chat_id,
-                    video=handle,
-                    caption="Video TOAN AAS đã tạo xong",
-                    supports_streaming=True,
-                )
-            if getattr(message, "video", None):
-                file_id = str(getattr(message.video, "file_id", "") or "")
+        delivery = await send_generated_video_path_for_delivery(
+            bot_client,
+            chat_id,
+            output_path,
+            filename=f"TOAN_AAS_{parent_task_id}.mp4",
+            caption="Video TOAN AAS đã tạo xong",
+        )
+        if not delivery.get("sent"):
+            release_shopaikey_video_output_claim(parent_job_id, parent_task_id, str(delivery.get("delivery_reason") or "telegram_send_failed"))
+            return {**claim, "sent": False, "reason": str(delivery.get("delivery_reason") or "telegram_send_failed"), **generated_media_debug_payload(method=str(delivery.get("delivery_method") or "failed"), file_size=os.path.getsize(output_path), limit_bytes=generated_media_delivery_limits()["generated_bytes"], message_id=str(delivery.get("telegram_message_id") or ""), reason=str(delivery.get("delivery_reason") or ""))}
+        file_id = str(delivery.get("file_id") or "")
     except Exception as exc:
         release_shopaikey_video_output_claim(parent_job_id, parent_task_id, type(exc).__name__)
         return {**claim, "sent": False, "reason": "telegram_send_failed_no_ambiguous_retry"}
@@ -41326,7 +41322,15 @@ async def send_multiscene_video_result_once(bot_client, chat_id, job: dict, outp
         "multiscene_stitched",
         file_id,
     )
-    return {**claim, "sent": True, "output_file_id": file_id}
+    return {
+        **claim,
+        "sent": True,
+        "output_file_id": file_id,
+        "delivery_method": str(delivery.get("delivery_method") or ""),
+        "telegram_message_id": str(delivery.get("telegram_message_id") or ""),
+        "file_size_mb": float(delivery.get("file_size_mb") or 0.0),
+        "size_limit_used": float(delivery.get("size_limit_used") or 0.0),
+    }
 
 async def _finish_multiscene_failure(job: dict, bot_client, chat_id, reason: str) -> dict:
     completed = sum(1 for child in job.get("scene_jobs") or [] if child.get("status") == "COMPLETED")
@@ -53812,13 +53816,15 @@ async def send_shopaikey_video_result(bot_client, chat_id, task_id: str, result_
             video=result_url,
             caption="🎞 Video TOAN AAS đã tạo xong",
         )
+        if not telegram_delivery_message_id(msg):
+            return False, ""
         file_id = ""
         if getattr(msg, "video", None):
             file_id = getattr(msg.video, "file_id", "") or ""
         return True, file_id
     except Exception:
         try:
-            await bot_client.send_message(
+            msg = await bot_client.send_message(
                 chat_id=chat_id,
                 text=(
                     "🎞 <b>Video đã tạo xong</b>\n\n"
@@ -53828,7 +53834,7 @@ async def send_shopaikey_video_result(bot_client, chat_id, task_id: str, result_
                 parse_mode="HTML",
                 disable_web_page_preview=False,
             )
-            return True, ""
+            return bool(telegram_delivery_message_id(msg)), ""
         except Exception:
             return False, ""
 
@@ -157645,8 +157651,134 @@ def subtitle_dub_debug_job_payload(
     }
 
 def pipeline_final_video_sendable(video_bytes: bytes) -> bool:
-    limit_mb = min(int(PIPELINE_MAX_TELEGRAM_OUTPUT_MB or 0), int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB or 0))
+    limit_mb = min(int(GENERATED_MEDIA_MAX_MB or 0), int(TELEGRAM_DOCUMENT_MAX_MB or 0))
     return bool(video_bytes) and len(video_bytes) <= max(1, limit_mb) * 1024 * 1024
+
+def generated_media_delivery_limits() -> dict:
+    preview = max(1, int(TELEGRAM_VIDEO_PREVIEW_MAX_MB or 45))
+    document = max(preview, int(TELEGRAM_DOCUMENT_MAX_MB or PIPELINE_MAX_TELEGRAM_OUTPUT_MB or preview))
+    generated = max(document, int(GENERATED_MEDIA_MAX_MB or document))
+    return {
+        "preview_max_mb": preview,
+        "document_max_mb": document,
+        "generated_max_mb": generated,
+        "preview_bytes": preview * 1024 * 1024,
+        "document_bytes": document * 1024 * 1024,
+        "generated_bytes": generated * 1024 * 1024,
+    }
+
+def telegram_delivery_message_id(message_obj) -> str:
+    return str(getattr(message_obj, "message_id", "") or "").strip()
+
+def telegram_delivery_file_id(message_obj, method: str = "video") -> str:
+    attr = "document" if str(method or "") == "document" else "video"
+    media = getattr(message_obj, attr, None)
+    return str(getattr(media, "file_id", "") or "").strip()
+
+def generated_video_document_caption(lang: str = "vi") -> str:
+    if normalize_user_language(lang) != "vi":
+        return "The file is a bit large, so TOAN AAS sends it as a document for download."
+    return "File hơi lớn nên TOAN AAS gửi dưới dạng tệp để anh/chị tải về."
+
+def generated_media_debug_payload(*, method: str, file_size: int, limit_bytes: int, message_id: str = "", reason: str = "") -> dict:
+    limit_mb = round(float(limit_bytes or 0) / (1024 * 1024), 2)
+    size_mb = round(float(file_size or 0) / (1024 * 1024), 2)
+    return {
+        "delivery_method": str(method or "failed"),
+        "file_size_mb": size_mb,
+        "size_limit_used": limit_mb,
+        "telegram_message_id": str(message_id or ""),
+        "delivery_reason": str(reason or "")[:120],
+    }
+
+async def send_generated_video_bytes_for_delivery(
+    message,
+    video_bytes: bytes,
+    *,
+    filename: str,
+    caption: str,
+    lang: str = "vi",
+    preview_max_mb: int | None = None,
+    document_max_mb: int | None = None,
+    generated_max_mb: int | None = None,
+) -> dict:
+    payload = bytes(video_bytes or b"")
+    limits = generated_media_delivery_limits()
+    if preview_max_mb is not None:
+        limits["preview_bytes"] = max(1, int(preview_max_mb)) * 1024 * 1024
+        limits["preview_max_mb"] = max(1, int(preview_max_mb))
+    if document_max_mb is not None:
+        limits["document_bytes"] = max(1, int(document_max_mb)) * 1024 * 1024
+        limits["document_max_mb"] = max(1, int(document_max_mb))
+    if generated_max_mb is not None:
+        limits["generated_bytes"] = max(1, int(generated_max_mb)) * 1024 * 1024
+        limits["generated_max_mb"] = max(1, int(generated_max_mb))
+    size = len(payload)
+    if not payload:
+        return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=limits["generated_bytes"], reason="empty_file"), "sent": False}
+    if size > limits["generated_bytes"]:
+        return {**generated_media_debug_payload(method="failed", file_size=size, limit_bytes=limits["generated_bytes"], reason="generated_media_too_large"), "sent": False}
+    if size <= limits["preview_bytes"] and callable(getattr(message, "reply_video", None)):
+        sent_msg = await message.reply_video(
+            video=video_dubbing_output_file(payload, filename),
+            filename=filename,
+            caption=caption,
+        )
+        message_id = telegram_delivery_message_id(sent_msg)
+        if message_id:
+            return {**generated_media_debug_payload(method="video", file_size=size, limit_bytes=limits["preview_bytes"], message_id=message_id), "sent": True, "file_id": telegram_delivery_file_id(sent_msg, "video")}
+        return {**generated_media_debug_payload(method="failed", file_size=size, limit_bytes=limits["preview_bytes"], reason="telegram_message_id_missing"), "sent": False}
+    if size <= limits["document_bytes"] and callable(getattr(message, "reply_document", None)):
+        sent_msg = await message.reply_document(
+            document=video_dubbing_output_file(payload, filename),
+            filename=filename,
+            caption=generated_video_document_caption(lang),
+        )
+        message_id = telegram_delivery_message_id(sent_msg)
+        if message_id:
+            return {**generated_media_debug_payload(method="document", file_size=size, limit_bytes=limits["document_bytes"], message_id=message_id), "sent": True, "file_id": telegram_delivery_file_id(sent_msg, "document")}
+        return {**generated_media_debug_payload(method="failed", file_size=size, limit_bytes=limits["document_bytes"], reason="telegram_message_id_missing"), "sent": False}
+    return {**generated_media_debug_payload(method="failed", file_size=size, limit_bytes=limits["document_bytes"], reason="telegram_document_limit_exceeded"), "sent": False}
+
+async def send_generated_video_path_for_delivery(
+    bot_client,
+    chat_id,
+    video_path: str,
+    *,
+    filename: str = "",
+    caption: str = "",
+    lang: str = "vi",
+) -> dict:
+    path = str(video_path or "")
+    if not bot_client or not chat_id or not path or not os.path.exists(path) or os.path.getsize(path) <= 0:
+        return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=generated_media_delivery_limits()["generated_bytes"], reason="missing_file"), "sent": False}
+
+    class _BotChatDelivery:
+        async def reply_video(self, **kwargs):
+            return await bot_client.send_video(
+                chat_id=chat_id,
+                video=kwargs.get("video"),
+                caption=kwargs.get("caption"),
+                supports_streaming=True,
+            )
+
+        async def reply_document(self, **kwargs):
+            return await bot_client.send_document(
+                chat_id=chat_id,
+                document=kwargs.get("document"),
+                filename=kwargs.get("filename"),
+                caption=kwargs.get("caption"),
+            )
+
+    with open(path, "rb") as handle:
+        payload = handle.read()
+    return await send_generated_video_bytes_for_delivery(
+        _BotChatDelivery(),
+        payload,
+        filename=filename or os.path.basename(path) or "toan_aas_video.mp4",
+        caption=caption,
+        lang=lang,
+    )
 
 SUBDUB_STYLE_PRESET_ORDER = (
     "tiktok_clear",
@@ -158281,10 +158413,19 @@ async def send_public_subtitle_dub_final_outputs(
     requested_mode = normalize_video_translate_mode(requested_mode)
     is_combined = mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
     metadata_enabled = bool(strict_validation)
-    sent = {"documents": 0, "audio": 0, "video": 0}
+    sent = {
+        "documents": 0,
+        "audio": 0,
+        "video": 0,
+        "video_document": 0,
+        "delivery_method": "",
+        "file_size_mb": 0.0,
+        "size_limit_used": 0.0,
+        "telegram_message_id": "",
+    }
     if video_bytes:
         if metadata_enabled:
-            sent.update({"video_document": 0, "delivery_method": "", "output_validation": {}})
+            sent.update({"output_validation": {}})
         filename, caption, _button = video_dubbing_final_video_label(mode, lang)
         require_audio = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and bool(audio_bytes)
         validation = (
@@ -158294,57 +158435,62 @@ async def send_public_subtitle_dub_final_outputs(
         )
         if metadata_enabled:
             sent["output_validation"] = dict(validation or {})
-        send_limit = max(1, int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB or PIPELINE_MAX_TELEGRAM_OUTPUT_MB)) * 1024 * 1024
-        doc_limit = max(1, int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB or PIPELINE_MAX_TELEGRAM_OUTPUT_MB)) * 1024 * 1024
+        send_limit_mb = max(1, int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB or TELEGRAM_VIDEO_PREVIEW_MAX_MB))
+        doc_limit_mb = max(send_limit_mb, int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB or TELEGRAM_DOCUMENT_MAX_MB))
+        generated_limit_mb = max(doc_limit_mb, int(GENERATED_MEDIA_MAX_MB or doc_limit_mb))
+        send_limit = send_limit_mb * 1024 * 1024
+        doc_limit = doc_limit_mb * 1024 * 1024
         compress_threshold = max(1, int(SUBDUB_COMPRESS_IF_OVER_MB or SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB)) * 1024 * 1024
 
-        async def _try_reply_video(payload: bytes, method: str) -> bool:
-            if not payload or len(payload) > send_limit:
+        async def _deliver_video_payload(payload: bytes, source: str = "") -> bool:
+            if not payload:
                 return False
             try:
-                await message.reply_video(
-                    video=video_dubbing_output_file(payload, filename),
+                if not SUBDUB_ENABLE_DOCUMENT_FALLBACK and len(payload) > send_limit:
+                    return False
+                result = await send_generated_video_bytes_for_delivery(
+                    message,
+                    payload,
                     filename=filename,
                     caption=caption,
+                    lang=lang,
+                    preview_max_mb=send_limit_mb,
+                    document_max_mb=doc_limit_mb,
+                    generated_max_mb=generated_limit_mb,
                 )
-                sent["video"] = 1
-                if metadata_enabled:
-                    sent["delivery_method"] = method
+                sent.update({
+                    "delivery_method": str(result.get("delivery_method") or ""),
+                    "file_size_mb": float(result.get("file_size_mb") or 0.0),
+                    "size_limit_used": float(result.get("size_limit_used") or 0.0),
+                    "telegram_message_id": str(result.get("telegram_message_id") or ""),
+                })
+                if not result.get("sent"):
+                    if result.get("delivery_reason"):
+                        sent["delivery_reason"] = str(result.get("delivery_reason") or "")
+                    return False
+                if result.get("delivery_method") == "video":
+                    sent["video"] = 1
+                    if source == "compressed":
+                        sent["delivery_method"] = "compressed_video"
+                elif result.get("delivery_method") == "document":
+                    sent["documents"] += 1
+                    sent["video_document"] = 1
+                    if source == "compressed":
+                        sent["delivery_method"] = "compressed_document"
                 return True
             except Exception as exc:
+                sent["delivery_reason"] = type(exc).__name__
                 logger.warning("subtitle/dub video delivery failed | %s", sanitize_log_text(str(exc))[:160])
                 return False
 
-        async def _try_reply_video_document(payload: bytes, method: str) -> bool:
-            if not SUBDUB_ENABLE_DOCUMENT_FALLBACK or not payload or len(payload) > doc_limit:
-                return False
-            try:
-                await message.reply_document(
-                    document=video_dubbing_output_file(payload, filename),
-                    filename=filename,
-                    caption="✅ Video đã tạo xong. File hơi lớn nên TOAN AAS gửi dưới dạng tệp để anh/chị tải về.",
-                )
-                sent["documents"] += 1
-                if metadata_enabled:
-                    sent["video_document"] = 1
-                    sent["delivery_method"] = method
-                return True
-            except Exception as exc:
-                logger.warning("subtitle/dub video document delivery failed | %s", sanitize_log_text(str(exc))[:160])
-                return False
-
         if validation.get("ok"):
-            if await _try_reply_video(video_bytes, "video"):
+            if await _deliver_video_payload(video_bytes, "original"):
                 return sent
             compressed = b""
-            if len(video_bytes) >= compress_threshold or len(video_bytes) > send_limit:
+            if len(video_bytes) > doc_limit or len(video_bytes) >= compress_threshold:
                 compressed, _compress_detail = await subdub_compress_video_bytes(video_bytes, require_audio=require_audio)
-                if compressed and await _try_reply_video(compressed, "compressed_video"):
+                if compressed and await _deliver_video_payload(compressed, "compressed"):
                     return sent
-            if compressed and await _try_reply_video_document(compressed, "compressed_document"):
-                return sent
-            if await _try_reply_video_document(video_bytes, "document"):
-                return sent
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and audio_bytes:
         await message.reply_audio(
             audio=video_dubbing_output_file(audio_bytes, "toan_aas_dub_audio.mp3"),
@@ -166902,13 +167048,14 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
     else:
         return {"sent": False, "reason": "render_mode_not_real"}
     try:
-        with open(final_path, "rb") as handle:
-            await tg_app.bot.send_video(
-                chat_id=int(user_id),
-                video=handle,
-                caption=caption,
-            )
-        return {"sent": True}
+        delivery = await send_generated_video_path_for_delivery(
+            tg_app.bot,
+            int(user_id),
+            final_path,
+            filename=os.path.basename(final_path) or "toan_aas_video.mp4",
+            caption=caption,
+        )
+        return {"sent": bool(delivery.get("sent")), **delivery}
     except Exception as exc:
         logger.warning(f"remote worker final video send failed: {type(exc).__name__}")
         return {"sent": False, "reason": type(exc).__name__}

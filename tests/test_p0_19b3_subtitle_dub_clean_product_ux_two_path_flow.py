@@ -26,12 +26,12 @@ class CaptureMessage:
     async def reply_audio(self, **kwargs):
         item = {"audio": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919401, audio=SimpleNamespace(file_id="audio-file"))
 
     async def reply_document(self, **kwargs):
         item = {"document": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919402, document=SimpleNamespace(file_id="doc-file"))
 
 
 class CaptureQuery:
@@ -305,6 +305,8 @@ def test_partial_result_sends_audio_and_subtitle():
             lang="vi",
         )
     )
-    assert sent == {"documents": 1, "audio": 1, "video": 0}
+    assert sent["documents"] == 1
+    assert sent["audio"] == 1
+    assert sent["video"] == 0
     assert any(item.get("audio") for item in message.outputs)
     assert any(item.get("document") for item in message.outputs)

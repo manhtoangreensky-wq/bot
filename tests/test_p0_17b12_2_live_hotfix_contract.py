@@ -87,12 +87,15 @@ class CaptureMessage:
 
     async def reply_video(self, **kwargs):
         self.video.append(kwargs)
+        return SimpleNamespace(message_id=4201, video=SimpleNamespace(file_id="video-file"))
 
     async def reply_audio(self, **kwargs):
         self.audio.append(kwargs)
+        return SimpleNamespace(message_id=4202, audio=SimpleNamespace(file_id="audio-file"))
 
     async def reply_document(self, **kwargs):
         self.documents.append(kwargs)
+        return SimpleNamespace(message_id=4203, document=SimpleNamespace(file_id="doc-file"))
 
 
 def test_final_outputs_send_mp4_first_for_all_video_product_modes():
@@ -115,7 +118,11 @@ def test_final_outputs_send_mp4_first_for_all_video_product_modes():
         bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
     ):
         message, sent = asyncio.run(run_case(mode))
-        assert sent == {"documents": 0, "audio": 0, "video": 1}
+        assert sent["documents"] == 0
+        assert sent["audio"] == 0
+        assert sent["video"] == 1
+        assert sent["delivery_method"] == "video"
+        assert sent["telegram_message_id"] == "4201"
         assert len(message.video) == 1
         assert message.audio == []
         assert message.documents == []
@@ -135,7 +142,9 @@ def test_voice_video_sends_audio_fallback_only_when_mp4_missing():
 
     message, sent = asyncio.run(run_case())
 
-    assert sent == {"documents": 0, "audio": 1, "video": 0}
+    assert sent["documents"] == 0
+    assert sent["audio"] == 1
+    assert sent["video"] == 0
     assert message.video == []
     assert len(message.audio) == 1
     assert "chưa ghép được thành video hoàn chỉnh" in message.audio[0]["caption"]
