@@ -5305,6 +5305,9 @@ MUSIC_AUTO_DELIVERY_ENABLED = env_flag("MUSIC_AUTO_DELIVERY_ENABLED", "true")
 MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS = max(5, env_int("MUSIC_AUTO_DELIVERY_POLL_INTERVAL_SECONDS", 20))
 MUSIC_AUTO_DELIVERY_MAX_POLLS = max(1, env_int("MUSIC_AUTO_DELIVERY_MAX_POLLS", 30))
 MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL = env_flag("MUSIC_AUTO_DELIVERY_STOP_ON_TERMINAL", "true")
+MUSIC_RESULT_DOWNLOAD_USER_AGENT = _env("MUSIC_RESULT_DOWNLOAD_USER_AGENT", "TOAN-AAS-MusicDownloader/1.0")
+MUSIC_RESULT_DOWNLOAD_MAX_RETRIES = max(1, env_int("MUSIC_RESULT_DOWNLOAD_MAX_RETRIES", 3))
+MUSIC_RESULT_DOWNLOAD_RETRY_SLEEP_SECONDS = max(0.0, env_float("MUSIC_RESULT_DOWNLOAD_RETRY_SLEEP_SECONDS", 0.35))
 PROGRESS_AUTO_REFRESH_JOBS: dict[str, dict] = {}
 PROGRESS_AUTO_REFRESH_TASKS: dict[str, asyncio.Task] = {}
 VIDEO_STATUS_AUTO_REFRESH_JOBS: dict[str, dict] = {}
@@ -5606,11 +5609,12 @@ def mark_music_confirm_submit_blocker(
             "confirm_submit_phase": str(current.get("confirm_submit_phase") or "submitted"),
             "auto_delivery_blocker": normalized,
             "scheduler_mode": "scheduler_failed",
+            "scheduler_status": "start_failed",
             "task_started": False,
             "task_alive": False,
             "progress_percent": max(int(current.get("progress_percent") or 0), 12),
             "progress_text": music_confirm_submit_blocker_text(normalized),
-            "last_provider_status": safe_detail,
+            "last_provider_status": str(current.get("last_provider_status") or safe_detail),
             "scheduler_failed_at": now,
         })
         if str(current.get("error_category") or "") in {"", "scheduler_start_failed"}:
@@ -6213,6 +6217,7 @@ def product_progress_status_text(
     public_note: str = "",
     lang: str = "vi",
     completed_steps: list[str] | tuple[str, ...] | set[str] | None = None,
+    status_override: str = "",
 ) -> str:
     return product_progress_status.render_product_progress_panel(
         product_type=product_type,
@@ -6223,6 +6228,7 @@ def product_progress_status_text(
         public_note=public_note,
         lang=lang,
         completed_steps=completed_steps,
+        status_override=status_override,
     )
 
 
@@ -6415,7 +6421,7 @@ def music_job_result_url(job: dict | None = None) -> str:
 
 def music_job_local_artifact_path(job: dict | None = None) -> str:
     current = dict(job or {})
-    for key in ("music_result_path", "output_path", "local_path", "storage_ref", "selected_artifact_path"):
+    for key in ("local_artifact_path", "music_result_path", "output_path", "local_path", "storage_ref", "selected_artifact_path"):
         value = str(current.get(key) or "").strip()
         if value:
             return value
@@ -6429,6 +6435,67 @@ def music_job_local_artifact_path(job: dict | None = None) -> str:
         if storage_ref:
             return storage_ref
     return ""
+
+
+def music_canonical_output_root() -> str:
+    candidates = [
+        _env("MUSIC_OUTPUT_DIR", ""),
+        os.path.join("/data", "music_outputs") if os.path.isdir("/data") else "",
+        os.path.join(OPERATOR_UPLOAD_DIR or "operator_uploads", "music_outputs"),
+    ]
+    for candidate in candidates:
+        root = str(candidate or "").strip()
+        if not root:
+            continue
+        try:
+            root = os.path.abspath(root)
+            os.makedirs(root, exist_ok=True)
+            return root
+        except Exception:
+            continue
+    return os.path.abspath(os.path.join("operator_uploads", "music_outputs"))
+
+
+def music_canonical_artifact_path(job: dict | None = None, job_id: str = "") -> str:
+    current = dict(job or {})
+    raw_id = str(job_id or current.get("internal_job_id") or current.get("job_id") or "").strip()
+    safe_id = canonical_music_job_id(raw_id) or re.sub(r"[^A-Za-z0-9_.-]+", "", raw_id.upper())[:48]
+    if not safe_id:
+        safe_id = "MUS" + hashlib.sha256(str(time.time_ns()).encode("utf-8")).hexdigest()[:8].upper()
+    return os.path.join(music_canonical_output_root(), safe_id, f"{safe_id}.mp3")
+
+
+def write_music_canonical_artifact(job: dict | None, audio_bytes: bytes | bytearray | None = None) -> str:
+    payload = bytes(audio_bytes or b"")
+    if not payload:
+        return ""
+    try:
+        path = music_canonical_artifact_path(job)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(payload)
+        return path if os.path.exists(path) and os.path.getsize(path) > 0 else ""
+    except Exception as exc:
+        logger.warning("music canonical artifact store failed | %s", sanitize_log_text(str(exc))[:180])
+        return ""
+
+
+def music_result_url_age_seconds(job: dict | None = None) -> int:
+    raw = str((job or {}).get("result_url_first_seen_at") or "").strip()
+    if not raw:
+        return 0
+    for parser in (
+        lambda value: datetime.strptime(value[:19], "%Y-%m-%d %H:%M:%S"),
+        lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")),
+    ):
+        try:
+            seen_at = parser(raw)
+            if seen_at.tzinfo is not None:
+                seen_at = seen_at.astimezone().replace(tzinfo=None)
+            return max(0, int((datetime.now() - seen_at).total_seconds()))
+        except Exception:
+            continue
+    return 0
 
 
 def music_job_materialized_source_present(job: dict | None = None) -> bool:
@@ -6530,6 +6597,8 @@ def set_music_artifact_blocker(job: dict | None, primary: str, *, secondary: str
         "secondary_blocker": str(secondary_value or ""),
         "auto_delivery_blocker": str(primary or "artifact_materialization_failed"),
         "error_category": str(primary or "artifact_materialization_failed"),
+        "lifecycle_status": "artifact_failed",
+        "materialization_status": "failed",
         "last_artifact_error": sanitize_provider_status_text(detail or primary or "", current.get("provider_task_id") or current.get("provider_job_id") or "", 220),
     })
     if music_job_artifact_bytes_value(current) <= 0:
@@ -6731,6 +6800,7 @@ def product_progress_status_from_job_text(product_type: str = "", job: dict | No
         str(state.get("terminal_state") or ""),
         lang=lang,
         completed_steps=state.get("completed_steps"),
+        status_override=str(state.get("status_text") or ""),
     )
 
 
@@ -6830,6 +6900,7 @@ def progress_auto_refresh_register(
         "edit_fail_count": int(current.get("edit_fail_count") or 0),
         "registry_saved": True,
         "scheduler_mode": str(current.get("scheduler_mode") or ("music_auto_delivery" if is_music_progress else "auto_refresh")),
+        "scheduler_status": str(current.get("scheduler_status") or ("not_started" if start_task else "not_started")),
         "task_started": bool(current.get("task_started")),
         "task_alive": bool(current.get("task_alive")),
         "task_started_at": str(current.get("task_started_at") or ""),
@@ -6851,6 +6922,7 @@ def progress_auto_refresh_register(
                 "task_started": False,
                 "task_alive": False,
                 "scheduler_mode": "scheduler_failed",
+                "scheduler_status": "start_failed",
                 "stopped_reason": "scheduler_start_failed",
                 "stop_reason": str(record.get("stop_reason") or "scheduler_start_failed"),
             })
@@ -6905,6 +6977,7 @@ def progress_auto_refresh_start_task(context, key: str) -> bool:
             "task_alive": True,
             "task_started_at": now_text(),
             "scheduler_mode": "job_queue" if application and hasattr(application, "create_task") else "asyncio_task",
+            "scheduler_status": "running",
         })
         PROGRESS_AUTO_REFRESH_JOBS[str(key or "")] = record
         return True
@@ -6931,6 +7004,7 @@ async def progress_auto_refresh_loop(context, key: str):
             record = dict(PROGRESS_AUTO_REFRESH_JOBS.get(str(key or "")) or record)
             record.update({
                 "task_alive": False,
+                "scheduler_status": "stopped",
                 "stopped": True,
                 "stop_reason": "auto_tick_exception",
                 "stopped_reason": "auto_tick_exception",
@@ -7038,7 +7112,15 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "artifact_materialization_started_at": now_text(),
         "artifact_materialization_attempted": True,
         "artifact_materialization_source": str(source or "recovery"),
+        "artifact_materialization_status": "downloading",
+        "materialization_status": "downloading",
+        "lifecycle_status": "materializing",
+        "progress_text": "TOAN AAS đã tạo xong bài hát, đang tải file nhạc để gửi cho anh/chị.",
     })
+    result_url = music_job_result_url(current)
+    if result_url:
+        current["result_url_first_seen_at"] = str(current.get("result_url_first_seen_at") or now_text())
+        current["result_url_label"] = music_result_url_debug_label(result_url)
     if current.get("internal_job_id"):
         save_engine_async_job(current)
     artifact = await select_music_delivery_artifact(current, current, None)
@@ -7067,6 +7149,8 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         updated.update({
             "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
             "artifact_materialization_status": status,
+            "materialization_status": "expired" if str(artifact.get("download_error_category") or "").strip().lower() == "result_url_expired" else "failed",
+            "lifecycle_status": "artifact_failed",
             "artifact_materialization_failed_at": now_text(),
             "artifact_materialization_url": str(artifact.get("selected_artifact_url") or music_job_result_url(current) or ""),
             "artifact_download_attempted": bool(music_job_result_url(current) or artifact.get("selected_artifact_url")),
@@ -7074,6 +7158,12 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "artifact_download_content_type": str(artifact.get("download_content_type") or ""),
             "artifact_downloaded_bytes": int(artifact.get("downloaded_bytes") or 0),
             "artifact_download_error_category": str(artifact.get("download_error_category") or blocker),
+            "download_attempt_count": int(current.get("download_attempt_count") or 0) + (1 if bool(music_job_result_url(current) or artifact.get("selected_artifact_url")) else 0),
+            "last_download_http_status": int(artifact.get("download_http_status") or 0),
+            "last_download_error_category": str(artifact.get("download_error_category") or blocker),
+            "last_download_content_type": str(artifact.get("download_content_type") or ""),
+            "last_downloaded_bytes": int(artifact.get("downloaded_bytes") or 0),
+            "result_url_age_seconds": music_result_url_age_seconds(current),
         })
         if updated.get("internal_job_id"):
             save_engine_async_job(updated)
@@ -7090,6 +7180,8 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             updated_by=updated_by,
         )
         updated["artifact_materialization_status"] = blocker
+        updated["materialization_status"] = "failed"
+        updated["lifecycle_status"] = "artifact_failed"
         if updated.get("internal_job_id"):
             save_engine_async_job(updated)
         return {"ok": False, "status": blocker.upper(), "job": updated, "artifact": artifact, "recovery_action": "materialize_failed"}
@@ -7101,6 +7193,7 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         updated_by=updated_by,
     )
     storage_ref = str(vault_entry.get("storage_ref") or "")
+    canonical_path = write_music_canonical_artifact(current, payload)
     artifact_hash = music_audio_sha256(payload)
     current.update({
         "_auto_delivery_audio_bytes": payload,
@@ -7118,6 +7211,8 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "artifact_state": "ready",
         "music_artifact_state": "ready",
         "artifact_downloaded_at": now_text(),
+        "result_url_downloaded_at": now_text(),
+        "result_url_age_seconds": music_result_url_age_seconds(current),
         "artifact_validated": True,
         "audio_validated": True,
         "music_audio_validated": True,
@@ -7138,13 +7233,19 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "artifact_candidates_count": int(artifact.get("artifact_candidates_count") or 0),
         "vault_id": str(vault_entry.get("vault_id") or current.get("vault_id") or ""),
         "music_vault_id": str(vault_entry.get("vault_id") or current.get("music_vault_id") or ""),
-        "music_result_path": storage_ref or str(current.get("music_result_path") or ""),
-        "output_path": storage_ref or str(current.get("output_path") or ""),
+        "local_artifact_path": canonical_path or storage_ref or str(current.get("local_artifact_path") or ""),
+        "music_result_path": canonical_path or storage_ref or str(current.get("music_result_path") or ""),
+        "output_path": canonical_path or storage_ref or str(current.get("output_path") or ""),
         "storage_ref": storage_ref or str(current.get("storage_ref") or ""),
         "artifact_download_attempted": True,
         "artifact_download_http_status": int(artifact.get("download_http_status") or 0),
         "artifact_download_content_type": str(artifact.get("download_content_type") or ""),
         "artifact_downloaded_bytes": int(artifact.get("downloaded_bytes") or len(payload) or 0),
+        "download_attempt_count": int(current.get("download_attempt_count") or 0) + (1 if bool(music_job_result_url(current) or artifact.get("selected_artifact_url")) else 0),
+        "last_download_http_status": int(artifact.get("download_http_status") or 0),
+        "last_download_error_category": "",
+        "last_download_content_type": str(artifact.get("download_content_type") or ""),
+        "last_downloaded_bytes": int(artifact.get("downloaded_bytes") or len(payload) or 0),
         "artifact_download_error_category": "",
         "artifact_materialized_source": str(artifact.get("selected_artifact_source") or source or "artifact"),
         "primary_blocker": "",
@@ -7152,6 +7253,8 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "auto_delivery_blocker": "",
         "error_category": "",
         "artifact_materialization_status": "materialize_success",
+        "materialization_status": "success",
+        "lifecycle_status": "artifact_validated",
         "artifact_materialized_at": now_text(),
     })
     if current.get("internal_job_id"):
@@ -7159,6 +7262,118 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         persisted.pop("_auto_delivery_audio_bytes", None)
         save_engine_async_job(persisted)
     return {"ok": True, "status": "MATERIALIZED", "job": current, "artifact": artifact, "audio_bytes": payload, "recovery_action": "materialize_success"}
+
+
+def music_result_url_expired_download(job: dict | None = None) -> bool:
+    current = dict(job or {})
+    category = str(current.get("artifact_download_error_category") or current.get("last_download_error_category") or "").strip().lower()
+    if category == "result_url_expired":
+        return True
+    try:
+        status = int(current.get("artifact_download_http_status") or current.get("last_download_http_status") or 0)
+    except Exception:
+        status = 0
+    if status in {401, 403, 404, 410}:
+        return True
+    return False
+
+
+async def refresh_music_expired_result_url_for_job(
+    job: dict | None = None,
+    *,
+    updated_by="",
+    source: str = "recovery_refresh",
+) -> dict:
+    current = dict(job or {})
+    if not current:
+        return {"ok": False, "status": "MISSING_JOB", "job": {}}
+    provider_task_id = music_job_provider_task_id(current)
+    if not provider_task_id:
+        return {"ok": False, "status": "PROVIDER_TASK_ID_MISSING", "job": current}
+    old_url = music_job_result_url(current)
+    current.update({
+        "refresh_url_attempted": True,
+        "refresh_url_attempted_at": now_text(),
+        "refresh_url_attempt_count": int(current.get("refresh_url_attempt_count") or 0) + 1,
+        "refreshed_result_url": False,
+        "lifecycle_status": str(current.get("lifecycle_status") or "refreshing_result_url"),
+    })
+    if current.get("internal_job_id"):
+        save_engine_async_job(current)
+    try:
+        polled = await poll_music_generation_job(music_suno_poll_state_from_job(current), updated_by=updated_by)
+    except Exception as exc:
+        current.update({
+            "refresh_url_status": "provider_repoll_failed",
+            "refresh_url_error": sanitize_provider_status_text(str(exc), provider_task_id, 180),
+            "primary_blocker": "result_url_expired",
+            "artifact_blocker": "result_url_expired",
+            "auto_delivery_blocker": "result_url_expired",
+            "error_category": "result_url_expired",
+            "terminal_state": "failed_no_charge",
+            "music_terminal_state": "failed_no_charge",
+            "progress_text": "Link kết quả nhạc đã hết hạn trước khi TOAN AAS tải được file. Hệ thống chưa trừ Xu.",
+        })
+        if current.get("internal_job_id"):
+            save_engine_async_job(current)
+        return {"ok": False, "status": "RESULT_URL_EXPIRED", "job": current, "recovery_action": "refresh_url_failed"}
+    provider_status = str(polled.get("status") or "")
+    fresh_url = str(polled.get("output_url") or "").strip()
+    current.update({
+        "provider_last_poll_at": now_text(),
+        "last_poll_at": now_text(),
+        "poll_count": int(current.get("poll_count") or 0) + 1,
+        "provider_poll_count": int(current.get("provider_poll_count") or current.get("poll_count") or 0) + 1,
+        "last_provider_status": sanitize_provider_status_text(provider_status or polled.get("detail") or "-", provider_task_id),
+        "provider_status_raw": sanitize_provider_status_text(provider_status or polled.get("detail") or "-", provider_task_id),
+    })
+    if polled.get("ok") and fresh_url and fresh_url != old_url:
+        current.update({
+            "status": "downloading",
+            "provider_status": "completed",
+            "provider_completed": True,
+            "music_provider_completed": True,
+            "provider_completed_at": str(current.get("provider_completed_at") or now_text()),
+            "lifecycle_status": "result_url_refreshed",
+            "materialization_status": "not_attempted",
+            "refresh_url_status": "refreshed",
+            "refreshed_result_url": True,
+            "result_url_refreshed_at": now_text(),
+            "result_url_first_seen_at": now_text(),
+            "result_url_label": music_result_url_debug_label(fresh_url),
+            "output_url": fresh_url,
+            "music_output_url": fresh_url,
+            "result_url": fresh_url,
+            "download_url": fresh_url,
+            "progress_text": "TOAN AAS đã tạo xong bài hát, đang tải file nhạc để gửi cho anh/chị.",
+            "terminal_state": "",
+            "music_terminal_state": "",
+            "primary_blocker": "",
+            "artifact_blocker": "",
+            "auto_delivery_blocker": "",
+            "error_category": "",
+        })
+        if current.get("internal_job_id"):
+            save_engine_async_job(current)
+        materialized = await materialize_music_artifact_for_job(current, updated_by=updated_by, source=source)
+        materialized["recovery_action"] = "refresh_url_materialized" if materialized.get("ok") else "refresh_url_materialize_failed"
+        return materialized
+    current.update({
+        "refresh_url_status": "same_or_missing_result_url",
+        "refreshed_result_url": False,
+        "primary_blocker": "result_url_expired",
+        "artifact_blocker": "result_url_expired",
+        "auto_delivery_blocker": "result_url_expired",
+        "error_category": "result_url_expired",
+        "terminal_state": "failed_no_charge",
+        "music_terminal_state": "failed_no_charge",
+        "lifecycle_status": "result_url_expired",
+        "materialization_status": "expired",
+        "progress_text": "Link kết quả nhạc đã hết hạn trước khi TOAN AAS tải được file. Hệ thống chưa trừ Xu.",
+    })
+    if current.get("internal_job_id"):
+        save_engine_async_job(current)
+    return {"ok": False, "status": "RESULT_URL_EXPIRED", "job": current, "recovery_action": "refresh_url_unavailable"}
 
 
 async def deliver_music_ready_artifact_once(
@@ -7185,6 +7400,14 @@ async def deliver_music_ready_artifact_once(
     if not music_job_ready_artifact_validated(current):
         materialized = await materialize_music_artifact_for_job(current, updated_by=user_id or current.get("user_id") or "", source=source)
         current = dict(materialized.get("job") or current)
+        if not materialized.get("ok") and music_result_url_expired_download(current) and not bool(current.get("refresh_url_attempted")):
+            refreshed = await refresh_music_expired_result_url_for_job(
+                current,
+                updated_by=user_id or current.get("user_id") or "",
+                source=f"{source}_url_refresh",
+            )
+            materialized = refreshed
+            current = dict(refreshed.get("job") or current)
     if not music_job_ready_artifact_validated(current):
         primary = music_job_artifact_primary_blocker(current) or "artifact_materialization_failed"
         current = set_music_artifact_blocker(
@@ -7524,6 +7747,7 @@ def progress_auto_refresh_status_text(job_id: str = "") -> str:
             f"• job_id: <code>{html.escape(str(record.get('job_id') or '-'))}</code>",
             f"• enabled: <code>{'true' if record.get('enabled') else 'false'}</code>",
             f"• scheduler_mode: <code>{html.escape(str(record.get('scheduler_mode') or '-'))}</code>",
+            f"• scheduler_status: <code>{html.escape(str(record.get('scheduler_status') or '-'))}</code>",
             f"• registry_saved: <code>{'true' if record.get('registry_saved') else 'false'}</code>",
             f"• task_started: <code>{'true' if record.get('task_started') else 'false'}</code>",
             f"• task_alive: <code>{'true' if record.get('task_alive') else 'false'}</code>",
@@ -7777,20 +8001,30 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• lifecycle_artifact_ready: <code>{'yes' if lifecycle.get('artifact_ready') else 'no'}</code>\n"
         f"• audio_validated: <code>{'yes' if lifecycle.get('audio_validated') else 'no'}</code>\n"
         f"• scheduler_mode: <code>{html.escape(str(auto_record.get('scheduler_mode') or '-'))}</code>\n"
+        f"• scheduler_status: <code>{html.escape(str((job or {}).get('scheduler_status') or auto_record.get('scheduler_status') or '-'))}</code>\n"
         f"• task_started: <code>{'yes' if auto_record.get('task_started') else 'no'}</code>\n"
         f"• last_tick_at: <code>{html.escape(str(auto_record.get('last_tick_at') or '-'))}</code>\n"
-        f"• provider_status: <code>{html.escape(sanitize_provider_status_text((job or {}).get('last_provider_status') or status, provider_task_id, 180))}</code>\n"
+        f"• provider_status: <code>{html.escape(sanitize_provider_status_text((job or {}).get('provider_status') or (job or {}).get('last_provider_status') or status, provider_task_id, 180))}</code>\n"
+        f"• provider_status_raw: <code>{html.escape(sanitize_provider_status_text((job or {}).get('provider_status_raw') or (job or {}).get('last_provider_status') or '-', provider_task_id, 180))}</code>\n"
+        f"• lifecycle_status: <code>{html.escape(str((job or {}).get('lifecycle_status') or '-'))}</code>\n"
         f"• provider_last_poll_at: <code>{html.escape(str((job or {}).get('provider_last_poll_at') or (job or {}).get('last_poll_at') or '-'))}</code>\n"
         f"• provider_poll_count: <code>{int((job or {}).get('provider_poll_count') or (job or {}).get('poll_count') or 0)}</code>\n"
         f"• provider_error: <code>{html.escape(sanitize_provider_status_text((job or {}).get('provider_error') or (job or {}).get('last_send_error') or '-', provider_task_id, 180))}</code>\n"
         f"• result_url_present: <code>{'yes' if result_url else 'no'}</code>\n"
         f"• result_url_label: <code>{html.escape(music_result_url_debug_label(result_url))}</code>\n"
+        f"• result_url_first_seen_at: <code>{html.escape(str((job or {}).get('result_url_first_seen_at') or '-'))}</code>\n"
+        f"• result_url_downloaded_at: <code>{html.escape(str((job or {}).get('result_url_downloaded_at') or '-'))}</code>\n"
+        f"• result_url_age_seconds: <code>{int((job or {}).get('result_url_age_seconds') or music_result_url_age_seconds(job))}</code>\n"
+        f"• refresh_url_attempted: <code>{'yes' if (job or {}).get('refresh_url_attempted') else 'no'}</code>\n"
+        f"• refreshed_result_url: <code>{'yes' if (job or {}).get('refreshed_result_url') else 'no'}</code>\n"
         f"• local_artifact_path: <code>{html.escape(local_artifact_path or '-')}</code>\n"
         f"• artifact_state: <code>{html.escape(artifact_state or '-')}</code>\n"
         f"• artifact_candidates_count: <code>{int((job or {}).get('artifact_candidates_count') or 0)}</code>\n"
         f"• materialization_attempted: <code>{'yes' if (job or {}).get('artifact_materialization_attempted') or (job or {}).get('artifact_materialization_started_at') else 'no'}</code>\n"
         f"• materialization_status: <code>{html.escape(str((job or {}).get('artifact_materialization_status') or '-'))}</code>\n"
+        f"• materialization_status2: <code>{html.escape(str((job or {}).get('materialization_status') or '-'))}</code>\n"
         f"• materialized_source: <code>{html.escape(str((job or {}).get('artifact_materialized_source') or (job or {}).get('artifact_materialization_source') or '-'))}</code>\n"
+        f"• download_attempt_count: <code>{int((job or {}).get('download_attempt_count') or 0)}</code>\n"
         f"• download_http_status: <code>{int((job or {}).get('artifact_download_http_status') or 0)}</code>\n"
         f"• download_content_type: <code>{html.escape(str((job or {}).get('artifact_download_content_type') or '-'))}</code>\n"
         f"• downloaded_bytes: <code>{int((job or {}).get('artifact_downloaded_bytes') or 0)}</code>\n"
@@ -7810,6 +8044,7 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• last_duplicate_blocked_at: <code>{html.escape(str((job or {}).get('last_duplicate_blocked_at') or '-'))}</code>\n"
         f"• delivery_message_id: <code>{html.escape(str((job or {}).get('music_delivery_message_id') or (job or {}).get('delivery_message_id') or '-'))}</code>\n"
         f"• success_message_id: <code>{html.escape(str((job or {}).get('music_success_message_id') or (job or {}).get('success_message_id') or '-'))}</code>\n"
+        f"• retry_job_id: <code>{html.escape(str((job or {}).get('retry_job_id') or '-'))}</code>\n"
         f"• terminal_state: <code>{html.escape(terminal or '-')}</code>\n"
         f"• terminal_locked_at: <code>{html.escape(str((job or {}).get('music_terminal_locked_at') or (job or {}).get('terminal_locked_at') or '-'))}</code>\n"
         f"• confirm_submit_phase: <code>{html.escape(str((job or {}).get('confirm_submit_phase') or '-'))}</code>\n"
@@ -7849,12 +8084,21 @@ def music_delivery_recover_report_text(input_job_id: str = "", result: dict | No
         f"• canonical_job_id: <code>{html.escape(str(data.get('canonical_job_id') or '-'))}</code>\n"
         f"• legacy_job_id: <code>{html.escape(str(data.get('legacy_job_id') or '-'))}</code>\n"
         f"• provider_task_id: <code>{html.escape(mask_provider_task_id(music_job_provider_task_id(job)) if music_job_provider_task_id(job) else '-')}</code>\n"
-        f"• provider_status: <code>{html.escape(sanitize_provider_status_text(job.get('last_provider_status') or job.get('status') or '-', music_job_provider_task_id(job), 180))}</code>\n"
+        f"• provider_status: <code>{html.escape(sanitize_provider_status_text(job.get('provider_status') or job.get('last_provider_status') or job.get('status') or '-', music_job_provider_task_id(job), 180))}</code>\n"
+        f"• scheduler_status: <code>{html.escape(str(job.get('scheduler_status') or '-'))}</code>\n"
+        f"• lifecycle_status: <code>{html.escape(str(job.get('lifecycle_status') or '-'))}</code>\n"
         f"• result_url_present: <code>{'yes' if result_url else 'no'}</code>\n"
         f"• result_url_label: <code>{html.escape(music_result_url_debug_label(result_url))}</code>\n"
+        f"• result_url_first_seen_at: <code>{html.escape(str(job.get('result_url_first_seen_at') or '-'))}</code>\n"
+        f"• result_url_downloaded_at: <code>{html.escape(str(job.get('result_url_downloaded_at') or '-'))}</code>\n"
+        f"• result_url_age_seconds: <code>{int(job.get('result_url_age_seconds') or music_result_url_age_seconds(job))}</code>\n"
+        f"• refresh_url_attempted: <code>{'yes' if job.get('refresh_url_attempted') else 'no'}</code>\n"
+        f"• refreshed_result_url: <code>{'yes' if job.get('refreshed_result_url') else 'no'}</code>\n"
         f"• local_artifact_path: <code>{html.escape(local_artifact_path or '-')}</code>\n"
         f"• artifact_state: <code>{html.escape(music_job_artifact_state(job) or '-')}</code>\n"
         f"• materialization_status: <code>{html.escape(str(job.get('artifact_materialization_status') or '-'))}</code>\n"
+        f"• materialization_status2: <code>{html.escape(str(job.get('materialization_status') or '-'))}</code>\n"
+        f"• download_attempt_count: <code>{int(job.get('download_attempt_count') or 0)}</code>\n"
         f"• download_http_status: <code>{int(job.get('artifact_download_http_status') or 0)}</code>\n"
         f"• download_content_type: <code>{html.escape(str(job.get('artifact_download_content_type') or '-'))}</code>\n"
         f"• downloaded_bytes: <code>{int(job.get('artifact_downloaded_bytes') or 0)}</code>\n"
@@ -7866,6 +8110,7 @@ def music_delivery_recover_report_text(input_job_id: str = "", result: dict | No
         f"• artifact_hash: <code>{html.escape(artifact_hash or '-')}</code>\n"
         f"• delivery_attempted: <code>{'yes' if attempted else 'no'}</code>\n"
         f"• delivery_message_id: <code>{html.escape(delivery_message_id or '-')}</code>\n"
+        f"• retry_job_id: <code>{html.escape(str(job.get('retry_job_id') or '-'))}</code>\n"
         f"• terminal_state: <code>{html.escape(str(job.get('terminal_state') or job.get('music_terminal_state') or '-'))}</code>\n"
         f"• primary_blocker: <code>{html.escape(primary_blocker or '-')}</code>\n"
         f"• secondary_blocker: <code>{html.escape(secondary_blocker or '-')}</code>\n"
@@ -7890,6 +8135,112 @@ async def cmd_music_delivery_recover(update: Update, context: ContextTypes.DEFAU
         source="admin_recover",
     )
     return await update.message.reply_text(music_delivery_recover_report_text(job_id, result), parse_mode="HTML")
+
+
+async def retry_music_job_from_saved_request(
+    job_id: str = "",
+    *,
+    user_id=0,
+    chat_id=None,
+    updated_by="",
+) -> dict:
+    lookup = get_engine_async_job_lookup(job_id)
+    old_job = dict(lookup.get("job") or {})
+    if not old_job:
+        return {"ok": False, "status": "MISSING_JOB", **lookup, "job": {}}
+    if music_job_delivered(old_job):
+        return {"ok": False, "status": "ALREADY_DELIVERED", **lookup, "job": old_job}
+    old_resolved = str(lookup.get("resolved_job_id") or old_job.get("internal_job_id") or job_id or "").strip()
+    retry_user_id = old_job.get("user_id") or user_id or 0
+    retry_chat_id = chat_id or old_job.get("chat_id") or retry_user_id
+    seed = dict(old_job)
+    for key in (
+        "internal_job_id", "job_id", "provider_task_id", "provider_job_id", "music_task_id",
+        "output_url", "music_output_url", "result_url", "download_url", "file_url", "audio_url",
+        "music_result_url", "music_artifact_url", "selected_artifact_url", "local_artifact_path",
+        "music_result_path", "output_path", "storage_ref", "vault_id", "music_vault_id",
+        "output_bytes", "music_result_size_bytes", "selected_artifact_bytes", "artifact_bytes",
+        "delivery_message_id", "music_delivery_message_id", "sent_full_at", "delivered_at",
+    ):
+        seed.pop(key, None)
+    seed.update({
+        "retry_of_job_id": old_resolved,
+        "pending_charge_xu": 0,
+        "music_pending_charge_xu": 0,
+        "charged_xu": 0,
+        "music_charged_xu": 0,
+        "music_refunded": False,
+    })
+    new_job = create_music_pending_submit_job(
+        user_id=retry_user_id,
+        chat_id=retry_chat_id,
+        result=seed,
+        admin_test=True,
+        confirm_route="music_retry_job",
+        confirm_callback_data=f"/music_retry_job {old_resolved}",
+        confirm_handler_name="retry_music_job_from_saved_request",
+        panel_created_by="music_retry_job",
+    )
+    if music_confirm_submit_blocker_from_job(new_job) == "job_persist_failed":
+        return {"ok": False, "status": "JOB_PERSIST_FAILED", **lookup, "job": new_job}
+    new_job.update({
+        "retry_of_job_id": old_resolved,
+        "pending_charge_xu": 0,
+        "music_pending_charge_xu": 0,
+        "charged_xu": 0,
+        "music_charged_xu": 0,
+        "retry_no_duplicate_charge": True,
+    })
+    new_job = save_engine_async_job(new_job)
+    new_job = update_music_submit_job_provider_started(new_job, updated_by=updated_by or user_id)
+    submitted = await submit_music_generation_job(seed, preview=False, admin_smoke=True, updated_by=updated_by or user_id)
+    if not submitted.get("ok") or not music_provider_result_task_id(submitted):
+        failed = mark_music_confirm_submit_blocker(new_job, "provider_submit_failed", submitted.get("detail") or submitted.get("status") or "", updated_by=updated_by or user_id)
+        return {"ok": False, "status": "PROVIDER_SUBMIT_FAILED", **lookup, "job": failed, "new_job_id": str(failed.get("internal_job_id") or ""), "submitted": submitted}
+    accepted = update_music_submit_job_provider_accepted(new_job, submitted, updated_by=updated_by or user_id)
+    accepted.update({
+        "retry_of_job_id": old_resolved,
+        "pending_charge_xu": 0,
+        "music_pending_charge_xu": 0,
+        "charged_xu": 0,
+        "music_charged_xu": 0,
+        "retry_no_duplicate_charge": True,
+    })
+    save_engine_async_job(accepted)
+    old_job.update({
+        "retry_job_id": str(accepted.get("internal_job_id") or ""),
+        "terminal_state": "failed_no_charge_result_expired",
+        "music_terminal_state": "failed_no_charge_result_expired",
+        "primary_blocker": "result_url_expired",
+        "artifact_blocker": "result_url_expired",
+        "auto_delivery_blocker": "result_url_expired",
+        "error_category": "result_url_expired",
+        "retry_created_at": now_text(),
+        "retry_no_duplicate_charge": True,
+    })
+    save_engine_async_job(old_job)
+    return {"ok": True, "status": "RETRY_SUBMITTED", **lookup, "job": old_job, "retry_job": accepted, "new_job_id": str(accepted.get("internal_job_id") or ""), "submitted": submitted}
+
+
+async def cmd_music_retry_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id if update.effective_user else 0):
+        return
+    args = list(getattr(context, "args", []) or [])
+    job_id = str(args[0] if args else "").strip()
+    if not job_id:
+        return await update.message.reply_text("Dùng: /music_retry_job <MUS_ID>")
+    result = await retry_music_job_from_saved_request(
+        job_id,
+        user_id=update.effective_user.id if update.effective_user else 0,
+        chat_id=getattr(update.effective_chat, "id", None) if getattr(update, "effective_chat", None) else None,
+        updated_by=update.effective_user.id if update.effective_user else 0,
+    )
+    retry_id = str(result.get("new_job_id") or "-")
+    status = str(result.get("status") or "-")
+    return await update.message.reply_text(
+        f"🎵 Music retry\n\n• status: <code>{html.escape(status)}</code>\n• retry_job_id: <code>{html.escape(retry_id)}</code>",
+        parse_mode="HTML",
+    )
 
 async def cmd_music_confirm_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id if update.effective_user else 0):
@@ -52396,12 +52747,28 @@ async def _download_audio_url_bytes(url: str, timeout_seconds: float = 60.0) -> 
     target = str(url or "").strip()
     if not target.startswith(("http://", "https://")):
         return b"", "invalid_url", 0
-    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
-        res = await client.get(target)
+    res = None
+    attempts = max(1, int(MUSIC_RESULT_DOWNLOAD_MAX_RETRIES or 1))
+    attempted = 0
+    headers = {"User-Agent": str(MUSIC_RESULT_DOWNLOAD_USER_AGENT or "TOAN-AAS-MusicDownloader/1.0")}
+    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
+        for attempt in range(attempts):
+            attempted = attempt + 1
+            res = await client.get(target)
+            status_code = int(getattr(res, "status_code", 0) or 0)
+            if status_code in {429} or status_code >= 500:
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(float(MUSIC_RESULT_DOWNLOAD_RETRY_SLEEP_SECONDS or 0))
+                    continue
+            break
+    if res is None:
+        return b"", "download_failed", 0
     content_type = str(res.headers.get("content-type") or "")
     if res.status_code < 400 and res.content and (content_type.startswith("audio/") or len(res.content) > 1024):
-        return bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; content_type={content_type or '-'}", int(res.status_code)
-    return b"", shopaikey_sanitize_error(res.text[:260] if getattr(res, "text", "") else f"HTTP {res.status_code}"), int(res.status_code)
+        return bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; content_type={content_type or '-'}; attempts={attempted}", int(res.status_code)
+    downloaded = len(getattr(res, "content", b"") or b"")
+    safe_error = shopaikey_sanitize_error(res.text[:220] if getattr(res, "text", "") else f"HTTP {res.status_code}")
+    return b"", f"http={res.status_code}; downloaded_bytes={downloaded}; content_type={content_type or '-'}; error={safe_error}; attempts={attempted}", int(res.status_code)
 
 async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
     candidates = _minimax_audio_candidates(value if isinstance(value, (dict, list)) else {"audio": value})
@@ -98074,6 +98441,9 @@ def update_music_submit_job_provider_started(job: dict | None, *, updated_by="")
         "provider_submit_attempt_count": int(current.get("provider_submit_attempt_count") or 0) + 1,
         "submitted_to_provider_started_at": now_text(),
         "last_provider_status": "provider_submit_called",
+        "provider_status": "submitting",
+        "scheduler_status": str(current.get("scheduler_status") or "not_started"),
+        "lifecycle_status": "submitting",
         "confirm_submit_phase": "provider_submit_called",
         "confirm_submit_blocker": "",
         "progress_percent": max(8, int(current.get("progress_percent") or 8)),
@@ -98098,6 +98468,9 @@ def update_music_submit_job_provider_accepted(
         "provider_job_id": task_id,
         "status": "submitted",
         "last_provider_status": sanitize_provider_status_text(payload.get("status") or "PASS_SUBMITTED", task_id, 180),
+        "provider_status": "submitted",
+        "scheduler_status": str(current.get("scheduler_status") or "not_started"),
+        "lifecycle_status": "provider_submitted",
         "progress_text": "Đã gửi yêu cầu tạo nhạc tới provider.",
         "progress_percent": max(12, int(current.get("progress_percent") or 12)),
         "confirm_submit_phase": "submitted",
@@ -98186,8 +98559,10 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
     job["provider_last_poll_at"] = str(job.get("last_poll_at") or "")
     job["next_poll_after"] = engine_async_next_poll_after_text()
     job["parsed_fields"] = suno_result_parsed_fields(polled)
-    job["last_provider_status"] = sanitize_provider_status_text(provider_status or polled.get("detail") or "-", provider_task_id)
-    job["provider_status"] = job["last_provider_status"]
+    raw_provider_status = sanitize_provider_status_text(provider_status or polled.get("detail") or "-", provider_task_id)
+    job["last_provider_status"] = raw_provider_status
+    job["provider_status_raw"] = raw_provider_status
+    job["provider_status"] = "completed" if polled.get("ok") and output_url else ("running" if music_poll_status_is_processing(provider_status) else raw_provider_status)
     job["provider_error"] = sanitize_provider_status_text(polled.get("detail") or polled.get("error") or "", provider_task_id, 180)
     if polled.get("ok") and output_url:
         if not download:
@@ -98195,6 +98570,9 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             job["progress_text"] = "Đã có kết quả, TOAN AAS đang tải file nhạc."
             job["provider_completed"] = True
             job["music_provider_completed"] = True
+            job["provider_status"] = "completed"
+            job["lifecycle_status"] = "provider_completed"
+            job["materialization_status"] = "not_attempted"
             job["provider_completed_at"] = str(job.get("provider_completed_at") or now_text())
             job["artifact_ready"] = False
             job["music_artifact_ready"] = False
@@ -98207,12 +98585,17 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             job["output_url"] = output_url
             job["music_output_url"] = output_url
             job["result_url"] = output_url
+            job["result_url_first_seen_at"] = str(job.get("result_url_first_seen_at") or now_text())
+            job["result_url_label"] = music_result_url_debug_label(output_url)
             save_engine_async_job(job)
             return {"ok": True, "status": "OUTPUT_URL_READY", "job": job, "output_url": output_url, "audio_bytes": b""}
         job["status"] = "downloading"
         job["progress_text"] = "Đã có kết quả, TOAN AAS đang tải file nhạc."
         job["provider_completed"] = True
         job["music_provider_completed"] = True
+        job["provider_status"] = "completed"
+        job["lifecycle_status"] = "provider_completed"
+        job["materialization_status"] = "not_attempted"
         job["provider_completed_at"] = str(job.get("provider_completed_at") or now_text())
         job["artifact_ready"] = False
         job["music_artifact_ready"] = False
@@ -98225,8 +98608,10 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         job["output_url"] = output_url
         job["music_output_url"] = output_url
         job["result_url"] = output_url
+        job["result_url_first_seen_at"] = str(job.get("result_url_first_seen_at") or now_text())
+        job["result_url_label"] = music_result_url_debug_label(output_url)
         save_engine_async_job(job)
-        materialized = await materialize_music_artifact_for_job(job, updated_by=updated_by, source="provider_poll")
+        materialized = await materialize_music_artifact_for_job(job, updated_by=updated_by, source="provider_poll_completed")
         materialized_job = dict(materialized.get("job") or job)
         audio_bytes = bytes(materialized.get("audio_bytes") or b"")
         record_music_provider_attempt(
@@ -98239,12 +98624,34 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
         )
         if materialized.get("ok") and audio_bytes:
             return {"ok": True, "status": "COMPLETED", "job": materialized_job, "output_url": output_url, "audio_bytes": audio_bytes}
+        if music_result_url_expired_download(materialized_job) and not bool(materialized_job.get("refresh_url_attempted")):
+            refreshed = await refresh_music_expired_result_url_for_job(
+                materialized_job,
+                updated_by=updated_by,
+                source="provider_poll_completed_url_refresh",
+            )
+            refreshed_job = dict(refreshed.get("job") or materialized_job)
+            refreshed_audio = bytes(refreshed.get("audio_bytes") or b"")
+            if refreshed.get("ok") and refreshed_audio:
+                record_music_provider_attempt(
+                    provider=str(job.get("provider") or ""),
+                    task_id=provider_task_id,
+                    fetch_status=provider_status,
+                    download_status="PASS_REFRESHED_URL",
+                    error="refreshed_result_url",
+                    updated_by=updated_by,
+                )
+                return {"ok": True, "status": "COMPLETED", "job": refreshed_job, "output_url": music_job_result_url(refreshed_job), "audio_bytes": refreshed_audio}
+            materialized = refreshed
+            materialized_job = refreshed_job
         blocker = music_job_artifact_primary_blocker(materialized_job) or "artifact_materialization_failed"
         materialized_job.update({
             "status": "failed",
             "terminal_state": "failed_no_charge",
             "music_terminal_state": "failed_no_charge",
             "progress_text": "Có URL kết quả nhưng chưa tải được file nhạc hợp lệ. TOAN AAS chưa trừ Xu.",
+            "provider_status": "completed",
+            "lifecycle_status": "artifact_failed",
             "artifact_ready": False,
             "music_artifact_ready": False,
             "artifact_validated": False,
@@ -98255,7 +98662,8 @@ async def poll_music_suno_async_job(internal_job_id: str, *, updated_by="", down
             "secondary_blocker": music_job_artifact_secondary_blocker(materialized_job),
             "error_category": blocker,
             "auto_delivery_blocker": blocker,
-            "last_provider_status": sanitize_provider_status_text(str((materialized.get("artifact") or {}).get("download_detail") or materialized.get("status") or ""), provider_task_id),
+            "last_provider_status": raw_provider_status,
+            "last_artifact_error": sanitize_provider_status_text(str((materialized.get("artifact") or {}).get("download_detail") or materialized.get("status") or ""), provider_task_id),
         })
         save_engine_async_job(materialized_job)
         return {"ok": False, "status": str(materialized.get("status") or "ARTIFACT_MATERIALIZATION_FAILED"), "job": materialized_job, "output_url": output_url, "audio_bytes": b""}
@@ -98470,7 +98878,7 @@ def music_delivery_artifact_candidates(result: dict | None = None, job: dict | N
                 "artifact_id": data.get("music_artifact_id") or data.get("provider_artifact_id") or "",
                 "duration_seconds": data.get("artifact_duration_seconds") or data.get("music_result_duration_seconds") or data.get("duration_seconds") or 0,
             })
-    for path_key in ("music_result_path", "output_path", "local_path", "storage_ref"):
+    for path_key in ("local_artifact_path", "music_result_path", "output_path", "local_path", "storage_ref"):
         local_path = str(data.get(path_key) or "").strip()
         if local_path and os.path.exists(local_path) and os.path.getsize(local_path) > 0:
             candidates.append({
@@ -169441,6 +169849,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("product_job_status", cmd_product_job_status))
     tg_app.add_handler(CommandHandler("music_job_debug", cmd_music_job_debug))
     tg_app.add_handler(CommandHandler("music_delivery_recover", cmd_music_delivery_recover))
+    tg_app.add_handler(CommandHandler("music_retry_job", cmd_music_retry_job))
     tg_app.add_handler(CommandHandler("music_confirm_route_audit", cmd_music_confirm_route_audit))
     tg_app.add_handler(CommandHandler("music_panel_creator_audit", cmd_music_panel_creator_audit))
     tg_app.add_handler(CommandHandler("source_help", cmd_source_help))
