@@ -173,7 +173,10 @@ from free_tools_hub import (
 )
 from providers.video_downloader_provider import (
     VIDEO_DOWNLOADER_RIGHTS_COPY,
-    VideoDownloaderProvider,
+)
+from services.public_video_link_downloader import (
+    LinkDownloadRequest,
+    PublicVideoLinkDownloader,
 )
 try:
     import edge_tts
@@ -661,9 +664,12 @@ CUSTOM_VOICE_USAGE_PRICE_PER_CHAR_XU = max(0.0, env_float("CUSTOM_VOICE_USAGE_PR
 CUSTOM_VOICE_USAGE_MIN_CHARS = max(0, env_int("CUSTOM_VOICE_USAGE_MIN_CHARS", 10))
 CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS = max(0, env_int("CUSTOM_VOICE_USAGE_MIN_DURATION_SECONDS", 3))
 LINK_IMPORT_PRICE_XU = max(0, env_int("LINK_IMPORT_PRICE_XU", 10))
-VIDEO_DOWNLOADER_PUBLIC_ENABLED = env_flag("VIDEO_DOWNLOADER_PUBLIC_ENABLED", "false")
-VIDEO_DOWNLOADER_MAX_MB_PUBLIC = max(1, env_int("VIDEO_DOWNLOADER_MAX_MB_PUBLIC", 100))
-VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC", 300))
+VIDEO_DOWNLOADER_PUBLIC_ENABLED = env_flag("VIDEO_DOWNLOADER_PUBLIC_ENABLED", _env("LINKDL_PUBLIC_ENABLED", "true"))
+LINKDL_MAX_INPUT_MB = max(1, env_int("LINKDL_MAX_INPUT_MB", 100))
+LINKDL_MAX_OUTPUT_MB = max(1, env_int("LINKDL_MAX_OUTPUT_MB", LINKDL_MAX_INPUT_MB))
+LINKDL_MAX_DURATION_SECONDS = max(1, env_int("LINKDL_MAX_DURATION_SECONDS", 300))
+VIDEO_DOWNLOADER_MAX_MB_PUBLIC = max(1, env_int("VIDEO_DOWNLOADER_MAX_MB_PUBLIC", LINKDL_MAX_OUTPUT_MB))
+VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC = max(1, env_int("VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC", LINKDL_MAX_DURATION_SECONDS))
 VIDEO_DOWNLOADER_TEMP_CLEANUP = env_flag("VIDEO_DOWNLOADER_TEMP_CLEANUP", "true")
 SUBTITLE_BASE_PRICE_XU_PER_MIN = max(0, env_int("SUBTITLE_BASE_PRICE_XU_PER_MIN", 50))
 TRANSLATE_SUBTITLE_PRICE_XU_PER_MIN = max(0, env_int("TRANSLATE_SUBTITLE_PRICE_XU_PER_MIN", 40))
@@ -157330,11 +157336,12 @@ def subtitle_plus_dub_safe_fail_text(reason: str = "", lang: str = "vi") -> str:
         return "TOAN AAS đã tạo audio lồng tiếng nhưng chưa ghép được vào video. Hệ thống gửi audio trước và chưa trừ thêm Xu."
     return "TOAN AAS chưa xử lý được bước này. Hệ thống chưa trừ Xu. Anh/chị thử lại sau."
 
-def video_downloader_provider() -> VideoDownloaderProvider:
-    return VideoDownloaderProvider(
-        max_mb=VIDEO_DOWNLOADER_MAX_MB_PUBLIC,
+def video_downloader_provider() -> PublicVideoLinkDownloader:
+    return PublicVideoLinkDownloader(
+        data_dir=_env("LINKDL_DATA_DIR", "data/link_downloads"),
+        max_input_mb=LINKDL_MAX_INPUT_MB,
+        max_output_mb=VIDEO_DOWNLOADER_MAX_MB_PUBLIC,
         max_duration_seconds=VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC,
-        temp_cleanup=VIDEO_DOWNLOADER_TEMP_CLEANUP,
     )
 
 def video_downloader_detect_link(url: str) -> dict:
@@ -157406,40 +157413,56 @@ def video_downloader_guard_text(reason: str = "", lang: str = "vi", detection: d
     detection = detection or {}
     if normalize_user_language(lang) != "vi":
         messages = {
-            "private_or_invalid": "Only valid public video links are supported. TOAN AAS will not download private, paywalled, DRM-protected or login-required content.",
-            "unsupported_platform": "This platform or link type is not supported yet.",
+            "private_or_invalid": "TOAN AAS cannot download private or login-required content.",
+            "private_or_login_required": "TOAN AAS cannot download private or login-required content.",
+            "unsupported_platform": "TOAN AAS does not support this link yet.",
+            "unsupported_url": "TOAN AAS does not support this link yet.",
             "disabled": "TOAN AAS cannot download from this link right now.",
-            "adapter_missing": "TOAN AAS cannot download from this link right now.",
-            "too_large": f"This file is over the public limit of {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB.",
-            "duration_too_long": f"This video is over the public limit of {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} seconds.",
+            "adapter_missing": "The link downloader is temporarily unavailable.",
+            "downloader_unavailable": "The link downloader is temporarily unavailable.",
+            "file_too_large": f"This file is over the current {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB limit.",
+            "too_large": f"This file is over the current {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB limit.",
+            "duration_too_long": f"This video is over the current {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} second limit.",
             "cover_unavailable": "This link does not expose a downloadable cover image.",
+            "url_resolve_failed": "TOAN AAS could not resolve this short link right now.",
+            "metadata_failed": "TOAN AAS could not read this link right now.",
+            "download_failed": "TOAN AAS could not download this link right now.",
+            "empty_download": "TOAN AAS could not download a valid file from this link.",
         }
         body = messages.get(reason, "TOAN AAS could not download this link. No Xu was charged.")
         platform = html.escape(str(detection.get("platform") or "-"))
         return (
             f"📥 <b>Video link downloader</b>\n\n"
             f"{body}\n"
-            "TOAN AAS has not processed the link and has not charged Xu.\n\n"
+            "The system has not charged Xu.\n\n"
             f"Platform: <b>{platform}</b>\n"
             f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}"
         )
     messages = {
-        "private_or_invalid": "Chỉ xử lý link video công khai hợp lệ. TOAN AAS không tải video riêng tư/paywall/DRM hoặc nội dung cần đăng nhập.",
-        "unsupported_platform": "Nền tảng hoặc kiểu link này chưa hỗ trợ.",
+        "private_or_invalid": "Chỉ xử lý link công khai. TOAN AAS không tải được nội dung riêng tư hoặc cần đăng nhập. Hệ thống chưa trừ Xu.",
+        "private_or_login_required": "Chỉ xử lý link công khai. TOAN AAS không tải được nội dung riêng tư hoặc cần đăng nhập. Hệ thống chưa trừ Xu.",
+        "unsupported_platform": "TOAN AAS chưa hỗ trợ tải link này. Hệ thống chưa trừ Xu.",
+        "unsupported_url": "TOAN AAS chưa hỗ trợ tải link này. Hệ thống chưa trừ Xu.",
         "disabled": "TOAN AAS chưa tải được link này lúc này.",
-        "adapter_missing": "TOAN AAS chưa tải được link này lúc này.",
-        "too_large": f"File vượt giới hạn công khai {VIDEO_DOWNLOADER_MAX_MB_PUBLIC} MB.",
-        "duration_too_long": f"Video vượt giới hạn công khai {VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC} giây.",
-        "cover_unavailable": "Link này chưa có ảnh bìa có thể tải.",
+        "adapter_missing": "Bộ tải link đang tạm thời chưa sẵn sàng. Hệ thống chưa trừ Xu.",
+        "downloader_unavailable": "Bộ tải link đang tạm thời chưa sẵn sàng. Hệ thống chưa trừ Xu.",
+        "file_too_large": "File vượt giới hạn dung lượng hiện tại. Hệ thống chưa trừ Xu.",
+        "too_large": "File vượt giới hạn dung lượng hiện tại. Hệ thống chưa trừ Xu.",
+        "duration_too_long": "Video vượt giới hạn thời lượng hiện tại. Hệ thống chưa trừ Xu.",
+        "cover_unavailable": "Link này chưa có ảnh bìa có thể tải. Hệ thống chưa trừ Xu.",
+        "url_resolve_failed": "TOAN AAS chưa tải được link này lúc này. Hệ thống chưa trừ Xu.",
+        "metadata_failed": "TOAN AAS chưa lấy được thông tin link này lúc này. Hệ thống chưa trừ Xu.",
+        "download_failed": "TOAN AAS chưa tải được link này lúc này. Hệ thống chưa trừ Xu.",
+        "empty_download": "TOAN AAS chưa tải được file hợp lệ từ link này. Hệ thống chưa trừ Xu.",
     }
     body = messages.get(reason, "TOAN AAS chưa tải được link này. Bạn chưa bị trừ Xu.")
     platform = html.escape(str(detection.get("platform") or "-"))
     return (
         "📥 <b>Tải video từ link</b>\n\n"
         f"{body}\n"
-        "TOAN AAS chưa xử lý link và chưa trừ Xu.\n\n"
-        f"Nền tảng: <b>{platform}</b>\n"
-        f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}"
+        + ("" if "chưa trừ Xu" in body else "TOAN AAS chưa xử lý link và chưa trừ Xu.\n\n")
+        + f"Nền tảng: <b>{platform}</b>\n"
+        + f"{html.escape(VIDEO_DOWNLOADER_RIGHTS_COPY)}"
     )
 
 def video_downloader_preview_text(detection: dict, metadata: dict | None = None, lang: str = "vi") -> str:
@@ -157448,7 +157471,7 @@ def video_downloader_preview_text(detection: dict, metadata: dict | None = None,
     title = html.escape(str(metadata.get("title") or "chưa lấy được tiêu đề")[:160])
     duration = video_downloader_format_seconds(metadata.get("duration_seconds"))
     size = video_downloader_format_size(metadata.get("size_bytes"))
-    url = html.escape(str(detection.get("url") or "")[:700])
+    url = html.escape(str(metadata.get("final_url") or detection.get("final_url") or detection.get("url") or "")[:700])
     english_ui = normalize_user_language(lang) != "vi"
     status_line = "Ready to download when you choose a format." if english_ui else "Sẵn sàng tải khi chọn định dạng."
     if not VIDEO_DOWNLOADER_PUBLIC_ENABLED:
@@ -157486,9 +157509,15 @@ def video_downloader_preview_text(detection: dict, metadata: dict | None = None,
 def video_downloader_result_caption(kind: str, detection: dict, lang: str = "vi") -> str:
     platform = str((detection or {}).get("platform") or "link")
     if normalize_user_language(lang) != "vi":
-        return f"✅ Downloaded {kind} from {platform}. No Xu was charged."
+        label = {"video": "video", "audio": "audio", "cover": "cover image"}.get(str(kind or ""), "file")
+        return f"✅ TOAN AAS downloaded the {label} from {platform}. No Xu was charged."
     label = {"video": "video", "audio": "audio", "cover": "ảnh bìa"}.get(str(kind or ""), "file")
-    return f"✅ Đã tải {label} từ {platform}. TOAN AAS không trừ Xu cho công cụ này."
+    success = {
+        "video": "✅ TOAN AAS đã tải video.",
+        "audio": "✅ TOAN AAS đã tách/tải audio.",
+        "cover": "✅ TOAN AAS đã tải ảnh bìa.",
+    }.get(str(kind or ""), f"✅ TOAN AAS đã tải {label}.")
+    return f"{success}\nNền tảng: {platform}. TOAN AAS không trừ Xu cho công cụ này."
 
 async def handle_video_downloader_pending_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not update.message or not update.message.text or not update.effective_user:
@@ -157510,10 +157539,32 @@ async def handle_video_downloader_pending_text(update: Update, context: ContextT
         return True
     metadata = {}
     if VIDEO_DOWNLOADER_PUBLIC_ENABLED:
-        metadata = await asyncio.to_thread(adapter.metadata, detection["url"])
-        if metadata.get("reason") in {"too_large", "duration_too_long", "private_or_invalid", "unsupported_platform"}:
+        await update.message.reply_text(
+            "TOAN AAS đang kiểm tra link và chuẩn bị tải nội dung.",
+            parse_mode="HTML",
+        )
+        request = LinkDownloadRequest(
+            url=url,
+            user_id=uid,
+            chat_id=getattr(update.effective_chat, "id", 0) if getattr(update, "effective_chat", None) else 0,
+            requested_asset="video",
+            max_duration_seconds=VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC,
+            max_input_mb=LINKDL_MAX_INPUT_MB,
+            max_output_mb=VIDEO_DOWNLOADER_MAX_MB_PUBLIC,
+            platform=detection.get("platform") or "",
+        )
+        prepared = await asyncio.to_thread(adapter.prepare, request)
+        metadata = prepared.to_dict()
+        detection = {
+            **detection,
+            "url": prepared.input_url or detection.get("url") or url,
+            "final_url": prepared.final_url or "",
+            "platform": prepared.platform or detection.get("platform") or "",
+            "job_id": prepared.job_id,
+        }
+        if not prepared.ok:
             await update.message.reply_text(
-                video_downloader_guard_text(metadata.get("reason"), lang, detection),
+                video_downloader_guard_text(prepared.blocker, lang, detection),
                 parse_mode="HTML",
                 reply_markup=video_downloader_start_keyboard(lang),
             )
@@ -157521,7 +157572,9 @@ async def handle_video_downloader_pending_text(update: Update, context: ContextT
     set_video_downloader_pending(
         uid,
         "choose_format",
-        source_url=detection["url"],
+        source_url=url,
+        final_url=detection.get("final_url") or "",
+        job_id=detection.get("job_id") or "",
         source_platform=detection.get("platform") or "",
         detection=detection,
         metadata=metadata,
@@ -157533,27 +157586,36 @@ async def handle_video_downloader_pending_text(update: Update, context: ContextT
     )
     return True
 
-async def send_video_downloader_file(query, result: dict, lang: str = "vi") -> None:
+async def send_video_downloader_file(query, result: dict, lang: str = "vi") -> dict:
     file_path = str(result.get("file_path") or "")
     kind = str(result.get("kind") or "video")
+    if not kind or kind == "None":
+        kind = str(result.get("requested_asset") or "video")
     detection = dict(result.get("detection") or {})
+    if not detection:
+        detection = {"platform": result.get("platform") or ""}
     caption = video_downloader_result_caption(kind, detection, lang)
     filename = os.path.basename(file_path) or f"toan-aas-{kind}"
     with open(file_path, "rb") as handle:
         if kind == "audio":
-            await query.message.reply_audio(audio=handle, filename=filename, caption=caption)
+            sent = await query.message.reply_audio(audio=handle, filename=filename, caption=caption)
+            return {"method": "audio", "message_id": int(getattr(sent, "message_id", 0) or 0)}
         elif kind == "cover":
             try:
-                await query.message.reply_photo(photo=handle, caption=caption)
+                sent = await query.message.reply_photo(photo=handle, caption=caption)
+                return {"method": "photo", "message_id": int(getattr(sent, "message_id", 0) or 0)}
             except Exception:
                 handle.seek(0)
-                await query.message.reply_document(document=handle, filename=filename, caption=caption)
+                sent = await query.message.reply_document(document=handle, filename=filename, caption=caption)
+                return {"method": "document", "message_id": int(getattr(sent, "message_id", 0) or 0)}
         else:
             try:
-                await query.message.reply_video(video=handle, caption=caption)
+                sent = await query.message.reply_video(video=handle, caption=caption)
+                return {"method": "video", "message_id": int(getattr(sent, "message_id", 0) or 0)}
             except Exception:
                 handle.seek(0)
-                await query.message.reply_document(document=handle, filename=filename, caption=caption)
+                sent = await query.message.reply_document(document=handle, filename=filename, caption=caption)
+                return {"method": "document", "message_id": int(getattr(sent, "message_id", 0) or 0)}
 
 async def handle_video_downloader_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -157598,26 +157660,120 @@ async def handle_video_downloader_callback(update: Update, context: ContextTypes
         reply_markup=video_downloader_choice_keyboard(lang),
     )
     adapter = video_downloader_provider()
-    result = await asyncio.to_thread(adapter.download, source_url, kind)
+    request = LinkDownloadRequest(
+        url=source_url,
+        user_id=uid,
+        chat_id=getattr(query.message, "chat_id", 0) or getattr(getattr(query.message, "chat", None), "id", 0) or 0,
+        requested_asset=kind,
+        max_duration_seconds=VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC,
+        max_input_mb=LINKDL_MAX_INPUT_MB,
+        max_output_mb=VIDEO_DOWNLOADER_MAX_MB_PUBLIC,
+        platform=detection.get("platform") or state.get("source_platform") or "",
+        job_id=str(state.get("job_id") or detection.get("job_id") or ""),
+    )
+    result = await asyncio.to_thread(adapter.download, request)
     file_path = str(result.get("file_path") or "")
-    try:
-        if not result.get("ok"):
-            return await safe_edit_or_send(
-                query,
-                video_downloader_guard_text(result.get("reason"), lang, dict(result.get("detection") or detection)),
-                parse_mode="HTML",
-                reply_markup=video_downloader_choice_keyboard(lang),
-            )
-        await send_video_downloader_file(query, result, lang)
-        clear_video_downloader_pending(uid)
+    if not result.get("ok"):
         return await safe_edit_or_send(
             query,
-            "✅ Đã gửi file tải về. File tạm đã được dọn sau khi gửi." if normalize_user_language(lang) == "vi" else "✅ Download sent. Temporary file was cleaned after sending.",
-            reply_markup=video_downloader_start_keyboard(lang),
+            video_downloader_guard_text(result.get("reason") or result.get("blocker"), lang, dict(result.get("detection") or detection)),
+            parse_mode="HTML",
+            reply_markup=video_downloader_choice_keyboard(lang),
         )
-    finally:
-        if file_path:
-            VideoDownloaderProvider.cleanup_temp_files([file_path], enabled=VIDEO_DOWNLOADER_TEMP_CLEANUP)
+    delivery = await send_video_downloader_file(query, result, lang)
+    await asyncio.to_thread(
+        adapter.mark_delivered,
+        str(result.get("job_id") or request.job_id or ""),
+        message_id=int(delivery.get("message_id") or 0),
+        method=str(delivery.get("method") or ""),
+        asset=kind,
+    )
+    set_video_downloader_pending(
+        uid,
+        "choose_format",
+        source_url=source_url,
+        final_url=str(result.get("final_url") or state.get("final_url") or ""),
+        job_id=str(result.get("job_id") or request.job_id or state.get("job_id") or ""),
+        source_platform=str(result.get("platform") or state.get("source_platform") or ""),
+        detection={**detection, "platform": str(result.get("platform") or detection.get("platform") or ""), "job_id": str(result.get("job_id") or request.job_id or "")},
+        metadata=dict(state.get("metadata") or {}),
+        last_asset=kind,
+        last_file_path=file_path,
+        delivery_message_id=int(delivery.get("message_id") or 0),
+    )
+    return await safe_edit_or_send(
+        query,
+        "✅ Đã gửi file tải về. Anh/chị có thể chọn tải thêm audio hoặc ảnh bìa từ cùng link." if normalize_user_language(lang) == "vi" else "✅ Download sent. You can still choose audio or cover from the same link.",
+        parse_mode="HTML",
+        reply_markup=video_downloader_choice_keyboard(lang),
+    )
+
+def linkdl_yes_no(value) -> str:
+    return "YES" if bool(value) else "NO"
+
+def linkdl_audit_text() -> str:
+    audit = video_downloader_provider().audit()
+    platforms = ", ".join(str(item) for item in audit.get("supported_platforms") or [])
+    return "\n".join([
+        "📥 <b>LinkDL audit</b>",
+        "",
+        f"• public_enabled: <code>{linkdl_yes_no(VIDEO_DOWNLOADER_PUBLIC_ENABLED)}</code>",
+        f"• downloader_available: <code>{linkdl_yes_no(audit.get('downloader_available'))}</code>",
+        f"• yt_dlp_available: <code>{linkdl_yes_no(audit.get('yt_dlp_available'))}</code>",
+        f"• supported_platforms: <code>{html.escape(platforms)}</code>",
+        f"• tiktok_shortlink_supported: <code>{linkdl_yes_no(audit.get('tiktok_shortlink_supported'))}</code>",
+        f"• direct_mp4_supported: <code>{linkdl_yes_no(audit.get('direct_mp4_supported'))}</code>",
+        f"• max_mb: <code>{int(audit.get('max_mb') or VIDEO_DOWNLOADER_MAX_MB_PUBLIC)}</code>",
+        f"• max_duration: <code>{int(audit.get('max_duration') or VIDEO_DOWNLOADER_MAX_DURATION_SECONDS_PUBLIC)}</code>",
+        f"• telegram_fallback_enabled: <code>{linkdl_yes_no(audit.get('telegram_fallback_enabled'))}</code>",
+        f"• no_cookie_required: <code>{linkdl_yes_no(audit.get('no_cookie_required'))}</code>",
+        f"• no_private_bypass: <code>{linkdl_yes_no(audit.get('no_private_bypass'))}</code>",
+    ])
+
+def linkdl_status_text(job_id: str) -> str:
+    status = video_downloader_provider().status(job_id)
+    if not status.get("ok"):
+        return (
+            "📥 <b>LinkDL status</b>\n\n"
+            f"• job_id: <code>{html.escape(str(status.get('job_id') or job_id or '-'))}</code>\n"
+            "• blocker: <code>job_not_found</code>"
+        )
+    return "\n".join([
+        "📥 <b>LinkDL status</b>",
+        "",
+        f"• job_id: <code>{html.escape(str(status.get('job_id') or '-'))}</code>",
+        f"• platform: <code>{html.escape(str(status.get('platform') or '-'))}</code>",
+        f"• input_url_host: <code>{html.escape(str(status.get('input_url_host') or '-'))}</code>",
+        f"• final_url_host: <code>{html.escape(str(status.get('final_url_host') or '-'))}</code>",
+        f"• resolver_status: <code>{html.escape(str(status.get('resolver_status') or '-'))}</code>",
+        f"• metadata_status: <code>{html.escape(str(status.get('metadata_status') or '-'))}</code>",
+        f"• requested_asset: <code>{html.escape(str(status.get('requested_asset') or '-'))}</code>",
+        f"• local_video_path exists: <code>{linkdl_yes_no(status.get('local_video_path_exists'))}</code>",
+        f"• local_audio_path exists: <code>{linkdl_yes_no(status.get('local_audio_path_exists'))}</code>",
+        f"• cover_path exists: <code>{linkdl_yes_no(status.get('cover_path_exists'))}</code>",
+        f"• output_bytes: <code>{int(status.get('output_bytes') or 0)}</code>",
+        f"• duration: <code>{int(status.get('duration') or 0)}</code>",
+        f"• blocker: <code>{html.escape(str(status.get('blocker') or '-'))}</code>",
+        f"• delivery_message_id: <code>{int(status.get('delivery_message_id') or 0)}</code>",
+    ])
+
+async def cmd_linkdl_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(linkdl_audit_text(), parse_mode="HTML")
+
+async def cmd_linkdl_platforms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await update.message.reply_text(linkdl_audit_text(), parse_mode="HTML")
+
+async def cmd_linkdl_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    job_id = str((context.args or [""])[0] if context.args else "").strip()
+    if not job_id:
+        return await update.message.reply_text("⚠️ Cú pháp: <code>/linkdl_status LDL...</code>", parse_mode="HTML")
+    await update.message.reply_text(linkdl_status_text(job_id), parse_mode="HTML")
 
 def video_dubbing_output_text(state: dict | None = None, lang: str = "vi") -> str:
     state = state or {}
@@ -168378,6 +168534,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_route_audit", cmd_video_route_audit))
     tg_app.add_handler(CommandHandler("video_route_matrix", cmd_video_route_matrix))
     tg_app.add_handler(CommandHandler("video_back_audit", cmd_video_back_audit))
+    tg_app.add_handler(CommandHandler("linkdl_audit", cmd_linkdl_audit))
+    tg_app.add_handler(CommandHandler("linkdl_platforms", cmd_linkdl_platforms))
+    tg_app.add_handler(CommandHandler("linkdl_status", cmd_linkdl_status))
     tg_app.add_handler(CommandHandler("video_flow_contract_audit", cmd_video_flow_contract_audit))
     tg_app.add_handler(CommandHandler("video_engine_route_audit", cmd_video_engine_route_audit))
     tg_app.add_handler(CommandHandler("video_final_output_audit", cmd_video_final_output_audit))

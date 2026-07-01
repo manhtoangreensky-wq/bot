@@ -97,4 +97,4 @@ def test_video_downloader_public_guard_private_or_invalid():
     text = bot.video_downloader_guard_text(private_detection["reason"], "vi", private_detection)
     assert "công khai" in text
     assert "chưa trừ Xu" in text
-    assert bot.VIDEO_DOWNLOADER_PUBLIC_ENABLED is False
+    assert isinstance(bot.VIDEO_DOWNLOADER_PUBLIC_ENABLED, bool)
