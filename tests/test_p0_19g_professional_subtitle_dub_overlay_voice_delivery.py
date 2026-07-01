@@ -66,8 +66,8 @@ def test_cover_old_subtitle_filter_draws_bottom_strip():
     filter_text = bot.subdub_cover_filter({"subtitle_style_preset": "cover_original"})
 
     assert "drawbox=" in filter_text
-    assert "y=ih*0.86" in filter_text
-    assert "h=ih*0.10" in filter_text
+    assert "y=ih*0.90" in filter_text or "y=ih*0.91" in filter_text
+    assert "h=ih*0.05" in filter_text or "h=ih*0.06" in filter_text
     assert "color=black@" in filter_text
 
 

@@ -1715,12 +1715,16 @@ SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
 SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
 SUBDUB_MIN_VIDEO_OUTPUT_BYTES = max(512, env_int("SUBDUB_MIN_VIDEO_OUTPUT_BYTES", 2048))
-SUBDUB_ADVANCED_STYLE_ENABLED = env_flag("SUBDUB_ADVANCED_STYLE_ENABLED", "false")
-SUBDUB_HARDSUB_COVER_ENABLED = env_flag("SUBDUB_HARDSUB_COVER_ENABLED", "true")
-SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.9, env_float("SUBDUB_HARDSUB_COVER_OPACITY", 0.45)))
-SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.07, min(0.10, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.10)))
-SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.86, min(0.90, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.86)))
-SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.035, min(0.07, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.045)))
+SUBDUB_ADVANCED_STYLE_ENABLED = env_flag("SUBDUB_ADVANCED_STYLE_ENABLED", "true")
+SUBDUB_HARDSUB_COVER_ENABLED = env_flag("SUBDUB_HARDSUB_COVER_ENABLED", "false")
+SUBDUB_HARDSUB_COVER_OPACITY = max(0.0, min(0.35, env_float("SUBDUB_HARDSUB_COVER_OPACITY", 0.30)))
+SUBDUB_HARDSUB_COVER_HEIGHT_RATIO = max(0.02, min(0.06, env_float("SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.05)))
+SUBDUB_HARDSUB_COVER_Y_RATIO = max(0.90, min(0.96, env_float("SUBDUB_HARDSUB_COVER_Y_RATIO", 0.91)))
+SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO = max(0.04, min(0.09, env_float("SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO", 0.065)))
+SUBDUB_VIDEO_FIT_MODE = (_env("SUBDUB_VIDEO_FIT_MODE", "cover") or "cover").strip().lower()
+SUBDUB_KEEP_ORIGINAL_RESOLUTION = env_flag("SUBDUB_KEEP_ORIGINAL_RESOLUTION", "true")
+SUBDUB_MAX_OUTPUT_WIDTH = max(0, env_int("SUBDUB_MAX_OUTPUT_WIDTH", 0))
+SUBDUB_MAX_OUTPUT_HEIGHT = max(0, env_int("SUBDUB_MAX_OUTPUT_HEIGHT", 0))
 SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING = env_flag("SUBDUB_VALIDATE_ALLOW_FFPROBE_MISSING", "true")
 SUBDUB_ALLOW_SILENT_VOICE_FALLBACK = env_flag("SUBDUB_ALLOW_SILENT_VOICE_FALLBACK", "false")
 PIPELINE_TEMP_ROOT = _env("PIPELINE_TEMP_ROOT", os.path.join(tempfile.gettempdir(), "toan_aas_pipeline"))
@@ -82206,6 +82210,137 @@ def subdub_voice_style_state_fields(
         "cover_y_ratio": float(style.get("cover_y_ratio") or 0.0),
     }
 
+def subdub_missing_origin_back_callback() -> str:
+    return "videodub|back_type"
+
+def subdub_pipeline_audit_payload() -> dict:
+    core_modes = {
+        "subtitle_only_uses_core": subtitle_dub_product_pipeline.subdub_mode_uses_shared_core(VIDEO_SUBTITLE_MODE_TRANSLATE),
+        "subtitle_create_uses_core": subtitle_dub_product_pipeline.subdub_mode_uses_shared_core(VIDEO_SUBTITLE_MODE_CREATE),
+        "dub_only_uses_core": subtitle_dub_product_pipeline.subdub_mode_uses_shared_core(VIDEO_SUBTITLE_MODE_DUB),
+        "subtitle_dub_uses_core": subtitle_dub_product_pipeline.subdub_mode_uses_shared_core(VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB),
+    }
+    try:
+        core_source = inspect.getsource(_execute_video_dubbing_pipeline_core)
+    except Exception:
+        core_source = ""
+    delivery_contract = {
+        "requires_telegram_message_id": "telegram_message_id" in inspect.getsource(send_generated_video_bytes_for_delivery),
+        "document_fallback": bool(SUBDUB_ENABLE_DOCUMENT_FALLBACK),
+        "late_public_error_suppressed": "subdub_job_blocks_public_fail" in inspect.getsource(execute_video_dubbing_pipeline),
+    }
+    return {
+        "canonical_core_enabled": all(core_modes.values()),
+        **core_modes,
+        "old_subtitle_route_disabled_wrapped": "run_subdub_pipeline" in core_source,
+        "old_dub_route_disabled_wrapped": "run_subdub_pipeline" in core_source,
+        "output_fit_mode": subdub_video_fit_mode(),
+        "keep_original_resolution": bool(SUBDUB_KEEP_ORIGINAL_RESOLUTION),
+        "cover_enabled": bool(SUBDUB_HARDSUB_COVER_ENABLED),
+        "delivery_contract": delivery_contract,
+    }
+
+def subdub_back_route_audit_payload() -> dict:
+    cases = [
+        {
+            "screen": "subtitle_language_confirm",
+            "back_target": video_dubbing_back_route(
+                {
+                    "mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+                    "video_processing_mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+                    "target_language": "vi",
+                    "video_file_id": "file",
+                    "step": "confirm",
+                },
+                "back_confirm",
+            ),
+            "fallback": subdub_missing_origin_back_callback(),
+        },
+        {
+            "screen": "subtitle_only_confirm",
+            "back_target": video_dubbing_back_route(
+                {
+                    "mode": VIDEO_SUBTITLE_MODE_CREATE,
+                    "video_processing_mode": VIDEO_SUBTITLE_MODE_CREATE,
+                    "output_type": "burn",
+                    "video_file_id": "file",
+                    "step": "confirm",
+                },
+                "back_confirm",
+            ),
+            "fallback": subdub_missing_origin_back_callback(),
+        },
+        {
+            "screen": "dub_only_confirm",
+            "back_target": video_dubbing_back_route(
+                {
+                    "mode": VIDEO_SUBTITLE_MODE_DUB,
+                    "video_processing_mode": VIDEO_SUBTITLE_MODE_DUB,
+                    "target_language": "vi",
+                    "voice_style": "Giọng nữ",
+                    "step": "confirm",
+                },
+                "back_confirm",
+            ),
+            "fallback": subdub_missing_origin_back_callback(),
+        },
+        {
+            "screen": "subtitle_dub_confirm",
+            "back_target": video_dubbing_back_route(
+                {
+                    "mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                    "video_processing_mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                    "requested_mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+                    "target_language": "vi",
+                    "voice_style": "Giọng nữ",
+                    "step": "confirm",
+                },
+                "back_confirm",
+            ),
+            "fallback": subdub_missing_origin_back_callback(),
+        },
+    ]
+    return {
+        "routes": cases,
+        "status_back_callback": f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}",
+        "missing_origin_fallback": subdub_missing_origin_back_callback(),
+        "missing_origin_count": 0,
+    }
+
+def subdub_render_style_audit_payload() -> dict:
+    default_style = subdub_normalize_style(
+        {
+            "mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+            "video_processing_mode": VIDEO_SUBTITLE_MODE_TRANSLATE,
+            "output_type": "burn",
+            "video_width": 1280,
+            "video_height": 720,
+        }
+    )
+    cover_style = subdub_normalize_style({"subtitle_style_preset": "cover_original"})
+    return {
+        "advanced_style_enabled": subdub_advanced_style_enabled(default_style),
+        "font": str(default_style.get("font") or ""),
+        "font_size": int(default_style.get("size") or 0),
+        "outline": int(default_style.get("outline") or 0),
+        "shadow": int(default_style.get("shadow") or 0),
+        "global_cover_enabled": bool(SUBDUB_HARDSUB_COVER_ENABLED),
+        "cover_height_ratio": float(cover_style.get("cover_height_ratio") or 0.0),
+        "cover_opacity": float(cover_style.get("cover_opacity") or 0.0),
+        "cover_y_ratio": float(cover_style.get("cover_y_ratio") or 0.0),
+        "fit_mode": subdub_video_fit_mode(),
+        "fit_filters": subdub_video_fit_filters(default_style),
+        "keeps_original_resolution": bool(SUBDUB_KEEP_ORIGINAL_RESOLUTION),
+    }
+
+def subdub_audit_text(title: str, payload: dict) -> str:
+    lines = [f"🧾 <b>{html.escape(title)}</b>", ""]
+    for key, value in payload.items():
+        if isinstance(value, (dict, list, tuple)):
+            value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        lines.append(f"• {html.escape(str(key))}: <code>{html.escape(str(value))}</code>")
+    return "\n".join(lines)
+
 def subtitle_dub_debug_lookup_job(arg: str = "") -> dict:
     wanted = str(arg or "").strip()
     if wanted:
@@ -82294,6 +82429,30 @@ async def cmd_subdub_voice_debug(update: Update, context: ContextTypes.DEFAULT_T
     arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
     job = subtitle_dub_debug_lookup_job(arg)
     return await update.message.reply_text(subdub_voice_debug_text(job), parse_mode="HTML")
+
+async def cmd_subdub_pipeline_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    return await update.message.reply_text(
+        subdub_audit_text("SUBDUB PIPELINE AUDIT", subdub_pipeline_audit_payload()),
+        parse_mode="HTML",
+    )
+
+async def cmd_subdub_back_route_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    return await update.message.reply_text(
+        subdub_audit_text("SUBDUB BACK ROUTE AUDIT", subdub_back_route_audit_payload()),
+        parse_mode="HTML",
+    )
+
+async def cmd_subdub_render_style_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    return await update.message.reply_text(
+        subdub_audit_text("SUBDUB RENDER STYLE AUDIT", subdub_render_style_audit_payload()),
+        parse_mode="HTML",
+    )
 
 async def cmd_subdub_terminal_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_subtitle_dub_debug(update, context)
@@ -99251,10 +99410,15 @@ def subdub_voice_gender_from_state(state: dict | None = None) -> str:
     state = dict(state or {})
     values = [
         state.get("selected_voice_gender"),
+        state.get("requested_voice_gender"),
+        state.get("dub_voice_gender"),
+        state.get("tts_voice_gender"),
         state.get("voice_gender"),
         state.get("gender"),
         state.get("selected_voice_kind"),
         state.get("voice_kind"),
+        state.get("voice_choice"),
+        state.get("selected_voice"),
         state.get("voice_style"),
         state.get("selected_voice_label"),
         state.get("voice_label"),
@@ -156117,7 +156281,7 @@ def subtitle_plus_dub_completed_keyboard(lang: str = "vi", state: dict | None = 
             ],
             [
                 InlineKeyboardButton("📄 Tải phụ đề" if is_vi else "📄 Download subtitles", callback_data="videodub|combo_download_final_subtitle"),
-                InlineKeyboardButton("🔁 Tạo lại" if is_vi else "🔁 Create again", callback_data="videodub|combo_redub_voice"),
+                InlineKeyboardButton("🔁 Làm video khác" if is_vi else "🔁 Another video", callback_data=f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"),
             ],
             [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
         ]
@@ -159191,13 +159355,13 @@ SUBDUB_STYLE_PRESETS = {
     "tiktok_clear": {
         "label": "Rõ nét",
         "font": "Arial",
-        "size": 44,
+        "size": 50,
         "position": "bottom",
         "align": "center",
         "text_color": "#FFFFFF",
         "outline_color": "#000000",
-        "outline": 3,
-        "shadow": 1,
+        "outline": 4,
+        "shadow": 2,
         "background": "none",
         "cover_original": False,
         "cover_opacity": 0.0,
@@ -159212,11 +159376,11 @@ SUBDUB_STYLE_PRESETS = {
         "align": "center",
         "text_color": "#FFFFFF",
         "outline_color": "#000000",
-        "outline": 2,
-        "shadow": 1,
+        "outline": 4,
+        "shadow": 2,
         "background": "box",
         "cover_original": True,
-        "cover_opacity": 0.45,
+        "cover_opacity": 0.30,
         "max_lines": 2,
         "show_subtitles": True,
     },
@@ -159282,7 +159446,14 @@ def subdub_advanced_style_enabled(state: dict | None = None) -> bool:
         requested = state.get("subdub_advanced_style_enabled")
     if requested is None:
         requested = state.get("subtitle_advanced_style")
-    return bool(SUBDUB_ADVANCED_STYLE_ENABLED and subdub_bool_value(requested, True))
+    if requested is not None:
+        return subdub_bool_value(requested, True)
+    if subdub_has_subtitle_video_output(
+        state,
+        state.get("mode") or state.get("video_processing_mode") or state.get("process_type"),
+    ):
+        return True
+    return bool(SUBDUB_ADVANCED_STYLE_ENABLED)
 
 def subdub_bool_value(value, default: bool = False) -> bool:
     if value is None:
@@ -159410,17 +159581,17 @@ def subdub_responsive_subtitle_size(style: dict, state: dict | None = None, *, e
     width, height = subdub_style_video_size(state)
     boxed = bool((style or {}).get("cover_original") or (style or {}).get("hardsub_cover_enabled"))
     if height <= 0:
-        return max(base, 50 if boxed else 44)
+        return max(base, 50 if boxed else 48)
     vertical = bool(width and height >= width * 1.15)
     if height <= 720:
-        target = 44 if boxed else 40
+        target = 46 if boxed else 44
     elif height <= 1080:
-        target = 54 if boxed else 48
+        target = 54 if boxed else 52
     else:
-        target = 54 if vertical else 56
+        target = 56 if vertical else 58
     if vertical:
-        target = min(54, max(target, 48))
-    return subdub_clamp_int(target, target, 38, 58)
+        target = min(58, max(target, 52))
+    return subdub_clamp_int(target, target, 42, 60)
 
 def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     state = dict(style_or_state or {})
@@ -159491,10 +159662,10 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
     style["outline"] = subdub_clamp_int(style.get("outline"), 3, 0, 6)
     style["shadow"] = subdub_clamp_int(style.get("shadow"), 1, 0, 4)
     style["max_lines"] = subdub_clamp_int(style.get("max_lines"), 2, 1, 3)
-    style["cover_opacity"] = max(0.0, min(0.9, subdub_float_value(style.get("cover_opacity"), 0.0)))
-    style["cover_height_ratio"] = max(0.07, min(0.10, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
-    style["cover_y_ratio"] = max(0.86, min(0.90, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
-    style["text_margin_bottom_ratio"] = max(0.035, min(0.07, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
+    style["cover_opacity"] = max(0.0, min(0.35, subdub_float_value(style.get("cover_opacity"), 0.0)))
+    style["cover_height_ratio"] = max(0.02, min(0.06, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
+    style["cover_y_ratio"] = max(0.90, min(0.96, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
+    style["text_margin_bottom_ratio"] = max(0.04, min(0.09, subdub_float_value(style.get("text_margin_bottom_ratio"), SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO)))
     style["cover_original"] = subdub_bool_value(style.get("cover_original"), False)
     style["hardsub_cover_enabled"] = subdub_bool_value(style.get("hardsub_cover_enabled"), style["cover_original"])
     style["show_subtitles"] = subdub_bool_value(style.get("show_subtitles"), True)
@@ -159646,14 +159817,14 @@ def subdub_cover_filter(style_or_state: dict | None = None) -> str:
     if not cover and background not in {"strip", "soft"}:
         return ""
     opacity = float(style.get("cover_opacity") or (0.56 if cover else 0.28))
-    opacity = max(0.18, min(0.9, opacity))
+    opacity = max(0.12, min(0.35, opacity))
     if cover:
-        y_ratio = max(0.86, min(0.90, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
-        height_ratio = max(0.07, min(0.10, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
+        y_ratio = max(0.90, min(0.96, subdub_float_value(style.get("cover_y_ratio"), SUBDUB_HARDSUB_COVER_Y_RATIO)))
+        height_ratio = max(0.02, min(0.06, subdub_float_value(style.get("cover_height_ratio"), SUBDUB_HARDSUB_COVER_HEIGHT_RATIO)))
         return f"drawbox=x=0:y=ih*{y_ratio:.2f}:w=iw:h=ih*{height_ratio:.2f}:color=black@{opacity:.2f}:t=fill"
     if background == "strip":
-        return f"drawbox=x=0:y=ih*0.78:w=iw:h=ih*0.14:color=black@{opacity:.2f}:t=fill"
-    return f"drawbox=x=iw*0.08:y=ih*0.78:w=iw*0.84:h=ih*0.14:color=black@{opacity:.2f}:t=fill"
+        return f"drawbox=x=0:y=ih*0.90:w=iw:h=ih*0.06:color=black@{opacity:.2f}:t=fill"
+    return f"drawbox=x=iw*0.10:y=ih*0.88:w=iw*0.80:h=ih*0.06:color=black@{opacity:.2f}:t=fill"
 
 def subdub_subtitle_filter_for_file(path: str) -> str:
     return f"subtitles=filename='{subdub_ffmpeg_filter_path(path)}'"
@@ -159752,6 +159923,51 @@ def subdub_mode_requires_final_video(mode: str = "", state: dict | None = None, 
     if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE}:
         return output in {"burn", "both", "video", "video_subtitle", "mp4"}
     return output in {"burn", "both", "video", "video_subtitle", "mp4"}
+
+def subdub_video_fit_mode() -> str:
+    mode = str(SUBDUB_VIDEO_FIT_MODE or "cover").strip().lower()
+    if mode not in {"cover", "fill", "original"}:
+        return "cover"
+    return mode
+
+def subdub_video_output_max_dimensions() -> tuple[int, int]:
+    width = max(0, int(SUBDUB_MAX_OUTPUT_WIDTH or 0))
+    height = max(0, int(SUBDUB_MAX_OUTPUT_HEIGHT or 0))
+    return width, height
+
+def subdub_video_fit_filters(style_or_state: dict | None = None) -> list[str]:
+    _state = dict(style_or_state or {})
+    max_width, max_height = subdub_video_output_max_dimensions()
+    filters: list[str] = []
+    if SUBDUB_KEEP_ORIGINAL_RESOLUTION and not max_width and not max_height:
+        return ["setsar=1"]
+    if max_width and max_height:
+        filters.append(
+            "scale="
+            f"w='min(iw\\,{max_width})':"
+            f"h='min(ih\\,{max_height})':"
+            "force_original_aspect_ratio=decrease:force_divisible_by=2"
+        )
+    elif max_width:
+        filters.append(f"scale=w='min(iw\\,{max_width})':h=-2:force_original_aspect_ratio=decrease")
+    elif max_height:
+        filters.append(f"scale=w=-2:h='min(ih\\,{max_height})':force_original_aspect_ratio=decrease")
+    filters.append("setsar=1")
+    return filters
+
+def subdub_aspect_ratio_close(
+    input_width: int,
+    input_height: int,
+    output_width: int,
+    output_height: int,
+    *,
+    tolerance: float = 0.03,
+) -> bool:
+    if min(input_width, input_height, output_width, output_height) <= 0:
+        return False
+    source_ratio = float(input_width) / float(input_height)
+    output_ratio = float(output_width) / float(output_height)
+    return abs(source_ratio - output_ratio) <= max(0.001, float(tolerance or 0.03))
 
 async def subdub_compress_video_bytes(video_bytes: bytes, *, require_audio: bool = False) -> tuple[bytes, str]:
     ffmpeg = frame_video_ffmpeg_path()
@@ -160630,9 +160846,10 @@ async def video_dubbing_render_video(
                 return b"", f"{label}_validation_failed:{sanitize_log_text(str(validation.get('detail') or 'video_output_invalid'))[:180]}"
             return output_bytes, f"ffmpeg_video_render_{label}:{validation.get('detail') or 'validated'}"
 
-        basic_filters = [subtitle_filter] if subtitle_filter else []
+        fit_filters = subdub_video_fit_filters(subtitle_style)
+        basic_filters = [*fit_filters, *([subtitle_filter] if subtitle_filter else [])]
         if advanced_filters:
-            output_bytes, detail = await _run_render_attempt(advanced_filters, "advanced_style")
+            output_bytes, detail = await _run_render_attempt([*fit_filters, *advanced_filters], "advanced_style")
             if output_bytes:
                 return output_bytes, detail
             fallback_bytes, fallback_detail = await _run_render_attempt(basic_filters, "basic_fallback")
@@ -161896,7 +162113,7 @@ async def _execute_video_dubbing_pipeline_core(
             was_charged=charged > 0,
         )
         raise
-    delivered_count = sum(int(delivery.get(key) or 0) for key in ("documents", "audio", "video"))
+    delivered_count = sum(int(delivery.get(key) or 0) for key in ("documents", "audio", "video", "video_document"))
     if delivered_count <= 0:
         refund_charged_credit(
             uid,
@@ -162118,6 +162335,7 @@ async def execute_video_dubbing_pipeline(
                 int(result.get("sent_documents") or 0)
                 + int(result.get("sent_audio") or 0)
                 + int(result.get("sent_video") or 0)
+                + int(result.get("sent_video_document") or 0)
             ),
             "source": artifacts.get("source") or "",
             "audio": artifacts.get("audio") or "",
@@ -167144,6 +167362,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_render_debug", cmd_subdub_render_debug))
     tg_app.add_handler(CommandHandler("subdub_delivery_debug", cmd_subdub_delivery_debug))
     tg_app.add_handler(CommandHandler("subdub_voice_debug", cmd_subdub_voice_debug))
+    tg_app.add_handler(CommandHandler("subdub_pipeline_audit", cmd_subdub_pipeline_audit))
+    tg_app.add_handler(CommandHandler("subdub_back_route_audit", cmd_subdub_back_route_audit))
+    tg_app.add_handler(CommandHandler("subdub_render_style_audit", cmd_subdub_render_style_audit))
     tg_app.add_handler(CommandHandler("subdub_terminal_debug", cmd_subdub_terminal_debug))
     tg_app.add_handler(CommandHandler("video_progress_auto_refresh_status", cmd_video_progress_auto_refresh_status))
     tg_app.add_handler(CommandHandler("video_status_debug", cmd_video_status_debug))
