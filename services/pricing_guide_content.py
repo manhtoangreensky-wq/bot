@@ -153,21 +153,25 @@ def _context_value(context: dict | None, key: str) -> list[str]:
 
 
 def pricing_total_lines(context: dict | None = None) -> list[str]:
+    voice_lines = _context_value(context, "voice_price_lines")
+    subtitle_lines = _context_value(context, "subtitle_price_lines")
+    video_addon_lines = _context_value(context, "video_addon_price_lines")
     return [
         "💰 <b>Bảng giá tổng TOAN AAS</b>",
         "",
         CONFIRM_GATE_COPY,
         "",
-        "• Giọng nói: từ 0.10 Xu / từ.",
-        "• Tạo voice riêng: lần đầu miễn phí, từ lần 2: 50 Xu / voice thành công.",
+        *(voice_lines[:2] if voice_lines else ["• Giọng nói: từ 0.10 Xu / từ."]),
         "• Nhạc nền AI: 100 / 150 / 200 Xu.",
         "• Bài hát có lời: 200 / 250 / 300 Xu.",
         "• Video AI: theo gói video đang chọn.",
-        "• Tạo phụ đề tự động: miễn phí.",
-        "• Dịch phụ đề: 0.1 Xu / ký tự.",
-        "• Lồng tiếng giọng mặc định: 0.10 Xu / ký tự.",
-        "• Lồng tiếng voice riêng: 0.20 Xu / ký tự.",
+        *(subtitle_lines if subtitle_lines else [
+            "• Tạo phụ đề tự động: miễn phí.",
+            "• Dịch phụ đề: 0.1 Xu / ký tự.",
+            "• Lồng tiếng giọng mặc định: 0.10 Xu / ký tự.",
+        ]),
         "• Hình ảnh: 50 / 150 / 200 / 300 / 400 / 500 / 600 Xu.",
+        *(video_addon_lines if video_addon_lines else []),
         "• Tài nguyên tự có của anh/chị: miễn phí nếu hệ thống không cần tạo mới.",
         "",
         "<b>Nhóm giá chính</b>",
@@ -184,21 +188,24 @@ def pricing_total_lines(context: dict | None = None) -> list[str]:
     ]
 
 
-def pricing_voice_lines() -> list[str]:
+def pricing_voice_lines(context: dict | None = None) -> list[str]:
+    voice_lines = _context_value(context, "voice_price_lines")
     return [
         "🎙 <b>Bảng giá Giọng nói</b>",
         "",
         CONFIRM_GATE_COPY,
         "",
         "<b>A. Tạo voice riêng</b>",
-        "• Voice riêng đầu tiên tạo thành công: miễn phí.",
-        "• Từ voice riêng thứ 2 trở đi: 50 Xu / voice tạo thành công.",
+        *(voice_lines if voice_lines else [
+            "• Voice riêng đầu tiên tạo thành công: miễn phí.",
+            "• Từ voice riêng thứ 2 trở đi: 50 Xu / voice tạo thành công.",
+            "• Tạo audio từ voice: 0.10 Xu / từ.",
+        ]),
         "• Chỉ tính Xu khi tạo voice thành công.",
         "• Nếu mẫu lỗi, quá ngắn hoặc không tạo được voice hợp lệ: không trừ Xu.",
         "• Nếu tài khoản vận hành được miễn phí nội bộ, phần hiển thị cho khách vẫn giữ cùng cách báo giá.",
         "",
         "<b>B. Tạo audio từ voice</b>",
-        "• 0.10 Xu / từ.",
         "• Nội dung tối thiểu: 20 từ.",
         "• Tối thiểu thanh toán: 1 Xu.",
         "• Không giới hạn từ nếu hệ thống cho phép.",
@@ -270,41 +277,44 @@ def pricing_video_lines(context: dict | None = None) -> list[str]:
     ]
 
 
-def pricing_subtitle_lines() -> list[str]:
+def pricing_subtitle_lines(context: dict | None = None) -> list[str]:
+    subtitle_lines = _context_value(context, "subtitle_price_lines")
     return [
         "🌐 <b>Bảng giá Phụ đề / Lồng tiếng</b>",
         "",
         CONFIRM_GATE_COPY,
         "",
+        *(subtitle_lines if subtitle_lines else []),
+        "" if subtitle_lines else "",
         "<b>A. Tạo phụ đề tự động</b>",
-        "• Miễn phí.",
+        "• Miễn phí nếu chỉ tạo phụ đề gốc trong luồng hiện tại." if subtitle_lines else "• Miễn phí.",
         "• Chỉ tạo phụ đề gốc từ video/audio/lời đọc.",
         "• Không dịch, không lồng tiếng nếu chưa chọn thêm tác vụ.",
         "",
         "<b>B. Dịch phụ đề</b>",
-        "• 0.1 Xu / ký tự.",
+        "• Theo bảng giá trung tâm ở trên." if subtitle_lines else "• 0.1 Xu / ký tự.",
         "• Trên 1.000 ký tự: giảm 10%.",
         "• Trên 10.000 ký tự: giảm 20%.",
         "• Hệ thống hiển thị rõ số ký tự tính phí trước khi xử lý.",
         "",
         "<b>C. Lồng tiếng giọng mặc định</b>",
-        "• 0.10 Xu / ký tự.",
+        "• Theo bảng giá trung tâm ở trên." if subtitle_lines else "• 0.10 Xu / ký tự.",
         "• Trên 1.000 ký tự: giảm 10%.",
         "• Trên 10.000 ký tự: giảm 20%.",
         "",
         "<b>D. Lồng tiếng voice riêng</b>",
-        "• 0.20 Xu / ký tự.",
+        "• Theo bảng giá Giọng nói/Voice riêng ở bảng trung tâm.",
         "• Trên 1.000 ký tự: giảm 10%.",
         "• Trên 10.000 ký tự: giảm 20%.",
         "",
         "<b>E. Phụ đề + Lồng tiếng</b>",
-        "Tổng = giá dịch phụ đề + giá lồng tiếng.",
+        "Tổng = giá dịch phụ đề + giá lồng tiếng. Tạo phụ đề rồi lồng tiếng = giá phụ đề tự động + giá lồng tiếng.",
         "",
         "<b>Ví dụ</b>",
         "• Dịch phụ đề 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.",
         "• Lồng tiếng giọng mặc định 2.000 ký tự: giá gốc 200 Xu, giảm 10%, tổng còn 180 Xu.",
         "• Lồng tiếng voice riêng 2.000 ký tự: giá gốc 400 Xu, giảm 10%, tổng còn 360 Xu.",
-        "• Phụ đề + lồng tiếng: 180 Xu + 180 Xu = 360 Xu.",
+        "• Phụ đề + lồng tiếng: tổng luôn cộng từ hai dòng giá đang hiển thị ở bảng trung tâm.",
     ]
 
 
@@ -387,11 +397,11 @@ def pricing_lines(section: str = "total", context: dict | None = None) -> list[s
         "catalog": pricing_total_lines,
         "main": pricing_total_lines,
         "total": pricing_total_lines,
-        "voice": lambda _context=None: pricing_voice_lines(),
+        "voice": pricing_voice_lines,
         "music": lambda _context=None: pricing_music_lines(),
         "video": pricing_video_lines,
-        "subtitle": lambda _context=None: pricing_subtitle_lines(),
-        "subtitle_dub": lambda _context=None: pricing_subtitle_lines(),
+        "subtitle": pricing_subtitle_lines,
+        "subtitle_dub": pricing_subtitle_lines,
         "image": pricing_image_lines,
         "docs": pricing_docs_lines,
         "free": lambda _context=None: pricing_free_lines(),
