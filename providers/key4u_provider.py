@@ -1456,6 +1456,8 @@ class Key4UProvider:
                     "response_shape": sorted(data.keys())[:12] if isinstance(data, dict) else [],
                 },
             )
+            result["raw_provider_result"] = data if isinstance(data, dict) else {}
+            result["audio_url_candidates"] = list(audio_urls)
             result["clip_id"] = output_id
             result["text"] = lyrics_text
             result["parsed_fields"] = parsed_fields
