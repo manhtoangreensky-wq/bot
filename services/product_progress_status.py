@@ -572,6 +572,7 @@ def render_product_progress_panel(
     public_note: str = "",
     lang: str = "vi",
     completed_steps: list[str] | tuple[str, ...] | set[str] | None = None,
+    status_override: str = "",
 ) -> str:
     canonical = normalize_product_type(product_type)
     spec = product_progress_spec(canonical)
@@ -580,7 +581,7 @@ def render_product_progress_panel(
         current_stage = "delivered"
     stage = product_progress_stage(canonical, current_stage)
     progress = product_progress_percent(canonical, stage.get("key"), percent, terminal)
-    status_text = product_progress_terminal_label(terminal) or str(stage.get("status") or "")
+    status_text = product_progress_terminal_label(terminal) or sanitize_public_copy(status_override, "") or str(stage.get("status") or "")
     if canonical in {"music_bg", "music_song"} and terminal == "delivered":
         status_text = "Đã gửi file nhạc"
     status_text = sanitize_public_copy(status_text, "TOAN AAS đang xử lý.")
@@ -705,6 +706,7 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
     if canonical in {"music_bg", "music_song"}:
         lifecycle = music_progress_lifecycle(canonical, job)
         completed_steps = list(lifecycle.get("completed_steps") or [])
+        status_text = ""
         if terminal == "delivered":
             stage_key = "delivered"
             progress = 100
@@ -724,15 +726,19 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
                     stage_key = "generating_song" if canonical == "music_song" else "generating_music"
             if progress is None:
                 progress = int(product_progress_stage(canonical, stage_key).get("percent") or 5)
+            if lifecycle.get("provider_completed") and not lifecycle.get("audio_validated"):
+                status_text = "Chưa tải được file nhạc. Hệ thống chưa trừ Xu."
+                progress = max(85, int(progress or 85))
         elif lifecycle.get("audio_validated"):
             stage_key = "delivering"
-            progress = min(95, int(progress if progress is not None else 85))
+            progress = max(90, min(95, int(progress if progress is not None else 95)))
         elif lifecycle.get("artifact_ready"):
             stage_key = "validating_audio"
-            progress = min(85, int(progress if progress is not None else 85))
+            progress = max(85, min(90, int(progress if progress is not None else 85)))
         elif lifecycle.get("provider_completed"):
             stage_key = "validating_audio"
-            progress = min(85, int(progress if progress is not None else 85))
+            progress = max(80, min(90, int(progress if progress is not None else 85)))
+            status_text = "Đang tải file nhạc"
         elif lifecycle.get("provider_task_id") or lifecycle.get("provider_submit_called"):
             stage_key = "generating_song" if canonical == "music_song" else "generating_music"
             if progress is None:
@@ -761,6 +767,7 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             "terminal_state": terminal,
             "completed_steps": completed_steps,
             "music_lifecycle": lifecycle,
+            "status_text": status_text,
         }
     stage_key = STAGE_ALIASES.get(canonical, {}).get(status, "")
     if not stage_key:
