@@ -190,10 +190,14 @@ def test_music_provider_completed_downloads_and_validates_artifact(monkeypatch):
     async def fake_download(_url, timeout_seconds=60.0):
         return b"real-audio-bytes", "http=200; bytes=16; content_type=audio/mpeg", 200
 
+    async def fake_duration(*_args, **_kwargs):
+        return 120
+
     monkeypatch.setattr(bot, "get_engine_async_job", lambda _job_id: dict(saved or job))
     monkeypatch.setattr(bot, "save_engine_async_job", lambda payload: saved.clear() or saved.update(payload) or payload)
     monkeypatch.setattr(bot, "poll_music_generation_job", fake_poll)
     monkeypatch.setattr(bot, "_download_music_audio_url_bytes", fake_download)
+    monkeypatch.setattr(bot, "music_audio_real_duration_seconds", fake_duration)
     monkeypatch.setattr(bot, "upsert_music_vault_from_output", lambda **kwargs: {"vault_id": "MV23C", "storage_ref": ""})
     result = asyncio.run(bot.poll_music_suno_async_job("MUS-DONE", download=True))
     assert result["ok"] is True

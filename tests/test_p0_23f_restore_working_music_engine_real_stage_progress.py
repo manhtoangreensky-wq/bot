@@ -229,7 +229,7 @@ def test_music_create_song_step_green_after_provider_completed():
 
 def test_music_check_file_step_only_after_artifact_ready():
     no_artifact = _base_job(status="processing", progress_percent=65, provider_task_id="task-23f")
-    validated = _base_job(status="completed", progress_percent=85, provider_task_id="task-23f", output_bytes=2048, artifact_duration_seconds=60)
+    validated = _base_job(status="completed", progress_percent=85, provider_task_id="task-23f", output_bytes=2048, artifact_duration_seconds=60, audio_validated=True, artifact_validated=True, music_audio_validated=True)
     assert "✅ Kiểm tra file nhạc" not in _panel(no_artifact)
     assert "✅ Kiểm tra file nhạc" in _panel(validated)
 
@@ -248,6 +248,9 @@ def test_music_check_file_step_only_after_validated_artifact():
         provider_task_id="task-23f",
         output_bytes=2048,
         artifact_duration_seconds=60,
+        audio_validated=True,
+        artifact_validated=True,
+        music_audio_validated=True,
     )
     assert "✅ Kiểm tra file nhạc" not in _panel(artifact_only)
     assert "✅ Kiểm tra file nhạc" in _panel(validated)
@@ -293,7 +296,7 @@ def test_music_auto_tick_polls_provider_and_updates_stage(monkeypatch):
     job = _base_job(status="processing", progress_percent=65, provider_task_id="task-23f")
 
     async def fake_poll(_job_id, *, updated_by="", download=True):
-        return {"ok": True, "status": "COMPLETED", "job": {**job, "status": "completed", "output_bytes": 2048, "artifact_duration_seconds": 60}, "audio_bytes": b"mp3"}
+        return {"ok": True, "status": "COMPLETED", "job": {**job, "status": "completed", "output_bytes": 2048, "artifact_duration_seconds": 60, "audio_validated": True, "artifact_validated": True, "music_audio_validated": True}, "audio_bytes": b"mp3"}
 
     monkeypatch.setattr(bot, "get_engine_async_job", lambda _job_id: dict(job))
     monkeypatch.setattr(bot, "poll_music_suno_async_job", fake_poll)
@@ -469,6 +472,9 @@ def test_music_auto_refresh_snapshot_uses_real_stage_not_stale_stage():
         provider_task_id="task-23f",
         output_bytes=2048,
         artifact_duration_seconds=60,
+        audio_validated=True,
+        artifact_validated=True,
+        music_audio_validated=True,
     )
     snapshot = bot.progress_auto_refresh_snapshot("music_song", "MUS23F-STALE", job=job)
     assert snapshot["stage"] == "delivering"

@@ -254,7 +254,7 @@ def test_music_recover_download_failed_sets_materialization_failed(monkeypatch):
     _install_job(monkeypatch, _metadata_job(), payload=b"", http_status=500, detail="upstream failed")
     result = asyncio.run(bot.deliver_music_ready_artifact_once(JOB_ID, context=_ctx(FakeBot()), user_id=USER_ID, source="h5_download_fail"))
     assert result["ok"] is False
-    assert result["primary_blocker"] == "artifact_materialization_failed"
+    assert result["primary_blocker"] == "artifact_download_failed"
     assert result["job"]["artifact_materialization_status"] == "ARTIFACT_DOWNLOAD_FAILED"
 
 
@@ -341,6 +341,6 @@ def test_music_update_status_does_not_resubmit_or_duplicate_deliver(monkeypatch)
     first = asyncio.run(bot.music_auto_deliver_from_progress_record(_ctx(fake), record, bot.get_engine_async_job(JOB_ID)))
     second = asyncio.run(bot.music_auto_deliver_from_progress_record(_ctx(fake), record, bot.get_engine_async_job(JOB_ID)))
     assert provider_calls == []
-    assert len(fake.audio) == 0
-    assert first.get("terminal_state") != "delivered"
-    assert second.get("terminal_state") != "delivered"
+    assert len(fake.audio) == 1
+    assert first.get("terminal_state") == "delivered"
+    assert second.get("terminal_state") == "delivered"
