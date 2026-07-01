@@ -151908,11 +151908,12 @@ def finance_tax_scenario_report_payload(gross_vnd: int = 100_000, tax_config: di
     internal_vat = b2c_internal_vat_snapshot(gross, config)
     vat_reserve = int(internal_vat.get("vat_amount_vnd") or 0)
     net_revenue = max(0, gross - vat_reserve)
-    cogs = int(round(net_revenue * FINANCE_COGS_WORST_CASE_RATE))
-    marketing = int(round(net_revenue * FINANCE_MARKETING_RESERVE_RATE))
-    profit_before_cit = net_revenue - cogs - marketing
-    cit_rate = FINANCE_CIT_SCENARIO_RATE if bool(config.get("cit_enabled", True)) else 0.0
-    cit = int(round(max(profit_before_cit, 0) * cit_rate))
+    cogs = int(round(gross * FINANCE_COGS_WORST_CASE_RATE))
+    marketing = int(round(gross * FINANCE_MARKETING_RESERVE_RATE))
+    profit_before_cit = gross - cogs - marketing
+    cit_enabled = bool(config.get("cit_enabled", True))
+    cit_rate = max(0.0, min(float(config.get("cit_rate", FINANCE_CIT_SCENARIO_RATE) or 0), float(CIT_SAFE_MAX_RATE)))
+    cit = int(round(max(profit_before_cit, 0) * cit_rate)) if cit_enabled else 0
     return {
         "gross_cash_received": gross,
         "customer_vat_surcharge": 0,
@@ -151925,6 +151926,7 @@ def finance_tax_scenario_report_payload(gross_vnd: int = 100_000, tax_config: di
         "marketing_reserve_rate": FINANCE_MARKETING_RESERVE_RATE,
         "promo_bonus_cost_estimated": marketing,
         "profit_before_cit": profit_before_cit,
+        "cit_scenario_enabled": cit_enabled,
         "cit_rate_scenario": cit_rate,
         "cit_scenario_estimated": cit,
         "profit_after_cit": profit_before_cit - cit,
@@ -151932,6 +151934,8 @@ def finance_tax_scenario_report_payload(gross_vnd: int = 100_000, tax_config: di
 
 def finance_tax_scenario_report_text(gross_vnd: int = 100_000) -> str:
     payload = finance_tax_scenario_report_payload(gross_vnd)
+    cit_percent = f"{payload['cit_rate_scenario'] * 100:g}%"
+    cit_suffix = "" if payload.get("cit_scenario_enabled") else " (đang tắt dự phòng)"
     return "\n".join([
         "🧮 <b>Kịch bản thuế nội bộ B2C</b>",
         "",
@@ -151943,7 +151947,7 @@ def finance_tax_scenario_report_text(gross_vnd: int = 100_000) -> str:
         f"• COGS/API worst-case 50%: <b>{vnd_text(payload['provider_cogs_estimated'])}</b>",
         f"• Marketing/promo reserve 30%: <b>{vnd_text(payload['promo_bonus_cost_estimated'])}</b>",
         f"• Lợi nhuận trước TNDN: <b>{vnd_text(payload['profit_before_cit'])}</b>",
-        f"• TNDN scenario 20%: <b>{vnd_text(payload['cit_scenario_estimated'])}</b>",
+        f"• TNDN scenario {cit_percent}: <b>{vnd_text(payload['cit_scenario_estimated'])}</b>{cit_suffix}",
         f"• Lợi nhuận sau TNDN: <b>{vnd_text(payload['profit_after_cit'])}</b>",
         "",
         "Đây là báo cáo nội bộ. Không cộng TNDN thành phí khách trả.",
@@ -152078,26 +152082,32 @@ def finance_tax_toggle_result_text(kind: str, result: dict) -> str:
     )
 
 def finance_adjustment_help_text(kind: str) -> str:
-    examples = {
+    syntax = {
         "revenue": [
-            "• <code>/finance_adjust revenue_add 100000 ly_do</code>",
-            "• <code>/finance_adjust revenue_subtract 100000 ly_do</code>",
-            "• <code>/finance_adjust refund 100000 ly_do</code>",
+            "• <code>/finance_adjust revenue_add &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+            "• <code>/finance_adjust revenue_subtract &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+            "• <code>/finance_adjust refund &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
         ],
         "expense": [
-            "• <code>/finance_adjust expense_add 100000 ly_do</code>",
-            "• <code>/finance_adjust expense_subtract 100000 ly_do</code>",
-            "• <code>/finance_adjust provider_cost_adjustment 100000 ly_do</code>",
+            "• <code>/finance_adjust expense_add &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+            "• <code>/finance_adjust expense_subtract &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+            "• <code>/finance_adjust provider_cost_adjustment &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
         ],
         "vat": [
-            "• <code>/finance_adjust vat_add 100000 ly_do</code>",
-            "• <code>/finance_adjust vat_subtract 100000 ly_do</code>",
+            "• <code>/finance_adjust vat_add &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+            "• <code>/finance_adjust vat_subtract &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
         ],
         "cit": [
-            "• <code>/finance_adjust cit_add 100000 ly_do</code>",
-            "• <code>/finance_adjust cit_subtract 100000 ly_do</code>",
-            "• <code>/finance_adjust tax_manual_correction 100000 ly_do</code>",
+            "• <code>/finance_adjust cit_add &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+            "• <code>/finance_adjust cit_subtract &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+            "• <code>/finance_adjust tax_manual_correction &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
         ],
+    }
+    examples = {
+        "revenue": "• <code>/finance_adjust revenue_subtract 100000 khach_chuyen_nham_can_dieu_chinh</code>",
+        "expense": "• <code>/finance_adjust expense_add 100000 chi_phi_van_hanh_bo_sung</code>",
+        "vat": "• <code>/finance_adjust vat_add 100000 dieu_chinh_du_phong_vat_thang_6</code>",
+        "cit": "• <code>/finance_adjust cit_add 100000 dieu_chinh_du_phong_tndn_thang_6</code>",
     }
     title = {
         "revenue": "➕ Điều chỉnh doanh thu",
@@ -152109,8 +152119,18 @@ def finance_adjustment_help_text(kind: str) -> str:
         f"{title}",
         "",
         "Không sửa giao dịch gốc. Sai thì tạo bút toán điều chỉnh có lý do.",
+        "Lệnh này không sửa giao dịch gốc, không cộng thêm tiền khách B2C, không đổi giá nạp Xu/gói/combo.",
         "",
-        *examples.get(kind, examples["revenue"]),
+        "Cú pháp chính:",
+        *syntax.get(kind, syntax["revenue"]),
+        "",
+        "<so_tien_vnd> là số tiền bút toán điều chỉnh nội bộ, không phải thuế suất, không phải số tiền tự động cộng cho khách.",
+        "Muốn đổi tỷ lệ VAT nội bộ dùng <code>/vat_rate</code>.",
+        "Muốn đổi tỷ lệ TNDN scenario dùng <code>/cit_rate</code>.",
+        "<code>/finance_adjust</code> chỉ ghi bút toán số tiền điều chỉnh.",
+        "",
+        "Ví dụ:",
+        examples.get(kind, examples["revenue"]),
     ])
 
 def finance_profit_dashboard_text(raw: str = "", default_period: str = "month") -> str:
@@ -152157,7 +152177,8 @@ def finance_adjustments_text(limit: int = 8) -> str:
         "🧮 <b>Sổ điều chỉnh</b>",
         "",
         "Nguyên tắc: không sửa/xóa giao dịch gốc. Sai thì tạo bút toán điều chỉnh có lý do.",
-        "Cú pháp: <code>/finance_adjust &lt;type&gt; &lt;amount_vnd&gt; &lt;reason&gt;</code>",
+        "Cú pháp: <code>/finance_adjust &lt;type&gt; &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>",
+        "<so_tien_vnd> là số tiền bút toán nội bộ, không phải thuế suất và không tự cộng tiền khách.",
         "Type: <code>" + ", ".join(sorted(FINANCE_ADJUSTMENT_TYPES)) + "</code>",
         "",
     ]
@@ -153918,7 +153939,10 @@ async def cmd_finance_adjust(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     if len(context.args or []) < 3:
         return await update.message.reply_text(
-            "⚠️ Cú pháp: <code>/finance_adjust &lt;type&gt; &lt;amount_vnd&gt; &lt;reason&gt;</code>\n"
+            "⚠️ Cú pháp: <code>/finance_adjust &lt;type&gt; &lt;so_tien_vnd&gt; &lt;ly_do&gt;</code>\n"
+            "<so_tien_vnd> là số tiền bút toán điều chỉnh nội bộ, không phải thuế suất, không phải số tiền tự động cộng cho khách.\n"
+            "Lệnh này không sửa giao dịch gốc, không cộng thêm tiền khách B2C, không đổi giá nạp Xu/gói/combo.\n"
+            "Muốn đổi tỷ lệ VAT nội bộ dùng <code>/vat_rate</code>; muốn đổi tỷ lệ TNDN scenario dùng <code>/cit_rate</code>.\n"
             f"Type: <code>{html.escape(', '.join(sorted(FINANCE_ADJUSTMENT_TYPES)))}</code>",
             parse_mode="HTML",
         )
