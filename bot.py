@@ -1709,8 +1709,10 @@ PIPELINE_MAX_TELEGRAM_OUTPUT_MB = max(1, env_int("PIPELINE_MAX_TELEGRAM_OUTPUT_M
 TELEGRAM_VIDEO_PREVIEW_MAX_MB = max(1, env_int("TELEGRAM_VIDEO_PREVIEW_MAX_MB", 45))
 TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("TELEGRAM_DOCUMENT_MAX_MB", PIPELINE_MAX_TELEGRAM_OUTPUT_MB))
 GENERATED_MEDIA_MAX_MB = max(1, env_int("GENERATED_MEDIA_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
+SUBDUB_TELEGRAM_INPUT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_INPUT_MAX_MB", 50))
+SUBDUB_TELEGRAM_OUTPUT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_OUTPUT_MAX_MB", 50))
 SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB", TELEGRAM_VIDEO_PREVIEW_MAX_MB))
-SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", TELEGRAM_DOCUMENT_MAX_MB))
+SUBDUB_TELEGRAM_DOCUMENT_MAX_MB = max(1, env_int("SUBDUB_TELEGRAM_DOCUMENT_MAX_MB", SUBDUB_TELEGRAM_OUTPUT_MAX_MB))
 SUBDUB_COMPRESS_IF_OVER_MB = max(1, env_int("SUBDUB_COMPRESS_IF_OVER_MB", 40))
 SUBDUB_ENABLE_DOCUMENT_FALLBACK = env_flag("SUBDUB_ENABLE_DOCUMENT_FALLBACK", "true")
 SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK = env_flag("SUBDUB_ENABLE_DOWNLOAD_LINK_FALLBACK", "false")
@@ -82432,6 +82434,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• input file id: <code>{esc(job.get('input_file_id'))}</code>",
         f"• input file exists: <code>{yes_no(job.get('input_file_exists'))}</code>",
         f"• file size: <code>{int(job.get('input_file_size') or 0)}</code>",
+        f"• input bytes: <code>{int(job.get('input_bytes') or job.get('input_file_size') or 0)}</code>",
+        f"• input configured limit: <code>{int(job.get('input_configured_limit_mb') or SUBDUB_TELEGRAM_INPUT_MAX_MB)} MB</code>",
         f"• duration: <code>{int(job.get('duration_seconds') or 0)}</code>",
         f"• gate product route allowed: <code>{yes_no(matrix.get('product_route_allowed'))}</code>",
         f"• gate blackbox enabled: <code>{yes_no(matrix.get('blackbox_enabled'))}</code>",
@@ -82471,6 +82475,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• final MP4 path: <code>{esc(job.get('final_mp4_path'))}</code>",
         f"• final MP4 exists: <code>{yes_no(job.get('final_mp4_exists'))}</code>",
         f"• final MP4 size: <code>{int(job.get('final_mp4_size') or job.get('video_bytes') or 0)}</code>",
+        f"• output bytes: <code>{int(job.get('output_bytes') or job.get('final_mp4_size') or job.get('video_bytes') or 0)}</code>",
+        f"• output configured limit: <code>{int(job.get('output_configured_limit_mb') or SUBDUB_TELEGRAM_OUTPUT_MAX_MB)} MB</code>",
         f"• final MP4 duration: <code>{int(job.get('final_mp4_duration') or job.get('duration_seconds') or 0)}</code>",
         f"• subtitle style: <code>{esc(job.get('subtitle_style_preset'))}</code>",
         f"• subtitle font multiplier: <code>{esc(job.get('subtitle_font_multiplier'))}</code>",
@@ -82487,6 +82493,8 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• direct dub core used: <code>{yes_no(job.get('direct_dub_core_used'))}</code>",
         f"• output audio source: <code>{esc(job.get('output_audio_source'))}</code>",
         f"• delivery method: <code>{esc(job.get('delivery_method'))}</code>",
+        f"• telegram send method: <code>{esc(job.get('telegram_send_method') or job.get('delivery_method'))}</code>",
+        f"• delivery blocker: <code>{esc(job.get('delivery_blocker'))}</code>",
         f"• terminal artifact type: <code>{esc(job.get('terminal_artifact_type'))}</code>",
         f"• video delivery message id: <code>{esc(job.get('video_delivery_message_id'))}</code>",
         f"• audio delivery message id: <code>{esc(job.get('audio_delivery_message_id'))}</code>",
@@ -82609,6 +82617,9 @@ def subdub_pipeline_audit_payload() -> dict:
         "output_fit_mode": subdub_video_fit_mode(),
         "keep_original_resolution": bool(SUBDUB_KEEP_ORIGINAL_RESOLUTION),
         "cover_enabled": bool(SUBDUB_HARDSUB_COVER_ENABLED),
+        "input_max_mb": int(SUBDUB_TELEGRAM_INPUT_MAX_MB),
+        "output_max_mb": int(SUBDUB_TELEGRAM_OUTPUT_MAX_MB),
+        "direct_dub_public_enabled": subdub_direct_dub_public_enabled(),
         "expected_steps": {
             SUBDUB_CANONICAL_MODE_AUTO_SUBTITLE: subdub_mode_expected_steps(VIDEO_SUBTITLE_MODE_CREATE),
             SUBDUB_CANONICAL_MODE_SUBTITLE_TRANSLATE: subdub_mode_expected_steps(VIDEO_SUBTITLE_MODE_TRANSLATE),
@@ -82616,6 +82627,47 @@ def subdub_pipeline_audit_payload() -> dict:
             SUBDUB_CANONICAL_MODE_SUBTITLE_DUB: subdub_mode_expected_steps(VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB),
         },
         "delivery_contract": delivery_contract,
+    }
+
+def subdub_status_debug_payload(job: dict | None = None) -> dict:
+    current = dict(job or {})
+    return {
+        "manual_refresh_read_only": True,
+        "status_callback": "videodub|subdub_status|<job_id>",
+        "reprocess_on_refresh": False,
+        "provider_call_on_refresh": False,
+        "send_output_on_refresh": False,
+        "generic_error_after_delivered": False,
+        "terminal_state": str(current.get("terminal_state") or ""),
+        "terminal_artifact_type": str(current.get("terminal_artifact_type") or ""),
+        "video_delivery_message_id": str(current.get("video_delivery_message_id") or ""),
+        "late_fail_suppressed": bool(current.get("late_fail_suppressed") or subdub_job_blocks_public_fail(current)),
+    }
+
+def subdub_pricing_audit_payload() -> dict:
+    sample_state = {
+        "mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "video_processing_mode": VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+        "combo_subpath": VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB,
+        "billing_chars": 1000,
+        "voice_kind": "default_female",
+    }
+    invoice = video_dubbing_invoice_breakdown(sample_state)
+    return {
+        "create_then_dub_has_invoice": bool(invoice.get("auto_subtitle_then_dub")),
+        "subtitle_price_xu": int(invoice.get("subtitle_xu") or 0),
+        "dubbing_price_xu": int(invoice.get("voice_xu") or 0),
+        "total_before_discount_xu": voice_tts_format_xu(invoice.get("total_before_discount_xu") or 0),
+        "discount_xu": voice_tts_format_xu(invoice.get("discount_xu") or 0),
+        "total_payment_xu": int(invoice.get("total_xu") or 0),
+        "default_voice_rate_xu": float(VIDEO_ONLY_DUB_DEFAULT_RATE_XU),
+        "custom_voice_rate_xu": float(VIDEO_ONLY_DUB_CUSTOM_RATE_XU),
+        "voice_subdub_base_x2": bool(float(VIDEO_ONLY_DUB_DEFAULT_RATE_XU) >= 0.10 and float(VIDEO_ONLY_DUB_CUSTOM_RATE_XU) >= 0.20),
+        "discount_cap_percent": int(invoice.get("discount_cap_percent") or VOLUME_DISCOUNT_CAP_PERCENT),
+        "discount_over_cap": bool(max(int(invoice.get("subtitle_discount_percent") or 0), int(invoice.get("dub_discount_percent") or 0)) > int(VOLUME_DISCOUNT_CAP_PERCENT)),
+        "b2c_vat_added": bool(invoice.get("b2c_vat_xu")),
+        "b2c_cit_added": bool(invoice.get("b2c_cit_xu")),
+        "invoice_public_lines": ["Phụ đề tự động", "Lồng tiếng", "Tổng trước giảm", "Giảm giá", "Tổng thanh toán"],
     }
 
 def subdub_back_route_audit_payload() -> dict:
@@ -82812,6 +82864,24 @@ async def cmd_subdub_voice_debug(update: Update, context: ContextTypes.DEFAULT_T
     arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
     job = subtitle_dub_debug_lookup_job(arg)
     return await update.message.reply_text(subdub_voice_debug_text(job), parse_mode="HTML")
+
+async def cmd_subdub_status_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    arg = str((getattr(context, "args", []) or [""])[0] or "").strip()
+    job = subtitle_dub_debug_lookup_job(arg)
+    return await update.message.reply_text(
+        subdub_audit_text("SUBDUB STATUS DEBUG", subdub_status_debug_payload(job)),
+        parse_mode="HTML",
+    )
+
+async def cmd_subdub_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    return await update.message.reply_text(
+        subdub_audit_text("SUBDUB PRICING AUDIT", subdub_pricing_audit_payload()),
+        parse_mode="HTML",
+    )
 
 async def cmd_subdub_pipeline_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -99982,6 +100052,26 @@ def resolve_video_dub_tts_voice(state_user_id, state: dict | None = None) -> dic
     if exact_requested and not custom_kind:
         provider_voice_id = requested
         hint = subdub_voice_id_gender_hint(provider_voice_id)
+        if gender in {"female", "male"} and hint in {"female", "male"} and hint != gender:
+            reason = "selected_voice_gender_unavailable"
+            resolution = subdub_voice_resolution_payload(
+                ok=False,
+                selected_voice_label=label,
+                selected_voice_gender=gender,
+                requested_voice_gender=gender,
+                selected_voice_id=requested,
+                provider_voice_id=provider_voice_id,
+                voice_provider=TTS_PROVIDER or "tts",
+                tts_payload_voice_id=provider_voice_id,
+                resolved_gender=hint,
+                confidence=1.0,
+                fallback_used=False,
+                fallback_reason=reason,
+                reason=reason,
+                blocker=reason,
+            )
+            subdub_apply_voice_resolution_to_state(state, resolution)
+            return resolution
         resolution = subdub_voice_resolution_payload(
             ok=True,
             selected_voice_label=label,
@@ -155548,6 +155638,12 @@ VIDEO_SUBTITLE_MODE_CREATE = "subtitle_create"
 VIDEO_SUBTITLE_MODE_TRANSLATE = "subtitle_translate"
 VIDEO_SUBTITLE_MODE_DUB = "dub"
 VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB = "subtitle_plus_dub"
+VIDEO_SUBTITLE_MODES = {
+    VIDEO_SUBTITLE_MODE_CREATE,
+    VIDEO_SUBTITLE_MODE_TRANSLATE,
+    VIDEO_SUBTITLE_MODE_DUB,
+    VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+}
 VIDEO_TRANSLATE_MODES = {
     VIDEO_SUBTITLE_MODE_CREATE: "Tạo phụ đề tự động",
     VIDEO_SUBTITLE_MODE_TRANSLATE: "Dịch phụ đề",
@@ -155749,14 +155845,13 @@ def subtitle_plus_dub_no_subtitle_menu_keyboard(lang: str = "vi") -> InlineKeybo
                 "🎬 Tạo phụ đề rồi lồng tiếng" if is_vi else "🎬 Create subtitles, then dub",
                 f"videodub|no_subtitle_flow|{VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB}",
             ),
-            (
-                "🎙 Lồng tiếng trực tiếp" if is_vi else "🎙 Dub directly",
-                f"videodub|no_subtitle_flow|{VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB}",
-            ),
         ],
         lang,
         back=("⬅️ Phụ đề + Lồng tiếng" if is_vi else "⬅️ Subtitles + dubbing", f"videodub|type|{VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}"),
     )
+
+def subdub_direct_dub_public_enabled() -> bool:
+    return False
 
 def subtitle_plus_dub_clean_failure_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
@@ -155780,7 +155875,7 @@ def subtitle_plus_dub_clean_failure_keyboard(lang: str = "vi") -> InlineKeyboard
     ])
 
 def video_only_price_discount_percent(chars: int) -> int:
-    return finance_volume_discount_percent(chars)
+    return finance_discount_cap_percent(finance_volume_discount_percent(chars))
 
 def calculate_video_only_char_price(chars: int, rate_xu: float, *, minimum: int = 1) -> dict:
     chars = max(0, int(chars or 0))
@@ -156559,7 +156654,7 @@ def subtitle_plus_dub_is_active(state: dict | None = None) -> bool:
 
 def subtitle_plus_dub_exceeds_limits(state: dict | None = None, *, admin: bool = False) -> bool:
     state = dict(state or {})
-    max_bytes = pipeline_input_limit_mb(admin) * 1024 * 1024
+    max_bytes = subdub_input_limit_bytes(admin)
     max_duration = pipeline_duration_limit_seconds(admin)
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
     duration = _safe_int(state.get("video_duration") or state.get("source_duration"), 0)
@@ -157581,7 +157676,7 @@ def video_dubbing_original_subtitle_confirm_keyboard(lang: str = "vi", state: di
     rows = [
         [InlineKeyboardButton("✅ Tạo phụ đề gốc" if is_vi else "✅ Create original subtitles", callback_data="videodub|confirm_original_subtitle")],
     ]
-    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
+    if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB and combo_subpath != VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB:
         rows.append([InlineKeyboardButton("⏭ Bỏ qua" if is_vi else "⏭ Skip", callback_data="videodub|skip_original_subtitle")])
     back_label = "⬅️ Quay lại" if is_vi else "⬅️ Back"
     back_callback = "videodub|back_upload"
@@ -157792,10 +157887,21 @@ def video_dubbing_invoice_breakdown(state: dict | None = None) -> dict:
     subtitle_price = calculate_video_only_char_price(chars, VIDEO_ONLY_SUBTITLE_TRANSLATE_RATE_XU)
     voice_rate = video_dubbing_voice_rate_xu(state)
     dub_price = calculate_video_only_char_price(chars, voice_rate)
+    combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
+    auto_subtitle_then_dub = (
+        mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB
+        and combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB
+    )
     translation_needed = mode in {VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
     dubbing_needed = mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
-    translation_xu = int(subtitle_price.get("total_xu") or 0) if translation_needed else 0
+    subtitle_xu = int(subtitle_price.get("total_xu") or 0) if auto_subtitle_then_dub else 0
+    translation_xu = int(subtitle_price.get("total_xu") or 0) if (translation_needed and not auto_subtitle_then_dub) else 0
     voice_xu = int(dub_price.get("total_xu") or 0) if dubbing_needed else 0
+    subtitle_component_raw = float(subtitle_price.get("raw_xu") or 0.0) if (auto_subtitle_then_dub or translation_xu) else 0.0
+    voice_component_raw = float(dub_price.get("raw_xu") or 0.0) if dubbing_needed else 0.0
+    total_before_discount_xu = subtitle_component_raw + voice_component_raw
+    total_xu = subtitle_xu + translation_xu + voice_xu
+    discount_xu = max(0.0, total_before_discount_xu - float(total_xu))
     return {
         "chars": chars,
         "subtitle_chars": chars,
@@ -157804,12 +157910,19 @@ def video_dubbing_invoice_breakdown(state: dict | None = None) -> dict:
         "dub_rate_xu": voice_rate,
         "subtitle_discount_percent": int(subtitle_price.get("discount_percent") or 0),
         "dub_discount_percent": int(dub_price.get("discount_percent") or 0),
-        "subtitle_xu": 0,
+        "discount_cap_percent": int(VOLUME_DISCOUNT_CAP_PERCENT),
+        "auto_subtitle_then_dub": auto_subtitle_then_dub,
+        "subtitle_xu": subtitle_xu,
+        "auto_subtitle_xu": subtitle_xu,
         "translation_xu": translation_xu,
         "voice_xu": voice_xu,
         "mix_xu": 0,
         "link_xu": int(state.get("link_import_charged_xu") or 0),
-        "total_xu": translation_xu + voice_xu,
+        "total_before_discount_xu": total_before_discount_xu,
+        "discount_xu": discount_xu,
+        "b2c_vat_xu": 0,
+        "b2c_cit_xu": 0,
+        "total_xu": total_xu,
     }
 
 def video_dubbing_estimated_price_xu(state: dict | None = None) -> int:
@@ -157853,12 +157966,12 @@ def video_dubbing_cancelled_text(lang: str = "vi") -> str:
 def video_dubbing_dialogue_unavailable_text(lang: str = "vi") -> str:
     if normalize_user_language(lang) != "vi":
         return (
-            "TOAN AAS could not obtain dialogue from this video. The system has not processed it and has not charged Xu. "
-            "Please try a clearer video or use Auto subtitles first."
+            "TOAN AAS could not recognize clear dialogue in this video. No Xu was charged. "
+            "Please try a video with clearer speech."
         )
     return (
-        "TOAN AAS chưa lấy được lời thoại từ video này. Hệ thống chưa xử lý và chưa trừ Xu. "
-        "Anh/chị có thể thử video rõ tiếng hơn hoặc dùng Tạo phụ đề tự động trước."
+        "TOAN AAS chưa nhận diện được lời thoại rõ ràng trong video này. Hệ thống chưa trừ Xu. "
+        "Anh/chị có thể thử video rõ tiếng hơn."
     )
 
 def video_dubbing_dialogue_unavailable_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
@@ -157967,8 +158080,28 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
     if not standalone_flow and mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
         language = html.escape(target or "ngôn ngữ đã chọn")
         voice_label = html.escape(voice or "Nữ mặc định")
-        direct_dub = subtitle_plus_dub_no_subtitle_subpath(state) == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB
+        combo_subpath = subtitle_plus_dub_no_subtitle_subpath(state)
+        direct_dub = combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB
+        auto_subtitle_then_dub = combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB
+        before_discount = voice_tts_format_xu(invoice.get("total_before_discount_xu") or invoice.get("total_xu") or 0)
+        discount_percent = max(int(invoice.get("subtitle_discount_percent") or 0), int(invoice.get("dub_discount_percent") or 0))
+        discount_amount = voice_tts_format_xu(invoice.get("discount_xu") or 0)
         if normalize_user_language(lang) != "vi":
+            if auto_subtitle_then_dub:
+                discount_line = f"{discount_amount} Xu ({discount_percent}%)" if discount_percent else "0 Xu"
+                return (
+                    "🎞 <b>Create subtitles, then dub</b>\n"
+                    "💰 <b>Confirm final video</b>\n\n"
+                    "• Video: received\n"
+                    f"• Target language: <b>{language}</b>\n"
+                    f"• Voice: <b>{voice_label}</b>\n"
+                    f"• Auto subtitles: <b>{int(invoice.get('subtitle_xu') or 0)} Xu</b>\n"
+                    f"• Dubbing: <b>{int(invoice.get('voice_xu') or 0)} Xu</b>\n"
+                    f"• Before discount: <b>{before_discount} Xu</b>\n"
+                    f"• Discount: <b>{discount_line}</b>\n"
+                    f"• Total: <b>{int(invoice.get('total_xu') or 0)} Xu</b>\n\n"
+                    "TOAN AAS only processes and charges Xu after you confirm."
+                )
             if direct_dub:
                 return (
                     "🎙 <b>Direct video dubbing</b>\n"
@@ -157996,6 +158129,21 @@ def video_dubbing_confirm_text(state: dict | None = None, lang: str = "vi") -> s
                 f"• Discount: <b>{max(int(invoice.get('subtitle_discount_percent') or 0), int(invoice.get('dub_discount_percent') or 0))}%</b>\n"
                 f"• Total: <b>{int(invoice.get('total_xu') or 0)} Xu</b>\n\n"
                 "TOAN AAS only processes and charges Xu after you confirm."
+            )
+        if auto_subtitle_then_dub:
+            discount_line = f"{discount_amount} Xu ({discount_percent}%)" if discount_percent else "0 Xu"
+            return (
+                "🎞 <b>Tạo phụ đề rồi lồng tiếng</b>\n"
+                "💰 <b>Xác nhận tạo video hoàn chỉnh</b>\n\n"
+                "• Video: đã nhận\n"
+                f"• Ngôn ngữ đích: <b>{language}</b>\n"
+                f"• Giọng: <b>{voice_label}</b>\n"
+                f"• Phụ đề tự động: <b>{int(invoice.get('subtitle_xu') or 0)} Xu</b>\n"
+                f"• Lồng tiếng: <b>{int(invoice.get('voice_xu') or 0)} Xu</b>\n"
+                f"• Tổng trước giảm: <b>{before_discount} Xu</b>\n"
+                f"• Giảm giá: <b>{discount_line}</b>\n"
+                f"• Tổng thanh toán: <b>{int(invoice.get('total_xu') or 0)} Xu</b>\n\n"
+                "TOAN AAS chỉ xử lý và trừ Xu sau khi anh/chị xác nhận."
             )
         if direct_dub:
             return (
@@ -158342,24 +158490,16 @@ def video_dubbing_receipt_keyboard(lang: str = "vi", origin: str = "translation"
         return InlineKeyboardMarkup(rows)
     elif mode == VIDEO_SUBTITLE_MODE_TRANSLATE:
         _filename, _caption, video_button = video_dubbing_final_video_label(mode, lang)
-        requested = normalize_video_translate_mode(state.get("requested_mode"))
         rows.extend([
             [
                 InlineKeyboardButton(video_button, callback_data="videodub|download_final_video"),
                 InlineKeyboardButton("📄 Tải SRT dịch" if is_vi else "📄 Download translated SRT", callback_data="videodub|download_final_subtitle"),
             ],
         ])
-        if requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
-            rows.append([
-                InlineKeyboardButton("🎙 Lồng tiếng bản dịch" if is_vi else "🎙 Dub translated subtitles", callback_data="videodub|result_translate_dub"),
-                InlineKeyboardButton("🌐 Dịch ngôn ngữ khác" if is_vi else "🌐 Translate another language", callback_data="videodub|result_translate"),
-            ])
-            rows.append([InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")])
-        else:
-            rows.append([
-                InlineKeyboardButton("🌐 Dịch ngôn ngữ khác" if is_vi else "🌐 Translate another language", callback_data="videodub|result_translate"),
-                InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
-            ])
+        rows.append([
+            InlineKeyboardButton("🌐 Dịch ngôn ngữ khác" if is_vi else "🌐 Translate another language", callback_data="videodub|result_translate"),
+            InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main"),
+        ])
         return InlineKeyboardMarkup(rows)
     elif mode == VIDEO_SUBTITLE_MODE_DUB:
         _filename, _caption, video_button = video_dubbing_final_video_label(mode, lang)
@@ -159041,10 +159181,14 @@ def subdub_progress_stage_tokens_for_product(product_type_or_mode: str = "", sta
 def subdub_progress_steps_for_product(product_type_or_mode: str = "", state: dict | None = None) -> list[dict]:
     product_type = subdub_product_type_from_mode(product_type_or_mode, state)
     canonical = subdub_canonical_mode(product_type_or_mode, state) if str(product_type_or_mode or "") in VIDEO_SUBTITLE_MODES or state else ""
-    return [
-        {**subdub_progress_stage_payload(token), "product_type": product_type, "canonical_mode": canonical}
-        for token in subdub_progress_stage_tokens_for_product(product_type_or_mode, state)
-    ]
+    compact_product_label = str(product_type_or_mode or "").strip().lower() in SUBDUB_PRODUCT_TYPES and not state
+    steps = []
+    for token in subdub_progress_stage_tokens_for_product(product_type_or_mode, state):
+        payload = subdub_progress_stage_payload(token)
+        if compact_product_label and str(token or "") == "choosing_voice":
+            payload = {**payload, "label": "Chọn giọng", "status": "Đã chọn giọng"}
+        steps.append({**payload, "product_type": product_type, "canonical_mode": canonical})
+    return steps
 
 def subdub_public_job_code(job_id: str = "") -> str:
     return product_progress_status.product_progress_public_job_code(job_id)
@@ -159142,6 +159286,22 @@ def subdub_mode_fail_text(mode: str = "", lang: str = "vi") -> str:
         return "TOAN AAS chưa tạo được video phụ đề + lồng tiếng lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc chọn giọng khác."
     return "TOAN AAS chưa tạo được phụ đề cho video này lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video rõ tiếng hơn hoặc gửi video khác."
 
+def subdub_known_failure_text(reason: str = "", mode: str = "", lang: str = "vi", *, limit_mb: int | None = None) -> str:
+    reason_text = str(reason or "").strip().lower()
+    if "file_too_large" in reason_text or "video_too_large" in reason_text:
+        return subdub_file_too_large_text(limit_mb or SUBDUB_TELEGRAM_INPUT_MAX_MB, lang)
+    if "dialogue" in reason_text or "no_speech" in reason_text or "audio_not_recognized" in reason_text:
+        return video_dubbing_dialogue_unavailable_text(lang)
+    if "voice_gender" in reason_text or "voice_not_ready" in reason_text or "selected_voice_gender" in reason_text:
+        return subdub_voice_not_ready_text(lang)
+    if "telegram" in reason_text or "delivery" in reason_text:
+        if normalize_user_language(lang) != "vi":
+            return "TOAN AAS could not send the result file this time. No Xu was charged. Please try a smaller video."
+        return "TOAN AAS chưa gửi được file kết quả lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video nhẹ hơn."
+    if "mux" in reason_text or "render" in reason_text or "missing_artifact" in reason_text:
+        return subdub_mode_fail_text(mode, lang)
+    return subdub_mode_fail_text(mode, lang)
+
 def subdub_validate_saved_input_for_pipeline(input_save: dict | None = None, state: dict | None = None) -> dict:
     current = dict(input_save or {})
     state = dict(state or {})
@@ -159155,6 +159315,17 @@ def subdub_validate_saved_input_for_pipeline(input_save: dict | None = None, sta
         return {"ok": False, "blocker": "input_missing", "duration": duration, "size": size}
     if size <= 0:
         return {"ok": False, "blocker": "input_missing", "duration": duration, "size": size}
+    size_validation = subdub_validate_input_size_bytes(size, is_admin=bool(state.get("_pipeline_is_admin")))
+    if not size_validation.get("ok"):
+        return {
+            "ok": False,
+            "blocker": "file_too_large",
+            "duration": duration,
+            "size": size,
+            "input_bytes": size,
+            "configured_limit_mb": int(size_validation.get("configured_limit_mb") or SUBDUB_TELEGRAM_INPUT_MAX_MB),
+            "configured_limit_bytes": int(size_validation.get("configured_limit_bytes") or subdub_input_limit_bytes(False)),
+        }
     source_bytes = current.get("source_bytes")
     has_source_bytes = isinstance(source_bytes, (bytes, bytearray)) and len(source_bytes) > 0
     if content_type.startswith("video/") and duration <= 0 and not (has_source_bytes or isinstance(state.get("_pipeline_source_bytes_override"), (bytes, bytearray))):
@@ -159219,6 +159390,7 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
     if job and subdub_job_blocks_public_fail(job):
         job["ignored_late_error_count"] = int(job.get("ignored_late_error_count") or 0) + 1
         job["last_ignored_error_reason"] = str(reason or "")[:180]
+        job["late_fail_suppressed"] = True
         job["updated_at"] = time.time()
         SUBTITLE_DUB_PIPELINE_JOBS[key] = job
         return {"sent": False, "suppressed": True, "reason": "terminal_delivered"}
@@ -159227,7 +159399,7 @@ async def send_subdub_fail_once(message, job_key: str, *, mode: str = "", reason
         job["updated_at"] = time.time()
         SUBTITLE_DUB_PIPELINE_JOBS[key] = job
         return {"sent": False, "suppressed": True, "reason": "already_failed"}
-    text = subdub_mode_fail_text(mode, lang)
+    text = subdub_known_failure_text(reason, mode, lang)
     message_id = ""
     if callable(getattr(message, "reply_text", None)):
         sent_msg = await message.reply_text(text, parse_mode="HTML", reply_markup=reply_markup)
@@ -159263,7 +159435,12 @@ def subdub_job_public_status_text(job: dict | None = None, lang: str = "vi") -> 
     if terminal == "delivered" or (status == "completed" and job.get("output_sent")):
         return subdub_progress_text("delivered", job_id, lang)
     if status.startswith("failed") or terminal.startswith("failed"):
-        return subdub_clean_failure_text(lang)
+        return subdub_known_failure_text(
+            str(job.get("pipeline_blocker") or job.get("last_technical_error") or job.get("delivery_blocker") or ""),
+            str(job.get("mode") or ""),
+            lang,
+            limit_mb=int(job.get("input_configured_limit_mb") or SUBDUB_TELEGRAM_INPUT_MAX_MB),
+        )
     return subdub_progress_text(str(job.get("progress_stage") or job.get("stage") or "saved_input"), job_id, lang)
 
 async def subdub_send_progress_update(query, job_key: str, job_id: str, stage: str, lang: str = "vi") -> None:
@@ -159308,6 +159485,50 @@ def pipeline_input_limit_mb(is_admin: bool = False) -> int:
 
 def pipeline_duration_limit_seconds(is_admin: bool = False) -> int:
     return PIPELINE_MAX_DURATION_SECONDS_ADMIN if is_admin else PIPELINE_MAX_DURATION_SECONDS_PUBLIC
+
+def subdub_input_limit_mb(is_admin: bool = False) -> int:
+    return max(1, int(PIPELINE_MAX_INPUT_MB_ADMIN if is_admin else SUBDUB_TELEGRAM_INPUT_MAX_MB))
+
+def subdub_input_limit_bytes(is_admin: bool = False) -> int:
+    return subdub_input_limit_mb(is_admin) * 1024 * 1024
+
+def subdub_output_limit_mb() -> int:
+    return max(1, int(SUBDUB_TELEGRAM_OUTPUT_MAX_MB or 50))
+
+def subdub_output_limit_bytes() -> int:
+    return subdub_output_limit_mb() * 1024 * 1024
+
+def subdub_validate_input_size_bytes(size_bytes: int = 0, *, is_admin: bool = False) -> dict:
+    size = max(0, int(size_bytes or 0))
+    limit_mb = subdub_input_limit_mb(is_admin)
+    limit_bytes = limit_mb * 1024 * 1024
+    if size and size > limit_bytes:
+        return {
+            "ok": False,
+            "blocker": "file_too_large",
+            "input_bytes": size,
+            "configured_limit_mb": limit_mb,
+            "configured_limit_bytes": limit_bytes,
+        }
+    return {
+        "ok": True,
+        "blocker": "",
+        "input_bytes": size,
+        "configured_limit_mb": limit_mb,
+        "configured_limit_bytes": limit_bytes,
+    }
+
+def subdub_file_too_large_text(limit_mb: int | None = None, lang: str = "vi") -> str:
+    safe_limit = max(1, int(limit_mb or SUBDUB_TELEGRAM_INPUT_MAX_MB or 50))
+    if normalize_user_language(lang) != "vi":
+        return (
+            f"This video is over the current processing size limit. Please compress it or send a file under {safe_limit}MB. "
+            "No Xu was charged."
+        )
+    return (
+        f"Video này đang vượt giới hạn dung lượng xử lý hiện tại. Anh/chị vui lòng nén video hoặc gửi bản dưới {safe_limit}MB. "
+        "Hệ thống chưa trừ Xu."
+    )
 
 def subtitle_dub_pipeline_job_key(user_id, chat_id, state: dict | None = None) -> str:
     state = dict(state or {})
@@ -159535,6 +159756,18 @@ async def video_dubbing_save_input_for_pipeline(
     if not source_bytes:
         result.update({"error": "RuntimeError", "detail": "file_not_saved", "content_type": content_type})
         return result
+    size_validation = subdub_validate_input_size_bytes(len(source_bytes), is_admin=bool(state.get("_pipeline_is_admin")))
+    if not size_validation.get("ok"):
+        result.update({
+            "error": "RuntimeError",
+            "detail": "file_too_large",
+            "content_type": content_type,
+            "size": len(source_bytes),
+            "input_bytes": len(source_bytes),
+            "configured_limit_mb": int(size_validation.get("configured_limit_mb") or SUBDUB_TELEGRAM_INPUT_MAX_MB),
+            "configured_limit_bytes": int(size_validation.get("configured_limit_bytes") or subdub_input_limit_bytes(False)),
+        })
+        return result
     result.update({
         "ok": True,
         "source_bytes": bytes(source_bytes),
@@ -159729,6 +159962,26 @@ def video_dubbing_product_public_failure_text(mode: str, state: dict | None = No
     mode = normalize_video_translate_mode(mode)
     state = dict(state or {})
     technical_missing = set(str(item) for item in (dict(gate_matrix or {}).get("technical_missing") or []))
+    blocker_text = " ".join(
+        str(item or "")
+        for item in (
+            state.get("_subdub_delivery_blocker"),
+            state.get("delivery_blocker"),
+            state.get("pipeline_blocker"),
+            state.get("processing_error"),
+            *(dict(gate_matrix or {}).get("gate_blockers") or []),
+            *(dict(gate_matrix or {}).get("public_blockers") or []),
+        )
+    ).lower()
+    if "file_too_large" in blocker_text or "video_too_large" in blocker_text:
+        return subdub_file_too_large_text(
+            state.get("_subdub_output_configured_limit_mb") or state.get("configured_limit_mb") or SUBDUB_TELEGRAM_INPUT_MAX_MB,
+            lang,
+        )
+    if "telegram_delivery_failed" in blocker_text or "telegram_limit" in blocker_text:
+        if normalize_user_language(lang) != "vi":
+            return "TOAN AAS could not send the result file this time. No Xu was charged. Please try a smaller video."
+        return "TOAN AAS chưa gửi được file kết quả lúc này. Hệ thống chưa trừ Xu. Anh/chị có thể thử video nhẹ hơn."
     if "asr" in technical_missing and video_dubbing_mode_needs_asr_provider(mode, state):
         return video_dubbing_asr_missing_guard_text(lang)
     if mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
@@ -159784,6 +160037,9 @@ def subtitle_dub_debug_job_payload(
         "input_file_path": source_path,
         "input_file_exists": bool(source_path and os.path.exists(source_path)),
         "input_file_size": int(input_save.get("size") or (os.path.getsize(source_path) if source_path and os.path.exists(source_path) else 0)),
+        "input_bytes": int(input_save.get("input_bytes") or input_save.get("size") or (os.path.getsize(source_path) if source_path and os.path.exists(source_path) else 0)),
+        "input_configured_limit_mb": int(input_save.get("configured_limit_mb") or SUBDUB_TELEGRAM_INPUT_MAX_MB),
+        "input_configured_limit_bytes": int(input_save.get("configured_limit_bytes") or subdub_input_limit_bytes(bool(state.get("_pipeline_is_admin")))),
         "duration_seconds": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "extracted_audio_path": str(artifacts.get("audio") or ""),
         "extracted_audio_exists": bool(artifacts.get("audio") and os.path.exists(str(artifacts.get("audio")))),
@@ -159813,6 +160069,9 @@ def subtitle_dub_debug_job_payload(
         "final_mp4_path": final_path,
         "final_mp4_exists": bool(final_path and os.path.exists(final_path)),
         "final_mp4_size": os.path.getsize(final_path) if final_path and os.path.exists(final_path) else 0,
+        "output_bytes": int(state.get("_subdub_output_file_size_bytes") or (os.path.getsize(final_path) if final_path and os.path.exists(final_path) else 0)),
+        "output_configured_limit_mb": int(state.get("_subdub_output_configured_limit_mb") or SUBDUB_TELEGRAM_OUTPUT_MAX_MB),
+        "output_configured_limit_bytes": int(state.get("_subdub_output_configured_limit_bytes") or subdub_output_limit_bytes()),
         "final_mp4_duration": int(input_save.get("duration") or _safe_int(state.get("video_duration") or state.get("source_duration"), 0)),
         "subtitle_style_preset": str(style.get("preset") or ""),
         "subtitle_style_profile": str(style.get("subtitle_style_profile") or ""),
@@ -159830,6 +160089,8 @@ def subtitle_dub_debug_job_payload(
         "direct_dub_core_used": bool(state.get("_subdub_direct_dub_core_used")),
         "output_audio_source": str(state.get("_subdub_output_audio_source") or ""),
         "delivery_method": str(state.get("_subdub_delivery_method") or ""),
+        "telegram_send_method": str(state.get("_subdub_delivery_method") or ""),
+        "delivery_blocker": str(state.get("_subdub_delivery_blocker") or ""),
         "output_validation": dict(state.get("_subdub_output_validation") or {}),
         "terminal_state": str(state.get("_subdub_terminal_state") or ""),
         "terminal_state_history": list(state.get("terminal_state_history") or []),
@@ -159844,7 +160105,7 @@ def subtitle_dub_debug_job_payload(
     }
 
 def pipeline_final_video_sendable(video_bytes: bytes) -> bool:
-    limit_mb = min(int(GENERATED_MEDIA_MAX_MB or 0), int(TELEGRAM_DOCUMENT_MAX_MB or 0))
+    limit_mb = min(int(SUBDUB_TELEGRAM_OUTPUT_MAX_MB or 0), int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB or 0))
     return bool(video_bytes) and len(video_bytes) <= max(1, limit_mb) * 1024 * 1024
 
 def generated_media_delivery_limits() -> dict:
@@ -160694,6 +160955,11 @@ async def send_public_subtitle_dub_final_outputs(
         "audio_delivery_message_id": "",
         "srt_delivery_message_id": "",
         "terminal_artifact_type": "",
+        "input_configured_limit_mb": int(SUBDUB_TELEGRAM_INPUT_MAX_MB),
+        "output_configured_limit_mb": int(SUBDUB_TELEGRAM_OUTPUT_MAX_MB),
+        "output_configured_limit_bytes": subdub_output_limit_bytes(),
+        "output_file_size_bytes": int(len(video_bytes or b"")),
+        "delivery_blocker": "",
     }
     if video_bytes:
         if metadata_enabled:
@@ -160709,7 +160975,8 @@ async def send_public_subtitle_dub_final_outputs(
             sent["output_validation"] = dict(validation or {})
         send_limit_mb = max(1, int(SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB or TELEGRAM_VIDEO_PREVIEW_MAX_MB))
         doc_limit_mb = max(send_limit_mb, int(SUBDUB_TELEGRAM_DOCUMENT_MAX_MB or TELEGRAM_DOCUMENT_MAX_MB))
-        generated_limit_mb = max(doc_limit_mb, int(GENERATED_MEDIA_MAX_MB or doc_limit_mb))
+        output_limit_mb = subdub_output_limit_mb()
+        generated_limit_mb = max(doc_limit_mb, output_limit_mb)
         send_limit = send_limit_mb * 1024 * 1024
         doc_limit = doc_limit_mb * 1024 * 1024
         compress_threshold = max(1, int(SUBDUB_COMPRESS_IF_OVER_MB or SUBDUB_TELEGRAM_SEND_VIDEO_MAX_MB)) * 1024 * 1024
@@ -160719,6 +160986,8 @@ async def send_public_subtitle_dub_final_outputs(
                 return False
             try:
                 if not SUBDUB_ENABLE_DOCUMENT_FALLBACK and len(payload) > send_limit:
+                    sent["delivery_blocker"] = "file_too_large"
+                    sent["delivery_reason"] = "document_fallback_disabled"
                     return False
                 result = await send_generated_video_bytes_for_delivery(
                     message,
@@ -160740,6 +161009,7 @@ async def send_public_subtitle_dub_final_outputs(
                 if not result.get("sent"):
                     if result.get("delivery_reason"):
                         sent["delivery_reason"] = str(result.get("delivery_reason") or "")
+                        sent["delivery_blocker"] = "file_too_large" if "size" in str(result.get("delivery_reason") or "").lower() else "telegram_delivery_failed"
                     return False
                 if result.get("delivery_method") == "video":
                     sent["video"] = 1
@@ -160755,6 +161025,7 @@ async def send_public_subtitle_dub_final_outputs(
                 return True
             except Exception as exc:
                 sent["delivery_reason"] = type(exc).__name__
+                sent["delivery_blocker"] = "telegram_delivery_failed"
                 logger.warning("subtitle/dub video delivery failed | %s", sanitize_log_text(str(exc))[:160])
                 return False
 
@@ -160905,7 +161176,7 @@ async def video_dubbing_download_source(context: ContextTypes.DEFAULT_TYPE, stat
     file_id = str(state.get("video_file_id") or state.get("source_file_id") or "")
     if not file_id:
         raise RuntimeError("missing_video_file_id")
-    max_input_mb = pipeline_input_limit_mb(bool(state.get("_pipeline_is_admin")))
+    max_input_mb = subdub_input_limit_mb(bool(state.get("_pipeline_is_admin")))
     max_bytes = max_input_mb * 1024 * 1024
     max_duration = pipeline_duration_limit_seconds(bool(state.get("_pipeline_is_admin")))
     file_size = _safe_int(state.get("video_file_size") or state.get("source_file_size"), 0)
@@ -162217,6 +162488,9 @@ async def _execute_video_dubbing_pipeline_core(
             "detail": str(input_validation.get("blocker") or "input_invalid"),
             "duration": int(input_validation.get("duration") or 0),
             "size": int(input_validation.get("size") or input_save.get("size") or 0),
+            "input_bytes": int(input_validation.get("input_bytes") or input_validation.get("size") or input_save.get("size") or 0),
+            "configured_limit_mb": int(input_validation.get("configured_limit_mb") or SUBDUB_TELEGRAM_INPUT_MAX_MB),
+            "configured_limit_bytes": int(input_validation.get("configured_limit_bytes") or subdub_input_limit_bytes(bool(state.get("_pipeline_is_admin")))),
         }
     if input_save.get("ok") and input_save.get("source_bytes"):
         state = {
@@ -162240,6 +162514,7 @@ async def _execute_video_dubbing_pipeline_core(
     chat_id = getattr(getattr(query, "message", None), "chat_id", uid)
     if not input_save.get("ok"):
         detail = sanitize_log_text(str(input_save.get("detail") or input_save.get("error") or "input_save_failed"))[:180]
+        failure_text = subdub_file_too_large_text(input_save.get("configured_limit_mb"), lang) if detail == "file_too_large" else public_failure
         debug_job = subtitle_dub_debug_job_payload(
             user_id=uid,
             chat_id=chat_id,
@@ -162252,12 +162527,12 @@ async def _execute_video_dubbing_pipeline_core(
             workspace_artifacts=workspace_artifacts,
             detail=detail,
             pipeline_attempted=False,
-            public_safe_error=public_failure,
+            public_safe_error=failure_text,
         )
         return {
             "ok": False,
             "status": "INPUT_SAVE_FAILED",
-            "text": public_failure,
+            "text": failure_text,
             "detail": detail,
             "workspace_artifacts": workspace_artifacts,
             "input_save": input_save,
@@ -162801,6 +163076,10 @@ async def _execute_video_dubbing_pipeline_core(
             **state,
             "_subdub_delivery_method": str(delivery.get("delivery_method") or ""),
             "_subdub_output_validation": dict(delivery.get("output_validation") or {}),
+            "_subdub_output_file_size_bytes": int(delivery.get("output_file_size_bytes") or len(video_output or b"")),
+            "_subdub_output_configured_limit_mb": int(delivery.get("output_configured_limit_mb") or SUBDUB_TELEGRAM_OUTPUT_MAX_MB),
+            "_subdub_output_configured_limit_bytes": int(delivery.get("output_configured_limit_bytes") or subdub_output_limit_bytes()),
+            "_subdub_delivery_blocker": str(delivery.get("delivery_blocker") or delivery.get("delivery_reason") or ""),
             "video_delivery_message_id": str(delivery.get("video_delivery_message_id") or ""),
             "audio_delivery_message_id": str(delivery.get("audio_delivery_message_id") or ""),
             "srt_delivery_message_id": str(delivery.get("srt_delivery_message_id") or ""),
@@ -162891,6 +163170,9 @@ async def _execute_video_dubbing_pipeline_core(
             "input_file_path": source_path,
             "input_file_exists": bool(source_path and os.path.exists(source_path)),
             "input_file_size": len(video_bytes or b""),
+            "input_bytes": int(input_save.get("input_bytes") or input_save.get("size") or len(video_bytes or b"")),
+            "input_configured_limit_mb": int(input_save.get("configured_limit_mb") or SUBDUB_TELEGRAM_INPUT_MAX_MB),
+            "input_configured_limit_bytes": int(input_save.get("configured_limit_bytes") or subdub_input_limit_bytes(bool(state.get("_pipeline_is_admin")))),
             "duration_seconds": duration_seconds,
             "extracted_audio_path": "",
             "extracted_audio_exists": False,
@@ -162905,6 +163187,9 @@ async def _execute_video_dubbing_pipeline_core(
             "final_mp4_path": dub_video_path,
             "final_mp4_exists": bool(dub_video_path and os.path.exists(dub_video_path)),
             "final_mp4_size": len(video_output or b""),
+            "output_bytes": len(video_output or b""),
+            "output_configured_limit_mb": int(delivery.get("output_configured_limit_mb") or SUBDUB_TELEGRAM_OUTPUT_MAX_MB),
+            "output_configured_limit_bytes": int(delivery.get("output_configured_limit_bytes") or subdub_output_limit_bytes()),
             "final_mp4_duration": duration_seconds,
             **subdub_voice_style_state_fields(
                 mode=mode,
@@ -162923,6 +163208,8 @@ async def _execute_video_dubbing_pipeline_core(
             "output_audio_source": output_audio_source,
             "original_audio_mode": str(state.get("original_audio_mode") or ""),
             "delivery_method": str(delivery.get("delivery_method") or ""),
+            "telegram_send_method": str(delivery.get("delivery_method") or ""),
+            "delivery_blocker": str(delivery.get("delivery_blocker") or delivery.get("delivery_reason") or ""),
             "telegram_message_id": str(delivery.get("telegram_message_id") or ""),
             "video_delivery_message_id": str(delivery.get("video_delivery_message_id") or ""),
             "audio_delivery_message_id": str(delivery.get("audio_delivery_message_id") or ""),
@@ -162967,6 +163254,10 @@ async def _execute_video_dubbing_pipeline_core(
         "sent_video": int(delivery.get("video") or 0),
         "sent_video_document": int(delivery.get("video_document") or 0),
         "delivery_method": str(delivery.get("delivery_method") or ""),
+        "telegram_send_method": str(delivery.get("delivery_method") or ""),
+        "delivery_blocker": str(delivery.get("delivery_blocker") or delivery.get("delivery_reason") or ""),
+        "output_bytes": int(delivery.get("output_file_size_bytes") or len(video_output or b"")),
+        "output_configured_limit_mb": int(delivery.get("output_configured_limit_mb") or SUBDUB_TELEGRAM_OUTPUT_MAX_MB),
         "telegram_message_id": str(delivery.get("telegram_message_id") or ""),
         "video_delivery_message_id": str(delivery.get("video_delivery_message_id") or ""),
         "audio_delivery_message_id": str(delivery.get("audio_delivery_message_id") or ""),
@@ -165136,6 +165427,8 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
         if mode != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             return await safe_edit_or_send(query, video_dubbing_menu_text(lang, origin), parse_mode="HTML", reply_markup=video_dubbing_menu_keyboard(lang, origin))
         combo_subpath = value if value in {VIDEO_DUBBING_NO_SUBTITLE_CREATE_THEN_DUB, VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB} else ""
+        if combo_subpath == VIDEO_DUBBING_NO_SUBTITLE_DIRECT_DUB and not subdub_direct_dub_public_enabled():
+            combo_subpath = ""
         if not combo_subpath:
             state = set_video_dubbing_pending(uid, "no_subtitle_menu", processing="0")
             return await safe_edit_or_send(
@@ -165174,6 +165467,22 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
     if action == "skip_original_subtitle":
         if mode != VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             return await safe_edit_or_send(query, video_dubbing_source_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_source_keyboard(lang, state))
+        if not subdub_direct_dub_public_enabled():
+            state = set_video_dubbing_pending(
+                uid,
+                "no_subtitle_menu",
+                active_flow=VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB,
+                flow_type=VIDEO_DUBBING_FLOW_NO_SUBTITLE,
+                combo_subpath="",
+                translate_requested="0",
+                processing="0",
+            )
+            return await safe_edit_or_send(
+                query,
+                subtitle_plus_dub_no_subtitle_menu_text(lang),
+                parse_mode="HTML",
+                reply_markup=subtitle_plus_dub_no_subtitle_menu_keyboard(lang),
+            )
         state = set_video_dubbing_pending(
             uid,
             "language",
@@ -168087,7 +168396,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_render_debug", cmd_subdub_render_debug))
     tg_app.add_handler(CommandHandler("subdub_delivery_debug", cmd_subdub_delivery_debug))
     tg_app.add_handler(CommandHandler("subdub_voice_debug", cmd_subdub_voice_debug))
+    tg_app.add_handler(CommandHandler("subdub_status_debug", cmd_subdub_status_debug))
     tg_app.add_handler(CommandHandler("subdub_pipeline_audit", cmd_subdub_pipeline_audit))
+    tg_app.add_handler(CommandHandler("subdub_pricing_audit", cmd_subdub_pricing_audit))
     tg_app.add_handler(CommandHandler("subdub_back_route_audit", cmd_subdub_back_route_audit))
     tg_app.add_handler(CommandHandler("subdub_render_style_audit", cmd_subdub_render_style_audit))
     tg_app.add_handler(CommandHandler("subdub_terminal_debug", cmd_subdub_terminal_debug))
