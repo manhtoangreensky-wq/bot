@@ -19,15 +19,19 @@ class CaptureMessage:
 
     async def reply_text(self, text, **kwargs):
         self.outputs.append(("text", str(text), kwargs))
+        return SimpleNamespace(message_id=len(self.outputs))
 
     async def reply_video(self, **kwargs):
         self.outputs.append(("video", kwargs))
+        return SimpleNamespace(message_id=len(self.outputs), video=SimpleNamespace(file_id=f"video-{len(self.outputs)}"))
 
     async def reply_audio(self, **kwargs):
         self.outputs.append(("audio", kwargs))
+        return SimpleNamespace(message_id=len(self.outputs), audio=SimpleNamespace(file_id=f"audio-{len(self.outputs)}"))
 
     async def reply_document(self, **kwargs):
         self.outputs.append(("document", kwargs))
+        return SimpleNamespace(message_id=len(self.outputs), document=SimpleNamespace(file_id=f"document-{len(self.outputs)}"))
 
 
 class CaptureQuery:

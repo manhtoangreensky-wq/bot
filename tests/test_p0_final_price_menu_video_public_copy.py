@@ -447,7 +447,7 @@ def test_video_final_result_sent_once(monkeypatch, tmp_path):
 
         async def send_video(self, **kwargs):
             self.video_calls += 1
-            return SimpleNamespace(video=SimpleNamespace(file_id="file_once"))
+            return SimpleNamespace(message_id=4501, video=SimpleNamespace(file_id="file_once"))
 
         async def send_message(self, **kwargs):
             raise AssertionError("link fallback should not be used")

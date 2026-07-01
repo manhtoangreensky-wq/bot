@@ -265,10 +265,18 @@ def test_canary_sends_admin_if_tg_available(monkeypatch, tmp_path):
     final_path.write_bytes(b"canary-mp4")
 
     class FakeBot:
-        async def send_video(self, chat_id, video, caption):
+        async def send_video(self, chat_id, video, caption, **_kwargs):
             sent["chat_id"] = chat_id
             sent["caption"] = caption
             sent["bytes"] = len(video.read())
+            return SimpleNamespace(message_id=901, video=SimpleNamespace(file_id="canary-video"))
+
+        async def send_document(self, chat_id, document, filename, caption, **_kwargs):
+            sent["chat_id"] = chat_id
+            sent["caption"] = caption
+            sent["bytes"] = len(document.read())
+            sent["filename"] = filename
+            return SimpleNamespace(message_id=902, document=SimpleNamespace(file_id="canary-document"))
 
     monkeypatch.setattr(bot, "tg_app", SimpleNamespace(bot=FakeBot()))
     result = {

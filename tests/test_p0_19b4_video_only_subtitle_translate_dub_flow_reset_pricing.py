@@ -52,17 +52,17 @@ class CaptureMessage:
     async def reply_audio(self, **kwargs):
         item = {"audio": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919501, audio=SimpleNamespace(file_id="audio-file"))
 
     async def reply_document(self, **kwargs):
         item = {"document": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919502, document=SimpleNamespace(file_id="doc-file"))
 
     async def reply_video(self, **kwargs):
         item = {"video": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919503, video=SimpleNamespace(file_id="video-file"))
 
 
 def _update(uid, message):
@@ -222,7 +222,10 @@ def test_translate_subtitle_outputs_video_with_translated_subtitle():
             lang="vi",
         )
     )
-    assert sent == {"documents": 0, "audio": 0, "video": 1}
+    assert sent["documents"] == 0
+    assert sent["audio"] == 0
+    assert sent["video"] == 1
+    assert sent["delivery_method"] == "video"
 
 
 def test_dub_menu_is_closed_video_flow():

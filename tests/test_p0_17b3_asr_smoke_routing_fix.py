@@ -25,15 +25,15 @@ class CaptureMessage:
 
     async def reply_document(self, document=None, filename=None, caption=None, **kwargs):
         self.outputs.append({"document": document, "filename": filename, "caption": str(caption or ""), **kwargs})
-        return SimpleNamespace(document=SimpleNamespace(file_id=f"doc-{filename or 'file'}"))
+        return SimpleNamespace(message_id=173401, document=SimpleNamespace(file_id=f"doc-{filename or 'file'}"))
 
     async def reply_audio(self, audio=None, filename=None, caption=None, **kwargs):
         self.outputs.append({"audio": audio, "filename": filename, "caption": str(caption or ""), **kwargs})
-        return SimpleNamespace(audio=SimpleNamespace(file_id=f"audio-{filename or 'file'}"))
+        return SimpleNamespace(message_id=173402, audio=SimpleNamespace(file_id=f"audio-{filename or 'file'}"))
 
     async def reply_video(self, video=None, filename=None, caption=None, **kwargs):
         self.outputs.append({"video": video, "filename": filename, "caption": str(caption or ""), **kwargs})
-        return SimpleNamespace(video=SimpleNamespace(file_id=f"video-{filename or 'file'}"))
+        return SimpleNamespace(message_id=173403, video=SimpleNamespace(file_id=f"video-{filename or 'file'}"))
 
 
 def command_update(command, user_id=173301):
@@ -514,11 +514,14 @@ def test_asr_provider_order_prefers_openai_compatible_before_deepgram():
 
 def test_public_subtitle_plus_dub_outputs_all_assets():
     source = inspect.getsource(bot.send_public_subtitle_dub_final_outputs)
+    delivery_source = inspect.getsource(bot.send_generated_video_bytes_for_delivery)
 
     assert "mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB" in source
     assert "reply_document" in source
     assert "reply_audio" in source
-    assert "reply_video" in source
+    assert "send_generated_video_bytes_for_delivery" in source
+    assert "reply_video" in delivery_source
+    assert "reply_document" in delivery_source
 
 
 def test_public_final_mp4_only_when_mux_ready():

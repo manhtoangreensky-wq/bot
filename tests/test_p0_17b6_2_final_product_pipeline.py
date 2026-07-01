@@ -20,12 +20,15 @@ class CaptureMessage:
 
     async def reply_document(self, **kwargs):
         self.outputs.append(("document", kwargs))
+        return SimpleNamespace(message_id=917701, document=SimpleNamespace(file_id="doc-file"))
 
     async def reply_audio(self, **kwargs):
         self.outputs.append(("audio", kwargs))
+        return SimpleNamespace(message_id=917702, audio=SimpleNamespace(file_id="audio-file"))
 
     async def reply_video(self, **kwargs):
         self.outputs.append(("video", kwargs))
+        return SimpleNamespace(message_id=917703, video=SimpleNamespace(file_id="video-file"))
 
     async def reply_text(self, text, **kwargs):
         self.outputs.append(("text", {"text": text, **kwargs}))
@@ -210,7 +213,9 @@ def test_public_output_matches_tool():
         active_flow="auto_subtitle",
         subtitle_items=subtitle_items,
     ))
-    assert result == {"documents": 1, "audio": 0, "video": 0}
+    assert result["documents"] == 1
+    assert result["audio"] == 0
+    assert result["video"] == 0
     assert [kind for kind, _ in auto.outputs] == ["document"]
 
     transcript = CaptureMessage()
@@ -220,7 +225,9 @@ def test_public_output_matches_tool():
         active_flow=bot.VIDEO_DUBBING_FLOW_TRANSCRIPT,
         subtitle_items=subtitle_items,
     ))
-    assert result == {"documents": 1, "audio": 0, "video": 0}
+    assert result["documents"] == 1
+    assert result["audio"] == 0
+    assert result["video"] == 0
     assert transcript.outputs[0][1]["filename"].endswith(".txt")
 
     dub = CaptureMessage()
@@ -230,7 +237,9 @@ def test_public_output_matches_tool():
         audio_bytes=b"audio",
         subtitle_items=subtitle_items,
     ))
-    assert result == {"documents": 0, "audio": 1, "video": 0}
+    assert result["documents"] == 0
+    assert result["audio"] == 1
+    assert result["video"] == 0
 
 
 def test_mux_unavailable_no_fake_mp4():
@@ -242,7 +251,9 @@ def test_mux_unavailable_no_fake_mp4():
         subtitle_items=[{"output_type": "srt", "bytes": b"srt", "filename": "result.srt"}],
         video_bytes=b"",
     ))
-    assert result == {"documents": 1, "audio": 1, "video": 0}
+    assert result["documents"] == 1
+    assert result["audio"] == 1
+    assert result["video"] == 0
     assert "video" not in [kind for kind, _ in message.outputs]
     assert "document" in [kind for kind, _ in message.outputs]
     assert "text" not in [kind for kind, _ in message.outputs]

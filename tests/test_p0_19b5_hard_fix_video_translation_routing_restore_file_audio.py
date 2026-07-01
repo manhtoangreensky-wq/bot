@@ -52,17 +52,17 @@ class CaptureMessage:
     async def reply_audio(self, **kwargs):
         item = {"audio": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919601, audio=SimpleNamespace(file_id="audio-file"))
 
     async def reply_document(self, **kwargs):
         item = {"document": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919602, document=SimpleNamespace(file_id="doc-file"))
 
     async def reply_video(self, **kwargs):
         item = {"video": True, **kwargs}
         self.outputs.append(item)
-        return SimpleNamespace(**item)
+        return SimpleNamespace(message_id=919603, video=SimpleNamespace(file_id="video-file"))
 
 
 class CaptureQuery:

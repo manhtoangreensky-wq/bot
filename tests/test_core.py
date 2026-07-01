@@ -8121,12 +8121,15 @@ def test_video_subtitle_v22_per_mode_guard_and_pipeline_outputs(monkeypatch):
 
         async def reply_document(self, document, **kwargs):
             self.documents.append((document, kwargs))
+            return SimpleNamespace(message_id=3101, document=SimpleNamespace(file_id="doc-file"))
 
         async def reply_audio(self, audio, **kwargs):
             self.audio.append((audio, kwargs))
+            return SimpleNamespace(message_id=3102, audio=SimpleNamespace(file_id="audio-file"))
 
         async def reply_video(self, video, **kwargs):
             self.video.append((video, kwargs))
+            return SimpleNamespace(message_id=3103, video=SimpleNamespace(file_id="video-file"))
 
     for mode, expect_video, expect_audio, expect_result_subtitle in [
         (bot.VIDEO_SUBTITLE_MODE_CREATE, True, False, True),
