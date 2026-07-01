@@ -487,23 +487,18 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
         or str(job.get("confirm_submit_phase") or "").strip().lower() in {"provider_submit_called", "provider_job_id_saved"}
         or provider_task_id
     )
-    provider_completed = bool(
-        _as_bool(job.get("provider_completed"))
-        or _as_bool(job.get("music_provider_completed"))
-        or status in {"completed", "complete", "success", "succeeded", "done", "finished", "downloading", "delivered"}
-        or output_bytes > 0
-    )
-    artifact_ready = bool(
-        _as_bool(job.get("artifact_ready"))
-        or _as_bool(job.get("music_artifact_ready"))
-        or output_bytes > 0
-        or _first_text(
+    artifact_metadata_ready = bool(
+        _first_text(
             job,
             "output_url",
             "music_output_url",
             "result_url",
             "download_url",
             "file_url",
+            "audio_url",
+            "music_result_url",
+            "music_artifact_url",
+            "selected_artifact_url",
             "output_path",
             "music_result_path",
             "local_path",
@@ -511,16 +506,30 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
             "vault_id",
             "music_vault_id",
             "music_artifact_id",
+            "selected_artifact_id",
             "selected_artifact_hash",
+            "music_artifact_hash",
         )
+        or str(job.get("artifact_state") or job.get("music_artifact_state") or "").strip().lower() in {"metadata_ready", "materializing", "ready"}
     )
-    audio_validated = bool(
+    provider_completed = bool(
+        _as_bool(job.get("provider_completed"))
+        or _as_bool(job.get("music_provider_completed"))
+        or status in {"completed", "complete", "success", "succeeded", "done", "finished", "downloading", "delivered"}
+        or output_bytes > 0
+        or artifact_metadata_ready
+    )
+    audio_validation_flag = bool(
         _as_bool(job.get("artifact_validated"))
         or _as_bool(job.get("audio_validated"))
         or _as_bool(job.get("music_audio_validated"))
-        or (output_bytes > 0 and duration > 0)
-        or has_delivery
     )
+    audio_validation_explicit = any(key in job for key in ("artifact_validated", "audio_validated", "music_audio_validated"))
+    audio_validated = bool(
+        has_delivery
+        or (output_bytes > 0 and duration > 0 and (audio_validation_flag or not audio_validation_explicit))
+    )
+    artifact_ready = bool(audio_validated and output_bytes > 0 and duration > 0)
     completed_steps: list[str] = []
     if job:
         completed_steps.append("received_request")
@@ -544,6 +553,8 @@ def music_progress_lifecycle(product_type: str = "", job: dict[str, Any] | None 
         "provider_submit_called": provider_submit_called,
         "provider_task_id": provider_task_id,
         "provider_completed": provider_completed,
+        "artifact_metadata_ready": artifact_metadata_ready,
+        "artifact_state": str(job.get("artifact_state") or job.get("music_artifact_state") or ("ready" if artifact_ready else "metadata_ready" if artifact_metadata_ready else "missing")),
         "artifact_ready": artifact_ready,
         "audio_validated": audio_validated,
         "delivery_confirmed": has_delivery,
@@ -718,6 +729,9 @@ def product_progress_stage_from_job(product_type: str = "", job: dict[str, Any] 
             stage_key = "delivering"
             progress = min(95, int(progress if progress is not None else 85))
         elif lifecycle.get("artifact_ready"):
+            stage_key = "validating_audio"
+            progress = min(85, int(progress if progress is not None else 85))
+        elif lifecycle.get("provider_completed"):
             stage_key = "validating_audio"
             progress = min(85, int(progress if progress is not None else 85))
         elif lifecycle.get("provider_task_id") or lifecycle.get("provider_submit_called"):
