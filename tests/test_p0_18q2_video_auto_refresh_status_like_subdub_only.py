@@ -296,5 +296,5 @@ def test_no_music_subdub_voice_payos_changes():
 
 def test_video_auto_refresh_handlers_registered():
     source = inspect.getsource(bot)
-    assert 'CommandHandler("video_progress_auto_refresh_status", cmd_video_progress_auto_refresh_status)' in source
+    assert 'CommandHandler("video_auto_status", cmd_video_progress_auto_refresh_status)' in source
     assert 'CommandHandler("video_status_debug", cmd_video_status_debug)' in source
