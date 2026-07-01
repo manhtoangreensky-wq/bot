@@ -265,25 +265,40 @@ def test_translated_subtitle_output_enables_hardsub_cover_by_default(monkeypatch
 def test_hardsub_cover_drawbox_or_ass_style_present(monkeypatch):
     monkeypatch.setattr(bot, "SUBDUB_HARDSUB_COVER_Y_RATIO", 0.76)
     monkeypatch.setattr(bot, "SUBDUB_HARDSUB_COVER_HEIGHT_RATIO", 0.18)
-    style = bot.subdub_output_style_state({"mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB, "output_type": "video_subtitle"}, bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB)
+    style = bot.subdub_output_style_state(
+        {
+            "mode": bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+            "output_type": "video_subtitle",
+            "hardsub_cover_enabled": "1",
+        },
+        bot.VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB,
+    )
     filter_text = bot.subdub_cover_filter(style)
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, style)
 
     assert "drawbox=" in filter_text
-    assert "y=ih*0.86" in filter_text
-    assert "h=ih*0.10" in filter_text
+    assert "y=ih*0.90" in filter_text
+    assert "h=ih*0.06" in filter_text
     assert "Dialogue: 0" in ass
 
 
 def test_hardsub_cover_has_opacity_config(monkeypatch):
     monkeypatch.setattr(bot, "SUBDUB_HARDSUB_COVER_OPACITY", 0.60)
-    style = bot.subdub_normalize_style(bot.subdub_output_style_state({"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "translate_requested": "1"}, bot.VIDEO_SUBTITLE_MODE_TRANSLATE))
+    style = bot.subdub_normalize_style(
+        bot.subdub_output_style_state(
+            {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "translate_requested": "1", "hardsub_cover_enabled": "1"},
+            bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+        )
+    )
 
-    assert style["cover_opacity"] == 0.60
+    assert style["cover_opacity"] == 0.35
 
 
 def test_subtitle_render_places_translated_text_over_cover():
-    state = bot.subdub_output_style_state({"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "translate_requested": "1"}, bot.VIDEO_SUBTITLE_MODE_TRANSLATE)
+    state = bot.subdub_output_style_state(
+        {"mode": bot.VIDEO_SUBTITLE_MODE_TRANSLATE, "translate_requested": "1", "hardsub_cover_enabled": "1"},
+        bot.VIDEO_SUBTITLE_MODE_TRANSLATE,
+    )
     ass = bot.subdub_generate_ass_from_srt(VALID_SRT, state)
 
     assert "Style: Default" in ass

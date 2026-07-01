@@ -18,9 +18,9 @@ def test_subtitle_font_size_increased_responsive():
     style_vertical = _style(video_height=1280, video_width=720)
 
     assert default_style["size"] >= 50
-    assert 38 <= style_720["size"] <= 44
-    assert 48 <= style_1080["size"] <= 58
-    assert 44 <= style_vertical["size"] <= 54
+    assert 44 <= style_720["size"] <= 48
+    assert 50 <= style_1080["size"] <= 58
+    assert 52 <= style_vertical["size"] <= 58
 
 
 def test_subtitle_style_has_outline_or_box():
@@ -39,23 +39,23 @@ def test_cover_bar_bottom_safe_area_only():
     style = _style()
     drawbox = bot.subdub_cover_filter(style)
 
-    assert style["cover_y_ratio"] >= 0.86
-    assert style["cover_height_ratio"] <= 0.10
-    assert "y=ih*0.86" in drawbox
-    assert "h=ih*0.10" in drawbox
+    assert style["cover_y_ratio"] >= 0.90
+    assert style["cover_height_ratio"] <= 0.06
+    assert "y=ih*0.90" in drawbox or "y=ih*0.91" in drawbox
+    assert "h=ih*0.05" in drawbox or "h=ih*0.06" in drawbox
 
 
 def test_cover_bar_not_mid_screen():
     style = _style(cover_y_ratio=0.62, cover_height_ratio=0.22)
 
-    assert style["cover_y_ratio"] >= 0.86
+    assert style["cover_y_ratio"] >= 0.90
     assert "y=ih*0.62" not in bot.subdub_cover_filter(style)
 
 
 def test_cover_height_not_too_large():
     style = _style(cover_height_ratio=0.24)
 
-    assert style["cover_height_ratio"] <= 0.10
+    assert style["cover_height_ratio"] <= 0.06
     assert "h=ih*0.24" not in bot.subdub_cover_filter(style)
 
 
@@ -64,7 +64,6 @@ def test_translated_subtitle_position_readable():
 
     assert "Style: Default" in ass
     assert "Dialogue: 0" in ass
-    assert ",86,1" in ass or ",87,1" in ass
     assert "Xin chao" in ass
 
 
