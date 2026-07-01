@@ -42252,7 +42252,7 @@ def video_b14_live_buttons_regression_report(user_id: int = 0) -> dict:
     status_text = video_b14_queue_status_text(session, result, uid, "vi")
     forbidden_status_terms = ("OWNER/ADMIN TEST MODE", "ADMIN TEST MODE", "TEST PATTERN", "provider", "worker", "render_mode")
     status_ok = (
-        all(marker in status_text for marker in ["Mã xử lý", "Trạng thái", "Tiến độ", "Tùy chọn thêm"])
+        all(marker in status_text for marker in ["Mã xử lý", "Trạng thái", "Tiến độ", "Thông tin video", "Tiến trình"])
         and all(term.lower() not in status_text.lower() for term in forbidden_status_terms)
         and safe_int(job.get("id"), 0) > 0
     )
@@ -57999,7 +57999,7 @@ def video_ui_audit_payload() -> dict:
     }
     status_text = video_b14_queue_status_text(
         sample_session,
-        {"job": {"id": 37, "status": "queued", "progress_percent": 5}},
+        {"job": {"id": 987001, "status": "queued", "progress_percent": 5}},
         user_id=0,
         lang="vi",
     )
@@ -58014,6 +58014,27 @@ def video_ui_audit_payload() -> dict:
     )
     first_option_row = option_rows[0] if option_rows else []
     aux_rows = option_rows[1:3] if len(option_rows) >= 3 else []
+    long_public_terms = (
+        "Giai đoạn",
+        "Cập nhật lần cuối",
+        "Kết quả",
+        "Tùy chọn thêm",
+        "Thời gian chờ",
+        "Voice:",
+        "Nhạc:",
+        "Phụ đề:",
+        "Lồng tiếng:",
+        "tốc độ",
+        "chưa có file thành phẩm",
+    )
+    dynamic_steps_ok = (
+        "<b>Tiến trình:</b>" in status_text
+        and "✅ Nhận yêu cầu" in status_text
+        and "⏳ Chuẩn bị dựng" in status_text
+        and "⬜ Dựng video" in status_text
+        and "⬜ Kiểm tra file" in status_text
+        and "⬜ Gửi kết quả" in status_text
+    )
     checks = [
         {
             "name": "status_panel_compact_public_copy",
@@ -58026,6 +58047,10 @@ def video_ui_audit_payload() -> dict:
                 and "Thời gian chờ dự kiến:" not in status_text
             ),
         },
+        {"name": "status_panel_compact", "ok": "• Hậu kỳ:" in status_text and not any(term in status_text for term in long_public_terms)},
+        {"name": "dynamic_steps_enabled", "ok": dynamic_steps_ok},
+        {"name": "long_addon_details_public", "ok": not any(term in status_text for term in long_public_terms)},
+        {"name": "debug_terms_public", "ok": not video_ui_forbidden_terms(status_text), "terms": video_ui_forbidden_terms(status_text)},
         {"name": "status_panel_no_debug_terms", "ok": not video_ui_forbidden_terms(status_text), "terms": video_ui_forbidden_terms(status_text)},
         {"name": "refresh_button_label", "ok": bool(status_rows and status_rows[0][:1] == ["🔄 Cập nhật trạng thái"])},
         {"name": "status_invoice_label", "ok": bool(status_rows and len(status_rows[0]) > 1 and status_rows[0][1] == "🧾 Xem hóa đơn")},
@@ -58053,6 +58078,8 @@ def video_ui_audit_payload() -> dict:
             }) == "b14_scene_count",
         },
         {"name": "no_BACK_text_in_back_button_label", "ok": all("BACK" not in label for row in (status_rows + option_rows) for label in row)},
+        {"name": "flow_locked", "ok": bool(status_rows and status_rows[0] == ["🔄 Cập nhật trạng thái", "🧾 Xem hóa đơn"] and first_option_row == ["1", "2", "3", "4", "5"])},
+        {"name": "engine_touched", "ok": True, "value": False},
     ]
     return {
         "ok": all(check.get("ok") for check in checks),
@@ -62017,8 +62044,12 @@ def video_b14_render_mode_from_job(job: dict | None = None, project: dict | None
     return ""
 
 
-VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE = "TOAN AAS chưa dựng được video AI hoàn chỉnh lần này. Hệ thống chưa trừ Xu. Anh/chị vui lòng thử lại sau."
-VIDEO_B14_PARTIAL_SIMPLE_MESSAGE = "TOAN AAS đã dựng được bản nháp đơn giản, nhưng chưa tạo được video AI hoàn chỉnh. Hệ thống chưa trừ Xu cho bản này."
+VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE = (
+    "❌ TOAN AAS chưa tạo được video lúc này.\n"
+    "Hệ thống chưa trừ Xu hoặc đã hoàn Xu nếu cần.\n"
+    "Anh/chị có thể thử lại với video/prompt khác."
+)
+VIDEO_B14_PARTIAL_SIMPLE_MESSAGE = VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE
 
 
 def video_b14_result_renderer_has_test_marker(renderer: str) -> bool:
@@ -62082,6 +62113,94 @@ def video_b14_fail_stale_product_job_for_status(job_id: int) -> int:
         return remote_worker_api.fail_stale_product_video_jobs(conn, job_id=wanted)
     finally:
         conn.close()
+
+
+VIDEO_B14_STATUS_STEP_LABELS = (
+    "Nhận yêu cầu",
+    "Chuẩn bị dựng",
+    "Dựng video",
+    "Kiểm tra file",
+    "Gửi kết quả",
+)
+
+
+def video_b14_compact_postproduction_label(addon_plan: dict | None) -> str:
+    addon_plan = dict(addon_plan or {})
+    items: list[str] = []
+    if addon_plan.get("voice_enabled"):
+        items.append("Voice")
+    if addon_plan.get("dub_enabled"):
+        items.append("lồng tiếng")
+    if addon_plan.get("music_enabled"):
+        items.append("Nhạc nền")
+    if addon_plan.get("subtitle_enabled"):
+        items.append("phụ đề")
+    if addon_plan.get("logo_enabled"):
+        items.append("logo")
+    return ", ".join(items) if items else "Không thêm"
+
+
+def video_b14_status_step_rows(
+    status: str,
+    progress: int,
+    *,
+    has_final_artifact: bool = False,
+    blocked_reason: str = "",
+    visual_classification: str = "",
+) -> list[tuple[str, str]]:
+    status = str(status or "").strip().lower()
+    progress = max(0, min(100, safe_int(progress, 0)))
+    icons = ["⬜", "⬜", "⬜", "⬜", "⬜"]
+    final_missing = status in {"completed", "success"} and not has_final_artifact
+    failed = status in {"failed", "error"} or bool(blocked_reason) or visual_classification == "partial_simple_video" or final_missing
+
+    if status in {"draft", ""}:
+        return list(zip(icons, VIDEO_B14_STATUS_STEP_LABELS))
+    if status in {"completed", "success"} and has_final_artifact:
+        return list(zip(["✅", "✅", "✅", "✅", "✅"], VIDEO_B14_STATUS_STEP_LABELS))
+    if failed:
+        icons[0] = "✅"
+        if progress >= 30 or status in {"processing", "running", "completed", "success"}:
+            icons[1] = "✅"
+            icons[2] = "⚠️"
+        else:
+            icons[1] = "⚠️"
+        return list(zip(icons, VIDEO_B14_STATUS_STEP_LABELS))
+
+    icons[0] = "✅"
+    if progress <= 5 or status in {"queued", "queued_for_worker"}:
+        icons[1] = "⏳"
+    elif progress < 80:
+        icons[1] = "✅"
+        icons[2] = "⏳"
+    elif has_final_artifact:
+        icons[1] = "✅"
+        icons[2] = "✅"
+        icons[3] = "⏳"
+    else:
+        icons[1] = "✅"
+        icons[2] = "⏳"
+    return list(zip(icons, VIDEO_B14_STATUS_STEP_LABELS))
+
+
+def video_b14_status_steps_text(
+    status: str,
+    progress: int,
+    *,
+    has_final_artifact: bool = False,
+    blocked_reason: str = "",
+    visual_classification: str = "",
+) -> str:
+    rows = video_b14_status_step_rows(
+        status,
+        progress,
+        has_final_artifact=has_final_artifact,
+        blocked_reason=blocked_reason,
+        visual_classification=visual_classification,
+    )
+    lines = ["<b>Tiến trình:</b>"]
+    lines.extend(f"{icon} {label}" for icon, label in rows)
+    return "\n".join(lines)
 
 
 def video_b14_queue_status_text(session: dict | None, result: dict | None = None, user_id=0, lang: str = "vi") -> str:
@@ -62151,8 +62270,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     has_final_artifact = bool(final_path or final_file_id)
     if not has_final_artifact and status in {"queued", "queued_for_worker", "processing", "running"} and progress >= 95:
         progress = 85
-        status_label = "Đang kiểm tra file"
-        stage = "hệ thống đang kiểm tra file"
+        status_label = "Đang dựng video"
+        stage = "hệ thống đang dựng video"
     error_log = str(project.get("error_log") or job.get("last_error") or "")
     render_mode = video_b14_render_mode_from_job(job, project)
     job_result = video_b14_job_result_payload(job)
@@ -62161,46 +62280,8 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
     real_renderer_unavailable = "real_video_renderer_unavailable" in error_log
     if real_renderer_unavailable:
         render_mode = "unavailable"
-    if visual_classification == "partial_simple_video":
-        result_text = VIDEO_B14_PARTIAL_SIMPLE_MESSAGE
-    elif blocked_reason:
-        result_text = VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE
-    elif status in {"completed", "success"} and (final_path or final_file_id):
-        if render_mode == "real":
-            result_text = "hệ thống đã dựng video thật và sẽ gửi kết quả cuối"
-        else:
-            result_text = "TOAN AAS đang kiểm tra file cuối trước khi gửi thành phẩm"
-    elif status in {"failed", "error"}:
-        result_text = VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE
-    elif status in {"queued", "queued_for_worker"}:
-        result_text = "đang chuẩn bị xử lý, chưa có file thành phẩm"
-    elif status in {"processing", "running"}:
-        result_text = "đang dựng video trong nền, chưa có file thành phẩm"
-    else:
-        result_text = "chưa có file thành phẩm"
     package_label = str(invoice.get("package_label") or video_b14_package_full_label(safe_int(invoice.get("quality_xu"), 200)))
-    voice_label = str(addon_plan.get("voice_label") or video_b14_addon_label("voice", str(addon_plan.get("voice_source") or "none")))
-    music_label = video_b14_addon_label("music", str(addon_plan.get("music_source") or "none"))
-    subtitle_label = video_b14_addon_label("subtitle", str(addon_plan.get("subtitle_source") or "none"))
-    dub_target = str(addon_plan.get("dub_target_language") or addon_plan.get("subtitle_target_language") or "").strip()
-    logo_label = video_b14_addon_label("logo", str(addon_plan.get("logo_source") or "none"))
-    postproduction = []
-    if addon_plan.get("voice_enabled") or addon_plan.get("dub_enabled"):
-        postproduction.append("giọng đọc/lồng tiếng")
-    if addon_plan.get("music_enabled"):
-        postproduction.append("nhạc nền")
-    if addon_plan.get("subtitle_enabled"):
-        postproduction.append("phụ đề")
-    postproduction_label = ", ".join(postproduction) if postproduction else "mặc định"
-    logo_status = "Bật" if addon_plan.get("logo_enabled") else "Tắt"
-    logo_line = f"{logo_status} · {logo_label if addon_plan.get('logo_enabled') else video_b14_addon_label('logo', 'none')}"
-    logo_public_line = f"• Logo: <b>{logo_status}</b> · {html.escape(logo_label if addon_plan.get('logo_enabled') else video_b14_addon_label('logo', 'none'))}"
-    if addon_plan.get("logo_enabled"):
-        logo_text_value = logo_watermark_clean_text(addon_plan.get("logo_text") or "")
-        logo_line += f" · {logo_text_value or 'chưa nhập'}"
-        logo_line += f" · {video_b14_addon_label('logo', str(addon_plan.get('logo_position') or 'bottom_right'))}"
-        logo_public_line += f" · {html.escape(logo_text_value or 'chưa nhập')}"
-        logo_public_line += f" · {html.escape(video_b14_addon_label('logo', str(addon_plan.get('logo_position') or 'bottom_right')))}"
+    postproduction_label = video_b14_compact_postproduction_label(addon_plan)
     lines = [
         "🎬 <b>Trạng thái tạo video</b>",
         "",
@@ -62213,41 +62294,33 @@ def video_b14_queue_status_text(session: dict | None, result: dict | None = None
         "",
         "<b>Thông tin video:</b>",
         f"• Số cảnh: <b>{scene_count}</b>",
-        f"• Thời lượng dự kiến: <b>{duration}s</b>",
+        f"• Thời lượng: <b>{duration}s</b>",
         f"• Hậu kỳ: <b>{html.escape(postproduction_label)}</b>",
-        logo_public_line,
     ]
     if duplicate:
         lines.append("• Ghi chú: video này đã có trong danh sách chờ, TOAN AAS không tạo trùng lần nữa.")
-    lines.append("")
-    lines.append(f"Thời gian chờ dự kiến {video_b14_eta_text(eta)}.")
-    updated_at = vietnam_time_display(job.get("updated_at") or project.get("updated_at") or now_text())
+
     lines.extend([
         "",
-        f"• Giai đoạn <b>{html.escape(stage)}</b>",
-        f"• Cập nhật lần cuối <code>{html.escape(updated_at)}</code>",
-        f"• Kết quả <b>{html.escape(result_text)}</b>",
-        "• Tùy chọn thêm",
-        f"  Voice: <b>{'bật' if addon_plan.get('voice_enabled') else 'tắt'}</b> · {html.escape(voice_label)} · tốc độ {html.escape(video_audio_speed_display(video_audio_settings_from_state(addon_plan)['video_voice_speed']))}x · {safe_int(video_audio_settings_from_state(addon_plan)['video_voice_volume_percent'], 100)}%",
-        f"  Nhạc: <b>{'bật' if addon_plan.get('music_enabled') else 'tắt'}</b> · {html.escape(music_label)} · tốc độ {html.escape(video_audio_speed_display(video_audio_settings_from_state(addon_plan)['video_music_speed']))}x · {safe_int(video_audio_settings_from_state(addon_plan)['video_music_volume_percent'], 10)}%",
-        f"  Phụ đề: <b>{'bật' if addon_plan.get('subtitle_enabled') else 'tắt'}</b> · {html.escape(subtitle_label)}",
-        f"  Lồng tiếng: <b>{'bật' if addon_plan.get('dub_enabled') else 'tắt'}</b>{(' · ' + html.escape(dub_target)) if dub_target else ''}",
-        f"  Logo: <b>{logo_status}</b> · {html.escape(logo_label if addon_plan.get('logo_enabled') else video_b14_addon_label('logo', 'none'))}",
+        video_b14_status_steps_text(
+            status,
+            progress,
+            has_final_artifact=has_final_artifact,
+            blocked_reason=blocked_reason,
+            visual_classification=visual_classification,
+        ),
+        "",
     ])
-    if visual_classification == "partial_simple_video":
-        lines.append(VIDEO_B14_PARTIAL_SIMPLE_MESSAGE)
-        lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
-    elif status in {"failed", "error"} or blocked_reason:
-        lines.append(VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE)
-        lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
+
+    if visual_classification == "partial_simple_video" or status in {"failed", "error"} or blocked_reason or (status in {"completed", "success"} and not has_final_artifact):
+        lines.extend(VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE.splitlines())
     elif status in {"completed", "success"} and has_final_artifact:
-        lines.append(result_text)
-    elif status in {"completed", "success"}:
-        lines.append(result_text)
-        lines.append("TOAN AAS không báo hoàn tất khi chưa có video cuối (MP4).")
+        lines.extend([
+            "✅ Video đã sẵn sàng.",
+            "TOAN AAS đã gửi kết quả bên dưới.",
+        ])
     else:
         lines.append("TOAN AAS sẽ tự cập nhật khi có video hoàn chỉnh.")
-        lines.append("Hệ thống sẽ báo khi có video cuối (MP4).")
         lines.append("Anh/chị không cần bấm nhiều lần.")
     return video_b14_with_admin_label("\n".join(lines), user_id, lang)
 

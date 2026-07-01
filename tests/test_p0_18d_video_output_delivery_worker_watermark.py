@@ -198,5 +198,5 @@ def test_public_status_copy_hides_technical_words():
     lowered = text.lower()
     for forbidden in ("worker", "queue", "provider", "api", "ffmpeg", "lease", "traceback", "vps-secret"):
         assert forbidden not in lowered
-    assert "hệ thống" in lowered
-    assert "video cuối" in lowered
+    assert "tiến trình" in lowered
+    assert "video hoàn chỉnh" in lowered

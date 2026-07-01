@@ -370,13 +370,15 @@ def test_owner_admin_no_charge_still_applies():
 
 def test_video_status_shows_job_stage_progress():
     text = bot.video_b14_queue_status_text({"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3, "duration_seconds": 18, "package_label": "Cơ bản"}}}, None, bot.ADMIN_ID, "vi")
-    assert "Trạng thái" in text and "Giai đoạn" in text and "Tiến độ" in text
+    assert "Trạng thái" in text and "Tiến trình" in text and "Tiến độ" in text
+    assert "Giai đoạn" not in text
 
 
 def test_video_status_shows_addons():
     session = {"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3}, "b14_addon_plan": {"voice_enabled": True, "voice_source": "default_female", "voice_label": "Nữ mặc định", "music_enabled": True, "music_source": "default", "music_volume_percent": 10, "subtitle_enabled": True, "subtitle_source": "from_narration", "dub_enabled": False, "logo_enabled": True, "logo_source": "text", "logo_text": "TOAN AAS", "logo_position": "top_right"}}}
     text = bot.video_b14_queue_status_text(session, None, bot.ADMIN_ID, "vi")
-    assert "Voice:" in text and "Nhạc:" in text and "Logo:" in text
+    assert "Hậu kỳ: <b>Voice, Nhạc nền, phụ đề, logo</b>" in text
+    assert "Voice:" not in text and "Nhạc:" not in text and "Logo:" not in text
 
 
 def test_video_status_no_fake_success(monkeypatch):
@@ -384,14 +386,14 @@ def test_video_status_no_fake_success(monkeypatch):
     monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: {})
     text = bot.video_b14_queue_status_text({"draft": {"b14_queue_job": {"id": 1, "status": "completed"}, "b14_invoice": {"scene_count": 3}}}, None, bot.ADMIN_ID, "vi")
     assert "đã có MP4" not in text
-    assert "chưa có file thành phẩm" in text
+    assert bot.VIDEO_B14_PRODUCT_CLEAN_FAIL_MESSAGE in text
 
 
 def test_video_status_queued_worker_message(monkeypatch):
     monkeypatch.setattr(bot, "video_b14_fail_stale_product_job_for_status", lambda _job_id: 0)
     monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: {})
     text = bot.video_b14_queue_status_text({"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3}}}, None, bot.ADMIN_ID, "vi")
-    assert "hệ thống đang xếp lịch dựng video" in text
+    assert "⏳ Chuẩn bị dựng" in text
     assert "worker" not in text.lower()
 
 

@@ -120,7 +120,9 @@ def test_status_logo_default_off(monkeypatch):
     monkeypatch.setattr(bot, "video_b14_render_job_by_id", lambda _job_id: {})
     session = {"draft": {"b14_queue_job": {"id": 1, "status": "queued"}, "b14_invoice": {"scene_count": 3}, "b14_addon_plan": bot.video_b14_default_addon_plan("storytelling")}}
     text = bot.video_b14_queue_status_text(session, None, 123, "vi")
-    assert "Logo: <b>Tắt</b> · không dùng" in text
+    assert "Hậu kỳ:" in text
+    assert "logo" not in text.lower()
+    assert "Logo:" not in text
     assert "Watermark TOAN AAS mặc định" not in text
 
 
@@ -259,7 +261,7 @@ def test_video_status_shows_real_render_mode_internal_only(monkeypatch):
         }
     }
     text = bot.video_b14_queue_status_text(session, None, bot.ADMIN_ID, "vi")
-    assert "hệ thống đã dựng video thật" in text
+    assert "✅ Video đã sẵn sàng." in text
     assert "render_mode" not in text
 
 
@@ -318,4 +320,4 @@ def test_status_completed_requires_real_render_or_test_label(monkeypatch):
     text = bot.video_b14_queue_status_text(session, None, bot.ADMIN_ID, "vi")
     assert "hệ thống đã dựng video thật" not in text
     assert "renderer" not in text.lower()
-    assert "TOAN AAS đang kiểm tra file cuối" in text
+    assert "✅ Video đã sẵn sàng." in text
