@@ -44173,9 +44173,21 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         "Runtime/artifact:",
         f"• ffmpeg available: <code>{'yes' if ffmpeg else 'no'}</code>",
         f"• provider ready: <code>{'yes' if readiness.get('ok') else 'no'}</code>",
+        f"• required capability: <code>{html.escape(str(result.get('required_capability') or engine_route.get('provider_capability') or '-'))}</code>",
+        f"• route requires provider: <code>{'yes' if result.get('route_requires_provider') else 'no'}</code>",
+        f"• local fallback allowed: <code>{'yes' if result.get('local_fallback_allowed') else 'no'}</code>",
+        f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
+        f"• provider candidates: <code>{safe_int(result.get('provider_candidates_count'), 0)}</code>",
+        f"• selected provider: <code>{html.escape(str(result.get('selected_provider') or '-'))}</code>",
+        f"• provider selection blocker: <code>{html.escape(str(result.get('provider_selection_blocker') or '-')[:220])}</code>",
         f"• provider route selected: <code>{'yes' if result.get('provider_route_selected') else 'no'}</code>",
         f"• connector renderer: <code>{html.escape(str(result.get('connector_renderer') or result.get('renderer') or '-'))}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
+        f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
+        f"• provider submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
+        f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') else 'no'}</code>",
+        f"• provider poll called: <code>{'yes' if result.get('provider_poll_called') else 'no'}</code>",
+        f"• provider result url present: <code>{'yes' if result.get('provider_result_url_present') else 'no'}</code>",
         f"• provider video id: <code>{html.escape(','.join(mask_provider_task_id(item) for item in (result.get('provider_video_ids') or [])) or '-')}</code>",
         f"• provider task id: <code>{html.escape(','.join(mask_provider_task_id(item) for item in (result.get('provider_task_ids') or [])) or '-')}</code>",
         f"• selected model: <code>{html.escape(','.join(str(item) for item in (result.get('provider_models') or [])) or '-')}</code>",
@@ -44188,6 +44200,9 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• fallback used: <code>{'yes' if result.get('fallback_used') else 'no'}</code>",
         f"• fallback reason: <code>{html.escape(str(result.get('fallback_reason') or '-')[:220])}</code>",
         f"• visual source: <code>{html.escape(str(result.get('visual_source') or '-'))}</code>",
+        f"• base video source: <code>{html.escape(str(result.get('base_video_source') or '-'))}</code>",
+        f"• placeholder forbidden: <code>{'yes' if result.get('placeholder_forbidden') else 'no'}</code>",
+        f"• fallback policy: <code>{html.escape(str(result.get('fallback_policy') or result.get('fallback_capability') or '-'))}</code>",
         f"• placeholder detected: <code>{'yes' if result.get('placeholder_detected') or result.get('placeholder_visual') else 'no'}</code>",
         f"• raw prompt burned into frame: <code>{'yes' if result.get('raw_prompt_burned_into_frame') else 'no'}</code>",
         f"• final classified as: <code>{html.escape(str(result.get('visual_classification') or result.get('final_classification') or '-'))}</code>",
@@ -133858,6 +133873,92 @@ async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAUL
 async def cmd_video_provider_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_video_provider_status(update, context)
 
+
+VIDEO_PROVIDER_SMOKE_PROMPT = "Short vertical product video, clean studio background, jade green brand style, smooth camera movement."
+VIDEO_PROVIDER_SMOKE_ALLOWED = {"key4u_video", "shopaikey_video", "toanaas_video", "veo", "kling", "generic_http"}
+
+
+async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = _diagnostic_message_args(update, context)
+    provider = str(args[0] if args else "").strip().lower()
+    capability = str(args[1] if len(args) > 1 else "text_to_video").strip() or "text_to_video"
+    if provider in {"key4u", "k4u"}:
+        provider = "key4u_video"
+    elif provider in {"shopai", "shopaikey"}:
+        provider = "shopaikey_video"
+    if provider not in VIDEO_PROVIDER_SMOKE_ALLOWED:
+        return await update.message.reply_text(
+            "⚠️ Dùng: <code>/video_provider_smoke key4u_video text_to_video</code>\n"
+            "Hoặc: <code>/video_provider_smoke shopaikey_video text_to_video</code>",
+            parse_mode="HTML",
+        )
+    from services.video_provider_base import VideoGenerationRequest
+
+    output_dir = tempfile.mkdtemp(prefix=f"toanaas_video_provider_smoke_{provider}_")
+    env = dict(os.environ)
+    env["VIDEO_PROVIDER_CHAIN"] = provider
+    request = VideoGenerationRequest(
+        job_id=f"smoke-{provider}-{int(time.time())}",
+        product_type="video_ai_prompt",
+        video_flow_type="video_ai_prompt",
+        prompt=VIDEO_PROVIDER_SMOKE_PROMPT,
+        ratio="9:16",
+        duration_seconds=4.0,
+        add_ons={},
+        metadata={"admin_smoke": True, "no_wallet_charge": True},
+        required_capability=capability,
+    )
+    try:
+        result = video_provider_router.run_provider_generation(request, output_dir=output_dir, environ=env)
+    except Exception as exc:
+        return await update.message.reply_text(
+            "❌ Provider smoke lỗi trước khi có MP4.\n"
+            f"• provider: <code>{html.escape(provider)}</code>\n"
+            f"• blocker: <code>{html.escape(type(exc).__name__)}</code>\n"
+            "• charge: <code>no</code>",
+            parse_mode="HTML",
+        )
+    output_path = str(result.get("output_path") or result.get("local_path") or "")
+    validation = video_final_output.validate_final_video_output(
+        path=output_path,
+        result={
+            "renderer": "provider_scene_video",
+            "connector_renderer": "video_provider_bridge",
+            "visual_classification": "final_ai_video",
+            "placeholder_detected": False,
+        },
+    )
+    if not result.get("ok") or not validation.get("ok"):
+        blocker = str(result.get("blocker") or result.get("provider_error") or validation.get("reason") or "provider_smoke_failed")
+        task_id = ",".join(mask_provider_task_id(item) for item in (result.get("provider_task_ids") or [])) or "-"
+        return await update.message.reply_text(
+            "❌ Provider smoke chưa có MP4 hợp lệ.\n"
+            f"• provider: <code>{html.escape(provider)}</code>\n"
+            f"• capability: <code>{html.escape(capability)}</code>\n"
+            f"• attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>\n"
+            f"• task: <code>{html.escape(task_id)}</code>\n"
+            f"• blocker: <code>{html.escape(blocker[:220])}</code>\n"
+            "• charge: <code>no</code>",
+            parse_mode="HTML",
+        )
+    caption = (
+        "✅ Provider smoke tạo MP4 hợp lệ.\n"
+        f"provider={provider}; capability={capability}; charge=no"
+    )
+    try:
+        with open(output_path, "rb") as handle:
+            return await update.message.reply_video(video=handle, caption=caption, supports_streaming=True)
+    except Exception:
+        return await update.message.reply_text(
+            "✅ Provider smoke tạo MP4 hợp lệ nhưng Telegram chưa gửi được file trong lệnh này.\n"
+            f"• provider: <code>{html.escape(provider)}</code>\n"
+            "• charge: <code>no</code>",
+            parse_mode="HTML",
+        )
+
 async def prepare_remove_bg_from_cached_image(update: Update, context: ContextTypes.DEFAULT_TYPE, info: dict) -> bool:
     uid = update.effective_user.id
     if not info or not doc_is_image(info):
@@ -169705,6 +169806,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_provider_status", cmd_video_provider_status))
     tg_app.add_handler(CommandHandler("video_provider_audit", cmd_video_provider_audit))
     tg_app.add_handler(CommandHandler("video_provider_setup", cmd_video_provider_setup))
+    tg_app.add_handler(CommandHandler("video_provider_smoke", cmd_video_provider_smoke))
     tg_app.add_handler(CommandHandler("video_provider_curl", cmd_video_provider_curl))
     tg_app.add_handler(CommandHandler("prompt_vault_status", cmd_prompt_vault_status))
     tg_app.add_handler(CommandHandler("prompt_vault_refresh", cmd_prompt_vault_refresh))

@@ -397,9 +397,27 @@ def run_provider_generation(
 ) -> dict[str, Any]:
     env = dict(environ or os.environ)
     adapter, status = select_video_provider(request.required_capability, env)
+    allowed_capabilities = set(capability_options(request.required_capability))
+    provider_candidates = [
+        str(item.get("provider") or "")
+        for item in (status.get("providers") or [])
+        if item.get("configured") and (set(str(value) for value in (item.get("capabilities") or [])) & allowed_capabilities)
+    ]
+    base_debug = {
+        "provider_router_called": True,
+        "provider_candidates_count": len([item for item in provider_candidates if item]),
+        "selected_provider": adapter.provider_name if adapter else "",
+        "provider_selection_blocker": "" if adapter else "provider_capability_missing",
+        "provider_submit_called": False,
+        "provider_submit_http_status": 0,
+        "provider_task_id_saved": False,
+        "provider_poll_called": False,
+        "provider_result_url_present": False,
+    }
     if adapter is None:
         return {
             "ok": False,
+            **base_debug,
             "provider_attempted": False,
             "provider_error": "provider_capability_missing",
             "blocker": "provider_capability_missing",
@@ -410,7 +428,11 @@ def run_provider_generation(
     if not submit.ok:
         return {
             "ok": False,
+            **base_debug,
             "provider_attempted": True,
+            "provider_submit_called": True,
+            "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
+            "provider_task_id_saved": bool(submit.provider_task_id),
             "provider": adapter.provider_name,
             "provider_error": submit.error_code or "provider_submit_failed",
             "blocker": submit.error_code or "provider_submit_failed",
@@ -442,7 +464,12 @@ def run_provider_generation(
             if poll_result.status in {"failed", "cancelled"}:
                 return {
                     "ok": False,
+                    **base_debug,
                     "provider_attempted": True,
+                    "provider_submit_called": True,
+                    "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
+                    "provider_task_id_saved": bool(submit.provider_task_id),
+                    "provider_poll_called": True,
                     "provider": adapter.provider_name,
                     "provider_error": poll_result.error_code or f"provider_poll_{poll_result.status}",
                     "blocker": poll_result.error_code or f"provider_poll_{poll_result.status}",
@@ -453,7 +480,12 @@ def run_provider_generation(
         else:
             return {
                 "ok": False,
+                **base_debug,
                 "provider_attempted": True,
+                "provider_submit_called": True,
+                "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
+                "provider_task_id_saved": bool(submit.provider_task_id),
+                "provider_poll_called": True,
                 "provider": adapter.provider_name,
                 "provider_error": "provider_timeout",
                 "blocker": "provider_timeout",
@@ -464,7 +496,13 @@ def run_provider_generation(
     if not (poll_result.result_url or poll_result.file_url):
         return {
             "ok": False,
+            **base_debug,
             "provider_attempted": True,
+            "provider_submit_called": True,
+            "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
+            "provider_task_id_saved": bool(submit.provider_task_id),
+            "provider_poll_called": bool(not result_url),
+            "provider_result_url_present": False,
             "provider": adapter.provider_name,
             "provider_error": "provider_result_url_missing",
             "blocker": "provider_result_url_missing",
@@ -476,7 +514,13 @@ def run_provider_generation(
     if not artifact.ok:
         return {
             "ok": False,
+            **base_debug,
             "provider_attempted": True,
+            "provider_submit_called": True,
+            "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
+            "provider_task_id_saved": bool(submit.provider_task_id),
+            "provider_poll_called": bool(not result_url),
+            "provider_result_url_present": True,
             "provider": adapter.provider_name,
             "provider_error": artifact.error_code or "provider_download_failed",
             "blocker": artifact.error_code or "provider_download_failed",
@@ -490,7 +534,13 @@ def run_provider_generation(
         }
     return {
         "ok": True,
+        **base_debug,
         "provider_attempted": True,
+        "provider_submit_called": True,
+        "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
+        "provider_task_id_saved": bool(submit.provider_task_id),
+        "provider_poll_called": bool(not result_url),
+        "provider_result_url_present": True,
         "provider": adapter.provider_name,
         "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
         "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
