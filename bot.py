@@ -44563,6 +44563,8 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• provider result blocker: <code>{html.escape(str(result.get('provider_result_blocker') or '-')[:220])}</code>",
         f"• provider exception: <code>{html.escape(str(result.get('exception_class') or '-'))}</code> message=<code>{html.escape(str(result.get('exception_message_safe') or '-')[:220])}</code>",
         f"• provider result url present: <code>{'yes' if result.get('provider_result_url_present') else 'no'}</code>",
+        f"• continue polling: <code>{'yes' if result.get('continue_polling') else 'no'}</code>",
+        f"• normalized provider status: <code>{html.escape(str(result.get('normalized_provider_status') or result.get('provider_status') or '-'))}</code>",
         f"• provider video id: <code>{html.escape(','.join(mask_provider_task_id(item) for item in (result.get('provider_video_ids') or [])) or '-')}</code>",
         f"• provider task id: <code>{html.escape(','.join(mask_provider_task_id(item) for item in (result.get('provider_task_ids') or [])) or '-')}</code>",
         f"• selected model: <code>{html.escape(','.join(str(item) for item in (result.get('provider_models') or [])) or '-')}</code>",
@@ -44595,6 +44597,76 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
     return "\n".join(lines)
 
 
+def video_provider_job_debug_text(job_id: int, *, conn=None) -> str:
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return "⚠️ Dùng: <code>/video_provider_job_debug JOB_ID</code>"
+    owns_conn = conn is None
+    if conn is None:
+        conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, jid)
+        project = video_project_queue.get_video_project(conn, safe_int((job or {}).get("project_id"), 0)) if job else {}
+    finally:
+        if owns_conn:
+            conn.close()
+    if not job:
+        return f"⚠️ Không tìm thấy video job <code>{jid}</code>."
+    result = _video_debug_json((job or {}).get("result_json"), {})
+    events = [item for item in (result.get("provider_events") or []) if isinstance(item, dict)]
+    provider = str(result.get("selected_provider") or result.get("provider") or (events[0].get("provider") if events else "") or "-")
+    task_ids = [str(item or "") for item in (result.get("provider_task_ids") or []) if str(item or "").strip()]
+    if not task_ids:
+        task_ids = [str(item.get("task_id") or "") for item in events if str(item.get("task_id") or "").strip()]
+    video_ids = [str(item or "") for item in (result.get("provider_video_ids") or []) if str(item or "").strip()]
+    if not video_ids:
+        video_ids = [str(item.get("video_id") or "") for item in events if str(item.get("video_id") or "").strip()]
+    masked_tasks = ",".join(mask_provider_task_id(item) for item in task_ids) or "-"
+    masked_videos = ",".join(mask_provider_task_id(item) for item in video_ids) or "-"
+    poll_count = safe_int(result.get("provider_poll_count"), 0)
+    if not poll_count and result.get("provider_poll_called"):
+        poll_count = max(1, len(events))
+    result_url_present = bool(
+        result.get("provider_result_url_present")
+        or result.get("result_url_present")
+        or any(item.get("download_url_present") for item in events)
+    )
+    blocker = str(
+        result.get("blocker")
+        or result.get("provider_error")
+        or result.get("provider_submit_blocker")
+        or result.get("provider_poll_blocker")
+        or result.get("provider_result_blocker")
+        or (job or {}).get("last_error")
+        or "-"
+    )
+    terminal_state = str((project or {}).get("video_terminal_state") or result.get("terminal_state") or (job or {}).get("status") or "-")
+    lines = [
+        "🎬 <b>Video Provider Job Debug</b>",
+        "",
+        f"• job id: <code>{jid}</code>",
+        f"• project id: <code>{safe_int((project or {}).get('project_id'), 0) or '-'}</code>",
+        f"• provider: <code>{html.escape(provider)}</code>",
+        f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
+        f"• provider router called: <code>{'yes' if result.get('provider_router_called') else 'no'}</code>",
+        f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
+        f"• submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
+        f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') or task_ids or video_ids else 'no'}</code>",
+        f"• provider task id: <code>{html.escape(masked_tasks)}</code>",
+        f"• provider video id: <code>{html.escape(masked_videos)}</code>",
+        f"• provider poll called: <code>{'yes' if result.get('provider_poll_called') else 'no'}</code>",
+        f"• poll count: <code>{poll_count}</code>",
+        f"• last poll raw status: <code>{html.escape(str(result.get('provider_status_raw') or result.get('provider_status') or '-'))}</code>",
+        f"• normalized status: <code>{html.escape(str(result.get('normalized_provider_status') or result.get('provider_status') or '-'))}</code>",
+        f"• result url present: <code>{'yes' if result_url_present else 'no'}</code>",
+        f"• continue polling: <code>{'yes' if result.get('continue_polling') else 'no'}</code>",
+        f"• terminal state: <code>{html.escape(terminal_state)}</code>",
+        f"• charge: <code>{safe_int((project or {}).get('charged_xu') or (project or {}).get('total_xu_charged'), 0)}</code>",
+        f"• blocker: <code>{html.escape(blocker[:240])}</code>",
+    ]
+    return "\n".join(lines)
+
+
 async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else 0
     if not is_admin_user(uid):
@@ -44603,6 +44675,15 @@ async def cmd_video_render_debug(update: Update, context: ContextTypes.DEFAULT_T
     job_id = safe_int(args[0] if args else 0, 0)
     text = video_render_debug_text(job_id, mode=str(getattr(update.message, "text", "") or "").split()[0].lstrip("/") or "render")
     return await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def cmd_video_provider_job_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id if update.effective_user else 0
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+    args = _diagnostic_message_args(update, context)
+    job_id = safe_int(args[0] if args else 0, 0)
+    return await update.message.reply_text(video_provider_job_debug_text(job_id), parse_mode="HTML")
 
 
 def multiscene_job_status_text(job: dict, *, admin: bool = True) -> str:
@@ -156220,6 +156301,7 @@ ADMIN_CONTROL_MODULES = {
             ("/video_worker_claim_debug", "debug lane claim worker video, không lộ secret"),
             ("/video_job_debug <job_id>", "debug job video và lane claim, không lộ secret"),
             ("/video_render_debug <job_id>", "debug render video và artifact, không lộ secret"),
+            ("/video_provider_job_debug <job_id>", "debug lifecycle provider của job video, không lộ secret"),
             ("/video_artifact_debug <job_id>", "debug file MP4/artifact, không lộ secret"),
             ("/video_worker_debug", "debug worker lane tổng quan, không lộ secret"),
             ("/tool_test_video_product_worker_claim --no-charge", "kiểm tra route claim product video thật, không render MP4"),
@@ -171186,6 +171268,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("video_render_debug", cmd_video_render_debug))
     tg_app.add_handler(CommandHandler("video_delivery_debug", cmd_video_render_debug))
     tg_app.add_handler(CommandHandler("video_artifact_debug", cmd_video_render_debug))
+    tg_app.add_handler(CommandHandler("video_provider_job_debug", cmd_video_provider_job_debug))
     tg_app.add_handler(MessageHandler(filters.Regex(r"^/tool_test_video_product_worker_claim(?:@\w+)?(?:\s|$)"), cmd_tool_test_video_product_worker_claim))
     tg_app.add_handler(CommandHandler("admin_whoami", cmd_admin_whoami))
     tg_app.add_handler(CommandHandler("telegram_status", cmd_telegram_status))

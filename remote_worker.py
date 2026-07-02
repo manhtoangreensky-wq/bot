@@ -665,8 +665,21 @@ def process_claimed_job(job: dict) -> dict:
             "admin_only": bool(job.get("admin_only")),
             "no_charge": bool(job.get("no_charge")) or force_no_charge,
             "connector_renderer": str(connector_result.get("renderer") or ""),
+            "route_requires_provider": bool(connector_result.get("route_requires_provider")),
+            "local_fallback_allowed": bool(connector_result.get("local_fallback_allowed")),
+            "provider_router_called": bool(connector_result.get("provider_router_called")),
+            "provider_candidates_count": int(connector_result.get("provider_candidates_count") or 0),
+            "selected_provider": str(connector_result.get("selected_provider") or ""),
+            "provider_selection_blocker": str(connector_result.get("provider_selection_blocker") or ""),
             "provider_attempted": bool(connector_result.get("provider_attempted")),
             "provider_route_selected": bool(connector_result.get("provider_route_selected")),
+            "provider_submit_called": bool(connector_result.get("provider_submit_called")),
+            "provider_submit_http_status": connector_result.get("provider_submit_http_status") or 0,
+            "provider_task_id_saved": bool(connector_result.get("provider_task_id_saved")),
+            "provider_poll_called": bool(connector_result.get("provider_poll_called")),
+            "provider_result_url_present": bool(connector_result.get("provider_result_url_present")),
+            "continue_polling": bool(connector_result.get("continue_polling")),
+            "normalized_provider_status": str(connector_result.get("normalized_provider_status") or ""),
             "provider_events": connector_result.get("provider_events") or [],
             "provider_task_ids": connector_result.get("provider_task_ids") or [],
             "provider_video_ids": connector_result.get("provider_video_ids") or [],
@@ -680,6 +693,9 @@ def process_claimed_job(job: dict) -> dict:
             "fallback_used": bool(connector_result.get("fallback_used")),
             "fallback_reason": str(connector_result.get("fallback_reason") or ""),
             "visual_source": str(connector_result.get("visual_source") or ""),
+            "base_video_source": str(connector_result.get("base_video_source") or ""),
+            "placeholder_forbidden": bool(connector_result.get("placeholder_forbidden")),
+            "fallback_policy": str(connector_result.get("fallback_policy") or connector_result.get("fallback_capability") or ""),
             "visual_classification": visual_classification,
             "final_classification": visual_classification,
             "placeholder_detected": bool(connector_result.get("placeholder_detected") or connector_result.get("placeholder_visual")),
@@ -882,10 +898,13 @@ def run_once(
         if job_id:
             message = first_line(str(exc))
             unavailable = REAL_VIDEO_RENDER_UNAVAILABLE in message
+            diagnostics = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
+            continue_polling = bool(diagnostics.get("continue_polling")) or "provider_in_progress" in message
             fail_job(
                 job_id,
                 f"{type(exc).__name__}:{message}",
-                retryable=not bool(
+                retryable=bool(continue_polling)
+                or not bool(
                     unavailable
                     or canary_only
                     or admin_canary_only

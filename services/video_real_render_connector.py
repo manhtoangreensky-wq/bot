@@ -755,7 +755,13 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         quality=str((job or {}).get("quality") or ""),
         style=str((job or {}).get("style") or ""),
         add_ons=_addon_plan(job),
-        metadata={"scene_id": _safe_int(getattr(scene, "scene_id", 0), 0), "raw_output_path": raw_path},
+        metadata={
+            "scene_id": _safe_int(getattr(scene, "scene_id", 0), 0),
+            "raw_output_path": raw_path,
+            "product_video": bool(str((job or {}).get("source") or "") == "product_video" or (job or {}).get("product_video")),
+            "render_mode": str((job or {}).get("render_mode") or ""),
+            "allow_provider_pending": True,
+        },
         required_capability=required_capability,
     )
     output_dir = os.path.dirname(os.path.abspath(raw_path))
@@ -1145,6 +1151,9 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     product_route = video_final_output.route_for_product_type(product_type)
     required_capability = str(product_route.get("provider_capability") or "text_to_video")
     fallback_capability = str(product_route.get("fallback_capability") or "")
+    render_mode = str(job.get("render_mode") or "").strip().lower().replace("-", "_")
+    test_pattern = bool(job.get("test_pattern") or job.get("admin_video_delivery"))
+    provider_call_requested = bool(job.get("provider_call") or job.get("real_renderer_required") or product_type == "video_ai_prompt")
     result: dict[str, Any] = {}
     provider_attempted = False
     provider_events: list[dict[str, Any]] = []
@@ -1152,13 +1161,23 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
     fallback_used = False
     fallback_reason = ""
     provider_candidates = _provider_candidates_for_capability(readiness, required_capability)
+    force_product_provider_route = bool(
+        is_product_video
+        and render_mode == "real"
+        and not test_pattern
+        and provider_call_requested
+        and required_capability in PROVIDER_REQUIRED_CAPABILITIES
+    )
     route_requires_provider = bool(
         is_product_video
-        and _route_requires_provider(
-            product_type,
-            required_capability,
-            fallback_capability,
-            provider_ready=bool(provider_candidates),
+        and (
+            force_product_provider_route
+            or _route_requires_provider(
+                product_type,
+                required_capability,
+                fallback_capability,
+                provider_ready=bool(provider_candidates),
+            )
         )
     )
     provider_route_selected = bool(provider_candidates) if route_requires_provider else bool(readiness.get("ok"))
@@ -1216,6 +1235,8 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
             or data.get("result_url_present")
             or any((item or {}).get("download_url_present") for item in provider_events if isinstance(item, dict))
         )
+        data["continue_polling"] = bool(data.get("continue_polling"))
+        data["normalized_provider_status"] = str(data.get("normalized_provider_status") or data.get("provider_status") or "")
         data["base_video_source"] = str(
             data.get("base_video_source")
             or (
@@ -1477,6 +1498,8 @@ def render_real_video_job(job: dict, work_dir: str) -> dict:
         or result.get("result_url_present")
         or any((item or {}).get("download_url_present") for item in provider_events if isinstance(item, dict))
     )
+    result["continue_polling"] = bool(result.get("continue_polling"))
+    result["normalized_provider_status"] = str(result.get("normalized_provider_status") or result.get("provider_status") or "")
     result["base_video_source"] = str(
         result.get("base_video_source")
         or (
