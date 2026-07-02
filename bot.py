@@ -93,7 +93,7 @@ import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import voice_clone_pipeline
-from services import remote_worker_api, video_final_output, video_provider_router, worker_auth
+from services import remote_worker_api, storage_cleanup as storage_cleanup_service, video_final_output, video_provider_router, worker_auth
 from services.video_provider_base import mask_provider_task_id
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
@@ -1006,6 +1006,16 @@ def is_railway_runtime() -> bool:
             "RAILWAY_DEPLOYMENT_ID",
         )
     )
+
+STORAGE_CLEANUP_BASE_DIR = _env(
+    "STORAGE_CLEANUP_BASE_DIR",
+    "/app/files" if is_railway_runtime() else "files",
+)
+STORAGE_CLEANUP_TTL_HOURS = max(1, env_int("STORAGE_CLEANUP_TTL_HOURS", 168))
+STORAGE_CLEANUP_AUTO_ENABLED = env_flag("STORAGE_CLEANUP_AUTO_ENABLED", "false")
+STORAGE_CLEANUP_MAX_SCAN_FILES = max(100, env_int("STORAGE_CLEANUP_MAX_SCAN_FILES", 10000))
+STORAGE_CLEANUP_MAX_DELETE_FILES = max(1, env_int("STORAGE_CLEANUP_MAX_DELETE_FILES", 500))
+STORAGE_CLEANUP_CONFIRM_TOKEN = "CONFIRM_TTL"
 
 def expected_telegram_webhook_url() -> str:
     return (PUBLIC_BASE_URL.rstrip("/") + TELEGRAM_WEBHOOK_PATH) if PUBLIC_BASE_URL else ""
@@ -77824,6 +77834,233 @@ async def cmd_security_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     await update.message.reply_text(security_log_text(), parse_mode="HTML", reply_markup=security_log_keyboard())
+
+
+def storage_cleanup_base_dir() -> str:
+    configured = str(STORAGE_CLEANUP_BASE_DIR or "").strip()
+    if not configured:
+        configured = "/app/files" if is_railway_runtime() else "files"
+    if os.path.isabs(configured):
+        return configured
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), configured))
+
+
+def storage_cleanup_ttl_seconds() -> int:
+    return max(1, int(STORAGE_CLEANUP_TTL_HOURS)) * 3600
+
+
+def _storage_cleanup_local_path(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw.startswith(("http://", "https://", "tg://")):
+        return ""
+    base_dir = storage_cleanup_base_dir()
+    candidates = []
+    if os.path.isabs(raw):
+        candidates.append(os.path.abspath(raw))
+    else:
+        candidates.append(os.path.abspath(raw))
+        candidates.append(os.path.abspath(os.path.join(os.path.dirname(__file__), raw)))
+    for candidate in candidates:
+        if path_under_dir(candidate, base_dir):
+            return candidate
+    return ""
+
+
+def storage_cleanup_db_referenced_paths(max_rows: int = 3000) -> set[str]:
+    table_columns = {
+        "storyboard_videos": ("output_path", "output_url"),
+        "voice_assets": ("local_path",),
+        "subtitle_assets": ("local_path",),
+        "translation_assets": ("local_path",),
+        "dub_assets": ("local_path",),
+        "local_worker_jobs": ("output_url",),
+        "music_generation_jobs": ("output_url",),
+        "shopaikey_jobs": ("result_url", "output_sent_result_url"),
+    }
+    protected: set[str] = set()
+    conn = None
+    try:
+        conn = db_connect()
+        cur = conn.cursor()
+        for table, candidate_columns in table_columns.items():
+            try:
+                existing = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})").fetchall()}
+            except Exception:
+                continue
+            for column in candidate_columns:
+                if column not in existing:
+                    continue
+                try:
+                    rows = cur.execute(
+                        f"SELECT {column} FROM {table} WHERE {column} IS NOT NULL AND TRIM({column}) != '' LIMIT ?",
+                        (max(1, int(max_rows)),),
+                    ).fetchall()
+                except Exception:
+                    continue
+                for row in rows:
+                    local_path = _storage_cleanup_local_path(row[0] if row else "")
+                    if local_path:
+                        protected.add(os.path.abspath(local_path))
+    except Exception as exc:
+        logger.warning("storage cleanup protected path scan skipped: %s", type(exc).__name__)
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+    return protected
+
+
+def storage_cleanup_protected_paths() -> set[str]:
+    protected: set[str] = set()
+    for candidate in (DB_FILE, sqlite_db_abs_path(), sqlite_local_fallback_path()):
+        value = str(candidate or "").strip()
+        if value:
+            protected.add(os.path.abspath(value))
+    protected.update(storage_cleanup_db_referenced_paths())
+    return {path.replace("\\", "/") for path in protected if path}
+
+
+def format_storage_bytes(size: object) -> str:
+    amount = float(safe_int(size, 0))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if amount < 1024 or unit == "TB":
+            return f"{amount:.1f} {unit}" if unit != "B" else f"{int(amount)} B"
+        amount /= 1024
+    return f"{int(safe_int(size, 0))} B"
+
+
+def storage_cleanup_disk_usage() -> dict:
+    target = storage_cleanup_base_dir()
+    candidate = target
+    while candidate and not os.path.exists(candidate):
+        parent = os.path.dirname(candidate)
+        if not parent or parent == candidate:
+            break
+        candidate = parent
+    return storage_cleanup_service.disk_usage_for_path(candidate or target)
+
+
+def run_storage_cleanup_report(*, delete: bool = False, confirm_delete: bool = False):
+    return storage_cleanup_service.audit_storage_cleanup(
+        base_dir=storage_cleanup_base_dir(),
+        ttl_seconds=storage_cleanup_ttl_seconds(),
+        protected_paths=storage_cleanup_protected_paths(),
+        delete=delete,
+        confirm_delete=confirm_delete,
+        max_scan_files=STORAGE_CLEANUP_MAX_SCAN_FILES,
+        max_delete_files=STORAGE_CLEANUP_MAX_DELETE_FILES,
+    )
+
+
+def storage_cleanup_report_lines(report, disk: dict | None = None, *, mode: str = "audit") -> list[str]:
+    disk = disk or {}
+    mode_label = "DELETE CONFIRMED" if not bool(report.dry_run) else "DRY RUN"
+    lines = [
+        "<b>RAILWAY STORAGE CLEANUP - TOAN AAS</b>",
+        "",
+        f"- Mode: <b>{safe_html(mode_label)}</b>",
+        f"- Base: <code>{safe_html(report.base_dir)}</code>",
+        f"- TTL: <code>{int(report.ttl_seconds // 3600)} gio</code>",
+        f"- Auto cleanup: <code>{'ON' if STORAGE_CLEANUP_AUTO_ENABLED else 'OFF'}</code>",
+        f"- Max scan/delete: <code>{int(STORAGE_CLEANUP_MAX_SCAN_FILES)}</code> / <code>{int(STORAGE_CLEANUP_MAX_DELETE_FILES)}</code>",
+    ]
+    if disk.get("ok"):
+        lines.extend([
+            f"- Disk used: <code>{format_storage_bytes(disk.get('used'))}</code> / <code>{format_storage_bytes(disk.get('total'))}</code> ({safe_html(disk.get('used_percent'))}%)",
+            f"- Disk free: <code>{format_storage_bytes(disk.get('free'))}</code>",
+        ])
+    lines.extend(["", "<b>Cleanup targets</b>"])
+    for root in report.roots:
+        lines.append(f"- <code>{safe_html(root)}</code>")
+    lines.extend([
+        "",
+        "<b>Audit</b>",
+        f"- Scanned: <code>{int(report.files_scanned)}</code> files / <code>{format_storage_bytes(report.bytes_scanned)}</code>",
+        f"- Eligible older-than-TTL artifacts: <code>{int(report.files_eligible)}</code> / <code>{format_storage_bytes(report.bytes_eligible)}</code>",
+        f"- Young files kept: <code>{int(report.files_young)}</code>",
+        f"- Blocked/protected kept: <code>{int(report.files_blocked)}</code>",
+        f"- Deleted: <code>{int(report.files_deleted)}</code> / <code>{format_storage_bytes(report.bytes_deleted)}</code>",
+        "",
+        "<b>Safety locks</b>",
+        "- Khong xoa DB/sqlite, wallet, payment, finance, .env/secret, config, source code, Railway runtime config.",
+        "- Khong xoa file con duoc DB/job tham chieu.",
+        "- Khong xoa file tre hon TTL neu chua co xac nhan rieng.",
+        f"- Lenh xoa thu cong: <code>/storage_cleanup_confirm {STORAGE_CLEANUP_CONFIRM_TOKEN}</code>",
+    ])
+    if report.errors:
+        lines.extend(["", "<b>Warnings</b>"])
+        for error in report.errors[:8]:
+            lines.append(f"- <code>{safe_html(error)}</code>")
+    if report.samples:
+        lines.extend(["", "<b>Samples</b>"])
+        for item in report.samples[:10]:
+            name = os.path.basename(str(item.path or "")) or str(item.path or "-")[-80:]
+            age_hours = int(item.age_seconds // 3600)
+            lines.append(
+                f"- <code>{safe_html(item.status)}</code> {safe_html(name)} - "
+                f"{format_storage_bytes(item.size_bytes)}, {age_hours}h, <code>{safe_html(item.reason)}</code>"
+            )
+    if mode == "confirm_missing":
+        lines.extend(["", f"Canh bao: chua xoa file nao. Muon xoa artifact qua TTL, chay: <code>/storage_cleanup_confirm {STORAGE_CLEANUP_CONFIRM_TOKEN}</code>"])
+    return lines
+
+
+def run_storage_cleanup_auto_once() -> dict:
+    if not STORAGE_CLEANUP_AUTO_ENABLED:
+        return {"ok": False, "reason": "auto_disabled"}
+    report = run_storage_cleanup_report(delete=True, confirm_delete=True)
+    logger.info(
+        "storage_cleanup_auto | deleted=%s bytes=%s eligible=%s errors=%s",
+        report.files_deleted,
+        report.bytes_deleted,
+        report.files_eligible,
+        ",".join(report.errors[:5]),
+    )
+    return {"ok": True, "report": report.to_dict()}
+
+
+async def cmd_storage_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("Ban khong co quyen dung lenh nay.")
+    report = run_storage_cleanup_report(delete=False, confirm_delete=False)
+    await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="audit"), limit=3900)
+
+
+async def cmd_storage_cleanup_dry_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("Ban khong co quyen dung lenh nay.")
+    report = run_storage_cleanup_report(delete=False, confirm_delete=False)
+    await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="dry_run"), limit=3900)
+
+
+async def cmd_storage_cleanup_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("Ban khong co quyen dung lenh nay.")
+    args = list(getattr(context, "args", []) or [])
+    if not args or str(args[0]).strip() != STORAGE_CLEANUP_CONFIRM_TOKEN:
+        report = run_storage_cleanup_report(delete=False, confirm_delete=False)
+        return await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="confirm_missing"), limit=3900)
+    report = run_storage_cleanup_report(delete=True, confirm_delete=True)
+    await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="confirm"), limit=3900)
+
+
+async def cmd_storage_cleanup_auto_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("Ban khong co quyen dung lenh nay.")
+    lines = [
+        "<b>STORAGE CLEANUP AUTO STATUS</b>",
+        "",
+        f"- Auto cleanup: <code>{'ON' if STORAGE_CLEANUP_AUTO_ENABLED else 'OFF'}</code>",
+        f"- Base: <code>{safe_html(storage_cleanup_base_dir())}</code>",
+        f"- TTL: <code>{int(storage_cleanup_ttl_seconds() // 3600)} gio</code>",
+        f"- Max scan/delete: <code>{int(STORAGE_CLEANUP_MAX_SCAN_FILES)}</code> / <code>{int(STORAGE_CLEANUP_MAX_DELETE_FILES)}</code>",
+        "",
+        "Mac dinh an toan: auto OFF. Dung /storage_cleanup_dry_run de xem truoc, /storage_cleanup_confirm CONFIRM_TTL de xoa artifact qua TTL.",
+    ]
+    await reply_html_lines(update, lines, limit=3900)
+
 
 async def cmd_data_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
@@ -170734,6 +170971,10 @@ async def run_polling_guarded():
 async def lifespan(app: FastAPI):
     global tg_app, tg_polling_task, tg_webhook_watchdog_task, tg_auto_backup_task, tg_memory_reminder_task, tg_shopaikey_usage_task, tg_payos_expiry_task, ACTIVE_TELEGRAM_UPDATE_MODE, ACTIVE_TELEGRAM_WEBHOOK_URL, TELEGRAM_STARTUP_ERROR, ACTIVE_TELEGRAM_BOT_ID, ACTIVE_TELEGRAM_BOT_USERNAME, TELEGRAM_HANDLERS_REGISTERED
     init_db()
+    try:
+        run_storage_cleanup_auto_once()
+    except Exception as exc:
+        logger.warning("storage cleanup auto skipped: %s", type(exc).__name__)
     token_summary = telegram_token_runtime_summary()
     db_summary = runtime_db_status()
     data_summary = data_persistence_status_payload(include_counts=False)
@@ -170826,6 +171067,10 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("admin_doc_sources", cmd_admin_doc_sources))
     tg_app.add_handler(CommandHandler("security_status", cmd_security_status))
     tg_app.add_handler(CommandHandler("data_status", cmd_data_status))
+    tg_app.add_handler(CommandHandler("storage_audit", cmd_storage_audit))
+    tg_app.add_handler(CommandHandler("storage_cleanup_dry_run", cmd_storage_cleanup_dry_run))
+    tg_app.add_handler(CommandHandler("storage_cleanup_confirm", cmd_storage_cleanup_confirm))
+    tg_app.add_handler(CommandHandler("storage_cleanup_auto_status", cmd_storage_cleanup_auto_status))
     tg_app.add_handler(CommandHandler("db_status", cmd_db_status))
     tg_app.add_handler(CommandHandler("security_log", cmd_security_log))
     tg_app.add_handler(CommandHandler("security_checklist", cmd_security_checklist))
