@@ -93,7 +93,7 @@ import video_image_to_video_flow as ivf
 from services import multiscene_video_pipeline as multiscene_blackbox
 from services import audio_postprocess, minimax_voice_adapter, product_progress_status, provider_gate, subtitle_dub_pipeline, subtitle_dub_product_pipeline, workflow_graph_contract
 from services import voice_clone_pipeline
-from services import remote_worker_api, storage_cleanup as storage_cleanup_service, video_final_output, video_provider_router, worker_auth
+from services import artifact_storage, remote_worker_api, storage_cleanup as storage_cleanup_service, video_final_output, video_provider_router, worker_auth
 from services.video_provider_base import mask_provider_task_id
 from services import video_asset_intake as video_assets
 from services import video_postprocess_pipeline as video_postprocess
@@ -991,6 +991,16 @@ LOCAL_WORKER_TOKEN = _env("LOCAL_WORKER_TOKEN")
 LOCAL_WORKER_POLL_ENABLED = env_flag("LOCAL_WORKER_POLL_ENABLED", "true")
 LOCAL_WORKER_MAX_JOB_SECONDS = max(30, env_int("LOCAL_WORKER_MAX_JOB_SECONDS", 600))
 WORKER_RESULT_UPLOAD_DIR = _env("WORKER_RESULT_UPLOAD_DIR", os.path.join("files", "worker_results"))
+ARTIFACT_STORAGE_BACKEND = _env("ARTIFACT_STORAGE_BACKEND", "local").strip().lower() or "local"
+ARTIFACT_VPS_HOST = _env("ARTIFACT_VPS_HOST", "")
+ARTIFACT_VPS_PORT = max(1, env_int("ARTIFACT_VPS_PORT", 22))
+ARTIFACT_VPS_USER = _env("ARTIFACT_VPS_USER", "toanaas")
+ARTIFACT_VPS_BASE_DIR = _env("ARTIFACT_VPS_BASE_DIR", "/opt/toanaas-storage")
+ARTIFACT_VPS_SSH_KEY_PATH = _env("ARTIFACT_VPS_SSH_KEY_PATH", "")
+ARTIFACT_PUBLIC_BASE_URL = _env("ARTIFACT_PUBLIC_BASE_URL", "")
+ARTIFACT_TTL_HOURS = max(1, env_int("ARTIFACT_TTL_HOURS", 24))
+ARTIFACT_TMP_TTL_HOURS = max(1, env_int("ARTIFACT_TMP_TTL_HOURS", 6))
+ARTIFACT_MAX_MB = max(1, env_int("ARTIFACT_MAX_MB", 1024))
 LOCAL_FFMPEG_PATH = _env("LOCAL_FFMPEG_PATH", r"D:\TOANAAS\ffmpeg-8.1.1\bin\ffmpeg.exe")
 LOCAL_COMFY_URL = _env("LOCAL_COMFY_URL", "http://127.0.0.1:8188")
 LOCAL_COMFY_ENABLED = env_flag("LOCAL_COMFY_ENABLED", "false")
@@ -77836,6 +77846,22 @@ async def cmd_security_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(security_log_text(), parse_mode="HTML", reply_markup=security_log_keyboard())
 
 
+
+def artifact_storage_config() -> artifact_storage.ArtifactStorageConfig:
+    return artifact_storage.ArtifactStorageConfig(
+        backend=ARTIFACT_STORAGE_BACKEND,
+        vps_host=ARTIFACT_VPS_HOST,
+        vps_port=ARTIFACT_VPS_PORT,
+        vps_user=ARTIFACT_VPS_USER,
+        vps_base_dir=ARTIFACT_VPS_BASE_DIR,
+        vps_ssh_key_path=ARTIFACT_VPS_SSH_KEY_PATH,
+        public_base_url=ARTIFACT_PUBLIC_BASE_URL,
+        ttl_hours=ARTIFACT_TTL_HOURS,
+        tmp_ttl_hours=ARTIFACT_TMP_TTL_HOURS,
+        max_mb=ARTIFACT_MAX_MB,
+    )
+
+
 def storage_cleanup_base_dir() -> str:
     configured = str(STORAGE_CLEANUP_BASE_DIR or "").strip()
     if not configured:
@@ -77846,7 +77872,11 @@ def storage_cleanup_base_dir() -> str:
 
 
 def storage_cleanup_ttl_seconds() -> int:
-    return max(1, int(STORAGE_CLEANUP_TTL_HOURS)) * 3600
+    return max(1, int(ARTIFACT_TTL_HOURS or STORAGE_CLEANUP_TTL_HOURS)) * 3600
+
+
+def storage_cleanup_tmp_ttl_seconds() -> int:
+    return max(1, int(ARTIFACT_TMP_TTL_HOURS)) * 3600
 
 
 def _storage_cleanup_local_path(value: object) -> str:
@@ -77876,6 +77906,8 @@ def storage_cleanup_db_referenced_paths(max_rows: int = 3000) -> set[str]:
         "local_worker_jobs": ("output_url",),
         "music_generation_jobs": ("output_url",),
         "shopaikey_jobs": ("result_url", "output_sent_result_url"),
+        "production_assets": ("local_path",),
+        "video_projects": ("final_video_path",),
     }
     protected: set[str] = set()
     conn = None
@@ -77946,6 +77978,7 @@ def run_storage_cleanup_report(*, delete: bool = False, confirm_delete: bool = F
     return storage_cleanup_service.audit_storage_cleanup(
         base_dir=storage_cleanup_base_dir(),
         ttl_seconds=storage_cleanup_ttl_seconds(),
+        tmp_ttl_seconds=storage_cleanup_tmp_ttl_seconds(),
         protected_paths=storage_cleanup_protected_paths(),
         delete=delete,
         confirm_delete=confirm_delete,
@@ -77954,15 +77987,17 @@ def run_storage_cleanup_report(*, delete: bool = False, confirm_delete: bool = F
     )
 
 
-def storage_cleanup_report_lines(report, disk: dict | None = None, *, mode: str = "audit") -> list[str]:
+def storage_cleanup_report_lines(report, disk: dict | None = None, *, mode: str = "preview") -> list[str]:
     disk = disk or {}
-    mode_label = "DELETE CONFIRMED" if not bool(report.dry_run) else "DRY RUN"
+    mode_label = "DELETE CONFIRMED" if not bool(report.dry_run) else "PREVIEW / DRY RUN"
+    cfg = artifact_storage_config()
     lines = [
-        "<b>RAILWAY STORAGE CLEANUP - TOAN AAS</b>",
+        "<b>STORAGE CLEANUP - TOAN AAS</b>",
         "",
         f"- Mode: <b>{safe_html(mode_label)}</b>",
+        f"- Artifact backend: <code>{safe_html(cfg.backend)}</code>",
         f"- Base: <code>{safe_html(report.base_dir)}</code>",
-        f"- TTL: <code>{int(report.ttl_seconds // 3600)} gio</code>",
+        f"- TTL artifact/tmp: <code>{int(report.ttl_seconds // 3600)}h</code> / <code>{int(storage_cleanup_tmp_ttl_seconds() // 3600)}h</code>",
         f"- Auto cleanup: <code>{'ON' if STORAGE_CLEANUP_AUTO_ENABLED else 'OFF'}</code>",
         f"- Max scan/delete: <code>{int(STORAGE_CLEANUP_MAX_SCAN_FILES)}</code> / <code>{int(STORAGE_CLEANUP_MAX_DELETE_FILES)}</code>",
     ]
@@ -77978,16 +78013,18 @@ def storage_cleanup_report_lines(report, disk: dict | None = None, *, mode: str 
         "",
         "<b>Audit</b>",
         f"- Scanned: <code>{int(report.files_scanned)}</code> files / <code>{format_storage_bytes(report.bytes_scanned)}</code>",
-        f"- Eligible older-than-TTL artifacts: <code>{int(report.files_eligible)}</code> / <code>{format_storage_bytes(report.bytes_eligible)}</code>",
+        f"- Delete candidates: <code>{int(report.files_eligible)}</code> / <code>{format_storage_bytes(report.bytes_eligible)}</code>",
         f"- Young files kept: <code>{int(report.files_young)}</code>",
         f"- Blocked/protected kept: <code>{int(report.files_blocked)}</code>",
         f"- Deleted: <code>{int(report.files_deleted)}</code> / <code>{format_storage_bytes(report.bytes_deleted)}</code>",
         "",
-        "<b>Safety locks</b>",
-        "- Khong xoa DB/sqlite, wallet, payment, finance, .env/secret, config, source code, Railway runtime config.",
+        "<b>Hard safety</b>",
+        "- Khong xoa DB/sqlite, wallet/payment/finance, user data, pricing/finance, .env/secrets, repo source, Railway config.",
         "- Khong xoa file con duoc DB/job tham chieu.",
         "- Khong xoa file tre hon TTL neu chua co xac nhan rieng.",
-        f"- Lenh xoa thu cong: <code>/storage_cleanup_confirm {STORAGE_CLEANUP_CONFIRM_TOKEN}</code>",
+        "- Preview: /storage_cleanup_preview hoac /storage_cleanup_dry_run",
+        f"- Legacy confirm: <code>/storage_cleanup_confirm {STORAGE_CLEANUP_CONFIRM_TOKEN}</code>",
+        "- New confirm: <code>/storage_cleanup_run confirm</code>",
     ])
     if report.errors:
         lines.extend(["", "<b>Warnings</b>"])
@@ -78003,7 +78040,7 @@ def storage_cleanup_report_lines(report, disk: dict | None = None, *, mode: str 
                 f"{format_storage_bytes(item.size_bytes)}, {age_hours}h, <code>{safe_html(item.reason)}</code>"
             )
     if mode == "confirm_missing":
-        lines.extend(["", f"Canh bao: chua xoa file nao. Muon xoa artifact qua TTL, chay: <code>/storage_cleanup_confirm {STORAGE_CLEANUP_CONFIRM_TOKEN}</code>"])
+        lines.extend(["", f"No files deleted. Use exactly: <code>/storage_cleanup_run confirm</code> or <code>/storage_cleanup_confirm {STORAGE_CLEANUP_CONFIRM_TOKEN}</code>"])
     return lines
 
 
@@ -78021,23 +78058,122 @@ def run_storage_cleanup_auto_once() -> dict:
     return {"ok": True, "report": report.to_dict()}
 
 
+def store_uploaded_worker_artifact(uploaded_path: str, *, job_id: int | str) -> dict:
+    if not uploaded_path:
+        return {"ok": False, "reason": "missing_uploaded_path"}
+    meta = artifact_storage.store_artifact(
+        uploaded_path,
+        config=artifact_storage_config(),
+        product_area="worker_results",
+        job_id=job_id,
+        delete_local_after_upload=False,
+    )
+    if not meta.get("ok"):
+        logger.warning("artifact storage skipped | backend=%s reason=%s", ARTIFACT_STORAGE_BACKEND, meta.get("reason"))
+    return meta
+
+
+def cleanup_worker_local_copy_after_delivery(uploaded_path: str, metadata: dict, delivery: dict) -> dict:
+    cfg = artifact_storage_config()
+    if not cfg.is_remote or not uploaded_path or not metadata.get("ok"):
+        return {"deleted": False, "reason": "local_backend_or_missing_meta"}
+    if not (delivery.get("sent") or metadata.get("public_url")):
+        return {"deleted": False, "reason": "not_delivered_or_recoverable"}
+    abs_path = os.path.abspath(uploaded_path)
+    upload_root = os.path.abspath(worker_result_upload_root())
+    if not path_under_dir(abs_path, upload_root):
+        return {"deleted": False, "reason": "outside_worker_results"}
+    if not os.path.exists(abs_path):
+        return {"deleted": False, "reason": "already_missing"}
+    try:
+        os.remove(abs_path)
+        return {"deleted": True, "reason": "deleted_after_vps_upload"}
+    except OSError as exc:
+        return {"deleted": False, "reason": type(exc).__name__}
+
+
+async def send_generated_video_artifact_for_delivery(
+    bot_client,
+    chat_id,
+    video_path: str,
+    artifact_metadata: dict | None = None,
+    *,
+    filename: str = "",
+    caption: str = "",
+    lang: str = "vi",
+) -> dict:
+    if video_path and os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+        return await send_generated_video_path_for_delivery(
+            bot_client,
+            chat_id,
+            video_path,
+            filename=filename,
+            caption=caption,
+            lang=lang,
+        )
+    ref = artifact_storage.delivery_reference(artifact_metadata or {})
+    if not ref.get("ok") or ref.get("kind") != "public_url":
+        return {**generated_media_debug_payload(method="failed", file_size=0, limit_bytes=generated_media_delivery_limits()["generated_bytes"], reason="missing_file"), "sent": False}
+    public_url = str(ref.get("value") or "")
+    try:
+        sent = await bot_client.send_video(chat_id=chat_id, video=public_url, caption=caption, supports_streaming=True)
+        return {"sent": True, "method": "public_url_video", "telegram_message_id": telegram_delivery_message_id(sent)}
+    except Exception:
+        sent = await bot_client.send_document(chat_id=chat_id, document=public_url, filename=filename or "toan_aas_video.mp4", caption=caption)
+        return {"sent": True, "method": "public_url_document", "telegram_message_id": telegram_delivery_message_id(sent)}
+
+
+def _job_artifact_snapshot(job_id: int | str) -> dict:
+    jid = safe_int(job_id, 0)
+    if jid <= 0:
+        return {"ok": False, "reason": "job_id_required"}
+    conn = db_connect()
+    try:
+        job = video_project_queue.get_video_render_job(conn, jid)
+        if not job:
+            return {"ok": False, "reason": "job_not_found"}
+        project = video_project_queue.get_video_project(conn, int(job.get("project_id") or 0))
+        result = {}
+        try:
+            result = json.loads(str(job.get("result_json") or "{}"))
+        except Exception:
+            result = {}
+        metadata = result.get("artifact_storage") if isinstance(result.get("artifact_storage"), dict) else {}
+        return {
+            "ok": True,
+            "job_id": jid,
+            "status": str(job.get("status") or ""),
+            "final_video_path": str(project.get("final_video_path") or ""),
+            "local_exists": bool(project.get("final_video_path") and os.path.exists(str(project.get("final_video_path")))),
+            "artifact": metadata,
+            "public": artifact_storage.public_metadata(metadata),
+            "delivery_reference": artifact_storage.delivery_reference(metadata),
+        }
+    finally:
+        conn.close()
+
+
 async def cmd_storage_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("Ban khong co quyen dung lenh nay.")
+        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
     report = run_storage_cleanup_report(delete=False, confirm_delete=False)
     await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="audit"), limit=3900)
 
 
 async def cmd_storage_cleanup_dry_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("Ban khong co quyen dung lenh nay.")
+        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
     report = run_storage_cleanup_report(delete=False, confirm_delete=False)
     await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="dry_run"), limit=3900)
 
 
+async def cmd_storage_cleanup_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await cmd_storage_cleanup_dry_run(update, context)
+
+
 async def cmd_storage_cleanup_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("Ban khong co quyen dung lenh nay.")
+        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
     args = list(getattr(context, "args", []) or [])
     if not args or str(args[0]).strip() != STORAGE_CLEANUP_CONFIRM_TOKEN:
         report = run_storage_cleanup_report(delete=False, confirm_delete=False)
@@ -78046,18 +78182,57 @@ async def cmd_storage_cleanup_confirm(update: Update, context: ContextTypes.DEFA
     await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="confirm"), limit=3900)
 
 
+async def cmd_storage_cleanup_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
+    args = list(getattr(context, "args", []) or [])
+    if not args or str(args[0]).strip().lower() != "confirm":
+        report = run_storage_cleanup_report(delete=False, confirm_delete=False)
+        return await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="confirm_missing"), limit=3900)
+    report = run_storage_cleanup_report(delete=True, confirm_delete=True)
+    await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="run"), limit=3900)
+
+
 async def cmd_storage_cleanup_auto_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("Ban khong co quyen dung lenh nay.")
+        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
     lines = [
         "<b>STORAGE CLEANUP AUTO STATUS</b>",
         "",
         f"- Auto cleanup: <code>{'ON' if STORAGE_CLEANUP_AUTO_ENABLED else 'OFF'}</code>",
+        f"- Artifact backend: <code>{safe_html(ARTIFACT_STORAGE_BACKEND)}</code>",
         f"- Base: <code>{safe_html(storage_cleanup_base_dir())}</code>",
-        f"- TTL: <code>{int(storage_cleanup_ttl_seconds() // 3600)} gio</code>",
+        f"- TTL artifact/tmp: <code>{int(storage_cleanup_ttl_seconds() // 3600)}h</code> / <code>{int(storage_cleanup_tmp_ttl_seconds() // 3600)}h</code>",
         f"- Max scan/delete: <code>{int(STORAGE_CLEANUP_MAX_SCAN_FILES)}</code> / <code>{int(STORAGE_CLEANUP_MAX_DELETE_FILES)}</code>",
         "",
-        "Mac dinh an toan: auto OFF. Dung /storage_cleanup_dry_run de xem truoc, /storage_cleanup_confirm CONFIRM_TTL de xoa artifact qua TTL.",
+        "Mac dinh an toan: auto OFF. Dung /storage_cleanup_preview de xem truoc, /storage_cleanup_run confirm de xoa artifact qua TTL.",
+    ]
+    await reply_html_lines(update, lines, limit=3900)
+
+
+async def cmd_storage_job_artifacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
+    args = list(getattr(context, "args", []) or [])
+    snapshot = _job_artifact_snapshot(args[0] if args else 0)
+    if not snapshot.get("ok"):
+        return await update.message.reply_text(f"Khong tim thay artifact: {snapshot.get('reason') or 'unknown'}")
+    public = snapshot.get("public") or {}
+    ref = snapshot.get("delivery_reference") or {}
+    lines = [
+        "<b>STORAGE JOB ARTIFACTS</b>",
+        "",
+        f"- Job: <code>{safe_html(snapshot.get('job_id'))}</code>",
+        f"- Status: <code>{safe_html(snapshot.get('status'))}</code>",
+        f"- Local exists: <code>{'yes' if snapshot.get('local_exists') else 'no'}</code>",
+        f"- Backend: <code>{safe_html(public.get('backend') or '-')}</code>",
+        f"- Size: <code>{format_storage_bytes(public.get('artifact_size'))}</code>",
+        f"- Hash: <code>{safe_html(str(public.get('artifact_hash') or '')[:16])}</code>",
+        f"- Public URL: <code>{safe_html(public.get('public_url') or '-')}</code>",
+        f"- Recoverable: <code>{'yes' if public.get('recoverable') or ref.get('ok') else 'no'}</code>",
+        f"- Delivery ref: <code>{safe_html(ref.get('kind') or ref.get('reason') or '-')}</code>",
+        "",
+        "Internal note: no SSH key, token, host secret, PayOS, wallet, pricing data is shown.",
     ]
     await reply_html_lines(update, lines, limit=3900)
 
@@ -171071,6 +171246,9 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("storage_cleanup_dry_run", cmd_storage_cleanup_dry_run))
     tg_app.add_handler(CommandHandler("storage_cleanup_confirm", cmd_storage_cleanup_confirm))
     tg_app.add_handler(CommandHandler("storage_cleanup_auto_status", cmd_storage_cleanup_auto_status))
+    tg_app.add_handler(CommandHandler("storage_cleanup_preview", cmd_storage_cleanup_preview))
+    tg_app.add_handler(CommandHandler("storage_cleanup_run", cmd_storage_cleanup_run))
+    tg_app.add_handler(CommandHandler("storage_job_artifacts", cmd_storage_job_artifacts))
     tg_app.add_handler(CommandHandler("db_status", cmd_db_status))
     tg_app.add_handler(CommandHandler("security_log", cmd_security_log))
     tg_app.add_handler(CommandHandler("security_checklist", cmd_security_checklist))
@@ -172637,13 +172815,14 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
     project = result.get("project") or {}
     user_id = str(project.get("user_id") or "").strip()
     final_path = str(project.get("final_video_path") or "")
-    if not user_id or not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
+    job_result = video_b14_job_result_payload(job)
+    artifact_meta = job_result.get("artifact_storage") if isinstance(job_result.get("artifact_storage"), dict) else {}
+    if not user_id or (not final_path and not artifact_meta):
         return {"sent": False, "reason": "missing_user_or_file"}
     is_canary = remote_worker_api.is_remote_worker_canary_job(job, project)
     is_admin_canary = remote_worker_api.is_remote_worker_admin_canary_job(job, project)
     is_admin_video = remote_worker_api.is_remote_worker_admin_video_job(job, project)
     render_mode = video_b14_render_mode_from_job(job, project)
-    job_result = video_b14_job_result_payload(job)
     blocked_reason = video_b14_product_result_block_reason(job, project)
     visual_classification = video_b14_result_visual_classification(job)
     if blocked_reason:
@@ -172675,10 +172854,11 @@ async def maybe_send_remote_worker_final_video(result: dict) -> dict:
     else:
         return {"sent": False, "reason": "render_mode_not_real"}
     try:
-        delivery = await send_generated_video_path_for_delivery(
+        delivery = await send_generated_video_artifact_for_delivery(
             tg_app.bot,
             int(user_id),
             final_path,
+            artifact_meta,
             filename=os.path.basename(final_path) or "toan_aas_video.mp4",
             caption=caption,
         )
@@ -172723,6 +172903,13 @@ async def api_worker_complete(request: Request):
     if not job_id:
         raise HTTPException(status_code=400, detail="job_id required")
     result_payload = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    artifact_meta = {}
+    if uploaded_path:
+        artifact_meta = store_uploaded_worker_artifact(uploaded_path, job_id=job_id)
+        result_payload = dict(result_payload)
+        result_payload["artifact_storage"] = artifact_meta
+        if artifact_meta.get("public_url"):
+            result_payload["artifact_public_url"] = artifact_meta.get("public_url")
     conn = db_connect()
     try:
         result = remote_worker_api.complete_remote_worker_job(
@@ -172739,6 +172926,7 @@ async def api_worker_complete(request: Request):
     finally:
         conn.close()
     delivery = await maybe_send_remote_worker_final_video(result)
+    local_cleanup = cleanup_worker_local_copy_after_delivery(uploaded_path, artifact_meta, delivery) if uploaded_path else {"deleted": False, "reason": "no_uploaded_path"}
     job = result.get("job") or {}
     project = result.get("project") or {}
     is_safe_worker_canary = remote_worker_api.is_remote_worker_canary_job(job, project)
@@ -172776,7 +172964,13 @@ async def api_worker_complete(request: Request):
             )
         finally:
             conn.close()
-    return {"ok": True, "result": result, "delivery": delivery}
+    return {
+        "ok": True,
+        "result": result,
+        "delivery": delivery,
+        "artifact_storage": artifact_storage.public_metadata(artifact_meta),
+        "local_cleanup": local_cleanup,
+    }
 
 
 @fastapi_app.post("/api/v1/worker/fail")

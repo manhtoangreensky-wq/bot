@@ -309,6 +309,9 @@ def classify_remote_worker_error(value: Any, *, status: str = "", worker_id: str
 
 def _result_file_exists(project: dict, result: dict | None = None) -> bool:
     payload = result if isinstance(result, dict) else {}
+    artifact_meta = payload.get("artifact_storage") if isinstance(payload.get("artifact_storage"), dict) else {}
+    if artifact_meta and (artifact_meta.get("recoverable") or artifact_meta.get("public_url") or artifact_meta.get("remote_path")):
+        return True
     path = str(project.get("final_video_path") or payload.get("final_video_path") or "")
     if path:
         try:
