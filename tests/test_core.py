@@ -825,7 +825,7 @@ def test_video_maintenance_guard_low_credit_lock_refund_and_stale(monkeypatch):
         assert active and int(active["id"]) == lock_job_id
         assert "Video sẽ được gửi tự động" in bot.public_video_active_job_text("vi")
         lock_buttons = [button.text for row in bot.public_video_active_job_keyboard(active, "vi").inline_keyboard for button in row]
-        assert "🔄 Kiểm tra trạng thái video" in lock_buttons
+        assert "🔄 Cập nhật trạng thái" in lock_buttons
         assert "🏠 Menu chính" in lock_buttons
 
         bot.get_user("refund_video", "Refund video")
@@ -1106,7 +1106,7 @@ def test_shopaikey_public_billing_flow_guards_and_schema(monkeypatch):
         assert "Auto poll" not in queue_text
         assert "job" not in queue_text.lower()
         public_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi", public_user=True).inline_keyboard for button in row]
-        assert "🔄 Kiểm tra trạng thái video" in public_queue_buttons
+        assert "🔄 Cập nhật trạng thái" in public_queue_buttons
         assert "🏠 Menu chính" in public_queue_buttons
         assert not any("ShopAIKey" in text for text in public_queue_buttons)
         admin_queue_buttons = [button.text for row in bot.shopaikey_video_job_check_keyboard("task_123", "vi").inline_keyboard for button in row]

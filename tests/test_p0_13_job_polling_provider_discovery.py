@@ -70,7 +70,7 @@ def test_no_fake_processing_without_provider_task_id():
 def test_music_accept_sends_check_status_button():
     keyboard = bot.engine_async_status_keyboard("MUS-ABCD1234", "music")
     buttons = [button for row in keyboard.inline_keyboard for button in row]
-    assert any("Kiểm tra trạng thái" in button.text for button in buttons)
+    assert any("Cập nhật trạng thái" in button.text for button in buttons)
     assert any(button.callback_data == "enginejob|music|MUS-ABCD1234" for button in buttons)
     source = inspect.getsource(bot.cmd_music_suno_admin_test)
     assert "create_music_suno_async_job" in source

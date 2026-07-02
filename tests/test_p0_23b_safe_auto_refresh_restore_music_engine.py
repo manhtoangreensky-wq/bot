@@ -67,8 +67,8 @@ def test_p0_23b_does_not_touch_suno_provider_call():
 def test_music_generation_confirm_still_uses_locked_engine_path():
     source = inspect.getsource(bot.handle_music_product_confirm)
     assert "execute_engine(" in source
-    assert "create_music_suno_async_job(" in source
-    assert "music_product_auto_deliver_job(" in source
+    assert "create_music_pending_submit_job(" in source
+    assert "send_product_progress_message(" in source
     assert "send_music_product_audio_result(" in source
     callbacks = _callbacks(bot.product_progress_status_keyboard("music_song", "MUS123"))
     assert "progress|status|music_song|MUS123" in callbacks
