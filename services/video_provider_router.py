@@ -674,6 +674,11 @@ def run_provider_generation(
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
     adapter = candidate_adapters[0] if candidate_adapters else None
     provider_candidates = [item.provider_name for item in candidate_adapters]
+    allow_pending_result = bool(
+        (request.metadata or {}).get("product_video")
+        or (request.metadata or {}).get("allow_provider_pending")
+        or (request.metadata or {}).get("interactive_product")
+    )
     base_debug = {
         "provider_router_called": True,
         "provider_candidates_count": len([item for item in provider_candidates if item]),
@@ -864,6 +869,28 @@ def run_provider_generation(
                     }
                     return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
             else:
+                if allow_pending_result and (submit.provider_task_id or submit.provider_video_id) and poll_result.status in {"queued", "running"}:
+                    payload = {
+                        "ok": False,
+                        **_attempt_base(),
+                        "fallback_used": attempt_index > 0,
+                        "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                        "provider_submit_called": True,
+                        "provider_submit_http_status": submit_http_status,
+                        "provider_task_id_saved": bool(submit.provider_task_id or submit.provider_video_id),
+                        "provider_poll_called": True,
+                        "provider_result_url_present": False,
+                        "provider_error": "provider_in_progress",
+                        "blocker": "provider_in_progress",
+                        "continue_polling": True,
+                        "normalized_provider_status": poll_result.status,
+                        "provider_status": poll_result.status,
+                        "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                        "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
+                        "provider_readiness": status,
+                        "no_charge": True,
+                    }
+                    return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
                 blocker = "provider_timeout"
                 if attempt_index + 1 < len(candidate_adapters):
                     _record_failure(blocker)

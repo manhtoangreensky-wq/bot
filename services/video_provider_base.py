@@ -131,7 +131,16 @@ def normalize_provider_status(value: Any, *, has_result_url: bool = False) -> st
         return "failed"
     if raw in {"cancelled", "canceled"}:
         return "cancelled"
-    if raw in {"running", "processing", "in_progress", "generating", "started", "media_generation_status_running", "media_generation_status_processing"}:
+    if raw in {
+        "running",
+        "processing",
+        "in_progress",
+        "generating",
+        "started",
+        "media_generation_status_running",
+        "media_generation_status_processing",
+        "media_generation_status_in_progress",
+    }:
         return "running"
     if raw in {"queued", "pending", "submitted", "created", "waiting", "media_generation_status_pending", "media_generation_status_queued"}:
         return "queued"
