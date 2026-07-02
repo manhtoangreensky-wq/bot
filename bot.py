@@ -516,6 +516,7 @@ KEY4U_VIDEO_AUTH_HEADER_VALUE = _env("KEY4U_VIDEO_AUTH_HEADER_VALUE", "")
 KEY4U_SYSTEM_API_KEY = _env("KEY4U_SYSTEM_API_KEY", "")
 KEY4U_USAGE_AUTH_HEADER_NAME = _env("KEY4U_USAGE_AUTH_HEADER_NAME", "Authorization")
 KEY4U_USAGE_AUTH_HEADER_VALUE = _env("KEY4U_USAGE_AUTH_HEADER_VALUE", "")
+KEY4U_USAGE_AUTH_MODE = _env("KEY4U_USAGE_AUTH_MODE", "")
 KEY4U_BASE_URL = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
 KEY4U_OPENAI_BASE_URL = _env("KEY4U_OPENAI_BASE_URL", join_shopaikey_url(KEY4U_BASE_URL, "/v1"))
 KEY4U_MINIMAX_BASE_URL = _env("KEY4U_MINIMAX_BASE", join_provider_url(KEY4U_BASE_URL, "/minimax"))
@@ -524,8 +525,11 @@ KEY4U_SUNO_BASE_URL = _env("KEY4U_SUNO_BASE", join_provider_url(KEY4U_BASE_URL, 
 KEY4U_SMART_ROUTING = env_flag("KEY4U_SMART_ROUTING", "true")
 KEY4U_USAGE_URL = _env("KEY4U_USAGE_URL", "")
 KEY4U_USAGE_CHECK_URL = _env("KEY4U_USAGE_CHECK_URL", "")
+KEY4U_BALANCE_URL = _env("KEY4U_BALANCE_URL", "")
+KEY4U_WALLET_BALANCE_URL = _env("KEY4U_WALLET_BALANCE_URL", "")
 KEY4U_USAGE_ENDPOINT = _env("KEY4U_USAGE_ENDPOINT", KEY4U_USAGE_URL or KEY4U_USAGE_CHECK_URL)
-KEY4U_BALANCE_ENDPOINT = _env("KEY4U_BALANCE_ENDPOINT", KEY4U_USAGE_CHECK_URL or KEY4U_USAGE_URL)
+KEY4U_BALANCE_ENDPOINT = _env("KEY4U_BALANCE_ENDPOINT", KEY4U_BALANCE_URL or KEY4U_WALLET_BALANCE_URL or KEY4U_USAGE_CHECK_URL or KEY4U_USAGE_URL)
+KEY4U_USAGE_DISCOVERY_ENABLED = env_flag("KEY4U_USAGE_DISCOVERY_ENABLED", "false")
 KEY4U_MODELS_ENDPOINT = _env("KEY4U_MODELS_ENDPOINT", "")
 KEY4U_CHAT_ENDPOINT = _env("KEY4U_CHAT_COMPLETIONS_ENDPOINT", _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions"))
 KEY4U_IMAGE_EDIT_ENDPOINT = _env("KEY4U_IMAGE_EDITS_ENDPOINT", _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits"))
@@ -40103,6 +40107,7 @@ def key4u_provider_instance():
         system_api_key=KEY4U_SYSTEM_API_KEY,
         usage_auth_header_name=KEY4U_USAGE_AUTH_HEADER_NAME,
         usage_auth_header_value=KEY4U_USAGE_AUTH_HEADER_VALUE,
+        usage_auth_mode=KEY4U_USAGE_AUTH_MODE,
         base_url=KEY4U_BASE_URL,
         openai_base_url=KEY4U_OPENAI_BASE_URL,
         minimax_base_url=KEY4U_MINIMAX_BASE_URL,
@@ -40114,6 +40119,9 @@ def key4u_provider_instance():
         usage_endpoint=KEY4U_USAGE_ENDPOINT,
         usage_check_url=KEY4U_USAGE_CHECK_URL,
         balance_endpoint=KEY4U_BALANCE_ENDPOINT,
+        balance_url=KEY4U_BALANCE_URL,
+        wallet_balance_url=KEY4U_WALLET_BALANCE_URL,
+        usage_discovery_enabled=bool(KEY4U_USAGE_DISCOVERY_ENABLED),
         models_endpoint=KEY4U_MODELS_ENDPOINT,
         chat_endpoint=KEY4U_CHAT_ENDPOINT,
         image_edit_endpoint=KEY4U_IMAGE_EDIT_ENDPOINT,
@@ -88343,8 +88351,10 @@ def key4u_provider_usage_lines_for_admin() -> list[str]:
         "<b>Key4U</b>",
         f"• Credit diagnostic: <code>{html.escape(str(credit.get('credit') or 'unknown'))}</code> | reason <code>{html.escape(str(credit.get('reason') or '-'))}</code>",
         f"• Usage endpoint: <code>{'configured' if credit.get('endpoint_configured') else 'missing'}</code> | auth <code>{'configured' if credit.get('auth_configured') else 'missing'}</code>",
-        f"• Usage auth: source <code>{html.escape(str(credit.get('usage_auth_source') or '-'))}</code> | header <code>{html.escape(str(credit.get('usage_auth_header_name') or '-'))}</code> | scheme <code>{html.escape(str(credit.get('usage_auth_scheme_prefix') or '-'))}</code>",
+        f"• Usage auth: source <code>{html.escape(str(credit.get('usage_auth_source') or '-'))}</code> | header <code>{html.escape(str(credit.get('usage_auth_header_name') or '-'))}</code> | scheme <code>{html.escape(str(credit.get('usage_auth_scheme_prefix') or '-'))}</code> | mode <code>{html.escape(str(credit.get('usage_auth_mode') or '-'))}</code>",
         f"• Usage HTTP: <code>{html.escape(str(credit.get('usage_http_status') or 0))}</code> | host <code>{html.escape(str(credit.get('usage_endpoint_host') or '-'))}</code> | path <code>{html.escape(str(credit.get('usage_endpoint_path') or '-'))}</code>",
+        f"• Discovery: tried <code>{len(credit.get('usage_endpoint_candidates_tried') or [])}</code> | modes <code>{html.escape(','.join(str(x) for x in (credit.get('usage_auth_modes_tried') or [])) or '-')}</code> | last_http <code>{html.escape(str(credit.get('usage_last_http_status') or 0))}</code>",
+        f"• Success endpoint: <code>{html.escape(str(credit.get('usage_success_endpoint_host_path') or '-'))}</code> | success mode <code>{html.escape(str(credit.get('usage_success_auth_mode') or '-'))}</code>",
         f"• Usage response shape: <code>{html.escape(str(credit.get('usage_response_shape') or '-'))}</code>",
         f"• Remote usage: <code>{html.escape(str(snapshot['remote_usage']))}</code>",
         f"• Remote balance: <code>{html.escape(str(snapshot['remote_balance']))}</code>",
@@ -88393,6 +88403,8 @@ def key4u_configured_usage_url() -> str:
         or str(KEY4U_USAGE_URL or "").strip()
         or str(KEY4U_USAGE_CHECK_URL or "").strip()
         or str(KEY4U_BALANCE_ENDPOINT or "").strip()
+        or str(KEY4U_BALANCE_URL or "").strip()
+        or str(KEY4U_WALLET_BALANCE_URL or "").strip()
     )
 
 def key4u_usage_auth_configured() -> bool:
@@ -88419,13 +88431,21 @@ def key4u_usage_auth_source_info() -> dict:
             raw_value = value
             break
     header_name = str(KEY4U_USAGE_AUTH_HEADER_NAME or "Authorization").strip() or "Authorization"
+    configured_mode = str(KEY4U_USAGE_AUTH_MODE or "").strip().lower().replace("-", "_")
+    if configured_mode in {"x_api_key", "xapikey", "x_api"}:
+        header_name = "x-api-key"
+    elif configured_mode in {"api_key", "apikey"}:
+        header_name = "api-key"
+    elif configured_mode in {"authorization_raw", "raw", "authorization"}:
+        header_name = "Authorization"
     header_value = raw_value
-    if header_name.lower() == "authorization" and header_value and not header_value.lower().startswith(("bearer ", "apikey ", "key ", "basic ")):
+    auth_mode = configured_mode or ("x_api_key" if header_name.lower() == "x-api-key" else "api_key" if header_name.lower() == "api-key" else "authorization_bearer")
+    if auth_mode == "authorization_bearer" and header_name.lower() == "authorization" and header_value and not header_value.lower().startswith(("bearer ", "apikey ", "key ", "basic ")):
         header_value = f"Bearer {header_value}"
     scheme_prefix = "missing"
     if header_value:
         scheme_prefix = header_value.split(" ", 1)[0] if " " in header_value else "raw"
-    return {"source": source, "header_name": header_name, "scheme_prefix": scheme_prefix}
+    return {"source": source, "header_name": header_name, "scheme_prefix": scheme_prefix, "auth_mode": auth_mode}
 
 def key4u_usage_endpoint_debug() -> dict:
     raw_url = key4u_configured_usage_url()
@@ -88468,6 +88488,9 @@ def key4u_credit_diagnostic_from_results(remote_usage: dict | None = None, remot
         or (usage_debug_source or {}).get("http_status")
         or 0
     )
+    safe_reason = str(usage_debug.get("usage_reason") or reason)
+    if usage_debug.get("usage_endpoint_candidates_tried") and not balance and safe_reason in {"FAIL_AUTH", "NOT_FOUND", "FAIL", "FAIL_HTTP"}:
+        safe_reason = "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN"
     return {
         "provider": "key4u",
         "endpoint_configured": endpoint_configured,
@@ -88475,15 +88498,22 @@ def key4u_credit_diagnostic_from_results(remote_usage: dict | None = None, remot
         "credit": f"{key4u_format_usd_amount(balance)} USD" if balance is not None else "unknown",
         "balance_usd": balance,
         "source": source,
-        "reason": reason,
+        "reason": safe_reason,
         "usage_auth_source": usage_debug.get("usage_auth_source") or auth_info["source"],
         "usage_auth_header_name": usage_debug.get("usage_auth_header_name") or auth_info["header_name"],
         "usage_auth_scheme_prefix": usage_debug.get("usage_auth_scheme_prefix") or auth_info["scheme_prefix"],
+        "usage_auth_mode": usage_debug.get("usage_auth_mode") or auth_info["auth_mode"],
         "usage_endpoint_host": usage_debug.get("usage_endpoint_host") or endpoint_debug["usage_endpoint_host"],
         "usage_endpoint_path": usage_debug.get("usage_endpoint_path") or endpoint_debug["usage_endpoint_path"],
         "usage_http_status": usage_http_status,
+        "usage_endpoint_candidates_tried": usage_debug.get("usage_endpoint_candidates_tried") or [],
+        "usage_auth_modes_tried": usage_debug.get("usage_auth_modes_tried") or [],
+        "usage_last_http_status": int(usage_debug.get("usage_last_http_status") or usage_http_status or 0),
+        "usage_last_error_message_safe": usage_debug.get("usage_last_error_message_safe") or "",
+        "usage_success_endpoint_host_path": usage_debug.get("usage_success_endpoint_host_path") or "",
+        "usage_success_auth_mode": usage_debug.get("usage_success_auth_mode") or "",
         "usage_response_shape": usage_debug.get("usage_response_shape") or "",
-        "usage_reason": usage_debug.get("usage_reason") or reason,
+        "usage_reason": safe_reason,
         "usage_status": str((remote_usage or {}).get("status") or ("UNKNOWN" if not endpoint_configured else "-")),
         "balance_status": str((remote_balance_result or {}).get("status") or ("UNKNOWN" if not endpoint_configured else "-")),
     }
@@ -88758,12 +88788,16 @@ async def cmd_key4u_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Usage auth source: <code>{html.escape(str(payload.get('usage_auth_source') or '-'))}</code>",
         f"• Usage auth header: <code>{html.escape(str(payload.get('usage_auth_header_name') or '-'))}</code>",
         f"• Usage auth scheme: <code>{html.escape(str(payload.get('usage_auth_scheme_prefix') or '-'))}</code>",
+        f"• Usage auth mode: <code>{html.escape(str(payload.get('usage_auth_mode') or '-'))}</code>",
+        f"• Usage discovery: <code>{'ON' if payload.get('usage_discovery_enabled') else 'OFF'}</code>",
         f"• Stage: <code>{html.escape(str(payload.get('stage') or 'disabled'))}</code>",
         f"• Base URL: <code>{'configured' if payload.get('base_url') else 'missing'}</code>",
         f"• OpenAI base URL: <code>{'configured' if payload.get('openai_base_url') else 'missing'}</code>",
         f"• Usage endpoint: <code>{html.escape(str(payload.get('usage_endpoint') or 'NEED_ENDPOINT'))}</code>",
         f"• Usage check URL: <code>{html.escape(str(payload.get('usage_check_url') or 'NEED_ENDPOINT'))}</code>",
         f"• Balance endpoint: <code>{html.escape(str(payload.get('balance_endpoint') or 'NEED_ENDPOINT'))}</code>",
+        f"• Balance URL: <code>{html.escape(str(payload.get('balance_url') or 'NEED_ENDPOINT'))}</code>",
+        f"• Wallet balance URL: <code>{html.escape(str(payload.get('wallet_balance_url') or 'NEED_ENDPOINT'))}</code>",
         f"• Chat model: <code>{html.escape(str(payload.get('chat_model') or '-'))}</code>",
         f"• Vision model: <code>{html.escape(str(payload.get('vision_model') or '-'))}</code>",
         f"• Image edit model: <code>{html.escape(str(payload.get('image_edit_model') or '-'))}</code>",
@@ -136280,9 +136314,13 @@ def video_provider_status_text(status: dict | None = None, key4u_credit: dict | 
                 f"usage_auth_source=<code>{html.escape(str(key4u_credit.get('usage_auth_source') or '-'))}</code> "
                 f"usage_auth_header=<code>{html.escape(str(key4u_credit.get('usage_auth_header_name') or '-'))}</code> "
                 f"usage_auth_scheme=<code>{html.escape(str(key4u_credit.get('usage_auth_scheme_prefix') or '-'))}</code> "
+                f"usage_auth_mode=<code>{html.escape(str(key4u_credit.get('usage_auth_mode') or '-'))}</code> "
                 f"usage_host=<code>{html.escape(str(key4u_credit.get('usage_endpoint_host') or '-'))}</code> "
                 f"usage_path=<code>{html.escape(str(key4u_credit.get('usage_endpoint_path') or '-'))}</code> "
                 f"usage_http=<code>{html.escape(str(key4u_credit.get('usage_http_status') or 0))}</code> "
+                f"usage_tried=<code>{len(key4u_credit.get('usage_endpoint_candidates_tried') or [])}</code> "
+                f"usage_success=<code>{html.escape(str(key4u_credit.get('usage_success_endpoint_host_path') or '-'))}</code> "
+                f"usage_success_mode=<code>{html.escape(str(key4u_credit.get('usage_success_auth_mode') or '-'))}</code> "
                 f"usage_shape=<code>{html.escape(str(key4u_credit.get('usage_response_shape') or '-'))}</code> "
             )
         lines.append(

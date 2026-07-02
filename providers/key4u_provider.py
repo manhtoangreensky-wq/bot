@@ -99,6 +99,29 @@ GROUP_UNAVAILABLE_MARKERS = (
     "distributor",
 )
 
+KEY4U_USER_APIKEY_BALANCE_DISCOVERY_CANDIDATES = (
+    "/user/wallet/balance",
+    "/wallet/balance",
+    "/user/balance",
+    "/api/user/wallet/balance",
+    "/api/wallet/balance",
+    "/user-api-key/wallet/balance",
+    "/userapikey/wallet/balance",
+    "/userApiKey/wallet/balance",
+    "/logs/usage",
+    "/user/usage",
+    "/groups",
+    "/health",
+)
+
+KEY4U_USAGE_DISCOVERY_HTTP_STATUSES = {401, 403, 404}
+KEY4U_USAGE_AUTH_MODES = (
+    "authorization_bearer",
+    "x_api_key",
+    "api_key",
+    "authorization_raw",
+)
+
 
 def _is_group_or_channel_unavailable(status_code: int, message: Any) -> bool:
     if int(status_code or 0) != 503:
@@ -359,6 +382,7 @@ class Key4UConfig:
     system_api_key: str = ""
     usage_auth_header_name: str = "Authorization"
     usage_auth_header_value: str = ""
+    usage_auth_mode: str = ""
     base_url: str = "https://api.key4u.shop"
     openai_base_url: str = "https://api.key4u.shop/v1"
     minimax_base_url: str = "https://api.key4u.shop/minimax"
@@ -370,6 +394,9 @@ class Key4UConfig:
     usage_endpoint: str = ""
     usage_check_url: str = ""
     balance_endpoint: str = ""
+    balance_url: str = ""
+    wallet_balance_url: str = ""
+    usage_discovery_enabled: bool = False
     models_endpoint: str = ""
     chat_endpoint: str = "/v1/chat/completions"
     image_edit_endpoint: str = "/v1/images/edits"
@@ -406,7 +433,9 @@ class Key4UConfig:
 def config_from_env() -> Key4UConfig:
     api_base = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
     usage_url = _env("KEY4U_USAGE_ENDPOINT", _env("KEY4U_USAGE_URL", _env("KEY4U_USAGE_CHECK_URL", "")))
-    balance_url = _env("KEY4U_BALANCE_ENDPOINT", _env("KEY4U_USAGE_CHECK_URL", _env("KEY4U_USAGE_URL", "")))
+    balance_url = _env("KEY4U_BALANCE_URL", "")
+    wallet_balance_url = _env("KEY4U_WALLET_BALANCE_URL", "")
+    balance_endpoint = _env("KEY4U_BALANCE_ENDPOINT", balance_url or wallet_balance_url or _env("KEY4U_USAGE_CHECK_URL", _env("KEY4U_USAGE_URL", "")))
     return Key4UConfig(
         enabled=_flag("KEY4U_ENABLED", "false"),
         api_key=_env("KEY4U_TOKEN", _env("KEY4U_API_KEY", "")),
@@ -414,6 +443,7 @@ def config_from_env() -> Key4UConfig:
         system_api_key=_env("KEY4U_SYSTEM_API_KEY", ""),
         usage_auth_header_name=_env("KEY4U_USAGE_AUTH_HEADER_NAME", "Authorization"),
         usage_auth_header_value=_env("KEY4U_USAGE_AUTH_HEADER_VALUE", ""),
+        usage_auth_mode=_env("KEY4U_USAGE_AUTH_MODE", ""),
         base_url=api_base,
         openai_base_url=_env("KEY4U_OPENAI_BASE_URL", safe_join_url(api_base, "/v1")),
         minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax")),
@@ -424,7 +454,10 @@ def config_from_env() -> Key4UConfig:
         admin_smoke_enabled=_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true"),
         usage_endpoint=usage_url,
         usage_check_url=_env("KEY4U_USAGE_CHECK_URL", ""),
-        balance_endpoint=balance_url,
+        balance_endpoint=balance_endpoint,
+        balance_url=balance_url,
+        wallet_balance_url=wallet_balance_url,
+        usage_discovery_enabled=_flag("KEY4U_USAGE_DISCOVERY_ENABLED", "false"),
         models_endpoint=_env("KEY4U_MODELS_ENDPOINT", ""),
         chat_endpoint=_env("KEY4U_CHAT_COMPLETIONS_ENDPOINT", _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions")),
         image_edit_endpoint=_env("KEY4U_IMAGE_EDITS_ENDPOINT", _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits")),
@@ -485,6 +518,7 @@ class Key4UProvider:
             "usage_auth_source": self._usage_auth_info()["source"],
             "usage_auth_header_name": self._usage_auth_info()["header_name"],
             "usage_auth_scheme_prefix": self._usage_auth_info()["scheme_prefix"],
+            "usage_auth_mode": self._usage_auth_info()["auth_mode"],
             "base_url": self.config.base_url,
             "openai_base_url": self.config.openai_base_url,
             "minimax_base_url": self.config.minimax_base_url,
@@ -499,6 +533,9 @@ class Key4UProvider:
             "usage_endpoint": "configured" if self.config.usage_endpoint else "NEED_ENDPOINT",
             "usage_check_url": "configured" if self.config.usage_check_url else "NEED_ENDPOINT",
             "balance_endpoint": "configured" if self.config.balance_endpoint else "NEED_ENDPOINT",
+            "balance_url": "configured" if self.config.balance_url else "NEED_ENDPOINT",
+            "wallet_balance_url": "configured" if self.config.wallet_balance_url else "NEED_ENDPOINT",
+            "usage_discovery_enabled": bool(self.config.usage_discovery_enabled),
             "models_endpoint": "configured" if self.config.models_endpoint else "NEED_ENDPOINT",
             "chat_model": self.config.chat_model or "",
             "vision_model": self.config.vision_model or "",
@@ -550,7 +587,24 @@ class Key4UProvider:
             "Accept": "application/json",
         }
 
-    def _usage_auth_info(self) -> dict[str, str]:
+    def _normalize_usage_auth_mode(self, mode: str = "") -> str:
+        selected = str(mode or self.config.usage_auth_mode or "").strip().lower().replace("-", "_")
+        if selected in {"x_api_key", "xapikey", "x_api"}:
+            return "x_api_key"
+        if selected in {"api_key", "apikey"}:
+            return "api_key"
+        if selected in {"authorization_raw", "raw", "authorization"}:
+            return "authorization_raw"
+        if selected in {"authorization_bearer", "bearer"}:
+            return "authorization_bearer"
+        header = str(self.config.usage_auth_header_name or "Authorization").strip().lower()
+        if header == "x-api-key":
+            return "x_api_key"
+        if header == "api-key":
+            return "api_key"
+        return "authorization_bearer"
+
+    def _usage_auth_info(self, mode: str = "") -> dict[str, str]:
         candidates = (
             ("usage_auth_header_value", self.config.usage_auth_header_value),
             ("system_api_key", self.config.system_api_key),
@@ -565,9 +619,15 @@ class Key4UProvider:
                 source = candidate_source
                 raw_value = value
                 break
-        header_name = str(self.config.usage_auth_header_name or "Authorization").strip() or "Authorization"
+        auth_mode = self._normalize_usage_auth_mode(mode)
+        if auth_mode == "x_api_key":
+            header_name = "x-api-key"
+        elif auth_mode == "api_key":
+            header_name = "api-key"
+        else:
+            header_name = "Authorization"
         header_value = raw_value
-        if header_name.lower() == "authorization" and header_value and not header_value.lower().startswith(("bearer ", "apikey ", "key ", "basic ")):
+        if auth_mode == "authorization_bearer" and header_value and not header_value.lower().startswith(("bearer ", "apikey ", "key ", "basic ")):
             header_value = f"Bearer {header_value}"
         scheme_prefix = "missing"
         if header_value:
@@ -577,23 +637,25 @@ class Key4UProvider:
             "header_name": header_name,
             "value": header_value,
             "scheme_prefix": scheme_prefix,
+            "auth_mode": auth_mode,
         }
 
-    def _usage_headers(self) -> dict[str, str]:
-        auth_info = self._usage_auth_info()
+    def _usage_headers(self, mode: str = "") -> dict[str, str]:
+        auth_info = self._usage_auth_info(mode)
         headers = {"Accept": "application/json"}
         if auth_info["value"]:
             headers[auth_info["header_name"]] = auth_info["value"]
         return headers
 
-    def _usage_endpoint_debug(self, endpoint_path: str) -> dict[str, Any]:
+    def _usage_endpoint_debug(self, endpoint_path: str, mode: str = "") -> dict[str, Any]:
         endpoint = safe_join_url(self.config.base_url, endpoint_path)
         parsed = urlparse(endpoint)
-        auth_info = self._usage_auth_info()
+        auth_info = self._usage_auth_info(mode)
         return {
             "usage_auth_source": auth_info["source"],
             "usage_auth_header_name": auth_info["header_name"],
             "usage_auth_scheme_prefix": auth_info["scheme_prefix"],
+            "usage_auth_mode": auth_info["auth_mode"],
             "usage_endpoint_host": parsed.netloc or "",
             "usage_endpoint_path": parsed.path or "",
         }
@@ -613,14 +675,136 @@ class Key4UProvider:
             return "list"
         return type(data).__name__
 
-    def _apply_usage_debug(self, result: dict[str, Any], endpoint_path: str) -> dict[str, Any]:
+    @staticmethod
+    def _safe_endpoint_host_path(base_url: str, endpoint_path: str) -> str:
+        parsed = urlparse(safe_join_url(base_url, endpoint_path))
+        return (parsed.netloc or "") + (parsed.path or "")
+
+    @staticmethod
+    def _dedupe(items: list[str]) -> list[str]:
+        out = []
+        seen = set()
+        for item in items:
+            safe = str(item or "").strip()
+            if not safe or safe in seen:
+                continue
+            seen.add(safe)
+            out.append(safe)
+        return out
+
+    def _usage_candidate_endpoints(self, primary_endpoint: str, capability: str) -> list[str]:
+        candidates = []
+        if capability == "balance":
+            candidates.extend([
+                primary_endpoint,
+                self.config.balance_endpoint,
+                self.config.wallet_balance_url,
+                self.config.balance_url,
+                self.config.usage_check_url,
+                self.config.usage_endpoint,
+            ])
+        else:
+            candidates.extend([
+                primary_endpoint,
+                self.config.usage_endpoint,
+                self.config.usage_check_url,
+                self.config.balance_endpoint,
+                self.config.wallet_balance_url,
+                self.config.balance_url,
+            ])
+        if self.config.usage_discovery_enabled:
+            candidates.extend(KEY4U_USER_APIKEY_BALANCE_DISCOVERY_CANDIDATES)
+        return self._dedupe(candidates)
+
+    def _usage_attempt_label(self, endpoint_path: str, auth_mode: str, result: dict[str, Any]) -> str:
+        return f"{self._safe_endpoint_host_path(self.config.base_url, endpoint_path)}|{auth_mode}|{int(result.get('http_status') or 0)}"
+
+    def _apply_usage_debug(
+        self,
+        result: dict[str, Any],
+        endpoint_path: str,
+        auth_mode: str = "",
+        *,
+        candidates_tried: list[str] | None = None,
+        auth_modes_tried: list[str] | None = None,
+        success_endpoint_host_path: str = "",
+        success_auth_mode: str = "",
+    ) -> dict[str, Any]:
         debug = dict(result.get("raw_debug_admin_only") or {})
-        debug.update(self._usage_endpoint_debug(endpoint_path))
+        debug.update(self._usage_endpoint_debug(endpoint_path, auth_mode))
         debug["usage_http_status"] = int(result.get("http_status") or 0)
         debug["usage_response_shape"] = self._response_shape(result.get("data"))
         debug["usage_reason"] = str(result.get("error_class") or result.get("status") or "-")
+        debug["usage_endpoint_candidates_tried"] = list(candidates_tried or [])
+        debug["usage_auth_modes_tried"] = list(auth_modes_tried or [])
+        debug["usage_last_http_status"] = int(result.get("http_status") or 0)
+        debug["usage_last_error_message_safe"] = str(result.get("error_message_safe") or "")[:220]
+        debug["usage_success_endpoint_host_path"] = success_endpoint_host_path
+        debug["usage_success_auth_mode"] = success_auth_mode
         result["raw_debug_admin_only"] = debug
         return result
+
+    async def _request_usage_or_balance(self, capability: str, primary_endpoint: str) -> dict[str, Any]:
+        if not primary_endpoint:
+            return _result(ok=False, capability=capability, status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
+        primary_mode = self._usage_auth_info()["auth_mode"]
+        candidates_tried: list[str] = []
+        auth_modes_tried: list[str] = []
+        result = await self.request_json("GET", primary_endpoint, headers=self._usage_headers(primary_mode))
+        result["capability"] = capability
+        candidates_tried.append(self._usage_attempt_label(primary_endpoint, primary_mode, result))
+        auth_modes_tried.append(primary_mode)
+        if result.get("ok"):
+            return self._apply_usage_debug(
+                result,
+                primary_endpoint,
+                primary_mode,
+                candidates_tried=candidates_tried,
+                auth_modes_tried=self._dedupe(auth_modes_tried),
+                success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, primary_endpoint),
+                success_auth_mode=primary_mode,
+            )
+        http_status = int(result.get("http_status") or 0)
+        if not self.config.usage_discovery_enabled or http_status not in KEY4U_USAGE_DISCOVERY_HTTP_STATUSES:
+            return self._apply_usage_debug(
+                result,
+                primary_endpoint,
+                primary_mode,
+                candidates_tried=candidates_tried,
+                auth_modes_tried=self._dedupe(auth_modes_tried),
+            )
+        last_result = result
+        last_endpoint = primary_endpoint
+        last_mode = primary_mode
+        for endpoint in self._usage_candidate_endpoints(primary_endpoint, capability):
+            for auth_mode in KEY4U_USAGE_AUTH_MODES:
+                if endpoint == primary_endpoint and auth_mode == primary_mode:
+                    continue
+                current = await self.request_json("GET", endpoint, headers=self._usage_headers(auth_mode))
+                current["capability"] = capability
+                candidates_tried.append(self._usage_attempt_label(endpoint, auth_mode, current))
+                auth_modes_tried.append(auth_mode)
+                if current.get("ok"):
+                    return self._apply_usage_debug(
+                        current,
+                        endpoint,
+                        auth_mode,
+                        candidates_tried=candidates_tried,
+                        auth_modes_tried=self._dedupe(auth_modes_tried),
+                        success_endpoint_host_path=self._safe_endpoint_host_path(self.config.base_url, endpoint),
+                        success_auth_mode=auth_mode,
+                    )
+                last_result = current
+                last_endpoint = endpoint
+                last_mode = auth_mode
+        last_result["error_class"] = "KEY4U_USERAPIKEY_ENDPOINT_NOT_FOUND_OR_FORBIDDEN"
+        return self._apply_usage_debug(
+            last_result,
+            last_endpoint,
+            last_mode,
+            candidates_tried=candidates_tried,
+            auth_modes_tried=self._dedupe(auth_modes_tried),
+        )
 
     def _minimax_url(self, endpoint: str) -> str:
         return scoped_join_url(self.config.base_url, self.config.minimax_base_url, endpoint, "/minimax/v1")
@@ -736,18 +920,14 @@ class Key4UProvider:
             return self._missing_result("usage", "")
         if not self.config.usage_endpoint:
             return _result(ok=False, capability="usage", status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
-        result = await self.request_json("GET", self.config.usage_endpoint, headers=self._usage_headers())
-        result["capability"] = "usage"
-        return self._apply_usage_debug(result, self.config.usage_endpoint)
+        return await self._request_usage_or_balance("usage", self.config.usage_endpoint)
 
     async def get_balance(self) -> dict[str, Any]:
         if not self.usage_configured():
             return self._missing_result("balance", "")
         if not self.config.balance_endpoint:
             return _result(ok=False, capability="balance", status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
-        result = await self.request_json("GET", self.config.balance_endpoint, headers=self._usage_headers())
-        result["capability"] = "balance"
-        return self._apply_usage_debug(result, self.config.balance_endpoint)
+        return await self._request_usage_or_balance("balance", self.config.balance_endpoint)
 
     def get_local_estimated_usage(self) -> dict[str, Any]:
         return {"status": "BOT_DB_SUMMARY", "note": "Computed in bot from provider_usage_events."}
