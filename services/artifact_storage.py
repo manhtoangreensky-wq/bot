@@ -41,7 +41,19 @@ ARTIFACT_SAFE_EXTENSIONS = {
     ".webp",
     ".zip",
 }
-HEAVY_PRODUCT_AREAS = {"worker_results", "artifacts", "tmp", "music", "subdub", "video", "cache"}
+HEAVY_PRODUCT_AREAS = {
+    "worker_results",
+    "artifacts",
+    "tmp",
+    "music",
+    "subdub",
+    "video",
+    "cache",
+    "dub_assets",
+    "voice_assets",
+    "translation_assets",
+    "subtitle_assets",
+}
 REMOTE_BACKENDS = {"vps_sftp", "vps_http"}
 
 
@@ -104,6 +116,13 @@ def artifact_sha256(path: str | os.PathLike[str]) -> str:
     with open(path, "rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _hash_fileobj(handle) -> str:
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
     return digest.hexdigest()
 
 
@@ -288,6 +307,117 @@ def delivery_reference(metadata: Mapping[str, object] | None = None) -> dict:
     if remote_path:
         return {"ok": True, "kind": "remote_path", "value": remote_path}
     return {"ok": False, "reason": "artifact_not_recoverable"}
+
+
+def _verify_vps_sftp(local_path: str, remote_path: str, config: ArtifactStorageConfig) -> dict:
+    try:
+        import paramiko  # type: ignore
+    except Exception:
+        return {"ok": False, "reason": "paramiko_missing"}
+    if not config.vps_host or not config.vps_user or not config.vps_ssh_key_path or not remote_path:
+        return {"ok": False, "reason": "vps_sftp_config_missing"}
+    transport = None
+    sftp = None
+    try:
+        expected_size = int(Path(local_path).stat().st_size)
+        expected_hash = artifact_sha256(local_path)
+        key = paramiko.RSAKey.from_private_key_file(config.vps_ssh_key_path)
+        transport = paramiko.Transport((config.vps_host, int(config.vps_port)))
+        transport.connect(username=config.vps_user, pkey=key)
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        remote_size = int(sftp.stat(remote_path).st_size)
+        with sftp.open(remote_path, "rb") as handle:
+            remote_hash = _hash_fileobj(handle)
+        return {
+            "ok": remote_size == expected_size and remote_hash == expected_hash,
+            "backend": config.backend,
+            "remote_size": remote_size,
+            "remote_hash": remote_hash,
+            "size_matches": remote_size == expected_size,
+            "hash_matches": remote_hash == expected_hash,
+            "reason": "remote_verified" if remote_size == expected_size and remote_hash == expected_hash else "remote_mismatch",
+        }
+    except Exception as exc:
+        return {"ok": False, "backend": config.backend, "reason": f"remote_verify_failed:{type(exc).__name__}"}
+    finally:
+        try:
+            if sftp:
+                sftp.close()
+        finally:
+            if transport:
+                transport.close()
+
+
+def _verify_public_url(local_path: str, public_url: str, config: ArtifactStorageConfig) -> dict:
+    if not public_url:
+        return {"ok": False, "backend": config.backend, "reason": "public_url_missing"}
+    expected_size = int(Path(local_path).stat().st_size)
+    expected_hash = artifact_sha256(local_path)
+    try:
+        digest = hashlib.sha256()
+        remote_size = 0
+        with urllib.request.urlopen(public_url, timeout=180) as response:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                remote_size += len(chunk)
+                digest.update(chunk)
+        remote_hash = digest.hexdigest()
+        return {
+            "ok": remote_size == expected_size and remote_hash == expected_hash,
+            "backend": config.backend,
+            "remote_size": remote_size,
+            "remote_hash": remote_hash,
+            "size_matches": remote_size == expected_size,
+            "hash_matches": remote_hash == expected_hash,
+            "reason": "remote_verified" if remote_size == expected_size and remote_hash == expected_hash else "remote_mismatch",
+        }
+    except Exception as exc:
+        return {"ok": False, "backend": config.backend, "reason": f"remote_verify_failed:{type(exc).__name__}"}
+
+
+def verify_stored_artifact(
+    local_path: str | os.PathLike[str],
+    metadata: Mapping[str, object] | None,
+    *,
+    config: ArtifactStorageConfig | None = None,
+    verifier: Callable[[str, dict, ArtifactStorageConfig], dict] | None = None,
+) -> dict:
+    cfg = config or config_from_env()
+    local = Path(local_path)
+    if not local.exists() or not local.is_file():
+        return {"ok": False, "backend": cfg.backend, "reason": "local_artifact_missing"}
+    raw = dict(metadata or {})
+    if verifier:
+        result = verifier(str(local), raw, cfg)
+        return {
+            "backend": cfg.backend,
+            "ok": bool(result.get("ok")),
+            "remote_size": int(result.get("remote_size") or raw.get("artifact_size") or 0),
+            "remote_hash": str(result.get("remote_hash") or raw.get("artifact_hash") or ""),
+            "size_matches": bool(result.get("size_matches", result.get("ok"))),
+            "hash_matches": bool(result.get("hash_matches", result.get("ok"))),
+            "reason": str(result.get("reason") or ("remote_verified" if result.get("ok") else "remote_verify_failed")),
+        }
+    expected_size = int(local.stat().st_size)
+    expected_hash = artifact_sha256(local)
+    backend = str(raw.get("backend") or cfg.backend)
+    if backend == "local":
+        return {
+            "ok": True,
+            "backend": backend,
+            "remote_size": expected_size,
+            "remote_hash": expected_hash,
+            "size_matches": True,
+            "hash_matches": True,
+            "reason": "local_verified",
+        }
+    if backend == "vps_sftp":
+        return _verify_vps_sftp(str(local), str(raw.get("remote_path") or ""), cfg)
+    if backend == "vps_http":
+        return _verify_public_url(str(local), str(raw.get("public_url") or ""), cfg)
+    return {"ok": False, "backend": backend, "reason": "artifact_backend_unsupported"}
 
 
 def recover_artifact_to_temp(
