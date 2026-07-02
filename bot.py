@@ -997,6 +997,8 @@ ARTIFACT_VPS_PORT = max(1, env_int("ARTIFACT_VPS_PORT", 22))
 ARTIFACT_VPS_USER = _env("ARTIFACT_VPS_USER", "toanaas")
 ARTIFACT_VPS_BASE_DIR = _env("ARTIFACT_VPS_BASE_DIR", "/opt/toanaas-storage")
 ARTIFACT_VPS_SSH_KEY_PATH = _env("ARTIFACT_VPS_SSH_KEY_PATH", "")
+ARTIFACT_VPS_SSH_PRIVATE_KEY = _env("ARTIFACT_VPS_SSH_PRIVATE_KEY", "")
+ARTIFACT_VPS_SSH_PRIVATE_KEY_B64 = _env("ARTIFACT_VPS_SSH_PRIVATE_KEY_B64", "")
 ARTIFACT_PUBLIC_BASE_URL = _env("ARTIFACT_PUBLIC_BASE_URL", "")
 ARTIFACT_TTL_HOURS = max(1, env_int("ARTIFACT_TTL_HOURS", 24))
 ARTIFACT_TMP_TTL_HOURS = max(1, env_int("ARTIFACT_TMP_TTL_HOURS", 6))
@@ -77848,6 +77850,8 @@ def artifact_storage_config() -> artifact_storage.ArtifactStorageConfig:
         vps_user=ARTIFACT_VPS_USER,
         vps_base_dir=ARTIFACT_VPS_BASE_DIR,
         vps_ssh_key_path=ARTIFACT_VPS_SSH_KEY_PATH,
+        vps_ssh_private_key=ARTIFACT_VPS_SSH_PRIVATE_KEY,
+        vps_ssh_private_key_b64=ARTIFACT_VPS_SSH_PRIVATE_KEY_B64,
         public_base_url=ARTIFACT_PUBLIC_BASE_URL,
         ttl_hours=ARTIFACT_TTL_HOURS,
         tmp_ttl_hours=ARTIFACT_TMP_TTL_HOURS,
@@ -78230,6 +78234,35 @@ async def cmd_storage_job_artifacts(update: Update, context: ContextTypes.DEFAUL
     await reply_html_lines(update, lines, limit=3900)
 
 
+def storage_artifact_backend_debug_lines() -> list[str]:
+    payload = artifact_storage.vps_sftp_config_diagnostic(artifact_storage_config())
+    yes_no = lambda value: "yes" if value else "no"
+    return [
+        "<b>STORAGE ARTIFACT BACKEND DEBUG</b>",
+        "",
+        f"- Backend: <code>{safe_html(payload.get('backend'))}</code>",
+        f"- Host configured: <code>{yes_no(payload.get('host_configured'))}</code>",
+        f"- Port: <code>{safe_html(payload.get('port'))}</code>",
+        f"- User configured: <code>{yes_no(payload.get('user_configured'))}</code>",
+        f"- Base dir: <code>{safe_html(payload.get('base_dir'))}</code>",
+        f"- Key path configured: <code>{yes_no(payload.get('key_path_configured'))}</code>",
+        f"- Key path exists: <code>{yes_no(payload.get('key_path_exists'))}</code>",
+        f"- Raw private key configured: <code>{yes_no(payload.get('raw_private_key_configured'))}</code>",
+        f"- Private key b64 configured: <code>{yes_no(payload.get('private_key_b64_configured'))}</code>",
+        f"- Public base URL configured: <code>{yes_no(payload.get('public_base_url_configured'))}</code>",
+        f"- Paramiko available: <code>{yes_no(payload.get('paramiko_available'))}</code>",
+        f"- Last safe blocker: <code>{safe_html(payload.get('last_safe_blocker') or '-')}</code>",
+        "",
+        "Khong hien private key, token, secret, PayOS, wallet hay noi dung file.",
+    ]
+
+
+async def cmd_storage_artifact_backend_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin_user(update.effective_user.id):
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
+    await reply_html_lines(update, storage_artifact_backend_debug_lines(), limit=3900)
+
+
 def storage_migration_running_paths(max_rows: int = 1000) -> set[str]:
     table_columns = {
         "local_worker_jobs": ("output_url",),
@@ -78378,6 +78411,7 @@ def storage_backup_cleanup_lines(report, *, mode: str = "preview") -> list[str]:
         "<b>Safety</b>",
         "- Chi xu ly file trong /backups.",
         "- Giu latest N backup, mac dinh N=5.",
+        "- Cho phep xoa backup .db/.sqlite cu chi khi nam trong /backups.",
         "- Khong bao gio xoa DB hien tai ngoai thu muc backups.",
     ]
     samples = report.files[:12]
@@ -171108,6 +171142,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("storage_cleanup_preview", cmd_storage_cleanup_preview))
     tg_app.add_handler(CommandHandler("storage_cleanup_run", cmd_storage_cleanup_run))
     tg_app.add_handler(CommandHandler("storage_job_artifacts", cmd_storage_job_artifacts))
+    tg_app.add_handler(CommandHandler("storage_artifact_backend_debug", cmd_storage_artifact_backend_debug))
     tg_app.add_handler(CommandHandler("storage_migrate_preview", cmd_storage_migrate_preview))
     tg_app.add_handler(CommandHandler("storage_migrate_run", cmd_storage_migrate_run))
     tg_app.add_handler(CommandHandler("storage_backup_cleanup_preview", cmd_storage_backup_cleanup_preview))
