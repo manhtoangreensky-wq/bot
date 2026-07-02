@@ -5301,6 +5301,10 @@ CANONICAL_PRICE_KEYS = (
     "video_addon_logo",
 )
 CANONICAL_DERIVED_PRICE_KEYS = {"subtitle_dub_video", "auto_subtitle_then_dub"}
+CANONICAL_DERIVED_PRICE_FORMULAS = {
+    "subtitle_dub_video": ("subtitle_translate_video", "dub_video"),
+    "auto_subtitle_then_dub": ("auto_subtitle_video", "dub_video"),
+}
 CANONICAL_PRICE_KEY_ALIASES = {
     "voice": "voice_tts_basic",
     "voice_basic": "voice_tts_basic",
@@ -5454,6 +5458,28 @@ def canonical_price_display(key: str = "") -> str:
     else:
         value = str(int(price or 0))
     return f"{value} {unit}"
+
+def canonical_price_aliases_for_key(key: str = "") -> list[str]:
+    normalized = normalize_canonical_price_key(key)
+    return [alias for alias, target in CANONICAL_PRICE_KEY_ALIASES.items() if target == normalized]
+
+def canonical_price_audit_marker(key: str = "") -> str:
+    normalized = normalize_canonical_price_key(key)
+    formula = CANONICAL_DERIVED_PRICE_FORMULAS.get(normalized)
+    if formula:
+        return f"[derived={'+'.join(formula)}]"
+    aliases = canonical_price_aliases_for_key(normalized)
+    alias_text = f", alias={aliases[0]}" if aliases else ""
+    return f"[key={normalized}{alias_text}]"
+
+def canonical_price_audit_line(key: str = "") -> str:
+    normalized = normalize_canonical_price_key(key)
+    entry = canonical_price_table().get(normalized) or {}
+    editable = "editable" if entry.get("editable") else "derived"
+    label = html.escape(str(entry.get("label") or normalized))
+    marker = html.escape(canonical_price_audit_marker(normalized))
+    price = html.escape(canonical_price_display(normalized))
+    return f"• {label} <code>{marker}</code>: <code>{price}</code> | {editable}"
 
 def set_canonical_price_value(key: str, value, updated_by="") -> dict:
     normalized = normalize_canonical_price_key(key)
@@ -134926,11 +134952,7 @@ def product_price_audit_lines(scope: str = "all") -> list[str]:
         "",
     ]
     for key in keys:
-        entry = table.get(key) or {}
-        editable = "editable" if entry.get("editable") else "derived"
-        lines.append(
-            f"• {html.escape(str(entry.get('label') or key))}: <code>{html.escape(canonical_price_display(key))}</code> | {editable}"
-        )
+        lines.append(canonical_price_audit_line(key))
     if scope in {"all", "subdub"}:
         lines.extend([
             "",
@@ -134961,15 +134983,60 @@ async def cmd_video_pricing_audit(update: Update, context: ContextTypes.DEFAULT_
 async def cmd_voice_pricing_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cmd_product_price_audit(update, context, "voice")
 
+def canonical_price_example_value(key: str = "") -> str:
+    price = canonical_price_xu(key)
+    if isinstance(price, float):
+        return f"{price:g}"
+    return str(int(price or 0))
+
+def price_keys_lines() -> list[str]:
+    table = canonical_price_table()
+    editable = [key for key in CANONICAL_PRICE_KEYS if key not in CANONICAL_DERIVED_PRICE_KEYS]
+    lines = [
+        "🔑 <b>Price keys</b>",
+        "",
+        "Admin được xem key/audit. Chỉ owner được đổi giá bằng <code>/price_set</code>.",
+        "Giá B2C giữ gross fixed; VAT/TNDN không cộng thêm vào khách lẻ.",
+        "",
+        "<b>Editable keys</b>",
+    ]
+    for key in editable:
+        entry = table.get(key) or {}
+        aliases = canonical_price_aliases_for_key(key)
+        alias_text = f" | alias: <code>{html.escape(aliases[0])}</code>" if aliases else ""
+        example_key = aliases[0] if aliases else key
+        label = html.escape(str(entry.get("label") or key))
+        unit = html.escape(str(entry.get("unit") or "Xu"))
+        price = html.escape(canonical_price_display(key))
+        lines.append(
+            f"• {label} <code>[key={html.escape(key)}]</code>{alias_text}: <b>{price}</b> | unit: <code>{unit}</code>"
+        )
+        lines.append(f"  Ví dụ: <code>/price_set {html.escape(example_key)} {html.escape(canonical_price_example_value(key))}</code>")
+    lines.extend(["", "<b>Derived keys</b>"])
+    for key in CANONICAL_DERIVED_PRICE_KEYS:
+        entry = table.get(key) or {}
+        label = html.escape(str(entry.get("label") or key))
+        marker = html.escape(canonical_price_audit_marker(key))
+        price = html.escape(canonical_price_display(key))
+        lines.append(f"• {label} <code>{marker}</code>: <b>{price}</b> | derived, không nhập tay")
+    return lines
+
+async def cmd_price_keys(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = getattr(getattr(update, "effective_user", None), "id", None)
+    if not (is_admin_user(user_id) or is_owner_user(user_id)):
+        return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin/owner.")
+    await reply_html_lines(update, price_keys_lines())
+
 def price_set_help_text() -> str:
     editable = [key for key in CANONICAL_PRICE_KEYS if key not in CANONICAL_DERIVED_PRICE_KEYS]
     return (
         "💰 <b>Owner price_set</b>\n\n"
         "Cú pháp: <code>/price_set &lt;key&gt; &lt;gia_xu&gt;</code>\n"
-        "Chỉ owner được đổi giá. Admin mặc định chỉ xem audit.\n\n"
+        "Chỉ owner được đổi giá. Admin mặc định chỉ xem audit/key bằng <code>/price_keys</code>.\n\n"
         "Key có thể đổi:\n"
         + "\n".join(f"• <code>{key}</code>" for key in editable)
         + "\n\n"
+        "Ví dụ nhanh: <code>/price_set video_300 300</code>\n"
         "Key cộng tự động, không nhập tay: <code>subtitle_dub_video</code>, <code>auto_subtitle_then_dub</code>.\n"
         "Giá B2C giữ gross fixed; VAT/TNDN không cộng thêm vào khách lẻ."
     )
@@ -153673,13 +153740,19 @@ def finance_capital_breakeven_text() -> str:
 
 def finance_adjustments_text(limit: int = 8) -> str:
     conn = db_connect()
+    rows = []
     try:
+        ensure_finance_accounting_tables_conn(conn)
+        conn.commit()
         rows = sql_rows(
             conn,
             """SELECT id, adjustment_type, amount_vnd, related_order_id, reason, admin_id, created_at
                FROM finance_adjustments ORDER BY id DESC LIMIT ?""",
             (int(limit),),
         )
+    except Exception:
+        logger.exception("finance_adjustments_text failed; showing empty adjustment ledger")
+        rows = []
     finally:
         conn.close()
     lines = [
@@ -170572,6 +170645,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("subdub_pricing_audit", cmd_subdub_pricing_audit))
     tg_app.add_handler(CommandHandler("video_pricing_audit", cmd_video_pricing_audit))
     tg_app.add_handler(CommandHandler("voice_pricing_audit", cmd_voice_pricing_audit))
+    tg_app.add_handler(CommandHandler("price_keys", cmd_price_keys))
     tg_app.add_handler(CommandHandler("price_set", cmd_price_set))
     tg_app.add_handler(CommandHandler("mode",        cmd_mode))
     tg_app.add_handler(CommandHandler("chat_pro_on", cmd_chat_pro_on))
