@@ -511,14 +511,17 @@ SHOPAIKEY_CHAT_TIMEOUT_SECONDS = env_int("SHOPAIKEY_CHAT_TIMEOUT_SECONDS", 30)
 # that explicitly.
 KEY4U_ENABLED = env_flag("KEY4U_ENABLED", "false")
 KEY4U_API_KEY = _env("KEY4U_TOKEN", _env("KEY4U_API_KEY", ""))
+KEY4U_VIDEO_AUTH_HEADER_VALUE = _env("KEY4U_VIDEO_AUTH_HEADER_VALUE", "")
 KEY4U_BASE_URL = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
 KEY4U_OPENAI_BASE_URL = _env("KEY4U_OPENAI_BASE_URL", join_shopaikey_url(KEY4U_BASE_URL, "/v1"))
 KEY4U_MINIMAX_BASE_URL = _env("KEY4U_MINIMAX_BASE", join_provider_url(KEY4U_BASE_URL, "/minimax"))
 KEY4U_VOICE_BASE_URL = _env("KEY4U_VOICE_BASE", "https://voice.key4u.shop/api/v1")
 KEY4U_SUNO_BASE_URL = _env("KEY4U_SUNO_BASE", join_provider_url(KEY4U_BASE_URL, "/suno"))
 KEY4U_SMART_ROUTING = env_flag("KEY4U_SMART_ROUTING", "true")
-KEY4U_USAGE_ENDPOINT = _env("KEY4U_USAGE_ENDPOINT", "")
-KEY4U_BALANCE_ENDPOINT = _env("KEY4U_BALANCE_ENDPOINT", "")
+KEY4U_USAGE_URL = _env("KEY4U_USAGE_URL", "")
+KEY4U_USAGE_CHECK_URL = _env("KEY4U_USAGE_CHECK_URL", "")
+KEY4U_USAGE_ENDPOINT = _env("KEY4U_USAGE_ENDPOINT", KEY4U_USAGE_URL or KEY4U_USAGE_CHECK_URL)
+KEY4U_BALANCE_ENDPOINT = _env("KEY4U_BALANCE_ENDPOINT", KEY4U_USAGE_CHECK_URL or KEY4U_USAGE_URL)
 KEY4U_MODELS_ENDPOINT = _env("KEY4U_MODELS_ENDPOINT", "")
 KEY4U_CHAT_ENDPOINT = _env("KEY4U_CHAT_COMPLETIONS_ENDPOINT", _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions"))
 KEY4U_IMAGE_EDIT_ENDPOINT = _env("KEY4U_IMAGE_EDITS_ENDPOINT", _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits"))
@@ -570,6 +573,7 @@ KEY4U_WARN_USD = env_float("KEY4U_WARN_USD", 5.0)
 KEY4U_CRITICAL_USD = env_float("KEY4U_CRITICAL_USD", 2.0)
 KEY4U_FREEZE_USD = env_float("KEY4U_FREEZE_USD", 1.0)
 KEY4U_USAGE_ALERT_ENABLED = env_flag("KEY4U_USAGE_ALERT_ENABLED", "true")
+KEY4U_USAGE_ALERT_THRESHOLD = env_float("KEY4U_USAGE_ALERT_THRESHOLD", KEY4U_WARN_USD)
 MUSIC_PUBLIC_ENABLED = env_flag("MUSIC_PUBLIC_ENABLED", "true")
 MUSIC_INSTRUMENTAL_PUBLIC_ENABLED = env_flag(
     "MUSIC_INSTRUMENTAL_PUBLIC_ENABLED",
@@ -40060,6 +40064,7 @@ def key4u_provider_instance():
     return Key4UProvider(Key4UConfig(
         enabled=bool(KEY4U_ENABLED),
         api_key=KEY4U_API_KEY,
+        video_auth_header_value=KEY4U_VIDEO_AUTH_HEADER_VALUE,
         base_url=KEY4U_BASE_URL,
         openai_base_url=KEY4U_OPENAI_BASE_URL,
         minimax_base_url=KEY4U_MINIMAX_BASE_URL,
@@ -40069,6 +40074,7 @@ def key4u_provider_instance():
         public_enabled=bool(KEY4U_PUBLIC_ENABLED),
         admin_smoke_enabled=bool(KEY4U_ADMIN_SMOKE_ENABLED),
         usage_endpoint=KEY4U_USAGE_ENDPOINT,
+        usage_check_url=KEY4U_USAGE_CHECK_URL,
         balance_endpoint=KEY4U_BALANCE_ENDPOINT,
         models_endpoint=KEY4U_MODELS_ENDPOINT,
         chat_endpoint=KEY4U_CHAT_ENDPOINT,
@@ -57601,7 +57607,7 @@ TOOL_FREEZE_COMMANDS = {
     "tool_test_kling_video", "tool_test_runway_video", "tool_test_heygen_avatar",
     "tool_test_music_library", "tool_test_sfx_library", "tool_test_media_library",
     "tool_test_music_ai", "tool_test_replicate_media",
-    "orchestrator_status", "provider_matrix", "provider_usage", "providers_compact", "provider_detail", "core_4_status", "core_blockers", "tool_test_openrouter",
+    "orchestrator_status", "provider_matrix", "provider_usage", "provider_usage_status", "providers_compact", "provider_detail", "core_4_status", "core_blockers", "tool_test_openrouter",
     "tool_test_kling_status", "tool_test_replicate_status",
     "tool_test_elevenlabs_status", "tool_test_deepgram_status",
     "shopaikey_status", "shopaikey_usage", "tool_test_shopaikey", "tool_test_shopaikey_chat", "tool_test_shopaikey_tts",
@@ -88063,7 +88069,12 @@ def key4u_manual_usage_snapshot() -> dict:
     }
 
 def key4u_usage_endpoint_verified() -> bool:
-    return bool(str(globals().get("KEY4U_USAGE_ENDPOINT") or "").strip())
+    return bool(
+        str(globals().get("KEY4U_USAGE_ENDPOINT") or "").strip()
+        or str(globals().get("KEY4U_USAGE_URL") or "").strip()
+        or str(globals().get("KEY4U_USAGE_CHECK_URL") or "").strip()
+        or str(globals().get("KEY4U_BALANCE_ENDPOINT") or "").strip()
+    )
 
 KEY4U_COST_UNVERIFIED_MARKER = "cost_unverified"
 
@@ -88077,7 +88088,7 @@ def key4u_decimal_or_default(value, default="0") -> Decimal:
     return dec
 
 def key4u_alert_thresholds() -> dict:
-    warn = key4u_decimal_or_default(get_system_setting("key4u_usage_alert_warn_usd", ""), KEY4U_WARN_USD)
+    warn = key4u_decimal_or_default(get_system_setting("key4u_usage_alert_warn_usd", ""), KEY4U_USAGE_ALERT_THRESHOLD)
     critical = key4u_decimal_or_default(get_system_setting("key4u_usage_alert_critical_usd", ""), KEY4U_CRITICAL_USD)
     freeze = key4u_decimal_or_default(get_system_setting("key4u_usage_alert_freeze_usd", ""), KEY4U_FREEZE_USD)
     if critical < freeze:
@@ -88156,6 +88167,8 @@ def key4u_usage_snapshot(remote_usage: dict | None = None, remote_balance_result
     local = key4u_local_usage_estimate(24)
     manual = key4u_manual_usage_snapshot()
     remote_balance = key4u_extract_balance_usd(remote_balance_result or {})
+    if remote_balance is None:
+        remote_balance = key4u_extract_balance_usd(remote_usage or {})
     estimated_used = float(local.get("estimated_used_usd") or 0)
     estimated_remaining = None
     remaining_source = "unknown_balance"
@@ -88279,8 +88292,11 @@ def key4u_usage_status_lines(remote_usage: dict | None = None, remote_balance_re
 
 def key4u_provider_usage_lines_for_admin() -> list[str]:
     snapshot = key4u_usage_alert_snapshot()
+    credit = key4u_credit_diagnostic_from_results()
     return [
         "<b>Key4U</b>",
+        f"• Credit diagnostic: <code>{html.escape(str(credit.get('credit') or 'unknown'))}</code> | reason <code>{html.escape(str(credit.get('reason') or '-'))}</code>",
+        f"• Usage endpoint: <code>{'configured' if credit.get('endpoint_configured') else 'missing'}</code> | auth <code>{'configured' if credit.get('auth_configured') else 'missing'}</code>",
         f"• Remote usage: <code>{html.escape(str(snapshot['remote_usage']))}</code>",
         f"• Remote balance: <code>{html.escape(str(snapshot['remote_balance']))}</code>",
         f"• Dashboard balance thủ công: <code>{html.escape(str(snapshot['manual_balance']))}</code>",
@@ -88316,6 +88332,71 @@ def key4u_extract_balance_usd(result: dict) -> float | None:
         except Exception:
             continue
     return None
+
+def key4u_configured_usage_url() -> str:
+    return (
+        str(KEY4U_USAGE_ENDPOINT or "").strip()
+        or str(KEY4U_USAGE_URL or "").strip()
+        or str(KEY4U_USAGE_CHECK_URL or "").strip()
+        or str(KEY4U_BALANCE_ENDPOINT or "").strip()
+    )
+
+def key4u_usage_auth_configured() -> bool:
+    return bool(str(KEY4U_API_KEY or "").strip() or str(KEY4U_VIDEO_AUTH_HEADER_VALUE or "").strip())
+
+def key4u_credit_diagnostic_from_results(remote_usage: dict | None = None, remote_balance_result: dict | None = None) -> dict:
+    remote_usage = remote_usage or {}
+    remote_balance_result = remote_balance_result or {}
+    balance = key4u_extract_balance_usd(remote_balance_result)
+    source = "balance_endpoint"
+    if balance is None:
+        balance = key4u_extract_balance_usd(remote_usage)
+        source = "usage_endpoint" if balance is not None else "unknown"
+    endpoint_configured = bool(key4u_configured_usage_url())
+    reason = ""
+    if balance is not None:
+        reason = "key4u_usage_balance_ok"
+    elif not endpoint_configured:
+        reason = "key4u_usage_url_missing"
+    elif not key4u_usage_auth_configured():
+        reason = "key4u_usage_auth_missing"
+    elif balance is None:
+        reason = str(
+            (remote_balance_result or {}).get("error_class")
+            or (remote_usage or {}).get("error_class")
+            or (remote_balance_result or {}).get("status")
+            or (remote_usage or {}).get("status")
+            or "key4u_usage_balance_unknown"
+        )
+    return {
+        "provider": "key4u",
+        "endpoint_configured": endpoint_configured,
+        "auth_configured": key4u_usage_auth_configured(),
+        "credit": f"{key4u_format_usd_amount(balance)} USD" if balance is not None else "unknown",
+        "balance_usd": balance,
+        "source": source,
+        "reason": reason,
+        "usage_status": str((remote_usage or {}).get("status") or ("UNKNOWN" if not endpoint_configured else "-")),
+        "balance_status": str((remote_balance_result or {}).get("status") or ("UNKNOWN" if not endpoint_configured else "-")),
+    }
+
+async def key4u_credit_diagnostic(refresh_remote: bool = False) -> dict:
+    if not key4u_configured_usage_url():
+        return key4u_credit_diagnostic_from_results(
+            {"status": "UNKNOWN", "error_class": "key4u_usage_url_missing"},
+            {"status": "UNKNOWN", "error_class": "key4u_usage_url_missing"},
+        )
+    if not key4u_usage_auth_configured():
+        return key4u_credit_diagnostic_from_results(
+            {"status": "UNKNOWN", "error_class": "key4u_usage_auth_missing"},
+            {"status": "UNKNOWN", "error_class": "key4u_usage_auth_missing"},
+        )
+    if not refresh_remote:
+        return key4u_credit_diagnostic_from_results({"status": "CONFIGURED"}, {"status": "CONFIGURED"})
+    provider = key4u_provider_instance()
+    remote_usage = await provider.get_usage() if KEY4U_USAGE_ENDPOINT else {"status": "UNKNOWN", "error_class": "key4u_usage_url_missing"}
+    remote_balance = await provider.get_balance() if KEY4U_BALANCE_ENDPOINT else {"status": "UNKNOWN", "error_class": "key4u_usage_url_missing"}
+    return key4u_credit_diagnostic_from_results(remote_usage, remote_balance)
 
 def key4u_warning_text(remote_balance: float | None, manual_balance: float | None, estimated_used: float = 0.0) -> str:
     balance = remote_balance
@@ -88408,6 +88489,8 @@ async def key4u_usage_lines(remote_usage: dict | None = None, remote_balance_res
     local = provider_usage_summary("key4u", 24)
     manual_balance = key4u_manual_balance_usd()
     remote_balance = key4u_extract_balance_usd(remote_balance_result or {})
+    if remote_balance is None:
+        remote_balance = key4u_extract_balance_usd(remote_usage or {})
     estimated_used = float(local.get("estimated_cost_usd") or 0)
     estimated_remaining = None
     if remote_balance is not None:
@@ -88427,6 +88510,7 @@ async def key4u_usage_lines(remote_usage: dict | None = None, remote_balance_res
         f"API key: <code>{'configured' if payload.get('configured') else 'missing'}</code>",
         f"Base URL: <code>{html.escape(str(payload.get('base_url') or '-'))}</code>",
         f"Smart routing: <code>{'ON' if payload.get('smart_routing') else 'OFF'}</code>",
+        f"Usage auth: <code>{'configured' if payload.get('usage_auth_configured') else 'missing'}</code>",
         "",
         "<b>Balance</b>",
         f"• Remote usage: <code>{html.escape(usage_status)}</code>",
@@ -88562,10 +88646,12 @@ async def cmd_key4u_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Smart routing: <code>{'yes' if payload.get('smart_routing') else 'no'}</code>",
         f"• API key: <code>{html.escape(str(payload.get('api_key') or 'missing'))}</code>",
         f"• Configured: <code>{'yes' if payload.get('configured') else 'no'}</code>",
+        f"• Usage auth: <code>{'yes' if payload.get('usage_auth_configured') else 'no'}</code>",
         f"• Stage: <code>{html.escape(str(payload.get('stage') or 'disabled'))}</code>",
         f"• Base URL: <code>{'configured' if payload.get('base_url') else 'missing'}</code>",
         f"• OpenAI base URL: <code>{'configured' if payload.get('openai_base_url') else 'missing'}</code>",
         f"• Usage endpoint: <code>{html.escape(str(payload.get('usage_endpoint') or 'NEED_ENDPOINT'))}</code>",
+        f"• Usage check URL: <code>{html.escape(str(payload.get('usage_check_url') or 'NEED_ENDPOINT'))}</code>",
         f"• Balance endpoint: <code>{html.escape(str(payload.get('balance_endpoint') or 'NEED_ENDPOINT'))}</code>",
         f"• Chat model: <code>{html.escape(str(payload.get('chat_model') or '-'))}</code>",
         f"• Vision model: <code>{html.escape(str(payload.get('vision_model') or '-'))}</code>",
@@ -136035,8 +136121,9 @@ async def cmd_trend_source_add(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("<pre>" + html.escape(json.dumps(result, ensure_ascii=False, indent=2)) + "</pre>", parse_mode="HTML")
 
 
-def video_provider_status_text(status: dict | None = None) -> str:
+def video_provider_status_text(status: dict | None = None, key4u_credit: dict | None = None) -> str:
     status = dict(status or video_provider_router.provider_status_payload())
+    key4u_credit = dict(key4u_credit or status.get("key4u_credit_diagnostic") or {})
     providers = list(status.get("providers") or [])
     missing_env = dict(status.get("missing_env") or {})
     invalid_env = dict(status.get("invalid_env") or {})
@@ -136073,9 +136160,16 @@ def video_provider_status_text(status: dict | None = None) -> str:
         lines.append("• <code>-</code>")
     lines.extend(["", "Providers:"])
     for provider in providers:
+        provider_name = str(provider.get("provider") or "-")
+        key4u_usage_suffix = ""
+        if provider_name == "key4u_video":
+            key4u_usage_suffix = (
+                f" usage_credit=<code>{html.escape(str(key4u_credit.get('credit') or 'unknown'))}</code> "
+                f"usage_reason=<code>{html.escape(str(key4u_credit.get('reason') or 'key4u_usage_url_missing'))}</code> "
+            )
         lines.append(
             "• "
-            f"<code>{html.escape(str(provider.get('provider') or '-'))}</code> "
+            f"<code>{html.escape(provider_name)}</code> "
             f"enabled=<code>{'yes' if provider.get('enabled') else 'no'}</code> "
             f"configured=<code>{'yes' if provider.get('configured') else 'no'}</code> "
             f"endpoint=<code>{'yes' if provider.get('endpoint_present') else 'no'}</code> "
@@ -136084,6 +136178,7 @@ def video_provider_status_text(status: dict | None = None) -> str:
             f"auth=<code>{'yes' if provider.get('auth_present') else 'no'}</code> "
             f"model=<code>{'yes' if provider.get('model_present') else 'no'}</code> "
             f"credit=<code>{html.escape(str(provider.get('credit_status') or 'unknown'))}</code> "
+            f"{key4u_usage_suffix}"
             f"fallback_only=<code>{'yes' if provider.get('fallback_only') else 'no'}</code> "
             f"blocker=<code>{html.escape(str(provider.get('blocker') or provider.get('selection_blocker') or '-'))}</code> "
             f"invalid_fields=<code>{html.escape(','.join(str(item) for item in (provider.get('invalid_fields') or [])) or '-')}</code> "
@@ -136172,7 +136267,9 @@ async def cmd_video_provider_status(update: Update, context: ContextTypes.DEFAUL
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin. Người dùng public không thấy URL, cURL hoặc lỗi provider.")
     status = video_provider_router.provider_status_payload()
-    await update.message.reply_text(video_provider_status_text(status), parse_mode="HTML")
+    key4u_credit = await key4u_credit_diagnostic(refresh_remote=True)
+    status["key4u_credit_diagnostic"] = key4u_credit
+    await update.message.reply_text(video_provider_status_text(status, key4u_credit), parse_mode="HTML")
 
 
 async def cmd_video_provider_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171755,6 +171852,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("providers_compact", cmd_providers_compact))
     tg_app.add_handler(CommandHandler("provider_detail", cmd_provider_detail))
     tg_app.add_handler(CommandHandler("provider_usage", cmd_provider_usage))
+    tg_app.add_handler(CommandHandler("provider_usage_status", cmd_provider_usage))
     tg_app.add_handler(CommandHandler("core_4_status", cmd_core_4_status))
     tg_app.add_handler(CommandHandler("core_blockers", cmd_core_4_status))
     tg_app.add_handler(CommandHandler("free_hub_status", cmd_free_hub_status))
