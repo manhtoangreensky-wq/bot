@@ -11,15 +11,15 @@ def _env(provider: str = "key4u_video") -> dict[str, str]:
     if provider == "shopaikey_video":
         return {
             "SHOPAIKEY_VIDEO_ENABLED": "1",
-            "SHOPAIKEY_VIDEO_SUBMIT_URL": "https://example.invalid/submit?token=secret",
-            "SHOPAIKEY_VIDEO_POLL_URL": "https://example.invalid/poll/{task_id}?token=secret",
+            "SHOPAIKEY_VIDEO_SUBMIT_URL": "https://video-provider.invalid/submit?token=secret",
+            "SHOPAIKEY_VIDEO_POLL_URL": "https://video-provider.invalid/poll/{task_id}?token=secret",
             "SHOPAIKEY_VIDEO_AUTH_HEADER_NAME": "Authorization",
             "SHOPAIKEY_VIDEO_AUTH_HEADER_VALUE": "Bearer secret",
         }
     return {
         "KEY4U_VIDEO_ENABLED": "1",
-        "KEY4U_VIDEO_SUBMIT_URL": "https://example.invalid/submit?token=secret",
-        "KEY4U_VIDEO_POLL_URL": "https://example.invalid/poll/{task_id}?token=secret",
+        "KEY4U_VIDEO_SUBMIT_URL": "https://video-provider.invalid/submit?token=secret",
+        "KEY4U_VIDEO_POLL_URL": "https://video-provider.invalid/poll/{task_id}?token=secret",
         "KEY4U_VIDEO_AUTH_HEADER_NAME": "Authorization",
         "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer secret",
     }

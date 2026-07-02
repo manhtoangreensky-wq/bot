@@ -134765,6 +134765,7 @@ def video_provider_status_text(status: dict | None = None) -> str:
     status = dict(status or video_provider_router.provider_status_payload())
     providers = list(status.get("providers") or [])
     missing_env = dict(status.get("missing_env") or {})
+    invalid_env = dict(status.get("invalid_env") or {})
     provider_chain_text = ",".join(str(item) for item in (status.get("effective_provider_chain") or status.get("provider_chain") or [])) or "-"
     selection_reason = str(status.get("selection_reason") or status.get("summary_reason") or "-")
     fallback_order = list(status.get("fallback_order") or [])
@@ -134789,6 +134790,13 @@ def video_provider_status_text(status: dict | None = None) -> str:
             lines.append(f"• <code>{html.escape(str(provider_name))}</code>: <code>{html.escape(', '.join(str(item) for item in missing) or '-')}</code>")
     else:
         lines.append("• <code>-</code>")
+    lines.append("")
+    lines.append("Biến sai/placeholder:")
+    if invalid_env:
+        for provider_name, invalid in invalid_env.items():
+            lines.append(f"• <code>{html.escape(str(provider_name))}</code>: <code>{html.escape(', '.join(str(item) for item in invalid) or '-')}</code>")
+    else:
+        lines.append("• <code>-</code>")
     lines.extend(["", "Providers:"])
     for provider in providers:
         lines.append(
@@ -134803,6 +134811,8 @@ def video_provider_status_text(status: dict | None = None) -> str:
             f"model=<code>{'yes' if provider.get('model_present') else 'no'}</code> "
             f"credit=<code>{html.escape(str(provider.get('credit_status') or 'unknown'))}</code> "
             f"fallback_only=<code>{'yes' if provider.get('fallback_only') else 'no'}</code> "
+            f"blocker=<code>{html.escape(str(provider.get('blocker') or provider.get('selection_blocker') or '-'))}</code> "
+            f"invalid_fields=<code>{html.escape(','.join(str(item) for item in (provider.get('invalid_fields') or [])) or '-')}</code> "
             f"caps=<code>{html.escape(','.join(str(item) for item in (provider.get('capabilities') or [])) or '-')}</code> "
             f"missing=<code>{html.escape(','.join(str(item) for item in (provider.get('missing') or [])) or '-')}</code>"
         )
@@ -134814,11 +134824,22 @@ def video_provider_status_text(status: dict | None = None) -> str:
 def video_provider_setup_text(status: dict | None = None) -> str:
     status = dict(status or video_provider_router.provider_status_payload())
     missing_env = dict(status.get("missing_env") or {})
+    invalid_env = dict(status.get("invalid_env") or {})
     missing_lines = []
     for provider_name, missing in missing_env.items():
         missing_lines.append(f"- {provider_name}: {', '.join(str(item) for item in missing) or '-'}")
     if not missing_lines:
         missing_lines.append("- -")
+    invalid_lines = []
+    for provider in status.get("providers") or []:
+        provider_name = str(provider.get("provider") or "-")
+        invalid_fields = ", ".join(str(item) for item in (provider.get("invalid_fields") or [])) or "-"
+        invalid_names = ", ".join(str(item) for item in invalid_env.get(provider_name, [])) or "-"
+        blocker = str(provider.get("blocker") or "-")
+        if invalid_names != "-" or invalid_fields != "-":
+            invalid_lines.append(f"- {provider_name}: fields={invalid_fields}; env={invalid_names}; blocker={blocker}")
+    if not invalid_lines:
+        invalid_lines.append("- -")
     lines = [
         "🎬 <b>Cấu hình nhà cung cấp dựng video</b>",
         "",
@@ -134828,6 +134849,8 @@ def video_provider_setup_text(status: dict | None = None) -> str:
         f"- Provider có endpoint: {int(status.get('configured_count') or 0)}",
         "- Provider thiếu biến:",
         *missing_lines,
+        "- Provider sai cấu hình/placeholder:",
+        *invalid_lines,
         "",
         "Recommended Railway variables:",
         "",
