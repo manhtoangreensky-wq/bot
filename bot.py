@@ -550,12 +550,17 @@ KEY4U_OPENAI_TTS_MODEL = _env("KEY4U_OPENAI_TTS_MODEL", "tts-1")
 KEY4U_OPENAI_TTS_VOICE = _env("KEY4U_OPENAI_TTS_VOICE", "alloy")
 KEY4U_SUNO_CREATE_ENDPOINT = _env("KEY4U_SUNO_CREATE_ENDPOINT", "/submit/music")
 KEY4U_SUNO_QUERY_ENDPOINT = _env("KEY4U_SUNO_QUERY_ENDPOINT", "/fetch/{taskId}")
+KEY4U_SUNO_FETCH_URL = _env("KEY4U_SUNO_FETCH_URL", "")
 KEY4U_SUNO_DOWNLOAD_URL = _env("KEY4U_SUNO_DOWNLOAD_URL", _env("KEY4U_MUSIC_DOWNLOAD_URL", _env("MUSIC_KEY4U_DOWNLOAD_URL", "")))
 KEY4U_SUNO_RESULT_FIELD = _env("KEY4U_SUNO_RESULT_FIELD", _env("KEY4U_MUSIC_RESULT_FIELD", ""))
 KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED = "KEY4U_SUNO_DOWNLOAD_URL or KEY4U_MUSIC_DOWNLOAD_URL"
 KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER = "key4u_suno_download_endpoint_missing_for_bare_cdn"
 KEY4U_SUNO_DOWNLOAD_PUBLIC_NO_CHARGE = "TOAN AAS chưa lấy được file nhạc từ nhà cung cấp lúc này. Hệ thống chưa trừ Xu."
 KEY4U_SUNO_LYRICS_ENDPOINT = _env("KEY4U_SUNO_LYRICS_ENDPOINT", "/submit/lyrics")
+KEY4U_SUNO_WAV_URL = _env("KEY4U_SUNO_WAV_URL", "")
+KEY4U_SUNO_WAV_RESULT_URL = _env("KEY4U_SUNO_WAV_RESULT_URL", "")
+KEY4U_SUNO_WAV_SETUP_REQUIRED = "KEY4U_SUNO_FETCH_URL or KEY4U_SUNO_WAV_RESULT_URL"
+KEY4U_SUNO_WAV_RESULT_BLOCKER = "key4u_suno_wav_result_endpoint_missing"
 KEY4U_SUNO_WAV_ENDPOINT = _env("KEY4U_SUNO_WAV_ENDPOINT", "/act/wav/{clipId}")
 KEY4U_SUNO_TIMING_ENDPOINT = _env("KEY4U_SUNO_TIMING_ENDPOINT", "/act/timing/{clipId}")
 KEY4U_RERANK_ENDPOINT = _env("KEY4U_RERANK_ENDPOINT", "")
@@ -605,6 +610,19 @@ def key4u_minimax_final_url(endpoint: str = "") -> str:
 def key4u_suno_final_url(endpoint: str = "") -> str:
     return join_provider_url(KEY4U_SUNO_BASE_URL, endpoint or "")
 
+def key4u_suno_clip_id_from_url(raw_url: str = "") -> str:
+    try:
+        path = urlparse(str(raw_url or "").strip()).path
+        stem = os.path.splitext(os.path.basename(path))[0].strip()
+    except Exception:
+        stem = ""
+    lowered = stem.lower()
+    if not stem or lowered in {"song", "audio", "music", "file", "result", "download"}:
+        return ""
+    if len(stem) < 6:
+        return ""
+    return re.sub(r"[^A-Za-z0-9_-]+", "", stem)[:120]
+
 def key4u_endpoint_with_id(endpoint: str, value: str, *names: str) -> str:
     path = str(endpoint or "")
     replacement = str(value or "")
@@ -618,12 +636,9 @@ def key4u_endpoint_with_id(endpoint: str, value: str, *names: str) -> str:
         path = path.rstrip("/") + "/" + replacement
     return path
 
-def key4u_suno_fetch_final_url(task_id: str = "{taskId}") -> str:
-    return key4u_suno_final_url(key4u_endpoint_with_id(KEY4U_SUNO_QUERY_ENDPOINT, task_id, "taskId", "task_id"))
-
-def key4u_suno_download_final_url(task_id: str = "{taskId}", *, audio_id: str = "", raw_url: str = "") -> str:
-    endpoint = str(KEY4U_SUNO_DOWNLOAD_URL or "").strip()
-    if not endpoint:
+def key4u_suno_endpoint_with_values(endpoint: str, *, task_id: str = "", audio_id: str = "", raw_url: str = "") -> str:
+    path = str(endpoint or "").strip()
+    if not path:
         return ""
     task_value = str(task_id or "").strip()
     audio_value = str(audio_id or task_value or "").strip()
@@ -632,20 +647,59 @@ def key4u_suno_download_final_url(task_id: str = "{taskId}", *, audio_id: str = 
         "{taskId}": task_value,
         "{task_id}": task_value,
         "{provider_task_id}": task_value,
-        "{id}": task_value,
+        "{clip_id}": audio_value,
+        "{clipId}": audio_value,
         "{audio_id}": audio_value,
+        "{audioId}": audio_value,
+        "{id}": audio_value or task_value,
         "{url}": url_value,
     }
     changed = False
     for token, value in replacements.items():
-        if token in endpoint:
-            endpoint = endpoint.replace(token, value)
+        if token in path:
+            path = path.replace(token, value)
             changed = True
     if not changed and task_value:
-        endpoint = endpoint.rstrip("/") + "/" + task_value
-    if endpoint.startswith(("http://", "https://")):
-        return endpoint
-    return key4u_suno_final_url(endpoint)
+        path = path.rstrip("/") + "/" + task_value
+    if path.startswith(("http://", "https://")):
+        return path
+    return key4u_suno_final_url(path)
+
+def key4u_suno_fetch_final_url(task_id: str = "{taskId}") -> str:
+    endpoint = KEY4U_SUNO_FETCH_URL or KEY4U_SUNO_QUERY_ENDPOINT
+    return key4u_suno_endpoint_with_values(endpoint, task_id=task_id)
+
+def key4u_suno_download_final_url(task_id: str = "{taskId}", *, audio_id: str = "", raw_url: str = "") -> str:
+    endpoint = str(KEY4U_SUNO_DOWNLOAD_URL or "").strip()
+    if not endpoint:
+        return ""
+    return key4u_suno_endpoint_with_values(endpoint, task_id=task_id, audio_id=audio_id, raw_url=raw_url)
+
+def key4u_suno_wav_endpoint_template() -> str:
+    download_endpoint = str(KEY4U_SUNO_DOWNLOAD_URL or "").strip()
+    if str(KEY4U_SUNO_WAV_URL or "").strip():
+        return str(KEY4U_SUNO_WAV_URL or "").strip()
+    if "/act/wav" in download_endpoint.lower():
+        return download_endpoint
+    return str(KEY4U_SUNO_WAV_ENDPOINT or "").strip()
+
+def key4u_suno_wav_final_url(clip_id: str = "", *, task_id: str = "", raw_url: str = "") -> str:
+    endpoint = key4u_suno_wav_endpoint_template()
+    if not endpoint:
+        return ""
+    return key4u_suno_endpoint_with_values(endpoint, task_id=task_id, audio_id=clip_id or key4u_suno_clip_id_from_url(raw_url), raw_url=raw_url)
+
+def key4u_suno_provider_download_final_url(task_id: str = "{taskId}", *, audio_id: str = "", raw_url: str = "") -> str:
+    return (
+        key4u_suno_download_final_url(task_id, audio_id=audio_id, raw_url=raw_url)
+        or key4u_suno_wav_final_url(audio_id or key4u_suno_clip_id_from_url(raw_url), task_id=task_id, raw_url=raw_url)
+    )
+
+def key4u_suno_wav_result_final_url(wav_task_id: str = "", *, clip_id: str = "", task_id: str = "") -> str:
+    endpoint = str(KEY4U_SUNO_WAV_RESULT_URL or KEY4U_SUNO_FETCH_URL or KEY4U_SUNO_QUERY_ENDPOINT or "").strip()
+    if not endpoint:
+        return ""
+    return key4u_suno_endpoint_with_values(endpoint, task_id=wav_task_id or task_id, audio_id=clip_id or wav_task_id)
 
 MINIMAX_TTS_ENDPOINT = _env("MINIMAX_TTS_ENDPOINT", "/tts/minimax/t2a_v2")
 MINIMAX_DIRECT_BASE_URL = _env("MINIMAX_DIRECT_BASE_URL", "https://api.minimax.chat/v1")
@@ -7439,12 +7493,12 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "result_url_expired", "result_url_forbidden", "result_url_forbidden_access_denied", "result_url_forbidden_or_missing_auth",
             "result_url_signature_lost_or_invalid", "provider_auth_required",
             "provider_result_missing_or_expired", "result_url_missing",
-            "download_http_failed", "download_failed", KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER,
+            "download_http_failed", "download_failed", KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER, KEY4U_SUNO_WAV_RESULT_BLOCKER,
         }:
             blocker = download_error if download_error in {
                 "result_url_forbidden", "result_url_forbidden_access_denied", "result_url_forbidden_or_missing_auth",
                 "result_url_signature_lost_or_invalid", "provider_auth_required",
-                "provider_result_missing_or_expired", "result_url_missing", KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER,
+                "provider_result_missing_or_expired", "result_url_missing", KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER, KEY4U_SUNO_WAV_RESULT_BLOCKER,
             } else "artifact_download_failed"
             if download_error == "result_url_expired" and "http=" in str(artifact.get("download_detail") or "").lower():
                 blocker = "result_url_expired"
@@ -7488,14 +7542,19 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
             "provider_download_http_status": int(artifact.get("provider_download_http_status") or artifact.get("download_http_status") or 0),
             "provider_download_content_type": str(artifact.get("provider_download_content_type") or artifact.get("download_content_type") or ""),
             "provider_download_bytes": int(artifact.get("provider_download_bytes") or artifact.get("downloaded_bytes") or 0),
-            "setup_required": str(artifact.get("setup_required") or current.get("setup_required") or (KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED if blocker == KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER else "")),
+            "setup_required": str(artifact.get("setup_required") or current.get("setup_required") or (KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED if blocker == KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER else KEY4U_SUNO_WAV_SETUP_REQUIRED if blocker == KEY4U_SUNO_WAV_RESULT_BLOCKER else "")),
+            "wav_endpoint_configured": bool(artifact.get("wav_endpoint_configured") or current.get("wav_endpoint_configured")),
+            "wav_request_http_status": int(artifact.get("wav_request_http_status") or current.get("wav_request_http_status") or 0),
+            "wav_response_shape": str(artifact.get("wav_response_shape") or current.get("wav_response_shape") or ""),
+            "wav_task_id_present": bool(artifact.get("wav_task_id_present") or current.get("wav_task_id_present")),
+            "final_audio_download_status": str(artifact.get("final_audio_download_status") or current.get("final_audio_download_status") or ""),
             "selected_artifact_selected_reason": str(artifact.get("selected_artifact_selected_reason") or current.get("selected_artifact_selected_reason") or ""),
             "music_output_url_reject_reason": str(artifact.get("music_output_url_reject_reason") or current.get("music_output_url_reject_reason") or ""),
             "rejected_candidates": list(artifact.get("rejected_candidates") or [])[-8:],
             "provider_result_candidate_count": int(artifact.get("provider_result_candidate_count") or current.get("provider_result_candidate_count") or 0),
             "result_url_age_seconds": music_result_url_age_seconds(current),
         })
-        if blocker == KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER:
+        if blocker in {KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER, KEY4U_SUNO_WAV_RESULT_BLOCKER}:
             updated["progress_text"] = KEY4U_SUNO_DOWNLOAD_PUBLIC_NO_CHARGE
         if updated.get("internal_job_id"):
             save_engine_async_job(updated)
@@ -7592,6 +7651,11 @@ async def materialize_music_artifact_for_job(job: dict | None = None, *, updated
         "provider_download_content_type": str(artifact.get("provider_download_content_type") or artifact.get("download_content_type") or ""),
         "provider_download_bytes": int(artifact.get("provider_download_bytes") or artifact.get("downloaded_bytes") or len(payload) or 0),
         "setup_required": "",
+        "wav_endpoint_configured": bool(artifact.get("wav_endpoint_configured") or current.get("wav_endpoint_configured")),
+        "wav_request_http_status": int(artifact.get("wav_request_http_status") or current.get("wav_request_http_status") or 0),
+        "wav_response_shape": str(artifact.get("wav_response_shape") or current.get("wav_response_shape") or ""),
+        "wav_task_id_present": bool(artifact.get("wav_task_id_present") or current.get("wav_task_id_present")),
+        "final_audio_download_status": str(artifact.get("final_audio_download_status") or current.get("final_audio_download_status") or ("PASS" if payload else "")),
         "selected_artifact_selected_reason": str(artifact.get("selected_artifact_selected_reason") or current.get("selected_artifact_selected_reason") or ""),
         "music_output_url_reject_reason": str(artifact.get("music_output_url_reject_reason") or current.get("music_output_url_reject_reason") or ""),
         "last_error_body_class": "",
@@ -7787,6 +7851,7 @@ async def deliver_music_ready_artifact_once(
     materialized = {"recovery_action": "none", "job": current}
     if (
         not music_job_ready_artifact_validated(current)
+        and not music_job_artifact_metadata_ready(current)
         and str(current.get("provider") or current.get("provider_name_internal") or "") == "key4u_suno"
         and music_job_provider_task_id(current)
     ):
@@ -8519,6 +8584,11 @@ def music_job_debug_text(job_id: str = "") -> str:
         f"• provider_download_http_status: <code>{int((job or {}).get('provider_download_http_status') or 0)}</code>\n"
         f"• provider_download_content_type: <code>{html.escape(str((job or {}).get('provider_download_content_type') or '-'))}</code>\n"
         f"• provider_download_bytes: <code>{int((job or {}).get('provider_download_bytes') or 0)}</code>\n"
+        f"• wav_endpoint_configured: <code>{'yes' if (job or {}).get('wav_endpoint_configured') else 'no'}</code>\n"
+        f"• wav_request_http_status: <code>{int((job or {}).get('wav_request_http_status') or 0)}</code>\n"
+        f"• wav_response_shape: <code>{html.escape(str((job or {}).get('wav_response_shape') or '-'))}</code>\n"
+        f"• wav_task_id_present: <code>{'yes' if (job or {}).get('wav_task_id_present') else 'no'}</code>\n"
+        f"• final_audio_download_status: <code>{html.escape(str((job or {}).get('final_audio_download_status') or '-'))}</code>\n"
         f"• setup_required: <code>{html.escape(str((job or {}).get('setup_required') or '-'))}</code>\n"
         f"• rejected_candidate_reasons: <code>{html.escape('; '.join(str(item) for item in ((job or {}).get('rejected_candidate_reasons') or []))[:900] or '-')}</code>\n"
         f"• last_error_body_class: <code>{html.escape(str((job or {}).get('last_error_body_class') or '-'))}</code>\n"
@@ -8615,6 +8685,11 @@ def music_delivery_recover_report_text(input_job_id: str = "", result: dict | No
         f"• provider_download_http_status: <code>{int(job.get('provider_download_http_status') or 0)}</code>\n"
         f"• provider_download_content_type: <code>{html.escape(str(job.get('provider_download_content_type') or '-'))}</code>\n"
         f"• provider_download_bytes: <code>{int(job.get('provider_download_bytes') or 0)}</code>\n"
+        f"• wav_endpoint_configured: <code>{'yes' if job.get('wav_endpoint_configured') else 'no'}</code>\n"
+        f"• wav_request_http_status: <code>{int(job.get('wav_request_http_status') or 0)}</code>\n"
+        f"• wav_response_shape: <code>{html.escape(str(job.get('wav_response_shape') or '-'))}</code>\n"
+        f"• wav_task_id_present: <code>{'yes' if job.get('wav_task_id_present') else 'no'}</code>\n"
+        f"• final_audio_download_status: <code>{html.escape(str(job.get('final_audio_download_status') or '-'))}</code>\n"
         f"• setup_required: <code>{html.escape(str(job.get('setup_required') or '-'))}</code>\n"
         f"• rejected_candidate_reasons: <code>{html.escape('; '.join(str(item) for item in (job.get('rejected_candidate_reasons') or []))[:900] or '-')}</code>\n"
         f"• last_error_body_class: <code>{html.escape(str(job.get('last_error_body_class') or '-'))}</code>\n"
@@ -53561,7 +53636,7 @@ def music_provider_downloadable_candidates(candidates: list[dict] | None = None)
 
 def music_key4u_suno_download_candidate(provider_task_id: str = "", *, raw_url: str = "") -> dict:
     task_id = str(provider_task_id or "").strip()
-    endpoint = key4u_suno_download_final_url(task_id, raw_url=raw_url)
+    endpoint = key4u_suno_provider_download_final_url(task_id, raw_url=raw_url)
     if not task_id or not endpoint:
         return {}
     candidate = music_provider_candidate_from_url(
@@ -53708,6 +53783,8 @@ def music_download_error_category(detail: str = "", http_status: int = 0) -> str
     body_class = music_download_detail_field(detail, "error_body_class").lower()
     if KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER in lowered:
         return KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER
+    if KEY4U_SUNO_WAV_RESULT_BLOCKER in lowered:
+        return KEY4U_SUNO_WAV_RESULT_BLOCKER
     if status == 401:
         return "provider_auth_required"
     if status == 403:
@@ -85875,7 +85952,8 @@ def music_provider_audit_text() -> str:
     latest_jobs = list_engine_async_jobs(feature="music_suno", limit=1, active_only=False)
     latest_job = dict(latest_jobs[0]) if latest_jobs else {}
     music_attempt = load_provider_attempt("music")
-    download_endpoint = key4u_suno_download_final_url("{taskId}")
+    download_endpoint = key4u_suno_provider_download_final_url("{taskId}", raw_url="")
+    wav_endpoint = key4u_suno_wav_final_url("{clip_id}", task_id="{taskId}")
     candidate_paths = str(
         latest_job.get("key4u_suno_fetch_candidate_paths_text")
         or latest_job.get("provider_result_candidate_paths_text")
@@ -85894,10 +85972,15 @@ def music_provider_audit_text() -> str:
         "",
         f"• Key4U Suno base: <code>{html.escape(KEY4U_SUNO_BASE_URL or '-')}</code>",
         f"• submit URL configured: <code>{html.escape(key4u_suno_final_url(KEY4U_SUNO_CREATE_ENDPOINT) if KEY4U_SUNO_CREATE_ENDPOINT else 'missing')}</code>",
-        f"• fetch URL configured: <code>{html.escape(key4u_suno_fetch_final_url('{taskId}') if KEY4U_SUNO_QUERY_ENDPOINT else 'missing')}</code>",
+        f"• fetch URL configured: <code>{html.escape(key4u_suno_fetch_final_url('{taskId}') if (KEY4U_SUNO_FETCH_URL or KEY4U_SUNO_QUERY_ENDPOINT) else 'missing')}</code>",
         f"• download endpoint configured: <code>{'yes' if download_endpoint else 'no'}</code>",
         f"• download endpoint URL: <code>{html.escape(music_result_url_debug_label(download_endpoint) if download_endpoint else '-')}</code>",
         f"• setup_required: <code>{html.escape(str(latest_job.get('setup_required') or (KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED if not download_endpoint else '-') or '-'))}</code>",
+        f"• wav_endpoint_configured: <code>{'yes' if wav_endpoint else 'no'}</code>",
+        f"• wav_request_http_status: <code>{int(latest_job.get('wav_request_http_status') or 0)}</code>",
+        f"• wav_response_shape: <code>{html.escape(str(latest_job.get('wav_response_shape') or '-'))}</code>",
+        f"• wav_task_id_present: <code>{'yes' if latest_job.get('wav_task_id_present') else 'no'}</code>",
+        f"• final_audio_download_status: <code>{html.escape(str(latest_job.get('final_audio_download_status') or '-'))}</code>",
         f"• result field override: <code>{html.escape(KEY4U_SUNO_RESULT_FIELD or '-')}</code>",
         f"• last fetch attempted: <code>{'yes' if latest_job.get('key4u_suno_fetch_attempted') else 'no'}</code>",
         f"• last fetch http: <code>{int(latest_job.get('key4u_suno_fetch_http_status') or 0)}</code>",
@@ -100357,7 +100440,6 @@ async def poll_music_generation_job(result: dict, updated_by="") -> dict:
             if isinstance(override_value, str) and override_value.strip().startswith(("http://", "https://")):
                 candidates.append(music_provider_candidate_from_url(override_path, override_value, provider_name=provider, source="KEY4U_SUNO_RESULT_FIELD"))
                 candidates = sorted(candidates, key=music_provider_candidate_priority, reverse=True)
-        candidates = music_key4u_candidates_with_download_endpoint(candidates, task_id)
         selected = select_music_provider_audio_candidate(candidates)
         output_url = str(selected.get("url") or "")
         fetch_status_raw = str(polled.get("status") or "")
@@ -100413,12 +100495,12 @@ async def poll_music_generation_job(result: dict, updated_by="") -> dict:
                     "music_output_url_reject_reason": bare_reject_reason or music_bare_suno_output_reject_reason(retry_candidates),
                     "rejected_candidate_reasons": music_provider_rejected_candidate_reasons(retry_candidates or candidates),
                     "selected_artifact_selected_reason": "",
-                    "provider_download_endpoint_configured": bool(key4u_suno_download_final_url(task_id)),
+                    "provider_download_endpoint_configured": bool(key4u_suno_provider_download_final_url(task_id, raw_url=music_first_bare_suno_cdn_url(retry_candidates or candidates))),
                     "provider_download_endpoint_attempted": False,
-                    "setup_required": KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED if not key4u_suno_download_final_url(task_id) else "",
-                    "recovery_action": "setup_required_key4u_suno_download_url" if not key4u_suno_download_final_url(task_id) else "need_key4u_signed_download_field_or_proxy",
+                    "setup_required": KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED if not key4u_suno_provider_download_final_url(task_id, raw_url=music_first_bare_suno_cdn_url(retry_candidates or candidates)) else "",
+                    "recovery_action": "setup_required_key4u_suno_download_url" if not key4u_suno_provider_download_final_url(task_id, raw_url=music_first_bare_suno_cdn_url(retry_candidates or candidates)) else "need_key4u_signed_download_field_or_proxy",
                 })
-                blocker = KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER if not key4u_suno_download_final_url(task_id) else "result_url_forbidden_access_denied"
+                blocker = KEY4U_SUNO_BARE_CDN_SETUP_BLOCKER if not key4u_suno_provider_download_final_url(task_id, raw_url=music_first_bare_suno_cdn_url(retry_candidates or candidates)) else "result_url_forbidden_access_denied"
                 return {
                     "ok": False,
                     "status": "COMPLETED_NO_DOWNLOADABLE_AUDIO",
@@ -100455,8 +100537,8 @@ async def poll_music_generation_job(result: dict, updated_by="") -> dict:
             "music_output_url_reject_reason": bare_reject_reason,
             "rejected_candidate_reasons": music_provider_rejected_candidate_reasons(candidates),
             "selected_artifact_selected_reason": str(selected.get("selected_reason") or ""),
-            "provider_download_endpoint_configured": bool(key4u_suno_download_final_url(task_id)),
-            "setup_required": KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED if bare_reject_reason and not key4u_suno_download_final_url(task_id) else "",
+            "provider_download_endpoint_configured": bool(key4u_suno_provider_download_final_url(task_id, raw_url=music_first_bare_suno_cdn_url(candidates))),
+            "setup_required": KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED if bare_reject_reason and not key4u_suno_provider_download_final_url(task_id, raw_url=music_first_bare_suno_cdn_url(candidates)) else "",
             **metadata,
         }
     if not SHOPAIKEY_MUSIC_STATUS_ENDPOINT:
@@ -101072,7 +101154,7 @@ def music_provider_result_metadata(payload: dict | None = None, *, provider_name
     bare_reject = music_bare_suno_output_reject_reason(candidates)
     is_key4u = str(provider_name or data.get("provider") or "").strip() == "key4u_suno"
     task_id = str(data.get("music_task_id") or data.get("provider_task_id") or data.get("task_id") or "").strip()
-    endpoint_configured = bool(key4u_suno_download_final_url(task_id or "{taskId}", raw_url=music_first_bare_suno_cdn_url(candidates))) if is_key4u else False
+    endpoint_configured = bool(key4u_suno_provider_download_final_url(task_id or "{taskId}", raw_url=music_first_bare_suno_cdn_url(candidates))) if is_key4u else False
     return {
         "raw_provider_result_saved": bool(isinstance(raw_payload, (dict, list))),
         "provider_result_candidates": candidate_records,
@@ -101122,6 +101204,11 @@ def apply_music_provider_result_metadata(target: dict | None = None, polled: dic
         "provider_download_http_status",
         "provider_download_content_type",
         "provider_download_bytes",
+        "wav_endpoint_configured",
+        "wav_request_http_status",
+        "wav_response_shape",
+        "wav_task_id_present",
+        "final_audio_download_status",
         "rejected_candidate_reasons",
         "setup_required",
         "recovery_action",
@@ -101167,45 +101254,138 @@ def music_provider_auth_download_headers(provider_name: str = "") -> dict:
         return {}
     return {"Authorization": f"Bearer {token}"}
 
-async def music_provider_proxy_download_audio(
-    *,
-    provider_name: str = "",
-    provider_task_id: str = "",
-    raw_url: str = "",
-    raw_provider_result=None,
-    timeout_seconds: float = 60.0,
-) -> tuple[bytes, str, int]:
-    provider = str(provider_name or "").strip().lower()
-    task_id = str(provider_task_id or "").strip()
-    if provider != "key4u_suno":
-        return b"", "provider_proxy_unavailable", 0
-    endpoint = key4u_suno_download_final_url(task_id, raw_url=raw_url)
-    if not endpoint:
-        return b"", "provider_proxy_unavailable; provider_download_endpoint_configured=no", 0
-    headers = music_provider_auth_download_headers("key4u_suno")
-    headers = {
-        **headers,
-        "Accept": "audio/mpeg,audio/*,application/json,*/*",
-        "User-Agent": "TOAN-AAS/1.0",
-        "Referer": "https://api.key4u.shop/",
+def music_key4u_suno_safe_id(value: str = "") -> str:
+    text = re.sub(r"[^A-Za-z0-9_-]+", "", str(value or "").strip())
+    if len(text) < 6:
+        return ""
+    return text[:160]
+
+def music_key4u_suno_clip_id_from_payload(payload=None, *, raw_url: str = "", provider_task_id: str = "") -> str:
+    url_clip = key4u_suno_clip_id_from_url(raw_url)
+    if url_clip:
+        return url_clip
+    task = str(provider_task_id or "").strip()
+    preferred_keys = {"clip_id", "clipid", "audio_id", "audioid", "song_id", "songid"}
+    fallback_keys = {"id", "uuid"}
+
+    def visit(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                normalized = re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+                if normalized in preferred_keys and isinstance(child, (str, int)):
+                    candidate = music_key4u_suno_safe_id(str(child))
+                    if candidate and candidate != task:
+                        return candidate
+            for key, child in value.items():
+                normalized = re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+                if normalized in fallback_keys and isinstance(child, (str, int)):
+                    candidate = music_key4u_suno_safe_id(str(child))
+                    if candidate and candidate != task:
+                        return candidate
+            for child in value.values():
+                found = visit(child)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = visit(item)
+                if found:
+                    return found
+        return ""
+
+    return visit(payload)
+
+def music_key4u_suno_wav_task_id_from_json(payload=None) -> str:
+    data = payload
+    if isinstance(payload, dict) and "data" in payload:
+        data = payload.get("data")
+    if isinstance(data, (str, int)):
+        return music_key4u_suno_safe_id(str(data))
+    if isinstance(data, dict):
+        for key in ("task_id", "taskId", "id", "uuid", "clip_id", "clipId", "audio_id", "audioId"):
+            value = data.get(key)
+            if isinstance(value, (str, int)):
+                candidate = music_key4u_suno_safe_id(str(value))
+                if candidate:
+                    return candidate
+    return ""
+
+def music_key4u_suno_json_response_shape(payload=None) -> str:
+    if not isinstance(payload, dict):
+        return "json_other"
+    data = payload.get("data")
+    if isinstance(data, str):
+        return "json_data_uuid"
+    if isinstance(data, dict):
+        return "json_data_object"
+    if isinstance(data, list):
+        return "json_data_array"
+    if data is None:
+        return "json_no_data"
+    return "json_data_other"
+
+def music_key4u_suno_wav_detail_fields(detail: str = "", *, payload_bytes: int = 0) -> dict:
+    text = str(detail or "")
+    wav_status = 0
+    for raw_status in re.findall(r"(?:^|;\s*)wav_request_http_status=([^;]*)", text, flags=re.IGNORECASE):
+        try:
+            current_status = int(str(raw_status or "0").strip() or 0)
+        except Exception:
+            current_status = 0
+        if current_status:
+            wav_status = current_status
+    shapes = [str(item or "").strip() for item in re.findall(r"(?:^|;\s*)wav_response_shape=([^;]*)", text, flags=re.IGNORECASE)]
+    task_flags = [str(item or "").strip().lower() for item in re.findall(r"(?:^|;\s*)wav_task_id_present=([^;]*)", text, flags=re.IGNORECASE)]
+    final_statuses = [str(item or "").strip() for item in re.findall(r"(?:^|;\s*)final_audio_download_status=([^;]*)", text, flags=re.IGNORECASE)]
+    return {
+        "wav_endpoint_configured": music_download_detail_field(text, "wav_endpoint_configured") == "yes",
+        "wav_request_http_status": wav_status,
+        "wav_response_shape": next((item for item in reversed(shapes) if item), ""),
+        "wav_task_id_present": "yes" in task_flags,
+        "final_audio_download_status": next((item for item in final_statuses if item), ("PASS" if int(payload_bytes or 0) > 0 else "")),
     }
+
+async def music_key4u_suno_audio_from_endpoint(
+    endpoint: str,
+    *,
+    headers: dict,
+    timeout_seconds: float = 60.0,
+    role: str = "provider_download",
+    task_id: str = "",
+    clip_id: str = "",
+    allow_wav_task_followup: bool = True,
+) -> tuple[bytes, str, int]:
+    endpoint = str(endpoint or "").strip()
+    if not endpoint:
+        return b"", "provider_download_endpoint_configured=no", 0
+    role_name = re.sub(r"[^a-z0-9_]+", "_", str(role or "provider_download").lower()).strip("_") or "provider_download"
     try:
         async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
             response = await client.get(endpoint, headers=headers)
         content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
         payload = bytes(response.content or b"")
         status = int(response.status_code or 0)
+        wav_request_status = status if role_name == "wav_request" else 0
+        prefix = (
+            f"http={status}; downloaded_bytes={len(payload)}; content_type={content_type}; "
+            "provider_download_endpoint_attempted=yes; "
+            f"wav_request_http_status={wav_request_status}; "
+        )
         if 200 <= status < 300 and payload and (
             content_type.startswith("audio/")
             or content_type in {"application/octet-stream", "binary/octet-stream"}
             or music_audio_url_has_acceptable_extension(endpoint)
         ):
-            return payload, f"http={status}; bytes={len(payload)}; content_type={content_type}; provider_download_endpoint_attempted=yes", status
+            return payload, (
+                f"{prefix}bytes={len(payload)}; wav_response_shape=audio_bytes; "
+                "wav_task_id_present=no; final_audio_download_status=PASS"
+            ), status
         if content_type.startswith("application/json") or payload[:1] in {b"{", b"["}:
             try:
                 data = response.json()
             except Exception:
                 data = {}
+            response_shape = music_key4u_suno_json_response_shape(data)
             candidates = extract_shopaikey_suno_audio_candidates(data, provider_name="key4u_suno")
             override_path = str(KEY4U_SUNO_RESULT_FIELD or "").strip()
             if override_path:
@@ -101223,25 +101403,105 @@ async def music_provider_proxy_download_audio(
                     headers=selected_headers,
                 )
                 if audio_bytes:
-                    return audio_bytes, f"{detail}; provider_download_endpoint_attempted=yes; provider_download_json_field={selected.get('field_path')}", http_status
+                    return audio_bytes, (
+                        f"{sanitize_provider_status_text(detail, '', 160)}; provider_download_endpoint_attempted=yes; "
+                        f"provider_download_json_field={selected.get('field_path')}; wav_response_shape={response_shape}; "
+                        "wav_task_id_present=no; final_audio_download_status=PASS"
+                    ), http_status
                 category = music_download_error_category(detail, http_status)
                 return b"", (
-                    f"{sanitize_provider_status_text(detail, '', 160)}; "
-                    f"provider_download_endpoint_attempted=yes; provider_download_json_field={selected.get('field_path')}; "
-                    f"candidate_paths={music_provider_candidate_paths_text(candidates)}; category={category}"
+                    f"{sanitize_provider_status_text(detail, '', 160)}; provider_download_endpoint_attempted=yes; "
+                    f"provider_download_json_field={selected.get('field_path')}; candidate_paths={music_provider_candidate_paths_text(candidates)}; "
+                    f"wav_response_shape={response_shape}; wav_task_id_present=no; final_audio_download_status=FAIL; category={category}"
                 ), http_status
+            wav_task_id = music_key4u_suno_wav_task_id_from_json(data)
+            if wav_task_id and allow_wav_task_followup:
+                followup = key4u_suno_wav_result_final_url(wav_task_id, clip_id=clip_id, task_id=task_id)
+                if not followup:
+                    return b"", (
+                        f"{prefix}wav_response_shape={response_shape}; wav_task_id_present=yes; "
+                        "final_audio_download_status=SETUP_REQUIRED; "
+                        f"setup_required={KEY4U_SUNO_WAV_SETUP_REQUIRED}; category={KEY4U_SUNO_WAV_RESULT_BLOCKER}"
+                    ), status
+                audio_bytes, follow_detail, follow_status = await music_key4u_suno_audio_from_endpoint(
+                    followup,
+                    headers=headers,
+                    timeout_seconds=timeout_seconds,
+                    role="wav_result",
+                    task_id=wav_task_id,
+                    clip_id=clip_id,
+                    allow_wav_task_followup=False,
+                )
+                if audio_bytes:
+                    return audio_bytes, (
+                        f"{sanitize_provider_status_text(follow_detail, wav_task_id, 180)}; "
+                        f"{prefix}wav_response_shape={response_shape}; wav_task_id_present=yes; "
+                        f"wav_task_id_safe={mask_provider_task_id(wav_task_id)}; final_audio_download_status=PASS; "
+                    ), follow_status
+                category = music_download_error_category(follow_detail, follow_status)
+                return b"", (
+                    f"{prefix}wav_response_shape={response_shape}; wav_task_id_present=yes; "
+                    f"wav_task_id_safe={mask_provider_task_id(wav_task_id)}; final_audio_download_status=FAIL; "
+                    f"{sanitize_provider_status_text(follow_detail, wav_task_id, 180)}; category={category or 'wav_result_download_failed'}"
+                ), follow_status or status
             return b"", (
-                f"http={status}; downloaded_bytes={len(payload)}; content_type={content_type}; "
-                f"provider_download_endpoint_attempted=yes; candidate_paths={music_provider_candidate_paths_text(candidates)}; "
-                "downloadable_candidate_missing"
+                f"{prefix}wav_response_shape={response_shape}; wav_task_id_present={'yes' if wav_task_id else 'no'}; "
+                f"candidate_paths={music_provider_candidate_paths_text(candidates)}; final_audio_download_status=FAIL; downloadable_candidate_missing"
             ), status
         body_class = music_download_error_body_class(payload[:512].decode("utf-8", errors="ignore"), content_type)
         return b"", (
-            f"http={status}; downloaded_bytes={len(payload)}; content_type={content_type}; "
-            f"provider_download_endpoint_attempted=yes; error_body_class={body_class or '-'}"
+            f"{prefix}wav_response_shape=non_json; wav_task_id_present=no; final_audio_download_status=FAIL; "
+            f"error_body_class={body_class or '-'}"
         ), status
     except Exception as exc:
-        return b"", f"provider_download_endpoint_attempted=yes; provider_proxy_exception={sanitize_provider_status_text(str(exc), '', 160)}", 0
+        return b"", (
+            "provider_download_endpoint_attempted=yes; final_audio_download_status=FAIL; "
+            f"provider_proxy_exception={sanitize_provider_status_text(str(exc), '', 160)}"
+        ), 0
+
+async def music_provider_proxy_download_audio(
+    *,
+    provider_name: str = "",
+    provider_task_id: str = "",
+    raw_url: str = "",
+    raw_provider_result=None,
+    timeout_seconds: float = 60.0,
+) -> tuple[bytes, str, int]:
+    provider = str(provider_name or "").strip().lower()
+    task_id = str(provider_task_id or "").strip()
+    if provider != "key4u_suno":
+        return b"", "provider_proxy_unavailable", 0
+    clip_id = music_key4u_suno_clip_id_from_payload(raw_provider_result, raw_url=raw_url, provider_task_id=task_id)
+    endpoint = (
+        key4u_suno_download_final_url(task_id, audio_id=clip_id, raw_url=raw_url)
+        or key4u_suno_wav_final_url(clip_id, task_id=task_id, raw_url=raw_url)
+    )
+    wav_endpoint_configured = bool(key4u_suno_wav_final_url(clip_id or "{clip_id}", task_id=task_id or "{taskId}", raw_url=raw_url))
+    if not endpoint:
+        return b"", (
+            "provider_proxy_unavailable; provider_download_endpoint_configured=no; "
+            f"wav_endpoint_configured={'yes' if wav_endpoint_configured else 'no'}"
+        ), 0
+    headers = music_provider_auth_download_headers("key4u_suno")
+    headers = {
+        **headers,
+        "Accept": "audio/wav,audio/mpeg,audio/*,application/json,*/*",
+        "User-Agent": "TOAN-AAS/1.0",
+        "Referer": "https://api.key4u.shop/",
+    }
+    role = "wav_request" if "/act/wav" in urlparse(endpoint).path.lower() or bool(KEY4U_SUNO_WAV_URL) else "provider_download"
+    audio_bytes, detail, status = await music_key4u_suno_audio_from_endpoint(
+        endpoint,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+        role=role,
+        task_id=task_id,
+        clip_id=clip_id,
+        allow_wav_task_followup=True,
+    )
+    if "wav_endpoint_configured=" not in detail:
+        detail = f"{detail}; wav_endpoint_configured={'yes' if wav_endpoint_configured else 'no'}"
+    return audio_bytes, detail, status
 
 async def music_download_artifact_candidate(
     candidate: dict | None = None,
@@ -101280,10 +101540,15 @@ async def music_download_artifact_candidate(
         })
         return payload, detail, status, content_type, downloaded, category
 
-    if not url:
-        return {"ok": False, "status": "MISSING_URL", "download_strategy_used": "", "provider_auth_header_used": False, "provider_proxy_attempted": False, "provider_download_endpoint_configured": bool(key4u_suno_download_final_url(provider_task_id)) if provider_name == "key4u_suno" else False, "provider_download_endpoint_attempted": False}
+    clip_id = music_key4u_suno_clip_id_from_payload(raw_provider_result, raw_url=url, provider_task_id=provider_task_id) if provider_name == "key4u_suno" else ""
+    provider_download_endpoint_configured = bool(
+        key4u_suno_download_final_url(provider_task_id, audio_id=clip_id, raw_url=url)
+        or key4u_suno_wav_final_url(clip_id or "{clip_id}", task_id=provider_task_id or "{taskId}", raw_url=url)
+    ) if provider_name == "key4u_suno" else False
 
-    provider_download_endpoint_configured = bool(key4u_suno_download_final_url(provider_task_id, raw_url=url)) if provider_name == "key4u_suno" else False
+    if not url:
+        return {"ok": False, "status": "MISSING_URL", "download_strategy_used": "", "provider_auth_header_used": False, "provider_proxy_attempted": False, "provider_download_endpoint_configured": provider_download_endpoint_configured, "provider_download_endpoint_attempted": False}
+
     is_key4u_bare_suno_cdn = bool(provider_name == "key4u_suno" and music_url_is_bare_suno_cdn(url))
     if is_key4u_bare_suno_cdn and not provider_download_endpoint_configured:
         detail = (
@@ -101311,7 +101576,7 @@ async def music_download_artifact_candidate(
             "download_attempts": [],
         }
 
-    if provider_name == "key4u_suno" and (item.get("provider_download_endpoint_candidate") or is_key4u_bare_suno_cdn):
+    if provider_name == "key4u_suno" and item.get("provider_download_endpoint_candidate"):
         proxy_payload, proxy_detail, proxy_status = await music_provider_proxy_download_audio(
             provider_name=provider_name,
             provider_task_id=provider_task_id,
@@ -101321,6 +101586,7 @@ async def music_download_artifact_candidate(
         )
         proxy_content_type = music_download_detail_field(proxy_detail, "content_type")
         if proxy_payload:
+            wav_fields = music_key4u_suno_wav_detail_fields(proxy_detail, payload_bytes=len(proxy_payload))
             return {
                 "ok": True,
                 "audio_bytes": proxy_payload,
@@ -101337,6 +101603,7 @@ async def music_download_artifact_candidate(
                 "provider_download_http_status": int(proxy_status or 0),
                 "provider_download_content_type": proxy_content_type,
                 "provider_download_bytes": len(proxy_payload),
+                **wav_fields,
                 "setup_required": "",
                 "download_attempts": [{
                     "strategy": "provider_proxy",
@@ -101352,6 +101619,7 @@ async def music_download_artifact_candidate(
             proxy_downloaded = int(music_download_detail_field(proxy_detail, "downloaded_bytes") or music_download_detail_field(proxy_detail, "bytes") or 0)
         except Exception:
             proxy_downloaded = 0
+        wav_fields = music_key4u_suno_wav_detail_fields(proxy_detail, payload_bytes=0)
         return {
             "ok": False,
             "status": "ARTIFACT_DOWNLOAD_FAILED",
@@ -101368,7 +101636,8 @@ async def music_download_artifact_candidate(
             "provider_download_http_status": int(proxy_status or 0),
             "provider_download_content_type": proxy_content_type,
             "provider_download_bytes": int(proxy_downloaded or 0),
-            "setup_required": "" if provider_download_endpoint_configured else KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED,
+            **wav_fields,
+            "setup_required": str(music_download_detail_field(proxy_detail, "setup_required") or ("" if provider_download_endpoint_configured else KEY4U_SUNO_DOWNLOAD_SETUP_REQUIRED)),
             "download_attempts": [{
                 "strategy": "provider_proxy",
                 "http_status": int(proxy_status or 0),
@@ -101392,7 +101661,7 @@ async def music_download_artifact_candidate(
             "download_strategy_used": "direct_raw_url",
             "provider_auth_header_used": False,
             "provider_proxy_attempted": False,
-            "provider_download_endpoint_configured": bool(key4u_suno_download_final_url(provider_task_id)) if provider_name == "key4u_suno" else False,
+            "provider_download_endpoint_configured": provider_download_endpoint_configured,
             "provider_download_endpoint_attempted": False,
             "download_attempts": attempts,
         }
@@ -101415,22 +101684,29 @@ async def music_download_artifact_candidate(
                 "download_strategy_used": "provider_auth",
                 "provider_auth_header_used": True,
                 "provider_proxy_attempted": False,
-                "provider_download_endpoint_configured": bool(key4u_suno_download_final_url(provider_task_id)) if provider_name == "key4u_suno" else False,
+                "provider_download_endpoint_configured": provider_download_endpoint_configured,
                 "provider_download_endpoint_attempted": False,
                 "download_attempts": attempts,
             }
 
-    provider_download_endpoint_configured = bool(key4u_suno_download_final_url(provider_task_id)) if provider_name == "key4u_suno" else False
-    proxy_payload, proxy_detail, proxy_status = await music_provider_proxy_download_audio(
-        provider_name=provider_name,
-        provider_task_id=provider_task_id,
-        raw_url=url,
-        raw_provider_result=raw_provider_result,
-        timeout_seconds=timeout_seconds,
+    allow_proxy_fallback = bool(
+        provider_name != "key4u_suno"
+        or key4u_suno_download_final_url(provider_task_id, audio_id=clip_id, raw_url=url)
     )
-    proxy_attempted = True
+    proxy_payload, proxy_detail, proxy_status = (b"", "", 0)
+    proxy_attempted = False
+    if allow_proxy_fallback:
+        proxy_payload, proxy_detail, proxy_status = await music_provider_proxy_download_audio(
+            provider_name=provider_name,
+            provider_task_id=provider_task_id,
+            raw_url=url,
+            raw_provider_result=raw_provider_result,
+            timeout_seconds=timeout_seconds,
+        )
+        proxy_attempted = True
     if proxy_payload:
         proxy_content_type = music_download_detail_field(proxy_detail, "content_type")
+        wav_fields = music_key4u_suno_wav_detail_fields(proxy_detail, payload_bytes=len(proxy_payload))
         return {
             "ok": True,
             "audio_bytes": proxy_payload,
@@ -101444,6 +101720,10 @@ async def music_download_artifact_candidate(
             "provider_proxy_attempted": True,
             "provider_download_endpoint_configured": provider_download_endpoint_configured,
             "provider_download_endpoint_attempted": True,
+            "provider_download_http_status": int(proxy_status or 0),
+            "provider_download_content_type": proxy_content_type,
+            "provider_download_bytes": len(proxy_payload),
+            **wav_fields,
             "download_attempts": attempts + [{
                 "strategy": "provider_proxy",
                 "http_status": int(proxy_status or 0),
@@ -101463,6 +101743,7 @@ async def music_download_artifact_candidate(
             downloaded = int(music_download_detail_field(proxy_detail, "downloaded_bytes") or 0)
         except Exception:
             downloaded = 0
+    wav_fields = music_key4u_suno_wav_detail_fields(proxy_detail, payload_bytes=0)
     return {
         "ok": False,
         "status": "ARTIFACT_DOWNLOAD_FAILED",
@@ -101476,6 +101757,11 @@ async def music_download_artifact_candidate(
         "provider_proxy_attempted": proxy_attempted,
         "provider_download_endpoint_configured": provider_download_endpoint_configured,
         "provider_download_endpoint_attempted": proxy_attempted and provider_name == "key4u_suno",
+        "provider_download_http_status": int(proxy_status or status or 0),
+        "provider_download_content_type": content_type,
+        "provider_download_bytes": int(downloaded or 0),
+        **wav_fields,
+        "setup_required": str(music_download_detail_field(proxy_detail, "setup_required") or ""),
         "download_attempts": attempts,
     }
 
@@ -101651,6 +101937,11 @@ async def select_music_delivery_artifact(
         provider_download_http_status = 0
         provider_download_content_type = ""
         provider_download_bytes = 0
+        wav_endpoint_configured = False
+        wav_request_http_status = 0
+        wav_response_shape = ""
+        wav_task_id_present = False
+        final_audio_download_status = ""
         setup_required = ""
         if not payload and url:
             downloaded = await music_download_artifact_candidate(selected, {**dict(job or {}), **dict(result or {})}, timeout_seconds=60.0)
@@ -101668,6 +101959,11 @@ async def select_music_delivery_artifact(
             provider_download_http_status = int(downloaded.get("provider_download_http_status") or download_status or 0)
             provider_download_content_type = str(downloaded.get("provider_download_content_type") or download_content_type or "")
             provider_download_bytes = int(downloaded.get("provider_download_bytes") or downloaded_bytes or 0)
+            wav_endpoint_configured = bool(downloaded.get("wav_endpoint_configured"))
+            wav_request_http_status = int(downloaded.get("wav_request_http_status") or 0)
+            wav_response_shape = str(downloaded.get("wav_response_shape") or "")
+            wav_task_id_present = bool(downloaded.get("wav_task_id_present"))
+            final_audio_download_status = str(downloaded.get("final_audio_download_status") or "")
             setup_required = str(downloaded.get("setup_required") or selected.get("setup_required") or "")
         if not payload:
             if url:
@@ -101698,6 +101994,11 @@ async def select_music_delivery_artifact(
                     "provider_download_http_status": provider_download_http_status,
                     "provider_download_content_type": provider_download_content_type,
                     "provider_download_bytes": provider_download_bytes,
+                    "wav_endpoint_configured": wav_endpoint_configured,
+                    "wav_request_http_status": wav_request_http_status,
+                    "wav_response_shape": wav_response_shape,
+                    "wav_task_id_present": wav_task_id_present,
+                    "final_audio_download_status": final_audio_download_status,
                     "setup_required": setup_required,
                     "selected_artifact_selected_reason": str(selected.get("selected_reason") or ""),
                     "music_output_url_reject_reason": str(selected.get("reject_reason") or ""),
@@ -101736,6 +102037,11 @@ async def select_music_delivery_artifact(
                 "provider_download_http_status": provider_download_http_status,
                 "provider_download_content_type": provider_download_content_type,
                 "provider_download_bytes": provider_download_bytes,
+                "wav_endpoint_configured": wav_endpoint_configured,
+                "wav_request_http_status": wav_request_http_status,
+                "wav_response_shape": wav_response_shape,
+                "wav_task_id_present": wav_task_id_present,
+                "final_audio_download_status": final_audio_download_status,
                 "setup_required": setup_required,
                 "selected_artifact_selected_reason": str(selected.get("selected_reason") or ""),
                 "music_output_url_reject_reason": str(selected.get("reject_reason") or ""),
@@ -101774,6 +102080,11 @@ async def select_music_delivery_artifact(
             "provider_download_http_status": provider_download_http_status,
             "provider_download_content_type": provider_download_content_type,
             "provider_download_bytes": provider_download_bytes,
+            "wav_endpoint_configured": wav_endpoint_configured,
+            "wav_request_http_status": wav_request_http_status,
+            "wav_response_shape": wav_response_shape,
+            "wav_task_id_present": wav_task_id_present,
+            "final_audio_download_status": final_audio_download_status,
             "setup_required": setup_required,
             "selected_artifact_selected_reason": str(selected.get("selected_reason") or ""),
             "music_output_url_reject_reason": str(selected.get("reject_reason") or ""),
@@ -102002,12 +102313,29 @@ async def deliver_music_result_once(
             if current_job.get("internal_job_id"):
                 save_engine_async_job(current_job)
         return {"ok": False, "status": "EMPTY_AUDIO", "job": current_job, "result": current_result}
+    pre_delivery_lock_set = False
+    if current_job and job_id:
+        lock_started_at = now_text()
+        current_job.update({
+            "music_delivery_lock": "sending",
+            "music_result_delivery_lock": "sending",
+            "music_delivery_started_at": lock_started_at,
+            "music_delivery_path": source_token,
+            "delivery_source_first": str(current_job.get("delivery_source_first") or source_token),
+        })
+        current_result["music_result_delivery_lock"] = "sending"
+        current_result["music_delivery_lock"] = "sending"
+        save_engine_async_job(current_job)
+        pre_delivery_lock_set = True
     artifact = await select_music_delivery_artifact(current_result, current_job, audio_bytes)
     if not artifact.get("ok"):
         artifact_status = str(artifact.get("status") or "artifact_not_ready")
         if current_job:
             current_job["auto_delivery_blocker"] = artifact_status
             current_job["artifact_candidates_count"] = int(artifact.get("artifact_candidates_count") or 0)
+            if pre_delivery_lock_set:
+                current_job["music_delivery_lock"] = ""
+                current_job["music_result_delivery_lock"] = ""
             if (
                 bool(current_job.get("provider_completed") or current_job.get("music_provider_completed"))
                 or str(current_job.get("status") or "").strip().lower() in {"completed", "complete", "success", "succeeded", "downloading"}
@@ -102024,9 +102352,19 @@ async def deliver_music_result_once(
         return {"ok": False, "status": artifact_status, "job": current_job, "result": current_result}
     payload = bytes(artifact.get("audio_bytes") or b"")
     if not payload:
+        if current_job and pre_delivery_lock_set:
+            current_job["music_delivery_lock"] = ""
+            current_job["music_result_delivery_lock"] = ""
+            if current_job.get("internal_job_id"):
+                save_engine_async_job(current_job)
         return {"ok": False, "status": "EMPTY_AUDIO", "job": current_job, "result": current_result}
     actual_duration = int(artifact.get("selected_artifact_duration") or 0)
     if actual_duration <= 0:
+        if current_job and pre_delivery_lock_set:
+            current_job["music_delivery_lock"] = ""
+            current_job["music_result_delivery_lock"] = ""
+            if current_job.get("internal_job_id"):
+                save_engine_async_job(current_job)
         return {"ok": False, "status": "AUDIO_DURATION_MISSING", "job": current_job, "result": current_result}
     lock_key = music_product_delivery_lock_key(user_id, current_result, current_job, payload)
     if lock_key in MUSIC_PRODUCT_DELIVERY_MEMORY_LOCKS:

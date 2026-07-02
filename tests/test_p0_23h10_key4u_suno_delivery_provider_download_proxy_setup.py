@@ -93,6 +93,8 @@ def test_no_download_endpoint_sets_setup_required_blocker(monkeypatch):
         return dict(current)
 
     monkeypatch.setattr(bot, "KEY4U_SUNO_DOWNLOAD_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_ENDPOINT", "")
     monkeypatch.setattr(bot, "key4u_provider_instance", lambda: FakeProvider())
     monkeypatch.setattr(bot, "record_music_provider_attempt", lambda **kwargs: None)
     monkeypatch.setattr(bot, "get_engine_async_job", lambda job_id: dict(store.get(str(job_id)) or {}))
@@ -282,6 +284,8 @@ def test_recovery_refetches_provider_result_delivers_once_and_does_not_resubmit(
 
 def test_music_provider_audit_shows_setup_required_without_endpoint(monkeypatch):
     monkeypatch.setattr(bot, "KEY4U_SUNO_DOWNLOAD_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_URL", "")
+    monkeypatch.setattr(bot, "KEY4U_SUNO_WAV_ENDPOINT", "")
     monkeypatch.setattr(
         bot,
         "list_engine_async_jobs",
