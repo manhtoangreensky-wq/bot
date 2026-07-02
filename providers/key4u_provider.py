@@ -354,6 +354,7 @@ def _result(
 class Key4UConfig:
     enabled: bool = True
     api_key: str = ""
+    video_auth_header_value: str = ""
     base_url: str = "https://api.key4u.shop"
     openai_base_url: str = "https://api.key4u.shop/v1"
     minimax_base_url: str = "https://api.key4u.shop/minimax"
@@ -363,6 +364,7 @@ class Key4UConfig:
     public_enabled: bool = False
     admin_smoke_enabled: bool = True
     usage_endpoint: str = ""
+    usage_check_url: str = ""
     balance_endpoint: str = ""
     models_endpoint: str = ""
     chat_endpoint: str = "/v1/chat/completions"
@@ -399,9 +401,12 @@ class Key4UConfig:
 
 def config_from_env() -> Key4UConfig:
     api_base = _env("KEY4U_API_BASE", _env("KEY4U_BASE_URL", "https://api.key4u.shop"))
+    usage_url = _env("KEY4U_USAGE_ENDPOINT", _env("KEY4U_USAGE_URL", _env("KEY4U_USAGE_CHECK_URL", "")))
+    balance_url = _env("KEY4U_BALANCE_ENDPOINT", _env("KEY4U_USAGE_CHECK_URL", _env("KEY4U_USAGE_URL", "")))
     return Key4UConfig(
         enabled=_flag("KEY4U_ENABLED", "false"),
         api_key=_env("KEY4U_TOKEN", _env("KEY4U_API_KEY", "")),
+        video_auth_header_value=_env("KEY4U_VIDEO_AUTH_HEADER_VALUE", ""),
         base_url=api_base,
         openai_base_url=_env("KEY4U_OPENAI_BASE_URL", safe_join_url(api_base, "/v1")),
         minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax")),
@@ -410,8 +415,9 @@ def config_from_env() -> Key4UConfig:
         smart_routing=_flag("KEY4U_SMART_ROUTING", "true"),
         public_enabled=_flag("KEY4U_PUBLIC_ENABLED", "false"),
         admin_smoke_enabled=_flag("KEY4U_ADMIN_SMOKE_ENABLED", "true"),
-        usage_endpoint=_env("KEY4U_USAGE_ENDPOINT", ""),
-        balance_endpoint=_env("KEY4U_BALANCE_ENDPOINT", ""),
+        usage_endpoint=usage_url,
+        usage_check_url=_env("KEY4U_USAGE_CHECK_URL", ""),
+        balance_endpoint=balance_url,
         models_endpoint=_env("KEY4U_MODELS_ENDPOINT", ""),
         chat_endpoint=_env("KEY4U_CHAT_COMPLETIONS_ENDPOINT", _env("KEY4U_CHAT_ENDPOINT", "/v1/chat/completions")),
         image_edit_endpoint=_env("KEY4U_IMAGE_EDITS_ENDPOINT", _env("KEY4U_IMAGE_EDIT_ENDPOINT", "/v1/images/edits")),
@@ -453,6 +459,12 @@ class Key4UProvider:
     def is_configured(self) -> bool:
         return bool(self.config.enabled and self.config.admin_smoke_enabled and self.config.api_key)
 
+    def usage_auth_configured(self) -> bool:
+        return bool(str(self.config.api_key or "").strip() or str(self.config.video_auth_header_value or "").strip())
+
+    def usage_configured(self) -> bool:
+        return bool(self.config.enabled and self.usage_auth_configured())
+
     def get_status(self) -> dict[str, Any]:
         return {
             "provider": "key4u",
@@ -462,6 +474,7 @@ class Key4UProvider:
             "smart_routing": bool(self.config.smart_routing),
             "api_key": mask_key(self.config.api_key),
             "configured": self.is_configured(),
+            "usage_auth_configured": self.usage_auth_configured(),
             "base_url": self.config.base_url,
             "openai_base_url": self.config.openai_base_url,
             "minimax_base_url": self.config.minimax_base_url,
@@ -474,6 +487,7 @@ class Key4UProvider:
             "suno_fetch_final_url": self._suno_url(self._path_with_id(self.config.suno_query_endpoint, "{taskId}", "taskId", "task_id")) if self.config.suno_query_endpoint else "",
             "suno_lyrics_final_url": self._suno_url(self.config.suno_lyrics_endpoint) if self.config.suno_lyrics_endpoint else "",
             "usage_endpoint": "configured" if self.config.usage_endpoint else "NEED_ENDPOINT",
+            "usage_check_url": "configured" if self.config.usage_check_url else "NEED_ENDPOINT",
             "balance_endpoint": "configured" if self.config.balance_endpoint else "NEED_ENDPOINT",
             "models_endpoint": "configured" if self.config.models_endpoint else "NEED_ENDPOINT",
             "chat_model": self.config.chat_model or "",
@@ -518,8 +532,11 @@ class Key4UProvider:
         }
 
     def _headers(self) -> dict[str, str]:
+        auth_value = str(self.config.api_key or self.config.video_auth_header_value or "").strip()
+        if auth_value and not auth_value.lower().startswith(("bearer ", "apikey ", "key ")):
+            auth_value = f"Bearer {auth_value}"
         return {
-            "Authorization": f"Bearer {self.config.api_key}",
+            "Authorization": auth_value,
             "Accept": "application/json",
         }
 
@@ -631,19 +648,19 @@ class Key4UProvider:
         }
 
     async def get_usage(self) -> dict[str, Any]:
-        if not self.is_configured():
+        if not self.usage_configured():
             return self._missing_result("usage", "")
         if not self.config.usage_endpoint:
-            return _result(ok=False, capability="usage", status="NEED_ENDPOINT", error_class="NEED_ENDPOINT", error_message_safe="KEY4U_USAGE_ENDPOINT is not configured")
+            return _result(ok=False, capability="usage", status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
         result = await self.request_json("GET", self.config.usage_endpoint)
         result["capability"] = "usage"
         return result
 
     async def get_balance(self) -> dict[str, Any]:
-        if not self.is_configured():
+        if not self.usage_configured():
             return self._missing_result("balance", "")
         if not self.config.balance_endpoint:
-            return _result(ok=False, capability="balance", status="NEED_ENDPOINT", error_class="NEED_ENDPOINT", error_message_safe="KEY4U_BALANCE_ENDPOINT is not configured")
+            return _result(ok=False, capability="balance", status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
         result = await self.request_json("GET", self.config.balance_endpoint)
         result["capability"] = "balance"
         return result
