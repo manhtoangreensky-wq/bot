@@ -44358,6 +44358,15 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         for item in degrade_notes
         if isinstance(item, dict)
     ) or "-"
+    provider_chain_text = ",".join(str(item) for item in (result.get("effective_provider_chain") or result.get("provider_chain") or readiness.get("provider_order") or [])) or "-"
+    fallback_order_text = ",".join(str(item) for item in (result.get("fallback_order") or [])) or "-"
+    skipped_provider_names = []
+    for item in result.get("skipped_providers") or []:
+        if isinstance(item, dict):
+            skipped_provider_names.append(str(item.get("provider") or ""))
+        elif item:
+            skipped_provider_names.append(str(item))
+    skipped_provider_text = ",".join(name for name in skipped_provider_names if name) or "-"
     lines = [
         "🧪 <b>Video Render Debug</b>",
         "",
@@ -44394,6 +44403,9 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         "Runtime/artifact:",
         f"• ffmpeg available: <code>{'yes' if ffmpeg else 'no'}</code>",
         f"• provider ready: <code>{'yes' if readiness.get('ok') else 'no'}</code>",
+        f"• provider chain: <code>{html.escape(provider_chain_text)}</code>",
+        f"• fallback order: <code>{html.escape(fallback_order_text)}</code>",
+        f"• skipped providers: <code>{html.escape(skipped_provider_text)}</code>",
         f"• required capability: <code>{html.escape(str(result.get('required_capability') or engine_route.get('provider_capability') or '-'))}</code>",
         f"• route requires provider: <code>{'yes' if result.get('route_requires_provider') else 'no'}</code>",
         f"• local fallback allowed: <code>{'yes' if result.get('local_fallback_allowed') else 'no'}</code>",
@@ -44402,12 +44414,18 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• selected provider: <code>{html.escape(str(result.get('selected_provider') or '-'))}</code>",
         f"• provider selection blocker: <code>{html.escape(str(result.get('provider_selection_blocker') or '-')[:220])}</code>",
         f"• provider route selected: <code>{'yes' if result.get('provider_route_selected') else 'no'}</code>",
+        f"• provider smoke contract available: <code>yes</code>",
         f"• connector renderer: <code>{html.escape(str(result.get('connector_renderer') or result.get('renderer') or '-'))}</code>",
         f"• provider attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>",
         f"• provider submit called: <code>{'yes' if result.get('provider_submit_called') else 'no'}</code>",
+        f"• provider submit stage: <code>{html.escape(str(result.get('provider_submit_stage') or result.get('smoke_stage') or '-'))}</code>",
+        f"• provider submit blocker: <code>{html.escape(str(result.get('provider_submit_blocker') or '-')[:220])}</code>",
         f"• provider submit http: <code>{safe_int(result.get('provider_submit_http_status'), 0)}</code>",
         f"• provider task id saved: <code>{'yes' if result.get('provider_task_id_saved') else 'no'}</code>",
         f"• provider poll called: <code>{'yes' if result.get('provider_poll_called') else 'no'}</code>",
+        f"• provider poll blocker: <code>{html.escape(str(result.get('provider_poll_blocker') or '-')[:220])}</code>",
+        f"• provider result blocker: <code>{html.escape(str(result.get('provider_result_blocker') or '-')[:220])}</code>",
+        f"• provider exception: <code>{html.escape(str(result.get('exception_class') or '-'))}</code> message=<code>{html.escape(str(result.get('exception_message_safe') or '-')[:220])}</code>",
         f"• provider result url present: <code>{'yes' if result.get('provider_result_url_present') else 'no'}</code>",
         f"• provider video id: <code>{html.escape(','.join(mask_provider_task_id(item) for item in (result.get('provider_video_ids') or [])) or '-')}</code>",
         f"• provider task id: <code>{html.escape(','.join(mask_provider_task_id(item) for item in (result.get('provider_task_ids') or [])) or '-')}</code>",
@@ -44424,6 +44442,7 @@ def video_render_debug_text(job_id: int, *, mode: str = "render") -> str:
         f"• base video source: <code>{html.escape(str(result.get('base_video_source') or '-'))}</code>",
         f"• placeholder forbidden: <code>{'yes' if result.get('placeholder_forbidden') else 'no'}</code>",
         f"• fallback policy: <code>{html.escape(str(result.get('fallback_policy') or result.get('fallback_capability') or '-'))}</code>",
+        f"• local placeholder attempted: <code>{'yes' if str(result.get('connector_renderer') or result.get('renderer') or result.get('visual_source') or '').lower() in {'local_scene_composer', 'local_placeholder'} else 'no'}</code>",
         f"• placeholder detected: <code>{'yes' if result.get('placeholder_detected') or result.get('placeholder_visual') else 'no'}</code>",
         f"• raw prompt burned into frame: <code>{'yes' if result.get('raw_prompt_burned_into_frame') else 'no'}</code>",
         f"• final classified as: <code>{html.escape(str(result.get('visual_classification') or result.get('final_classification') or '-'))}</code>",
@@ -133989,12 +134008,19 @@ def video_provider_status_text(status: dict | None = None) -> str:
     status = dict(status or video_provider_router.provider_status_payload())
     providers = list(status.get("providers") or [])
     missing_env = dict(status.get("missing_env") or {})
+    provider_chain_text = ",".join(str(item) for item in (status.get("effective_provider_chain") or status.get("provider_chain") or [])) or "-"
+    selection_reason = str(status.get("selection_reason") or status.get("summary_reason") or "-")
+    fallback_order = list(status.get("fallback_order") or [])
+    first_fallback = str(fallback_order[0]) if fallback_order else "-"
     lines = [
         "🎬 <b>Trạng thái nhà cung cấp video</b>",
         "",
         f"• Sẵn sàng: <code>{'có' if status.get('ready') or status.get('ok') else 'không'}</code>",
         f"• Lý do: <code>{html.escape(str(status.get('summary_reason') or status.get('reason') or '-'))}</code>",
+        f"• Thứ tự provider: <code>{html.escape(provider_chain_text)}</code>",
         f"• Provider đầu tiên: <code>{html.escape(str(status.get('first_ready_provider') or '-'))}</code>",
+        f"• Lý do chọn: <code>{html.escape(selection_reason)}</code>",
+        f"• Fallback tiếp theo: <code>{html.escape(first_fallback)}</code>",
         f"• Provider đang bật: <code>{int(status.get('enabled_count') or 0)}</code>",
         f"• Provider đủ cấu hình: <code>{int(status.get('configured_count') or 0)}</code>",
         f"• Provider gần đủ cấu hình: <code>{html.escape(', '.join(status.get('near_ready_providers') or []) or '-')}</code>",
@@ -134018,6 +134044,8 @@ def video_provider_status_text(status: dict | None = None) -> str:
             f"poll=<code>{'yes' if provider.get('poll_url_present') else 'no'}</code> "
             f"auth=<code>{'yes' if provider.get('auth_present') else 'no'}</code> "
             f"model=<code>{'yes' if provider.get('model_present') else 'no'}</code> "
+            f"credit=<code>{html.escape(str(provider.get('credit_status') or 'unknown'))}</code> "
+            f"fallback_only=<code>{'yes' if provider.get('fallback_only') else 'no'}</code> "
             f"caps=<code>{html.escape(','.join(str(item) for item in (provider.get('capabilities') or [])) or '-')}</code> "
             f"missing=<code>{html.escape(','.join(str(item) for item in (provider.get('missing') or [])) or '-')}</code>"
         )
@@ -134097,8 +134125,55 @@ async def cmd_video_provider_audit(update: Update, context: ContextTypes.DEFAULT
     return await cmd_video_provider_status(update, context)
 
 
-VIDEO_PROVIDER_SMOKE_PROMPT = "Short vertical product video, clean studio background, jade green brand style, smooth camera movement."
+VIDEO_PROVIDER_SMOKE_PROMPT = "Short vertical product video, jade green brand style, clean studio background, smooth camera movement."
 VIDEO_PROVIDER_SMOKE_ALLOWED = {"key4u_video", "shopaikey_video", "toanaas_video", "veo", "kling", "generic_http"}
+
+
+def video_provider_smoke_debug_text(provider: str, capability: str, result: dict | None = None, *, validation: dict | None = None) -> str:
+    payload = dict(result or {})
+    validation = dict(validation or {})
+    blocker = str(
+        payload.get("blocker")
+        or payload.get("provider_error")
+        or payload.get("provider_submit_blocker")
+        or payload.get("provider_poll_blocker")
+        or payload.get("provider_result_blocker")
+        or validation.get("reason")
+        or "provider_smoke_failed"
+    )
+    if validation and not validation.get("ok") and payload.get("ok"):
+        blocker = "provider_result_invalid_mp4"
+        payload["provider_result_blocker"] = blocker
+    task_ids = payload.get("provider_task_ids") or []
+    masked_task = str(payload.get("provider_task_id_masked") or ",".join(mask_provider_task_id(item) for item in task_ids) or "-")
+    shape_submit = json.dumps(payload.get("submit_response_shape") or {}, ensure_ascii=False)[:500]
+    shape_poll = json.dumps(payload.get("poll_response_shape") or {}, ensure_ascii=False)[:500]
+    lines = [
+        "❌ Provider smoke chưa có MP4 hợp lệ.",
+        f"• provider: <code>{html.escape(provider)}</code>",
+        f"• capability: <code>{html.escape(capability)}</code>",
+        f"• smoke_stage: <code>{html.escape(str(payload.get('smoke_stage') or '-'))}</code>",
+        f"• blocker: <code>{html.escape(blocker[:220])}</code>",
+        f"• exception_class: <code>{html.escape(str(payload.get('exception_class') or '-'))}</code>",
+        f"• exception_message_safe: <code>{html.escape(str(payload.get('exception_message_safe') or '-')[:220])}</code>",
+        f"• submit_url_configured: <code>{'yes' if payload.get('submit_url_configured') else 'no'}</code>",
+        f"• poll_url_configured: <code>{'yes' if payload.get('poll_url_configured') else 'no'}</code>",
+        f"• auth_configured: <code>{'yes' if payload.get('auth_configured') else 'no'}</code>",
+        f"• payload_has_prompt: <code>{'yes' if payload.get('payload_has_prompt') else 'no'}</code>",
+        f"• payload_has_duration: <code>{'yes' if payload.get('payload_has_duration') else 'no'}</code>",
+        f"• payload_has_ratio: <code>{'yes' if payload.get('payload_has_ratio') else 'no'}</code>",
+        f"• submit_http_status: <code>{safe_int(payload.get('provider_submit_http_status') or payload.get('submit_http_status'), 0)}</code>",
+        f"• submit_response_shape: <code>{html.escape(shape_submit or '-')}</code>",
+        f"• provider_task_id_present: <code>{'yes' if payload.get('provider_task_id_saved') or payload.get('provider_task_id_present') else 'no'}</code>",
+        f"• provider_task_id_masked: <code>{html.escape(masked_task)}</code>",
+        f"• poll_http_status: <code>{safe_int(payload.get('provider_poll_http_status') or payload.get('poll_http_status'), 0)}</code>",
+        f"• poll_response_shape: <code>{html.escape(shape_poll or '-')}</code>",
+        f"• provider_status_raw: <code>{html.escape(str(payload.get('provider_status_raw') or payload.get('provider_status') or '-')[:160])}</code>",
+        f"• result_url_present: <code>{'yes' if payload.get('provider_result_url_present') or payload.get('result_url_present') else 'no'}</code>",
+        f"• result_field_path: <code>{html.escape(str(payload.get('result_field_path') or '-'))}</code>",
+        "• charge: <code>no</code>",
+    ]
+    return "\n".join(lines)
 
 
 async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134137,13 +134212,8 @@ async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT
     try:
         result = video_provider_router.run_provider_generation(request, output_dir=output_dir, environ=env)
     except Exception as exc:
-        return await update.message.reply_text(
-            "❌ Provider smoke lỗi trước khi có MP4.\n"
-            f"• provider: <code>{html.escape(provider)}</code>\n"
-            f"• blocker: <code>{html.escape(type(exc).__name__)}</code>\n"
-            "• charge: <code>no</code>",
-            parse_mode="HTML",
-        )
+        result = video_provider_router.provider_exception_result(exc, provider=provider, stage="submit_request", status={})
+        return await update.message.reply_text(video_provider_smoke_debug_text(provider, capability, result), parse_mode="HTML")
     output_path = str(result.get("output_path") or result.get("local_path") or "")
     validation = video_final_output.validate_final_video_output(
         path=output_path,
@@ -134155,18 +134225,7 @@ async def cmd_video_provider_smoke(update: Update, context: ContextTypes.DEFAULT
         },
     )
     if not result.get("ok") or not validation.get("ok"):
-        blocker = str(result.get("blocker") or result.get("provider_error") or validation.get("reason") or "provider_smoke_failed")
-        task_id = ",".join(mask_provider_task_id(item) for item in (result.get("provider_task_ids") or [])) or "-"
-        return await update.message.reply_text(
-            "❌ Provider smoke chưa có MP4 hợp lệ.\n"
-            f"• provider: <code>{html.escape(provider)}</code>\n"
-            f"• capability: <code>{html.escape(capability)}</code>\n"
-            f"• attempted: <code>{'yes' if result.get('provider_attempted') else 'no'}</code>\n"
-            f"• task: <code>{html.escape(task_id)}</code>\n"
-            f"• blocker: <code>{html.escape(blocker[:220])}</code>\n"
-            "• charge: <code>no</code>",
-            parse_mode="HTML",
-        )
+        return await update.message.reply_text(video_provider_smoke_debug_text(provider, capability, result, validation=validation), parse_mode="HTML")
     caption = (
         "✅ Provider smoke tạo MP4 hợp lệ.\n"
         f"provider={provider}; capability={capability}; charge=no"

@@ -25,12 +25,25 @@ from services.video_provider_base import (
 )
 
 
-DEFAULT_VIDEO_PROVIDER_CHAIN = "toanaas_video,key4u_video,shopaikey_video,veo,kling,generic_http"
+DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
 VIDEO_STUB_PROVIDER_NAME = "stub_video"
 PUBLIC_NO_VIDEO_PROVIDER_COPY = (
     "TOAN AAS chưa có máy dựng video phù hợp cho kiểu video này lúc này. "
     "Hệ thống chưa trừ Xu. Anh/chị có thể thử kiểu video khác hoặc quay lại sau."
 )
+VIDEO_CREDIT_BLOCKED_STATUSES = {
+    "low",
+    "low_credit",
+    "exhausted",
+    "quota_exhausted",
+    "quota_empty",
+    "frozen",
+    "disabled",
+    "blocked",
+    "bad_health",
+    "health_bad",
+    "unhealthy",
+}
 
 
 def _env_flag(env: dict[str, str], name: str, default: str = "0") -> bool:
@@ -73,6 +86,81 @@ def _first_env(env: dict[str, str], *names: str) -> str:
         if value:
             return value
     return ""
+
+
+def _normalize_credit_status(value: Any) -> str:
+    raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not raw or raw in {"none", "null", "n_a", "na", "unknown"}:
+        return "unknown"
+    aliases = {
+        "ok": "ok",
+        "ready": "ok",
+        "healthy": "ok",
+        "has_credit": "ok",
+        "sufficient": "ok",
+        "available": "ok",
+        "normal": "ok",
+        "good": "ok",
+        "lowcredit": "low_credit",
+        "low_balance": "low_credit",
+        "out_of_credit": "exhausted",
+        "outofcredit": "exhausted",
+        "no_credit": "exhausted",
+        "no_balance": "exhausted",
+        "empty": "exhausted",
+        "quota_empty": "quota_exhausted",
+        "quota_exceeded": "quota_exhausted",
+        "rate_limited": "bad_health",
+        "error": "bad_health",
+        "failed": "bad_health",
+    }
+    return aliases.get(raw, raw)
+
+
+def _provider_credit_prefixes(provider: str) -> list[str]:
+    normalized = str(provider or "").strip().lower()
+    if normalized == "shopaikey_video":
+        return ["SHOPAIKEY_VIDEO", "SHOPAIKEY"]
+    if normalized == "key4u_video":
+        return ["KEY4U_VIDEO", "KEY4U"]
+    if normalized == "toanaas_video":
+        return ["VIDEO_TOANAAS", "TOANAAS_VIDEO", "TOANAAS"]
+    if normalized == "veo":
+        return ["VIDEO_VEO", "VEO"]
+    if normalized == "kling":
+        return ["VIDEO_KLING", "KLING"]
+    if normalized == "generic_http":
+        return ["VIDEO_GENERIC_HTTP", "GENERIC_HTTP"]
+    return [normalized.upper()]
+
+
+def provider_credit_status(provider: str, env: dict[str, str] | None = None) -> str:
+    data = dict(env or os.environ)
+    prefixes = _provider_credit_prefixes(provider)
+    flag_suffixes = [
+        ("FROZEN", "frozen"),
+        ("EXHAUSTED", "exhausted"),
+        ("QUOTA_EXHAUSTED", "quota_exhausted"),
+        ("LOW_CREDIT", "low_credit"),
+        ("LOW_BALANCE", "low_credit"),
+        ("HEALTH_BAD", "bad_health"),
+        ("DISABLED", "disabled"),
+    ]
+    for prefix in prefixes:
+        for suffix, status in flag_suffixes:
+            if _env_flag(data, f"{prefix}_{suffix}", "0"):
+                return status
+    for suffix in ("CREDIT_STATUS", "BALANCE_STATUS", "HEALTH_STATUS", "STATUS"):
+        for prefix in prefixes:
+            value = str(data.get(f"{prefix}_{suffix}") or "").strip()
+            if value:
+                return _normalize_credit_status(value)
+    return "unknown"
+
+
+def provider_credit_allows_selection(status: str) -> bool:
+    normalized = _normalize_credit_status(status)
+    return normalized not in VIDEO_CREDIT_BLOCKED_STATUSES
 
 
 def _endpoint_alias(env: dict[str, str], direct_name: str, base_name: str, endpoint_name: str, *legacy_names: str) -> str:
@@ -324,11 +412,20 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
     for adapter in adapters:
         caps = dict(adapter.capabilities())
         missing = list(caps.get("missing") or [])
+        provider_name = str(caps.get("provider") or adapter.provider_name or "").strip()
+        credit_status = provider_credit_status(provider_name, env)
+        credit_ok = provider_credit_allows_selection(credit_status)
+        configured = bool(caps.get("configured"))
+        selection_blocker = ""
+        if configured and not credit_ok:
+            selection_blocker = f"credit_{credit_status}"
+        elif not configured:
+            selection_blocker = "not_configured"
         providers.append(
             {
-                "provider": caps.get("provider") or adapter.provider_name,
+                "provider": provider_name,
                 "enabled": bool(caps.get("enabled")),
-                "configured": bool(caps.get("configured")),
+                "configured": configured,
                 "missing": missing,
                 "capabilities": list(caps.get("capabilities") or []),
                 "endpoint_configured": bool(caps.get("endpoint_configured")),
@@ -341,9 +438,13 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
                 "auth_present": bool(caps.get("auth_present") or caps.get("auth_configured")),
                 "stub_test_only": bool(caps.get("stub_test_only")),
                 "production_disabled": bool(caps.get("production_disabled")),
+                "credit_status": credit_status,
+                "credit_ok": bool(credit_ok),
+                "fallback_only": bool(provider_name == "key4u_video" or not credit_ok),
+                "selection_blocker": selection_blocker,
             }
         )
-    ready = [item["provider"] for item in providers if item["configured"]]
+    ready = [item["provider"] for item in providers if item["configured"] and item.get("credit_ok")]
     enabled = [item["provider"] for item in providers if item["enabled"]]
     configured = [item["provider"] for item in providers if item["configured"]]
     near_ready = [
@@ -352,12 +453,26 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
         if not item["configured"] and (item["endpoint_present"] or item["auth_present"] or item["enabled"])
     ]
     missing_env = {item["provider"]: item["missing"] for item in providers if item["missing"]}
+    selected_provider = ready[0] if ready else ""
+    fallback_order = [item["provider"] for item in providers if item["configured"] and item["provider"] != selected_provider]
+    usable_fallback_order = [
+        item["provider"]
+        for item in providers
+        if item["configured"] and item.get("credit_ok") and item["provider"] != selected_provider
+    ]
+    skipped_providers = [
+        {"provider": item["provider"], "reason": item.get("selection_blocker") or f"credit_{item.get('credit_status')}"}
+        for item in providers
+        if item["configured"] and not item.get("credit_ok")
+    ]
     if ready:
-        reason = "ready"
+        reason = "provider_ready_and_has_credit"
     elif not enabled:
         reason = "chưa bật provider nào"
     elif not configured:
         reason = "provider chưa đủ endpoint/auth"
+    elif skipped_providers:
+        reason = "provider_credit_unavailable"
     else:
         reason = "provider thiếu capability"
     return {
@@ -366,8 +481,14 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
         "reason": reason,
         "summary_reason": reason,
         "provider_chain": configured_provider_chain(env),
+        "effective_provider_chain": configured_provider_chain(env),
         "ready_provider_order": ready,
-        "first_ready_provider": ready[0] if ready else "",
+        "first_ready_provider": selected_provider,
+        "selected_provider": selected_provider,
+        "selection_reason": reason,
+        "fallback_order": fallback_order,
+        "usable_fallback_order": usable_fallback_order,
+        "skipped_providers": skipped_providers,
         "enabled_count": len(enabled),
         "configured_count": len(configured),
         "enabled_providers": enabled,
@@ -379,13 +500,125 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
     }
 
 
-def select_video_provider(required_capability: str, environ: dict[str, str] | None = None) -> tuple[VideoProviderAdapter | None, dict[str, Any]]:
-    adapters = load_video_provider_adapters(environ)
-    status = provider_status_payload(environ)
-    for adapter in adapters:
+def provider_candidate_adapters(
+    required_capability: str,
+    environ: dict[str, str] | None = None,
+    status: dict[str, Any] | None = None,
+) -> list[VideoProviderAdapter]:
+    env = dict(environ or os.environ)
+    payload = dict(status or provider_status_payload(env))
+    status_by_provider = {str(item.get("provider") or ""): item for item in (payload.get("providers") or []) if isinstance(item, dict)}
+    candidates: list[VideoProviderAdapter] = []
+    for adapter in load_video_provider_adapters(env):
+        item = status_by_provider.get(adapter.provider_name, {})
+        if item and not item.get("credit_ok", True):
+            continue
         if provider_supports(adapter, required_capability):
-            return adapter, status
+            candidates.append(adapter)
+    return candidates
+
+
+def select_video_provider(required_capability: str, environ: dict[str, str] | None = None) -> tuple[VideoProviderAdapter | None, dict[str, Any]]:
+    status = provider_status_payload(environ)
+    for adapter in provider_candidate_adapters(required_capability, environ, status):
+        return adapter, status
     return None, status
+
+
+def _safe_exception_message(value: Any, limit: int = 220) -> str:
+    text = str(value or "").replace("\n", " ").replace("\r", " ")
+    for marker in ("Bearer ", "token=", "key=", "secret=", "authorization="):
+        idx = text.lower().find(marker.lower())
+        if idx >= 0:
+            text = text[: idx + len(marker)] + "***"
+            break
+    return text[:limit]
+
+
+def _debug_http_status(raw: dict[str, Any] | None = None, key: str = "http_status") -> int:
+    raw = dict(raw or {})
+    for candidate in (key, "http_status", "status_code", "submit_http_status", "poll_http_status"):
+        try:
+            value = int(raw.get(candidate) or 0)
+        except Exception:
+            value = 0
+        if value:
+            return value
+    return 0
+
+
+def provider_exception_result(exc: BaseException, *, provider: str = "", stage: str = "submit_request", status: dict[str, Any] | None = None) -> dict[str, Any]:
+    blocker = str(getattr(exc, "blocker", "") or "")
+    if not blocker:
+        if isinstance(exc, ValueError):
+            blocker = "provider_unhandled_exception"
+        elif isinstance(exc, (KeyError, TypeError)):
+            blocker = "provider_submit_response_invalid_shape"
+        elif isinstance(exc, TimeoutError):
+            blocker = "provider_submit_http_error"
+        else:
+            blocker = "provider_unhandled_exception"
+    debug = dict(getattr(exc, "debug", {}) or {})
+    return {
+        "ok": False,
+        **debug,
+        "provider_router_called": True,
+        "provider_attempted": stage != "payload_build",
+        "provider": provider,
+        "selected_provider": provider,
+        "provider_error": blocker,
+        "blocker": blocker,
+        "provider_status": "failed",
+        "smoke_stage": str(getattr(exc, "stage", "") or debug.get("smoke_stage") or stage),
+        "exception_class": type(exc).__name__,
+        "exception_message_safe": _safe_exception_message(exc),
+        "provider_readiness": status or {},
+    }
+
+
+def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = dict(raw or {})
+    for key in (
+        "smoke_stage",
+        "exception_class",
+        "exception_message_safe",
+        "submit_url_configured",
+        "poll_url_configured",
+        "auth_configured",
+        "payload_has_prompt",
+        "payload_has_duration",
+        "payload_has_ratio",
+        "payload_keys",
+        "prompt_chars",
+        "duration",
+        "ratio",
+        "quality",
+        "scenes_count",
+        "submit_response_shape",
+        "provider_task_id_present",
+        "provider_task_id_masked",
+        "poll_response_shape",
+        "provider_status_raw",
+        "result_field_path",
+        "task_id_field_path",
+        "video_id_field_path",
+    ):
+        if key in raw and key not in target:
+            target[key] = raw.get(key)
+    if "provider_submit_blocker" in raw:
+        target["provider_submit_stage"] = raw.get("smoke_stage") or "submit_response_parse"
+        target["provider_submit_blocker"] = raw.get("provider_submit_blocker")
+    if "provider_poll_blocker" in raw:
+        target["provider_poll_blocker"] = raw.get("provider_poll_blocker")
+    if "provider_result_blocker" in raw:
+        target["provider_result_blocker"] = raw.get("provider_result_blocker")
+    if "submit_http_status" in raw or "http_status" in raw or "status_code" in raw:
+        target["provider_submit_http_status"] = _debug_http_status(raw, "submit_http_status")
+    if "poll_http_status" in raw:
+        target["provider_poll_http_status"] = _debug_http_status(raw, "poll_http_status")
+    if raw.get("result_url_present") is not None:
+        target["provider_result_url_present"] = bool(raw.get("result_url_present"))
+    return target
 
 
 def run_provider_generation(
@@ -396,18 +629,22 @@ def run_provider_generation(
     sleep_func=time.sleep,
 ) -> dict[str, Any]:
     env = dict(environ or os.environ)
-    adapter, status = select_video_provider(request.required_capability, env)
-    allowed_capabilities = set(capability_options(request.required_capability))
-    provider_candidates = [
-        str(item.get("provider") or "")
-        for item in (status.get("providers") or [])
-        if item.get("configured") and (set(str(value) for value in (item.get("capabilities") or [])) & allowed_capabilities)
-    ]
+    status = provider_status_payload(env)
+    candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
+    adapter = candidate_adapters[0] if candidate_adapters else None
+    provider_candidates = [item.provider_name for item in candidate_adapters]
     base_debug = {
         "provider_router_called": True,
         "provider_candidates_count": len([item for item in provider_candidates if item]),
         "selected_provider": adapter.provider_name if adapter else "",
         "provider_selection_blocker": "" if adapter else "provider_capability_missing",
+        "provider_chain": list(status.get("provider_chain") or []),
+        "effective_provider_chain": list(status.get("effective_provider_chain") or status.get("provider_chain") or []),
+        "fallback_order": list(status.get("fallback_order") or []),
+        "usable_fallback_order": list(status.get("usable_fallback_order") or []),
+        "fallback_used": False,
+        "fallback_reason": "",
+        "skipped_providers": list(status.get("skipped_providers") or []),
         "provider_submit_called": False,
         "provider_submit_http_status": 0,
         "provider_task_id_saved": False,
@@ -424,136 +661,266 @@ def run_provider_generation(
             "provider_status": "not_attempted",
             "provider_readiness": status,
         }
-    submit = adapter.submit_video_job(request)
-    if not submit.ok:
-        return {
-            "ok": False,
-            **base_debug,
-            "provider_attempted": True,
-            "provider_submit_called": True,
-            "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
-            "provider_task_id_saved": bool(submit.provider_task_id),
-            "provider": adapter.provider_name,
-            "provider_error": submit.error_code or "provider_submit_failed",
-            "blocker": submit.error_code or "provider_submit_failed",
-            "provider_status": submit.provider_status or "failed",
-            "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
-            "provider_readiness": status,
-        }
-    result_url = submit.result_url or submit.file_url
-    poll_result = VideoPollResult(
-        ok=True,
-        status=normalize_provider_status(submit.provider_status, has_result_url=bool(result_url)),
-        provider_name=adapter.provider_name,
-        provider_task_id=submit.provider_task_id,
-        provider_video_id=submit.provider_video_id,
-        result_url=result_url,
-        file_url=result_url,
-        raw_status=submit.provider_status,
-    )
-    if not result_url:
-        max_attempts = max(1, _env_int(env, "VIDEO_PROVIDER_MAX_POLL_ATTEMPTS", 90))
-        interval = max(0, _env_int(env, "VIDEO_PROVIDER_POLL_INTERVAL_SECONDS", 10))
-        for attempt in range(1, max_attempts + 1):
-            if attempt > 1 and interval:
-                sleep_func(interval)
-            poll_result = adapter.poll_video_job(submit.provider_task_id or submit.provider_video_id)
-            poll_result.status = normalize_provider_status(poll_result.status, has_result_url=bool(poll_result.result_url or poll_result.file_url))
-            if poll_result.status == "succeeded" and (poll_result.result_url or poll_result.file_url):
-                break
-            if poll_result.status in {"failed", "cancelled"}:
-                return {
-                    "ok": False,
-                    **base_debug,
-                    "provider_attempted": True,
-                    "provider_submit_called": True,
-                    "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
-                    "provider_task_id_saved": bool(submit.provider_task_id),
-                    "provider_poll_called": True,
-                    "provider": adapter.provider_name,
-                    "provider_error": poll_result.error_code or f"provider_poll_{poll_result.status}",
-                    "blocker": poll_result.error_code or f"provider_poll_{poll_result.status}",
-                    "provider_status": poll_result.status,
-                    "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
-                    "provider_readiness": status,
-                }
-        else:
+
+    def _submit_http_status(raw: dict[str, Any] | None) -> int:
+        try:
+            return int((raw or {}).get("http_status") or (raw or {}).get("status_code") or 0)
+        except Exception:
+            return 0
+
+    attempt_failures: list[dict[str, Any]] = []
+    first_fallback_reason = ""
+    for attempt_index, current_adapter in enumerate(candidate_adapters):
+        fallback_used = attempt_index > 0
+        fallback_reason = first_fallback_reason if fallback_used else ""
+
+        def _attempt_base() -> dict[str, Any]:
             return {
-                "ok": False,
                 **base_debug,
+                "selected_provider": current_adapter.provider_name,
+                "provider": current_adapter.provider_name,
+                "provider_selection_blocker": "",
+                "fallback_used": fallback_used,
+                "fallback_reason": fallback_reason,
                 "provider_attempted": True,
+                "provider_attempts": list(attempt_failures),
+            }
+
+        def _record_failure(reason: str) -> None:
+            nonlocal first_fallback_reason
+            clean_reason = str(reason or "provider_failed").strip() or "provider_failed"
+            attempt_failures.append({"provider": current_adapter.provider_name, "reason": clean_reason})
+            if not first_fallback_reason:
+                first_fallback_reason = clean_reason
+
+        try:
+            submit = current_adapter.submit_video_job(request)
+        except Exception as exc:
+            exc_payload = {
+                **_attempt_base(),
+                **provider_exception_result(exc, provider=current_adapter.provider_name, stage="submit_request", status=status),
+                "fallback_used": attempt_index > 0,
+                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+            }
+            blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
+            if attempt_index + 1 < len(candidate_adapters):
+                _record_failure(blocker)
+                continue
+            _record_failure(blocker)
+            exc_payload["provider_attempts"] = list(attempt_failures)
+            return exc_payload
+        submit_http_status = _submit_http_status(submit.raw)
+        if not submit.ok:
+            blocker = submit.error_code or "provider_submit_failed"
+            if attempt_index + 1 < len(candidate_adapters):
+                _record_failure(blocker)
+                continue
+            _record_failure(blocker)
+            payload = {
+                "ok": False,
+                **_attempt_base(),
+                "fallback_used": attempt_index > 0,
+                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
                 "provider_submit_called": True,
-                "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
+                "provider_submit_http_status": submit_http_status,
                 "provider_task_id_saved": bool(submit.provider_task_id),
-                "provider_poll_called": True,
-                "provider": adapter.provider_name,
-                "provider_error": "provider_timeout",
-                "blocker": "provider_timeout",
-                "provider_status": "timeout",
+                "provider_error": blocker,
+                "blocker": blocker,
+                "provider_status": submit.provider_status or "failed",
                 "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
                 "provider_readiness": status,
             }
-    if not (poll_result.result_url or poll_result.file_url):
-        return {
-            "ok": False,
-            **base_debug,
-            "provider_attempted": True,
+            return _merge_contract_debug(payload, submit.raw)
+        result_url = submit.result_url or submit.file_url
+        poll_result = VideoPollResult(
+            ok=True,
+            status=normalize_provider_status(submit.provider_status, has_result_url=bool(result_url)),
+            provider_name=current_adapter.provider_name,
+            provider_task_id=submit.provider_task_id,
+            provider_video_id=submit.provider_video_id,
+            result_url=result_url,
+            file_url=result_url,
+            raw_status=submit.provider_status,
+        )
+        if not result_url:
+            max_attempts = max(1, _env_int(env, "VIDEO_PROVIDER_MAX_POLL_ATTEMPTS", 90))
+            interval = max(0, _env_int(env, "VIDEO_PROVIDER_POLL_INTERVAL_SECONDS", 10))
+            for attempt in range(1, max_attempts + 1):
+                if attempt > 1 and interval:
+                    sleep_func(interval)
+                try:
+                    poll_result = current_adapter.poll_video_job(submit.provider_task_id or submit.provider_video_id)
+                except Exception as exc:
+                    exc_payload = {
+                        **_attempt_base(),
+                        **provider_exception_result(exc, provider=current_adapter.provider_name, stage="poll_request", status=status),
+                        "fallback_used": attempt_index > 0,
+                        "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                        "provider_submit_called": True,
+                        "provider_submit_http_status": submit_http_status,
+                        "provider_task_id_saved": bool(submit.provider_task_id),
+                        "provider_poll_called": True,
+                        "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                    }
+                    blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
+                    if attempt_index + 1 < len(candidate_adapters):
+                        _record_failure(blocker)
+                        break
+                    _record_failure(blocker)
+                    exc_payload["provider_attempts"] = list(attempt_failures)
+                    return _merge_contract_debug(exc_payload, submit.raw)
+                poll_result.status = normalize_provider_status(poll_result.status, has_result_url=bool(poll_result.result_url or poll_result.file_url))
+                if poll_result.status == "succeeded" and (poll_result.result_url or poll_result.file_url):
+                    break
+                if poll_result.status in {"failed", "cancelled"}:
+                    blocker = poll_result.error_code or f"provider_poll_{poll_result.status}"
+                    if attempt_index + 1 < len(candidate_adapters):
+                        _record_failure(blocker)
+                        break
+                    _record_failure(blocker)
+                    payload = {
+                        "ok": False,
+                        **_attempt_base(),
+                        "fallback_used": attempt_index > 0,
+                        "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                        "provider_submit_called": True,
+                        "provider_submit_http_status": submit_http_status,
+                        "provider_task_id_saved": bool(submit.provider_task_id),
+                        "provider_poll_called": True,
+                        "provider_error": blocker,
+                        "blocker": blocker,
+                        "provider_status": poll_result.status,
+                        "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                        "provider_readiness": status,
+                    }
+                    return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
+            else:
+                blocker = "provider_timeout"
+                if attempt_index + 1 < len(candidate_adapters):
+                    _record_failure(blocker)
+                    continue
+                _record_failure(blocker)
+                payload = {
+                    "ok": False,
+                    **_attempt_base(),
+                    "fallback_used": attempt_index > 0,
+                    "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                    "provider_submit_called": True,
+                    "provider_submit_http_status": submit_http_status,
+                    "provider_task_id_saved": bool(submit.provider_task_id),
+                    "provider_poll_called": True,
+                    "provider_error": blocker,
+                    "blocker": blocker,
+                    "provider_status": "timeout",
+                    "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                    "provider_readiness": status,
+                }
+                return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
+            if attempt_failures and attempt_failures[-1].get("provider") == current_adapter.provider_name:
+                continue
+        if not (poll_result.result_url or poll_result.file_url):
+            blocker = "provider_result_url_missing"
+            if attempt_index + 1 < len(candidate_adapters):
+                _record_failure(blocker)
+                continue
+            _record_failure(blocker)
+            payload = {
+                "ok": False,
+                **_attempt_base(),
+                "fallback_used": attempt_index > 0,
+                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                "provider_submit_called": True,
+                "provider_submit_http_status": submit_http_status,
+                "provider_task_id_saved": bool(submit.provider_task_id),
+                "provider_poll_called": bool(not result_url),
+                "provider_result_url_present": False,
+                "provider_error": blocker,
+                "blocker": blocker,
+                "provider_status": poll_result.status,
+                "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                "provider_readiness": status,
+            }
+            return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
+        try:
+            artifact: VideoArtifactResult = current_adapter.materialize_result(poll_result, str(request.job_id or submit.provider_task_id))
+        except Exception as exc:
+            exc_payload = {
+                **_attempt_base(),
+                **provider_exception_result(exc, provider=current_adapter.provider_name, stage="download", status=status),
+                "fallback_used": attempt_index > 0,
+                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                "provider_submit_called": True,
+                "provider_submit_http_status": submit_http_status,
+                "provider_task_id_saved": bool(submit.provider_task_id),
+                "provider_poll_called": bool(not result_url),
+                "provider_result_url_present": bool(poll_result.result_url or poll_result.file_url),
+                "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+            }
+            blocker = str(exc_payload.get("blocker") or "provider_unhandled_exception")
+            if attempt_index + 1 < len(candidate_adapters):
+                _record_failure(blocker)
+                continue
+            _record_failure(blocker)
+            exc_payload["provider_attempts"] = list(attempt_failures)
+            return _merge_contract_debug(_merge_contract_debug(exc_payload, submit.raw), getattr(poll_result, "raw", {}))
+        if not artifact.ok:
+            blocker = artifact.error_code or "provider_download_failed"
+            if attempt_index + 1 < len(candidate_adapters):
+                _record_failure(blocker)
+                continue
+            _record_failure(blocker)
+            payload = {
+                "ok": False,
+                **_attempt_base(),
+                "fallback_used": attempt_index > 0,
+                "fallback_reason": first_fallback_reason if attempt_index > 0 else "",
+                "provider_submit_called": True,
+                "provider_submit_http_status": submit_http_status,
+                "provider_task_id_saved": bool(submit.provider_task_id),
+                "provider_poll_called": bool(not result_url),
+                "provider_result_url_present": True,
+                "provider_error": blocker,
+                "blocker": blocker,
+                "provider_status": poll_result.status,
+                "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
+                "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
+                "provider_task_id_masked": mask_provider_task_id(submit.provider_task_id),
+                "result_url_present": True,
+                "download_status": artifact.error_code or "failed",
+                "provider_readiness": status,
+            }
+            payload["provider_result_blocker"] = payload["blocker"]
+            return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
+        payload = {
+            "ok": True,
+            **_attempt_base(),
             "provider_submit_called": True,
-            "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
-            "provider_task_id_saved": bool(submit.provider_task_id),
-            "provider_poll_called": bool(not result_url),
-            "provider_result_url_present": False,
-            "provider": adapter.provider_name,
-            "provider_error": "provider_result_url_missing",
-            "blocker": "provider_result_url_missing",
-            "provider_status": poll_result.status,
-            "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
-            "provider_readiness": status,
-        }
-    artifact: VideoArtifactResult = adapter.materialize_result(poll_result, str(request.job_id or submit.provider_task_id))
-    if not artifact.ok:
-        return {
-            "ok": False,
-            **base_debug,
-            "provider_attempted": True,
-            "provider_submit_called": True,
-            "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
+            "provider_submit_http_status": submit_http_status,
             "provider_task_id_saved": bool(submit.provider_task_id),
             "provider_poll_called": bool(not result_url),
             "provider_result_url_present": True,
-            "provider": adapter.provider_name,
-            "provider_error": artifact.error_code or "provider_download_failed",
-            "blocker": artifact.error_code or "provider_download_failed",
-            "provider_status": poll_result.status,
             "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
             "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
             "provider_task_id_masked": mask_provider_task_id(submit.provider_task_id),
+            "provider_status": "downloaded",
             "result_url_present": True,
-            "download_status": artifact.error_code or "failed",
+            "download_status": "downloaded",
+            "output_path": artifact.local_path,
+            "local_path": artifact.local_path,
+            "bytes": artifact.bytes,
+            "duration": artifact.duration,
+            "has_video_stream": artifact.has_video_stream,
+            "has_audio_stream": artifact.has_audio_stream,
+            "artifact_hash": artifact.artifact_hash,
             "provider_readiness": status,
         }
+        return _merge_contract_debug(_merge_contract_debug(payload, submit.raw), getattr(poll_result, "raw", {}))
     return {
-        "ok": True,
+        "ok": False,
         **base_debug,
-        "provider_attempted": True,
-        "provider_submit_called": True,
-        "provider_submit_http_status": int((submit.raw or {}).get("http_status") or (submit.raw or {}).get("status_code") or 0),
-        "provider_task_id_saved": bool(submit.provider_task_id),
-        "provider_poll_called": bool(not result_url),
-        "provider_result_url_present": True,
-        "provider": adapter.provider_name,
-        "provider_task_ids": [submit.provider_task_id] if submit.provider_task_id else [],
-        "provider_video_ids": [submit.provider_video_id] if submit.provider_video_id else [],
-        "provider_task_id_masked": mask_provider_task_id(submit.provider_task_id),
-        "provider_status": "downloaded",
-        "result_url_present": True,
-        "download_status": "downloaded",
-        "output_path": artifact.local_path,
-        "local_path": artifact.local_path,
-        "bytes": artifact.bytes,
-        "duration": artifact.duration,
-        "has_video_stream": artifact.has_video_stream,
-        "has_audio_stream": artifact.has_audio_stream,
-        "artifact_hash": artifact.artifact_hash,
+        "provider_attempted": False,
+        "provider_error": "provider_capability_missing",
+        "blocker": "provider_capability_missing",
+        "provider_status": "not_attempted",
         "provider_readiness": status,
     }
