@@ -33,7 +33,7 @@ MIGRATION_TARGET_DIRS = (
     "cache",
 )
 BACKUP_DIR_NAME = "backups"
-BACKUP_CLEANUP_EXTENSIONS = {".bak", ".backup", ".zip", ".tar", ".gz", ".tgz", ".7z"}
+BACKUP_CLEANUP_EXTENSIONS = {".bak", ".backup", ".zip", ".tar", ".gz", ".tgz", ".7z", ".db", ".sqlite", ".sqlite3"}
 MIGRATION_TABLE = "storage_artifact_migrations"
 
 

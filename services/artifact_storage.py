@@ -7,7 +7,9 @@ Secrets and internal host names are never included in public metadata.
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import os
 import posixpath
 import re
@@ -65,6 +67,8 @@ class ArtifactStorageConfig:
     vps_user: str = "toanaas"
     vps_base_dir: str = "/opt/toanaas-storage"
     vps_ssh_key_path: str = ""
+    vps_ssh_private_key: str = ""
+    vps_ssh_private_key_b64: str = ""
     public_base_url: str = ""
     ttl_hours: int = 24
     tmp_ttl_hours: int = 6
@@ -84,6 +88,8 @@ def config_from_env(env: Mapping[str, str] | None = None) -> ArtifactStorageConf
         vps_user=str(data.get("ARTIFACT_VPS_USER") or "toanaas").strip() or "toanaas",
         vps_base_dir=str(data.get("ARTIFACT_VPS_BASE_DIR") or "/opt/toanaas-storage").strip() or "/opt/toanaas-storage",
         vps_ssh_key_path=str(data.get("ARTIFACT_VPS_SSH_KEY_PATH") or "").strip(),
+        vps_ssh_private_key=str(data.get("ARTIFACT_VPS_SSH_PRIVATE_KEY") or ""),
+        vps_ssh_private_key_b64=str(data.get("ARTIFACT_VPS_SSH_PRIVATE_KEY_B64") or "").strip(),
         public_base_url=str(data.get("ARTIFACT_PUBLIC_BASE_URL") or "").strip(),
         ttl_hours=max(1, _safe_int(data.get("ARTIFACT_TTL_HOURS"), 24)),
         tmp_ttl_hours=max(1, _safe_int(data.get("ARTIFACT_TMP_TTL_HOURS"), 6)),
@@ -171,20 +177,155 @@ def public_url_for_remote_path(config: ArtifactStorageConfig, remote_path: str) 
     return "/".join([base_url, *safe_parts]) if safe_parts else base_url
 
 
-def _upload_vps_sftp(local_path: str, remote_path: str, config: ArtifactStorageConfig) -> dict:
+def _normalize_private_key_text(value: str) -> str:
+    text = str(value or "").strip()
+    if "\\n" in text and "\n" not in text:
+        text = text.replace("\\n", "\n")
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return text
+
+
+def _write_secure_runtime_key_file(key_text: str) -> str:
+    digest = hashlib.sha256(key_text.encode("utf-8")).hexdigest()[:24]
+    key_dir = Path(tempfile.gettempdir()) / "toanaas-artifact-keys"
+    key_dir.mkdir(parents=True, exist_ok=True)
+    key_path = key_dir / f"artifact-vps-{digest}.key"
+    if not key_path.exists() or key_path.read_text(encoding="utf-8", errors="ignore") != key_text:
+        key_path.write_text(key_text, encoding="utf-8")
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        pass
+    return str(key_path)
+
+
+def _raw_private_key_from_b64(value: str) -> dict:
+    try:
+        decoded = base64.b64decode(str(value or "").strip(), validate=True)
+        return {"ok": True, "key_text": _normalize_private_key_text(decoded.decode("utf-8"))}
+    except Exception:
+        return {"ok": False, "reason": "vps_sftp_key_invalid"}
+
+
+def _vps_sftp_key_source(config: ArtifactStorageConfig) -> dict:
+    key_path = str(config.vps_ssh_key_path or "").strip()
+    if key_path:
+        if os.path.exists(key_path) and os.access(key_path, os.R_OK):
+            return {"ok": True, "kind": "path", "path": key_path}
+    raw_key = _normalize_private_key_text(config.vps_ssh_private_key)
+    if raw_key:
+        runtime_path = _write_secure_runtime_key_file(raw_key)
+        return {"ok": True, "kind": "raw", "key_text": raw_key, "path": runtime_path}
+    raw_b64 = str(config.vps_ssh_private_key_b64 or "").strip()
+    if raw_b64:
+        decoded = _raw_private_key_from_b64(raw_b64)
+        if not decoded.get("ok"):
+            return decoded
+        runtime_path = _write_secure_runtime_key_file(str(decoded.get("key_text") or ""))
+        return {"ok": True, "kind": "b64", "key_text": decoded["key_text"], "path": runtime_path}
+    return {"ok": False, "reason": "vps_sftp_key_missing"}
+
+
+def _paramiko_module() -> dict:
     try:
         import paramiko  # type: ignore
     except Exception:
-        return {"ok": False, "reason": "paramiko_missing"}
-    if not config.vps_host or not config.vps_user or not config.vps_ssh_key_path:
+        return {"ok": False, "reason": "paramiko_missing", "paramiko": None}
+    return {"ok": True, "paramiko": paramiko}
+
+
+def _load_vps_private_key(config: ArtifactStorageConfig) -> dict:
+    source = _vps_sftp_key_source(config)
+    if not source.get("ok"):
+        return source
+    module = _paramiko_module()
+    if not module.get("ok"):
+        return {"ok": False, "reason": module.get("reason") or "paramiko_missing"}
+    paramiko = module["paramiko"]
+    loaders = (
+        getattr(paramiko, "Ed25519Key", None),
+        getattr(paramiko, "RSAKey", None),
+        getattr(paramiko, "ECDSAKey", None),
+    )
+    last_error = ""
+    for loader in [item for item in loaders if item is not None]:
+        try:
+            if source.get("kind") == "path":
+                key = loader.from_private_key_file(str(source.get("path") or ""))
+            else:
+                key = loader.from_private_key(io.StringIO(str(source.get("key_text") or "")))
+            return {"ok": True, "key": key, "kind": source.get("kind"), "runtime_key_path": source.get("path") or ""}
+        except Exception as exc:
+            last_error = type(exc).__name__
+            continue
+    return {"ok": False, "reason": "vps_sftp_key_invalid", "last_error": last_error}
+
+
+def vps_sftp_config_diagnostic(config: ArtifactStorageConfig) -> dict:
+    module = _paramiko_module()
+    key_source = _vps_sftp_key_source(config)
+    reason = ""
+    if config.backend == "vps_sftp":
+        if not config.vps_host or not config.vps_user:
+            reason = "vps_sftp_config_missing"
+        elif not key_source.get("ok"):
+            reason = str(key_source.get("reason") or "")
+        else:
+            key_loaded = _load_vps_private_key(config)
+            if not key_loaded.get("ok"):
+                reason = str(key_loaded.get("reason") or "")
+    return {
+        "backend": config.backend,
+        "host_configured": bool(config.vps_host),
+        "port": int(config.vps_port),
+        "user_configured": bool(config.vps_user),
+        "base_dir": str(config.vps_base_dir or ""),
+        "key_path_configured": bool(str(config.vps_ssh_key_path or "").strip()),
+        "key_path_exists": bool(str(config.vps_ssh_key_path or "").strip() and os.path.exists(str(config.vps_ssh_key_path))),
+        "raw_private_key_configured": bool(str(config.vps_ssh_private_key or "").strip()),
+        "private_key_b64_configured": bool(str(config.vps_ssh_private_key_b64 or "").strip()),
+        "public_base_url_configured": bool(str(config.public_base_url or "").strip()),
+        "paramiko_available": bool(module.get("ok")),
+        "last_safe_blocker": reason or "-",
+    }
+
+
+def _open_vps_sftp(config: ArtifactStorageConfig) -> dict:
+    if not config.vps_host or not config.vps_user:
         return {"ok": False, "reason": "vps_sftp_config_missing"}
+    key_result = _load_vps_private_key(config)
+    if not key_result.get("ok"):
+        return {"ok": False, "reason": key_result.get("reason") or "vps_sftp_key_invalid"}
+    module = _paramiko_module()
+    if not module.get("ok"):
+        return {"ok": False, "reason": module.get("reason") or "paramiko_missing"}
+    paramiko = module["paramiko"]
     transport = None
-    sftp = None
     try:
-        key = paramiko.RSAKey.from_private_key_file(config.vps_ssh_key_path)
         transport = paramiko.Transport((config.vps_host, int(config.vps_port)))
-        transport.connect(username=config.vps_user, pkey=key)
+        transport.connect(username=config.vps_user, pkey=key_result["key"])
         sftp = paramiko.SFTPClient.from_transport(transport)
+        return {"ok": True, "transport": transport, "sftp": sftp}
+    except Exception as exc:
+        try:
+            if transport:
+                transport.close()
+        except Exception:
+            pass
+        exc_name = type(exc).__name__
+        if "Authentication" in exc_name or "auth" in exc_name.lower():
+            return {"ok": False, "reason": "vps_sftp_auth_failed"}
+        return {"ok": False, "reason": f"vps_sftp_connect_failed:{exc_name}"}
+
+
+def _upload_vps_sftp(local_path: str, remote_path: str, config: ArtifactStorageConfig) -> dict:
+    opened = _open_vps_sftp(config)
+    if not opened.get("ok"):
+        return {"ok": False, "reason": opened.get("reason") or "vps_sftp_connect_failed"}
+    sftp = opened.get("sftp")
+    transport = opened.get("transport")
+    try:
         current = ""
         for part in str(posixpath.dirname(remote_path)).split("/"):
             if not part:
@@ -310,21 +451,16 @@ def delivery_reference(metadata: Mapping[str, object] | None = None) -> dict:
 
 
 def _verify_vps_sftp(local_path: str, remote_path: str, config: ArtifactStorageConfig) -> dict:
-    try:
-        import paramiko  # type: ignore
-    except Exception:
-        return {"ok": False, "reason": "paramiko_missing"}
-    if not config.vps_host or not config.vps_user or not config.vps_ssh_key_path or not remote_path:
-        return {"ok": False, "reason": "vps_sftp_config_missing"}
-    transport = None
-    sftp = None
+    if not remote_path:
+        return {"ok": False, "reason": "vps_sftp_remote_path_missing"}
+    opened = _open_vps_sftp(config)
+    if not opened.get("ok"):
+        return {"ok": False, "reason": opened.get("reason") or "vps_sftp_connect_failed"}
+    sftp = opened.get("sftp")
+    transport = opened.get("transport")
     try:
         expected_size = int(Path(local_path).stat().st_size)
         expected_hash = artifact_sha256(local_path)
-        key = paramiko.RSAKey.from_private_key_file(config.vps_ssh_key_path)
-        transport = paramiko.Transport((config.vps_host, int(config.vps_port)))
-        transport.connect(username=config.vps_user, pkey=key)
-        sftp = paramiko.SFTPClient.from_transport(transport)
         remote_size = int(sftp.stat(remote_path).st_size)
         with sftp.open(remote_path, "rb") as handle:
             remote_hash = _hash_fileobj(handle)
