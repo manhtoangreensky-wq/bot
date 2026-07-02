@@ -1477,6 +1477,78 @@ def remote_worker_claim_debug_snapshot(
     }
 
 
+def worker_claim_trace_payload(
+    *,
+    worker_id: str = "",
+    service_mode: str = "",
+    claim_status: str = "",
+    claim_reason: str = "",
+    claim_route: str = "/api/v1/worker/claim",
+    actual_processor: str = "remote_worker",
+) -> dict[str, Any]:
+    mode = str(service_mode or "").strip() or "unknown"
+    return {
+        "actual_processor": str(actual_processor or "unknown")[:80],
+        "worker_id": sanitize_worker_id(worker_id),
+        "worker_service_mode": mode[:80],
+        "claimed_by_service_mode": mode[:80],
+        "worker_claim_route": str(claim_route or "/api/v1/worker/claim")[:160],
+        "worker_claim_status": str(claim_status or "")[:80],
+        "worker_claim_reason": scrub_secret_text(claim_reason)[:300],
+    }
+
+
+def stamp_worker_claim_trace(
+    conn: sqlite3.Connection,
+    *,
+    job_id: int,
+    worker_id: str,
+    service_mode: str,
+    claim_status: str = "claimed",
+    claim_reason: str = "",
+) -> dict[str, Any]:
+    trace = worker_claim_trace_payload(
+        worker_id=worker_id,
+        service_mode=service_mode,
+        claim_status=claim_status,
+        claim_reason=claim_reason,
+    )
+    job = video_project_queue.get_video_render_job(conn, int(job_id))
+    if not job:
+        return trace
+    payload = _json_loads(job.get("result_json"), {})
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.update(trace)
+    conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(strip_secret_fields(payload)), int(job_id)))
+    conn.commit()
+    return trace
+
+
+def _build_claimed_worker_payload(
+    conn: sqlite3.Connection,
+    hydrated: dict,
+    *,
+    worker_id: str,
+    service_mode: str,
+    claim_reason: str = "",
+) -> dict:
+    if not hydrated:
+        return {}
+    job_id = _safe_int(hydrated.get("id") or hydrated.get("job_id"), 0)
+    trace = stamp_worker_claim_trace(
+        conn,
+        job_id=job_id,
+        worker_id=worker_id,
+        service_mode=service_mode,
+        claim_status="claimed",
+        claim_reason=claim_reason,
+    )
+    payload = build_worker_job_payload(hydrated)
+    payload.update(trace)
+    return payload
+
+
 def claim_remote_worker_job(
     conn: sqlite3.Connection,
     *,
@@ -1501,7 +1573,7 @@ def claim_remote_worker_job(
             return {"ok": True, "job": None, "reason": "canary_capability_required"}
         job = claim_remote_worker_canary_job(conn, worker_id=worker, lease_seconds=lease_seconds)
         hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
-        return {"ok": True, "job": build_worker_job_payload(hydrated) if hydrated else None, "canary_only": True}
+        return {"ok": True, "job": _build_claimed_worker_payload(conn, hydrated, worker_id=worker, service_mode="canary") if hydrated else None, "canary_only": True}
     if admin_canary_only:
         if requested and REMOTE_WORKER_ADMIN_CANARY_CAPABILITY not in requested:
             return {"ok": True, "job": None, "reason": "admin_canary_capability_required"}
@@ -1512,7 +1584,7 @@ def claim_remote_worker_job(
         hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
         return {
             "ok": True,
-            "job": build_worker_job_payload(hydrated) if hydrated else None,
+            "job": _build_claimed_worker_payload(conn, hydrated, worker_id=worker, service_mode="admin_canary") if hydrated else None,
             "admin_canary_only": True,
             "reason": "" if hydrated else "no_admin_canary_job",
             "debug": {} if hydrated else remote_worker_claim_debug_snapshot(conn, claim_route="admin_canary"),
@@ -1524,7 +1596,7 @@ def claim_remote_worker_job(
         hydrated = video_project_queue.hydrate_video_job_payload(conn, job) if job else {}
         return {
             "ok": True,
-            "job": build_worker_job_payload(hydrated) if hydrated else None,
+            "job": _build_claimed_worker_payload(conn, hydrated, worker_id=worker, service_mode="admin_video") if hydrated else None,
             "admin_video_only": True,
             "reason": "" if hydrated else "no_admin_video_job",
             "debug": {} if hydrated else remote_worker_claim_debug_snapshot(conn, claim_route="admin_video"),
@@ -1553,7 +1625,14 @@ def claim_remote_worker_job(
             reason = "no_product_video_job"
         return {
             "ok": True,
-            "job": build_worker_job_payload(hydrated) if hydrated else None,
+            "job": _build_claimed_worker_payload(
+                conn,
+                hydrated,
+                worker_id=worker,
+                service_mode="owner_product_video" if owner_product_video_only else "product_video",
+            )
+            if hydrated
+            else None,
             "product_video_only": bool(product_video_only),
             "owner_product_video_only": bool(owner_product_video_only),
             "reason": reason,
@@ -1576,7 +1655,7 @@ def claim_remote_worker_job(
     reason = "" if hydrated else ("no_job" if config["public_enabled"] else "public_worker_disabled")
     return {
         "ok": True,
-        "job": build_worker_job_payload(hydrated) if hydrated else None,
+        "job": _build_claimed_worker_payload(conn, hydrated, worker_id=worker, service_mode="default_video") if hydrated else None,
         "reason": reason,
         "debug": {} if hydrated else remote_worker_claim_debug_snapshot(conn, claim_route="default_render", public_enabled=bool(config["public_enabled"])),
     }

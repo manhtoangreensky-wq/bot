@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -81,6 +82,7 @@ FFMPEG_PATH = str(os.environ.get("LOCAL_FFMPEG_PATH") or os.environ.get("FFMPEG_
 LAST_CLAIM_RESPONSE: dict = {}
 LAST_IDLE_REASON = ""
 LAST_REAL_VIDEO_RENDER_RESULT: dict = {}
+LAST_CLAIMED_JOB: dict = {}
 LOCAL_VIDEO_FAKE_RENDERER_ENABLED = env_flag("LOCAL_VIDEO_FAKE_RENDERER_ENABLED", "false")
 REAL_VIDEO_RENDER_UNAVAILABLE = "real_video_renderer_unavailable"
 RENDER_MODE_REAL = "real"
@@ -174,7 +176,8 @@ def claim_job(
     product_video_only: bool = False,
     owner_product_video_only: bool = False,
 ) -> dict | None:
-    global LAST_CLAIM_RESPONSE
+    global LAST_CLAIM_RESPONSE, LAST_CLAIMED_JOB
+    LAST_CLAIMED_JOB = {}
     if product_video_only or owner_product_video_only:
         capabilities = ["product_video", "owner_product_video", "ffmpeg", "video_postprocess"]
     elif admin_video_only:
@@ -207,7 +210,27 @@ def claim_job(
         LAST_CLAIM_RESPONSE = {"ok": False, "reason": type(exc).__name__}
         raise
     LAST_CLAIM_RESPONSE = data if isinstance(data, dict) else {}
-    return data.get("job") if isinstance(data, dict) and data.get("ok") else None
+    job = data.get("job") if isinstance(data, dict) and data.get("ok") else None
+    if isinstance(job, dict) and job:
+        service_mode = claim_mode_label(
+            canary_only=canary_only,
+            admin_canary_only=admin_canary_only,
+            admin_video_only=admin_video_only,
+            product_video_only=product_video_only,
+            owner_product_video_only=owner_product_video_only,
+        )
+        trace = worker_process_trace(job, service_mode=service_mode, claim_status="claimed")
+        job.update(trace)
+        LAST_CLAIMED_JOB = dict(job)
+        print(
+            "[remote_worker] claim job "
+            f"job_id={job.get('job_id') or '-'} "
+            f"job_type={job.get('job_type') or '-'} "
+            f"product_type={job.get('product_type') or job.get('profile_id') or '-'} "
+            f"service_mode={service_mode} "
+            f"provider_call={'yes' if job.get('provider_call') else 'no'}"
+        )
+    return job
 
 
 def claim_idle_reason(
@@ -344,6 +367,26 @@ def first_line(text: str) -> str:
         if clean:
             return clean[:300]
     return ""
+
+
+def worker_process_trace(job: dict | None = None, *, service_mode: str = "", claim_status: str = "") -> dict:
+    data = dict(job or {})
+    mode = str(service_mode or data.get("worker_service_mode") or data.get("claimed_by_service_mode") or "unknown").strip()
+    try:
+        hostname = socket.gethostname()
+    except Exception:
+        hostname = ""
+    return {
+        "actual_processor": "remote_worker",
+        "worker_id": WORKER_ID,
+        "worker_service_mode": mode[:80],
+        "claimed_by_service_mode": mode[:80],
+        "worker_claim_route": str(data.get("worker_claim_route") or "/api/v1/worker/claim")[:160],
+        "worker_claim_status": str(claim_status or data.get("worker_claim_status") or "claimed")[:80],
+        "worker_claim_reason": str(data.get("worker_claim_reason") or "")[:300],
+        "process_hostname": str(hostname or "")[:160],
+        "process_pid": int(os.getpid() or 0),
+    }
 
 
 def normalize_render_mode(job: dict | None = None) -> str:
@@ -568,16 +611,17 @@ def render_admin_video_delivery(job: dict, work_dir: str) -> str:
 def render_real_video(job: dict, work_dir: str) -> str:
     """Render a normal product video through the real provider connector."""
     global LAST_REAL_VIDEO_RENDER_RESULT
-    LAST_REAL_VIDEO_RENDER_RESULT = {}
+    trace = worker_process_trace(job)
+    LAST_REAL_VIDEO_RENDER_RESULT = dict(trace)
     try:
         from services.video_real_render_connector import LAST_RENDER_DIAGNOSTICS, RealVideoRenderError, render_real_video_job
     except Exception as exc:
         raise RuntimeError(f"{REAL_VIDEO_RENDER_UNAVAILABLE}:connector_import_failed:{type(exc).__name__}") from exc
     try:
         result = render_real_video_job(job, work_dir)
-        LAST_REAL_VIDEO_RENDER_RESULT = dict(result or {})
+        LAST_REAL_VIDEO_RENDER_RESULT = {**trace, **dict(result or {})}
     except RealVideoRenderError as exc:
-        LAST_REAL_VIDEO_RENDER_RESULT = dict(getattr(exc, "diagnostics", {}) or LAST_RENDER_DIAGNOSTICS or {})
+        LAST_REAL_VIDEO_RENDER_RESULT = {**trace, **dict(getattr(exc, "diagnostics", {}) or LAST_RENDER_DIAGNOSTICS or {})}
         raise RuntimeError(str(exc) or REAL_VIDEO_RENDER_UNAVAILABLE) from exc
     final_path = str(result.get("final_video_path") or "")
     if not final_path or not os.path.exists(final_path) or os.path.getsize(final_path) <= 0:
@@ -589,6 +633,7 @@ def process_claimed_job(job: dict) -> dict:
     job_id = str(job.get("job_id") or "")
     if not job_id:
         raise RuntimeError("job_id_missing")
+    trace = worker_process_trace(job)
     if job.get("claim_only_diagnostic"):
         if str(job.get("source") or "") != REMOTE_WORKER_PRODUCT_VIDEO_SOURCE:
             raise RuntimeError("claim_only_product_video_required")
@@ -597,6 +642,7 @@ def process_claimed_job(job: dict) -> dict:
         send_heartbeat(job_id, 20, "product diagnostic claimed")
         result = {
             "ok": True,
+            **trace,
             "claim_only_diagnostic": True,
             "diagnostic_claim_only": True,
             "renderer": "remote_worker_claim_only",
@@ -638,6 +684,12 @@ def process_claimed_job(job: dict) -> dict:
             send_heartbeat(job_id, 90, "uploading ADMIN TEST PATTERN")
             return complete_job(job_id, result, final_path)
         send_heartbeat(job_id, 20, "preparing product video")
+        print(
+            "[remote_worker] provider submit start "
+            f"job_id={job_id} "
+            f"provider={job.get('selected_provider') or '-'} "
+            f"service_mode={trace.get('worker_service_mode') or '-'}"
+        )
         final_path = render_real_video(job, work_dir)
         send_heartbeat(job_id, 80, "product video rendered")
         send_heartbeat(job_id, 88, "checking rendered video")
@@ -646,6 +698,7 @@ def process_claimed_job(job: dict) -> dict:
         force_no_charge = bool(visual_classification and visual_classification != "final_ai_video")
         result = {
             "ok": True,
+            **trace,
             "render_mode": RENDER_MODE_REAL,
             "renderer": "remote_worker_real_render_route",
             "final_video_name": os.path.basename(final_path),
@@ -675,6 +728,17 @@ def process_claimed_job(job: dict) -> dict:
             "provider_route_selected": bool(connector_result.get("provider_route_selected")),
             "provider_submit_called": bool(connector_result.get("provider_submit_called")),
             "provider_submit_http_status": connector_result.get("provider_submit_http_status") or 0,
+            "provider_submit_exception_class": str(connector_result.get("provider_submit_exception_class") or connector_result.get("exception_class") or ""),
+            "provider_submit_exception_message_safe": str(connector_result.get("provider_submit_exception_message_safe") or connector_result.get("exception_message_safe") or "")[:220],
+            "provider_submit_url_configured": bool(connector_result.get("provider_submit_url_configured") or connector_result.get("submit_url_configured")),
+            "provider_submit_url_host": str(connector_result.get("provider_submit_url_host") or ""),
+            "provider_auth_header_name": str(connector_result.get("provider_auth_header_name") or ""),
+            "provider_auth_value_present": bool(connector_result.get("provider_auth_value_present") or connector_result.get("auth_configured")),
+            "provider_auth_scheme_prefix": str(connector_result.get("provider_auth_scheme_prefix") or ""),
+            "provider_payload_keys": connector_result.get("provider_payload_keys") or connector_result.get("payload_keys") or [],
+            "provider_payload_model": str(connector_result.get("provider_payload_model") or ""),
+            "provider_response_http_status": connector_result.get("provider_response_http_status") or connector_result.get("provider_submit_http_status") or 0,
+            "provider_response_body_shape": connector_result.get("provider_response_body_shape") or connector_result.get("submit_response_shape") or {},
             "provider_task_id_saved": bool(connector_result.get("provider_task_id_saved")),
             "provider_poll_called": bool(connector_result.get("provider_poll_called")),
             "provider_result_url_present": bool(connector_result.get("provider_result_url_present")),
@@ -898,7 +962,15 @@ def run_once(
         if job_id:
             message = first_line(str(exc))
             unavailable = REAL_VIDEO_RENDER_UNAVAILABLE in message
-            diagnostics = dict(LAST_REAL_VIDEO_RENDER_RESULT or {})
+            diagnostics = {**worker_process_trace(job), **dict(LAST_REAL_VIDEO_RENDER_RESULT or {})}
+            print(
+                "[remote_worker] provider submit/render failed "
+                f"job_id={job_id} "
+                f"provider={diagnostics.get('selected_provider') or diagnostics.get('provider') or '-'} "
+                f"submit_url_host={diagnostics.get('provider_submit_url_host') or '-'} "
+                f"exception_class={type(exc).__name__} "
+                f"exception_message_safe={first_line(message)}"
+            )
             continue_polling = bool(diagnostics.get("continue_polling")) or "provider_in_progress" in message
             fail_result = fail_job(
                 job_id,

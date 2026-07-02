@@ -8,6 +8,8 @@ atomically from SQLite.
 from __future__ import annotations
 
 import json
+import os
+import socket
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
@@ -42,6 +44,24 @@ def now_text(moment: datetime | None = None) -> str:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, ensure_ascii=False, separators=(",", ":"))
+
+
+def inline_processor_trace_payload(*, processor: str = "railway_bot", service_mode: str = "inline_video_job") -> dict[str, Any]:
+    try:
+        hostname = socket.gethostname()
+    except Exception:
+        hostname = ""
+    return {
+        "actual_processor": str(processor or "railway_bot")[:80],
+        "worker_id": str(processor or "railway_bot")[:120],
+        "worker_service_mode": str(service_mode or "inline_video_job")[:80],
+        "claimed_by_service_mode": str(service_mode or "inline_video_job")[:80],
+        "worker_claim_route": "inline",
+        "worker_claim_status": "inline_processing",
+        "worker_claim_reason": "",
+        "process_hostname": str(hostname or "")[:160],
+        "process_pid": int(os.getpid() or 0),
+    }
 
 
 def _json_loads(value: str | None, fallback: Any = None) -> Any:
@@ -1018,6 +1038,7 @@ def process_claimed_video_job(
         result = runner(project, scenes)
         if not result or not result.get("ok"):
             raise RuntimeError(str((result or {}).get("error") or "video_render_failed"))
+        result = {**inline_processor_trace_payload(), **dict(result or {})}
         return complete_video_job(
             conn,
             job_id=int(job.get("id") or job.get("job_id")),

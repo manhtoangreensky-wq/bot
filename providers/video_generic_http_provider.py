@@ -186,9 +186,31 @@ def _safe_exception_message(value: Any, limit: int = 220) -> str:
     return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
+def _safe_url_host(value: Any) -> str:
+    try:
+        parsed = urllib.parse.urlparse(str(value or "").strip())
+        return str(parsed.netloc or "").strip()[:160]
+    except Exception:
+        return ""
+
+
+def _auth_scheme_prefix(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    first = text.split(None, 1)[0].strip()
+    if not re.match(r"^[A-Za-z][A-Za-z0-9_.-]{0,30}$", first):
+        return "present"
+    return first[:32]
+
+
 def _payload_debug(payload: dict[str, Any]) -> dict[str, Any]:
+    keys = sorted(str(key) for key in payload.keys())[:80]
+    model = str(payload.get("model") or payload.get("model_id") or payload.get("modelName") or "")[:120]
     return {
-        "payload_keys": sorted(str(key) for key in payload.keys())[:80],
+        "payload_keys": keys,
+        "provider_payload_keys": keys,
+        "provider_payload_model": model,
         "payload_has_prompt": bool(payload.get("prompt")),
         "payload_has_duration": bool(payload.get("duration") or payload.get("duration_seconds")),
         "payload_has_ratio": bool(payload.get("ratio") or payload.get("aspect_ratio") or payload.get("aspectRatio")),
@@ -497,7 +519,9 @@ class GenericHttpVideoProvider:
             raise
         except Exception as exc:
             raise VideoProviderContractError("provider_payload_invalid_shape", stage="payload_build", message=str(exc)) from exc
-        result = self._open_json(self._submit_url(), payload, timeout=int(self.env.get("VIDEO_PROVIDER_SUBMIT_TIMEOUT_SECONDS") or 90))
+        submit_url = self._submit_url()
+        auth_name, auth_value = self._auth_header()
+        result = self._open_json(submit_url, payload, timeout=int(self.env.get("VIDEO_PROVIDER_SUBMIT_TIMEOUT_SECONDS") or 90))
         body = result.get("body") or {}
         task_id, task_path, video_id, video_path = parse_submit_task_ids(body)
         result_url, result_url_path = parse_result_url(body, str(self.env.get(self.result_field_env) or "result_url"))
@@ -506,11 +530,18 @@ class GenericHttpVideoProvider:
             "smoke_stage": "submit_response_parse",
             **_payload_debug(payload),
             "submit_url_configured": bool(caps.get("submit_url_configured")),
+            "provider_submit_url_configured": bool(caps.get("submit_url_configured")),
+            "provider_submit_url_host": _safe_url_host(submit_url),
             "poll_url_configured": bool(caps.get("poll_url_configured")),
             "auth_configured": bool(caps.get("auth_configured")),
+            "provider_auth_header_name": str(auth_name or "")[:80],
+            "provider_auth_value_present": bool(str(auth_value or "").strip()),
+            "provider_auth_scheme_prefix": _auth_scheme_prefix(auth_value),
             "http_status": int(result.get("status_code") or 0),
             "submit_http_status": int(result.get("status_code") or 0),
+            "provider_response_http_status": int(result.get("status_code") or 0),
             "submit_response_shape": result.get("response_shape") or _response_shape(body),
+            "provider_response_body_shape": result.get("response_shape") or _response_shape(body),
             "provider_task_id_present": bool(task_id or video_id),
             "provider_task_id_masked": (str(task_id or video_id)[:4] + "***") if (task_id or video_id) else "",
             "provider_status_raw": raw_status,
