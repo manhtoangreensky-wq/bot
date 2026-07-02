@@ -26,6 +26,7 @@ import unicodedata
 import csv
 import io
 import inspect
+import subprocess
 import tempfile
 import mimetypes
 import shutil
@@ -84686,6 +84687,10 @@ def subtitle_dub_debug_text(job: dict) -> str:
         f"• subtitle font multiplier: <code>{esc(job.get('subtitle_font_multiplier'))}</code>",
         f"• subtitle render font size: <code>{esc(job.get('subtitle_render_font_size'))}</code>",
         f"• subtitle text box: <code>{yes_no(job.get('subtitle_text_box_enabled'))}</code>",
+        f"• subtitle font: <code>{esc(job.get('subtitle_font_family'))}</code>",
+        f"• subtitle font path: <code>{esc(job.get('subtitle_font_path'))}</code>",
+        f"• subtitle font blocker: <code>{esc(job.get('subtitle_font_blocker'))}</code>",
+        f"• subtitle text validation: <code>{esc(json.dumps(job.get('subtitle_text_validation') or {}, ensure_ascii=False)[:240])}</code>",
         f"• cover old subtitle: <code>{yes_no(job.get('cover_original_subtitle'))}</code>",
         f"• advanced style enabled: <code>{yes_no(job.get('advanced_style_enabled'))}</code>",
         f"• style render attempted: <code>{yes_no(job.get('style_render_attempted'))}</code>",
@@ -84989,6 +84994,9 @@ def subdub_voice_style_state_fields(
         "subtitle_render_font_size": int(style.get("render_size") or style.get("size") or 0),
         "subtitle_text_box_enabled": bool(style.get("boxed_background")),
         "subtitle_outline": int(style.get("outline") or 0),
+        "subtitle_font_family": str(style.get("subtitle_font_family") or style.get("font") or "")[:80],
+        "subtitle_font_path": str(style.get("subtitle_font_path") or "")[:260],
+        "subtitle_font_blocker": str(style.get("subtitle_font_blocker") or "")[:80],
         "hardsub_cover_enabled": bool(style.get("hardsub_cover_enabled")),
         "cover_original_subtitle": bool(style.get("cover_original")),
         "cover_opacity": float(style.get("cover_opacity") or 0.0),
@@ -162776,7 +162784,7 @@ def video_dubbing_job_progress_keyboard(job_id, lang: str = "vi") -> InlineKeybo
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🔄 Kiểm tra kết quả" if is_vi else "🔄 Check result", callback_data=f"videodub|job_status|{_safe_int(job_id, 0)}"),
-            InlineKeyboardButton("⬅️ Quay lại" if is_vi else "⬅️ Back", callback_data="videodub|preview_back"),
+            InlineKeyboardButton("⬅️ Phụ đề / Lồng tiếng" if is_vi else "⬅️ Subtitles / dubbing", callback_data=subdub_missing_origin_back_callback({})),
         ],
         [InlineKeyboardButton(ui_text(lang, "common.main_menu"), callback_data="menu|main")],
     ])
@@ -163957,6 +163965,236 @@ SUBDUB_STYLE_PRESETS = {
     },
 }
 
+SUBDUB_SUBTITLE_FONT_CANDIDATES = (
+    {
+        "family": "Noto Sans CJK SC",
+        "paths": (
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        ),
+        "vietnamese": True,
+        "cjk": True,
+    },
+    {
+        "family": "Noto Sans",
+        "paths": (
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
+        ),
+        "vietnamese": True,
+        "cjk": False,
+    },
+    {
+        "family": "DejaVu Sans",
+        "paths": (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "C:\\Windows\\Fonts\\DejaVuSans.ttf",
+        ),
+        "vietnamese": True,
+        "cjk": False,
+    },
+    {
+        "family": "Arial Unicode MS",
+        "paths": (
+            "C:\\Windows\\Fonts\\arialuni.ttf",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ),
+        "vietnamese": True,
+        "cjk": True,
+    },
+    {
+        "family": "Microsoft YaHei",
+        "paths": ("C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\msyh.ttf"),
+        "vietnamese": True,
+        "cjk": True,
+    },
+    {
+        "family": "Segoe UI",
+        "paths": ("C:\\Windows\\Fonts\\segoeui.ttf",),
+        "vietnamese": True,
+        "cjk": False,
+    },
+    {
+        "family": "Arial",
+        "paths": ("C:\\Windows\\Fonts\\arial.ttf", "/Library/Fonts/Arial.ttf"),
+        "vietnamese": True,
+        "cjk": False,
+    },
+)
+
+SUBDUB_BROKEN_GLYPH_CHARS = {
+    "\ufffd", "□", "▯", "■", "�", "▢", "▣", "▤", "▥", "▦", "▧", "▨", "▩",
+}
+SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE: dict[str, dict] = {}
+
+def subdub_normalize_subtitle_text(text) -> str:
+    if isinstance(text, bytes):
+        value = text.decode("utf-8-sig", errors="replace")
+    else:
+        value = str(text or "")
+    value = value.replace("\ufeff", "").replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = []
+    for char in value:
+        if char in {"\n", "\t"}:
+            cleaned.append(char)
+            continue
+        if char == "\x00":
+            continue
+        category = unicodedata.category(char)
+        if category.startswith("C"):
+            continue
+        cleaned.append(char)
+    return unicodedata.normalize("NFC", "".join(cleaned)).strip()
+
+def subdub_font_path_available(path: str = "") -> bool:
+    return bool(path and os.path.exists(os.path.expandvars(os.path.expanduser(str(path)))))
+
+def _subdub_font_candidates_for_request(requested_family: str = "", candidates=None) -> list[dict]:
+    requested = re.sub(r"[^A-Za-z0-9 _.-]", "", str(requested_family or "")).strip()
+    base = list(candidates if candidates is not None else SUBDUB_SUBTITLE_FONT_CANDIDATES)
+    if not requested:
+        return base
+    matches = [dict(item) for item in base if str(item.get("family") or "").lower() == requested.lower()]
+    if matches:
+        return matches + [dict(item) for item in base if str(item.get("family") or "").lower() != requested.lower()]
+    return [{"family": requested, "paths": (), "vietnamese": True, "cjk": False}] + base
+
+def resolve_subdub_subtitle_font(style_or_state: dict | None = None, candidates=None) -> dict:
+    state = dict(style_or_state or {})
+    requested = (
+        os.getenv("SUBDUB_SUBTITLE_FONT")
+        or state.get("subtitle_font")
+        or state.get("subdub_font")
+        or state.get("font")
+        or ""
+    )
+    cache_key = str(requested or "__default__").strip().lower()
+    if candidates is None and cache_key in SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE:
+        return dict(SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE[cache_key])
+    for candidate in _subdub_font_candidates_for_request(str(requested or ""), candidates):
+        family = re.sub(r"[^A-Za-z0-9 _.-]", "", str(candidate.get("family") or "")).strip()
+        if not family:
+            continue
+        for path in tuple(candidate.get("paths") or ()):
+            if subdub_font_path_available(path):
+                result = {
+                    "ok": True,
+                    "family": family,
+                    "path": os.path.abspath(os.path.expandvars(os.path.expanduser(str(path)))),
+                    "source": "path",
+                    "supports_vietnamese": bool(candidate.get("vietnamese", True)),
+                    "supports_cjk": bool(candidate.get("cjk", False)),
+                    "blocker": "",
+                }
+                if candidates is None:
+                    SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE[cache_key] = dict(result)
+                return result
+        fc_match = shutil.which("fc-match")
+        if fc_match:
+            try:
+                proc = subprocess.run(
+                    [fc_match, "-f", "%{family}|%{file}", family],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                    check=False,
+                )
+                payload = str(proc.stdout or "").strip()
+                matched_family, matched_path = (payload.split("|", 1) + [""])[:2]
+                if proc.returncode == 0 and matched_path and subdub_font_path_available(matched_path):
+                    result = {
+                        "ok": True,
+                        "family": (matched_family.split(",", 1)[0] or family).strip(),
+                        "path": os.path.abspath(matched_path),
+                        "source": "fontconfig",
+                        "supports_vietnamese": bool(candidate.get("vietnamese", True)),
+                        "supports_cjk": bool(candidate.get("cjk", False)),
+                        "blocker": "",
+                    }
+                    if candidates is None:
+                        SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE[cache_key] = dict(result)
+                    return result
+            except Exception:
+                continue
+    result = {
+        "ok": False,
+        "family": "",
+        "path": "",
+        "source": "",
+        "supports_vietnamese": False,
+        "supports_cjk": False,
+        "blocker": "subtitle_font_missing",
+    }
+    if candidates is None:
+        SUBDUB_SUBTITLE_FONT_RESOLUTION_CACHE[cache_key] = dict(result)
+    return result
+
+def subdub_visible_subtitle_text(srt_text: str) -> str:
+    text = subdub_normalize_subtitle_text(srt_text)
+    blocks = subdub_srt_blocks(text)
+    if blocks:
+        return "\n".join(str(block.get("text") or "") for block in blocks)
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or "-->" in stripped or re.fullmatch(r"\d+", stripped):
+            continue
+        lines.append(stripped)
+    return "\n".join(lines)
+
+def subdub_broken_glyph_ratio(text: str) -> float:
+    visible = [char for char in str(text or "") if not char.isspace()]
+    if not visible:
+        return 1.0
+    broken = sum(1 for char in visible if char in SUBDUB_BROKEN_GLYPH_CHARS or unicodedata.category(char) == "Co")
+    return broken / max(1, len(visible))
+
+def subdub_placeholder_only_text(text: str) -> bool:
+    compact = re.sub(r"[\s.,:;!?_\-/\\|()\[\]{}'\"`~^+*=<>]+", "", str(text or ""))
+    if len(compact) < 4:
+        return False
+    if re.fullmatch(r"[0oO〇○零]+", compact):
+        return True
+    return bool(re.fullmatch(r"[\ufffd□▯■▢▣]+", compact))
+
+def subdub_validate_subtitle_text_for_delivery(srt_text: str) -> dict:
+    normalized = subdub_normalize_subtitle_text(srt_text)
+    blocks = subdub_srt_blocks(normalized)
+    visible = subdub_visible_subtitle_text(normalized)
+    ratio = subdub_broken_glyph_ratio(visible)
+    if not blocks:
+        return {
+            "ok": False,
+            "blocker": "empty_translation",
+            "cue_count": 0,
+            "broken_glyph_ratio": ratio,
+            "normalized_text": normalized,
+        }
+    if not visible.strip():
+        return {
+            "ok": False,
+            "blocker": "empty_translation",
+            "cue_count": len(blocks),
+            "broken_glyph_ratio": ratio,
+            "normalized_text": normalized,
+        }
+    if ratio > 0.18 or subdub_placeholder_only_text(visible):
+        return {
+            "ok": False,
+            "blocker": "broken_glyphs",
+            "cue_count": len(blocks),
+            "broken_glyph_ratio": ratio,
+            "normalized_text": normalized,
+        }
+    return {
+        "ok": True,
+        "blocker": "",
+        "cue_count": len(blocks),
+        "broken_glyph_ratio": ratio,
+        "normalized_text": normalized,
+    }
+
 def subdub_style_presets() -> dict:
     return {key: dict(SUBDUB_STYLE_PRESETS[key]) for key in SUBDUB_STYLE_PRESET_ORDER}
 
@@ -164196,6 +164434,13 @@ def subdub_normalize_style(style_or_state: dict | None = None) -> dict:
         style["text_margin_bottom_ratio"] = state.get("text_margin_bottom_ratio") or SUBDUB_HARDSUB_TEXT_MARGIN_BOTTOM_RATIO
         style["subtitle_style_profile"] = style.get("subtitle_style_profile") or subdub_style_profile_for_state(state)
     style["font"] = re.sub(r"[^A-Za-z0-9 _.-]", "", str(style.get("font") or "Arial")).strip()[:40] or "Arial"
+    font_resolution = resolve_subdub_subtitle_font(style)
+    if font_resolution.get("ok"):
+        style["font"] = str(font_resolution.get("family") or style["font"]).strip()[:80] or style["font"]
+    style["subtitle_font_resolution_ok"] = bool(font_resolution.get("ok"))
+    style["subtitle_font_family"] = str(font_resolution.get("family") or "")[:80]
+    style["subtitle_font_path"] = str(font_resolution.get("path") or "")[:260]
+    style["subtitle_font_blocker"] = str(font_resolution.get("blocker") or "")[:80]
     style["size"] = subdub_responsive_subtitle_size(style, state, explicit=explicit_size)
     style["subtitle_font_multiplier"] = max(1.0, min(2.5, subdub_float_value(style.get("subtitle_font_multiplier"), SUBDUB_SUBTITLE_FONT_MULTIPLIER)))
     style["render_size"] = subdub_render_subtitle_size(style, state)
@@ -164279,7 +164524,7 @@ def subdub_ass_timestamp(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
 
 def subdub_srt_blocks(srt_text: str) -> list[dict]:
-    text = str(srt_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = subdub_normalize_subtitle_text(srt_text)
     blocks: list[dict] = []
     for raw_block in re.split(r"\n\s*\n", text):
         lines = [line.strip() for line in raw_block.split("\n") if line.strip()]
@@ -164302,7 +164547,9 @@ def subdub_srt_blocks(srt_text: str) -> list[dict]:
     return blocks
 
 def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
-    lines = [re.sub(r"\s+", " ", line).strip() for line in str(text or "").replace("{", "").replace("}", "").splitlines()]
+    normalized = subdub_normalize_subtitle_text(text).replace("\\N", "\n")
+    normalized = re.sub(r"[{}]", "", normalized)
+    lines = [re.sub(r"\s+", " ", line).strip().replace("\\", r"\\") for line in normalized.splitlines()]
     lines = [line for line in lines if line]
     if not lines:
         return ""
@@ -164310,7 +164557,12 @@ def subdub_ass_escape(text: str, max_lines: int = 2) -> str:
 
 def subdub_generate_ass_from_srt(srt_text: str, style_or_state: dict | None = None) -> str:
     style = subdub_normalize_style(style_or_state)
-    blocks = subdub_srt_blocks(srt_text)
+    readability = subdub_validate_subtitle_text_for_delivery(srt_text)
+    if not readability.get("ok"):
+        return ""
+    if not style.get("subtitle_font_resolution_ok"):
+        return ""
+    blocks = subdub_srt_blocks(str(readability.get("normalized_text") or ""))
     if not blocks or not style.get("show_subtitles"):
         return ""
     alignment, margin_v = subdub_ass_alignment(style.get("position"), style.get("align"))
@@ -164718,6 +164970,12 @@ async def send_public_subtitle_dub_final_outputs(
                 sent["telegram_message_id"] = sent.get("telegram_message_id") or str(message_id)
                 sent["terminal_artifact_type"] = sent.get("terminal_artifact_type") or "srt_fallback"
     return sent
+
+def subdub_missing_origin_back_callback(state: dict | None = None) -> str:
+    state = dict(state or {})
+    if str(state.get("origin") or "").strip().lower() == "video_addon":
+        return "videodub|return_origin"
+    return "menu|translation_video_factory"
 
 def video_dubbing_back_route(state: dict | None, action: str) -> str:
     state = dict(state or {})
@@ -165389,26 +165647,31 @@ async def video_dubbing_render_video(
                 handle.write(dubbed_audio)
         style = subdub_normalize_style(subtitle_style)
         subtitle_filter = ""
+        fallback_subtitle_filter = ""
         advanced_filters = []
         if subtitle_bytes:
-            with open(subtitle_path, "wb") as handle:
-                handle.write(subtitle_bytes)
+            subtitle_text = subdub_normalize_subtitle_text(subtitle_bytes)
+            readability = subdub_validate_subtitle_text_for_delivery(subtitle_text)
+            if not readability.get("ok"):
+                return b"", f"subtitle_text_unreadable:{readability.get('blocker') or 'subtitle_text_invalid'}"
+            subtitle_text = str(readability.get("normalized_text") or subtitle_text)
+            with open(subtitle_path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(subtitle_text)
             if style.get("show_subtitles"):
-                subtitle_filter = subdub_subtitle_filter_for_file(subtitle_path)
-        if subtitle_bytes and subtitle_filter and subdub_advanced_style_enabled(subtitle_style):
-            try:
-                subtitle_text = subtitle_bytes.decode("utf-8-sig", errors="ignore")
+                fallback_subtitle_filter = subdub_subtitle_filter_for_file(subtitle_path)
+                if not style.get("subtitle_font_resolution_ok"):
+                    return b"", str(style.get("subtitle_font_blocker") or "subtitle_font_missing")
                 ass_text = subdub_generate_ass_from_srt(subtitle_text, style)
-                cover_filter = subdub_cover_filter(style)
-                if cover_filter:
-                    advanced_filters.append(cover_filter)
-                if ass_text:
-                    with open(ass_path, "wb") as handle:
-                        handle.write(ass_text.encode("utf-8-sig"))
-                    advanced_filters.append(subdub_subtitle_filter_for_file(ass_path))
-            except Exception as exc:
-                advanced_filters = []
-                logger.warning("subtitle/dub advanced style setup failed | %s", sanitize_log_text(type(exc).__name__)[:120])
+                if not ass_text:
+                    return b"", "subtitle_ass_generation_failed"
+                with open(ass_path, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(ass_text)
+                subtitle_filter = subdub_subtitle_filter_for_file(ass_path)
+        if subtitle_filter and subdub_advanced_style_enabled(subtitle_style):
+            cover_filter = subdub_cover_filter(style)
+            if cover_filter:
+                advanced_filters.append(cover_filter)
+            advanced_filters.append(subtitle_filter)
 
         async def _run_render_attempt(video_filters: list[str], label: str) -> tuple[bytes, str]:
             if os.path.exists(output_path):
@@ -165451,7 +165714,8 @@ async def video_dubbing_render_video(
             return output_bytes, f"ffmpeg_video_render_{label}:{validation.get('detail') or 'validated'}"
 
         fit_filters = subdub_video_fit_filters(subtitle_style)
-        basic_filters = [*fit_filters, *([subtitle_filter] if subtitle_filter else [])]
+        basic_filter = fallback_subtitle_filter if advanced_filters and fallback_subtitle_filter else subtitle_filter
+        basic_filters = [*fit_filters, *([basic_filter] if basic_filter else [])]
         if advanced_filters:
             output_bytes, detail = await _run_render_attempt([*fit_filters, *advanced_filters], "advanced_style")
             if output_bytes:
@@ -166501,6 +166765,25 @@ async def _execute_video_dubbing_pipeline_core(
     partial_result = bool(product_result.get("partial_result") or product_result.get("partial"))
     partial_reason = str(product_result.get("partial_reason") or "")
     final_video_required = subdub_mode_requires_final_video(mode, state, content_type, str(product_result.get("output_type") or state.get("output_type") or ""))
+    subtitle_readability = {"ok": True, "blocker": "", "cue_count": 0, "broken_glyph_ratio": 0.0}
+    if mode in {VIDEO_SUBTITLE_MODE_CREATE, VIDEO_SUBTITLE_MODE_TRANSLATE, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}:
+        subtitle_text_for_validation = (
+            srt_text
+            or output_subtitle
+            or (srt_bytes.decode("utf-8-sig", errors="replace") if srt_bytes else "")
+            or "\n\n".join(
+                (bytes(item.get("bytes") or b"").decode("utf-8-sig", errors="replace") if isinstance(item, dict) else "")
+                for item in subtitle_items
+            )
+        )
+        subtitle_readability = subdub_validate_subtitle_text_for_delivery(subtitle_text_for_validation)
+        if not subtitle_readability.get("ok"):
+            return _failed_product_result(
+                "SUBTITLE_TEXT_UNREADABLE",
+                video_dubbing_flow_failure_text(mode, lang),
+                str(subtitle_readability.get("blocker") or "subtitle_text_unreadable"),
+                stage="subtitle",
+            )
     if mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB} and (
         not audio_bytes
         or output_audio_source not in {"generated_tts", "mixed"}
@@ -166549,6 +166832,7 @@ async def _execute_video_dubbing_pipeline_core(
             or mode in {VIDEO_SUBTITLE_MODE_DUB, VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB}
         ),
         "_subdub_render_debug": dict(render_debug),
+        "_subdub_subtitle_readability": dict(subtitle_readability),
         "original_audio_mode": str(
             state.get("original_audio_mode")
             or state.get("source_audio_mode")
@@ -166889,6 +167173,7 @@ async def _execute_video_dubbing_pipeline_core(
             "terminal_locked_at": time.time(),
             "late_fail_suppressed": bool(result_terminal_state == "delivered"),
             "output_validation": dict(delivery.get("output_validation") or {}),
+            "subtitle_text_validation": dict(state.get("_subdub_subtitle_readability") or subtitle_readability),
             "last_technical_error": sanitize_log_text(partial_reason or product_result.get("error_code") or "")[:180],
             "public_safe_error": subtitle_plus_dub_clean_failure_text(lang) if (partial_result or delivery_partial_result) else "",
             "stage": "completed" if delivered_video else ("partial" if (partial_result or delivery_partial_result) else "output"),
@@ -170029,6 +170314,29 @@ async def handle_video_dubbing_callback(update: Update, context: ContextTypes.DE
             return await safe_edit_or_send(query, video_dubbing_confirm_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_confirm_keyboard(lang, state))
         return await safe_edit_or_send(query, video_dubbing_upload_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_upload_keyboard(lang, state))
     if action == "back_voice":
+        if active_flow == VIDEO_DUBBING_FLOW_SUBTITLE_PLUS_DUB:
+            if str(state.get("step") or "") in {"confirm", "dub_confirmation"}:
+                state = set_video_dubbing_pending(
+                    uid,
+                    "voice",
+                    voice_style="",
+                    voice_id="",
+                    voice_kind="",
+                    voice_speed="",
+                    processing="0",
+                )
+                return await safe_edit_or_send(query, video_dubbing_voice_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_voice_keyboard(lang, state))
+            state = set_video_dubbing_pending(
+                uid,
+                "language",
+                target_language="",
+                voice_style="",
+                voice_id="",
+                voice_kind="",
+                voice_speed="",
+                processing="0",
+            )
+            return await safe_edit_or_send(query, video_dubbing_language_text(state, lang), parse_mode="HTML", reply_markup=video_dubbing_language_keyboard(lang, state))
         requested = normalize_video_translate_mode(state.get("requested_mode"))
         if requested == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB or mode == VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB:
             state = set_video_dubbing_pending(

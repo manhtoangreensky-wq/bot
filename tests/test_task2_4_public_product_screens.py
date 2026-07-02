@@ -406,7 +406,7 @@ def test_task2_job_progress_screen():
     assert "TOAN AAS đang xử lý yêu cầu của bạn" in text
     assert "Mã job" not in text
     assert "Tác vụ:" not in text
-    assert labels == ["🔄 Kiểm tra kết quả", "⬅️ Quay lại", "🏠 Menu chính"]
+    assert labels == ["🔄 Kiểm tra kết quả", "⬅️ Phụ đề / Lồng tiếng", "🏠 Menu chính"]
 
 
 def test_task2_check_result_processing():

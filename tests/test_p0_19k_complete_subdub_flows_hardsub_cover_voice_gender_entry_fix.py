@@ -433,7 +433,7 @@ def test_subtitle_only_progress_steps_do_not_show_voice_required():
 def test_dub_only_progress_steps_include_voice():
     labels = _labels_for_product("dub_only")
 
-    assert "Chọn giọng" in labels
+    assert "Chọn giọng lồng tiếng" in labels
     assert "Tạo giọng lồng tiếng" in labels
     assert "Tạo phụ đề" not in labels
 
