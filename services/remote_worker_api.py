@@ -672,6 +672,14 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
     cleaned_user_prompt = re.sub(r"\s+", " ", str(asset_pack.get("cleaned_user_prompt") or original_user_prompt or "")).strip()[:8000]
     provider_order = asset_pack.get("provider_order") or invoice.get("provider_order") or "shopaikey,key4u"
     source = str(asset_pack.get("source") or invoice.get("source") or REMOTE_WORKER_PRODUCT_VIDEO_SOURCE)
+    product_type = str(
+        asset_pack.get("product_type")
+        or asset_pack.get("video_product_type")
+        or invoice.get("product_type")
+        or project.get("profile_id")
+        or ""
+    )
+    engine_adapter = str(asset_pack.get("engine_adapter") or invoice.get("engine_adapter") or "")
     admin_only = _safe_bool(asset_pack.get("admin_only") or invoice.get("admin_only"))
     no_charge = _safe_bool(asset_pack.get("no_charge") or invoice.get("no_charge"))
     public_user = _safe_bool(asset_pack.get("public_user") or invoice.get("public_user"))
@@ -686,6 +694,9 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "attempts": _safe_int(hydrated_job.get("attempts"), 0),
         "max_attempts": _safe_int(hydrated_job.get("max_attempts"), 3),
         "profile_id": str(project.get("profile_id") or ""),
+        "product_type": product_type,
+        "video_flow": product_type,
+        "engine_adapter": engine_adapter,
         "topic": str(project.get("topic") or "")[:500],
         "prompt_text": str(project.get("prompt_text") or "")[:8000],
         "original_user_prompt": original_user_prompt,
@@ -1863,6 +1874,22 @@ def fail_remote_worker_job(
         diagnostic_payload["worker_safe_error"] = scrub_secret_text(error)[:500]
         existing.update(diagnostic_payload)
         conn.execute("UPDATE video_jobs SET result_json=? WHERE id=?", (_json_dumps(existing), int(job_id)))
+    pending_provider = bool(
+        retryable
+        and isinstance(diagnostics, dict)
+        and (
+            diagnostics.get("continue_polling")
+            or str(diagnostics.get("blocker") or diagnostics.get("provider_error") or "").strip() == "provider_in_progress"
+            or "provider_in_progress" in error
+        )
+    )
+    if pending_provider:
+        return video_project_queue.defer_video_job_for_provider_polling(
+            conn,
+            job_id=int(job_id),
+            reason=str(diagnostics.get("provider_error") or diagnostics.get("blocker") or error or "provider_in_progress"),
+            diagnostics=diagnostics,
+        )
     return video_project_queue.fail_video_job(conn, job_id=int(job_id), error=error, retry=bool(retryable))
 
 

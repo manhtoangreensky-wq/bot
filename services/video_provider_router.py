@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import os
 import shutil
@@ -383,13 +384,40 @@ def load_video_provider_adapters(environ: dict[str, str] | None = None) -> list[
     return adapters
 
 
+def normalize_capability_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_values = value.replace("|", ",").replace(";", ",").split(",")
+    else:
+        try:
+            raw_values = list(value)
+        except TypeError:
+            raw_values = [value]
+    result: list[str] = []
+    aliases = {
+        "text_to_video_or_scene_engine": "text_to_video_or_scene_video",
+        "text_to_video_or_scene": "text_to_video_or_scene_video",
+        "scene_engine": "scene_video",
+        "multiscene_video": "multi_scene_video",
+        "multi_scene": "multi_scene_video",
+    }
+    for item in raw_values:
+        token = str(item or "").strip().lower().replace("-", "_")
+        token = aliases.get(token, token)
+        if token and token not in result:
+            result.append(token)
+    return result
+
+
 def capability_options(required_capability: str) -> list[str]:
-    cap = str(required_capability or "").strip()
+    cap = (normalize_capability_values([required_capability]) or ["text_to_video"])[0]
     mapping = {
-        "text_to_video_or_scene_video": ["text_to_video", "scene_video", "multi_scene_video"],
+        "text_to_video_or_scene_video": ["multi_scene_video", "scene_video", "text_to_video"],
+        "text_to_video_or_scene_engine": ["multi_scene_video", "scene_video", "text_to_video"],
         "multi_scene_video": ["multi_scene_video", "scene_video", "text_to_video"],
-        "scene_video": ["scene_video", "text_to_video", "multi_scene_video"],
-        "delegates_to_selected_product": ["text_to_video", "scene_video", "image_to_video", "video_to_video", "multi_scene_video"],
+        "scene_video": ["scene_video", "multi_scene_video", "text_to_video"],
+        "delegates_to_selected_product": ["multi_scene_video", "scene_video", "text_to_video", "image_to_video", "video_to_video"],
     }
     return mapping.get(cap, [cap] if cap else ["text_to_video"])
 
@@ -398,8 +426,17 @@ def provider_supports(adapter: VideoProviderAdapter, required_capability: str) -
     caps = adapter.capabilities()
     if not caps.get("configured"):
         return False
-    supported = {str(item) for item in caps.get("capabilities") or []}
+    supported = set(normalize_capability_values(caps.get("capabilities") or []))
     return any(cap in supported for cap in capability_options(required_capability))
+
+
+def preferred_provider_capability(adapter: VideoProviderAdapter, required_capability: str) -> str:
+    caps = adapter.capabilities()
+    supported = set(normalize_capability_values(caps.get("capabilities") or []))
+    for cap in capability_options(required_capability):
+        if cap in supported:
+            return cap
+    return (capability_options(required_capability) or ["text_to_video"])[0]
 
 
 def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, Any]:
@@ -433,7 +470,7 @@ def provider_status_payload(environ: dict[str, str] | None = None) -> dict[str, 
                 "invalid_env": invalid_env,
                 "blocker": config_blocker,
                 "config_blocker": config_blocker,
-                "capabilities": list(caps.get("capabilities") or []),
+                "capabilities": normalize_capability_values(caps.get("capabilities") or []),
                 "endpoint_configured": bool(caps.get("endpoint_configured")),
                 "endpoint_present": bool(caps.get("endpoint_present") or caps.get("endpoint_configured")),
                 "submit_url_present": bool(caps.get("submit_url_present") or caps.get("endpoint_configured")),
@@ -641,7 +678,7 @@ def _config_validation_blocker_from_status(status: dict[str, Any], required_capa
             continue
         if not item.get("config_blocker") and not item.get("blocker"):
             continue
-        supported = {str(cap) for cap in item.get("capabilities") or []}
+        supported = set(normalize_capability_values(item.get("capabilities") or []))
         if not any(cap in supported for cap in capability_options(required_capability)):
             continue
         invalid_fields = [str(field) for field in (item.get("invalid_fields") or [])]
@@ -671,6 +708,8 @@ def run_provider_generation(
 ) -> dict[str, Any]:
     env = dict(environ or os.environ)
     status = provider_status_payload(env)
+    required_capability_original = str(request.required_capability or "").strip()
+    normalized_capability_candidates = capability_options(required_capability_original)
     candidate_adapters = provider_candidate_adapters(request.required_capability, env, status)
     adapter = candidate_adapters[0] if candidate_adapters else None
     provider_candidates = [item.provider_name for item in candidate_adapters]
@@ -681,8 +720,11 @@ def run_provider_generation(
     )
     base_debug = {
         "provider_router_called": True,
+        "required_capability_original": required_capability_original,
+        "normalized_capability_candidates": list(normalized_capability_candidates),
         "provider_candidates_count": len([item for item in provider_candidates if item]),
         "selected_provider": adapter.provider_name if adapter else "",
+        "selected_capability": preferred_provider_capability(adapter, request.required_capability) if adapter else "",
         "provider_selection_blocker": "" if adapter else "provider_capability_missing",
         "provider_chain": list(status.get("provider_chain") or []),
         "effective_provider_chain": list(status.get("effective_provider_chain") or status.get("provider_chain") or []),
@@ -747,11 +789,14 @@ def run_provider_generation(
     for attempt_index, current_adapter in enumerate(candidate_adapters):
         fallback_used = attempt_index > 0
         fallback_reason = first_fallback_reason if fallback_used else ""
+        selected_capability = preferred_provider_capability(current_adapter, request.required_capability)
+        provider_request = dataclasses.replace(request, required_capability=selected_capability)
 
         def _attempt_base() -> dict[str, Any]:
             return {
                 **base_debug,
                 "selected_provider": current_adapter.provider_name,
+                "selected_capability": selected_capability,
                 "provider": current_adapter.provider_name,
                 "provider_selection_blocker": "",
                 "fallback_used": fallback_used,
@@ -768,7 +813,7 @@ def run_provider_generation(
                 first_fallback_reason = clean_reason
 
         try:
-            submit = current_adapter.submit_video_job(request)
+            submit = current_adapter.submit_video_job(provider_request)
         except Exception as exc:
             exc_payload = {
                 **_attempt_base(),
