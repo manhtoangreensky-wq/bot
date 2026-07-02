@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -23,6 +24,78 @@ from services.video_provider_base import (
     materialize_video_url,
     normalize_provider_status,
 )
+
+
+TASK_ID_PATHS = (
+    "task_id",
+    "id",
+    "job_id",
+    "request_id",
+    "data_id",
+    "data.task_id",
+    "data.id",
+    "data.job_id",
+    "data.request_id",
+    "result.task_id",
+    "result.id",
+    "result.job_id",
+    "output.task_id",
+)
+VIDEO_ID_PATHS = (
+    "video_id",
+    "videoId",
+    "id_base",
+    "data.video_id",
+    "data.videoId",
+    "data.id_base",
+    "result.video_id",
+    "result.videoId",
+    "result.id_base",
+)
+STATUS_PATHS = (
+    "status",
+    "state",
+    "task_status",
+    "data.status",
+    "data.state",
+    "data.task_status",
+    "result.status",
+    "result.state",
+    "output.status",
+)
+RESULT_URL_PATHS = (
+    "download_url",
+    "file_url",
+    "result_url",
+    "video_url",
+    "output_url",
+    "media_url",
+    "url",
+    "data.download_url",
+    "data.file_url",
+    "data.result_url",
+    "data.video_url",
+    "data.output_url",
+    "data.media_url",
+    "data.url",
+    "result.download_url",
+    "result.file_url",
+    "result.result_url",
+    "result.video_url",
+    "outputs.0.url",
+    "videos.0.url",
+    "files.0.url",
+)
+
+
+class VideoProviderContractError(ValueError):
+    """Provider contract error with safe stage/debug fields for admin diagnostics."""
+
+    def __init__(self, blocker: str, *, stage: str = "payload_build", message: str = "", debug: dict[str, Any] | None = None):
+        super().__init__(message or blocker)
+        self.blocker = blocker
+        self.stage = stage
+        self.debug = dict(debug or {})
 
 
 def _safe_text(value: Any, limit: int = 4000) -> str:
@@ -52,6 +125,163 @@ def _first_value(payload: Any, keys: tuple[str, ...]) -> str:
         if value not in (None, ""):
             return str(value).strip()
     return ""
+
+
+def _first_value_with_path(payload: Any, keys: tuple[str, ...]) -> tuple[str, str]:
+    if not isinstance(payload, dict):
+        return "", ""
+    for key in keys:
+        value = _json_path(payload, key)
+        if value not in (None, ""):
+            return str(value).strip(), key
+    return "", ""
+
+
+def _response_shape(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"type": type(payload).__name__, "top_level_keys": [], "nested_keys": []}
+    nested: list[str] = []
+    for key, value in payload.items():
+        if isinstance(value, dict):
+            nested.append(str(key) + ":{" + ",".join(sorted(str(k) for k in value.keys())[:20]) + "}")
+        elif isinstance(value, list):
+            first = value[0] if value else None
+            if isinstance(first, dict):
+                nested.append(str(key) + "[0]:{" + ",".join(sorted(str(k) for k in first.keys())[:20]) + "}")
+            else:
+                nested.append(str(key) + "[]")
+    return {"type": "dict", "top_level_keys": sorted(str(key) for key in payload.keys())[:40], "nested_keys": nested[:40]}
+
+
+def _safe_exception_message(value: Any, limit: int = 220) -> str:
+    text = re.sub(r"(?i)(bearer|token|key|secret|authorization)=?\s*[^\s,;]+", r"\1=***", str(value or ""))
+    text = re.sub(r"https?://\S+", "<url>", text)
+    return re.sub(r"\s+", " ", text).strip()[:limit]
+
+
+def _payload_debug(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "payload_keys": sorted(str(key) for key in payload.keys())[:80],
+        "payload_has_prompt": bool(payload.get("prompt")),
+        "payload_has_duration": bool(payload.get("duration") or payload.get("duration_seconds")),
+        "payload_has_ratio": bool(payload.get("ratio") or payload.get("aspect_ratio") or payload.get("aspectRatio")),
+        "prompt_chars": len(str(payload.get("prompt") or "")),
+        "duration": payload.get("duration") or payload.get("duration_seconds") or 0,
+        "ratio": payload.get("ratio") or payload.get("aspect_ratio") or payload.get("aspectRatio") or "",
+        "quality": str(payload.get("quality") or ""),
+        "scenes_count": len(payload.get("scenes") or []),
+    }
+
+
+def _validated_prompt(request: VideoGenerationRequest) -> str:
+    prompt = _safe_text(request.prompt, 4000)
+    if not prompt:
+        raise VideoProviderContractError("provider_payload_missing_prompt", debug={"payload_has_prompt": False})
+    return prompt
+
+
+def _validated_duration(request: VideoGenerationRequest) -> int:
+    raw = request.duration_seconds
+    if raw in (None, ""):
+        raise VideoProviderContractError("provider_payload_missing_duration", debug={"payload_has_duration": False})
+    try:
+        duration = float(raw)
+    except Exception as exc:
+        raise VideoProviderContractError("provider_payload_invalid_duration", message=str(exc), debug={"duration": str(raw)}) from exc
+    if duration <= 0:
+        raise VideoProviderContractError("provider_payload_invalid_duration", debug={"duration": raw})
+    return max(1, min(30, int(round(duration))))
+
+
+def _validated_ratio(request: VideoGenerationRequest) -> str:
+    ratio = str(request.ratio or "").strip()
+    if not ratio:
+        raise VideoProviderContractError("provider_payload_missing_ratio", debug={"payload_has_ratio": False})
+    if not re.match(r"^\d{1,2}:\d{1,2}$", ratio):
+        raise VideoProviderContractError("provider_payload_invalid_ratio", debug={"ratio": ratio})
+    return ratio
+
+
+def _base_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
+    env = env or os.environ
+    source = str((request.metadata or {}).get("source") or ("admin_smoke" if (request.metadata or {}).get("admin_smoke") else "product_video"))
+    duration = _validated_duration(request)
+    ratio = _validated_ratio(request)
+    quality = str(request.quality or env.get("VIDEO_PROVIDER_DEFAULT_QUALITY") or "basic").strip() or "basic"
+    return {
+        "job_id": request.job_id or "smoke",
+        "source": source,
+        "wallet_charge": False,
+        "product_type": request.product_type or "video_ai_prompt",
+        "capability": request.required_capability or "text_to_video",
+        "prompt": _validated_prompt(request),
+        "negative_prompt": _safe_text(request.negative_prompt, 1200),
+        "ratio": ratio,
+        "aspect_ratio": ratio,
+        "aspectRatio": ratio,
+        "duration": duration,
+        "duration_seconds": duration,
+        "quality": quality,
+        "style": request.style,
+        "seed": request.seed,
+        "scenes": list(request.scenes or []),
+        "storyboard": list(request.storyboard or []),
+        "image_paths": list(request.image_paths or []),
+        "source_video_path": request.source_video_path,
+        "metadata": {"job_id": request.job_id or "smoke", "source": source, "wallet_charge": False},
+    }
+
+
+def build_key4u_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
+    data = _base_video_payload(request, env)
+    model = str((env or os.environ).get("KEY4U_VIDEO_MODEL") or (env or os.environ).get("VIDEO_PROVIDER_MODEL") or "").strip()
+    if model:
+        data["model"] = model
+    return data
+
+
+def build_shopaikey_video_payload(request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str] | None = None) -> dict[str, Any]:
+    data = _base_video_payload(request, env)
+    model = str((env or os.environ).get("SHOPAIKEY_VIDEO_MODEL") or (env or os.environ).get("VIDEO_PROVIDER_MODEL") or "").strip()
+    if model:
+        data["model"] = model
+    return data
+
+
+def _build_provider_payload(provider_name: str, request: VideoGenerationRequest, env: dict[str, str] | os._Environ[str]) -> dict[str, Any]:
+    if provider_name == "key4u_video":
+        return build_key4u_video_payload(request, env)
+    if provider_name == "shopaikey_video":
+        return build_shopaikey_video_payload(request, env)
+    data = _base_video_payload(request, env)
+    model = str(env.get("VIDEO_GENERIC_HTTP_MODEL") or env.get("VIDEO_PROVIDER_MODEL") or "").strip()
+    if model:
+        data["model"] = model
+    return data
+
+
+def parse_submit_task_ids(body: Any) -> tuple[str, str, str, str]:
+    task_id, task_path = _first_value_with_path(body, TASK_ID_PATHS)
+    video_id, video_path = _first_value_with_path(body, VIDEO_ID_PATHS)
+    return task_id, task_path, video_id, video_path
+
+
+def parse_provider_status(body: Any, *, has_result_url: bool = False) -> tuple[str, str, str]:
+    raw, path = _first_value_with_path(body, STATUS_PATHS)
+    return normalize_provider_status(raw, has_result_url=has_result_url), raw, path
+
+
+def parse_result_url(body: Any, configured_field: str = "") -> tuple[str, str]:
+    paths = tuple([configured_field] if configured_field else []) + RESULT_URL_PATHS
+    for path in paths:
+        value = str(_json_path(body, path) or "").strip()
+        if not value:
+            continue
+        lower = value.split("?", 1)[0].lower()
+        if lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")):
+            continue
+        return value, path
+    return "", ""
 
 
 class GenericHttpVideoProvider:
@@ -148,6 +378,8 @@ class GenericHttpVideoProvider:
         return headers
 
     def _open_json(self, url: str, payload: dict[str, Any] | None = None, *, method: str = "POST", timeout: int = 90) -> dict[str, Any]:
+        if not str(url or "").strip():
+            return {"ok": False, "status_code": 0, "body": {}, "error": "url_missing", "response_shape": _response_shape({})}
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(url, data=data, headers=self._headers(), method=method)
         try:
@@ -157,44 +389,86 @@ class GenericHttpVideoProvider:
                     parsed = json.loads(body.decode("utf-8", errors="replace"))
                 except Exception:
                     parsed = {}
-                return {"ok": int(getattr(response, "status", 200)) < 400, "status_code": int(getattr(response, "status", 200)), "body": parsed}
+                    return {
+                        "ok": False,
+                        "status_code": int(getattr(response, "status", 200)),
+                        "body": parsed,
+                        "error": "invalid_json",
+                        "response_shape": _response_shape(parsed),
+                    }
+                return {
+                    "ok": int(getattr(response, "status", 200)) < 400,
+                    "status_code": int(getattr(response, "status", 200)),
+                    "body": parsed,
+                    "response_shape": _response_shape(parsed),
+                }
         except urllib.error.HTTPError as exc:
             try:
                 parsed = json.loads(exc.read().decode("utf-8", errors="replace"))
             except Exception:
                 parsed = {}
-            return {"ok": False, "status_code": int(exc.code), "body": parsed, "error": "http_error"}
+                return {"ok": False, "status_code": int(exc.code), "body": parsed, "error": "http_error_invalid_json", "response_shape": _response_shape(parsed)}
+            return {"ok": False, "status_code": int(exc.code), "body": parsed, "error": "http_error", "response_shape": _response_shape(parsed)}
         except Exception as exc:
-            return {"ok": False, "status_code": 0, "body": {}, "error": type(exc).__name__}
+            return {
+                "ok": False,
+                "status_code": 0,
+                "body": {},
+                "error": type(exc).__name__,
+                "exception_class": type(exc).__name__,
+                "exception_message_safe": _safe_exception_message(exc),
+                "response_shape": _response_shape({}),
+            }
 
     def submit_video_job(self, request: VideoGenerationRequest) -> VideoSubmitResult:
         caps = self.capabilities()
         if not caps.get("configured"):
             return VideoSubmitResult(ok=False, provider_name=self.provider_name, error_code="provider_not_configured")
-        payload = {
-            "job_id": request.job_id,
-            "product_type": request.product_type,
-            "capability": request.required_capability,
-            "prompt": _safe_text(request.prompt, 4000),
-            "negative_prompt": _safe_text(request.negative_prompt, 1200),
-            "ratio": request.ratio,
-            "duration_seconds": request.duration_seconds,
-            "quality": request.quality,
-            "style": request.style,
-            "seed": request.seed,
-            "scenes": request.scenes,
-            "storyboard": request.storyboard,
-            "image_paths": request.image_paths,
-            "source_video_path": request.source_video_path,
-            "model": str(self.env.get(self.model_env) or ""),
-            "metadata": request.metadata,
-        }
+        try:
+            payload = _build_provider_payload(self.provider_name, request, self.env)
+        except VideoProviderContractError:
+            raise
+        except Exception as exc:
+            raise VideoProviderContractError("provider_payload_invalid_shape", stage="payload_build", message=str(exc)) from exc
         result = self._open_json(self._submit_url(), payload, timeout=int(self.env.get("VIDEO_PROVIDER_SUBMIT_TIMEOUT_SECONDS") or 90))
         body = result.get("body") or {}
-        task_id = _first_value(body, ("provider_task_id", "task_id", "taskId", "id", "data.task_id", "data.id"))
-        video_id = _first_value(body, ("video_id", "videoId", "id_base", "data.video_id", "data.id_base"))
-        result_url = _first_value(body, ("result_url", "file_url", "download_url", "data.result_url", "data.file_url", "data.download_url"))
-        status = normalize_provider_status(_first_value(body, ("status", "data.status")), has_result_url=bool(result_url))
+        task_id, task_path, video_id, video_path = parse_submit_task_ids(body)
+        result_url, result_url_path = parse_result_url(body, str(self.env.get(self.result_field_env) or "result_url"))
+        status, raw_status, status_path = parse_provider_status(body, has_result_url=bool(result_url))
+        raw_debug = {
+            "smoke_stage": "submit_response_parse",
+            **_payload_debug(payload),
+            "submit_url_configured": bool(self._submit_url()),
+            "poll_url_configured": bool(self._poll_url()),
+            "auth_configured": bool(caps.get("auth_configured")),
+            "http_status": int(result.get("status_code") or 0),
+            "submit_http_status": int(result.get("status_code") or 0),
+            "submit_response_shape": result.get("response_shape") or _response_shape(body),
+            "provider_task_id_present": bool(task_id or video_id),
+            "provider_task_id_masked": (str(task_id or video_id)[:4] + "***") if (task_id or video_id) else "",
+            "provider_status_raw": raw_status,
+            "provider_status_path": status_path,
+            "result_url_present": bool(result_url),
+            "result_field_path": result_url_path,
+            "task_id_field_path": task_path,
+            "video_id_field_path": video_path,
+        }
+        if result.get("exception_class"):
+            raw_debug["exception_class"] = result.get("exception_class")
+            raw_debug["exception_message_safe"] = result.get("exception_message_safe") or ""
+        if result.get("error") in {"invalid_json", "http_error_invalid_json"}:
+            raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_json"
+            return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status="failed", error_code="provider_submit_response_invalid_json", raw=raw_debug)
+        if not result.get("ok"):
+            blocker = "provider_submit_url_missing" if result.get("error") == "url_missing" else "provider_submit_http_error"
+            raw_debug["provider_submit_blocker"] = blocker
+            return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status=status or "failed", error_code=blocker, raw=raw_debug)
+        if not isinstance(body, dict):
+            raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_shape"
+            return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status="failed", error_code="provider_submit_response_invalid_shape", raw=raw_debug)
+        if result.get("ok") and not (task_id or video_id or result_url):
+            raw_debug["provider_submit_blocker"] = "provider_task_id_missing"
+            return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status=status or "failed", error_code="provider_task_id_missing", raw=raw_debug)
         if result.get("ok") and (task_id or video_id or result_url):
             return VideoSubmitResult(
                 ok=True,
@@ -204,15 +478,10 @@ class GenericHttpVideoProvider:
                 provider_status=status,
                 result_url=result_url,
                 submitted_at=str(int(time.time())),
-                raw=body if isinstance(body, dict) else {},
+                raw=raw_debug,
             )
-        return VideoSubmitResult(
-            ok=False,
-            provider_name=self.provider_name,
-            provider_status=status,
-            error_code=str(result.get("error") or f"submit_failed:{result.get('status_code') or 0}"),
-            raw=body if isinstance(body, dict) else {},
-        )
+        raw_debug["provider_submit_blocker"] = "provider_submit_response_invalid_shape"
+        return VideoSubmitResult(ok=False, provider_name=self.provider_name, provider_status=status, error_code="provider_submit_response_invalid_shape", raw=raw_debug)
 
     def poll_video_job(self, provider_task_id: str) -> VideoPollResult:
         caps = self.capabilities()
@@ -229,28 +498,64 @@ class GenericHttpVideoProvider:
         result = self._open_json(url, None, method="GET", timeout=int(self.env.get("VIDEO_PROVIDER_POLL_HTTP_TIMEOUT_SECONDS") or 60))
         body = result.get("body") or {}
         result_field = str(self.env.get(self.result_field_env) or "result_url")
-        result_url = str(_json_path(body, result_field) or "").strip() or _first_value(
-            body,
-            ("result_url", "file_url", "download_url", "video_url", "data.result_url", "data.file_url", "data.download_url", "data.video_url"),
-        )
-        status = normalize_provider_status(_first_value(body, ("status", "data.status", "state", "data.state")), has_result_url=bool(result_url))
+        result_url, result_url_path = parse_result_url(body, result_field)
+        status, raw_status, status_path = parse_provider_status(body, has_result_url=bool(result_url))
         progress = _first_value(body, ("progress", "progress_percent", "data.progress", "data.progress_percent"))
         try:
             progress_value = int(float(progress)) if progress != "" else None
         except Exception:
             progress_value = None
+        raw_debug = {
+            "smoke_stage": "poll_response_parse",
+            "poll_http_status": int(result.get("status_code") or 0),
+            "poll_response_shape": result.get("response_shape") or _response_shape(body),
+            "provider_status_raw": raw_status,
+            "provider_status_path": status_path,
+            "result_url_present": bool(result_url),
+            "result_field_path": result_url_path,
+        }
+        if result.get("exception_class"):
+            raw_debug["exception_class"] = result.get("exception_class")
+            raw_debug["exception_message_safe"] = result.get("exception_message_safe") or ""
+        ok = bool(result.get("ok"))
+        error_code = ""
+        if result.get("error") in {"invalid_json", "http_error_invalid_json"}:
+            ok = False
+            status = "failed"
+            error_code = "provider_poll_response_invalid_json"
+            raw_debug["provider_poll_blocker"] = error_code
+        elif not result.get("ok"):
+            ok = False
+            status = "failed"
+            error_code = "provider_poll_http_error"
+            raw_debug["provider_poll_blocker"] = error_code
+        elif not isinstance(body, dict):
+            ok = False
+            status = "failed"
+            error_code = "provider_poll_response_invalid_shape"
+            raw_debug["provider_poll_blocker"] = error_code
+        elif raw_status and status not in {"queued", "running", "succeeded", "failed", "cancelled"}:
+            ok = False
+            status = "failed"
+            error_code = "provider_status_unknown"
+            raw_debug["provider_poll_blocker"] = error_code
+        elif not raw_status and not result_url:
+            ok = False
+            status = "failed"
+            error_code = "provider_status_unknown"
+            raw_debug["provider_poll_blocker"] = error_code
         return VideoPollResult(
-            ok=bool(result.get("ok")),
+            ok=ok,
             status=status,
             provider_name=self.provider_name,
             provider_task_id=str(provider_task_id or ""),
-            provider_video_id=_first_value(body, ("video_id", "videoId", "id_base", "data.video_id", "data.id_base")),
+            provider_video_id=_first_value(body, VIDEO_ID_PATHS),
             progress_percent=progress_value,
             result_url=result_url,
             file_url=result_url,
-            error_code="" if result.get("ok") else str(result.get("error") or f"poll_failed:{result.get('status_code') or 0}"),
-            raw_status=_first_value(body, ("status", "data.status", "state", "data.state")),
-            raw=body if isinstance(body, dict) else {},
+            error_code=error_code,
+            raw_status=raw_status,
+            raw=raw_debug,
         )
 
     def materialize_result(self, result: VideoPollResult, job_id: str) -> VideoArtifactResult:

@@ -168,7 +168,7 @@ def _provider_order(job: dict | None = None) -> list[str]:
         or asset_pack.get("provider_order")
         or os.environ.get("VIDEO_PROVIDER_CHAIN")
         or os.environ.get("VIDEO_PROVIDER_ORDER")
-        or "toanaas_video,key4u_video,shopaikey_video,veo,kling,generic_http"
+        or "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
     )
     if isinstance(raw, (list, tuple)):
         values = raw
@@ -193,7 +193,7 @@ def _provider_order(job: dict | None = None) -> list[str]:
             continue
         if provider not in result:
             result.append(provider)
-    return result or ["toanaas_video", "key4u_video", "shopaikey_video", "veo", "kling", "generic_http"]
+    return result or ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"]
 
 
 def real_video_provider_readiness(job: dict | None = None, environ: dict[str, str] | None = None) -> dict:
