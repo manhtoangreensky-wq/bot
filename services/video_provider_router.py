@@ -615,6 +615,7 @@ def provider_exception_result(exc: BaseException, *, provider: str = "", stage: 
         **debug,
         "provider_router_called": True,
         "provider_attempted": stage != "payload_build",
+        "provider_submit_called": stage == "submit_request",
         "provider": provider,
         "selected_provider": provider,
         "provider_error": blocker,
@@ -623,6 +624,8 @@ def provider_exception_result(exc: BaseException, *, provider: str = "", stage: 
         "smoke_stage": str(getattr(exc, "stage", "") or debug.get("smoke_stage") or stage),
         "exception_class": type(exc).__name__,
         "exception_message_safe": _safe_exception_message(exc),
+        "provider_submit_exception_class": type(exc).__name__ if stage == "submit_request" else "",
+        "provider_submit_exception_message_safe": _safe_exception_message(exc) if stage == "submit_request" else "",
         "provider_readiness": status or {},
     }
 
@@ -653,9 +656,24 @@ def _merge_contract_debug(target: dict[str, Any], raw: dict[str, Any] | None = N
         "result_field_path",
         "task_id_field_path",
         "video_id_field_path",
+        "provider_submit_url_configured",
+        "provider_submit_url_host",
+        "provider_auth_header_name",
+        "provider_auth_value_present",
+        "provider_auth_scheme_prefix",
+        "provider_payload_keys",
+        "provider_payload_model",
+        "provider_response_http_status",
+        "provider_response_body_shape",
+        "provider_submit_exception_class",
+        "provider_submit_exception_message_safe",
     ):
         if key in raw and key not in target:
             target[key] = raw.get(key)
+    if raw.get("exception_class") and not target.get("provider_submit_exception_class"):
+        target["provider_submit_exception_class"] = raw.get("exception_class")
+    if raw.get("exception_message_safe") and not target.get("provider_submit_exception_message_safe"):
+        target["provider_submit_exception_message_safe"] = raw.get("exception_message_safe")
     if "provider_submit_blocker" in raw:
         target["provider_submit_stage"] = raw.get("smoke_stage") or "submit_response_parse"
         target["provider_submit_blocker"] = raw.get("provider_submit_blocker")
@@ -826,6 +844,8 @@ def run_provider_generation(
                 _record_failure(blocker)
                 continue
             _record_failure(blocker)
+            if allow_pending_result:
+                exc_payload["no_charge"] = True
             exc_payload["provider_attempts"] = list(attempt_failures)
             return exc_payload
         submit_http_status = _submit_http_status(submit.raw)

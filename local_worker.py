@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import shutil
 import tempfile
 import subprocess
@@ -164,6 +165,8 @@ def update_video_render_job(
     final_video_file_id: str = "",
     result: dict | None = None,
 ) -> None:
+    safe_result = dict(result or {})
+    safe_result.update(local_worker_process_trace())
     payload = {
         "job_id": job_id,
         "status": status,
@@ -171,7 +174,7 @@ def update_video_render_job(
         "error_short": str(error_short or "")[:500],
         "final_video_path": str(final_video_path or "")[:1000],
         "final_video_file_id": str(final_video_file_id or "")[:500],
-        "result": result or {},
+        "result": safe_result,
     }
     http_json("POST", "/internal/video_worker/job_update", payload, timeout=25)
 
@@ -182,6 +185,24 @@ def first_line(text: str) -> str:
         if clean:
             return clean[:300]
     return ""
+
+
+def local_worker_process_trace() -> dict:
+    try:
+        hostname = socket.gethostname()
+    except Exception:
+        hostname = ""
+    return {
+        "actual_processor": "local_worker",
+        "worker_id": LOCAL_WORKER_ID,
+        "worker_service_mode": "local_video_worker",
+        "claimed_by_service_mode": "local_video_worker",
+        "worker_claim_route": "/internal/video_worker/poll",
+        "worker_claim_status": "claimed",
+        "worker_claim_reason": "",
+        "process_hostname": str(hostname or "")[:160],
+        "process_pid": int(os.getpid() or 0),
+    }
 
 
 def local_ffmpeg_path() -> str:
