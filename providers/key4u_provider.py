@@ -12,6 +12,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -355,6 +356,9 @@ class Key4UConfig:
     enabled: bool = True
     api_key: str = ""
     video_auth_header_value: str = ""
+    system_api_key: str = ""
+    usage_auth_header_name: str = "Authorization"
+    usage_auth_header_value: str = ""
     base_url: str = "https://api.key4u.shop"
     openai_base_url: str = "https://api.key4u.shop/v1"
     minimax_base_url: str = "https://api.key4u.shop/minimax"
@@ -407,6 +411,9 @@ def config_from_env() -> Key4UConfig:
         enabled=_flag("KEY4U_ENABLED", "false"),
         api_key=_env("KEY4U_TOKEN", _env("KEY4U_API_KEY", "")),
         video_auth_header_value=_env("KEY4U_VIDEO_AUTH_HEADER_VALUE", ""),
+        system_api_key=_env("KEY4U_SYSTEM_API_KEY", ""),
+        usage_auth_header_name=_env("KEY4U_USAGE_AUTH_HEADER_NAME", "Authorization"),
+        usage_auth_header_value=_env("KEY4U_USAGE_AUTH_HEADER_VALUE", ""),
         base_url=api_base,
         openai_base_url=_env("KEY4U_OPENAI_BASE_URL", safe_join_url(api_base, "/v1")),
         minimax_base_url=_env("KEY4U_MINIMAX_BASE", safe_join_url(api_base, "/minimax")),
@@ -460,7 +467,7 @@ class Key4UProvider:
         return bool(self.config.enabled and self.config.admin_smoke_enabled and self.config.api_key)
 
     def usage_auth_configured(self) -> bool:
-        return bool(str(self.config.api_key or "").strip() or str(self.config.video_auth_header_value or "").strip())
+        return bool(self._usage_auth_info()["value"])
 
     def usage_configured(self) -> bool:
         return bool(self.config.enabled and self.usage_auth_configured())
@@ -475,6 +482,9 @@ class Key4UProvider:
             "api_key": mask_key(self.config.api_key),
             "configured": self.is_configured(),
             "usage_auth_configured": self.usage_auth_configured(),
+            "usage_auth_source": self._usage_auth_info()["source"],
+            "usage_auth_header_name": self._usage_auth_info()["header_name"],
+            "usage_auth_scheme_prefix": self._usage_auth_info()["scheme_prefix"],
             "base_url": self.config.base_url,
             "openai_base_url": self.config.openai_base_url,
             "minimax_base_url": self.config.minimax_base_url,
@@ -540,6 +550,78 @@ class Key4UProvider:
             "Accept": "application/json",
         }
 
+    def _usage_auth_info(self) -> dict[str, str]:
+        candidates = (
+            ("usage_auth_header_value", self.config.usage_auth_header_value),
+            ("system_api_key", self.config.system_api_key),
+            ("api_key", self.config.api_key),
+            ("video_auth_header_value", self.config.video_auth_header_value),
+        )
+        source = "missing"
+        raw_value = ""
+        for candidate_source, candidate_value in candidates:
+            value = str(candidate_value or "").strip()
+            if value:
+                source = candidate_source
+                raw_value = value
+                break
+        header_name = str(self.config.usage_auth_header_name or "Authorization").strip() or "Authorization"
+        header_value = raw_value
+        if header_name.lower() == "authorization" and header_value and not header_value.lower().startswith(("bearer ", "apikey ", "key ", "basic ")):
+            header_value = f"Bearer {header_value}"
+        scheme_prefix = "missing"
+        if header_value:
+            scheme_prefix = header_value.split(" ", 1)[0] if " " in header_value else "raw"
+        return {
+            "source": source,
+            "header_name": header_name,
+            "value": header_value,
+            "scheme_prefix": scheme_prefix,
+        }
+
+    def _usage_headers(self) -> dict[str, str]:
+        auth_info = self._usage_auth_info()
+        headers = {"Accept": "application/json"}
+        if auth_info["value"]:
+            headers[auth_info["header_name"]] = auth_info["value"]
+        return headers
+
+    def _usage_endpoint_debug(self, endpoint_path: str) -> dict[str, Any]:
+        endpoint = safe_join_url(self.config.base_url, endpoint_path)
+        parsed = urlparse(endpoint)
+        auth_info = self._usage_auth_info()
+        return {
+            "usage_auth_source": auth_info["source"],
+            "usage_auth_header_name": auth_info["header_name"],
+            "usage_auth_scheme_prefix": auth_info["scheme_prefix"],
+            "usage_endpoint_host": parsed.netloc or "",
+            "usage_endpoint_path": parsed.path or "",
+        }
+
+    @staticmethod
+    def _response_shape(data: Any) -> str:
+        if isinstance(data, dict):
+            keys = [str(key) for key in sorted(data.keys())[:10]]
+            nested = data.get("data")
+            if isinstance(nested, dict):
+                keys.extend(f"data.{key}" for key in sorted(str(key) for key in nested.keys())[:8])
+                wallet = nested.get("wallet")
+                if isinstance(wallet, dict):
+                    keys.extend(f"data.wallet.{key}" for key in sorted(str(key) for key in wallet.keys())[:6])
+            return ",".join(keys) or "dict_empty"
+        if isinstance(data, list):
+            return "list"
+        return type(data).__name__
+
+    def _apply_usage_debug(self, result: dict[str, Any], endpoint_path: str) -> dict[str, Any]:
+        debug = dict(result.get("raw_debug_admin_only") or {})
+        debug.update(self._usage_endpoint_debug(endpoint_path))
+        debug["usage_http_status"] = int(result.get("http_status") or 0)
+        debug["usage_response_shape"] = self._response_shape(result.get("data"))
+        debug["usage_reason"] = str(result.get("error_class") or result.get("status") or "-")
+        result["raw_debug_admin_only"] = debug
+        return result
+
     def _minimax_url(self, endpoint: str) -> str:
         return scoped_join_url(self.config.base_url, self.config.minimax_base_url, endpoint, "/minimax/v1")
 
@@ -571,16 +653,18 @@ class Key4UProvider:
         *,
         use_openai_base: bool = False,
         timeout_seconds: float = 30.0,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         base_url = self.config.openai_base_url if use_openai_base else self.config.base_url
         endpoint = safe_join_url(base_url, endpoint_path)
+        request_headers = headers or self._headers()
         started = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                 if str(method or "GET").upper() == "POST":
-                    response = await client.post(endpoint, headers={**self._headers(), "Content-Type": "application/json"}, json=payload or {})
+                    response = await client.post(endpoint, headers={**request_headers, "Content-Type": "application/json"}, json=payload or {})
                 else:
-                    response = await client.get(endpoint, headers=self._headers())
+                    response = await client.get(endpoint, headers=request_headers)
             latency_ms = int((time.perf_counter() - started) * 1000)
             try:
                 data = response.json()
@@ -652,18 +736,18 @@ class Key4UProvider:
             return self._missing_result("usage", "")
         if not self.config.usage_endpoint:
             return _result(ok=False, capability="usage", status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
-        result = await self.request_json("GET", self.config.usage_endpoint)
+        result = await self.request_json("GET", self.config.usage_endpoint, headers=self._usage_headers())
         result["capability"] = "usage"
-        return result
+        return self._apply_usage_debug(result, self.config.usage_endpoint)
 
     async def get_balance(self) -> dict[str, Any]:
         if not self.usage_configured():
             return self._missing_result("balance", "")
         if not self.config.balance_endpoint:
             return _result(ok=False, capability="balance", status="NEED_ENDPOINT", error_class="key4u_usage_url_missing", error_message_safe="key4u_usage_url_missing")
-        result = await self.request_json("GET", self.config.balance_endpoint)
+        result = await self.request_json("GET", self.config.balance_endpoint, headers=self._usage_headers())
         result["capability"] = "balance"
-        return result
+        return self._apply_usage_debug(result, self.config.balance_endpoint)
 
     def get_local_estimated_usage(self) -> dict[str, Any]:
         return {"status": "BOT_DB_SUMMARY", "note": "Computed in bot from provider_usage_events."}
