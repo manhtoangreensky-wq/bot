@@ -1,6 +1,6 @@
-"""Safe Railway volume audit and TTL cleanup helpers.
+"""Safe Railway/VPS artifact cleanup helpers.
 
-This module is intentionally conservative. It only cleans generated artifact
+This module is intentionally conservative. It cleans only generated artifact
 extensions inside configured file-volume targets and blocks databases, config,
 secrets, source files, hidden files, and paths referenced by active jobs.
 """
@@ -22,6 +22,7 @@ GENERATED_ARTIFACT_EXTENSIONS = {
     ".gif",
     ".jpeg",
     ".jpg",
+    ".json",
     ".m4a",
     ".mov",
     ".mp3",
@@ -29,12 +30,14 @@ GENERATED_ARTIFACT_EXTENSIONS = {
     ".png",
     ".srt",
     ".tmp",
+    ".txt",
     ".vtt",
     ".wav",
     ".webm",
     ".webp",
     ".zip",
 }
+TEMP_TEXT_ARTIFACT_EXTENSIONS = {".json", ".txt"}
 PROTECTED_EXTENSIONS = {
     ".cfg",
     ".conf",
@@ -117,7 +120,7 @@ class StorageCleanupReport:
             "files_blocked": int(self.files_blocked),
             "files_young": int(self.files_young),
             "errors": list(self.errors),
-            "samples": [item.__dict__ for item in self.samples],
+            "samples": [dict(item.__dict__) for item in self.samples],
         }
 
 
@@ -140,11 +143,20 @@ def cleanup_roots(base_dir: str, extra_targets: Iterable[str] | None = None) -> 
     base = _resolve(base_dir)
     if not base:
         return []
-    candidates = [base / "worker_results", base / "tmp", base]
+    candidates = [
+        base / "worker_results",
+        base / "artifacts",
+        base / "tmp",
+        base / "music",
+        base / "subdub",
+        base / "video",
+        base / "cache",
+        base,
+    ]
     for target in extra_targets or []:
-        target_path = _resolve(target)
-        if target_path:
-            candidates.append(target_path)
+        resolved = _resolve(target)
+        if resolved:
+            candidates.append(resolved)
     roots: list[Path] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -165,11 +177,17 @@ def _path_has_protected_name(path: Path) -> bool:
     return any(token in name or token in parts for token in PROTECTED_NAME_TOKENS)
 
 
+def _is_tmp_path(normalized: str) -> bool:
+    lowered = normalized.replace("\\", "/").lower()
+    return "/tmp/" in lowered or lowered.endswith("/tmp")
+
+
 def classify_cleanup_file(
     path: Path,
     *,
     roots: list[Path],
     ttl_seconds: int,
+    tmp_ttl_seconds: int | None = None,
     protected_paths: set[str] | None = None,
     now: float | None = None,
 ) -> StorageCleanupFile:
@@ -184,18 +202,20 @@ def classify_cleanup_file(
         return StorageCleanupFile(str(resolved), str(root), 0, 0, "blocked", f"stat_failed:{type(exc).__name__}")
     age = max(0, int(now_ts - float(stat.st_mtime)))
     size = max(0, int(stat.st_size))
-    lower_suffix = resolved.suffix.lower()
+    suffix = resolved.suffix.lower()
     normalized = str(resolved).replace("\\", "/")
     protected = {str(item).replace("\\", "/") for item in (protected_paths or set())}
+    is_tmp = _is_tmp_path(normalized)
+    ttl = int(tmp_ttl_seconds or ttl_seconds) if is_tmp else int(ttl_seconds)
     if normalized in protected:
         status, reason = "blocked", "active_job_reference"
     elif _path_has_protected_name(resolved):
         status, reason = "blocked", "protected_name"
-    elif lower_suffix in PROTECTED_EXTENSIONS:
+    elif suffix in PROTECTED_EXTENSIONS and not (is_tmp and suffix in TEMP_TEXT_ARTIFACT_EXTENSIONS):
         status, reason = "blocked", "protected_extension"
-    elif lower_suffix not in GENERATED_ARTIFACT_EXTENSIONS:
+    elif suffix not in GENERATED_ARTIFACT_EXTENSIONS:
         status, reason = "blocked", "unsupported_extension"
-    elif age < int(ttl_seconds):
+    elif age < ttl:
         status, reason = "young", "younger_than_ttl"
     else:
         status, reason = "eligible", "ttl_expired_generated_artifact"
@@ -206,6 +226,7 @@ def audit_storage_cleanup(
     *,
     base_dir: str,
     ttl_seconds: int,
+    tmp_ttl_seconds: int | None = None,
     protected_paths: set[str] | None = None,
     delete: bool = False,
     confirm_delete: bool = False,
@@ -223,7 +244,7 @@ def audit_storage_cleanup(
     if not roots:
         report.errors.append("no_cleanup_roots")
         return report
-    scanned_paths: set[str] = set()
+    scanned: set[str] = set()
     for root in roots:
         if not root.exists():
             continue
@@ -235,9 +256,9 @@ def audit_storage_cleanup(
             for filename in filenames:
                 path = current_path / filename
                 normalized = str(_resolve(path) or path)
-                if normalized in scanned_paths:
+                if normalized in scanned:
                     continue
-                scanned_paths.add(normalized)
+                scanned.add(normalized)
                 if report.files_scanned >= int(max_scan_files):
                     report.errors.append("max_scan_files_reached")
                     return report
@@ -245,6 +266,7 @@ def audit_storage_cleanup(
                     path,
                     roots=roots,
                     ttl_seconds=report.ttl_seconds,
+                    tmp_ttl_seconds=tmp_ttl_seconds,
                     protected_paths=protected_paths or set(),
                     now=now,
                 )
@@ -257,7 +279,7 @@ def audit_storage_cleanup(
                     report.files_young += 1
                 else:
                     report.files_blocked += 1
-                if len(report.samples) < 20 and item.status in {"eligible", "blocked", "young"}:
+                if len(report.samples) < 25 and item.status in {"eligible", "blocked", "young"}:
                     report.samples.append(item)
                 if delete and confirm_delete and item.status == "eligible":
                     if report.files_deleted >= int(max_delete_files):
